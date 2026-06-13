@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
 import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { OnboardingWizard, shouldShowOnboarding, isForceOnboarding } from './OnboardingWizard'
+import {
+  OnboardingWizard,
+  shouldShowOnboarding,
+  isForceOnboarding,
+  pickFreeModel
+} from './OnboardingWizard'
 import { CodingAgentType } from '@/types'
 
 // Access mock electronAPI from test/setup-renderer.ts
@@ -21,6 +26,21 @@ const mockSettings = window.electronAPI.settings as unknown as {
   set: Mock
   getAll: Mock
 }
+
+describe('pickFreeModel', () => {
+  it.each([
+    ['array model ID', [{ id: 'kimi-k2.5-free', name: 'Kimi K2.5' }], 'opencode/kimi-k2.5-free'],
+    ['object-map key', { 'kimi-k2.5-free': { name: 'Kimi K2.5' } }, 'opencode/kimi-k2.5-free'],
+    ['explicit object-map ID', { alias: { id: 'model-free' } }, 'opencode/model-free'],
+    ['display name', [{ id: 'model-1', name: 'Community Free Model' }], 'opencode/model-1']
+  ])('detects a free model from its %s', (_, models, expected) => {
+    expect(pickFreeModel('opencode', models)).toBe(expected)
+  })
+
+  it('returns null when no free model exists', () => {
+    expect(pickFreeModel('opencode', { 'paid-model': { name: 'Paid Model' } })).toBeNull()
+  })
+})
 
 describe('shouldShowOnboarding', () => {
   beforeEach(() => {
