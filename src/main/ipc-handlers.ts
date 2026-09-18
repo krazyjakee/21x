@@ -1,3 +1,6 @@
+import { guardedIpcSend } from './guarded-ipc-send'
+import { MAX_IPC_REPLY_BYTES, MAX_IPC_REPLY_VALUES, measureIpcMessage } from './ipc-message-size'
+import { transcriptDisplayPart } from './transcript-display'
 import { updateTaskFromUser } from './session-feedback'
 import { ipcMain, dialog, shell, Notification, app, session } from 'electron'
 import * as childProcess from 'child_process'
@@ -108,7 +111,7 @@ export function registerIpcHandlers(
     }
     // Notify renderer so auto-start hook can trigger triage for UI-created tasks
     if (task) {
-      event.sender.send('task:created', { task })
+      guardedIpcSend(event.sender, 'task:created', { task })
     }
     return task
   })
@@ -180,7 +183,7 @@ export function registerIpcHandlers(
   ipcMain.handle('db:deleteTask', (event, id: string) => {
     const success = db.deleteTask(id)
     if (success) {
-      event.sender.send('task:deleted', { taskId: id })
+      guardedIpcSend(event.sender, 'task:deleted', { taskId: id })
     }
     return success
   })
@@ -446,18 +449,27 @@ export function registerIpcHandlers(
   })
 
   ipcMain.handle('agentSession:getRawTranscript', async (_, taskId: string) => {
-    return await agentManager.getRawTranscriptForDebug(taskId)
+    const result = await agentManager.getRawTranscriptForDebug(taskId)
+    if (measureIpcMessage(result, MAX_IPC_REPLY_BYTES, MAX_IPC_REPLY_VALUES).reason) throw new Error('Transcript is too large to copy.')
+    return result
   })
 
   // Durable transcript snapshot: the renderer hydrates transcript state from
   // the main-process projection instead of depending on catching live events.
-  ipcMain.handle('agentSession:getTranscriptSnapshot', (_, taskId: string, sinceSeq?: number) => {
-    return agentManager.getTranscriptSnapshot(taskId, sinceSeq)
+  // Oversized individual records are replaced by display previews (stored data
+  // is unchanged) so a single huge tool output cannot overflow the serializer.
+  ipcMain.handle('agentSession:getTranscriptSnapshot', async (_, taskId: string, sinceSeq?: number) => {
+    const parts = (await agentManager.getTranscriptSnapshot(taskId, sinceSeq)).map(part => transcriptDisplayPart(part))
+    if (measureIpcMessage(parts, MAX_IPC_REPLY_BYTES, MAX_IPC_REPLY_VALUES).reason) throw new Error('Transcript is too large to display')
+    return parts
   })
 
   // Event-sourced projection: delta since a rev cursor (parts changed since then).
-  ipcMain.handle('agentSession:getTranscriptDelta', (_, taskId: string, sinceRev: number) => {
-    return agentManager.getTranscriptDelta(taskId, sinceRev)
+  ipcMain.handle('agentSession:getTranscriptDelta', async (_, taskId: string, sinceRev: number) => {
+    const { parts, maxRev } = await agentManager.getTranscriptDelta(taskId, sinceRev)
+    const result = { parts: parts.map(part => transcriptDisplayPart(part)), maxRev }
+    if (measureIpcMessage(result, MAX_IPC_REPLY_BYTES, MAX_IPC_REPLY_VALUES).reason) throw new Error('Transcript delta is too large to display')
+    return result
   })
 
   // Agent Config handlers
@@ -554,7 +566,7 @@ export function registerIpcHandlers(
   ipcMain.handle('gitlab:startAuth', async (event) => {
     if (!gitlabManager) throw new Error('GitLab manager not initialized')
     await gitlabManager.startWebAuth((code) => {
-      event.sender.send('gitlab:deviceCode', code)
+      guardedIpcSend(event.sender, 'gitlab:deviceCode', code)
     })
   })
 
@@ -628,7 +640,7 @@ export function registerIpcHandlers(
   ipcMain.handle('taskSource:exportUpdate', async (event, taskId: string, fields: Record<string, unknown>) => {
     await syncManager.exportTaskUpdate(taskId, fields)
     const updated = db.getTask(taskId)
-    if (updated) event.sender.send('task:updated', { taskId, updates: updated })
+    if (updated) guardedIpcSend(event.sender, 'task:updated', { taskId, updates: updated })
   })
 
   ipcMain.handle('taskSource:getUsers', (_, sourceId: string) => {
@@ -1095,7 +1107,7 @@ export function registerIpcHandlers(
   ipcMain.handle('agent-installer:install', async (event, { agentName }: { agentName: string }) => {
     const { installAgent } = await import('./agent-installer/install.js')
     return installAgent(agentName, (progress: { stage: string; output: string; percent: number }) => {
-      event.sender.send('agent-installer:progress', { agentName, ...progress })
+      guardedIpcSend(event.sender, 'agent-installer:progress', { agentName, ...progress })
     })
   })
 
@@ -1168,7 +1180,7 @@ export function registerIpcHandlers(
     ptyProcess.onData((data: string) => {
       appendToBuffer(data)
       if (!sender.isDestroyed()) {
-        sender.send('terminal:data', { id, data })
+        guardedIpcSend(sender, 'terminal:data', { id, data })
       }
     })
 
@@ -1178,7 +1190,7 @@ export function registerIpcHandlers(
       if (current && current.pid === ptyProcess.pid) {
         terminals.delete(id)
         if (!sender.isDestroyed()) {
-          sender.send('terminal:exit', { id })
+          guardedIpcSend(sender, 'terminal:exit', { id })
         }
       }
     })
@@ -1326,7 +1338,7 @@ else:
       const str = data.toString()
       appendToBuffer(str)
       if (!sender.isDestroyed()) {
-        sender.send('terminal:data', { id, data: str })
+        guardedIpcSend(sender, 'terminal:data', { id, data: str })
       }
     })
 
@@ -1335,7 +1347,7 @@ else:
       appendToBuffer(str)
       // Forward stderr too (e.g. shell startup errors)
       if (!sender.isDestroyed()) {
-        sender.send('terminal:data', { id, data: str })
+        guardedIpcSend(sender, 'terminal:data', { id, data: str })
       }
     })
 
@@ -1348,7 +1360,7 @@ else:
       if (current && current.pid === (child.pid || 0)) {
         terminals.delete(id)
         if (!sender.isDestroyed()) {
-          sender.send('terminal:exit', { id })
+          guardedIpcSend(sender, 'terminal:exit', { id })
         }
       }
     })

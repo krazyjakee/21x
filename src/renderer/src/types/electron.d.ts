@@ -116,6 +116,7 @@ export interface TranscriptPartRecord {
 
 /** Payload of the transcript:changed delta push. */
 export interface TranscriptChangedEvent {
+  reloadRequired?: boolean
   taskId: string
   parts: TranscriptPartRecord[]
   maxRev: number

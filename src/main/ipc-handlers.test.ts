@@ -317,3 +317,36 @@ describe('db:updateTask heartbeat cascade on parent completion', () => {
     expect(disableHeartbeat).not.toHaveBeenCalled()
   })
 })
+
+describe('bounded transcript IPC replies', () => {
+  function handlers(agentManager: Record<string, unknown>) {
+    vi.mocked(ipcMain.handle).mockClear()
+    registerIpcHandlers(
+      {} as Parameters<typeof registerIpcHandlers>[0],
+      agentManager as unknown as Parameters<typeof registerIpcHandlers>[1],
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never
+    )
+    const calls = vi.mocked(ipcMain.handle).mock.calls
+    return (channel: string) => calls.find(([name]) => name === channel)![1]
+  }
+
+  it('previews oversized records in snapshot and delta replies', async () => {
+    const huge = { taskId: 't', partId: 'p', seq: 1, role: 'assistant', content: 'x'.repeat(5 * 1024 * 1024), rev: 3, createdAt: 1, updatedAt: 1 }
+    const small = { ...huge, partId: 'q', seq: 2, content: 'ok', rev: 4 }
+    const get = handlers({
+      getTranscriptSnapshot: vi.fn().mockResolvedValue([huge, small]),
+      getTranscriptDelta: vi.fn().mockResolvedValue({ parts: [huge], maxRev: 4 })
+    })
+    const snapshot = await get('agentSession:getTranscriptSnapshot')({} as Electron.IpcMainInvokeEvent, 't') as typeof huge[]
+    expect(snapshot.map(p => p.partId)).toEqual(['p', 'q'])
+    expect(snapshot[0].content.length).toBeLessThan(10_000)
+    expect(snapshot[1]).toBe(small)
+    const delta = await get('agentSession:getTranscriptDelta')({} as Electron.IpcMainInvokeEvent, 't', 2) as { parts: typeof huge[]; maxRev: number }
+    expect(delta.maxRev).toBe(4)
+    expect(delta.parts[0].rev).toBe(3)
+    expect(delta.parts[0].content.length).toBeLessThan(10_000)
+  })
+})
