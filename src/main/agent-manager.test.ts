@@ -3437,7 +3437,7 @@ describe('AgentManager event-driven parent wake-up', () => {
     expect(wakeSpy).toHaveBeenCalledOnce()
   })
 
-  it('does not follow successor edges until the subtask is completed', async () => {
+  it('does not follow successor edges from review when the chain has not opted in', async () => {
     const inReview = {
       id: 'sub-1', title: 'Child A', status: TaskStatus.ReadyForReview,
       parent_task_id: 'parent-1', next_subtask_ids: ['sub-2']
@@ -3449,6 +3449,62 @@ describe('AgentManager event-driven parent wake-up', () => {
     await mgr.notifyParentOfSubtaskCompletion('parent-1', 'sub-1')
 
     expect(startSpy).not.toHaveBeenCalled()
+  })
+
+  it('follows successor edges from ready_for_review when the parent runs unattended', async () => {
+    const inReview = {
+      id: 'sub-1', title: 'Child A', status: TaskStatus.ReadyForReview,
+      parent_task_id: 'parent-1', next_subtask_ids: ['sub-2']
+    }
+    const successor = { id: 'sub-2', title: 'Child B', status: TaskStatus.NotStarted, parent_task_id: 'parent-1', agent_id: 'agent-2' }
+    const { mgr, wakeSpy } = buildManager(
+      { 'parent-1': { ...parentTask, auto_start_agent: true }, 'sub-1': inReview, 'sub-2': successor },
+      [inReview, successor]
+    )
+    const startSpy = vi.spyOn(mgr, 'startTask').mockResolvedValue({ action: 'task_started' })
+
+    await mgr.notifyParentOfSubtaskCompletion('parent-1', 'sub-1')
+
+    expect(startSpy).toHaveBeenCalledWith('sub-2', { preferSubtasks: false, allowTriage: false })
+    expect(wakeSpy).not.toHaveBeenCalled()
+    // The finished step stays in review — a human still accepts it.
+    expect(inReview.status).toBe(TaskStatus.ReadyForReview)
+  })
+
+  it('runs a successor chain to the end unattended, every step waiting in review', async () => {
+    const chain = [
+      { id: 'sub-1', title: 'Child A', status: TaskStatus.NotStarted, parent_task_id: 'parent-1', agent_id: 'agent-1', next_subtask_ids: ['sub-2'] },
+      { id: 'sub-2', title: 'Child B', status: TaskStatus.NotStarted, parent_task_id: 'parent-1', agent_id: 'agent-2', next_subtask_ids: ['sub-3'] },
+      { id: 'sub-3', title: 'Child C', status: TaskStatus.NotStarted, parent_task_id: 'parent-1', agent_id: 'agent-3', next_subtask_ids: [] }
+    ]
+    const { mgr, wakeSpy } = buildManager(
+      {
+        'parent-1': { ...parentTask, auto_complete_without_review: true },
+        'sub-1': chain[0], 'sub-2': chain[1], 'sub-3': chain[2]
+      },
+      chain
+    )
+    const started: string[] = []
+    // A started subtask runs, parks in review, and reports back — as
+    // transitionToIdle does in production.
+    vi.spyOn(mgr, 'startTask').mockImplementation(async (taskId: string) => {
+      started.push(taskId)
+      const subtask = chain.find((c) => c.id === taskId)!
+      subtask.status = TaskStatus.ReadyForReview
+      await mgr.notifyParentOfSubtaskCompletion('parent-1', taskId)
+      return { action: 'task_started', startedTaskId: taskId }
+    })
+
+    // The first step is started by a scheduler; nobody reviews anything after that.
+    await mgr.startTask('sub-1')
+
+    expect(started).toEqual(['sub-1', 'sub-2', 'sub-3'])
+    expect(chain.map((c) => c.status)).toEqual([
+      TaskStatus.ReadyForReview, TaskStatus.ReadyForReview, TaskStatus.ReadyForReview
+    ])
+    // Only the end of the chain wakes the parent, which consolidates and reviews.
+    expect(wakeSpy).toHaveBeenCalledOnce()
+    expect(wakeSpy.mock.calls[0][0]).toBe('parent-1')
   })
 
   it('wakes the parent at once when a selected successor cannot start, even mid-pipeline', async () => {

@@ -1,7 +1,7 @@
 import type { DatabaseManager, TaskRecord } from './database'
 import type { AgentManager } from './agent-manager'
 import { TaskStatus } from '../shared/constants'
-import { isSuccessorGraphInProgress } from '../shared/subtask-graph'
+import { findBlockingSibling, isSuccessorGraphInProgress } from '../shared/subtask-graph'
 
 /**
  * TaskAutomationScheduler — makes `auto_start_agent` and
@@ -202,13 +202,10 @@ export class TaskAutomationScheduler {
    * The one subtask that should run next, or null.
    *
    * Subtasks run strictly in `sort_order`, one at a time. Only a genuinely
-   * running state blocks the next one.
-   *
-   * The renderer also blocked on `ready_for_review`, which deadlocks an
-   * unattended chain: a child that finishes stops there (a subtask does not
-   * carry `auto_complete_without_review`), so nothing would ever start the
-   * child after it. A child in review has finished its agent run, and
-   * notifyParentOfSubtaskCompletion already counts that state as terminal.
+   * running state blocks the next one ({@link findBlockingSibling}, shared
+   * with the renderer and AgentManager.startTask): a child in
+   * `ready_for_review` has finished its agent run and cannot accept itself,
+   * so blocking on it would deadlock an unattended chain.
    */
   private getNextStartableSubtaskId(parentId: string): string | null {
     const subtasks = this.dbManager.getSubtasks(parentId)
@@ -218,13 +215,7 @@ export class TaskAutomationScheduler {
     // starts the selected successors or wakes the parent to decide.
     if (isSuccessorGraphInProgress(subtasks)) return null
 
-    const active = subtasks.some(
-      (subtask) =>
-        subtask.status === TaskStatus.AgentWorking ||
-        subtask.status === TaskStatus.Triaging ||
-        subtask.status === TaskStatus.AgentLearning
-    )
-    if (active) return null
+    if (findBlockingSibling(subtasks)) return null
 
     const next = subtasks.find((subtask) => subtask.status === TaskStatus.NotStarted && !!subtask.agent_id)
     return next?.id ?? null

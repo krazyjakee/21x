@@ -5,7 +5,7 @@ import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useAgentSessionActions } from './use-agent-session'
 import { onAgentStatus, onTaskUpdated, onTaskCreated, taskApi } from '@/lib/ipc-client'
 import { TaskStatus } from '@/types'
-import { isSuccessorGraphInProgress } from '@shared/subtask-graph'
+import { findBlockingSibling, isSuccessorGraphInProgress } from '@shared/subtask-graph'
 import type { Task, Agent, TaskPriority } from '@/types'
 import type { AgentStatusEvent } from '@/types/electron.d'
 import type { TaskSession } from '@/stores/agent-store'
@@ -18,13 +18,6 @@ const PRIORITY_ORDER: Record<TaskPriority, number> = {
 }
 
 const MAX_TRIAGE_ATTEMPTS = 2
-
-const ACTIVE_STATUSES = new Set<TaskStatus>([
-  TaskStatus.AgentWorking,
-  TaskStatus.ReadyForReview,
-  TaskStatus.Triaging,
-  TaskStatus.AgentLearning
-])
 
 function isSnoozed(snoozedUntil: string | null): boolean {
   if (!snoozedUntil) return false
@@ -44,7 +37,8 @@ function bySortOrder(a: Task, b: Task): number {
  * Subtasks of one parent run strictly in sort order, one at a time, and only
  * while the parent itself is not started.
  *  - `blocked`: nothing in this family may start
- *  - `wait`:    a sibling is still active; retry when it finishes
+ *  - `wait`:    a sibling is still running; retry when it finishes. A sibling
+ *               in `ready_for_review` does not block (see findBlockingSibling).
  *  - `ready`:   `nextId` may start
  */
 type FamilyGate = { state: 'blocked' | 'wait' } | { state: 'ready'; nextId: string | undefined }
@@ -53,7 +47,7 @@ function familyGate(parent: Task | undefined, siblings: Task[]): FamilyGate {
   if (!parent || parent.status !== TaskStatus.NotStarted) return { state: 'blocked' }
   // Successor edges own sequencing once the run has begun.
   if (isSuccessorGraphInProgress(siblings)) return { state: 'blocked' }
-  if (siblings.some((s) => ACTIVE_STATUSES.has(s.status))) return { state: 'wait' }
+  if (findBlockingSibling(siblings)) return { state: 'wait' }
   const sorted = [...siblings].sort(bySortOrder)
   return { state: 'ready', nextId: sorted.find((s) => s.status === TaskStatus.NotStarted)?.id }
 }
@@ -135,7 +129,7 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
         // selected successors or wakes the parent — never pick by list order.
         if (isSuccessorGraphInProgress(sorted)) return
 
-        if (sorted.some((s: Task) => ACTIVE_STATUSES.has(s.status))) return
+        if (findBlockingSibling(sorted)) return
 
         const nextSubtask = sorted.find((s: Task) => s.status === TaskStatus.NotStarted && !!s.agent_id)
         if (!nextSubtask || !nextSubtask.agent_id) return

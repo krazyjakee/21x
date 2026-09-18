@@ -10,6 +10,7 @@ import { powerSaveBlocker } from 'electron'
 import type { BrowserWindow } from 'electron'
 import type { AgentRecord, DatabaseManager, TaskRecord } from './database'
 import { TaskStatus } from '../shared/constants'
+import { findBlockingSibling, isSuccessorGraphInProgress, successorsFireOnReview } from '../shared/subtask-graph'
 import type { WorktreeManager } from './worktree-manager'
 import type { GitHubManager } from './github-manager'
 import type { GitLabManager } from './gitlab-manager'
@@ -1603,12 +1604,9 @@ export class AgentManager extends EventEmitter {
       const subtasks = this.db.getSubtasks(taskId)
         .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
 
-      const activeSubtask = subtasks.find((subtask) =>
-        subtask.status === TaskStatus.AgentWorking ||
-        subtask.status === TaskStatus.ReadyForReview ||
-        subtask.status === TaskStatus.Triaging ||
-        subtask.status === TaskStatus.AgentLearning
-      )
+      // Same rule as the schedulers: only a running sibling blocks; one in
+      // ready_for_review has finished its run and cannot accept itself.
+      const activeSubtask = findBlockingSibling(subtasks)
       if (activeSubtask) {
         return {
           action: 'already_running',
@@ -1617,7 +1615,10 @@ export class AgentManager extends EventEmitter {
         }
       }
 
-      const nextSubtask = subtasks.find((subtask) => subtask.status === TaskStatus.NotStarted && !!subtask.agent_id)
+      // Once successor edges drive the run, never pick the next one by list order.
+      const nextSubtask = isSuccessorGraphInProgress(subtasks)
+        ? undefined
+        : subtasks.find((subtask) => subtask.status === TaskStatus.NotStarted && !!subtask.agent_id)
       if (nextSubtask?.agent_id) {
         const sessionId = await this.startSession(nextSubtask.agent_id, nextSubtask.id)
         return {
@@ -1787,6 +1788,9 @@ export class AgentManager extends EventEmitter {
    * - A completed subtask with `next_subtask_ids` starts those siblings instead
    *   of waking the parent. The parent is woken at once (even mid-pipeline) if
    *   a selected successor is missing, has no agent, or fails to start.
+   * - When the chain opts in ({@link successorsFireOnReview}), a subtask in
+   *   ready_for_review starts its successors too. It stays in review: the
+   *   chain advances, but accepting the result is still a human's call.
    */
   async notifyParentOfSubtaskCompletion(parentTaskId: string, subtaskId: string): Promise<void> {
     const parentTask = this.db.getTask(parentTaskId)
@@ -1794,9 +1798,10 @@ export class AgentManager extends EventEmitter {
     if (parentTask.status === TaskStatus.Completed) return
 
     const completedSubtask = this.db.getTask(subtaskId)
-    const nextSubtaskIds = completedSubtask?.status === TaskStatus.Completed
-      ? completedSubtask.next_subtask_ids ?? []
-      : []
+    const routesSuccessors =
+      completedSubtask?.status === TaskStatus.Completed ||
+      (completedSubtask?.status === TaskStatus.ReadyForReview && successorsFireOnReview(parentTask, completedSubtask))
+    const nextSubtaskIds = routesSuccessors ? completedSubtask?.next_subtask_ids ?? [] : []
     let routingIssue: string | null = null
 
     if (nextSubtaskIds.length > 0) {

@@ -132,10 +132,38 @@ A task that works through subtasks obeys these rules:
   `agent_learning`) blocks the next one. A child in `ready_for_review` has
   finished its agent run and does not block, because a subtask cannot set
   itself to `completed`.
+
+  This is **one rule with one implementation**: `isSiblingBlocking` /
+  `findBlockingSibling` in `src/shared/subtask-graph.ts`, used by the renderer
+  auto-start hook (`use-agent-auto-start.ts`), `TaskAutomationScheduler` and
+  `AgentManager.startTask`'s `preferSubtasks` path. Blocking on
+  `ready_for_review` in any one of them deadlocks every unattended chain at
+  its first step.
 - `/create_subtask` passes `auto_complete_without_review` down from the
   parent, so an unattended chain does not park in review at its first step.
   `auto_start_agent` is **not** passed down — children are started through the
   parent, which is what keeps them in order.
+
+### Successor edges (`next_subtask_ids`)
+
+A subtask can name the sibling(s) that run after it. Once any subtask of a
+parent has started and edges exist, the graph — not `sort_order` — owns
+sequencing (`isSuccessorGraphInProgress`), and
+`AgentManager.notifyParentOfSubtaskCompletion` starts the selected successors
+or wakes the parent to decide.
+
+Successors normally fire when a subtask reaches `completed`. They also fire
+from `ready_for_review` when the chain opts in
+(`successorsFireOnReview` in `src/shared/subtask-graph.ts`): the parent carries
+`auto_start_agent` or `auto_complete_without_review`, or the subtask itself
+carries `auto_complete_without_review` (which `/create_subtask` passes down).
+No new field is involved — the existing unattended flags *are* the opt-in.
+
+The finished step stays in `ready_for_review`. Only ordering moves on:
+`completeTaskWithoutReview` still refuses to accept a local agent's own result,
+so a human accepts every step whenever they get to it, and the chain does not
+wait for them. Without an opt-in, a chain advances only as a human accepts each
+step — the old behaviour.
 
 ## Auto-Triage
 
