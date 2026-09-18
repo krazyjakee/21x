@@ -41,6 +41,62 @@ describe('GitHubManager', () => {
     execFileMock.mockReset()
   })
 
+  describe('checkGhCli', () => {
+    const mockAuthStatus = (result: { error?: boolean; stdout?: string; stderr?: string }) => {
+      execFileMock.mockImplementation((_file: string, args: string[], callback: (error: Error | null, stdout?: string, stderr?: string) => void) => {
+        if (args[0] === '--version') {
+          callback(null, 'gh version 2.45.0', '')
+          return
+        }
+        if (result.error) {
+          const error = Object.assign(new Error('exit 1'), { stdout: result.stdout ?? '', stderr: result.stderr ?? '' })
+          callback(error)
+          return
+        }
+        callback(null, result.stdout ?? '', result.stderr ?? '')
+      })
+    }
+
+    it('does not pass --active, which older gh versions reject', async () => {
+      mockAuthStatus({ stdout: 'github.com\n  ✓ Logged in to github.com account krazyjakee (keyring)\n  - Active account: true\n' })
+
+      await expect(new GitHubManager().checkGhCli()).resolves.toEqual({ installed: true, authenticated: true, username: 'krazyjakee' })
+      const authCall = execFileMock.mock.calls.find(([, args]) => args[0] === 'auth')
+      expect(authCall?.[1]).toEqual(['auth', 'status'])
+    })
+
+    it('reads the legacy stderr "as <user>" format', async () => {
+      mockAuthStatus({ stderr: 'github.com\n  ✓ Logged in to github.com as octocat (oauth_token)\n  ✓ Token: gho_***\n' })
+
+      await expect(new GitHubManager().checkGhCli()).resolves.toEqual({ installed: true, authenticated: true, username: 'octocat' })
+    })
+
+    it('picks the active account when several are listed and an inactive one is stale', async () => {
+      mockAuthStatus({
+        error: true,
+        stdout: [
+          'github.com',
+          '  X Failed to log in to github.com account old-user (keyring)',
+          '  - Active account: false',
+          '',
+          '  ✓ Logged in to github.com account other (keyring)',
+          '  - Active account: false',
+          '',
+          '  ✓ Logged in to github.com account current (keyring)',
+          '  - Active account: true'
+        ].join('\n')
+      })
+
+      await expect(new GitHubManager().checkGhCli()).resolves.toEqual({ installed: true, authenticated: true, username: 'current' })
+    })
+
+    it('reports unauthenticated when no account is logged in', async () => {
+      mockAuthStatus({ error: true, stderr: 'You are not logged into any GitHub hosts. To log in, run: gh auth login\n' })
+
+      await expect(new GitHubManager().checkGhCli()).resolves.toEqual({ installed: true, authenticated: false })
+    })
+  })
+
   it('derives owners from accessible repos when org membership is missing', async () => {
     execFileMock.mockImplementation((file: string, args: string[], optionsOrCallback: unknown, maybeCallback?: (error: Error | null, stdout?: string, stderr?: string) => void) => {
       const callback = typeof optionsOrCallback === 'function'

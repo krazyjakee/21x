@@ -115,6 +115,14 @@ function mapPullRequestCheck(check: RawPullRequestCheck): PullRequestCheck {
   }
 }
 
+function parseActiveGhAccount(output: string): string | undefined | null {
+  const accounts = output.split(/\n(?=\s*(?:\S\s+)?Logged in to )/).filter((block) => block.includes('Logged in to'))
+  if (accounts.length === 0) return null
+  const active = accounts.find((block) => /Active account:\s*true/.test(block)) ?? accounts[0]
+  const match = active.match(/Logged in to \S+ account (\S+)/) || active.match(/Logged in to \S+ as (\S+)/)
+  return match?.[1]
+}
+
 /**
  * All GitHub operations go through the user's authenticated gh CLI. 20x never
  * logs in, reads, stores, or forwards GitHub credentials itself.
@@ -155,22 +163,20 @@ export class GitHubManager {
       return { installed: false, authenticated: false }
     }
 
+    // `--active` only exists in gh >= 2.40, so parse the full status output instead.
+    // Older gh writes status to stderr, and a stale inactive account can make it exit 1.
+    let output: string
     try {
-      const { stdout } = await execFileAsync('gh', ['auth', 'status', '--active'])
-      const match = stdout.match(/Logged in to .+ account (\S+)/) ||
-                    stdout.match(/account (\S+)/) ||
-                    stdout.match(/as (\S+)/)
-      return { installed: true, authenticated: true, username: match?.[1] }
+      const { stdout, stderr } = await execFileAsync('gh', ['auth', 'status'])
+      output = `${stdout}\n${stderr}`
     } catch (error: unknown) {
-      // gh auth status exits with 1 when not authenticated, but may still output to stderr
       const execErr = error as { stderr?: string; stdout?: string }
-      const output = execErr?.stderr || execErr?.stdout || ''
-      if (output.includes('Logged in')) {
-        const match = output.match(/account (\S+)/) || output.match(/as (\S+)/)
-        return { installed: true, authenticated: true, username: match?.[1] }
-      }
-      return { installed: true, authenticated: false }
+      output = `${execErr?.stdout || ''}\n${execErr?.stderr || ''}`
     }
+
+    const username = parseActiveGhAccount(output)
+    if (username === null) return { installed: true, authenticated: false }
+    return { installed: true, authenticated: true, username }
   }
 
   async fetchUserOrgs(): Promise<string[]> {
