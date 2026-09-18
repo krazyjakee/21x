@@ -58,7 +58,10 @@ describe('project-scoped task-management tools', () => {
       const result = await callToolForScope(tool.name, argsFor(tool, 'in-b'), PROJECT, invoke)
       expect(result.isError).toBe(true)
       expect(errorText(result)).toContain('not in this project')
-      expect(invoke.mock.calls.map(([route]) => route)).not.toContain(`/${tool.name}`)
+      // The membership check itself reads the task with /get_task, so for that
+      // tool the only permitted call is that one lookup.
+      const ownRouteCalls = invoke.mock.calls.filter(([route]) => route === `/${tool.name}`)
+      expect(ownRouteCalls).toHaveLength(tool.name === 'get_task' ? 1 : 0)
     })
 
     it(`${tool.name} refuses a task id that does not exist`, async () => {

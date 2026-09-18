@@ -354,8 +354,6 @@ describe('project filter on list routes', () => {
     expect(await handleRoute(db, '/get_task_statistics', { metric: 'label_usage', project_id: project.id })).toEqual({ p: 1 })
   })
 })
-  })
-})
 
 describe('skill routes', () => {
   it('lists skills by confidence without their content', async () => {
