@@ -51,8 +51,19 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 
 1. Fork the repo and create a branch from `main`
 2. Make your changes
-3. Run `pnpm typecheck && pnpm build && pnpm test:run`
+3. Run `pnpm lint && pnpm typecheck && pnpm test:run`
 4. Open a PR with a clear description of what changed and why
+
+CI (`.github/workflows/verify.yml`) runs lint, typecheck, the build and the full test suite on every PR and push to `main`.
+
+## Pre-commit Hook
+
+`pnpm install` sets up a Husky pre-commit hook that runs in seconds:
+
+- [lint-staged](https://github.com/lint-staged/lint-staged) — ESLint on the staged `.ts`/`.tsx` files only
+- `pnpm typecheck`
+
+The build and the test suite are left to CI. Run `pnpm test:run` yourself before opening a PR.
 
 ## Testing
 

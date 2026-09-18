@@ -1,15 +1,23 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mkdtempSync, readdirSync, rmSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
 import { LinearPlugin } from './linear-plugin'
 import { PluginActionId, type PluginContext } from './types'
 import { TaskStatus } from '../../shared/constants'
 import type { DatabaseManager, TaskRecord } from '../database'
 import type { OAuthManager } from '../oauth/oauth-manager'
+import { createTestDb } from '../../../test/helpers/db-test-helper'
+import { LINEAR_ISSUES_FIRST_SYNC, LINEAR_ISSUES_RESYNC, LINEAR_UPLOAD_URL } from '../../../test/fixtures/linear-issues'
 
 const mockClientInstance = {
   getIssue: vi.fn(),
+  getIssues: vi.fn(),
   getWorkflowStates: vi.fn(),
   updateIssue: vi.fn(),
-  addComment: vi.fn()
+  addComment: vi.fn(),
+  getAttachmentMetadata: vi.fn(),
+  downloadAttachment: vi.fn()
 }
 
 vi.mock('./linear-client', () => ({
@@ -25,12 +33,13 @@ const STATES = [
   { id: 'state-done', name: 'Done', type: 'completed' }
 ]
 
-function makeContext(): PluginContext {
+function makeContext(overrides: Partial<PluginContext> = {}): PluginContext {
   return {
     db: {} as unknown as DatabaseManager,
     oauthManager: {
       getValidToken: vi.fn().mockResolvedValue('token-1')
-    } as unknown as OAuthManager
+    } as unknown as OAuthManager,
+    ...overrides
   }
 }
 
@@ -100,5 +109,132 @@ describe('LinearPlugin change status action', () => {
   it('requires a status', async () => {
     const result = await plugin.executeAction(PluginActionId.ChangeStatus, task, '  ', {}, makeContext())
     expect(result).toEqual({ success: false, error: 'Status is required' })
+  })
+})
+
+// ── Fixture-based import ─────────────────────────────────────
+
+describe('LinearPlugin importTasks', () => {
+  let plugin: LinearPlugin
+  let db: DatabaseManager
+  let ctx: PluginContext
+  let sourceId: string
+  let attachmentsDir: string
+
+  function taskFor(externalId: string): TaskRecord | undefined {
+    return db.getTaskByExternalId(sourceId, externalId)
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    plugin = new LinearPlugin()
+    attachmentsDir = mkdtempSync(join(tmpdir(), '20x-linear-'))
+    ;({ db } = createTestDb())
+    db.getAttachmentsDir = vi.fn(() => attachmentsDir)
+    ctx = makeContext({ db })
+    sourceId = db.createTaskSource({ name: 'Linear', plugin_id: 'linear', mcp_server_id: null })!.id
+
+    mockClientInstance.getIssues.mockResolvedValue(LINEAR_ISSUES_FIRST_SYNC)
+    mockClientInstance.getAttachmentMetadata.mockResolvedValue({ id: 'att-1', title: 'login-loop.png' })
+    mockClientInstance.downloadAttachment.mockResolvedValue({
+      buffer: Buffer.from('png-bytes'),
+      contentType: 'image/png'
+    })
+  })
+
+  afterEach(() => {
+    rmSync(attachmentsDir, { recursive: true, force: true })
+  })
+
+  it('imports issues with their mapped fields', async () => {
+    const result = await plugin.importTasks(sourceId, { assignee_id: 'user-1' }, ctx)
+
+    expect(result).toEqual({ imported: 3, updated: 0, errors: [] })
+    expect(mockClientInstance.getIssues).toHaveBeenCalledWith('user-1')
+
+    expect(taskFor('iss-1')).toMatchObject({
+      title: 'Fix login redirect',
+      status: TaskStatus.AgentWorking,
+      priority: 'high',
+      assignee: 'Ana',
+      due_date: '2026-10-02',
+      labels: ['Bug', 'Auth'],
+      source: 'Linear',
+      source_id: sourceId,
+      external_id: 'iss-1'
+    })
+    expect(taskFor('iss-1')!.description).toContain('Users bounce back to /login')
+
+    // No priority (0) is low; Todo is not started; Done is completed.
+    expect(taskFor('iss-2')).toMatchObject({ status: TaskStatus.NotStarted, priority: 'low', assignee: '', labels: [] })
+    expect(taskFor('iss-3')).toMatchObject({ status: TaskStatus.Completed, priority: 'critical', labels: ['Security'] })
+  })
+
+  it('downloads files linked from the description and points the markdown at the local copy', async () => {
+    await plugin.importTasks(sourceId, {}, ctx)
+
+    const task = taskFor('iss-1')!
+    expect(mockClientInstance.downloadAttachment).toHaveBeenCalledWith(LINEAR_UPLOAD_URL)
+    expect(task.attachments).toHaveLength(1)
+    const attachment = task.attachments[0] as unknown as Record<string, unknown>
+    expect(attachment).toMatchObject({ filename: 'login-loop.png', mime_type: 'image/png', linear_url: LINEAR_UPLOAD_URL })
+    expect(readdirSync(attachmentsDir)).toEqual([`${attachment.id}-login-loop.png`])
+
+    // Linear upload links expire; the description must use the saved copy.
+    expect(task.description).toContain(`![login-loop.png](app-attachment://${task.id}/${attachment.id})`)
+    expect(task.description).not.toContain(LINEAR_UPLOAD_URL)
+  })
+
+  it('refreshes existing tasks on a later sync without re-downloading files', async () => {
+    await plugin.importTasks(sourceId, {}, ctx)
+    const ids = { login: taskFor('iss-1')!.id, changelog: taskFor('iss-2')!.id }
+
+    mockClientInstance.getIssues.mockResolvedValue(LINEAR_ISSUES_RESYNC)
+    const result = await plugin.importTasks(sourceId, {}, ctx)
+
+    expect(result).toEqual({ imported: 0, updated: 2, errors: [] })
+    // Done in Linear completes the task here.
+    expect(taskFor('iss-1')).toMatchObject({ id: ids.login, status: TaskStatus.Completed })
+    // Still open in Linear: fields refresh, but 20x keeps the workflow state it had.
+    expect(taskFor('iss-2')).toMatchObject({
+      id: ids.changelog,
+      title: 'Write the 2.0 changelog',
+      assignee: 'Ben',
+      status: TaskStatus.NotStarted
+    })
+    expect(mockClientInstance.downloadAttachment).toHaveBeenCalledTimes(1)
+    expect(taskFor('iss-1')!.attachments).toHaveLength(1)
+  })
+
+  it('keeps the task when a file download fails', async () => {
+    mockClientInstance.downloadAttachment.mockRejectedValue(new Error('Failed to download file: 403'))
+
+    const result = await plugin.importTasks(sourceId, {}, ctx)
+
+    expect(result).toEqual({ imported: 3, updated: 0, errors: [] })
+    expect(taskFor('iss-1')!.attachments).toEqual([])
+    expect(taskFor('iss-1')!.description).toContain(LINEAR_UPLOAD_URL)
+  })
+
+  it('reports an API failure and imports nothing', async () => {
+    mockClientInstance.getIssues.mockRejectedValue(new Error('Linear GraphQL error: rate limited'))
+
+    const result = await plugin.importTasks(sourceId, {}, ctx)
+
+    expect(result).toEqual({ imported: 0, updated: 0, errors: ['Import failed: Linear GraphQL error: rate limited'] })
+    expect(db.getTasks()).toHaveLength(0)
+  })
+
+  it('requires a valid OAuth token', async () => {
+    const expired = makeContext({ db })
+    ;(expired.oauthManager!.getValidToken as ReturnType<typeof vi.fn>).mockResolvedValue(null)
+    expect(await plugin.importTasks(sourceId, {}, expired)).toEqual({
+      imported: 0, updated: 0, errors: ['OAuth token expired. Please re-authenticate.']
+    })
+
+    expect(await plugin.importTasks(sourceId, {}, { db })).toEqual({
+      imported: 0, updated: 0, errors: ['OAuth manager not available']
+    })
+    expect(mockClientInstance.getIssues).not.toHaveBeenCalled()
   })
 })
