@@ -1,5 +1,6 @@
 import { safeStorage } from 'electron'
 import { TASK_ROLE_TASK, isCoordinatorRole, type TaskRole } from '../../shared/task-roles'
+import { DEFAULT_PROJECT_ID } from '../../shared/projects'
 import type {
   AgentConfigRecord, AgentRecord, AgentRow,
   FileAttachmentRecord,
@@ -7,7 +8,7 @@ import type {
   MarketplaceSourceRecord, MarketplaceSourceRow,
   McpOAuthRegistration, McpServerRecord, McpServerRow, McpServerSource, McpServerToolRecord,
   OAuthTokenRecord, OAuthTokenRow,
-  OutputFieldRecord, RecurrencePatternObject,
+  OutputFieldRecord, ProjectRecord, ProjectRow, RecurrencePatternObject,
   SecretRecord, SecretRecordWithValue, SecretRow,
   SkillRecord, SkillRow,
   TaskRecord, TaskRow,
@@ -137,7 +138,27 @@ export function deserializeTask(row: TaskRow): TaskRecord {
     auto_complete_without_review: (row.auto_complete_without_review ?? 0) === 1,
     complete_at_source: row.complete_at_source == null ? null : row.complete_at_source === 1,
     next_subtask_ids: parseJsonArray(row.next_subtask_ids),
-    role: isCoordinatorRole(row.role) ? (row.role as TaskRole) : TASK_ROLE_TASK
+    role: isCoordinatorRole(row.role) ? (row.role as TaskRole) : TASK_ROLE_TASK,
+    project_id: row.project_id ?? DEFAULT_PROJECT_ID
+  }
+}
+
+export function deserializeProject(row: ProjectRow): ProjectRecord {
+  let settings: Record<string, unknown> = {}
+  try {
+    const parsed = JSON.parse(row.settings || '{}') as unknown
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) settings = parsed as Record<string, unknown>
+  } catch {
+    // Unreadable settings fall back to none rather than hiding the project.
+  }
+  return {
+    ...row,
+    default_agent_id: row.default_agent_id ?? null,
+    mastermind_agent_id: row.mastermind_agent_id ?? null,
+    git_provider: row.git_provider ?? null,
+    git_org: row.git_org ?? null,
+    settings,
+    archived: row.archived === 1
   }
 }
 
@@ -148,7 +169,8 @@ export function deserializeTaskSource(row: TaskSourceRow): TaskSourceRecord {
       config: JSON.parse(row.config || '{}') as Record<string, unknown>,
       list_tool_args: JSON.parse(row.list_tool_args) as Record<string, unknown>,
       update_tool_args: JSON.parse(row.update_tool_args) as Record<string, unknown>,
-      enabled: row.enabled === 1
+      enabled: row.enabled === 1,
+      project_id: row.project_id ?? DEFAULT_PROJECT_ID
     }
   } catch (err) {
     console.error('[Database] Failed to deserialize task source:', {

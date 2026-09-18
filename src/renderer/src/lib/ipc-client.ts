@@ -23,6 +23,11 @@ import type {
 } from '@shared/voice-tts'
 import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
 import type { CliMcpMutationResult, CliMcpProbeResult, CliMcpServerRef, CliMcpSnapshot, CliMcpUpsertRequest } from '@shared/cli-mcp-config'
+import type {
+  ProjectRecord, CreateProjectData, UpdateProjectData,
+  ProjectRepoRecord, CreateProjectRepoData, UpdateProjectRepoData,
+  ProjectResourceRecord, CreateProjectResourceData, UpdateProjectResourceData
+} from '@shared/projects'
 
 export const taskApi = {
   getAll: (): Promise<Task[]> => {
@@ -458,6 +463,34 @@ export const taskSourceApi = {
   reassign: (taskId: string, userIds: string[], assigneeDisplay: string): Promise<ReassignResult> => {
     return window.electronAPI.taskSources.reassign(taskId, userIds, assigneeDisplay)
   }
+}
+
+export const projectApi = {
+  getAll: (opts?: { includeArchived?: boolean }): Promise<ProjectRecord[]> => window.electronAPI.projects.getAll(opts),
+  get: (id: string): Promise<ProjectRecord | undefined> => window.electronAPI.projects.get(id),
+  getDefault: (): Promise<ProjectRecord | undefined> => window.electronAPI.projects.getDefault(),
+  create: (data: CreateProjectData): Promise<ProjectRecord | undefined> => window.electronAPI.projects.create(data),
+  update: (id: string, data: UpdateProjectData): Promise<ProjectRecord | undefined> => window.electronAPI.projects.update(id, data),
+  archive: (id: string, archived?: boolean): Promise<ProjectRecord | undefined> => window.electronAPI.projects.archive(id, archived),
+  reorder: (orderedIds: string[]): Promise<void> => window.electronAPI.projects.reorder(orderedIds),
+
+  listRepos: (projectId: string): Promise<ProjectRepoRecord[]> => window.electronAPI.projects.repos.list(projectId),
+  addRepo: (projectId: string, data: CreateProjectRepoData): Promise<ProjectRepoRecord | undefined> =>
+    window.electronAPI.projects.repos.add(projectId, data),
+  updateRepo: (id: string, data: UpdateProjectRepoData): Promise<ProjectRepoRecord | undefined> =>
+    window.electronAPI.projects.repos.update(id, data),
+  removeRepo: (id: string): Promise<boolean> => window.electronAPI.projects.repos.remove(id),
+  reorderRepos: (projectId: string, orderedIds: string[]): Promise<void> =>
+    window.electronAPI.projects.repos.reorder(projectId, orderedIds),
+
+  listResources: (projectId: string): Promise<ProjectResourceRecord[]> => window.electronAPI.projects.resources.list(projectId),
+  addResource: (projectId: string, data: CreateProjectResourceData): Promise<ProjectResourceRecord | undefined> =>
+    window.electronAPI.projects.resources.add(projectId, data),
+  updateResource: (id: string, data: UpdateProjectResourceData): Promise<ProjectResourceRecord | undefined> =>
+    window.electronAPI.projects.resources.update(id, data),
+  removeResource: (id: string): Promise<boolean> => window.electronAPI.projects.resources.remove(id),
+  reorderResources: (projectId: string, orderedIds: string[]): Promise<void> =>
+    window.electronAPI.projects.resources.reorder(projectId, orderedIds)
 }
 
 export const skillApi = {

@@ -58,6 +58,11 @@ import type {
 } from '@shared/voice-tts'
 import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
 import type { CliMcpMutationResult, CliMcpProbeResult, CliMcpServerRef, CliMcpSnapshot, CliMcpUpsertRequest } from '@shared/cli-mcp-config'
+import type {
+  ProjectRecord, CreateProjectData, UpdateProjectData,
+  ProjectRepoRecord, CreateProjectRepoData, UpdateProjectRepoData,
+  ProjectResourceRecord, CreateProjectResourceData, UpdateProjectResourceData
+} from '@shared/projects'
 
 export interface AgentSessionStartResult {
   sessionId: string
@@ -355,6 +360,29 @@ interface ElectronAPI {
     exportUpdate: (taskId: string, fields: Record<string, unknown>) => Promise<void>
     getUsers: (sourceId: string) => Promise<SourceUser[]>
     reassign: (taskId: string, userIds: string[], assigneeDisplay: string) => Promise<ReassignResult>
+  }
+  projects: {
+    getAll: (opts?: { includeArchived?: boolean }) => Promise<ProjectRecord[]>
+    get: (id: string) => Promise<ProjectRecord | undefined>
+    getDefault: () => Promise<ProjectRecord | undefined>
+    create: (data: CreateProjectData) => Promise<ProjectRecord | undefined>
+    update: (id: string, data: UpdateProjectData) => Promise<ProjectRecord | undefined>
+    archive: (id: string, archived?: boolean) => Promise<ProjectRecord | undefined>
+    reorder: (orderedIds: string[]) => Promise<void>
+    repos: {
+      list: (projectId: string) => Promise<ProjectRepoRecord[]>
+      add: (projectId: string, data: CreateProjectRepoData) => Promise<ProjectRepoRecord | undefined>
+      update: (id: string, data: UpdateProjectRepoData) => Promise<ProjectRepoRecord | undefined>
+      remove: (id: string) => Promise<boolean>
+      reorder: (projectId: string, orderedIds: string[]) => Promise<void>
+    }
+    resources: {
+      list: (projectId: string) => Promise<ProjectResourceRecord[]>
+      add: (projectId: string, data: CreateProjectResourceData) => Promise<ProjectResourceRecord | undefined>
+      update: (id: string, data: UpdateProjectResourceData) => Promise<ProjectResourceRecord | undefined>
+      remove: (id: string) => Promise<boolean>
+      reorder: (projectId: string, orderedIds: string[]) => Promise<void>
+    }
   }
   skills: {
     getAll: () => Promise<Skill[]>

@@ -28,6 +28,31 @@ runs on every startup, so a returning user gets the row exactly once. Never
 default `role` to anything but `'task'`: an old row with a missing column must
 stay a user task.
 
+### Every task belongs to a project
+
+Migration 15 (`migrateToProjects()`) adds `project_id` to `tasks` and
+`task_sources`, creates the Default project (`DEFAULT_PROJECT_ID` in
+`src/shared/projects.ts`), moves every existing row into it (coordinator rows
+included), copies the global `github_org` / `git_provider` settings onto it and
+seeds `project_repos` from the distinct `tasks.repos` values (`org/name`, or a
+bare `name` resolved with `github_org`). The settings and repos are seeded only
+when the Default row is first inserted, so later re-runs never undo user edits.
+
+`tasks.project_id` is not declared `NOT NULL`: SQLite's `ALTER TABLE` can only
+add a `REFERENCES` column with a NULL default, and a fresh database must match a
+migrated one (`database-schema-equivalence.test.ts`). It is NOT NULL in effect:
+
+- `DatabaseManager.createTask` assigns the parent's (or recurrence template's)
+  project to a subtask, else the requested project, else the task source's,
+  else the Default project; `updateTask` moves a task re-parented under another
+  task into that task's project;
+- the `tasks_assign_project` trigger applies the same fallback to raw inserts
+  (the recurrence scheduler, the seed);
+- the migration fills every existing NULL.
+
+`rebuildTasksTable()` drops that trigger with the old table; it runs before
+`migrateToProjects()` in `runMigrations()`, which recreates it. Keep that order.
+
 ## Adding a column to other tables
 
 Same pattern: update `createTables()`, add a guarded `ALTER TABLE` in `runMigrations()`, and bump `SCHEMA_VERSION`.

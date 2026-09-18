@@ -9,6 +9,7 @@ import { applySchema } from './database/schema'
 import { seedDefaultAgent, seedMastermindTask, seedOrchestratorSkill, seedTaskManagementMcpServer } from './database/seed'
 import { userTaskRoleFilter } from './database/task-roles'
 import { TASK_ROLE_MASTERMIND, type TaskRole } from '../shared/task-roles'
+import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import {
   JSON_COLUMNS,
   UPDATABLE_COLUMNS,
@@ -17,6 +18,7 @@ import {
   deserializeMarketplaceSource,
   deserializeMcpServer,
   deserializeOAuthToken,
+  deserializeProject,
   deserializeSecret,
   deserializeSecretWithValue,
   deserializeSkill,
@@ -36,6 +38,9 @@ import type {
   CreateMarketplaceSourceData, MarketplaceSourceRecord, MarketplaceSourceRow,
   CreateMcpServerData, McpServerRecord, McpServerRow, McpServerSource, McpServerToolRecord, UpdateMcpServerData,
   CreateOAuthTokenData, OAuthTokenRecord, OAuthTokenRow,
+  CreateProjectData, ProjectRecord, ProjectRow, UpdateProjectData,
+  CreateProjectRepoData, ProjectRepoRecord, UpdateProjectRepoData,
+  CreateProjectResourceData, ProjectResourceRecord, UpdateProjectResourceData,
   CreateSecretData, SecretRecord, SecretRecordWithValue, SecretRow, UpdateSecretData,
   CreateSkillData, SkillRecord, SkillRow, UpdateSkillData,
   CreateTaskData, HeartbeatLogRecord, TaskRecord, TaskRow, UpdateTaskData,
@@ -139,14 +144,23 @@ export class DatabaseManager {
    * the sidebar, mobile, the MCP tools and every other consumer inherit the
    * same rule. Pass `includeCoordinators` only for bookkeeping over every row,
    * such as deciding which workspace directories belong to something.
+   * `projectId` narrows the list to one project; without it every project's
+   * tasks are returned, as before projects existed.
    */
-  getTasks(opts?: { includeCoordinators?: boolean }): TaskRecord[] {
+  getTasks(opts?: { includeCoordinators?: boolean; projectId?: string }): TaskRecord[] {
     if (!this.ensureDbOpen()) return []
 
-    const where = opts?.includeCoordinators ? '' : ` WHERE ${userTaskRoleFilter()}`
+    const conditions: string[] = []
+    const params: string[] = []
+    if (!opts?.includeCoordinators) conditions.push(userTaskRoleFilter())
+    if (opts?.projectId) {
+      conditions.push('project_id = ?')
+      params.push(opts.projectId)
+    }
+    const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : ''
     const rows = this.prepare(
       `SELECT * FROM tasks${where} ORDER BY created_at DESC`
-    ).all() as TaskRow[]
+    ).all(...params) as TaskRow[]
 
     return rows.map(deserializeTask)
   }
@@ -330,6 +344,27 @@ export class DatabaseManager {
     runAll()
   }
 
+  /**
+   * `tasks.project_id` is NOT NULL in effect but not in the schema (see
+   * migrateToProjects in database/schema.ts), so every write picks one here:
+   * a subtask or recurrence instance shares its parent's project; anything
+   * else gets the requested project, else its task source's project, else the
+   * Default project.
+   */
+  private resolveTaskProjectId(data: Pick<CreateTaskData, 'parent_task_id' | 'recurrence_parent_id' | 'project_id' | 'source_id'>): string {
+    for (const parentId of [data.parent_task_id, data.recurrence_parent_id]) {
+      if (!parentId) continue
+      const row = this.prepare('SELECT project_id FROM tasks WHERE id = ?').get(parentId) as { project_id: string | null } | undefined
+      if (row?.project_id) return row.project_id
+    }
+    if (data.project_id) return data.project_id
+    if (data.source_id) {
+      const row = this.prepare('SELECT project_id FROM task_sources WHERE id = ?').get(data.source_id) as { project_id: string | null } | undefined
+      if (row?.project_id) return row.project_id
+    }
+    return DEFAULT_PROJECT_ID
+  }
+
   createTask(data: CreateTaskData): TaskRecord | undefined {
     const id = createId()
     const now = new Date().toISOString()
@@ -356,10 +391,10 @@ export class DatabaseManager {
         labels, attachments, repos, output_fields, external_id, source_id, source,
         is_recurring, recurrence_pattern, recurrence_parent_id,
         auto_start_agent, auto_complete_without_review,
-        parent_task_id, next_subtask_ids, sort_order, role,
+        parent_task_id, next_subtask_ids, sort_order, role, project_id,
         created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       data.title,
@@ -385,6 +420,7 @@ export class DatabaseManager {
       JSON.stringify(data.next_subtask_ids ?? []),
       sortOrder,
       data.role ?? 'task',
+      this.resolveTaskProjectId(data),
       now,
       now
     )
@@ -441,6 +477,12 @@ export class DatabaseManager {
       } else {
         values.push(value as string | number | null)
       }
+    }
+
+    // A task moved under a parent joins the parent's project.
+    if (data.parent_task_id) {
+      setClauses.push('project_id = ?')
+      values.push(this.resolveTaskProjectId({ parent_task_id: data.parent_task_id, project_id: currentTask?.project_id }))
     }
 
     // Auto-set heartbeat_next_check_at when enabling heartbeat without explicit next check time
@@ -717,10 +759,215 @@ export class DatabaseManager {
     return result.changes > 0
   }
 
+  // ── Projects ─────────────────────────────────────────────────
+  // A project groups tasks and task sources and has zero, one or many repos
+  // plus context-only resources. Projects are archived, never deleted: tasks
+  // reference them without a cascade.
+
+  /** Active projects in sidebar order; `includeArchived` adds the archived ones. */
+  getProjects(opts?: { includeArchived?: boolean }): ProjectRecord[] {
+    if (!this.ensureDbOpen()) return []
+    const where = opts?.includeArchived ? '' : ' WHERE archived = 0'
+    const rows = this.prepare(
+      `SELECT * FROM projects${where} ORDER BY sort_order ASC, created_at ASC`
+    ).all() as ProjectRow[]
+    return rows.map(deserializeProject)
+  }
+
+  getProject(id: string): ProjectRecord | undefined {
+    if (!this.ensureDbOpen()) return undefined
+    const row = this.prepare('SELECT * FROM projects WHERE id = ?').get(id) as ProjectRow | undefined
+    return row ? deserializeProject(row) : undefined
+  }
+
+  /** The project unassigned tasks and sources belong to; created by schema migration 15. */
+  getDefaultProject(): ProjectRecord | undefined {
+    return this.getProject(DEFAULT_PROJECT_ID)
+  }
+
+  createProject(data: CreateProjectData): ProjectRecord | undefined {
+    const name = data.name?.trim()
+    if (!name) throw new Error('A project needs a name.')
+    const id = createId()
+    const now = new Date().toISOString()
+    const { next } = this.prepare('SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM projects').get() as { next: number }
+    this.prepare(`
+      INSERT INTO projects (id, name, description, default_agent_id, mastermind_agent_id, git_provider, git_org, settings, sort_order, archived, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+    `).run(
+      id,
+      name,
+      data.description ?? '',
+      data.default_agent_id ?? null,
+      data.mastermind_agent_id ?? null,
+      data.git_provider || null,
+      data.git_org || null,
+      JSON.stringify(data.settings ?? {}),
+      next,
+      now,
+      now
+    )
+    return this.getProject(id)
+  }
+
+  updateProject(id: string, data: UpdateProjectData): ProjectRecord | undefined {
+    const setClauses: string[] = []
+    const values: (string | null)[] = []
+    if (data.name !== undefined) {
+      const name = data.name.trim()
+      if (!name) throw new Error('A project needs a name.')
+      setClauses.push('name = ?'); values.push(name)
+    }
+    if (data.description !== undefined) { setClauses.push('description = ?'); values.push(data.description) }
+    if (data.default_agent_id !== undefined) { setClauses.push('default_agent_id = ?'); values.push(data.default_agent_id || null) }
+    if (data.mastermind_agent_id !== undefined) { setClauses.push('mastermind_agent_id = ?'); values.push(data.mastermind_agent_id || null) }
+    if (data.git_provider !== undefined) { setClauses.push('git_provider = ?'); values.push(data.git_provider || null) }
+    if (data.git_org !== undefined) { setClauses.push('git_org = ?'); values.push(data.git_org || null) }
+    if (data.settings !== undefined) { setClauses.push('settings = ?'); values.push(JSON.stringify(data.settings ?? {})) }
+    if (setClauses.length === 0) return this.getProject(id)
+
+    setClauses.push('updated_at = ?')
+    values.push(new Date().toISOString(), id)
+    this.db.prepare(`UPDATE projects SET ${setClauses.join(', ')} WHERE id = ?`).run(...values)
+    return this.getProject(id)
+  }
+
+  /** Archive (or restore) a project. The Default project always stays active. */
+  archiveProject(id: string, archived = true): ProjectRecord | undefined {
+    if (archived && id === DEFAULT_PROJECT_ID) throw new Error('The Default project cannot be archived.')
+    this.prepare('UPDATE projects SET archived = ?, updated_at = ? WHERE id = ?')
+      .run(archived ? 1 : 0, new Date().toISOString(), id)
+    return this.getProject(id)
+  }
+
+  /** Index in `orderedIds` becomes each project's sort_order. */
+  reorderProjects(orderedIds: string[]): void {
+    this.reorderRows('projects', null, orderedIds)
+  }
+
+  getProjectRepos(projectId: string): ProjectRepoRecord[] {
+    if (!this.ensureDbOpen()) return []
+    return this.prepare(
+      'SELECT * FROM project_repos WHERE project_id = ? ORDER BY sort_order ASC, created_at ASC'
+    ).all(projectId) as ProjectRepoRecord[]
+  }
+
+  getProjectRepo(id: string): ProjectRepoRecord | undefined {
+    return this.prepare('SELECT * FROM project_repos WHERE id = ?').get(id) as ProjectRepoRecord | undefined
+  }
+
+  addProjectRepo(projectId: string, data: CreateProjectRepoData): ProjectRepoRecord | undefined {
+    const name = data.name?.trim()
+    if (!name) throw new Error('A repo needs a name.')
+    const id = createId()
+    const { next } = this.prepare(
+      'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM project_repos WHERE project_id = ?'
+    ).get(projectId) as { next: number }
+    this.prepare(`
+      INSERT INTO project_repos (id, project_id, provider, org, name, default_branch, sort_order, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, projectId, data.provider || 'github', data.org?.trim() ?? '', name, data.default_branch || null, next, new Date().toISOString())
+    return this.getProjectRepo(id)
+  }
+
+  updateProjectRepo(id: string, data: UpdateProjectRepoData): ProjectRepoRecord | undefined {
+    const setClauses: string[] = []
+    const values: (string | null)[] = []
+    if (data.name !== undefined) {
+      const name = data.name.trim()
+      if (!name) throw new Error('A repo needs a name.')
+      setClauses.push('name = ?'); values.push(name)
+    }
+    if (data.provider !== undefined) { setClauses.push('provider = ?'); values.push(data.provider || 'github') }
+    if (data.org !== undefined) { setClauses.push('org = ?'); values.push(data.org.trim()) }
+    if (data.default_branch !== undefined) { setClauses.push('default_branch = ?'); values.push(data.default_branch || null) }
+    if (setClauses.length > 0) {
+      values.push(id)
+      this.db.prepare(`UPDATE project_repos SET ${setClauses.join(', ')} WHERE id = ?`).run(...values)
+    }
+    return this.getProjectRepo(id)
+  }
+
+  removeProjectRepo(id: string): boolean {
+    return this.prepare('DELETE FROM project_repos WHERE id = ?').run(id).changes > 0
+  }
+
+  reorderProjectRepos(projectId: string, orderedIds: string[]): void {
+    this.reorderRows('project_repos', projectId, orderedIds)
+  }
+
+  getProjectResources(projectId: string): ProjectResourceRecord[] {
+    if (!this.ensureDbOpen()) return []
+    return this.prepare(
+      'SELECT * FROM project_resources WHERE project_id = ? ORDER BY sort_order ASC, created_at ASC'
+    ).all(projectId) as ProjectResourceRecord[]
+  }
+
+  getProjectResource(id: string): ProjectResourceRecord | undefined {
+    return this.prepare('SELECT * FROM project_resources WHERE id = ?').get(id) as ProjectResourceRecord | undefined
+  }
+
+  addProjectResource(projectId: string, data: CreateProjectResourceData): ProjectResourceRecord | undefined {
+    const label = data.label?.trim()
+    if (!label) throw new Error('A resource needs a label.')
+    const id = createId()
+    const { next } = this.prepare(
+      'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM project_resources WHERE project_id = ?'
+    ).get(projectId) as { next: number }
+    this.prepare(`
+      INSERT INTO project_resources (id, project_id, label, url, notes, sort_order, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(id, projectId, label, data.url?.trim() || null, data.notes ?? '', next, new Date().toISOString())
+    return this.getProjectResource(id)
+  }
+
+  updateProjectResource(id: string, data: UpdateProjectResourceData): ProjectResourceRecord | undefined {
+    const setClauses: string[] = []
+    const values: (string | null)[] = []
+    if (data.label !== undefined) {
+      const label = data.label.trim()
+      if (!label) throw new Error('A resource needs a label.')
+      setClauses.push('label = ?'); values.push(label)
+    }
+    if (data.url !== undefined) { setClauses.push('url = ?'); values.push(data.url?.trim() || null) }
+    if (data.notes !== undefined) { setClauses.push('notes = ?'); values.push(data.notes) }
+    if (setClauses.length > 0) {
+      values.push(id)
+      this.db.prepare(`UPDATE project_resources SET ${setClauses.join(', ')} WHERE id = ?`).run(...values)
+    }
+    return this.getProjectResource(id)
+  }
+
+  removeProjectResource(id: string): boolean {
+    return this.prepare('DELETE FROM project_resources WHERE id = ?').run(id).changes > 0
+  }
+
+  reorderProjectResources(projectId: string, orderedIds: string[]): void {
+    this.reorderRows('project_resources', projectId, orderedIds)
+  }
+
+  /** Index in `orderedIds` becomes sort_order; ids outside `projectId` are ignored. */
+  private reorderRows(table: 'projects' | 'project_repos' | 'project_resources', projectId: string | null, orderedIds: string[]): void {
+    if (!this.ensureDbOpen()) return
+    const stmt = projectId === null
+      ? this.prepare(`UPDATE ${table} SET sort_order = ? WHERE id = ?`)
+      : this.prepare(`UPDATE ${table} SET sort_order = ? WHERE id = ? AND project_id = ?`)
+    this.db.transaction(() => {
+      orderedIds.forEach((id, index) => {
+        if (projectId === null) stmt.run(index, id)
+        else stmt.run(index, id, projectId)
+      })
+    })()
+  }
+
   // ── Task Source CRUD ─────────────────────────────────────────
 
-  getTaskSources(): TaskSourceRecord[] {
-    const rows = this.prepare('SELECT * FROM task_sources ORDER BY created_at ASC').all() as TaskSourceRow[]
+  /** Every project's sources unless `projectId` narrows it to one. */
+  getTaskSources(projectId?: string): TaskSourceRecord[] {
+    const rows = (projectId
+      ? this.prepare('SELECT * FROM task_sources WHERE project_id = ? ORDER BY created_at ASC').all(projectId)
+      : this.prepare('SELECT * FROM task_sources ORDER BY created_at ASC').all()
+    ) as TaskSourceRow[]
     return rows.map(deserializeTaskSource)
   }
 
@@ -733,7 +980,7 @@ export class DatabaseManager {
     const id = createId()
     const now = new Date().toISOString()
     this.prepare(
-      'INSERT INTO task_sources (id, mcp_server_id, name, plugin_id, config, list_tool, list_tool_args, update_tool, update_tool_args, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)'
+      'INSERT INTO task_sources (id, mcp_server_id, name, plugin_id, config, list_tool, list_tool_args, update_tool, update_tool_args, enabled, project_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)'
     ).run(
       id,
       data.mcp_server_id,
@@ -744,6 +991,7 @@ export class DatabaseManager {
       JSON.stringify(data.list_tool_args ?? {}),
       data.update_tool ?? '',
       JSON.stringify(data.update_tool_args ?? {}),
+      data.project_id || DEFAULT_PROJECT_ID,
       now,
       now
     )

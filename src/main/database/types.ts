@@ -1,6 +1,27 @@
 import type { TaskRole } from '../../shared/task-roles'
 import type { ReasoningEffort } from '../../shared/reasoning-effort'
 
+export type {
+  ProjectRecord, CreateProjectData, UpdateProjectData,
+  ProjectRepoRecord, CreateProjectRepoData, UpdateProjectRepoData,
+  ProjectResourceRecord, CreateProjectResourceData, UpdateProjectResourceData
+} from '../../shared/projects'
+
+export interface ProjectRow {
+  id: string
+  name: string
+  description: string
+  default_agent_id: string | null
+  mastermind_agent_id: string | null
+  git_provider: string | null
+  git_org: string | null
+  settings: string
+  sort_order: number
+  archived: number
+  created_at: string
+  updated_at: string
+}
+
 export interface AgentRow {
   id: string
   name: string
@@ -172,6 +193,7 @@ export interface TaskSourceRow {
   update_tool_args: string
   last_synced_at: string | null
   enabled: number
+  project_id: string | null
   created_at: string
   updated_at: string
 }
@@ -188,6 +210,8 @@ export interface TaskSourceRecord {
   update_tool_args: Record<string, unknown>
   last_synced_at: string | null
   enabled: boolean
+  /** The project imported tasks land in. */
+  project_id: string
   created_at: string
   updated_at: string
 }
@@ -196,6 +220,8 @@ export interface CreateTaskSourceData {
   mcp_server_id: string | null
   name: string
   plugin_id: string
+  /** Defaults to the Default project. */
+  project_id?: string
   config?: Record<string, unknown>
   list_tool?: string
   list_tool_args?: Record<string, unknown>
@@ -265,6 +291,7 @@ export interface TaskRow {
   next_subtask_ids: string
   sort_order: number
   role: string
+  project_id: string | null
   created_at: string
   updated_at: string
 }
@@ -352,6 +379,8 @@ export interface TaskRecord {
   /** 'task' for the user's work; a coordinator role for rows that only host a conversation. */
   role: TaskRole
   sort_order: number
+  /** Always set: subtasks share their parent's project; unassigned rows belong to the Default project. */
+  project_id: string
   created_at: string
   updated_at: string
 }
@@ -389,6 +418,8 @@ export interface CreateTaskData {
   next_subtask_ids?: string[]
   /** Defaults to 'task'. Only the seed creates coordinator rows. */
   role?: TaskRole
+  /** Defaults to the Default project. Ignored for a subtask, which always shares its parent's project. */
+  project_id?: string
   /** Cron expression — if provided, sets is_recurring=true and stores as recurrence_pattern */
   cron?: string
 }

@@ -4,6 +4,7 @@ import { registerAgentHandlers } from './ipc/agents'
 import { registerMcpHandlers } from './ipc/mcp'
 import { registerCliMcpHandlers } from './ipc/cli-mcp'
 import { registerTaskSourceHandlers } from './ipc/task-sources'
+import { registerProjectHandlers } from './ipc/projects'
 import { registerGitHandlers } from './ipc/git'
 import { registerSettingsHandlers } from './ipc/settings'
 import { registerAppHandlers } from './ipc/app'
@@ -21,6 +22,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   registerMcpHandlers(deps)
   registerCliMcpHandlers()
   registerTaskSourceHandlers(deps)
+  registerProjectHandlers(deps)
   registerGitHandlers(deps)
   registerSettingsHandlers(deps)
   registerAppHandlers(deps)

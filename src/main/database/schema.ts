@@ -1,6 +1,8 @@
 import type Database from 'better-sqlite3'
 import { createId } from '@paralleldrive/cuid2'
 import { TaskStatus } from '../../shared/constants'
+import { DEFAULT_PROJECT_ID, DEFAULT_PROJECT_NAME } from '../../shared/projects'
+import { getRepoProviders, isGitProvider } from '../repo-providers'
 import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
 
 /**
@@ -19,8 +21,11 @@ import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
  * 11 → 12: tasks.next_subtask_ids
  * 12 → 13: tasks.role (coordinator rows such as the Mastermind)
  * 13 → 14: skills.preferred_model
+ * 14 → 15: projects, project_repos, project_resources; tasks.project_id and
+ *          task_sources.project_id, everything moved into the Default project
+ *          (migrateToProjects)
  */
-const SCHEMA_VERSION = 14
+const SCHEMA_VERSION = 15
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -39,6 +44,7 @@ export function applySchema(db: Database.Database): boolean {
   // its triggers in step with the current schema.
   ensureTranscriptRevColumn(db)
   initializeTasksFts(db)
+  ensureTaskProjectAssignment(db)
   return migrated
 }
 
@@ -119,6 +125,7 @@ export function createTables(db: Database.Database): void {
       next_subtask_ids TEXT NOT NULL DEFAULT '[]',
       sort_order INTEGER NOT NULL DEFAULT 0,
       role TEXT NOT NULL DEFAULT 'task',
+      project_id TEXT REFERENCES projects(id),
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -126,6 +133,48 @@ export function createTables(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
     CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority);
     CREATE INDEX IF NOT EXISTS idx_tasks_source ON tasks(source);
+    -- NOTE: idx_tasks_project is created in migrateToProjects(), after the
+    -- project_id column exists on an upgraded database.
+
+    -- Projects group tasks and task sources. A project has zero, one or many
+    -- repos; resources are links and notes given to agents as context only.
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      default_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+      mastermind_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+      git_provider TEXT DEFAULT NULL,
+      git_org TEXT DEFAULT NULL,
+      settings TEXT NOT NULL DEFAULT '{}',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      archived INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS project_repos (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      provider TEXT NOT NULL DEFAULT 'github',
+      org TEXT NOT NULL DEFAULT '',
+      name TEXT NOT NULL,
+      default_branch TEXT DEFAULT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_repos_project ON project_repos(project_id, sort_order);
+
+    CREATE TABLE IF NOT EXISTS project_resources (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      label TEXT NOT NULL,
+      url TEXT DEFAULT NULL,
+      notes TEXT NOT NULL DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_resources_project ON project_resources(project_id, sort_order);
 
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,
@@ -168,6 +217,7 @@ export function createTables(db: Database.Database): void {
       plugin_id TEXT NOT NULL DEFAULT '',
       config TEXT NOT NULL DEFAULT '{}',
       enabled INTEGER NOT NULL DEFAULT 1,
+      project_id TEXT REFERENCES projects(id),
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -399,7 +449,11 @@ function rebuildTasksTable(db: Database.Database, columnNames: Set<string>): voi
       auto_start_agent INTEGER NOT NULL DEFAULT 0,
       auto_complete_without_review INTEGER NOT NULL DEFAULT 0,
       complete_at_source INTEGER DEFAULT NULL,
+      parent_task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+      next_subtask_ids TEXT NOT NULL DEFAULT '[]',
+      sort_order INTEGER NOT NULL DEFAULT 0,
       role TEXT NOT NULL DEFAULT 'task',
+      project_id TEXT REFERENCES projects(id),
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
@@ -427,9 +481,13 @@ function rebuildTasksTable(db: Database.Database, columnNames: Set<string>): voi
     CREATE UNIQUE INDEX idx_tasks_source_external ON tasks(source_id, external_id) WHERE external_id IS NOT NULL;
     CREATE INDEX idx_tasks_next_occurrence ON tasks(next_occurrence_at) WHERE is_recurring = 1;
     CREATE INDEX idx_tasks_heartbeat_next ON tasks(heartbeat_next_check_at) WHERE heartbeat_enabled = 1;
+    CREATE INDEX idx_tasks_parent ON tasks(parent_task_id) WHERE parent_task_id IS NOT NULL;
+    CREATE INDEX idx_tasks_project ON tasks(project_id);
   `)
 
   db.exec('PRAGMA foreign_keys = ON')
+
+  ensureTaskProjectAssignment(db)
 
   // Refresh columnNames so subsequent migrations see accurate state
   columnNames.clear()
@@ -630,6 +688,7 @@ export function runMigrations(db: Database.Database): void {
         plugin_id TEXT NOT NULL DEFAULT '',
         config TEXT NOT NULL DEFAULT '{}',
         enabled INTEGER NOT NULL DEFAULT 1,
+        project_id TEXT REFERENCES projects(id),
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -808,6 +867,9 @@ export function runMigrations(db: Database.Database): void {
     db.exec(`ALTER TABLE skills ADD COLUMN preferred_model TEXT DEFAULT NULL`)
   }
 
+  // Migration v15: projects. Everything that existed before moves into the Default project.
+  migrateToProjects(db)
+
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)
 
@@ -817,6 +879,125 @@ export function runMigrations(db: Database.Database): void {
 
   // Migration v11: the Claude Code adapter now honours permission_mode.
   preserveClaudeCodePermissionBehaviour(db)
+}
+
+function readSetting(db: Database.Database, key: string): string | null {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined
+  const value = row?.value?.trim()
+  return value ? value : null
+}
+
+/**
+ * Migration v15: projects.
+ *
+ * Adds `project_id` to tasks and task_sources, creates the Default project,
+ * moves every existing task (coordinator rows included) and task source into
+ * it, copies the global `github_org` / `git_provider` settings onto it and
+ * seeds its repos from the distinct `tasks.repos` values. The global settings
+ * stay in place, so nothing that still reads them changes behaviour.
+ *
+ * Why `tasks.project_id` is not declared NOT NULL: it references
+ * `projects(id)`, and SQLite's ALTER TABLE only adds a REFERENCES column with
+ * a NULL default — so an upgraded install cannot get NOT NULL without
+ * rebuilding `tasks`, and a fresh install must match an upgraded one (see
+ * database-schema-equivalence.test.ts). It is NOT NULL in effect instead:
+ * - `DatabaseManager.createTask` gives a subtask its parent's project, else
+ *   the requested project, else the Default project;
+ * - the `tasks_assign_project` trigger applies the same rule to every other
+ *   INSERT (the recurrence scheduler and the seed write raw SQL);
+ * - this migration fills every existing NULL.
+ *
+ * Idempotent: runMigrations() re-runs on every later schema bump. The Default
+ * project's settings and repos are only seeded when the row is first created,
+ * so a later bump never undoes the user's edits.
+ */
+function migrateToProjects(db: Database.Database): void {
+  const taskCols = new Set((db.pragma('table_info(tasks)') as { name: string }[]).map((c) => c.name))
+  if (!taskCols.has('project_id')) {
+    db.exec(`ALTER TABLE tasks ADD COLUMN project_id TEXT REFERENCES projects(id)`)
+  }
+
+  const sourceCols = new Set((db.pragma('table_info(task_sources)') as { name: string }[]).map((c) => c.name))
+  if (!sourceCols.has('project_id')) {
+    db.exec(`ALTER TABLE task_sources ADD COLUMN project_id TEXT REFERENCES projects(id)`)
+  }
+
+  const githubOrg = readSetting(db, 'github_org')
+  const gitProvider = readSetting(db, 'git_provider')
+  const now = new Date().toISOString()
+  const created = db.prepare(`
+    INSERT OR IGNORE INTO projects (id, name, description, git_provider, git_org, settings, sort_order, archived, created_at, updated_at)
+    VALUES (?, ?, '', ?, ?, '{}', 0, 0, ?, ?)
+  `).run(DEFAULT_PROJECT_ID, DEFAULT_PROJECT_NAME, gitProvider, githubOrg, now, now).changes > 0
+  if (created) seedDefaultProjectRepos(db, githubOrg, gitProvider, now)
+
+  db.prepare('UPDATE tasks SET project_id = ? WHERE project_id IS NULL').run(DEFAULT_PROJECT_ID)
+  db.prepare('UPDATE task_sources SET project_id = ? WHERE project_id IS NULL').run(DEFAULT_PROJECT_ID)
+
+  ensureTaskProjectAssignment(db)
+}
+
+/**
+ * The project index and the `tasks_assign_project` trigger. A tasks-table
+ * rebuild drops both, so this runs after every rebuild and on every startup
+ * (applySchema), not only inside the migration. No-op before tasks has
+ * project_id.
+ */
+export function ensureTaskProjectAssignment(db: Database.Database): void {
+  const taskCols = new Set((db.pragma('table_info(tasks)') as { name: string }[]).map((c) => c.name))
+  if (!taskCols.has('project_id')) return
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)`)
+  // Keep in step with DatabaseManager.createTask: parent, then recurrence template, then Default.
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS tasks_assign_project AFTER INSERT ON tasks
+    WHEN NEW.project_id IS NULL
+    BEGIN
+      UPDATE tasks SET project_id = COALESCE(
+        (SELECT project_id FROM tasks WHERE id = NEW.parent_task_id),
+        (SELECT project_id FROM tasks WHERE id = NEW.recurrence_parent_id),
+        '${DEFAULT_PROJECT_ID}'
+      ) WHERE id = NEW.id;
+    END
+  `)
+}
+
+/**
+ * One project_repos row per distinct repo in `tasks.repos`, in first-use order.
+ * Entries are `org/name` (the org may contain '/' for GitLab subgroups) or a
+ * bare `name`, which gets the configured `github_org` like worktree setup does.
+ * The provider is the one recorded when the repo was attached, else the
+ * global default.
+ */
+function seedDefaultProjectRepos(db: Database.Database, githubOrg: string | null, gitProvider: string | null, now: string): void {
+  const recorded = getRepoProviders({ getSetting: (key) => readSetting(db, key), setSetting: () => {} })
+  const fallbackProvider = isGitProvider(gitProvider) ? gitProvider : 'github'
+  const insert = db.prepare(`
+    INSERT INTO project_repos (id, project_id, provider, org, name, default_branch, sort_order, created_at)
+    VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
+  `)
+  const seen = new Set<string>()
+  const rows = db.prepare('SELECT repos FROM tasks ORDER BY created_at ASC, rowid ASC').all() as { repos: string | null }[]
+  for (const row of rows) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(row.repos || '[]')
+    } catch {
+      continue
+    }
+    for (const entry of Array.isArray(parsed) ? parsed : [parsed]) {
+      if (typeof entry !== 'string') continue
+      const repo = entry.trim().replace(/^\/+|\/+$/g, '')
+      if (!repo) continue
+      const slash = repo.lastIndexOf('/')
+      const org = slash >= 0 ? repo.slice(0, slash) : (githubOrg ?? '')
+      const name = slash >= 0 ? repo.slice(slash + 1) : repo
+      const key = `${org}/${name}`.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      const provider = (org && recorded[`${org}/${name}`]) || fallbackProvider
+      insert.run(createId(), DEFAULT_PROJECT_ID, provider, org, name, seen.size - 1, now)
+    }
+  }
 }
 
 /**
