@@ -126,7 +126,10 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
     try {
       const { messages, activeTurnId } = await commanderApi.listMessages(id)
       set((state) => ({
-        messages: { ...state.messages, [id]: mergeMessages([], [...(state.messages[id] ?? []), ...messages]) },
+        // mergeMessages(existing, incoming) drops `incoming` entries whose id is
+        // already in `existing`, so the stored fetch dedupes against local state
+        // instead of the combined array (which contains each id twice).
+        messages: { ...state.messages, [id]: mergeMessages(state.messages[id] ?? [], messages) },
         // Main is the truth about running turns: events may have been missed
         // while the view was closed, so a turn that ended meanwhile is cleared.
         streaming: !activeTurnId

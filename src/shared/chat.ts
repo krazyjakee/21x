@@ -63,7 +63,8 @@ export interface ChatIpcEvent {
 export const CHAT_SETTING_KEYS = {
   provider: 'chat_provider',
   model: 'chat_model',
-  baseUrl: 'chat_base_url'
+  baseUrl: 'chat_base_url',
+  reasoningEffort: 'chat_reasoning_effort'
 } as const
 
 export type ChatProviderId = 'anthropic' | 'openai-compatible'
@@ -72,4 +73,34 @@ export const CHAT_PROVIDER_IDS: readonly ChatProviderId[] = ['anthropic', 'opena
 
 export function isChatProviderId(value: unknown): value is ChatProviderId {
   return typeof value === 'string' && (CHAT_PROVIDER_IDS as readonly string[]).includes(value)
+}
+
+/** The thinking controls supported by the chat transports. */
+export type ChatReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+export const CHAT_REASONING_EFFORTS: readonly ChatReasoningEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+
+export function isChatReasoningEffort(value: unknown): value is ChatReasoningEffort {
+  return typeof value === 'string' && (CHAT_REASONING_EFFORTS as readonly string[]).includes(value)
+}
+
+/**
+ * The chat transport a configured agent's model should use. Any agent that
+ * saved a model is a Commander option — the coding backend decides how the
+ * agent executes tasks, not which models the Commander may chat with. Claude
+ * Code agents serve Anthropic models; other backends (Codex, Pi, Cursor,
+ * OpenCode) route by model name: Claude models over the Anthropic transport,
+ * everything else over an OpenAI-compatible endpoint.
+ */
+export function chatProviderForAgentModel(
+  codingAgent: string | undefined,
+  model: string | undefined
+): ChatProviderId | null {
+  const trimmed = model?.trim()
+  if (!trimmed) return null
+  const name = trimmed.toLowerCase()
+  if (codingAgent === 'claude-code' || name.startsWith('claude') || name.includes('/claude')) {
+    return 'anthropic'
+  }
+  return 'openai-compatible'
 }

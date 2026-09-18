@@ -1,4 +1,4 @@
-import type { ChatMessage } from '../../../shared/chat'
+import type { ChatMessage, ChatReasoningEffort } from '../../../shared/chat'
 import {
   ChatAbortError,
   type ChatProvider,
@@ -22,11 +22,19 @@ const DEFAULT_MAX_TOKENS = 4096
 
 export interface OpenAICompatibleChatProviderOptions {
   model?: string
+  /**
+   * Model identifier sent to the API; defaults to `model`. Selections in
+   * `vendor/model` shape keep the full string for display but must send the
+   * vendor-local id (e.g. `gpt-oss-120b`, not `cerebras/gpt-oss-120b`).
+   */
+  modelId?: string
   /** Root of the API, e.g. `http://localhost:11434/v1`. Trailing slash optional. */
   baseUrl?: string
   /** Optional: local servers usually need none. */
   apiKey?: string
   maxTokens?: number
+  /** Sent as `reasoning_effort` when explicitly selected. */
+  reasoningEffort?: ChatReasoningEffort
   fetch?: FetchLike
 }
 
@@ -121,15 +129,19 @@ export class OpenAICompatibleChatProvider implements ChatProvider {
   readonly id = 'openai-compatible'
   readonly model: string
   readonly baseUrl: string
+  private readonly modelId: string
   private readonly apiKey: string | undefined
   private readonly maxTokens: number
+  private readonly reasoningEffort: ChatReasoningEffort | undefined
   private readonly fetchImpl: FetchLike
 
   constructor(options: OpenAICompatibleChatProviderOptions = {}) {
     this.model = options.model || DEFAULT_OPENAI_CHAT_MODEL
+    this.modelId = options.modelId || this.model
     this.baseUrl = (options.baseUrl || DEFAULT_OPENAI_BASE_URL).replace(/\/+$/, '')
     this.apiKey = options.apiKey || undefined
     this.maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS
+    this.reasoningEffort = options.reasoningEffort
     this.fetchImpl = options.fetch ?? ((input, init) => fetch(input, init))
     if (!this.apiKey && this.baseUrl === DEFAULT_OPENAI_BASE_URL) {
       throw new Error('OpenAI API key is required for the chat runtime (or set a local chat_base_url)')
@@ -143,10 +155,11 @@ export class OpenAICompatibleChatProvider implements ChatProvider {
       function: { name: tool.name, description: tool.description, parameters: tool.inputSchema }
     }))
     const body = {
-      model: this.model,
+      model: this.modelId,
       messages: toWireMessages(request.system, request.messages),
       stream: true,
       max_tokens: request.maxTokens ?? this.maxTokens,
+      ...(this.reasoningEffort ? { reasoning_effort: this.reasoningEffort } : {}),
       ...(tools.length > 0 ? { tools, tool_choice: request.toolChoice } : {})
     }
     const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'text/event-stream' }

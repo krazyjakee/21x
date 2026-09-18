@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentRecord } from '../database/types'
-import { createChatProviderFromSettings, resolveChatApiKey, type ChatSettingsSource } from './provider-factory'
-import { DEFAULT_ANTHROPIC_CHAT_MODEL } from './providers/anthropic'
+import { configuredChatModels, createChatProviderFromSettings, resolveChatApiKey, type ChatSettingsSource } from './provider-factory'
 
 function source(settings: Record<string, string>, agents: Array<Partial<AgentRecord>> = []): ChatSettingsSource {
   return {
@@ -13,26 +12,63 @@ function source(settings: Record<string, string>, agents: Array<Partial<AgentRec
 }
 
 describe('createChatProviderFromSettings', () => {
-  it('defaults to Anthropic on a fast model using the saved (decrypted) settings key', () => {
-    const provider = createChatProviderFromSettings(source({ anthropic_api_key: 'sk-ant' }))
+  it('defaults to the configured default agent model', () => {
+    const provider = createChatProviderFromSettings(source({ anthropic_api_key: 'sk-ant' }, [
+      { config: { coding_agent: 'codex', model: 'gpt-other' } },
+      { is_default: true, config: { coding_agent: 'claude-code', model: 'claude-saved', reasoning_effort: 'high' } }
+    ]))
     expect(provider.id).toBe('anthropic')
-    expect(provider.model).toBe(DEFAULT_ANTHROPIC_CHAT_MODEL)
+    expect(provider.model).toBe('claude-saved')
   })
 
   it('honours chat_provider, chat_model and chat_base_url', () => {
     const provider = createChatProviderFromSettings(source({
       chat_provider: 'openai-compatible',
       chat_model: 'qwen2.5:7b',
-      chat_base_url: 'http://localhost:11434/v1'
-    }))
+      chat_base_url: 'http://localhost:11434/v1',
+      chat_reasoning_effort: 'high'
+    }, [{ config: { coding_agent: 'codex', model: 'qwen2.5:7b' } }]))
     expect(provider.id).toBe('openai-compatible')
     expect(provider.model).toBe('qwen2.5:7b')
   })
 
+  it('ignores an unknown reasoning effort', () => {
+    expect(() => createChatProviderFromSettings(source({
+      anthropic_api_key: 'k',
+      chat_reasoning_effort: 'turbo'
+    }, [{ config: { coding_agent: 'claude-code', model: 'claude-saved' } }]))).not.toThrow()
+  })
+
+  it('exposes every model saved on a configured agent, routing by model name', () => {
+    const models = configuredChatModels(source({}, [
+      { id: 'open', is_default: true, config: { coding_agent: 'opencode', model: 'anthropic/claude-x' } },
+      { id: 'claude', config: { coding_agent: 'claude-code', model: 'claude-saved', reasoning_effort: 'max' } },
+      { id: 'empty', config: { coding_agent: 'codex' } },
+      { id: 'codex', config: { coding_agent: 'codex', model: 'gpt-saved' } },
+      { id: 'pi', config: { coding_agent: 'pi', model: 'cerebras/gpt-oss-120b' } }
+    ]))
+    expect(models).toEqual([
+      { agentId: 'open', provider: 'anthropic', model: 'anthropic/claude-x', reasoningEffort: undefined },
+      { agentId: 'claude', provider: 'anthropic', model: 'claude-saved', reasoningEffort: 'max' },
+      { agentId: 'codex', provider: 'openai-compatible', model: 'gpt-saved', reasoningEffort: undefined },
+      { agentId: 'pi', provider: 'openai-compatible', model: 'cerebras/gpt-oss-120b', reasoningEffort: undefined }
+    ])
+  })
+
+  it('sends a pi agent model the commander selected through the matching transport', () => {
+    const provider = createChatProviderFromSettings(source({
+      chat_provider: 'openai-compatible',
+      chat_model: 'cerebras/gpt-oss-120b',
+      anthropic_api_key: 'k'
+    }, [{ config: { coding_agent: 'pi', model: 'cerebras/gpt-oss-120b', api_keys: { openai: 'oai-key' } } }]))
+    expect(provider.id).toBe('openai-compatible')
+    expect(provider.model).toBe('cerebras/gpt-oss-120b')
+  })
+
   it('falls back to an agent api_keys entry, default agent first', () => {
     const src = source({}, [
-      { config: { api_keys: { anthropic: 'from-second' } } },
-      { is_default: true, config: { api_keys: { anthropic: 'from-default', openai: 'oai-default' } } }
+      { config: { coding_agent: 'claude-code', model: 'claude-second', api_keys: { anthropic: 'from-second' } } },
+      { is_default: true, config: { coding_agent: 'claude-code', model: 'claude-default', api_keys: { anthropic: 'from-default', openai: 'oai-default' } } }
     ])
     expect(resolveChatApiKey(src, 'anthropic')).toBe('from-default')
     expect(resolveChatApiKey(src, 'openai')).toBe('oai-default')
@@ -45,10 +81,23 @@ describe('createChatProviderFromSettings', () => {
   })
 
   it('fails with a clear message when no Anthropic key exists anywhere', () => {
-    expect(() => createChatProviderFromSettings(source({}))).toThrow(/No Anthropic API key/)
+    expect(() => createChatProviderFromSettings(source({}, [
+      { config: { coding_agent: 'claude-code', model: 'claude-saved' } }
+    ]))).toThrow(/No Anthropic API key/)
   })
 
-  it('ignores an unknown chat_provider value', () => {
-    expect(createChatProviderFromSettings(source({ chat_provider: 'gemini', anthropic_api_key: 'k' })).id).toBe('anthropic')
+  it('ignores a saved provider/model that is not configured', () => {
+    const provider = createChatProviderFromSettings(source({
+      chat_provider: 'openai-compatible',
+      chat_model: 'not-configured',
+      anthropic_api_key: 'k'
+    }, [{ is_default: true, config: { coding_agent: 'claude-code', model: 'claude-saved' } }]))
+    expect(provider.id).toBe('anthropic')
+    expect(provider.model).toBe('claude-saved')
+  })
+
+  it('fails clearly instead of inventing a model when none is configured', () => {
+    expect(() => createChatProviderFromSettings(source({ anthropic_api_key: 'k' })))
+      .toThrow(/No compatible Commander model is configured/)
   })
 })

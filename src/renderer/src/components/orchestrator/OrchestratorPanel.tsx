@@ -185,13 +185,12 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
             <FolderKanban className="size-icon-xs shrink-0" />
             <span className="truncate font-medium text-foreground/80" data-testid="mastermind-project">{projectName}</span>
           </span>
-          {/* A warm session is not a conversation: the choice stays open until
-              something has actually been said. */}
+          {/* The Mastermind's coding agent. It stays usable the whole time:
+              changing it re-warms the session on the freshly picked agent. */}
           <select
             value={selectedAgentId || ''}
             onChange={(e) => handleAgentChange(e.target.value)}
             className="text-xs bg-background border border-border rounded px-2 py-1 cursor-pointer hover:border-primary/50 transition-colors"
-            disabled={(currentSession?.messages?.length ?? 0) > 0}
             aria-label="Mastermind agent"
           >
             {agents.map((agent) => (

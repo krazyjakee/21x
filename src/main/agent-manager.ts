@@ -1766,6 +1766,15 @@ export class AgentManager extends EventEmitter {
       // The reserved slot is free again (released in finally, before the
       // deferred drain runs).
       this.scheduleStartQueueDrain()
+      // The renderer pre-registered a "starting" session before awaiting this
+      // call, and the IPC rejection alone does not tell other bound views the
+      // start failed. Surface the reason in the transcript and as an error
+      // status so every view leaves "Agent is starting..." instead of sitting
+      // there forever (e.g. the backend process died before it came up).
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(`[AgentManager] Failed to start ${agent.name} for task ${taskId}:`, error)
+      this.emitSystemError('', taskId, `session-start-failed-${Date.now()}`, `Could not start ${agent.name}: ${message}`)
+      this.emitStatus('', { agentId, taskId }, 'error')
       throw error
     } finally {
       this.admittedStarts.delete(taskId)

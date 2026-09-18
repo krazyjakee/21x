@@ -6,7 +6,7 @@ export const ARTIFACT_WORKSPACE_INSTRUCTIONS = `
 
 [Workspace Deliverables]
 Repository files are code and appear in the task's Changes view; do not treat ordinary source files as artifacts.
-For every standalone user-facing deliverable, first call \`create_artifact\` on the task-management MCP server. Then use \`write_artifact_file\`, \`read_artifact_file\`, and \`edit_artifact_file\` with the returned artifact_id. Multiple supporting files belong to that one artifact; mark its preview entry file with \`preview: true\`. Do not create artifact files with generic filesystem Write/Edit tools. Screenshots and pull requests are detected automatically.`
+For every standalone user-facing deliverable, first call \`create_artifact\` on the task-management MCP server (its exact callable name is listed under the MCP section of your workspace docs, AGENTS.md / CLAUDE.md). Then use \`write_artifact_file\`, \`read_artifact_file\`, and \`edit_artifact_file\` with the returned artifact_id. Multiple supporting files belong to that one artifact; mark its preview entry file with \`preview: true\`. Do not create artifact files with generic filesystem Write/Edit tools. Screenshots and pull requests are detected automatically.`
 
 export const HEARTBEAT_MONITORING_INSTRUCTIONS = `\n\n## Heartbeat Monitoring (Optional)
 
@@ -73,6 +73,7 @@ export function buildTaskWorkPrompt(db: DatabaseManager, taskId: string, task: T
   promptText += '\n- Use `create_subtask` to break work down.'
   promptText += '\n- Use `start_task` to triage+start an unassigned task, start an assigned task, or start a specific subtask by ID.'
   promptText += '\n- Use `wait_for_subtasks` to block until subtasks reach `ready_for_review` or `completed` before continuing coordination.'
+  promptText += '\n- Repetitive work: when the task needs the same tool called once per item (e.g. creating one subtask per issue), make that call once per item until the list is done — that is the normal pattern and no per-item approval is needed. If a batching helper is missing or returns an error, fall back to repeated individual calls instead of stopping, and do not pause mid-loop to ask whether to continue.'
 
   if (Array.isArray(task.output_fields) && task.output_fields.length > 0) {
     promptText += buildOutputFieldInstructions(task.output_fields)

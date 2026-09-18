@@ -175,6 +175,11 @@ The Commander view is in the NavRail (`sidebarView === 'commander'`) and lives i
     a chip's result comes from the matching `tool` row.
   - Shows reports as bordered, project-tagged cards.
   - Has a Stop button and an empty state.
+  - The composer includes persistent model and thinking-level selectors. It
+    lists models saved on configured agents, default agent first (Claude Code
+    and `claude`-named models pick Anthropic; every other model picks
+    OpenAI-compatible). Model choices select the matching transport
+    automatically, so creating or editing an agent anywhere updates the list.
 - The state lives in `stores/commander-store.ts`.
 
 ## Reports (#62)

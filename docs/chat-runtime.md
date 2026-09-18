@@ -65,6 +65,17 @@ text and adds a session with audio in / audio events out; see the comment on
 | `chat_provider` | `anthropic`, `openai-compatible`         | `anthropic`            |
 | `chat_model`    | any model id                             | per provider           |
 | `chat_base_url` | API root, e.g. `http://localhost:11434/v1` | provider default     |
+| `chat_reasoning_effort` | `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | provider default |
+
+The Commander composer exposes model and thinking selectors. Its model list
+is built from every configured agent that saved a model, default agent first.
+Claude Code agents and `claude`-named models route to Anthropic; any other
+model routes to an OpenAI-compatible endpoint (see
+`chatProviderForAgentModel` in `src/shared/chat.ts`). A model choice also
+selects its provider and is persisted in these settings. Anthropic sends the
+chosen level as `output_config.effort`;
+OpenAI-compatible endpoints receive `reasoning_effort`. Leaving thinking at
+Default omits the provider parameter.
 
 API keys are not chat settings. `provider-factory.ts` reads the existing
 `anthropic_api_key` / `openai_api_key` rows (encrypted at rest;

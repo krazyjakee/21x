@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'fs/promises'
 import type { DatabaseManager, McpServerRecord, SecretRecord, SkillRecord } from '../database'
 import type { CodingAgentAdapter, McpServerConfig } from '../adapters/coding-agent-adapter'
 import { CodingAgentType } from './adapter-factory'
+import { slugPiMcpServers } from '../adapters/pi-config'
 import { readServerToolLimits } from '../mcp-tool-limits'
 import { isSkillVisibleToProject } from '../../shared/skill-scope'
 
@@ -187,6 +188,28 @@ function visibleTools({ server, enabledTools }: DocumentedMcpServer): McpServerR
   return enabledTools ? server.tools.filter(t => enabledTools.includes(t.name)) : server.tools
 }
 
+/**
+ * How the session's model actually calls a documented MCP tool:
+ * - Pi keeps every MCP tool behind the single `mcp` gateway tool and calls it
+ *   as `<server-slug>_<tool>`; the slug is built the same way the adapter
+ *   renames servers (bracket prefixes, 24-char cap), so docs and runtime agree.
+ * - Claude Code surfaces tools as `mcp__<server>__<tool>`.
+ * - The other adapters expose tools directly under their bare names.
+ */
+function toolCallNames(
+  codingAgent: string | undefined,
+  documentedServers: DocumentedMcpServer[]
+): (serverName: string, toolName: string) => string {
+  if (codingAgent === CodingAgentType.PI) {
+    const slugs = slugPiMcpServers(documentedServers.map(entry => entry.server.name))
+    return (serverName, toolName) => `${slugs.get(serverName) ?? serverName}_${toolName}`
+  }
+  if (codingAgent === CodingAgentType.CLAUDE_CODE) {
+    return (serverName, toolName) => `mcp__${serverName}__${toolName}`
+  }
+  return (_serverName, toolName) => toolName
+}
+
 /** Secret names and descriptions only — never the values. */
 function agentSecrets(db: DatabaseManager, agentId?: string): SecretRecord[] {
   if (!agentId) return []
@@ -218,8 +241,27 @@ export function generateAgentsMd(
 
   const documentedServers = resolveDocumentedMcpServers(db, agentId, injectedMcpServers)
   if (documentedServers.length > 0) {
+    const codingAgent = agentId ? db.getAgent(agentId)?.config?.coding_agent : undefined
+    const callName = toolCallNames(codingAgent, documentedServers)
+
     md += `## Available MCP Servers & Tools\n\n`
     md += `This session has access to the following Model Context Protocol (MCP) servers and their tools:\n\n`
+
+    if (codingAgent === CodingAgentType.PI) {
+      // The Pi session surfaces every MCP tool through the one `mcp` gateway
+      // tool. Document the exact namespaced form — bare names are not callable
+      // there and the slug differs from the server's display name for bracket
+      // prefixes (e.g. "[Team] Tools" -> team-tools).
+      const example = documentedServers
+        .flatMap((entry) => visibleTools(entry).map((tool) => callName(entry.server.name, tool.name)))
+        .slice(0, 1)[0] ?? '<server>_<tool>'
+      md += `**How to call these tools:** every MCP tool below is invoked through the single \`mcp\` tool using its namespaced name (the server's slug, not its display name, plus \`_\` and the tool name):\n\n\`\`\`json\n`
+      md += `mcp({ "tool": "${example}", "args": {} })\n\`\`\`\n\n`
+      md += `Look up names and parameter shapes with \`mcp({ "search": "keyword" })\`.\n\n`
+      md += `**Repetitive work:** when you must apply one tool to every item in a list (e.g. create one subtask per issue), make that \`mcp\` call once per item, in sequence, until the list is done — that is the normal pattern and the user does not need to approve each repetition. You may instead use the \`mcpScript\` tool to loop the calls in one script when it is among your tools. If either mechanism is missing or returns an error, switch to the other and continue; do not stop mid-loop to ask whether to keep going.\n\n`
+    } else if (codingAgent === CodingAgentType.CLAUDE_CODE) {
+      md += `**How to call these tools:** each tool below is directly available under its namespaced name \`mcp__<server>__<tool>\`.\n\n`
+    }
 
     for (const entry of documentedServers) {
       const transport = describeMcpTransport(entry)
@@ -231,7 +273,7 @@ export function generateAgentsMd(
         const toolsToShow = visibleTools(entry)
         md += `**Available Tools (${toolsToShow.length}):**\n\n`
         for (const tool of toolsToShow) {
-          md += `- **\`${tool.name}\`** - ${tool.description}\n`
+          md += `- **\`${callName(entry.server.name, tool.name)}\`** - ${tool.description}\n`
         }
         md += `\n`
       }
@@ -312,14 +354,15 @@ export function generateClaudeMd(
   const documentedServers = resolveDocumentedMcpServers(db, agentId, injectedMcpServers)
   if (documentedServers.length > 0) {
     md += `## MCP Tools Available\n\n`
-    md += `You have access to the following tools through Model Context Protocol (MCP) servers:\n\n`
+    md += `You have access to the following tools through Model Context Protocol (MCP) servers.\n`
+    md += `Each tool is directly available under its namespaced name, \`mcp__<server>__<tool>\` (the names below are the callable ones):\n\n`
 
     for (const entry of documentedServers) {
       if (entry.server.tools && entry.server.tools.length > 0) {
         const toolsToShow = visibleTools(entry)
         md += `### ${entry.server.name} (${toolsToShow.length} tools)\n\n`
         for (const tool of toolsToShow) {
-          md += `#### \`${tool.name}\`\n\n`
+          md += `#### \`mcp__${entry.server.name}__${tool.name}\`\n\n`
           md += `${tool.description}\n\n`
         }
       }

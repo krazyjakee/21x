@@ -141,12 +141,22 @@ describe('OrchestratorPanel — warming the session', () => {
     expect(screen.getByRole('combobox')).not.toBeDisabled()
   })
 
-  it('locks the agent choice once something has been said', async () => {
+  it('lets the user swap agents once a conversation is in flight', async () => {
     await act(async () => {
       render(<OrchestratorPanel onClose={vi.fn()} />)
     })
-    await waitFor(() => expect(agentSessionApi.start).toHaveBeenCalled())
+    // Wait for the session to actually be live before we switch agents.
+    await waitFor(() => {
+      expect(useAgentStore.getState().sessions.get(MASTERMIND)?.sessionId).toBe('session-1')
+    })
+    // ensureSession holds its start promise for a ~100 ms settle window; let
+    // it clear so the switch is not de-duped against the initial warm-up.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150))
+    })
 
+    // A conversation exists. The old code locked the picker here; it stays
+    // usable, and picking a different agent re-warms the session on that agent.
     await act(async () => {
       useAgentStore.setState((state) => {
         const sessions = new Map(state.sessions)
@@ -159,7 +169,24 @@ describe('OrchestratorPanel — warming the session', () => {
       })
     })
 
-    expect(screen.getByRole('combobox')).toBeDisabled()
+    const combobox = screen.getByRole('combobox') as HTMLSelectElement
+    expect(combobox).not.toBeDisabled()
+
+    const started = deferredStart()
+    await act(async () => {
+      combobox.value = 'other-agent'
+      combobox.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+
+    // The outgoing session is stopped and the pre-warm restarts, still pending
+    // on the deferred start.
+    expect(agentSessionApi.stop).toHaveBeenCalledWith('session-1')
+    await waitFor(() =>
+      expect(agentSessionApi.start).toHaveBeenLastCalledWith('other-agent', MASTERMIND, undefined, true)
+    )
+    await act(async () => {
+      started.resolve()
+    })
   })
 
   it('starts the session only once, however many times it re-renders', async () => {

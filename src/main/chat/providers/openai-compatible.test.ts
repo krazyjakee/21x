@@ -150,6 +150,24 @@ describe('OpenAICompatibleChatProvider', () => {
     expect(body.messages[2]).toEqual({ role: 'tool', tool_call_id: 'c', content: 'Error: nope' })
   })
 
+  it('sends the selected reasoning effort', async () => {
+    let body: Record<string, unknown> = {}
+    const provider = new OpenAICompatibleChatProvider({
+      baseUrl: 'http://localhost:1234/v1',
+      reasoningEffort: 'xhigh',
+      fetch: async (_input, init) => {
+        body = JSON.parse(String(init?.body))
+        return sseResponse(textTurn)
+      }
+    })
+    await drain(provider.stream({
+      messages: [{ role: 'user', content: 'Think about this' }],
+      tools: [],
+      toolChoice: 'none'
+    }, new AbortController().signal))
+    expect(body.reasoning_effort).toBe('xhigh')
+  })
+
   it('refuses the hosted default without a key but allows keyless local servers', () => {
     expect(() => new OpenAICompatibleChatProvider({})).toThrow(/API key/)
     expect(() => new OpenAICompatibleChatProvider({ baseUrl: 'http://127.0.0.1:1234/v1' })).not.toThrow()
