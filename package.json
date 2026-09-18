@@ -27,6 +27,7 @@
     "release": "bash scripts/release.sh"
   },
   "dependencies": {
+    "@activepieces/piece-trello": "0.6.0",
     "@agentclientprotocol/codex-acp": "^1.9.0",
     "@anthropic-ai/claude-agent-sdk": "^0.3.260",
     "@anthropic-ai/sdk": "^0.123.0",
@@ -54,6 +55,7 @@
     "ws": "^8.19.0"
   },
   "devDependencies": {
+    "@activepieces/pieces-framework": "0.32.0",
     "@electron-toolkit/tsconfig": "^1.0.1",
     "@electron/fuses": "^1.8.0",
     "@electron/notarize": "^2.5.0",
