@@ -28,18 +28,6 @@ describe('fixPlatformPath behaviour', () => {
       expect(indexSource).toContain('__20X_PATH_START__')
       expect(indexSource).toContain('__20X_PATH_END__')
     })
-
-    it('fix-path-manual.ts should also use markers', async () => {
-      const fs = await import('fs')
-      const path = await import('path')
-      const source = fs.readFileSync(
-        path.join(__dirname, 'fix-path-manual.ts'),
-        'utf8'
-      )
-
-      expect(source).toContain('__20X_PATH_START__')
-      expect(source).toContain('__20X_PATH_END__')
-    })
   })
 
   describe('fallback PATH construction', () => {

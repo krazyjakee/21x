@@ -40,7 +40,7 @@ export enum PluginActionId {
   ChangeState = 'change_state',
   // HubSpot
   AddNote = 'add_note',
-  // Peakflo
+  // Generic approval flow (sources that complete tasks by approve/reject)
   Approve = 'approve',
   Reject = 'reject'
 }

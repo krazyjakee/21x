@@ -38,7 +38,6 @@ import {
 import {
   DEFAULT_TTS_SPEAKER_BY_MODEL,
   DEFAULT_VOICE_TTS_MODEL_ID,
-  VOICE_TTS_MODEL_MANIFEST,
   findTtsManifestEntry,
 } from './voice-tts-manifest'
 import { VoiceTtsModelManager } from './voice-tts-model-manager'
@@ -846,11 +845,6 @@ export function localVoicesForModel(modelId: string): VoiceTtsVoice[] {
     language: entry.languages[0] ?? 'en',
     description: speaker.description,
   }))
-}
-
-/** Every speaker of every catalogue model. Used by the settings page. */
-export function allLocalVoices(): VoiceTtsVoice[] {
-  return VOICE_TTS_MODEL_MANIFEST.flatMap((entry) => localVoicesForModel(entry.id))
 }
 
 export { VOICE_TTS_DEFAULT_SPEED }

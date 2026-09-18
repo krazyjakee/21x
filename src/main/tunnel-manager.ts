@@ -9,9 +9,9 @@ import { app } from 'electron'
 // asar-transparent for reads, but spawning a binary from inside the asar
 // fails (ENOENT) — electron-builder's asarUnpack only extracts the real file
 // to the sibling `app.asar.unpacked` directory, so spawn must be told to use
-// that path explicitly. Resolved via process.resourcesPath (same approach as
-// binary-manager.ts) rather than string-replacing the package's own default
-// path, since that default can vary in shape across platforms/versions.
+// that path explicitly. Resolved via process.resourcesPath rather than
+// string-replacing the package's own default path, since that default can
+// vary in shape across platforms/versions.
 let cloudflaredBinError: string | null = null
 if (app.isPackaged) {
   const unpackedBin = join(

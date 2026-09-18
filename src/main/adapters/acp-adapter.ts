@@ -748,8 +748,7 @@ export class AcpAdapter implements CodingAgentAdapter {
       throw new Error('No text content in message parts')
     }
 
-    console.log(`[AcpAdapter/${this.agentType}] Sending prompt to session ${sessionId}:`)
-    console.log(promptText.slice(0, 200) + (promptText.length > 200 ? '...' : ''))
+    console.log(`[AcpAdapter/${this.agentType}] Sending prompt to session ${sessionId} (${promptText.length} chars)`)
 
     // Clear stale buffered events from the previous turn. Between the last
     // pollMessages() call (which empties the buffer) and the idle detection
@@ -1571,10 +1570,7 @@ export class AcpAdapter implements CodingAgentAdapter {
                      toolCall?.content?.[0]?.content?.text ||
                      `Execute: ${toolCall?.title || 'unknown command'}`
 
-    console.log(`[AcpAdapter/${this.agentType}] Permission request:`)
-    console.log(`  Question: ${question}`)
-    console.log(`  Tool: ${toolCall?.kind} - ${toolCall?.toolCallId}`)
-    console.log(`  Options: ${options.map((o) => `${o.name} (${o.optionId})`).join(', ')}`)
+    console.log(`[AcpAdapter/${this.agentType}] Permission request for ${toolCall?.kind} ${toolCall?.toolCallId} (options: ${options.map((o) => o.optionId).join(', ')})`)
 
     const approvalOptions = options.map((o) => ({
       optionId: o.optionId,
