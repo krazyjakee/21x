@@ -7,6 +7,24 @@ import { existsSync } from 'fs'
 const execFileAsync = promisify(execFile)
 export const MINIMUM_PI_VERSION = '0.80.5'
 
+/** Detection keys for every supported coding-agent backend. */
+export const AGENT_BACKEND_KEYS = ['claudeCode', 'opencode', 'codex', 'cursor', 'pi']
+
+/** A backend is usable when it is installed and not flagged as unsupported. */
+export function isBackendReady(status) {
+  return Boolean(status && status.installed && status.supported !== false)
+}
+
+/**
+ * Backend keys that are installed and usable, in `AGENT_BACKEND_KEYS` order.
+ * Every detected backend is available — there is no single-selection gate.
+ * @param {Record<string, { installed: boolean, supported?: boolean }>} status
+ * @returns {string[]}
+ */
+export function getInstalledBackends(status) {
+  return AGENT_BACKEND_KEYS.filter((key) => isBackendReady(status?.[key]))
+}
+
 function unique(items) {
   return [...new Set(items.filter(Boolean))]
 }
@@ -20,7 +38,7 @@ function ensurePathDirectory(dir) {
 }
 
 /** Return common locations used by global npm and Node version managers. */
-export async function getPiCommandCandidates() {
+export async function getPiCommandCandidates(exec = execFileAsync) {
   const home = homedir()
   const candidates = process.platform === 'win32'
     ? [
@@ -40,7 +58,7 @@ export async function getPiCommandCandidates() {
 
   try {
     const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-    const { stdout } = await execFileAsync(npmCommand, ['prefix', '-g'], {
+    const { stdout } = await exec(npmCommand, ['prefix', '-g'], {
       timeout: 5000,
       shell: process.platform === 'win32',
       windowsHide: true
@@ -90,10 +108,18 @@ function ensureAgentPaths() {
 
 /**
  * Detect which agents and tools are installed on this system.
+ *
+ * Every supported backend (`AGENT_BACKEND_KEYS`) is probed on each call, so
+ * re-running detection reflects backends installed or removed since the last
+ * run. The result is a snapshot — nothing is cached between calls.
+ *
+ * @param {{ exec?: typeof execFileAsync }} [options] - `exec` overrides the
+ *   command runner (used by tests to simulate installs and removals).
  * @returns {Promise<Record<string, { installed: boolean, version: string | null }>>}
  */
-export async function detectInstalledAgents() {
+export async function detectInstalledAgents(options = {}) {
   const isWin = process.platform === 'win32'
+  const exec = options.exec || execFileAsync
 
   // Ensure well-known install dirs are on PATH before probing
   ensureAgentPaths()
@@ -107,7 +133,7 @@ export async function detectInstalledAgents() {
    */
   async function probe(cmd, args) {
     try {
-      const { stdout, stderr } = await execFileAsync(cmd, args, {
+      const { stdout, stderr } = await exec(cmd, args, {
         timeout: 10000,
         shell: isWin,
         windowsHide: true
@@ -122,7 +148,7 @@ export async function detectInstalledAgents() {
   }
 
   async function probePi() {
-    for (const command of await getPiCommandCandidates()) {
+    for (const command of await getPiCommandCandidates(exec)) {
       const status = await probe(command, ['--version'])
       if (!status.installed) continue
       if (existsSync(command)) ensurePathDirectory(dirname(command))
