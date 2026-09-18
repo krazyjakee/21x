@@ -23,7 +23,8 @@ function findAttachmentFile(dir: string, attachmentId: string): string | undefin
 export function registerTaskHandlers(deps: IpcDeps): void {
   const { db, heartbeatScheduler } = deps
 
-  ipcMain.handle('db:getTasks', () => db.getTasks())
+  // `projectId` narrows the list to one project; without it every project's tasks come back.
+  ipcMain.handle('db:getTasks', (_, projectId?: string) => db.getTasks(projectId ? { projectId } : undefined))
 
   ipcMain.handle('db:getTask', (_, id: string) => db.getTask(id))
 

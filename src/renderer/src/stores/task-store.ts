@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { Task, CreateTaskDTO, UpdateTaskDTO, OutputField, OutputFieldType } from '@/types'
-import { taskApi, taskSourceApi, onTaskUpdated, onTaskCreated, onTaskDeleted, onTasksRefresh } from '@/lib/ipc-client'
+import { taskApi, taskSourceApi, projectApi, onTaskUpdated, onTaskCreated, onTaskDeleted, onTasksRefresh } from '@/lib/ipc-client'
+import { useProjectStore, getCurrentProjectId, isInProject, projectIdOf } from './project-store'
 
 const VALID_OUTPUT_FIELD_TYPES = new Set<OutputFieldType>([
   'text',
@@ -50,6 +51,12 @@ function normalizeTask(task: Task): Task {
   }
 }
 
+/**
+ * `tasks` holds every project's tasks, so notifications, auto-start and the
+ * cross-project Commander keep working. Task-facing views read them through
+ * `useProjectTasks` (hooks/use-project-tasks), which narrows to the current
+ * project.
+ */
 interface TaskState {
   tasks: Task[]
   selectedTaskId: string | null
@@ -60,10 +67,13 @@ interface TaskState {
   createTask: (data: CreateTaskDTO) => Promise<Task | null>
   updateTask: (id: string, data: UpdateTaskDTO) => Promise<Task | null>
   deleteTask: (id: string) => Promise<boolean>
+  /** Selecting a task from another project switches to that project. */
   selectTask: (id: string | null) => void
+  /** Moves a top-level task and its subtasks to another project. */
+  moveTaskToProject: (taskId: string, projectId: string) => Promise<boolean>
 }
 
-export const useTaskStore = create<TaskState>((set) => ({
+export const useTaskStore = create<TaskState>((set, get) => ({
   tasks: [],
   selectedTaskId: null,
   isLoading: false,
@@ -81,7 +91,10 @@ export const useTaskStore = create<TaskState>((set) => ({
 
   createTask: async (data) => {
     try {
-      const task = normalizeTask(await taskApi.create(data))
+      // New tasks land in the current project. A subtask's project is its
+      // parent's, which the main process enforces.
+      const payload = data.project_id || data.parent_task_id ? data : { ...data, project_id: getCurrentProjectId() }
+      const task = normalizeTask(await taskApi.create(payload))
       return task
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -130,8 +143,41 @@ export const useTaskStore = create<TaskState>((set) => ({
     }
   },
 
-  selectTask: (id) => set({ selectedTaskId: id })
+  selectTask: (id) => {
+    const task = id ? get().tasks.find((t) => t.id === id) : undefined
+    if (task && !isInProject(task, getCurrentProjectId())) {
+      useProjectStore.getState().setCurrentProject(projectIdOf(task))
+    }
+    set({ selectedTaskId: id })
+  },
+
+  moveTaskToProject: async (taskId, projectId) => {
+    try {
+      const moved = await projectApi.moveTask(taskId, projectId)
+      if (!moved) return false
+      const byId = new Map(moved.map((t) => [t.id, normalizeTask(t)]))
+      set((state) => ({
+        tasks: state.tasks.map((t) => byId.get(t.id) ?? t),
+        error: null
+      }))
+      return true
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err) })
+      return false
+    }
+  }
 }))
+
+// Switching projects drops a selection that belongs to the project left behind.
+useProjectStore.subscribe((state, previous) => {
+  if (state.currentProjectId === previous.currentProjectId) return
+  const { selectedTaskId, tasks } = useTaskStore.getState()
+  if (!selectedTaskId) return
+  const selected = tasks.find((t) => t.id === selectedTaskId)
+  if (!selected || !isInProject(selected, state.currentProjectId)) {
+    useTaskStore.setState({ selectedTaskId: null })
+  }
+})
 
 // Listen for task updates from the backend (e.g., when agent changes task status)
 onTaskUpdated((event) => {

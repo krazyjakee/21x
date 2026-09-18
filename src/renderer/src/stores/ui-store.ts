@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { TaskStatus, SettingsTab } from '@/types'
 import type { TaskPriority } from '@/types'
+import { useProjectStore } from './project-store'
 
 export type SortField = 'created_at' | 'updated_at' | 'priority' | 'due_date' | 'title' | 'status'
 export type SortDirection = 'asc' | 'desc'
@@ -54,6 +55,10 @@ interface UIState {
   sidebarCollapsed: boolean
   /** Contextual sidebar width in px (persisted) */
   sidebarWidth: number
+  /** Whether the top-bar project switcher is open */
+  projectSwitcherOpen: boolean
+  /** The project being edited: an id, 'new' for the create flow, or null when the editor is closed */
+  projectEditorTarget: string | 'new' | null
 
   setSidebarView: (view: SidebarView) => void
   setStatusFilter: (filter: TaskStatus | 'all') => void
@@ -88,6 +93,10 @@ interface UIState {
   setSidebarCollapsed: (collapsed: boolean) => void
   /** Set the contextual sidebar width (clamped + persisted) */
   setSidebarWidth: (width: number) => void
+  setProjectSwitcherOpen: (open: boolean) => void
+  /** Open the project editor for a project, or for a new one */
+  openProjectEditor: (target: string | 'new') => void
+  closeProjectEditor: () => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -109,6 +118,8 @@ export const useUIStore = create<UIState>((set) => ({
   showOrchestrator: false,
   sidebarCollapsed: readStoredCollapsed(),
   sidebarWidth: readStoredWidth(),
+  projectSwitcherOpen: false,
+  projectEditorTarget: null,
 
   setSidebarView: (sidebarView) => set({ sidebarView }),
   setStatusFilter: (statusFilter) => set({ statusFilter }),
@@ -176,5 +187,15 @@ export const useUIStore = create<UIState>((set) => ({
     const clamped = Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, Math.round(width)))
     try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(clamped)) } catch { /* ignore */ }
     set({ sidebarWidth: clamped })
-  }
+  },
+  setProjectSwitcherOpen: (projectSwitcherOpen) => set({ projectSwitcherOpen }),
+  openProjectEditor: (projectEditorTarget) => set({ projectEditorTarget, projectSwitcherOpen: false }),
+  closeProjectEditor: () => set({ projectEditorTarget: null })
 }))
+
+// A source filter or a dashboard preview from the project left behind would
+// show nothing (or the wrong thing) in the new one, so switching clears them.
+useProjectStore.subscribe((state, previous) => {
+  if (state.currentProjectId === previous.currentProjectId) return
+  useUIStore.setState({ sourceFilter: 'all', dashboardPreviewTaskId: null })
+})

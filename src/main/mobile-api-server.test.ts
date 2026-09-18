@@ -570,3 +570,175 @@ describe('mobile-api-server: mobile access settings', () => {
     await expect(fetch(`http://127.0.0.1:${lanPort}/api/tasks`)).rejects.toThrow()
   })
 })
+
+describe('mobile-api-server: projects', () => {
+  afterEach(async () => {
+    await stopMobileApiServer()
+    vi.restoreAllMocks()
+  })
+
+  async function start(agentManager: unknown = {}) {
+    const { db } = createTestDb()
+    const token = 'projects-token'
+    db.createMobileSession('projects-session', createHash('sha256').update(token).digest('hex'), 'test-device')
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    const port = await startMobileApiServer(db, agentManager as never, {} as never, 0)
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+    const get = (path: string) => fetch(`http://127.0.0.1:${port}${path}`, { headers })
+    const post = (path: string, body: unknown) => fetch(`http://127.0.0.1:${port}${path}`, {
+      method: 'POST', headers, body: JSON.stringify(body)
+    })
+    return { db, get, post }
+  }
+
+  it('lists active projects with briefs and task counts', async () => {
+    const { db, get } = await start()
+    const alpha = db.createProject({ name: 'Alpha', description: 'The alpha brief' })!
+    const archived = db.createProject({ name: 'Old' })!
+    db.archiveProject(archived.id)
+    db.createTask(makeTask({ title: 'A1', project_id: alpha.id }))
+    const done = db.createTask(makeTask({ title: 'A2', project_id: alpha.id }))!
+    db.updateTask(done.id, { status: 'completed' })
+    db.createTask(makeTask({ title: 'D1' }))
+
+    const response = await get('/api/projects')
+    const projects = await response.json() as Array<Record<string, unknown>>
+
+    expect(response.status).toBe(200)
+    expect(projects.map(p => p.id)).not.toContain(archived.id)
+    expect(projects.find(p => p.id === alpha.id)).toMatchObject({
+      name: 'Alpha', brief: 'The alpha brief', task_count: 2, open_task_count: 1, current: false, is_default: false
+    })
+    expect(projects.find(p => p.id === 'default')).toMatchObject({ task_count: 1, current: true, is_default: true })
+  })
+
+  it('marks the desktop current project as current', async () => {
+    const { db, get } = await start()
+    const alpha = db.createProject({ name: 'Alpha' })!
+    db.setSetting('current_project_id', alpha.id)
+
+    const projects = await (await get('/api/projects')).json() as Array<Record<string, unknown>>
+
+    expect(projects.find(p => p.id === alpha.id)?.current).toBe(true)
+    expect(projects.find(p => p.id === 'default')?.current).toBe(false)
+  })
+
+  it('filters GET /api/tasks by project_id', async () => {
+    const { db, get } = await start()
+    const alpha = db.createProject({ name: 'Alpha' })!
+    db.createTask(makeTask({ title: 'In alpha', project_id: alpha.id }))
+    db.createTask(makeTask({ title: 'In default' }))
+
+    const alphaTasks = await (await get(`/api/tasks?project_id=${alpha.id}`)).json() as Array<{ title: string }>
+    const allTasks = await (await get('/api/tasks')).json() as Array<{ title: string }>
+
+    expect(alphaTasks.map(t => t.title)).toEqual(['In alpha'])
+    expect(allTasks).toHaveLength(2)
+    expect((await get('/api/tasks?project_id=nope')).status).toBe(404)
+  })
+
+  it('creates a task in the requested project', async () => {
+    const { db, post } = await start()
+    const alpha = db.createProject({ name: 'Alpha' })!
+
+    const task = await (await post('/api/tasks', { title: 'Phone task', project_id: alpha.id })).json() as { id: string }
+
+    expect(db.getTask(task.id)?.project_id).toBe(alpha.id)
+  })
+
+  it('defaults a created task to the desktop current project, else Default', async () => {
+    const { db, post } = await start()
+    const first = await (await post('/api/tasks', { title: 'No setting' })).json() as { id: string }
+    expect(db.getTask(first.id)?.project_id).toBe('default')
+
+    const alpha = db.createProject({ name: 'Alpha' })!
+    db.setSetting('current_project_id', alpha.id)
+    const second = await (await post('/api/tasks', { title: 'With setting' })).json() as { id: string }
+    expect(db.getTask(second.id)?.project_id).toBe(alpha.id)
+
+    db.archiveProject(alpha.id)
+    const third = await (await post('/api/tasks', { title: 'Archived setting' })).json() as { id: string }
+    expect(db.getTask(third.id)?.project_id).toBe('default')
+  })
+
+  it('puts a subtask in its parent project whatever the current project is', async () => {
+    const { db, post } = await start()
+    const alpha = db.createProject({ name: 'Alpha' })!
+    const parent = db.createTask(makeTask({ title: 'Parent', project_id: alpha.id }))!
+
+    const child = await (await post('/api/tasks', { title: 'Child', parent_task_id: parent.id })).json() as { id: string }
+
+    expect(db.getTask(child.id)?.project_id).toBe(alpha.id)
+  })
+
+  it('rejects an unknown or archived project_id with 400', async () => {
+    const { db, post } = await start()
+    const old = db.createProject({ name: 'Old' })!
+    db.archiveProject(old.id)
+
+    expect((await post('/api/tasks', { title: 'X', project_id: 'nope' })).status).toBe(400)
+    expect((await post('/api/tasks', { title: 'X', project_id: old.id })).status).toBe(400)
+    expect(db.getTasks().filter(t => t.title === 'X')).toHaveLength(0)
+  })
+})
+
+describe('mobile-api-server: POST /api/sessions/start admission', () => {
+  afterEach(async () => {
+    await stopMobileApiServer()
+    vi.restoreAllMocks()
+  })
+
+  async function start(agentManager: unknown) {
+    const { db } = createTestDb()
+    const token = 'start-token'
+    db.createMobileSession('start-session', createHash('sha256').update(token).digest('hex'), 'test-device')
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    const port = await startMobileApiServer(db, agentManager as never, {} as never, 0)
+    const post = (body: unknown) => fetch(`http://127.0.0.1:${port}/api/sessions/start`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    })
+    return { db, post }
+  }
+
+  it('goes through requestSession and reports a queued start with its position', async () => {
+    const requestSession = vi.fn().mockResolvedValue({ status: 'queued', position: 2, reason: 'global_limit' })
+    const { db, post } = await start({ requestSession })
+    const task = db.createTask(makeTask({ title: 'Busy' }))!
+
+    const response = await post({ agentId: 'agent-1', taskId: task.id })
+
+    expect(response.status).toBe(200)
+    expect(requestSession).toHaveBeenCalledWith('agent-1', task.id, undefined, undefined)
+    expect(await response.json()).toEqual({ sessionId: '', queued: true, queuePosition: 2, queueReason: 'global_limit' })
+  })
+
+  it('returns the session id when admitted', async () => {
+    const requestSession = vi.fn().mockResolvedValue({ status: 'started', sessionId: 'sess-9' })
+    const { db, post } = await start({ requestSession })
+    const task = db.createTask(makeTask({ title: 'Free' }))!
+
+    expect(await (await post({ agentId: 'agent-1', taskId: task.id })).json()).toEqual({ sessionId: 'sess-9' })
+  })
+
+  it('routes through startTask when no agent is given, and reports queued', async () => {
+    const startTask = vi.fn().mockResolvedValue({
+      action: 'queued', startedTaskId: 'sub-1', agentId: 'agent-2', queuePosition: 1, queueReason: 'agent_limit'
+    })
+    const requestSession = vi.fn()
+    const { db, post } = await start({ startTask, requestSession })
+    const task = db.createTask(makeTask({ title: 'Parent' }))!
+
+    const body = await (await post({ taskId: task.id })).json()
+
+    expect(startTask).toHaveBeenCalledWith(task.id)
+    expect(requestSession).not.toHaveBeenCalled()
+    expect(body).toMatchObject({ sessionId: '', action: 'queued', startedTaskId: 'sub-1', queued: true, queuePosition: 1, queueReason: 'agent_limit' })
+  })
+
+  it('answers 400 without a taskId and 404 for an unknown task', async () => {
+    const { post } = await start({ startTask: vi.fn(), requestSession: vi.fn() })
+
+    expect((await post({ agentId: 'agent-1' })).status).toBe(400)
+    expect((await post({ taskId: 'missing' })).status).toBe(404)
+  })
+})

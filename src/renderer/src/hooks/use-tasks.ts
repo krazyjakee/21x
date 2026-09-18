@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { useTaskStore } from '@/stores/task-store'
+import { useProjectTasks } from './use-project-tasks'
 import { useUIStore } from '@/stores/ui-store'
 import { TaskStatus } from '@/types'
 import type { Task, TaskPriority } from '@/types'
@@ -22,7 +23,9 @@ const STATUS_ORDER: Record<TaskStatus, number> = {
 
 export function useTasks() {
   // Use individual selectors to avoid re-renders from unrelated store changes
-  const tasks = useTaskStore((s) => s.tasks)
+  // Scoped to the current project: nothing from another project reaches a task view.
+  const tasks = useProjectTasks()
+  const everyTask = useTaskStore((s) => s.tasks)
   const selectedTaskId = useTaskStore((s) => s.selectedTaskId)
   const isLoading = useTaskStore((s) => s.isLoading)
   const error = useTaskStore((s) => s.error)
@@ -116,7 +119,10 @@ export function useTasks() {
 
   return {
     tasks: filteredTasks,
+    /** The current project's tasks, before the sidebar filters. */
     allTasks: tasks,
+    /** Every project's tasks — for notifications and auto-start only, never for display. */
+    everyTask,
     selectedTask,
     isLoading,
     error,

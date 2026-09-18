@@ -224,7 +224,7 @@ The triage agent receives a structured prompt that instructs it to:
 1. Call `find_similar_tasks` with keywords from the task title/description
 2. Call `list_agents` to see available agents
 3. Call `list_skills` to see available skills
-4. Call `list_repos` to see known repositories
+4. Call `list_repos` to see the repositories of the task's project (the prompt lists them too)
 5. Determine the best `agent_id`, `skill_ids`, `repos`, `priority`, and `labels`
 6. Call `update_task` once with all determined values
 7. NOT work on the task itself
@@ -236,6 +236,17 @@ The triage agent receives a structured prompt that instructs it to:
 - **Session cleanup:** The triage session is removed from the agent store after completion so the task becomes eligible for auto-start.
 - **No triage when disabled:** If auto-run is off, no triage happens.
 - **Pre-assigned tasks skip triage:** Tasks created with `agent_id` already set go directly to auto-run.
+- **Project repos only:** `create_task`, `update_task` and `create_subtask` check `repos` against the task's project (`validateProjectRepos` in `src/main/agent-manager/project-repos.ts`). An unknown repo fails the call with an error that lists the project's repos; it is never silently dropped. Repos the task (or its parent) already carries stay allowed.
+
+## Projects: repos and MCP scope
+
+A task's repos, git provider and org come from its project: its `project_repos` rows, then the project's `git_provider` / `git_org`. The global `git_provider` / `github_org` settings are a fallback for the Default project only (`src/main/agent-manager/project-repos.ts`). A project with no repos runs its tasks in an empty workspace.
+
+The task-management MCP tools have three scopes (`src/main/mcp-servers/task-management-core.ts`):
+
+- **Subtask scope** (`?task=&parent=`): subtask agents, parent and siblings only.
+- **Project scope** (`?project=<id>`): every other task agent and the Mastermind (for its row's `project_id`, the Default project today; see `coordinatorProjectScope` in `session-config.ts` for per-project Masterminds). List and search tools (`list_tasks`, `find_similar_tasks`, `get_task_statistics`, `get_recent_activity`, `list_pending_approvals`, `list_repos`) are narrowed to the project, `create_task` lands in it, and any call naming a `task_id`, `parent_task_id`, `subtask_ids` or `next_subtask_ids` outside it is refused.
+- **Full access** (no scope): internal and debug use only — a direct run of `task-management-mcp.js` without `TASK_SCOPE_PROJECT_ID`, or a session with no task row behind it.
 
 ### Manual Triage
 
@@ -250,7 +261,7 @@ The task-management MCP server provides these tools used during triage:
 | `find_similar_tasks` | Find historical tasks by keyword matching (title, description, type, labels) |
 | `list_agents` | List all available agents with capabilities |
 | `list_skills` | List all available skills |
-| `list_repos` | List known repos from historical tasks + GitHub org setting |
+| `list_repos` | List the project's repos with provider, org and default branch |
 | `update_task` | Assign agent_id, skill_ids, labels, priority, repos |
 
 ### `find_similar_tasks` Algorithm

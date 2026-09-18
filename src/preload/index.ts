@@ -10,7 +10,7 @@ import type {
 
 contextBridge.exposeInMainWorld('electronAPI', {
   db: {
-    getTasks: (): Promise<unknown[]> => ipcRenderer.invoke('db:getTasks'),
+    getTasks: (projectId?: string): Promise<unknown[]> => ipcRenderer.invoke('db:getTasks', projectId),
     getTask: (id: string): Promise<unknown> => ipcRenderer.invoke('db:getTask', id),
     createTask: (data: Record<string, unknown>): Promise<unknown> =>
       ipcRenderer.invoke('db:createTask', data),
@@ -269,7 +269,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('workspace:runCleanupNow')
   },
   taskSources: {
-    getAll: (): Promise<unknown[]> => ipcRenderer.invoke('taskSource:getAll'),
+    getAll: (projectId?: string): Promise<unknown[]> => ipcRenderer.invoke('taskSource:getAll', projectId),
     create: (data: Record<string, unknown>): Promise<unknown> =>
       ipcRenderer.invoke('taskSource:create', data),
     update: (id: string, data: Record<string, unknown>): Promise<unknown> =>
@@ -293,6 +293,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     archive: (id: string, archived?: boolean): Promise<ProjectRecord | undefined> =>
       ipcRenderer.invoke('project:archive', id, archived),
     reorder: (orderedIds: string[]): Promise<void> => ipcRenderer.invoke('project:reorder', orderedIds),
+    moveTask: (taskId: string, projectId: string): Promise<unknown[] | null> =>
+      ipcRenderer.invoke('project:moveTask', taskId, projectId),
     repos: {
       list: (projectId: string): Promise<ProjectRepoRecord[]> => ipcRenderer.invoke('projectRepo:list', projectId),
       add: (projectId: string, data: CreateProjectRepoData): Promise<ProjectRepoRecord | undefined> =>
@@ -338,6 +340,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('plugin:resolveOptions', pluginId, resolverKey, config, mcpServerId, sourceId),
     executeAction: (actionId: string, taskId: string, sourceId: string, input?: string): Promise<unknown> =>
       ipcRenderer.invoke('plugin:executeAction', actionId, taskId, sourceId, input)
+  },
+  // Connector-bridge task source form (docs/connectors.md). Credentials go in; none come back.
+  connectors: {
+    bridgePieces: (): Promise<unknown[]> => ipcRenderer.invoke('connectors:bridgePieces'),
+    ensureInstance: (pieceName: string, instanceId?: string): Promise<unknown> =>
+      ipcRenderer.invoke('connectors:ensureInstance', pieceName, instanceId),
+    credentialStatus: (instanceId: string): Promise<unknown> => ipcRenderer.invoke('connectors:credentialStatus', instanceId),
+    setCredentials: (instanceId: string, input: Record<string, string>, storage?: 'persistent' | 'session'): Promise<unknown> =>
+      ipcRenderer.invoke('connectors:setCredentials', instanceId, input, storage),
+    clearCredentials: (instanceId: string): Promise<void> => ipcRenderer.invoke('connectors:clearCredentials', instanceId),
+    syncStatus: (instanceId: string): Promise<unknown> => ipcRenderer.invoke('connectors:syncStatus', instanceId)
   },
   claudePlugins: {
     getMarketplaceSources: (): Promise<unknown[]> =>

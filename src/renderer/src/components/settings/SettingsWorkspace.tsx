@@ -1,4 +1,4 @@
-import { Settings, Users, Server, Workflow, Wrench, KeyRound, Building2, Puzzle, Cable, Mic, X } from 'lucide-react'
+import { Settings, Users, Server, Workflow, Wrench, KeyRound, Building2, Puzzle, Cable, Mic, FolderKanban, X } from 'lucide-react'
 import * as Tabs from '@radix-ui/react-tabs'
 import { useUIStore } from '@/stores/ui-store'
 import { SettingsTab } from '@/types'
@@ -12,9 +12,11 @@ import { VoiceSettings } from './tabs/VoiceSettings'
 import { IntegrationsSettings } from './tabs/IntegrationsSettings'
 import { AdvancedSettings } from './tabs/AdvancedSettings'
 import { PluginsSettings } from './tabs/PluginsSettings'
+import { ProjectsSettings } from './tabs/ProjectsSettings'
 
 const ICON_MAP = {
   Settings,
+  FolderKanban,
   Users,
   Server,
   KeyRound,
@@ -31,6 +33,7 @@ export function SettingsWorkspace() {
 
   const tabs = [
     { value: SettingsTab.GENERAL, label: 'General', iconName: 'Settings' },
+    { value: SettingsTab.PROJECTS, label: 'Projects', iconName: 'FolderKanban' },
     { value: SettingsTab.AGENTS, label: 'Agents', iconName: 'Users' },
     { value: SettingsTab.TOOLS_MCP, label: 'Tools & MCP', iconName: 'Server' },
     { value: SettingsTab.SECRETS, label: 'Secrets', iconName: 'KeyRound' },
@@ -90,6 +93,10 @@ export function SettingsWorkspace() {
           <div className="max-w-4xl mx-auto px-6 py-6">
             <Tabs.Content value={SettingsTab.GENERAL} className="focus-visible:outline-none space-y-6">
               <GeneralSettings />
+            </Tabs.Content>
+
+            <Tabs.Content value={SettingsTab.PROJECTS} className="focus-visible:outline-none space-y-6">
+              <ProjectsSettings />
             </Tabs.Content>
 
             <Tabs.Content value={SettingsTab.AGENTS} className="focus-visible:outline-none space-y-6">

@@ -17,6 +17,7 @@ import { FeedbackModal } from '../components/FeedbackModal'
 import { TaskAgentBar } from '../components/TaskAgentBar'
 import { TaskPropertiesGrid, type SessionActions } from '../components/TaskPropertiesGrid'
 import { TaskPrimaryCta } from '../components/TaskPrimaryCta'
+import { QueuedStartNotice } from '../components/QueuedStartNotice'
 import { TranscriptPreview } from '../components/TranscriptPreview'
 import { useArtifactStore } from '../stores/artifact-store'
 import { cn } from '../lib/utils'
@@ -186,6 +187,8 @@ export function TaskDetailPage({ taskId, onNavigate }: { taskId: string; onNavig
       />
 
       <TaskAgentBar task={task} agents={agents} assignedAgentName={assignedAgent?.name} onAssignAgent={handleAssignAgent} />
+
+      <QueuedStartNotice taskId={taskId} />
 
       <div className="shrink-0 border-b border-border/50 px-4 py-2">
         <div className="grid grid-cols-2 rounded-md bg-muted/40 p-0.5 text-xs">

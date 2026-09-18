@@ -5,17 +5,26 @@ import { SettingsSection } from '../SettingsSection'
 import { TaskSourceFormDialog } from '../forms/TaskSourceFormDialog'
 import { useTaskSourceStore } from '@/stores/task-source-store'
 import { useTaskStore } from '@/stores/task-store'
+import { useProjectTaskSources, useCurrentProject } from '@/hooks/use-project-tasks'
 import { pluginApi } from '@/lib/ipc-client'
 import type { CreateTaskSourceDTO, PluginMeta, TaskSource } from '@/types'
 
 export function IntegrationsSettings() {
-  const { sources, syncingIds, createSource, updateSource, deleteSource, syncSource } = useTaskSourceStore()
+  const { syncingIds, createSource, updateSource, deleteSource, syncSource, fetchSources } = useTaskSourceStore()
+  // Sources belong to a project: this tab shows and creates the current project's.
+  const sources = useProjectTaskSources()
+  const currentProject = useCurrentProject()
+  const projectLabel = currentProject?.name ?? 'this project'
   const { fetchTasks } = useTaskStore()
   const [plugins, setPlugins] = useState<PluginMeta[]>([])
   const [tsDialog, setTsDialog] = useState<{ open: boolean; source?: TaskSource }>({ open: false })
   const [oauthStatus, setOauthStatus] = useState<Map<string, boolean>>(new Map())
 
   const canAddSource = plugins.length > 0
+
+  useEffect(() => {
+    void fetchSources()
+  }, [fetchSources])
 
   useEffect(() => {
     const loadPlugins = async () => {
@@ -81,11 +90,11 @@ export function IntegrationsSettings() {
     <>
       <SettingsSection
         title="Task Sources"
-        description="Connect external task management systems to import and sync tasks"
+        description={`Connect external task management systems to import and sync tasks into ${projectLabel}. Synced tasks land in the project their source belongs to.`}
       >
         <div className="flex items-center justify-between">
           <p className="text-xs text-muted-foreground">
-            {sources.length} source{sources.length !== 1 ? 's' : ''} configured
+            {sources.length} source{sources.length !== 1 ? 's' : ''} in {projectLabel}
           </p>
           {canAddSource && (
             <Button size="sm" onClick={() => setTsDialog({ open: true })}>
@@ -100,7 +109,7 @@ export function IntegrationsSettings() {
             <p className="text-sm text-muted-foreground mb-3">
               {!canAddSource
                 ? 'No plugins available. This is unusual - please restart the app.'
-                : 'No task sources configured yet'}
+                : `No task sources in ${projectLabel} yet`}
             </p>
             {canAddSource && (
               <Button size="sm" onClick={() => setTsDialog({ open: true })}>

@@ -1,7 +1,7 @@
 {
   "name": "21x",
   "productName": "21x",
-  "version": "0.0.156",
+  "version": "0.0.161",
   "packageManager": "pnpm@9.15.2",
   "description": "21x — AI-powered desktop task manager",
   "main": "./out/main/index.js",

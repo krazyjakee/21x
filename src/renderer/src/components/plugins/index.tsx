@@ -10,6 +10,7 @@ import { HubSpotConfigForm } from './HubSpotConfigForm'
 import { GitHubIssuesConfigForm } from './GitHubIssuesConfigForm'
 import { NotionConfigForm } from './NotionConfigForm'
 import { YouTrackConfigForm } from './YouTrackConfigForm'
+import { ConnectorBridgeConfigForm } from './ConnectorBridgeConfigForm'
 import type { PluginFormProps } from './PluginFormProps'
 
 type PluginFormComponent = React.ComponentType<PluginFormProps>
@@ -22,7 +23,8 @@ export const PLUGIN_FORMS: Record<string, PluginFormComponent> = {
   hubspot: HubSpotConfigForm,
   'github-issues': GitHubIssuesConfigForm,
   notion: NotionConfigForm,
-  youtrack: YouTrackConfigForm
+  youtrack: YouTrackConfigForm,
+  'connector-bridge': ConnectorBridgeConfigForm
 }
 
 /**

@@ -6,9 +6,26 @@ import { userTaskRoleFilter } from '../database/task-roles'
 import { TaskStatus } from '../../shared/constants'
 import { buildSimilarTasksQuery } from '../task-search'
 import { afterTaskCreated, afterTaskUpdated, triggerTaskAutomation } from '../task-updates'
+import { DEFAULT_PROJECT_ID } from '../../shared/projects'
+import { listProjectRepos, projectGitDefaults, taskProjectId, validateProjectRepos } from '../agent-manager/project-repos'
 import { agentController, notifyRenderer } from './state'
 
 type ApiTask = Record<string, unknown>
+
+/**
+ * The project a list or search route is narrowed to. A project-scoped MCP
+ * session always sets it (see task-management-core.ts); without it the route
+ * spans every project, which only unscoped internal callers get.
+ */
+function projectFilter(params: Record<string, unknown>): string | undefined {
+  return typeof params.project_id === 'string' && params.project_id ? params.project_id : undefined
+}
+
+/** Normalizes the `repos` param: an array, one string, or nothing. */
+function reposParam(value: unknown): string[] {
+  if (Array.isArray(value)) return value as string[]
+  return typeof value === 'string' && value.length > 0 ? [value] : []
+}
 
 /**
  * The task shape this API has always returned: the row's JSON array columns
@@ -60,6 +77,8 @@ function listTasks(db: DatabaseManager, params: Record<string, unknown>): ApiTas
     query += params.has_agent ? ' AND agent_id IS NOT NULL' : ' AND agent_id IS NULL'
   }
   if (params.agent_id) { query += ' AND agent_id = ?'; qParams.push(params.agent_id) }
+  const projectId = projectFilter(params)
+  if (projectId) { query += ' AND project_id = ?'; qParams.push(projectId) }
   const labels = params.labels as string[] | undefined
   if (labels?.length) {
     query += ` AND (${labels.map(() => 'labels LIKE ?').join(' OR ')})`
@@ -74,6 +93,7 @@ function listTasks(db: DatabaseManager, params: Record<string, unknown>): ApiTas
 
 function findSimilarTasks(db: DatabaseManager, params: Record<string, unknown>): ApiTask[] {
   const limit = (params.limit as number) || 10
+  const projectId = projectFilter(params)
   // Stemming and synonym expansion happen in here, so near-miss wording still
   // finds the relevant history. See task-search.ts.
   const query = buildSimilarTasksQuery(params)
@@ -81,8 +101,9 @@ function findSimilarTasks(db: DatabaseManager, params: Record<string, unknown>):
   if (!query) {
     // No keywords at all: recent tasks.
     const status = params.completed_only ? ' AND status = ?' : ''
-    const rows = db.db.prepare(`SELECT * FROM tasks WHERE ${userTaskRoleFilter()}${status} ORDER BY created_at DESC LIMIT ?`)
-      .all(...(params.completed_only ? ['completed'] : []), limit) as TaskRow[]
+    const project = projectId ? ' AND project_id = ?' : ''
+    const rows = db.db.prepare(`SELECT * FROM tasks WHERE ${userTaskRoleFilter()}${status}${project} ORDER BY created_at DESC LIMIT ?`)
+      .all(...(params.completed_only ? ['completed'] : []), ...(projectId ? [projectId] : []), limit) as TaskRow[]
     return rows.map(rowToApiTask)
   }
 
@@ -98,9 +119,10 @@ function findSimilarTasks(db: DatabaseManager, params: Record<string, unknown>):
     SELECT t.*, bm25(tasks_fts, 10.0, 5.0, 2.0, 1.0) AS rank, ${tier} AS exact_tier
     FROM tasks_fts
     JOIN tasks t ON tasks_fts.rowid = t.rowid
-    WHERE tasks_fts MATCH ? AND ${userTaskRoleFilter('t.role')}`
+    WHERE tasks_fts MATCH ? AND ${userTaskRoleFilter('t.role')}${projectId ? ' AND t.project_id = ?' : ''}`
   // Bind order follows the SQL text: the tier subquery precedes the WHERE.
   const baseParams: unknown[] = query.exactMatch ? [query.exactMatch, query.match] : [query.match]
+  if (projectId) baseParams.push(projectId)
   const run = (completedOnly: boolean): TaskRow[] =>
     db.db.prepare(`${selectClause}${completedOnly ? ' AND t.status = ?' : ''} ORDER BY exact_tier, rank LIMIT ?`)
       .all(...baseParams, ...(completedOnly ? ['completed'] : []), limit) as TaskRow[]
@@ -111,10 +133,13 @@ function findSimilarTasks(db: DatabaseManager, params: Record<string, unknown>):
   return rows.map(rowToApiTask)
 }
 
-function getTaskStatistics(db: DatabaseManager, metric: unknown): unknown {
+function getTaskStatistics(db: DatabaseManager, metric: unknown, projectId?: string): unknown {
+  // Every metric counts the user's tasks, in one project when scoped.
+  const where = `${userTaskRoleFilter()}${projectId ? ' AND project_id = ?' : ''}`
+  const args = projectId ? [projectId] : []
   switch (metric) {
     case 'label_usage': {
-      const rows = db.db.prepare(`SELECT labels FROM tasks WHERE ${userTaskRoleFilter()}`).all() as Array<{ labels: string | null }>
+      const rows = db.db.prepare(`SELECT labels FROM tasks WHERE ${where}`).all(...args) as Array<{ labels: string | null }>
       const counts = new Map<string, number>()
       rows.forEach((row) => {
         JSON.parse(row.labels || '[]').forEach((l: string) => counts.set(l, (counts.get(l) || 0) + 1))
@@ -125,10 +150,10 @@ function getTaskStatistics(db: DatabaseManager, metric: unknown): unknown {
       return db.db.prepare(`
         SELECT agent_id, COUNT(*) as task_count,
                SUM(CASE WHEN status = 'agent_working' THEN 1 ELSE 0 END) as active_count
-        FROM tasks WHERE agent_id IS NOT NULL AND ${userTaskRoleFilter()} GROUP BY agent_id
-      `).all()
+        FROM tasks WHERE agent_id IS NOT NULL AND ${where} GROUP BY agent_id
+      `).all(...args)
     case 'priority_distribution': {
-      const dist = db.db.prepare(`SELECT priority, COUNT(*) as count FROM tasks WHERE ${userTaskRoleFilter()} GROUP BY priority`).all() as Array<{ priority: string; count: number }>
+      const dist = db.db.prepare(`SELECT priority, COUNT(*) as count FROM tasks WHERE ${where} GROUP BY priority`).all(...args) as Array<{ priority: string; count: number }>
       return Object.fromEntries(dist.map((d) => [d.priority, d.count]))
     }
     case 'completion_rate': {
@@ -137,8 +162,8 @@ function getTaskStatistics(db: DatabaseManager, metric: unknown): unknown {
                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
                SUM(CASE WHEN status = 'agent_working' THEN 1 ELSE 0 END) as in_progress,
                SUM(CASE WHEN status = 'not_started' THEN 1 ELSE 0 END) as not_started
-        FROM tasks WHERE ${userTaskRoleFilter()}
-      `).get() as { total: number; completed: number; in_progress: number; not_started: number }
+        FROM tasks WHERE ${where}
+      `).get(...args) as { total: number; completed: number; in_progress: number; not_started: number }
       return { ...stats, completion_rate: stats.total > 0 ? (stats.completed / stats.total * 100).toFixed(1) + '%' : '0%' }
     }
     default:
@@ -175,9 +200,11 @@ function updateTask(db: DatabaseManager, params: Record<string, unknown>): unkno
     data.auto_complete_without_review = params.auto_complete_without_review === true
   }
   if (params.repos !== undefined) {
-    data.repos = Array.isArray(params.repos)
-      ? params.repos
-      : (typeof params.repos === 'string' && params.repos.length > 0 ? [params.repos] : [])
+    // Repos must belong to the task's project. Ones the task already carries
+    // (set in the UI or by a task source) stay allowed.
+    const checked = validateProjectRepos(db, taskProjectId(current), reposParam(params.repos), current.repos ?? [])
+    if ('error' in checked) return checked
+    data.repos = checked.repos
   }
   if (params.priority) data.priority = params.priority as UpdateTaskData['priority']
   if (params.output_fields !== undefined) data.output_fields = params.output_fields as UpdateTaskData['output_fields']
@@ -211,6 +238,13 @@ function createSubtask(db: DatabaseManager, params: Record<string, unknown>): un
   if (params.next_subtask_ids !== undefined && !Array.isArray(params.next_subtask_ids)) {
     return { error: 'next_subtask_ids must be an array' }
   }
+  // A subtask shares its parent's project, so its repos must belong to it.
+  let repos = parent.repos
+  if (params.repos !== undefined) {
+    const checked = validateProjectRepos(db, taskProjectId(parent), reposParam(params.repos), parent.repos ?? [])
+    if ('error' in checked) return checked
+    repos = checked.repos
+  }
 
   let subtask: TaskRecord | undefined
   try {
@@ -220,7 +254,7 @@ function createSubtask(db: DatabaseManager, params: Record<string, unknown>): un
       type: (params.type as string) || 'general',
       priority: (params.priority as string) || parent.priority || 'medium',
       labels: (params.labels as string[]) || [],
-      repos: (params.repos as string[]) || parent.repos,
+      repos,
       output_fields: (params.output_fields as CreateTaskData['output_fields']) || [],
       parent_task_id: parent.id,
       next_subtask_ids: params.next_subtask_ids as string[] | undefined,
@@ -281,32 +315,70 @@ async function waitForSubtasks(db: DatabaseManager, params: Record<string, unkno
   return result(true, readSubtasks())
 }
 
+function createTopLevelTask(db: DatabaseManager, params: Record<string, unknown>): unknown {
+  if (!params.title) return { error: 'Title is required' }
+  const parentId = (params.parent_task_id as string) || null
+  const parent = parentId ? db.getTask(parentId) : undefined
+  if (parentId && !parent) return { error: 'Parent task not found' }
+  // A child always joins its parent's project; anything else joins the one asked
+  // for, else the Default project.
+  const projectId = parent ? taskProjectId(parent) : (projectFilter(params) ?? DEFAULT_PROJECT_ID)
+  if (!db.getProject(projectId)) return { error: `Project not found: ${projectId}` }
+  const checked = validateProjectRepos(db, projectId, reposParam(params.repos))
+  if ('error' in checked) return checked
+
+  const task = createTask(db, {
+    title: String(params.title),
+    description: (params.description as string) || '',
+    type: (params.type as string) || 'general',
+    priority: (params.priority as string) || 'medium',
+    assignee: (params.assignee as string) || '',
+    due_date: (params.due_date as string) || null,
+    labels: (params.labels as string[]) || [],
+    repos: checked.repos,
+    // cron is the current field; is_recurring + recurrence_pattern the legacy pair.
+    cron: (params.cron as string) || undefined,
+    is_recurring: !!params.is_recurring,
+    recurrence_pattern: (params.recurrence_pattern as CreateTaskData['recurrence_pattern']) || null,
+    parent_task_id: parentId,
+    project_id: projectId,
+    auto_start_agent: params.auto_start_agent === true,
+    auto_complete_without_review: params.auto_complete_without_review === true
+  }, params)
+  if (!task) return { error: 'Failed to create task' }
+  return { success: true, task: toApiTask(task) }
+}
+
+/**
+ * The project's repos with where each lives, for picking `repos` on a task.
+ * Scoped sessions get their own project; an unscoped call gets the Default
+ * project unless it names one.
+ */
+function listReposForProject(db: DatabaseManager, params: Record<string, unknown>): unknown {
+  const projectId = projectFilter(params) ?? DEFAULT_PROJECT_ID
+  if (!db.getProject(projectId)) return { error: `Project not found: ${projectId}` }
+  const defaults = projectGitDefaults(db, projectId)
+  return {
+    project_id: projectId,
+    repos: listProjectRepos(db, projectId).map((repo) => ({
+      full_name: repo.fullName,
+      name: repo.name,
+      org: repo.org || null,
+      provider: repo.provider,
+      default_branch: repo.defaultBranch
+    })),
+    git_provider: defaults.provider,
+    git_org: defaults.org
+  }
+}
+
 export async function handleTaskRoute(db: DatabaseManager, route: string, params: Record<string, unknown>): Promise<unknown> {
   switch (route) {
     case '/list_tasks':
       return listTasks(db, params)
 
-    case '/create_task': {
-      if (!params.title) return { error: 'Title is required' }
-      const task = createTask(db, {
-        title: String(params.title),
-        description: (params.description as string) || '',
-        type: (params.type as string) || 'general',
-        priority: (params.priority as string) || 'medium',
-        assignee: (params.assignee as string) || '',
-        due_date: (params.due_date as string) || null,
-        labels: (params.labels as string[]) || [],
-        // cron is the current field; is_recurring + recurrence_pattern the legacy pair.
-        cron: (params.cron as string) || undefined,
-        is_recurring: !!params.is_recurring,
-        recurrence_pattern: (params.recurrence_pattern as CreateTaskData['recurrence_pattern']) || null,
-        parent_task_id: (params.parent_task_id as string) || null,
-        auto_start_agent: params.auto_start_agent === true,
-        auto_complete_without_review: params.auto_complete_without_review === true
-      }, params)
-      if (!task) return { error: 'Failed to create task' }
-      return { success: true, task: toApiTask(task) }
-    }
+    case '/create_task':
+      return createTopLevelTask(db, params)
 
     case '/get_task': {
       const task = db.getTask(String(params.task_id))
@@ -323,18 +395,10 @@ export async function handleTaskRoute(db: DatabaseManager, route: string, params
       return findSimilarTasks(db, params)
 
     case '/get_task_statistics':
-      return getTaskStatistics(db, params.metric)
+      return getTaskStatistics(db, params.metric, projectFilter(params))
 
-    case '/list_repos': {
-      const rows = db.db.prepare(`SELECT repos FROM tasks WHERE repos IS NOT NULL AND repos != '[]' AND ${userTaskRoleFilter()}`).all() as Array<{ repos: string }>
-      const repoSet = new Set<string>()
-      rows.forEach((row) => {
-        try {
-          JSON.parse(row.repos || '[]').forEach((r: string) => repoSet.add(r))
-        } catch { /* a malformed row does not hide the others */ }
-      })
-      return { repos: Array.from(repoSet), github_org: db.getSetting('github_org') || null }
-    }
+    case '/list_repos':
+      return listReposForProject(db, params)
 
     case '/list_subtasks':
       if (!params.parent_task_id) return { error: 'parent_task_id is required' }

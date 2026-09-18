@@ -15,6 +15,7 @@ import { ConversationInput } from '../components/ConversationInput'
 import { PinnedTodoSummary } from '../components/PinnedTodoSummary'
 import { useArtifactStore } from '../stores/artifact-store'
 import type { Route } from '../App'
+import { QueuedStartNotice } from '../components/QueuedStartNotice'
 
 // Stable empty list — a fresh `[]` per render would invalidate every memo and
 // effect keyed on `messages` while no session exists.
@@ -213,6 +214,8 @@ export function ConversationPage({ taskId, onNavigate }: { taskId: string; onNav
       />
 
       {search.isOpen && <ConversationSearchBar search={search} />}
+
+      <QueuedStartNotice taskId={taskId} />
 
       {latestTodos && <PinnedTodoSummary todos={latestTodos} />}
 

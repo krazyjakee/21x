@@ -5,6 +5,7 @@ import type {
   CreateProjectResourceData, UpdateProjectResourceData
 } from '../database'
 import type { IpcDeps } from './deps'
+import { guardedIpcSend } from '../guarded-ipc-send'
 
 /** Projects, their repos and their context-only resources. */
 export function registerProjectHandlers({ db }: IpcDeps): void {
@@ -15,6 +16,14 @@ export function registerProjectHandlers({ db }: IpcDeps): void {
   ipcMain.handle('project:update', (_, id: string, data: UpdateProjectData) => db.updateProject(id, data))
   ipcMain.handle('project:archive', (_, id: string, archived?: boolean) => db.archiveProject(id, archived ?? true))
   ipcMain.handle('project:reorder', (_, orderedIds: string[]) => db.reorderProjects(orderedIds))
+  // Moves a top-level task, its subtasks and recurrence instances into another project.
+  ipcMain.handle('project:moveTask', (event, taskId: string, projectId: string) => {
+    const moved = db.moveTaskToProject(taskId, projectId)
+    if (moved) {
+      for (const task of moved) guardedIpcSend(event.sender, 'task:updated', { taskId: task.id, updates: task })
+    }
+    return moved ?? null
+  })
 
   ipcMain.handle('projectRepo:list', (_, projectId: string) => db.getProjectRepos(projectId))
   ipcMain.handle('projectRepo:add', (_, projectId: string, data: CreateProjectRepoData) => db.addProjectRepo(projectId, data))

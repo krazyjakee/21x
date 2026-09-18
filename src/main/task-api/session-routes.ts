@@ -40,6 +40,11 @@ function getMessages(db: DatabaseManager, params: Record<string, unknown>): unkn
   }
 }
 
+/** The project a list route is narrowed to, when the caller is project-scoped. */
+function projectOf(params: Record<string, unknown>): string | undefined {
+  return typeof params.project_id === 'string' && params.project_id ? params.project_id : undefined
+}
+
 export async function handleSessionRoute(db: DatabaseManager, route: string, params: Record<string, unknown>): Promise<unknown> {
   switch (route) {
     case '/get_messages':
@@ -70,7 +75,8 @@ export async function handleSessionRoute(db: DatabaseManager, route: string, par
     case '/list_pending_approvals': {
       const agents = agentController
       if (!agents) return { error: 'Agent controller not available' }
-      const pending = db.getTasks().flatMap((task) => {
+      // A project-scoped session passes project_id (task-management-core.ts).
+      const pending = db.getTasks({ projectId: projectOf(params) }).flatMap((task) => {
         const found = agents.findSessionByTaskId(task.id)
         if (!found || agents.getSessionStatus(found.sessionId)?.status !== 'waiting_approval') return []
         return [{ task_id: task.id, title: task.title, session_id: found.sessionId, agent_id: task.agent_id }]
@@ -82,7 +88,7 @@ export async function handleSessionRoute(db: DatabaseManager, route: string, par
       const limit = Math.min(Number(params.limit) || 20, 100)
       const since = params.since ? Date.parse(String(params.since)) : 0
       const activity = db
-        .getTasks()
+        .getTasks({ projectId: projectOf(params) })
         .filter((task) => Date.parse(task.updated_at) > since)
         .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
         .slice(0, limit)

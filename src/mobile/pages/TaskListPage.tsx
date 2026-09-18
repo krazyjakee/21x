@@ -20,6 +20,9 @@ export function TaskListPage({ onNavigate }: { onNavigate: (route: Route) => voi
   const isLoading = useTaskStore((s) => s.isLoading)
   const isSyncing = useTaskStore((s) => s.isSyncing)
   const syncAndFetch = useTaskStore((s) => s.syncAndFetch)
+  const projects = useTaskStore((s) => s.projects)
+  const currentProjectId = useTaskStore((s) => s.currentProjectId)
+  const setCurrentProject = useTaskStore((s) => s.setCurrentProject)
   // Only extract session statuses — avoids re-rendering on every streaming message
   const sessionStatuses = useAgentStore(useShallow((s) => {
     const result: Record<string, SessionStatus> = {}
@@ -151,7 +154,22 @@ export function TaskListPage({ onNavigate }: { onNavigate: (route: Route) => voi
     <div className="flex flex-col h-full">
       <div className="shrink-0 px-4 pt-3 pb-2 border-b border-border/30">
         <div className="flex items-center justify-between mb-2">
-          <h1 className="text-lg font-semibold">Tasks</h1>
+          {projects.length > 0 ? (
+            <select
+              value={currentProjectId ?? ''}
+              onChange={(e) => void setCurrentProject(e.target.value)}
+              aria-label="Project"
+              className="min-w-0 max-w-[65%] truncate bg-transparent text-lg font-semibold text-foreground focus:outline-none"
+            >
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}{project.open_task_count > 0 ? ` (${project.open_task_count})` : ''}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <h1 className="text-lg font-semibold">Tasks</h1>
+          )}
           <div className="flex items-center gap-1">
             <button
               onClick={() => syncAndFetch()}

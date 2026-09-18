@@ -24,15 +24,17 @@ if (!apiUrl) {
   throw new Error('TASK_API_URL environment variable is required')
 }
 
-// Scope: if set, this MCP server is running for a subtask agent
-// and can only access the parent task + its subtasks.
+// Scope: TASK_SCOPE_PARENT_ID + TASK_SCOPE_TASK_ID make this a subtask agent's
+// server (parent + siblings only); TASK_SCOPE_PROJECT_ID limits it to one
+// project. With neither it has full access, which is for debugging only.
 const scope: TaskMcpScope = {
   parentTaskId: process.env.TASK_SCOPE_PARENT_ID || null,
   taskId: process.env.TASK_SCOPE_TASK_ID || null,
   // Every real task session receives this even when it needs unscoped task
   // orchestration tools. Artifact file operations are always pinned to the
   // current task so an agent cannot mutate another task's workpieces.
-  artifactTaskId: process.env.TASK_ARTIFACT_SCOPE_ID || process.env.TASK_SCOPE_TASK_ID || null
+  artifactTaskId: process.env.TASK_ARTIFACT_SCOPE_ID || process.env.TASK_SCOPE_TASK_ID || null,
+  projectId: process.env.TASK_SCOPE_PROJECT_ID || null
 }
 
 async function callApi(route: string, params: Record<string, unknown> = {}): Promise<unknown> {
@@ -47,7 +49,9 @@ async function callApi(route: string, params: Record<string, unknown> = {}): Pro
   } catch (err) {
     const cause = (err as Error).cause
     const causeMsg = cause instanceof Error ? cause.message : (cause ? String(cause) : '')
-    const scopeText = isScopedSession(scope) ? `task=${scope.taskId} parent=${scope.parentTaskId}` : 'full'
+    const scopeText = isScopedSession(scope)
+      ? `task=${scope.taskId} parent=${scope.parentTaskId}`
+      : scope.projectId ? `project=${scope.projectId}` : 'full'
     return { error: `fetch failed: ${(err as Error).message}${causeMsg ? ` (cause: ${causeMsg})` : ''} | url=${url} | scope=${scopeText}` }
   }
 }
@@ -71,7 +75,7 @@ async function main(): Promise<void> {
   await server.connect(transport)
   const scopeText = isScopedSession(scope)
     ? ` (scoped: task=${scope.taskId}, parent=${scope.parentTaskId})`
-    : ' (full access)'
+    : scope.projectId ? ` (project: ${scope.projectId})` : ' (full access)'
   console.error(`Task Management MCP server started${scopeText}`)
 }
 

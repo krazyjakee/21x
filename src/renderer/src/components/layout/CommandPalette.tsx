@@ -4,11 +4,13 @@ import {
   Search, LayoutDashboard, Layers, CheckSquare, Zap, Settings, MessageSquare,
   Plus, Sun, Moon, CornerDownLeft, LayoutGrid, ArrowDown, ArrowUp, ExternalLink,
   PanelRightOpen, FileDiff, PackageOpen, Copy, GitBranch, Mic, CircleHelp,
-  CircleCheck, Clock3, Play, Trash2, LogOut, ListTree, CornerUpLeft, type LucideIcon
+  CircleCheck, Clock3, Play, Trash2, LogOut, ListTree, CornerUpLeft, FolderKanban, FolderPlus, type LucideIcon
 } from 'lucide-react'
 import { useUIStore } from '@/stores/ui-store'
 import { useThemeStore } from '@/stores/theme-store'
 import { useTaskStore } from '@/stores/task-store'
+import { useProjectStore, activeProjects } from '@/stores/project-store'
+import { useProjectTasks } from '@/hooks/use-project-tasks'
 import { useSkillStore } from '@/stores/skill-store'
 import { cn } from '@/lib/utils'
 import { modKey as mod } from '@/lib/platform'
@@ -63,7 +65,13 @@ export function CommandPalette({ open, onOpenChange, actions }: { open: boolean;
   const toggleOrchestrator = useUIStore((s) => s.toggleOrchestrator)
   const toggleTheme = useThemeStore((s) => s.toggle)
   const themeResolved = useThemeStore((s) => s.resolved)
-  const tasks = useTaskStore((s) => s.tasks)
+  // Task search covers the current project only.
+  const tasks = useProjectTasks()
+  const projects = useProjectStore((s) => s.projects)
+  const currentProjectId = useProjectStore((s) => s.currentProjectId)
+  const setCurrentProject = useProjectStore((s) => s.setCurrentProject)
+  const setProjectSwitcherOpen = useUIStore((s) => s.setProjectSwitcherOpen)
+  const openProjectEditor = useUIStore((s) => s.openProjectEditor)
   const selectTask = useTaskStore((s) => s.selectTask)
   const skills = useSkillStore((s) => s.skills)
   const selectSkill = useSkillStore((s) => s.selectSkill)
@@ -114,6 +122,9 @@ export function CommandPalette({ open, onOpenChange, actions }: { open: boolean;
       { id: 'copy-pr-branch', group: 'Pull request', label: 'Copy pull-request branch', icon: GitBranch, shortcut: 'Y B', run: () => { actions.copyPullRequestBranch(); close() } },
       { id: 'audio-task', group: 'Audio', label: 'Toggle task audio', icon: Mic, shortcut: 'V T', run: () => { actions.toggleTaskAudio(); close() } },
       { id: 'audio-mastermind', group: 'Audio', label: 'Toggle Mastermind audio', icon: Mic, shortcut: 'V M', run: () => { actions.toggleMastermindAudio(); close() } },
+      { id: 'act-switch-project', group: 'Projects', label: 'Switch project…', icon: FolderKanban, keywords: 'project change workspace', shortcut: `${mod}P`, run: () => { close(); if (useUIStore.getState().sidebarView === 'commander') setSidebarView('dashboard'); window.setTimeout(() => setProjectSwitcherOpen(true), 0) } },
+      { id: 'act-new-project', group: 'Projects', label: 'New project…', icon: FolderPlus, keywords: 'project create add', run: () => { close(); openProjectEditor('new') } },
+      { id: 'act-edit-project', group: 'Projects', label: 'Edit current project…', icon: FolderKanban, keywords: 'project settings repos resources brief', run: () => { close(); openProjectEditor(currentProjectId) } },
       { id: 'act-mastermind', group: 'Actions', label: 'Toggle Mastermind', icon: MessageSquare, keywords: 'orchestrator chat', run: () => { toggleOrchestrator(); close() } },
       { id: 'act-settings', group: 'Actions', label: 'Open Settings', icon: Settings, keywords: 'preferences config', run: () => { openSettings(); close() } },
       { id: 'act-theme', group: 'Actions', label: themeResolved === 'dark' ? 'Switch to Light mode' : 'Switch to Dark mode', icon: themeResolved === 'dark' ? Sun : Moon, keywords: 'theme dark light appearance', run: () => { toggleTheme(); close() } },
@@ -151,8 +162,21 @@ export function CommandPalette({ open, onOpenChange, actions }: { open: boolean;
           }))
       : []
 
-    return [...filteredBase, ...taskItems, ...skillItems]
-  }, [query, tasks, skills, themeResolved, closeModal, setSidebarView, openCreateModal, toggleOrchestrator, openSettings, toggleTheme, selectTask, selectSkill, actions])
+    const projectItems: CommandItem[] = q
+      ? activeProjects(projects)
+          .filter((p) => p.id !== currentProjectId && p.name.toLowerCase().includes(q))
+          .slice(0, 6)
+          .map((p) => ({
+            id: `project-${p.id}`,
+            group: 'Projects',
+            label: `Switch to ${p.name}`,
+            icon: FolderKanban,
+            run: () => { setCurrentProject(p.id); close() },
+          }))
+      : []
+
+    return [...filteredBase, ...projectItems, ...taskItems, ...skillItems]
+  }, [query, tasks, skills, projects, currentProjectId, themeResolved, closeModal, setSidebarView, openCreateModal, toggleOrchestrator, openSettings, toggleTheme, selectTask, selectSkill, setCurrentProject, setProjectSwitcherOpen, openProjectEditor, actions])
 
   // Keep highlight within bounds when the list shrinks.
   useEffect(() => { setActive((a) => Math.min(a, Math.max(0, items.length - 1))) }, [items.length])

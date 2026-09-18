@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ListChecks } from 'lucide-react'
-import { useTaskStore } from '@/stores/task-store'
+import { useProjectTasks } from '@/hooks/use-project-tasks'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { TaskStatus } from '@/types'
 import { isSnoozed } from '@/lib/utils'
@@ -10,7 +10,8 @@ import { isSnoozed } from '@/lib/utils'
  * counts on the left, app version on the right. Read-only.
  */
 export function StatusBar() {
-  const tasks = useTaskStore((s) => s.tasks)
+  // Counts are the current project's.
+  const tasks = useProjectTasks()
   // Select the derived count (a primitive) rather than the sessions Map: the
   // Map gets a new identity on every streamed delta, which re-rendered this
   // always-mounted bar 10–20×/s during any agent run. Object.is on the number

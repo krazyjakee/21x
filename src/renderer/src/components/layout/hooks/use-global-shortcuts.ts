@@ -42,6 +42,15 @@ export function useGlobalShortcuts(actions: CommandPaletteActions, setCmdOpen: D
           setCmdOpen((value) => !value)
           return
         }
+        // Mod+P: switch project (task views; Commander is cross-project).
+        if (key === 'p' && !e.shiftKey) {
+          e.preventDefault()
+          if (useUIStore.getState().sidebarView === 'commander') setSidebarView('dashboard')
+          setCmdOpen(false)
+          const ui = useUIStore.getState()
+          ui.setProjectSwitcherOpen(!ui.projectSwitcherOpen)
+          return
+        }
         const number = Number(e.key)
         if (Number.isInteger(number) && number >= 1 && number <= NAV_ITEMS.length) {
           e.preventDefault()

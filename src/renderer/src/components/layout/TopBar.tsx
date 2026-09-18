@@ -7,6 +7,7 @@ import { useUIStore } from '@/stores/ui-store'
 import { updaterApi } from '@/lib/ipc-client'
 import logo20x from '@/assets/logos/20x.svg'
 import { ThemeToggle } from './ThemeToggle'
+import { ProjectSwitcher } from './ProjectSwitcher'
 import { NAV_ITEMS } from './nav-items'
 import { isWindows, modKey } from '@/lib/platform'
 
@@ -79,6 +80,14 @@ export function TopBar({ onOpenCommandPalette }: { onOpenCommandPalette: () => v
             >
               {sidebarCollapsed ? <PanelLeftOpen className="size-icon" /> : <PanelLeftClose className="size-icon" />}
             </button>
+          )}
+
+          {/* The current project. Commander is cross-project, so it has no switcher. */}
+          {(sidebarView !== 'commander' || activeModal === 'settings') && (
+            <div className="flex items-center gap-1">
+              <span className="text-border/80 text-sm">/</span>
+              <ProjectSwitcher />
+            </div>
           )}
 
           {breadcrumb && BreadcrumbIcon && (

@@ -23,6 +23,15 @@ import type {
 } from '@shared/voice-tts'
 import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
 import type { CommanderEvent, CommanderListSessionsRequest, CommanderMessage, CommanderSession } from '@shared/commander'
+import type {
+  ConnectorBridgeCredentialInput,
+  ConnectorBridgeCredentialStatus,
+  ConnectorBridgeCredentialStorage,
+  ConnectorBridgeInstance,
+  ConnectorBridgePiece,
+  ConnectorBridgeSetCredentialsResult,
+  ConnectorBridgeSyncStatus
+} from '@shared/connector-bridge'
 import type { CliMcpMutationResult, CliMcpProbeResult, CliMcpServerRef, CliMcpSnapshot, CliMcpUpsertRequest } from '@shared/cli-mcp-config'
 import type {
   ProjectRecord, CreateProjectData, UpdateProjectData,
@@ -31,8 +40,9 @@ import type {
 } from '@shared/projects'
 
 export const taskApi = {
-  getAll: (): Promise<Task[]> => {
-    return window.electronAPI.db.getTasks()
+  /** Every project's tasks, or one project's when `projectId` is given. */
+  getAll: (projectId?: string): Promise<Task[]> => {
+    return window.electronAPI.db.getTasks(projectId)
   },
 
   getById: (id: string): Promise<Task | undefined> => {
@@ -433,8 +443,9 @@ export const gitApi = {
 }
 
 export const taskSourceApi = {
-  getAll: (): Promise<TaskSource[]> => {
-    return window.electronAPI.taskSources.getAll()
+  /** Every project's sources, or one project's when `projectId` is given. */
+  getAll: (projectId?: string): Promise<TaskSource[]> => {
+    return window.electronAPI.taskSources.getAll(projectId)
   },
 
   create: (data: CreateTaskSourceDTO): Promise<TaskSource> => {
@@ -474,6 +485,8 @@ export const projectApi = {
   update: (id: string, data: UpdateProjectData): Promise<ProjectRecord | undefined> => window.electronAPI.projects.update(id, data),
   archive: (id: string, archived?: boolean): Promise<ProjectRecord | undefined> => window.electronAPI.projects.archive(id, archived),
   reorder: (orderedIds: string[]): Promise<void> => window.electronAPI.projects.reorder(orderedIds),
+  /** Moves a top-level task with its subtasks; resolves to the moved rows, or null when refused. */
+  moveTask: (taskId: string, projectId: string): Promise<Task[] | null> => window.electronAPI.projects.moveTask(taskId, projectId),
 
   listRepos: (projectId: string): Promise<ProjectRepoRecord[]> => window.electronAPI.projects.repos.list(projectId),
   addRepo: (projectId: string, data: CreateProjectRepoData): Promise<ProjectRepoRecord | undefined> =>
@@ -546,6 +559,23 @@ export const pluginApi = {
   executeAction: (actionId: string, taskId: string, sourceId: string, input?: string): Promise<ActionResult> => {
     return window.electronAPI.plugins.executeAction(actionId, taskId, sourceId, input)
   }
+}
+
+// ── Connector-bridge task source (docs/connectors.md) ─────────
+// Credentials are write-only: no call returns them.
+
+export const connectorBridgeApi = {
+  bridgePieces: (): Promise<ConnectorBridgePiece[]> => window.electronAPI.connectors.bridgePieces(),
+  ensureInstance: (pieceName: string, instanceId?: string): Promise<ConnectorBridgeInstance> =>
+    window.electronAPI.connectors.ensureInstance(pieceName, instanceId),
+  credentialStatus: (instanceId: string): Promise<ConnectorBridgeCredentialStatus> => window.electronAPI.connectors.credentialStatus(instanceId),
+  setCredentials: (
+    instanceId: string,
+    input: ConnectorBridgeCredentialInput,
+    storage?: ConnectorBridgeCredentialStorage
+  ): Promise<ConnectorBridgeSetCredentialsResult> => window.electronAPI.connectors.setCredentials(instanceId, input, storage),
+  clearCredentials: (instanceId: string): Promise<void> => window.electronAPI.connectors.clearCredentials(instanceId),
+  syncStatus: (instanceId: string): Promise<ConnectorBridgeSyncStatus> => window.electronAPI.connectors.syncStatus(instanceId)
 }
 
 export const claudePluginApi = {

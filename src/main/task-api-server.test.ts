@@ -8,6 +8,7 @@ import type { DatabaseManager } from './database'
 import { getTaskApiToken, handleRoute, setTaskApiAgentController, setTaskApiNotifier, startTaskApiServer, stopTaskApiServer } from './task-api-server'
 import { TaskStatus } from '../shared/constants'
 import { setTaskAutomationTrigger, setTaskSchedulers } from './task-updates'
+import { DEFAULT_PROJECT_ID } from '../shared/projects'
 
 let db: DatabaseManager
 let rawDb: import('better-sqlite3').Database
@@ -183,6 +184,7 @@ describe('/update_task - triage status guard', () => {
 
 describe('/update_task - repos field', () => {
   it('accepts an array or a single repo string', async () => {
+    for (const name of ['repo-1', 'repo-2', 'solo']) db.addProjectRepo(DEFAULT_PROJECT_ID, { name, org: 'org' })
     const task = db.createTask(makeTask({ title: 'Task with repos' }))!
 
     await handleRoute(db, '/update_task', { task_id: task.id, repos: ['org/repo-1', 'org/repo-2'] })
@@ -242,20 +244,114 @@ describe('task response shape', () => {
 })
 
 describe('/list_repos', () => {
-  it('returns distinct repos from historical tasks and the configured org', async () => {
-    db.createTask(makeTask({ title: 'Task 1', repos: ['org/repo-a', 'org/repo-b'] }))
-    db.createTask(makeTask({ title: 'Task 2', repos: ['org/repo-b', 'org/repo-c'] }))
-    db.createTask(makeTask({ title: 'Task 3', repos: [] }))
+  it("returns the project's repos with provider, org and default branch", async () => {
+    db.addProjectRepo(DEFAULT_PROJECT_ID, { name: 'repo-a', org: 'org', provider: 'gitlab', default_branch: 'develop' })
+    db.addProjectRepo(DEFAULT_PROJECT_ID, { name: 'repo-b' })
     db.setSetting('github_org', 'my-org')
+    // A repo only another project has, and one only past tasks used, are not listed.
+    const other = db.createProject({ name: 'Other', git_org: 'elsewhere' })!
+    db.addProjectRepo(other.id, { name: 'hidden' })
+    db.createTask(makeTask({ title: 'Old', repos: ['org/from-history'] }))
 
-    const result = await handleRoute(db, '/list_repos', {}) as { repos: string[]; github_org: string | null }
+    const result = await handleRoute(db, '/list_repos', {}) as Record<string, unknown>
 
-    expect(result.repos.sort()).toEqual(['org/repo-a', 'org/repo-b', 'org/repo-c'])
-    expect(result.github_org).toBe('my-org')
+    expect(result).toEqual({
+      project_id: DEFAULT_PROJECT_ID,
+      repos: [
+        { full_name: 'org/repo-a', name: 'repo-a', org: 'org', provider: 'gitlab', default_branch: 'develop' },
+        // A bare repo of the Default project takes the global org.
+        { full_name: 'my-org/repo-b', name: 'repo-b', org: 'my-org', provider: 'github', default_branch: null }
+      ],
+      git_provider: 'github',
+      git_org: 'my-org'
+    })
+    expect((await handleRoute(db, '/list_repos', { project_id: other.id }) as { repos: Array<{ full_name: string }> }).repos
+      .map((r) => r.full_name)).toEqual(['elsewhere/hidden'])
   })
 
   it('returns no repos and a null org when there are none', async () => {
-    expect(await handleRoute(db, '/list_repos', {})).toEqual({ repos: [], github_org: null })
+    expect(await handleRoute(db, '/list_repos', {})).toEqual({
+      project_id: DEFAULT_PROJECT_ID, repos: [], git_provider: 'github', git_org: null
+    })
+  })
+
+  it('does not fall back to the global settings for a project other than Default', async () => {
+    db.setSetting('github_org', 'global-org')
+    db.setSetting('git_provider', 'forgejo')
+    const project = db.createProject({ name: 'Plain' })!
+    expect(await handleRoute(db, '/list_repos', { project_id: project.id })).toMatchObject({ git_provider: 'github', git_org: null })
+  })
+})
+
+describe('repos are validated against the task project (#50)', () => {
+  it('rejects an unknown repo on update_task with a clear error instead of skipping it', async () => {
+    db.addProjectRepo(DEFAULT_PROJECT_ID, { name: 'known', org: 'org' })
+    const task = db.createTask(makeTask({ title: 'T' }))!
+
+    const result = await handleRoute(db, '/update_task', { task_id: task.id, repos: ['org/known', 'org/unknown'] }) as { error?: string }
+
+    expect(result.error).toContain('org/unknown')
+    expect(result.error).toContain('org/known')
+    expect(db.getTask(task.id)!.repos).toEqual([])
+  })
+
+  it('canonicalizes a bare repo name to the project repo it names', async () => {
+    db.addProjectRepo(DEFAULT_PROJECT_ID, { name: 'known', org: 'org' })
+    const task = db.createTask(makeTask({ title: 'T' }))!
+    await handleRoute(db, '/update_task', { task_id: task.id, repos: ['known'] })
+    expect(db.getTask(task.id)!.repos).toEqual(['org/known'])
+  })
+
+  it('keeps repos a task already carries, even when the project does not list them', async () => {
+    const task = db.createTask(makeTask({ title: 'Imported', repos: ['org/from-source'] }))!
+    const result = await handleRoute(db, '/update_task', { task_id: task.id, repos: ['org/from-source'], priority: 'high' }) as { success?: boolean }
+    expect(result.success).toBe(true)
+  })
+
+  it("validates create_task repos against the requested project's repos", async () => {
+    const project = db.createProject({ name: 'P', git_org: 'p-org' })!
+    db.addProjectRepo(project.id, { name: 'app' })
+
+    const ok = await handleRoute(db, '/create_task', { title: 'Ok', project_id: project.id, repos: ['app'] }) as { task: { project_id: string; repos: string[] } }
+    expect(ok.task.project_id).toBe(project.id)
+    expect(ok.task.repos).toEqual(['p-org/app'])
+
+    const bad = await handleRoute(db, '/create_task', { title: 'Bad', project_id: project.id, repos: ['p-org/missing'] }) as { error?: string }
+    expect(bad.error).toContain('p-org/missing')
+    expect(db.getTasks({ projectId: project.id }).map((t) => t.title)).toEqual(['Ok'])
+  })
+
+  it('rejects any repo for a project with no repos', async () => {
+    const project = db.createProject({ name: 'Empty' })!
+    const bad = await handleRoute(db, '/create_task', { title: 'X', project_id: project.id, repos: ['org/anything'] }) as { error?: string }
+    expect(bad.error).toContain('has no repos')
+  })
+
+  it("validates create_subtask repos against the parent's project", async () => {
+    const project = db.createProject({ name: 'P', git_org: 'p-org' })!
+    db.addProjectRepo(project.id, { name: 'app' })
+    const parent = db.createTask(makeTask({ title: 'Parent', project_id: project.id }))!
+
+    const bad = await handleRoute(db, '/create_subtask', { parent_task_id: parent.id, title: 'Child', repos: ['org/elsewhere'] }) as { error?: string }
+    expect(bad.error).toContain('org/elsewhere')
+    const ok = await handleRoute(db, '/create_subtask', { parent_task_id: parent.id, title: 'Child', repos: ['app'] }) as { task: { repos: string[]; project_id: string } }
+    expect(ok.task).toMatchObject({ repos: ['p-org/app'], project_id: project.id })
+  })
+})
+
+describe('project filter on list routes', () => {
+  it('narrows list_tasks, find_similar_tasks and get_task_statistics to one project', async () => {
+    const project = db.createProject({ name: 'P' })!
+    db.createTask(makeTask({ title: 'Deploy pipeline in P', project_id: project.id, labels: ['p'] }))
+    db.createTask(makeTask({ title: 'Deploy pipeline in Default', labels: ['d'] }))
+
+    const listed = await handleRoute(db, '/list_tasks', { project_id: project.id }) as Array<{ title: string }>
+    expect(listed.map((t) => t.title)).toEqual(['Deploy pipeline in P'])
+
+    const similar = await handleRoute(db, '/find_similar_tasks', { title_keywords: 'deploy pipeline', project_id: project.id }) as Array<{ title: string }>
+    expect(similar.map((t) => t.title)).toEqual(['Deploy pipeline in P'])
+
+    expect(await handleRoute(db, '/get_task_statistics', { metric: 'label_usage', project_id: project.id })).toEqual({ p: 1 })
   })
 })
 

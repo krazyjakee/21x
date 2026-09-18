@@ -3,6 +3,7 @@ import { voiceApi } from '@/lib/ipc-client'
 import { useVoiceStore } from '@/stores/voice-store'
 import { useUIStore } from '@/stores/ui-store'
 import { useTaskStore } from '@/stores/task-store'
+import { filterToProject, getCurrentProjectId } from '@/stores/project-store'
 import {
   MASTERMIND_COMPOSER_KEY,
   clearActiveComposer,
@@ -49,9 +50,8 @@ export function useVoiceControl(): void {
         selectedTaskId,
         view,
         pendingApproval: null,
-        visibleTaskIds: useTaskStore
-          .getState()
-          .tasks.slice(0, 50)
+        visibleTaskIds: filterToProject(useTaskStore.getState().tasks, getCurrentProjectId())
+          .slice(0, 50)
           .map((task) => task.id)
       }
     })

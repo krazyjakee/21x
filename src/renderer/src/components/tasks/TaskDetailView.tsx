@@ -21,6 +21,7 @@ import { useUIStore } from '@/stores/ui-store'
 import { SubtasksSection } from './SubtasksSection'
 import { ParentTaskContext } from './ParentTaskContext'
 import { AgentConfigWarning } from './AgentConfigWarning'
+import { TaskProjectField } from './TaskProjectField'
 
 interface TaskDetailViewProps {
   task: Task
@@ -566,8 +567,9 @@ function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttac
             )
           })()}
 
-          <div className="pt-2 border-t text-xs text-muted-foreground">
-            Source: <Badge className="ml-1">{task.source}</Badge>
+          <div className="pt-2 border-t text-xs text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span>Source: <Badge className="ml-1">{task.source}</Badge></span>
+            <span className="inline-flex items-center gap-1">Project: <TaskProjectField task={task} /></span>
           </div>
         </div>
       </div>

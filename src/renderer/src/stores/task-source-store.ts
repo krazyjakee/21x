@@ -1,8 +1,13 @@
 import { create } from 'zustand'
 import { useTaskStore } from './task-store'
+import { getCurrentProjectId, isInProject } from './project-store'
 import type { TaskSource, CreateTaskSourceDTO, UpdateTaskSourceDTO, SyncResult, ActionResult } from '@/types'
 import { taskSourceApi, pluginApi } from '@/lib/ipc-client'
 
+/**
+ * `sources` holds every project's sources; Settings and the sidebar read the
+ * current project's through `useProjectTaskSources` (hooks/use-project-tasks).
+ */
 interface TaskSourceState {
   sources: TaskSource[]
   isLoading: boolean
@@ -15,6 +20,7 @@ interface TaskSourceState {
   updateSource: (id: string, data: UpdateTaskSourceDTO) => Promise<TaskSource | null>
   deleteSource: (id: string) => Promise<boolean>
   syncSource: (sourceId: string) => Promise<SyncResult | null>
+  /** Syncs the current project's enabled sources. */
   syncAllEnabled: () => Promise<void>
   executeAction: (actionId: string, taskId: string, sourceId: string, input?: string) => Promise<ActionResult>
 }
@@ -38,7 +44,8 @@ export const useTaskSourceStore = create<TaskSourceState>((set, get) => ({
 
   createSource: async (data) => {
     try {
-      const source = await taskSourceApi.create(data)
+      // A new source belongs to the current project unless told otherwise.
+      const source = await taskSourceApi.create(data.project_id ? data : { ...data, project_id: getCurrentProjectId() })
       set((state) => ({ sources: [...state.sources, source] }))
       return source
     } catch (err) {
@@ -111,7 +118,8 @@ export const useTaskSourceStore = create<TaskSourceState>((set, get) => ({
 
   syncAllEnabled: async () => {
     const { sources, syncSource } = get()
-    const enabled = sources.filter((s) => s.enabled)
+    const projectId = getCurrentProjectId()
+    const enabled = sources.filter((s) => s.enabled && isInProject(s, projectId))
     await Promise.allSettled(enabled.map((s) => syncSource(s.id)))
   },
 

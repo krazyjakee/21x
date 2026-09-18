@@ -50,6 +50,7 @@ export function TaskFormPage({ taskId, onNavigate }: { taskId?: string; onNaviga
   const existingTask = useTaskStore((s) => taskId ? s.tasks.find((t) => t.id === taskId) : undefined)
   const createTask = useTaskStore((s) => s.createTask)
   const updateTask = useTaskStore((s) => s.updateTask)
+  const projectName = useTaskStore((s) => s.projects.find((p) => p.id === s.currentProjectId)?.name)
   const isEdit = !!taskId
 
   const [title, setTitle] = useState('')
@@ -208,6 +209,9 @@ export function TaskFormPage({ taskId, onNavigate }: { taskId?: string; onNaviga
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
         <div className="space-y-4">
+          {!isEdit && projectName && (
+            <p className="text-xs text-muted-foreground">Project: <span className="text-foreground">{projectName}</span></p>
+          )}
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Title *</label>
             <input
