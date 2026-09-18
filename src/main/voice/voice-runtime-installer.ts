@@ -135,7 +135,7 @@ export async function installVoiceRuntime(
 
   if (!(await isNpmAvailable())) {
     const message =
-      'npm was not found. Install Node.js first — 20x can install it from Settings → General.\n'
+      'npm was not found. Install Node.js first — 21x can install it from Settings → General.\n'
     onProgress({ stage: 'error', output: message, percent: 100 })
     throw new Error(message.trim())
   }

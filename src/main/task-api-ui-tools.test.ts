@@ -54,7 +54,7 @@ describe('no window', () => {
       ['/open_artifact', { task_id: 't1', artifact_id: 'art-1' }],
     ] as Array<[string, Record<string, unknown>]>) {
       const result = (await handle(route, params)) as { error?: string }
-      expect(result.error, route).toMatch(/no 20x window/i)
+      expect(result.error, route).toMatch(/no 21x window/i)
     }
     expect(sent).toHaveLength(0)
   })

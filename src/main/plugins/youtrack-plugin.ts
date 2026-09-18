@@ -548,7 +548,7 @@ See [JetBrains documentation](https://www.jetbrains.com/help/youtrack/server/man
 1. Open YouTrack and click the **profile icon** (bottom-left)
 2. Go to **Profile** > **Account Security**
 3. Under **Tokens**, click **New token...**
-4. Enter a **Token name** (e.g. "20x Integration")
+4. Enter a **Token name** (e.g. "21x Integration")
 5. Under **Scope**, select **YouTrack**
 6. Click **Create**
 7. **Copy the token immediately** -- it won't be shown again

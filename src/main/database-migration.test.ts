@@ -30,7 +30,7 @@ describe('DatabaseManager migrations on an existing install', () => {
   })
 
   function openRaw() {
-    return new RawDatabase(join(dir, 'pf-desktop.db'))
+    return new RawDatabase(join(dir, '21x.db'))
   }
 
   function taskColumns(raw: InstanceType<typeof RawDatabase>): string[] {

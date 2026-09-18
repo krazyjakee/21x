@@ -104,7 +104,7 @@ export class DatabaseManager {
   }
 
   initialize(): void {
-    this.db = new Database(join(app.getPath('userData'), 'pf-desktop.db'))
+    this.db = new Database(join(app.getPath('userData'), '21x.db')) // DB_FILE_NAME in app-identity.ts
     this.db.pragma('journal_mode = WAL')
     this.db.pragma('foreign_keys = ON')
     this.db.pragma('busy_timeout = 5000') // Retry on SQLITE_BUSY for up to 5s

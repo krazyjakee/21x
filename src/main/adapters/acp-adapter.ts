@@ -6,6 +6,7 @@
  * Spec: https://github.com/agentclientprotocol/typescript-sdk
  */
 
+import { CLIENT_NAME } from '../app-identity'
 import { spawn, ChildProcess } from 'child_process'
 import { guardChildStreams } from '../child-stream-guards'
 import type {
@@ -249,7 +250,7 @@ export class AcpAdapter implements CodingAgentAdapter {
         terminal: false
       },
       clientInfo: {
-        name: 'pf-desktop',
+        name: CLIENT_NAME,
         version: '0.0.1'
       }
     })

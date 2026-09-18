@@ -218,8 +218,8 @@ export function UpdateDialog({ open, onClose }: UpdateDialogProps) {
               : state.status === 'up-to-date'
                 ? 'You\'re up to date!'
                 : hasUpdate
-                  ? 'A new version of 20x is available'
-                  : 'Check for 20x updates'}
+                  ? 'A new version of 21x is available'
+                  : 'Check for 21x updates'}
           </DialogDescription>
         </DialogHeader>
         <DialogBody>
@@ -252,7 +252,7 @@ export function UpdateDialog({ open, onClose }: UpdateDialogProps) {
             {state.status === 'up-to-date' && (
               <div className="text-sm text-green-400 flex items-center gap-1.5">
                 <Check className="h-4 w-4" />
-                20x is up to date. You&apos;re running the latest version.
+                21x is up to date. You&apos;re running the latest version.
               </div>
             )}
 

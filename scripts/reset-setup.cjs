@@ -1,10 +1,10 @@
 const { app } = require('electron')
-app.setName('20x')
-app.setPath('userData', require('path').join(app.getPath('appData'), '20x'))
+app.setName('21x')
+app.setPath('userData', require('path').join(app.getPath('appData'), '21x'))
 app.whenReady().then(() => {
   const Database = require('better-sqlite3')
   const path = require('path')
-  const dbPath = path.join(app.getPath('userData'), 'pf-desktop.db')
+  const dbPath = path.join(app.getPath('userData'), '21x.db')
   console.log('DB path:', dbPath)
   const db = new Database(dbPath)
   // List all tables

@@ -43,7 +43,7 @@ const CLI_TOOLS = {
     docsUrl: 'https://cli.github.com/',
     unsupported: 'GitHub CLI must be installed manually on this platform. See https://cli.github.com/',
     releaseUrl: 'https://api.github.com/repos/cli/cli/releases/latest',
-    headers: { 'User-Agent': '20x-app' },
+    headers: { 'User-Agent': '21x-app' },
     macAsset: (release) => githubAsset(selectGhMacAsset(release)),
     linuxAsset: (release) => {
       const arch = process.arch === 'arm64' ? 'arm64' : 'amd64'

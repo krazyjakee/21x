@@ -163,6 +163,32 @@ describe('auto-updater', () => {
       }))
     })
 
+    it('should normalize 21x Windows setup file names before download resolution', async () => {
+      Object.defineProperty(process, 'platform', { value: 'win32' })
+      const { initAutoUpdater } = await import('./auto-updater')
+      const mockWindow = { isDestroyed: vi.fn(() => false), webContents: { send: vi.fn() } } as any
+      const updateInfo = {
+        version: '0.0.157',
+        path: '21x-Setup-0.0.157.exe',
+        files: [
+          { url: '21x-Setup-0.0.157.exe', sha512: 'hash' },
+          { url: '21x-Setup-0.0.157.exe.blockmap', sha512: 'blockmap-hash' }
+        ],
+        releaseDate: '2026-09-18'
+      }
+
+      initAutoUpdater(mockWindow)
+
+      const updateAvailableHandler = mockAutoUpdater.on.mock.calls.find(
+        (c: any[]) => c[0] === 'update-available'
+      )?.[1]
+      updateAvailableHandler(updateInfo)
+
+      expect(updateInfo.path).toBe('21x.Setup.0.0.157.exe')
+      expect(updateInfo.files[0].url).toBe('21x.Setup.0.0.157.exe')
+      expect(updateInfo.files[1].url).toBe('21x.Setup.0.0.157.exe.blockmap')
+    })
+
     it('should send up-to-date status on 404 errors instead of suppressing', async () => {
       const { initAutoUpdater } = await import('./auto-updater')
       const sendMock = vi.fn()

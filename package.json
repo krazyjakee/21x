@@ -1,10 +1,11 @@
 {
-  "name": "20x",
+  "name": "21x",
+  "productName": "21x",
   "version": "0.0.156",
   "packageManager": "pnpm@9.15.2",
-  "description": "20x — AI-powered desktop task manager",
+  "description": "21x — AI-powered desktop task manager",
   "main": "./out/main/index.js",
-  "author": "Peakflo",
+  "author": "Jake Cattrall",
   "license": "MIT",
   "scripts": {
     "dev": "electron-vite dev",
@@ -104,8 +105,17 @@
     "*.{ts,tsx}": "eslint --no-warn-ignored"
   },
   "build": {
-    "appId": "com.20x.app",
-    "productName": "20x",
+    "appId": "com.krazyjakee.21x",
+    "productName": "21x",
+    "protocols": [
+      {
+        "name": "21x",
+        "schemes": [
+          "twentyonex",
+          "nuanu"
+        ]
+      }
+    ],
     "publish": {
       "provider": "github",
       "owner": "krazyjakee",
@@ -134,7 +144,7 @@
     "afterSign": "./scripts/notarize.js",
     "mac": {
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "20x uses the microphone for voice dictation and voice task commands. Speech is recognised on this computer and no audio is stored."
+        "NSMicrophoneUsageDescription": "21x uses the microphone for voice dictation and voice task commands. Speech is recognised on this computer and no audio is stored."
       },
       "target": [
         "dmg",
@@ -173,8 +183,8 @@
       "installerHeaderIcon": "resources/icon.ico",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "20x",
-      "uninstallDisplayName": "20x",
+      "shortcutName": "21x",
+      "uninstallDisplayName": "21x",
       "include": "resources/installer.nsh"
     },
     "nativeRebuilder": "sequential",

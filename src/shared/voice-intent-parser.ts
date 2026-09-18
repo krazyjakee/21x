@@ -24,7 +24,8 @@ import type {
   VoiceViewName,
 } from './voice'
 
-const WAKE_PREFIX = /^(?:hey\s+)?(?:20x|twenty\s*x|twentyx)\s*[,:]?\s*/i
+// 21x is the app's name; the 20x forms keep working for users used to the old one.
+const WAKE_PREFIX = /^(?:hey\s+)?(?:21x|twenty[\s-]*one\s*x|twentyonex|20x|twenty\s*x|twentyx)\s*[,:]?\s*/i
 const TRAILING_PUNCT = /[.!?,;\s]+$/
 
 function normalize(raw: string): string {

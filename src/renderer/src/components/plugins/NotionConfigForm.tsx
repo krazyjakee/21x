@@ -266,7 +266,7 @@ export function NotionConfigForm({ value, onChange, sourceId }: PluginFormProps)
         <div className="space-y-1.5" data-testid="notion-next-statuses">
           <Label>Next statuses</Label>
           <p className="text-xs text-muted-foreground">
-            Statuses a task can move to from 20x, from the "{statusProperty.name}"
+            Statuses a task can move to from 21x, from the "{statusProperty.name}"
             property.
           </p>
           {statusProperty.options?.length ? (

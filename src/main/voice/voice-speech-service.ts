@@ -338,7 +338,7 @@ export class VoiceSpeechService {
         if (this.systemVoices.length === 0) {
           this.status = {
             state: 'unavailable',
-            message: 'This system has no voice that 20x can use.',
+            message: 'This system has no voice that 21x can use.',
           }
           return
         }

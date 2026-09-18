@@ -38,7 +38,7 @@ export function OAuthDialog({ open, provider, config, sourceId, onSuccess, onCan
         return
       }
 
-      // Linear uses custom URL scheme (nuanu://)
+      // Linear uses custom URL scheme (twentyonex://, or legacy nuanu://)
       const authUrl = await oauthApi.startFlow(provider, config)
       await window.electronAPI.shell.openExternal(authUrl)
     } catch (err) {
@@ -96,7 +96,7 @@ export function OAuthDialog({ open, provider, config, sourceId, onSuccess, onCan
         <DialogHeader>
           <DialogTitle>Connect to {providerDisplayName}</DialogTitle>
           <DialogDescription>
-            Authorize pf-desktop to access your {providerDisplayName} workspace
+            Authorize 21x to access your {providerDisplayName} workspace
           </DialogDescription>
         </DialogHeader>
 

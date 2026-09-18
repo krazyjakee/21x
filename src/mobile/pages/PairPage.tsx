@@ -88,7 +88,7 @@ export function PairPage({ pairCode, onPaired }: Props) {
           <svg className="mx-auto h-9 w-9 text-destructive" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
           <h2 className="font-semibold text-foreground">Connection Failed</h2>
           <p className="text-sm text-muted-foreground">{error}</p>
-          <p className="text-xs text-muted-foreground">Please scan the QR code again from the 20x desktop app.</p>
+          <p className="text-xs text-muted-foreground">Please scan the QR code again from the 21x desktop app.</p>
         </div>
       </div>
     )
@@ -100,7 +100,7 @@ export function PairPage({ pairCode, onPaired }: Props) {
         <div className="text-center space-y-1">
           <h1 className="text-xl font-semibold text-foreground">Enter PIN</h1>
           <p className="text-sm text-muted-foreground">
-            Check the 20x desktop app for your 6-digit PIN
+            Check the 21x desktop app for your 6-digit PIN
           </p>
         </div>
 

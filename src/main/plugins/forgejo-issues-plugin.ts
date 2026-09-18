@@ -319,7 +319,7 @@ export class ForgejoIssuesPlugin implements TaskSourcePlugin {
 
 Import issues from a Forgejo (or Gitea) repository and keep them in sync. Changes made locally (status, title, assignees, labels) are pushed back to Forgejo.
 
-Uses the **tea CLI** and the logins it already stores — 20x never asks for, reads, or saves Forgejo tokens.
+Uses the **tea CLI** and the logins it already stores — 21x never asks for, reads, or saves Forgejo tokens.
 
 ## Prerequisites
 

@@ -707,7 +707,7 @@ Simpler setup but requires managing a long-lived access token. Good for testing 
 
 3. Fill in basic information:
 
-   - **App name**: \`nuanu\` or your app name
+   - **App name**: \`21x\` or your app name
    - **Description**: "Task management integration"
 
 ### Step 2: Configure OAuth Settings
@@ -771,7 +771,7 @@ After connecting, configure filters:
 
 3. Fill in basic information:
 
-   - **Name**: \`nuanu\` or your app name
+   - **Name**: \`21x\` or your app name
    - **Description**: "Task management integration"
 
 ### Step 2: Configure Scopes

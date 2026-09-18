@@ -27,7 +27,7 @@ describe('skills.preferred_model migration (13 → 14)', () => {
     first.close?.()
 
     // Roll back to schema 13: no preferred_model column, one existing skill.
-    const raw = new RawDatabase(join(dir, 'pf-desktop.db'))
+    const raw = new RawDatabase(join(dir, '21x.db'))
     raw.exec('ALTER TABLE skills DROP COLUMN preferred_model')
     raw.prepare(`
       INSERT INTO skills (id, name, description, content, version, confidence, uses, last_used, tags, is_deleted, created_at, updated_at)

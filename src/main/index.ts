@@ -41,6 +41,8 @@ import { isMainWindowUrl } from './main-window-url'
 import { applyMobileAccessSettings, setMobileApiDeps, stopMobileApiServer, broadcastToMobileClients, setMobileApiNotifier } from './mobile-api-server'
 import { registerUpdaterIpc, initAutoUpdater, isUpdateDownloaded, getPendingVersion } from './auto-updater'
 import { initCrashLogger } from './crash-logger'
+import { APP_NAME, DEEP_LINK_SCHEMES, parseOAuthCallbackUrl } from './app-identity'
+import { migrateAppIdentity } from './app-identity-migration'
 import { installProcessStreamErrorHandlers } from './process-stream-errors'
 
 /**
@@ -508,7 +510,7 @@ function createTray(): void {
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Show 20x',
+      label: `Show ${APP_NAME}`,
       click: () => {
         mainWindow?.show()
       }
@@ -525,7 +527,7 @@ function createTray(): void {
     }
   ])
 
-  tray.setToolTip('20x')
+  tray.setToolTip(APP_NAME)
   tray.setContextMenu(contextMenu)
 
   tray.on('click', () => {
@@ -533,15 +535,18 @@ function createTray(): void {
   })
 }
 
-// Register custom protocol for OAuth callback
-if (process.defaultApp) {
-  if (process.argv.length >= 2) {
-    app.setAsDefaultProtocolClient('nuanu', process.execPath, [
-      join(process.argv[1])
-    ])
+// Register custom protocols for OAuth callback: twentyonex://, plus the legacy
+// nuanu:// for one release so OAuth apps not yet updated still complete.
+for (const scheme of DEEP_LINK_SCHEMES) {
+  if (process.defaultApp) {
+    if (process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient(scheme, process.execPath, [
+        join(process.argv[1])
+      ])
+    }
+  } else {
+    app.setAsDefaultProtocolClient(scheme)
   }
-} else {
-  app.setAsDefaultProtocolClient('nuanu')
 }
 
 // Handle OAuth callback deep links
@@ -550,14 +555,12 @@ app.on('open-url', (event, url) => {
 
   console.log('[OAuth] Received callback URL:', url)
 
-  // Parse: nuanu://oauth/callback?code=xxx&state=yyy
+  // Parse: twentyonex://oauth/callback?code=xxx&state=yyy (or legacy nuanu://)
   try {
-    const parsedUrl = new URL(url)
-    console.log('[OAuth] Parsed URL - protocol:', parsedUrl.protocol, 'hostname:', parsedUrl.hostname, 'pathname:', parsedUrl.pathname)
+    const callback = parseOAuthCallbackUrl(url)
 
-    if (parsedUrl.protocol === 'nuanu:' && parsedUrl.hostname === 'oauth' && parsedUrl.pathname === '/callback') {
-      const code = parsedUrl.searchParams.get('code')
-      const state = parsedUrl.searchParams.get('state')
+    if (callback) {
+      const { code, state } = callback
 
       console.log('[OAuth] Extracted code:', code ? 'present' : 'missing', 'state:', state ? 'present' : 'missing')
 
@@ -676,6 +679,23 @@ app.whenReady().then(async () => {
 
   // Start PATH fix and DB init in parallel — both are independent
   const pathFixPromise = loadPlatformShellEnv()
+
+  // 20x → 21x: copy the previous userData over once, before the database opens.
+  try {
+    migrateAppIdentity({ userDataDir: app.getPath('userData') })
+  } catch (error) {
+    // Opening the database now would create an empty one that hides the
+    // user's data from every later launch. Stop instead; nothing was moved.
+    console.error('[IdentityMigration] Failed:', error)
+    dialog.showErrorBox(
+      `${APP_NAME} could not copy your data`,
+      `Your data from the previous version (20x) could not be copied to ${app.getPath('userData')}. ` +
+        `Nothing was deleted. Free some disk space or check permissions, then start ${APP_NAME} again.\n\n` +
+        (error instanceof Error ? error.message : String(error))
+    )
+    app.exit(1)
+    return
+  }
 
   db = new DatabaseManager()
   db.initialize()

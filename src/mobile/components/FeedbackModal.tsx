@@ -17,7 +17,7 @@ export function FeedbackModal({ onSubmit, onSkip, onCancel, completionDescriptio
         <h2>{withFeedback ? 'Session feedback' : 'Complete task'}</h2>
         {sourceName && (
           <div className="rounded-md border p-3 text-sm space-y-2">
-            <p>{completeAtSource ? completionDescription : 'Complete in 20x only. The source record will not change.'}</p>
+            <p>{completeAtSource ? completionDescription : 'Complete in 21x only. The source record will not change.'}</p>
             <div className="flex gap-2">
               <button className={`flex-1 rounded-md border px-2 py-2 ${completeAtSource ? 'border-ring bg-accent' : 'border-border text-muted-foreground'}`} role="radio" aria-checked={completeAtSource} onClick={() => setCompleteAtSource(true)}>Close it in {sourceName}</button>
               <button className={`flex-1 rounded-md border px-2 py-2 ${!completeAtSource ? 'border-ring bg-accent' : 'border-border text-muted-foreground'}`} role="radio" aria-checked={!completeAtSource} onClick={() => setCompleteAtSource(false)}>I'll do it manually</button>

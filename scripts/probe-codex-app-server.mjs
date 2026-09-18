@@ -129,7 +129,7 @@ child.on('exit', (code, signal) => {
 
 try {
   const init = await request('initialize', {
-    clientInfo: { name: '20x-app-server-probe', version: '0.0.1', title: '20x App Server Probe' },
+    clientInfo: { name: '21x-app-server-probe', version: '0.0.1', title: '21x App Server Probe' },
     capabilities: { experimentalApi: true, mcpServerOpenaiFormElicitation: true }
   })
   notify('initialized')

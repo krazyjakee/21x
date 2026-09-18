@@ -8,7 +8,7 @@ describe('installer script', () => {
     const script = readFileSync(join(__dirname, '..', 'resources', 'installer.nsh'), 'utf8')
 
     const upgradeGuardIndex = script.indexOf('${if} ${isUpdated}')
-    const promptIndex = script.indexOf('Do you want to remove your 20x data')
+    const promptIndex = script.indexOf('Do you want to remove your 21x data')
 
     expect(upgradeGuardIndex).toBeGreaterThan(-1)
     expect(promptIndex).toBeGreaterThan(-1)

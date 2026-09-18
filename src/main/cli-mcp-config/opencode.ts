@@ -91,7 +91,7 @@ export class OpencodeMcpStore extends BaseCliMcpStore<OpencodeState> {
     const files = this.readFilesOnly()
     const doc = parseJsonDocument(files[0].content)
     const notes: string[] = []
-    if (doc.hadComments) notes.push(`${this.configPath} contains comments or trailing commas; they are dropped when 20x writes the file.`)
+    if (doc.hadComments) notes.push(`${this.configPath} contains comments or trailing commas; they are dropped when 21x writes the file.`)
     return { files, state: { doc }, notes }
   }
 

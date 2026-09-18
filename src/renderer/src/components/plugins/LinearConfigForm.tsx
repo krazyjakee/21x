@@ -6,6 +6,10 @@ import { OAuthDialog } from '@/components/oauth/OAuthDialog'
 import { oauthApi } from '@/lib/oauth-api'
 import type { PluginFormProps } from './PluginFormProps'
 
+// Mirrors OAUTH_CALLBACK_URL / LEGACY_OAUTH_CALLBACK_URL in src/main/app-identity.ts.
+const OAUTH_CALLBACK_URL = 'twentyonex://oauth/callback'
+const LEGACY_OAUTH_CALLBACK_URL = 'nuanu://oauth/callback'
+
 export function LinearConfigForm({ value, onChange, sourceId, onRequestSave }: PluginFormProps) {
   const [showOAuthDialog, setShowOAuthDialog] = useState(false)
   const [oauthConnected, setOauthConnected] = useState(false)
@@ -64,7 +68,7 @@ export function LinearConfigForm({ value, onChange, sourceId, onRequestSave }: P
             >
               linear.app/settings/api
             </button>
-            . Set redirect URI to: <code className="text-xs bg-muted px-1 rounded">nuanu://oauth/callback</code>
+            . Set redirect URI to: <code className="text-xs bg-muted px-1 rounded">{OAUTH_CALLBACK_URL}</code>
           </p>
         </div>
 
@@ -114,6 +118,23 @@ export function LinearConfigForm({ value, onChange, sourceId, onRequestSave }: P
             <option value="read,write,issues:create,comments:create">All Permissions</option>
           </select>
           <p className="text-xs text-muted-foreground">OAuth scopes for Linear API access</p>
+        </div>
+
+        {/* Redirect URI — the legacy nuanu:// scheme is accepted for one release */}
+        <div className="space-y-1.5">
+          <Label htmlFor="redirect_uri">Redirect URI</Label>
+          <select
+            id="redirect_uri"
+            value={(value.redirect_uri as string) ?? OAUTH_CALLBACK_URL}
+            onChange={(e) => updateField('redirect_uri', e.target.value)}
+            className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm cursor-pointer"
+          >
+            <option value={OAUTH_CALLBACK_URL}>{OAUTH_CALLBACK_URL}</option>
+            <option value={LEGACY_OAUTH_CALLBACK_URL}>{LEGACY_OAUTH_CALLBACK_URL} (legacy, removed in the next release)</option>
+          </select>
+          <p className="text-xs text-muted-foreground">
+            Must match the Callback URL of your Linear OAuth application. Update the Linear app to {OAUTH_CALLBACK_URL}.
+          </p>
         </div>
 
         {/* OAuth Connect Button */}

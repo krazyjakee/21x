@@ -153,7 +153,7 @@ export function ConnectPhoneSection() {
   return (
     <SettingsSection
       title="Connect Phone"
-      description="Access 20x from your phone or any browser"
+      description="Access 21x from your phone or any browser"
     >
       <div className="space-y-4">
         <div className="flex items-center justify-between py-2 border-b border-border">
@@ -253,7 +253,7 @@ export function ConnectPhoneSection() {
           <div className="flex items-center justify-between py-2 border-b border-border gap-3">
             <div className="space-y-0.5">
               <Label>Custom URL</Label>
-              <p className="text-xs text-muted-foreground">Your own tunnel or reverse proxy pointed at 20x</p>
+              <p className="text-xs text-muted-foreground">Your own tunnel or reverse proxy pointed at 21x</p>
             </div>
             <div className="flex items-center gap-2">
               <Input

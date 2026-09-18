@@ -18,6 +18,7 @@ import {
   type PluginSyncResult,
   type ActionResult
 } from './types'
+import { LEGACY_OAUTH_CALLBACK_URL, OAUTH_CALLBACK_URL } from '../app-identity'
 import { LinearClient, type LinearIssue } from './linear-client'
 import { replaceRemoteImageUrlsInTask } from './replace-image-urls'
 import { upsertSourcedTask } from './sourced-tasks'
@@ -39,7 +40,19 @@ export class LinearPlugin implements TaskSourcePlugin {
         type: 'text',
         required: false,
         placeholder: 'https://linear.app/settings/api/applications/new',
-        description: '👉 Click to create a new OAuth application in Linear. Set redirect URI to: nuanu://oauth/callback'
+        description: '👉 Click to create a new OAuth application in Linear. Set redirect URI to: twentyonex://oauth/callback'
+      },
+      {
+        key: 'redirect_uri',
+        label: 'Redirect URI',
+        type: 'select',
+        required: false,
+        default: OAUTH_CALLBACK_URL,
+        options: [
+          { value: OAUTH_CALLBACK_URL, label: OAUTH_CALLBACK_URL },
+          { value: LEGACY_OAUTH_CALLBACK_URL, label: `${LEGACY_OAUTH_CALLBACK_URL} (legacy, removed in the next release)` }
+        ],
+        description: 'Must match the Callback URL of your Linear OAuth application. Update the Linear app to twentyonex://oauth/callback; the legacy nuanu:// URI still works for one release.'
       },
       {
         key: 'client_id',
@@ -689,9 +702,9 @@ Connect your Linear workspace to sync issues as tasks. This integration uses OAu
 1. Go to [Linear Settings → API → Applications](https://linear.app/settings/api/applications/new)
 2. Click **Create New Application**
 3. Fill in the application details:
-   - **Application name**: \`nuanu\` (or your preferred name)
+   - **Application name**: \`21x\` (or your preferred name)
    - **Description**: "Task management integration"
-   - **Callback URLs**: \`nuanu://oauth/callback\`
+   - **Callback URLs**: \`twentyonex://oauth/callback\` (apps created before 21x used \`nuanu://oauth/callback\`; update them, or pick the legacy Redirect URI for one more release)
 
 ### Step 2: Configure OAuth Credentials
 
@@ -749,7 +762,7 @@ After connecting, you can filter which issues to sync:
 - Try copying the authorization URL manually
 
 ### "Invalid redirect URI" error
-- Ensure the redirect URI in Linear is exactly: \`nuanu://oauth/callback\`
+- Ensure the redirect URI in Linear is exactly: \`twentyonex://oauth/callback\` (or matches the Redirect URI selected in the source settings)
 - No trailing slash, correct protocol scheme
 
 ### Issues not importing

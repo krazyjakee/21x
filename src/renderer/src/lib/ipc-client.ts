@@ -610,7 +610,7 @@ export const worktreeApi = {
   readFile: (taskId: string, repoFullName: string | null, filePath: string): Promise<{ content: string; size: number; binary: boolean; truncated: boolean } | null> => {
     const readFile = window.electronAPI.worktree.readFile
     if (typeof readFile !== 'function') {
-      return Promise.reject(new Error('Restart 20x to enable workspace file previews.'))
+      return Promise.reject(new Error('Restart 21x to enable workspace file previews.'))
     }
     return readFile(taskId, repoFullName, filePath)
   },

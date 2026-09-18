@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in 20x, **please do not open a public issue.**
+If you discover a security vulnerability in 21x, **please do not open a public issue.**
 
 Instead, report it privately through [GitHub's private vulnerability reporting](https://github.com/krazyjakee/21x/security/advisories/new) on krazyjakee/21x.
 

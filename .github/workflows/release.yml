@@ -75,9 +75,9 @@ jobs:
       - name: Resolve mac artifacts
         id: mac-artifacts
         run: |
-          APP_PATH="$(find dist -maxdepth 2 -type d -name '20x.app' | head -n 1)"
-          ZIP_PATH="$(find dist -maxdepth 1 -type f -name '20x-*-${{ matrix.arch }}.zip' | head -n 1)"
-          DMG_PATH="$(find dist -maxdepth 1 -type f -name '20x-*-${{ matrix.arch }}.dmg' | head -n 1)"
+          APP_PATH="$(find dist -maxdepth 2 -type d -name '21x.app' | head -n 1)"
+          ZIP_PATH="$(find dist -maxdepth 1 -type f -name '21x-*-${{ matrix.arch }}.zip' | head -n 1)"
+          DMG_PATH="$(find dist -maxdepth 1 -type f -name '21x-*-${{ matrix.arch }}.dmg' | head -n 1)"
 
           test -n "$APP_PATH"
           test -f "$ZIP_PATH"
@@ -128,8 +128,8 @@ jobs:
 
       - name: Create stable asset names
         run: |
-          cp dist/20x-*-${{ matrix.arch }}.dmg dist/20x-mac-${{ matrix.arch }}.dmg
-          cp dist/20x-*-${{ matrix.arch }}.zip dist/20x-mac-${{ matrix.arch }}.zip
+          cp dist/21x-*-${{ matrix.arch }}.dmg dist/21x-mac-${{ matrix.arch }}.dmg
+          cp dist/21x-*-${{ matrix.arch }}.zip dist/21x-mac-${{ matrix.arch }}.zip
 
       - name: Upload release assets directly
         uses: softprops/action-gh-release@v2
@@ -177,7 +177,7 @@ jobs:
         run: pnpm exec electron-builder --win --x64 --publish never
 
       - name: Create stable asset names
-        run: cp dist/*.exe dist/20x-windows-x64.exe
+        run: cp dist/*.exe dist/21x-windows-x64.exe
 
       - name: Upload release assets directly
         uses: softprops/action-gh-release@v2
@@ -221,7 +221,7 @@ jobs:
         run: pnpm exec electron-builder --linux --x64 --publish never
 
       - name: Create stable asset names
-        run: cp dist/*.AppImage dist/20x-linux-x86_64.AppImage
+        run: cp dist/*.AppImage dist/21x-linux-x86_64.AppImage
 
       - name: Upload release assets directly
         uses: softprops/action-gh-release@v2

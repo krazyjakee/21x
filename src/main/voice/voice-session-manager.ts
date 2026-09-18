@@ -675,7 +675,7 @@ export class VoiceSessionManager {
   /** Plays one short sample in the speaker the user is looking at. */
   speakPreview(voiceId: string): Promise<boolean> {
     return this.speech.speak({
-      text: 'This is how 20x will read an answer to you.',
+      text: 'This is how 21x will read an answer to you.',
       source: 'preview',
       voiceId,
     })

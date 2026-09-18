@@ -71,7 +71,7 @@ export function sanitizePiMcpServerName(name: string, used: Set<string>): string
 
 export function withProviderNameLimitHint(error: string): string {
   if (!/name must be at most 64/i.test(error)) return error
-  return `${error}\n\nHint: a tool name exceeded the provider 64-character limit. 20x now keeps MCP tools behind short namespace proxies. Stop and start the agent to rebuild its tool list.`
+  return `${error}\n\nHint: a tool name exceeded the provider 64-character limit. 21x now keeps MCP tools behind short namespace proxies. Stop and start the agent to rebuild its tool list.`
 }
 
 /**

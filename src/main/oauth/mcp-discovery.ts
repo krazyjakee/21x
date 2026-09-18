@@ -235,7 +235,7 @@ export class McpDiscovery {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          client_name: '20x Desktop',
+          client_name: '21x Desktop',
           redirect_uris: [redirectUri],
           grant_types: ['authorization_code', 'refresh_token'],
           response_types: ['code'],

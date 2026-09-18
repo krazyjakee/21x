@@ -277,12 +277,12 @@ export class ForgejoManager {
     if (selected) {
       const match = logins.find((login) => login.name === selected)
       if (match) return match
-      throw new ForgejoError('login-not-found', `The tea login "${selected}" selected in 20x no longer exists. Choose one of: ${logins.map((login) => login.name).join(', ')}.`)
+      throw new ForgejoError('login-not-found', `The tea login "${selected}" selected in 21x no longer exists. Choose one of: ${logins.map((login) => login.name).join(', ')}.`)
     }
     if (logins.length === 1) return logins[0]
     const teaDefault = logins.filter((login) => login.isDefault)
     if (teaDefault.length === 1) return teaDefault[0]
-    throw new ForgejoError('login-selection-required', `Multiple tea logins are configured (${logins.map((login) => login.name).join(', ')}). Choose which one 20x should use.`)
+    throw new ForgejoError('login-selection-required', `Multiple tea logins are configured (${logins.map((login) => login.name).join(', ')}). Choose which one 21x should use.`)
   }
 
   private async getLogin(loginName?: string): Promise<TeaLogin> {

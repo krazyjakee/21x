@@ -187,13 +187,13 @@ describe('OnboardingWizard', () => {
 
   it('should not render when open is false', () => {
     render(<OnboardingWizard open={false} onOpenChange={vi.fn()} />)
-    expect(screen.queryByText('Welcome to 20x')).not.toBeInTheDocument()
+    expect(screen.queryByText('Welcome to 21x')).not.toBeInTheDocument()
   })
 
   it('should render welcome title when open', () => {
     render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
     // Radix Dialog may render duplicate nodes
-    expect(screen.getAllByText('Welcome to 20x').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Welcome to 21x').length).toBeGreaterThan(0)
   })
 
   it('offers only local agents, with no hosted-service option', () => {

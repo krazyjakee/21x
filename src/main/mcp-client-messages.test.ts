@@ -22,6 +22,10 @@ describe('mcp-client-messages', () => {
     expect(mcpInitializeRequest(7).id).toBe(7)
   })
 
+  it('identifies as 21x', () => {
+    expect(MCP_CLIENT_INFO.name).toBe('21x')
+  })
+
   it('builds the initialized notification without an id', () => {
     expect(mcpInitializedNotification()).toEqual({ jsonrpc: '2.0', method: 'notifications/initialized' })
   })

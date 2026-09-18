@@ -83,7 +83,7 @@ describe('manual feedback completion', () => {
     const onSkip = vi.fn()
     render(<FeedbackDialog open sourceName="Session Feedback" onSubmit={onSubmit} onSkip={onSkip} onCancel={vi.fn()} />)
     fireEvent.click(screen.getByRole('radio', { name: "I'll do it manually" }))
-    expect(screen.getByText('Complete in 20x only. The source record will not change.')).toBeInTheDocument()
+    expect(screen.getByText('Complete in 21x only. The source record will not change.')).toBeInTheDocument()
     const stars = within(screen.getByRole('dialog')).getAllByRole('button').filter(button => button.querySelector('svg'))
     fireEvent.click(stars[3])
     fireEvent.click(screen.getByRole('button', { name: button }))

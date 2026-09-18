@@ -28,7 +28,7 @@ Function InstallPythonIfMissing
   Pop $2
   StrCmp $1 0 downloadSucceeded
 
-  MessageBox MB_ICONEXCLAMATION|MB_OK "20x could not download Python automatically ($1). Installation will continue, but Python may need to be installed later from python.org."
+  MessageBox MB_ICONEXCLAMATION|MB_OK "21x could not download Python automatically ($1). Installation will continue, but Python may need to be installed later from python.org."
   Delete "$0"
   Return
 
@@ -38,7 +38,7 @@ Function InstallPythonIfMissing
   Delete "$0"
   StrCmp $1 0 pythonInstallSucceeded
 
-  MessageBox MB_ICONEXCLAMATION|MB_OK "Python installer exited with code $1. 20x will finish installing, but Python may not be available until you install it manually."
+  MessageBox MB_ICONEXCLAMATION|MB_OK "Python installer exited with code $1. 21x will finish installing, but Python may not be available until you install it manually."
   Return
 
   pythonInstallSucceeded:
@@ -62,11 +62,11 @@ FunctionEnd
   ${endif}
 
   ; Ask user whether to remove app data (database, settings, attachments)
-  MessageBox MB_YESNO "Do you want to remove your 20x data (tasks, settings, attachments)?$\n$\nClick Yes to delete everything, or No to keep your data." IDYES removeData IDNO skipRemoveData
+  MessageBox MB_YESNO "Do you want to remove your 21x data (tasks, settings, attachments)?$\n$\nClick Yes to delete everything, or No to keep your data." IDYES removeData IDNO skipRemoveData
 
   removeData:
-    ; Remove userData directory (%APPDATA%/20x)
-    RMDir /r "$APPDATA\20x"
+    ; Remove userData directory (%APPDATA%/21x)
+    RMDir /r "$APPDATA\21x"
     goto doneRemoveData
 
   skipRemoveData:
