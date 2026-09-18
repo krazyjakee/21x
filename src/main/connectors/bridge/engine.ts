@@ -9,7 +9,7 @@ import type { PieceCallRequest, PieceCredentialSource } from '../piece-host/clie
 import {
   BRIDGE_MAX_ITEMS_PER_SYNC,
   BRIDGE_MAX_OUTPUT_BYTES,
-  buildUpdateProps,
+  buildUpdateCalls,
   extractItems,
   fieldsCoveredByUpdate,
   jsonByteLength,
@@ -29,6 +29,7 @@ import {
   errorMessage,
   type RetryPolicy
 } from './retry'
+import type { BridgeUpdateCall } from './mapping'
 import { readCursor, trimCursor, type BridgeCursor } from './state'
 
 /**
@@ -178,10 +179,19 @@ export class ConnectorBridgeEngine {
   private async runSync(sourceId: string, { mapping, cfg, instance }: Resolved, ctx: PluginContext, options: BridgeSyncOptions): Promise<PluginSyncResult> {
     const result: PluginSyncResult = { imported: 0, updated: 0, errors: [] }
     const now = this.now()
-    const creds = await this.credentialsFor(instance.id)
+    const resolved = await this.credentialsFor(instance.id)
+    const creds = resolved.creds
     const redact = (text: string): string => redactCredentials(text, creds)
+    if (resolved.error) {
+      // An OAuth token that was revoked or could not be renewed: a clear,
+      // permanent error in the sync status; no retries and no task changes.
+      this.log(`${mapping.label} sync failed for ${instance.id}: ${resolved.error}`)
+      this.store.updateSyncState(instance.id, { attemptCount: 0, nextRetryAt: null, lastError: resolved.error })
+      result.errors.push(`${mapping.label} sync failed: ${resolved.error} Existing tasks were kept.`)
+      return result
+    }
     if (!creds) {
-      result.errors.push(`${mapping.label} is not connected: enter its credentials in the task source settings.`)
+      result.errors.push(`${mapping.label} is not connected: ${mapping.auth.type === 'oauth2' ? 'connect it' : 'enter its credentials'} in the task source settings.`)
       return result
     }
 
@@ -388,26 +398,38 @@ export class ConnectorBridgeEngine {
     for (const f of ROUND_TRIP_FIELDS) if (f in changedFields) changed[f] = changedFields[f]
     const { mapping, cfg, instance } = resolved
     if (!mapping.update) return Promise.resolve({ ok: false, skipped: true, error: `${mapping.label} tasks cannot be updated from 21x` })
-    let props: Record<string, unknown> | null
+    let calls: BridgeUpdateCall[] | null
     try {
-      props = buildUpdateProps(mapping, externalId, changed, cfg.props)
+      calls = buildUpdateCalls(mapping, externalId, changed, cfg.props)
     } catch (err) {
       return Promise.resolve({ ok: false, error: errorMessage(err) })
     }
-    if (!props) return Promise.resolve({ ok: true, skipped: true })
-    const updateProps = props
+    if (!calls) return Promise.resolve({ ok: true, skipped: true })
+    const updateCalls = calls
 
     return this.withLock(instance.id, async () => {
-      const creds = await this.credentialsFor(instance.id)
+      const resolved = await this.credentialsFor(instance.id)
+      const creds = resolved.creds
       const cursor = readCursor(this.store.getSyncState(instance.id)?.cursor)
       const now = this.now()
+      if (resolved.error) {
+        // Unusable OAuth token: keep the change queued (not dead-lettered) so
+        // it lands on the first sync after the user reconnects.
+        this.log(`${mapping.label} update of ${externalId} failed: ${resolved.error}`)
+        if (options.queueOnFailure) {
+          this.queuePending(cursor, externalId, changed, cursor.pending[externalId]?.attempts ?? 0, now, resolved.error)
+          this.store.updateSyncState(instance.id, { cursor, lastError: resolved.error })
+          return { ok: false, queued: true, error: resolved.error }
+        }
+        return { ok: false, error: resolved.error }
+      }
       if (options.queueOnFailure && cursor.rateLimitedUntil && cursor.rateLimitedUntil > now) {
         this.queuePending(cursor, externalId, changed, 0, cursor.rateLimitedUntil, 'rate limited')
         this.store.updateSyncState(instance.id, { cursor })
         return { ok: false, queued: true, error: `${mapping.label} is rate limited; the change will be sent later` }
       }
       try {
-        await this.callUpdate(instance, mapping, updateProps)
+        await this.callUpdate(instance, updateCalls)
         this.clearPending(cursor, externalId, changed)
         this.store.updateSyncState(instance.id, { cursor })
         return { ok: true }
@@ -437,14 +459,17 @@ export class ConnectorBridgeEngine {
     })
   }
 
-  private async callUpdate(instance: ConnectorInstanceRecord, mapping: ConnectorTaskMapping, props: Record<string, unknown>): Promise<unknown> {
-    return this.runtime.client.call({
-      instanceId: instance.id,
-      pieceName: instance.pieceName,
-      pieceVersion: instance.pieceVersion,
-      target: { type: 'action', name: mapping.update!.action },
-      propsValue: props
-    })
+  /** Runs the update calls in order (a close / reopen action first, then the field update). */
+  private async callUpdate(instance: ConnectorInstanceRecord, calls: BridgeUpdateCall[]): Promise<void> {
+    for (const call of calls) {
+      await this.runtime.client.call({
+        instanceId: instance.id,
+        pieceName: instance.pieceName,
+        pieceVersion: instance.pieceVersion,
+        target: { type: 'action', name: call.action },
+        propsValue: call.props
+      })
+    }
   }
 
   private queuePending(cursor: BridgeCursor, externalId: string, changed: Record<string, unknown>, attempts: number, nextRetryAt: number, lastError: string): void {
@@ -477,18 +502,18 @@ export class ConnectorBridgeEngine {
       const now = this.now()
       if (pending.nextRetryAt > now) continue
       if (cursor.rateLimitedUntil && cursor.rateLimitedUntil > now) return
-      let props: Record<string, unknown> | null = null
+      let calls: BridgeUpdateCall[] | null = null
       try {
-        props = buildUpdateProps(mapping, externalId, pending.changed, cfg.props)
+        calls = buildUpdateCalls(mapping, externalId, pending.changed, cfg.props)
       } catch {
-        props = null
+        calls = null
       }
-      if (!props) {
+      if (!calls) {
         delete cursor.pending[externalId]
         continue
       }
       try {
-        await this.callUpdate(instance, mapping, props)
+        await this.callUpdate(instance, calls)
         delete cursor.pending[externalId]
       } catch (err) {
         const message = redactCredentials(errorMessage(err), creds)
@@ -533,11 +558,17 @@ export class ConnectorBridgeEngine {
     return { mapping, cfg, instance }
   }
 
-  private async credentialsFor(instanceId: string): Promise<ConnectorCredentials | null> {
+  /**
+   * The instance's credentials, or the reason they cannot be used (an OAuth
+   * token that was revoked or could not be renewed, a keychain that went
+   * away). Credential sources never leak secret values in their messages.
+   */
+  private async credentialsFor(instanceId: string): Promise<{ creds: ConnectorCredentials | null; error?: string }> {
     try {
-      return (await this.runtime.credentials.get(instanceId)) ?? null
-    } catch {
-      return null
+      return { creds: (await this.runtime.credentials.get(instanceId)) ?? null }
+    } catch (err) {
+      const message = errorMessage(err).trim()
+      return { creds: null, error: /[.!?]$/.test(message) ? message : `${message}.` }
     }
   }
 

@@ -169,10 +169,12 @@ ${pieces}
 
 ## Setup
 
-1. Choose the connector and enter its credentials. They are encrypted with the
-   OS keychain; if the keychain is unavailable you can keep them for this
-   session only.
-2. Fill in the connector settings (for Trello, the board id).
+1. Choose the connector and enter its credentials, or for an OAuth connector
+   (Todoist) paste your own app's client id and secret and click Connect to
+   sign in through the browser. Everything is encrypted with the OS keychain;
+   if the keychain is unavailable you can keep it for this session only.
+2. Fill in the connector settings (for Trello, the board id; for Todoist, a
+   filter such as \`#Work | overdue\`).
 3. Pick how often to sync (0 = only when you click Sync).
 
 Title, due date and completion made in 21x are written back to the source.

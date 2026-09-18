@@ -14,10 +14,32 @@ import type { ConnectorStore } from './connector-store'
  * dead letters; run such text through redactCredentials() first.
  */
 
+/**
+ * An OAuth2 token set plus the client registration it was issued to (issue
+ * #15). Stored like any other credential; ConnectorOAuthService refreshes the
+ * access token in place and marks the set `revoked` when the provider stops
+ * accepting the refresh token. Only the access token reaches a piece.
+ */
+export interface ConnectorOAuth2Credentials {
+  type: 'oauth2'
+  clientId: string
+  /** Null for public clients (PKCE without a secret). */
+  clientSecret: string | null
+  accessToken: string
+  refreshToken: string | null
+  /** Epoch ms, or null when the provider reported no expiry. */
+  expiresAt: number | null
+  tokenType: string
+  scope: string | null
+  /** Set when a refresh was refused (invalid_grant): the user must reconnect. */
+  revoked?: boolean
+}
+
 export type ConnectorCredentials =
   | { type: 'secret_text'; secret: string }
   | { type: 'basic'; username: string; password: string }
   | { type: 'custom_auth'; props: Record<string, unknown> }
+  | ConnectorOAuth2Credentials
 
 export type ConnectorAuthType = ConnectorCredentials['type']
 export type ConnectorCredentialStorage = 'persistent' | 'session'
@@ -68,6 +90,11 @@ export function credentialSecrets(creds: ConnectorCredentials): string[] {
     case 'custom_auth':
       collectStrings(creds.props, out)
       break
+    case 'oauth2':
+      if (creds.accessToken) out.push(creds.accessToken)
+      if (creds.refreshToken) out.push(creds.refreshToken)
+      if (creds.clientSecret) out.push(creds.clientSecret)
+      break
   }
   for (const s of [...out]) {
     const encoded = encodeURIComponent(s)
@@ -96,6 +123,16 @@ function isCredentials(value: unknown): value is ConnectorCredentials {
     case 'secret_text': return typeof v.secret === 'string'
     case 'basic': return typeof v.username === 'string' && typeof v.password === 'string'
     case 'custom_auth': return !!v.props && typeof v.props === 'object' && !Array.isArray(v.props)
+    case 'oauth2':
+      return (
+        typeof v.clientId === 'string' &&
+        (v.clientSecret === null || typeof v.clientSecret === 'string') &&
+        typeof v.accessToken === 'string' &&
+        (v.refreshToken === null || typeof v.refreshToken === 'string') &&
+        (v.expiresAt === null || typeof v.expiresAt === 'number') &&
+        typeof v.tokenType === 'string' &&
+        (v.scope === null || typeof v.scope === 'string')
+      )
     default: return false
   }
 }

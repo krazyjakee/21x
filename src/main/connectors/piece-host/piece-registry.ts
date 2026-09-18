@@ -15,6 +15,12 @@ const BUNDLED_PIECES: Record<string, () => LoadedPieceModule> = {
     module: require('@activepieces/piece-trello') as Record<string, unknown>,
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     version: (require('@activepieces/piece-trello/package.json') as { version: string }).version
+  }),
+  '@activepieces/piece-todoist': () => ({
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    module: require('@activepieces/piece-todoist') as Record<string, unknown>,
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    version: (require('@activepieces/piece-todoist/package.json') as { version: string }).version
   })
 }
 

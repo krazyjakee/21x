@@ -118,3 +118,33 @@ Last-write-wins. On import, the external system's data overwrites local changes.
 ### Task List Item
 
 Tasks from external sources show a small badge with the source name (e.g. "Linear") below the priority badge.
+
+## Connector OAuth2 (#15)
+
+Embedded connector pieces (see `docs/connectors.md`) that authenticate with
+OAuth2 use 21x's own loopback flow (`src/main/oauth/connector-oauth-flow.ts`,
+the same server, PKCE helper and provider contract as the Linear / HubSpot /
+MCP flows) and store the token set with the connector's credentials. The
+per-provider decisions live as data in the piece's allowlist entry
+(`oauth` in `src/main/connectors/allowlist.ts`) and are recorded here.
+
+| Provider (piece) | Mode | PKCE | Loopback redirect | Scopes requested | Refresh | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| Todoist (`@activepieces/piece-todoist` 0.5.0) | `user-supplied`: the user creates an app at developer.todoist.com/appconsole.html and pastes its Client ID and Client secret | No. Todoist does not document PKCE and needs the client secret at the token endpoint, so the secret is stored (encrypted) with the connector, never shipped | Accepted: any OAuth redirect URL can be registered in the app console; register `http://localhost:3000/callback` (21x falls back to 3001-3010 when 3000 is busy). Not yet verified against a live account | `data:read_write` — the smallest scope that can read tasks and update / close / reopen them (`data:read` cannot write; `data:delete` and `project:delete` are not requested) | Tokens never expire and no refresh token is issued; revocation surfaces as `HTTP 401` and a "reconnect" state | A 21x-registered Todoist app is a follow-up decision: it would need the secret in the app bundle, which the security policy forbids, so `registered` mode is reserved for providers that accept PKCE public clients |
+
+Decisions that apply to every provider:
+
+- **Mode.** `registered` (a 21x-registered app) is only an option for
+  providers that accept a PKCE public client with a loopback redirect; the
+  repo never carries a client secret. Every provider that needs a confidential
+  client is `user-supplied`.
+- **Loopback.** Only providers that accept `http://localhost:<port>/callback`
+  are supported; `loopbackRedirect: false` refuses to connect with a clear
+  message. The deep-link scheme is not used for connectors.
+- **Scopes.** The allowlist entry lists the smallest scopes the allowlisted
+  operations need; a mapping may narrow them further (`auth.scopes`), never
+  widen them.
+- **Refresh and revocation.** Handled in the main process by
+  `ConnectorOAuthService`: refresh five minutes before expiry, `invalid_grant`
+  marks the connection revoked, and the sync status shows one clear error
+  until the user reconnects. Pieces only ever see the access token.

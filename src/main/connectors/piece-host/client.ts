@@ -71,6 +71,10 @@ export function toPieceAuthValue(creds: ConnectorCredentials | null): unknown {
       return { type: 'BASIC_AUTH', username: creds.username, password: creds.password }
     case 'custom_auth':
       return { type: 'CUSTOM_AUTH', props: creds.props }
+    case 'oauth2':
+      // OAuth2PropertyValue: pieces read `access_token`. The refresh token and
+      // the client secret stay in the main process.
+      return { type: 'OAUTH2', access_token: creds.accessToken, token_type: creds.tokenType, scope: creds.scope ?? undefined, data: {} }
   }
 }
 

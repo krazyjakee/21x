@@ -79,19 +79,35 @@ export interface BridgeFieldMapping {
   status?: BridgeStatusMapping
 }
 
+/** A dedicated allowlisted action that closes or reopens one item. */
+export interface BridgeStatusAction {
+  action: string
+  /** Prop that receives the item's external id. */
+  idProp: string
+  staticProps?: Record<string, MappedPropValue>
+}
+
 export interface BridgeUpdateMapping {
   /** Allowlisted action that updates one item. */
   action: string
   /** Prop that receives the item's external id. */
   idProp: string
   titleProp?: string
-  /** Receives an ISO 8601 timestamp. */
+  /** Receives the due date: an ISO 8601 timestamp, or `YYYY-MM-DD` when `dueDateFormat` is `date`. */
   dueDateProp?: string
+  /** `date` for providers whose due dates are calendar days (default `iso`). */
+  dueDateFormat?: 'iso' | 'date'
   /**
    * Prop that opens/closes the item. Only a local Completed (close) or Not
    * Started (reopen) is pushed; the other workflow states belong to 21x.
    */
   status?: { prop: string; completedValue: string | number | boolean; openValue: string | number | boolean }
+  /**
+   * For pieces whose update action cannot change completion: separate
+   * close / reopen actions. Mutually exclusive with `status`. A status change
+   * runs the status action first, then the update action for other fields.
+   */
+  statusActions?: { complete: BridgeStatusAction; reopen?: BridgeStatusAction }
   staticProps?: Record<string, MappedPropValue>
 }
 
@@ -101,10 +117,13 @@ export interface ConnectorTaskMapping {
   label: string
   /** Credential shape the piece expects; drives the config form. */
   auth: {
-    type: 'secret_text' | 'basic'
-    /** Field labels for the form (basic: username/password; secret_text: secret). */
+    /** `oauth2` pieces connect through the browser flow; the allowlist entry holds the provider settings. */
+    type: 'secret_text' | 'basic' | 'oauth2'
+    /** Field labels for the form (basic: username/password; secret_text: secret; oauth2: clientId/clientSecret). */
     labels: Record<string, string>
     help?: string
+    /** oauth2: the subset of the allowlisted scopes this mapping needs; the allowlist scopes when omitted. */
+    scopes?: string[]
   }
   configProps: BridgeConfigProp[]
   import: {
@@ -220,6 +239,24 @@ export function validateMapping(
       problems.push(`update action "${mapping.update.action}" is not allowlisted`)
     }
     checkProps(mapping.update.staticProps, 'update')
+    const { statusActions } = mapping.update
+    if (statusActions) {
+      if (mapping.update.status) problems.push('update cannot declare both status and statusActions')
+      for (const [name, sa] of Object.entries({ complete: statusActions.complete, reopen: statusActions.reopen })) {
+        if (!sa) continue
+        if (!Object.prototype.hasOwnProperty.call(piece.actions, sa.action)) problems.push(`${name} action "${sa.action}" is not allowlisted`)
+        checkProps(sa.staticProps, name)
+      }
+    }
+  }
+
+  if (mapping.auth.type === 'oauth2') {
+    if (!piece.oauth) problems.push(`${mapping.pieceName} has no OAuth2 settings in the allowlist`)
+    else if (mapping.auth.scopes?.some((s) => !piece.oauth!.scopes.includes(s))) {
+      problems.push('auth.scopes must be a subset of the allowlisted OAuth2 scopes')
+    }
+  } else if (piece.oauth) {
+    problems.push(`${mapping.pieceName} is an OAuth2 piece; auth.type must be "oauth2"`)
   }
   return problems
 }
@@ -411,7 +448,10 @@ export function buildUpdateProps(
   }
   if (u.dueDateProp && typeof changed.due_date === 'string' && changed.due_date) {
     const date = new Date(changed.due_date)
-    if (!Number.isNaN(date.getTime())) props[u.dueDateProp] = date.toISOString()
+    if (!Number.isNaN(date.getTime())) {
+      const iso = date.toISOString()
+      props[u.dueDateProp] = u.dueDateFormat === 'date' ? iso.slice(0, 10) : iso
+    }
   }
   if (u.status && typeof changed.status === 'string') {
     if (changed.status === TaskStatus.Completed) props[u.status.prop] = u.status.completedValue
@@ -419,6 +459,37 @@ export function buildUpdateProps(
   }
   if (Object.keys(props).length === 0) return null
   return { ...resolveProps(u.staticProps, configProps, mapping), ...props, [u.idProp]: externalId }
+}
+
+/** One allowlisted action call the bridge makes to push a change. */
+export interface BridgeUpdateCall {
+  action: string
+  props: Record<string, unknown>
+}
+
+/**
+ * The action calls that push the changed fields: a dedicated close / reopen
+ * call when the mapping has `statusActions`, then the update action for the
+ * remaining fields. Null when nothing the mapping can round-trip changed.
+ */
+export function buildUpdateCalls(
+  mapping: ConnectorTaskMapping,
+  externalId: string,
+  changed: Record<string, unknown>,
+  configProps: Record<string, unknown>
+): BridgeUpdateCall[] | null {
+  const u = mapping.update
+  if (!u) return null
+  const calls: BridgeUpdateCall[] = []
+  const sa = u.statusActions
+  if (sa && typeof changed.status === 'string') {
+    const target = changed.status === TaskStatus.Completed ? sa.complete : changed.status === TaskStatus.NotStarted ? sa.reopen : undefined
+    if (target) calls.push({ action: target.action, props: { ...resolveProps(target.staticProps, configProps, mapping), [target.idProp]: externalId } })
+  }
+  const rest = sa ? Object.fromEntries(Object.entries(changed).filter(([k]) => k !== 'status')) : changed
+  const props = buildUpdateProps(mapping, externalId, rest, configProps)
+  if (props) calls.push({ action: u.action, props })
+  return calls.length ? calls : null
 }
 
 /** The task fields a pending update covers; import leaves them alone until it lands. */
