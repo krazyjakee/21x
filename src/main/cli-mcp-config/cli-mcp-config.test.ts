@@ -463,8 +463,11 @@ describe('stores in isolation', () => {
     rmSync(join(home, '.claude.json'))
     rmSync(join(home, '.claude', 'settings.json'))
     const store = new ClaudeCodeMcpStore({ homeDir: home })
-    expect(store.load()).toMatchObject({ servers: [], error: undefined })
-    const result = store.apply(undefined, () => ({ kind: 'upsert', name: 'n', definition: { transport: 'stdio', command: 'x' } }))
+    const loaded = store.load()
+    expect(loaded.servers).toEqual([])
+    expect(loaded.error).toBeUndefined()
+    const noFingerprint: string | undefined = undefined
+    const result = store.apply(noFingerprint, () => ({ kind: 'upsert', name: 'n', definition: { transport: 'stdio', command: 'x' } }))
     expect(result.ok).toBe(true)
     expect(readJson('.claude.json')).toEqual({ mcpServers: { n: { type: 'stdio', command: 'x', args: [] } } })
   })

@@ -10,7 +10,15 @@ export const MINIMUM_PI_VERSION = '0.80.5'
 /** Detection keys for every supported coding-agent backend. */
 export const AGENT_BACKEND_KEYS = ['claudeCode', 'opencode', 'codex', 'cursor', 'pi']
 
-/** A backend is usable when it is installed and not flagged as unsupported. */
+/**
+ * @typedef {{ installed: boolean, version?: string | null, supported?: boolean, reason?: string }} BackendStatus
+ * @typedef {(cmd: string, args?: string[], options?: object) => Promise<{ stdout: string, stderr: string }>} ExecRunner
+ */
+
+/**
+ * A backend is usable when it is installed and not flagged as unsupported.
+ * @param {BackendStatus | undefined} status
+ */
 export function isBackendReady(status) {
   return Boolean(status && status.installed && status.supported !== false)
 }
@@ -18,7 +26,7 @@ export function isBackendReady(status) {
 /**
  * Backend keys that are installed and usable, in `AGENT_BACKEND_KEYS` order.
  * Every detected backend is available — there is no single-selection gate.
- * @param {Record<string, { installed: boolean, supported?: boolean }>} status
+ * @param {Record<string, BackendStatus> | undefined} status
  * @returns {string[]}
  */
 export function getInstalledBackends(status) {
@@ -37,8 +45,11 @@ function ensurePathDirectory(dir) {
   return true
 }
 
-/** Return common locations used by global npm and Node version managers. */
-export async function getPiCommandCandidates(exec = execFileAsync) {
+/**
+ * Return common locations used by global npm and Node version managers.
+ * @param {ExecRunner} [exec]
+ */
+export async function getPiCommandCandidates(exec = /** @type {ExecRunner} */ (execFileAsync)) {
   const home = homedir()
   const candidates = process.platform === 'win32'
     ? [
@@ -113,13 +124,13 @@ function ensureAgentPaths() {
  * re-running detection reflects backends installed or removed since the last
  * run. The result is a snapshot — nothing is cached between calls.
  *
- * @param {{ exec?: typeof execFileAsync }} [options] - `exec` overrides the
+ * @param {{ exec?: ExecRunner }} [options] - `exec` overrides the
  *   command runner (used by tests to simulate installs and removals).
- * @returns {Promise<Record<string, { installed: boolean, version: string | null }>>}
+ * @returns {Promise<Record<string, BackendStatus>>}
  */
 export async function detectInstalledAgents(options = {}) {
   const isWin = process.platform === 'win32'
-  const exec = options.exec || execFileAsync
+  const exec = options.exec || /** @type {ExecRunner} */ (execFileAsync)
 
   // Ensure well-known install dirs are on PATH before probing
   ensureAgentPaths()

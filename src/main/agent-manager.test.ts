@@ -103,6 +103,7 @@ function makeSkillRecord(overrides: Partial<{
     is_deleted: false,
     created_at: '2026-03-01',
     updated_at: '2026-03-06',
+    preferred_model: null as string | null,
     ...overrides,
   }
 }

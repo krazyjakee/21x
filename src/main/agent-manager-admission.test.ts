@@ -121,7 +121,7 @@ describe('admission control — AgentManager.startTask', () => {
     const { manager, started, createTasks } = setup()
     const tasks = createTasks(LIMIT + 1)
 
-    const results = []
+    const results: Awaited<ReturnType<AgentManager['startTask']>>[] = []
     for (const task of tasks) results.push(await manager.startTask(task.id))
 
     expect(results.slice(0, LIMIT).map((r) => r.action)).toEqual(['task_started', 'task_started'])
@@ -166,7 +166,7 @@ describe('admission control — AgentManager.startSession', () => {
     const { manager, agentId, started, createTasks } = setup()
     const tasks = createTasks(LIMIT + 1)
 
-    const ids = []
+    const ids: string[] = []
     for (const task of tasks) ids.push(await manager.startSession(agentId, task.id))
 
     expect(ids.slice(0, LIMIT).every(Boolean)).toBe(true)
@@ -185,7 +185,7 @@ describe('admission control — AgentManager.startSession', () => {
     const { manager, agentId, createTasks } = setup(1)
     const tasks = createTasks(3)
 
-    const outcomes = []
+    const outcomes: Awaited<ReturnType<AgentManager['requestSession']>>[] = []
     for (const task of tasks) outcomes.push(await manager.requestSession(agentId, task.id))
 
     expect(outcomes.map((o) => o.status)).toEqual(['started', 'queued', 'queued'])
@@ -199,7 +199,7 @@ describe('admission control — MCP start_task', () => {
     setTaskApiAgentController(manager)
     const tasks = createTasks(LIMIT + 1)
 
-    const results = []
+    const results: Record<string, unknown>[] = []
     for (const task of tasks) {
       results.push(await handleSessionRoute(db, '/start_task', { task_id: task.id }) as Record<string, unknown>)
     }
@@ -220,7 +220,7 @@ describe('admission control — MCP start_task', () => {
     const parent = db.createTask(makeTask({ title: 'Parent' }))!
     const subtasks = createTasks(LIMIT + 1, { parent_task_id: parent.id })
 
-    const results = []
+    const results: Record<string, unknown>[] = []
     for (const subtask of subtasks) {
       results.push(await handleSessionRoute(db, '/start_task', { task_id: subtask.id, prefer_subtasks: false }) as Record<string, unknown>)
     }
@@ -239,7 +239,7 @@ describe('admission control — mobile /api/sessions/start', () => {
     const port = await startMobileApiServer(db, manager, {} as never, 0)
     const tasks = createTasks(LIMIT + 1)
 
-    const results = []
+    const results: Record<string, unknown>[] = []
     for (const task of tasks) {
       const response = await fetch(`http://127.0.0.1:${port}/api/sessions/start`, {
         method: 'POST',

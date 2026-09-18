@@ -17,7 +17,7 @@ vi.mock('./voice-runtime-installer', () => installer)
 
 const { VoiceSessionManager } = await import('./voice-session-manager')
 const { DEFAULT_VOICE_MODEL_ID } = await import('./voice-model-manifest')
-import type { VoiceModelManager } from './voice-model-manager'
+import type { ResolvedModel, VoiceModelManager } from './voice-model-manager'
 import type { VoiceWorkerClient } from './voice-worker-client'
 
 const ABSENT = { installed: false, version: null, modulePath: null, sizeBytes: 1 }
@@ -27,14 +27,14 @@ const PRESENT = {
   modulePath: '/data/voice-runtime/node_modules/sherpa-onnx-node',
   sizeBytes: 1,
 }
-const RESOLVED_MODEL = {
+const RESOLVED_MODEL: ResolvedModel = {
   id: DEFAULT_VOICE_MODEL_ID,
   dir: '/data/voice-models/en',
   encoder: '/data/voice-models/en/encoder.onnx',
   decoder: '/data/voice-models/en/decoder.onnx',
   joiner: '/data/voice-models/en/joiner.onnx',
   tokens: '/data/voice-models/en/tokens.txt',
-  kind: 'offline' as const,
+  kind: 'offline',
 }
 const LEGACY_ID = 'sherpa-streaming-zipformer-en'
 
@@ -188,7 +188,7 @@ describe('one-action voice setup', () => {
  * leave voice without a model.
  */
 describe('a legacy model already on disk', () => {
-  const LEGACY_RESOLVED = { ...RESOLVED_MODEL, id: LEGACY_ID, kind: 'streaming' as const }
+  const LEGACY_RESOLVED: ResolvedModel = { ...RESOLVED_MODEL, id: LEGACY_ID, kind: 'streaming' }
 
   it('is kept by the one-action setup rather than downloading a second model over it', async () => {
     installer.detectVoiceRuntime.mockResolvedValue(PRESENT)

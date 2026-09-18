@@ -21,6 +21,7 @@ import {
 } from './types'
 import { HubSpotClient, type HubSpotAttachment, type HubSpotTicket, type HubSpotPipeline } from './hubspot-client'
 import { saveTaskAttachment } from './attachments'
+import { upsertSourcedTask } from './sourced-tasks'
 import { extensionForMimeType, hasKnownExtension, mimeTypeForPath, sniffMimeType } from '../mime'
 
 export class HubSpotPlugin implements TaskSourcePlugin {

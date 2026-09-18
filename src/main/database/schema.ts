@@ -126,7 +126,6 @@ export function createTables(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
     CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority);
     CREATE INDEX IF NOT EXISTS idx_tasks_source ON tasks(source);
-    CREATE INDEX IF NOT EXISTS idx_tasks_next_occurrence ON tasks(next_occurrence_at) WHERE is_recurring = 1;
 
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,
@@ -360,7 +359,11 @@ function rebuildTasksTable(db: Database.Database, columnNames: Set<string>): voi
 
   // Dynamically find columns shared between old and new tables
   const newCols = (db.pragma('table_info(tasks_new)') as { name: string }[]).map(c => c.name)
-  const sharedCols = newCols.filter(c => columnNames.has(c))
+  // Read the live columns: earlier migrations in the same run ALTER the table
+  // without updating the caller's set (e.g. session_id), and trusting it would
+  // drop those columns' data here.
+  const oldCols = new Set((db.pragma('table_info(tasks)') as { name: string }[]).map(c => c.name))
+  const sharedCols = newCols.filter(c => oldCols.has(c))
 
   const colList = sharedCols.join(', ')
   db.exec(`INSERT INTO tasks_new (${colList}) SELECT ${colList} FROM tasks`)
@@ -555,11 +558,14 @@ export function runMigrations(db: Database.Database): void {
     db.exec(`UPDATE agents SET coding_agent = 'opencode' WHERE coding_agent IS NULL OR coding_agent = ''`)
   }
 
-  // Migrate task_sources: make mcp_server_id nullable (for plugins that don't need MCP)
-  const tsInfo = db.pragma('table_info(task_sources)') as Array<{name: string, notnull: number}>
+  // Migrate task_sources: make mcp_server_id nullable (for plugins that don't
+  // need MCP), and drop the legacy 'peakflo' default on plugin_id. Both need a
+  // table rebuild, so either one triggers it.
+  const tsInfo = db.pragma('table_info(task_sources)') as Array<{name: string, notnull: number, dflt_value: string | null}>
   const mcpServerIdCol = tsInfo.find(col => col.name === 'mcp_server_id')
+  const pluginIdCol = tsInfo.find(col => col.name === 'plugin_id')
 
-  if (mcpServerIdCol && mcpServerIdCol.notnull === 1) {
+  if ((mcpServerIdCol && mcpServerIdCol.notnull === 1) || (pluginIdCol && pluginIdCol.dflt_value !== "''")) {
     // Column exists and is NOT NULL, need to recreate table
     db.exec(`
       PRAGMA foreign_keys = OFF;
@@ -580,7 +586,14 @@ export function runMigrations(db: Database.Database): void {
         updated_at TEXT NOT NULL
       );
 
-      INSERT INTO task_sources_new SELECT * FROM task_sources;
+    `)
+    // Copy by name: an older table has fewer columns, or the same ones in a
+    // different order, so a positional SELECT * would scramble rows.
+    const newTsCols = (db.pragma('table_info(task_sources_new)') as { name: string }[]).map(c => c.name)
+    const oldTsCols = new Set((db.pragma('table_info(task_sources)') as { name: string }[]).map(c => c.name))
+    const tsCols = newTsCols.filter(c => oldTsCols.has(c)).join(', ')
+    db.exec(`
+      INSERT INTO task_sources_new (${tsCols}) SELECT ${tsCols} FROM task_sources;
 
       DROP TABLE task_sources;
 
@@ -649,9 +662,10 @@ export function runMigrations(db: Database.Database): void {
   }
   if (!columnNames.has('next_occurrence_at')) {
     db.exec(`ALTER TABLE tasks ADD COLUMN next_occurrence_at TEXT DEFAULT NULL`)
-    // Create index for efficient querying of recurring tasks
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_next_occurrence ON tasks(next_occurrence_at) WHERE is_recurring = 1`)
   }
+  // Built here rather than in createTables(): on a database older than
+  // recurring tasks the column only exists after the ALTER above.
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_next_occurrence ON tasks(next_occurrence_at) WHERE is_recurring = 1`)
 
   // Add heartbeat columns to tasks
   if (!columnNames.has('heartbeat_enabled')) {

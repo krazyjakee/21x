@@ -30,9 +30,11 @@ describe('installer script', () => {
     expect(script).toContain('Call BroadcastEnvironmentChange')
   })
 
-  it('requests administrator privileges for Windows NSIS installs', () => {
+  it('elevates only the NSIS installer, never the installed app', () => {
+    // The app and every agent it spawns run with the user's own privileges;
+    // installer.nsh's RequestExecutionLevel admin covers the installer.
     expect(packageJson.build.win).toMatchObject({
-      requestedExecutionLevel: 'requireAdministrator'
+      requestedExecutionLevel: 'asInvoker'
     })
     expect(packageJson.build.nsis).toMatchObject({
       allowElevation: true

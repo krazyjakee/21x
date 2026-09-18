@@ -173,7 +173,7 @@ export class CodexMcpStore extends BaseCliMcpStore<CodexState> {
     return [{ path: this.configPath, content: state.content }]
   }
 
-  private valuesFromDefinition(serverName: string, def: McpServerDefinition, warnings: string[]): Record<string, TomlValue> {
+  private valuesFromDefinition(_serverName: string, def: McpServerDefinition, warnings: string[]): Record<string, TomlValue> {
     const values: Record<string, TomlValue> = {}
     if (def.transport === 'stdio') {
       values.command = def.command ?? ''

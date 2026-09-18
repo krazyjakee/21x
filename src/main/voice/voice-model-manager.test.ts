@@ -241,12 +241,18 @@ describe('model lifecycle states', () => {
   it('reports progress as a fraction of the whole model', async () => {
     const entry = addToManifest(verifiedEntry())
     const progress: number[] = []
+    let last: { installing: boolean } | undefined
     const manager = new VoiceModelManager({
       rootDir: root,
       fetchImpl: (async () => new Response(CONTENT, { status: 200 })) as never,
-      onProgress: (state) => progress.push(state.progress),
+      onProgress: (state) => {
+        last = state
+        // The closing event is a state change (installing: false), not a progress step.
+        if (state.installing) progress.push(state.progress)
+      },
     })
     await manager.install(entry.id)
+    expect(last?.installing).toBe(false)
     expect(progress[0]).toBe(0)
     expect(Math.max(...progress)).toBe(1)
     for (let i = 1; i < progress.length; i++) expect(progress[i]).toBeGreaterThanOrEqual(progress[i - 1])
