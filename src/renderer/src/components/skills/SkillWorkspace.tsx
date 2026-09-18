@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
-import { Trash2, BookOpen } from 'lucide-react'
+import { Trash2, BookOpen, Globe } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Textarea } from '@/components/ui/Textarea'
 import { Label } from '@/components/ui/Label'
 import { Badge } from '@/components/ui/Badge'
+import { Select } from '@/components/ui/Select'
 import {
   AlertDialog,
   AlertDialogContent,
@@ -16,14 +17,19 @@ import {
   AlertDialogCancel
 } from '@/components/ui/AlertDialog'
 import { useSkillStore } from '@/stores/skill-store'
+import { useProjectStore } from '@/stores/project-store'
 import { formatRelativeDate } from '@/lib/utils'
 import type { Skill, UpdateSkillDTO } from '@/types'
 import { SkillModelPicker } from './SkillModelPicker'
+import { SkillScopeBadge } from './SkillList'
 
 const NAME_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
+/** The `Select` value for a scope: '' is global, else the project id. */
+const GLOBAL_SCOPE_VALUE = ''
+
 export function SkillWorkspace() {
-  const { skills, selectedSkillId, updateSkill, deleteSkill, selectSkill } = useSkillStore()
+  const { skills, selectedSkillId, updateSkill, deleteSkill, selectSkill, setSkillProject, error, clearError } = useSkillStore()
   const skill = skills.find((s) => s.id === selectedSkillId)
 
   if (!skill) {
@@ -37,15 +43,31 @@ export function SkillWorkspace() {
     )
   }
 
-  return <SkillEditor key={skill.id} skill={skill} onUpdate={updateSkill} onDelete={deleteSkill} onDeselect={() => selectSkill(null)} />
+  return (
+    <SkillEditor
+      key={skill.id}
+      skill={skill}
+      onUpdate={updateSkill}
+      onDelete={deleteSkill}
+      onSetProject={setSkillProject}
+      onDeselect={() => selectSkill(null)}
+      storeError={error}
+      onClearError={clearError}
+    />
+  )
 }
 
-function SkillEditor({ skill, onUpdate, onDelete, onDeselect }: {
+function SkillEditor({ skill, onUpdate, onDelete, onSetProject, onDeselect, storeError, onClearError }: {
   skill: Skill
   onUpdate: (id: string, data: UpdateSkillDTO) => Promise<Skill | null>
   onDelete: (id: string) => Promise<boolean>
+  onSetProject: (id: string, projectId: string | null) => Promise<Skill | null>
   onDeselect: () => void
+  storeError: string | null
+  onClearError: () => void
 }) {
+  const projects = useProjectStore((s) => s.projects)
+
   const [name, setName] = useState(skill.name)
   const [description, setDescription] = useState(skill.description)
   const [confidence, setConfidence] = useState(skill.confidence)
@@ -54,6 +76,10 @@ function SkillEditor({ skill, onUpdate, onDelete, onDeselect }: {
   const [preferredModel, setPreferredModel] = useState(skill.preferred_model ?? '')
   const [showDelete, setShowDelete] = useState(false)
   const [nameError, setNameError] = useState<string | null>(null)
+  // Scope (#74): changed only through the explicit promote/move flow below,
+  // never as part of Save, because it changes which projects see the skill.
+  const [scopeValue, setScopeValue] = useState(skill.project_id ?? GLOBAL_SCOPE_VALUE)
+  const [showScopeChange, setShowScopeChange] = useState(false)
 
   useEffect(() => {
     setName(skill.name)
@@ -63,7 +89,28 @@ function SkillEditor({ skill, onUpdate, onDelete, onDeselect }: {
     setContent(skill.content)
     setPreferredModel(skill.preferred_model ?? '')
     setNameError(null)
+    setScopeValue(skill.project_id ?? GLOBAL_SCOPE_VALUE)
+    onClearError()
   }, [skill.id])
+
+  useEffect(() => {
+    setScopeValue(skill.project_id ?? GLOBAL_SCOPE_VALUE)
+  }, [skill.project_id])
+
+  const scopeOptions = [
+    { value: GLOBAL_SCOPE_VALUE, label: 'Global (every project)' },
+    ...projects
+      .filter((p) => !p.archived || p.id === skill.project_id)
+      .map((p) => ({ value: p.id, label: p.archived ? `${p.name} (archived)` : p.name }))
+  ]
+  const scopeDirty = scopeValue !== (skill.project_id ?? GLOBAL_SCOPE_VALUE)
+  const targetProjectName = projects.find((p) => p.id === scopeValue)?.name ?? scopeValue
+  const isPromotion = scopeValue === GLOBAL_SCOPE_VALUE
+
+  const handleScopeChange = async () => {
+    await onSetProject(skill.id, scopeValue || null)
+    setShowScopeChange(false)
+  }
 
   const isDirty = name !== skill.name ||
                   description !== skill.description ||
@@ -96,6 +143,10 @@ function SkillEditor({ skill, onUpdate, onDelete, onDeselect }: {
     if (preferredModel.trim() !== (skill.preferred_model ?? '')) data.preferred_model = preferredModel.trim() || null
 
     if (Object.keys(data).length > 0) {
+      // The version this editor loaded: a save over a newer version (another
+      // editor, the Commander, a learning session) is refused, not merged.
+      data.expected_version = skill.version
+      onClearError()
       await onUpdate(skill.id, data)
     }
   }
@@ -111,6 +162,7 @@ function SkillEditor({ skill, onUpdate, onDelete, onDeselect }: {
       <div className="flex items-center justify-between border-b px-6 py-4 shrink-0">
         <div className="flex items-center gap-2.5">
           <Badge variant="teal">v{skill.version}</Badge>
+          <SkillScopeBadge skill={skill} />
           <span className="text-xs text-muted-foreground">{formatRelativeDate(skill.updated_at)}</span>
         </div>
         <div className="flex items-center gap-1">
@@ -122,6 +174,29 @@ function SkillEditor({ skill, onUpdate, onDelete, onDeselect }: {
 
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-2xl mx-auto px-8 py-8 space-y-5">
+          {storeError && (
+            <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {storeError.replace(/^Error: /, '')}
+            </div>
+          )}
+
+          {/* Scope: who sees this skill (#74) */}
+          <div className="space-y-1.5 p-4 rounded-lg bg-accent/50">
+            <Label htmlFor="skill-scope">Scope</Label>
+            <div className="flex items-center gap-2">
+              <Select id="skill-scope" options={scopeOptions} value={scopeValue} onChange={(e) => setScopeValue(e.target.value)} />
+              <Button variant="outline" size="sm" disabled={!scopeDirty} onClick={() => setShowScopeChange(true)}>
+                <Globe className="h-3.5 w-3.5" />
+                {isPromotion ? 'Promote' : 'Move'}
+              </Button>
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              {skill.project_id
+                ? 'A project skill: only this project\'s Mastermind and task agents see it. Promoting it makes it visible to every project.'
+                : 'A global skill: every project can discover and use it. Moving it into a project hides it from the others.'}
+            </p>
+          </div>
+
           {/* Read-only Metadata */}
           <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-accent/50">
             <div>
@@ -212,6 +287,23 @@ function SkillEditor({ skill, onUpdate, onDelete, onDeselect }: {
           </div>
         </div>
       </div>
+
+      <AlertDialog open={showScopeChange} onOpenChange={setShowScopeChange}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{isPromotion ? 'Promote skill to global' : `Move skill to ${targetProjectName}`}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {isPromotion
+                ? `"${skill.name}" will become visible to every project's Mastermind and task agents, and any of them may assign it.`
+                : `Only "${targetProjectName}" will see "${skill.name}". Tasks in other projects and agent defaults that still use it will stop receiving it.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleScopeChange}>{isPromotion ? 'Promote' : 'Move'}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={showDelete} onOpenChange={setShowDelete}>
         <AlertDialogContent>

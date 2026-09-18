@@ -7,6 +7,9 @@ import type { ChatToolDefinition } from '../chat/tools'
 import { CommanderService, type CommanderToolContext } from '../commander/commander-service'
 import { CommanderStore } from '../commander/commander-store'
 import { createCommanderProjectTools, ProjectMutationConfirmations } from '../commander/project-tools'
+import { createCommanderSkillTools } from '../commander/skill-tools'
+import { installCommanderReportBridge } from '../commander/report-tools'
+import { broadcastSkillsChanged } from './settings'
 import { listHeldActions } from '../escalation'
 import { guardedIpcSend } from '../guarded-ipc-send'
 import { assertTrustedSender } from '../ipc-sender'
@@ -71,32 +74,46 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
     store,
     emit,
     createProvider: () => createProvider(deps),
-    getTools: options.getTools ?? ((context) => createCommanderProjectTools({
-      db: deps.db,
-      context,
-      confirmations,
-      agents: deps.agentManager,
-      listHeldActions,
-      sendUiCommand,
-      onProjectChanged: (projectId, kind) => broadcastProjectChanged({ projectId, kind }),
-      // The tool already returned "sent"; the failure reaches the user the
-      // same way an answer would, as a report on the session.
-      onDeliveryFailed: (dispatch, error) => {
-        const reason = error instanceof Error ? error.message : String(error)
-        try {
-          commander.appendReport({
-            sessionId: dispatch.sessionId,
-            content: `Your request could not be delivered to the Mastermind of "${dispatch.projectName}": ${reason}`,
-            projectId: dispatch.projectId,
-            correlationId: dispatch.correlationId
-          })
-        } catch (err) {
-          console.error('[Commander] Could not record the delivery failure:', err)
+    getTools: options.getTools ?? ((context) => [
+      ...createCommanderProjectTools({
+        db: deps.db,
+        context,
+        confirmations,
+        agents: deps.agentManager,
+        listHeldActions,
+        sendUiCommand,
+        onProjectChanged: (projectId, kind) => broadcastProjectChanged({ projectId, kind }),
+        // The tool already returned "sent"; the failure reaches the user the
+        // same way an answer would, as a report on the session.
+        onDeliveryFailed: (dispatch, error) => {
+          const reason = error instanceof Error ? error.message : String(error)
+          try {
+            commander.appendReport({
+              sessionId: dispatch.sessionId,
+              content: `Your request could not be delivered to the Mastermind of "${dispatch.projectName}": ${reason}`,
+              projectId: dispatch.projectId,
+              correlationId: dispatch.correlationId
+            })
+          } catch (err) {
+            console.error('[Commander] Could not record the delivery failure:', err)
+          }
         }
-      }
-    }))
+      }),
+      // Skill administration (#74): same confirmation table, so a token is
+      // bound to exactly one change whichever registry issued it.
+      ...createCommanderSkillTools({
+        db: deps.db,
+        context,
+        confirmations,
+        onSkillChanged: (skillId, kind) => broadcastSkillsChanged({ skillId, kind })
+      })
+    ])
   })
   service = commander
+
+  // #62: `report_to_commander` (Task API route) and `tell_commander`
+  // escalations reach the sessions through this bridge.
+  installCommanderReportBridge({ service: commander, store, getProject: (projectId) => deps.db.getProject(projectId) })
 
   /** Every Commander call is from the main window; the caller then receives events. */
   const trusted = (event: IpcMainInvokeEvent, channel: string): void => {
@@ -104,7 +121,11 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
     const sender = event.sender
     if (sender && !subscribers.has(sender)) {
       subscribers.add(sender)
-      sender.once?.('destroyed', () => subscribers.delete(sender))
+      sender.once?.('destroyed', () => {
+        subscribers.delete(sender)
+        // A closed window shows no session: reports only queue from now on.
+        commander.setActiveSession(null)
+      })
     }
   }
 
@@ -149,6 +170,14 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
     const session = store.markRead(requireString(payload?.sessionId, 'sessionId'))
     if (session) emit({ type: 'session_updated', session })
     return session
+  })
+
+  // #62: which session the view shows. A report for it is relayed at once;
+  // any other only queues as unread. Null when the view closes.
+  ipcMain.handle('commander:setActiveSession', (event, payload?: { sessionId?: string | null }) => {
+    trusted(event, 'commander:setActiveSession')
+    const sessionId = typeof payload?.sessionId === 'string' && payload.sessionId ? payload.sessionId : null
+    commander.setActiveSession(sessionId)
   })
 
   ipcMain.handle('commander:send', (event, payload: { sessionId?: string; text?: string }) => {

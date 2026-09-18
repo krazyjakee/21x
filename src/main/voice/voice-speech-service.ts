@@ -17,6 +17,7 @@
 import { createId } from '@paralleldrive/cuid2'
 import {
   VOICE_TTS_DEFAULT_MAX_CHARS,
+  VOICE_TTS_ELEVENLABS_DEFAULT_MODEL,
   VOICE_TTS_EVENTS,
   VOICE_TTS_HARD_MAX_CHARS,
   VOICE_TTS_SETTING_KEYS,
@@ -28,7 +29,10 @@ import {
   withShortLeadIn,
   type VoiceSpeechEndEvent,
   type VoiceSpeechRequest,
+  type VoiceSpeechSource,
   type VoiceSpeechStartEvent,
+  type VoiceTtsElevenLabsErrorKind,
+  type VoiceTtsElevenLabsState,
   type VoiceTtsEngineId,
   type VoiceTtsSnapshot,
   type VoiceTtsStatus,
@@ -42,6 +46,7 @@ import {
 import { VoiceTtsModelManager } from './voice-tts-model-manager'
 import { VoiceTtsWorkerClient, type VoiceTtsChunk } from './voice-tts-worker-client'
 import { listSystemVoices, pickDefaultSystemVoice, systemVoiceName } from './voice-system-voices'
+import { ELEVENLABS_SAMPLE_RATE, ElevenLabsEngine, elevenLabsVoiceIdOf } from './voice-elevenlabs'
 
 /**
  * One message of an agent answer.
@@ -67,7 +72,12 @@ export interface VoiceSpeechServiceOptions {
   worker?: VoiceTtsWorkerClient
   /** Injected in tests so no machine command runs. */
   listVoices?: typeof listSystemVoices
+  /** Injected in tests with a fake transport, so no request leaves the machine (#64). */
+  elevenlabs?: ElevenLabsEngine
 }
+
+/** Which producer a passage was handed to, so stopping it reaches the right one. */
+type SpeechBackend = 'worker' | 'elevenlabs'
 
 /**
  * An answer expected because the user asked a question by voice.
@@ -102,6 +112,7 @@ const VOICE_SILENCED_PARTS_PER_TASK = 64
 interface ActiveSpeech {
   speechId: string
   source: VoiceSpeechRequest['source']
+  backend: SpeechBackend
   taskId?: string
   /** Set while the answer is still being written. */
   streaming?: {
@@ -127,6 +138,8 @@ export class VoiceSpeechService {
   private readonly models: VoiceTtsModelManager
   private readonly worker: VoiceTtsWorkerClient
   private readonly listVoices: typeof listSystemVoices
+  /** The hosted engine (#64). Holds no key: it reads the settings row on use. */
+  readonly elevenlabs: ElevenLabsEngine
 
   private status: VoiceTtsStatus = { state: 'loading' }
   private systemVoices: VoiceTtsVoice[] = []
@@ -163,11 +176,28 @@ export class VoiceSpeechService {
       })
     this.worker = options.worker ?? new VoiceTtsWorkerClient()
     this.listVoices = options.listVoices ?? listSystemVoices
+    this.elevenlabs =
+      options.elevenlabs ??
+      new ElevenLabsEngine({
+        // Read at the moment of use, so a key saved a second ago is the key
+        // that is sent, and nothing here ever holds a copy.
+        getKey: () => options.db.getSetting(VOICE_TTS_SETTING_KEYS.elevenlabsApiKey) ?? '',
+      })
 
     this.worker.on('status', (status: VoiceTtsStatus) => this.onWorkerStatus(status))
     this.worker.on('chunk', (chunk: VoiceTtsChunk) => this.onChunk(chunk))
     this.worker.on('done', (speechId: string, cancelled: boolean) => this.onDone(speechId, cancelled))
     this.worker.on('error', (message: string, speechId?: string) => this.onError(message, speechId))
+
+    // The hosted engine feeds the same three handlers, so its audio reaches the
+    // renderer's playback queue by the same path as the local voices.
+    this.elevenlabs.tts.on('chunk', (chunk: VoiceTtsChunk) => this.onChunk(chunk))
+    this.elevenlabs.tts.on('done', (speechId: string, cancelled: boolean) => this.onDone(speechId, cancelled))
+    this.elevenlabs.tts.on('error', (message: string, speechId?: string, kind?: VoiceTtsElevenLabsErrorKind) => {
+      this.elevenlabs.noteError(kind ?? 'unknown', message)
+      this.onError(message, speechId)
+      void this.broadcast()
+    })
   }
 
   /** Lets the session manager mirror `speaking` in its own state machine. */
@@ -182,6 +212,9 @@ export class VoiceSpeechService {
 
   shutdown(): void {
     this.worker.stop()
+    // Any open ElevenLabs connection is closed with the app, and its late
+    // audio is discarded.
+    this.elevenlabs.shutdown()
   }
 
   // ── Settings ──────────────────────────────────────────────
@@ -223,17 +256,95 @@ export class VoiceSpeechService {
   voiceId(): string {
     const stored = this.options.db.getSetting(VOICE_TTS_SETTING_KEYS.voiceId) || ''
     const engine = this.engine()
-    if (stored && stored.startsWith(engine === 'system' ? 'system:' : 'local:')) return stored
+    if (stored && stored.startsWith(`${engine}:`)) return stored
     return this.defaultVoiceId()
   }
 
   private defaultVoiceId(): string {
-    if (this.engine() === 'system') {
+    const engine = this.engine()
+    if (engine === 'system') {
       return pickDefaultSystemVoice(this.systemVoices)?.id ?? ''
+    }
+    if (engine === 'elevenlabs') {
+      // The voice chosen last time ElevenLabs was the engine, if it is still on
+      // the account; otherwise the first voice the account has.
+      const remembered = this.options.db.getSetting(VOICE_TTS_SETTING_KEYS.elevenlabsVoiceId) || ''
+      const voices = this.elevenlabs.voices
+      if (remembered && (voices.length === 0 || voices.some((v) => v.id === remembered))) return remembered
+      return voices[0]?.id ?? ''
     }
     const modelId = this.modelId()
     const speaker = DEFAULT_TTS_SPEAKER_BY_MODEL[modelId] ?? 0
     return `local:${modelId}:${speaker}`
+  }
+
+  // ── ElevenLabs (#64) ──────────────────────────────────────
+
+  elevenLabsModelId(): string {
+    return this.options.db.getSetting(VOICE_TTS_SETTING_KEYS.elevenlabsModelId) || VOICE_TTS_ELEVENLABS_DEFAULT_MODEL
+  }
+
+  elevenLabsDisclosureAccepted(): boolean {
+    return this.options.db.getSetting(VOICE_TTS_SETTING_KEYS.elevenlabsDisclosure) === 'true'
+  }
+
+  /**
+   * Records that the user read what ElevenLabs means: the text leaves the
+   * device, credits may be spent, ElevenLabs' terms apply. The engine cannot
+   * be selected before this.
+   */
+  async acceptElevenLabsDisclosure(): Promise<VoiceTtsSnapshot> {
+    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.elevenlabsDisclosure, 'true')
+    return this.broadcast()
+  }
+
+  /**
+   * Stores the key on the encrypted settings path and proves it against the
+   * account. The key is never returned: the snapshot says only that one is set.
+   */
+  async setElevenLabsKey(key: string): Promise<VoiceTtsSnapshot> {
+    const trimmed = String(key ?? '').trim()
+    if (!trimmed) return this.clearElevenLabsKey()
+    this.stop('cancelled')
+    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.elevenlabsApiKey, trimmed)
+    this.elevenlabs.reset()
+    await this.elevenlabs.refresh()
+    if (this.engine() === 'elevenlabs') await this.prepare()
+    return this.broadcast()
+  }
+
+  async clearElevenLabsKey(): Promise<VoiceTtsSnapshot> {
+    this.stop('cancelled')
+    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.elevenlabsApiKey, '')
+    this.elevenlabs.reset()
+    if (this.engine() === 'elevenlabs') await this.prepare()
+    return this.broadcast()
+  }
+
+  /** Lists the account's voices and models again. */
+  async refreshElevenLabs(): Promise<VoiceTtsSnapshot> {
+    await this.elevenlabs.refresh()
+    if (this.engine() === 'elevenlabs') await this.prepare()
+    return this.broadcast()
+  }
+
+  async setElevenLabsModel(modelId: string): Promise<VoiceTtsSnapshot> {
+    const id = String(modelId ?? '').trim()
+    if (!id) throw new Error('Choose a model.')
+    if (!this.elevenlabs.supportsModel(id)) {
+      throw new Error(`“${id}” cannot be used for streaming speech. Choose another ElevenLabs model.`)
+    }
+    this.stop('cancelled')
+    this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.elevenlabsModelId, id)
+    if (this.engine() === 'elevenlabs') await this.prepare()
+    return this.broadcast()
+  }
+
+  private elevenLabsState(): VoiceTtsElevenLabsState {
+    return this.elevenlabs.state({
+      disclosureAccepted: this.elevenLabsDisclosureAccepted(),
+      modelId: this.elevenLabsModelId(),
+    })
   }
 
   async setEnabled(enabled: boolean): Promise<VoiceTtsSnapshot> {
@@ -244,6 +355,11 @@ export class VoiceSpeechService {
   }
 
   async setEngine(engine: VoiceTtsEngineId): Promise<VoiceTtsSnapshot> {
+    // The hosted engine sends the text away and may cost money. It is refused,
+    // not silently allowed, until the user has acknowledged that (#64).
+    if (engine === 'elevenlabs' && !this.elevenLabsDisclosureAccepted()) {
+      throw new Error('Read and accept the ElevenLabs disclosure in Settings → Voice before choosing this engine.')
+    }
     this.stop('cancelled')
     this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.engine, engine)
     // The stored speaker belongs to the old engine, so it is cleared rather
@@ -257,9 +373,13 @@ export class VoiceSpeechService {
   async setVoice(voiceId: string): Promise<VoiceTtsSnapshot> {
     this.stop('cancelled')
     this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.voiceId, voiceId)
+    // An ElevenLabs voice is also remembered on its own, so switching to a
+    // local voice and back does not lose it (#64).
+    if (voiceId.startsWith('elevenlabs:')) this.options.db.setSetting(VOICE_TTS_SETTING_KEYS.elevenlabsVoiceId, voiceId)
     // A system voice is chosen when the engine is loaded, so the worker has to
     // hear about it. A model speaker is chosen per passage and needs nothing.
     if (this.engine() === 'system') await this.prepare()
+    else if (this.engine() === 'elevenlabs') this.status = this.elevenLabsReadyStatus()
     return this.broadcast()
   }
 
@@ -333,6 +453,11 @@ export class VoiceSpeechService {
     try {
       if (this.systemVoices.length === 0) this.systemVoices = await this.listVoices()
 
+      if (this.engine() === 'elevenlabs') {
+        await this.prepareElevenLabs()
+        return
+      }
+
       if (this.engine() === 'system') {
         const name = systemVoiceName(this.voiceId())
         if (this.systemVoices.length === 0) {
@@ -359,6 +484,86 @@ export class VoiceSpeechService {
     } catch (err) {
       this.status = { state: 'error', message: err instanceof Error ? err.message : String(err) }
     }
+  }
+
+  /**
+   * The hosted engine has nothing to load. Ready means: a key is saved, the
+   * disclosure is accepted, and the account answered when its voices were
+   * listed. Every failure is stated on the settings page; nothing is spoken
+   * and nothing else is affected.
+   */
+  private async prepareElevenLabs(): Promise<void> {
+    if (!this.elevenLabsDisclosureAccepted()) {
+      this.status = { state: 'unavailable', message: 'Accept the ElevenLabs disclosure in Settings → Voice to use this engine.' }
+      return
+    }
+    if (!this.elevenlabs.hasKey()) {
+      this.status = { state: 'unavailable', message: 'Add your ElevenLabs API key in Settings → Voice to use this engine.' }
+      return
+    }
+    await this.elevenlabs.ensureLoaded()
+    if (this.elevenlabs.error) {
+      this.status = { state: 'error', message: this.elevenlabs.error.message }
+      return
+    }
+    if (this.elevenlabs.voices.length === 0) {
+      this.status = { state: 'unavailable', message: 'The ElevenLabs account has no voices.' }
+      return
+    }
+    if (!this.elevenlabs.supportsModel(this.elevenLabsModelId())) {
+      this.status = { state: 'error', message: 'The selected ElevenLabs model cannot stream speech. Choose another model in Settings → Voice.' }
+      return
+    }
+    this.status = this.elevenLabsReadyStatus()
+  }
+
+  private elevenLabsReadyStatus(): VoiceTtsStatus {
+    this.sampleRate = ELEVENLABS_SAMPLE_RATE
+    return { state: 'ready', engine: 'elevenlabs', modelId: this.elevenLabsModelId(), voiceId: this.voiceId(), sampleRate: ELEVENLABS_SAMPLE_RATE }
+  }
+
+  /** Which producer the selected engine speaks through. */
+  private backend(): SpeechBackend {
+    return this.engine() === 'elevenlabs' ? 'elevenlabs' : 'worker'
+  }
+
+  /** Opens a passage on the selected engine. */
+  private startPassage(speechId: string, sentences: string[], voice: VoiceTtsVoice, open: boolean): SpeechBackend {
+    if (this.backend() === 'elevenlabs') {
+      this.elevenlabs.tts.speak({
+        speechId,
+        sentences,
+        open,
+        speed: this.speed(),
+        voiceId: elevenLabsVoiceIdOf(voice.id),
+        modelId: this.elevenLabsModelId(),
+      })
+      return 'elevenlabs'
+    }
+    this.worker.speak({
+      speechId,
+      sentences,
+      ...(open ? { open: true } : {}),
+      speakerId: voice.speakerId,
+      speed: this.speed(),
+      ...(voice.engine === 'system' ? { systemVoice: systemVoiceName(voice.id) } : {}),
+    })
+    return 'worker'
+  }
+
+  private appendToPassage(active: ActiveSpeech, sentences: string[]): void {
+    if (active.backend === 'elevenlabs') this.elevenlabs.tts.append(active.speechId, sentences)
+    else this.worker.append(active.speechId, sentences)
+  }
+
+  private finishPassage(active: ActiveSpeech): void {
+    if (active.backend === 'elevenlabs') this.elevenlabs.tts.finish(active.speechId)
+    else this.worker.finish(active.speechId)
+  }
+
+  private cancelPassage(active: ActiveSpeech): void {
+    if (active.backend === 'elevenlabs') this.elevenlabs.tts.cancel(active.speechId)
+    else this.worker.cancel(active.speechId)
   }
 
   // ── Correlation (design §5.7) ─────────────────────────────
@@ -474,7 +679,12 @@ export class VoiceSpeechService {
     // after it is produced while the previous sentence is still being heard.
     const sentences = withShortLeadIn(splitIntoSentences(prepared.text))
     const voice = this.resolveVoice(request.voiceId)
-    this.active = { speechId, source: request.source, ...(request.taskId ? { taskId: request.taskId } : {}) }
+    this.active = {
+      speechId,
+      source: request.source,
+      backend: this.backend(),
+      ...(request.taskId ? { taskId: request.taskId } : {}),
+    }
     this.onSpeakingChange?.(true)
 
     this.options.notifyRenderer(VOICE_TTS_EVENTS.speechStart, {
@@ -486,13 +696,7 @@ export class VoiceSpeechService {
       ...(request.taskId ? { taskId: request.taskId } : {}),
     } satisfies VoiceSpeechStartEvent)
 
-    this.worker.speak({
-      speechId,
-      sentences,
-      speakerId: voice.speakerId,
-      speed: this.speed(),
-      ...(voice.engine === 'system' ? { systemVoice: systemVoiceName(voice.id) } : {}),
-    })
+    this.startPassage(speechId, sentences, voice, false)
     return true
   }
 
@@ -508,8 +712,18 @@ export class VoiceSpeechService {
    *
    * Returns false when this answer may not be spoken, and then the caller need
    * not push anything.
+   *
+   * `source` is `agent_answer` for a task's reply, which is spoken only when
+   * the user asked for it by voice. It is `conversation` for a reply in a voice
+   * conversation the user opened on purpose — Commander voice mode (#64) —
+   * which needs neither the automatic switch nor a voice turn: opening the
+   * conversation was the request.
    */
-  async beginStreamingAnswer(taskId: string, parts?: VoiceAnswerPart[]): Promise<boolean> {
+  async beginStreamingAnswer(
+    taskId: string,
+    parts?: VoiceAnswerPart[],
+    source: Extract<VoiceSpeechSource, 'agent_answer' | 'conversation'> = 'agent_answer'
+  ): Promise<boolean> {
     if (this.active?.streaming && this.active.taskId === taskId) return true
 
     // An answer the user talked over must not open a passage. Opening one
@@ -517,9 +731,11 @@ export class VoiceSpeechService {
     // then the interrupted answer is read again from its first word.
     if (parts && this.audibleParts(taskId, parts).length === 0) return false
 
-    const expectation = this.takeExpectation(taskId)
-    if (!expectation && this.onlyVoiceTurns()) return false
-    if (!this.isEnabled()) return false
+    if (source === 'agent_answer') {
+      const expectation = this.takeExpectation(taskId)
+      if (!expectation && this.onlyVoiceTurns()) return false
+      if (!this.isEnabled()) return false
+    }
 
     if (this.status.state !== 'ready') await this.prepare()
     if (this.status.state !== 'ready') return false
@@ -529,7 +745,8 @@ export class VoiceSpeechService {
     const voice = this.resolveVoice()
     this.active = {
       speechId,
-      source: 'agent_answer',
+      source,
+      backend: this.backend(),
       taskId,
       streaming: { spoken: new Map(), charsSent: 0, truncated: false, started: false },
     }
@@ -537,21 +754,14 @@ export class VoiceSpeechService {
 
     this.options.notifyRenderer(VOICE_TTS_EVENTS.speechStart, {
       speechId,
-      source: 'agent_answer',
+      source,
       text: '',
       taskId,
       sampleRate: this.sampleRate,
       truncated: false,
     } satisfies VoiceSpeechStartEvent)
 
-    this.worker.speak({
-      speechId,
-      sentences: [],
-      open: true,
-      speakerId: voice.speakerId,
-      speed: this.speed(),
-      ...(voice.engine === 'system' ? { systemVoice: systemVoiceName(voice.id) } : {}),
-    })
+    this.startPassage(speechId, [], voice, true)
     return true
   }
 
@@ -620,22 +830,26 @@ export class VoiceSpeechService {
     streaming.started = true
     // The counter follows the transcript, not what was said aloud.
     streaming.spoken.set(part.partId, already + Math.max(0, allowed.length - leadInExtra))
+    const active = this.active as ActiveSpeech
     this.options.notifyRenderer(VOICE_TTS_EVENTS.speechStart, {
       speechId,
-      source: 'agent_answer',
+      source: active.source,
       text: prepared.text,
       taskId,
       sampleRate: this.sampleRate,
       truncated: streaming.truncated,
     } satisfies VoiceSpeechStartEvent)
-    this.worker.append(speechId, allowed)
+    this.appendToPassage(active, allowed)
   }
 
   /** No more of this answer is coming. What is queued is still read. */
   endStreamingAnswer(taskId: string): void {
     const active = this.active
     if (!active?.streaming || active.taskId !== taskId) return
-    this.worker.finish(active.speechId)
+    // For the hosted engine this is the flush: the end-of-stream marker makes
+    // the server generate whatever it still holds, so a short reply is not
+    // left in its buffer (#64).
+    this.finishPassage(active)
   }
 
   /** True while an answer is being read as it is written. */
@@ -694,7 +908,9 @@ export class VoiceSpeechService {
     const active = this.active
     if (!active) return
     this.active = null
-    this.worker.cancel(active.speechId)
+    // The passage is stopped on the producer it was given to — which may not
+    // be the selected engine any more, if the user changed engines mid-reply.
+    this.cancelPassage(active)
     this.onSpeakingChange?.(false)
     this.options.notifyRenderer(VOICE_TTS_EVENTS.speechEnd, {
       speechId: active.speechId,
@@ -706,8 +922,13 @@ export class VoiceSpeechService {
     return this.active !== null
   }
 
+  /** The task (or Commander session key) the passage being spoken belongs to. */
+  get currentTaskId(): string | null {
+    return this.active?.taskId ?? null
+  }
+
   /**
-   * The policy. Only these five reasons can produce speech, and each one has
+   * The policy. Only these six reasons can produce speech, and each one has
    * its own condition (design §5.7).
    */
   private mayspeak(request: VoiceSpeechRequest): boolean {
@@ -718,6 +939,8 @@ export class VoiceSpeechService {
       case 'preview':
       case 'manual':
       case 'read_last_answer':
+      // The user opened a voice conversation (#64). Same reasoning.
+      case 'conversation':
         return true
       case 'agent_answer':
         if (!this.isEnabled()) return false
@@ -750,13 +973,18 @@ export class VoiceSpeechService {
 
   /** Every speaker the user can choose right now. */
   availableVoices(): VoiceTtsVoice[] {
-    if (this.engine() === 'system') return this.systemVoices
+    const engine = this.engine()
+    if (engine === 'system') return this.systemVoices
+    if (engine === 'elevenlabs') return this.elevenlabs.voices
     return localVoicesForModel(this.modelId())
   }
 
   // ── Worker events ─────────────────────────────────────────
 
   private onWorkerStatus(status: VoiceTtsStatus): void {
+    // The worker is not the selected engine, so its state — an unload after
+    // the switch, say — must not overwrite what the hosted engine reported.
+    if (this.engine() === 'elevenlabs') return
     if (status.state === 'ready') {
       this.sampleRate = status.sampleRate
       this.status = { ...status, engine: this.engine(), voiceId: this.voiceId() }
@@ -821,6 +1049,7 @@ export class VoiceSpeechService {
       onlyVoiceTurns: this.onlyVoiceTurns(),
       models: await this.listModels(),
       speaking: this.speaking,
+      elevenlabs: this.elevenLabsState(),
     }
   }
 

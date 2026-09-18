@@ -1,11 +1,27 @@
 import { join } from 'path'
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
 import type { DatabaseManager } from '../database'
+import { isSkillOwnedByProject } from '../../shared/skill-scope'
 
 export interface SkillSyncResult {
   created: string[]
   updated: string[]
   unchanged: string[]
+  /**
+   * Skills the workspace changed but the session may not write (#74): a
+   * global skill, or one another project owns. Absent from older results.
+   */
+  skipped?: string[]
+}
+
+/**
+ * Who the synced skills belong to (#74). `projectId` is the task's project:
+ * new skills are created in it, and only skills it owns are updated. Without
+ * a project (internal callers) everything is written and new skills are
+ * global, as before.
+ */
+export interface SkillSyncOptions {
+  projectId?: string | null
 }
 
 export interface ParsedSkill {
@@ -23,7 +39,7 @@ export interface ParsedSkill {
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
 export function emptySkillSyncResult(): SkillSyncResult {
-  return { created: [], updated: [], unchanged: [] }
+  return { created: [], updated: [], unchanged: [], skipped: [] }
 }
 
 /** Parses `---\nname: ...\ndescription: ...\n---\n\ncontent` plus optional metadata. */
@@ -109,8 +125,16 @@ function readSkillEntry(skillsDir: string, entry: string): ParsedSkill | null {
  * Scans the workspace skill directories (.claude/skills for Claude Code,
  * .agents/skills for other agents, .opencode/skills legacy) and creates or
  * updates DB skills that changed.
+ *
+ * With a project (the learning loop always passes the task's): a new skill is
+ * created in that project, a changed skill is only written back when the
+ * project owns it. A changed global skill, or another project's skill, is
+ * reported in `skipped` and left alone — a task session may not silently
+ * alter what every other project sees. Promotion is the user's call
+ * (docs/skills.md).
  */
-export function syncSkillsFromDirectory(db: DatabaseManager, workspaceDir: string): SkillSyncResult {
+export function syncSkillsFromDirectory(db: DatabaseManager, workspaceDir: string, options: SkillSyncOptions = {}): SkillSyncResult {
+  const projectId = options.projectId || null
   const skillsDirs = [
     join(workspaceDir, '.claude', 'skills'),
     join(workspaceDir, '.agents', 'skills'),
@@ -144,7 +168,8 @@ export function syncSkillsFromDirectory(db: DatabaseManager, workspaceDir: strin
           uses: parsed.uses,
           last_used: parsed.last_used,
           tags: parsed.tags,
-          preferred_model: parsed.preferred_model ?? null
+          preferred_model: parsed.preferred_model ?? null,
+          project_id: projectId
         })
         result.created.push(parsed.name)
         continue
@@ -158,7 +183,11 @@ export function syncSkillsFromDirectory(db: DatabaseManager, workspaceDir: strin
         || (parsed.tags !== undefined && JSON.stringify(existing.tags) !== JSON.stringify(parsed.tags))
         || (parsed.preferred_model !== undefined && existing.preferred_model !== parsed.preferred_model)
 
-      if (changed) {
+      if (changed && projectId && !isSkillOwnedByProject(existing, projectId)) {
+        const owner = existing.project_id ? `project ${existing.project_id}` : 'global'
+        console.log(`[AgentManager] Skill sync: "${parsed.name}" changed in the workspace but is ${owner}; not written from project ${projectId}`)
+        result.skipped?.push(parsed.name)
+      } else if (changed) {
         db.updateSkill(existing.id, {
           description: parsed.description,
           content: parsed.content,
@@ -175,6 +204,6 @@ export function syncSkillsFromDirectory(db: DatabaseManager, workspaceDir: strin
     }
   }
 
-  console.log(`[AgentManager] Skill sync: created=${result.created.length}, updated=${result.updated.length}, unchanged=${result.unchanged.length}`)
+  console.log(`[AgentManager] Skill sync: created=${result.created.length}, updated=${result.updated.length}, unchanged=${result.unchanged.length}, skipped=${result.skipped?.length ?? 0}`)
   return result
 }

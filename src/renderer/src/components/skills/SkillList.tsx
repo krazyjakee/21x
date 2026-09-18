@@ -1,5 +1,7 @@
 import { Badge } from '@/components/ui/Badge'
 import { formatRelativeDate } from '@/lib/utils'
+import { useProjectStore } from '@/stores/project-store'
+import { skillScopeLabel } from '@shared/skill-scope'
 import type { Skill } from '@/types'
 
 interface SkillListProps {
@@ -7,6 +9,18 @@ interface SkillListProps {
   selectedSkillId: string | null
   onSelectSkill: (id: string) => void
   emptyMessage?: string
+}
+
+/** The Global / project-name badge every skill row and the editor show (#74). */
+export function SkillScopeBadge({ skill, className }: { skill: Pick<Skill, 'project_id'>; className?: string }) {
+  const projects = useProjectStore((s) => s.projects)
+  const project = skill.project_id ? projects.find((p) => p.id === skill.project_id) : undefined
+  const label = skillScopeLabel(skill, project?.name)
+  return (
+    <Badge variant={skill.project_id ? 'blue' : 'green'} className={className} title={skill.project_id ? `Project skill: ${label}` : 'Global skill: visible to every project'}>
+      {label}{project?.archived ? ' (archived)' : ''}
+    </Badge>
+  )
 }
 
 export function SkillList({ skills, selectedSkillId, onSelectSkill, emptyMessage }: SkillListProps) {
@@ -38,7 +52,8 @@ export function SkillList({ skills, selectedSkillId, onSelectSkill, emptyMessage
             </div>
           </div>
           <p className="text-xs text-muted-foreground mt-0.5 truncate">{skill.description}</p>
-          <div className="flex items-center gap-2 mt-0.5">
+          <div className="flex items-center gap-2 mt-1">
+            <SkillScopeBadge skill={skill} className="shrink-0 max-w-[10rem] truncate" />
             <p className="text-[10px] text-muted-foreground/70">{formatRelativeDate(skill.updated_at)}</p>
             {skill.uses > 0 && (
               <span className="text-[10px] text-muted-foreground/70">• {skill.uses} uses</span>

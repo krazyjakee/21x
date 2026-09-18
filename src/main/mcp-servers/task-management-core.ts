@@ -27,6 +27,7 @@ import {
   sharedTools,
   subtaskTools
 } from './task-management-tools'
+import { SKILL_SCOPE_PARAM, SKILL_TOOL_NAMES } from '../task-api/skill-routes'
 
 /** Which task a session may act on. All fields null means full access. */
 export type TaskMcpScope = {
@@ -74,7 +75,7 @@ export function isCoordinatorScope(scope: TaskMcpScope): boolean {
 }
 
 /** Tools only the project's Mastermind may call. */
-const COORDINATOR_ONLY_TOOLS = new Set(['update_project_status'])
+const COORDINATOR_ONLY_TOOLS = new Set(['update_project_status', 'report_to_commander'])
 
 /**
  * The escalation policy hook (#66). The main process installs one from
@@ -118,7 +119,8 @@ const PROJECT_FILTERED_TOOLS = new Set([
   'list_pending_approvals',
   'list_repos',
   'create_task',
-  'update_project_status'
+  'update_project_status',
+  'report_to_commander'
 ])
 
 const PROJECT_ACCESS_DENIED = { error: 'Access denied: task is not in this project' }
@@ -266,6 +268,24 @@ async function handleScopedCall(
   }
 }
 
+/**
+ * The project a skill call is made from, and whether the caller is the
+ * project's Mastermind (#74). A subtask scope carries no project of its own,
+ * so it is read off the subtask's row; a session whose task cannot be found
+ * is treated as a task agent of no project, which the skill routes refuse.
+ */
+async function skillScopeFor(scope: TaskMcpScope, invoke: TaskApiInvoke): Promise<{ project_id: string; role: 'coordinator' | 'task' } | null> {
+  if (isProjectScopedSession(scope)) {
+    return { project_id: scope.projectId as string, role: isCoordinatorScope(scope) ? 'coordinator' : 'task' }
+  }
+  if (isScopedSession(scope)) {
+    const own = await invoke('/get_task', { task_id: scope.taskId }) as Record<string, unknown> | null
+    const projectId = own && !own.error && typeof own.project_id === 'string' ? own.project_id : ''
+    return { project_id: projectId || 'unknown-project', role: 'task' }
+  }
+  return null
+}
+
 /** The tools a session may see. This is the whole answer to "which tools to serve". */
 export function listToolsForScope(scope: TaskMcpScope) {
   return isScopedSession(scope)
@@ -313,6 +333,13 @@ export async function callToolForScope(
     if (artifactToolNames.has(name) && scope.artifactTaskId) normalizedArgs.task_id = scope.artifactTaskId
     if (browserRecordingToolNames.has(name) && (scope.taskId || scope.artifactTaskId)) {
       normalizedArgs.task_id = scope.taskId || scope.artifactTaskId
+    }
+    // #74: the skill routes see who is calling. The scope's project wins over
+    // anything the caller put under the key; full access carries no scope.
+    delete normalizedArgs[SKILL_SCOPE_PARAM]
+    if (SKILL_TOOL_NAMES.has(name)) {
+      const skillScope = await skillScopeFor(scope, invoke)
+      if (skillScope) normalizedArgs[SKILL_SCOPE_PARAM] = skillScope
     }
 
     const result = isScopedSession(scope)

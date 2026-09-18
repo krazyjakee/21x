@@ -36,6 +36,8 @@ import {
 } from '@/lib/project-editor'
 import { DEFAULT_PROJECT_ID } from '@shared/projects'
 import type { MastermindMemory } from '@shared/mastermind-memory'
+import type { ProjectStatusJournalEntry } from '@shared/project-status'
+import { formatRelativeDate } from '@shared/date-format'
 import {
   ESCALATION_ACTIONS, ESCALATION_ACTION_LABELS, ESCALATION_LEVELS, ESCALATION_LEVEL_LABELS,
   escalationPolicyFromSettings, projectLimitsFromSettings,
@@ -643,6 +645,9 @@ export function ProjectEditorDialog() {
                     {memory && <p className="text-[11px] text-muted-foreground/70 font-mono truncate" title={memory.path}>{memory.path}</p>}
                   </section>
                 )}
+
+                {/* ── Status history (#72) ── */}
+                {project && <ProjectStatusHistory projectId={project.id} />}
               </>
             )}
 
@@ -674,5 +679,103 @@ export function ProjectEditorDialog() {
         onConfirm={handlePickedRepos}
       />
     </>
+  )
+}
+
+// ── Status history (#72) ──────────────────────────────────────
+
+const HISTORY_LISTS: Array<[keyof Pick<ProjectStatusJournalEntry, 'completed' | 'blockers' | 'decisions' | 'next_steps'>, string]> = [
+  ['completed', 'Completed'],
+  ['blockers', 'Blockers'],
+  ['decisions', 'Decisions'],
+  ['next_steps', 'Next steps']
+]
+
+/**
+ * The Mastermind's status journal for a project, newest first, one page at a
+ * time. Read-only: entries are written by `update_project_status` and rolled
+ * up by the retention job; nothing here edits them. Reloads its first page
+ * when the Mastermind writes a new status.
+ */
+function ProjectStatusHistory({ projectId }: { projectId: string }) {
+  const [entries, setEntries] = useState<ProjectStatusJournalEntry[]>([])
+  const [cursor, setCursor] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const [revision, setRevision] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setFailed(false)
+    Promise.resolve()
+      .then(() => projectApi.getStatusHistory(projectId, { limit: 5 }))
+      .then((page) => {
+        if (cancelled) return
+        setEntries(page.entries)
+        setCursor(page.has_more ? page.next_cursor : null)
+      })
+      .catch(() => { if (!cancelled) setFailed(true) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [projectId, revision])
+
+  useEffect(() => projectApi.onStatusChanged((event) => {
+    if (event.projectId === projectId) setRevision((r) => r + 1)
+  }), [projectId])
+
+  const loadMore = () => {
+    if (!cursor || loading) return
+    setLoading(true)
+    projectApi.getStatusHistory(projectId, { limit: 10, cursor })
+      .then((page) => {
+        setEntries((current) => {
+          const seen = new Set(current.map((entry) => entry.id))
+          return [...current, ...page.entries.filter((entry) => !seen.has(entry.id))]
+        })
+        setCursor(page.has_more ? page.next_cursor : null)
+      })
+      .catch(() => setFailed(true))
+      .finally(() => setLoading(false))
+  }
+
+  return (
+    <section className="space-y-3" aria-label="Status history">
+      <div>
+        <h3 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Status history</h3>
+        <p className="text-xs text-muted-foreground">
+          What the Mastermind reported after each round of work, newest first. Entries older than three months are rolled up by month.
+        </p>
+      </div>
+      {failed && <p className="text-xs text-destructive">The history could not be loaded.</p>}
+      {!failed && entries.length === 0 && !loading && <p className="text-xs text-muted-foreground">No status updates yet.</p>}
+      {entries.length > 0 && (
+        <ol className="max-h-80 space-y-2 overflow-y-auto" data-testid="project-status-history">
+          {entries.map((entry) => (
+            <li key={entry.id} className="rounded-lg border border-border bg-card px-3 py-2">
+              <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                <span title={entry.created_at}>{formatRelativeDate(entry.created_at)}</span>
+                {entry.source === 'compaction' && <Badge variant="default">Monthly roll-up</Badge>}
+              </div>
+              <p className="whitespace-pre-wrap text-xs text-foreground">{entry.summary}</p>
+              {HISTORY_LISTS.map(([key, label]) => entry[key].length > 0 && (
+                <div key={key} className="mt-1.5">
+                  <p className="text-[11px] font-medium text-muted-foreground">{label}</p>
+                  <ul className="list-disc pl-4 text-xs text-muted-foreground">
+                    {entry[key].map((item, i) => <li key={i}>{item}</li>)}
+                  </ul>
+                </div>
+              ))}
+            </li>
+          ))}
+        </ol>
+      )}
+      {cursor && (
+        <Button variant="ghost" size="sm" onClick={loadMore} disabled={loading}>
+          {loading && <Loader2 className="size-icon-sm animate-spin" />}
+          Show older
+        </Button>
+      )}
+    </section>
   )
 }

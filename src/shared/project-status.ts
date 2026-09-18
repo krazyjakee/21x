@@ -41,3 +41,52 @@ export interface ProjectStatus {
 export const PROJECT_STATUS_SUMMARY_MAX_CHARS = 1_000
 export const PROJECT_STATUS_BLOCKER_MAX_CHARS = 200
 export const PROJECT_STATUS_MAX_BLOCKERS = 5
+
+// ── Status journal (#72) ──────────────────────────────────────
+// Every `update_project_status` also appends one entry here, so a project's
+// history survives beside the snapshot. Reads are paginated newest first and
+// capped; nothing here is ever injected into a system prompt.
+
+/** Where an entry came from: the Mastermind's own update, or the monthly roll-up of old entries. */
+export type ProjectStatusJournalSource = 'mastermind' | 'compaction'
+
+export interface ProjectStatusJournalEntry {
+  id: string
+  project_id: string
+  summary: string
+  completed: string[]
+  blockers: string[]
+  decisions: string[]
+  next_steps: string[]
+  source: ProjectStatusJournalSource
+  /** The Commander correlation id the update answered, when the Mastermind quoted one. */
+  correlation_id: string | null
+  /** ISO time. For a compaction entry: the newest entry it replaced. */
+  created_at: string
+}
+
+/** What the Mastermind may attach to an update besides the summary. */
+export interface ProjectStatusJournalInput {
+  summary: string
+  completed?: string[]
+  blockers?: string[]
+  decisions?: string[]
+  next_steps?: string[]
+  correlation_id?: string | null
+}
+
+/** One page of history, newest first. `next_cursor` is opaque; pass it back to continue. */
+export interface ProjectStatusHistoryPage {
+  entries: ProjectStatusJournalEntry[]
+  has_more: boolean
+  next_cursor: string | null
+}
+
+/** Per-list caps on a journal entry's structured highlights. */
+export const PROJECT_STATUS_JOURNAL_MAX_ITEMS = 8
+export const PROJECT_STATUS_JOURNAL_ITEM_MAX_CHARS = 200
+/** Page caps for history reads (the Commander tool and the project editor). */
+export const PROJECT_STATUS_HISTORY_DEFAULT_LIMIT = 5
+export const PROJECT_STATUS_HISTORY_MAX_LIMIT = 20
+/** Entries older than this are rolled into one entry per project and month. */
+export const PROJECT_STATUS_JOURNAL_COMPACT_AFTER_DAYS = 90

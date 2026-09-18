@@ -8,7 +8,10 @@ import { useTaskSourceStore } from '@/stores/task-source-store'
 import { useTaskStore } from '@/stores/task-store'
 import { useProjectTaskSources } from '@/hooks/use-project-tasks'
 import { useUserStore } from '@/stores/user-store'
-import { useSkillStore } from '@/stores/skill-store'
+import { useSkillStore, matchesScopeFilter, type SkillScopeFilter } from '@/stores/skill-store'
+import { useProjectStore } from '@/stores/project-store'
+import { skillApi } from '@/lib/ipc-client'
+import { Select } from '@/components/ui/Select'
 import { useAgentSchedulerStore } from '@/stores/agent-scheduler-store'
 import { isSnoozed } from '@/lib/utils'
 import { TaskStatus, TASK_STATUSES, TASK_PRIORITIES } from '@/types'
@@ -65,6 +68,9 @@ export function Sidebar({ tasks, selectedTaskId, overdueCount, onSelectTask, onC
   const fetchSkills = useSkillStore((s) => s.fetchSkills)
   const selectSkill = useSkillStore((s) => s.selectSkill)
   const createSkill = useSkillStore((s) => s.createSkill)
+  const skillScopeFilter = useSkillStore((s) => s.scopeFilter)
+  const setSkillScopeFilter = useSkillStore((s) => s.setScopeFilter)
+  const projects = useProjectStore((s) => s.projects)
   const isAutoStartEnabled = useAgentSchedulerStore((s) => s.isEnabled)
   const toggleAutoStart = useAgentSchedulerStore((s) => s.toggle)
   const [isSyncingAll, setIsSyncingAll] = useState(false)
@@ -77,6 +83,12 @@ export function Sidebar({ tasks, selectedTaskId, overdueCount, onSelectTask, onC
   useEffect(() => {
     if (sidebarView === 'skills') fetchSkills()
   }, [sidebarView])
+
+  // The Commander's skill tools change skills behind the view (#74).
+  useEffect(() => {
+    if (sidebarView !== 'skills') return
+    return skillApi.onChanged(() => fetchSkills())
+  }, [sidebarView, fetchSkills])
 
   const handleSyncAll = async () => {
     setIsSyncingAll(true)
@@ -91,24 +103,48 @@ export function Sidebar({ tasks, selectedTaskId, overdueCount, onSelectTask, onC
   }
 
   const handleCreateSkill = async () => {
+    // A skill made from the view belongs to the project the filter shows, else it is global.
+    const projectId = typeof skillScopeFilter === 'object' ? skillScopeFilter.projectId : null
     const skill = await createSkill({
       name: 'new-skill',
       description: 'Describe when this skill should be used',
-      content: '# Instructions\n\nAdd your skill instructions here.'
+      content: '# Instructions\n\nAdd your skill instructions here.',
+      project_id: projectId
     })
     if (skill) selectSkill(skill.id)
   }
 
+  // Scope filter (#74): All, Global, or one project. Archived projects are
+  // listed only while they still own skills, so their history stays reachable.
+  const skillScopeOptions = useMemo(() => {
+    const owning = new Set(skills.map((s) => s.project_id).filter(Boolean))
+    return [
+      { value: 'all', label: 'All scopes' },
+      { value: 'global', label: 'Global' },
+      ...projects
+        .filter((p) => !p.archived || owning.has(p.id))
+        .map((p) => ({ value: `project:${p.id}`, label: p.archived ? `${p.name} (archived)` : p.name }))
+    ]
+  }, [projects, skills])
+  const skillScopeValue = skillScopeFilter === 'all' || skillScopeFilter === 'global' ? skillScopeFilter : `project:${skillScopeFilter.projectId}`
+  const handleSkillScopeChange = (value: string) => {
+    const next: SkillScopeFilter = value === 'all' || value === 'global' ? value : { projectId: value.replace(/^project:/, '') }
+    setSkillScopeFilter(next)
+  }
+
+  const scopedSkills = useMemo(() => skills.filter((s) => matchesScopeFilter(s, skillScopeFilter)), [skills, skillScopeFilter])
+  const globalSkillCount = useMemo(() => skills.filter((s) => !s.project_id).length, [skills])
+
   const filteredSkills = useMemo(() => {
-    if (!skillSearchQuery.trim()) return skills
+    if (!skillSearchQuery.trim()) return scopedSkills
     const q = skillSearchQuery.toLowerCase()
-    return skills.filter(
+    return scopedSkills.filter(
       (s) =>
         s.name.toLowerCase().includes(q) ||
         s.description.toLowerCase().includes(q) ||
         s.tags.some((tag) => tag.toLowerCase().includes(q))
     )
-  }, [skills, skillSearchQuery])
+  }, [scopedSkills, skillSearchQuery])
 
   const hasActiveFilters = statusFilter !== 'all' || priorityFilter !== 'all' || sourceFilter !== 'all'
 
@@ -344,19 +380,27 @@ export function Sidebar({ tasks, selectedTaskId, overdueCount, onSelectTask, onC
                 </button>
               )}
             </div>
+            <Select
+              aria-label="Skill scope"
+              className="mt-2 h-8 text-xs"
+              options={skillScopeOptions}
+              value={skillScopeValue}
+              onChange={(e) => handleSkillScopeChange(e.target.value)}
+            />
           </div>
 
           <div className="mx-3 border-t" />
 
           <div className="flex-1 overflow-y-auto pt-1">
-            <SkillList skills={filteredSkills} selectedSkillId={selectedSkillId} emptyMessage={skillSearchQuery ? 'No matching skills' : undefined} onSelectSkill={(id) => {
+            <SkillList skills={filteredSkills} selectedSkillId={selectedSkillId} emptyMessage={skillSearchQuery || skillScopeFilter !== 'all' ? 'No matching skills' : undefined} onSelectSkill={(id) => {
               if (activeModal === 'settings') closeModal()
               selectSkill(id)
             }} />
           </div>
 
           <div className="px-4 py-2.5 border-t text-xs text-muted-foreground tabular-nums">
-            {skills.length} skill{skills.length !== 1 ? 's' : ''}
+            {scopedSkills.length !== skills.length && <>{scopedSkills.length} shown · </>}
+            {skills.length} skill{skills.length !== 1 ? 's' : ''} · {globalSkillCount} global · {skills.length - globalSkillCount} project
           </div>
         </>
       )}

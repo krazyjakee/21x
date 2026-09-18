@@ -5,7 +5,8 @@ import type { ChatProvider, ChatProviderRequest } from '../chat/providers/types'
 import type { ChatToolDefinition } from '../chat/tools'
 import { normalizeTitle, type CommanderStore } from './commander-store'
 import { buildContext, DEFAULT_CONTEXT_BUDGET, planFold, transcriptForSummary, type ContextBudget } from './context'
-import { COMMANDER_SUMMARY_PROMPT, COMMANDER_SYSTEM_PROMPT, COMMANDER_TITLE_PROMPT, withSummary } from './prompts'
+import { COMMANDER_SUMMARY_PROMPT, COMMANDER_SYSTEM_PROMPT, COMMANDER_TITLE_PROMPT, reportRelayNote, withSummary } from './prompts'
+import { guardReportAsks, MAX_REPORT_ASKS_WITHOUT_USER_TURN } from './report-tools'
 
 /**
  * Runs Commander chat turns over persisted sessions (docs/commander.md).
@@ -20,13 +21,20 @@ import { COMMANDER_SUMMARY_PROMPT, COMMANDER_SYSTEM_PROMPT, COMMANDER_TITLE_PROM
  * Extension points:
  * - The Commander's tools (project-tools.ts) are supplied through `getTools`,
  *   built per turn so a confirmation can be checked against the user message.
- * - #62 delivers Mastermind replies through `appendReport`.
+ * - #62 delivers Mastermind reports through `deliverReport`: the report is
+ *   stored (unread until the session is read) and, when the session is the
+ *   one open in the Commander view (`setActiveSession`), a turn is started so
+ *   the Commander relays it. A turn started by a report can only call
+ *   `ask_mastermind` within the session's report-ask budget until the user
+ *   speaks again (report-tools.ts).
  */
 
 export interface CommanderToolContext {
   sessionId: string
-  /** The user message that immediately precedes this turn's tool calls. */
+  /** The user message that immediately precedes this turn's tool calls; empty for a report-triggered turn. */
   userMessage: string
+  /** What started the turn: the user, or a report being relayed (#62). */
+  trigger: 'user' | 'report'
 }
 
 export interface CommanderServiceOptions {
@@ -41,6 +49,8 @@ export interface CommanderServiceOptions {
   maxToolCalls?: number
   /** Timeout for the title and summary one-shot calls. */
   oneShotTimeoutMs?: number
+  /** `ask_mastermind` calls report-triggered turns may make per session before a user turn resets the count (#62). */
+  maxReportAsks?: number
 }
 
 export interface SendResult {
@@ -55,6 +65,24 @@ export interface AppendReportInput {
   content: string
   projectId?: string | null
   correlationId?: string | null
+}
+
+export interface DeliverReportInput extends AppendReportInput {
+  /** Shown to the model when it relays ("Project X says …"); the id is the fallback. */
+  projectName?: string | null
+}
+
+export interface DeliverReportResult {
+  message: CommanderMessage
+  /** True when the session is open in the view and a relay turn started (or will, after the running one). */
+  relayed: boolean
+}
+
+interface TurnStart {
+  trigger: 'user' | 'report'
+  userMessage: string
+  /** Extra system text for the turn (the relay note of a report-triggered turn). */
+  systemNote?: string
 }
 
 const MAX_USER_MESSAGE_CHARS = 100_000
@@ -120,6 +148,12 @@ export class CommanderService {
   private readonly active = new Map<string, ChatTurnHandle>()
   private readonly folding = new Set<string>()
   private readonly naming = new Set<string>()
+  /** The session open in the Commander view, as the renderer reports it (#62). */
+  private activeSessionId: string | null = null
+  /** Reports that arrived during a turn; relayed together once that turn ends. */
+  private readonly pendingRelay = new Map<string, { messageIds: string[]; projectName: string | null }>()
+  /** `ask_mastermind` calls made by report-triggered turns since the user last spoke, per session. */
+  private readonly reportAsks = new Map<string, number>()
 
   constructor(private readonly options: CommanderServiceOptions) {
     this.store = options.store
@@ -127,11 +161,29 @@ export class CommanderService {
     this.budget = { ...DEFAULT_CONTEXT_BUDGET, ...options.budget }
   }
 
+  /** Main-process observers of the event stream (#64 voice mode). Additive; the renderer path is `options.emit`. */
+  private readonly listeners = new Set<(event: CommanderEvent) => void>()
+
+  /** Subscribes a main-process observer to every event the renderer receives. Returns the unsubscribe. */
+  onEvent(listener: (event: CommanderEvent) => void): () => void {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
   private emit(event: CommanderEvent): void {
     try {
       this.options.emit(event)
     } catch (err) {
       console.error('[Commander] emit failed:', err)
+    }
+    for (const listener of this.listeners) {
+      try {
+        listener(event)
+      } catch (err) {
+        console.error('[Commander] event listener failed:', err)
+      }
     }
   }
 
@@ -149,6 +201,17 @@ export class CommanderService {
     return [...this.active.entries()].map(([sessionId, handle]) => ({ sessionId, turnId: handle.turnId }))
   }
 
+  // ── The open session (#62) ──────────────────────────────────
+
+  /** The renderer says which session the Commander view shows; null when the view is closed. */
+  setActiveSession(sessionId: string | null): void {
+    this.activeSessionId = sessionId
+  }
+
+  isSessionActive(sessionId: string): boolean {
+    return this.activeSessionId === sessionId
+  }
+
   sendUserMessage(sessionId: string, text: string): SendResult {
     const content = typeof text === 'string' ? text.trim() : ''
     if (!content) throw new Error('Message is empty')
@@ -164,10 +227,26 @@ export class CommanderService {
     // Sending is reading: the user is looking at this session.
     this.store.markRead(sessionId)
     this.emitSession(sessionId)
+    // A user turn resets the report-ask budget (#62).
+    this.reportAsks.delete(sessionId)
 
+    const { turnId, done } = this.startTurn(sessionId, provider, { trigger: 'user', userMessage: content })
+    return { turnId, message, done }
+  }
+
+  /** One model turn over the session as stored right now. The caller has checked that no turn is running. */
+  private startTurn(sessionId: string, provider: ChatProvider, start: TurnStart): { turnId: string; done: Promise<void> } {
     const context = buildContext(this.store.listMessages(sessionId), this.budget)
-    const system = withSummary(this.options.systemPrompt ?? COMMANDER_SYSTEM_PROMPT, context.summary)
-    const tools = this.options.getTools?.({ sessionId, userMessage: content }) ?? []
+    let system = withSummary(this.options.systemPrompt ?? COMMANDER_SYSTEM_PROMPT, context.summary)
+    if (start.systemNote) system = `${system}\n\n${start.systemNote}`
+    let tools = this.options.getTools?.({ sessionId, userMessage: start.userMessage, trigger: start.trigger }) ?? []
+    if (start.trigger === 'report') {
+      const max = this.options.maxReportAsks ?? MAX_REPORT_ASKS_WITHOUT_USER_TURN
+      tools = guardReportAsks(tools, {
+        remaining: () => max - (this.reportAsks.get(sessionId) ?? 0),
+        consume: () => this.reportAsks.set(sessionId, (this.reportAsks.get(sessionId) ?? 0) + 1)
+      })
+    }
 
     let turnId = ''
     const handle = this.runtime.startTurn(
@@ -196,8 +275,10 @@ export class CommanderService {
       })
       .then(() => this.afterTurn(sessionId, provider))
       .catch((err) => console.error('[Commander] post-turn work failed:', err))
+      .then(() => this.relayPending(sessionId))
+      .catch((err) => console.error('[Commander] report relay failed:', err))
 
-    return { turnId, message, done }
+    return { turnId, done }
   }
 
   private finishTurn(sessionId: string, inputCount: number, result: ChatTurnResult): void {
@@ -332,10 +413,10 @@ export class CommanderService {
   }
 
   /**
-   * Stores a Mastermind report for a session (#62 calls this). It counts as
-   * unread until the session is read, and the model sees it on the next turn.
+   * Stores a Mastermind report for a session. It counts as unread until the
+   * session is read, and the model sees it on the next turn.
    */
-  appendReport(input: AppendReportInput): CommanderMessage {
+  appendReport(input: AppendReportInput, emit = true): CommanderMessage {
     const content = input.content?.trim()
     if (!content) throw new Error('Report is empty')
     const message = this.store.appendMessage(input.sessionId, {
@@ -344,8 +425,69 @@ export class CommanderService {
       projectId: input.projectId ?? null,
       correlationId: input.correlationId ?? null
     })
-    this.emit({ type: 'messages_appended', sessionId: input.sessionId, messages: [message] })
+    if (emit) {
+      this.emit({ type: 'messages_appended', sessionId: input.sessionId, messages: [message] })
+    }
     this.emitSession(input.sessionId)
     return message
+  }
+
+  // ── Report delivery (#62) ───────────────────────────────────
+
+  /**
+   * Stores a report and, when its session is the one open in the view, gives
+   * the Commander a turn to relay it. A session that is not open only gets
+   * the unread report (the list badge). If the open session is mid-turn, the
+   * relay waits for that turn to end. Storing never depends on the relay:
+   * with no provider (no API key) the report is still there, unread.
+   */
+  deliverReport(input: DeliverReportInput): DeliverReportResult {
+    const waitsForCurrentTurn = this.isSessionActive(input.sessionId) && this.active.has(input.sessionId)
+    const message = this.appendReport(input, !waitsForCurrentTurn)
+    if (!this.isSessionActive(input.sessionId)) return { message, relayed: false }
+    if (waitsForCurrentTurn) {
+      const pending = this.pendingRelay.get(input.sessionId)
+      if (pending) {
+        pending.messageIds.push(message.id)
+        pending.projectName = input.projectName ?? pending.projectName
+      } else {
+        this.pendingRelay.set(input.sessionId, { messageIds: [message.id], projectName: input.projectName ?? null })
+      }
+      return { message, relayed: true }
+    }
+    return { message, relayed: this.relayReport(input.sessionId, input.projectName ?? null) }
+  }
+
+  private relayReport(sessionId: string, projectName: string | null): boolean {
+    let provider: ChatProvider
+    try {
+      provider = this.options.createProvider()
+    } catch (err) {
+      console.warn('[Commander] Report stored but not relayed:', err instanceof Error ? err.message : err)
+      return false
+    }
+    if (!this.store.getSession(sessionId)) return false
+    this.startTurn(sessionId, provider, {
+      trigger: 'report',
+      userMessage: '',
+      systemNote: reportRelayNote(projectName ? `"${projectName}"` : 'a project')
+    })
+    return true
+  }
+
+  /** After a turn: relays a report that arrived during it, if the session is still open and idle. */
+  private relayPending(sessionId: string): void {
+    const pending = this.pendingRelay.get(sessionId)
+    if (!pending) return
+    this.pendingRelay.delete(sessionId)
+    const messages = pending.messageIds
+      .map((id) => this.store.moveMessageToEnd(id))
+      .filter((message): message is CommanderMessage => message !== null)
+    if (messages.length > 0) {
+      this.emit({ type: 'messages_appended', sessionId, messages })
+      this.emitSession(sessionId)
+    }
+    if (!this.isSessionActive(sessionId) || this.active.has(sessionId)) return
+    this.relayReport(sessionId, pending.projectName)
   }
 }

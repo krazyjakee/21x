@@ -120,6 +120,8 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
 
   selectSession: async (id) => {
     set({ selectedSessionId: id })
+    // Main relays a report at once only for the open session (#62).
+    void Promise.resolve(commanderApi.setActiveSession(id)).catch(() => {})
     if (!id) return
     try {
       const { messages, activeTurnId } = await commanderApi.listMessages(id)

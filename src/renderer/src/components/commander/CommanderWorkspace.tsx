@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { commanderApi } from '@/lib/ipc-client'
 import { useCommanderStore } from '@/stores/commander-store'
 import { CommanderChatPane } from './CommanderChatPane'
 import { CommanderSessionList } from './CommanderSessionList'
@@ -11,10 +12,15 @@ export function CommanderWorkspace() {
   useEffect(() => {
     const unsubscribe = subscribe()
     void fetchSessions()
-    // Events were missed while the view was closed: reload the open session.
+    // Events were missed while the view was closed: reload the open session
+    // (which also tells main it is the active one, #62).
     const open = useCommanderStore.getState().selectedSessionId
     if (open) void useCommanderStore.getState().selectSession(open)
-    return unsubscribe
+    return () => {
+      unsubscribe()
+      // The view is closed: reports only queue as unread until it opens again.
+      void Promise.resolve(commanderApi.setActiveSession(null)).catch(() => {})
+    }
   }, [subscribe, fetchSessions])
 
   return (

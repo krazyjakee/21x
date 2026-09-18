@@ -105,6 +105,7 @@ export function TaskWorkspaceDialogs({
         onOpenChange={onShowSkillSelectorChange}
         initialSkillIds={task.skill_ids ?? []}
         onConfirm={onUpdateSkillIds}
+        projectId={task.project_id}
       />
 
       <FeedbackDialog

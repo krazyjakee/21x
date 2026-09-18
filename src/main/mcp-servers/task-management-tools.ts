@@ -82,14 +82,19 @@ export const sharedTools: Tool[] = [
     description: 'List all available agents with their capabilities and configurations',
     inputSchema: { type: 'object', properties: {} }
   },
+  // Skill tools (#74). A skill is global (project_id null, visible to every
+  // project) or owned by one project. A session sees global skills plus its
+  // own project's, creates skills in its project, and may only change its
+  // project's own: global skills need the user's confirmation, which the
+  // Commander or the Skills view obtains. Names are unique across scopes.
   {
     name: 'list_skills',
-    description: 'List all available skills with their names, descriptions, and metadata (does not include full skill content — use get_skill for that)',
+    description: 'List the skills this project may use: global skills plus the ones this project owns, with names, descriptions, scope and metadata (no content — use get_skill for that).',
     inputSchema: { type: 'object', properties: {} }
   },
   {
     name: 'get_skill',
-    description: 'Get full details of a specific skill by ID, including its content',
+    description: 'Get full details of a specific skill by ID, including its content. Only global skills and this project\'s own skills can be read.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -100,23 +105,24 @@ export const sharedTools: Tool[] = [
   },
   {
     name: 'create_skill',
-    description: 'Create a new skill with name, description, and content (markdown body). Returns the created skill with its ID.',
+    description: 'Create a new skill owned by this project with name, description, and content (markdown body). Returns the created skill with its ID. A global skill (visible to every project) can only be created by the user: if the user asked for one, tell them to create it in the Skills view or through the Commander.',
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Skill name (lowercase hyphenated, 1-64 chars, e.g. "my-skill")' },
+        name: { type: 'string', description: 'Skill name (lowercase hyphenated, 1-64 chars, e.g. "my-skill"); unique across all projects' },
         description: { type: 'string', description: 'Skill description (1-1024 chars)' },
         content: { type: 'string', description: 'Skill content (the full skill file body, markdown)' },
         confidence: { type: 'number', description: 'Confidence score (0.0 to 1.0, defaults to 0.5)' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Tags for categorization' },
-        preferred_model: { type: 'string', description: 'Optional model id this skill runs best with. Used for the session when the backend offers it; otherwise the agent model is kept.' }
+        preferred_model: { type: 'string', description: 'Optional model id this skill runs best with. Used for the session when the backend offers it; otherwise the agent model is kept.' },
+        global: { type: 'boolean', description: 'Ask for a global skill instead of a project skill. Refused with instructions for the user; leave it out unless the user explicitly asked for a global skill.' }
       },
       required: ['name', 'description', 'content']
     }
   },
   {
     name: 'update_skill',
-    description: 'Update an existing skill. Only provided fields will be updated.',
+    description: 'Update a skill this project owns. Only provided fields will be updated. Global skills and other projects\' skills cannot be changed from here. Pass expected_version (from get_skill) so a concurrent edit is detected instead of overwritten.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -126,14 +132,15 @@ export const sharedTools: Tool[] = [
         content: { type: 'string', description: 'Skill content (the full skill file body)' },
         confidence: { type: 'number', description: 'Confidence score (0.0 to 1.0)' },
         tags: { type: 'array', items: { type: 'string' }, description: 'Tags for categorization' },
-        preferred_model: { type: 'string', description: 'Preferred model id; an empty string clears it' }
+        preferred_model: { type: 'string', description: 'Preferred model id; an empty string clears it' },
+        expected_version: { type: 'integer', description: 'The version you last read. The update is refused with the current version when the skill changed since.' }
       },
       required: ['skill_id']
     }
   },
   {
     name: 'delete_skill',
-    description: 'Delete a skill by ID (soft delete)',
+    description: 'Delete a skill this project owns by ID (soft delete). Global skills and other projects\' skills cannot be deleted from here.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -400,14 +407,37 @@ export const mastermindTools: Tool[] = [
     description:
       "Write the project's status snapshot (#58): a one-paragraph summary of where the project stands and, optionally, the top blockers. " +
       'Counts (running, queued, awaiting review, awaiting approval, blocked) are computed from the database and must not be repeated here. ' +
+      'Every call also appends one entry to the project\'s status journal (#72), so add the structured highlights of this round when you have them: ' +
+      'completed work, blockers, decisions taken, next steps (short lines, at most 8 per list). Do not paste task lists or transcripts. ' +
       'Call it after a meaningful round of work. Only the project Mastermind may call it.',
     inputSchema: {
       type: 'object',
       properties: {
         summary: { type: 'string', description: 'One short paragraph: what is done, what is in flight, what is next. At most 1000 characters.' },
-        top_blockers: { type: 'array', items: { type: 'string' }, description: 'Up to five short lines naming what is in the way and on whom it waits. Omit or pass [] when nothing blocks.' }
+        top_blockers: { type: 'array', items: { type: 'string' }, description: 'Up to five short lines naming what is in the way and on whom it waits. Omit or pass [] when nothing blocks.' },
+        completed: { type: 'array', items: { type: 'string' }, description: 'Journal only: what was finished in this round, one short line each (at most 8).' },
+        blockers: { type: 'array', items: { type: 'string' }, description: 'Journal only: blockers as of this round (at most 8). Defaults to top_blockers.' },
+        decisions: { type: 'array', items: { type: 'string' }, description: 'Journal only: decisions taken in this round and why, one short line each (at most 8).' },
+        next_steps: { type: 'array', items: { type: 'string' }, description: 'Journal only: what comes next, one short line each (at most 8).' },
+        correlation_id: { type: 'string', description: 'Journal only: the Commander correlation_id this update answers, when there is one.' }
       },
       required: ['summary']
+    }
+  },
+  {
+    name: 'report_to_commander',
+    description:
+      'Send a report to the Commander, the fast chat that relays between the user and every project (#62). ' +
+      'Use it to answer a request that arrived from the Commander (quote its correlation_id so the reply lands in the right conversation) ' +
+      'and, without a correlation_id, to escalate: a decision the user must take, a blocker, or something finished that the user asked about elsewhere. ' +
+      'Keep it to a few sentences the Commander can relay as-is; the user reads it as "Project X says …". Only the project Mastermind may call it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', description: 'The report: outcome first, then what the user must decide, if anything. At most 4000 characters.' },
+        correlation_id: { type: 'string', description: 'The correlation_id from the Commander message this answers. Omit for an unprompted report.' }
+      },
+      required: ['message']
     }
   },
   {

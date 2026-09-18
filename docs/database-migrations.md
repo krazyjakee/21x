@@ -53,6 +53,16 @@ migrated one (`database-schema-equivalence.test.ts`). It is NOT NULL in effect:
 `rebuildTasksTable()` drops that trigger with the old table; it runs before
 `migrateToProjects()` in `runMigrations()`, which recreates it. Keep that order.
 
+### Skills have a scope
+
+Migration 16 (`migrateSkillScope()`) adds `skills.project_id` (nullable,
+references `projects`) and `idx_skills_project`. Nothing is backfilled: NULL
+means global, so every skill that existed before the upgrade is visible to
+every project exactly as it was. The column is declared in `createTables()`
+and added with a guarded `ALTER TABLE` in the migration; it runs after
+`migrateToProjects()` so the referenced table exists. Names stay unique across
+scopes (`idx_skills_name`). See docs/skills.md, *Scope*.
+
 ## Adding a column to other tables
 
 Same pattern: update `createTables()`, add a guarded `ALTER TABLE` in `runMigrations()`, and bump `SCHEMA_VERSION`.

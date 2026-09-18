@@ -89,6 +89,7 @@ function makeSkillRecord(overrides: Partial<{
   id: string; name: string; description: string; content: string;
   confidence: number; uses: number; last_used: string; tags: string[];
   version: number; is_deleted: boolean; created_at: string; updated_at: string;
+  project_id: string | null;
 }> = {}) {
   return {
     id: 'skill-1',
@@ -104,6 +105,7 @@ function makeSkillRecord(overrides: Partial<{
     created_at: '2026-03-01',
     updated_at: '2026-03-06',
     preferred_model: null as string | null,
+    project_id: null as string | null,
     ...overrides,
   }
 }

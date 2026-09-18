@@ -1,6 +1,8 @@
 import { ipcMain, dialog } from 'electron'
-import { isVoiceTtsEngineId } from '../../shared/voice-tts'
+import { VOICE_TTS_ELEVENLABS_EMPTY_STATE, isVoiceTtsEngineId } from '../../shared/voice-tts'
+import { CommanderVoice } from '../voice/commander-voice'
 import type { VoiceSessionManager } from '../voice/voice-session-manager'
+import { getCommanderService } from './commander'
 import type { IpcDeps } from './deps'
 
 // The renderer only captures audio and draws state. Every decision — turn
@@ -11,12 +13,27 @@ const UNAVAILABLE = 'Voice control is not available in this build.'
 const VOICE_TURN_MODES = ['dictation', 'command', 'conversation'] as const
 type VoiceTurnModeName = (typeof VOICE_TURN_MODES)[number]
 
-export function registerVoiceHandlers({ voiceSessionManager }: IpcDeps): void {
+export function registerVoiceHandlers({ voiceSessionManager, db }: IpcDeps): void {
   const requireVoice = (): VoiceSessionManager => {
     if (!voiceSessionManager) throw new Error(UNAVAILABLE)
     return voiceSessionManager
   }
   const speech = (): VoiceSessionManager['speech'] => requireVoice().speech
+
+  // Commander voice mode (#64). Built on first use: the Commander handlers
+  // register after this file, so the service does not exist yet here.
+  let commanderVoice: CommanderVoice | null = null
+  const requireCommanderVoice = (): CommanderVoice => {
+    if (commanderVoice) return commanderVoice
+    const commander = getCommanderService()
+    if (!commander) throw new Error('The Commander is not available.')
+    commanderVoice = new CommanderVoice({
+      commander,
+      speech: speech(),
+      resolveProjectName: (projectId) => db.getProject(projectId)?.name
+    })
+    return commanderVoice
+  }
 
   ipcMain.handle('voice:getSnapshot', async () => {
     if (!voiceSessionManager) {
@@ -130,7 +147,8 @@ export function registerVoiceHandlers({ voiceSessionManager }: IpcDeps): void {
         speakActionResults: false,
         onlyVoiceTurns: true,
         models: [],
-        speaking: false
+        speaking: false,
+        elevenlabs: VOICE_TTS_ELEVENLABS_EMPTY_STATE
       }
     }
     return voiceSessionManager.speech.snapshot()
@@ -171,6 +189,40 @@ export function registerVoiceHandlers({ voiceSessionManager }: IpcDeps): void {
 
   ipcMain.handle('voice:tts:stop', () => {
     voiceSessionManager?.stopSpeaking()
+  })
+
+  // ElevenLabs (#64). The key goes in and never comes out: every reply is a
+  // snapshot, and the snapshot says only whether a key is set.
+  ipcMain.handle('voice:tts:elevenlabs:setKey', async (_, payload: { key: string }) => speech().setElevenLabsKey(String(payload?.key ?? '')))
+
+  ipcMain.handle('voice:tts:elevenlabs:clearKey', async () => speech().clearElevenLabsKey())
+
+  ipcMain.handle('voice:tts:elevenlabs:acceptDisclosure', async () => speech().acceptElevenLabsDisclosure())
+
+  ipcMain.handle('voice:tts:elevenlabs:refresh', async () => speech().refreshElevenLabs())
+
+  ipcMain.handle('voice:tts:elevenlabs:setModel', async (_, payload: { modelId: string }) =>
+    speech().setElevenLabsModel(String(payload?.modelId ?? ''))
+  )
+
+  // Commander voice mode (#64). Main speaks the session's replies and reports
+  // while a session is active, and barge-in cancels speech and the turn together.
+  ipcMain.handle('voice:commander:setActive', (_, payload: { sessionId: string | null }) => {
+    const sessionId = typeof payload?.sessionId === 'string' && payload.sessionId ? payload.sessionId : null
+    // Closing voice mode before the bridge exists is nothing to do.
+    if (!sessionId && !commanderVoice) return { active: null }
+    requireCommanderVoice().setActiveSession(sessionId)
+    return { active: sessionId }
+  })
+
+  ipcMain.handle('voice:commander:bargeIn', (_, payload: { sessionId: string }) => {
+    if (typeof payload?.sessionId !== 'string' || !payload.sessionId) return { cancelled: false }
+    return requireCommanderVoice().bargeIn(payload.sessionId)
+  })
+
+  ipcMain.handle('voice:commander:send', async (_, payload: { sessionId: string; text: string }) => {
+    if (typeof payload?.sessionId !== 'string' || !payload.sessionId) throw new Error('sessionId is required')
+    return requireCommanderVoice().send(payload.sessionId, String(payload?.text ?? ''))
   })
 
   // The renderer sent a spoken sentence to an agent. The answer that comes back

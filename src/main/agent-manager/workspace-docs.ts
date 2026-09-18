@@ -4,6 +4,7 @@ import type { DatabaseManager, McpServerRecord, SecretRecord, SkillRecord } from
 import type { CodingAgentAdapter, McpServerConfig } from '../adapters/coding-agent-adapter'
 import { CodingAgentType } from './adapter-factory'
 import { readServerToolLimits } from '../mcp-tool-limits'
+import { isSkillVisibleToProject } from '../../shared/skill-scope'
 
 /**
  * One MCP server as the session documentation describes it.
@@ -33,6 +34,11 @@ function sanitizeYamlValue(value: string): string {
  * Writes the selected SKILL.md files (task + agent selections, deduplicated,
  * never all skills) and then AGENTS.md / CLAUDE.md. Async I/O lets IPC and
  * rendering run between writes.
+ *
+ * Scope (#74): only skills the task's project may see are written — global
+ * ones and the project's own. A selection that names another project's skill
+ * (an agent-level default reused across projects, or a task moved between
+ * projects) is dropped here and logged, never copied into the workspace.
  */
 export async function writeSkillFiles(
   db: DatabaseManager,
@@ -45,7 +51,12 @@ export async function writeSkillFiles(
     const task = db.getTask(taskId)
     const agentConfig = db.getAgent(agentId)?.config
     const skillIds = [...new Set([...(task?.skill_ids ?? []), ...(agentConfig?.skill_ids ?? [])])]
-    const skills = skillIds.length > 0 ? db.getSkillsByIds(skillIds) : []
+    const selected = skillIds.length > 0 ? db.getSkillsByIds(skillIds) : []
+    const skills = selected.filter((skill) => isSkillVisibleToProject(skill, task?.project_id))
+    const hidden = selected.filter((skill) => !skills.includes(skill))
+    if (hidden.length > 0) {
+      console.warn(`[AgentManager] Not writing ${hidden.length} skill(s) another project owns to task ${taskId}: ${hidden.map((s) => s.name).join(', ')}`)
+    }
 
     if (skills.length > 0) {
       const skillsDir = agentConfig?.coding_agent === CodingAgentType.CLAUDE_CODE

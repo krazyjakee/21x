@@ -890,6 +890,7 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
         onOpenChange={setShowSkillSelector}
         initialSkillIds={skillIds ?? []}
         onConfirm={setSkillIds}
+        globalOnly
       />
     </form>
   )

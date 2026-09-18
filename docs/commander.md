@@ -4,8 +4,8 @@ The Commander is a fast conversational model with no canvas. The user talks to
 it in persisted chat sessions; it delegates work to each project's Mastermind
 and relays their reports. It never does the project work itself, and it has
 no tool that could: its registry (#61, #73) holds delegation, status reads
-and project administration only. Mastermind reply routing (#62) is a
-separate concern.
+and project administration only. Mastermind replies and escalations come
+back as reports routed to the right session (#62, below).
 
 ## Storage
 
@@ -66,7 +66,11 @@ kept.
 
 ## Tools
 
-`src/main/commander/project-tools.ts` builds the registry. Every result is a
+`src/main/commander/project-tools.ts` builds the project registry and
+`src/main/commander/skill-tools.ts` the skill registry (#74: `list_skills`,
+`get_skill`, `create_skill`, `update_skill`, `remove_skill`, `promote_skill`,
+`move_skill`; see docs/skills.md, *Scope*). `ipc/commander.ts` concatenates
+the two under one confirmation table. Every result is a
 small JSON object with fixed item and character caps (50 projects, 20 repos,
 20 resources, 30 approvals, 12k characters), never raw tasks or transcripts.
 A project is addressed by its stable id, or by its exact name when that name
@@ -81,6 +85,14 @@ Delegation and status (#61):
 - `get_project_summary(project)`: the #58 status record (counts, compact
   limits, the Mastermind's summary and top blockers) plus the Mastermind
   agent and whether its session is running.
+- `get_project_status_history(project, limit?, cursor?)` (#72): one page of
+  the project's status journal, newest first: 5 entries by default, 20 at
+  most, each clipped (600-character summary, 6 items of 160 characters per
+  list), the page capped at 8k characters, with `has_more` and an opaque
+  `next_cursor` that continues exactly where the page stopped even when new
+  entries arrived meanwhile. The prompt reserves it for "what changed?"
+  questions; it is never part of `list_projects` or the system prompt. See
+  docs/task-lifecycle.md, "Status journal".
 - `ask_mastermind(project, message)`: sends a fenced relay message to the
   project's Mastermind through `AgentManager.sendMessage` on its coordinator
   row (the same rejoin-or-resume path the wake-ups use) and returns at once
@@ -129,8 +141,10 @@ in the main process, not a prompt convention. Successful mutations call
 
 `src/main/ipc/commander.ts` registers these handlers: `commander:listSessions`,
 `createSession`, `renameSession`, `archiveSession` (which also cancels a running
-turn), `listMessages` (returns `{ messages, activeTurnId }`), `markRead`, `send`
-and `cancel`. Every handler checks the sender with `assertTrustedSender`.
+turn), `listMessages` (returns `{ messages, activeTurnId }`), `markRead`,
+`setActiveSession` (the session the view shows, or null when it closes; see
+Reports), `send` and `cancel`. Every handler checks the sender with
+`assertTrustedSender`. It also installs the report bridge (`installCommanderReportBridge`).
 Callers are subscribed to `commander:event`, which carries these events:
 `turn_started`, `turn_event` (runtime events, where `done` carries only the stop
 reason), `messages_appended` and `session_updated`.
@@ -163,12 +177,61 @@ The Commander view is in the NavRail (`sidebarView === 'commander'`) and lives i
   - Has a Stop button and an empty state.
 - The state lives in `stores/commander-store.ts`.
 
+## Reports (#62)
+
+A Mastermind is slow and the user moves on; its answer must still land in the
+right place. The pieces:
+
+- **The Mastermind's tool.** `report_to_commander(message, correlation_id?)`
+  is a project-scoped, coordinator-only task-management tool (route
+  `/report_to_commander`, message capped at 4,000 characters). The Mastermind
+  prompt (section 11) tells it to answer a Commander request with it, quoting
+  the `correlation_id` from the relay message, and to report unasked when the
+  user must decide something. The route hands the report to the seam in
+  `src/main/commander/report-inbox.ts`; `ipc/commander.ts` installs the
+  handler (`installCommanderReportBridge` in `report-tools.ts`). Without the
+  handler (before the Commander IPC is registered) the tool returns an error
+  the Mastermind can read.
+- **Routing** (`resolveReportSession`). A report quoting a `correlation_id`
+  goes to the session whose `ask_mastermind` tool row carries that id
+  (`CommanderStore.findDelegation`, indexed on `correlation_id`), unless that
+  session is archived. Otherwise — no id, an unknown id, or an archived
+  origin — it goes to the most recently active session, which is where the
+  user is working. With no session at all, one titled "Project reports" is
+  created for it. The stored `report` message keeps the project tag and the
+  correlation id whichever rule applied. The tool result says which rule
+  (`routed_by`: `correlation` | `latest` | `inbox`).
+- **Delivery** (`CommanderService.deliverReport`). The report is stored and
+  emitted (unread until read, as before). The renderer tells main which
+  session the Commander view shows (`commander:setActiveSession`, sent by the
+  store's `selectSession` and cleared when the view unmounts or the window
+  closes). If the report's session is that one and idle, a turn starts at
+  once with a relay note appended to the system prompt, so the Commander
+  relays it conversationally ("Project X says …"); the stored history ends
+  with the report, which the context builder already renders as a user-side
+  note. If that session is mid-turn, the relay runs when the turn ends. Any
+  other session only gets the unread report and its badge; opening it later
+  shows the report as a card without a relay turn. With no provider (no API
+  key) the report is still stored.
+- **Loop protection.** A turn started by a report may call `ask_mastermind`
+  only while the session's budget lasts: 3 calls
+  (`MAX_REPORT_ASKS_WITHOUT_USER_TURN`) across report-triggered turns since
+  the user last spoke. `guardReportAsks` wraps the tool for such turns and
+  returns a `loop_guard` error result beyond that; a user message resets the
+  count. User-triggered turns are not limited.
+- **Escalations.** `installCommanderReportBridge` also installs the
+  `escalation.ts` handler: a `tell_commander` action the Mastermind performed
+  (#66) becomes an unprompted, project-tagged report ("Escalation notice …")
+  routed by the rules above. Held, approved and rejected `ask_user` calls are
+  not reported; they are the user's business (`get_pending_approvals`).
+
 ## Extension points
 
 - **Custom tools**: tests or integrations may pass `getTools` to
   `registerCommanderHandlers` (or `CommanderService`) to replace the default
-  registry.
-- **#62 reports**: `getCommanderService()?.appendReport({ sessionId, content,
-  projectId, correlationId })` stores the report, emits the events and counts it
-  as unread. The `correlation_id` a Mastermind quotes is the one its relay
-  message carried; the matching `ask_mastermind` tool row holds the same id.
+  registry. The tool context carries `trigger: 'user' | 'report'`.
+- **Reports from elsewhere**: `getCommanderService()?.deliverReport({ sessionId,
+  content, projectId, projectName, correlationId })` stores, counts unread and
+  relays when the session is open; `appendReport` only stores. To route by
+  correlation id first, go through `deliverMastermindReport` in
+  `report-inbox.ts`.

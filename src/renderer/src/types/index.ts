@@ -487,6 +487,8 @@ export interface Skill {
   tags: string[]
   /** Model this skill runs best with; null = use the agent's model. */
   preferred_model: string | null
+  /** Owning project (#74); null = global, visible to every project. */
+  project_id: string | null
   created_at: string
   updated_at: string
 }
@@ -500,6 +502,8 @@ export interface CreateSkillDTO {
   last_used?: string | null
   tags?: string[]
   preferred_model?: string | null
+  /** Owning project; omitted or null = global. */
+  project_id?: string | null
 }
 
 export interface UpdateSkillDTO {
@@ -512,6 +516,8 @@ export interface UpdateSkillDTO {
   tags?: string[]
   /** null clears the preference. */
   preferred_model?: string | null
+  /** The version the editor loaded; a newer version in the database rejects the save. */
+  expected_version?: number
 }
 
 // ── Secret types ──────────────────────────────────────────────

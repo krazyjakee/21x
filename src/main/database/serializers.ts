@@ -232,6 +232,7 @@ export function deserializeSkill(row: SkillRow): SkillRecord {
     last_used: row.last_used,
     tags,
     preferred_model: normalizePreferredModel(row.preferred_model),
+    project_id: row.project_id ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at
   }

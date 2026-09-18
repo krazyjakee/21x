@@ -198,6 +198,24 @@ export class CommanderStore {
     return row ? toMessage(row) : null
   }
 
+  /**
+   * Moves an already-durable message to the end of its session. Reports that
+   * arrive during a model turn are stored immediately, then moved behind that
+   * turn's assistant reply so the relay turn sees the report as the newest
+   * input rather than splicing it into the turn that was already in flight.
+   */
+  moveMessageToEnd(id: string): CommanderMessage | null {
+    const message = this.getMessage(id)
+    if (!message) return null
+    const ts = this.now()
+    const move = this.db.transaction(() => {
+      this.db.prepare('UPDATE commander_messages SET created_at = ? WHERE id = ?').run(ts, id)
+      this.db.prepare('UPDATE commander_sessions SET updated_at = ? WHERE id = ?').run(ts, message.session_id)
+    })
+    move()
+    return this.getMessage(id)
+  }
+
   /** Oldest first. */
   listMessages(sessionId: string): CommanderMessage[] {
     const rows = this.db
@@ -208,5 +226,20 @@ export class CommanderStore {
 
   unreadCount(sessionId: string): number {
     return this.getSession(sessionId)?.unread_count ?? 0
+  }
+
+  // ── Report routing (#62) ──────────────────────────────────
+
+  /**
+   * The delegation that carries a correlation id: the `ask_mastermind` tool
+   * row the service tagged when the tool returned. Its session is where the
+   * report quoting that id belongs. Null for an unknown id.
+   */
+  findDelegation(correlationId: string): { sessionId: string; projectId: string | null } | null {
+    const row = this.db
+      .prepare(`SELECT session_id, project_id FROM commander_messages
+        WHERE role = 'tool' AND correlation_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`)
+      .get(correlationId) as { session_id: string; project_id: string | null } | undefined
+    return row ? { sessionId: row.session_id, projectId: row.project_id ?? null } : null
   }
 }

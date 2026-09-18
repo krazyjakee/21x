@@ -92,7 +92,7 @@ describe('Commander tool registry', () => {
   it('registers delegation and project administration only: no task tools at all', () => {
     const names = tools().map((entry) => entry.name)
     expect(names).toEqual([
-      'list_projects', 'get_project_summary', 'ask_mastermind', 'get_pending_approvals', 'navigate_to_project', 'pause_all_projects',
+      'list_projects', 'get_project_summary', 'get_project_status_history', 'ask_mastermind', 'get_pending_approvals', 'navigate_to_project', 'pause_all_projects',
       'get_project', 'create_project', 'update_project',
       'add_project_repo', 'update_project_repo', 'remove_project_repo', 'reorder_project_repos',
       'add_project_resource', 'update_project_resource', 'remove_project_resource', 'reorder_project_resources',

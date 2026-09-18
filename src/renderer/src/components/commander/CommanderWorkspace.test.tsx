@@ -9,6 +9,7 @@ const api = vi.hoisted(() => ({
   archiveSession: vi.fn(),
   listMessages: vi.fn(),
   markRead: vi.fn(),
+  setActiveSession: vi.fn(async () => undefined),
   send: vi.fn(),
   cancel: vi.fn(),
   onEvent: vi.fn()

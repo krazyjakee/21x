@@ -3350,7 +3350,9 @@ export class AgentManager extends EventEmitter {
       console.log(`[AgentManager] syncSkillsFromWorkspace: no session or workspaceDir for ${sessionId} (sessions count: ${this.sessions.size})`)
       return emptySkillSyncResult()
     }
-    return syncSkillsFromDirectory(this.db, session.workspaceDir)
+    // #74: what the session learned belongs to its task's project.
+    const projectId = session.taskId ? this.db.getTask(session.taskId)?.project_id ?? null : null
+    return syncSkillsFromDirectory(this.db, session.workspaceDir, { projectId })
   }
 
   /**
