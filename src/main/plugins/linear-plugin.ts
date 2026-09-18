@@ -20,6 +20,7 @@ import {
 } from './types'
 import { LinearClient, type LinearIssue } from './linear-client'
 import { replaceRemoteImageUrlsInTask } from './replace-image-urls'
+import { upsertSourcedTask } from './sourced-tasks'
 import { normalizeUrlForComparison, buildNormalizedUrlSet } from './url-utils'
 import { saveTaskAttachment } from './attachments'
 import { mimeTypeForPath, sniffMimeType } from '../mime'
@@ -153,29 +154,17 @@ export class LinearPlugin implements TaskSourcePlugin {
       for (const issue of issues) {
         try {
           const mapped = this.mapLinearIssue(issue)
-          const existing = ctx.db.getTaskByExternalId(sourceId, issue.id)
-
-          let taskId: string
-          if (existing) {
-            ctx.db.updateTask(existing.id, mapped)
-            taskId = existing.id
-            result.updated++
-          } else {
-            const created = ctx.db.createTask({
-              ...mapped,
-              title: mapped.title || issue.title,
-              source_id: sourceId,
-              external_id: issue.id,
-              source: 'Linear',
-              status: mapped.status || 'not_started'
-            })
-            if (!created) {
-              console.error('[linear-plugin] Failed to create task:', issue.id)
-              continue
-            }
-            taskId = created.id
-            result.imported++
+          const upserted = upsertSourcedTask(ctx, sourceId, issue.id, mapped, {
+            title: issue.title,
+            source: 'Linear'
+          })
+          if (!upserted) {
+            console.error('[linear-plugin] Failed to create task:', issue.id)
+            continue
           }
+          const taskId = upserted.task.id
+          if (upserted.created) result.imported++
+          else result.updated++
 
           const fileUrls = this.extractLinearFileUrls(issue)
           if (fileUrls.length > 0) {
@@ -249,7 +238,25 @@ export class LinearPlugin implements TaskSourcePlugin {
     }
   }
 
-  private findStateForStatus(states: Array<{ id: string; name: string; type: string }>, localStatus: string): { id: string; name: string } | null {
+  /**
+   * Resolve user input for the Change Status action: a Linear workflow state
+   * name (case-insensitive), or a local status such as "In Progress" or "Done".
+   */
+  private findStateForInput(
+    states: Array<{ id: string; name: string; type: string }>,
+    input: string
+  ): { id: string; name: string; type: string } | null {
+    const wanted = input.trim().toLowerCase()
+    const byName = states.find(s => s.name.toLowerCase() === wanted)
+    if (byName) return byName
+    const normalized = wanted.replace(/[\s-]+/g, '_')
+    return this.findStateForStatus(states, normalized === 'done' ? 'completed' : normalized)
+  }
+
+  private findStateForStatus(
+    states: Array<{ id: string; name: string; type: string }>,
+    localStatus: string
+  ): { id: string; name: string; type: string } | null {
     const statusLower = localStatus.toLowerCase()
 
     if (statusLower === 'completed') {
@@ -335,11 +342,25 @@ export class LinearPlugin implements TaskSourcePlugin {
           return { success: true, taskUpdate: { status: TaskStatus.Completed } }
         }
 
-        case PluginActionId.ChangeStatus:
-          if (!input) {
+        case PluginActionId.ChangeStatus: {
+          if (!input?.trim()) {
             return { success: false, error: 'Status is required' }
           }
-          return { success: false, error: 'Status change not yet implemented' }
+          const issue = await client.getIssue(task.external_id)
+          if (!issue?.team?.id) {
+            return { success: false, error: 'Could not load the Linear issue team' }
+          }
+          const states = await client.getWorkflowStates(issue.team.id)
+          const targetState = this.findStateForInput(states, input)
+          if (!targetState) {
+            return { success: false, error: `No Linear workflow state matches "${input.trim()}"` }
+          }
+          await client.updateIssue(task.external_id, { stateId: targetState.id })
+          const status = targetState.type === 'completed' || targetState.type === 'canceled'
+            ? TaskStatus.Completed
+            : this.mapStatusFromLinear(targetState.name)
+          return { success: true, taskUpdate: { status } }
+        }
 
         default:
           return { success: false, error: `Unknown action: ${actionId}` }

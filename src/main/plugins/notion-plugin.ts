@@ -12,6 +12,7 @@ import type { TaskRecord } from '../database'
 import type { SourceUser, ReassignResult } from '../../shared/types'
 import { TaskStatus } from '../../shared/constants'
 import { replaceRemoteImageUrlsInTask } from './replace-image-urls'
+import { upsertSourcedTask } from './sourced-tasks'
 import { normalizeUrlForComparison, buildNormalizedUrlSet } from './url-utils'
 import { saveTaskAttachment } from './attachments'
 import { mimeTypeForPath } from '../mime'
@@ -313,42 +314,29 @@ export class NotionPlugin implements TaskSourcePlugin {
 
           const description = parts.join('\n\n')
 
-          const existing = ctx.db.getTaskByExternalId(sourceId, page.id)
-
-          let taskId: string
-          if (existing) {
-            ctx.db.updateTask(existing.id, {
-              title: mapped.title,
-              description: description || existing.description,
-              status: mapped.status,
-              priority: mapped.priority,
-              assignee: mapped.assignee,
-              due_date: mapped.dueDate,
-              labels: mapped.labels
-            })
-            taskId = existing.id
-            result.updated++
-          } else {
-            const created = ctx.db.createTask({
-              title: mapped.title,
-              description,
-              type: 'general',
-              priority: mapped.priority || 'medium',
-              status: mapped.status || TaskStatus.NotStarted,
-              assignee: mapped.assignee,
-              due_date: mapped.dueDate,
-              labels: mapped.labels,
-              external_id: page.id,
-              source_id: sourceId,
-              source: 'Notion'
-            })
-            if (!created) {
-              console.error('[notion] Failed to create task for page:', page.id)
-              continue
-            }
-            taskId = created.id
-            result.imported++
+          const upserted = upsertSourcedTask(ctx, sourceId, page.id, {
+            title: mapped.title,
+            // Keep the existing description if the page content could not be read.
+            description: description || undefined,
+            status: mapped.status,
+            priority: mapped.priority,
+            assignee: mapped.assignee,
+            due_date: mapped.dueDate,
+            labels: mapped.labels
+          }, {
+            title: mapped.title,
+            description,
+            type: 'general',
+            priority: 'medium',
+            source: 'Notion'
+          })
+          if (!upserted) {
+            console.error('[notion] Failed to create task for page:', page.id)
+            continue
           }
+          const taskId = upserted.task.id
+          if (upserted.created) result.imported++
+          else result.updated++
 
           // Collect all file URLs from page properties (Files type) and content blocks
           const fileUrls: Array<{ url: string; filename: string }> = []

@@ -186,7 +186,8 @@ describe('NotionPlugin', () => {
       expect(result.updated).toBe(1)
       expect(ctx.db.updateTask).toHaveBeenCalledWith(
         'existing-1',
-        expect.objectContaining({ title: 'Test Task' })
+        expect.objectContaining({ title: 'Test Task' }),
+        'task-source'
       )
     })
 

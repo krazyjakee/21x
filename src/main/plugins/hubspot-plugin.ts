@@ -212,34 +212,24 @@ export class HubSpotPlugin implements TaskSourcePlugin {
 
           const mapped = await this.mapHubSpotTicket(ticket, ownerName, contactInfo, pipelines, client)
 
-          // Incremental syncs also return recently closed tickets; skip them.
-          if (mapped.status === 'completed') {
+          // Incremental syncs also return recently closed tickets. Closing an
+          // already-imported ticket completes its task; a ticket that was
+          // closed before it was ever imported is not brought in.
+          if (mapped.status === TaskStatus.Completed && !ctx.db.getTaskByExternalId(sourceId, ticket.id)) {
             continue
           }
 
-          const existing = ctx.db.getTaskByExternalId(sourceId, ticket.id)
-
-          let taskId: string
-          if (existing) {
-            ctx.db.updateTask(existing.id, mapped)
-            taskId = existing.id
-            result.updated++
-          } else {
-            const created = ctx.db.createTask({
-              ...mapped,
-              title: mapped.title || ticket.properties.subject || 'Untitled Ticket',
-              source_id: sourceId,
-              external_id: ticket.id,
-              source: 'HubSpot',
-              status: mapped.status || 'not_started'
-            })
-            if (!created) {
-              console.error('[hubspot-plugin] Failed to create task:', ticket.id)
-              continue
-            }
-            taskId = created.id
-            result.imported++
+          const upserted = upsertSourcedTask(ctx, sourceId, ticket.id, mapped, {
+            title: ticket.properties.subject || 'Untitled Ticket',
+            source: 'HubSpot'
+          })
+          if (!upserted) {
+            console.error('[hubspot-plugin] Failed to create task:', ticket.id)
+            continue
           }
+          const taskId = upserted.task.id
+          if (upserted.created) result.imported++
+          else result.updated++
 
           const hubspotAttachments = await client.getTicketAttachments(ticket.id)
           if (hubspotAttachments.length > 0) {

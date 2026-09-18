@@ -12,6 +12,7 @@ import {
   type PluginSyncResult,
   type ActionResult
 } from './types'
+import { upsertSourcedTask } from './sourced-tasks'
 
 // Labels that map to priority (case-insensitive)
 const PRIORITY_LABELS: Record<string, string> = {
@@ -215,25 +216,13 @@ export class GitHubIssuesPlugin implements TaskSourcePlugin {
         try {
           const mapped = mapIssueToTask(issue)
           const externalId = String(issue.number)
-          const existing = ctx.db.getTaskByExternalId(sourceId, externalId)
-
-          if (existing) {
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            const { status: _status, ...withoutStatus } = mapped
-            ctx.db.updateTask(existing.id, withoutStatus)
-            result.updated++
-          } else {
-            const created = ctx.db.createTask({
-              ...mapped,
-              title: mapped.title || issue.title,
-              source_id: sourceId,
-              external_id: externalId,
-              source: 'GitHub',
-              status: mapped.status || TaskStatus.NotStarted,
-              repos: [fullRepoName]
-            })
-            if (created) result.imported++
-          }
+          const upserted = upsertSourcedTask(ctx, sourceId, externalId, mapped, {
+            title: issue.title,
+            source: 'GitHub',
+            repos: [fullRepoName]
+          })
+          if (upserted?.created) result.imported++
+          else if (upserted) result.updated++
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Unknown error'
           result.errors.push(`Failed to import #${issue.number} "${issue.title}": ${msg}`)
