@@ -18,12 +18,15 @@ import { COMMANDER_SUMMARY_PROMPT, COMMANDER_SYSTEM_PROMPT, COMMANDER_TITLE_PROM
  * without waiting on either.
  *
  * Extension points:
- * - #61 supplies the Commander's delegation tools through `getTools`.
+ * - The Commander's tools (project-tools.ts) are supplied through `getTools`,
+ *   built per turn so a confirmation can be checked against the user message.
  * - #62 delivers Mastermind replies through `appendReport`.
  */
 
 export interface CommanderToolContext {
   sessionId: string
+  /** The user message that immediately precedes this turn's tool calls. */
+  userMessage: string
 }
 
 export interface CommanderServiceOptions {
@@ -78,6 +81,27 @@ export function cleanGeneratedTitle(raw: string): string {
     .replace(/[.!?:;,]+$/, '')
     .trim()
   return title.length > MAX_TITLE_CHARS ? `${title.slice(0, MAX_TITLE_CHARS).trimEnd()}…` : title
+}
+
+/**
+ * The `project_id` and `correlation_id` a successful tool result carries
+ * (`ask_mastermind` does), so the stored tool row can be matched to the
+ * report that answers it (#62). Anything that is not such an object tags nothing.
+ */
+export function toolResultTags(content: string, isError: boolean): { projectId?: string; correlationId?: string } {
+  if (isError || !content.startsWith('{')) return {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(content)
+  } catch {
+    return {}
+  }
+  if (!parsed || typeof parsed !== 'object') return {}
+  const record = parsed as { project_id?: unknown; correlation_id?: unknown }
+  return {
+    ...(typeof record.project_id === 'string' && record.project_id ? { projectId: record.project_id } : {}),
+    ...(typeof record.correlation_id === 'string' && record.correlation_id ? { correlationId: record.correlation_id } : {})
+  }
 }
 
 /** One non-streaming-to-anyone model call; returns the text. */
@@ -143,7 +167,7 @@ export class CommanderService {
 
     const context = buildContext(this.store.listMessages(sessionId), this.budget)
     const system = withSummary(this.options.systemPrompt ?? COMMANDER_SYSTEM_PROMPT, context.summary)
-    const tools = this.options.getTools?.({ sessionId }) ?? []
+    const tools = this.options.getTools?.({ sessionId, userMessage: content }) ?? []
 
     let turnId = ''
     const handle = this.runtime.startTurn(
@@ -195,12 +219,14 @@ export class CommanderService {
       return this.store.appendMessage(sessionId, { role: 'assistant', content: message.content, toolCalls: message.toolCalls ?? null })
     }
     if (message.role === 'tool') {
+      const isError = message.isError === true
       return this.store.appendMessage(sessionId, {
         role: 'tool',
         content: message.content,
         toolCallId: message.toolCallId,
         toolName: message.name,
-        isError: message.isError === true
+        isError,
+        ...toolResultTags(message.content, isError)
       })
     }
     // The runtime never adds user messages; ignore defensively.

@@ -320,10 +320,16 @@ body, .theme-transition {
   margin-left: calc(92px / var(--zoom-factor, 1));
 }
 
-/* Windows title-bar overlay safe areas */
-[data-platform="win32"] .windows-titlebar-pad { padding-right: 150px; }
-[data-platform="win32"] .windows-titlebar-safe { padding-right: 150px; }
-[data-platform="win32"] .windows-titlebar-actions { right: 154px; }
+/* Window Controls Overlay safe areas (Windows + Linux). The native min/max/close
+   buttons sit over the top-right of the page; the titlebar-area env vars give
+   the space left of them, so the inset is exact on every platform and zero
+   where no overlay is drawn (macOS). */
+:root {
+  --wco-inset: max(0px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)));
+}
+.windows-titlebar-pad { padding-right: calc(var(--wco-inset) + 12px); }
+.windows-titlebar-safe { padding-right: calc(var(--wco-inset) + 16px); }
+.windows-titlebar-actions { right: calc(var(--wco-inset) + 16px); }
 
 /* ── Scrollbar ──────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 8px; height: 8px; }

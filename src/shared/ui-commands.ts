@@ -31,6 +31,8 @@ export const UI_CANVAS_MAX_ZOOM = 3
 
 export type UiCommand =
   | { kind: 'navigate'; view: UiViewName; settingsTab?: string }
+  /** Show a project (the Commander's `navigate_to_project`). Leaves a project-less view for the dashboard. */
+  | { kind: 'switch_project'; projectId: string }
   | { kind: 'open_task'; taskId: string; where: Exclude<UiOpenTaskTarget, 'auto'> }
   | { kind: 'move_task_panel'; taskId: string; x: number; y: number }
   | { kind: 'close_task_panel'; taskId: string }

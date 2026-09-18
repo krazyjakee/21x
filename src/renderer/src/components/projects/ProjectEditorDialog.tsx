@@ -112,6 +112,7 @@ export function ProjectEditorDialog() {
   const [repoInput, setRepoInput] = useState('')
   const [repoInputProvider, setRepoInputProvider] = useState<GitProviderId>('github')
   const [repoPickerOpen, setRepoPickerOpen] = useState(false)
+  const [externalRevision, setExternalRevision] = useState(0)
   /** The project's Mastermind memory file (#55). Read-only here: the Mastermind writes it. */
   const [memory, setMemory] = useState<MastermindMemory | null>(null)
   /** Which project events wake the Mastermind (#57): a keyed block of the draft's settings JSON, saved with it. */
@@ -132,7 +133,7 @@ export function ProjectEditorDialog() {
       .then((state) => { if (!cancelled) setLimitState(state ?? null) })
       .catch(() => { if (!cancelled) setLimitState(null) })
     return () => { cancelled = true }
-  }, [target])
+  }, [target, externalRevision])
 
   useEffect(() => {
     if (!target || target === 'new') {
@@ -146,6 +147,13 @@ export function ProjectEditorDialog() {
       .catch(() => { if (!cancelled) setMemory(null) })
     return () => { cancelled = true }
   }, [target])
+
+  useEffect(() => projectApi.onChanged((event) => {
+    if (event.projectId !== target) return
+    void useProjectStore.getState().fetchProjects().then(() => {
+      setExternalRevision((revision) => revision + 1)
+    })
+  }), [target])
 
   // Load the draft each time the editor opens.
   useEffect(() => {
@@ -173,7 +181,7 @@ export function ProjectEditorDialog() {
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [target])
+  }, [target, externalRevision])
 
   const effectiveProvider = (draft.git_provider || globalProvider || 'github') as GitProviderId
   const effectiveOrg = draft.git_org ?? globalOrg ?? ''

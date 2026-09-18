@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { BrowserWindow, ipcMain } from 'electron'
 import type {
   CreateProjectData, UpdateProjectData,
   CreateProjectRepoData, UpdateProjectRepoData,
@@ -9,24 +9,48 @@ import { guardedIpcSend } from '../guarded-ipc-send'
 import { readMastermindMemory, type MastermindMemory } from '../agent-manager/mastermind-context'
 import { buildProjectStatus } from '../project-status'
 import type { ProjectStatus } from '../../shared/project-status'
+import type { ProjectChangedEvent } from '../../shared/projects'
 import { approveHeldAction, listHeldActions, rejectHeldAction } from '../escalation'
+
+export const PROJECT_CHANGED_CHANNEL = 'project:changed'
+
+/**
+ * Tells every window that a project's row, repos or resources changed, from
+ * whichever side wrote it (the editor over IPC, or the Commander's tools).
+ * The project store refetches, and an open editor for that project reloads.
+ */
+export function broadcastProjectChanged(event: ProjectChangedEvent): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) guardedIpcSend(win.webContents, PROJECT_CHANGED_CHANNEL, event)
+  }
+}
 
 /** Projects, their repos and their context-only resources. */
 export function registerProjectHandlers({ db, agentManager }: IpcDeps): void {
+  const changed = <T>(value: T, projectId: string | null | undefined, kind: ProjectChangedEvent['kind']): T => {
+    if (projectId) broadcastProjectChanged({ projectId, kind })
+    return value
+  }
   // Project status (#58): counts from the database and live sessions, plus
   // the Mastermind's narrative snapshot.
   ipcMain.handle('project:getStatus', (_, projectId: string): ProjectStatus => buildProjectStatus(db, agentManager, projectId))
   ipcMain.handle('project:getAll', (_, opts?: { includeArchived?: boolean }) => db.getProjects(opts))
   ipcMain.handle('project:get', (_, id: string) => db.getProject(id))
   ipcMain.handle('project:getDefault', () => db.getDefaultProject())
-  ipcMain.handle('project:create', (_, data: CreateProjectData) => db.createProject(data))
+  ipcMain.handle('project:create', (_, data: CreateProjectData) => {
+    const created = db.createProject(data)
+    return changed(created, created?.id, 'created')
+  })
   ipcMain.handle('project:update', (_, id: string, data: UpdateProjectData) => {
     const updated = db.updateProject(id, data)
     // #65: a pause lifted or a cap raised in the editor must start queued work now.
     if (data.settings !== undefined) agentManager.recheckStartQueue()
-    return updated
+    return changed(updated, updated?.id, 'updated')
   })
-  ipcMain.handle('project:archive', (_, id: string, archived?: boolean) => db.archiveProject(id, archived ?? true))
+  ipcMain.handle('project:archive', (_, id: string, archived?: boolean) => {
+    const updated = db.archiveProject(id, archived ?? true)
+    return changed(updated, updated?.id, archived ?? true ? 'archived' : 'restored')
+  })
   ipcMain.handle('project:reorder', (_, orderedIds: string[]) => db.reorderProjects(orderedIds))
   // The memory file the project's Mastermind keeps in its workspace (#55),
   // read-only for the project editor. Null when the project has no Mastermind.
@@ -44,16 +68,32 @@ export function registerProjectHandlers({ db, agentManager }: IpcDeps): void {
   })
 
   ipcMain.handle('projectRepo:list', (_, projectId: string) => db.getProjectRepos(projectId))
-  ipcMain.handle('projectRepo:add', (_, projectId: string, data: CreateProjectRepoData) => db.addProjectRepo(projectId, data))
-  ipcMain.handle('projectRepo:update', (_, id: string, data: UpdateProjectRepoData) => db.updateProjectRepo(id, data))
-  ipcMain.handle('projectRepo:remove', (_, id: string) => db.removeProjectRepo(id))
-  ipcMain.handle('projectRepo:reorder', (_, projectId: string, orderedIds: string[]) => db.reorderProjectRepos(projectId, orderedIds))
+  ipcMain.handle('projectRepo:add', (_, projectId: string, data: CreateProjectRepoData) =>
+    changed(db.addProjectRepo(projectId, data), projectId, 'repos'))
+  ipcMain.handle('projectRepo:update', (_, id: string, data: UpdateProjectRepoData) => {
+    const updated = db.updateProjectRepo(id, data)
+    return changed(updated, updated?.project_id, 'repos')
+  })
+  ipcMain.handle('projectRepo:remove', (_, id: string) => {
+    const projectId = db.getProjectRepo(id)?.project_id
+    return changed(db.removeProjectRepo(id), projectId, 'repos')
+  })
+  ipcMain.handle('projectRepo:reorder', (_, projectId: string, orderedIds: string[]) =>
+    changed(db.reorderProjectRepos(projectId, orderedIds), projectId, 'repos'))
 
   ipcMain.handle('projectResource:list', (_, projectId: string) => db.getProjectResources(projectId))
-  ipcMain.handle('projectResource:add', (_, projectId: string, data: CreateProjectResourceData) => db.addProjectResource(projectId, data))
-  ipcMain.handle('projectResource:update', (_, id: string, data: UpdateProjectResourceData) => db.updateProjectResource(id, data))
-  ipcMain.handle('projectResource:remove', (_, id: string) => db.removeProjectResource(id))
-  ipcMain.handle('projectResource:reorder', (_, projectId: string, orderedIds: string[]) => db.reorderProjectResources(projectId, orderedIds))
+  ipcMain.handle('projectResource:add', (_, projectId: string, data: CreateProjectResourceData) =>
+    changed(db.addProjectResource(projectId, data), projectId, 'resources'))
+  ipcMain.handle('projectResource:update', (_, id: string, data: UpdateProjectResourceData) => {
+    const updated = db.updateProjectResource(id, data)
+    return changed(updated, updated?.project_id, 'resources')
+  })
+  ipcMain.handle('projectResource:remove', (_, id: string) => {
+    const projectId = db.getProjectResource(id)?.project_id
+    return changed(db.removeProjectResource(id), projectId, 'resources')
+  })
+  ipcMain.handle('projectResource:reorder', (_, projectId: string, orderedIds: string[]) =>
+    changed(db.reorderProjectResources(projectId, orderedIds), projectId, 'resources'))
 
   // ── Limits and pause (#65) ──
   ipcMain.handle('projectLimits:getState', (_, projectId: string) => agentManager.getProjectLimitState(projectId))

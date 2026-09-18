@@ -13,6 +13,11 @@
 export const DEFAULT_PROJECT_ID = 'default'
 export const DEFAULT_PROJECT_NAME = 'Default'
 
+export interface ProjectChangedEvent {
+  projectId: string
+  kind: 'created' | 'updated' | 'archived' | 'restored' | 'repos' | 'resources'
+}
+
 export interface ProjectRecord {
   id: string
   name: string

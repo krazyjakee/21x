@@ -1,4 +1,4 @@
-import { ipcMain, shell, Notification, app } from 'electron'
+import { ipcMain, shell, Notification, app, BrowserWindow } from 'electron'
 import { existsSync, statSync, readFileSync } from 'fs'
 import { setTaskApiUiState } from '../task-api-server'
 import type { IpcDeps } from './deps'
@@ -64,6 +64,15 @@ export function registerAppHandlers({ db }: IpcDeps): void {
   ipcMain.handle('app:setMinimizeToTray', async (_, enabled: boolean) => {
     db.setSetting('minimize_to_tray', enabled.toString())
     return enabled
+  })
+
+  // Keeps the native min/max/close overlay (Windows/Linux) in the app's theme.
+  ipcMain.handle('app:setTitleBarOverlay', (event, colors: { color: string; symbolColor: string }) => {
+    assertTrustedSender(event, 'app:setTitleBarOverlay')
+    if (process.platform === 'darwin') return
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win || win.isDestroyed()) return
+    win.setTitleBarOverlay({ color: colors.color, symbolColor: colors.symbolColor, height: 36 })
   })
 
   // The renderer publishes what it is showing, throttled, so an agent tool can

@@ -104,6 +104,18 @@ export function applyUiCommand(command: UiCommand): UiCommandResult {
       return { applied: true }
     }
 
+    case 'switch_project': {
+      const projects = useProjectStore.getState()
+      const project = projects.projects.find((p) => p.id === command.projectId)
+      if (!project || project.archived) return { applied: false, detail: 'That project is not available' }
+      projects.setCurrentProject(command.projectId)
+      // The Commander view shows no project; land on the dashboard so the
+      // switch is visible. A project view keeps its place.
+      if (ui.activeModal === 'settings') ui.closeModal()
+      if (ui.sidebarView === 'commander') ui.setSidebarView('dashboard')
+      return { applied: true }
+    }
+
     case 'open_task': {
       if (!isKnownTask(command.taskId)) return { applied: false, detail: 'That task is not loaded' }
       useTaskStore.getState().selectTask(command.taskId)

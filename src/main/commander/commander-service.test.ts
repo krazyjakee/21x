@@ -1,13 +1,17 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTestDb } from '../../../test/helpers/db-test-helper'
 import type { CommanderEvent, CommanderMessage } from '../../shared/commander'
 import type { ChatProvider, ChatProviderEvent, ChatProviderRequest } from '../chat/providers/types'
-import { CommanderService, cleanGeneratedTitle, fallbackTitle } from './commander-service'
+import type { DatabaseManager } from '../database'
+import { CommanderService, cleanGeneratedTitle, fallbackTitle, toolResultTags } from './commander-service'
 import { CommanderStore } from './commander-store'
 import { buildContext, planFold, splitTurns } from './context'
+import { createCommanderProjectTools, ProjectMutationConfirmations, type CommanderAgents } from './project-tools'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_TITLE_PROMPT } from './prompts'
 
-type Reply = (request: ChatProviderRequest) => string | Error
+/** A model answer: text, a failure, or text plus tool calls (the turn then continues with their results). */
+type ModelAnswer = string | Error | { text?: string; toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> }
+type Reply = (request: ChatProviderRequest) => ModelAnswer
 
 /** A fake provider: `chat`, `title` and `summary` decide the text of each kind of call. */
 function fakeProvider(replies: { chat?: Reply; title?: Reply; summary?: Reply } = {}): ChatProvider & { requests: ChatProviderRequest[] } {
@@ -25,13 +29,20 @@ function fakeProvider(replies: { chat?: Reply; title?: Reply; summary?: Reply } 
       const out = pick ? pick(request) : 'ok'
       return (async function* (): AsyncGenerator<ChatProviderEvent> {
         if (out instanceof Error) throw out
-        for (const word of out.split(/(?<= )/)) yield { type: 'text_delta', text: word }
+        const text = typeof out === 'string' ? out : out.text ?? ''
+        for (const word of text.split(/(?<= )/)) if (word) yield { type: 'text_delta', text: word }
+        if (typeof out !== 'string') {
+          for (const call of out.toolCalls) yield { type: 'tool_call', ...call }
+          yield { type: 'message_end', stopReason: 'tool_use' }
+          return
+        }
         yield { type: 'message_end', stopReason: 'end_turn' }
       })()
     }
   }
 }
 
+let db: DatabaseManager
 let store: CommanderStore
 let events: CommanderEvent[]
 
@@ -52,8 +63,9 @@ function seedProjects(rawDb: ReturnType<typeof createTestDb>['rawDb'], ids: stri
 }
 
 beforeEach(() => {
-  const { db, rawDb } = createTestDb()
-  seedProjects(rawDb, ['web'])
+  const created = createTestDb()
+  db = created.db
+  seedProjects(created.rawDb, ['web'])
   store = new CommanderStore(db)
   events = []
 })
@@ -125,6 +137,96 @@ describe('CommanderService turns', () => {
     const session = store.createSession()
     expect(() => service.sendUserMessage(session.id, 'hi')).toThrow('No API key')
     expect(store.listMessages(session.id)).toEqual([])
+  })
+
+  it('binds each turn tool registry to the immediately preceding user message', async () => {
+    const seen: Array<{ sessionId: string; userMessage: string }> = []
+    const service = new CommanderService({
+      store,
+      emit: (event) => events.push(event),
+      createProvider: () => fakeProvider(),
+      getTools: (context) => {
+        seen.push(context)
+        return []
+      }
+    })
+    const session = store.createSession('Confirmation context')
+    await service.sendUserMessage(session.id, 'propose a rename').done
+    await service.sendUserMessage(session.id, 'Confirm abc123').done
+
+    expect(seen).toEqual([
+      { sessionId: session.id, userMessage: 'propose a rename' },
+      { sessionId: session.id, userMessage: 'Confirm abc123' }
+    ])
+  })
+
+  it('delegates to each project the user names and replies at once, without waiting for the Masterminds', async () => {
+    db.createAgent({ name: 'Claude' })
+    const alpha = db.createProject({ name: 'Alpha' })!
+    const beta = db.createProject({ name: 'Beta' })!
+    // Masterminds that never answer: the Commander's turn must still finish.
+    const sendMessage = vi.fn(() => new Promise<{ newSessionId?: string }>(() => {}))
+    const agents = {
+      getStartQueue: () => [],
+      findSessionByTaskId: () => undefined,
+      getSessionStatus: () => null,
+      getProjectLimitState: () => undefined,
+      sendMessage,
+      pauseAllProjects: vi.fn(),
+      isAllProjectsPaused: () => false
+    } as unknown as CommanderAgents
+    const provider = fakeProvider({
+      chat: (request) =>
+        request.messages.some((m) => m.role === 'tool')
+          ? 'Asked Alpha to ship the site and Beta to review the API. They will report back here.'
+          : {
+              toolCalls: [
+                { id: 'c1', name: 'ask_mastermind', input: { project: 'Alpha', message: 'Ship the site' } },
+                { id: 'c2', name: 'ask_mastermind', input: { project: beta.id, message: 'Review the API' } }
+              ]
+            },
+      title: () => 'Two projects'
+    })
+    const confirmations = new ProjectMutationConfirmations()
+    const service = new CommanderService({
+      store,
+      emit: (e) => events.push(e),
+      createProvider: () => provider,
+      getTools: (context) => createCommanderProjectTools({ db, context, confirmations, agents })
+    })
+    const session = store.createSession()
+
+    await service.sendUserMessage(session.id, 'Get Alpha to ship the site and Beta to review the API').done
+
+    // Both Masterminds were asked, each with its own correlation id, and the turn ended in text.
+    expect(sendMessage).toHaveBeenCalledTimes(2)
+    const targets = sendMessage.mock.calls.map((args) => (args as unknown as [string, string, string])[2]).sort()
+    expect(targets).toEqual([db.getCoordinatorTask(alpha.id)!.id, db.getCoordinatorTask(beta.id)!.id].sort())
+    expect(service.activeTurnId(session.id)).toBeNull()
+
+    const messages = store.listMessages(session.id)
+    expect(messages.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'tool', 'assistant'])
+    expect(messages[1].tool_calls?.map((c) => c.name)).toEqual(['ask_mastermind', 'ask_mastermind'])
+    // Tool rows are tagged with the project and the correlation id the report will quote (#62).
+    expect(messages[2]).toMatchObject({ tool_name: 'ask_mastermind', is_error: false, project_id: alpha.id })
+    expect(messages[3]).toMatchObject({ tool_name: 'ask_mastermind', is_error: false, project_id: beta.id })
+    expect(messages[2].correlation_id).toMatch(/^cmd-/)
+    expect(messages[3].correlation_id).toMatch(/^cmd-/)
+    expect(messages[2].correlation_id).not.toBe(messages[3].correlation_id)
+    for (const [index, call] of (sendMessage.mock.calls as unknown as Array<[string, string]>).entries()) {
+      expect(call[1]).toContain(`correlation_id=${messages[2 + index].correlation_id}`)
+    }
+    expect(messages[4].content).toMatch(/Alpha.*Beta/)
+    const doneEvent = events.find((e) => e.type === 'turn_event' && e.event.type === 'done')
+    expect(doneEvent).toMatchObject({ event: { stopReason: 'end_turn' } })
+  })
+
+  it('tags tool rows only from successful object results', () => {
+    expect(toolResultTags('{"status":"sent","project_id":"p1","correlation_id":"cmd-1"}', false)).toEqual({ projectId: 'p1', correlationId: 'cmd-1' })
+    expect(toolResultTags('{"status":"sent","project_id":"p1","correlation_id":"cmd-1"}', true)).toEqual({})
+    expect(toolResultTags('{"projects":[]}', false)).toEqual({})
+    expect(toolResultTags('Project not found', false)).toEqual({})
+    expect(toolResultTags('{not json', false)).toEqual({})
   })
 
   it('stores reports as unread until the session is read', () => {

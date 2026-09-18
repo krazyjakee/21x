@@ -38,8 +38,9 @@ is kept in the returned history.
 schema with an object root, and an async `handler(input, { signal, toolCallId })`
 returning a string or `{ content, isError }`. A thrown error becomes an
 `isError` result the model can read. What a model can do is enforced by the
-tool list it is given, not by prompting. This issue ships no tools; the
-Commander's delegation tools come later (#61).
+tool list it is given, not by prompting. The runtime itself ships no tools;
+the Commander supplies its bounded project discovery and administration tools
+through that registry.
 
 ## Providers
 

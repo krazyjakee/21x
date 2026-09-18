@@ -37,10 +37,12 @@ import type { CliMcpMutationResult, CliMcpProbeResult, CliMcpServerRef, CliMcpSn
 import type {
   ProjectRecord, CreateProjectData, UpdateProjectData,
   ProjectRepoRecord, CreateProjectRepoData, UpdateProjectRepoData,
-  ProjectResourceRecord, CreateProjectResourceData, UpdateProjectResourceData
+  ProjectResourceRecord, CreateProjectResourceData, UpdateProjectResourceData,
+  ProjectChangedEvent
 } from '@shared/projects'
 import type { HeldAction, ProjectLimitState } from '@shared/project-limit-types'
 import type { ProjectStatus } from '@shared/project-status'
+import type { ProjectOverviewEntry } from '@shared/project-overview'
 import type { MastermindMemory } from '@shared/mastermind-memory'
 
 export const taskApi = {
@@ -494,6 +496,8 @@ export const projectApi = {
     window.electronAPI.projects.getMastermindMemory(projectId),
   /** Moves a top-level task with its subtasks; resolves to the moved rows, or null when refused. */
   moveTask: (taskId: string, projectId: string): Promise<Task[] | null> => window.electronAPI.projects.moveTask(taskId, projectId),
+  onChanged: (callback: (event: ProjectChangedEvent) => void): (() => void) =>
+    typeof window.electronAPI.projects.onChanged === 'function' ? window.electronAPI.projects.onChanged(callback) : () => {},
   /** Project status (#58): counts computed now, plus the Mastermind's latest summary. */
   getStatus: (projectId: string): Promise<ProjectStatus> => window.electronAPI.projects.getStatus(projectId),
   /** Fires when the Mastermind writes a new summary through `update_project_status`. */
@@ -534,6 +538,12 @@ export const escalationApi = {
   reject: (id: string, note?: string): Promise<boolean> => window.electronAPI.escalation.reject(id, note),
   onHeldChanged: (callback: (event: { held: HeldAction[] }) => void): (() => void) =>
     typeof window.electronAPI.escalation?.onHeldChanged === 'function' ? window.electronAPI.escalation.onHeldChanged(callback) : () => {}
+}
+
+/** The all-projects overview (#63): every active project's status and card facts in one call. */
+export const overviewApi = {
+  getAllStatuses: (): Promise<ProjectOverviewEntry[]> =>
+    typeof window.electronAPI.overview?.getAllStatuses === 'function' ? window.electronAPI.overview.getAllStatuses() : Promise.resolve([])
 }
 
 export const skillApi = {

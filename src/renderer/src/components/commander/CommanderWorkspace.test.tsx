@@ -162,6 +162,9 @@ describe('CommanderWorkspace', () => {
 describe('toolCallLabel', () => {
   it('reads as a delegation when the call names a project', () => {
     expect(toolCallLabel('ask_project', { project: 'Web' })).toBe('Asked Web…')
+    expect(toolCallLabel('ask_mastermind', { project: 'Web', message: 'Deploy the site' })).toBe('Asked Web: Deploy the site')
     expect(toolCallLabel('list_projects', {})).toBe('List projects')
+    expect(toolCallLabel('archive_project', { project: 'Web' })).toBe('Archive project · Web')
+    expect(toolCallLabel('navigate_to_project', { project: 'Web' })).toBe('Navigate to project · Web')
   })
 })

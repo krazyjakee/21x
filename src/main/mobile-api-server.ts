@@ -23,6 +23,7 @@ import type { Artifact, ArtifactFileEntry } from '../shared/artifacts'
 import { MOBILE_VOICE_CAPABILITIES } from '../shared/voice'
 import { TaskStatus } from '../shared/constants'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
+import { buildProjectOverview } from './project-overview'
 import { guardStream } from './child-stream-guards'
 import { bearerToken, readJsonBody } from './http-utils'
 import { completeTaskAtSource, updateTaskFromUser } from './session-feedback'
@@ -408,6 +409,13 @@ async function routeGet(pathname: string, url: URL): Promise<unknown> {
       open_task_count: counts.get(project.id)?.open ?? 0,
       sort_order: project.sort_order
     }))
+  }
+
+  // GET /api/projects/status — the all-projects overview (#63): every active
+  // project's status counts, approvals, agents, limit state and last activity,
+  // the same rows the desktop overview shows. Read-only.
+  if (pathname === '/api/projects/status') {
+    return buildProjectOverview(db, agentRef)
   }
 
   // GET /api/tasks
