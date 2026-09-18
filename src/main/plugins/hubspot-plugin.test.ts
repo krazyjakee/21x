@@ -218,6 +218,8 @@ describe('HubSpotPlugin importTasks (first sync)', () => {
     const attachment = task.attachments[0] as unknown as Record<string, unknown>
     expect(attachment).toMatchObject({
       filename: 'screenshot.png',
+      // HubSpot reports type "IMG" (a category), which must not become the MIME type.
+      mime_type: 'image/png',
       size: HUBSPOT_FILE_777_BYTES.length,
       hubspot_file_id: '777',
       hubspot_url: HUBSPOT_FILE_777_SIGNED_URL
