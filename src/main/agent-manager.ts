@@ -1,3 +1,5 @@
+import { guardedIpcSend } from './guarded-ipc-send'
+import { transcriptDisplayPart } from './transcript-display'
 import { finishSessionFeedback, updateTaskFromUser } from './session-feedback'
 import { buildAgentSwitchRecap, INITIAL_PROMPT_PART_PREFIX } from './agent-handoff'
 import { EventEmitter } from 'events'
@@ -5265,7 +5267,20 @@ Important:
   private sendTranscriptChangedNow(taskId: string, parts: ReturnType<DatabaseManager['getTranscriptParts']>, maxRev: number): void {
     const payload = { taskId, parts, maxRev }
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send('transcript:changed', payload)
+      let sent = false
+      try {
+        sent = guardedIpcSend(this.mainWindow.webContents, 'transcript:changed', {
+          ...payload, parts: parts.map(part => transcriptDisplayPart(part))
+        })
+      } catch (err) {
+        console.error('[AgentManager] Could not prepare transcript update for display:', err)
+      }
+      if (!sent) {
+        // Keep the client cursor unchanged; the renderer reconciles via a delta read.
+        guardedIpcSend(this.mainWindow.webContents, 'transcript:changed', {
+          taskId, parts: [], maxRev: 0, reloadRequired: true
+        })
+      }
     }
     for (const fn of this.externalListeners) {
       try { fn('transcript:changed', payload) } catch { /* ignore */ }
@@ -5355,7 +5370,7 @@ Important:
   private sendArtifactUpdated(artifact: Artifact): void {
     const artifactPayload = { taskId: artifact.taskId, artifact }
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send('artifact:updated', artifactPayload)
+      guardedIpcSend(this.mainWindow.webContents, 'artifact:updated', artifactPayload)
     }
     for (const fn of this.externalListeners) {
       try { fn('artifact:updated', artifactPayload) } catch { /* ignore */ }
@@ -5377,7 +5392,7 @@ Important:
     }
 
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send(channel, data)
+      guardedIpcSend(this.mainWindow.webContents, channel, data)
     }
     // Also notify external listeners (mobile API WebSocket)
     for (const fn of this.externalListeners) {
