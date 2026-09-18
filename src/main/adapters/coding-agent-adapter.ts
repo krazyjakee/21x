@@ -140,20 +140,6 @@ export interface MessagePart {
   }
 }
 
-export interface MessagePayload {
-  content: string
-  partType: string
-  tool?: {
-    name: string
-    status?: string
-    title?: string
-    description?: string
-    input?: unknown
-    output?: unknown
-    error?: string
-  }
-}
-
 /**
  * Common interface for all coding agent backends (OpenCode, Claude Code, etc.)
  */

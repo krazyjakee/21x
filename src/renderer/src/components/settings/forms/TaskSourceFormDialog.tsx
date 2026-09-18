@@ -6,11 +6,10 @@ import { Label } from '@/components/ui/Label'
 import { getPluginForm } from '@/components/plugins'
 import { PluginSetupDocumentation } from '@/components/plugins/PluginSetupDocumentation'
 import { pluginApi } from '@/lib/ipc-client'
-import type { McpServer, TaskSource, CreateTaskSourceDTO, PluginMeta } from '@/types'
+import type { TaskSource, CreateTaskSourceDTO, PluginMeta } from '@/types'
 
 interface TaskSourceFormDialogProps {
   source?: TaskSource
-  mcpServers: McpServer[]
   plugins: PluginMeta[]
   open: boolean
   onClose: () => void
@@ -19,7 +18,6 @@ interface TaskSourceFormDialogProps {
 
 export function TaskSourceFormDialog({
   source,
-  mcpServers,
   plugins,
   open,
   onClose,
@@ -27,7 +25,6 @@ export function TaskSourceFormDialog({
 }: TaskSourceFormDialogProps) {
   const [name, setName] = useState(source?.name ?? '')
   const [pluginId, setPluginId] = useState(source?.plugin_id ?? (plugins[0]?.id ?? ''))
-  const [mcpServerId, setMcpServerId] = useState(source?.mcp_server_id ?? (mcpServers[0]?.id ?? ''))
   const [pluginConfig, setPluginConfig] = useState<Record<string, unknown>>(source?.config ?? {})
   const [documentation, setDocumentation] = useState<string | null>(null)
 
@@ -35,7 +32,6 @@ export function TaskSourceFormDialog({
     if (open) {
       setName(source?.name ?? '')
       setPluginId(source?.plugin_id ?? (plugins[0]?.id ?? ''))
-      setMcpServerId(source?.mcp_server_id ?? (mcpServers[0]?.id ?? ''))
       setPluginConfig(source?.config ?? {})
     }
   }, [open, source?.id])
@@ -48,20 +44,19 @@ export function TaskSourceFormDialog({
   }, [pluginId])
 
   const selectedPlugin = plugins.find((p) => p.id === pluginId)
-  const isValid = name.trim() && pluginId && (!selectedPlugin?.requiresMcpServer || mcpServerId)
+  const isValid = name.trim() && pluginId
+
+  const buildData = (): CreateTaskSourceDTO => ({
+    mcp_server_id: null,
+    name: name.trim(),
+    plugin_id: pluginId,
+    config: pluginConfig
+  })
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!isValid) return
-
-    const data: CreateTaskSourceDTO = {
-      mcp_server_id: selectedPlugin?.requiresMcpServer ? mcpServerId : null,
-      name: name.trim(),
-      plugin_id: pluginId,
-      config: pluginConfig
-    }
-
-    onSubmit(data)
+    onSubmit(buildData())
     onClose()
   }
 
@@ -109,29 +104,6 @@ export function TaskSourceFormDialog({
                   />
                 </div>
 
-                {selectedPlugin?.requiresMcpServer && (
-                  <div className="space-y-1.5">
-                    <Label htmlFor="ts-server">MCP Server</Label>
-                    <select
-                      id="ts-server"
-                      value={mcpServerId}
-                      onChange={(e) => setMcpServerId(e.target.value)}
-                      className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm cursor-pointer"
-                      required
-                    >
-                      {mcpServers.length === 0 ? (
-                        <option value="">No MCP servers available</option>
-                      ) : (
-                        mcpServers.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.name}
-                          </option>
-                        ))
-                      )}
-                    </select>
-                  </div>
-                )}
-
                 {selectedPlugin && (() => {
                   const PluginForm = getPluginForm(selectedPlugin.id)
                   if (!PluginForm) {
@@ -150,13 +122,7 @@ export function TaskSourceFormDialog({
                       onRequestSave={() => {
                         // Auto-save source before OAuth when creating new source
                         if (!source && isValid) {
-                          const data: CreateTaskSourceDTO = {
-                            mcp_server_id: selectedPlugin?.requiresMcpServer ? mcpServerId : null,
-                            name: name.trim(),
-                            plugin_id: pluginId,
-                            config: pluginConfig
-                          }
-                          onSubmit(data)
+                          onSubmit(buildData())
                           return true
                         }
                         return false

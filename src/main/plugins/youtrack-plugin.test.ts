@@ -42,7 +42,6 @@ function makeContext(overrides: Partial<PluginContext> = {}): PluginContext {
       updateTaskSourceLastSynced: vi.fn(),
       getAttachmentsDir: vi.fn().mockReturnValue(TEST_ATTACHMENTS_DIR)
     } as unknown as DatabaseManager,
-    toolCaller: {} as PluginContext['toolCaller'],
     ...overrides
   }
 }
@@ -103,7 +102,6 @@ describe('YouTrackPlugin', () => {
     it('has correct plugin id and display name', () => {
       expect(plugin.id).toBe('youtrack')
       expect(plugin.displayName).toBe('YouTrack')
-      expect(plugin.requiresMcpServer).toBe(false)
     })
   })
 
@@ -145,40 +143,6 @@ describe('YouTrackPlugin', () => {
 
       const state = schema.find((f) => f.key === 'state')
       expect(state?.dependsOn).toEqual({ field: 'project', value: '__any__' })
-    })
-  })
-
-  describe('validateConfig', () => {
-    it('returns null for valid config', () => {
-      expect(plugin.validateConfig(defaultConfig)).toBeNull()
-    })
-
-    it('returns error for missing server_url', () => {
-      expect(plugin.validateConfig({ api_token: 'tok', project: 'P' }))
-        .toBe('Server URL is required')
-    })
-
-    it('returns error for missing api_token', () => {
-      expect(plugin.validateConfig({ server_url: 'http://x', project: 'P' }))
-        .toBe('Permanent token is required')
-    })
-
-    it('returns error for missing project', () => {
-      expect(plugin.validateConfig({ server_url: 'http://x', api_token: 'tok' }))
-        .toBe('Project is required')
-    })
-  })
-
-  describe('getFieldMapping', () => {
-    it('returns correct field mapping', () => {
-      const mapping = plugin.getFieldMapping(defaultConfig)
-      expect(mapping.external_id).toBe('id')
-      expect(mapping.title).toBe('summary')
-      expect(mapping.description).toBe('description')
-      expect(mapping.status).toBe('State')
-      expect(mapping.priority).toBe('Priority')
-      expect(mapping.assignee).toBe('Assignee')
-      expect(mapping.labels).toBe('tags')
     })
   })
 

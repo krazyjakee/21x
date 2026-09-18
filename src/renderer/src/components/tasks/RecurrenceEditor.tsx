@@ -4,6 +4,7 @@ import { Label } from '../ui/Label'
 import { Input } from '../ui/Input'
 import { Select } from '../ui/Select'
 import { Button } from '../ui/Button'
+import { buildCronExpression, parseCronToState, type RecurrenceFrequency as FrequencyType } from '@shared/recurrence-cron'
 
 interface RecurrenceEditorProps {
   value: RecurrencePattern | null
@@ -25,73 +26,6 @@ const FREQUENCY_OPTIONS = [
   { value: 'weekly', label: 'Weekly' },
   { value: 'monthly', label: 'Monthly' }
 ]
-
-type FrequencyType = 'daily' | 'weekly' | 'monthly'
-
-/** Parse a cron string back into visual controls state */
-function parseCronToState(cron: string): {
-  type: FrequencyType
-  interval: number
-  time: string
-  weekdays: number[]
-  monthDay: number
-} {
-  const parts = cron.trim().split(/\s+/)
-  if (parts.length < 5) {
-    return { type: 'daily', interval: 1, time: '09:00', weekdays: [1, 2, 3, 4, 5], monthDay: 1 }
-  }
-
-  const [minute, hour, dayOfMonth, , dayOfWeek] = parts
-  const time = `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`
-
-  // Monthly: specific day-of-month, any day-of-week
-  if (dayOfMonth !== '*' && !dayOfMonth.startsWith('*/') && dayOfWeek === '*') {
-    return { type: 'monthly', interval: 1, time, weekdays: [1, 2, 3, 4, 5], monthDay: parseInt(dayOfMonth) || 1 }
-  }
-
-  // Weekly: specific day-of-week
-  if (dayOfWeek !== '*') {
-    const weekdays = dayOfWeek.split(',').flatMap(part => {
-      if (part.includes('-')) {
-        const [start, end] = part.split('-').map(Number)
-        const days: number[] = []
-        for (let i = start; i <= end; i++) days.push(i)
-        return days
-      }
-      return [parseInt(part)]
-    }).filter(n => !isNaN(n))
-    return { type: 'weekly', interval: 1, time, weekdays, monthDay: 1 }
-  }
-
-  // Daily
-  let interval = 1
-  if (dayOfMonth.startsWith('*/')) {
-    interval = parseInt(dayOfMonth.slice(2)) || 1
-  }
-  return { type: 'daily', interval, time, weekdays: [1, 2, 3, 4, 5], monthDay: 1 }
-}
-
-/** Build a cron expression from visual controls */
-function buildCronExpression(
-  type: FrequencyType,
-  interval: number,
-  time: string,
-  weekdays: number[],
-  monthDay: number
-): string {
-  const [hour, minute] = time.split(':').map(s => parseInt(s) || 0)
-
-  switch (type) {
-    case 'daily':
-      return interval === 1
-        ? `${minute} ${hour} * * *`
-        : `${minute} ${hour} */${interval} * *`
-    case 'weekly':
-      return `${minute} ${hour} * * ${weekdays.sort((a, b) => a - b).join(',')}`
-    case 'monthly':
-      return `${minute} ${hour} ${monthDay} * *`
-  }
-}
 
 export function RecurrenceEditor({ value, onChange }: RecurrenceEditorProps) {
   const [enabled, setEnabled] = useState(!!value)

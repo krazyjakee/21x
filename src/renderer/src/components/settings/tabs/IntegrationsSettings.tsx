@@ -3,23 +3,19 @@ import { Plus, Loader2, RefreshCw, Edit3, Trash2, CheckCircle, XCircle } from 'l
 import { Button } from '@/components/ui/Button'
 import { SettingsSection } from '../SettingsSection'
 import { TaskSourceFormDialog } from '../forms/TaskSourceFormDialog'
-import { useMcpStore } from '@/stores/mcp-store'
 import { useTaskSourceStore } from '@/stores/task-source-store'
 import { useTaskStore } from '@/stores/task-store'
 import { pluginApi } from '@/lib/ipc-client'
 import type { CreateTaskSourceDTO, PluginMeta, TaskSource } from '@/types'
 
 export function IntegrationsSettings() {
-  const { servers: mcpServers } = useMcpStore()
   const { sources, syncingIds, createSource, updateSource, deleteSource, syncSource } = useTaskSourceStore()
   const { fetchTasks } = useTaskStore()
   const [plugins, setPlugins] = useState<PluginMeta[]>([])
   const [tsDialog, setTsDialog] = useState<{ open: boolean; source?: TaskSource }>({ open: false })
   const [oauthStatus, setOauthStatus] = useState<Map<string, boolean>>(new Map())
 
-  // Check if there are any plugins that don't require MCP servers (like Linear, HubSpot)
-  const hasStandalonePlugins = plugins.some((p) => !p.requiresMcpServer)
-  const canAddSource = mcpServers.length > 0 || hasStandalonePlugins
+  const canAddSource = plugins.length > 0
 
   useEffect(() => {
     const loadPlugins = async () => {
@@ -63,8 +59,7 @@ export function IntegrationsSettings() {
       await updateSource(tsDialog.source.id, {
         name: data.name,
         plugin_id: data.plugin_id,
-        config: data.config,
-        mcp_server_id: data.mcp_server_id || undefined
+        config: data.config
       })
       setTsDialog({ open: false })
       await checkOAuthStatus()
@@ -151,11 +146,8 @@ export function IntegrationsSettings() {
                         )}
                       </div>
                       <div className="text-xs text-muted-foreground truncate mt-0.5">
-                        {plugin?.requiresMcpServer &&
-                          (mcpServers.find((s) => s.id === source.mcp_server_id)?.name ?? 'Unknown')}
                         {source.last_synced_at && (
                           <span className="text-foreground/60">
-                            {plugin?.requiresMcpServer && ' · '}
                             Synced {new Date(source.last_synced_at).toLocaleString()}
                           </span>
                         )}
@@ -203,7 +195,6 @@ export function IntegrationsSettings() {
 
       <TaskSourceFormDialog
         source={tsDialog.source}
-        mcpServers={mcpServers}
         plugins={plugins}
         open={tsDialog.open}
         onClose={() => setTsDialog({ open: false })}

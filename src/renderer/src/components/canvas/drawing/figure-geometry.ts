@@ -166,18 +166,6 @@ export function hitTest(p: Point, obj: DrawingObject, tolerance = 4): boolean {
   }
 }
 
-/**
- * Return the id of the topmost figure under `p`, or null. Figures are tested
- * in descending z-order so the front-most one wins.
- */
-export function hitTestObjects(p: Point, objects: DrawingObject[], tolerance = 4): string | null {
-  const sorted = [...objects].sort((a, b) => b.zIndex - a.zIndex)
-  for (const obj of sorted) {
-    if (hitTest(p, obj, tolerance)) return obj.id
-  }
-  return null
-}
-
 /** Union bounding box of a set of figures (for selection outline / fit). */
 export function unionBox(objects: DrawingObject[]): Box | null {
   if (objects.length === 0) return null

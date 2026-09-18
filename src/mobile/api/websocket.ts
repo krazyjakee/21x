@@ -114,16 +114,6 @@ export function connectWebSocket(): void {
   }
 }
 
-export function disconnectWebSocket(): void {
-  stopHeartbeat()
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer)
-    reconnectTimer = null
-  }
-  ws?.close()
-  ws = null
-}
-
 export function onEvent(type: string, handler: EventHandler): () => void {
   if (!handlers.has(type)) handlers.set(type, new Set())
   handlers.get(type)!.add(handler)

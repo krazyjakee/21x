@@ -69,21 +69,6 @@ describe('canvas-store', () => {
       expect(viewport).toEqual({ x: 0, y: 0, zoom: 1 })
     })
 
-    it('should pan by delta', () => {
-      useCanvasStore.getState().panBy(100, -50)
-      const { viewport } = useCanvasStore.getState()
-      expect(viewport.x).toBe(100)
-      expect(viewport.y).toBe(-50)
-    })
-
-    it('should accumulate pans', () => {
-      useCanvasStore.getState().panBy(10, 20)
-      useCanvasStore.getState().panBy(30, 40)
-      const { viewport } = useCanvasStore.getState()
-      expect(viewport.x).toBe(40)
-      expect(viewport.y).toBe(60)
-    })
-
     it('should clamp zoom to MIN_ZOOM', () => {
       useCanvasStore.getState().zoomTo(0.01)
       const { viewport } = useCanvasStore.getState()
@@ -110,17 +95,10 @@ describe('canvas-store', () => {
     })
 
     it('should reset viewport', () => {
-      useCanvasStore.getState().panBy(500, 300)
+      useCanvasStore.getState().setViewport({ x: 500, y: 300 })
       useCanvasStore.getState().zoomTo(2.5)
       useCanvasStore.getState().resetViewport()
       expect(useCanvasStore.getState().viewport).toEqual({ x: 0, y: 0, zoom: 1 })
-    })
-
-    it('should zoomAtPoint correctly', () => {
-      const containerRect = { left: 0, top: 0, width: 800, height: 600 } as DOMRect
-      useCanvasStore.getState().zoomAtPoint(-1, 400, 300, containerRect)
-      const { viewport } = useCanvasStore.getState()
-      expect(viewport.zoom).toBeGreaterThan(1)
     })
 
     it('fitToContent fits the passed content bounds when there are no panels', () => {
@@ -231,16 +209,6 @@ describe('canvas-store', () => {
       expect(panelA.zIndex).toBe(3)
     })
 
-    it('should clear all panels and edges', () => {
-      const id1 = useCanvasStore.getState().addPanel({ type: 'task', title: 'A', x: 0, y: 0, width: 400, height: 300 })
-      const id2 = useCanvasStore.getState().addPanel({ type: 'task', title: 'B', x: 100, y: 100, width: 400, height: 300 })
-      useCanvasStore.getState().addEdge(id1, id2)
-      useCanvasStore.getState().clearPanels()
-      expect(useCanvasStore.getState().panels).toHaveLength(0)
-      expect(useCanvasStore.getState().edges).toHaveLength(0)
-      expect(useCanvasStore.getState().nextZIndex).toBe(1)
-    })
-
     it('should remove associated edges when removing a panel', () => {
       const id1 = useCanvasStore.getState().addPanel({ type: 'task', title: 'A', x: 0, y: 0, width: 400, height: 300 })
       const id2 = useCanvasStore.getState().addPanel({ type: 'task', title: 'B', x: 100, y: 100, width: 400, height: 300 })
@@ -290,16 +258,6 @@ describe('canvas-store', () => {
       const id2 = useCanvasStore.getState().addPanel({ type: 'task', title: 'B', x: 500, y: 0, width: 400, height: 300 })
       const edgeId = useCanvasStore.getState().addEdge(id1, id2)
       useCanvasStore.getState().removeEdge(edgeId)
-      expect(useCanvasStore.getState().edges).toHaveLength(0)
-    })
-
-    it('should clear all edges', () => {
-      const id1 = useCanvasStore.getState().addPanel({ type: 'task', title: 'A', x: 0, y: 0, width: 400, height: 300 })
-      const id2 = useCanvasStore.getState().addPanel({ type: 'task', title: 'B', x: 500, y: 0, width: 400, height: 300 })
-      const id3 = useCanvasStore.getState().addPanel({ type: 'task', title: 'C', x: 0, y: 500, width: 400, height: 300 })
-      useCanvasStore.getState().addEdge(id1, id2)
-      useCanvasStore.getState().addEdge(id2, id3)
-      useCanvasStore.getState().clearEdges()
       expect(useCanvasStore.getState().edges).toHaveLength(0)
     })
   })
@@ -356,15 +314,6 @@ describe('canvas-store', () => {
       expect(clampZoom(100)).toBe(MAX_ZOOM)
       expect(clampZoom(0)).toBe(MIN_ZOOM)
       expect(clampZoom(1.5)).toBe(1.5)
-    })
-
-    it('produces the same result as the zoomAtPoint store action', () => {
-      const rect = { left: 0, top: 0 } as DOMRect
-      const expected = zoomViewportAtPoint({ x: 0, y: 0, zoom: 1 }, -120, 400, 300, rect)
-
-      useCanvasStore.getState().zoomAtPoint(-120, 400, 300, rect)
-
-      expect(useCanvasStore.getState().viewport).toEqual(expected)
     })
 
     it('keeps the zoom anchor point fixed on screen', () => {

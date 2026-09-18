@@ -1,12 +1,9 @@
-import { writeFileSync } from 'fs'
-import { join, extname } from 'path'
 import {
   PluginActionId,
   type TaskSourcePlugin,
   type PluginConfigSchema,
   type ConfigFieldOption,
   type PluginContext,
-  type FieldMapping,
   type PluginAction,
   type PluginSyncResult,
   type ActionResult
@@ -16,115 +13,23 @@ import type { SourceUser, ReassignResult } from '../../shared/types'
 import { TaskStatus } from '../../shared/constants'
 import { replaceRemoteImageUrlsInTask } from './replace-image-urls'
 import { normalizeUrlForComparison, buildNormalizedUrlSet } from './url-utils'
+import { saveTaskAttachment } from './attachments'
+import { mimeTypeForPath } from '../mime'
+import { NotionClient, type NotionBlock, type NotionPage } from './notion-client'
 import {
-  NotionClient,
-  type NotionDataSource,
-  type NotionPage,
-  type NotionPropertySchema,
-  type NotionPropertyValue,
-  type NotionFilter
-} from './notion-client'
-
-// ── Notion property types ────────────────────────────────────
-
-export enum NotionPropertyType {
-  Title = 'title',
-  RichText = 'rich_text',
-  Number = 'number',
-  Select = 'select',
-  MultiSelect = 'multi_select',
-  Status = 'status',
-  Date = 'date',
-  People = 'people',
-  Checkbox = 'checkbox',
-  Url = 'url',
-  Email = 'email',
-  PhoneNumber = 'phone_number',
-  Files = 'files',
-  CreatedTime = 'created_time',
-  LastEditedTime = 'last_edited_time',
-  Formula = 'formula',
-  Relation = 'relation',
-  Rollup = 'rollup',
-  UniqueId = 'unique_id'
-}
-
-/** Property types that support server-side filtering */
-export const FILTERABLE_PROPERTY_TYPES = new Set([
-  NotionPropertyType.Status,
-  NotionPropertyType.Select,
-  NotionPropertyType.MultiSelect,
-  NotionPropertyType.People,
-  NotionPropertyType.Title,
-  NotionPropertyType.RichText,
-  NotionPropertyType.Number,
-  NotionPropertyType.Checkbox,
-  NotionPropertyType.Date
-])
-
-/** Property types that have predefined option values (rendered as dropdown/checkboxes in UI) */
-export const ENUM_PROPERTY_TYPES = new Set([
-  NotionPropertyType.Status,
-  NotionPropertyType.Select,
-  NotionPropertyType.MultiSelect,
-  NotionPropertyType.People
-])
-
-/** Human-readable labels for property types */
-export const PROPERTY_TYPE_LABELS: Record<string, string> = {
-  [NotionPropertyType.Status]: 'Status',
-  [NotionPropertyType.Select]: 'Select',
-  [NotionPropertyType.MultiSelect]: 'Multi-select',
-  [NotionPropertyType.Title]: 'Title',
-  [NotionPropertyType.RichText]: 'Text',
-  [NotionPropertyType.Number]: 'Number',
-  [NotionPropertyType.Checkbox]: 'Checkbox',
-  [NotionPropertyType.Date]: 'Date',
-  [NotionPropertyType.People]: 'People',
-  [NotionPropertyType.Url]: 'URL',
-  [NotionPropertyType.Email]: 'Email'
-}
-
-// ── Filter config (stored in source config) ──────────────────
-
-export interface NotionFilterConfig {
-  property: string
-  type: string
-  values: string[]
-}
-
-/**
- * Maps a Notion property type to its Notion API filter key and operator.
- * Returns { filterKey, operator } for building Notion compound filters.
- */
-function buildPropertyFilter(
-  type: string,
-  property: string,
-  val: string
-): Record<string, unknown> {
-  switch (type) {
-    case NotionPropertyType.Status:
-      return { property, status: { equals: val } }
-    case NotionPropertyType.Select:
-      return { property, select: { equals: val } }
-    case NotionPropertyType.MultiSelect:
-      return { property, multi_select: { contains: val } }
-    case NotionPropertyType.People:
-      return { property, people: { contains: val } }
-    case NotionPropertyType.Title:
-      return { property, title: { contains: val } }
-    case NotionPropertyType.RichText:
-      return { property, rich_text: { contains: val } }
-    case NotionPropertyType.Number:
-      return { property, number: { equals: Number(val) } }
-    case NotionPropertyType.Checkbox:
-      return { property, checkbox: { equals: val === 'true' } }
-    case NotionPropertyType.Date:
-      return { property, date: { on_or_after: val } }
-    default:
-      return { property, rich_text: { contains: val } }
-  }
-}
+  FILTERABLE_PROPERTY_TYPES,
+  NotionPropertyType,
+  PRIORITY_TO_LOCAL,
+  STATUS_TO_LOCAL,
+  buildNotionFilter,
+  buildPropertyMap,
+  formatProperties,
+  localPriorityToNotion,
+  localStatusToNotion,
+  statusOptionNames,
+  type NotionFilterConfig,
+  type PropertyMap
+} from './notion-properties'
 
 // ── Next statuses (stored in source config) ──────────────────
 
@@ -133,7 +38,7 @@ function buildPropertyFilter(
  * the source form from the real options of the Notion status property, because
  * the name heuristics below only know the default Notion board names.
  */
-export function readNextStatuses(config: Record<string, unknown>): string[] {
+function readNextStatuses(config: Record<string, unknown>): string[] {
   const raw = config.next_statuses
   if (!Array.isArray(raw)) return []
   const seen = new Set<string>()
@@ -153,7 +58,7 @@ export function readNextStatuses(config: Record<string, unknown>): string[] {
  * none, or when the selection is stale — the status list can change in Notion
  * after the source was configured.
  */
-export function readCompletionStatus(config: Record<string, unknown>): string | null {
+function readCompletionStatus(config: Record<string, unknown>): string | null {
   const raw = config.completion_status
   if (typeof raw !== 'string') return null
   const name = raw.trim()
@@ -174,64 +79,6 @@ function configuredStatuses(config: Record<string, unknown>): string[] {
   return nextStatuses
 }
 
-// ── Status mapping ───────────────────────────────────────────
-
-const STATUS_TO_LOCAL: Record<string, TaskStatus> = {
-  'not started': TaskStatus.NotStarted,
-  'todo': TaskStatus.NotStarted,
-  'to do': TaskStatus.NotStarted,
-  'backlog': TaskStatus.NotStarted,
-  'in progress': TaskStatus.AgentWorking,
-  'doing': TaskStatus.AgentWorking,
-  'in review': TaskStatus.ReadyForReview,
-  'done': TaskStatus.Completed,
-  'complete': TaskStatus.Completed,
-  'completed': TaskStatus.Completed
-}
-
-const LOCAL_TO_NOTION_STATUS: Record<string, string[]> = {
-  [TaskStatus.NotStarted]: ['Not started', 'To Do', 'Backlog'],
-  [TaskStatus.AgentWorking]: ['In progress', 'Doing'],
-  [TaskStatus.ReadyForReview]: ['In review'],
-  [TaskStatus.Completed]: ['Done', 'Complete', 'Completed']
-}
-
-// ── Priority mapping ─────────────────────────────────────────
-
-const PRIORITY_TO_LOCAL: Record<string, string> = {
-  'critical': 'critical',
-  'urgent': 'critical',
-  'p0': 'critical',
-  'high': 'high',
-  'p1': 'high',
-  'medium': 'medium',
-  'p2': 'medium',
-  'low': 'low',
-  'p3': 'low'
-}
-
-const LOCAL_TO_NOTION_PRIORITY: Record<string, string[]> = {
-  critical: ['Critical', 'Urgent', 'P0'],
-  high: ['High', 'P1'],
-  medium: ['Medium', 'P2'],
-  low: ['Low', 'P3']
-}
-
-// ── Property map (auto-detected from DB schema) ──────────────
-
-interface PropertyMap {
-  title: string
-  status?: { name: string; type: NotionPropertyType.Status | NotionPropertyType.Select }
-  priority?: { name: string; type: NotionPropertyType.Select }
-  assignee?: { name: string }
-  dueDate?: { name: string }
-  labels?: { name: string; type: NotionPropertyType.MultiSelect }
-}
-
-/** Name heuristics for auto-detecting property roles */
-const ASSIGNEE_HEURISTICS = new Set(['assignee', 'owner', 'assigned to'])
-const DUE_DATE_HEURISTICS = new Set(['due', 'deadline', 'due date'])
-const LABELS_HEURISTICS = new Set(['tags', 'labels', 'category'])
 
 // ── Plugin ───────────────────────────────────────────────────
 
@@ -240,7 +87,6 @@ export class NotionPlugin implements TaskSourcePlugin {
   displayName = 'Notion'
   description = 'Import tasks from a Notion data source'
   icon = 'BookOpen'
-  requiresMcpServer = false
 
   getConfigSchema(): PluginConfigSchema {
     return [
@@ -298,16 +144,11 @@ export class NotionPlugin implements TaskSourcePlugin {
     const client = new NotionClient(token)
 
     if (resolverKey === 'data_sources') {
-      try {
-        const dataSources = await client.searchDataSources()
-        return dataSources.map((dataSource) => ({
-          value: dataSource.id,
-          label: dataSource.title.map((t) => t.plain_text).join('') || 'Untitled'
-        }))
-      } catch (err) {
-        console.error('[notion] Failed to fetch data sources:', err)
-        throw err
-      }
+      const dataSources = await client.searchDataSources()
+      return dataSources.map((dataSource) => ({
+        value: dataSource.id,
+        label: dataSource.title.map((t) => t.plain_text).join('') || 'Untitled'
+      }))
     }
 
     if (resolverKey === 'status_options') {
@@ -316,9 +157,9 @@ export class NotionPlugin implements TaskSourcePlugin {
 
       try {
         const db = await client.getDataSource(dataSourceId)
-        const propMap = this.buildPropertyMap(db)
+        const propMap = buildPropertyMap(db)
         if (!propMap.status) return []
-        return this.statusOptionNames(db.properties[propMap.status.name]).map((name) => ({
+        return statusOptionNames(db.properties[propMap.status.name]).map((name) => ({
           value: name,
           label: name
         }))
@@ -386,29 +227,6 @@ export class NotionPlugin implements TaskSourcePlugin {
     return []
   }
 
-  validateConfig(config: Record<string, unknown>): string | null {
-    if (!config.api_token || typeof config.api_token !== 'string') {
-      return 'Integration token is required'
-    }
-    if (!config.data_source_id || typeof config.data_source_id !== 'string') {
-      return 'Data source is required'
-    }
-    return null
-  }
-
-  getFieldMapping(_config: Record<string, unknown>): FieldMapping {
-    return {
-      external_id: 'id',
-      title: 'title',
-      description: 'content',
-      status: 'status',
-      priority: 'priority',
-      assignee: 'assignee',
-      due_date: 'due_date',
-      labels: 'labels'
-    }
-  }
-
   getActions(config: Record<string, unknown>): PluginAction[] {
     const nextStatuses = readNextStatuses(config)
     const changeStatus: PluginAction = {
@@ -453,13 +271,10 @@ export class NotionPlugin implements TaskSourcePlugin {
     try {
       // Fetch DB schema and build property map
       const db = await client.getDataSource(dataSourceId)
-      const propMap = this.buildPropertyMap(db)
+      const propMap = buildPropertyMap(db)
 
       // Build filter from config
-      const rawFilters = config.filters as NotionFilterConfig[] | undefined
-      console.log('[Notion] Raw filter config:', JSON.stringify(rawFilters))
-      const notionFilter = this.buildNotionFilter(rawFilters)
-      console.log('[Notion] Built Notion filter:', JSON.stringify(notionFilter))
+      const notionFilter = buildNotionFilter(config.filters as NotionFilterConfig[] | undefined)
 
       // Get last synced time for incremental sync
       const source = ctx.db.getTaskSource(sourceId)
@@ -476,7 +291,7 @@ export class NotionPlugin implements TaskSourcePlugin {
           if (!mapped.title) continue
 
           // Fetch page blocks for both content rendering and file extraction
-          let blocks: import('./notion-client').NotionBlock[] = []
+          let blocks: NotionBlock[] = []
           const parts: string[] = []
           try {
             blocks = await client.getPageBlocks(page.id)
@@ -487,7 +302,7 @@ export class NotionPlugin implements TaskSourcePlugin {
           }
 
           // Append properties table
-          const propsSection = this.formatProperties(page, propMap.title)
+          const propsSection = formatProperties(page, propMap.title)
           if (propsSection) parts.push(propsSection)
 
           // Append link to Notion page
@@ -587,7 +402,7 @@ export class NotionPlugin implements TaskSourcePlugin {
 
     try {
       const db = await client.getDataSource(dataSourceId)
-      const propMap = this.buildPropertyMap(db)
+      const propMap = buildPropertyMap(db)
       const properties: Record<string, unknown> = {}
 
       if (changedFields.title && typeof changedFields.title === 'string') {
@@ -600,7 +415,7 @@ export class NotionPlugin implements TaskSourcePlugin {
         const localStatus = changedFields.status as string
         const notionStatus =
           (localStatus === TaskStatus.Completed ? readCompletionStatus(config) : null) ??
-          this.localStatusToNotion(localStatus, db.properties[propMap.status.name])
+          localStatusToNotion(localStatus, db.properties[propMap.status.name])
         if (notionStatus) {
           if (propMap.status.type === NotionPropertyType.Status) {
             properties[propMap.status.name] = { status: { name: notionStatus } }
@@ -611,7 +426,7 @@ export class NotionPlugin implements TaskSourcePlugin {
       }
 
       if (changedFields.priority && propMap.priority) {
-        const notionPriority = this.localPriorityToNotion(
+        const notionPriority = localPriorityToNotion(
           changedFields.priority as string,
           db.properties[propMap.priority.name]
         )
@@ -663,7 +478,7 @@ export class NotionPlugin implements TaskSourcePlugin {
 
     try {
       const db = await client.getDataSource(dataSourceId)
-      const propMap = this.buildPropertyMap(db)
+      const propMap = buildPropertyMap(db)
       const properties: Record<string, unknown> = {}
 
       if (actionId === PluginActionId.ChangeStatus && propMap.status) {
@@ -671,7 +486,7 @@ export class NotionPlugin implements TaskSourcePlugin {
         // the DB schema, and finally the input as typed.
         const notionStatus =
           this.matchConfiguredStatus(input, config) ??
-          this.localStatusToNotion(input, db.properties[propMap.status.name]) ??
+          localStatusToNotion(input, db.properties[propMap.status.name]) ??
           input
         if (propMap.status.type === NotionPropertyType.Status) {
           properties[propMap.status.name] = { status: { name: notionStatus } }
@@ -679,7 +494,7 @@ export class NotionPlugin implements TaskSourcePlugin {
           properties[propMap.status.name] = { select: { name: notionStatus } }
         }
       } else if (actionId === PluginActionId.UpdatePriority && propMap.priority) {
-        const notionPriority = this.localPriorityToNotion(input, db.properties[propMap.priority.name]) || input
+        const notionPriority = localPriorityToNotion(input, db.properties[propMap.priority.name]) || input
         properties[propMap.priority.name] = { select: { name: notionPriority } }
       } else {
         return { success: false, error: `Unknown action or missing property: ${actionId}` }
@@ -745,7 +560,7 @@ export class NotionPlugin implements TaskSourcePlugin {
 
     try {
       const db = await client.getDataSource(dataSourceId)
-      const propMap = this.buildPropertyMap(db)
+      const propMap = buildPropertyMap(db)
 
       if (!propMap.assignee) {
         return { success: false, error: 'No assignee property found in database' }
@@ -865,66 +680,6 @@ The integration automatically maps Notion properties to task fields:
   // ── Private helpers ────────────────────────────────────────
 
   /**
-   * Auto-detect which Notion properties map to task fields
-   */
-  private buildPropertyMap(
-    db: NotionDataSource
-  ): PropertyMap {
-    const props = db.properties
-    const map: PropertyMap = { title: '' }
-
-    for (const [name, schema] of Object.entries(props)) {
-      const lower = name.toLowerCase()
-
-      // Title — every DB has exactly one
-      if (schema.type === NotionPropertyType.Title) {
-        map.title = name
-      }
-
-      // Status
-      if (!map.status) {
-        if (schema.type === NotionPropertyType.Status) {
-          map.status = { name, type: NotionPropertyType.Status }
-        } else if (schema.type === NotionPropertyType.Select && lower === 'status') {
-          map.status = { name, type: NotionPropertyType.Select }
-        }
-      }
-
-      // Priority
-      if (!map.priority && schema.type === NotionPropertyType.Select && lower === 'priority') {
-        map.priority = { name, type: NotionPropertyType.Select }
-      }
-
-      // Assignee
-      if (schema.type === NotionPropertyType.People) {
-        if (!map.assignee) {
-          if (ASSIGNEE_HEURISTICS.has(lower)) {
-            map.assignee = { name }
-          } else {
-            map.assignee = { name } // fallback to first People property
-          }
-        }
-      }
-
-      // Due date
-      if (schema.type === NotionPropertyType.Date) {
-        if (!map.dueDate || DUE_DATE_HEURISTICS.has(lower)) {
-          map.dueDate = { name }
-        }
-      }
-
-      // Labels
-      if (schema.type === NotionPropertyType.MultiSelect) {
-        if (!map.labels || LABELS_HEURISTICS.has(lower)) {
-          map.labels = { name, type: NotionPropertyType.MultiSelect }
-        }
-      }
-    }
-
-    return map
-  }
-
-  /**
    * Extract task fields from a Notion page using the property map
    */
   private mapPage(
@@ -1008,106 +763,6 @@ The integration automatically maps Notion properties to task fields:
   }
 
   /**
-   * Format all Notion page properties as a markdown section.
-   * Skips the title property (already used as task title).
-   */
-  private formatProperties(page: NotionPage, titlePropName: string): string {
-    const lines: string[] = []
-
-    for (const [name, prop] of Object.entries(page.properties)) {
-      if (name === titlePropName) continue
-
-      const val = this.formatPropertyValue(prop)
-      if (val) {
-        lines.push(`| ${name} | ${val} |`)
-      }
-    }
-
-    if (lines.length === 0) return ''
-
-    return '---\n\n**Properties**\n\n| Property | Value |\n| --- | --- |\n' + lines.join('\n')
-  }
-
-  /**
-   * Format a single Notion property value as a string
-   */
-  private formatPropertyValue(prop: NotionPropertyValue): string | null {
-    switch (prop.type) {
-      case 'title':
-        return prop.title?.map((t) => t.plain_text).join('') || null
-      case 'rich_text':
-        return prop.rich_text?.map((t) => t.plain_text).join('') || null
-      case 'status':
-        return prop.status?.name || null
-      case 'select':
-        return prop.select?.name || null
-      case 'multi_select':
-        return prop.multi_select?.map((s) => s.name).join(', ') || null
-      case 'people':
-        return prop.people?.map((p) => p.name || p.person?.email || p.id).join(', ') || null
-      case 'date': {
-        if (!prop.date?.start) return null
-        const start = prop.date.start.split('T')[0]
-        const end = prop.date.end?.split('T')[0]
-        return end ? `${start} → ${end}` : start
-      }
-      case 'number':
-        return prop.number != null ? String(prop.number) : null
-      case 'checkbox':
-        return prop.checkbox ? 'Yes' : 'No'
-      case 'url':
-        return prop.url || null
-      case 'files': {
-        if (!prop.files || prop.files.length === 0) return null
-        return prop.files.map((f) => {
-          const url = f.type === 'file' ? f.file?.url : f.external?.url
-          return url ? `[${f.name}](${url})` : f.name
-        }).join(', ')
-      }
-      case 'unique_id': {
-        if (!prop.unique_id) return null
-        const prefix = prop.unique_id.prefix
-        return prefix ? `${prefix}-${prop.unique_id.number}` : String(prop.unique_id.number)
-      }
-      default:
-        return null
-    }
-  }
-
-  /**
-   * Build Notion API filter from structured filter config.
-   * Same property values → OR, different properties → AND.
-   */
-  private buildNotionFilter(
-    filters: NotionFilterConfig[] | undefined
-  ): NotionFilter | undefined {
-    if (!filters || filters.length === 0) return undefined
-
-    const andClauses: NotionFilter[] = []
-
-    for (const filter of filters) {
-      if (!filter.property || !filter.type || filter.values.length === 0) continue
-
-      const nonEmptyValues = filter.values.filter((v) => v !== '')
-      if (nonEmptyValues.length === 0) continue
-
-      const orClauses = nonEmptyValues.map((val) =>
-        buildPropertyFilter(filter.type, filter.property, val)
-      ) as NotionFilter[]
-
-      if (orClauses.length === 1) {
-        andClauses.push(orClauses[0])
-      } else {
-        andClauses.push({ or: orClauses })
-      }
-    }
-
-    if (andClauses.length === 0) return undefined
-    if (andClauses.length === 1) return andClauses[0]
-    return { and: andClauses }
-  }
-
-  /**
    * Download Notion files and save them as task attachments.
    * Skips files that have already been downloaded (by URL).
    */
@@ -1120,101 +775,28 @@ The integration automatically maps Notion properties to task fields:
     const task = ctx.db.getTask(taskId)
     if (!task) return
 
-    const existingAttachments = task.attachments || []
-    const existingNormalizedUrls = buildNormalizedUrlSet(
-      existingAttachments as unknown as Array<Record<string, unknown>>,
+    // Signed query params change on every API call, so compare without them.
+    const existingUrls = buildNormalizedUrlSet(
+      (task.attachments || []) as unknown as Array<Record<string, unknown>>,
       'notion_url'
     )
 
     for (const file of files) {
-      // Skip if already downloaded (compare without query params since signed tokens change on each API call)
-      if (existingNormalizedUrls.has(normalizeUrlForComparison(file.url))) continue
+      if (existingUrls.has(normalizeUrlForComparison(file.url))) continue
 
       try {
-        console.log(`[notion] Downloading: ${file.filename}`)
-
         const { buffer, filename: headerFilename, contentType } = await client.downloadFile(file.url)
-
-        // Priority: original filename from Notion > Content-Disposition header filename
-        const actualFilename = file.filename || headerFilename || `notion-file-${Date.now()}`
-
-        // Detect MIME type
-        const mimeType = contentType || this.guessMimeType(actualFilename)
-
-        // Generate unique ID
-        const attachmentId = crypto.randomUUID()
-
-        // Save to attachments directory
-        const attachmentsDir = ctx.db.getAttachmentsDir(taskId)
-        const filePath = join(attachmentsDir, `${attachmentId}-${actualFilename}`)
-        writeFileSync(filePath, buffer)
-
-        // Add to task attachments
-        const newAttachment = {
-          id: attachmentId,
-          filename: actualFilename,
-          size: buffer.length,
-          mime_type: mimeType,
-          added_at: new Date().toISOString(),
-          notion_url: file.url
-        }
-
-        ctx.db.updateTask(taskId, {
-          attachments: [...existingAttachments, newAttachment]
-        })
-
-        console.log(`[notion] Saved attachment: ${actualFilename} (${buffer.length} bytes, ${mimeType})`)
-
-        // Update for next iteration
-        existingAttachments.push(newAttachment)
-        existingNormalizedUrls.add(normalizeUrlForComparison(file.url))
+        // The name Notion shows beats the Content-Disposition header.
+        const filename = file.filename || headerFilename || `notion-file-${Date.now()}`
+        const mimeType = contentType || mimeTypeForPath(filename)
+        saveTaskAttachment(ctx, taskId, { buffer, filename, mimeType, extra: { notion_url: file.url } })
+        existingUrls.add(normalizeUrlForComparison(file.url))
+        console.log(`[notion] Saved attachment: ${filename} (${buffer.length} bytes, ${mimeType})`)
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Unknown error'
         console.error(`[notion] Failed to download ${file.filename}: ${msg}`)
       }
     }
-  }
-
-  /**
-   * Guess MIME type from filename extension
-   */
-  private guessMimeType(filename: string): string {
-    const ext = extname(filename).toLowerCase()
-    const mimeTypes: Record<string, string> = {
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.png': 'image/png',
-      '.gif': 'image/gif',
-      '.webp': 'image/webp',
-      '.svg': 'image/svg+xml',
-      '.pdf': 'application/pdf',
-      '.doc': 'application/msword',
-      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      '.xls': 'application/vnd.ms-excel',
-      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      '.ppt': 'application/vnd.ms-powerpoint',
-      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.document',
-      '.zip': 'application/zip',
-      '.txt': 'text/plain',
-      '.csv': 'text/csv',
-      '.json': 'application/json',
-      '.mp3': 'audio/mpeg',
-      '.mp4': 'video/mp4',
-      '.mov': 'video/quicktime'
-    }
-    return mimeTypes[ext] || 'application/octet-stream'
-  }
-
-  /**
-   * Option names of a Notion status or select property, in board order.
-   */
-  private statusOptionNames(propSchema: NotionPropertySchema | undefined): string[] {
-    if (!propSchema) return []
-    const options =
-      propSchema.type === NotionPropertyType.Status
-        ? propSchema.status?.options
-        : propSchema.select?.options
-    return options?.map((o) => o.name) ?? []
   }
 
   /**
@@ -1230,49 +812,4 @@ The integration automatically maps Notion properties to task fields:
     return configuredStatuses(config).find((s) => s.toLowerCase() === wanted) ?? null
   }
 
-  /**
-   * Map local status to a Notion status option name
-   */
-  private localStatusToNotion(
-    localStatus: string,
-    propSchema: NotionPropertySchema | undefined
-  ): string | null {
-    if (!propSchema) return null
-
-    const candidates = LOCAL_TO_NOTION_STATUS[localStatus]
-    if (!candidates) return null
-
-    const optionNames = this.statusOptionNames(propSchema)
-    if (optionNames.length === 0) return null
-
-    // Find first matching candidate
-    for (const candidate of candidates) {
-      const match = optionNames.find((n) => n.toLowerCase() === candidate.toLowerCase())
-      if (match) return match
-    }
-
-    return null
-  }
-
-  /**
-   * Map local priority to a Notion select option name
-   */
-  private localPriorityToNotion(
-    localPriority: string,
-    propSchema: NotionPropertySchema | undefined
-  ): string | null {
-    if (!propSchema?.select?.options) return null
-
-    const candidates = LOCAL_TO_NOTION_PRIORITY[localPriority]
-    if (!candidates) return null
-
-    const optionNames = propSchema.select.options.map((o) => o.name)
-
-    for (const candidate of candidates) {
-      const match = optionNames.find((n) => n.toLowerCase() === candidate.toLowerCase())
-      if (match) return match
-    }
-
-    return null
-  }
 }

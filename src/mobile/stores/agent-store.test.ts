@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { Mock } from 'vitest'
 import { onEvent } from '../api/websocket'
 import { useAgentStore, SessionStatus, __clearProjectionsForTest } from './agent-store'
-import { api, type TranscriptPartRecord } from '../api/client'
+import { api } from '../api/client'
+import type { TranscriptPartRecord } from '@shared/transcript/types'
 
 // Capture the onEvent callbacks registered at store init time
 const eventHandlers = new Map<string, (payload: unknown) => void>()
@@ -82,6 +83,8 @@ describe('useAgentStore (projection model)', () => {
   })
 
   describe('transcript:changed delta', () => {
+    beforeEach(() => setSession('task-1', SessionStatus.WORKING))
+
     it('applies a delta into the derived list', () => {
       transcriptHandler({ taskId: 'task-1', parts: [part('a')], maxRev: 1 })
       const s = useAgentStore.getState().sessions.get('task-1')!
@@ -112,7 +115,19 @@ describe('useAgentStore (projection model)', () => {
 
     it('ignores deltas with no taskId', () => {
       transcriptHandler({ parts: [part('a')], maxRev: 1 })
-      expect(useAgentStore.getState().sessions.size).toBe(0)
+      expect(useAgentStore.getState().sessions.get('task-1')!.messages).toHaveLength(0)
+    })
+
+    it('ignores deltas for tasks that are neither bound nor have a session', () => {
+      transcriptHandler({ taskId: 'task-other', parts: [part('a', { taskId: 'task-other' })], maxRev: 1 })
+      expect(useAgentStore.getState().sessions.has('task-other')).toBe(false)
+    })
+
+    it('applies deltas to a bound task even when its snapshot was empty', async () => {
+      ;(api.transcript.snapshot as unknown as Mock).mockResolvedValue([])
+      await useAgentStore.getState().bindTranscript('task-bound')
+      transcriptHandler({ taskId: 'task-bound', parts: [part('a', { taskId: 'task-bound' })], maxRev: 1 })
+      expect(useAgentStore.getState().sessions.get('task-bound')!.messages.map((m) => m.id)).toEqual(['a'])
     })
   })
 
@@ -139,14 +154,6 @@ describe('useAgentStore (projection model)', () => {
       expect(s.messages.map((m) => m.id)).toEqual(['m1'])
     })
 
-    it('does not call the removed replay/sync endpoint', async () => {
-      ;(api.sessions.list as unknown as Mock).mockResolvedValue([
-        { sessionId: 'sess-1', agentId: 'agent-1', taskId: 'task-1', status: 'working' }
-      ])
-      ;(api.transcript.snapshot as unknown as Mock).mockResolvedValue([])
-      await useAgentStore.getState().syncActiveSessions()
-      expect(api.sessions.sync).not.toHaveBeenCalled()
-    })
 
     it('handles api.sessions.list failure gracefully', async () => {
       ;(api.sessions.list as unknown as Mock).mockRejectedValue(new Error('Server down'))
@@ -190,7 +197,8 @@ describe('useAgentStore (projection model)', () => {
       statusHandler({ sessionId: 'sess-x', agentId: 'agent-1', taskId: 'task-9', status: SessionStatus.WORKING })
       const s = useAgentStore.getState().sessions.get('task-9')!
       expect(s.sessionId).toBe('sess-x')
-      expect(s.status).toBe(SessionStatus.WORKING)
+      expect(s.status).toBe(SessionStatus.WORKING)      // Deltas that preceded the status event were skipped — load the snapshot.
+      expect(api.transcript.snapshot).toHaveBeenCalledWith('task-9')
     })
   })
 

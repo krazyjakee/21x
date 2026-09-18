@@ -35,8 +35,11 @@
  * service belongs outside the workspaces root.
  */
 
-import { execFileSync } from 'child_process'
-import { existsSync, readlinkSync, realpathSync, statfsSync } from 'fs'
+import { execFile } from 'child_process'
+import { existsSync, realpathSync, statfsSync } from 'fs'
+import { readlink } from 'fs/promises'
+import { setTimeout as sleep } from 'timers/promises'
+import { promisify } from 'util'
 import { isAbsolute, normalize, resolve, sep } from 'path'
 import { collectDescendantPids, parseProcessTable, type ProcessRow } from './mcp-process-cleanup'
 
@@ -187,10 +190,9 @@ export type LeakSelection = {
    * Whether a parentless process is leaked WHATEVER its task's status says.
    *
    * True only for the BOOT sweep, and it is what makes the reported bug
-   * actually get fixed. `stopAllSessions` deliberately preserves task status
-   * across a quit (`agent-manager.ts`: "Don't reset task status during app
-   * shutdown"), and nothing repairs it at startup — so a task that was
-   * force-quit mid-run stays `agent_working` in SQLite FOREVER. Without this,
+   * actually get fixed. `AgentManager.stopAllSessions` deliberately preserves
+   * task status across a quit, and nothing repairs it at startup — so a task
+   * that was force-quit mid-run stays `agent_working` in SQLite FOREVER. Without this,
    * the watcher it leaked is vetoed by its own stale status on every boot from
    * then on, and the headline case — "20x is force-quit" — is the one case the
    * sweep could never collect.
@@ -250,7 +252,7 @@ export function selectLeakedWorkspaceRoots(input: LeakSelection): LeakedProcess[
 }
 
 /** Adds the descendants of already-selected roots, keeping the same guards. */
-export function expandToProcessTrees(
+function expandToProcessTrees(
   rows: ProcessRow[],
   cwdRows: readonly CwdRow[],
   workspacesRoot: string,
@@ -326,68 +328,80 @@ const LSOF_CANDIDATES = ['/usr/sbin/lsof', '/usr/bin/lsof', 'lsof'] as const
  */
 const SUBPROCESS_TIMEOUT_MS = 20_000
 
-function readCwdsWithLsof(): CwdRow[] {
-  // `-w` suppresses the warnings lsof prints for directories it cannot read;
-  // without it an ordinary permission notice looks like a failure. `-n` and
-  // `-P` skip DNS and service lookups.
-  const args = ['-a', '-d', 'cwd', '-n', '-P', '-w', '-F', 'pn']
+const EXEC_OPTIONS = { encoding: 'utf-8' as const, maxBuffer: 16 * 1024 * 1024, timeout: SUBPROCESS_TIMEOUT_MS }
+const PS_ARGS = ['-eo', 'pid=,ppid=,command=']
+// `-w` suppresses the warnings lsof prints for directories it cannot read;
+// without it an ordinary permission notice looks like a failure. `-n` and
+// `-P` skip DNS and service lookups.
+const LSOF_ARGS = ['-a', '-d', 'cwd', '-n', '-P', '-w', '-F', 'pn']
+
+const execFileAsync = promisify(execFile)
+
+/**
+ * lsof exits non-zero when any process refused inspection, but still prints
+ * everything it could read. Use that rather than losing the scan.
+ */
+function partialLsofOutput(err: unknown): string | undefined {
+  const output = (err as { stdout?: string }).stdout
+  return typeof output === 'string' && output.length > 0 ? output : undefined
+}
+
+async function readCwdsWithLsof(): Promise<CwdRow[]> {
   let lastError: unknown = new Error('lsof not found')
   for (const binary of LSOF_CANDIDATES) {
     try {
-      return parseLsofCwd(execFileSync(binary, args, { encoding: 'utf-8', maxBuffer: 16 * 1024 * 1024, timeout: SUBPROCESS_TIMEOUT_MS }))
+      return parseLsofCwd((await execFileAsync(binary, LSOF_ARGS, EXEC_OPTIONS)).stdout)
     } catch (err) {
-      // lsof exits non-zero when any process refused inspection, but still
-      // prints everything it could read. Use that rather than losing the scan.
-      const output = (err as { stdout?: string }).stdout
-      if (typeof output === 'string' && output.length > 0) return parseLsofCwd(output)
+      const output = partialLsofOutput(err)
+      if (output) return parseLsofCwd(output)
       lastError = err
     }
   }
   throw lastError
 }
 
-/** On Linux the kernel answers directly, with no lsof and no subprocess. */
-function readCwdsFromProc(pids: readonly number[]): CwdRow[] {
-  const rows: CwdRow[] = []
-  for (const pid of pids) {
-    try {
-      rows.push({ pid, cwd: readlinkSync(`/proc/${pid}/cwd`) })
-    } catch {
-      // Exited mid-scan, or owned by another user. Not readable is not leaked.
-    }
-  }
-  return rows
+/**
+ * On Linux the kernel answers directly, with no lsof and no subprocess. A pid
+ * that exited mid-scan or belongs to another user is skipped: not readable is
+ * not leaked.
+ */
+async function readCwdsFromProc(pids: readonly number[]): Promise<CwdRow[]> {
+  const results = await Promise.allSettled(pids.map(async (pid) => ({ pid, cwd: await readlink(`/proc/${pid}/cwd`) })))
+  return results.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []))
 }
 
-/** Both tables, read once. A full cwd scan measures at ~0.7 s via lsof on macOS. */
-export function readProcessSnapshot(): { rows: ProcessRow[]; cwdRows: CwdRow[] } {
-  const ps = execFileSync('ps', ['-eo', 'pid=,ppid=,command='], {
-    encoding: 'utf-8',
-    maxBuffer: 16 * 1024 * 1024,
-    timeout: SUBPROCESS_TIMEOUT_MS
-  })
-  const rows = parseProcessTable(ps)
-  // On Linux `/proc` answers directly. But `hidepid=2`, a container, or another
-  // uid can make every entry unreadable, and an EMPTY cwd table is
-  // indistinguishable from "nothing is leaked" — the sweep would report success
-  // having looked at nothing. Fall back to lsof, and say so if both come back
-  // empty against a non-empty process table.
-  let cwdRows = existsSync('/proc/self/cwd') ? readCwdsFromProc(rows.map((row) => row.pid)) : []
-  if (cwdRows.length === 0) {
-    try {
-      cwdRows = readCwdsWithLsof()
-    } catch (err) {
-      console.warn('[WorkspaceProcessCleanup] Could not read any process cwd:', err)
-    }
-  }
+// On Linux `/proc` answers directly. But `hidepid=2`, a container, or another
+// uid can make every entry unreadable, and an EMPTY cwd table is
+// indistinguishable from "nothing is leaked" — the sweep would report success
+// having looked at nothing. So an empty /proc read falls back to lsof, and
+// warns if that also comes back empty against a non-empty process table.
+const hasProcCwd = (): boolean => existsSync('/proc/self/cwd')
+
+function warnIfBlind(rows: ProcessRow[], cwdRows: CwdRow[]): { rows: ProcessRow[]; cwdRows: CwdRow[] } {
   if (cwdRows.length === 0 && rows.length > 0) {
     console.warn(`[WorkspaceProcessCleanup] Read ${rows.length} processes but no cwd for any of them — the sweep can see nothing and is a no-op.`)
   }
   return { rows, cwdRows }
 }
 
+function warnNoCwd(err: unknown): CwdRow[] {
+  console.warn('[WorkspaceProcessCleanup] Could not read any process cwd:', err)
+  return []
+}
+
+/**
+ * Both tables, read once. A full cwd scan measures at ~0.7 s via lsof on macOS,
+ * so it runs async to keep the main thread free during live sessions.
+ */
+export async function readProcessSnapshot(): Promise<{ rows: ProcessRow[]; cwdRows: CwdRow[] }> {
+  const rows = parseProcessTable((await execFileAsync('ps', PS_ARGS, EXEC_OPTIONS)).stdout)
+  let cwdRows = hasProcCwd() ? await readCwdsFromProc(rows.map((row) => row.pid)) : []
+  if (cwdRows.length === 0) cwdRows = await readCwdsWithLsof().catch(warnNoCwd)
+  return warnIfBlind(rows, cwdRows)
+}
+
 /** How long a process gets to honour SIGTERM before SIGKILL. */
-export const DEFAULT_GRACE_MS = 1500
+const DEFAULT_GRACE_MS = 1500
 
 /**
  * The grace used while quitting. Shorter, because quit latency is visible to
@@ -410,7 +424,7 @@ export const SHUTDOWN_GRACE_MS = 300
  * of window against days of leaked descriptors is the right trade. Written down
  * rather than engineered around.
  */
-export async function terminateProcessTree(pids: readonly number[], graceMs = DEFAULT_GRACE_MS): Promise<void> {
+async function terminateProcessTree(pids: readonly number[], graceMs = DEFAULT_GRACE_MS): Promise<void> {
   if (pids.length === 0) return
   for (const pid of pids) {
     try {
@@ -419,7 +433,7 @@ export async function terminateProcessTree(pids: readonly number[], graceMs = DE
       // Already gone between the listing and the signal.
     }
   }
-  await new Promise((done) => setTimeout(done, graceMs))
+  await sleep(graceMs)
   for (const pid of pids) {
     try {
       process.kill(pid, 0) // throws when the process is gone
@@ -483,7 +497,7 @@ export async function sweepLeakedWorkspaceProcesses(input: {
 }): Promise<LeakedProcess[]> {
   if (!canReadProcessCwd()) return []
   const ownPid = input.ownPid ?? process.pid
-  const { rows, cwdRows } = readProcessSnapshot()
+  const { rows, cwdRows } = await readProcessSnapshot()
   const workspacesRoot = resolveWorkspacesRoot(input.workspacesRoot)
   const selection: LeakSelection = {
     rows,
@@ -506,7 +520,10 @@ export async function sweepLeakedWorkspaceProcesses(input: {
   return leaked
 }
 
-/** Kills everything rooted in the given workspaces, before their directories go. */
+/**
+ * Kills everything rooted in the given workspaces, before their directories go.
+ * Runs from the hourly cleanup during live sessions.
+ */
 export async function terminateProcessesInWorkspaces(input: {
   workspacesRoot: string
   workspaceIds: readonly string[]
@@ -514,7 +531,7 @@ export async function terminateProcessesInWorkspaces(input: {
 }): Promise<number[]> {
   if (!canReadProcessCwd() || input.workspaceIds.length === 0) return []
   const ownPid = input.ownPid ?? process.pid
-  const { rows, cwdRows } = readProcessSnapshot()
+  const { rows, cwdRows } = await readProcessSnapshot()
   const pids = selectPidsRootedInWorkspaces({ rows, cwdRows, workspacesRoot: resolveWorkspacesRoot(input.workspacesRoot), ownPid, workspaceIds: input.workspaceIds })
   if (pids.length === 0) return []
   console.log(`[WorkspaceProcessCleanup] ${pids.length} process(es) still rooted in ${input.workspaceIds.length} workspace(s) being removed: ${pids.join(', ')}`)
@@ -559,7 +576,7 @@ export const WORKSPACE_COUNT_WARN_THRESHOLD = 100
  * not convey that; "39 GiB free, 4% of the volume" does, and it is the number
  * that decides whether the next run succeeds.
  */
-export const WORKSPACE_FREE_SPACE_WARN_FRACTION = 0.1
+const WORKSPACE_FREE_SPACE_WARN_FRACTION = 0.1
 
 /** Volume capacity, when it could be read. */
 export type DiskSpace = { freeBytes: number; totalBytes: number }

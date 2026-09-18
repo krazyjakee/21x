@@ -5,9 +5,8 @@ import { AgentTranscriptPanel } from '@/components/agents/AgentTranscriptPanel'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useAgentSession } from '@/hooks/use-agent-session'
 import { agentApi, settingsApi } from '@/lib/ipc-client'
+import { MASTERMIND_SESSION_ID } from '@/lib/voice-dictation-target'
 import type { Agent } from '@/types'
-
-const MASTERMIND_SESSION_ID = 'mastermind-session'
 
 /** Start the agent at app start, so the first sentence does not wait for it. */
 export const MASTERMIND_PREWARM_SETTING = 'mastermind_prewarm'
@@ -192,7 +191,6 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
           onSend={handleSendMessage}
           className="flex-1 min-h-0"
           sessionId={currentSession?.sessionId}
-          pendingApproval={currentSession?.pendingApproval ?? undefined}
           pendingSend={currentSession?.pendingSend}
         />
       )}

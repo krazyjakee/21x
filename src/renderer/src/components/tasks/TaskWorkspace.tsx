@@ -1,70 +1,35 @@
-import { getSourceCompletionDescription, getTaskSourceName } from '@shared/task-completion'
-import { useTaskSourceStore } from '@/stores/task-source-store'
 import { LayoutList, Send, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { FeedbackDialog } from './FeedbackDialog'
-import { SnoozeDialog } from './SnoozeDialog'
-import { IncompatibleSessionDialog } from './IncompatibleSessionDialog'
 import { TaskDetailView } from './TaskDetailView'
-import { AgentTranscriptPanel } from '@/components/agents/AgentTranscriptPanel'
 import { ChangesPanel } from './ChangesPanel'
 import { OutputFieldsDisplay } from './OutputFieldsDisplay'
 import { TaskHeaderBar, TaskPrimaryAction } from './TaskHeaderBar'
-import { AgentApprovalBanner } from '@/components/agents/AgentApprovalBanner'
-import { GhCliSetupDialog } from '@/components/github/GhCliSetupDialog'
-import { OrgPickerDialog } from '@/components/github/OrgPickerDialog'
-import { RepoSelectorDialog } from '@/components/github/RepoSelectorDialog'
-import { SkillSelectorDialog } from '@/components/skills/SkillSelectorDialog'
-import { AgentFormDialog } from '@/components/settings/forms/AgentFormDialog'
 import { WorktreeProgressOverlay } from '@/components/github/WorktreeProgressOverlay'
-import { useAgentSession } from '@/hooks/use-agent-session'
+import { useAgentSessionActions } from '@/hooks/use-agent-session'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
-import { useSettingsStore, type GitProvider } from '@/stores/settings-store'
+import { useSettingsStore } from '@/stores/settings-store'
 import { useTaskStore } from '@/stores/task-store'
-import { useProgressToastStore } from '@/stores/progress-toast-store'
-import { taskApi, worktreeApi, taskSourceApi, onAgentIncompatibleSession, onWorktreeProgress, attachmentApi, gitApi } from '@/lib/ipc-client'
-import { subscribe } from '@/lib/shared-ipc-listeners'
-import { memo, useEffect, useLayoutEffect, useCallback, useRef, useState, useMemo, type PointerEvent as ReactPointerEvent } from 'react'
+import { taskApi, worktreeApi, taskSourceApi, attachmentApi, artifactApi } from '@/lib/ipc-client'
+import { memo, useEffect, useCallback, useRef, useState, useMemo } from 'react'
 import { TaskStatus } from '@/types'
-import type { Task, FileAttachment, OutputField, Agent, UpdateAgentDTO, CreateAgentDTO } from '@/types'
-import type { GitHubRepo } from '@/types/electron'
+import type { Task, FileAttachment, OutputField, Agent } from '@/types'
 import { isAgentConfigured } from '@shared/agent-utils'
 import { useUIStore } from '@/stores/ui-store'
 import { useArtifactStore, PinnedArtifactTabId } from '@/stores/artifact-store'
-import { artifactApi } from '@/lib/ipc-client'
 import { ArtifactType } from '@shared/artifacts'
 import { ArtifactsPanel } from '@/components/artifacts/ArtifactsPanel'
 import { ArtifactRail } from '@/components/artifacts/ArtifactRail'
 import type { Artifact, ArtifactUIState } from '@shared/artifacts'
-import { dispatchShortcutFeedback, onTaskShortcut, TaskShortcutAction } from '@/lib/keyboard-shortcuts'
+import { useResizableTranscript } from './workspace/useResizableTranscript'
+import { useRepoSetupFlow } from './workspace/useRepoSetupFlow'
+import { useTaskFeedbackFlow } from './workspace/useTaskFeedbackFlow'
+import { useTaskShortcutRouter } from './workspace/useTaskShortcutRouter'
+import { TaskWorkspaceDialogs } from './workspace/TaskWorkspaceDialogs'
+import { TaskTranscriptPane } from './workspace/TaskTranscriptPane'
 
 const EMPTY_ARTIFACTS: Artifact[] = []
 const DEFAULT_ARTIFACT_UI: ArtifactUIState = { open: false, activeTabId: null, railExpanded: false }
-const MIN_WORKSPACE_PANE_WIDTH = 320
-const WORKSPACE_RESIZER_WIDTH = 4
-/** Fraction of the workspace body given to the transcript by default. Leaves ~40% for the artifacts/details sidebar. */
-const DEFAULT_TRANSCRIPT_WIDTH_FRACTION = 0.6
-// v3 key: v2 values could be poisoned by drags performed inside scaled canvas
-// panels (screen px persisted as if they were local px), pinning the details
-// sidebar at ~70% until re-dragged. Bump to give everyone a clean default.
-const TRANSCRIPT_WIDTH_STORAGE_KEY = '20x:task:transcriptWidth:v3'
-
-export function clampTranscriptWidth(width: number, containerWidth: number): number {
-  const maximum = Math.max(MIN_WORKSPACE_PANE_WIDTH, containerWidth - MIN_WORKSPACE_PANE_WIDTH - WORKSPACE_RESIZER_WIDTH)
-  return Math.min(Math.max(MIN_WORKSPACE_PANE_WIDTH, width), maximum)
-}
-
-/** User-persisted transcript width, or null when the default 60/40 split should apply. */
-function readStoredTranscriptWidth(): number | null {
-  const stored = Number(window.localStorage.getItem(TRANSCRIPT_WIDTH_STORAGE_KEY))
-  return Number.isFinite(stored) && stored >= MIN_WORKSPACE_PANE_WIDTH ? stored : null
-}
-
-/** Default split: transcript takes its fraction of the actual workspace body. */
-function defaultTranscriptWidth(containerWidth: number): number {
-  return clampTranscriptWidth(Math.round(containerWidth * DEFAULT_TRANSCRIPT_WIDTH_FRACTION), containerWidth)
-}
 
 /** Controls which columns are visible in the TaskWorkspace grid */
 export type TaskWorkspaceLayout = 'both' | 'task-only' | 'transcript-only'
@@ -104,46 +69,23 @@ function TaskWorkspaceComponent({
   onOpenFullView,
   panelLayout = 'both'
 }: TaskWorkspaceProps) {
-  const { session, start, resume, switchAgent, abort, stop, sendMessage, approve } = useAgentSession(task?.id)
-  // Per-field selectors: a selector-less useStore() subscribes to the whole
-  // store, re-rendering this entire workspace on every streamed delta of every
-  // task's session (agent store) or any settings change. Action identities are
-  // stable, so these selectors never trigger re-renders themselves.
+  const { start, resume, switchAgent, abort, stop, sendMessage, approve } = useAgentSessionActions(task?.id)
+  // Narrow per-field selectors: the transcript (TaskTranscriptPane) owns the
+  // messages subscription, so streamed deltas don't re-render this workspace.
+  const sessionId = useAgentStore((s) => (task?.id ? s.sessions.get(task.id)?.sessionId ?? null : null))
+  const sessionStatus = useAgentStore((s) => (task?.id ? s.sessions.get(task.id)?.status : undefined) ?? SessionStatus.IDLE)
+  const hasMessages = useAgentStore((s) => (task?.id ? s.sessions.get(task.id)?.messages.length ?? 0 : 0) > 0)
   const removeSession = useAgentStore((s) => s.removeSession)
-  const updateAgent = useAgentStore((s) => s.updateAgent)
-  const githubOrg = useSettingsStore((s) => s.githubOrg)
-  const checkGhCli = useSettingsStore((s) => s.checkGhCli)
-  const checkGlabCli = useSettingsStore((s) => s.checkGlabCli)
-  const checkTeaCli = useSettingsStore((s) => s.checkTeaCli)
-  const setGithubOrg = useSettingsStore((s) => s.setGithubOrg)
   const fetchSettings = useSettingsStore((s) => s.fetchSettings)
 
   const [changesSummary, setChangesSummary] = useState<{ files: number; additions: number; deletions: number } | null>(null)
   const [kickoffMessage, setKickoffMessage] = useState('')
-  const [showGhSetup, setShowGhSetup] = useState(false)
-  const [showOrgPicker, setShowOrgPicker] = useState(false)
-  const [showRepoSelector, setShowRepoSelector] = useState(false)
   const [showSkillSelector, setShowSkillSelector] = useState(false)
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
-  const [orgProvider, setOrgProvider] = useState<GitProvider>('github')
-  const [isSettingUpWorktree, setIsSettingUpWorktree] = useState(false)
-  const taskSources = useTaskSourceStore(state => state.sources)
-  const [showFeedback, setShowFeedback] = useState(false)
   const [showSnooze, setShowSnooze] = useState(false)
-  const [showIncompatibleSession, setShowIncompatibleSession] = useState(false)
-  const [incompatibleSessionError, setIncompatibleSessionError] = useState<string>()
   const [parentTask, setParentTask] = useState<Task | null>(null)
   const startingRef = useRef(false)
   const submittedQuestionIdsRef = useRef(new Set<string>())
-  const workspaceBodyRef = useRef<HTMLDivElement>(null)
-  const resizingRef = useRef(false)
-  const [transcriptWidth, setTranscriptWidth] = useState(() => {
-    const stored = readStoredTranscriptWidth()
-    return stored ?? Math.max(MIN_WORKSPACE_PANE_WIDTH, Math.round(window.innerWidth * DEFAULT_TRANSCRIPT_WIDTH_FRACTION))
-  })
-  // Whether the user actively resized the panes. While false, the transcript
-  // tracks the default 60/40 split as the workspace resizes.
-  const hasCustomTranscriptWidthRef = useRef(readStoredTranscriptWidth() !== null)
   const openTaskOnCanvas = useUIStore((s) => s.openTaskOnCanvas)
   const artifacts = useArtifactStore((s) => task?.id ? (s.artifactsByTask[task.id] || EMPTY_ARTIFACTS) : EMPTY_ARTIFACTS)
   const artifactUI = useArtifactStore((s) => task?.id ? (s.uiByTask[task.id] || DEFAULT_ARTIFACT_UI) : DEFAULT_ARTIFACT_UI)
@@ -156,8 +98,11 @@ function TaskWorkspaceComponent({
 
   const fetchTasks = useTaskStore((s) => s.fetchTasks)
   const updateTaskInStore = useTaskStore((s) => s.updateTask)
-  const showProgressToast = useProgressToastStore((s) => s.show)
-  const failProgressToast = useProgressToastStore((s) => s.fail)
+
+  const { workspaceBodyRef, transcriptWidth, handleResizeStart, handleResizeMove, handleResizeEnd } =
+    useResizableTranscript(artifactUI.open)
+  const repoSetup = useRepoSetupFlow(task, sessionId, onUpdateTask, fetchTasks)
+  const { githubOrg } = repoSetup
 
   // Derive subtasks reactively from the task store so status changes (e.g., from
   // mobile-initiated sessions) update immediately without needing a re-fetch.
@@ -182,57 +127,8 @@ function TaskWorkspaceComponent({
     })
   }, [hydrateArtifacts, task?.id])
 
-  useLayoutEffect(() => {
-    if (!artifactUI.open || !workspaceBodyRef.current) return
-    const container = workspaceBodyRef.current
-    const applyWidth = () => {
-      // offsetWidth is the LAYOUT width in local px. getBoundingClientRect()
-      // would return scaled screen px on the canvas, where task panels render
-      // under a scale(zoom) transform — mixing the two spaces is what pinned
-      // the details sidebar at ~70% regardless of dragging.
-      const containerWidth = container.offsetWidth
-      if (containerWidth <= 0) return
-      setTranscriptWidth((current) => {
-        // Default mode keeps the artifacts/details sidebar at ~40% of the
-        // workspace as it resizes; once the user drags, their width wins
-        // (clamped only, never persisted as a system-side effect).
-        if (!hasCustomTranscriptWidthRef.current) return defaultTranscriptWidth(containerWidth)
-        return clampTranscriptWidth(current, containerWidth)
-      })
-    }
-    applyWidth()
-    if (typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(applyWidth)
-    observer.observe(container)
-    return () => observer.disconnect()
-  }, [artifactUI.open])
-
-  const handleResizeMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!resizingRef.current || !workspaceBodyRef.current) return
-    const container = workspaceBodyRef.current
-    // clientX/rect are in screen px and include any ancestor transform scale
-    // (canvas zoom); the width style is applied in layout px. Convert the
-    // pointer position to local px so the pane tracks the cursor and the
-    // clamp operates in the same space as the applied width.
-    const rect = container.getBoundingClientRect()
-    const layoutWidth = container.offsetWidth
-    const scale = rect.width > 0 && layoutWidth > 0 ? rect.width / layoutWidth : 1
-    const next = clampTranscriptWidth((event.clientX - rect.left) / scale, layoutWidth)
-    hasCustomTranscriptWidthRef.current = true
-    setTranscriptWidth(next)
-  }, [])
-
-  const handleResizeEnd = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!resizingRef.current) return
-    resizingRef.current = false
-    event.currentTarget.releasePointerCapture?.(event.pointerId)
-    window.localStorage.setItem(TRANSCRIPT_WIDTH_STORAGE_KEY, String(transcriptWidth))
-  }, [transcriptWidth])
-
-  // Fetch settings on mount
   useEffect(() => { fetchSettings() }, [])
 
-  // Fetch parent task when task changes
   useEffect(() => {
     if (!task) {
       setParentTask(null)
@@ -245,7 +141,6 @@ function TaskWorkspaceComponent({
     }
   }, [task?.id, task?.parent_task_id])
 
-  // Create a subtask under the current task
   const handleAddSubtask = useCallback(async (title: string) => {
     if (!task) return
     try {
@@ -257,66 +152,35 @@ function TaskWorkspaceComponent({
         repos: task.repos,
       })
       if (newSubtask) {
-        fetchTasks() // Refresh store — subtasks are derived reactively
+        fetchTasks() // Subtasks are derived reactively from the store
       }
     } catch (err) {
       console.error('[TaskWorkspace] Failed to create subtask:', err)
     }
   }, [task, fetchTasks])
 
-  // Reorder subtasks via drag-and-drop
   const handleReorderSubtasks = useCallback(async (orderedIds: string[]) => {
     if (!task) return
     try {
       await taskApi.reorderSubtasks(task.id, orderedIds)
-      fetchTasks() // Refresh store — subtasks are derived reactively
+      fetchTasks()
     } catch (err) {
       console.error('[TaskWorkspace] Failed to reorder subtasks:', err)
       fetchTasks() // Re-fetch to restore actual order
     }
   }, [task, fetchTasks])
 
-  // Listen for incompatible session events (shared listener to avoid MaxListeners warning)
-  useEffect(() => {
-    if (!task?.id) return
-
-    return subscribe<{ taskId: string; agentId: string; error: string }>(
-      'agent:incompatible-session',
-      (cb) => onAgentIncompatibleSession(cb),
-      (data) => {
-        if (data.taskId === task.id) {
-          setIncompatibleSessionError(data.error)
-          setShowIncompatibleSession(true)
-        }
-      }
-    )
-  }, [task?.id])
-
-  // Drive worktree progress overlay from IPC events (shared listener)
-  useEffect(() => {
-    if (!task?.id) return
-
-    return subscribe(
-      'worktree:progress',
-      (cb) => onWorktreeProgress(cb),
-      (event: { taskId?: string; done?: boolean }) => {
-        if (event.taskId !== task.id) return
-        setIsSettingUpWorktree(!event.done)
-      }
-    )
-  }, [task?.id])
-
   // Re-fetch tasks when agent status changes (status is updated in DB by agent-manager).
   // Debounced to 500ms to prevent cascading re-fetches when multiple canvas panels
   // observe simultaneous status transitions — each would otherwise trigger an
   // independent fetchTasks() call that replaces the entire tasks array and causes
   // a cascade of re-renders through AppLayout → all child components.
-  const prevStatusRef = useRef(session.status)
+  const prevStatusRef = useRef(sessionStatus)
   const fetchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     const prev = prevStatusRef.current
-    prevStatusRef.current = session.status
-    if (prev !== session.status) {
+    prevStatusRef.current = sessionStatus
+    if (prev !== sessionStatus) {
       if (fetchDebounceRef.current) clearTimeout(fetchDebounceRef.current)
       fetchDebounceRef.current = setTimeout(() => {
         fetchDebounceRef.current = null
@@ -326,15 +190,15 @@ function TaskWorkspaceComponent({
     return () => {
       if (fetchDebounceRef.current) clearTimeout(fetchDebounceRef.current)
     }
-  }, [session.status, fetchTasks])
+  }, [sessionStatus, fetchTasks])
 
-  // Stop session when task transitions to completed, but keep transcript
-  // Uses ref to track previous status — prevents auto-stop on resume of already-completed tasks
+  // Stop session when task transitions to completed, but keep transcript.
+  // Tracks the previous status so resuming an already-completed task doesn't auto-stop.
   const prevTaskStatusRef = useRef(task?.status)
   useEffect(() => {
     const prevStatus = prevTaskStatusRef.current
     prevTaskStatusRef.current = task?.status
-    if (session.sessionId && task?.status === TaskStatus.Completed && prevStatus !== TaskStatus.Completed) {
+    if (sessionId && task?.status === TaskStatus.Completed && prevStatus !== TaskStatus.Completed) {
       stop()
         .then(() => {
           if (task && task.repos.length > 0 && githubOrg) {
@@ -343,11 +207,11 @@ function TaskWorkspaceComponent({
         })
         .catch(console.error)
     }
-    // Clean up triage session when triage completes (Triaging → NotStarted)
+    // Triage finished (Triaging → NotStarted): drop the triage session.
     if (prevStatus === TaskStatus.Triaging && task?.status === TaskStatus.NotStarted) {
       removeSession(task.id)
     }
-  }, [task?.status, session.sessionId, stop, task, githubOrg, removeSession])
+  }, [task?.status, sessionId, stop, task, githubOrg, removeSession])
 
   // Clean up stale triage session when returning to a task that was triaged while unmounted.
   // If the task is no longer Triaging, has no persisted session_id, but the in-memory session
@@ -357,15 +221,15 @@ function TaskWorkspaceComponent({
       task &&
       task.status !== TaskStatus.Triaging &&
       !task.session_id &&
-      session.sessionId &&
-      session.status === SessionStatus.IDLE
+      sessionId &&
+      sessionStatus === SessionStatus.IDLE
     ) {
       removeSession(task.id)
     }
   }, [task?.id]) // intentionally run only on mount/task switch
 
   const handleStartSession = useCallback(async () => {
-    if (!task?.agent_id || startingRef.current || session.sessionId) return
+    if (!task?.agent_id || startingRef.current || sessionId) return
     startingRef.current = true
 
     try {
@@ -375,10 +239,10 @@ function TaskWorkspaceComponent({
     } finally {
       startingRef.current = false
     }
-  }, [task?.agent_id, task?.id, session.sessionId, start])
+  }, [task?.agent_id, task?.id, sessionId, start])
 
   const handleResumeSession = useCallback(async () => {
-    if (!task?.agent_id || !task?.session_id || startingRef.current || session.sessionId) return
+    if (!task?.agent_id || !task?.session_id || startingRef.current || sessionId) return
     startingRef.current = true
     try {
       await resume(task.agent_id, task.id, task.session_id)
@@ -389,113 +253,14 @@ function TaskWorkspaceComponent({
     } finally {
       startingRef.current = false
     }
-  }, [task?.agent_id, task?.id, task?.session_id, session.sessionId, resume, fetchTasks])
-
-  const handleGhSetupComplete = useCallback(() => {
-    setShowGhSetup(false)
-    // gh is ready — check if org is set — if not, show org picker
-    if (!githubOrg) {
-      setShowOrgPicker(true)
-    } else {
-      setShowRepoSelector(true)
-    }
-  }, [githubOrg])
-
-  const handleOrgSelected = useCallback(async (org: string, provider: GitProvider) => {
-    await setGithubOrg(org)
-    setOrgProvider(provider)
-    setShowOrgPicker(false)
-    setShowRepoSelector(true)
-  }, [setGithubOrg])
-
-  const handleAddRepos = useCallback(async () => {
-    // Check if at least one git provider is authenticated
-    const [ghStatus, glabStatus, teaStatus] = await Promise.all([
-      checkGhCli().catch(() => ({ installed: false, authenticated: false })),
-      checkGlabCli().catch(() => ({ installed: false, authenticated: false })),
-      checkTeaCli().catch(() => ({ installed: false, authenticated: false }))
-    ])
-    const anyAuthed = (ghStatus.installed && ghStatus.authenticated) ||
-                      (glabStatus.installed && glabStatus.authenticated) ||
-                      (teaStatus.installed && teaStatus.authenticated)
-    if (!anyAuthed) {
-      setShowGhSetup(true)
-      return
-    }
-    if (!githubOrg) {
-      setShowOrgPicker(true)
-      return
-    }
-    setShowRepoSelector(true)
-  }, [githubOrg, checkGhCli, checkGlabCli, checkTeaCli])
-
-  const handleReposConfirmed = useCallback(async (selectedRepos: GitHubRepo[], selectedOrg: string, selectedProvider: GitProvider) => {
-    if (!task) return
-    setShowRepoSelector(false)
-
-    if (selectedOrg && selectedOrg !== githubOrg) {
-      await setGithubOrg(selectedOrg)
-    }
-    setOrgProvider(selectedProvider)
-
-    const repoNames = selectedRepos.map((r) => r.fullName)
-    const merged = [...new Set([...task.repos, ...repoNames])]
-    // Remember the provider so the workspace is later cloned with its CLI.
-    await gitApi.recordRepoProviders(repoNames, selectedProvider).catch(() => {})
-
-    // If the task already has a live or persisted coding session, provision the
-    // new repo worktrees immediately so the agent can use them without restart.
-    const newRepos = selectedRepos.filter((r) => !task.repos.includes(r.fullName))
-    const hasActiveOrPersistedSession = !!(session.sessionId || task.session_id)
-    if (hasActiveOrPersistedSession && newRepos.length > 0 && selectedOrg) {
-      try {
-        setIsSettingUpWorktree(true)
-        await worktreeApi.setup(
-          task.id,
-          newRepos.map((r) => ({ fullName: r.fullName, defaultBranch: r.defaultBranch })),
-          selectedOrg,
-          selectedProvider
-        )
-      } catch (err) {
-        console.error('Failed to setup worktrees for new repos:', err)
-      } finally {
-        setIsSettingUpWorktree(false)
-      }
-    }
-
-    if (onUpdateTask) {
-      await onUpdateTask(task.id, { repos: merged })
-    } else {
-      await taskApi.update(task.id, { repos: merged })
-    }
-    fetchTasks()
-  }, [task, onUpdateTask, fetchTasks, session.sessionId, githubOrg, setGithubOrg])
-
-  const handleUpdateRepos = useCallback(async (repos: string[]) => {
-    if (!task) return
-
-    // If session is running and repos were removed, cleanup their worktrees
-    const removedRepos = task.repos.filter((r) => !repos.includes(r))
-    if (session.sessionId && removedRepos.length > 0 && githubOrg) {
-      worktreeApi
-        .cleanup(task.id, removedRepos.map((r) => ({ fullName: r })), githubOrg, false)
-        .catch((err) => console.error('Failed to cleanup removed repo worktrees:', err))
-    }
-
-    if (onUpdateTask) {
-      await onUpdateTask(task.id, { repos })
-    } else {
-      await taskApi.update(task.id, { repos })
-    }
-    fetchTasks()
-  }, [task, onUpdateTask, fetchTasks, session.sessionId, githubOrg])
+  }, [task?.agent_id, task?.id, task?.session_id, sessionId, resume, fetchTasks])
 
   const handleAssignAgent = useCallback(
     (agentId: string | null) => {
       if (!task) return
 
-      // If unassigning, stop and remove session entirely
-      if (!agentId && session.sessionId) {
+      // Unassigning stops and removes the session entirely.
+      if (!agentId && sessionId) {
         stop().then(() => removeSession(task.id)).catch(console.error)
         onAssignAgent(task.id, agentId)
         return
@@ -505,7 +270,7 @@ function TaskWorkspaceComponent({
       // exists (e.g. switching off a model that ran out of credits) — hand
       // off instead of just changing the field, so the new agent picks up
       // with a recap of what happened instead of a blank slate.
-      const hasExistingConversation = Boolean(session.sessionId || task.session_id)
+      const hasExistingConversation = Boolean(sessionId || task.session_id)
       if (agentId && task.agent_id && task.agent_id !== agentId && hasExistingConversation) {
         // On failure, fall back to a plain reassignment so the selection sticks.
         switchAgent(task.id, agentId)
@@ -516,46 +281,31 @@ function TaskWorkspaceComponent({
 
       onAssignAgent(task.id, agentId)
     },
-    [task, session.sessionId, stop, switchAgent, onAssignAgent, removeSession]
+    [task, sessionId, stop, switchAgent, onAssignAgent, removeSession]
   )
 
   const handleTriage = useCallback(async () => {
     if (!task || task.agent_id) return
 
-    // Find the default agent
     const defaultAgent = agents.find((a) => a.is_default) || agents[0]
     if (!defaultAgent) return
 
     try {
-      // Set status to Triaging
       await taskApi.update(task.id, { status: TaskStatus.Triaging })
       updateTaskInStore(task.id, { status: TaskStatus.Triaging })
-
-      // Start the default agent for triage
       await start(defaultAgent.id, task.id)
     } catch (error) {
       console.error('[TaskWorkspace] Triage failed:', error)
-      // Revert status
       await taskApi.update(task.id, { status: TaskStatus.NotStarted })
       updateTaskInStore(task.id, { status: TaskStatus.NotStarted })
     }
   }, [task, agents, start, updateTaskInStore])
 
   const handleAbort = useCallback(() => {
-    if (session.sessionId) {
+    if (sessionId) {
       abort().catch(console.error)
     }
-  }, [session.sessionId, abort])
-
-  const handleApprove = useCallback(
-    (message?: string) => approve(true, message).catch(console.error),
-    [approve]
-  )
-
-  const handleReject = useCallback(
-    (message?: string) => approve(false, message).catch(console.error),
-    [approve]
-  )
+  }, [sessionId, abort])
 
   /**
    * Gives the composer a session to talk to, starting or resuming one if the
@@ -593,9 +343,9 @@ function TaskWorkspaceComponent({
   const handleSend = useCallback(
     async (message: string, options?: { attachments?: Array<{ id: string; filename: string; size: number; mime_type: string }> }) => {
       // Read messages from the store at call time instead of closing over the
-      // render-time array: depending on `session.messages` gives this callback
-      // a new identity on every streamed delta, which defeats React.memo on
-      // every transcript row receiving it as a prop.
+      // render-time array: depending on messages gives this callback a new
+      // identity on every streamed delta, which defeats React.memo on every
+      // transcript row receiving it as a prop.
       const messages = (task?.id && useAgentStore.getState().sessions.get(task.id)?.messages) || []
       // Route unresolved question responses through approve(), even if status lags.
       let questionIndex = -1
@@ -658,120 +408,16 @@ function TaskWorkspaceComponent({
     return handleAddAttachmentPaths(filePaths)
   }, [handleAddAttachmentPaths, task?.id])
 
-  // ── Feedback orchestration ──────────────────────────────────
-
-  const handleCompleteTask = useCallback(async () => {
-    // Show feedback if there's an active session OR a resumable session
-    const hasActiveSession = session.sessionId && session.messages.length > 0
-    const hasResumableSession = !session.sessionId && task?.session_id
-
-    console.log('[TaskWorkspace] Complete check:', {
-      hasActiveSession,
-      hasResumableSession,
-      sessionId: session.sessionId,
-      taskSessionId: task?.session_id,
-      messagesCount: session.messages.length
-    })
-
-    if (hasActiveSession || hasResumableSession) {
-      setShowFeedback(true)
-    } else {
-      await onCompleteTask()
-    }
-  }, [session.sessionId, session.messages.length, task?.session_id, onCompleteTask])
-
-  const handleFeedbackSubmit = useCallback(async (rating: number, comment: string, completeAtSource: boolean) => {
-    if (!task?.agent_id || !task?.id) return
-    setShowFeedback(false)
-
-    // Persist feedback + set task to Learning status - prevents auto-stop useEffect.
-    console.log('[TaskWorkspace] Setting task status to AgentLearning:', task.id)
-    let updatedTask: Task | null | undefined
-    try {
-      updatedTask = await taskApi.update(task.id, {
-        status: TaskStatus.AgentLearning,
-        complete_at_source: completeAtSource,
-        feedback_rating: rating,
-        feedback_comment: comment || null,
-      })
-    } catch (error) {
-      // The dialog is already closed at this point, so a rejected write left the
-      // task untouched with nothing on screen — the user just saw the dialog
-      // vanish and nothing happen. Say so and let them retry.
-      console.error('[TaskWorkspace] Failed to record feedback:', error)
-      // `fail` is a no-op unless the toast already exists, so show it first.
-      const toastId = `feedback-${task.id}`
-      showProgressToast(toastId, 'Feedback not saved')
-      failProgressToast(
-        toastId,
-        `Could not save feedback for "${task.title}": ${error instanceof Error ? error.message : String(error)}`
-      )
-      setShowFeedback(true)
-      return
-    }
-    console.log('[TaskWorkspace] Task status set to AgentLearning, verified:', updatedTask?.status)
-
-    // Build feedback prompt
-    const commentPart = comment ? ` Comment: "${comment}".` : ''
-    const today = new Date().toISOString().split('T')[0]
-    const prompt = `User rated this session ${rating}/5.${commentPart}
-
-Review the session and update skills in .agents/skills/:
-
-**For skills you used:**
-Update the YAML frontmatter:
-- confidence: ${rating >= 4 ? '+0.05 (was helpful)' : rating <= 2 ? '-0.10 (was wrong/outdated)' : 'no change'}
-- uses: increment by 1
-- lastUsed: ${today}
-- tags: add relevant keywords if missing
-
-**If you discovered a new reusable pattern:**
-Create a new skill file with:
-\`\`\`yaml
----
-name: skill-name
-description: Brief description of when to use this skill
-confidence: 0.5
-uses: 1
-lastUsed: ${today}
-tags:
-  - relevant-tag
----
-# Skill content here
-\`\`\`
-
-Update existing skills that were helpful or create new ones for patterns worth reusing.`
-
-    try {
-      // Resume if possible, or start a learning-only session when the old
-      // adapter session has ended. The feedback prompt is the sole new task.
-      if (!useAgentStore.getState().sessions.get(task.id)?.sessionId) {
-        const readySessionId = task.session_id
-          ? await ensureChatSession(true)
-          : await start(task.agent_id, task.id, undefined, true)
-        if (!readySessionId) throw new Error('Could not start the learning session.')
-      }
-
-      // Send feedback message through normal flow so it shows in UI
-      await sendMessage(prompt)
-
-      // Backend will handle skill sync and task completion when session goes idle
-    } catch (error) {
-      console.error('Failed to send feedback:', error)
-      const toastId = `feedback-${task.id}`
-      showProgressToast(toastId, 'Learning could not start')
-      failProgressToast(toastId, error instanceof Error ? error.message : String(error))
-      await taskApi.update(task.id, { status: TaskStatus.ReadyForReview })
-      setShowFeedback(true)
-    }
-  }, [ensureChatSession, sendMessage, start, task])
-
-  const handleFeedbackSkip = useCallback(async (completeAtSource: boolean) => {
-    if (!task?.id) return
-    setShowFeedback(false)
-    // Preserve the source choice when feedback is skipped.
-    await onCompleteTask(completeAtSource)
-  }, [task?.id, onCompleteTask])
+  const feedback = useTaskFeedbackFlow({
+    task,
+    sessionId,
+    hasMessages,
+    onCompleteTask,
+    ensureChatSession,
+    start,
+    sendMessage
+  })
+  const { handleCompleteTask } = feedback
 
   const handleSnooze = useCallback(async (isoString: string) => {
     if (!task) return
@@ -809,11 +455,9 @@ Update existing skills that were helpful or create new ones for patterns worth r
     if (!task?.agent_id) return
     startingRef.current = true
     try {
-      // Stop current session if it exists
-      if (session.sessionId) {
+      if (sessionId) {
         await stop()
       }
-      // Remove session from store and clear task's session_id
       await removeSession(task.id)
       if (onUpdateTask) {
         await onUpdateTask(task.id, { session_id: null })
@@ -825,14 +469,9 @@ Update existing skills that were helpful or create new ones for patterns worth r
     } finally {
       startingRef.current = false
     }
-  }, [task?.agent_id, task?.id, session.sessionId, start, stop, removeSession, onUpdateTask])
+  }, [task?.agent_id, task?.id, sessionId, start, stop, removeSession, onUpdateTask])
 
   const handleEditAgent = useCallback((agentId: string) => setEditingAgentId(agentId), [])
-  const handleSaveAgent = useCallback(async (data: CreateAgentDTO | UpdateAgentDTO) => {
-    if (!editingAgentId) return
-    await updateAgent(editingAgentId, data as UpdateAgentDTO)
-    setEditingAgentId(null)
-  }, [editingAgentId, updateAgent])
 
   const handleUpdateSkillIds = useCallback(async (skillIds: string[] | null) => {
     if (task?.id && onUpdateTask) await onUpdateTask(task.id, { skill_ids: skillIds })
@@ -918,86 +557,19 @@ Update existing skills that were helpful or create new ones for patterns worth r
     }
   }, [task?.id, upsertArtifact])
 
-  const newestPullRequest = useCallback(() => {
-    if (!task) return undefined
-    const active = artifacts.find((artifact) => artifact.id === artifactUI.activeTabId && artifact.type === ArtifactType.PR)
-    if (active) return active
-    return artifacts
-      .filter((artifact) => artifact.type === ArtifactType.PR)
-      .sort((a, b) => b.updatedAt - a.updatedAt)[0]
-  }, [artifactUI.activeTabId, artifacts, task])
-
-  const handleRunShortcut = useCallback(() => {
-    if (!task) return
-    const assignedAgent = task.agent_id ? agents.find((agent) => agent.id === task.agent_id) : null
-    const triageAgent = !task.agent_id ? (agents.find((agent) => agent.is_default) || agents[0] || null) : null
-    const idle = session.status === SessionStatus.IDLE
-    if (task.agent_id && isAgentConfigured(assignedAgent) && !task.session_id && !session.sessionId && idle && task.status !== TaskStatus.Completed) {
-      void handleStartSession()
-    } else if (task.agent_id && task.session_id && !session.sessionId && idle && session.messages.length === 0) {
-      void handleResumeSession()
-    } else if (task.agent_id && task.session_id && !session.sessionId && idle && session.messages.length > 0) {
-      void handleStartFreshSession()
-    } else if (!task.agent_id && triageAgent && isAgentConfigured(triageAgent) && idle && task.status !== TaskStatus.Completed && task.status !== TaskStatus.Triaging) {
-      void handleTriage()
-    }
-  }, [agents, handleResumeSession, handleStartFreshSession, handleStartSession, handleTriage, session.messages.length, session.sessionId, session.status, task])
-
-  useEffect(() => onTaskShortcut(({ action, taskId }) => {
-    if (!task || task.id !== taskId) return
-    const workspace = workspaceBodyRef.current
-    if (workspace && window.getComputedStyle(workspace).visibility === 'hidden') return
-    if (action === TaskShortcutAction.COMPLETE) {
-      void handleCompleteTask()
-      return
-    }
-    if (action === TaskShortcutAction.RUN) {
-      handleRunShortcut()
-      return
-    }
-    if (action === TaskShortcutAction.SNOOZE) {
-      setShowSnooze(true)
-      return
-    }
-    if (action === TaskShortcutAction.OPEN_DETAILS) {
-      selectArtifactTab(task.id, PinnedArtifactTabId.DETAILS, true)
-      return
-    }
-    if (action === TaskShortcutAction.OPEN_CHANGES) {
-      selectArtifactTab(task.id, PinnedArtifactTabId.CHANGES, true)
-      return
-    }
-    if (action === TaskShortcutAction.OPEN_OUTPUT) {
-      if (task.output_fields.length > 0) selectArtifactTab(task.id, PinnedArtifactTabId.OUTPUT, true)
-      else dispatchShortcutFeedback('This task has no output fields', true)
-      return
-    }
-    if (action === TaskShortcutAction.OPEN_ARTIFACT) {
-      const artifact = artifacts
-        .filter((candidate) => candidate.type !== ArtifactType.PR)
-        .sort((a, b) => b.updatedAt - a.updatedAt)[0]
-      if (artifact) selectArtifactTab(task.id, artifact.id, true)
-      else setRailExpanded(task.id, true)
-      return
-    }
-    const pullRequest = newestPullRequest()
-    if (!pullRequest) {
-      dispatchShortcutFeedback('This task has no pull request', true)
-      return
-    }
-    if (action === TaskShortcutAction.OPEN_PR) {
-      selectArtifactTab(task.id, pullRequest.id, true)
-    } else if (action === TaskShortcutAction.COPY_PR_URL && pullRequest.url) {
-      void navigator.clipboard.writeText(pullRequest.url)
-        .then(() => dispatchShortcutFeedback('Pull-request URL copied'))
-        .catch(() => dispatchShortcutFeedback('Could not copy the pull-request URL', true))
-    } else if (action === TaskShortcutAction.COPY_PR_BRANCH && pullRequest.url) {
-      void window.electronAPI.github.fetchPullRequestDetails(pullRequest.url)
-        .then((details) => navigator.clipboard.writeText(details.headRefName))
-        .then(() => dispatchShortcutFeedback('Pull-request branch copied'))
-        .catch(() => dispatchShortcutFeedback('Could not copy the pull-request branch', true))
-    }
-  }), [artifacts, handleCompleteTask, handleRunShortcut, newestPullRequest, selectArtifactTab, setRailExpanded, task])
+  useTaskShortcutRouter({
+    task,
+    agents,
+    artifacts,
+    activeArtifactTabId: artifactUI.activeTabId,
+    workspaceBodyRef,
+    onComplete: handleCompleteTask,
+    onStartSession: handleStartSession,
+    onResumeSession: handleResumeSession,
+    onStartFreshSession: handleStartFreshSession,
+    onTriage: handleTriage,
+    onSnooze: handleShowSnooze
+  })
 
   if (!task) {
     return (
@@ -1012,17 +584,17 @@ Update existing skills that were helpful or create new ones for patterns worth r
   }
 
   // Persisted sessions count as started even before their transcript is hydrated.
-  const hasSession = !!task.session_id || !!session.sessionId || session.status !== SessionStatus.IDLE || session.messages.length > 0
+  const hasSession = !!task.session_id || !!sessionId || sessionStatus !== SessionStatus.IDLE || hasMessages
   const assignedAgent = task.agent_id ? agents.find((a) => a.id === task.agent_id) : null
   const assignedAgentConfigured = isAgentConfigured(assignedAgent)
   // Triage uses the default agent (or the first agent in the list as a fallback).
   const triageAgent = !task.agent_id ? (agents.find((a) => a.is_default) || agents[0] || null) : null
   const triageAgentConfigured = isAgentConfigured(triageAgent)
-  const canResume = task.agent_id && task.session_id && !session.sessionId && session.status === SessionStatus.IDLE && session.messages.length === 0
-  const canRestart = task.agent_id && task.session_id && !session.sessionId && session.status === SessionStatus.IDLE && session.messages.length > 0
-  const canStart = task.agent_id && assignedAgentConfigured && !task.session_id && !session.sessionId && session.status === SessionStatus.IDLE
+  const canResume = task.agent_id && task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE && !hasMessages
+  const canRestart = task.agent_id && task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE && hasMessages
+  const canStart = task.agent_id && assignedAgentConfigured && !task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE
     && task.status !== TaskStatus.Completed
-  const canTriage = !task.agent_id && agents.length > 0 && triageAgentConfigured && session.status === SessionStatus.IDLE
+  const canTriage = !task.agent_id && agents.length > 0 && triageAgentConfigured && sessionStatus === SessionStatus.IDLE
     && task.status !== TaskStatus.Completed && task.status !== TaskStatus.Triaging
 
   let primaryAction: TaskPrimaryAction | null = null
@@ -1046,8 +618,6 @@ Update existing skills that were helpful or create new ones for patterns worth r
     handlePrimaryAction = () => void handleTriage()
   }
 
-  const editingAgent = editingAgentId ? agents.find((a) => a.id === editingAgentId) : undefined
-
   const detailsView = (
     <TaskDetailView
       task={task}
@@ -1058,8 +628,8 @@ Update existing skills that were helpful or create new ones for patterns worth r
       onUpdateOutputFields={onUpdateOutputFields}
       onCompleteTask={handleCompleteTask}
       onAssignAgent={handleAssignAgent}
-      onUpdateRepos={handleUpdateRepos}
-      onAddRepos={handleAddRepos}
+      onUpdateRepos={repoSetup.handleUpdateRepos}
+      onAddRepos={repoSetup.handleAddRepos}
       onUpdateSkillIds={handleUpdateSkillIds}
       onUpdateDescription={handleUpdateDescription}
       onAddSkills={handleShowSkillSelector}
@@ -1091,25 +661,15 @@ Update existing skills that were helpful or create new ones for patterns worth r
   )
 
   const transcriptView = (
-    <div className="flex h-full min-h-0 flex-col bg-background">
-      <AgentApprovalBanner request={session.pendingApproval} onApprove={handleApprove} onReject={handleReject} />
-      <AgentTranscriptPanel
-        messages={session.messages}
-        status={session.status}
-        systemStatus={session.systemStatus}
-        onStop={handleAbort}
-        onRestart={handleStartFreshSession}
-        onSend={handleSend}
-        onPickAttachments={handlePickAttachments}
-        onAddAttachmentPaths={handleAddAttachmentPaths}
-        sessionId={session.sessionId}
-        taskId={task.id}
-        agentId={task.agent_id ?? undefined}
-        pendingApproval={session.pendingApproval ?? undefined}
-        pendingSend={session.pendingSend}
-        className="h-full min-h-0 border-0 bg-background"
-      />
-    </div>
+    <TaskTranscriptPane
+      taskId={task.id}
+      agentId={task.agent_id ?? undefined}
+      onStop={handleAbort}
+      onRestart={handleStartFreshSession}
+      onSend={handleSend}
+      onPickAttachments={handlePickAttachments}
+      onAddAttachmentPaths={handleAddAttachmentPaths}
+    />
   )
 
   const openDetails = () => {
@@ -1179,7 +739,7 @@ Update existing skills that were helpful or create new ones for patterns worth r
                     role="separator"
                     aria-orientation="vertical"
                     aria-label="Resize transcript"
-                    onPointerDown={(event) => { resizingRef.current = true; event.currentTarget.setPointerCapture(event.pointerId) }}
+                    onPointerDown={handleResizeStart}
                     onPointerMove={handleResizeMove}
                     onPointerUp={handleResizeEnd}
                     onPointerCancel={handleResizeEnd}
@@ -1208,7 +768,7 @@ Update existing skills that were helpful or create new ones for patterns worth r
                   artifacts={artifacts}
                   expanded={artifactUI.railExpanded}
                   activeTabId={artifactUI.activeTabId}
-                  agentActive={session.status === SessionStatus.WORKING}
+                  agentActive={sessionStatus === SessionStatus.WORKING}
                   hasChanges
                   hasOutput={task.output_fields.length > 0}
                   changesCount={changesSummary?.files}
@@ -1219,68 +779,23 @@ Update existing skills that were helpful or create new ones for patterns worth r
             </>
           )}
         </div>
-        <WorktreeProgressOverlay taskId={task.id} visible={isSettingUpWorktree} />
+        <WorktreeProgressOverlay taskId={task.id} visible={repoSetup.isSettingUpWorktree} />
       </div>
 
-      <GhCliSetupDialog
-        open={showGhSetup}
-        onOpenChange={setShowGhSetup}
-        onComplete={handleGhSetupComplete}
-      />
-
-      <OrgPickerDialog
-        open={showOrgPicker}
-        onOpenChange={setShowOrgPicker}
-        onSelect={handleOrgSelected}
-      />
-
-      {githubOrg && (
-        <RepoSelectorDialog
-          open={showRepoSelector}
-          onOpenChange={setShowRepoSelector}
-          org={githubOrg}
-          orgProvider={orgProvider}
-          initialRepos={task.repos}
-          onConfirm={handleReposConfirmed}
-        />
-      )}
-
-      <SkillSelectorDialog
-        open={showSkillSelector}
-        onOpenChange={setShowSkillSelector}
-        initialSkillIds={task.skill_ids ?? []}
-        onConfirm={async (skillIds) => {
-          if (onUpdateTask) await onUpdateTask(task.id, { skill_ids: skillIds })
-        }}
-      />
-
-      <FeedbackDialog
-        open={showFeedback}
-        sourceName={task?.source_id ? getTaskSourceName(task, taskSources.find(source => source.id === task.source_id)?.name) : undefined}
-        completionDescription={task ? getSourceCompletionDescription(task, taskSources.find(source => source.id === task.source_id)?.name) : undefined}
-        onSubmit={handleFeedbackSubmit}
-        onSkip={handleFeedbackSkip}
-        onCancel={() => setShowFeedback(false)}
-      />
-
-      <SnoozeDialog
-        open={showSnooze}
-        onOpenChange={setShowSnooze}
+      <TaskWorkspaceDialogs
+        task={task}
+        agents={agents}
+        repoSetup={repoSetup}
+        feedback={feedback}
+        showSkillSelector={showSkillSelector}
+        onShowSkillSelectorChange={setShowSkillSelector}
+        onUpdateSkillIds={handleUpdateSkillIds}
+        showSnooze={showSnooze}
+        onShowSnoozeChange={setShowSnooze}
         onSnooze={handleSnooze}
-      />
-
-      <IncompatibleSessionDialog
-        open={showIncompatibleSession}
-        onOpenChange={setShowIncompatibleSession}
-        onStartFresh={handleStartFreshSession}
-        error={incompatibleSessionError}
-      />
-
-      <AgentFormDialog
-        agent={editingAgent}
-        open={!!editingAgentId}
-        onClose={() => setEditingAgentId(null)}
-        onSubmit={handleSaveAgent}
+        editingAgentId={editingAgentId}
+        onEditingAgentIdChange={setEditingAgentId}
+        onStartFreshSession={handleStartFreshSession}
       />
     </>
   )

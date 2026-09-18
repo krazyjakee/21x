@@ -2,8 +2,10 @@
  * Linear GraphQL API Client
  *
  * Wraps Linear's GraphQL API for task management operations.
- * Handles pagination, issue queries, teams, and mutations.
+ * Handles pagination, issue queries, workflow states, and mutations.
  */
+
+import { downloadFile, requestJson, type DownloadedFile } from './http'
 
 export interface LinearIssue {
   id: string
@@ -22,12 +24,6 @@ export interface LinearIssue {
   updatedAt: string
 }
 
-export interface LinearTeam {
-  id: string
-  name: string
-  key: string
-}
-
 export interface LinearWorkflowState {
   id: string
   name: string
@@ -41,12 +37,6 @@ export interface LinearUser {
   email: string
 }
 
-export interface LinearLabel {
-  id: string
-  name: string
-  color: string
-}
-
 export class LinearClient {
   private accessToken: string
   private apiUrl = 'https://api.linear.app/graphql'
@@ -55,44 +45,48 @@ export class LinearClient {
     this.accessToken = accessToken
   }
 
-  /**
-   * Execute a GraphQL query
-   */
   async query<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
-    const response = await fetch(this.apiUrl, {
+    const result = await requestJson<{ data?: T; errors?: Array<{ message: string }> }>(this.apiUrl, {
       method: 'POST',
+      body: { query, variables },
+      service: 'Linear',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.accessToken}`
       },
-      body: JSON.stringify({ query, variables })
+      errors: {
+        401: 'Linear authentication failed. Please re-authenticate.',
+        403: 'Linear access forbidden. Check your OAuth permissions.'
+      }
     })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-
-      // Handle specific error codes
-      if (response.status === 401) {
-        throw new Error('Linear authentication failed. Please re-authenticate.')
-      }
-      if (response.status === 403) {
-        throw new Error('Linear access forbidden. Check your OAuth permissions.')
-      }
-
-      throw new Error(`Linear API error: ${response.status} ${errorText}`)
-    }
-
-    const result = await response.json() as { data?: T; errors?: Array<{ message: string }> }
 
     if (result.errors && result.errors.length > 0) {
       throw new Error(`Linear GraphQL error: ${result.errors[0].message}`)
     }
-
     if (!result.data) {
       throw new Error('Linear API returned no data')
     }
-
     return result.data
+  }
+
+  /** Collects every page of a Relay-style connection query. */
+  private async paginate<T>(
+    query: string,
+    connection: string,
+    variables: Record<string, unknown> = {}
+  ): Promise<T[]> {
+    const all: T[] = []
+    let after: string | undefined
+    for (;;) {
+      const data = await this.query<Record<string, { nodes: T[]; pageInfo: { hasNextPage: boolean; endCursor: string } }>>(
+        query,
+        { ...variables, first: 50, after }
+      )
+      const page = data[connection]
+      all.push(...page.nodes)
+      if (!page.pageInfo.hasNextPage) return all
+      after = page.pageInfo.endCursor
+    }
   }
 
   /**
@@ -223,45 +217,7 @@ export class LinearClient {
       }
     `
 
-    let allIssues: LinearIssue[] = []
-    let hasNextPage = true
-    let after: string | undefined
-
-    // Paginate through all issues
-    while (hasNextPage) {
-      const data = await this.query<{
-        issues: {
-          nodes: LinearIssue[]
-          pageInfo: { hasNextPage: boolean; endCursor: string }
-        }
-      }>(query, { assigneeId: assigneeId || null, first: 50, after })
-
-      allIssues = allIssues.concat(data.issues.nodes)
-      hasNextPage = data.issues.pageInfo.hasNextPage
-      after = data.issues.pageInfo.endCursor
-    }
-
-    return allIssues
-  }
-
-  /**
-   * Get all teams in the workspace
-   */
-  async getTeams(): Promise<LinearTeam[]> {
-    const query = `
-      query GetTeams {
-        teams {
-          nodes {
-            id
-            name
-            key
-          }
-        }
-      }
-    `
-
-    const data = await this.query<{ teams: { nodes: LinearTeam[] } }>(query)
-    return data.teams.nodes
+    return this.paginate<LinearIssue>(query, 'issues', { assigneeId: assigneeId || null })
   }
 
   /**
@@ -310,26 +266,9 @@ export class LinearClient {
       }
     `
 
-    let allUsers: LinearUser[] = []
-    let hasNextPage = true
-    let after: string | undefined
-
-    // Paginate through all users
-    while (hasNextPage) {
-      const data = await this.query<{
-        users: {
-          nodes: LinearUser[]
-          pageInfo: { hasNextPage: boolean; endCursor: string }
-        }
-      }>(query, { first: 50, after })
-
-      allUsers = allUsers.concat(data.users.nodes)
-      hasNextPage = data.users.pageInfo.hasNextPage
-      after = data.users.pageInfo.endCursor
-    }
-
-    console.log(`[LinearClient] Fetched ${allUsers.length} users`)
-    return allUsers
+    const users = await this.paginate<LinearUser>(query, 'users')
+    console.log(`[LinearClient] Fetched ${users.length} users`)
+    return users
   }
 
   /**
@@ -399,68 +338,6 @@ export class LinearClient {
   }
 
   /**
-   * Create a new issue
-   */
-  async createIssue(
-    teamId: string,
-    title: string,
-    description?: string,
-    priority?: number,
-    assigneeId?: string,
-    dueDate?: string
-  ): Promise<string> {
-    const mutation = `
-      mutation CreateIssue($input: IssueCreateInput!) {
-        issueCreate(input: $input) {
-          success
-          issue {
-            id
-          }
-        }
-      }
-    `
-
-    const input: Record<string, unknown> = {
-      teamId,
-      title
-    }
-    if (description) input.description = description
-    if (priority !== undefined) input.priority = priority
-    if (assigneeId) input.assigneeId = assigneeId
-    if (dueDate) input.dueDate = dueDate
-
-    const data = await this.query<{
-      issueCreate: { success: boolean; issue: { id: string } }
-    }>(mutation, { input })
-
-    if (!data.issueCreate.success) {
-      throw new Error('Failed to create Linear issue')
-    }
-
-    return data.issueCreate.issue.id
-  }
-
-  /**
-   * Get labels for the workspace
-   */
-  async getLabels(): Promise<LinearLabel[]> {
-    const query = `
-      query GetLabels {
-        issueLabels {
-          nodes {
-            id
-            name
-            color
-          }
-        }
-      }
-    `
-
-    const data = await this.query<{ issueLabels: { nodes: LinearLabel[] } }>(query)
-    return data.issueLabels.nodes
-  }
-
-  /**
    * Get attachment metadata by ID
    */
   async getAttachmentMetadata(attachmentId: string): Promise<{ id: string; title?: string; url?: string } | null> {
@@ -486,38 +363,7 @@ export class LinearClient {
     }
   }
 
-  /**
-   * Download an attachment from Linear
-   */
-  async downloadAttachment(url: string): Promise<{ buffer: Buffer; filename?: string; contentType?: string }> {
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${this.accessToken}`
-      }
-    })
-
-    if (!response.ok) {
-      throw new Error(`Failed to download attachment: ${response.status} ${response.statusText}`)
-    }
-
-    // Extract filename from Content-Disposition header
-    let filename: string | undefined
-    const contentDisposition = response.headers.get('content-disposition')
-    if (contentDisposition) {
-      const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
-      if (filenameMatch && filenameMatch[1]) {
-        filename = filenameMatch[1].replace(/['"]/g, '')
-      }
-    }
-
-    // Get content type
-    const contentType = response.headers.get('content-type') || undefined
-
-    const arrayBuffer = await response.arrayBuffer()
-    return {
-      buffer: Buffer.from(arrayBuffer),
-      filename,
-      contentType
-    }
+  downloadAttachment(url: string): Promise<DownloadedFile> {
+    return downloadFile(url, { 'Authorization': `Bearer ${this.accessToken}` })
   }
 }

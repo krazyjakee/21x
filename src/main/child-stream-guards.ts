@@ -87,7 +87,8 @@ export function guardChildStreams(child: ChildProcess | null | undefined, label:
 export function writeToChildStdin(
   child: ChildProcess | null | undefined,
   data: string | Uint8Array,
-  label: string
+  label: string,
+  onError?: (err: Error) => void
 ): boolean {
   const stdin = child?.stdin as Writable | null | undefined
   if (!stdin || stdin.destroyed || stdin.writable === false) return false
@@ -96,7 +97,9 @@ export function writeToChildStdin(
 
   try {
     stdin.write(data, (err) => {
-      if (!err || isBenignStreamError(err)) return
+      if (!err) return
+      onError?.(err)
+      if (isBenignStreamError(err)) return
       try {
         console.warn(`[${label}] stdin write failed:`, err.message)
       } catch {

@@ -45,7 +45,7 @@ interface NotionFilterRow {
 /**
  * Finds the property the plugin treats as the task status: the first Status
  * property, else a Select property named "status". Mirrors buildPropertyMap()
- * in src/main/plugins/notion-plugin.ts.
+ * in src/main/plugins/notion-properties.ts.
  */
 function findStatusProperty(
   properties: NotionPropertyInfo[]

@@ -17,7 +17,6 @@
 import { createId } from '@paralleldrive/cuid2'
 import {
   VOICE_TTS_DEFAULT_MAX_CHARS,
-  VOICE_TTS_DEFAULT_SPEED,
   VOICE_TTS_EVENTS,
   VOICE_TTS_HARD_MAX_CHARS,
   VOICE_TTS_SETTING_KEYS,
@@ -83,7 +82,7 @@ interface AnswerExpectation {
 }
 
 /** An expected answer is forgotten after this long. */
-export const VOICE_ANSWER_EXPECTATION_MS = 10 * 60 * 1000
+const VOICE_ANSWER_EXPECTATION_MS = 10 * 60 * 1000
 
 /**
  * How long an answer is expected when the task it will come from is not known
@@ -93,12 +92,12 @@ export const VOICE_ANSWER_EXPECTATION_MS = 10 * 60 * 1000
  * the renderer has no task to name. The window is short on purpose: it is armed
  * only by the user speaking, and it is consumed by the first answer to arrive.
  */
-export const VOICE_ANY_ANSWER_EXPECTATION_MS = 90 * 1000
+const VOICE_ANY_ANSWER_EXPECTATION_MS = 90 * 1000
 
 /** How many tasks keep a record of the messages the user talked over. */
-export const VOICE_SILENCED_TASKS = 32
+const VOICE_SILENCED_TASKS = 32
 /** And how many messages of each. */
-export const VOICE_SILENCED_PARTS_PER_TASK = 64
+const VOICE_SILENCED_PARTS_PER_TASK = 64
 
 interface ActiveSpeech {
   speechId: string
@@ -846,5 +845,3 @@ export function localVoicesForModel(modelId: string): VoiceTtsVoice[] {
     description: speaker.description,
   }))
 }
-
-export { VOICE_TTS_DEFAULT_SPEED }

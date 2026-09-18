@@ -140,13 +140,6 @@ describe('Database: Marketplace Sources', () => {
     expect(found!.name).toBe('test-mp')
   })
 
-  it('updates a marketplace source', () => {
-    const source = db.createMarketplaceSource({ name: 'mp', source_url: 'owner/repo' })
-    const updated = db.updateMarketplaceSource(source.id, { auto_update: true, metadata: { version: '2.0' } })
-    expect(updated!.auto_update).toBe(true)
-    expect(updated!.metadata).toEqual({ version: '2.0' })
-  })
-
   it('deletes a marketplace source', () => {
     const source = db.createMarketplaceSource({ name: 'mp', source_url: 'owner/repo' })
     expect(db.deleteMarketplaceSource(source.id)).toBe(true)
@@ -338,7 +331,6 @@ describe('Plugin Resource Materialization from Files', () => {
   })
 
   function setupPluginFiles(): void {
-    // fs imports from top-level
     const pluginDir = join(tempPluginsDir, 'file-plugin')
     mkdirSync(pluginDir, { recursive: true })
 
@@ -546,7 +538,6 @@ You are a TypeScript Agent SDK application verifier.
     setupPluginFiles()
     const installed = await manager.installPlugin('file-plugin', marketplaceId)
 
-    // fs imports from top-level
     const pluginDir = join(tempPluginsDir, 'file-plugin')
     expect(existsSync(pluginDir)).toBe(true)
 

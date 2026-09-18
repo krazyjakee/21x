@@ -7,7 +7,6 @@ import {
   distanceToSegment,
   pointInBox,
   hitTest,
-  hitTestObjects,
   unionBox,
 } from './figure-geometry'
 import type { DrawingObject } from './types'
@@ -196,36 +195,6 @@ describe('hitTest', () => {
     // slack = tolerance + strokeWidth/2 → 1 for thin (miss), 4 for thick (hit).
     expect(hitTest(p, thin, 0)).toBe(false)
     expect(hitTest(p, thick, 0)).toBe(true)
-  })
-})
-
-describe('hitTestObjects', () => {
-  const make = (id: string, x: number, zIndex: number): DrawingObject => ({
-    id,
-    type: 'rectangle',
-    x,
-    y: 0,
-    width: 100,
-    height: 50,
-    stroke: '#000',
-    strokeWidth: 2,
-    fill: null,
-    opacity: 1,
-    zIndex,
-  })
-
-  it('returns the topmost figure under the point', () => {
-    const back = make('back', 0, 1)
-    const front = make('front', 10, 2)
-    expect(hitTestObjects({ x: 50, y: 25 }, [back, front])).toBe('front')
-  })
-
-  it('returns null when nothing is hit', () => {
-    expect(hitTestObjects({ x: 500, y: 500 }, [make('a', 0, 1)])).toBeNull()
-  })
-
-  it('returns null for an empty list', () => {
-    expect(hitTestObjects({ x: 0, y: 0 }, [])).toBeNull()
   })
 })
 

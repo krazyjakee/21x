@@ -76,31 +76,31 @@ export function useTasks() {
       )
     }
 
-    // Sort
+    // Date fields are parsed once per task, not once per comparison.
+    const dateField = sortField === 'due_date' || sortField === 'updated_at' ? sortField : 'created_at'
+    const timestamps = new Map<Task, number>()
+    if (sortField !== 'priority' && sortField !== 'status' && sortField !== 'title') {
+      for (const t of result) {
+        const value = t[dateField]
+        // Tasks without a due date sort last.
+        timestamps.set(t, dateField === 'due_date' && !value ? Infinity : new Date(value as string).getTime())
+      }
+    }
+
     result.sort((a, b) => {
-      let cmp = 0
+      let cmp: number
       switch (sortField) {
         case 'priority':
           cmp = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]
           break
-        case 'due_date': {
-          const aDate = a.due_date ? new Date(a.due_date).getTime() : Infinity
-          const bDate = b.due_date ? new Date(b.due_date).getTime() : Infinity
-          cmp = aDate - bDate
-          break
-        }
         case 'status':
           cmp = STATUS_ORDER[a.status] - STATUS_ORDER[b.status]
           break
         case 'title':
           cmp = a.title.localeCompare(b.title)
           break
-        case 'updated_at':
-          cmp = new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime()
-          break
-        case 'created_at':
         default:
-          cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          cmp = timestamps.get(a)! - timestamps.get(b)!
           break
       }
       return sortDirection === 'desc' ? -cmp : cmp

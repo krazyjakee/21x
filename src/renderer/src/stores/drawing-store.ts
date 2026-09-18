@@ -67,7 +67,6 @@ interface DrawingState {
   clearSelection: () => void
   setEditingTextId: (id: string | null) => void
   setLiveObject: (obj: DrawingObject | null) => void
-  clearAll: () => void
 }
 
 let figureCounter = 0
@@ -214,16 +213,5 @@ export const useDrawingStore = create<DrawingState>()(subscribeWithSelector((set
   setLiveObject: (obj) => {
     if (liveObjectEqual(get().liveObject, obj)) return
     set({ liveObject: obj })
-  },
-
-  clearAll: () => {
-    set({
-      objects: [],
-      nextZIndex: 1,
-      selectedIds: [],
-      editingTextId: null,
-      liveObject: null,
-    })
-    scheduleSave()
   },
 })))

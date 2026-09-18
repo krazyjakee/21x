@@ -1,90 +1,26 @@
 import { describe, it, expect } from 'vitest'
-import {
-  extractJsonBlock,
-  extractPartialJson,
-  extractOutputFromMessages,
-  collectWrittenFiles
-} from './output-extraction'
+import { extractPartialJson, extractOutputFromMessages, collectWrittenFiles } from './output-extraction'
+import type { OutputFieldRecord } from './database'
+import type { SessionMessage } from './adapters/coding-agent-adapter'
 
-describe('extractJsonBlock', () => {
-  it('extracts json code block', () => {
-    const text = 'Some text\n```json\n{"key": "value"}\n```\nMore text'
-    expect(extractJsonBlock(text)).toEqual({ key: 'value' })
-  })
+type TestPart = { type: string; text?: string; tool?: { name: string }; state?: { status: string; input: Record<string, string> } }
 
-  it('extracts last json block when multiple exist', () => {
-    const text = '```json\n{"first": true}\n```\nSome text\n```json\n{"last": true}\n```'
-    expect(extractJsonBlock(text)).toEqual({ last: true })
-  })
-
-  it('extracts plain code block as fallback', () => {
-    const text = 'Some text\n```\n{"key": "value"}\n```'
-    expect(extractJsonBlock(text)).toEqual({ key: 'value' })
-  })
-
-  it('prefers json block over plain block', () => {
-    const text = '```\n{"plain": true}\n```\n```json\n{"typed": true}\n```'
-    expect(extractJsonBlock(text)).toEqual({ typed: true })
-  })
-
-  it('returns null when no code block', () => {
-    expect(extractJsonBlock('no code block here')).toBeNull()
-  })
-
-  it('handles truncated JSON via partial extraction', () => {
-    const text = '```json\n{"key": "value", "other": "trun\n```'
-    const result = extractJsonBlock(text)
-    expect(result).toEqual({ key: 'value' })
-  })
-
-  it('skips non-json code blocks (python etc)', () => {
-    const text = '```python\nprint("hello")\n```\n```json\n{"result": 42}\n```'
-    expect(extractJsonBlock(text)).toEqual({ result: 42 })
-  })
-
-  it('handles real agent output with task completion summary', () => {
-    const text = `## Task Completion Summary
-
-I have successfully completed the GL Account Mapping Algorithm task with all requirements fulfilled. Here are the key accomplishments:
-
-**All Tasks Completed:**
-
-1. **Data Analysis**: Processed 6,048 bill records from 356 unique vendors across 109 GL accounts
-2. **Semantic Categorization**: Extracted 20 semantic categories using pattern matching and K-means clustering
-3. **Hierarchical Rule System**: Built 4-level decision hierarchy as specified
-4. **Decision Tree Algorithm**: Implemented optimized decision tree with overfitting prevention (58.7% accuracy)
-5. **Rule Optimization**: Removed redundant rules and optimized feature importance
-6. **Pattern Mining**: Analyzed historical feedback patterns across vendor types and amount thresholds
-
-**Algorithm Features:**
-- **Level 1**: Vendor + Semantic Category (most specific)
-- **Level 2**: Vendor Type + Semantic Category
-- **Level 3**: Semantic Category only
-- **Level 4**: Amount-based rules (fallback)
-- **Overfitting Prevention**: Cross-validation, min samples constraints, feature selection
-- **Redundancy Removal**: Feature importance filtering, rule pruning
-
-**Key Insights:**
-- Technology expenses (1,065 items) and Office Supplies (429 items) are major categories
-- 168 general vendors, 64 technology vendors identified
-- Amount range: -$15K to $54B (outliers detected)
-- Decision tree: 15 levels deep, 465 nodes for optimal complexity
-
-\`\`\`json
-{
-  "semantic categories": "/Users/dmitryvedenyapin/Library/Application Support/pf-desktop/workspaces/dox8eiwqw6i5iful7tob96ra/semantic_categories.json",
-  "analysis": "Successfully implemented a comprehensive GL account mapping algorithm that processes 6,048 financial records from 356 vendors across 109 GL accounts. The algorithm extracts 20 semantic categories using hybrid pattern matching and K-means clustering, classifies vendors into 8 types, and builds a 4-level hierarchical decision system. The optimized decision tree achieves 58.7% accuracy with overfitting prevention through cross-validation and feature selection. Key findings include Technology (1,065 items) and Office Supplies (429 items) as dominant expense categories, with effective rule optimization removing redundant patterns while maintaining decision accuracy. The system successfully mines historical patterns and provides automated GL account classification based on vendor characteristics, semantic content, and amount thresholds.",
-  "code": "/Users/dmitryvedenyapin/Library/Application Support/pf-desktop/workspaces/dox8eiwqw6i5iful7tob96ra/gl_account_mapping_algorithm.py"
+function message(role: string, ...parts: TestPart[]): SessionMessage {
+  return { id: `msg-${role}`, role, parts } as unknown as SessionMessage
 }
-\`\`\``
 
-    const result = extractJsonBlock(text)
-    expect(result).not.toBeNull()
-    expect(result!['semantic categories']).toContain('semantic_categories.json')
-    expect(result!['analysis']).toContain('GL account mapping algorithm')
-    expect(result!['code']).toContain('gl_account_mapping_algorithm.py')
-  })
-})
+const assistant = (...parts: TestPart[]): SessionMessage => message('assistant', ...parts)
+const text = (value: string): TestPart => ({ type: 'text', text: value })
+const toolCall = (tool: string, filePath: string, status = 'completed'): TestPart =>
+  ({ type: 'tool', tool: { name: tool }, state: { status, input: { file_path: filePath } } })
+
+const fields = [
+  { id: 'f1', name: 'semantic categories', type: 'file', required: true },
+  { id: 'f2', name: 'analysis', type: 'text', required: true },
+  { id: 'f3', name: 'code', type: 'file', required: true }
+] as OutputFieldRecord[]
+
+const analysisOf = (messages: SessionMessage[]): unknown => extractOutputFromMessages(messages, fields)[1].value
 
 describe('extractPartialJson', () => {
   it('extracts complete string pairs from truncated JSON', () => {
@@ -102,47 +38,19 @@ describe('extractPartialJson', () => {
 })
 
 describe('collectWrittenFiles', () => {
-  it('collects file paths from write tool calls', () => {
-    const messages = [
-      {
-        info: { role: 'assistant' },
-        parts: [
-          { type: 'tool', tool: 'Write', state: { status: 'completed', input: { file_path: '/tmp/out.json' } } },
-          { type: 'tool', tool: 'Read', state: { status: 'completed', input: { file_path: '/tmp/in.json' } } }
-        ]
-      }
-    ]
+  it('collects file paths from completed write tool calls', () => {
+    const messages = [assistant(toolCall('Write', '/tmp/out.json'), toolCall('Read', '/tmp/in.json'))]
     expect(collectWrittenFiles(messages)).toEqual(['/tmp/out.json'])
   })
 
   it('skips incomplete tool calls', () => {
-    const messages = [
-      {
-        info: { role: 'assistant' },
-        parts: [
-          { type: 'tool', tool: 'Write', state: { status: 'pending', input: { file_path: '/tmp/out.json' } } }
-        ]
-      }
-    ]
-    expect(collectWrittenFiles(messages)).toEqual([])
+    expect(collectWrittenFiles([assistant(toolCall('Write', '/tmp/out.json', 'pending'))])).toEqual([])
   })
 })
 
 describe('extractOutputFromMessages', () => {
-  const fields = [
-    { id: 'f1', name: 'semantic categories', type: 'file', required: true },
-    { id: 'f2', name: 'analysis', type: 'text', required: true },
-    { id: 'f3', name: 'code', type: 'file', required: true }
-  ]
-
   it('extracts values from real agent output', () => {
-    const messages = [
-      {
-        info: { role: 'assistant' },
-        parts: [
-          {
-            type: 'text',
-            text: `## Task Completion Summary
+    const messages = [assistant(text(`## Task Completion Summary
 
 Done.
 
@@ -152,84 +60,66 @@ Done.
   "analysis": "Successfully implemented the algorithm.",
   "code": "/workspace/gl_mapping.py"
 }
-\`\`\``
-          }
-        ]
-      }
-    ]
+\`\`\``))]
 
     const result = extractOutputFromMessages(messages, fields)
-    expect(result).not.toBeNull()
-    expect(result![0].value).toBe('/workspace/semantic_categories.json')
-    expect(result![1].value).toBe('Successfully implemented the algorithm.')
-    expect(result![2].value).toBe('/workspace/gl_mapping.py')
+    expect(result[0].value).toBe('/workspace/semantic_categories.json')
+    expect(result[1].value).toBe('Successfully implemented the algorithm.')
+    expect(result[2].value).toBe('/workspace/gl_mapping.py')
   })
 
-  it('returns null when no assistant messages', () => {
-    expect(extractOutputFromMessages([], fields)).toBeNull()
+  it('leaves fields unset when there are no assistant messages', () => {
+    const result = extractOutputFromMessages([message('user', text('```json\n{"analysis": "x"}\n```'))], fields)
+    expect(result.map((f) => f.value)).toEqual([undefined, undefined, undefined])
   })
 
-  it('returns null when no JSON block and no written files', () => {
-    const messages = [
-      { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'No JSON here' }] }
-    ]
-    expect(extractOutputFromMessages(messages, fields)).toBeNull()
+  it('leaves fields unset when there is no JSON block and no written file', () => {
+    expect(analysisOf([assistant(text('No JSON here'))])).toBeUndefined()
   })
 
-  it('matches fields case-insensitively', () => {
-    const messages = [
-      {
-        info: { role: 'assistant' },
-        parts: [{ type: 'text', text: '```json\n{"Semantic Categories": "val"}\n```' }]
-      }
-    ]
-    const result = extractOutputFromMessages(messages, fields)
-    expect(result![0].value).toBe('val')
+  it('uses the first json block of a message', () => {
+    expect(analysisOf([assistant(text('```json\n{"analysis": "first"}\n```\n```json\n{"analysis": "second"}\n```'))])).toBe('first')
+  })
+
+  it('falls back to a plain code block', () => {
+    expect(analysisOf([assistant(text('Some text\n```\n{"analysis": "plain"}\n```'))])).toBe('plain')
+  })
+
+  it('prefers a json block over a plain block', () => {
+    expect(analysisOf([assistant(text('```\n{"analysis": "plain"}\n```\n```json\n{"analysis": "typed"}\n```'))])).toBe('typed')
+  })
+
+  it('skips non-json fenced blocks such as python', () => {
+    expect(analysisOf([assistant(text('```python\nprint("hello")\n```\n```json\n{"analysis": 42}\n```'))])).toBe(42)
+  })
+
+  it('recovers complete pairs from truncated JSON', () => {
+    expect(analysisOf([assistant(text('```json\n{"analysis": "value", "other": "trun\n```'))])).toBe('value')
+  })
+
+  it('matches fields case-insensitively by name, then by id', () => {
+    const result = extractOutputFromMessages([assistant(text('```json\n{"Semantic Categories": "val", "f2": "by id"}\n```'))], fields)
+    expect(result[0].value).toBe('val')
+    expect(result[1].value).toBe('by id')
   })
 
   it('falls back to written files for unfilled file fields', () => {
-    const messages = [
-      {
-        info: { role: 'assistant' },
-        parts: [
-          { type: 'text', text: '```json\n{"analysis": "done"}\n```' },
-          { type: 'tool', tool: 'Write', state: { status: 'completed', input: { file_path: '/tmp/result.py' } } }
-        ]
-      }
-    ]
-    const result = extractOutputFromMessages(messages, fields)
-    expect(result![1].value).toBe('done')
-    // file fields with no JSON value get the written file
-    expect(result![0].value).toBe('/tmp/result.py')
-    expect(result![2].value).toBe('/tmp/result.py')
+    const result = extractOutputFromMessages([
+      assistant(text('```json\n{"analysis": "done"}\n```'), toolCall('Write', '/tmp/result.py'))
+    ], fields)
+    expect(result[1].value).toBe('done')
+    expect(result[0].value).toBe('/tmp/result.py')
+    expect(result[2].value).toBe('/tmp/result.py')
   })
 
-  it('searches last assistant message first', () => {
-    const messages = [
-      {
-        info: { role: 'assistant' },
-        parts: [{ type: 'text', text: '```json\n{"analysis": "old"}\n```' }]
-      },
-      {
-        info: { role: 'assistant' },
-        parts: [{ type: 'text', text: '```json\n{"analysis": "new"}\n```' }]
-      }
-    ]
-    const result = extractOutputFromMessages(messages, fields)
-    expect(result![1].value).toBe('new')
+  it('searches the last assistant message first', () => {
+    expect(analysisOf([
+      assistant(text('```json\n{"analysis": "old"}\n```')),
+      assistant(text('```json\n{"analysis": "new"}\n```'))
+    ])).toBe('new')
   })
 
   it('handles text split across multiple parts', () => {
-    const messages = [
-      {
-        info: { role: 'assistant' },
-        parts: [
-          { type: 'text', text: 'Some summary\n```json\n{' },
-          { type: 'text', text: '"analysis": "split value"}\n```' }
-        ]
-      }
-    ]
-    const result = extractOutputFromMessages(messages, fields)
-    expect(result![1].value).toBe('split value')
+    expect(analysisOf([assistant(text('Some summary\n```json\n{'), text('"analysis": "split value"}\n```'))])).toBe('split value')
   })
 })

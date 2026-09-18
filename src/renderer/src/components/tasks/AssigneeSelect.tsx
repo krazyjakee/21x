@@ -1,11 +1,8 @@
 import { useState, useMemo } from 'react'
 import { UserRoundPen } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
-import { useUserStore } from '@/stores/user-store'
+import { useSourceUsers, useUserStore } from '@/stores/user-store'
 import { ReassignDialog } from './ReassignDialog'
-import type { SourceUser } from '@/types'
-
-const EMPTY_USERS: SourceUser[] = []
 
 interface AssigneeSelectProps {
   assignee: string
@@ -16,7 +13,7 @@ interface AssigneeSelectProps {
 
 export function AssigneeSelect({ assignee, sourceId, onReassign }: AssigneeSelectProps) {
   const [dialogOpen, setDialogOpen] = useState(false)
-  const users = useUserStore((s) => (sourceId ? s.cache.get(sourceId)?.users : undefined) ?? EMPTY_USERS)
+  const users = useSourceUsers(sourceId)
   const isMe = useUserStore((s) => s.isMe)
 
   const displayName = useMemo(() => {

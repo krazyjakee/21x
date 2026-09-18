@@ -1,968 +1,85 @@
 import Database from 'better-sqlite3'
-import { app, safeStorage } from 'electron'
+import { app } from 'electron'
 import { join } from 'path'
-import { existsSync, mkdirSync, rmSync } from 'fs'
+import { mkdirSync, rmSync } from 'fs'
 import { createId } from '@paralleldrive/cuid2'
 import { TaskStatus } from '../shared/constants'
-import type { ReasoningEffort } from '../shared/reasoning-effort'
 import { startTaskApiServer } from './task-api-server'
+import { WORKSPACES_DIR, taskAttachmentsDir } from './workspace-paths'
+import { applySchema } from './database/schema'
+import { seedDefaultAgent, seedOrchestratorSkill, seedTaskManagementMcpServer } from './database/seed'
+import {
+  JSON_COLUMNS,
+  UPDATABLE_COLUMNS,
+  deserializeAgent,
+  deserializeInstalledPlugin,
+  deserializeMarketplaceSource,
+  deserializeMcpServer,
+  deserializeOAuthToken,
+  deserializeSecret,
+  deserializeSecretWithValue,
+  deserializeSkill,
+  deserializeTask,
+  deserializeTaskSource,
+  encryptSecret,
+  parseJsonArray
+} from './database/serializers'
+import type {
+  AgentRecord, AgentRow, CreateAgentData, UpdateAgentData,
+  CreateInstalledPluginData, InstalledPluginRecord, InstalledPluginRow, UpdateInstalledPluginData,
+  CreateMarketplaceSourceData, MarketplaceSourceRecord, MarketplaceSourceRow,
+  CreateMcpServerData, McpServerRecord, McpServerRow, McpServerSource, McpServerToolRecord, UpdateMcpServerData,
+  CreateOAuthTokenData, OAuthTokenRecord, OAuthTokenRow,
+  CreateSecretData, SecretRecord, SecretRecordWithValue, SecretRow, UpdateSecretData,
+  CreateSkillData, SkillRecord, SkillRow, UpdateSkillData,
+  CreateTaskData, HeartbeatLogRecord, TaskRecord, TaskRow, UpdateTaskData,
+  CreateTaskSourceData, TaskSourceRecord, TaskSourceRow, UpdateTaskSourceData,
+  TranscriptPartInput, TranscriptPartRecord
+} from './database/types'
 
-export interface AgentRow {
-  id: string
-  name: string
-  server_url: string
-  config: string
-  is_default: number
-  created_at: string
-  updated_at: string
+export type * from './database/types'
+
+interface TranscriptPartRow {
+  task_id: string; part_id: string; seq: number; role: string; content: string
+  part_type: string | null; tool: string | null; payload: string | null
+  created_at: number; updated_at: number; rev: number
 }
 
-export interface AgentRecord {
-  id: string
-  name: string
-  server_url: string
-  config: AgentConfigRecord
-  is_default: boolean
-  created_at: string
-  updated_at: string
-}
-
-export interface AgentMcpServerEntry {
-  serverId: string
-  enabledTools?: string[]
-}
-
-export interface AgentConfigRecord {
-  coding_agent?: 'opencode' | 'claude-code' | 'codex' | 'cursor' | 'pi'
-  model?: string
-  reasoning_effort?: ReasoningEffort
-  auth_method?: 'subscription' | 'api_key'
-  permission_mode?: 'ask' | 'allow'
-  sandbox_mode?: 'read-only' | 'workspace-write' | 'danger-full-access'
-  system_prompt?: string
-  mcp_servers?: Array<string | AgentMcpServerEntry>
-  skill_ids?: string[]
-  secret_ids?: string[]
-  api_keys?: {
-    openai?: string
-    anthropic?: string
-    cursor?: string
-  }
-}
-
-export interface McpServerConfigRecord {
-  name: string
-  command: string
-  args: string[]
-}
-
-export interface McpServerToolRecord {
-  name: string
-  description: string
-}
-
-export interface McpOAuthRegistration {
-  // Discovered metadata (RFC 9728 + RFC 8414)
-  resource_url: string
-  authorization_server_url: string
-  authorization_endpoint: string
-  token_endpoint: string
-  registration_endpoint?: string
-  revocation_endpoint?: string
-  scopes?: string
-  code_challenge_methods_supported?: string[]
-
-  // Client registration result (DCR or manual)
-  client_id: string
-  client_secret?: string
-  registration_method: 'dcr' | 'manual'
-
-  // Timestamp
-  discovered_at: string
-}
-
-/** @deprecated Use McpOAuthRegistration instead */
-export type McpOAuthMetadata = McpOAuthRegistration
-
-/**
- * Provenance of an MCP server row:
- * - 'user'       — added by the user through the 20x UI / IPC.
- * - 'plugin'     — materialised from a Claude plugin (.mcp.json or manifest).
- *
- * This is the authoritative signal for "is this a plugin-managed MCP?"
- * Do NOT rely on name prefixes or URL heuristics — those are display details
- * that the user can edit. `source` is set at create time and never changes.
- */
-export type McpServerSource = 'user' | 'plugin'
-
-export interface McpServerRow {
-  id: string
-  name: string
-  type: string
-  command: string
-  args: string
-  url: string | null
-  headers: string
-  environment: string
-  tools: string
-  oauth_metadata: string
-  source: string
-  created_at: string
-  updated_at: string
-}
-
-export interface McpServerRecord {
-  id: string
-  name: string
-  type: 'local' | 'remote'
-  command: string
-  args: string[]
-  url: string
-  headers: Record<string, string>
-  environment: Record<string, string>
-  tools: McpServerToolRecord[]
-  oauth_metadata: McpOAuthRegistration | Record<string, never>
-  source: McpServerSource
-  created_at: string
-  updated_at: string
-}
-
-export interface CreateMcpServerData {
-  name: string
-  type?: 'local' | 'remote'
-  command?: string
-  args?: string[]
-  url?: string
-  headers?: Record<string, string>
-  environment?: Record<string, string>
-  oauth_metadata?: McpOAuthRegistration
-  /** Defaults to 'user' when omitted — see McpServerSource. */
-  source?: McpServerSource
-}
-
-export interface UpdateMcpServerData {
-  name?: string
-  type?: 'local' | 'remote'
-  command?: string
-  args?: string[]
-  url?: string
-  headers?: Record<string, string>
-  environment?: Record<string, string>
-  oauth_metadata?: McpOAuthRegistration
-  /**
-   * Provenance is set at create time and generally immutable. This field is
-   * exposed for migrations and tests only — UI/IPC paths should never write it.
-   */
-  source?: McpServerSource
-}
-
-export interface CreateAgentData {
-  name: string
-  server_url?: string
-  config?: AgentConfigRecord
-  is_default?: boolean
-}
-
-export interface UpdateAgentData {
-  name?: string
-  server_url?: string
-  config?: AgentConfigRecord
-  is_default?: boolean
-}
-
-export interface TaskSourceRow {
-  id: string
-  mcp_server_id: string | null
-  name: string
-  plugin_id: string
-  config: string
-  list_tool: string
-  list_tool_args: string
-  update_tool: string
-  update_tool_args: string
-  last_synced_at: string | null
-  enabled: number
-  created_at: string
-  updated_at: string
-}
-
-export interface TaskSourceRecord {
-  id: string
-  mcp_server_id: string | null
-  name: string
-  plugin_id: string
-  config: Record<string, unknown>
-  list_tool: string
-  list_tool_args: Record<string, unknown>
-  update_tool: string
-  update_tool_args: Record<string, unknown>
-  last_synced_at: string | null
-  enabled: boolean
-  created_at: string
-  updated_at: string
-}
-
-export interface CreateTaskSourceData {
-  mcp_server_id: string | null
-  name: string
-  plugin_id: string
-  config?: Record<string, unknown>
-  list_tool?: string
-  list_tool_args?: Record<string, unknown>
-  update_tool?: string
-  update_tool_args?: Record<string, unknown>
-}
-
-export interface UpdateTaskSourceData {
-  name?: string
-  plugin_id?: string
-  config?: Record<string, unknown>
-  mcp_server_id?: string
-  list_tool?: string
-  list_tool_args?: Record<string, unknown>
-  update_tool?: string
-  update_tool_args?: Record<string, unknown>
-  enabled?: boolean
-}
-
-export interface OutputFieldRecord {
-  id: string
-  name: string
-  type: string
-  multiple?: boolean
-  options?: string[]
-  required?: boolean
-  value?: unknown
-}
-
-export interface TaskRow {
-  id: string
-  title: string
-  description: string
-  type: string
-  priority: string
-  status: string
-  assignee: string
-  due_date: string | null
-  labels: string
-  checklist: string
-  attachments: string
-  repos: string
-  output_fields: string
-  agent_id: string | null
-  external_id: string | null
-  source_id: string | null
-  source: string
-  skill_ids: string | null
-  session_id: string | null
-  snoozed_until: string | null
-  resolution: string | null
-  feedback_rating: number | null
-  feedback_comment: string | null
-  is_recurring: number
-  recurrence_pattern: string | null
-  recurrence_parent_id: string | null
-  last_occurrence_at: string | null
-  next_occurrence_at: string | null
-  heartbeat_enabled: number
-  heartbeat_interval_minutes: number | null
-  heartbeat_last_check_at: string | null
-  heartbeat_next_check_at: string | null
-  auto_start_agent: number
-  auto_complete_without_review: number
-  complete_at_source: number | null
-  parent_task_id: string | null
-  next_subtask_ids: string
-  sort_order: number
-  created_at: string
-  updated_at: string
-}
-
-export interface HeartbeatLogRecord {
-  id: string
-  task_id: string
-  status: string
-  summary: string | null
-  session_id: string | null
-  created_at: string
-}
-
-export interface RecurrencePatternObject {
-  type: 'daily' | 'weekly' | 'monthly' | 'custom'
-  interval: number
-  time: string
-  weekdays?: number[]
-  monthDay?: number
-  endDate?: string
-  maxOccurrences?: number
-}
-
-/** A cron expression string OR a legacy JSON object */
-export type RecurrencePatternRecord = RecurrencePatternObject | string
-
-/** Input shape for persisting a transcript part (mirrors agent:output payloads). */
-export interface TranscriptPartInput {
-  id: string
-  role?: string
-  content?: string
-  partType?: string
-  tool?: unknown
-  payload?: unknown
-  /** Original time the part was produced (ms epoch). Persisted as created_at so a
-   *  bulk seed/replay keeps real chronology instead of a single write-time. */
-  receivedAt?: number
-}
-
-/** Persisted transcript part returned by snapshot queries. */
-export interface TranscriptPartRecord {
-  taskId: string
-  partId: string
-  seq: number
-  role: string
-  content: string
-  partType?: string
-  tool?: unknown
-  payload?: unknown
-  createdAt: number
-  updatedAt: number
-  /** Global monotonic change cursor for this row (delta subscriptions). */
-  rev: number
-}
-
-export interface TaskRecord {
-  id: string
-  title: string
-  description: string
-  type: string
-  priority: string
-  status: string
-  assignee: string
-  due_date: string | null
-  labels: string[]
-  attachments: FileAttachmentRecord[]
-  repos: string[]
-  output_fields: OutputFieldRecord[]
-  agent_id: string | null
-  external_id: string | null
-  source_id: string | null
-  source: string
-  skill_ids: string[] | null
-  session_id: string | null
-  snoozed_until: string | null
-  resolution: string | null
-  feedback_rating: number | null
-  feedback_comment: string | null
-  is_recurring: boolean
-  recurrence_pattern: RecurrencePatternRecord | null
-  recurrence_parent_id: string | null
-  last_occurrence_at: string | null
-  next_occurrence_at: string | null
-  heartbeat_enabled: boolean
-  heartbeat_interval_minutes: number | null
-  heartbeat_last_check_at: string | null
-  heartbeat_next_check_at: string | null
-  auto_start_agent: boolean
-  auto_complete_without_review: boolean
-  /**
-   * How the user chose to complete a task that came from an external source.
-   * null = not answered yet, true = close it at the source, false = the user
-   * updates the source themselves.
-   */
-  complete_at_source: boolean | null
-  parent_task_id: string | null
-  next_subtask_ids: string[]
-  sort_order: number
-  created_at: string
-  updated_at: string
-}
-
-/** @deprecated Use RecurrencePatternRecord union type instead */
-export type LegacyRecurrencePatternRecord = RecurrencePatternObject
-
-export interface FileAttachmentRecord {
-  id: string
-  filename: string
-  size: number
-  mime_type: string
-  added_at: string
-}
-
-export interface CreateTaskData {
-  title: string
-  description?: string
-  type?: string
-  priority?: string
-  status?: string
-  assignee?: string
-  due_date?: string | null
-  labels?: string[]
-  attachments?: FileAttachmentRecord[]
-  repos?: string[]
-  output_fields?: OutputFieldRecord[]
-  external_id?: string
-  source_id?: string
-  source?: string
-  is_recurring?: boolean
-  recurrence_pattern?: RecurrencePatternRecord | null
-  recurrence_parent_id?: string | null
-  auto_start_agent?: boolean
-  auto_complete_without_review?: boolean
-  complete_at_source?: boolean | null
-  parent_task_id?: string | null
-  next_subtask_ids?: string[]
-  /** Cron expression — if provided, sets is_recurring=true and stores as recurrence_pattern */
-  cron?: string
-}
-
-export interface UpdateTaskData {
-  external_id?: string | null
-  source_id?: string | null
-  source?: string
-  title?: string
-  description?: string
-  type?: string
-  priority?: string
-  status?: string
-  assignee?: string
-  due_date?: string | null
-  labels?: string[]
-  attachments?: FileAttachmentRecord[]
-  repos?: string[]
-  output_fields?: OutputFieldRecord[]
-  agent_id?: string | null
-  skill_ids?: string[] | null
-  session_id?: string | null
-  snoozed_until?: string | null
-  resolution?: string | null
-  feedback_rating?: number | null
-  feedback_comment?: string | null
-  is_recurring?: boolean
-  recurrence_pattern?: RecurrencePatternRecord | null
-  last_occurrence_at?: string | null
-  next_occurrence_at?: string | null
-  heartbeat_enabled?: boolean
-  heartbeat_interval_minutes?: number | null
-  heartbeat_last_check_at?: string | null
-  heartbeat_next_check_at?: string | null
-  auto_start_agent?: boolean
-  auto_complete_without_review?: boolean
-  complete_at_source?: boolean | null
-  parent_task_id?: string | null
-  next_subtask_ids?: string[]
-  sort_order?: number
-}
-
-/** Columns that can be dynamically updated via updateTask. */
-const UPDATABLE_COLUMNS = new Set([
-  'external_id', 'source_id', 'source',
-  'title',
-  'description',
-  'type',
-  'priority',
-  'status',
-  'assignee',
-  'due_date',
-  'labels',
-  'attachments',
-  'repos',
-  'output_fields',
-  'agent_id',
-  'skill_ids',
-  'session_id',
-  'snoozed_until',
-  'resolution',
-  'feedback_rating',
-  'feedback_comment',
-  'is_recurring',
-  'recurrence_pattern',
-  'last_occurrence_at',
-  'next_occurrence_at',
-  'heartbeat_enabled',
-  'heartbeat_interval_minutes',
-  'heartbeat_last_check_at',
-  'heartbeat_next_check_at',
-  'auto_start_agent',
-  'auto_complete_without_review',
-  'complete_at_source',
-  'parent_task_id',
-  'next_subtask_ids',
-  'sort_order'
-])
-
-const JSON_COLUMNS = new Set(['labels', 'attachments', 'repos', 'output_fields', 'skill_ids', 'next_subtask_ids'])
-
-/** Ensure a parsed JSON value is always an array (guards against double-stringified or scalar values) */
-/** True for URLs served by the hosted service that older releases connected to. */
-function isHostedServiceUrl(url: string | null | undefined): boolean {
-  if (!url) return false
-  try {
-    const parsed = new URL(url)
-    const host = parsed.hostname.toLowerCase()
-    return host === 'peakflo.ai' || host.endsWith('.peakflo.ai') ||
-      parsed.pathname.replace(/\/+$/, '') === '/api/mcp/dev/mcp'
-  } catch {
-    return false
-  }
-}
-
-function ensureArray<T = string>(value: unknown): T[] {
-  if (Array.isArray(value)) return value as T[]
-  if (value != null && value !== '') return [value] as T[]
-  return []
-}
-
-/** Safely parse a JSON column that should be an array */
-function parseJsonArray<T = string>(raw: string | null | undefined, fallback = '[]'): T[] {
-  const parsed = JSON.parse(raw || fallback)
-  return ensureArray<T>(parsed)
-}
-
-function deserializeTask(row: TaskRow): TaskRecord {
+function toTranscriptPartRecord(r: TranscriptPartRow): TranscriptPartRecord {
   return {
-    ...row,
-    labels: parseJsonArray(row.labels),
-    attachments: parseJsonArray<FileAttachmentRecord>(row.attachments),
-    repos: parseJsonArray(row.repos),
-    output_fields: parseJsonArray<OutputFieldRecord>(row.output_fields),
-    agent_id: row.agent_id ?? null,
-    external_id: row.external_id ?? null,
-    source_id: row.source_id ?? null,
-    skill_ids: row.skill_ids ? parseJsonArray(row.skill_ids) : null,
-    session_id: row.session_id ?? null,
-    snoozed_until: row.snoozed_until ?? null,
-    resolution: row.resolution ?? null,
-    feedback_rating: row.feedback_rating ?? null,
-    feedback_comment: row.feedback_comment ?? null,
-    is_recurring: row.is_recurring === 1,
-    recurrence_pattern: row.recurrence_pattern
-      ? (row.recurrence_pattern.startsWith('{')
-          ? JSON.parse(row.recurrence_pattern) as RecurrencePatternObject
-          : row.recurrence_pattern as string)
-      : null,
-    recurrence_parent_id: row.recurrence_parent_id ?? null,
-    last_occurrence_at: row.last_occurrence_at ?? null,
-    next_occurrence_at: row.next_occurrence_at ?? null,
-    heartbeat_enabled: row.heartbeat_enabled === 1,
-    heartbeat_interval_minutes: row.heartbeat_interval_minutes ?? null,
-    heartbeat_last_check_at: row.heartbeat_last_check_at ?? null,
-    heartbeat_next_check_at: row.heartbeat_next_check_at ?? null,
-    auto_start_agent: (row.auto_start_agent ?? 0) === 1,
-    auto_complete_without_review: (row.auto_complete_without_review ?? 0) === 1,
-    complete_at_source: row.complete_at_source == null ? null : row.complete_at_source === 1,
-    next_subtask_ids: parseJsonArray(row.next_subtask_ids)
+    taskId: r.task_id,
+    partId: r.part_id,
+    seq: r.seq,
+    role: r.role,
+    content: r.content,
+    rev: r.rev ?? 0,
+    partType: r.part_type ?? undefined,
+    tool: r.tool ? (JSON.parse(r.tool) as unknown) : undefined,
+    payload: r.payload ? (JSON.parse(r.payload) as unknown) : undefined,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at
   }
 }
-
-function deserializeTaskSource(row: TaskSourceRow): TaskSourceRecord {
-  try {
-    return {
-      ...row,
-      config: JSON.parse(row.config || '{}') as Record<string, unknown>,
-      list_tool_args: JSON.parse(row.list_tool_args) as Record<string, unknown>,
-      update_tool_args: JSON.parse(row.update_tool_args) as Record<string, unknown>,
-      enabled: row.enabled === 1
-    }
-  } catch (err) {
-    console.error('[Database] Failed to deserialize task source:', {
-      id: row.id,
-      name: row.name,
-      config: row.config,
-      list_tool_args: row.list_tool_args,
-      update_tool_args: row.update_tool_args,
-      error: err instanceof Error ? err.message : String(err)
-    })
-    throw err
-  }
-}
-
-function deserializeMcpServer(row: McpServerRow): McpServerRecord {
-  const source: McpServerSource = row.source === 'plugin' ? 'plugin' : 'user'
-  return {
-    ...row,
-    type: (row.type as 'local' | 'remote') || 'local',
-    args: JSON.parse(row.args) as string[],
-    url: row.url ?? '',
-    headers: JSON.parse(row.headers || '{}') as Record<string, string>,
-    environment: JSON.parse(row.environment || '{}') as Record<string, string>,
-    tools: JSON.parse(row.tools || '[]') as McpServerToolRecord[],
-    oauth_metadata: JSON.parse(row.oauth_metadata || '{}') as McpOAuthRegistration | Record<string, never>,
-    source
-  }
-}
-
-function deserializeAgent(row: AgentRow): AgentRecord {
-  return {
-    ...row,
-    config: JSON.parse(row.config) as AgentConfigRecord,
-    is_default: row.is_default === 1
-  }
-}
-
-// ── Skill types ───────────────────────────────────────────
-
-export interface SkillRow {
-  id: string
-  name: string
-  description: string
-  content: string
-  version: number
-  confidence: number
-  uses: number
-  last_used: string | null
-  tags: string
-  is_deleted: number
-  created_at: string
-  updated_at: string
-}
-
-export interface SkillRecord {
-  id: string
-  name: string
-  description: string
-  content: string
-  version: number
-  confidence: number
-  uses: number
-  last_used: string | null
-  tags: string[]
-  created_at: string
-  updated_at: string
-}
-
-export interface CreateSkillData {
-  name: string
-  description: string
-  content: string
-  confidence?: number
-  uses?: number
-  last_used?: string | null
-  tags?: string[]
-}
-
-export interface UpdateSkillData {
-  name?: string
-  description?: string
-  content?: string
-  confidence?: number
-  uses?: number
-  last_used?: string | null
-  tags?: string[]
-}
-
-// ── Secret types ─────────────────────────────────────────────
-
-export interface SecretRow {
-  id: string
-  name: string
-  description: string
-  env_var_name: string
-  value: Buffer
-  created_at: string
-  updated_at: string
-}
-
-export interface SecretRecord {
-  id: string
-  name: string
-  description: string
-  env_var_name: string
-  // value intentionally omitted — never crosses IPC boundary
-  created_at: string
-  updated_at: string
-}
-
-export interface SecretRecordWithValue extends SecretRecord {
-  value: string  // Decrypted plaintext — only used internally in main process
-}
-
-export interface CreateSecretData {
-  name: string
-  description: string
-  env_var_name: string
-  value: string
-}
-
-export interface UpdateSecretData {
-  name?: string
-  description?: string
-  env_var_name?: string
-  value?: string
-}
-
-// ── Marketplace Source types ─────────────────────────────────
-
-export interface MarketplaceSourceRow {
-  id: string
-  name: string
-  source_type: string
-  source_url: string
-  metadata: string
-  auto_update: number
-  created_at: string
-  updated_at: string
-}
-
-export interface MarketplaceSourceRecord {
-  id: string
-  name: string
-  source_type: string
-  source_url: string
-  metadata: Record<string, unknown>
-  auto_update: boolean
-  created_at: string
-  updated_at: string
-}
-
-export interface CreateMarketplaceSourceData {
-  name: string
-  source_type?: string
-  source_url: string
-  metadata?: Record<string, unknown>
-  auto_update?: boolean
-}
-
-export interface UpdateMarketplaceSourceData {
-  name?: string
-  source_type?: string
-  source_url?: string
-  metadata?: Record<string, unknown>
-  auto_update?: boolean
-}
-
-// ── Installed Plugin types ──────────────────────────────────
-
-export interface ClaudePluginManifest {
-  name: string
-  version?: string
-  description?: string
-  author?: { name: string; email?: string; url?: string }
-  homepage?: string
-  repository?: string
-  license?: string
-  keywords?: string[]
-  commands?: string | string[]
-  agents?: string | string[]
-  skills?: string | string[]
-  hooks?: string | Record<string, unknown>
-  mcpServers?: string | Record<string, unknown>
-  lspServers?: string | Record<string, unknown>
-}
-
-export interface ClaudePluginSource {
-  source?: string
-  repo?: string
-  url?: string
-  ref?: string
-  sha?: string
-  path?: string
-  package?: string
-  version?: string
-  registry?: string
-}
-
-export interface InstalledPluginRow {
-  id: string
-  name: string
-  marketplace_id: string
-  manifest: string
-  source: string
-  scope: string
-  enabled: number
-  version: string
-  installed_at: string
-  updated_at: string
-}
-
-export interface InstalledPluginRecord {
-  id: string
-  name: string
-  marketplace_id: string
-  manifest: ClaudePluginManifest
-  source: ClaudePluginSource
-  scope: string
-  enabled: boolean
-  version: string
-  installed_at: string
-  updated_at: string
-}
-
-export interface CreateInstalledPluginData {
-  name: string
-  marketplace_id: string
-  manifest?: ClaudePluginManifest
-  source?: ClaudePluginSource
-  scope?: string
-  version?: string
-}
-
-export interface UpdateInstalledPluginData {
-  enabled?: boolean
-  manifest?: ClaudePluginManifest
-  version?: string
-  scope?: string
-}
-
-// ── OAuth Token types ────────────────────────────────────────
-
-export interface OAuthTokenRow {
-  id: string
-  provider: string
-  source_id: string | null
-  mcp_server_id: string | null
-  access_token: Buffer
-  refresh_token: Buffer | null
-  expires_at: string
-  scope: string | null
-  token_type: string
-  created_at: string
-  updated_at: string
-}
-
-export interface OAuthTokenRecord {
-  id: string
-  provider: string
-  source_id: string | null
-  mcp_server_id: string | null
-  access_token: string
-  refresh_token: string | null
-  expires_at: string
-  scope: string | null
-  token_type: string
-  created_at: string
-  updated_at: string
-}
-
-export interface CreateOAuthTokenData {
-  provider: string
-  source_id?: string | null
-  mcp_server_id?: string | null
-  access_token: string
-  refresh_token: string | null
-  expires_in: number
-  scope: string | null
-}
-
-function deserializeSkill(row: SkillRow): SkillRecord {
-  let tags: string[] = []
-  try {
-    tags = JSON.parse(row.tags)
-  } catch {
-    tags = []
-  }
-  return {
-    id: row.id,
-    name: row.name,
-    description: row.description,
-    content: row.content,
-    version: row.version,
-    confidence: row.confidence,
-    uses: row.uses,
-    last_used: row.last_used,
-    tags,
-    created_at: row.created_at,
-    updated_at: row.updated_at
-  }
-}
-
-function deserializeSecret(row: SecretRow): SecretRecord {
-  return {
-    id: row.id,
-    name: row.name,
-    description: row.description,
-    env_var_name: row.env_var_name,
-    // value intentionally omitted — never sent to renderer
-    created_at: row.created_at,
-    updated_at: row.updated_at
-  }
-}
-
-function deserializeSecretWithValue(row: SecretRow): SecretRecordWithValue {
-  const decryptedValue = safeStorage.isEncryptionAvailable()
-    ? safeStorage.decryptString(row.value)
-    : row.value.toString('utf8')
-  return {
-    id: row.id,
-    name: row.name,
-    description: row.description,
-    env_var_name: row.env_var_name,
-    value: decryptedValue,
-    created_at: row.created_at,
-    updated_at: row.updated_at
-  }
-}
-
-function deserializeOAuthToken(row: OAuthTokenRow): OAuthTokenRecord {
-  // Decrypt tokens using safeStorage
-  const accessToken = safeStorage.isEncryptionAvailable()
-    ? safeStorage.decryptString(row.access_token)
-    : row.access_token.toString('utf8')
-
-  const refreshToken = row.refresh_token && safeStorage.isEncryptionAvailable()
-    ? safeStorage.decryptString(row.refresh_token)
-    : row.refresh_token?.toString('utf8') || null
-
-  return {
-    id: row.id,
-    provider: row.provider,
-    source_id: row.source_id,
-    mcp_server_id: row.mcp_server_id ?? null,
-    access_token: accessToken,
-    refresh_token: refreshToken,
-    expires_at: row.expires_at,
-    scope: row.scope,
-    token_type: row.token_type,
-    created_at: row.created_at,
-    updated_at: row.updated_at
-  }
-}
-
-function deserializeMarketplaceSource(row: MarketplaceSourceRow): MarketplaceSourceRecord {
-  return {
-    id: row.id,
-    name: row.name,
-    source_type: row.source_type,
-    source_url: row.source_url,
-    metadata: JSON.parse(row.metadata || '{}'),
-    auto_update: row.auto_update === 1,
-    created_at: row.created_at,
-    updated_at: row.updated_at
-  }
-}
-
-function deserializeInstalledPlugin(row: InstalledPluginRow): InstalledPluginRecord {
-  return {
-    id: row.id,
-    name: row.name,
-    marketplace_id: row.marketplace_id,
-    manifest: JSON.parse(row.manifest || '{}'),
-    source: JSON.parse(row.source || '{}'),
-    scope: row.scope,
-    enabled: row.enabled === 1,
-    version: row.version,
-    installed_at: row.installed_at,
-    updated_at: row.updated_at
-  }
-}
-
-/**
- * Bump this whenever new migrations are added so returning users skip
- * the full migration check on startup.
- *
- * ⚠️ `runMigrations()` is ONLY called when the stored version is LOWER than
- * this number (see `initialize()`). Adding an `ALTER TABLE` to `runMigrations()`
- * without bumping this leaves the column missing on every existing install, and
- * every write to it fails with "no such column" at runtime. Tests pass, because
- * they build the schema from `CREATE TABLE`, not from the migration path.
- *
- * 8 → 9: tasks.complete_at_source
- * 9 → 10: remove hosted-service data (removeHostedServiceData)
- * 10 → 11: preserve existing Claude Code agents' permission behaviour
- * 11 → 12: tasks.next_subtask_ids
- */
-const SCHEMA_VERSION = 12
 
 export class DatabaseManager {
   public db!: Database.Database
+
+  private statements = new Map<string, Database.Statement>()
+  private statementsDb?: Database.Database
+
+  /** Static SQL is compiled once per connection and reused. */
+  private prepare(sql: string): Database.Statement {
+    if (this.statementsDb !== this.db) {
+      this.statements.clear()
+      this.statementsDb = this.db
+    }
+    let stmt = this.statements.get(sql)
+    if (!stmt) {
+      stmt = this.db.prepare(sql)
+      this.statements.set(sql, stmt)
+    }
+    return stmt
+  }
 
   private ensureDbOpen(): boolean {
     return !!this.db?.open
@@ -976,1217 +93,42 @@ export class DatabaseManager {
   }
 
   initialize(): void {
-    const userDataPath = app.getPath('userData')
-    const dbPath = join(userDataPath, 'pf-desktop.db')
-
-    this.db = new Database(dbPath)
+    this.db = new Database(join(app.getPath('userData'), 'pf-desktop.db'))
     this.db.pragma('journal_mode = WAL')
     this.db.pragma('foreign_keys = ON')
     this.db.pragma('busy_timeout = 5000') // Retry on SQLITE_BUSY for up to 5s
 
-    this.createTables()
+    if (applySchema(this.db)) seedDefaultAgent(this.db)
 
-    const currentVersion = this.getSchemaVersion()
-    if (currentVersion < SCHEMA_VERSION) {
-      this.runMigrations()
-      this.setSchemaVersion(SCHEMA_VERSION)
-    }
-
-    // These must run on EVERY startup (not just during migrations)
-    // because they start runtime services (task API server) and
-    // ensure default records exist (MCP server, orchestrator skill).
-    this.ensureTranscriptRevColumn()
-    this.initializeTasksFts()
-    this.initializeTaskManagementMcpServer()
-    this.initializeOrchestratorSkill()
-  }
-
-  /**
-   * Idempotently add the `rev` change-cursor column to transcript_parts for DBs
-   * created before it existed. Backfills existing rows with a monotonic rev so
-   * a first delta query returns them in a stable order.
-   */
-  private ensureTranscriptRevColumn(): void {
-    try {
-      const cols = this.db.prepare(`PRAGMA table_info(transcript_parts)`).all() as Array<{ name: string }>
-      if (!cols.some((c) => c.name === 'rev')) {
-        // Legacy DB created before `rev` existed — add the column and backfill
-        // existing rows with a global monotonic rev ordered by (created_at, seq).
-        this.db.exec(`ALTER TABLE transcript_parts ADD COLUMN rev INTEGER NOT NULL DEFAULT 0`)
-        this.db.exec(`
-          WITH ordered AS (
-            SELECT rowid AS rid, ROW_NUMBER() OVER (ORDER BY created_at ASC, seq ASC) AS rn
-            FROM transcript_parts
-          )
-          UPDATE transcript_parts SET rev = (SELECT rn FROM ordered WHERE ordered.rid = transcript_parts.rowid)
-        `)
-        console.log('[Database] Added transcript_parts.rev column and backfilled existing rows')
-      }
-      // Create the rev index HERE (not in createTables) so it never runs before
-      // the column exists on a legacy DB. Idempotent + safe on a fresh DB, where
-      // the column is declared in the CREATE TABLE and this simply adds the index.
-      this.db.exec(`CREATE INDEX IF NOT EXISTS idx_transcript_parts_task_rev ON transcript_parts(task_id, rev)`)
-    } catch (err) {
-      console.error('[Database] ensureTranscriptRevColumn failed:', err)
-    }
-  }
-
-  private getSchemaVersion(): number {
-    try {
-      const row = this.db.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string } | undefined
-      return row ? parseInt(row.value, 10) || 0 : 0
-    } catch {
-      return 0
-    }
-  }
-
-  private setSchemaVersion(version: number): void {
-    this.db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('__schema_version', ?)").run(String(version))
-  }
-
-  private createTables(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS tasks (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        description TEXT NOT NULL DEFAULT '',
-        type TEXT NOT NULL DEFAULT 'general',
-        priority TEXT NOT NULL DEFAULT 'medium',
-        status TEXT NOT NULL DEFAULT '${TaskStatus.NotStarted}',
-        assignee TEXT NOT NULL DEFAULT '',
-        due_date TEXT,
-        labels TEXT NOT NULL DEFAULT '[]',
-        checklist TEXT NOT NULL DEFAULT '[]',
-        source TEXT NOT NULL DEFAULT 'local',
-        resolution TEXT,
-        is_recurring INTEGER NOT NULL DEFAULT 0,
-        recurrence_pattern TEXT DEFAULT NULL,
-        recurrence_parent_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
-        last_occurrence_at TEXT DEFAULT NULL,
-        next_occurrence_at TEXT DEFAULT NULL,
-        heartbeat_enabled INTEGER NOT NULL DEFAULT 0,
-        heartbeat_interval_minutes INTEGER DEFAULT 30,
-        heartbeat_last_check_at TEXT DEFAULT NULL,
-        heartbeat_next_check_at TEXT DEFAULT NULL,
-        auto_start_agent INTEGER NOT NULL DEFAULT 0,
-        auto_complete_without_review INTEGER NOT NULL DEFAULT 0,
-        complete_at_source INTEGER DEFAULT NULL,
-        parent_task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
-        next_subtask_ids TEXT NOT NULL DEFAULT '[]',
-        sort_order INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-      CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority);
-      CREATE INDEX IF NOT EXISTS idx_tasks_source ON tasks(source);
-      CREATE INDEX IF NOT EXISTS idx_tasks_next_occurrence ON tasks(next_occurrence_at) WHERE is_recurring = 1;
-
-      CREATE TABLE IF NOT EXISTS agents (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        server_url TEXT NOT NULL DEFAULT 'http://localhost:4096',
-        config TEXT NOT NULL DEFAULT '{}',
-        is_default INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS mcp_servers (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        type TEXT NOT NULL DEFAULT 'local',
-        command TEXT NOT NULL DEFAULT '',
-        args TEXT NOT NULL DEFAULT '[]',
-        url TEXT,
-        headers TEXT NOT NULL DEFAULT '{}',
-        environment TEXT NOT NULL DEFAULT '{}',
-        source TEXT NOT NULL DEFAULT 'user',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS task_sources (
-        id TEXT PRIMARY KEY,
-        mcp_server_id TEXT REFERENCES mcp_servers(id) ON DELETE CASCADE,
-        name TEXT NOT NULL,
-        list_tool TEXT NOT NULL,
-        list_tool_args TEXT NOT NULL DEFAULT '{}',
-        update_tool TEXT NOT NULL DEFAULT '',
-        update_tool_args TEXT NOT NULL DEFAULT '{}',
-        last_synced_at TEXT,
-        plugin_id TEXT NOT NULL DEFAULT '',
-        config TEXT NOT NULL DEFAULT '{}',
-        enabled INTEGER NOT NULL DEFAULT 1,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS skills (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        description TEXT NOT NULL,
-        content TEXT NOT NULL,
-        version INTEGER NOT NULL DEFAULT 1,
-        confidence REAL NOT NULL DEFAULT 0.5,
-        uses INTEGER NOT NULL DEFAULT 0,
-        last_used TEXT,
-        tags TEXT NOT NULL DEFAULT '[]',
-        is_deleted INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS heartbeat_logs (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-        status TEXT NOT NULL,
-        summary TEXT,
-        session_id TEXT,
-        created_at TEXT NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_heartbeat_logs_task ON heartbeat_logs(task_id);
-      CREATE INDEX IF NOT EXISTS idx_heartbeat_logs_created ON heartbeat_logs(created_at);
-
-      CREATE TABLE IF NOT EXISTS oauth_tokens (
-        id TEXT PRIMARY KEY,
-        provider TEXT NOT NULL,
-        source_id TEXT NOT NULL REFERENCES task_sources(id) ON DELETE CASCADE,
-        access_token BLOB NOT NULL,
-        refresh_token BLOB,
-        expires_at TEXT NOT NULL,
-        scope TEXT,
-        token_type TEXT NOT NULL DEFAULT 'Bearer',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_oauth_tokens_source ON oauth_tokens(source_id);
-      CREATE INDEX IF NOT EXISTS idx_oauth_tokens_provider ON oauth_tokens(provider);
-
-      CREATE TABLE IF NOT EXISTS secrets (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        description TEXT NOT NULL DEFAULT '',
-        env_var_name TEXT NOT NULL UNIQUE,
-        value BLOB NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_secrets_env_var ON secrets(env_var_name);
-
-      CREATE TABLE IF NOT EXISTS marketplace_sources (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL UNIQUE,
-        source_type TEXT NOT NULL DEFAULT 'github',
-        source_url TEXT NOT NULL,
-        metadata TEXT NOT NULL DEFAULT '{}',
-        auto_update INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS installed_plugins (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        marketplace_id TEXT REFERENCES marketplace_sources(id) ON DELETE CASCADE,
-        manifest TEXT NOT NULL DEFAULT '{}',
-        source TEXT NOT NULL DEFAULT '{}',
-        scope TEXT NOT NULL DEFAULT 'user',
-        enabled INTEGER NOT NULL DEFAULT 1,
-        version TEXT NOT NULL DEFAULT '1.0.0',
-        installed_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_installed_plugins_name_marketplace
-        ON installed_plugins(name, marketplace_id);
-
-      CREATE TABLE IF NOT EXISTS mobile_pair_codes (
-        id TEXT PRIMARY KEY,
-        pin TEXT NOT NULL,
-        expires_at INTEGER NOT NULL,
-        attempts INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL DEFAULT (unixepoch())
-      );
-
-      CREATE TABLE IF NOT EXISTS mobile_sessions (
-        id TEXT PRIMARY KEY,
-        token_hash TEXT NOT NULL UNIQUE,
-        device_name TEXT,
-        paired_at INTEGER NOT NULL DEFAULT (unixepoch()),
-        last_seen INTEGER NOT NULL DEFAULT (unixepoch()),
-        revoked INTEGER NOT NULL DEFAULT 0
-      );
-
-      -- Durable transcript projection: the main process is the source of truth
-      -- for every message part shown in a task transcript. The renderer hydrates
-      -- from snapshots of this table instead of depending on catching live
-      -- events, so output produced while no view is bound (background wake-ups,
-      -- resumed sessions, mobile) is never lost.
-      CREATE TABLE IF NOT EXISTS transcript_parts (
-        task_id TEXT NOT NULL,
-        part_id TEXT NOT NULL,
-        seq INTEGER NOT NULL,
-        role TEXT NOT NULL DEFAULT 'system',
-        content TEXT NOT NULL DEFAULT '',
-        part_type TEXT,
-        tool TEXT,
-        payload TEXT,
-        created_at INTEGER NOT NULL DEFAULT (unixepoch('subsec') * 1000),
-        updated_at INTEGER NOT NULL DEFAULT (unixepoch('subsec') * 1000),
-        -- Global monotonic change cursor: bumped on every insert AND content
-        -- update, so a client can fetch "everything changed since rev N" (deltas),
-        -- capturing both new parts and streaming edits to existing ones.
-        rev INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (task_id, part_id)
-      );
-      CREATE INDEX IF NOT EXISTS idx_transcript_parts_task_seq ON transcript_parts(task_id, seq);
-      -- NOTE: the (task_id, rev) index is created in ensureTranscriptRevColumn(),
-      -- NOT here. On a DB created before rev existed, CREATE TABLE IF NOT EXISTS
-      -- is a no-op (no rev column), so building a rev index here would fail with
-      -- no-such-column before the ALTER TABLE migration runs.
-    `)
-  }
-
-  /**
-   * Rebuild the tasks table using the canonical schema from createTables().
-   * Dynamically copies all columns that exist in both old and new tables,
-   * so future column additions don't need to update this method.
-   * Refreshes columnNames in-place after the rebuild.
-   */
-  private rebuildTasksTable(columnNames: Set<string>): void {
-    this.db.exec('PRAGMA foreign_keys = OFF')
-
-    // Drop tasks_new if it exists from a previous failed attempt
-    this.db.exec('DROP TABLE IF EXISTS tasks_new')
-
-    // Create tasks_new with the canonical schema
-    this.db.exec(`
-      CREATE TABLE tasks_new (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        description TEXT NOT NULL DEFAULT '',
-        type TEXT NOT NULL DEFAULT 'general',
-        priority TEXT NOT NULL DEFAULT 'medium',
-        status TEXT NOT NULL DEFAULT '${TaskStatus.NotStarted}',
-        assignee TEXT NOT NULL DEFAULT '',
-        due_date TEXT,
-        labels TEXT NOT NULL DEFAULT '[]',
-        checklist TEXT NOT NULL DEFAULT '[]',
-        source TEXT NOT NULL DEFAULT 'local',
-        resolution TEXT,
-        attachments TEXT NOT NULL DEFAULT '[]',
-        repos TEXT NOT NULL DEFAULT '[]',
-        output_fields TEXT NOT NULL DEFAULT '[]',
-        agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
-        external_id TEXT,
-        source_id TEXT REFERENCES task_sources(id) ON DELETE CASCADE,
-        skill_ids TEXT DEFAULT NULL,
-        session_id TEXT DEFAULT NULL,
-        snoozed_until TEXT DEFAULT NULL,
-        feedback_rating INTEGER DEFAULT NULL,
-        feedback_comment TEXT DEFAULT NULL,
-        is_recurring INTEGER NOT NULL DEFAULT 0,
-        recurrence_pattern TEXT DEFAULT NULL,
-        recurrence_parent_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
-        last_occurrence_at TEXT DEFAULT NULL,
-        next_occurrence_at TEXT DEFAULT NULL,
-        heartbeat_enabled INTEGER NOT NULL DEFAULT 0,
-        heartbeat_interval_minutes INTEGER DEFAULT 30,
-        heartbeat_last_check_at TEXT DEFAULT NULL,
-        heartbeat_next_check_at TEXT DEFAULT NULL,
-        auto_start_agent INTEGER NOT NULL DEFAULT 0,
-        auto_complete_without_review INTEGER NOT NULL DEFAULT 0,
-        complete_at_source INTEGER DEFAULT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    `)
-
-    // Dynamically find columns shared between old and new tables
-    const newCols = (this.db.pragma('table_info(tasks_new)') as { name: string }[]).map(c => c.name)
-    const sharedCols = newCols.filter(c => columnNames.has(c))
-
-    const colList = sharedCols.join(', ')
-    this.db.exec(`INSERT INTO tasks_new (${colList}) SELECT ${colList} FROM tasks`)
-
-    this.db.exec('DROP TABLE tasks')
-    this.db.exec('ALTER TABLE tasks_new RENAME TO tasks')
-
-    // Recreate indexes
-    this.db.exec(`
-      CREATE INDEX idx_tasks_status ON tasks(status);
-      CREATE INDEX idx_tasks_priority ON tasks(priority);
-      CREATE INDEX idx_tasks_source ON tasks(source);
-      CREATE UNIQUE INDEX idx_tasks_source_external ON tasks(source_id, external_id) WHERE external_id IS NOT NULL;
-      CREATE INDEX idx_tasks_next_occurrence ON tasks(next_occurrence_at) WHERE is_recurring = 1;
-      CREATE INDEX idx_tasks_heartbeat_next ON tasks(heartbeat_next_check_at) WHERE heartbeat_enabled = 1;
-    `)
-
-    this.db.exec('PRAGMA foreign_keys = ON')
-
-    // Refresh columnNames so subsequent migrations see accurate state
-    columnNames.clear()
-    for (const col of newCols) columnNames.add(col)
-  }
-
-  private runMigrations(): void {
-    const columns = this.db.pragma('table_info(tasks)') as { name: string }[]
-    const columnNames = new Set(columns.map((c) => c.name))
-
-    if (!columnNames.has('attachments')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'`)
-    }
-
-    if (!columnNames.has('agent_id')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL`)
-    }
-
-    if (!columnNames.has('repos')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN repos TEXT NOT NULL DEFAULT '[]'`)
-    }
-
-    if (!columnNames.has('output_fields')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN output_fields TEXT NOT NULL DEFAULT '[]'`)
-    }
-
-    if (!columnNames.has('external_id')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN external_id TEXT`)
-    }
-    if (!columnNames.has('source_id')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN source_id TEXT REFERENCES task_sources(id) ON DELETE SET NULL`)
-      this.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_source_external ON tasks(source_id, external_id) WHERE external_id IS NOT NULL`)
-    }
-
-    if (!columnNames.has('skill_ids')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN skill_ids TEXT DEFAULT NULL`)
-    }
-
-    // Migrate oc_session_id to session_id (for backward compatibility)
-    if (columnNames.has('oc_session_id') && !columnNames.has('session_id')) {
-      // Rename column by creating new column, copying data, dropping old
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN session_id TEXT DEFAULT NULL`)
-      this.db.exec(`UPDATE tasks SET session_id = oc_session_id WHERE oc_session_id IS NOT NULL`)
-      // Note: SQLite doesn't support DROP COLUMN in all versions, so we leave oc_session_id for now
-      // It will be unused going forward
-    } else if (!columnNames.has('session_id')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN session_id TEXT DEFAULT NULL`)
-    }
-
-    if (!columnNames.has('snoozed_until')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN snoozed_until TEXT DEFAULT NULL`)
-    }
-
-    if (!columnNames.has('resolution')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN resolution TEXT DEFAULT NULL`)
-    }
-
-    if (!columnNames.has('feedback_rating')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN feedback_rating INTEGER DEFAULT NULL`)
-    }
-    if (!columnNames.has('feedback_comment')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN feedback_comment TEXT DEFAULT NULL`)
-    }
-
-    // Migrate mcp_servers table — add new columns for remote support
-    const mcpColumns = this.db.pragma('table_info(mcp_servers)') as { name: string }[]
-    const mcpColumnNames = new Set(mcpColumns.map((c) => c.name))
-
-    if (!mcpColumnNames.has('type')) {
-      this.db.exec(`ALTER TABLE mcp_servers ADD COLUMN type TEXT NOT NULL DEFAULT 'local'`)
-    }
-    if (!mcpColumnNames.has('url')) {
-      this.db.exec(`ALTER TABLE mcp_servers ADD COLUMN url TEXT`)
-    }
-    if (!mcpColumnNames.has('headers')) {
-      this.db.exec(`ALTER TABLE mcp_servers ADD COLUMN headers TEXT NOT NULL DEFAULT '{}'`)
-    }
-    if (!mcpColumnNames.has('environment')) {
-      this.db.exec(`ALTER TABLE mcp_servers ADD COLUMN environment TEXT NOT NULL DEFAULT '{}'`)
-    }
-    if (!mcpColumnNames.has('tools')) {
-      this.db.exec(`ALTER TABLE mcp_servers ADD COLUMN tools TEXT NOT NULL DEFAULT '[]'`)
-    }
-    if (!mcpColumnNames.has('oauth_metadata')) {
-      this.db.exec(`ALTER TABLE mcp_servers ADD COLUMN oauth_metadata TEXT NOT NULL DEFAULT '{}'`)
-    }
-    if (!mcpColumnNames.has('source')) {
-      // Provenance column. Defaults to 'user'.
-      this.db.exec(`ALTER TABLE mcp_servers ADD COLUMN source TEXT NOT NULL DEFAULT 'user'`)
-    }
-
-    // Migrate oauth_tokens: make source_id nullable and add mcp_server_id
-    const oauthTokenColumns = this.db.pragma('table_info(oauth_tokens)') as { name: string; notnull: number }[]
-    const hasMcpServerIdOAuth = oauthTokenColumns.some(col => col.name === 'mcp_server_id')
-
-    if (oauthTokenColumns.length > 0 && !hasMcpServerIdOAuth) {
-      this.db.exec(`
-        PRAGMA foreign_keys = OFF;
-
-        CREATE TABLE IF NOT EXISTS oauth_tokens_new (
-          id TEXT PRIMARY KEY,
-          provider TEXT NOT NULL,
-          source_id TEXT REFERENCES task_sources(id) ON DELETE CASCADE,
-          mcp_server_id TEXT REFERENCES mcp_servers(id) ON DELETE CASCADE,
-          access_token BLOB NOT NULL,
-          refresh_token BLOB,
-          expires_at TEXT NOT NULL,
-          scope TEXT,
-          token_type TEXT NOT NULL DEFAULT 'Bearer',
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL
-        );
-
-        INSERT INTO oauth_tokens_new (id, provider, source_id, access_token, refresh_token, expires_at, scope, token_type, created_at, updated_at)
-        SELECT id, provider, source_id, access_token, refresh_token, expires_at, scope, token_type, created_at, updated_at FROM oauth_tokens;
-
-        DROP TABLE oauth_tokens;
-        ALTER TABLE oauth_tokens_new RENAME TO oauth_tokens;
-
-        CREATE INDEX IF NOT EXISTS idx_oauth_tokens_source ON oauth_tokens(source_id);
-        CREATE INDEX IF NOT EXISTS idx_oauth_tokens_provider ON oauth_tokens(provider);
-        CREATE INDEX IF NOT EXISTS idx_oauth_tokens_mcp_server ON oauth_tokens(mcp_server_id);
-
-        PRAGMA foreign_keys = ON;
-      `)
-    }
-
-    // Migrate inline MCP servers from agent configs → mcp_servers table
-    this.migrateInlineMcpServers()
-
-    // Migrate task_sources: add plugin_id + config columns
-    const tsColumns = this.db.pragma('table_info(task_sources)') as { name: string }[]
-    const tsColumnNames = new Set(tsColumns.map((c) => c.name))
-
-    if (!tsColumnNames.has('plugin_id')) {
-      this.db.exec(`ALTER TABLE task_sources ADD COLUMN plugin_id TEXT NOT NULL DEFAULT ''`)
-    }
-    if (!tsColumnNames.has('config')) {
-      this.db.exec(`ALTER TABLE task_sources ADD COLUMN config TEXT NOT NULL DEFAULT '{}'`)
-      // Migrate existing rows: pack old columns into config JSON
-      const sources = this.db.prepare('SELECT id, list_tool, list_tool_args, update_tool, update_tool_args FROM task_sources').all() as {
-        id: string; list_tool: string; list_tool_args: string; update_tool: string; update_tool_args: string
-      }[]
-      for (const src of sources) {
-        const config = {
-          list_tool: src.list_tool,
-          list_tool_args: JSON.parse(src.list_tool_args || '{}'),
-          update_tool: src.update_tool || undefined,
-          update_tool_args: JSON.parse(src.update_tool_args || '{}')
-        }
-        this.db.prepare('UPDATE task_sources SET config = ? WHERE id = ?').run(JSON.stringify(config), src.id)
-      }
-    }
-
-    // Migrate task statuses: old 6-status → new 4-status
-    const hasOldStatuses = (this.db.prepare(
-      "SELECT COUNT(*) as count FROM tasks WHERE status IN ('inbox', 'accepted', 'in_progress', 'pending_review', 'cancelled')"
-    ).get() as { count: number }).count > 0
-
-    if (hasOldStatuses) {
-      this.db.exec(`
-        UPDATE tasks SET status = 'not_started' WHERE status IN ('inbox', 'accepted', 'cancelled');
-        UPDATE tasks SET status = 'agent_working' WHERE status = 'in_progress';
-        UPDATE tasks SET status = 'ready_for_review' WHERE status = 'pending_review';
-      `)
-    }
-
-    // Add coding_agent column to agents table for multi-backend support
-    const agentColumns = this.db.pragma('table_info(agents)') as { name: string }[]
-    const agentColumnNames = new Set(agentColumns.map((c) => c.name))
-
-    if (!agentColumnNames.has('coding_agent')) {
-      this.db.exec(`ALTER TABLE agents ADD COLUMN coding_agent TEXT NOT NULL DEFAULT 'opencode'`)
-      // Update existing agents to explicitly have 'opencode' as their coding_agent
-      this.db.exec(`UPDATE agents SET coding_agent = 'opencode' WHERE coding_agent IS NULL OR coding_agent = ''`)
-    }
-
-    // Migrate task_sources: make mcp_server_id nullable (for plugins that don't need MCP)
-    const tsInfo = this.db.pragma('table_info(task_sources)') as Array<{name: string, notnull: number}>
-    const mcpServerIdCol = tsInfo.find(col => col.name === 'mcp_server_id')
-
-    if (mcpServerIdCol && mcpServerIdCol.notnull === 1) {
-      // Column exists and is NOT NULL, need to recreate table
-      this.db.exec(`
-        -- Disable foreign keys temporarily
-        PRAGMA foreign_keys = OFF;
-
-        -- Create new table with nullable mcp_server_id
-        CREATE TABLE task_sources_new (
-          id TEXT PRIMARY KEY,
-          mcp_server_id TEXT REFERENCES mcp_servers(id) ON DELETE CASCADE,
-          name TEXT NOT NULL,
-          list_tool TEXT NOT NULL,
-          list_tool_args TEXT NOT NULL DEFAULT '{}',
-          update_tool TEXT NOT NULL DEFAULT '',
-          update_tool_args TEXT NOT NULL DEFAULT '{}',
-          last_synced_at TEXT,
-          plugin_id TEXT NOT NULL DEFAULT '',
-          config TEXT NOT NULL DEFAULT '{}',
-          enabled INTEGER NOT NULL DEFAULT 1,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL
-        );
-
-        -- Copy data
-        INSERT INTO task_sources_new SELECT * FROM task_sources;
-
-        -- Drop old table
-        DROP TABLE task_sources;
-
-        -- Rename new table
-        ALTER TABLE task_sources_new RENAME TO task_sources;
-
-        -- Re-enable foreign keys
-        PRAGMA foreign_keys = ON;
-      `)
-    }
-
-    // Fix corrupted task_sources config fields (cleanup after migration issues)
-    const allSources = this.db.prepare('SELECT id, config, name FROM task_sources').all() as Array<{
-      id: string
-      config: string
-      name: string
-    }>
-
-    for (const src of allSources) {
-      try {
-        // Try to parse config as JSON
-        JSON.parse(src.config)
-      } catch {
-        // Invalid JSON - reset to empty object and infer plugin_id from the name
-        console.log(`[Database Migration] Fixing corrupted config for task source: ${src.name} (${src.id})`)
-
-        const name = src.name.toLowerCase()
-        const pluginId = name.includes('linear') ? 'linear' : name.includes('hubspot') ? 'hubspot' : null
-        if (pluginId) {
-          this.db.prepare('UPDATE task_sources SET config = ?, plugin_id = ? WHERE id = ?')
-            .run('{}', pluginId, src.id)
-        } else {
-          this.db.prepare('UPDATE task_sources SET config = ? WHERE id = ?').run('{}', src.id)
-        }
-      }
-    }
-
-    // Migrate tasks table: change source_id foreign key from ON DELETE SET NULL to ON DELETE CASCADE
-    const taskTableInfo = this.db.pragma('foreign_key_list(tasks)') as Array<{
-      id: number
-      seq: number
-      table: string
-      from: string
-      to: string
-      on_update: string
-      on_delete: string
-    }>
-
-    const sourceIdFk = taskTableInfo.find(fk => fk.from === 'source_id' && fk.table === 'task_sources')
-    if (sourceIdFk && sourceIdFk.on_delete === 'SET NULL') {
-      console.log('[Database Migration] Updating source_id foreign key to CASCADE delete')
-      this.rebuildTasksTable(columnNames)
-      console.log('[Database Migration] Successfully updated source_id foreign key to CASCADE')
-    }
-
-    // Add recurring task columns
-    if (!columnNames.has('is_recurring')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN is_recurring INTEGER NOT NULL DEFAULT 0`)
-    }
-    if (!columnNames.has('recurrence_pattern')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN recurrence_pattern TEXT DEFAULT NULL`)
-    }
-    if (!columnNames.has('recurrence_parent_id')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN recurrence_parent_id TEXT REFERENCES tasks(id) ON DELETE CASCADE`)
-    }
-    if (!columnNames.has('last_occurrence_at')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN last_occurrence_at TEXT DEFAULT NULL`)
-    }
-    if (!columnNames.has('next_occurrence_at')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN next_occurrence_at TEXT DEFAULT NULL`)
-      // Create index for efficient querying of recurring tasks
-      this.db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_next_occurrence ON tasks(next_occurrence_at) WHERE is_recurring = 1`)
-    }
-
-    // Add heartbeat columns to tasks
-    if (!columnNames.has('heartbeat_enabled')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN heartbeat_enabled INTEGER NOT NULL DEFAULT 0`)
-    }
-    if (!columnNames.has('heartbeat_interval_minutes')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN heartbeat_interval_minutes INTEGER DEFAULT 30`)
-    }
-    if (!columnNames.has('heartbeat_last_check_at')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN heartbeat_last_check_at TEXT DEFAULT NULL`)
-    }
-    if (!columnNames.has('heartbeat_next_check_at')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN heartbeat_next_check_at TEXT DEFAULT NULL`)
-      this.db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_heartbeat_next ON tasks(heartbeat_next_check_at) WHERE heartbeat_enabled = 1`)
-    }
-
-    // Add parent_task_id column for subtask support
-    if (!columnNames.has('parent_task_id')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN parent_task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE`)
-    }
-    // Always ensure the index exists (covers both new DBs and migrated DBs)
-    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id) WHERE parent_task_id IS NOT NULL`)
-
-    // Add sort_order column for explicit subtask ordering (supports drag-and-drop)
-    if (!columnNames.has('sort_order')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
-    }
-    if (!columnNames.has('next_subtask_ids')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN next_subtask_ids TEXT NOT NULL DEFAULT '[]'`)
-    }
-
-    // Add auto_start_agent and auto_complete_without_review columns for recurring tasks
-    if (!columnNames.has('auto_start_agent')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN auto_start_agent INTEGER NOT NULL DEFAULT 0`)
-    }
-    if (!columnNames.has('complete_at_source')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN complete_at_source INTEGER DEFAULT NULL`)
-    }
-    if (!columnNames.has('auto_complete_without_review')) {
-      this.db.exec(`ALTER TABLE tasks ADD COLUMN auto_complete_without_review INTEGER NOT NULL DEFAULT 0`)
-    }
-
-    // Create heartbeat_logs table
-    const heartbeatLogsTable = this.db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='heartbeat_logs'"
-    ).get()
-    if (!heartbeatLogsTable) {
-      this.db.exec(`
-        CREATE TABLE IF NOT EXISTS heartbeat_logs (
-          id TEXT PRIMARY KEY,
-          task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-          status TEXT NOT NULL,
-          summary TEXT,
-          session_id TEXT,
-          created_at TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_heartbeat_logs_task ON heartbeat_logs(task_id);
-        CREATE INDEX IF NOT EXISTS idx_heartbeat_logs_created ON heartbeat_logs(created_at);
-      `)
-    }
-
-    // Migration v2: secrets table
-    const secretsTable = this.db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='secrets'"
-    ).get()
-    if (!secretsTable) {
-      this.db.exec(`
-        CREATE TABLE IF NOT EXISTS secrets (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          description TEXT NOT NULL DEFAULT '',
-          env_var_name TEXT NOT NULL UNIQUE,
-          value BLOB NOT NULL,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL
-        );
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_secrets_env_var ON secrets(env_var_name);
-      `)
-    }
-
-    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name)`)
-
-    // Seed default agent if none exist
-    const agentCount = this.db.prepare('SELECT COUNT(*) as count FROM agents').get() as { count: number }
-    if (agentCount.count === 0) {
-      const now = new Date().toISOString()
-      this.db.prepare(`
-        INSERT INTO agents (id, name, server_url, config, is_default, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 1, ?, ?)
-      `).run(createId(), 'Default Agent', 'http://localhost:4096', '{}', now, now)
-    }
-
-    // Migration v4: FTS5 full-text search index for similar task search
-    this.initializeTasksFts()
-
-    // Migration v10: 20x is local-only. Remove hosted-service data left by
-    // older releases without losing any local work.
-    this.removeHostedServiceData()
-
-    // Migration v11: the Claude Code adapter now honours permission_mode.
-    this.preserveClaudeCodePermissionBehaviour()
-  }
-
-  /**
-   * The Claude Code adapter used to ignore `permission_mode` and always run
-   * with permission checks bypassed, while the agent form showed (and saved)
-   * 'ask' by default. Now that the setting is honoured, record what existing
-   * Claude Code agents actually did, 'allow', so upgrading does not suddenly
-   * stop every unattended run at an approval prompt. The form then shows the
-   * real behaviour and the user can switch to 'ask'.
-   *
-   * Runs once, guarded by a settings flag, because runMigrations() runs again
-   * on every later schema bump and must not undo a choice made after this.
-   */
-  private preserveClaudeCodePermissionBehaviour(): void {
-    const flag = 'migration:claude-code-permission-mode'
-    if (this.getSetting(flag)) return
-
-    const agents = this.db.prepare('SELECT id, config FROM agents').all() as { id: string; config: string }[]
-    for (const agent of agents) {
-      let config: Record<string, unknown>
-      try {
-        config = JSON.parse(agent.config || '{}') as Record<string, unknown>
-      } catch {
-        continue
-      }
-      if (config.coding_agent !== 'claude-code' || config.permission_mode === 'allow') continue
-      config.permission_mode = 'allow'
-      this.db.prepare('UPDATE agents SET config = ? WHERE id = ?').run(JSON.stringify(config), agent.id)
-      console.log(`[Database Migration] Kept automatic permissions for Claude Code agent ${agent.id}`)
-    }
-
-    this.setSetting(flag, '1')
-  }
-
-  /**
-   * Older releases could connect to a hosted service that synced tasks,
-   * agents, skills and MCP servers into this database. Keep everything the
-   * user can still use locally, and remove only what cannot work without it:
-   *
-   * - Tasks imported from the hosted task source become ordinary local tasks
-   *   before the source row goes (tasks.source_id cascades on delete).
-   * - MCP servers that point at the hosted API are removed and unlinked from
-   *   agents. Other synced MCP servers are kept as user servers.
-   * - Synced agents and skills are kept; only their remote link ids go.
-   * - Session tokens, tenant data, gateway keys and sync queues are deleted.
-   *
-   * Every step is idempotent, so a partial run is completed on the next start.
-   */
-  private removeHostedServiceData(): void {
-    const hostedSources = this.db.prepare(
-      "SELECT id FROM task_sources WHERE plugin_id = 'peakflo'"
-    ).all() as { id: string }[]
-    for (const { id } of hostedSources) {
-      this.db.prepare(
-        "UPDATE tasks SET source_id = NULL, external_id = NULL, source = 'local' WHERE source_id = ?"
-      ).run(id)
-      this.db.prepare('DELETE FROM task_sources WHERE id = ?').run(id)
-    }
-
-    const hostedMcpIds = new Set<string>()
-    const syncedMcpServers = this.db.prepare(
-      "SELECT id, url FROM mcp_servers WHERE source = 'enterprise'"
-    ).all() as { id: string; url: string | null }[]
-    for (const server of syncedMcpServers) {
-      if (isHostedServiceUrl(server.url)) {
-        hostedMcpIds.add(server.id)
-        this.db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(server.id)
-      } else {
-        this.db.prepare("UPDATE mcp_servers SET source = 'user' WHERE id = ?").run(server.id)
-      }
-    }
-
-    const agents = this.db.prepare('SELECT id, config FROM agents').all() as { id: string; config: string }[]
-    for (const agent of agents) {
-      let config: Record<string, unknown>
-      try {
-        config = JSON.parse(agent.config || '{}') as Record<string, unknown>
-      } catch {
-        continue
-      }
-      let changed = false
-      for (const key of ['enterprise_source', 'enterprise_agent_id']) {
-        if (key in config) {
-          delete config[key]
-          changed = true
-        }
-      }
-      if (Array.isArray(config.mcp_servers) && hostedMcpIds.size > 0) {
-        const kept = (config.mcp_servers as Array<string | AgentMcpServerEntry>).filter((entry) =>
-          !hostedMcpIds.has(typeof entry === 'string' ? entry : entry.serverId)
-        )
-        if (kept.length !== config.mcp_servers.length) {
-          config.mcp_servers = kept
-          changed = true
-        }
-      }
-      if (changed) {
-        this.db.prepare('UPDATE agents SET config = ? WHERE id = ?').run(JSON.stringify(config), agent.id)
-      }
-    }
-
-    this.db.exec('DROP INDEX IF EXISTS idx_skills_enterprise_id')
-    const skillColumns = new Set((this.db.pragma('table_info(skills)') as { name: string }[]).map((c) => c.name))
-    for (const column of ['enterprise_skill_id', 'uses_at_last_sync']) {
-      if (skillColumns.has(column)) this.db.exec(`ALTER TABLE skills DROP COLUMN ${column}`)
-    }
-
-    this.db.exec(`
-      DELETE FROM settings
-      WHERE substr(key, 1, 11) = 'enterprise_'
-         OR substr(key, 1, 8) = 'workflo-'
-    `)
-  }
-
-  /**
-   * Creates (or rebuilds) the FTS5 full-text search index used by
-   * `find_similar_tasks`.  The virtual table is a *content-sync* table
-   * backed by `tasks`, plus triggers that keep it in sync on every
-   * INSERT / UPDATE / DELETE.
-   *
-   * We always DROP + re-CREATE the FTS table so the trigger definitions
-   * stay in sync with the current schema — this is cheap because the
-   * table is tiny and only holds text columns.
-   */
-  private initializeTasksFts(): void {
-    this.db.exec(`
-      -- Drop existing FTS artifacts so we can recreate cleanly
-      DROP TRIGGER IF EXISTS tasks_fts_insert;
-      DROP TRIGGER IF EXISTS tasks_fts_update;
-      DROP TRIGGER IF EXISTS tasks_fts_delete;
-      DROP TABLE   IF EXISTS tasks_fts;
-
-      -- Content-sync FTS5 table.  content= keeps it linked to tasks;
-      -- content_rowid= maps the FTS rowid to tasks.rowid.
-      --
-      -- The porter stemmer reduces each word to its root at both index and
-      -- query time, so "fix" also finds "fixed" and "fixing".  Without it a
-      -- search only matches the exact form the author happened to type, which
-      -- costs recall on the similar-task lookup.  Changing the tokenizer needs
-      -- the index rebuilt against it — the DROP + re-CREATE above does that on
-      -- the next launch, so existing installs upgrade with no extra migration.
-      CREATE VIRTUAL TABLE tasks_fts USING fts5(
-        title,
-        description,
-        labels,
-        type,
-        content='tasks',
-        content_rowid='rowid',
-        tokenize='porter unicode61 remove_diacritics 2'
-      );
-
-      -- Populate from existing rows
-      INSERT INTO tasks_fts(rowid, title, description, labels, type)
-        SELECT rowid, title, description, labels, type FROM tasks;
-
-      -- Keep FTS in sync via triggers
-      CREATE TRIGGER tasks_fts_insert AFTER INSERT ON tasks BEGIN
-        INSERT INTO tasks_fts(rowid, title, description, labels, type)
-          VALUES (new.rowid, new.title, new.description, new.labels, new.type);
-      END;
-
-      CREATE TRIGGER tasks_fts_update AFTER UPDATE OF title, description, labels, type ON tasks BEGIN
-        INSERT INTO tasks_fts(tasks_fts, rowid, title, description, labels, type)
-          VALUES ('delete', old.rowid, old.title, old.description, old.labels, old.type);
-        INSERT INTO tasks_fts(rowid, title, description, labels, type)
-          VALUES (new.rowid, new.title, new.description, new.labels, new.type);
-      END;
-
-      CREATE TRIGGER tasks_fts_delete AFTER DELETE ON tasks BEGIN
-        INSERT INTO tasks_fts(tasks_fts, rowid, title, description, labels, type)
-          VALUES ('delete', old.rowid, old.title, old.description, old.labels, old.type);
-      END;
-    `)
-  }
-
-  private initializeOrchestratorSkill(): void {
-    const now = new Date().toISOString()
-
-    // Check if mastermind skill already exists
-    const existingSkill = this.getSkillByName('Mastermind')
-    if (existingSkill) return
-
-    // Create the mastermind skill
-    const skillContent = `# Mastermind Skill
-
-You are helping the user manage their tasks. When analyzing tasks or making recommendations:
-
-## 1. Understanding Historical Patterns
-
-When a new task is created or user asks for recommendations:
-- Use \`find_similar_tasks\` to find tasks with similar titles/descriptions
-- Look at how those tasks were labeled, which agent handled them, and which skills were used
-- Identify patterns (e.g., "tasks with 'bug' in title are usually labeled 'bug', 'high' priority")
-
-## 2. Making Recommendations
-
-Based on historical patterns, suggest:
-- **Labels**: Common labels from similar tasks (e.g., "frontend", "backend", "bug", "feature")
-- **Skills**: Skills that were effective for similar tasks
-- **Agent**: Agent that successfully handled similar tasks
-- **Priority**: Priority level based on task urgency and type
-
-Format your recommendations clearly:
-\`\`\`
-I found 5 similar tasks about login bugs. Based on those:
-- Labels: "bug", "frontend", "authentication"
-- Agent: Frontend Agent (handled 4/5 similar tasks)
-- Priority: High (login issues are critical)
-- Skills: Authentication Debugging, Frontend Troubleshooting
-
-Should I apply these recommendations?
-\`\`\`
-
-## 3. Applying Recommendations
-
-If user approves (or if you're very confident), use \`update_task\` to apply:
-\`\`\`json
-{
-  "task_id": "task-123",
-  "labels": ["bug", "frontend", "authentication"],
-  "agent_id": "agent-frontend-001",
-  "skill_ids": ["skill-auth-debug", "skill-frontend"],
-  "priority": "high"
-}
-\`\`\`
-
-## 4. Answering Questions
-
-Handle queries like:
-- "What tasks are pending?" → Use \`list_tasks\` with status="not_started"
-- "Show high priority bugs" → Use \`list_tasks\` with priority="high" and labels=["bug"]
-- "How many tasks does Frontend Agent have?" → Use \`list_tasks\` with agent_id filter
-
-## 5. Statistics and Insights
-
-Use \`get_task_statistics\` to provide insights:
-- Label usage trends
-- Agent workload distribution
-- Completion rates
-- Priority distribution
-
-## Example Workflow
-
-User: "I just created a task: Fix payment gateway timeout"
-
-You:
-1. Call \`find_similar_tasks\` with title_keywords="payment gateway"
-2. Analyze results: Found 3 similar payment tasks
-3. Pattern: All labeled "bug", "backend", "payment", assigned to Backend Agent
-4. Recommend same pattern
-5. Ask user or apply if confident
-
-Remember: Be helpful, concise, and proactive. Learn from history, but adapt to context.`
-
-    const skillId = createId()
-    this.db
-      .prepare(
-        `
-      INSERT INTO skills (id, name, description, content, version, confidence, uses, last_used, tags, is_deleted, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 1, ?, 0, NULL, ?, 0, ?, ?)
-    `
-      )
-      .run(
-        skillId,
-        'Mastermind',
-        'Helps agents analyze tasks, make recommendations based on historical patterns, and manage task metadata intelligently',
-        skillContent,
-        0.8, // Higher confidence since this is a system skill
-        JSON.stringify(['mastermind', 'task-management', 'system']),
-        now,
-        now
-      )
-
-    // Add skill to default agent's configuration
-    const defaultAgent = this.db
-      .prepare('SELECT id, config FROM agents WHERE is_default = 1')
-      .get() as { id: string; config: string } | undefined
-
-    if (defaultAgent) {
-      let config: Record<string, unknown>
-      try {
-        config = JSON.parse(defaultAgent.config) as Record<string, unknown>
-      } catch {
-        config = {}
-      }
-
-      const skillIds = (config.skill_ids as string[]) || []
-      if (!skillIds.includes(skillId)) {
-        skillIds.push(skillId)
-        config.skill_ids = skillIds
-
-        this.db
-          .prepare(
-            `
-          UPDATE agents
-          SET config = ?, updated_at = ?
-          WHERE id = ?
-        `
-          )
-          .run(JSON.stringify(config), now, defaultAgent.id)
-      }
-    }
-  }
-
-  private initializeTaskManagementMcpServer(): void {
-    const now = new Date().toISOString()
-
-    // Absolute path to the MCP server script (__dirname = out/main/)
-    // When packaged, the file is inside app.asar but we unpack it via asarUnpack,
-    // so replace app.asar with app.asar.unpacked to get the real filesystem path.
-    let mcpServerPath = join(__dirname, 'mcp-servers', 'task-management-mcp.js')
-    if (mcpServerPath.includes('app.asar')) {
-      mcpServerPath = mcpServerPath.replace('app.asar', 'app.asar.unpacked')
-    }
-
-    // Direct stdio use needs standalone Node on macOS and Windows. Agent
-    // sessions use the in-process HTTP endpoint instead.
-    const useSystemNode = process.platform === 'win32' || process.platform === 'darwin'
-    const mcpCommand = useSystemNode ? 'node' : process.execPath
-    const mcpEnv = useSystemNode ? {} : { ELECTRON_RUN_AS_NODE: '1' }
-
-    // Start the HTTP API server so the MCP server can call back to it
+    // The MCP server script calls back into this HTTP API.
     startTaskApiServer(this).catch(err =>
       console.error('[Database] Failed to start task API server:', err)
     )
-
-    // Check if task-management MCP server already exists
-    const existingServer = this.db.prepare(
-      'SELECT id, args FROM mcp_servers WHERE name = ?'
-    ).get('task-management') as { id: string; args: string } | undefined
-
-    let mcpServerId: string
-
-    // Define the tools available in the MCP server
-    const tools = [
-      { name: 'list_tasks', description: 'List all tasks with optional filters (status, priority, agent, labels)' },
-      { name: 'create_task', description: 'Create a new task with title, description, type, priority, labels, assignee, agent_id, skill_ids, due date. Use cron field for recurring tasks (e.g. "0 9 * * 1-5")' },
-      { name: 'get_task', description: 'Get detailed information about a specific task by ID' },
-      { name: 'update_task', description: 'Update task metadata (labels, skills, agent assignment, priority, status)' },
-      { name: 'create_artifact', description: 'Create a durable task-scoped artifact workpiece' },
-      { name: 'list_artifacts', description: 'List explicitly registered artifacts and their files' },
-      { name: 'read_artifact_file', description: 'Read a file owned by an artifact workpiece' },
-      { name: 'write_artifact_file', description: 'Write a file owned by an artifact workpiece' },
-      { name: 'edit_artifact_file', description: 'Edit a file owned by an artifact workpiece' },
-      { name: 'list_agents', description: 'List all available agents with their configurations' },
-      { name: 'list_skills', description: 'List all available skills with their descriptions' },
-      { name: 'find_similar_tasks', description: 'Find historical tasks similar to given criteria for pattern analysis' },
-      { name: 'get_task_statistics', description: 'Get aggregated statistics about tasks (label usage, agent workload, completion rate)' }
-    ]
-
-    if (!existingServer) {
-      // Create the task management MCP server
-      mcpServerId = createId()
-
-      this.db.prepare(`
-        INSERT INTO mcp_servers (id, name, type, command, args, environment, tools, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        mcpServerId,
-        'task-management',
-        'local',
-        mcpCommand,
-        JSON.stringify([mcpServerPath]),
-        JSON.stringify(mcpEnv),
-        JSON.stringify(tools),
-        now,
-        now
-      )
-    } else {
-      mcpServerId = existingServer.id
-
-      // Always update path, command and refresh tools
-      this.db.prepare(`
-        UPDATE mcp_servers SET command = ?, args = ?, environment = ?, tools = ?, updated_at = ? WHERE id = ?
-      `).run(
-        mcpCommand,
-        JSON.stringify([mcpServerPath]),
-        JSON.stringify(mcpEnv),
-        JSON.stringify(tools),
-        now,
-        mcpServerId
-      )
-    }
-
-    // Add to default agent's MCP servers if not already present
-    const defaultAgent = this.db.prepare(
-      'SELECT id, config FROM agents WHERE is_default = 1'
-    ).get() as { id: string; config: string } | undefined
-
-    if (defaultAgent) {
-      let config: Record<string, unknown>
-      try {
-        config = JSON.parse(defaultAgent.config) as Record<string, unknown>
-      } catch {
-        config = {}
-      }
-
-      const mcpServers = (config.mcp_servers as Array<string | { serverId: string }>) || []
-      // Check if already present (either as string ID or AgentMcpServerEntry)
-      const alreadyPresent = mcpServers.some((s: string | { serverId: string }) =>
-        typeof s === 'string' ? s === mcpServerId : s.serverId === mcpServerId
-      )
-
-      if (!alreadyPresent) {
-        mcpServers.push(mcpServerId)
-        config.mcp_servers = mcpServers
-
-        this.db.prepare(`
-          UPDATE agents
-          SET config = ?, updated_at = ?
-          WHERE id = ?
-        `).run(JSON.stringify(config), now, defaultAgent.id)
-      }
-    }
-  }
-
-  private migrateInlineMcpServers(): void {
-    const agents = this.db.prepare('SELECT id, config FROM agents').all() as { id: string; config: string }[]
-    const now = new Date().toISOString()
-
-    for (const agent of agents) {
-      let config: Record<string, unknown>
-      try { config = JSON.parse(agent.config) as Record<string, unknown> } catch { continue }
-
-      if (!Array.isArray(config.mcp_servers) || config.mcp_servers.length === 0) continue
-      // Already migrated if first element is a string (ID) or an AgentMcpServerEntry object
-      const first = config.mcp_servers[0]
-      if (typeof first === 'string' || (typeof first === 'object' && first.serverId)) continue
-
-      const ids: string[] = []
-      for (const srv of config.mcp_servers as McpServerConfigRecord[]) {
-        // Check if server with same name+command already exists
-        const existing = this.db.prepare(
-          'SELECT id FROM mcp_servers WHERE name = ? AND command = ?'
-        ).get(srv.name, srv.command) as { id: string } | undefined
-
-        if (existing) {
-          ids.push(existing.id)
-        } else {
-          const id = createId()
-          this.db.prepare(
-            'INSERT INTO mcp_servers (id, name, command, args, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
-          ).run(id, srv.name, srv.command, JSON.stringify(srv.args || []), now, now)
-          ids.push(id)
-        }
-      }
-
-      config.mcp_servers = ids
-      this.db.prepare('UPDATE agents SET config = ? WHERE id = ?').run(JSON.stringify(config), agent.id)
-    }
+    seedTaskManagementMcpServer(this.db)
+    seedOrchestratorSkill(this.db)
   }
 
   getWorkspaceDir(taskId: string): string {
-    const dir = join(app.getPath('userData'), 'workspaces', taskId)
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+    // Not memoised: workspace cleanup can delete the directory at any time.
+    const dir = join(WORKSPACES_DIR, taskId)
+    mkdirSync(dir, { recursive: true })
     return dir
   }
 
   getAttachmentsDir(taskId: string): string {
-    const dir = join(app.getPath('userData'), 'attachments', taskId)
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+    const dir = taskAttachmentsDir(taskId)
+    mkdirSync(dir, { recursive: true })
     return dir
   }
 
   deleteTaskAttachments(taskId: string): void {
-    const dir = join(app.getPath('userData'), 'attachments', taskId)
-    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
+    rmSync(taskAttachmentsDir(taskId), { recursive: true, force: true })
   }
 
   getTasks(): TaskRecord[] {
     if (!this.ensureDbOpen()) return []
 
-    const rows = this.db.prepare(
+    const rows = this.prepare(
       'SELECT * FROM tasks ORDER BY created_at DESC'
     ).all() as TaskRow[]
 
@@ -2196,7 +138,7 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
   getTask(id: string): TaskRecord | undefined {
     if (!this.ensureDbOpen()) return undefined
 
-    const row = this.db.prepare(
+    const row = this.prepare(
       'SELECT * FROM tasks WHERE id = ?'
     ).get(id) as TaskRow | undefined
 
@@ -2206,7 +148,7 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
   getSubtasks(parentId: string): TaskRecord[] {
     if (!this.ensureDbOpen()) return []
 
-    const rows = this.db.prepare(
+    const rows = this.prepare(
       'SELECT * FROM tasks WHERE parent_task_id = ? ORDER BY sort_order ASC, created_at ASC'
     ).all(parentId) as TaskRow[]
 
@@ -2221,12 +163,15 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
   /**
    * Upsert a batch of transcript parts for a task inside one transaction.
    * New parts get the next per-task seq; existing parts keep their seq and
-   * update content in place (streaming).
+   * update content in place (streaming). Re-sending an unchanged part is a
+   * no-op: it keeps its rev and is not reported in changedPartIds, so the
+   * returned revs stay contiguous (maxRev - changedPartIds.length is the
+   * cursor before this batch).
    */
   upsertTranscriptParts(taskId: string, parts: TranscriptPartInput[]): { maxRev: number; changedPartIds: string[] } {
     if (!this.ensureDbOpen() || parts.length === 0) return { maxRev: this.getTranscriptMaxRev(taskId), changedPartIds: [] }
 
-    const nextSeqStmt = this.db.prepare(
+    const nextSeqStmt = this.prepare(
       'SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM transcript_parts WHERE task_id = ?'
     )
     // created_at carries the part's ORIGINAL time (receivedAt) when known, not
@@ -2234,10 +179,9 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
     // history in one burst) would stamp every row with a near-identical
     // timestamp and destroy the transcript's chronology. On conflict, created_at
     // is preserved (never overwritten by a later reconcile pass).
-    // Each upserted row (insert OR content update) gets a fresh globally-monotonic
-    // `rev` so a client can fetch everything changed since its last rev. On
-    // conflict, created_at is preserved (never overwritten by a later reconcile).
-    const upsertStmt = this.db.prepare(`
+    // Each inserted or changed row gets a fresh globally-monotonic `rev` so a
+    // client can fetch everything changed since its last rev.
+    const upsertStmt = this.prepare(`
       INSERT INTO transcript_parts (task_id, part_id, seq, role, content, part_type, tool, payload, created_at, updated_at, rev)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch('subsec') * 1000, ?)
       ON CONFLICT(task_id, part_id) DO UPDATE SET
@@ -2247,8 +191,13 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
         payload = COALESCE(excluded.payload, transcript_parts.payload),
         updated_at = excluded.updated_at,
         rev = excluded.rev
+      WHERE excluded.content IS NOT transcript_parts.content
+         OR COALESCE(excluded.part_type, transcript_parts.part_type) IS NOT transcript_parts.part_type
+         OR COALESCE(excluded.tool, transcript_parts.tool) IS NOT transcript_parts.tool
+         OR COALESCE(excluded.payload, transcript_parts.payload) IS NOT transcript_parts.payload
     `)
-    const maxRevStmt = this.db.prepare('SELECT COALESCE(MAX(rev), 0) AS m FROM transcript_parts')
+    // Served by idx_transcript_parts_rev; runs inside every write transaction.
+    const maxRevStmt = this.prepare('SELECT COALESCE(MAX(rev), 0) AS m FROM transcript_parts')
 
     let maxRev = 0
     const changedPartIds: string[] = []
@@ -2258,19 +207,21 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
       const writeNow = Date.now()
       for (const part of parts) {
         if (!part.id) continue
-        rev += 1
-        upsertStmt.run(
+        const { changes } = upsertStmt.run(
           taskId,
           part.id,
-          nextSeq++,
+          nextSeq,
           part.role || 'system',
           part.content || '',
           part.partType ?? null,
           part.tool != null ? JSON.stringify(part.tool) : null,
           part.payload != null ? JSON.stringify(part.payload) : null,
           typeof part.receivedAt === 'number' ? part.receivedAt : writeNow,
-          rev
+          rev + 1
         )
+        nextSeq++
+        if (changes === 0) continue
+        rev += 1
         changedPartIds.push(part.id)
       }
       maxRev = rev
@@ -2291,30 +242,17 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
    */
   getTranscriptDelta(taskId: string, sinceRev: number): { parts: TranscriptPartRecord[]; maxRev: number } {
     if (!this.ensureDbOpen()) return { parts: [], maxRev: sinceRev }
-    const rows = this.db.prepare(
+    const rows = this.prepare(
       'SELECT * FROM transcript_parts WHERE task_id = ? AND rev > ? ORDER BY created_at ASC, seq ASC'
-    ).all(taskId, sinceRev) as Array<{
-      task_id: string; part_id: string; seq: number; role: string; content: string;
-      part_type: string | null; tool: string | null; payload: string | null;
-      created_at: number; updated_at: number; rev: number
-    }>
-    const maxRow = this.db.prepare('SELECT COALESCE(MAX(rev), ?) AS m FROM transcript_parts WHERE task_id = ?').get(sinceRev, taskId) as { m: number }
-    return {
-      parts: rows.map((r) => ({
-        taskId: r.task_id, partId: r.part_id, seq: r.seq, role: r.role, content: r.content,
-        partType: r.part_type ?? undefined,
-        tool: r.tool ? (JSON.parse(r.tool) as unknown) : undefined,
-        payload: r.payload ? (JSON.parse(r.payload) as unknown) : undefined,
-        createdAt: r.created_at, updatedAt: r.updated_at, rev: r.rev
-      })),
-      maxRev: maxRow.m
-    }
+    ).all(taskId, sinceRev) as TranscriptPartRow[]
+    const maxRow = this.prepare('SELECT COALESCE(MAX(rev), ?) AS m FROM transcript_parts WHERE task_id = ?').get(sinceRev, taskId) as { m: number }
+    return { parts: rows.map(toTranscriptPartRecord), maxRev: maxRow.m }
   }
 
   /** Current max rev for a task (0 when empty). */
   getTranscriptMaxRev(taskId: string): number {
     if (!this.ensureDbOpen()) return 0
-    const row = this.db.prepare('SELECT COALESCE(MAX(rev), 0) AS m FROM transcript_parts WHERE task_id = ?').get(taskId) as { m: number }
+    const row = this.prepare('SELECT COALESCE(MAX(rev), 0) AS m FROM transcript_parts WHERE task_id = ?').get(taskId) as { m: number }
     return row.m
   }
 
@@ -2327,47 +265,23 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
     // later backfilled with older history — ordering by created_at keeps the
     // transcript correct regardless of when each part was ingested.
     const rows = (sinceSeq != null
-      ? this.db.prepare('SELECT * FROM transcript_parts WHERE task_id = ? AND seq > ? ORDER BY created_at ASC, seq ASC').all(taskId, sinceSeq)
-      : this.db.prepare('SELECT * FROM transcript_parts WHERE task_id = ? ORDER BY created_at ASC, seq ASC').all(taskId)
-    ) as Array<{
-      task_id: string; part_id: string; seq: number; role: string; content: string;
-      part_type: string | null; tool: string | null; payload: string | null;
-      created_at: number; updated_at: number; rev: number
-    }>
-
-    return rows.map((r) => ({
-      taskId: r.task_id,
-      partId: r.part_id,
-      seq: r.seq,
-      role: r.role,
-      content: r.content,
-      rev: r.rev ?? 0,
-      partType: r.part_type ?? undefined,
-      tool: r.tool ? (JSON.parse(r.tool) as unknown) : undefined,
-      payload: r.payload ? (JSON.parse(r.payload) as unknown) : undefined,
-      createdAt: r.created_at,
-      updatedAt: r.updated_at
-    }))
+      ? this.prepare('SELECT * FROM transcript_parts WHERE task_id = ? AND seq > ? ORDER BY created_at ASC, seq ASC').all(taskId, sinceSeq)
+      : this.prepare('SELECT * FROM transcript_parts WHERE task_id = ? ORDER BY created_at ASC, seq ASC').all(taskId)
+    ) as TranscriptPartRow[]
+    return rows.map(toTranscriptPartRecord)
   }
 
   /** True when the task already has persisted transcript parts. */
   hasTranscriptParts(taskId: string): boolean {
     if (!this.ensureDbOpen()) return false
-    const row = this.db.prepare('SELECT 1 FROM transcript_parts WHERE task_id = ? LIMIT 1').get(taskId)
+    const row = this.prepare('SELECT 1 FROM transcript_parts WHERE task_id = ? LIMIT 1').get(taskId)
     return !!row
-  }
-
-  /** Highest seq for a task (0 when empty) — used by clients to detect gaps. */
-  getTranscriptMaxSeq(taskId: string): number {
-    if (!this.ensureDbOpen()) return 0
-    const row = this.db.prepare('SELECT COALESCE(MAX(seq), 0) AS max FROM transcript_parts WHERE task_id = ?').get(taskId) as { max: number }
-    return row.max
   }
 
   /** Remove a task's transcript (task deletion cleanup). */
   deleteTranscriptParts(taskId: string): void {
     if (!this.ensureDbOpen()) return
-    this.db.prepare('DELETE FROM transcript_parts WHERE task_id = ?').run(taskId)
+    this.prepare('DELETE FROM transcript_parts WHERE task_id = ?').run(taskId)
   }
 
   /**
@@ -2378,7 +292,7 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
   reorderSubtasks(parentId: string, orderedIds: string[]): void {
     if (!this.ensureDbOpen()) return
 
-    const stmt = this.db.prepare('UPDATE tasks SET sort_order = ?, updated_at = ? WHERE id = ? AND parent_task_id = ?')
+    const stmt = this.prepare('UPDATE tasks SET sort_order = ?, updated_at = ? WHERE id = ? AND parent_task_id = ?')
     const now = new Date().toISOString()
 
     const runAll = this.db.transaction(() => {
@@ -2393,7 +307,6 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
     const id = createId()
     const now = new Date().toISOString()
 
-    // If cron shorthand is provided, use it
     const isRecurring = data.cron ? true : !!data.is_recurring
     const recurrencePattern = data.cron
       ? data.cron
@@ -2404,13 +317,13 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
     // When creating a subtask, place it at the end by using max(sort_order) + 1
     let sortOrder = 0
     if (data.parent_task_id) {
-      const maxRow = this.db.prepare(
+      const maxRow = this.prepare(
         'SELECT COALESCE(MAX(sort_order), -1) as max_order FROM tasks WHERE parent_task_id = ?'
       ).get(data.parent_task_id) as { max_order: number } | undefined
       sortOrder = (maxRow?.max_order ?? -1) + 1
     }
 
-    this.db.prepare(`
+    this.prepare(`
       INSERT INTO tasks (
         id, title, description, type, priority, status, assignee, due_date,
         labels, attachments, repos, output_fields, external_id, source_id, source,
@@ -2562,7 +475,7 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
     if (parentTaskId) this.removeFromSiblingSuccessors(id, parentTaskId)
     this.deleteTaskAttachments(id)
     this.deleteTranscriptParts(id)
-    const result = this.db.prepare('DELETE FROM tasks WHERE id = ?').run(id)
+    const result = this.prepare('DELETE FROM tasks WHERE id = ?').run(id)
     return result.changes > 0
   }
 
@@ -2571,7 +484,7 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
   /** Get all tasks that have heartbeat due (enabled + next_check_at <= now, excluding completed tasks). */
   getHeartbeatDueTasks(): TaskRecord[] {
     const now = new Date().toISOString()
-    const rows = this.db.prepare(`
+    const rows = this.prepare(`
       SELECT t.* FROM tasks t
       WHERE t.heartbeat_enabled = 1
         AND t.heartbeat_next_check_at IS NOT NULL
@@ -2588,15 +501,6 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
     return rows.map(deserializeTask)
   }
 
-  /** Get all tasks with heartbeat enabled. */
-  getHeartbeatEnabledTasks(): TaskRecord[] {
-    const rows = this.db.prepare(`
-      SELECT * FROM tasks WHERE heartbeat_enabled = 1
-      ORDER BY heartbeat_next_check_at ASC
-    `).all() as TaskRow[]
-    return rows.map(deserializeTask)
-  }
-
   /** Create a heartbeat log entry. */
   createHeartbeatLog(data: {
     task_id: string
@@ -2607,7 +511,7 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
     const id = createId()
     const now = new Date().toISOString()
 
-    this.db.prepare(`
+    this.prepare(`
       INSERT INTO heartbeat_logs (id, task_id, status, summary, session_id, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(id, data.task_id, data.status, data.summary ?? null, data.session_id ?? null, now)
@@ -2617,7 +521,7 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
 
   /** Get heartbeat logs for a task, most recent first. */
   getHeartbeatLogs(taskId: string, limit = 20): HeartbeatLogRecord[] {
-    return this.db.prepare(`
+    return this.prepare(`
       SELECT * FROM heartbeat_logs
       WHERE task_id = ?
       ORDER BY created_at DESC
@@ -2627,7 +531,7 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
 
   /** Count consecutive errors for a task (from most recent). */
   getHeartbeatConsecutiveErrors(taskId: string): number {
-    const logs = this.db.prepare(`
+    const logs = this.prepare(`
       SELECT status FROM heartbeat_logs
       WHERE task_id = ?
       ORDER BY created_at DESC
@@ -2645,12 +549,12 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
   // ── Agent CRUD ────────────────────────────────────────────
 
   getAgents(): AgentRecord[] {
-    const rows = this.db.prepare('SELECT * FROM agents ORDER BY created_at ASC').all() as AgentRow[]
+    const rows = this.prepare('SELECT * FROM agents ORDER BY created_at ASC').all() as AgentRow[]
     return rows.map(deserializeAgent)
   }
 
   getAgent(id: string): AgentRecord | undefined {
-    const row = this.db.prepare('SELECT * FROM agents WHERE id = ?').get(id) as AgentRow | undefined
+    const row = this.prepare('SELECT * FROM agents WHERE id = ?').get(id) as AgentRow | undefined
     return row ? deserializeAgent(row) : undefined
   }
 
@@ -2658,7 +562,7 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
     const id = createId()
     const now = new Date().toISOString()
 
-    this.db.prepare(`
+    this.prepare(`
       INSERT INTO agents (id, name, server_url, config, is_default, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(
@@ -2709,21 +613,21 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
   }
 
   deleteAgent(id: string): boolean {
-    const result = this.db.prepare('DELETE FROM agents WHERE id = ?').run(id)
+    const result = this.prepare('DELETE FROM agents WHERE id = ?').run(id)
     return result.changes > 0
   }
 
   // ── MCP Server CRUD ────────────────────────────────────────
 
   getMcpServers(): McpServerRecord[] {
-    const rows = this.db.prepare('SELECT * FROM mcp_servers ORDER BY created_at ASC').all() as McpServerRow[]
+    const rows = this.prepare('SELECT * FROM mcp_servers ORDER BY created_at ASC').all() as McpServerRow[]
     return rows.map(deserializeMcpServer)
   }
 
   getMcpServer(id: string): McpServerRecord | undefined {
     if (!this.ensureDbOpen()) return undefined
 
-    const row = this.db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(id) as McpServerRow | undefined
+    const row = this.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(id) as McpServerRow | undefined
     return row ? deserializeMcpServer(row) : undefined
   }
 
@@ -2732,7 +636,7 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
     const now = new Date().toISOString()
     const type = data.type ?? 'local'
     const source: McpServerSource = data.source ?? 'user'
-    this.db.prepare(
+    this.prepare(
       'INSERT INTO mcp_servers (id, name, type, command, args, url, headers, environment, oauth_metadata, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ).run(
       id,
@@ -2776,31 +680,31 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
   }
 
   updateMcpServerTools(id: string, tools: McpServerToolRecord[]): void {
-    this.db.prepare('UPDATE mcp_servers SET tools = ?, updated_at = ? WHERE id = ?')
+    this.prepare('UPDATE mcp_servers SET tools = ?, updated_at = ? WHERE id = ?')
       .run(JSON.stringify(tools), new Date().toISOString(), id)
   }
 
   deleteMcpServer(id: string): boolean {
-    const result = this.db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(id)
+    const result = this.prepare('DELETE FROM mcp_servers WHERE id = ?').run(id)
     return result.changes > 0
   }
 
   // ── Task Source CRUD ─────────────────────────────────────────
 
   getTaskSources(): TaskSourceRecord[] {
-    const rows = this.db.prepare('SELECT * FROM task_sources ORDER BY created_at ASC').all() as TaskSourceRow[]
+    const rows = this.prepare('SELECT * FROM task_sources ORDER BY created_at ASC').all() as TaskSourceRow[]
     return rows.map(deserializeTaskSource)
   }
 
   getTaskSource(id: string): TaskSourceRecord | undefined {
-    const row = this.db.prepare('SELECT * FROM task_sources WHERE id = ?').get(id) as TaskSourceRow | undefined
+    const row = this.prepare('SELECT * FROM task_sources WHERE id = ?').get(id) as TaskSourceRow | undefined
     return row ? deserializeTaskSource(row) : undefined
   }
 
   createTaskSource(data: CreateTaskSourceData): TaskSourceRecord | undefined {
     const id = createId()
     const now = new Date().toISOString()
-    this.db.prepare(
+    this.prepare(
       'INSERT INTO task_sources (id, mcp_server_id, name, plugin_id, config, list_tool, list_tool_args, update_tool, update_tool_args, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)'
     ).run(
       id,
@@ -2854,17 +758,17 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
   }
 
   updateTaskSourceLastSynced(id: string): void {
-    this.db.prepare('UPDATE task_sources SET last_synced_at = ?, updated_at = ? WHERE id = ?')
+    this.prepare('UPDATE task_sources SET last_synced_at = ?, updated_at = ? WHERE id = ?')
       .run(new Date().toISOString(), new Date().toISOString(), id)
   }
 
   deleteTaskSource(id: string): boolean {
-    const result = this.db.prepare('DELETE FROM task_sources WHERE id = ?').run(id)
+    const result = this.prepare('DELETE FROM task_sources WHERE id = ?').run(id)
     return result.changes > 0
   }
 
   getTaskByExternalId(sourceId: string, externalId: string): TaskRecord | undefined {
-    const row = this.db.prepare(
+    const row = this.prepare(
       'SELECT * FROM tasks WHERE source_id = ? AND external_id = ?'
     ).get(sourceId, externalId) as TaskRow | undefined
     return row ? deserializeTask(row) : undefined
@@ -2873,14 +777,14 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
   // ── Skill CRUD ────────────────────────────────────────────
 
   getSkills(): SkillRecord[] {
-    const rows = this.db.prepare(
+    const rows = this.prepare(
       'SELECT * FROM skills WHERE is_deleted = 0 ORDER BY name ASC'
     ).all() as SkillRow[]
     return rows.map(deserializeSkill)
   }
 
   getSkill(id: string): SkillRecord | undefined {
-    const row = this.db.prepare(
+    const row = this.prepare(
       'SELECT * FROM skills WHERE id = ? AND is_deleted = 0'
     ).get(id) as SkillRow | undefined
     return row ? deserializeSkill(row) : undefined
@@ -2902,7 +806,7 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
     const uses = data.uses ?? 0
     const lastUsed = data.last_used ?? null
     const tags = JSON.stringify(data.tags ?? [])
-    this.db.prepare(`
+    this.prepare(`
       INSERT INTO skills (id, name, description, content, version, confidence, uses, last_used, tags, is_deleted, created_at, updated_at)
       VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, 0, ?, ?)
     `).run(id, data.name, data.description, data.content, confidence, uses, lastUsed, tags, now, now)
@@ -2948,14 +852,14 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
   }
 
   getSkillByName(name: string): SkillRecord | undefined {
-    const row = this.db.prepare(
+    const row = this.prepare(
       'SELECT * FROM skills WHERE name = ? AND is_deleted = 0'
     ).get(name) as SkillRow | undefined
     return row ? deserializeSkill(row) : undefined
   }
 
   deleteSkill(id: string): boolean {
-    const result = this.db.prepare(
+    const result = this.prepare(
       'UPDATE skills SET is_deleted = 1, updated_at = ? WHERE id = ? AND is_deleted = 0'
     ).run(new Date().toISOString(), id)
     return result.changes > 0
@@ -2964,14 +868,14 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
   // ── Secret CRUD ──────────────────────────────────────────
 
   getSecrets(): SecretRecord[] {
-    const rows = this.db.prepare(
+    const rows = this.prepare(
       'SELECT * FROM secrets ORDER BY name ASC'
     ).all() as SecretRow[]
     return rows.map(deserializeSecret)
   }
 
   getSecret(id: string): SecretRecord | undefined {
-    const row = this.db.prepare(
+    const row = this.prepare(
       'SELECT * FROM secrets WHERE id = ?'
     ).get(id) as SecretRow | undefined
     return row ? deserializeSecret(row) : undefined
@@ -3003,10 +907,8 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
   createSecret(data: CreateSecretData): SecretRecord | undefined {
     const id = createId()
     const now = new Date().toISOString()
-    const encryptedValue = safeStorage.isEncryptionAvailable()
-      ? safeStorage.encryptString(data.value)
-      : Buffer.from(data.value, 'utf8')
-    this.db.prepare(`
+    const encryptedValue = encryptSecret(data.value)
+    this.prepare(`
       INSERT INTO secrets (id, name, description, env_var_name, value, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(id, data.name, data.description, data.env_var_name, encryptedValue, now, now)
@@ -3025,10 +927,7 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
     if (data.env_var_name !== undefined) { setClauses.push('env_var_name = ?'); values.push(data.env_var_name) }
     if (data.value !== undefined) {
       setClauses.push('value = ?')
-      const encryptedValue = safeStorage.isEncryptionAvailable()
-        ? safeStorage.encryptString(data.value)
-        : Buffer.from(data.value, 'utf8')
-      values.push(encryptedValue)
+      values.push(encryptSecret(data.value))
     }
 
     if (setClauses.length === 0) return existing
@@ -3045,27 +944,27 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
   }
 
   deleteSecret(id: string): boolean {
-    const result = this.db.prepare('DELETE FROM secrets WHERE id = ?').run(id)
+    const result = this.prepare('DELETE FROM secrets WHERE id = ?').run(id)
     return result.changes > 0
   }
 
   // ── Settings CRUD ──────────────────────────────────────────
 
   getSetting(key: string): string | undefined {
-    const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined
+    const row = this.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined
     return row?.value
   }
 
   setSetting(key: string, value: string): void {
-    this.db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, value)
+    this.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, value)
   }
 
   deleteSetting(key: string): void {
-    this.db.prepare('DELETE FROM settings WHERE key = ?').run(key)
+    this.prepare('DELETE FROM settings WHERE key = ?').run(key)
   }
 
   getAllSettings(): Record<string, string> {
-    const rows = this.db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[]
+    const rows = this.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[]
     const result: Record<string, string> = {}
     for (const row of rows) result[row.key] = row.value
     return result
@@ -3078,16 +977,7 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
     const now = new Date().toISOString()
     const expiresAt = new Date(Date.now() + data.expires_in * 1000).toISOString()
 
-    // Encrypt tokens before storing
-    const encryptedAccessToken = safeStorage.isEncryptionAvailable()
-      ? safeStorage.encryptString(data.access_token)
-      : Buffer.from(data.access_token, 'utf8')
-
-    const encryptedRefreshToken = data.refresh_token && safeStorage.isEncryptionAvailable()
-      ? safeStorage.encryptString(data.refresh_token)
-      : data.refresh_token ? Buffer.from(data.refresh_token, 'utf8') : null
-
-    this.db.prepare(`
+    this.prepare(`
       INSERT INTO oauth_tokens (id, provider, source_id, mcp_server_id, access_token, refresh_token, expires_at, scope, token_type, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
@@ -3095,8 +985,8 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
       data.provider,
       data.source_id ?? null,
       data.mcp_server_id ?? null,
-      encryptedAccessToken,
-      encryptedRefreshToken,
+      encryptSecret(data.access_token),
+      data.refresh_token ? encryptSecret(data.refresh_token) : null,
       expiresAt,
       data.scope,
       'Bearer',
@@ -3108,7 +998,7 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
   }
 
   getOAuthToken(id: string): OAuthTokenRecord | undefined {
-    const row = this.db.prepare(
+    const row = this.prepare(
       'SELECT * FROM oauth_tokens WHERE id = ?'
     ).get(id) as OAuthTokenRow | undefined
 
@@ -3116,7 +1006,7 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
   }
 
   getOAuthTokenBySource(sourceId: string): OAuthTokenRecord | undefined {
-    const row = this.db.prepare(
+    const row = this.prepare(
       'SELECT * FROM oauth_tokens WHERE source_id = ?'
     ).get(sourceId) as OAuthTokenRow | undefined
 
@@ -3127,112 +1017,87 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
     const now = new Date().toISOString()
     const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString()
 
-    // Encrypt tokens before storing
-    const encryptedAccessToken = safeStorage.isEncryptionAvailable()
-      ? safeStorage.encryptString(accessToken)
-      : Buffer.from(accessToken, 'utf8')
-
-    const encryptedRefreshToken = refreshToken && safeStorage.isEncryptionAvailable()
-      ? safeStorage.encryptString(refreshToken)
-      : refreshToken ? Buffer.from(refreshToken, 'utf8') : null
-
-    this.db.prepare(
+    this.prepare(
       'UPDATE oauth_tokens SET access_token = ?, refresh_token = ?, expires_at = ?, updated_at = ? WHERE id = ?'
-    ).run(encryptedAccessToken, encryptedRefreshToken, expiresAt, now, id)
+    ).run(encryptSecret(accessToken), refreshToken ? encryptSecret(refreshToken) : null, expiresAt, now, id)
 
     return this.getOAuthToken(id)
   }
 
   deleteOAuthToken(id: string): boolean {
-    const result = this.db.prepare('DELETE FROM oauth_tokens WHERE id = ?').run(id)
+    const result = this.prepare('DELETE FROM oauth_tokens WHERE id = ?').run(id)
     return result.changes > 0
   }
 
   deleteOAuthTokenBySource(sourceId: string): boolean {
-    const result = this.db.prepare('DELETE FROM oauth_tokens WHERE source_id = ?').run(sourceId)
+    const result = this.prepare('DELETE FROM oauth_tokens WHERE source_id = ?').run(sourceId)
     return result.changes > 0
   }
 
   getOAuthTokenByMcpServer(mcpServerId: string): OAuthTokenRecord | undefined {
-    const row = this.db.prepare(
+    const row = this.prepare(
       'SELECT * FROM oauth_tokens WHERE mcp_server_id = ?'
     ).get(mcpServerId) as OAuthTokenRow | undefined
     return row ? deserializeOAuthToken(row) : undefined
   }
 
   deleteOAuthTokenByMcpServer(mcpServerId: string): boolean {
-    const result = this.db.prepare('DELETE FROM oauth_tokens WHERE mcp_server_id = ?').run(mcpServerId)
+    const result = this.prepare('DELETE FROM oauth_tokens WHERE mcp_server_id = ?').run(mcpServerId)
     return result.changes > 0
   }
 
   // ── Marketplace Sources ──────────────────────────────────────
 
   getMarketplaceSources(): MarketplaceSourceRecord[] {
-    const rows = this.db.prepare('SELECT * FROM marketplace_sources ORDER BY created_at DESC').all() as MarketplaceSourceRow[]
+    const rows = this.prepare('SELECT * FROM marketplace_sources ORDER BY created_at DESC').all() as MarketplaceSourceRow[]
     return rows.map(deserializeMarketplaceSource)
   }
 
   getMarketplaceSource(id: string): MarketplaceSourceRecord | undefined {
-    const row = this.db.prepare('SELECT * FROM marketplace_sources WHERE id = ?').get(id) as MarketplaceSourceRow | undefined
+    const row = this.prepare('SELECT * FROM marketplace_sources WHERE id = ?').get(id) as MarketplaceSourceRow | undefined
     return row ? deserializeMarketplaceSource(row) : undefined
   }
 
   getMarketplaceSourceByName(name: string): MarketplaceSourceRecord | undefined {
-    const row = this.db.prepare('SELECT * FROM marketplace_sources WHERE name = ?').get(name) as MarketplaceSourceRow | undefined
+    const row = this.prepare('SELECT * FROM marketplace_sources WHERE name = ?').get(name) as MarketplaceSourceRow | undefined
     return row ? deserializeMarketplaceSource(row) : undefined
   }
 
   createMarketplaceSource(data: CreateMarketplaceSourceData): MarketplaceSourceRecord {
     const id = createId()
     const now = new Date().toISOString()
-    this.db.prepare(
+    this.prepare(
       'INSERT INTO marketplace_sources (id, name, source_type, source_url, metadata, auto_update, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     ).run(id, data.name, data.source_type || 'github', data.source_url, JSON.stringify(data.metadata || {}), data.auto_update ? 1 : 0, now, now)
     return this.getMarketplaceSource(id)!
   }
 
-  updateMarketplaceSource(id: string, data: UpdateMarketplaceSourceData): MarketplaceSourceRecord | undefined {
-    const existing = this.getMarketplaceSource(id)
-    if (!existing) return undefined
-    const now = new Date().toISOString()
-    const sets: string[] = ['updated_at = ?']
-    const values: unknown[] = [now]
-    if (data.name !== undefined) { sets.push('name = ?'); values.push(data.name) }
-    if (data.source_type !== undefined) { sets.push('source_type = ?'); values.push(data.source_type) }
-    if (data.source_url !== undefined) { sets.push('source_url = ?'); values.push(data.source_url) }
-    if (data.metadata !== undefined) { sets.push('metadata = ?'); values.push(JSON.stringify(data.metadata)) }
-    if (data.auto_update !== undefined) { sets.push('auto_update = ?'); values.push(data.auto_update ? 1 : 0) }
-    values.push(id)
-    this.db.prepare(`UPDATE marketplace_sources SET ${sets.join(', ')} WHERE id = ?`).run(...values)
-    return this.getMarketplaceSource(id)
-  }
-
   deleteMarketplaceSource(id: string): boolean {
-    const result = this.db.prepare('DELETE FROM marketplace_sources WHERE id = ?').run(id)
+    const result = this.prepare('DELETE FROM marketplace_sources WHERE id = ?').run(id)
     return result.changes > 0
   }
 
   // ── Installed Plugins ────────────────────────────────────────
 
   getInstalledPlugins(): InstalledPluginRecord[] {
-    const rows = this.db.prepare('SELECT * FROM installed_plugins ORDER BY installed_at DESC').all() as InstalledPluginRow[]
+    const rows = this.prepare('SELECT * FROM installed_plugins ORDER BY installed_at DESC').all() as InstalledPluginRow[]
     return rows.map(deserializeInstalledPlugin)
   }
 
   getInstalledPlugin(id: string): InstalledPluginRecord | undefined {
-    const row = this.db.prepare('SELECT * FROM installed_plugins WHERE id = ?').get(id) as InstalledPluginRow | undefined
+    const row = this.prepare('SELECT * FROM installed_plugins WHERE id = ?').get(id) as InstalledPluginRow | undefined
     return row ? deserializeInstalledPlugin(row) : undefined
   }
 
   getInstalledPluginByName(name: string, marketplaceId: string): InstalledPluginRecord | undefined {
-    const row = this.db.prepare('SELECT * FROM installed_plugins WHERE name = ? AND marketplace_id = ?').get(name, marketplaceId) as InstalledPluginRow | undefined
+    const row = this.prepare('SELECT * FROM installed_plugins WHERE name = ? AND marketplace_id = ?').get(name, marketplaceId) as InstalledPluginRow | undefined
     return row ? deserializeInstalledPlugin(row) : undefined
   }
 
   createInstalledPlugin(data: CreateInstalledPluginData): InstalledPluginRecord {
     const id = createId()
     const now = new Date().toISOString()
-    this.db.prepare(
+    this.prepare(
       'INSERT INTO installed_plugins (id, name, marketplace_id, manifest, source, scope, enabled, version, installed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ).run(
       id, data.name, data.marketplace_id, JSON.stringify(data.manifest || {}),
@@ -3257,56 +1122,56 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
   }
 
   deleteInstalledPlugin(id: string): boolean {
-    const result = this.db.prepare('DELETE FROM installed_plugins WHERE id = ?').run(id)
+    const result = this.prepare('DELETE FROM installed_plugins WHERE id = ?').run(id)
     return result.changes > 0
   }
 
   // ── Mobile pairing ─────────────────────────────────────────
 
   createMobilePairCode(id: string, pin: string, expiresAt: number): void {
-    this.db.prepare(
+    this.prepare(
       'INSERT INTO mobile_pair_codes (id, pin, expires_at) VALUES (?, ?, ?)'
     ).run(id, pin, expiresAt)
   }
 
   getMobilePairCode(id: string): { id: string; pin: string; expires_at: number; attempts: number } | undefined {
-    return this.db.prepare('SELECT * FROM mobile_pair_codes WHERE id = ?').get(id) as { id: string; pin: string; expires_at: number; attempts: number } | undefined
+    return this.prepare('SELECT * FROM mobile_pair_codes WHERE id = ?').get(id) as { id: string; pin: string; expires_at: number; attempts: number } | undefined
   }
 
   incrementPairCodeAttempts(id: string): number {
-    this.db.prepare('UPDATE mobile_pair_codes SET attempts = attempts + 1 WHERE id = ?').run(id)
-    const row = this.db.prepare('SELECT attempts FROM mobile_pair_codes WHERE id = ?').get(id) as { attempts: number } | undefined
+    this.prepare('UPDATE mobile_pair_codes SET attempts = attempts + 1 WHERE id = ?').run(id)
+    const row = this.prepare('SELECT attempts FROM mobile_pair_codes WHERE id = ?').get(id) as { attempts: number } | undefined
     return row?.attempts ?? 0
   }
 
   deleteMobilePairCode(id: string): void {
-    this.db.prepare('DELETE FROM mobile_pair_codes WHERE id = ?').run(id)
+    this.prepare('DELETE FROM mobile_pair_codes WHERE id = ?').run(id)
   }
 
   createMobileSession(id: string, tokenHash: string, deviceName: string): void {
-    this.db.prepare(
+    this.prepare(
       'INSERT INTO mobile_sessions (id, token_hash, device_name) VALUES (?, ?, ?)'
     ).run(id, tokenHash, deviceName)
   }
 
   getMobileSessionByTokenHash(tokenHash: string): { id: string; device_name: string; paired_at: number; last_seen: number; revoked: number } | undefined {
-    return this.db.prepare('SELECT * FROM mobile_sessions WHERE token_hash = ? AND revoked = 0').get(tokenHash) as { id: string; device_name: string; paired_at: number; last_seen: number; revoked: number } | undefined
+    return this.prepare('SELECT * FROM mobile_sessions WHERE token_hash = ? AND revoked = 0').get(tokenHash) as { id: string; device_name: string; paired_at: number; last_seen: number; revoked: number } | undefined
   }
 
   getMobileSessions(): { id: string; device_name: string; paired_at: number; last_seen: number; revoked: number }[] {
-    return this.db.prepare('SELECT id, device_name, paired_at, last_seen, revoked FROM mobile_sessions WHERE revoked = 0 ORDER BY last_seen DESC').all() as { id: string; device_name: string; paired_at: number; last_seen: number; revoked: number }[]
+    return this.prepare('SELECT id, device_name, paired_at, last_seen, revoked FROM mobile_sessions WHERE revoked = 0 ORDER BY last_seen DESC').all() as { id: string; device_name: string; paired_at: number; last_seen: number; revoked: number }[]
   }
 
   touchMobileSession(tokenHash: string): void {
-    this.db.prepare('UPDATE mobile_sessions SET last_seen = unixepoch() WHERE token_hash = ?').run(tokenHash)
+    this.prepare('UPDATE mobile_sessions SET last_seen = unixepoch() WHERE token_hash = ?').run(tokenHash)
   }
 
   revokeMobileSession(id: string): boolean {
-    const result = this.db.prepare('UPDATE mobile_sessions SET revoked = 1 WHERE id = ?').run(id)
+    const result = this.prepare('UPDATE mobile_sessions SET revoked = 1 WHERE id = ?').run(id)
     return result.changes > 0
   }
 
   revokeAllMobileSessions(): void {
-    this.db.prepare('UPDATE mobile_sessions SET revoked = 1').run()
+    this.prepare('UPDATE mobile_sessions SET revoked = 1').run()
   }
 }

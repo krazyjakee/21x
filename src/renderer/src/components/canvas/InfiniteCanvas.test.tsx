@@ -310,7 +310,7 @@ describe('InfiniteCanvas', () => {
   })
 
   it('should reset viewport when reset button is clicked', () => {
-    useCanvasStore.getState().panBy(200, 300)
+    useCanvasStore.getState().setViewport({ x: 200, y: 300 })
     useCanvasStore.getState().zoomTo(2)
     render(<InfiniteCanvas />)
     fireEvent.click(screen.getByTitle('Reset view (Ctrl+0)'))

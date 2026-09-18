@@ -23,7 +23,7 @@ The implementation adds multi-agent support via the OpenCode SDK, allowing users
   - Creates OpenCode client instances per agent
   - Uses `session.create()`, `session.prompt()`, `session.messages()`, `config.providers()` APIs
 
-#### 2. IPC Handlers (`src/main/ipc-handlers.ts`)
+#### 2. IPC Handlers (`src/main/ipc/agents.ts`)
 Extended with agent-specific handlers:
 - `agentSession:start` - Start new agent session
 - `agentSession:stop` - Stop active session
@@ -38,8 +38,8 @@ Extended tasks table with `agent_id` column (foreign key to agents table).
 
 #### 1. Agent Settings UI
 
-**AgentSettingsDialog** (`src/renderer/src/components/agents/AgentSettingsDialog.tsx`)
-- Modal dialog for managing agent configurations
+**AgentsSettings** (`src/renderer/src/components/settings/tabs/AgentsSettings.tsx`)
+- Settings tab for managing agent configurations
 - Lists all agents with connection test functionality
 - CRUD operations (Create, Read, Update, Delete)
 
@@ -83,15 +83,9 @@ Extended tasks table with `agent_id` column (foreign key to agents table).
 - Status indicator (idle/working/error/waiting_approval)
 - Stop button to kill session
 
-**AgentApprovalBanner** (`src/renderer/src/components/agents/AgentApprovalBanner.tsx`)
-- Fixed banner at top when permission is requested
-- Shows action description
-- Approve/Reject buttons
-- Optional message input
-
 **useAgentSession Hook** (`src/renderer/src/hooks/use-agent-session.ts`)
 - Manages agent session state
-- Subscribes to IPC events (output, status, approval)
+- Subscribes to IPC events (output, status)
 - Provides: start, stop, sendMessage, approve
 - Returns sessionId from start() for immediate use
 
@@ -102,16 +96,11 @@ Extended tasks table with `agent_id` column (foreign key to agents table).
 - Tracks active sessions per task
 - Subscribes to agent status updates
 
-**UI Store** (`src/renderer/src/stores/ui-store.ts`)
-- Added `activeModal: 'agent-settings'` variant
-- Agent settings dialog state management
-
 ### IPC Communication
 
 #### Channels (Main → Renderer)
 - `agent:output` - Agent message output
 - `agent:status` - Session status changes
-- `agent:approval` - Permission request
 
 #### Channels (Renderer → Main)
 - `agentSession:start` - Start session
@@ -141,7 +130,7 @@ Extended tasks table with `agent_id` column (foreign key to agents table).
 
 ### 4. Human-in-the-Loop (HITL)
 - Agent pauses on destructive actions
-- Approval banner appears at top
+- Approval request appears in the transcript
 - User can approve/reject with optional message
 - Agent continues based on decision
 
@@ -199,13 +188,12 @@ Extended tasks table with `agent_id` column (foreign key to agents table).
 ### New Files
 - `src/main/agent-manager.ts`
 - `src/renderer/src/components/agents/AgentForm.tsx`
-- `src/renderer/src/components/agents/AgentSettingsDialog.tsx`
+- `src/renderer/src/components/settings/tabs/AgentsSettings.tsx`
 - `src/renderer/src/components/agents/AgentTranscriptPanel.tsx`
-- `src/renderer/src/components/agents/AgentApprovalBanner.tsx`
 - `src/renderer/src/hooks/use-agent-session.ts`
 
 ### Modified Files
-- `src/main/ipc-handlers.ts` - Added agent session handlers
+- `src/main/ipc/agents.ts` - Added agent session handlers
 - `src/main/index.ts` - Integrated AgentManager lifecycle
 - `src/preload/index.ts` - Exposed agent APIs
 - `src/renderer/src/components/layout/Sidebar.tsx` - Added settings button
@@ -214,7 +202,6 @@ Extended tasks table with `agent_id` column (foreign key to agents table).
 - `src/renderer/src/components/tasks/TaskWorkspace.tsx` - Split layout with transcript
 - `src/renderer/src/components/tasks/TaskListItem.tsx` - Agent status indicator
 - `src/renderer/src/stores/agent-store.ts` - Session tracking
-- `src/renderer/src/stores/ui-store.ts` - Modal state
 - `src/renderer/src/lib/ipc-client.ts` - Agent APIs
 - `src/renderer/src/types/index.ts` - Agent types
 - `src/renderer/src/types/electron.d.ts` - Extended ElectronAPI
@@ -245,7 +232,7 @@ Extended tasks table with `agent_id` column (foreign key to agents table).
 10. Complete task and verify session stops
 
 ### Verification Points
-- [ ] Agent settings dialog opens/closes
+- [ ] Agent settings tab opens
 - [ ] Models load from OpenCode server
 - [ ] Agent assignment updates task
 - [ ] Session starts automatically

@@ -329,29 +329,6 @@ describe('serializeTranscriptForDebug', () => {
     expect(result).not.toContain('Silent For')
   })
 
-  it('should show pending approval info in header', () => {
-    const result = serializeTranscriptForDebug([], {
-      status: SessionStatus.WAITING_APPROVAL,
-      messageCount: 0,
-      pendingApproval: {
-        action: 'bash',
-        description: 'Run: rm -rf /tmp/test'
-      }
-    })
-
-    expect(result).toContain('⚠️ Pending Approval: bash — Run: rm -rf /tmp/test')
-  })
-
-  it('should not show pending approval when null', () => {
-    const result = serializeTranscriptForDebug([], {
-      status: SessionStatus.IDLE,
-      messageCount: 0,
-      pendingApproval: null
-    })
-
-    expect(result).not.toContain('Pending Approval')
-  })
-
   it('should include tool errors from raw transcript', () => {
     const rawTranscript: RawTranscriptMessage[] = [
       {

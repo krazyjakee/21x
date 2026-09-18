@@ -24,7 +24,6 @@ import type { VoiceRuntimeStatus } from '../../shared/voice'
  * what is really installed.
  */
 export const VOICE_RUNTIME_PACKAGE = 'sherpa-onnx-node'
-export const VOICE_RUNTIME_SPEC = VOICE_RUNTIME_PACKAGE
 
 /** Roughly how much disk the runtime and its platform binaries need. */
 export const VOICE_RUNTIME_APPROX_BYTES = 180 * 1024 * 1024
@@ -114,7 +113,7 @@ export async function installVoiceRuntime(
   await new Promise<void>((resolve, reject) => {
     const child = spawn(
       npmCommand(),
-      ['install', VOICE_RUNTIME_SPEC, '--omit=dev', '--no-audit', '--no-fund', '--loglevel=info'],
+      ['install', VOICE_RUNTIME_PACKAGE, '--omit=dev', '--no-audit', '--no-fund', '--loglevel=info'],
       { cwd: rootDir, shell: process.platform === 'win32', windowsHide: true }
     )
 

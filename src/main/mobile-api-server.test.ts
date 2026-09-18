@@ -172,6 +172,44 @@ describe('mobile-api-server: session tokens', () => {
   })
 })
 
+describe('mobile-api-server: POST /api/tasks over HTTP', () => {
+  afterEach(() => {
+    stopMobileApiServer()
+    vi.restoreAllMocks()
+  })
+
+  async function start() {
+    const { db } = createTestDb()
+    const token = 'create-token'
+    db.createMobileSession('create-session', createHash('sha256').update(token).digest('hex'), 'test-device')
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    const port = await startMobileApiServer(db, {} as never, {} as never, 0)
+    const post = (path: string, body: string) => fetch(`http://127.0.0.1:${port}${path}`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body
+    })
+    return { db, post }
+  }
+
+  it('does not let a phone set a task source link', async () => {
+    const { db, post } = await start()
+    const source = db.createTaskSource({ name: 'Linear', plugin_id: 'linear', mcp_server_id: null })!
+
+    const response = await post('/api/tasks', JSON.stringify({ title: 'Phone task', source_id: source.id, external_id: 'EXT-1', source: 'Linear' }))
+    const task = await response.json() as { id: string }
+
+    expect(response.status).toBe(200)
+    expect(db.getTask(task.id)).toMatchObject({ title: 'Phone task', source_id: null, external_id: null, source: 'local' })
+  })
+
+  it('answers a malformed JSON body with 400', async () => {
+    const { post } = await start()
+
+    const response = await post('/api/tasks', '{not json')
+
+    expect(response.status).toBe(400)
+  })
+})
+
 describe('mobile-api-server: POST /api/tasks/:id coordinator wake-up', () => {
   afterEach(() => {
     stopMobileApiServer()
@@ -296,7 +334,7 @@ describe('mobile-api-server: source completion action', () => {
     db.updateTask(task.id, {agent_id: agent.id})
     updateTaskFromUser(db, task.id, {status: 'agent_learning', feedback_rating: 5, complete_at_source: completeAtSource})
     const executeAction = vi.fn().mockResolvedValue({success: true, taskUpdate: {status: 'completed'}})
-    const sync = new SyncManager(db, {} as never, {get: () => ({executeAction})} as never)
+    const sync = new SyncManager(db, {get: () => ({executeAction})} as never)
     const token = `learning-skip-${completeAtSource}`
     db.createMobileSession(`learning-skip-session-${completeAtSource}`, createHash('sha256').update(token).digest('hex'), 'test-device')
     vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -329,7 +367,7 @@ describe('mobile API: all four feedback/source combinations', () => {
       notionRecord.status = 'closed'
       return {success: true, taskUpdate: {status: 'completed'}}
     })
-    const sync = new SyncManager(db, {} as never, {get: () => ({executeAction: sourceAction})} as never)
+    const sync = new SyncManager(db, {get: () => ({executeAction: sourceAction})} as never)
     const token = 'four-cases-token'
     db.createMobileSession('four-cases-session', createHash('sha256').update(token).digest('hex'), 'test-device')
     vi.spyOn(console, 'log').mockImplementation(() => {})

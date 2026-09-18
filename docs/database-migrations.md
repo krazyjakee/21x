@@ -1,6 +1,6 @@
 # Database Migrations
 
-All schema migrations live in `src/main/database.ts` inside `DatabaseManager`.
+All schema migrations live in `src/main/database/schema.ts` as plain functions over the raw SQLite handle; `DatabaseManager.initialize()` applies them through `applySchema()`. Tests build their schema from the same functions (`test/helpers/db-test-helper.ts`).
 
 ## How it works
 

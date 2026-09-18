@@ -128,7 +128,6 @@ export function CollapsibleDescription({
 
   const isCollapsed = needsCollapse && !expanded
 
-  // Edit mode
   if (isEditing) {
     return (
       <div className={className} data-testid="description-edit-form">

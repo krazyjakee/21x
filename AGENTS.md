@@ -4,7 +4,7 @@ This document describes the production multi-agent system powering 20x. The arch
 
 ## Overview
 
-20x supports running multiple AI coding agents in parallel, each working on assigned tasks within specific codebases. Agents are managed through adapter interfaces and interact with users via streaming transcripts with human-in-the-loop (HITL) approval flows. Five backends are supported (`CodingAgentType` in `src/main/agent-manager.ts`): **OpenCode**, **Claude Code**, **Codex**, **Cursor**, and **Pi**.
+20x supports running multiple AI coding agents in parallel, each working on assigned tasks within specific codebases. Agents are managed through adapter interfaces and interact with users via streaming transcripts with human-in-the-loop (HITL) approval flows. Five backends are supported (`CodingAgentType` in `src/main/agent-manager/adapter-factory.ts`): **OpenCode**, **Claude Code**, **Codex**, **Cursor**, and **Pi**.
 
 ## Agent Model
 
@@ -108,7 +108,7 @@ CREATE TABLE mcp_servers (
 );
 ```
 
-Database schema migrations are run automatically with version tracking (`SCHEMA_VERSION = 10` in `database.ts`; see `docs/database-migrations.md`). Migration history includes column additions for attachments, repos, output fields, agent_id, session_id, snoozed_until, recurring tasks, heartbeat, subtasks, and more.
+Database schema migrations are run automatically with version tracking (`SCHEMA_VERSION = 10` in `src/main/database/schema.ts`; see `docs/database-migrations.md`). Migration history includes column additions for attachments, repos, output fields, agent_id, session_id, snoozed_until, recurring tasks, heartbeat, subtasks, and more.
 
 ## Architecture
 
@@ -254,7 +254,6 @@ Features:
 | Channel | Direction | Payload | Response |
 |---------|-----------|---------|----------|
 | `agent:getAll` | renderer -> main | — | `Agent[]` |
-| `agent:get` | renderer -> main | `id` | `Agent` |
 | `agent:create` | renderer -> main | `CreateAgentData` | `Agent` |
 | `agent:update` | renderer -> main | `id, UpdateAgentData` | `Agent` |
 | `agent:delete` | renderer -> main | `id` | `boolean` |
@@ -271,9 +270,6 @@ Features:
 | `agentSession:send` | renderer -> main | `sessionId, message, taskId?, agentId?, attachments?` | `{ success, ... }` |
 | `agentSession:sendByTaskId` | renderer -> main | `taskId, message, attachments?` | `{ success, ... }` |
 | `agentSession:approve` | renderer -> main | `sessionId, approved, message?` | `{ success }` |
-| `agentSession:syncSkills` | renderer -> main | `sessionId` | `SkillSyncResult` |
-| `agentSession:syncSkillsForTask` | renderer -> main | `taskId` | `SkillSyncResult` |
-| `agentSession:learnFromSession` | renderer -> main | `sessionId, message` | `SkillSyncResult` |
 | `agentSession:getRawTranscript` | renderer -> main | `taskId` | transcript data |
 
 ### Agent Events (main -> renderer via `webContents.send`)
@@ -282,7 +278,6 @@ Features:
 |---------|---------|
 | `agent:output` | `{ sessionId, data }` — streaming transcript parts |
 | `agent:status` | `{ agentId, status }` — status transitions |
-| `agent:approval` | `{ sessionId, action, description }` — HITL request |
 
 ### Agent Config
 
@@ -317,7 +312,6 @@ sent to the desktop window only, never to a mobile client.
 | `voice:getRuntime` | renderer -> main | — | `VoiceRuntimeStatus` |
 | `voice:installRuntime` | renderer -> main | — | `VoiceRuntimeStatus` |
 | `voice:removeRuntime` | renderer -> main | — | `VoiceRuntimeStatus` |
-| `voice:listModels` | renderer -> main | — | `VoiceModelState[]` |
 | `voice:installModel` | renderer -> main | `{ id }` | `VoiceModelState` |
 | `voice:removeModel` | renderer -> main | `{ id }` | `{ success }` |
 | `voice:removeAllModels` | renderer -> main | — | `{ success }` |
@@ -346,7 +340,7 @@ writer for voice.
 
 ## Agent Manager
 
-`src/main/agent-manager.ts` — the core orchestration layer.
+`src/main/agent-manager.ts` — the core orchestration layer. Helpers live in `src/main/agent-manager/` (adapter factory, session config, workspace docs and skill files, attachments, skill sync, MCP server test, prompts, transcript events, watchdogs, output dedup, worktree setup).
 
 ```typescript
 class AgentManager extends EventEmitter {
@@ -369,10 +363,7 @@ class AgentManager extends EventEmitter {
   async respondToPermission(sessionId: string, approved: boolean, message?: string): Promise<void>
 
   // Skills
-  async writeSkillFiles(taskId: string, agentId: string, workspaceDir: string): Promise<void>
-  async learnFromSession(sessionId: string, message: string): Promise<SkillSyncResult>
-  async syncSkillsFromWorkspace(sessionId: string): Promise<SkillSyncResult>
-  async syncSkillsForTask(taskId: string): Promise<SkillSyncResult>
+  syncSkillsFromWorkspace(sessionId: string): SkillSyncResult
 
   // Diagnostics
   async getRawTranscriptForDebug(taskId: string): Promise<any>
@@ -391,7 +382,7 @@ Each session wraps a coding agent adapter instance and streams events to the ren
 2. **Streaming** — Centralized polling coordinator polls every 2s; adapter nudges on new data (50ms debounce)
 3. **Approval** — Agent pauses for human decisions; response sent back via `agentSession:approve`
 4. **Completion** — Idle detection transitions to `ready_for_review`, task updated
-5. **Learning** — Optional feedback loop: agent reviews session, updates skills, syncs back to DB
+5. **Learning** — Optional feedback loop: the feedback prompt is sent to the session; when it goes idle, skills are synced back to DB and the task is completed
 
 ### Worktree Management
 
@@ -412,8 +403,8 @@ Secrets (encrypted API keys, database URLs, etc.) are injected into agent sessio
 
 ### Task API Server
 
-`src/main/task-api-server.ts` serves the task-management HTTP API on `127.0.0.1` (random port). Every request must present a per-launch random token (`getTaskApiToken()`), either as `Authorization: Bearer <token>` or as a `?token=` query parameter:
-- HTTP MCP sessions get the token in the MCP URL (`?token=`), built in `agent-manager.ts`
+`src/main/task-api-server.ts` (routes in `src/main/task-api/*-routes.ts`) serves the task-management HTTP API on `127.0.0.1` (random port). Every request must present a per-launch random token (`getTaskApiToken()`), either as `Authorization: Bearer <token>` or as a `?token=` query parameter:
+- HTTP MCP sessions get the token in the MCP URL (`?token=`), built in `src/main/agent-manager/session-config.ts`
 - The stdio `task-management-mcp.js` server reads `TASK_API_URL` and `TASK_API_TOKEN` from its environment (`getTaskApiEnv()`) and sends the token as a bearer header
 
 ### Memory Management
@@ -451,8 +442,7 @@ Secrets (encrypted API keys, database URLs, etc.) are injected into agent sessio
 
 - Split view: task detail on left, agent transcript on right
 - Streaming terminal output with message part rendering (text, reasoning, tool calls, progress events)
-- HITL approval banner when agent requests permission for file writes, shell commands, etc.
-- Approve/reject buttons with optional user message
+- HITL permission requests and agent questions appear in the transcript; the user's reply is sent via `agentSession:approve`
 - Todo list tracking from agent output
 - Session status indicator (idle, working, error, waiting_approval)
 
@@ -486,9 +476,9 @@ Skills are reusable `SKILL.md` instructions that agents discover and load on-dem
 
 ### Data Model
 
-- **Task-level**: `task.skill_ids` — takes priority
-- **Agent-level**: `agent.config.skill_ids` — fallback
-- **Unset** (both null): all skills loaded
+- **Task-level**: `task.skill_ids`
+- **Agent-level**: `agent.config.skill_ids`
+- Both selections are merged; when neither is set, no skill files are written
 
 ### File Layout
 
@@ -501,17 +491,17 @@ workspaces/<taskId>/
 ### Feedback Learning Loop
 
 1. User completes task → FeedbackDialog (1-5 stars + optional comment)
-2. `learnFromSession(sessionId, prompt)` fires in background
-3. Agent reviews session transcript, updates SKILL.md files
-4. `syncSkillsFromWorkspace()` syncs changes back to SQLite
-5. Skills confidence and usage stats are updated automatically
+2. Task status is set to `agent_learning` and the feedback prompt is sent to the session (`useTaskFeedbackFlow.ts`)
+3. Agent reviews session transcript, updates SKILL.md files (confidence and usage stats in frontmatter)
+4. When the session goes idle, `syncSkillsFromWorkspace()` syncs changes back to SQLite
+5. `finishSessionFeedback()` completes the task (and at the source, if chosen); on failure the task returns to `ready_for_review`
 
 ## HITL (Human-in-the-Loop) Flow
 
 1. Agent encounters a potentially destructive action (file write, shell command, etc.)
 2. The backend adapter emits an approval event
-3. Main process forwards to renderer via IPC
-4. UI shows a banner with action description and approve/reject buttons
+3. Main process forwards it to the renderer as a transcript part
+4. The transcript shows the request; the user replies there
 5. User decision sent back via `agentSession:approve`
 6. Agent continues or aborts based on response
 
@@ -522,7 +512,7 @@ workspaces/<taskId>/
 - Each task's workspace `heartbeat.md` lists what to watch (PR comments, CI status, issue updates)
 - Configurable per-task interval (default: 30 minutes, `HEARTBEAT_DEFAULTS` in `src/shared/constants.ts`)
 - Scheduler checks for due tasks every 60 seconds
-- Cheap `gh api` preflight runs first; the agent session is skipped when nothing changed
+- Cheap `gh api` preflight (`src/main/heartbeat-preflight.ts`) runs first; the agent session is skipped when nothing changed
 - Status: ok, info, attention_needed, error
 - Logs stored in `heartbeat_logs` table
 - Disabled when the task is completed; skipped for subtasks whose parent is completed
@@ -538,11 +528,13 @@ workspaces/<taskId>/
 | `src/main/adapters/codex-app-server-adapter.ts` | Codex via `codex app-server` |
 | `src/main/adapters/acp-adapter.ts` | Agent Client Protocol (Cursor, Codex fallback) |
 | `src/main/adapters/pi-adapter.ts` | Pi JSONL RPC integration |
-| `src/main/ipc-handlers.ts` | All IPC channel registration |
-| `src/main/database.ts` | SQLite schema, CRUD, migrations |
+| `src/main/ipc-handlers.ts` | IPC entry point; calls the `register*` functions in `src/main/ipc/*.ts` |
+| `src/main/ipc/*.ts` | IPC channel handlers by area (agents, tasks, task sources, settings, ...) |
+| `src/main/database.ts` | SQLite CRUD |
+| `src/main/database/schema.ts` | SQLite schema, migrations, `SCHEMA_VERSION` |
 | `src/main/worktree-manager.ts` | Git worktree setup |
 | `src/main/secret-broker.ts` | Secret injection HTTP server |
-| `src/main/task-api-server.ts` | HTTP API for task-management MCP |
+| `src/main/task-api-server.ts` | HTTP API for task-management MCP (routes in `src/main/task-api/`) |
 | `src/main/sync-manager.ts` | Task source import, export and actions |
 | `src/main/heartbeat-scheduler.ts` | Task-level heartbeat scheduling |
 | `src/main/recurrence-scheduler.ts` | Recurring task scheduling |

@@ -24,6 +24,7 @@ import { dirname, join, sep } from 'path'
 import { totalmem, freemem } from 'os'
 import { pipeline } from 'stream/promises'
 import { Readable } from 'stream'
+import { setTimeout as sleep } from 'timers/promises'
 import bz2 from 'unbzip2-stream'
 import { extract as tarExtract } from 'tar-stream'
 import type { VoiceTtsModelManifestEntry, VoiceTtsModelState } from '../../shared/voice-tts'
@@ -62,7 +63,7 @@ const DOWNLOAD_SHARE = 0.9
  * Each attempt continues from the bytes already on disk, so this is a budget
  * for interruptions and not for repeated whole downloads.
  */
-export const VOICE_TTS_DOWNLOAD_ATTEMPTS = 6
+const VOICE_TTS_DOWNLOAD_ATTEMPTS = 6
 
 export class VoiceTtsModelManager {
   private installing = new Map<string, number>()
@@ -253,8 +254,9 @@ export class VoiceTtsModelManager {
       }
 
       if (attempt < this.attempts) {
-        // Back off a little, so a server that is refusing is not hammered.
-        await delay(Math.min(8 * this.baseDelayMs, this.baseDelayMs * 2 ** (attempt - 1)), signal)
+        // Back off a little, so a server that is refusing is not hammered. A
+        // cancel ends the wait early; the next attempt then reports it.
+        await sleep(Math.min(8 * this.baseDelayMs, this.baseDelayMs * 2 ** (attempt - 1)), undefined, { signal }).catch(() => {})
       }
     }
 
@@ -347,19 +349,6 @@ export function describeDownloadFailure(err: unknown): string {
     return `the connection closed early${causeText ? ` (${causeText})` : ''}`
   }
   return causeText ? `${err.message} (${causeText})` : err.message
-}
-
-/** Waits, and gives up early when the user cancels. */
-function delay(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(finish, ms)
-    function finish(): void {
-      clearTimeout(timer)
-      signal.removeEventListener('abort', finish)
-      resolve()
-    }
-    signal.addEventListener('abort', finish, { once: true })
-  })
 }
 
 // ── Archive extraction ──────────────────────────────────────

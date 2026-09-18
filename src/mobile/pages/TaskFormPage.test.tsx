@@ -154,6 +154,12 @@ describe('TaskFormPage — Edit mode', () => {
     recurrence_parent_id: null,
     last_occurrence_at: null,
     next_occurrence_at: null,
+    auto_start_agent: false,
+    auto_complete_without_review: false,
+    complete_at_source: null,
+    parent_task_id: null,
+    next_subtask_ids: [],
+    sort_order: 0,
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: '2026-01-01T00:00:00.000Z'
   }

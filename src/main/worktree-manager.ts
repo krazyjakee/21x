@@ -6,12 +6,11 @@ import { readdir } from 'fs/promises'
 import { isAbsolute, join, relative, resolve, sep, win32 } from 'path'
 import { app, type BrowserWindow } from 'electron'
 import type { ForgejoManager } from './forgejo-manager'
+import { WORKSPACES_DIR } from './workspace-paths'
 
 const execFileAsync = promisify(execFile)
 
-const BASE_DIR = app.getPath('userData')
-const REPOS_DIR = join(BASE_DIR, 'repos')
-const WORKSPACES_DIR = join(BASE_DIR, 'workspaces')
+const REPOS_DIR = join(app.getPath('userData'), 'repos')
 
 export interface WorktreeRepo {
   fullName: string
@@ -53,6 +52,23 @@ export interface TaskFileContent {
 }
 
 const MAX_TASK_FILE_PREVIEW_BYTES = 512 * 1024
+const GIT_OPTS = { maxBuffer: 64 * 1024 * 1024 }
+/** Parallel `git diff --no-index` processes when rendering untracked files. */
+const UNTRACKED_DIFF_CONCURRENCY = 8
+
+/** Like Promise.all over `items.map(fn)`, with at most `limit` in flight. */
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let next = 0
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const index = next++
+      results[index] = await fn(items[index])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return results
+}
 
 function isWithinRoot(rootPath: string, candidatePath: string): boolean {
   const pathFromRoot = relative(rootPath, candidatePath)
@@ -208,16 +224,12 @@ export class WorktreeManager {
     console.log(`[WorktreeManager]   CWD: ${barePath}`)
     this.sendProgress('', repoName, 'fetching', false)
 
-    try {
-      await execFileAsync('git', ['fetch', 'origin'], {
-        cwd: barePath,
-        timeout: 120000
-      })
-      console.log(`[WorktreeManager]   Fetch completed successfully`)
-    } catch (err: unknown) {
-      console.error(`[WorktreeManager]   Fetch failed:`, (err as Error).message)
-      throw err
-    }
+    // Failures propagate to setupWorkspaceForTask, which logs and reports them.
+    await execFileAsync('git', ['fetch', 'origin'], {
+      cwd: barePath,
+      timeout: 120000
+    })
+    console.log(`[WorktreeManager]   Fetch completed successfully`)
   }
 
   /**
@@ -356,211 +368,213 @@ export class WorktreeManager {
     taskId: string,
     repos: { fullName: string }[]
   ): Promise<TaskChangesResult[]> {
-    const results: TaskChangesResult[] = []
-    const gitOpts = { maxBuffer: 64 * 1024 * 1024 }
+    // Repos are independent worktrees, so inspect them concurrently.
+    const [workspaceFiles, results] = await Promise.all([
+      this.listNonRepositoryWorkspaceFiles(taskId, repos),
+      Promise.all(repos.map((repo) => this.getRepoChanges(taskId, repo)))
+    ])
+    return [{ repo: 'Task workspace', diff: '', allFiles: workspaceFiles, workspace: true }, ...results]
+  }
 
-    for (const repo of repos) {
-      const repoName = repo.fullName.split('/').pop() || repo.fullName
-      const wtPath = this.worktreePath(taskId, repoName)
-      if (!existsSync(wtPath)) {
-        console.log(`[WorktreeManager] getTaskChanges: no worktree for ${repo.fullName} at ${wtPath}`)
-        results.push({ repo: repo.fullName, diff: '', noWorktree: true, path: wtPath })
-        continue
-      }
-
-      try {
-        // Complete browsable worktree inventory: tracked + untracked files,
-        // while respecting .gitignore and never traversing .git internals.
-        const allFiles = await this.listRepositoryFiles(wtPath, gitOpts)
-
-        // Agents auto-commit, so "uncommitted only" (git diff HEAD) is usually
-        // empty. We want the task's whole diff: base branch → current work
-        // (committed + uncommitted). Discover the base branch this worktree
-        // forked from, then diff against the merge-base.
-        let baseRef = ''
-        try {
-          const { stdout } = await execFileAsync(
-            'git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'],
-            { cwd: wtPath, ...gitOpts }
-          )
-          baseRef = stdout.trim() // e.g. "origin/main"
-        } catch { /* origin/HEAD not set */ }
-        if (!baseRef) {
-          for (const cand of ['origin/main', 'origin/master', 'main', 'master']) {
-            try {
-              await execFileAsync('git', ['rev-parse', '--verify', '--quiet', cand], { cwd: wtPath, ...gitOpts })
-              baseRef = cand
-              break
-            } catch { /* not this candidate */ }
-          }
-        }
-
-        // Diff target: merge-base with the base branch (captures committed work);
-        // fall back to HEAD (uncommitted only) if no base can be resolved.
-        let against = 'HEAD'
-        if (baseRef) {
-          try {
-            const { stdout } = await execFileAsync('git', ['merge-base', 'HEAD', baseRef], { cwd: wtPath, ...gitOpts })
-            const mergeBase = stdout.trim()
-            if (mergeBase) against = mergeBase
-          } catch { /* keep HEAD */ }
-        }
-
-        // `git diff <against>` compares that commit to the WORKING TREE, so the
-        // patch includes both committed and uncommitted changes.
-        let tracked = ''
-        try {
-          const { stdout } = await execFileAsync(
-            'git', ['-c', 'core.quotepath=false', 'diff', '--no-color', against],
-            { cwd: wtPath, ...gitOpts }
-          )
-          tracked = stdout
-        } catch (e) {
-          const err = e as { stdout?: string }
-          tracked = err.stdout ?? ''
-        }
-
-        // Untracked files → new-file patches (no index mutation).
-        let untracked = ''
-        try {
-          const { stdout } = await execFileAsync(
-            'git', ['ls-files', '--others', '--exclude-standard', '-z'],
-            { cwd: wtPath, ...gitOpts }
-          )
-          for (const file of stdout.split('\0').filter(Boolean)) {
-            try {
-              await execFileAsync(
-                'git', ['diff', '--no-color', '--no-index', '--', '/dev/null', file],
-                { cwd: wtPath, ...gitOpts }
-              )
-            } catch (e) {
-              // --no-index exits 1 when files differ; the patch is on stdout.
-              const err = e as { stdout?: string }
-              if (err.stdout) untracked += err.stdout
-            }
-          }
-        } catch {
-          // Ignore untracked enumeration failures.
-        }
-
-        // Branch + PR metadata so the UI can group changes by branch / PR.
-        let branch: string | undefined
-        try {
-          const { stdout } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: wtPath, ...gitOpts })
-          const b = stdout.trim()
-          branch = b && b !== 'HEAD' ? b : undefined
-        } catch { /* detached HEAD */ }
-
-        let pushed = false
-        if (branch) {
-          try {
-            await execFileAsync('git', ['rev-parse', '--verify', '--quiet', `origin/${branch}`], { cwd: wtPath, ...gitOpts })
-            pushed = true
-          } catch { /* branch not on remote yet */ }
-        }
-
-        // Best-effort PR/MR lookup for the branch checked out in this worktree.
-        // `gh pr view` (no branch arg) resolves the current branch's PR directly,
-        // so it works even when the local origin/<branch> tracking ref is stale
-        // (i.e. the branch is pushed but this worktree hasn't fetched it).
-        let prNumber: number | undefined
-        let prUrl: string | undefined
-        let prState: string | undefined
-        let prTitle: string | undefined
-        let ciStatus: 'passing' | 'failing' | 'pending' | 'none' | undefined
-        if (branch) {
-          let provider: 'github' | 'gitlab' | 'forgejo' | 'other' = 'other'
-          let remoteUrl = ''
-          try {
-            const { stdout } = await execFileAsync('git', ['remote', 'get-url', 'origin'], { cwd: wtPath, ...gitOpts })
-            remoteUrl = stdout.trim()
-            const url = remoteUrl.toLowerCase()
-            if (url.includes('gitlab')) provider = 'gitlab'
-            else if (url.includes('github')) provider = 'github'
-            else if (this.forgejoManager && await this.forgejoManager.isForgejoUrl(remoteUrl)) provider = 'forgejo'
-          } catch { /* ignore */ }
-
-          try {
-            if (provider === 'github') {
-              const { stdout } = await execFileAsync(
-                'gh', ['pr', 'view', '--json', 'number,url,state,title,statusCheckRollup'],
-                { cwd: wtPath, timeout: 8000, ...gitOpts }
-              )
-              const j = JSON.parse(stdout) as {
-                number?: number; url?: string; state?: string; title?: string
-                statusCheckRollup?: Array<{ status?: string; conclusion?: string; state?: string }>
-              }
-              prNumber = j.number; prUrl = j.url; prState = j.state; prTitle = j.title
-              // Aggregate all check runs / status contexts into a single rollup.
-              const items = j.statusCheckRollup
-              if (!items || items.length === 0) {
-                ciStatus = 'none'
-              } else {
-                let pending = false
-                let failing = false
-                for (const it of items) {
-                  if (it.status && it.status !== 'COMPLETED') { pending = true; continue }
-                  const s = (it.conclusion || it.state || '').toUpperCase()
-                  if (['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE'].includes(s)) failing = true
-                  else if (['PENDING', 'EXPECTED', 'REQUESTED', 'WAITING', 'QUEUED', 'IN_PROGRESS'].includes(s)) pending = true
-                }
-                ciStatus = failing ? 'failing' : pending ? 'pending' : 'passing'
-              }
-            } else if (provider === 'gitlab') {
-              const { stdout } = await execFileAsync('glab', ['mr', 'list', '--source-branch', branch, '--output', 'json'], { cwd: wtPath, timeout: 8000, ...gitOpts })
-              const arr = JSON.parse(stdout) as Array<{ iid?: number; web_url?: string; state?: string; title?: string }>
-              if (Array.isArray(arr) && arr[0]) { prNumber = arr[0].iid; prUrl = arr[0].web_url; prState = arr[0].state; prTitle = arr[0].title }
-            } else if (provider === 'forgejo' && this.forgejoManager) {
-              const pr = await this.forgejoManager.getBranchPullRequest(remoteUrl, branch)
-              if (pr) { prNumber = pr.number; prUrl = pr.url; prState = pr.state; prTitle = pr.title; ciStatus = pr.ciStatus }
-            }
-          } catch { /* no PR/MR, or CLI unavailable */ }
-        }
-        // A resolved PR implies the branch is pushed, even if the local
-        // origin/<branch> tracking ref is missing/stale.
-        pushed = pushed || Boolean(prUrl)
-
-        console.log(`[WorktreeManager] getTaskChanges ${repo.fullName}: branch=${branch ?? '(detached)'} pushed=${pushed} pr=${prNumber ?? 'none'} ci=${ciStatus ?? 'n/a'}`)
-
-        results.push({ repo: repo.fullName, diff: tracked + untracked, allFiles, branch, pushed, prNumber, prUrl, prState, prTitle, ciStatus })
-      } catch (e) {
-        results.push({ repo: repo.fullName, diff: '', error: (e as Error).message })
-      }
+  private async getRepoChanges(taskId: string, repo: { fullName: string }): Promise<TaskChangesResult> {
+    const repoName = repo.fullName.split('/').pop() || repo.fullName
+    const wtPath = this.worktreePath(taskId, repoName)
+    if (!existsSync(wtPath)) {
+      console.log(`[WorktreeManager] getTaskChanges: no worktree for ${repo.fullName} at ${wtPath}`)
+      return { repo: repo.fullName, diff: '', noWorktree: true, path: wtPath }
     }
 
-    const workspaceFiles = await this.listNonRepositoryWorkspaceFiles(taskId, repos)
-    return [{ repo: 'Task workspace', diff: '', allFiles: workspaceFiles, workspace: true }, ...results]
+    try {
+      // Complete browsable worktree inventory: tracked + untracked files,
+      // while respecting .gitignore and never traversing .git internals.
+      const allFiles = await this.listRepositoryFiles(wtPath)
+
+      // Agents auto-commit, so "uncommitted only" (git diff HEAD) is usually
+      // empty. We want the task's whole diff: base branch → current work
+      // (committed + uncommitted). Discover the base branch this worktree
+      // forked from, then diff against the merge-base.
+      let baseRef = ''
+      try {
+        const { stdout } = await execFileAsync(
+          'git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'],
+          { cwd: wtPath, ...GIT_OPTS }
+        )
+        baseRef = stdout.trim() // e.g. "origin/main"
+      } catch { /* origin/HEAD not set */ }
+      if (!baseRef) {
+        for (const cand of ['origin/main', 'origin/master', 'main', 'master']) {
+          try {
+            await execFileAsync('git', ['rev-parse', '--verify', '--quiet', cand], { cwd: wtPath, ...GIT_OPTS })
+            baseRef = cand
+            break
+          } catch { /* not this candidate */ }
+        }
+      }
+
+      // Diff target: merge-base with the base branch (captures committed work);
+      // fall back to HEAD (uncommitted only) if no base can be resolved.
+      let against = 'HEAD'
+      if (baseRef) {
+        try {
+          const { stdout } = await execFileAsync('git', ['merge-base', 'HEAD', baseRef], { cwd: wtPath, ...GIT_OPTS })
+          const mergeBase = stdout.trim()
+          if (mergeBase) against = mergeBase
+        } catch { /* keep HEAD */ }
+      }
+
+      // `git diff <against>` compares that commit to the WORKING TREE, so the
+      // patch includes both committed and uncommitted changes.
+      let tracked = ''
+      try {
+        const { stdout } = await execFileAsync(
+          'git', ['-c', 'core.quotepath=false', 'diff', '--no-color', against],
+          { cwd: wtPath, ...GIT_OPTS }
+        )
+        tracked = stdout
+      } catch (e) {
+        const err = e as { stdout?: string }
+        tracked = err.stdout ?? ''
+      }
+
+      const untracked = await this.untrackedFilesPatch(wtPath)
+
+      // Branch + PR metadata so the UI can group changes by branch / PR.
+      let branch: string | undefined
+      try {
+        const { stdout } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: wtPath, ...GIT_OPTS })
+        const b = stdout.trim()
+        branch = b && b !== 'HEAD' ? b : undefined
+      } catch { /* detached HEAD */ }
+
+      let pushed = false
+      if (branch) {
+        try {
+          await execFileAsync('git', ['rev-parse', '--verify', '--quiet', `origin/${branch}`], { cwd: wtPath, ...GIT_OPTS })
+          pushed = true
+        } catch { /* branch not on remote yet */ }
+      }
+
+      // Best-effort PR/MR lookup for the branch checked out in this worktree.
+      // `gh pr view` (no branch arg) resolves the current branch's PR directly,
+      // so it works even when the local origin/<branch> tracking ref is stale
+      // (i.e. the branch is pushed but this worktree hasn't fetched it).
+      let prNumber: number | undefined
+      let prUrl: string | undefined
+      let prState: string | undefined
+      let prTitle: string | undefined
+      let ciStatus: 'passing' | 'failing' | 'pending' | 'none' | undefined
+      if (branch) {
+        let provider: 'github' | 'gitlab' | 'forgejo' | 'other' = 'other'
+        let remoteUrl = ''
+        try {
+          const { stdout } = await execFileAsync('git', ['remote', 'get-url', 'origin'], { cwd: wtPath, ...GIT_OPTS })
+          remoteUrl = stdout.trim()
+          const url = remoteUrl.toLowerCase()
+          if (url.includes('gitlab')) provider = 'gitlab'
+          else if (url.includes('github')) provider = 'github'
+          else if (this.forgejoManager && await this.forgejoManager.isForgejoUrl(remoteUrl)) provider = 'forgejo'
+        } catch { /* ignore */ }
+
+        try {
+          if (provider === 'github') {
+            const { stdout } = await execFileAsync(
+              'gh', ['pr', 'view', '--json', 'number,url,state,title,statusCheckRollup'],
+              { cwd: wtPath, timeout: 8000, ...GIT_OPTS }
+            )
+            const j = JSON.parse(stdout) as {
+              number?: number; url?: string; state?: string; title?: string
+              statusCheckRollup?: Array<{ status?: string; conclusion?: string; state?: string }>
+            }
+            prNumber = j.number; prUrl = j.url; prState = j.state; prTitle = j.title
+            // Aggregate all check runs / status contexts into a single rollup.
+            const items = j.statusCheckRollup
+            if (!items || items.length === 0) {
+              ciStatus = 'none'
+            } else {
+              let pending = false
+              let failing = false
+              for (const it of items) {
+                if (it.status && it.status !== 'COMPLETED') { pending = true; continue }
+                const s = (it.conclusion || it.state || '').toUpperCase()
+                if (['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE'].includes(s)) failing = true
+                else if (['PENDING', 'EXPECTED', 'REQUESTED', 'WAITING', 'QUEUED', 'IN_PROGRESS'].includes(s)) pending = true
+              }
+              ciStatus = failing ? 'failing' : pending ? 'pending' : 'passing'
+            }
+          } else if (provider === 'gitlab') {
+            const { stdout } = await execFileAsync('glab', ['mr', 'list', '--source-branch', branch, '--output', 'json'], { cwd: wtPath, timeout: 8000, ...GIT_OPTS })
+            const arr = JSON.parse(stdout) as Array<{ iid?: number; web_url?: string; state?: string; title?: string }>
+            if (Array.isArray(arr) && arr[0]) { prNumber = arr[0].iid; prUrl = arr[0].web_url; prState = arr[0].state; prTitle = arr[0].title }
+          } else if (provider === 'forgejo' && this.forgejoManager) {
+            const pr = await this.forgejoManager.getBranchPullRequest(remoteUrl, branch)
+            if (pr) { prNumber = pr.number; prUrl = pr.url; prState = pr.state; prTitle = pr.title; ciStatus = pr.ciStatus }
+          }
+        } catch { /* no PR/MR, or CLI unavailable */ }
+      }
+      // A resolved PR implies the branch is pushed, even if the local
+      // origin/<branch> tracking ref is missing/stale.
+      pushed = pushed || Boolean(prUrl)
+
+      console.log(`[WorktreeManager] getTaskChanges ${repo.fullName}: branch=${branch ?? '(detached)'} pushed=${pushed} pr=${prNumber ?? 'none'} ci=${ciStatus ?? 'n/a'}`)
+
+      return { repo: repo.fullName, diff: tracked + untracked, allFiles, branch, pushed, prNumber, prUrl, prState, prTitle, ciStatus }
+    } catch (e) {
+      return { repo: repo.fullName, diff: '', error: (e as Error).message }
+    }
+  }
+
+  /** New-file patches for untracked files, in `git ls-files` order. Read-only:
+   * never mutates the index. Enumeration failures yield an empty patch. */
+  private async untrackedFilesPatch(wtPath: string): Promise<string> {
+    let files: string[]
+    try {
+      const { stdout } = await execFileAsync(
+        'git', ['ls-files', '--others', '--exclude-standard', '-z'],
+        { cwd: wtPath, ...GIT_OPTS }
+      )
+      files = stdout.split('\0').filter(Boolean)
+    } catch {
+      return ''
+    }
+    const patches = await mapWithConcurrency(files, UNTRACKED_DIFF_CONCURRENCY, async (file) => {
+      try {
+        await execFileAsync(
+          'git', ['diff', '--no-color', '--no-index', '--', '/dev/null', file],
+          { cwd: wtPath, ...GIT_OPTS }
+        )
+        return ''
+      } catch (e) {
+        // --no-index exits 1 when files differ; the patch is on stdout.
+        return (e as { stdout?: string }).stdout ?? ''
+      }
+    })
+    return patches.join('')
   }
 
   /** Fast inventory used to render All files before the more expensive diff,
    * branch, pull-request, and CI discovery completes. */
   async getTaskFiles(taskId: string, repos: { fullName: string }[]): Promise<TaskFileInventoryResult[]> {
-    const results: TaskFileInventoryResult[] = []
-    const gitOpts = { maxBuffer: 64 * 1024 * 1024 }
-
-    for (const repo of repos) {
-      const repoName = repo.fullName.split('/').pop() || repo.fullName
-      const wtPath = this.worktreePath(taskId, repoName)
-      if (!existsSync(wtPath)) {
-        results.push({ repo: repo.fullName, allFiles: [], noWorktree: true, path: wtPath })
-        continue
-      }
-      try {
-        results.push({ repo: repo.fullName, allFiles: await this.listRepositoryFiles(wtPath, gitOpts) })
-      } catch (error) {
-        results.push({ repo: repo.fullName, allFiles: [], error: error instanceof Error ? error.message : String(error) })
-      }
-    }
-
-    const workspaceFiles = await this.listNonRepositoryWorkspaceFiles(taskId, repos)
+    const [workspaceFiles, results] = await Promise.all([
+      this.listNonRepositoryWorkspaceFiles(taskId, repos),
+      Promise.all(repos.map(async (repo): Promise<TaskFileInventoryResult> => {
+        const repoName = repo.fullName.split('/').pop() || repo.fullName
+        const wtPath = this.worktreePath(taskId, repoName)
+        if (!existsSync(wtPath)) return { repo: repo.fullName, allFiles: [], noWorktree: true, path: wtPath }
+        try {
+          return { repo: repo.fullName, allFiles: await this.listRepositoryFiles(wtPath) }
+        } catch (error) {
+          return { repo: repo.fullName, allFiles: [], error: error instanceof Error ? error.message : String(error) }
+        }
+      }))
+    ])
     return [{ repo: 'Task workspace', allFiles: workspaceFiles, workspace: true }, ...results]
   }
 
-  private async listRepositoryFiles(wtPath: string, gitOpts: { maxBuffer: number }): Promise<string[]> {
+  private async listRepositoryFiles(wtPath: string): Promise<string[]> {
     try {
       const { stdout } = await execFileAsync(
         'git', ['-c', 'core.quotepath=false', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'],
-        { cwd: wtPath, ...gitOpts }
+        { cwd: wtPath, ...GIT_OPTS }
       )
       return [...new Set(stdout.split('\0').filter(Boolean))].sort((left, right) => left.localeCompare(right))
     } catch {

@@ -1,4 +1,4 @@
-import { ArtifactType, type Artifact } from '../stores/artifact-store'
+import { ArtifactType, type Artifact } from '@shared/artifacts'
 
 function ArtifactIcon({ type }: { type: ArtifactType }) {
   if (type === ArtifactType.IMAGE) {

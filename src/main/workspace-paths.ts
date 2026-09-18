@@ -12,6 +12,11 @@ import { join } from 'path'
  */
 export const WORKSPACES_DIR = join(app.getPath('userData'), 'workspaces')
 
+/** Where a task's uploaded attachments are stored. */
+export function taskAttachmentsDir(taskId: string): string {
+  return join(app.getPath('userData'), 'attachments', taskId)
+}
+
 /**
  * The workspace directory names present on disk right now, or NULL when the
  * directory could not be read.

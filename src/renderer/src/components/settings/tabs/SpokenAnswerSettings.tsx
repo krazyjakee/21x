@@ -9,12 +9,7 @@ import { settingsApi } from '@/lib/ipc-client'
 import { useVoiceStore } from '@/stores/voice-store'
 import { VOICE_SETTING_KEYS } from '@shared/voice'
 import { VOICE_TTS_MAX_CHARS_CHOICES, VOICE_TTS_SPEED_CHOICES, type VoiceTtsEngineId } from '@shared/voice-tts'
-
-function formatSize(bytes: number): string {
-  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`
-  if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`
-  return `${Math.round(bytes / 1e3)} kB`
-}
+import { formatBytes } from '@/lib/utils'
 
 /**
  * Spoken answers — the speaking half of the voice page (design §5.7 and §5.10).
@@ -182,7 +177,7 @@ export function SpokenAnswerSettings() {
                 <p className="text-sm font-medium text-foreground">{model.label}</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">{model.description}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {formatSize(model.sizeBytes)} to download, {formatSize(model.unpackedBytes)} on disk ·{' '}
+                  {formatBytes(model.sizeBytes)} to download, {formatBytes(model.unpackedBytes)} on disk ·{' '}
                   {model.speakerCount} voices ·{' '}
                   <a
                     href={model.licenseUrl}

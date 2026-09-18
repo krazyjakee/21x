@@ -2,16 +2,11 @@ import { useEffect } from 'react'
 import { Check, Download, Loader2, Mic, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { selectVoiceSetupComplete, useVoiceStore } from '@/stores/voice-store'
+import { formatBytes } from '@/lib/utils'
 
 interface VoiceRuntimeRowProps {
   /** `compact` is the onboarding row. `full` is the settings section. */
   variant?: 'compact' | 'full'
-}
-
-function formatSize(bytes: number): string {
-  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`
-  if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`
-  return `${Math.round(bytes / 1e3)} kB`
 }
 
 /**
@@ -71,10 +66,10 @@ export function VoiceRuntimeRow({ variant = 'full' }: VoiceRuntimeRowProps) {
             {complete
               ? `Ready to use${runtime.version ? ` — runtime v${runtime.version}` : ''}. Switch it on below.`
               : runtime.installed
-                ? `The speech runtime is installed. One more step downloads the English speech model (about ${formatSize(
+                ? `The speech runtime is installed. One more step downloads the English speech model (about ${formatBytes(
                     pendingModelBytes
                   )}).`
-                : `Dictate and run task commands by speech. This downloads the speech runtime and the English model, about ${formatSize(
+                : `Dictate and run task commands by speech. This downloads the speech runtime and the English model, about ${formatBytes(
                     totalBytes
                   )} in total, and only if you ask for it.`}
           </p>

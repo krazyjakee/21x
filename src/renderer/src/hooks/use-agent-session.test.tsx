@@ -22,7 +22,6 @@ describe('useAgentSession', () => {
     expect(result.current.session.sessionId).toBeNull()
     expect(result.current.session.status).toBe('idle')
     expect(result.current.session.messages).toEqual([])
-    expect(result.current.session.pendingApproval).toBeNull()
   })
 
   it('returns empty session state when taskId has no session', () => {

@@ -280,15 +280,6 @@ describe('useAgentStore', () => {
       // idle for an unknown task triggers a bind (snapshot empty) but no phantom session
       expect(useAgentStore.getState().sessions.has('task-idle')).toBe(false)
     })
-
-    it('clears pendingApproval on idle', () => {
-      useAgentStore.getState().initSession('task-1', 'sess-1', 'agent-1')
-      useAgentStore.setState((st) => ({
-        sessions: new Map(st.sessions).set('task-1', { ...st.sessions.get('task-1')!, pendingApproval: { sessionId: 'sess-1', action: 'x', description: 'y' } })
-      }))
-      statusCallback!({ sessionId: 'sess-1', agentId: 'agent-1', taskId: 'task-1', status: SessionStatus.IDLE })
-      expect(useAgentStore.getState().sessions.get('task-1')!.pendingApproval).toBeNull()
-    })
   })
 
   describe('pendingSend (starting indicator during resume)', () => {

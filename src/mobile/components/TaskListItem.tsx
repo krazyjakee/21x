@@ -1,9 +1,11 @@
 import { TaskStatus } from '@shared/constants'
 import { TaskPriorityBadge } from '@/components/tasks/TaskPriorityBadge'
 import type { TaskPriority } from '@/types'
-import { cn, formatDate, isOverdue, isDueSoon, isSnoozed } from '../lib/utils'
+import { formatDate } from '@/lib/utils'
+import { cn, isOverdue, isDueSoon, isSnoozed } from '../lib/utils'
 import type { Task } from '../stores/task-store'
 import { SessionStatus } from '../stores/agent-store'
+import { ChevronRightIcon } from './icons'
 
 interface TaskListItemProps {
   task: Task
@@ -56,17 +58,7 @@ export function TaskListItem({ task, onSelect, sessionStatus, isSubtask, subtask
                 className="shrink-0 flex items-center gap-1 text-[10px] text-muted-foreground active:opacity-60"
               >
                 {subtaskCount}
-                <svg
-                  className={cn('h-3 w-3 transition-transform', isExpanded && 'rotate-90')}
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="m9 18 6-6-6-6" />
-                </svg>
+                <ChevronRightIcon className={cn('h-3 w-3 transition-transform', isExpanded && 'rotate-90')} />
               </span>
             )}
           </div>

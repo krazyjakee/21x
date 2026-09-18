@@ -37,7 +37,6 @@ export function PairPage({ pairCode, onPaired }: Props) {
     void initiate()
   }, [pairCode])
 
-  // Countdown timer
   useEffect(() => {
     if (!pairCodeId) return
     const interval = setInterval(() => {

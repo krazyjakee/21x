@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { onOverdueCheck } from '@/lib/ipc-client'
+import { SNOOZE_SOMEDAY } from '@/lib/snooze-options'
 import type { Task } from '@/types'
-
-const SNOOZE_SOMEDAY = '9999-12-31T00:00:00.000Z'
 
 /**
  * Returns a "tick" counter that increments whenever a snoozed task's

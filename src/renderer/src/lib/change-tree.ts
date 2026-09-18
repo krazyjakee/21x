@@ -72,7 +72,3 @@ export function buildFileTree(paths: string[], changes: DiffFile[]): ChangeTreeD
 
   return finalize(root)
 }
-
-export function buildChangeTree(files: DiffFile[]): ChangeTreeDirectory {
-  return buildFileTree(files.map((file) => file.path), files)
-}

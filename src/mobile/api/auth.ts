@@ -13,11 +13,6 @@ export function saveSessionToken(t: string): void {
   localStorage.setItem(SESSION_TOKEN_KEY, t)
 }
 
-export function clearSessionToken(): void {
-  token = null
-  localStorage.removeItem(SESSION_TOKEN_KEY)
-}
-
 export function hasSessionToken(): boolean {
   return !!getAuthToken()
 }

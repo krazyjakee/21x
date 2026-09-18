@@ -1,8 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useAgentStore, type AgentMessage } from '@/stores/agent-store'
 import { Bot, User } from 'lucide-react'
-
-const MASTERMIND_SESSION_ID = 'mastermind-session'
+import { MASTERMIND_SESSION_ID } from '@/lib/voice-dictation-target'
 
 // Stable empty list — a fresh `[]` per render would invalidate memos keyed on it.
 const EMPTY_MESSAGES: AgentMessage[] = []

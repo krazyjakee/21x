@@ -1,6 +1,5 @@
 import { useUIStore } from '@/stores/ui-store'
 import { useTaskStore } from '@/stores/task-store'
-import { useAgentStore } from '@/stores/agent-store'
 import { useCanvasStore } from '@/stores/canvas-store'
 import { useArtifactStore } from '@/stores/artifact-store'
 import { SETTINGS_TABS, SettingsTab } from '@/types'
@@ -154,7 +153,6 @@ export function collectUiState(): UiStateSnapshot {
   const tasks = useTaskStore.getState()
   const canvas = useCanvasStore.getState()
   const selected = tasks.selectedTaskId
-  const session = selected ? useAgentStore.getState().sessions.get(selected) : undefined
 
   return {
     view: ui.sidebarView,
@@ -164,7 +162,8 @@ export function collectUiState(): UiStateSnapshot {
     dashboardPreviewTaskId: ui.dashboardPreviewTaskId,
     mastermindOpen: ui.showOrchestrator,
     settingsTab: ui.activeModal === 'settings' ? ui.settingsTab : null,
-    waitingForYou: Boolean(session?.pendingApproval),
+    // Agent approval requests are not surfaced in the renderer.
+    waitingForYou: false,
     visibleTaskIds: tasks.tasks.slice(0, 50).map((task) => task.id),
     canvas: {
       viewport: canvas.viewport,

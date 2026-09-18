@@ -12,8 +12,6 @@ import { NotionConfigForm } from './NotionConfigForm'
 import { YouTrackConfigForm } from './YouTrackConfigForm'
 import type { PluginFormProps } from './PluginFormProps'
 
-export { PluginSetupDocumentation } from './PluginSetupDocumentation'
-
 type PluginFormComponent = React.ComponentType<PluginFormProps>
 
 /**

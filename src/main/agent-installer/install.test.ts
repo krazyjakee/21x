@@ -1,14 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { getInstallCommand, getNodejsAssetName, selectGhMacAsset } from './install.js'
-
-describe('getInstallCommand', () => {
-  it('installs Pi and its MCP adapter', () => {
-    expect(getInstallCommand('pi')).toBe(
-      'npm install -g --ignore-scripts @earendil-works/pi-coding-agent && pi install npm:pi-mcp-adapter'
-    )
-  })
-})
+import { getNodejsAssetName } from './nodejs.js'
+import { selectGhMacAsset } from './cli-tools.js'
 
 describe('getNodejsAssetName', () => {
   it('uses the universal macOS pkg name without an arch suffix', () => {

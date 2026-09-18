@@ -14,19 +14,19 @@ describe('fixPlatformPath behaviour', () => {
   })
 
   describe('shell invocation uses markers for safe PATH extraction', () => {
-    it('should use -ilc with marker-based PATH extraction in index.ts', async () => {
+    it('should use -ilc with marker-based PATH extraction in shell-env.ts', async () => {
       const fs = await import('fs')
       const path = await import('path')
-      const indexSource = fs.readFileSync(
-        path.join(__dirname, 'index.ts'),
+      const source = fs.readFileSync(
+        path.join(__dirname, 'shell-env.ts'),
         'utf8'
       )
 
       // Uses interactive login shell to pick up .zshrc paths (NVM, pnpm, etc.)
-      expect(indexSource).toContain("'-ilc'")
+      expect(source).toContain("'-ilc'")
       // Uses markers to extract PATH from noisy interactive shell output
-      expect(indexSource).toContain('__20X_PATH_START__')
-      expect(indexSource).toContain('__20X_PATH_END__')
+      expect(source).toContain('__20X_PATH_START__')
+      expect(source).toContain('__20X_PATH_END__')
     })
   })
 
@@ -34,8 +34,8 @@ describe('fixPlatformPath behaviour', () => {
     it('should include essential macOS paths in fallback', async () => {
       const fs = await import('fs')
       const path = await import('path')
-      const indexSource = fs.readFileSync(
-        path.join(__dirname, 'index.ts'),
+      const source = fs.readFileSync(
+        path.join(__dirname, 'shell-env.ts'),
         'utf8'
       )
 
@@ -51,21 +51,21 @@ describe('fixPlatformPath behaviour', () => {
       ]
 
       for (const p of requiredFallbackPaths) {
-        expect(indexSource).toContain(p)
+        expect(source).toContain(p)
       }
     })
 
     it('should NOT hardcode a specific NVM Node version', async () => {
       const fs = await import('fs')
       const path = await import('path')
-      const indexSource = fs.readFileSync(
-        path.join(__dirname, 'index.ts'),
+      const source = fs.readFileSync(
+        path.join(__dirname, 'shell-env.ts'),
         'utf8'
       )
 
       // The old code had a hardcoded path like .nvm/versions/node/v22.14.0/bin
       // The new code should dynamically detect NVM versions
-      expect(indexSource).not.toMatch(/\.nvm\/versions\/node\/v\d+\.\d+\.\d+\/bin/)
+      expect(source).not.toMatch(/\.nvm\/versions\/node\/v\d+\.\d+\.\d+\/bin/)
     })
   })
 })

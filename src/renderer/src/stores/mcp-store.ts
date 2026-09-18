@@ -23,7 +23,6 @@ interface McpState {
   startOAuthFlow: (mcpServerId: string) => Promise<{ needsManualClientId?: boolean }>
   submitManualClientId: (mcpServerId: string, clientId: string) => Promise<{ needsManualClientId?: boolean }>
   revokeOAuthToken: (mcpServerId: string) => Promise<void>
-  fetchOAuthStatus: (mcpServerId: string) => Promise<void>
   fetchAllOAuthStatuses: () => Promise<void>
   probeForAuth: (serverId: string, serverUrl: string) => Promise<boolean>
   probeAllForAuth: () => Promise<void>
@@ -140,17 +139,6 @@ export const useMcpStore = create<McpState>((set, get) => ({
       }))
     } catch (err) {
       set({ error: String(err) })
-    }
-  },
-
-  fetchOAuthStatus: async (mcpServerId: string) => {
-    try {
-      const status = await mcpServerApi.getOAuthStatus(mcpServerId)
-      set((state) => ({
-        oauthStatuses: { ...state.oauthStatuses, [mcpServerId]: status }
-      }))
-    } catch {
-      // Silently ignore
     }
   },
 
