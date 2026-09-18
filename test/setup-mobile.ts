@@ -6,6 +6,9 @@ import { vi } from 'vitest'
 // Mock the mobile API client
 vi.mock('../src/mobile/api/client', () => ({
   api: {
+    projects: {
+      list: vi.fn().mockResolvedValue([])
+    },
     tasks: {
       list: vi.fn().mockResolvedValue([]),
       create: vi.fn().mockResolvedValue({}),

@@ -49,7 +49,34 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
   return res.json()
 }
 
+/** A project as GET /api/projects returns it. */
+export interface MobileProject {
+  id: string
+  name: string
+  brief: string
+  is_default: boolean
+  /** The desktop's current project: where a task created without a project lands. */
+  current: boolean
+  task_count: number
+  open_task_count: number
+  sort_order: number
+}
+
+/** POST /api/sessions/start. `queued`: over a concurrency limit; it starts on its own later. */
+export interface SessionStartResult {
+  sessionId: string
+  queued?: boolean
+  queuePosition?: number
+  queueReason?: 'agent_limit' | 'global_limit'
+  action?: string
+  startedTaskId?: string
+  agentId?: string
+}
+
 export const api = {
+  projects: {
+    list: () => get<MobileProject[]>('/api/projects')
+  },
   tasks: {
     list: (params?: Record<string, string>) => {
       const qs = params ? '?' + new URLSearchParams(params).toString() : ''
@@ -96,7 +123,7 @@ export const api = {
   sessions: {
     list: () => get<unknown[]>('/api/sessions'),
     start: (agentId: string, taskId: string, skipInitialPrompt?: boolean) =>
-      post<{ sessionId: string }>('/api/sessions/start', { agentId, taskId, skipInitialPrompt }),
+      post<SessionStartResult>('/api/sessions/start', { agentId, taskId, skipInitialPrompt }),
     resume: (sessionId: string, agentId: string, taskId: string) =>
       post<{ sessionId: string }>(`/api/sessions/${encodeURIComponent(sessionId)}/resume`, { agentId, taskId }),
     send: (sessionId: string, message: string, taskId?: string, agentId?: string, attachments?: Array<{ id: string; filename: string; size: number; mime_type: string }>) =>

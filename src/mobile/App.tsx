@@ -59,6 +59,7 @@ export function App() {
   const setOnFirstConnect = useConnectionStore((s) => s.setOnFirstConnect)
   const setOnVisibilityReconnect = useConnectionStore((s) => s.setOnVisibilityReconnect)
   const fetchTasks = useTaskStore((s) => s.fetchTasks)
+  const fetchProjects = useTaskStore((s) => s.fetchProjects)
   const fetchAgents = useAgentStore((s) => s.fetchAgents)
   const fetchSkills = useAgentStore((s) => s.fetchSkills)
   const syncActiveSessions = useAgentStore((s) => s.syncActiveSessions)
@@ -67,6 +68,7 @@ export function App() {
   useEffect(() => {
     connect()
     fetchTasks()
+    void fetchProjects()
     fetchAgents()
     fetchSkills()
 
@@ -79,6 +81,7 @@ export function App() {
     // Re-sync state after WebSocket reconnects to recover missed events
     setOnReconnect(() => {
       fetchTasks()
+      void fetchProjects()
       syncActiveSessions()
       if (activeTaskId) void hydrateArtifacts(activeTaskId)
     })
@@ -89,7 +92,7 @@ export function App() {
       syncActiveSessions()
       if (activeTaskId) void hydrateArtifacts(activeTaskId)
     })
-  }, [activeTaskId, connect, fetchTasks, fetchAgents, fetchSkills, hydrateArtifacts, syncActiveSessions, setOnReconnect, setOnFirstConnect, setOnVisibilityReconnect])
+  }, [activeTaskId, connect, fetchTasks, fetchProjects, fetchAgents, fetchSkills, hydrateArtifacts, syncActiveSessions, setOnReconnect, setOnFirstConnect, setOnVisibilityReconnect])
 
   // Poll tasks every 10s as a fallback — but only while the tab is visible.
   // The WebSocket already pushes task events and re-syncs on visibility

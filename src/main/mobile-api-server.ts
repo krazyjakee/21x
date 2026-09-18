@@ -22,6 +22,7 @@ import { listTaskArtifactEntries, readTaskArtifact } from './artifacts'
 import type { Artifact, ArtifactFileEntry } from '../shared/artifacts'
 import { MOBILE_VOICE_CAPABILITIES } from '../shared/voice'
 import { TaskStatus } from '../shared/constants'
+import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import { guardStream } from './child-stream-guards'
 import { bearerToken, readJsonBody } from './http-utils'
 import { completeTaskAtSource, updateTaskFromUser } from './session-feedback'
@@ -386,9 +387,36 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, pathnam
 async function routeGet(pathname: string, url: URL): Promise<unknown> {
   const db = dbRef!
 
+  // GET /api/projects — active projects with cheap task counts. `current`
+  // marks the project a task created without a project_id lands in.
+  if (pathname === '/api/projects') {
+    const counts = new Map<string, { total: number; open: number }>()
+    for (const task of db.getTasks()) {
+      const entry = counts.get(task.project_id) ?? { total: 0, open: 0 }
+      entry.total++
+      if (task.status !== TaskStatus.Completed) entry.open++
+      counts.set(task.project_id, entry)
+    }
+    const currentId = resolveDefaultProjectId(db)
+    return db.getProjects().map(project => ({
+      id: project.id,
+      name: project.name,
+      brief: project.description,
+      is_default: project.id === DEFAULT_PROJECT_ID,
+      current: project.id === currentId,
+      task_count: counts.get(project.id)?.total ?? 0,
+      open_task_count: counts.get(project.id)?.open ?? 0,
+      sort_order: project.sort_order
+    }))
+  }
+
   // GET /api/tasks
   if (pathname === '/api/tasks') {
-    let tasks = db.getTasks()
+    const projectId = url.searchParams.get('project_id')
+    if (projectId && !db.getProject(projectId)) {
+      throw Object.assign(new Error('Project not found'), { status: 404 })
+    }
+    let tasks = db.getTasks(projectId ? { projectId } : undefined)
 
     const status = url.searchParams.get('status')
     if (status) tasks = tasks.filter(t => t.status === status)
@@ -793,7 +821,18 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
   // POST /api/tasks — create task (must be checked before the :id update route)
   if (pathname === '/api/tasks') {
     if (!params.title) throw Object.assign(new Error('title is required'), { status: 400 })
-    const created = db.createTask(pickCreateTaskFields(params))
+    const data = pickCreateTaskFields(params)
+    if (data.project_id !== undefined && data.project_id !== null) {
+      const project = typeof data.project_id === 'string' ? db.getProject(data.project_id) : undefined
+      if (!project || project.archived) {
+        throw Object.assign(new Error('project_id must name an active project'), { status: 400 })
+      }
+    } else if (!data.parent_task_id) {
+      // A subtask always joins its parent's project (DatabaseManager decides);
+      // anything else lands in the desktop's current project.
+      data.project_id = resolveDefaultProjectId(db)
+    }
+    const created = db.createTask(data)
     if (!created) throw Object.assign(new Error('Failed to create task'), { status: 500 })
     afterTaskCreated(created)
     const task = db.getTask(created.id) ?? created
@@ -860,10 +899,27 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
 
   // POST /api/sessions/start
   if (pathname === '/api/sessions/start') {
-    const { agentId, taskId, skipInitialPrompt } = params as { agentId: string; taskId: string; skipInitialPrompt?: boolean }
-    if (!agentId || !taskId) throw Object.assign(new Error('agentId and taskId are required'), { status: 400 })
+    const { agentId, taskId, skipInitialPrompt } = params as { agentId?: string; taskId: string; skipInitialPrompt?: boolean }
+    if (!taskId) throw Object.assign(new Error('taskId is required'), { status: 400 })
+    if (!agentId) {
+      // No explicit agent: the same routing as the desktop's Start button and
+      // the scheduler (next subtask, triage, the task's own agent), which is
+      // admission-controlled too.
+      if (!db.getTask(taskId)) throw Object.assign(new Error('Task not found'), { status: 404 })
+      const result = await agent.startTask(taskId)
+      return {
+        sessionId: result.sessionId ?? '',
+        action: result.action,
+        startedTaskId: result.startedTaskId,
+        agentId: result.agentId,
+        ...(result.action === 'queued'
+          ? { queued: true, queuePosition: result.queuePosition, queueReason: result.queueReason }
+          : {})
+      }
+    }
     // Admission-controlled: over a concurrency limit the start waits in the
-    // main-process queue and starts on its own when a slot frees.
+    // main-process queue and starts on its own when a slot frees. This is the
+    // path the desktop's agent:start IPC takes.
     const outcome = await agent.requestSession(agentId, taskId, undefined, skipInitialPrompt as boolean | undefined)
     if (outcome.status === 'queued') return { sessionId: '', queued: true, queuePosition: outcome.position, queueReason: outcome.reason }
     return { sessionId: outcome.sessionId }
@@ -986,7 +1042,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
 const CREATE_TASK_FIELDS = [
   'title', 'description', 'type', 'priority', 'status', 'assignee', 'due_date', 'labels', 'attachments',
   'repos', 'output_fields', 'is_recurring', 'recurrence_pattern', 'cron', 'auto_start_agent',
-  'auto_complete_without_review', 'parent_task_id'
+  'auto_complete_without_review', 'parent_task_id', 'project_id'
 ] as const satisfies ReadonlyArray<keyof CreateTaskData>
 
 function pickCreateTaskFields(params: Record<string, unknown>): CreateTaskData {
@@ -995,6 +1051,22 @@ function pickCreateTaskFields(params: Record<string, unknown>): CreateTaskData {
     if (params[key] !== undefined) data[key] = params[key]
   }
   return data as unknown as CreateTaskData
+}
+
+/**
+ * The desktop's current-project setting, written by the desktop project
+ * switcher. Tasks a phone creates without a project_id land there.
+ */
+export const CURRENT_PROJECT_SETTING = 'current_project_id'
+
+/** The desktop's current project when it is set and active, else Default. */
+function resolveDefaultProjectId(db: DatabaseManager): string {
+  const current = db.getSetting(CURRENT_PROJECT_SETTING)
+  if (current) {
+    const project = db.getProject(current)
+    if (project && !project.archived) return project.id
+  }
+  return DEFAULT_PROJECT_ID
 }
 
 function parseDeviceName(userAgent: string): string {

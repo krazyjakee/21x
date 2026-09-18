@@ -1,13 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { Mock } from 'vitest'
-import { useTaskStore, type Task } from './task-store'
+import { useTaskStore, CURRENT_PROJECT_STORAGE_KEY, type Task } from './task-store'
 import { api } from '../api/client'
 
 beforeEach(() => {
   useTaskStore.setState({
     tasks: [],
-    isLoading: false
+    isLoading: false,
+    projects: [],
+    currentProjectId: null
   })
+  localStorage.clear()
   vi.clearAllMocks()
 })
 
@@ -94,6 +97,59 @@ describe('useTaskStore', () => {
       expect(result).toBe(false)
       // Original task unchanged
       expect(useTaskStore.getState().tasks[0].title).toBe('Old')
+    })
+  })
+
+  describe('projects', () => {
+    const project = (id: string, extra: Record<string, unknown> = {}) =>
+      ({ id, name: id, brief: '', is_default: id === 'default', current: false, task_count: 0, open_task_count: 0, sort_order: 0, ...extra })
+
+    it('lists only the current project\'s tasks', async () => {
+      useTaskStore.setState({ currentProjectId: 'alpha' })
+      ;(api.tasks.list as unknown as Mock).mockResolvedValue([])
+
+      await useTaskStore.getState().fetchTasks()
+
+      expect(api.tasks.list).toHaveBeenCalledWith({ project_id: 'alpha' })
+    })
+
+    it('picks the desktop current project when none is stored, and persists it', async () => {
+      ;(api.projects.list as unknown as Mock).mockResolvedValue([project('default'), project('alpha', { current: true })])
+      ;(api.tasks.list as unknown as Mock).mockResolvedValue([])
+
+      await useTaskStore.getState().fetchProjects()
+
+      expect(useTaskStore.getState().currentProjectId).toBe('alpha')
+      expect(localStorage.getItem(CURRENT_PROJECT_STORAGE_KEY)).toBe('alpha')
+      expect(api.tasks.list).toHaveBeenCalledWith({ project_id: 'alpha' })
+    })
+
+    it('keeps a stored project that still exists', async () => {
+      useTaskStore.setState({ currentProjectId: 'beta' })
+      ;(api.projects.list as unknown as Mock).mockResolvedValue([project('default', { current: true }), project('beta')])
+
+      await useTaskStore.getState().fetchProjects()
+
+      expect(useTaskStore.getState().currentProjectId).toBe('beta')
+    })
+
+    it('creates new tasks in the current project', async () => {
+      useTaskStore.setState({ currentProjectId: 'alpha' })
+      ;(api.tasks.create as unknown as Mock).mockResolvedValue({ id: 't9', title: 'New', project_id: 'alpha' })
+
+      await useTaskStore.getState().createTask({ title: 'New' })
+
+      expect(api.tasks.create).toHaveBeenCalledWith({ title: 'New', project_id: 'alpha' })
+      expect(useTaskStore.getState().tasks.map((t) => t.id)).toEqual(['t9'])
+    })
+
+    it('lets a subtask inherit its parent\'s project', async () => {
+      useTaskStore.setState({ currentProjectId: 'alpha' })
+      ;(api.tasks.create as unknown as Mock).mockResolvedValue({ id: 't10', title: 'Child' })
+
+      await useTaskStore.getState().createTask({ title: 'Child', parent_task_id: 'p1' })
+
+      expect(api.tasks.create).toHaveBeenCalledWith({ title: 'Child', parent_task_id: 'p1' })
     })
   })
 })

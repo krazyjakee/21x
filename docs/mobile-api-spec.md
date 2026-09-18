@@ -13,6 +13,7 @@
 
 - [Authentication](#authentication)
 - [REST API](#rest-api)
+  - [Projects](#projects)
   - [Tasks](#tasks)
   - [Agents](#agents)
   - [Agent Sessions](#agent-sessions)
@@ -89,16 +90,64 @@ with an appropriate HTTP status code (400, 404, 500).
 
 ---
 
+### Projects
+
+Every task belongs to exactly one project. An install always has the `default`
+project; the desktop may create more. The phone keeps its own chosen project
+(stored locally on the device) and scopes its task list and new tasks to it.
+
+#### `GET /api/projects`
+
+List active (non-archived) projects in sidebar order.
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "default",
+    "name": "Default",
+    "brief": "",
+    "is_default": true,
+    "current": false,
+    "task_count": 12,
+    "open_task_count": 4,
+    "sort_order": 0
+  },
+  {
+    "id": "clproj456",
+    "name": "Website relaunch",
+    "brief": "Marketing site rebuild. Repos: acme/web.",
+    "is_default": false,
+    "current": true,
+    "task_count": 3,
+    "open_task_count": 3,
+    "sort_order": 1
+  }
+]
+```
+
+| Field             | Type      | Description |
+|-------------------|-----------|-------------|
+| `brief`           | `string`  | The project's description (the brief its Mastermind reads) |
+| `is_default`      | `boolean` | The built-in `default` project |
+| `current`         | `boolean` | The desktop's current project (setting `current_project_id`, else `default`): where a task created without `project_id` lands. Exactly one project is `current`. |
+| `task_count`      | `number`  | User tasks in the project (coordinator rows excluded) |
+| `open_task_count` | `number`  | Of those, tasks not `completed` |
+
+---
+
 ### Tasks
 
 #### `GET /api/tasks`
 
-List all tasks with optional filters.
+List tasks with optional filters. Without `project_id` every project's tasks are returned.
 
 **Query Parameters:**
 
 | Param      | Type     | Default | Description |
 |------------|----------|---------|-------------|
+| `project_id` | `string` | —     | Only this project's tasks. `404 { "error": "Project not found" }` for an unknown id. |
 | `status`   | `string` | —       | Filter by TaskStatus value (e.g., `not_started`, `agent_working`) |
 | `priority` | `string` | —       | Filter by priority (`critical`, `high`, `medium`, `low`) |
 | `source`   | `string` | —       | Filter by source name (e.g., `local`, `linear`) |
@@ -138,6 +187,7 @@ List all tasks with optional filters.
     "recurrence_parent_id": null,
     "last_occurrence_at": null,
     "next_occurrence_at": null,
+    "project_id": "default",
     "created_at": "2026-02-28T10:00:00.000Z",
     "updated_at": "2026-03-01T08:30:00.000Z"
   }
@@ -166,13 +216,22 @@ Get a single task by ID.
 
 Create a local task. Accepted fields: `title` (required), `description`, `type`, `priority`, `status`,
 `assignee`, `due_date`, `labels`, `attachments`, `repos`, `output_fields`, `is_recurring`,
-`recurrence_pattern`, `cron`, `auto_start_agent`, `auto_complete_without_review`, `parent_task_id`.
-Any other field is ignored; in particular a phone cannot link a task to a source
+`recurrence_pattern`, `cron`, `auto_start_agent`, `auto_complete_without_review`, `parent_task_id`,
+`project_id`. Any other field is ignored; in particular a phone cannot link a task to a source
 (`source_id`, `external_id`, `source`).
+
+Project assignment:
+
+- A subtask (`parent_task_id` set) always joins its parent's project; `project_id` is ignored for it.
+- Otherwise `project_id`, when given, must name an active project.
+- Without `project_id` the task lands in the desktop's current project (the one `GET /api/projects`
+  marks `current`), else `default`. The mobile app always sends its chosen project.
 
 **Response:** `200 OK` — the created `Task`.
 
-**Error:** `400` — `{ "error": "title is required" }`
+**Errors:**
+- `400` — `{ "error": "title is required" }`
+- `400` — `{ "error": "project_id must name an active project" }` (unknown or archived)
 
 ---
 
@@ -410,7 +469,10 @@ List all active agent sessions.
 
 #### `POST /api/sessions/start`
 
-Start a new agent session for a task.
+Start an agent session for a task. Starts go through the same main-process admission control as
+the desktop: over the per-agent or global concurrency limit the start is **queued** instead of
+refused, and the desktop starts it on its own when a slot frees (the task then moves to
+`agent_working`, which arrives as `task:updated`).
 
 **Request Body:**
 
@@ -423,11 +485,13 @@ Start a new agent session for a task.
 
 | Field              | Type      | Required | Description |
 |--------------------|-----------|----------|-------------|
-| `agentId`          | `string`  | Yes      | Agent to use |
+| `agentId`          | `string`  | No       | Agent to use. Given: the desktop's `agent:start` path (`requestSession`). Omitted: the desktop's Start-task routing (`startTask`: next subtask with an agent, else the task's own agent, else triage with the default agent). |
 | `taskId`           | `string`  | Yes      | Task to work on |
-| `skipInitialPrompt`| `boolean` | No       | If true, starts session without sending task prompt |
+| `skipInitialPrompt`| `boolean` | No       | If true, starts session without sending task prompt (only with `agentId`) |
 
 **Response:** `200 OK`
+
+Started:
 
 ```json
 {
@@ -435,7 +499,30 @@ Start a new agent session for a task.
 }
 ```
 
-**Error:** `400` — Agent or task not found, or agent already has an active session for this task.
+Queued behind a concurrency limit:
+
+```json
+{
+  "sessionId": "",
+  "queued": true,
+  "queuePosition": 2,
+  "queueReason": "global_limit"
+}
+```
+
+| Field           | Type      | Description |
+|-----------------|-----------|-------------|
+| `queued`        | `boolean` | Present and `true` when the start waits in the queue |
+| `queuePosition` | `number`  | 1-based place in the start queue |
+| `queueReason`   | `string`  | `agent_limit` (this agent's limit) or `global_limit` |
+| `action`        | `string`  | Only without `agentId`: `task_started`, `subtask_started`, `triage_started`, `already_running`, `queued` or `no_action` |
+| `startedTaskId` | `string`  | Only without `agentId`: the task actually started (a subtask when routed to one) |
+| `agentId`       | `string`  | Only without `agentId`: the agent that runs it |
+
+**Errors:**
+- `400` — `{ "error": "taskId is required" }`
+- `404` — task not found (without `agentId`)
+- `500` — agent not found or the session failed to start
 
 ---
 
@@ -983,6 +1070,7 @@ interface Task {
   recurrence_parent_id: string | null
   last_occurrence_at: string | null
   next_occurrence_at: string | null
+  project_id: string                               // Owning project; see GET /api/projects
   created_at: string                               // ISO 8601
   updated_at: string                               // ISO 8601
 }
