@@ -7,6 +7,7 @@ import type { AgentManager } from './agent-manager'
 import type { RecurrenceScheduler } from './recurrence-scheduler'
 import type { HeartbeatScheduler } from './heartbeat-scheduler'
 import { TaskStatus } from '../shared/constants'
+import { emitTaskEvent } from './project-events'
 
 type ParentWaker = Pick<AgentManager, 'notifyParentOfSubtaskCompletion'>
 
@@ -73,6 +74,12 @@ export function afterTaskUpdated(
   // auto-complete flag has to be honoured.
   if (data.status !== undefined || data.auto_start_agent !== undefined || data.auto_complete_without_review !== undefined) {
     triggerTaskAutomation()
+  }
+
+  // Project event (#57): a task reaching review wakes the project's Mastermind
+  // (the waker skips it when the Mastermind made the change itself).
+  if (data.status !== undefined && previous.status !== updated.status && updated.status === TaskStatus.ReadyForReview) {
+    emitTaskEvent(db, 'task_ready_for_review', updated.id)
   }
 
   // Event-driven coordinator wake-up: a subtask that reaches a terminal state

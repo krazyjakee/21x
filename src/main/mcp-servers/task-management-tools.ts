@@ -396,6 +396,21 @@ export const mastermindTools: Tool[] = [
     }
   },
   {
+    name: 'update_project_status',
+    description:
+      "Write the project's status snapshot (#58): a one-paragraph summary of where the project stands and, optionally, the top blockers. " +
+      'Counts (running, queued, awaiting review, awaiting approval, blocked) are computed from the database and must not be repeated here. ' +
+      'Call it after a meaningful round of work. Only the project Mastermind may call it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        summary: { type: 'string', description: 'One short paragraph: what is done, what is in flight, what is next. At most 1000 characters.' },
+        top_blockers: { type: 'array', items: { type: 'string' }, description: 'Up to five short lines naming what is in the way and on whom it waits. Omit or pass [] when nothing blocks.' }
+      },
+      required: ['summary']
+    }
+  },
+  {
     name: 'get_ui_state',
     description:
       'What the user is looking at right now: the open view, the selected task, any open dialog, and the canvas panels. Read this before you act on "this task" or "here".',

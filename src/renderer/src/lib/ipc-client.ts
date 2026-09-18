@@ -28,6 +28,7 @@ import type {
   ConnectorBridgeCredentialStatus,
   ConnectorBridgeCredentialStorage,
   ConnectorBridgeInstance,
+  ConnectorBridgeOAuthConnectInput,
   ConnectorBridgePiece,
   ConnectorBridgeSetCredentialsResult,
   ConnectorBridgeSyncStatus
@@ -38,6 +39,8 @@ import type {
   ProjectRepoRecord, CreateProjectRepoData, UpdateProjectRepoData,
   ProjectResourceRecord, CreateProjectResourceData, UpdateProjectResourceData
 } from '@shared/projects'
+import type { HeldAction, ProjectLimitState } from '@shared/project-limit-types'
+import type { ProjectStatus } from '@shared/project-status'
 import type { MastermindMemory } from '@shared/mastermind-memory'
 
 export const taskApi = {
@@ -491,6 +494,11 @@ export const projectApi = {
     window.electronAPI.projects.getMastermindMemory(projectId),
   /** Moves a top-level task with its subtasks; resolves to the moved rows, or null when refused. */
   moveTask: (taskId: string, projectId: string): Promise<Task[] | null> => window.electronAPI.projects.moveTask(taskId, projectId),
+  /** Project status (#58): counts computed now, plus the Mastermind's latest summary. */
+  getStatus: (projectId: string): Promise<ProjectStatus> => window.electronAPI.projects.getStatus(projectId),
+  /** Fires when the Mastermind writes a new summary through `update_project_status`. */
+  onStatusChanged: (callback: (event: { projectId: string }) => void): (() => void) =>
+    typeof window.electronAPI.projects.onStatusChanged === 'function' ? window.electronAPI.projects.onStatusChanged(callback) : () => {},
 
   listRepos: (projectId: string): Promise<ProjectRepoRecord[]> => window.electronAPI.projects.repos.list(projectId),
   addRepo: (projectId: string, data: CreateProjectRepoData): Promise<ProjectRepoRecord | undefined> =>
@@ -509,6 +517,23 @@ export const projectApi = {
   removeResource: (id: string): Promise<boolean> => window.electronAPI.projects.resources.remove(id),
   reorderResources: (projectId: string, orderedIds: string[]): Promise<void> =>
     window.electronAPI.projects.resources.reorder(projectId, orderedIds)
+}
+
+/** Per-project limits and the global pause (#65). */
+export const projectLimitsApi = {
+  getState: (projectId: string): Promise<ProjectLimitState> => window.electronAPI.projectLimits.getState(projectId),
+  isAllPaused: (): Promise<boolean> => window.electronAPI.projectLimits.isAllPaused(),
+  pauseAll: (paused: boolean): Promise<boolean> => window.electronAPI.projectLimits.pauseAll(paused)
+}
+
+/** Mastermind tool calls held by the escalation policy (#66). */
+export const escalationApi = {
+  listHeld: (projectId?: string): Promise<HeldAction[]> =>
+    typeof window.electronAPI.escalation?.listHeld === 'function' ? window.electronAPI.escalation.listHeld(projectId) : Promise.resolve([]),
+  approve: (id: string): Promise<{ ok: boolean; result?: unknown; error?: string }> => window.electronAPI.escalation.approve(id),
+  reject: (id: string, note?: string): Promise<boolean> => window.electronAPI.escalation.reject(id, note),
+  onHeldChanged: (callback: (event: { held: HeldAction[] }) => void): (() => void) =>
+    typeof window.electronAPI.escalation?.onHeldChanged === 'function' ? window.electronAPI.escalation.onHeldChanged(callback) : () => {}
 }
 
 export const skillApi = {
@@ -579,6 +604,11 @@ export const connectorBridgeApi = {
     storage?: ConnectorBridgeCredentialStorage
   ): Promise<ConnectorBridgeSetCredentialsResult> => window.electronAPI.connectors.setCredentials(instanceId, input, storage),
   clearCredentials: (instanceId: string): Promise<void> => window.electronAPI.connectors.clearCredentials(instanceId),
+  oauthConnect: (
+    instanceId: string,
+    input: ConnectorBridgeOAuthConnectInput,
+    storage?: ConnectorBridgeCredentialStorage
+  ): Promise<ConnectorBridgeSetCredentialsResult> => window.electronAPI.connectors.oauthConnect(instanceId, input, storage),
   syncStatus: (instanceId: string): Promise<ConnectorBridgeSyncStatus> => window.electronAPI.connectors.syncStatus(instanceId)
 }
 

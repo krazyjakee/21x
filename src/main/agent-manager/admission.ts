@@ -28,11 +28,17 @@
  *  - global: the `max_concurrent_agent_sessions` setting; empty or 0 means
  *    unlimited.
  *
- * Per-project limits (#65) slot into {@link checkAdmission}: the context
- * carries the task, so a project cap only needs the running sessions' tasks.
+ *  - per project (#65, `projects.settings.limits`, read by project-limits.ts):
+ *    `max_concurrent_agents` counts the running sessions whose task shares
+ *    the project; `daily_session_cap` counts starts since local midnight;
+ *    `paused` refuses every start. The `all_projects_paused` setting refuses
+ *    starts everywhere. Pauses and the daily cap are checked before the
+ *    concurrency limits, so a paused project's starts queue with that reason
+ *    and not as "agent limit".
  */
 import type { AgentRecord, TaskRecord } from '../database'
 import { isCoordinatorTask } from '../../shared/task-roles'
+import type { ProjectLimitReason } from '../../shared/project-policies'
 import { isTriageSessionTask } from './session-config'
 
 /** Settings key for the global cap on concurrently working agent sessions. */
@@ -50,14 +56,37 @@ export interface AdmissionContext {
 export interface CountedSession {
   agentId: string
   taskId: string
+  /** The task's project; missing on callers that predate #65 (treated as no project). */
+  projectId?: string
+}
+
+/** The requested task's project limits, resolved by project-limits.ts (#65). */
+export interface ProjectAdmissionLimits {
+  projectId: string
+  /** null = unlimited. */
+  maxConcurrent: number | null
+  paused: boolean
+  /** null = unlimited. */
+  dailyCap: number | null
+  /** Sessions the project has started since local midnight. */
+  startedToday: number
 }
 
 export interface AdmissionLimits {
   /** null = unlimited. */
   globalLimit: number | null
+  /** The `all_projects_paused` setting (#65). */
+  globalPaused?: boolean
+  /** Absent when the task has no project row to read (never for real tasks). */
+  project?: ProjectAdmissionLimits
 }
 
-export type AdmissionReason = 'agent_limit' | 'global_limit'
+export type AdmissionReason = 'agent_limit' | 'global_limit' | ProjectLimitReason
+
+/** Reasons that block every start, so a drain can stop at the first one. */
+export function isGlobalAdmissionReason(reason: AdmissionReason): boolean {
+  return reason === 'global_limit' || reason === 'global_pause'
+}
 
 export type AdmissionDecision =
   | { admitted: true }
@@ -90,6 +119,19 @@ export function checkAdmission(
 ): AdmissionDecision {
   const others = running.filter((s) => s.taskId !== ctx.taskId)
 
+  // #65: pauses and the daily cap first. They are not "no slot right now" but
+  // "do not start", and the queued reason should say so.
+  if (limits.globalPaused) {
+    return { admitted: false, reason: 'global_pause', limit: 0, running: others.length }
+  }
+  const project = limits.project
+  if (project?.paused) {
+    return { admitted: false, reason: 'project_paused', limit: 0, running: others.length }
+  }
+  if (project && project.dailyCap !== null && project.startedToday >= project.dailyCap) {
+    return { admitted: false, reason: 'project_daily_cap', limit: project.dailyCap, running: project.startedToday }
+  }
+
   if (limits.globalLimit !== null && others.length >= limits.globalLimit) {
     return { admitted: false, reason: 'global_limit', limit: limits.globalLimit, running: others.length }
   }
@@ -100,8 +142,12 @@ export function checkAdmission(
     return { admitted: false, reason: 'agent_limit', limit: agentLimit, running: agentRunning }
   }
 
-  // #65: a per-project cap goes here, counting `others` whose task shares
-  // ctx.task's project.
+  if (project && project.maxConcurrent !== null) {
+    const projectRunning = others.filter((s) => s.projectId === project.projectId).length
+    if (projectRunning >= project.maxConcurrent) {
+      return { admitted: false, reason: 'project_limit', limit: project.maxConcurrent, running: projectRunning }
+    }
+  }
   return { admitted: true }
 }
 

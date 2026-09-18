@@ -14,6 +14,7 @@ import type { DatabaseManager, TaskRecord } from '../database'
 import type { MastermindPromptOptions } from '../prompts/mastermind'
 import type { MastermindMemory } from '../../shared/mastermind-memory'
 import { listProjectRepos, taskProjectId } from './project-repos'
+import { escalationPolicyFromSettings } from '../../shared/project-policies'
 
 /** The file the Mastermind keeps its long-lived notes in, inside its workspace. */
 export const MASTERMIND_MEMORY_FILE = 'MEMORY.md'
@@ -100,8 +101,11 @@ export function mastermindPromptOptions(
   task: TaskRecord,
   workspaceDir: string
 ): MastermindPromptOptions {
+  const projectId = taskProjectId(task)
   return {
-    projectContext: buildProjectContext(db, taskProjectId(task)),
+    projectContext: buildProjectContext(db, projectId),
+    // #66: the policy travels with every session start, resume and send, like the context.
+    escalationPolicy: escalationPolicyFromSettings(db.getProject(projectId)?.settings),
     memory: readMastermindMemory(workspaceDir)
   }
 }

@@ -4,6 +4,7 @@ import { useProjectTasks } from '@/hooks/use-project-tasks'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { TaskStatus } from '@/types'
 import { isSnoozed } from '@/lib/utils'
+import { HeldActionsNotice } from '@/components/projects/HeldActionsNotice'
 
 /**
  * Slim always-visible strip at the bottom of the shell: live agent + task
@@ -51,6 +52,7 @@ export function StatusBar() {
         {active} active · {total} total
       </span>
       <div className="flex-1" />
+      <HeldActionsNotice />
       {version && <span className="opacity-70">v{version}</span>}
     </div>
   )

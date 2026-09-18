@@ -6,6 +6,7 @@ import { useCurrentProject } from '@/hooks/use-project-tasks'
 import { SettingsTab } from '@/types'
 import { cn } from '@/lib/utils'
 import { modKey } from '@/lib/platform'
+import { ProjectStatusLine, useProjectStatuses } from '@/components/projects/ProjectStatusLine'
 
 /**
  * The current-project picker in the top bar. Opens from a click, from
@@ -32,6 +33,8 @@ export function ProjectSwitcher() {
     const list = activeProjects(projects)
     return q ? list.filter((p) => p.name.toLowerCase().includes(q)) : list
   }, [projects, query])
+  // Project status (#58), fetched while the list is open.
+  const { statuses } = useProjectStatuses(useMemo(() => activeProjects(projects).map((p) => p.id), [projects]), open)
 
   useEffect(() => {
     if (!open) return undefined
@@ -114,7 +117,10 @@ export function ProjectSwitcher() {
                   i === active ? 'bg-accent text-foreground' : 'text-foreground/85'
                 )}
               >
-                <span className="flex-1 truncate">{project.name}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{project.name}</span>
+                  <ProjectStatusLine status={statuses[project.id]} compact />
+                </span>
                 {project.id === currentProjectId && <Check className="size-icon-sm shrink-0 text-primary" />}
               </button>
             ))}

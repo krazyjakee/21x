@@ -50,6 +50,53 @@ export type ToolCallResult = {
 /** Internal and debug use only: see the module comment. */
 export const FULL_ACCESS_SCOPE: TaskMcpScope = { parentTaskId: null, taskId: null, artifactTaskId: null, projectId: null }
 
+/**
+ * Sees every tool call that returned without an error. The Mastermind waker
+ * (#57) uses it to notice which tasks the Mastermind touched itself, so those
+ * changes do not wake it again. Never throws into the caller.
+ */
+export type ToolCallObserver = (call: { scope: TaskMcpScope; name: string; args: Record<string, unknown>; result: unknown }) => void
+
+let toolCallObserver: ToolCallObserver | null = null
+
+export function setToolCallObserver(observer: ToolCallObserver | null): void {
+  toolCallObserver = observer
+}
+
+/**
+ * A coordinator session's scope: project-limited and with no artifact pin,
+ * because the Mastermind is not a workpiece of its own (session-config.ts,
+ * mcpOptionsForTask). Task agents in the same project carry their own task
+ * as the artifact pin, so this tells the two apart without a database read.
+ */
+export function isCoordinatorScope(scope: TaskMcpScope): boolean {
+  return isProjectScopedSession(scope) && !scope.taskId && !scope.artifactTaskId
+}
+
+/** Tools only the project's Mastermind may call. */
+const COORDINATOR_ONLY_TOOLS = new Set(['update_project_status'])
+
+/**
+ * The escalation policy hook (#66). The main process installs one from
+ * src/main/escalation.ts; it sees every project-scoped call the Mastermind
+ * makes after the membership checks passed, and decides whether to run it
+ * (`run`), run it and report, or hold it for the user. This module cannot
+ * read the policy itself: it has no database, and the stdio entry point must
+ * not pull Electron in. With no gate installed every call just runs.
+ */
+export type CoordinatorCallGate = (call: {
+  projectId: string
+  tool: string
+  args: Record<string, unknown>
+  run: () => Promise<unknown>
+}) => Promise<unknown>
+
+let coordinatorCallGate: CoordinatorCallGate | null = null
+
+export function setCoordinatorCallGate(gate: CoordinatorCallGate | null): void {
+  coordinatorCallGate = gate
+}
+
 /** A session is scoped only when it has both a parent and its own task. */
 export function isScopedSession(scope: TaskMcpScope): boolean {
   return !!(scope.parentTaskId && scope.taskId)
@@ -70,7 +117,8 @@ const PROJECT_FILTERED_TOOLS = new Set([
   'get_recent_activity',
   'list_pending_approvals',
   'list_repos',
-  'create_task'
+  'create_task',
+  'update_project_status'
 ])
 
 const PROJECT_ACCESS_DENIED = { error: 'Access denied: task is not in this project' }
@@ -89,7 +137,8 @@ async function handleProjectCall(
   name: string,
   args: Record<string, unknown>,
   projectId: string,
-  invoke: TaskApiInvoke
+  invoke: TaskApiInvoke,
+  isCoordinator = false
 ): Promise<unknown> {
   // Lists, searches and create_task: the scope's project wins over any argument.
   if (PROJECT_FILTERED_TOOLS.has(name)) args.project_id = projectId
@@ -112,6 +161,11 @@ async function handleProjectCall(
     for (const id of args.next_subtask_ids) {
       if (!(await isTaskInProject(id, projectId, invoke))) return PROJECT_ACCESS_DENIED
     }
+  }
+  // #66: the Mastermind's calls pass through the escalation policy. Task
+  // agents in the same project are not covered by it.
+  if (isCoordinator && coordinatorCallGate) {
+    return coordinatorCallGate({ projectId, tool: name, args, run: () => invoke(`/${name}`, args) })
   }
   return invoke(`/${name}`, args)
 }
@@ -244,6 +298,16 @@ export async function callToolForScope(
       }
     }
 
+    // A task agent shares the project scope with the Mastermind but must not
+    // write the project's status on its behalf (#58). Full access (no
+    // project) stays allowed: it is internal, and names the project itself.
+    if (COORDINATOR_ONLY_TOOLS.has(name) && isProjectScopedSession(scope) && !isCoordinatorScope(scope)) {
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ error: `Access denied: only the project's Mastermind may call ${name}` }) }],
+        isError: true
+      }
+    }
+
     const normalizedArgs: Record<string, unknown> = args ? { ...args } : {}
     if (normalizedArgs.status === 'in_progress') normalizedArgs.status = 'agent_working'
     if (artifactToolNames.has(name) && scope.artifactTaskId) normalizedArgs.task_id = scope.artifactTaskId
@@ -254,11 +318,18 @@ export async function callToolForScope(
     const result = isScopedSession(scope)
       ? await handleScopedCall(name, normalizedArgs, scope, invoke) as Record<string, unknown> | null
       : isProjectScopedSession(scope)
-        ? await handleProjectCall(name, normalizedArgs, scope.projectId as string, invoke) as Record<string, unknown> | null
+        ? await handleProjectCall(name, normalizedArgs, scope.projectId as string, invoke, isCoordinatorScope(scope)) as Record<string, unknown> | null
         : await invoke(`/${name}`, normalizedArgs) as Record<string, unknown> | null
 
     if (result?.error) {
       return { content: [{ type: 'text', text: JSON.stringify(result) }], isError: true }
+    }
+    if (toolCallObserver) {
+      try {
+        toolCallObserver({ scope, name, args: normalizedArgs, result })
+      } catch (err) {
+        console.error('[TaskManagementMcp] Tool call observer failed:', err)
+      }
     }
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
   } catch (error: unknown) {
