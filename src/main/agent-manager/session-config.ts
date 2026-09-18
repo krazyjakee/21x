@@ -7,6 +7,7 @@ import { getTaskApiPort, getTaskApiToken, waitForTaskApiServer } from '../task-a
 import { buildTaskMcpUrl } from '../task-mcp-endpoint'
 import { getSecretBrokerPort, writeSecretShellWrapper } from '../secret-broker'
 import { opencodeDisallowedToolMap, readServerToolLimits, resolveAllowedToolNames } from '../mcp-tool-limits'
+import { withMastermindSystemPrompt } from '../prompts/mastermind'
 
 export interface McpServerOptions {
   ensureTaskManagement?: boolean
@@ -154,6 +155,8 @@ function buildSecretsSystemPrompt(secrets: SecretRecord[]): string {
  * Builds the adapter session config shared by start, resume and follow-up
  * sends. Secret broker fields are attached only when a broker token exists;
  * decrypted secret values and the secrets prompt come from the agent config.
+ * A coordinator task (the Mastermind) gets the built-in Mastermind prompt
+ * first, whatever the backend, with `systemPrompt` appended after it.
  */
 export function assembleSessionConfig(
   db: DatabaseManager,
@@ -174,7 +177,9 @@ export function assembleSessionConfig(
     workspaceDir: params.workspaceDir,
     model: agent.config?.model,
     reasoningEffort: agent.config?.reasoning_effort,
-    systemPrompt: params.systemPrompt,
+    systemPrompt: isCoordinatorTask(params.task)
+      ? withMastermindSystemPrompt(params.systemPrompt)
+      : params.systemPrompt,
     mcpServers: params.mcpServers,
     // OpenCode enforces per-agent MCP tool limits through session.prompt's
     // tool map (Claude Code reads enabledTools from mcpServers directly).

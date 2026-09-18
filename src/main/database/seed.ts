@@ -53,7 +53,12 @@ function addToDefaultAgent(db: Database.Database, key: 'skill_ids' | 'mcp_server
   db.prepare('UPDATE agents SET config = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(config), now, defaultAgent.id)
 }
 
-const MASTERMIND_SKILL_CONTENT = `# Mastermind Skill
+/**
+ * The text 20x used to seed as the "Mastermind" skill. The persona now lives in
+ * code (src/main/prompts/mastermind.ts); this copy exists only so startup can
+ * tell an untouched seeded skill from one the user edited. Never change it.
+ */
+export const LEGACY_MASTERMIND_SKILL_CONTENT = `# Mastermind Skill
 
 You are helping the user manage their tasks. When analyzing tasks or making recommendations:
 
@@ -124,25 +129,39 @@ You:
 
 Remember: Be helpful, concise, and proactive. Learn from history, but adapt to context.`
 
+/**
+ * Retires the seeded "Mastermind" skill now that the Mastermind has a built-in
+ * system prompt. Nothing is seeded any more. A copy whose content is still the
+ * seeded text is soft-deleted and detached from every agent; a copy the user
+ * edited is left alone, attached as before, as an ordinary user skill.
+ * Idempotent: once the untouched copy is gone there is nothing left to match.
+ */
 export function seedOrchestratorSkill(db: Database.Database): void {
-  if (db.prepare('SELECT 1 FROM skills WHERE name = ? AND is_deleted = 0').get('Mastermind')) return
+  const stale = db.prepare('SELECT id FROM skills WHERE name = ? AND content = ? AND is_deleted = 0')
+    .all('Mastermind', LEGACY_MASTERMIND_SKILL_CONTENT) as { id: string }[]
+  if (stale.length === 0) return
 
+  const staleIds = new Set(stale.map((row) => row.id))
   const now = new Date().toISOString()
-  const skillId = createId()
-  db.prepare(`
-    INSERT INTO skills (id, name, description, content, version, confidence, uses, last_used, tags, is_deleted, created_at, updated_at)
-    VALUES (?, ?, ?, ?, 1, ?, 0, NULL, ?, 0, ?, ?)
-  `).run(
-    skillId,
-    'Mastermind',
-    'Helps agents analyze tasks, make recommendations based on historical patterns, and manage task metadata intelligently',
-    MASTERMIND_SKILL_CONTENT,
-    0.8, // Higher confidence since this is a system skill
-    JSON.stringify(['mastermind', 'task-management', 'system']),
-    now,
-    now
-  )
-  addToDefaultAgent(db, 'skill_ids', skillId, now)
+  const agents = db.prepare('SELECT id, config FROM agents').all() as { id: string; config: string }[]
+  const updateAgent = db.prepare('UPDATE agents SET config = ?, updated_at = ? WHERE id = ?')
+  const deleteSkill = db.prepare('UPDATE skills SET is_deleted = 1, updated_at = ? WHERE id = ?')
+
+  db.transaction(() => {
+    for (const agent of agents) {
+      let config: Record<string, unknown>
+      try {
+        config = JSON.parse(agent.config) as Record<string, unknown>
+      } catch {
+        continue
+      }
+      const skillIds = config.skill_ids
+      if (!Array.isArray(skillIds) || !skillIds.some((id) => staleIds.has(id))) continue
+      config.skill_ids = skillIds.filter((id) => !staleIds.has(id))
+      updateAgent.run(JSON.stringify(config), now, agent.id)
+    }
+    for (const id of staleIds) deleteSkill.run(now, id)
+  })()
 }
 
 /** The full-access tool set the server actually serves, in the row's {name, description} shape. */

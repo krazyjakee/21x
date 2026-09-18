@@ -104,6 +104,10 @@ For each parsed skill:
 
 `SkillSyncResult = { created: string[], updated: string[], unchanged: string[] }`
 
+## The Mastermind is not a skill
+
+The Mastermind's instructions are a built-in system prompt (`src/main/prompts/mastermind.ts`). `assembleSessionConfig` puts it first for any coordinator task, whatever the backend, and appends the agent's own `system_prompt` after it. Older installs seeded a "Mastermind" skill. On startup, `seedOrchestratorSkill` soft-deletes that skill and detaches it from agents if its content still matches the seeded text. If the user edited it, it stays as an ordinary skill.
+
 ## UI Components
 
 - **SkillWorkspace** — full skill management view
