@@ -116,6 +116,9 @@ export class WorkspaceCleanupScheduler {
 
   private async runCleanup(): Promise<void> {
     if (this.isRunning) return
+    // Held for the whole run: the node_modules GC below awaits a process scan,
+    // and a runNow() started during that await must not overlap this run.
+    this.isRunning = true
 
     try {
       // Idle node_modules pruning has its own flag and schedule: it is safe for
@@ -141,7 +144,6 @@ export class WorkspaceCleanupScheduler {
         if (hoursSinceLastRun < 23) return // Run at most once per day
       }
 
-      this.isRunning = true
       const result = await this.doCleanup(false)
 
       this.dbManager.setSetting('workspace_autocleanup_last_run', new Date().toISOString())
