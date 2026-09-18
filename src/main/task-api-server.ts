@@ -21,6 +21,7 @@ import { handleSessionRoute } from './task-api/session-routes'
 import { handleSkillRoute } from './task-api/skill-routes'
 import { handleTaskRoute } from './task-api/task-routes'
 import { handleUiRoute } from './task-api/ui-routes'
+import { installEscalation } from './escalation'
 
 export { setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTranscriptProvider } from './task-api/state'
 
@@ -72,6 +73,11 @@ export async function waitForTaskApiServer(): Promise<number | null> {
 export function startTaskApiServer(db: DatabaseManager): Promise<number> {
   if (server && port) return Promise.resolve(port)
   if (startupPromise) return startupPromise
+
+  // #66: the Mastermind's project-scoped tool calls go through its project's
+  // escalation policy. Installed with the server because the MCP endpoint
+  // lives here; tests that call the routes directly install their own.
+  installEscalation(db)
 
   startupPromise = new Promise((resolve, reject) => {
     server = createServer(async (req, res) => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { CheckCircle2, Loader2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react'
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { Button } from '@/components/ui/Button'
@@ -8,6 +8,7 @@ import type {
   ConnectorBridgeCredentialStatus,
   ConnectorBridgeCredentialStorage,
   ConnectorBridgePiece,
+  ConnectorBridgeSetCredentialsResult,
   ConnectorBridgeSyncStatus
 } from '@shared/connector-bridge'
 import type { PluginFormProps } from './PluginFormProps'
@@ -19,6 +20,11 @@ import type { PluginFormProps } from './PluginFormProps'
  * main-process credential store and never read back), fill in the piece's
  * mapping props and a poll interval. The config only keeps the piece name,
  * the connector instance id, the props and the interval.
+ *
+ * OAuth2 pieces (issue #15) take the user's own app registration (client id
+ * and, when the provider needs one, secret) and a Connect button that runs
+ * the browser flow in the main process; the form then shows the connected /
+ * revoked state and a Disconnect button.
  */
 export function ConnectorBridgeConfigForm({ value, onChange }: PluginFormProps) {
   const [pieces, setPieces] = useState<ConnectorBridgePiece[]>([])
@@ -37,6 +43,7 @@ export function ConnectorBridgeConfigForm({ value, onChange }: PluginFormProps) 
   const instanceId = (value.connector_instance_id as string) || ''
   const props = (value.props && typeof value.props === 'object' ? value.props : {}) as Record<string, string>
   const piece = pieces.find((p) => p.pieceName === pieceName)
+  const isOAuth = piece?.authType === 'oauth2'
 
   useEffect(() => {
     connectorBridgeApi.bridgePieces().then(setPieces).catch(() => setPieces([]))
@@ -82,7 +89,10 @@ export function ConnectorBridgeConfigForm({ value, onChange }: PluginFormProps) 
     onChange({ ...value, props: { ...props, [key]: val } })
   }
 
-  const saveCredentials = async (storage: ConnectorBridgeCredentialStorage) => {
+  /** Creates the instance if needed, runs `store` against it, and applies the shared result handling. */
+  const withInstance = async (
+    store: (id: string) => Promise<ConnectorBridgeSetCredentialsResult>
+  ) => {
     if (!piece) return
     setSaving(true)
     setError(null)
@@ -91,7 +101,7 @@ export function ConnectorBridgeConfigForm({ value, onChange }: PluginFormProps) 
       if (instance.instanceId !== instanceId) {
         onChange({ ...valueRef.current, connector_instance_id: instance.instanceId })
       }
-      const result = await connectorBridgeApi.setCredentials(instance.instanceId, credentials, storage)
+      const result = await store(instance.instanceId)
       if (result.ok) {
         setCredentials({})
         setRemediation(null)
@@ -103,21 +113,57 @@ export function ConnectorBridgeConfigForm({ value, onChange }: PluginFormProps) 
         setSessionOffered(!!result.sessionOnlyAvailable)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save the credentials')
+      setError(err instanceof Error ? err.message : isOAuth ? 'Could not connect' : 'Could not save the credentials')
     } finally {
       setSaving(false)
     }
   }
 
-  const credentialFields = piece
+  const saveCredentials = (storage: ConnectorBridgeCredentialStorage) =>
+    withInstance((id) => connectorBridgeApi.setCredentials(id, credentials, storage))
+
+  const connectOAuth = (storage: ConnectorBridgeCredentialStorage) =>
+    withInstance((id) =>
+      connectorBridgeApi.oauthConnect(id, { clientId: credentials.clientId, clientSecret: credentials.clientSecret }, storage)
+    )
+
+  const disconnect = async () => {
+    if (!instanceId) return
+    setSaving(true)
+    setError(null)
+    try {
+      await connectorBridgeApi.clearCredentials(instanceId)
+      setCredentials({})
+      setSessionOffered(false)
+      setRemediation(null)
+      await refreshStatus()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not disconnect')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const credentialFields: { key: string; label: string; optional?: boolean }[] = piece
     ? piece.authType === 'basic'
       ? [
           { key: 'username', label: piece.authLabels.username ?? 'Username' },
           { key: 'password', label: piece.authLabels.password ?? 'Password' }
         ]
-      : [{ key: 'secret', label: piece.authLabels.secret ?? 'Secret' }]
+      : piece.authType === 'oauth2'
+        ? piece.oauth?.mode === 'registered'
+          ? []
+          : [
+              { key: 'clientId', label: piece.authLabels.clientId ?? 'Client ID' },
+              // A PKCE provider may take a public client; the secret is then optional.
+              { key: 'clientSecret', label: piece.authLabels.clientSecret ?? 'Client secret', optional: piece.oauth?.clientSecretRequired === false }
+            ]
+        : [{ key: 'secret', label: piece.authLabels.secret ?? 'Secret' }]
     : []
-  const credentialsComplete = credentialFields.every((f) => (credentials[f.key] ?? '').trim())
+  const credentialsComplete = credentialFields.every((f) => f.optional || (credentials[f.key] ?? '').trim())
+
+  const oauthState = credentialStatus?.oauth?.state ?? 'none'
+  const connected = isOAuth ? oauthState === 'connected' : !!credentialStatus?.storage
 
   return (
     <div className="space-y-3">
@@ -144,37 +190,78 @@ export function ConnectorBridgeConfigForm({ value, onChange }: PluginFormProps) 
       {piece && (
         <div className="space-y-2 pt-2 border-t border-border">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-medium text-muted-foreground">Credentials</p>
-            {credentialStatus?.storage && (
+            <p className="text-xs font-medium text-muted-foreground">{isOAuth ? 'Connection' : 'Credentials'}</p>
+            {connected && (
               <span className="flex items-center gap-1 text-xs text-green-600">
                 <CheckCircle2 className="h-3 w-3" />
-                {credentialStatus.storage === 'session' ? 'Connected for this session' : 'Connected'}
+                {credentialStatus?.storage === 'session' ? 'Connected for this session' : 'Connected'}
+              </span>
+            )}
+            {isOAuth && oauthState === 'revoked' && (
+              <span className="flex items-center gap-1 text-xs text-destructive">
+                <AlertTriangle className="h-3 w-3" />
+                Access revoked; reconnect
               </span>
             )}
           </div>
           {piece.authHelp && <p className="text-xs text-muted-foreground">{piece.authHelp}</p>}
+          {isOAuth && piece.oauth && (
+            <p className="text-xs text-muted-foreground">
+              Redirect URL to register: <code className="text-xs bg-muted px-1 rounded">{piece.oauth.redirectUriHint}</code>
+              {piece.oauth.scopes.length > 0 && <> · Scopes requested: {piece.oauth.scopes.join(', ')}</>}
+              {piece.oauth.pkce ? ' · PKCE' : ''}
+            </p>
+          )}
           {credentialFields.map((f) => (
             <div key={f.key} className="space-y-1.5">
-              <Label htmlFor={`bridge-cred-${f.key}`}>{f.label}</Label>
+              <Label htmlFor={`bridge-cred-${f.key}`}>
+                {f.label}
+                {f.optional ? ' (optional)' : ''}
+              </Label>
               <Input
                 id={`bridge-cred-${f.key}`}
-                type="password"
+                type={f.key === 'clientId' ? 'text' : 'password'}
                 autoComplete="off"
                 value={credentials[f.key] ?? ''}
                 onChange={(e) => setCredentials({ ...credentials, [f.key]: e.target.value })}
-                placeholder={credentialStatus?.storage ? 'Stored; enter a new value to replace it' : ''}
+                placeholder={connected || oauthState === 'revoked' ? 'Stored; enter a new value to replace it' : ''}
               />
             </div>
           ))}
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => void saveCredentials('persistent')}
-            disabled={saving || !credentialsComplete}
-          >
-            {saving && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
-            Save credentials
-          </Button>
+          <div className="flex items-center gap-2">
+            {isOAuth ? (
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void connectOAuth('persistent')}
+                disabled={saving || !credentialsComplete}
+                variant={connected ? 'outline' : 'default'}
+              >
+                {saving && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
+                {saving ? `Waiting for ${piece.label}…` : connected ? `Reconnect ${piece.label}` : `Connect ${piece.label}`}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void saveCredentials('persistent')}
+                disabled={saving || !credentialsComplete}
+              >
+                {saving && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
+                Save credentials
+              </Button>
+            )}
+            {isOAuth && (connected || oauthState === 'revoked') && (
+              <Button type="button" size="sm" variant="ghost" onClick={() => void disconnect()} disabled={saving}>
+                Disconnect
+              </Button>
+            )}
+          </div>
+          {isOAuth && saving && (
+            <p className="text-xs text-muted-foreground">
+              Finish signing in to {piece.label} in your browser. This window updates when {piece.label} sends you back.
+            </p>
+          )}
           {error && <p className="text-xs text-destructive">{error}</p>}
           {remediation && remediation !== error && <p className="text-xs text-muted-foreground">{remediation}</p>}
           {sessionOffered && (
@@ -182,7 +269,7 @@ export function ConnectorBridgeConfigForm({ value, onChange }: PluginFormProps) 
               type="button"
               size="sm"
               variant="outline"
-              onClick={() => void saveCredentials('session')}
+              onClick={() => void (isOAuth ? connectOAuth('session') : saveCredentials('session'))}
               disabled={saving || !credentialsComplete}
             >
               Keep for this session only

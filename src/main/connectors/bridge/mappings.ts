@@ -50,8 +50,62 @@ const trello: ConnectorTaskMapping = {
   }
 }
 
+/**
+ * Todoist: the OAuth2 proof piece (issue #15). Imports the active tasks a
+ * Todoist filter query selects (`todoist_filter_tasks` follows every page);
+ * completion goes through the dedicated close / reopen actions because
+ * `todoist_update_task` cannot change it. Active tasks only: a task completed
+ * in Todoist simply stops appearing (see docs/connectors.md).
+ */
+const todoist: ConnectorTaskMapping = {
+  pieceName: '@activepieces/piece-todoist',
+  label: 'Todoist',
+  auth: {
+    type: 'oauth2',
+    labels: { clientId: 'Client ID', clientSecret: 'Client secret' },
+    help: 'Create an app at developer.todoist.com/appconsole.html with the OAuth redirect URL http://localhost:3000/callback (21x also tries ports 3001-3010), then paste its Client ID and Client secret and click Connect.',
+    scopes: ['data:read_write']
+  },
+  configProps: [
+    {
+      key: 'filter_query',
+      label: 'Filter',
+      required: true,
+      placeholder: 'e.g. #Work | overdue',
+      description: 'A Todoist filter in its native syntax: a project (#Work), a label (@waiting), "today", "overdue", "no due date", combined with & and |.'
+    }
+  ],
+  import: {
+    target: { type: 'action', name: 'todoist_filter_tasks' },
+    props: { query: { config: 'filter_query' } },
+    itemsPath: 'tasks'
+  },
+  fields: {
+    externalId: 'id',
+    title: 'content',
+    description: 'description',
+    dueDate: 'due.date',
+    labels: 'labels',
+    status: { path: 'checked', completedValues: [true] }
+  },
+  update: {
+    action: 'todoist_update_task',
+    idProp: 'task_id',
+    titleProp: 'content',
+    // The piece routes any value matching \d{4}-\d{2}-\d{2} to Todoist's
+    // `due_date`, which only takes a calendar day; a full timestamp is refused.
+    dueDateProp: 'due_date',
+    dueDateFormat: 'date',
+    statusActions: {
+      complete: { action: 'todoist_complete_task', idProp: 'task_id' },
+      reopen: { action: 'todoist_reopen_task', idProp: 'task_id' }
+    }
+  }
+}
+
 export const CONNECTOR_TASK_MAPPINGS: ConnectorTaskMappings = {
-  [trello.pieceName]: trello
+  [trello.pieceName]: trello,
+  [todoist.pieceName]: todoist
 }
 
 export function getTaskMapping(

@@ -3,6 +3,7 @@ import type { PluginRegistry } from './plugins/registry'
 import type { OAuthManager } from './oauth/oauth-manager'
 import type { PluginContext, PluginSyncResult, ActionResult } from './plugins/types'
 import type { SourceUser, ReassignResult } from '../shared/types'
+import { emitTaskEvent } from './project-events'
 
 export interface SyncResult {
   source_id: string
@@ -43,6 +44,7 @@ export class SyncManager {
     console.log('[sync] Importing from:', source.name)
 
     const config = this.getConfig(source)
+    const startedAt = new Date().toISOString()
 
     try {
       const pluginResult: PluginSyncResult = await plugin.importTasks(sourceId, config, ctx)
@@ -53,6 +55,16 @@ export class SyncManager {
 
       this.db.updateTaskSourceLastSynced(sourceId)
       console.log('[sync] Updated last_synced_at for source:', sourceId)
+
+      // Project events (#57): each task this run created wakes the project's
+      // Mastermind. Plugins do not report ids, so the rows are found by source
+      // and creation time (both set by createTask, in the same clock).
+      if (result.imported > 0) {
+        for (const task of this.db.getTasks({ projectId: source.project_id })) {
+          if (task.source_id !== sourceId || task.created_at < startedAt) continue
+          emitTaskEvent(this.db, 'task_synced', task.id, undefined, { unassigned: !task.agent_id })
+        }
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Import failed'
       result.errors.push(msg)

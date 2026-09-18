@@ -11,6 +11,12 @@ import { userTaskRoleFilter } from './database/task-roles'
 import { TASK_ROLE_MASTERMIND, type TaskRole } from '../shared/task-roles'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import {
+  PROJECT_STATUS_BLOCKER_MAX_CHARS,
+  PROJECT_STATUS_MAX_BLOCKERS,
+  PROJECT_STATUS_SUMMARY_MAX_CHARS,
+  type ProjectStatus
+} from '../shared/project-status'
+import {
   JSON_COLUMNS,
   UPDATABLE_COLUMNS,
   deserializeAgent,
@@ -49,6 +55,15 @@ import type {
 } from './database/types'
 
 export type * from './database/types'
+export type { ProjectStatus } from '../shared/project-status'
+
+/** What only the agent manager knows about a project's tasks (#58): see getProjectStatus. */
+export interface ProjectStatusLiveState {
+  /** Tasks waiting in the admission queue (#47). */
+  queuedTaskIds?: Iterable<string>
+  /** Tasks whose live session is in `waiting_approval`. */
+  approvalTaskIds?: Iterable<string>
+}
 
 interface TranscriptPartRow {
   task_id: string; part_id: string; seq: number; role: string; content: string
@@ -910,6 +925,86 @@ export class DatabaseManager {
   /** Index in `orderedIds` becomes each project's sort_order. */
   reorderProjects(orderedIds: string[]): void {
     this.reorderRows('projects', null, orderedIds)
+  }
+
+  // ── Project status (#58) ─────────────────────────────────────
+  // Counts come from the task rows every time (plus the caller's live session
+  // facts, which no row records); only the Mastermind's narrative is stored,
+  // one snapshot per project in `project_status`. A journal of earlier
+  // snapshots (#72) goes in its own table beside it.
+
+  /**
+   * The project's status: counts from the database and the stored narrative.
+   * `live` carries what only the agent manager knows: tasks waiting in the
+   * admission queue and tasks whose session is waiting for approval. Without
+   * it those two counts are 0, never guessed.
+   */
+  getProjectStatus(projectId: string, live?: ProjectStatusLiveState): ProjectStatus {
+    const empty: ProjectStatus = {
+      project_id: projectId,
+      counts: { running: 0, queued: 0, awaiting_review: 0, awaiting_approval: 0, blocked: 0 },
+      summary: '',
+      top_blockers: [],
+      updated_at: null
+    }
+    if (!this.ensureDbOpen()) return empty
+
+    const queued = new Set(live?.queuedTaskIds ?? [])
+    const approval = new Set(live?.approvalTaskIds ?? [])
+    const rows = this.prepare(
+      `SELECT id, status, agent_id FROM tasks WHERE project_id = ? AND ${userTaskRoleFilter()}`
+    ).all(projectId) as Array<{ id: string; status: string; agent_id: string | null }>
+    const counts = { ...empty.counts }
+    for (const row of rows) {
+      if (row.status === TaskStatus.AgentWorking || row.status === TaskStatus.Triaging) counts.running += 1
+      else if (row.status === TaskStatus.ReadyForReview) counts.awaiting_review += 1
+      if (approval.has(row.id)) counts.awaiting_approval += 1
+      if (queued.has(row.id)) counts.queued += 1
+      else if (row.status === TaskStatus.NotStarted && !row.agent_id) counts.blocked += 1
+    }
+
+    const stored = this.prepare('SELECT summary, top_blockers, updated_at FROM project_status WHERE project_id = ?')
+      .get(projectId) as { summary: string; top_blockers: string; updated_at: string } | undefined
+    let topBlockers: string[] = []
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored.top_blockers || '[]') as unknown
+        if (Array.isArray(parsed)) topBlockers = parsed.filter((item): item is string => typeof item === 'string')
+      } catch {
+        // An unreadable list is an empty list; the summary still shows.
+      }
+    }
+    return {
+      project_id: projectId,
+      counts,
+      summary: stored?.summary ?? '',
+      top_blockers: topBlockers,
+      updated_at: stored?.updated_at ?? null
+    }
+  }
+
+  /**
+   * Replaces the project's narrative snapshot. The text is trimmed and capped
+   * (shared/project-status.ts) so the record stays one small read. Undefined
+   * for an unknown project: no row is invented for it.
+   */
+  setProjectStatusSummary(projectId: string, summary: string, topBlockers: string[] = []): ProjectStatus | undefined {
+    if (!this.ensureDbOpen() || !this.getProject(projectId)) return undefined
+    const text = summary.trim().slice(0, PROJECT_STATUS_SUMMARY_MAX_CHARS)
+    const blockers = topBlockers
+      .map((item) => String(item).trim().slice(0, PROJECT_STATUS_BLOCKER_MAX_CHARS))
+      .filter(Boolean)
+      .slice(0, PROJECT_STATUS_MAX_BLOCKERS)
+    const now = new Date().toISOString()
+    this.prepare(`
+      INSERT INTO project_status (project_id, summary, top_blockers, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(project_id) DO UPDATE SET
+        summary = excluded.summary,
+        top_blockers = excluded.top_blockers,
+        updated_at = excluded.updated_at
+    `).run(projectId, text, JSON.stringify(blockers), now)
+    return this.getProjectStatus(projectId)
   }
 
   getProjectRepos(projectId: string): ProjectRepoRecord[] {

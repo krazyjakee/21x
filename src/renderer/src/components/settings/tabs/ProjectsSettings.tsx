@@ -7,6 +7,7 @@ import { useProjectStore, activeProjects } from '@/stores/project-store'
 import { useUIStore } from '@/stores/ui-store'
 import { moveItem } from '@/lib/project-editor'
 import { DEFAULT_PROJECT_ID, type ProjectRecord } from '@shared/projects'
+import { ProjectStatusLine, useProjectStatuses } from '@/components/projects/ProjectStatusLine'
 
 /** Settings → Projects: create, edit, reorder, archive and restore projects. */
 export function ProjectsSettings() {
@@ -24,6 +25,8 @@ export function ProjectsSettings() {
 
   const active = useMemo(() => activeProjects(projects), [projects])
   const archived = useMemo(() => projects.filter((p) => p.archived), [projects])
+  // Project status (#58) for the active projects' cards.
+  const { statuses } = useProjectStatuses(useMemo(() => active.map((p) => p.id), [active]))
 
   const move = (index: number, delta: -1 | 1) => {
     void reorderProjects(moveItem(active, index, delta).map((p) => p.id))
@@ -53,6 +56,7 @@ export function ProjectsSettings() {
             {project.id === DEFAULT_PROJECT_ID && <Badge>Default</Badge>}
           </div>
           {brief && <p className="mt-0.5 truncate text-xs text-muted-foreground">{brief}</p>}
+          {!project.archived && <div className="mt-1"><ProjectStatusLine status={statuses[project.id]} /></div>}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {!project.archived && !isCurrent && (

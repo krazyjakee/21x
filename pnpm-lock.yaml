@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@activepieces/piece-todoist':
+        specifier: 0.5.0
+        version: 0.5.0
       '@activepieces/piece-trello':
         specifier: 0.6.0
         version: 0.6.0
@@ -224,6 +227,9 @@ packages:
 
   7zip-bin@5.2.0:
     resolution: {integrity: sha512-ukTPVhqG4jNzMro2qA9HSCSSVJN3aN7tlb+hfqYCt3ER0yWroeA2VR38MNrOHLQ/cVj+DaIMad0kFCtWWowh/A==}
+
+  '@activepieces/piece-todoist@0.5.0':
+    resolution: {integrity: sha512-D35aTwy0zQlFFyY/Y/u1/ySvvkdJmwZu3tpAEq5yFTWw3a4D2ydKnLhU2Kf4pm42eX3d83wMv/vK1gxss608mA==}
 
   '@activepieces/piece-trello@0.6.0':
     resolution: {integrity: sha512-tGTst3ogMA8aj9Aa8JHb0Yg6eU192bdoYX+I6iu88zniOz2Zmpv1n81nzipaB4ELnWtUmkPuIAyO28vmH/4p1A==}
@@ -4806,6 +4812,8 @@ packages:
 snapshots:
 
   7zip-bin@5.2.0: {}
+
+  '@activepieces/piece-todoist@0.5.0': {}
 
   '@activepieces/piece-trello@0.6.0': {}
 

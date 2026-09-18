@@ -28,6 +28,35 @@ export interface AllowedPieceTrigger extends AllowedPieceOperation {
   strategy: 'POLLING'
 }
 
+/**
+ * OAuth2 settings for a piece declared with `PieceAuth.OAuth2` (issue #15,
+ * docs/taskSources.md "Connector OAuth2"). Per-provider decisions live here as
+ * data; no client secret ever does.
+ */
+export interface AllowedPieceOAuth {
+  /**
+   * `user-supplied`: the user registers an OAuth app with the provider and
+   * pastes its client id (and secret) into the config form.
+   * `registered`: a 21x-registered public client whose id is `clientId`
+   * below; only for providers that accept PKCE without a secret. None yet.
+   */
+  mode: 'user-supplied' | 'registered'
+  /** Only for `registered` mode. Never a secret. */
+  clientId?: string
+  /** Must equal the piece's `PieceAuth.OAuth2({ authUrl, tokenUrl })`. */
+  authUrl: string
+  tokenUrl: string
+  /** The smallest scopes the allowlisted operations need. */
+  scopes: string[]
+  /** Send a PKCE S256 challenge. False when the provider does not document PKCE. */
+  pkce: boolean
+  /** Whether the provider accepts http://localhost:<port>/callback for desktop apps. */
+  loopbackRedirect: boolean
+  /** Extra authorization query parameters. */
+  authParams?: Record<string, string>
+  note?: string
+}
+
 export interface AllowedPiece {
   /** Exact version; package.json must pin the same string. */
   version: string
@@ -35,6 +64,8 @@ export interface AllowedPiece {
   exportName: string
   actions: Record<string, AllowedPieceOperation>
   triggers: Record<string, AllowedPieceTrigger>
+  /** Present for OAuth2 pieces; absent pieces use secret_text / basic / custom_auth credentials. */
+  oauth?: AllowedPieceOAuth
   note?: string
 }
 
@@ -114,6 +145,31 @@ export const CONNECTOR_PIECE_ALLOWLIST: ConnectorPieceAllowlist = {
       "triggers": {
         "deadline": { "strategy": "POLLING" }
       }
+    },
+    "@activepieces/piece-todoist": {
+      "version": "0.5.0",
+      "exportName": "todoist",
+      "note": "OAuth2 proof piece (issue #15). Self-contained esbuild bundle (framework, pieces-common, dayjs, mime-types, ipaddr.js inlined); no runtime dependencies. Only the read and task-state actions the task mapping needs are listed: create, quick-add, move, delete, comment, label, section, project-write, activity-log, completed-task listings and custom_api_call are deliberately excluded.",
+      "oauth": {
+        "mode": "user-supplied",
+        "authUrl": "https://todoist.com/oauth/authorize",
+        "tokenUrl": "https://todoist.com/oauth/access_token",
+        "scopes": ["data:read_write"],
+        "pkce": false,
+        "loopbackRedirect": true,
+        "note": "Todoist does not document PKCE and needs the client secret at the token endpoint, so the user pastes their own app's id and secret (developer.todoist.com/appconsole.html) and the secret is stored with the connector credentials, never in the repo. data:read_write is the smallest scope that can read tasks and update/close/reopen them (data:read cannot write). Tokens do not expire and no refresh token is issued; revocation shows up as HTTP 401. Any redirect URL can be registered in the app console, including the loopback http://localhost:<3000-3010>/callback."
+      },
+      "actions": {
+        "todoist_filter_tasks": {},
+        "todoist_get_task": {},
+        "todoist_list_projects": {},
+        "todoist_update_task": {},
+        "todoist_complete_task": {},
+        "todoist_reopen_task": {}
+      },
+      "triggers": {
+        "task_completed": { "strategy": "POLLING" }
+      }
     }
   },
   "packages": {
@@ -128,6 +184,13 @@ export const CONNECTOR_PIECE_ALLOWLIST: ConnectorPieceAllowlist = {
       "version": "0.6.0",
       "concludedLicense": "MIT",
       "note": "package.json has no license field and the tarball has no LICENSE file. Source lives in packages/pieces/community/trello of github.com/activepieces/activepieces, outside the commercially licensed packages/ee and packages/server/api/src/app/ee; the root LICENSE grants MIT for it. The bundle inlines MIT third-party code (axios, mime-types, dayjs, ipaddr.js). No ee DTOs appear in the bundle.",
+      "reviewedOn": "2026-09-18"
+    },
+    {
+      "package": "@activepieces/piece-todoist",
+      "version": "0.5.0",
+      "concludedLicense": "MIT",
+      "note": "package.json has no license field and the tarball has no LICENSE file. Source lives in packages/pieces/community/todoist of github.com/activepieces/activepieces, outside the commercially licensed packages/ee and packages/server/api/src/app/ee; the root LICENSE grants MIT for it. The bundle inlines MIT third-party code (mime-types, dayjs, ipaddr.js, form-data). No ee paths appear in the bundle.",
       "reviewedOn": "2026-09-18"
     },
     {

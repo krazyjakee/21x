@@ -43,6 +43,8 @@ export interface ProjectDraft {
   git_provider: string | null
   /** null = the global org setting. */
   git_org: string | null
+  /** The project's settings JSON (#49): limits (#65), escalation (#66) and other keyed blocks. */
+  settings: Record<string, unknown>
   repos: RepoDraft[]
   resources: ResourceDraft[]
 }
@@ -66,6 +68,7 @@ export function emptyProjectDraft(): ProjectDraft {
     mastermind_agent_id: null,
     git_provider: null,
     git_org: null,
+    settings: {},
     repos: [],
     resources: []
   }
@@ -83,6 +86,7 @@ export function draftFromProject(
     mastermind_agent_id: project.mastermind_agent_id,
     git_provider: project.git_provider,
     git_org: project.git_org,
+    settings: project.settings ?? {},
     repos: repos.map((r) => ({
       key: r.id,
       id: r.id,
@@ -207,7 +211,8 @@ export async function saveProjectDraft(
     default_agent_id: draft.default_agent_id || null,
     mastermind_agent_id: draft.mastermind_agent_id || null,
     git_provider: draft.git_provider || null,
-    git_org: draft.git_org?.trim() || null
+    git_org: draft.git_org?.trim() || null,
+    settings: draft.settings
   }
   const project = projectId
     ? await store.updateProject(projectId, fields)

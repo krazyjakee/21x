@@ -293,10 +293,111 @@ Uses SQL `LIKE` substring matching — not semantic search:
 - `labels` → JSON substring match
 - `completed_only` → filters to completed tasks only (default: true)
 
+## Project events and Mastermind wake-ups (#57)
+
+The Mastermind used to act only when the user talked to it. Now the main
+process raises a `ProjectEvent` (`src/main/project-events.ts`) at the places
+where something happens to a task, and the `MastermindWaker`
+(`src/main/mastermind-waker.ts`) turns a project's events into one wake-up
+for that project's Mastermind.
+
+Event kinds and where they are raised:
+
+| Kind | Raised from |
+|------|-------------|
+| `task_ready_for_review` | `afterTaskUpdated` (task API, IPC, mobile) and `AgentManager.updateTaskFromLocalAgent` (an agent's own work reaching review) |
+| `task_failed` | `AgentManager.emitStatus` when a session goes to `error` |
+| `approval_pending` | `AgentManager.emitStatus` when a session goes to `waiting_approval` |
+| `chain_stuck` | `notifyParentOfSubtaskCompletion` when a successor is missing, has no agent, or fails to start |
+| `heartbeat_finding` | `HeartbeatScheduler.forwardFindings`, after its own dedupe, for forwarded and escalated findings alike |
+| `task_synced` | `SyncManager.importTasks`, for every row a run created (flagged `unassigned` when it has no agent) |
+
+`emitTaskEvent(db, kind, taskId, detail?)` looks the task up, drops
+coordinator rows (the Mastermind's own session must never wake itself) and
+clips the detail to 400 characters, so each hook is one line.
+
+The waker holds a project's events for a debounce window (3 s), then sends
+ONE fenced system message (`buildSystemMessage`, origin `coordinator-wakeup`,
+the same authority boundary as the subtask wake-up) to the project's
+coordinator row through `AgentManager.sendMessage`, which rejoins the live
+session or resumes the persisted one. A Mastermind that is mid-turn is not
+interrupted: the batch waits for idle (dropped after 15 min). Rules:
+
+- **Per-project setting.** `projects.settings.mastermind_wakeups`
+  (`src/shared/mastermind-wakeups.ts`): `{ enabled, kinds[] }`; absent means
+  on for every kind. The project editor's "Mastermind wake-ups" section edits
+  it.
+- **Self-caused events are skipped.** The task-management MCP dispatch reports
+  every successful call (`setToolCallObserver`); a coordinator-shaped scope
+  (project scope, no artifact pin) touching a task marks it for 20 s, and
+  events on marked tasks do not wake the Mastermind.
+- **Cap.** At most 12 wake-ups per project per rolling hour; the first dropped
+  batch is logged (`[MastermindWaker] Wake-up cap reached`).
+- Duplicate (kind, task) pairs inside one window are one line; a batch lists
+  at most 40 events and counts the rest.
+
+## Project status (#58)
+
+`project_status` (`project_id` PK, `summary`, `top_blockers` JSON,
+`updated_at`) holds the Mastermind's narrative snapshot for a project, one
+row per project. Counts are never stored: `DatabaseManager.getProjectStatus`
+computes `running` (`agent_working` / `triaging`), `awaiting_review`
+(`ready_for_review`) and `blocked` (`not_started` with no agent and no
+queued start) from the task rows, and takes `queued` (admission queue) and
+`awaiting_approval` (session state) from the caller —
+`src/main/project-status.ts` reads those from the `AgentManager`. No LLM is
+involved in any count.
+
+The Mastermind writes the narrative with the project-scoped tool
+`update_project_status(summary, top_blockers?)` (route
+`/update_project_status`; the scope forces `project_id`, and a task agent in
+the same project is refused). Its prompt tells it to call the tool after a
+meaningful round of work and after every wake-up. The renderer reads
+`project:getStatus` and is pinged on `project:statusChanged`; the project
+switcher and Settings → Projects show the counts, the summary and its age. A
+durable journal of earlier snapshots (#72) adds a table beside
+`project_status` without changing this snapshot.
+
+## Project limits, pause and escalation policy (#65, #66)
+
+Both live in the project's `settings` JSON column under their own keys (`src/shared/project-policies.ts`), edited in the project editor's **Limits** and **Escalation** sections. Missing values mean the defaults.
+
+### Limits (`settings.limits`)
+
+| Key | Default | Effect |
+|-----|---------|--------|
+| `max_concurrent_agents` | null (unlimited) | Working sessions of real tasks in the project; checked in `checkAdmission` (`src/main/agent-manager/admission.ts`) against the running sessions' projects |
+| `daily_session_cap` | null | Sessions started since local midnight, counted in the `project_daily_usage:<projectId>` settings row (`src/main/project-limits.ts`) |
+| `daily_token_cap` | null | Stored and shown; `recordProjectTokenUsage` is the seam, no adapter reports a per-session token total yet |
+| `paused` | false | New starts wait; running sessions are untouched |
+
+The global pause is the `all_projects_paused` setting: `AgentManager.pauseAllProjects(paused)` sets it and drains the queue when lifted (IPC `projectLimits:pauseAll`; the Commander's "pause all projects" tool of #61 calls the same method).
+
+A start over a limit goes into the existing FIFO start queue with a reason of `project_limit`, `project_daily_cap`, `project_paused` or `global_pause` (beside `agent_limit` and `global_limit`). The `start_task` tool's result says which. The project's Mastermind is also told in a short fenced system message when its session is live and idle (once per project and reason until a queued start runs). Coordinator (Mastermind), heartbeat and triage sessions bypass all of it, as before. The queue is re-checked when a project's settings are saved (`project:update`), when the global pause is lifted, on every session idle/stop, and on every idle-session sweep, which is also what reopens a project after midnight. `AgentManager.getProjectLimitState(projectId)` (IPC `projectLimits:getState`) reports the limits, the live counts, the queued starts and what the next start would wait for; the project status (#58) carries it as `limits`.
+
+### Escalation policy (`settings.escalation`)
+
+Per action, one of `autonomous`, `tell_commander` or `ask_user`:
+
+| Action | Default | Tool calls covered |
+|--------|---------|--------------------|
+| `create_task` | autonomous | `create_task`, `create_subtask` |
+| `start_task` | autonomous | `start_task` |
+| `stop_task` | tell_commander | `stop_task` |
+| `respond_to_checkpoint` | ask_user | `respond_to_checkpoint` |
+| `change_priority` | autonomous | `update_task` with a `priority` |
+| `pr` | ask_user | none: prompt guidance only, no task-management tool opens or merges pull requests |
+
+The policy is a section of the Mastermind prompt (`src/main/prompts/mastermind.ts`) and is enforced for coordinator-scope calls by a gate on the project-scoped dispatch (`setCoordinatorCallGate` in `task-management-core.ts`, installed by `src/main/escalation.ts` when the Task API server starts). Task agents in the same project are not gated. `tell_commander` runs the call, then calls `escalateToCommander(event)` and shows a user notification; `ask_user` holds the call in memory, returns `{ status: 'held', id }` to the Mastermind, notifies the user, and the status bar's held-actions notice approves (runs the original call) or rejects it over IPC (`escalation:approve` / `escalation:reject`); either way the Mastermind's live session gets a fenced note with the outcome. `escalateToCommander` is a no-op seam until #62's `report_to_commander` installs a handler with `setCommanderEscalationHandler`. Held calls are not persisted: a restart forgets them.
+
 ## Key Files
 
 | File | Role |
 |------|------|
+| `src/main/project-events.ts` | Project event bus, `emitTaskEvent` |
+| `src/main/mastermind-waker.ts` | Batched, debounced, capped Mastermind wake-ups |
+| `src/shared/mastermind-wakeups.ts` | Event kinds and the per-project wake-up setting |
+| `src/main/project-status.ts` / `src/shared/project-status.ts` | Project status counts + narrative |
 | `src/shared/constants.ts` | `TaskStatus` enum |
 | `src/main/agent-manager.ts` | Session lifecycle, `transitionToIdle` |
 | `src/main/agent-manager/prompts.ts` | `buildTriagePrompt` |

@@ -8,6 +8,7 @@ import type { AgentManager } from './agent-manager'
 import { HeartbeatStatus, HEARTBEAT_OK_TOKEN, HEARTBEAT_INFO_TOKEN, HEARTBEAT_DEFAULTS, TaskStatus } from '../shared/constants'
 import { buildSystemMessage, computeDeliveryId, evaluateAuthorityGate, SystemMessageOrigin } from '../shared/system-authority'
 import { extractGitHubUrls, requiresCurrentStateChecks, runPreflightChecks } from './heartbeat-preflight'
+import { emitTaskEvent } from './project-events'
 
 /**
  * HeartbeatScheduler - Periodic monitoring of tasks in ready_for_review status
@@ -494,6 +495,10 @@ export class HeartbeatScheduler {
       return null
     }
     this.deliveredFindings.set(deliveryId, now)
+
+    // Project event (#57): every new finding, forwarded or escalated, reaches
+    // the project's Mastermind once, after the same dedupe as the delivery.
+    emitTaskEvent(this.dbManager, 'heartbeat_finding', task.id, findings)
 
     const gate = evaluateAuthorityGate(findings)
     if (gate.requiresHumanAuthorization) {

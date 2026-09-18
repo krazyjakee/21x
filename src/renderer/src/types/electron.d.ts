@@ -64,6 +64,8 @@ import type {
   ProjectRepoRecord, CreateProjectRepoData, UpdateProjectRepoData,
   ProjectResourceRecord, CreateProjectResourceData, UpdateProjectResourceData
 } from '@shared/projects'
+import type { HeldAction, ProjectLimitState } from '@shared/project-limit-types'
+import type { ProjectStatus } from '@shared/project-status'
 import type { MastermindMemory } from '@shared/mastermind-memory'
 
 export interface AgentSessionStartResult {
@@ -373,6 +375,9 @@ interface ElectronAPI {
     reorder: (orderedIds: string[]) => Promise<void>
     getMastermindMemory: (projectId: string) => Promise<MastermindMemory | null>
     moveTask: (taskId: string, projectId: string) => Promise<Task[] | null>
+    /** Project status (#58). */
+    getStatus: (projectId: string) => Promise<ProjectStatus>
+    onStatusChanged: (callback: (event: { projectId: string }) => void) => () => void
     repos: {
       list: (projectId: string) => Promise<ProjectRepoRecord[]>
       add: (projectId: string, data: CreateProjectRepoData) => Promise<ProjectRepoRecord | undefined>
@@ -387,6 +392,19 @@ interface ElectronAPI {
       remove: (id: string) => Promise<boolean>
       reorder: (projectId: string, orderedIds: string[]) => Promise<void>
     }
+  }
+  /** Per-project limits and the global pause (#65). */
+  projectLimits: {
+    getState: (projectId: string) => Promise<ProjectLimitState>
+    isAllPaused: () => Promise<boolean>
+    pauseAll: (paused: boolean) => Promise<boolean>
+  }
+  /** Mastermind tool calls held by the escalation policy (#66). */
+  escalation: {
+    listHeld: (projectId?: string) => Promise<HeldAction[]>
+    approve: (id: string) => Promise<{ ok: boolean; result?: unknown; error?: string }>
+    reject: (id: string, note?: string) => Promise<boolean>
+    onHeldChanged: (callback: (event: { held: HeldAction[] }) => void) => () => void
   }
   skills: {
     getAll: () => Promise<Skill[]>
@@ -416,6 +434,11 @@ interface ElectronAPI {
       storage?: import('@shared/connector-bridge').ConnectorBridgeCredentialStorage
     ) => Promise<import('@shared/connector-bridge').ConnectorBridgeSetCredentialsResult>
     clearCredentials: (instanceId: string) => Promise<void>
+    oauthConnect: (
+      instanceId: string,
+      input: import('@shared/connector-bridge').ConnectorBridgeOAuthConnectInput,
+      storage?: import('@shared/connector-bridge').ConnectorBridgeCredentialStorage
+    ) => Promise<import('@shared/connector-bridge').ConnectorBridgeSetCredentialsResult>
     syncStatus: (instanceId: string) => Promise<import('@shared/connector-bridge').ConnectorBridgeSyncStatus>
   }
   claudePlugins: {

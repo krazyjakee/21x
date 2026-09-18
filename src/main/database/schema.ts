@@ -424,6 +424,20 @@ export function createTables(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_connector_dead_letters_instance ON connector_dead_letters(instance_id, created_at);
   `)
+
+  // Project status snapshot (#58): the Mastermind's narrative for a project.
+  // Counts are never stored; they are computed from tasks and live sessions.
+  // One row per project, replaced on every write. A durable journal of past
+  // snapshots (#72) is a separate table beside this one, keyed the same way.
+  // New table, so CREATE IF NOT EXISTS covers fresh and existing DBs alike.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS project_status (
+      project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+      summary TEXT NOT NULL DEFAULT '',
+      top_blockers TEXT NOT NULL DEFAULT '[]',
+      updated_at TEXT NOT NULL
+    );
+  `)
 }
 
 /**

@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { Select } from '@/components/ui/Select'
 import { Textarea } from '@/components/ui/Textarea'
+import { Switch } from '@/components/ui/Switch'
 import { Badge } from '@/components/ui/Badge'
 import { Markdown } from '@/components/ui/Markdown'
 import { RepoSelectorDialog } from '@/components/github/RepoSelectorDialog'
@@ -15,7 +16,7 @@ import { useUIStore } from '@/stores/ui-store'
 import { useProjectStore } from '@/stores/project-store'
 import { useAgentStore } from '@/stores/agent-store'
 import { useSettingsStore, type GitProvider } from '@/stores/settings-store'
-import { projectApi } from '@/lib/ipc-client'
+import { projectApi, projectLimitsApi } from '@/lib/ipc-client'
 import {
   GIT_PROVIDER_LABELS,
   draftFromProject,
@@ -35,6 +36,19 @@ import {
 } from '@/lib/project-editor'
 import { DEFAULT_PROJECT_ID } from '@shared/projects'
 import type { MastermindMemory } from '@shared/mastermind-memory'
+import {
+  ESCALATION_ACTIONS, ESCALATION_ACTION_LABELS, ESCALATION_LEVELS, ESCALATION_LEVEL_LABELS,
+  escalationPolicyFromSettings, projectLimitsFromSettings,
+  type EscalationAction, type EscalationLevel, type ProjectLimitsSettings
+} from '@shared/project-policies'
+import type { ProjectLimitState } from '@shared/project-limit-types'
+import {
+  PROJECT_EVENT_KINDS,
+  PROJECT_EVENT_KIND_LABELS,
+  readMastermindWakeupSettings,
+  withMastermindWakeupSettings,
+  type MastermindWakeupSettings
+} from '@shared/mastermind-wakeups'
 import type { GitHubRepo } from '@/types/electron'
 
 const PROVIDER_IDS = Object.keys(GIT_PROVIDER_LABELS) as GitProviderId[]
@@ -42,6 +56,20 @@ const NO_INITIAL_REPOS: string[] = []
 
 function providerLabel(provider: string): string {
   return GIT_PROVIDER_LABELS[provider as GitProviderId] ?? provider
+}
+
+// ── Limits (#65) helpers ──
+/** A limit field: empty means unlimited (null); anything else must be a whole number of at least 1. */
+function parseLimitInput(value: string): number | null {
+  const n = parseInt(value, 10)
+  return Number.isFinite(n) && n >= 1 ? n : null
+}
+
+const QUEUE_REASON_LABELS: Record<string, string> = {
+  global_pause: 'all projects are paused',
+  project_paused: 'the project is paused',
+  project_daily_cap: 'the daily session cap is used up',
+  project_limit: 'the concurrent agent limit is reached'
 }
 
 function MoveButtons({ index, count, onMove }: { index: number; count: number; onMove: (delta: -1 | 1) => void }) {
@@ -86,6 +114,25 @@ export function ProjectEditorDialog() {
   const [repoPickerOpen, setRepoPickerOpen] = useState(false)
   /** The project's Mastermind memory file (#55). Read-only here: the Mastermind writes it. */
   const [memory, setMemory] = useState<MastermindMemory | null>(null)
+  /** Which project events wake the Mastermind (#57): a keyed block of the draft's settings JSON, saved with it. */
+  const wakeups = useMemo(() => readMastermindWakeupSettings(draft.settings), [draft.settings])
+  const patchWakeups = (fields: Partial<MastermindWakeupSettings>) =>
+    setDraft((d) => ({ ...d, settings: withMastermindWakeupSettings(d.settings, { ...readMastermindWakeupSettings(d.settings), ...fields }) }))
+  /** Live limit state (#65): what the caps count right now. Null for a new project. */
+  const [limitState, setLimitState] = useState<ProjectLimitState | null>(null)
+
+  useEffect(() => {
+    if (!target || target === 'new') {
+      setLimitState(null)
+      return undefined
+    }
+    let cancelled = false
+    Promise.resolve()
+      .then(() => projectLimitsApi.getState(target))
+      .then((state) => { if (!cancelled) setLimitState(state ?? null) })
+      .catch(() => { if (!cancelled) setLimitState(null) })
+    return () => { cancelled = true }
+  }, [target])
 
   useEffect(() => {
     if (!target || target === 'new') {
@@ -140,6 +187,18 @@ export function ProjectEditorDialog() {
     { value: '', label: 'App default' },
     ...agents.map((a) => ({ value: a.id, label: a.name }))
   ], [agents])
+
+  // ── Limits (#65) and escalation (#66): keyed blocks of the settings JSON ──
+  const limits = useMemo(() => projectLimitsFromSettings(draft.settings), [draft.settings])
+  const patchLimits = (fields: Partial<ProjectLimitsSettings>) =>
+    setDraft((d) => ({ ...d, settings: { ...d.settings, limits: { ...projectLimitsFromSettings(d.settings), ...fields } } }))
+  const escalation = useMemo(() => escalationPolicyFromSettings(draft.settings), [draft.settings])
+  const patchEscalation = (action: EscalationAction, level: EscalationLevel) =>
+    setDraft((d) => ({ ...d, settings: { ...d.settings, escalation: { ...escalationPolicyFromSettings(d.settings), [action]: level } } }))
+  const escalationOptions = useMemo(
+    () => ESCALATION_LEVELS.map((level) => ({ value: level, label: ESCALATION_LEVEL_LABELS[level] })),
+    []
+  )
 
   // ── Repos ──
   const addRepos = (repos: Omit<RepoDraft, 'key'>[]) => {
@@ -427,6 +486,131 @@ export function ProjectEditorDialog() {
                       })}
                     </div>
                   )}
+                </section>
+
+                {/* ── Limits (#65) ── */}
+                <section className="space-y-3" aria-label="Limits">
+                  <div>
+                    <h3 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Limits</h3>
+                    <p className="text-xs text-muted-foreground">
+                      Caps on this project’s agents. A start over a limit waits in the queue and runs when it fits. Pausing stops new starts; running sessions carry on.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="project-max-agents">Max concurrent agents</Label>
+                      <Input
+                        id="project-max-agents"
+                        type="number"
+                        min={1}
+                        value={limits.max_concurrent_agents ?? ''}
+                        onChange={(e) => patchLimits({ max_concurrent_agents: parseLimitInput(e.target.value) })}
+                        placeholder="Unlimited"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="project-daily-sessions">Agent sessions per day</Label>
+                      <Input
+                        id="project-daily-sessions"
+                        type="number"
+                        min={1}
+                        value={limits.daily_session_cap ?? ''}
+                        onChange={(e) => patchLimits({ daily_session_cap: parseLimitInput(e.target.value) })}
+                        placeholder="Unlimited"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="project-daily-tokens">Tokens per day</Label>
+                      <Input
+                        id="project-daily-tokens"
+                        type="number"
+                        min={1}
+                        value={limits.daily_token_cap ?? ''}
+                        onChange={(e) => patchLimits({ daily_token_cap: parseLimitInput(e.target.value) })}
+                        placeholder="Unlimited"
+                      />
+                      <p className="text-[11px] text-muted-foreground">Counted once an agent backend reports usage; none does yet.</p>
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm">
+                    <Switch checked={limits.paused} onCheckedChange={(checked) => patchLimits({ paused: checked })} aria-label="Pause project" />
+                    <span>Paused</span>
+                    <span className="text-xs text-muted-foreground">— new starts wait until unpaused</span>
+                  </label>
+                  {limitState && (
+                    <p className="text-xs text-muted-foreground">
+                      Right now: {limitState.runningAgents}{limitState.maxConcurrentAgents !== null ? ` of ${limitState.maxConcurrentAgents}` : ''} running
+                      {' · '}{limitState.sessionsStartedToday}{limitState.dailySessionCap !== null ? ` of ${limitState.dailySessionCap}` : ''} started today
+                      {' · '}{limitState.queued.length} queued
+                      {limitState.blockedBy ? ` · the next start waits: ${QUEUE_REASON_LABELS[limitState.blockedBy] ?? limitState.blockedBy}` : ''}
+                    </p>
+                  )}
+                  {limitState?.allProjectsPaused && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400">All projects are paused right now (global pause), so nothing starts here either.</p>
+                  )}
+                </section>
+
+                {/* ── Escalation (#66) ── */}
+                <section className="space-y-3" aria-label="Escalation">
+                  <div>
+                    <h3 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Escalation</h3>
+                    <p className="text-xs text-muted-foreground">
+                      What the Mastermind does on its own, does and reports, or asks you about first. “Ask the user first” holds the call until you approve it in the status bar.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    {ESCALATION_ACTIONS.map((action) => (
+                      <div key={action} className="grid grid-cols-2 items-center gap-4">
+                        <Label htmlFor={`project-escalation-${action}`}>{ESCALATION_ACTION_LABELS[action]}</Label>
+                        <Select
+                          id={`project-escalation-${action}`}
+                          value={escalation[action]}
+                          onChange={(e) => patchEscalation(action, e.target.value as EscalationLevel)}
+                          options={escalationOptions}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Pull requests are guidance to the Mastermind only: none of its tools opens or merges one.
+                  </p>
+                </section>
+
+                {/* ── Mastermind wake-ups (#57) ── */}
+                <section className="space-y-3" aria-label="Mastermind wake-ups">
+                  <div>
+                    <h3 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Mastermind wake-ups</h3>
+                    <p className="text-xs text-muted-foreground">
+                      What wakes this project’s Mastermind between conversations. Events are batched into one message, changes it made itself are skipped, and wake-ups are capped per hour.
+                    </p>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={wakeups.enabled}
+                      onChange={(e) => patchWakeups({ enabled: e.target.checked })}
+                      aria-label="Wake the Mastermind on project events"
+                    />
+                    Wake the Mastermind on project events
+                  </label>
+                  <div className={`grid grid-cols-2 gap-1.5 pl-5 ${wakeups.enabled ? '' : 'opacity-50'}`}>
+                    {PROJECT_EVENT_KINDS.map((kind) => (
+                      <label key={kind} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          disabled={!wakeups.enabled}
+                          checked={wakeups.kinds.includes(kind)}
+                          onChange={(e) => patchWakeups({
+                            kinds: e.target.checked
+                              ? PROJECT_EVENT_KINDS.filter((k) => k === kind || wakeups.kinds.includes(k))
+                              : wakeups.kinds.filter((k) => k !== kind)
+                          })}
+                          aria-label={PROJECT_EVENT_KIND_LABELS[kind]}
+                        />
+                        {PROJECT_EVENT_KIND_LABELS[kind]}
+                      </label>
+                    ))}
+                  </div>
                 </section>
 
                 {/* ── Mastermind memory (#55) ── */}

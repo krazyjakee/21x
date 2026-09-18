@@ -11,6 +11,7 @@ import type { BrowserWindow } from 'electron'
 import type { AgentRecord, DatabaseManager, TaskRecord } from './database'
 import { TaskStatus } from '../shared/constants'
 import { isCoordinatorTask } from '../shared/task-roles'
+import { emitTaskEvent } from './project-events'
 import { findBlockingSibling, isSuccessorGraphInProgress, successorsFireOnReview } from '../shared/subtask-graph'
 import type { WorktreeManager } from './worktree-manager'
 import type { GitHubManager } from './github-manager'
@@ -34,7 +35,9 @@ import { listProjectRepos, taskProjectId } from './agent-manager/project-repos'
 import { assistantTextKey, dedupStateFromHistory, hasMatchingErrorMessage, pruneDedup } from './agent-manager/output-dedup'
 import { findCreditExhaustionMessage, normalizeFallbackAgentIds } from './agent-manager/credit-exhaustion'
 import { STUCK_SESSION_TIMEOUT_MS, findStuckTool, hasGarbledOutput, isDelegationTool, isWaitingForUserInput, type RunningTool } from './agent-manager/watchdogs'
-import { MAX_CONCURRENT_AGENT_SESSIONS_SETTING, StartQueue, checkAdmission, isExemptFromAdmission, parseGlobalSessionLimit, type AdmissionReason, type CountedSession, type QueuedStartInfo } from './agent-manager/admission'
+import { MAX_CONCURRENT_AGENT_SESSIONS_SETTING, StartQueue, checkAdmission, isExemptFromAdmission, isGlobalAdmissionReason, parseGlobalSessionLimit, type AdmissionDecision, type AdmissionLimits, type AdmissionReason, type CountedSession, type QueuedStartInfo } from './agent-manager/admission'
+import { buildProjectLimitState, describeQueueReason, isAllProjectsPaused, projectAdmissionLimits, recordProjectSessionStart, setAllProjectsPaused, type ProjectLimitState } from './project-limits'
+import { FINDINGS_BEGIN, FINDINGS_END, SYSTEM_MESSAGE_MARKER } from '../shared/system-authority'
 import { collectMissedParts, debugTranscript, emitArtifactUpdatesFromParts, textTranscript, type DebugTranscriptMessage, notifyStatusTransition, transcriptPartsFromEvent, transcriptPartsFromMessages, type OutputMessage } from './agent-manager/transcript-events'
 
 // Default OpenCode server URL (matches database default)
@@ -221,6 +224,9 @@ export class AgentManager extends EventEmitter {
    *  They hold their slot so concurrent requests cannot all slip past. */
   private admittedStarts: Map<string, string> = new Map()
   private startQueueDrainScheduled = false
+  /** `projectId:reason` pairs the project's Mastermind has been told about (#65),
+   *  cleared when one of the project's queued starts runs. */
+  private projectLimitNotices: Set<string> = new Set()
 
   constructor(db: DatabaseManager) {
     super()
@@ -503,6 +509,11 @@ export class AgentManager extends EventEmitter {
     this.sendToRenderer('agent:status', { sessionId, agentId: owner.agentId, taskId: owner.taskId, status })
     // Every idle transition and every stop ends here: a slot may have freed.
     if (status === 'idle' || status === 'error') this.scheduleStartQueueDrain()
+    // Project events (#57): an agent waiting on the user, or one that failed,
+    // wakes the project's Mastermind. Pseudo-tasks and coordinator rows are
+    // dropped by emitTaskEvent itself.
+    if (status === 'waiting_approval') emitTaskEvent(this.db, 'approval_pending', owner.taskId)
+    else if (status === 'error') emitTaskEvent(this.db, 'task_failed', owner.taskId)
   }
 
   private emitSystemError(sessionId: string, taskId: string, id: string, content: string): void {
@@ -1689,7 +1700,14 @@ export class AgentManager extends EventEmitter {
       else if (fields.status === TaskStatus.AgentWorking && current?.status === TaskStatus.AgentLearning) delete fields.status
     }
     if (Object.keys(fields).length === 0) return this.db.getTask(taskId)
-    return this.db.updateTask(taskId, fields)
+    const before = fields.status !== undefined ? this.db.getTask(taskId)?.status : undefined
+    const updated = this.db.updateTask(taskId, fields)
+    // Project event (#57): an agent's own work reaching review bypasses
+    // afterTaskUpdated (task-updates.ts), so the event is raised here.
+    if (fields.status === TaskStatus.ReadyForReview && updated?.status === TaskStatus.ReadyForReview && before !== TaskStatus.ReadyForReview) {
+      emitTaskEvent(this.db, 'task_ready_for_review', taskId)
+    }
+    return updated
   }
 
   /**
@@ -1720,7 +1738,7 @@ export class AgentManager extends EventEmitter {
       if (alreadyQueued) {
         return { status: 'queued', position: alreadyQueued.position, reason: alreadyQueued.reason }
       }
-      const decision = checkAdmission({ agentId, taskId, task, agent }, this.countedSessions(), this.admissionLimits())
+      const decision = checkAdmission({ agentId, taskId, task, agent }, this.countedSessions(), this.admissionLimits(task))
       if (!decision.admitted) {
         const { position } = this.startQueue.enqueue({
           taskId,
@@ -1735,8 +1753,10 @@ export class AgentManager extends EventEmitter {
           `(${decision.running}/${decision.limit} running)`
         )
         this.emitStartQueueChanged()
+        this.tellMastermindAboutLimit(task, decision)
         return { status: 'queued', position, reason: decision.reason }
       }
+      this.recordCountedStart(task)
     }
 
     this.admittedStarts.set(taskId, agentId)
@@ -2136,6 +2156,9 @@ export class AgentManager extends EventEmitter {
         this.routingCompletedSubtasks.delete(subtaskId)
       }
       if (!routingIssue) return
+      // Project event (#57): a chain that cannot advance on its own needs the
+      // project's Mastermind, not only the parent coordinator.
+      emitTaskEvent(this.db, 'chain_stuck', parentTaskId, `After subtask ${subtaskId}: ${routingIssue}`)
     }
 
     const live = this.findSessionByTaskId(parentTaskId)
@@ -2680,21 +2703,107 @@ export class AgentManager extends EventEmitter {
 
   /** Sessions holding a slot: working real-task sessions plus admitted starts in flight. */
   private countedSessions(): CountedSession[] {
-    const counted = new Map<string, string>()
+    const counted = new Map<string, CountedSession>()
     for (const session of this.sessions.values()) {
       if (session.status !== 'working' && session.status !== 'waiting_approval') continue
       if (session.isTriageSession) continue
-      if (isExemptFromAdmission(session.taskId, this.db.getTask(session.taskId))) continue
-      counted.set(session.taskId, session.agentId)
+      const task = this.db.getTask(session.taskId)
+      if (isExemptFromAdmission(session.taskId, task)) continue
+      counted.set(session.taskId, { taskId: session.taskId, agentId: session.agentId, projectId: taskProjectId(task) })
     }
     for (const [taskId, agentId] of this.admittedStarts) {
-      if (!counted.has(taskId)) counted.set(taskId, agentId)
+      if (!counted.has(taskId)) counted.set(taskId, { taskId, agentId, projectId: taskProjectId(this.db.getTask(taskId)) })
     }
-    return [...counted].map(([taskId, agentId]) => ({ taskId, agentId }))
+    return [...counted.values()]
   }
 
-  private admissionLimits(): { globalLimit: number | null } {
-    return { globalLimit: parseGlobalSessionLimit(this.db.getSetting(MAX_CONCURRENT_AGENT_SESSIONS_SETTING)) }
+  /** The global cap and pause, plus the requested task's project limits (#65). */
+  private admissionLimits(task: TaskRecord | undefined): AdmissionLimits {
+    return {
+      globalLimit: parseGlobalSessionLimit(this.db.getSetting(MAX_CONCURRENT_AGENT_SESSIONS_SETTING)),
+      globalPaused: isAllProjectsPaused(this.db),
+      project: task ? projectAdmissionLimits(this.db, taskProjectId(task)) : undefined
+    }
+  }
+
+  /** Counts an admitted start of a real task against its project's day (#65). */
+  private recordCountedStart(task: TaskRecord | undefined): void {
+    if (!task) return
+    try {
+      recordProjectSessionStart(this.db, taskProjectId(task))
+    } catch (error) {
+      console.warn(`[AgentManager] Could not record the daily session count for task ${task.id}:`, error)
+    }
+  }
+
+  // ── Project limits and pause (#65) ─────────────────────────────
+
+  /**
+   * Stops new starts in every project (or lifts that). Running sessions are
+   * untouched; lifting the pause drains the queue. For the Commander (#61)
+   * and the project editor.
+   */
+  pauseAllProjects(paused: boolean): void {
+    setAllProjectsPaused(this.db, paused)
+    console.log(`[AgentManager] All projects ${paused ? 'paused' : 'unpaused'}`)
+    if (!paused) this.scheduleStartQueueDrain()
+  }
+
+  isAllProjectsPaused(): boolean {
+    return isAllProjectsPaused(this.db)
+  }
+
+  /**
+   * Re-checks the queue after something outside a session changed the limits:
+   * a project's settings were saved (pause lifted, cap raised). Idle sweeps do
+   * the same every few minutes as a safety net.
+   */
+  recheckStartQueue(): void {
+    this.scheduleStartQueueDrain()
+  }
+
+  /**
+   * The project's limits, what they count right now and what is waiting (#65).
+   * A `limits` field on the project status (#58) is the intended home once
+   * that reads live session state; until then this is its own read.
+   */
+  getProjectLimitState(projectId: string): ProjectLimitState {
+    const queued = this.startQueue.list().filter((entry) => taskProjectId(this.db.getTask(entry.taskId)) === projectId)
+    return buildProjectLimitState(this.db, projectId, this.countedSessions(), queued)
+  }
+
+  /**
+   * Tells the project's Mastermind why a start waits (#65): a short fenced
+   * system message to its live, idle coordinator session. A Mastermind
+   * mid-turn already sees the reason in its start_task result; one with no
+   * live session is told nothing (the queue entry and the project's limit
+   * state carry it). Once per project and reason until a queued start runs.
+   */
+  private tellMastermindAboutLimit(task: TaskRecord | undefined, decision: AdmissionDecision): void {
+    if (!task || decision.admitted) return
+    if (decision.reason === 'agent_limit' || decision.reason === 'global_limit') return
+    const projectId = taskProjectId(task)
+    const key = `${projectId}:${decision.reason}`
+    if (this.projectLimitNotices.has(key)) return
+    const coordinator = this.db.getCoordinatorTask(projectId)
+    if (!coordinator) return
+    const live = this.findSessionByTaskId(coordinator.id)
+    if (!live || live.session.status !== 'idle') return
+    this.projectLimitNotices.add(key)
+    const message = [
+      SYSTEM_MESSAGE_MARKER,
+      `provenance: origin=admission-control project=${projectId} human_authored=false authorizes_actions=false`,
+      '',
+      'A start in your project was queued by admission control. No action is required; the queue drains by itself.',
+      '',
+      FINDINGS_BEGIN,
+      `Task "${task.title}" (${task.id}) is waiting to start: ${describeQueueReason(decision.reason, decision.limit, decision.running)}`,
+      FINDINGS_END
+    ].join('\n')
+    this.sendMessage(live.sessionId, message, coordinator.id, live.session.agentId).catch((error) => {
+      console.warn(`[AgentManager] Could not tell the Mastermind of project ${projectId} about the queued start:`, error)
+      this.projectLimitNotices.delete(key)
+    })
   }
 
   private emitStartQueueChanged(): void {
@@ -2739,15 +2848,25 @@ export class AgentManager extends EventEmitter {
       const decision = checkAdmission(
         { agentId: entry.agentId, taskId: entry.taskId, task, agent: agent! },
         this.countedSessions(),
-        this.admissionLimits()
+        this.admissionLimits(task)
       )
       if (!decision.admitted) {
-        if (decision.reason === 'global_limit') break
+        // The queued reason follows the current limits: a project may have
+        // gone from "at its limit" to "paused" while its start waited.
+        if (entry.reason !== decision.reason) {
+          entry.reason = decision.reason
+          changed = true
+        }
+        if (isGlobalAdmissionReason(decision.reason)) break
         continue
       }
 
       this.startQueue.remove(entry.taskId)
       changed = true
+      this.recordCountedStart(task)
+      for (const key of this.projectLimitNotices) {
+        if (key.startsWith(`${taskProjectId(task)}:`)) this.projectLimitNotices.delete(key)
+      }
       // Reserve the slot now: the start below is async and the next entry's
       // check must already see it.
       this.admittedStarts.set(entry.taskId, entry.agentId)

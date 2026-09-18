@@ -110,6 +110,10 @@ function makeSkillRecord(overrides: Partial<{
 
 function createMockDb(agentConfig: Record<string, unknown> = {}) {
   return {
+    // Project limits (#65) and the Mastermind context (#55) read the task's project on every start.
+    getProject: vi.fn(() => undefined),
+    getProjectRepos: vi.fn(() => []),
+    getProjectResources: vi.fn(() => []),
     getTask: vi.fn(() => ({
       id: 'task-1',
       title: 'Test Task',

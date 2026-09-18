@@ -300,6 +300,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('project:getMastermindMemory', projectId),
     moveTask: (taskId: string, projectId: string): Promise<unknown[] | null> =>
       ipcRenderer.invoke('project:moveTask', taskId, projectId),
+    // Project status (#58): live counts plus the Mastermind's summary, and a
+    // ping when the Mastermind writes a new summary.
+    getStatus: (projectId: string): Promise<unknown> => ipcRenderer.invoke('project:getStatus', projectId),
+    onStatusChanged: (callback: (event: { projectId: string }) => void): (() => void) => {
+      const handler = (_: unknown, event: { projectId: string }): void => callback(event)
+      ipcRenderer.on('project:statusChanged', handler)
+      return () => ipcRenderer.removeListener('project:statusChanged', handler)
+    },
     repos: {
       list: (projectId: string): Promise<ProjectRepoRecord[]> => ipcRenderer.invoke('projectRepo:list', projectId),
       add: (projectId: string, data: CreateProjectRepoData): Promise<ProjectRepoRecord | undefined> =>
@@ -319,6 +327,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
       remove: (id: string): Promise<boolean> => ipcRenderer.invoke('projectResource:remove', id),
       reorder: (projectId: string, orderedIds: string[]): Promise<void> =>
         ipcRenderer.invoke('projectResource:reorder', projectId, orderedIds)
+    }
+  },
+  // Per-project limits and the global pause (#65).
+  projectLimits: {
+    getState: (projectId: string): Promise<unknown> => ipcRenderer.invoke('projectLimits:getState', projectId),
+    isAllPaused: (): Promise<boolean> => ipcRenderer.invoke('projectLimits:isAllPaused'),
+    pauseAll: (paused: boolean): Promise<boolean> => ipcRenderer.invoke('projectLimits:pauseAll', paused)
+  },
+  // Mastermind tool calls held by the escalation policy (#66).
+  escalation: {
+    listHeld: (projectId?: string): Promise<unknown[]> => ipcRenderer.invoke('escalation:listHeld', projectId),
+    approve: (id: string): Promise<unknown> => ipcRenderer.invoke('escalation:approve', id),
+    reject: (id: string, note?: string): Promise<boolean> => ipcRenderer.invoke('escalation:reject', id, note),
+    onHeldChanged: (callback: (event: unknown) => void): (() => void) => {
+      const handler = (_: unknown, event: unknown): void => callback(event)
+      ipcRenderer.on('escalation:heldChanged', handler)
+      return () => ipcRenderer.removeListener('escalation:heldChanged', handler)
     }
   },
   skills: {
@@ -355,6 +380,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setCredentials: (instanceId: string, input: Record<string, string>, storage?: 'persistent' | 'session'): Promise<unknown> =>
       ipcRenderer.invoke('connectors:setCredentials', instanceId, input, storage),
     clearCredentials: (instanceId: string): Promise<void> => ipcRenderer.invoke('connectors:clearCredentials', instanceId),
+    oauthConnect: (instanceId: string, input: Record<string, unknown>, storage?: string): Promise<unknown> =>
+      ipcRenderer.invoke('connectors:oauthConnect', instanceId, input, storage),
     syncStatus: (instanceId: string): Promise<unknown> => ipcRenderer.invoke('connectors:syncStatus', instanceId)
   },
   claudePlugins: {

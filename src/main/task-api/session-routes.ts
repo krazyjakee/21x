@@ -4,6 +4,7 @@
  * record, so a task blocked on the user looks exactly like one that is running.
  */
 import type { DatabaseManager } from '../database'
+import { describeQueueReason } from '../project-limits'
 import { agentController, notifyRenderer, transcriptProvider } from './state'
 
 function getMessages(db: DatabaseManager, params: Record<string, unknown>): unknown {
@@ -178,7 +179,8 @@ export async function handleSessionRoute(db: DatabaseManager, route: string, par
           success: true,
           ...result,
           queue_position: result.queuePosition,
-          message: `Queued at position ${result.queuePosition}: the ${result.queueReason === 'global_limit' ? 'global' : "agent's"} concurrent session limit is reached. It starts automatically when a running session finishes; do not call start_task again for it.`,
+          // #65: project limits and pauses queue too; the reason says which.
+          message: `Queued at position ${result.queuePosition}: ${describeQueueReason(result.queueReason ?? 'agent_limit')}`,
           task: startedTask
         }
       }

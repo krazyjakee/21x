@@ -372,6 +372,25 @@ function listReposForProject(db: DatabaseManager, params: Record<string, unknown
   }
 }
 
+/**
+ * The Mastermind's status snapshot for its project (#58). A project-scoped
+ * session has `project_id` forced by the scope (task-management-core.ts);
+ * an unscoped internal caller must name the project. The counts are never
+ * written: the reply carries the ones the database computed just now.
+ */
+function updateProjectStatus(db: DatabaseManager, params: Record<string, unknown>): unknown {
+  const projectId = projectFilter(params)
+  if (!projectId) return { error: 'project_id is required' }
+  const summary = typeof params.summary === 'string' ? params.summary.trim() : ''
+  if (!summary) return { error: 'summary is required' }
+  if (params.top_blockers !== undefined && !Array.isArray(params.top_blockers)) return { error: 'top_blockers must be an array of strings' }
+  const blockers = ((params.top_blockers as unknown[] | undefined) ?? []).filter((item): item is string => typeof item === 'string')
+  const status = db.setProjectStatusSummary(projectId, summary, blockers)
+  if (!status) return { error: 'Project not found' }
+  notifyRenderer?.('project:statusChanged', { projectId })
+  return { success: true, status }
+}
+
 export async function handleTaskRoute(db: DatabaseManager, route: string, params: Record<string, unknown>): Promise<unknown> {
   switch (route) {
     case '/list_tasks':
@@ -409,6 +428,9 @@ export async function handleTaskRoute(db: DatabaseManager, route: string, params
 
     case '/wait_for_subtasks':
       return waitForSubtasks(db, params)
+
+    case '/update_project_status':
+      return updateProjectStatus(db, params)
 
     default:
       return undefined

@@ -55,6 +55,54 @@ letters. Pass such text through `redactCredentials(text, creds)` (or
 (Basic `user:pass`, its base64, URL-encoded values). Values shorter than four
 characters are not redacted.
 
+### OAuth2 pieces (`src/main/connectors/oauth.ts`, #15)
+
+A piece declared with `PieceAuth.OAuth2({ authUrl, tokenUrl, scope })` gets an
+`oauth` block in its allowlist entry (`AllowedPieceOAuth`: `mode`, `authUrl`,
+`tokenUrl`, `scopes`, `pkce`, `loopbackRedirect`; see docs/taskSources.md
+"Connector OAuth2" for the per-provider decisions) and `auth.type: 'oauth2'`
+in its task mapping. The repo never holds a client secret.
+
+- **Flow.** `ConnectorOAuthService.connect(instanceId, { clientId, clientSecret })`
+  runs `runLoopbackOAuthFlow()` (`src/main/oauth/connector-oauth-flow.ts`):
+  the same steps as `OAuthManager.startLocalhostOAuthFlow` — `LocalOAuthServer`
+  on `http://localhost:3000-3010/callback`, a PKCE pair from
+  `src/main/oauth/pkce.ts`, a `state` check, code exchange — through a
+  `ConnectorOAuthProvider` (`src/main/oauth/providers/connector-oauth-provider.ts`)
+  built from the allowlist entry. PKCE is sent only when the entry says the
+  provider supports it. The token endpoint is the only network call the main
+  process makes for a connector.
+- **Storage.** The token set (`{ type: 'oauth2', clientId, clientSecret,
+  accessToken, refreshToken, expiresAt, ... }`) is stored with the instance's
+  other credentials: safeStorage ciphertext, or session-only, with the same
+  no-plaintext-fallback rule. It is keyed by connector instance id. The
+  `oauth_tokens` table is not used because its `source_id` / `mcp_server_id`
+  columns are foreign keys to task sources and MCP servers; moving connector
+  tokens there needs a schema change and would reintroduce `encryptSecret`'s
+  plaintext fallback.
+- **Resolution.** The service is the `PieceCredentialSource` every piece call
+  goes through (`ConnectorRuntime.credentials`). It refreshes a token that
+  expires within five minutes, persists the new set, and hands the piece only
+  `{ type: 'OAUTH2', access_token, token_type, scope }` — never the refresh
+  token or the client secret.
+- **Failure.** A token that is expired with no refresh token, or whose refresh
+  the provider refuses with `invalid_grant`, is marked `revoked` and every
+  use throws `ConnectorOAuthError` (`code: 'CONNECTOR_OAUTH'`). The bridge
+  turns that into one permanent sync error (`<Label> sync failed: <Label>
+  access was revoked or has expired; reconnect it in the task source
+  settings. Existing tasks were kept.`) in the sync result and
+  `connector_sync_state.last_error`, with no retries and no dead letter; a
+  local edit made meanwhile is queued and lands on the first sync after the
+  user reconnects. A token revoked at the provider without a refresh step
+  surfaces as the piece's own `HTTP 401` permanent error. Neither path
+  crashes a sync or touches cached tasks.
+- **IPC / form.** `connectors:oauthConnect(instanceId, { clientId,
+  clientSecret }, storage)` runs the flow; `connectors:credentialStatus`
+  reports `oauth.state` (`none` / `connected` / `revoked`);
+  `connectors:clearCredentials` disconnects. `ConnectorBridgeConfigForm`
+  shows the client id / secret fields, the redirect URL to register, the
+  requested scopes, a Connect (or Reconnect) button and Disconnect.
+
 ## Connector bridge task source (`src/main/connectors/bridge/`)
 
 The `connector-bridge` task-source plugin
@@ -77,9 +125,12 @@ A mapping sits next to the allowlist and declares:
   (`labels[].name`) and `status` (the item is closed at the source when the
   value at `path` is one of `completedValues`).
 - `update` (optional): one allowlisted update action plus the props that take
-  the title, the due date (ISO 8601) and open/closed. A local Completed closes
-  the item and a local Not Started reopens it. The other workflow states belong
-  to 21x and are never pushed.
+  the title, the due date (ISO 8601, or `YYYY-MM-DD` with
+  `dueDateFormat: 'date'`) and open/closed. A local Completed closes the item
+  and a local Not Started reopens it. The other workflow states belong to 21x
+  and are never pushed. When the update action cannot change completion,
+  `statusActions` names dedicated `complete` / `reopen` actions; the bridge
+  runs the status action first, then the update action for the other fields.
 
 `validateMapping()` rejects a mapping that names a non-allowlisted action or
 trigger, a non-polling trigger, or an unsafe path (`__proto__`, more than one
@@ -246,3 +297,51 @@ source-label colour in `TaskBoard.tsx`). There is no Trello client code.
 
 The connector layer holds up for Trello with the limits above. The TLS
 finding is the one blocker before a release that bundles the piece.
+
+## Todoist OAuth2 proof (#15)
+
+`src/main/connectors/bridge/todoist-oauth.test.ts` drives the **real pinned
+`@activepieces/piece-todoist` 0.5.0 bundle** through the real piece-host
+runtime and the connector bridge, with the token resolved by
+`ConnectorOAuthService`, against a **fake Todoist**: a fake authorization
+server (the "browser" is a function that checks the authorization URL and
+calls the real loopback callback server over localhost), a fake token endpoint
+and a fake task API behind `globalThis.fetch`. Nothing reaches the network.
+The allowlist entry, its `oauth` block and the Todoist mapping under test are
+the production ones; the test also asserts the `oauth` block equals the
+piece's own `todoistAuth` declaration.
+
+Todoist is wired with the same three declarative entries as Trello
+(`allowlist.ts`, `bridge/mappings.ts`, `piece-host/piece-registry.ts`), which
+a test asserts are the only non-test files in `src/main/connectors/**` that
+mention it.
+
+| Case | Result |
+| --- | --- |
+| Connect | Authorization URL: `response_type=code`, the user's client id, loopback `redirect_uri`, `scope=data:read_write`, `state`; no PKCE parameters for Todoist. Exchange: form-encoded with the client secret and the same redirect URI. Token set stored as keychain ciphertext (`auth_type = oauth2`); no secret in the browser URL. |
+| PKCE | With a provider entry that sets `pkce: true`: S256 `code_challenge` in the URL, `code_verifier` at exchange (verified by the fake), no client secret needed (public client). |
+| Refused exchange / keychain unavailable | Nothing stored; the keychain check happens before the browser opens and the session-only path connects. |
+| Import | `todoist_filter_tasks` follows `next_cursor` across pages, sends `Authorization: Bearer <token>`, maps `content` / `description` / `due.date` / `labels`; completed tasks are not returned by Todoist and never create tasks. |
+| Refresh | Expired (or within five minutes of expiry, including after a restart): one `grant_type=refresh_token` request with the client credentials, the new set persisted, the new bearer used for every later call, no second refresh within the window. |
+| Revoked (refresh refused) | One clear permanent error, `last_error` set, no retries, no dead letter, no task change, no secret in errors or logs, status `revoked`, no further token requests; completion gate fails cleanly; a local edit is queued; reconnect lands it. |
+| Revoked (non-expiring token, as real Todoist) | `HTTP 401` permanent error, no refresh attempted. |
+| Expired, no refresh token | "cannot be renewed; reconnect" error, no API call. |
+| Round trip | Complete closes first (`POST /tasks/{id}/close`), then the task completes; reopen + title + due date go as `/reopen` then `POST /tasks/{id}` with `content` and `due_date=YYYY-MM-DD`; workflow states and descriptions never sent; a 5xx on the field update after a successful close is queued and retried. |
+| Disconnect | Token set and client registration gone; the next sync asks to connect. |
+
+Limits found:
+
+- **Completed tasks disappear rather than complete.** `todoist_filter_tasks`
+  returns active tasks only, so a task closed in Todoist stops appearing and
+  the 21x task stays open. Closing through the mapping's status field needs
+  `todoist_list_completed_tasks*` (a second import target), which the
+  declarative format does not have.
+- **No task link.** Todoist's API v1 task object has no `url`; the mapping
+  cannot synthesise `https://app.todoist.com/app/task/<id>`.
+- **Due dates are calendar days.** The piece routes any value matching
+  `\d{4}-\d{2}-\d{2}` to Todoist's `due_date`, which refuses a timestamp, so
+  the mapping pushes `YYYY-MM-DD` (`dueDateFormat: 'date'`); a time of day set
+  in 21x is dropped at the source.
+- **Real Todoist issues no refresh token.** The refresh path is proven against
+  the fake provider; with Todoist it is never exercised and revocation shows
+  up as `HTTP 401`.
