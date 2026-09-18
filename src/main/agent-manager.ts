@@ -23,7 +23,6 @@ import { buildTaskMcpUrl } from './task-mcp-endpoint'
 import { guardChildStreams, writeToChildStdin } from './child-stream-guards'
 import { randomUUID } from 'crypto'
 import { registerSecretSession, unregisterSecretSession, getSecretBrokerPort, writeSecretShellWrapper } from './secret-broker'
-import { analytics } from './analytics-service'
 import { inspectTaskArtifact } from './artifacts'
 import { ArtifactType, pullRequestUrlFromTool, type Artifact } from '../shared/artifacts'
 import { buildSystemMessage, computeDeliveryId, SystemMessageOrigin } from '../shared/system-authority'
@@ -83,10 +82,6 @@ interface AgentSession {
 
 function isCodexAppServerAdapter(adapter: CodingAgentAdapter): boolean {
   return adapter instanceof CodexAppServerAdapter || adapter.constructor?.name === 'CodexAppServerAdapter'
-}
-
-function getAgentProvider(agent: { config?: { coding_agent?: string } } | null | undefined): string {
-  return agent?.config?.coding_agent || CodingAgentType.OPENCODE
 }
 
 /** Entry tracked by the centralized polling coordinator */
@@ -1525,17 +1520,6 @@ export class AgentManager extends EventEmitter {
       await this.writeSkillFiles(taskId, agentId, workspaceDir, attached)
     }
 
-    analytics()?.record('provider.session.started', {
-      provider: getAgentProvider(agent),
-      runtimeMode: sessionConfig.sandboxMode,
-      hasResumeCursor: false,
-      hasCwd: typeof workspaceDir === 'string' && workspaceDir.trim().length > 0,
-      hasModel: typeof sessionConfig.model === 'string' && sessionConfig.model.trim().length > 0,
-      isTriageSession,
-      isSubtask,
-      skipInitialPrompt: !!skipInitialPrompt
-    })
-
     // Store session in sessions map
     this.schedulePowerSaveBlockerUpdate()
     this.sessions.set(adapterSessionId, {
@@ -2896,11 +2880,6 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
       taskId,
       status: 'idle'
     })
-    analytics()?.record('provider.session.recovered', {
-      provider: getAgentProvider(agent),
-      strategy: 'resume-thread',
-      hasResumeCursor: true
-    })
 
     return adapterSessionId
   }
@@ -3869,10 +3848,6 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
     }
 
     console.log(`[AgentManager] Destroying session ${sessionId} (resetTaskStatus=${resetTaskStatus})`)
-    analytics()?.record('provider.session.stopped', {
-      provider: getAgentProvider(this.db.getAgent(session.agentId)),
-      resetTaskStatus
-    })
 
     // Stop polling for this session
     this.stopAdapterPolling(sessionId)
@@ -4153,13 +4128,6 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
     const promptText = this.buildMessageWithAttachmentContext(session, message, attachments)
     const parts: MessagePart[] = [{ type: MessagePartType.TEXT, text: promptText }]
     await session.adapter.sendPrompt(sessionId, parts, sessionConfig)
-    analytics()?.record('provider.turn.sent', {
-      provider: getAgentProvider(this.db.getAgent(session.agentId)),
-      model: sessionConfig.model,
-      interactionMode: 'message',
-      attachmentCount: attachments?.length ?? 0,
-      hasInput: typeof message === 'string' && message.trim().length > 0
-    })
 
     // Start polling if not already started (for Claude Code after resume)
     if (!session.pollingStarted) {
@@ -4193,10 +4161,6 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
       }
     }
     if (!session) throw new Error(`Session not found: ${sessionId}`)
-    analytics()?.record('provider.request.responded', {
-      provider: getAgentProvider(this.db.getAgent(session.agentId)),
-      decision: approved ? 'approved' : 'rejected'
-    })
 
     const adapter = this.getAdapter(session.agentId)
 
@@ -4357,9 +4321,6 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
 
   async stopAllSessions(): Promise<void> {
     console.log(`[AgentManager] Stopping all ${this.sessions.size} sessions`)
-    analytics()?.record('provider.sessions.stopped_all', {
-      sessionCount: this.sessions.size
-    })
 
     // Stop the centralized polling coordinator first
     if (this.pollingTimer) {

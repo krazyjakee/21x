@@ -13,7 +13,6 @@ import { SettingsPage } from './pages/SettingsPage'
 import { PairPage } from './pages/PairPage'
 import { ArtifactViewerPage } from './pages/ArtifactViewerPage'
 import { getPairCodeFromUrl, hasSessionToken } from './api/auth'
-import { captureAnalyticsEvent, capturePageView } from '@/lib/analytics'
 
 export type Route =
   | { page: 'list' }
@@ -36,10 +35,6 @@ export function App() {
   // Navigation that pushes browser history so back button works
   const navigate = useCallback((next: Route) => {
     setRoute(next)
-    captureAnalyticsEvent('mobile_route_selected', {
-      page: next.page,
-      task_id: 'taskId' in next ? next.taskId : undefined
-    })
     if (!isPopRef.current) {
       history.pushState(next, '', null)
     }
@@ -50,12 +45,6 @@ export function App() {
     const onPopState = (e: PopStateEvent) => {
       isPopRef.current = true
       setRoute((e.state as Route) || { page: 'list' })
-      const next = (e.state as Route) || { page: 'list' }
-      captureAnalyticsEvent('mobile_route_selected', {
-        page: next.page,
-        task_id: 'taskId' in next ? next.taskId : undefined,
-        source: 'history'
-      })
       isPopRef.current = false
     }
     // Seed initial history entry
@@ -101,14 +90,6 @@ export function App() {
       if (activeTaskId) void hydrateArtifacts(activeTaskId)
     })
   }, [activeTaskId, connect, fetchTasks, fetchAgents, fetchSkills, hydrateArtifacts, syncActiveSessions, setOnReconnect, setOnFirstConnect, setOnVisibilityReconnect])
-
-  useEffect(() => {
-    capturePageView(route.page, {
-      route_page: route.page,
-      task_id: 'taskId' in route ? route.taskId : undefined,
-      paired
-    })
-  }, [route, paired])
 
   // Poll tasks every 10s as a fallback — but only while the tab is visible.
   // The WebSocket already pushes task events and re-syncs on visibility

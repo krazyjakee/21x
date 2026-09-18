@@ -5,10 +5,6 @@ import type { PluginOption } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-function defineEnv(name: string): string {
-  return JSON.stringify(process.env[name] ?? '')
-}
-
 /**
  * Copies the voice workers next to the main bundle instead of bundling them.
  * Each worker is a plain CommonJS script that requires the local speech runtime
@@ -34,13 +30,6 @@ function copyVoiceWorker(): PluginOption {
 
 export default defineConfig({
   main: {
-    define: {
-      __POSTHOG_KEY__: defineEnv('POSTHOG_KEY'),
-      __POSTHOG_HOST__: defineEnv('POSTHOG_HOST'),
-      __TELEMETRY_ENABLED__: defineEnv('TELEMETRY_ENABLED'),
-      __TELEMETRY_FLUSH_BATCH_SIZE__: defineEnv('TELEMETRY_FLUSH_BATCH_SIZE'),
-      __TELEMETRY_MAX_BUFFERED_EVENTS__: defineEnv('TELEMETRY_MAX_BUFFERED_EVENTS')
-    },
     plugins: [externalizeDepsPlugin({
       exclude: [
         '@electron-toolkit/utils',

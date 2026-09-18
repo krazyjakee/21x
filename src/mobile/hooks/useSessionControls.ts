@@ -1,7 +1,6 @@
 import { useCallback, useRef } from 'react'
 import { useAgentStore } from '../stores/agent-store'
 import { api } from '../api/client'
-import { captureAnalyticsEvent } from '@/lib/analytics'
 
 /**
  * Shared session control handlers used by both ConversationPage and TaskDetailPage.
@@ -20,11 +19,6 @@ export function useSessionControls(taskId: string) {
     try {
       const { sessionId } = await api.sessions.start(agentId, taskId)
       initSession(taskId, sessionId, agentId)
-      captureAnalyticsEvent('agent_session_started', {
-        task_id: taskId,
-        agent_id: agentId,
-        session_id: sessionId
-      })
     } catch (e) {
       console.error('Failed to start session:', e)
       endSession(taskId)
@@ -41,12 +35,6 @@ export function useSessionControls(taskId: string) {
     try {
       const { sessionId } = await api.sessions.resume(existingSessionId, agentId, taskId)
       initSession(taskId, sessionId, agentId)
-      captureAnalyticsEvent('agent_session_resumed', {
-        task_id: taskId,
-        agent_id: agentId,
-        session_id: sessionId,
-        previous_session_id: existingSessionId
-      })
     } catch (e) {
       console.error('Failed to resume session:', e)
       endSession(taskId)
@@ -61,10 +49,6 @@ export function useSessionControls(taskId: string) {
     try {
       await api.sessions.stop(sessionId)
       endSession(taskId)
-      captureAnalyticsEvent('agent_session_stopped', {
-        task_id: taskId,
-        session_id: sessionId
-      })
     } catch (e) {
       console.error('Failed to stop session:', e)
     } finally {
@@ -82,12 +66,6 @@ export function useSessionControls(taskId: string) {
       initSession(taskId, '', agentId)
       const { sessionId } = await api.sessions.start(agentId, taskId)
       initSession(taskId, sessionId, agentId)
-      captureAnalyticsEvent('agent_session_restarted', {
-        task_id: taskId,
-        agent_id: agentId,
-        previous_session_id: currentSessionId,
-        session_id: sessionId
-      })
     } catch (e) {
       console.error('Failed to restart session:', e)
       endSession(taskId)

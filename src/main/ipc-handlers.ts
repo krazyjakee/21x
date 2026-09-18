@@ -36,7 +36,6 @@ import type { SyncManager } from './sync-manager'
 import type { PluginRegistry } from './plugins/registry'
 import type { OAuthManager } from './oauth/oauth-manager'
 import type { ClaudePluginManager } from './claude-plugin-manager'
-import { analytics } from './analytics-service'
 import { listTaskArtifactEntries, readTaskArtifact, resolveTaskArtifactFilePath } from './artifacts'
 import { writeArtifactFileToClipboard } from './artifact-clipboard'
 import { ArtifactClipboardMode, type ArtifactCopyFileResult } from '../shared/artifacts'
@@ -110,25 +109,12 @@ export function registerIpcHandlers(
     // Notify renderer so auto-start hook can trigger triage for UI-created tasks
     if (task) {
       event.sender.send('task:created', { task })
-      analytics()?.record('task.created', {
-        taskType: task.type,
-        priority: task.priority,
-        status: task.status,
-        labelCount: task.labels?.length ?? 0,
-        repoCount: task.repos?.length ?? 0,
-        attachmentCount: task.attachments?.length ?? 0,
-        outputFieldCount: task.output_fields?.length ?? 0,
-        hasAgent: !!task.agent_id,
-        hasSource: !!task.source_id,
-        isRecurring: !!task.is_recurring,
-        isSubtask: !!task.parent_task_id
-      })
     }
     return task
   })
 
   ipcMain.handle('db:updateTask', (_, id: string, data: UpdateTaskData) => {
-    // Capture previous status before updating (for analytics and parent wake-ups)
+    // Capture previous status before updating (for parent wake-ups)
     let previousStatus: string | undefined
     if (data.status) {
       const existing = db.getTask(id)
@@ -162,18 +148,6 @@ export function registerIpcHandlers(
       }
     }
 
-    if (updated && data.status) {
-      analytics()?.record('task.status_changed', {
-        previousStatus,
-        status: data.status,
-        taskType: updated.type,
-        priority: updated.priority,
-        hasAgent: !!updated.agent_id,
-        hasSource: !!updated.source_id,
-        isSubtask: !!updated.parent_task_id
-      })
-    }
-
     // A task that just landed in ready_for_review (or had a flag flipped) must
     // be re-checked against auto_complete_without_review / auto_start_agent.
     // The renderer used to own this, so it only worked with a window open and
@@ -200,30 +174,13 @@ export function registerIpcHandlers(
         })
     }
 
-    if (updated && data.feedback_rating) {
-      analytics()?.record('task.feedback_submitted', {
-        rating: data.feedback_rating,
-        taskType: updated.type,
-        hasSource: !!updated.source_id
-      })
-    }
-
     return updated
   })
 
   ipcMain.handle('db:deleteTask', (event, id: string) => {
-    const existing = db.getTask(id)
     const success = db.deleteTask(id)
     if (success) {
       event.sender.send('task:deleted', { taskId: id })
-      analytics()?.record('task.deleted', {
-        taskType: existing?.type,
-        status: existing?.status,
-        priority: existing?.priority,
-        hasAgent: !!existing?.agent_id,
-        hasSource: !!existing?.source_id,
-        isSubtask: !!existing?.parent_task_id
-      })
     }
     return success
   })

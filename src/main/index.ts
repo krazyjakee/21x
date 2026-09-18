@@ -38,7 +38,6 @@ import { registerUpdaterIpc, initAutoUpdater, isUpdateDownloaded, getPendingVers
 import { initCrashLogger } from './crash-logger'
 import { installProcessStreamErrorHandlers } from './process-stream-errors'
 import { getWindowsPathEntries, prependMissingWindowsPaths } from './windows-runtime-paths'
-import { initAnalytics, shutdownAnalytics } from './analytics-service'
 
 /**
  * Validate that a URL is safe to open via shell.openExternal.
@@ -270,7 +269,6 @@ async function shutdownAppServices(): Promise<void> {
   workspaceCleanupScheduler?.stop()
 
   await agentManager?.stopAllSessions()
-  await shutdownAnalytics()
   await agentManager?.stopServer()
 
   mcpToolCaller?.destroy()
@@ -899,8 +897,6 @@ app.commandLine.appendSwitch('disable-features', [
 installProcessStreamErrorHandlers()
 
 app.whenReady().then(async () => {
-  const analytics = initAnalytics()
-
   // Collect MCP server processes that a previous crash or force-quit orphaned.
   // Safe for a second live instance: only parentless processes match here,
   // because this instance has no descendants yet.
@@ -949,10 +945,6 @@ app.whenReady().then(async () => {
   // watcher it leaked would be vetoed by its own stale status on every boot,
   // making the reported case the one case that could never be collected.
   await sweepLeakedWorkspaces(undefined, true)
-  analytics.record('server.boot.heartbeat', {
-    taskCount: db.getTasks().length,
-    agentCount: db.getAgents().length
-  })
 
   // Ensure PATH is ready before creating managers that may spawn child processes
   await pathFixPromise

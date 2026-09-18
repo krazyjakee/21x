@@ -9,7 +9,6 @@ import { ArtifactCard } from '../components/ArtifactCard'
 import { ChatInput, type ChatInputAttachment } from '../components/ChatInput'
 import { useArtifactStore } from '../stores/artifact-store'
 import { cn } from '../lib/utils'
-import { captureAnalyticsEvent } from '@/lib/analytics'
 import type { Route } from '../App'
 
 function collectSearchableText(value: unknown, output: string[]): void {
@@ -235,13 +234,6 @@ export function ConversationPage({ taskId, onNavigate }: { taskId: string; onNav
           const activeQuestion = currentSession.messages.find((item) => item.id === activeQuestionId)
           const responseType = activeQuestion?.tool?.name === 'permission' ? 'permission' : 'question'
           await api.sessions.approve(currentSession.sessionId, true, message, responseType, activeQuestion?.tool?.requestId)
-          captureAnalyticsEvent('agent_approval_responded', {
-            task_id: taskId,
-            agent_id: currentSession.agentId,
-            session_id: currentSession.sessionId,
-            approved: true,
-            has_message: Boolean(message)
-          })
         } else {
           // Resuming an idle session is slow. Show "starting" immediately (the
           // send request blocks until the resume completes) so the UI isn't
@@ -258,13 +250,6 @@ export function ConversationPage({ taskId, onNavigate }: { taskId: string; onNav
           if (result.newSessionId && taskId) {
             initSession(taskId, result.newSessionId, currentSession.agentId)
           }
-          captureAnalyticsEvent('agent_message_sent', {
-            task_id: taskId,
-            agent_id: currentSession.agentId,
-            session_id: result.newSessionId || currentSession.sessionId,
-            attachment_count: options?.attachments?.length ?? 0,
-            recovered_session: Boolean(result.newSessionId)
-          })
         }
         setMessageAttachments([])
         setShowAttachmentPicker(false)
@@ -286,14 +271,6 @@ export function ConversationPage({ taskId, onNavigate }: { taskId: string; onNav
         const activeQuestion = currentSession.messages.find((item) => item.id === activeQuestionId)
         const responseType = activeQuestion?.tool?.name === 'permission' ? 'permission' : 'question'
         await api.sessions.approve(currentSession.sessionId, true, answer, responseType, activeQuestion?.tool?.requestId)
-        captureAnalyticsEvent('agent_approval_responded', {
-          task_id: taskId,
-          agent_id: currentSession.agentId,
-          session_id: currentSession.sessionId,
-          approved: true,
-          has_message: Boolean(answer),
-          source: 'question_option'
-        })
       } catch (e) {
         console.error('Failed to send answer:', e)
       }

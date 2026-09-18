@@ -2,7 +2,6 @@ import { create } from 'zustand'
 import type { Agent, CreateAgentDTO, UpdateAgentDTO } from '@/types'
 import { agentApi, agentSessionApi, onAgentStatus, onAgentApproval, onTranscriptChanged } from '@/lib/ipc-client'
 import type { AgentStatusEvent, AgentApprovalRequest, TranscriptPartRecord, TranscriptChangedEvent } from '@/types/electron'
-import { captureAnalyticsEvent } from '@/lib/analytics'
 import { useArtifactStore } from './artifact-store'
 
 // ── Message type ──────────────────────────────────────────────
@@ -104,7 +103,6 @@ const projections = new Map<string, ProjectionCache>()
 // is re-hydrated when a view comes back.
 const projectionBindings = new Map<string, number>()
 const bindingTasks = new Set<string>()
-const outputAnalyticsByTask = new Map<string, { messageCount: number; toolNames: Set<string> }>()
 
 function getProjection(taskId: string): ProjectionCache {
   let p = projections.get(taskId)
@@ -121,7 +119,6 @@ export function __clearProjectionsForTest(): void {
   projections.clear()
   projectionBindings.clear()
   bindingTasks.clear()
-  outputAnalyticsByTask.clear()
 }
 
 // Memoize the part → message projection per part record. Unchanged parts keep
@@ -218,30 +215,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
     commitMessages(taskId)
   }
 
-  const accumulateOutputAnalytics = (taskId: string, parts: TranscriptPartRecord[]): void => {
-    if (parts.length === 0) return
-    const aggregate = outputAnalyticsByTask.get(taskId) || { messageCount: 0, toolNames: new Set<string>() }
-    aggregate.messageCount += parts.length
-    for (const part of parts) {
-      const toolName = (part.tool as { name?: string } | undefined)?.name
-      if (toolName) aggregate.toolNames.add(toolName)
-    }
-    outputAnalyticsByTask.set(taskId, aggregate)
-  }
-
-  const flushOutputAnalytics = (taskId: string, session: TaskSession | undefined): void => {
-    const aggregate = outputAnalyticsByTask.get(taskId)
-    if (!aggregate) return
-    outputAnalyticsByTask.delete(taskId)
-    captureAnalyticsEvent('agent_output_batch_received', {
-      task_id: taskId,
-      agent_id: session?.agentId,
-      session_id: session?.sessionId,
-      message_count: aggregate.messageCount,
-      tool_names: Array.from(aggregate.toolNames).sort()
-    })
-  }
-
   const hydrateTranscript = async (taskId: string, requireBinding = false): Promise<void> => {
     if (!taskId || bindingTasks.has(taskId)) return
     if (requireBinding && !projectionBindings.has(taskId)) return
@@ -294,7 +267,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
     if (projections.has(event.taskId)) {
       applyParts(event.taskId, event.parts || [], event.maxRev)
     }
-    accumulateOutputAnalytics(event.taskId, event.parts || [])
   })
 
   // Session state only (status / pendingApproval / sessionId) — never messages.
@@ -316,14 +288,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
             pendingApproval: null
           })
         })
-        captureAnalyticsEvent('agent_session_status_changed', {
-          task_id: event.taskId,
-          agent_id: event.agentId,
-          session_id: event.sessionId,
-          previous_status: undefined,
-          next_status: event.status,
-          source: 'backend'
-        })
       }
       return
     }
@@ -340,19 +304,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
       useArtifactStore.getState().beginTurn(session.taskId)
     } else if (previousStatus !== SessionStatus.IDLE && event.status === SessionStatus.IDLE) {
       useArtifactStore.getState().endTurn(session.taskId)
-    }
-    if (previousStatus !== SessionStatus.IDLE && event.status === SessionStatus.IDLE) {
-      flushOutputAnalytics(session.taskId, updated)
-    }
-    if (previousStatus !== event.status) {
-      captureAnalyticsEvent('agent_session_status_changed', {
-        task_id: session.taskId,
-        agent_id: event.agentId || session.agentId,
-        session_id: event.sessionId,
-        previous_status: previousStatus,
-        next_status: event.status,
-        source: 'backend'
-      })
     }
 
     // Safety-net reconcile at end of each turn — catches any missed delta.
@@ -378,13 +329,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
         status: SessionStatus.WAITING_APPROVAL
       })
     })
-    captureAnalyticsEvent('agent_approval_requested', {
-      task_id: session.taskId,
-      agent_id: session.agentId,
-      session_id: event.sessionId,
-      action: event.action,
-      has_description: Boolean(event.description)
-    })
   })
 
   // ── Return store ──
@@ -409,12 +353,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
       try {
         const agent = await agentApi.create(data)
         set((state) => ({ agents: [...state.agents, agent] }))
-        captureAnalyticsEvent('agent_created', {
-          agent_id: agent.id,
-          coding_agent: agent.config?.coding_agent,
-          model: agent.config?.model,
-          is_default: agent.is_default
-        })
         return agent
       } catch (err) {
         set({ error: String(err) })
@@ -427,13 +365,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
         const updated = await agentApi.update(id, data)
         if (updated) {
           set((state) => ({ agents: state.agents.map((a) => (a.id === id ? updated : a)) }))
-          captureAnalyticsEvent('agent_updated', {
-            agent_id: updated.id,
-            coding_agent: updated.config?.coding_agent,
-            model: updated.config?.model,
-            is_default: updated.is_default,
-            changed_fields: Object.keys(data).sort()
-          })
         }
         return updated || null
       } catch (err) {
@@ -447,7 +378,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
         const success = await agentApi.delete(id)
         if (success) {
           set((state) => ({ agents: state.agents.filter((a) => a.id !== id) }))
-          captureAnalyticsEvent('agent_deleted', { agent_id: id })
         }
         return success
       } catch (err) {
@@ -552,12 +482,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
       if (session?.sessionId) {
         try {
           await agentSessionApi.stop(session.sessionId)
-          captureAnalyticsEvent('agent_session_stopped', {
-            task_id: taskId,
-            agent_id: session.agentId,
-            session_id: session.sessionId,
-            source: 'task_cleanup'
-          })
         } catch (err) {
           console.error('Failed to stop session:', err)
         }

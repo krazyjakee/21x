@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import { api, type TranscriptPartRecord } from '../api/client'
 import { onEvent } from '../api/websocket'
-import { captureAnalyticsEvent } from '@/lib/analytics'
 
 // ── Message types (mirrors desktop agent-store) ──────────────
 
@@ -104,13 +103,11 @@ interface ProjectionCache {
 
 const projections = new Map<string, ProjectionCache>()
 const bindingTasks = new Set<string>()
-const outputAnalyticsByTask = new Map<string, { messageCount: number; toolNames: Set<string> }>()
 
 /** Test-only: reset the module-level projection cache between tests. */
 export function __clearProjectionsForTest(): void {
   projections.clear()
   bindingTasks.clear()
-  outputAnalyticsByTask.clear()
 }
 
 function getProjection(taskId: string): ProjectionCache {
@@ -198,30 +195,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
     commitMessages(taskId)
   }
 
-  const accumulateOutputAnalytics = (taskId: string, parts: TranscriptPartRecord[]): void => {
-    if (parts.length === 0) return
-    const aggregate = outputAnalyticsByTask.get(taskId) || { messageCount: 0, toolNames: new Set<string>() }
-    aggregate.messageCount += parts.length
-    for (const part of parts) {
-      const toolName = (part.tool as { name?: string } | undefined)?.name
-      if (toolName) aggregate.toolNames.add(toolName)
-    }
-    outputAnalyticsByTask.set(taskId, aggregate)
-  }
-
-  const flushOutputAnalytics = (taskId: string, session: TaskSession | undefined): void => {
-    const aggregate = outputAnalyticsByTask.get(taskId)
-    if (!aggregate) return
-    outputAnalyticsByTask.delete(taskId)
-    captureAnalyticsEvent('agent_output_batch_received', {
-      task_id: taskId,
-      agent_id: session?.agentId,
-      session_id: session?.sessionId,
-      message_count: aggregate.messageCount,
-      tool_names: Array.from(aggregate.toolNames).sort()
-    })
-  }
-
   const bindTranscript = async (taskId: string): Promise<void> => {
     if (!taskId || bindingTasks.has(taskId)) return
     bindingTasks.add(taskId)
@@ -256,7 +229,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
     const event = payload as { taskId?: string; parts?: TranscriptPartRecord[]; maxRev?: number }
     if (!event?.taskId) return
     applyParts(event.taskId, event.parts || [], event.maxRev)
-    accumulateOutputAnalytics(event.taskId, event.parts || [])
   })
 
   // Session state only (status / sessionId) — never messages.
@@ -280,26 +252,12 @@ export const useAgentStore = create<AgentState>((set, get) => {
       }
       return
     }
-    const previousStatus = session.status
     const updated = { ...session, status: event.status }
     if (event.sessionId && session.sessionId !== event.sessionId) updated.sessionId = event.sessionId
     // The turn is confirmed running (or errored/awaiting input) — stop showing
     // "starting". Interim `idle` events during resume must NOT clear it.
     if (event.status !== SessionStatus.IDLE) updated.pendingSend = false
     set({ sessions: new Map(state.sessions).set(session.taskId, updated) })
-    if (previousStatus !== SessionStatus.IDLE && event.status === SessionStatus.IDLE) {
-      flushOutputAnalytics(session.taskId, updated)
-    }
-    if (previousStatus !== event.status) {
-      captureAnalyticsEvent('agent_session_status_changed', {
-        task_id: session.taskId,
-        agent_id: event.agentId || session.agentId,
-        session_id: event.sessionId,
-        previous_status: previousStatus,
-        next_status: event.status,
-        source: 'backend'
-      })
-    }
     if (event.status === SessionStatus.IDLE) void reconcileDelta(session.taskId)
   })
 

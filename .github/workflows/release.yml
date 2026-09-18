@@ -38,12 +38,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Build app
-        env:
-          POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
-          POSTHOG_HOST: ${{ vars.POSTHOG_HOST }}
-          TELEMETRY_ENABLED: ${{ vars.TELEMETRY_ENABLED }}
-          TELEMETRY_FLUSH_BATCH_SIZE: ${{ vars.TELEMETRY_FLUSH_BATCH_SIZE }}
-          TELEMETRY_MAX_BUFFERED_EVENTS: ${{ vars.TELEMETRY_MAX_BUFFERED_EVENTS }}
         run: pnpm build
 
       - name: Validate signing secrets
@@ -177,12 +171,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Build app
-        env:
-          POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
-          POSTHOG_HOST: ${{ vars.POSTHOG_HOST }}
-          TELEMETRY_ENABLED: ${{ vars.TELEMETRY_ENABLED }}
-          TELEMETRY_FLUSH_BATCH_SIZE: ${{ vars.TELEMETRY_FLUSH_BATCH_SIZE }}
-          TELEMETRY_MAX_BUFFERED_EVENTS: ${{ vars.TELEMETRY_MAX_BUFFERED_EVENTS }}
         run: pnpm build
 
       - name: Package for Windows
@@ -227,12 +215,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Build app
-        env:
-          POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
-          POSTHOG_HOST: ${{ vars.POSTHOG_HOST }}
-          TELEMETRY_ENABLED: ${{ vars.TELEMETRY_ENABLED }}
-          TELEMETRY_FLUSH_BATCH_SIZE: ${{ vars.TELEMETRY_FLUSH_BATCH_SIZE }}
-          TELEMETRY_MAX_BUFFERED_EVENTS: ${{ vars.TELEMETRY_MAX_BUFFERED_EVENTS }}
         run: pnpm build
 
       - name: Package for Linux
