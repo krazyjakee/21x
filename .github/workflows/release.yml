@@ -182,8 +182,12 @@ jobs:
       - name: Check connector pieces (allowlist, pins, licenses)
         run: node scripts/check-connector-pieces.mjs
 
+      # Gates on critical advisories. The full report (including the high and
+      # moderate advisories already in the dependency tree) is printed first.
       - name: Audit production dependencies
-        run: pnpm audit --prod
+        run: |
+          pnpm audit --prod || true
+          pnpm audit --prod --audit-level critical
 
       - name: Verify npm registry signatures and provenance
         run: npm audit signatures

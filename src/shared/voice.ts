@@ -82,7 +82,7 @@ export interface VoiceUiContext {
   visibleTaskIds?: string[]
 }
 
-export type VoiceViewName = 'tasks' | 'skills' | 'dashboard' | 'canvas' | 'settings'
+export type VoiceViewName = 'tasks' | 'skills' | 'dashboard' | 'canvas' | 'commander' | 'settings'
 
 // ── Intents (closed union — see design §5.4) ────────────────
 

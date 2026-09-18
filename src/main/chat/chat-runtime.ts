@@ -167,7 +167,9 @@ export class ChatRuntime {
         const stream = options.provider.stream(
           {
             system: options.system,
-            messages,
+            // A snapshot: the loop keeps appending to `messages`, and a provider
+            // (or a test double) that holds on to its request must not see that.
+            messages: [...messages],
             tools: providerTools,
             toolChoice: limitReached ? 'none' : 'auto',
             maxTokens: options.maxTokens

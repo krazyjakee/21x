@@ -71,7 +71,7 @@ embed the Activepieces builder, or call Activepieces-hosted services.
   - an `@activepieces/*` package ships files that match `commercialPathPatterns`, or files
     under any `ee/` directory that has no reviewed path exception.
 - **`release.yml`** (Linux job) also runs three steps:
-  - `pnpm audit --prod` to scan dependencies;
+  - `pnpm audit --prod` (gating on critical advisories; the full report is printed) to scan dependencies;
   - `npm audit signatures` to check registry signatures and provenance attestations;
   - `pnpm dlx @cyclonedx/cdxgen` to generate a CycloneDX SBOM, which it uploads as the
     `sbom-cyclonedx` artifact.
@@ -99,7 +99,7 @@ embed the Activepieces builder, or call Activepieces-hosted services.
 ## Security-update SLA and rollback
 
 - **Monitoring:** check upstream Activepieces releases and security advisories, the
-  `pnpm audit --prod` output, and Dependabot alerts at least once a week.
+  `pnpm audit --prod` (gating on critical advisories; the full report is printed) output, and Dependabot alerts at least once a week.
 - **SLA:** start from when the advisory is known.
 
   | Severity | What to do | Deadline |

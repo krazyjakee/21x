@@ -5,8 +5,17 @@ import { CommanderStore } from './commander-store'
 let store: CommanderStore
 let clock: number
 
+/** Project rows for the project tags these tests use (commander_messages.project_id references projects). */
+function seedProjects(rawDb: ReturnType<typeof createTestDb>['rawDb'], ids: string[]): void {
+  const insert = rawDb.prepare(
+    "INSERT OR IGNORE INTO projects (id, name, description, settings, sort_order, archived, created_at, updated_at) VALUES (?, ?, '', '{}', 0, 0, ?, ?)"
+  )
+  for (const id of ids) insert.run(id, id, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')
+}
+
 beforeEach(() => {
-  const { db } = createTestDb()
+  const { db, rawDb } = createTestDb()
+  seedProjects(rawDb, ['alpha', 'beta', 'p'])
   clock = 1_000
   store = new CommanderStore(db, { now: () => clock })
 })
@@ -98,7 +107,8 @@ describe('CommanderStore unread', () => {
   })
 
   it('unread counts survive a new store on the same database (restart)', () => {
-    const { db } = createTestDb()
+    const { db, rawDb } = createTestDb()
+    seedProjects(rawDb, ['alpha', 'beta', 'p'])
     const first = new CommanderStore(db)
     const s = first.createSession('Persisted')
     first.appendMessage(s.id, { role: 'report', content: 'r', projectId: 'p' })

@@ -43,8 +43,17 @@ function chatRequests(provider: { requests: ChatProviderRequest[] }): ChatProvid
   return provider.requests.filter((r) => r.system !== COMMANDER_TITLE_PROMPT && r.system !== COMMANDER_SUMMARY_PROMPT)
 }
 
+/** Project rows for the project tags these tests use (commander_messages.project_id references projects). */
+function seedProjects(rawDb: ReturnType<typeof createTestDb>['rawDb'], ids: string[]): void {
+  const insert = rawDb.prepare(
+    "INSERT OR IGNORE INTO projects (id, name, description, settings, sort_order, archived, created_at, updated_at) VALUES (?, ?, '', '{}', 0, 0, ?, ?)"
+  )
+  for (const id of ids) insert.run(id, id, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')
+}
+
 beforeEach(() => {
-  const { db } = createTestDb()
+  const { db, rawDb } = createTestDb()
+  seedProjects(rawDb, ['web'])
   store = new CommanderStore(db)
   events = []
 })
