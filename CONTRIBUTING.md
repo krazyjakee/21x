@@ -17,6 +17,8 @@ pnpm install
 pnpm dev
 ```
 
+**Windows:** Native modules require Visual Studio 2022 Build Tools. See [docs/windows-dev-setup.md](./docs/windows-dev-setup.md) for the full walkthrough (pnpm, MSVC, native rebuild, troubleshooting).
+
 ## Project Structure
 
 ```
