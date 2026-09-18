@@ -7,8 +7,8 @@ import type {
   ProjectRepoRecord, CreateProjectRepoData, UpdateProjectRepoData,
   ProjectResourceRecord, CreateProjectResourceData, UpdateProjectResourceData
 } from '../shared/projects'
-
 import type { MastermindMemory } from '../shared/mastermind-memory'
+
 contextBridge.exposeInMainWorld('electronAPI', {
   db: {
     getTasks: (projectId?: string): Promise<unknown[]> => ipcRenderer.invoke('db:getTasks', projectId),
@@ -295,10 +295,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     archive: (id: string, archived?: boolean): Promise<ProjectRecord | undefined> =>
       ipcRenderer.invoke('project:archive', id, archived),
     reorder: (orderedIds: string[]): Promise<void> => ipcRenderer.invoke('project:reorder', orderedIds),
-    moveTask: (taskId: string, projectId: string): Promise<unknown[] | null> =>
     // The project's Mastermind memory file (#55), read-only.
     getMastermindMemory: (projectId: string): Promise<MastermindMemory | null> =>
       ipcRenderer.invoke('project:getMastermindMemory', projectId),
+    moveTask: (taskId: string, projectId: string): Promise<unknown[] | null> =>
       ipcRenderer.invoke('project:moveTask', taskId, projectId),
     repos: {
       list: (projectId: string): Promise<ProjectRepoRecord[]> => ipcRenderer.invoke('projectRepo:list', projectId),
