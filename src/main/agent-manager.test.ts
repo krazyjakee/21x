@@ -1088,6 +1088,72 @@ describe('AgentManager MCP server routing', () => {
     } as unknown as ConstructorParameters<typeof AgentManager>[0]
   }
 
+  /**
+   * `enabledTools` used to be honoured only where AGENTS.md is written. These
+   * drive `buildMcpServersForAdapter`, which is what the session receives.
+   */
+  function makeLimitedDb(
+    entries: unknown[]
+  ): ConstructorParameters<typeof AgentManager>[0] {
+    const server = {
+      id: 'chat-id',
+      name: 'chat',
+      type: 'remote',
+      url: 'https://chat.example/mcp',
+      headers: {},
+      command: '',
+      args: [],
+      environment: {},
+      tools: [
+        { name: 'list_channels' },
+        { name: 'send_message' },
+        { name: 'delete_channel' },
+        { name: 'read_history' },
+        { name: 'invite_user' },
+        { name: 'set_topic' }
+      ],
+      oauth_metadata: {},
+      source: 'user'
+    }
+    return {
+      getAgent: vi.fn(() => ({ id: 'agent-1', name: 'Agent', config: { mcp_servers: entries } })),
+      getMcpServer: vi.fn(() => server),
+      getMcpServers: vi.fn(() => [server])
+    } as unknown as ConstructorParameters<typeof AgentManager>[0]
+  }
+
+  it('carries the per-agent tool limit into the SESSION config, not only into AGENTS.md', async () => {
+    const manager = new AgentManager(
+      makeLimitedDb([{ serverId: 'chat-id', enabledTools: ['list_channels', 'send_message'] }])
+    )
+
+    const mcpServers = await (manager as any).buildMcpServersForAdapter('agent-1')
+
+    // EXACTLY two of the server's six.
+    expect(mcpServers['chat'].enabledTools).toEqual(['list_channels', 'send_message'])
+    expect(mcpServers['chat'].knownTools).toHaveLength(6)
+  })
+
+  it('leaves an UNRESTRICTED server unrestricted — no empty allowlist', async () => {
+    const manager = new AgentManager(makeLimitedDb(['chat-id']))
+
+    const mcpServers = await (manager as any).buildMcpServersForAdapter('agent-1')
+
+    // Absent, not `[]`: an unrestricted server's config is unchanged.
+    expect(mcpServers['chat'].enabledTools).toBeUndefined()
+    expect(mcpServers['chat'].knownTools).toBeUndefined()
+  })
+
+  it('INTERSECTS with what the server advertises, so a stale name grants nothing', async () => {
+    const manager = new AgentManager(
+      makeLimitedDb([{ serverId: 'chat-id', enabledTools: ['list_channels', 'removed_tool'] }])
+    )
+
+    const mcpServers = await (manager as any).buildMcpServersForAdapter('agent-1')
+
+    expect(mcpServers['chat'].enabledTools).toEqual(['list_channels'])
+  })
+
   it('pins artifact MCP tools to the current task without restricting task orchestration', async () => {
     vi.mocked(getTaskApiPort).mockReturnValue(4321)
     const manager = new AgentManager(makeTaskManagementDb())

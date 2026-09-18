@@ -18,6 +18,7 @@ import type {
 } from './coding-agent-adapter'
 import { SessionStatusType, MessagePartType, MessageRole } from './coding-agent-adapter'
 import { claudeCodePermissionMode } from './permission-mode'
+import { claudeServerPrefix, claudeToolIds, resolveDisallowedToolNames } from '../mcp-tool-limits'
 
 type ClaudeSDK = typeof import('@anthropic-ai/claude-agent-sdk')
 type Query = import('@anthropic-ai/claude-agent-sdk').Query
@@ -132,6 +133,21 @@ interface ClaudeSession {
   releasePrompt: (() => void) | null
   /** Tool-permission requests awaiting the user, oldest first ('ask' mode only). */
   pendingApprovals: PendingClaudeApproval[]
+}
+
+type HookMap = Partial<Record<string, HookCallbackMatcher[]>>
+
+/** Combine hook maps, keeping every matcher from each event. */
+function mergeHooks(...maps: Array<HookMap | undefined>): HookMap | undefined {
+  const merged: HookMap = {}
+  for (const map of maps) {
+    if (!map) continue
+    for (const [event, matchers] of Object.entries(map)) {
+      if (!matchers) continue
+      merged[event] = [...(merged[event] || []), ...matchers]
+    }
+  }
+  return Object.keys(merged).length > 0 ? merged : undefined
 }
 
 export class ClaudeCodeAdapter implements CodingAgentAdapter {
@@ -296,6 +312,97 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     delete env.CLAUDECODE
 
     return env
+  }
+
+  /**
+   * The MCP servers handed to the SDK, without the 21x-only `enabledTools` /
+   * `knownTools` fields. The limit is enforced through `disallowedTools` and a
+   * PreToolUse hook instead.
+   */
+  private buildClaudeMcpServers(config: SessionConfig): Record<string, McpServerConfig> | undefined {
+    if (!config.mcpServers) return undefined
+    const cleaned: Record<string, unknown> = {}
+    for (const [name, server] of Object.entries(config.mcpServers)) {
+      const rest: Record<string, unknown> = { ...server }
+      delete rest.enabledTools
+      delete rest.knownTools
+      cleaned[name] = rest
+    }
+    return cleaned as Record<string, McpServerConfig>
+  }
+
+  /**
+   * MCP isolation and per-agent tool limits.
+   *
+   * `strictMcpConfig` makes the SDK use only the servers 21x passes in, instead
+   * of also loading project `.mcp.json`, user MCP settings, plugins and agent
+   * frontmatter. Without it the agent's MCP server selection, and the tool
+   * limits below, could be widened by a file in the repository being worked on.
+   *
+   * `disallowedTools` removes each tool the agent may not use from the model's
+   * context. It can only name tools the server advertised when its tool list
+   * was last refreshed, so the PreToolUse hook from buildMcpToolLimitHooks
+   * also rejects any other tool on a restricted server. The key is omitted
+   * when nothing is restricted.
+   */
+  private buildIsolationOptions(config: SessionConfig): Partial<Options> {
+    const disallowedTools: string[] = []
+    for (const [name, server] of Object.entries(config.mcpServers || {})) {
+      for (const tool of resolveDisallowedToolNames({
+        serverTools: (server.knownTools || []).map(toolName => ({ name: toolName })),
+        limit: server.enabledTools
+      })) {
+        disallowedTools.push(...claudeToolIds(name, tool))
+      }
+    }
+    return {
+      strictMcpConfig: true,
+      ...(disallowedTools.length > 0 ? { disallowedTools } : {})
+    }
+  }
+
+  /**
+   * PreToolUse hook that denies any tool on a restricted MCP server that is not
+   * in the agent's allowlist. Hooks run in every permission mode, including
+   * bypassPermissions, so this holds even for tools added to the server after
+   * the limit was saved.
+   */
+  private buildMcpToolLimitHooks(config: SessionConfig): Partial<Record<string, HookCallbackMatcher[]>> | undefined {
+    const allowedByPrefix = new Map<string, Set<string>>()
+    for (const [name, server] of Object.entries(config.mcpServers || {})) {
+      if (server.enabledTools === undefined) continue
+      const prefix = claudeServerPrefix(name)
+      const allowed = allowedByPrefix.get(prefix) ?? new Set<string>()
+      for (const tool of server.enabledTools) {
+        for (const id of claudeToolIds(name, tool)) allowed.add(id)
+      }
+      allowedByPrefix.set(prefix, allowed)
+    }
+    if (allowedByPrefix.size === 0) return undefined
+
+    const hook: HookCallback = async (input) => {
+      const toolName = 'tool_name' in input ? String(input.tool_name) : ''
+      for (const [prefix, allowed] of allowedByPrefix) {
+        if (toolName.startsWith(prefix) && !allowed.has(toolName)) {
+          console.warn(`[ClaudeCodeAdapter] Blocked MCP tool outside this agent's tool limit: ${toolName}`)
+          return {
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse' as const,
+              permissionDecision: 'deny' as const,
+              permissionDecisionReason: `${toolName} is not enabled for this agent.`
+            }
+          }
+        }
+      }
+      return {}
+    }
+
+    return {
+      PreToolUse: [{
+        matcher: 'mcp__.*',
+        hooks: [hook]
+      }]
+    }
   }
 
   /**
@@ -838,7 +945,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     session.abortController = abortController
 
     // Build options
-    const secretHooks = this.buildSecretHooks(config)
+    const hooks = mergeHooks(this.buildSecretHooks(config), this.buildMcpToolLimitHooks(config))
     const effort = config.reasoningEffort === 'minimal' ? undefined : config.reasoningEffort
     const claudePermissionMode = claudeCodePermissionMode(config)
 
@@ -846,7 +953,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       cwd: config.workspaceDir,
       pathToClaudeCodeExecutable: claudePath,
       env: this.buildClaudeEnvironment(),
-      mcpServers: config.mcpServers as Record<string, McpServerConfig> | undefined,
+      mcpServers: this.buildClaudeMcpServers(config),
       model: config.model,
       effort,
       systemPrompt: config.systemPrompt,
@@ -861,7 +968,8 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       ...(claudePermissionMode === 'bypassPermissions'
         ? { allowDangerouslySkipPermissions: true }
         : { canUseTool: this.buildCanUseTool(sessionId, session) }),
-      ...(secretHooks ? { hooks: secretHooks } : {}),
+      ...this.buildIsolationOptions(config),
+      ...(hooks ? { hooks } : {}),
     }
 
     // Determine session continuation mode

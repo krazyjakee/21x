@@ -39,6 +39,18 @@ export interface McpServerConfig {
   env?: Record<string, string>
   url?: string
   headers?: Record<string, string>
+  /**
+   * The tools this agent may use from this server (the per-agent limit set in
+   * the agent form). `undefined` means every tool; an empty array means none.
+   * Adapters must not forward this field to the backend as server config.
+   */
+  enabledTools?: string[]
+  /**
+   * Every tool the server advertised when its tool list was last refreshed, so
+   * an adapter that can only express a deny list can compute one. Populated
+   * alongside `enabledTools`; ignored when that is undefined.
+   */
+  knownTools?: string[]
 }
 
 export interface SessionConfig {
@@ -49,6 +61,11 @@ export interface SessionConfig {
   model?: string
   reasoningEffort?: ReasoningEffort
   systemPrompt?: string
+  /**
+   * Per-tool enable map, by tool name. Consumed by the OpenCode adapter, which
+   * passes it straight through to `session.prompt`. Filled from the agent's
+   * MCP tool limits.
+   */
   tools?: Record<string, boolean>
   promptAbort?: AbortController
   mcpServers?: Record<string, McpServerConfig>
