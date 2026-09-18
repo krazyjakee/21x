@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3'
 import { join } from 'path'
 import { createId } from '@paralleldrive/cuid2'
+import { FULL_ACCESS_SCOPE, listToolsForScope } from '../mcp-servers/task-management-core'
 
 /** First-run and every-startup rows the app relies on existing. */
 
@@ -127,21 +128,10 @@ export function seedOrchestratorSkill(db: Database.Database): void {
   addToDefaultAgent(db, 'skill_ids', skillId, now)
 }
 
-const TASK_MANAGEMENT_TOOLS = [
-  { name: 'list_tasks', description: 'List all tasks with optional filters (status, priority, agent, labels)' },
-  { name: 'create_task', description: 'Create a new task with title, description, type, priority, labels, assignee, agent_id, skill_ids, due date. Use cron field for recurring tasks (e.g. "0 9 * * 1-5")' },
-  { name: 'get_task', description: 'Get detailed information about a specific task by ID' },
-  { name: 'update_task', description: 'Update task metadata (labels, skills, agent assignment, priority, status)' },
-  { name: 'create_artifact', description: 'Create a durable task-scoped artifact workpiece' },
-  { name: 'list_artifacts', description: 'List explicitly registered artifacts and their files' },
-  { name: 'read_artifact_file', description: 'Read a file owned by an artifact workpiece' },
-  { name: 'write_artifact_file', description: 'Write a file owned by an artifact workpiece' },
-  { name: 'edit_artifact_file', description: 'Edit a file owned by an artifact workpiece' },
-  { name: 'list_agents', description: 'List all available agents with their configurations' },
-  { name: 'list_skills', description: 'List all available skills with their descriptions' },
-  { name: 'find_similar_tasks', description: 'Find historical tasks similar to given criteria for pattern analysis' },
-  { name: 'get_task_statistics', description: 'Get aggregated statistics about tasks (label usage, agent workload, completion rate)' }
-]
+/** The full-access tool set the server actually serves, in the row's {name, description} shape. */
+export function taskManagementToolRecords(): { name: string; description: string }[] {
+  return listToolsForScope(FULL_ACCESS_SCOPE).map((tool) => ({ name: tool.name, description: tool.description ?? '' }))
+}
 
 /** Create or refresh the built-in task-management MCP server row (path, command
  * and tools change between releases) and attach it to the default agent. */
@@ -163,6 +153,7 @@ export function seedTaskManagementMcpServer(db: Database.Database): void {
 
   const existingServer = db.prepare('SELECT id FROM mcp_servers WHERE name = ?')
     .get('task-management') as { id: string } | undefined
+  const tools = JSON.stringify(taskManagementToolRecords())
 
   const mcpServerId = existingServer?.id ?? createId()
   if (!existingServer) {
@@ -171,13 +162,13 @@ export function seedTaskManagementMcpServer(db: Database.Database): void {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       mcpServerId, 'task-management', 'local', mcpCommand,
-      JSON.stringify([mcpServerPath]), JSON.stringify(mcpEnv), JSON.stringify(TASK_MANAGEMENT_TOOLS), now, now
+      JSON.stringify([mcpServerPath]), JSON.stringify(mcpEnv), tools, now, now
     )
   } else {
     db.prepare(`
       UPDATE mcp_servers SET command = ?, args = ?, environment = ?, tools = ?, updated_at = ? WHERE id = ?
     `).run(
-      mcpCommand, JSON.stringify([mcpServerPath]), JSON.stringify(mcpEnv), JSON.stringify(TASK_MANAGEMENT_TOOLS), now, mcpServerId
+      mcpCommand, JSON.stringify([mcpServerPath]), JSON.stringify(mcpEnv), tools, now, mcpServerId
     )
   }
 

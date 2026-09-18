@@ -192,7 +192,6 @@ interface CodingAgentAdapter {
   pollMessages(sessionId: string, seenMessageIds, seenPartIds, partContentLengths, config): Promise<MessagePart[]>
   abortPrompt(sessionId: string, config: SessionConfig): Promise<void>
   destroySession(sessionId: string, config: SessionConfig): Promise<void>
-  registerMcpServer(serverName: string, mcpConfig, workspaceDir?: string): Promise<void>
   checkHealth(): Promise<{ available: boolean; reason?: string }>
   // Optional: getProviders, getAllMessages, getRunningTools, respondToQuestion, notifyConfigChanged
 }
@@ -208,11 +207,11 @@ Uses `@anthropic-ai/claude-agent-sdk` (`query()`), passing MCP servers through t
 
 ### Codex Adapter (`src/main/adapters/codex-app-server-adapter.ts`)
 
-Spawns `codex app-server` and speaks its JSON-RPC protocol over stdio, mapping app-server threads/turns/items onto the adapter contract. Setting `CODEX_APP_SERVER=0` makes `AgentManager.getAdapter` fall back to the ACP adapter (`codex-acp`).
+Spawns `codex app-server` and speaks its JSON-RPC protocol over stdio, mapping app-server threads/turns/items onto the adapter contract. This is the only Codex backend; every backend is created by `createAdapter` in `src/main/agent-manager/adapter-factory.ts`.
 
 ### ACP Adapter (`src/main/adapters/acp-adapter.ts`)
 
-Implements the Agent Client Protocol (ACP): JSON-RPC 2.0 over stdio, newline-delimited. Used for Cursor (`cursor-agent`) and as the Codex fallback.
+Implements the Agent Client Protocol (ACP): JSON-RPC 2.0 over stdio, newline-delimited. Used for Cursor (`cursor-agent`).
 
 ### Pi Adapter (`src/main/adapters/pi-adapter.ts`)
 
@@ -368,8 +367,7 @@ class AgentManager extends EventEmitter {
   // Diagnostics
   async getRawTranscriptForDebug(taskId: string): Promise<any>
 
-  // MCP
-  async testMcpServer(serverData): Promise<McpTestResult>
+  // Providers
   async getProviders(serverUrl?, directory?, backendType?): Promise<...>
 }
 ```
@@ -526,8 +524,10 @@ workspaces/<taskId>/
 | `src/main/adapters/opencode-adapter.ts` | OpenCode SDK integration |
 | `src/main/adapters/claude-code-adapter.ts` | Claude Code via `@anthropic-ai/claude-agent-sdk` |
 | `src/main/adapters/codex-app-server-adapter.ts` | Codex via `codex app-server` |
-| `src/main/adapters/acp-adapter.ts` | Agent Client Protocol (Cursor, Codex fallback) |
+| `src/main/adapters/acp-adapter.ts` | Agent Client Protocol (Cursor) |
 | `src/main/adapters/pi-adapter.ts` | Pi JSONL RPC integration |
+| `src/main/agent-manager/mcp-server-test.ts` | MCP connection probe (stdio + HTTP) behind `mcp:testConnection` |
+| `src/main/mcp-client-messages.ts` | Hand-written MCP handshake messages shared by the probe and OAuth discovery |
 | `src/main/ipc-handlers.ts` | IPC entry point; calls the `register*` functions in `src/main/ipc/*.ts` |
 | `src/main/ipc/*.ts` | IPC channel handlers by area (agents, tasks, task sources, settings, ...) |
 | `src/main/database.ts` | SQLite CRUD |

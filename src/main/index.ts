@@ -34,7 +34,7 @@ import { ClaudePluginManager } from './claude-plugin-manager'
 import { parseProcessTable, selectKillableMcpPids, WINDOWS_PROCESS_TABLE_SCRIPT } from './mcp-process-cleanup'
 import { buildWorkspaceStates, sweepLeakedWorkspaceProcesses, readDiskSpace, workspacePressureWarning, SHUTDOWN_GRACE_MS } from './workspace-process-cleanup'
 import { WORKSPACES_DIR, listWorkspaceDirs, taskAttachmentsDir } from './workspace-paths'
-import { setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTranscriptProvider, stopTaskApiServer } from './task-api-server'
+import { setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTranscriptProvider, startTaskApiServer, stopTaskApiServer } from './task-api-server'
 import { setTaskAutomationTrigger, setTaskSchedulers } from './task-updates'
 import { startSecretBroker, stopSecretBroker, writeSecretShellWrapper } from './secret-broker'
 import { isMainWindowUrl } from './main-window-url'
@@ -679,6 +679,10 @@ app.whenReady().then(async () => {
 
   db = new DatabaseManager()
   db.initialize()
+  // The task-management MCP server script calls back into this HTTP API.
+  startTaskApiServer(db).catch(err =>
+    console.error('[Main] Failed to start task API server:', err)
+  )
 
   // The BOOT sweep for workspace processes. It runs here rather than beside the
   // MCP sweep above because it needs the task table to tell a leaked workspace

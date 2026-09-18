@@ -24,7 +24,6 @@ export class OAuthManager {
   private db: DatabaseManager
   private providers: Map<string, OAuthProvider>
   private pendingFlows: Map<string, PendingFlow>
-  private refreshScheduler?: NodeJS.Timeout
   private notifiedOAuthFailures = new Set<string>()
 
   constructor(db: DatabaseManager) {
@@ -36,8 +35,6 @@ export class OAuthManager {
     this.registerProvider(new LinearProvider())
     this.registerProvider(new HubSpotProvider())
     this.registerProvider(new McpOAuthProvider())
-
-    this.startRefreshScheduler()
   }
 
   /**
@@ -555,31 +552,8 @@ export class OAuthManager {
   }
 
   /**
-   * Background scheduler to proactively refresh tokens
-   * Runs every 12 hours and refreshes tokens expiring within 1 hour
+   * App-quit hook. Tokens are refreshed on demand by getValidToken, so there
+   * is no background work to stop; kept because index.ts calls it on quit.
    */
-  private startRefreshScheduler(): void {
-    // Run every 12 hours
-    const TWELVE_HOURS = 12 * 60 * 60 * 1000
-
-    this.refreshScheduler = setInterval(async () => {
-      try {
-        // This would require a method to get all tokens, which we haven't implemented
-        // For now, tokens will be refreshed on-demand when getValidToken is called
-        // A future enhancement could add getAllOAuthTokens() and proactively refresh here
-      } catch (error) {
-        console.error('OAuth token refresh scheduler error:', error)
-      }
-    }, TWELVE_HOURS)
-  }
-
-  /**
-   * Stop the refresh scheduler (cleanup on app quit)
-   */
-  destroy(): void {
-    if (this.refreshScheduler) {
-      clearInterval(this.refreshScheduler)
-      this.refreshScheduler = undefined
-    }
-  }
+  destroy(): void {}
 }

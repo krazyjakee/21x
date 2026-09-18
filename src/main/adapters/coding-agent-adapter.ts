@@ -232,22 +232,6 @@ export interface CodingAgentAdapter {
   destroySession(sessionId: string, config: SessionConfig): Promise<void>
 
   /**
-   * Register an MCP server with the adapter
-   */
-  registerMcpServer(
-    serverName: string,
-    mcpConfig: {
-      type: 'local' | 'remote'
-      command?: string[]
-      args?: string[]
-      url?: string
-      headers?: Record<string, string>
-      environment?: Record<string, string>
-    },
-    workspaceDir?: string
-  ): Promise<void>
-
-  /**
    * Respond to a pending question (AskUserQuestion tool call).
    * Agent-manager passes structured answers; each adapter delivers them
    * in whatever format its backend expects.

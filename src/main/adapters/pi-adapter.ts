@@ -962,14 +962,6 @@ export class PiAdapter implements CodingAgentAdapter {
     }
   }
 
-  async registerMcpServer(
-    _serverName: string,
-    _mcpConfig: { type: 'local' | 'remote'; command?: string[]; args?: string[]; url?: string; headers?: Record<string, string>; environment?: Record<string, string> },
-    _workspaceDir?: string,
-  ): Promise<void> {
-    // MCP servers are supplied per process through pi-mcp-adapter.
-  }
-
   async checkHealth(): Promise<{ available: boolean; reason?: string }> {
     try {
       const executable = await this.findPiExecutable()

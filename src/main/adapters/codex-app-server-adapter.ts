@@ -502,23 +502,6 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     this.orphanSweepTimer.unref()
   }
 
-  async registerMcpServer(
-    _serverName: string,
-    _mcpConfig: {
-      type: 'local' | 'remote'
-      command?: string[]
-      args?: string[]
-      url?: string
-      headers?: Record<string, string>
-      environment?: Record<string, string>
-    },
-    _workspaceDir?: string
-  ): Promise<void> {
-    // App Server reads MCP configuration from Codex config. Per-session MCP
-    // injection will be added after the thread config shape is verified in app.
-    console.log('[CodexAppServerAdapter] MCP server registration deferred to Codex app-server config')
-  }
-
   async checkHealth(): Promise<{ available: boolean; reason?: string }> {
     try {
       const executable = await this.findCodexExecutable()

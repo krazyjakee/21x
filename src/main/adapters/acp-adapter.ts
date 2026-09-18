@@ -523,21 +523,6 @@ export class AcpAdapter implements CodingAgentAdapter {
     return groupPartsIntoMessages(allParts)
   }
 
-  async registerMcpServer(
-    _serverName: string,
-    _mcpConfig: {
-      type: 'local' | 'remote'
-      command?: string[]
-      args?: string[]
-      url?: string
-      headers?: Record<string, string>
-      environment?: Record<string, string>
-    },
-    _workspaceDir?: string
-  ): Promise<void> {
-    // MCP servers are passed to session/new and session/load instead.
-  }
-
   async checkHealth(): Promise<{ available: boolean; reason?: string }> {
     if (this.agentType === 'cursor') {
       try {

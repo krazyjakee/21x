@@ -1123,23 +1123,6 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     }
   }
 
-  async registerMcpServer(
-    _serverName: string,
-    _mcpConfig: {
-      type: 'local' | 'remote'
-      command?: string[]
-      url?: string
-      headers?: Record<string, string>
-      environment?: Record<string, string>
-    },
-    _workspaceDir?: string
-  ): Promise<void> {
-    // This needs to be called before session creation
-    // We need access to the ocClient, which we don't have yet
-    // For now, this will be handled in the AgentManager until we refactor further
-    throw new Error('registerMcpServer must be called via AgentManager for now')
-  }
-
   private getV2Client(serverUrl?: string): V2OpencodeClient | null {
     if (!this.v2Client && OpenCodeV2Client) {
       this.v2Client = OpenCodeV2Client.createOpencodeClient({

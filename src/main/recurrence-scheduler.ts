@@ -1,58 +1,10 @@
 import { guardedIpcSend } from './guarded-ipc-send'
 import { BrowserWindow } from 'electron'
 import { CronExpressionParser } from 'cron-parser'
-import type { DatabaseManager, RecurrencePatternRecord, RecurrencePatternObject, TaskRecord } from './database'
+import type { DatabaseManager, RecurrencePatternRecord, RecurrencePatternObject, TaskRecord, TaskRow } from './database'
+import { deserializeTask } from './database/serializers'
 import { createId } from '@paralleldrive/cuid2'
 import { TaskStatus } from '../shared/constants'
-
-/** Safely parse a JSON column that should be an array */
-function safeParseArray<T = string>(raw: string | null | undefined): T[] {
-  const parsed = JSON.parse(raw || '[]')
-  return Array.isArray(parsed) ? parsed : (parsed != null && parsed !== '' ? [parsed] : [])
-}
-
-/** Raw row shape returned by SQLite for the tasks table (before JSON deserialization). */
-interface RawTaskRow {
-  id: string
-  title: string
-  description: string
-  type: string
-  priority: string
-  status: string
-  assignee: string
-  due_date: string | null
-  labels: string
-  attachments: string
-  repos: string
-  output_fields: string
-  agent_id: string | null
-  external_id: string | null
-  source_id: string | null
-  source: string
-  skill_ids: string | null
-  session_id: string | null
-  snoozed_until: string | null
-  resolution: string | null
-  feedback_rating: number | null
-  feedback_comment: string | null
-  is_recurring: number
-  recurrence_pattern: string | null
-  recurrence_parent_id: string | null
-  last_occurrence_at: string | null
-  next_occurrence_at: string | null
-  heartbeat_enabled: number
-  heartbeat_interval_minutes: number
-  heartbeat_last_check_at: string | null
-  heartbeat_next_check_at: string | null
-  auto_start_agent: number
-  auto_complete_without_review: number
-  complete_at_source: number | null
-  parent_task_id: string | null
-  next_subtask_ids: string
-  sort_order: number
-  created_at: string
-  updated_at: string
-}
 
 /**
  * RecurrenceScheduler - Manages automatic creation of recurring task instances
@@ -170,7 +122,7 @@ export class RecurrenceScheduler {
           AND next_occurrence_at IS NOT NULL
           AND next_occurrence_at <= ?
         ORDER BY next_occurrence_at ASC
-      `).all(now) as RawTaskRow[]
+      `).all(now) as TaskRow[]
 
       if (dueTemplates.length === 0) {
         return
@@ -180,7 +132,7 @@ export class RecurrenceScheduler {
 
       for (const templateRow of dueTemplates) {
         try {
-          const template = this.deserializeTaskRow(templateRow)
+          const template = deserializeTask(templateRow)
           await this.catchUpMissedOccurrences(template)
         } catch (err) {
           console.error(`[RecurrenceScheduler] Error processing template ${templateRow.id}:`, err)
@@ -428,43 +380,6 @@ export class RecurrenceScheduler {
 
   private getDaysInMonth(date: Date): number {
     return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()
-  }
-
-  private deserializeTaskRow(row: RawTaskRow): TaskRecord {
-    return {
-      ...row,
-      labels: safeParseArray(row.labels),
-      attachments: safeParseArray(row.attachments),
-      repos: safeParseArray(row.repos),
-      output_fields: safeParseArray(row.output_fields),
-      agent_id: row.agent_id ?? null,
-      external_id: row.external_id ?? null,
-      source_id: row.source_id ?? null,
-      skill_ids: row.skill_ids ? safeParseArray(row.skill_ids) : null,
-      session_id: row.session_id ?? null,
-      snoozed_until: row.snoozed_until ?? null,
-      resolution: row.resolution ?? null,
-      is_recurring: row.is_recurring === 1,
-      recurrence_pattern: row.recurrence_pattern
-        ? (row.recurrence_pattern.startsWith('{')
-            ? JSON.parse(row.recurrence_pattern)
-            : row.recurrence_pattern)
-        : null,
-      recurrence_parent_id: row.recurrence_parent_id ?? null,
-      last_occurrence_at: row.last_occurrence_at ?? null,
-      next_occurrence_at: row.next_occurrence_at ?? null,
-      heartbeat_enabled: (row.heartbeat_enabled ?? 0) === 1,
-      heartbeat_interval_minutes: row.heartbeat_interval_minutes ?? 30,
-      heartbeat_last_check_at: row.heartbeat_last_check_at ?? null,
-      heartbeat_next_check_at: row.heartbeat_next_check_at ?? null,
-      auto_start_agent: (row.auto_start_agent ?? 0) === 1,
-      auto_complete_without_review: (row.auto_complete_without_review ?? 0) === 1,
-      // A new occurrence must not inherit the answer given on a past one.
-      complete_at_source: row.complete_at_source == null ? null : row.complete_at_source === 1,
-      parent_task_id: row.parent_task_id ?? null,
-      next_subtask_ids: safeParseArray(row.next_subtask_ids),
-      sort_order: row.sort_order ?? 0,
-    }
   }
 
   // Public method to initialize next_occurrence_at for a newly created recurring task.

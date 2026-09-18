@@ -4,7 +4,6 @@ import { join } from 'path'
 import { mkdirSync, rmSync } from 'fs'
 import { createId } from '@paralleldrive/cuid2'
 import { TaskStatus } from '../shared/constants'
-import { startTaskApiServer } from './task-api-server'
 import { WORKSPACES_DIR, taskAttachmentsDir } from './workspace-paths'
 import { applySchema } from './database/schema'
 import { seedDefaultAgent, seedOrchestratorSkill, seedTaskManagementMcpServer } from './database/seed'
@@ -110,10 +109,6 @@ export class DatabaseManager {
       console.error('[Database] Failed to encrypt stored API keys:', err)
     }
 
-    // The MCP server script calls back into this HTTP API.
-    startTaskApiServer(this).catch(err =>
-      console.error('[Database] Failed to start task API server:', err)
-    )
     seedTaskManagementMcpServer(this.db)
     seedOrchestratorSkill(this.db)
   }

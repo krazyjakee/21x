@@ -53,7 +53,7 @@ Most AI tools make you copy-paste context between tabs. 20x flips it: **your tas
 ### Multi-Agent Support
 - **Claude Code** — runs through Anthropic's `@anthropic-ai/claude-agent-sdk`
 - **OpenCode** — open-source coding agent, driven through `@opencode-ai/sdk`
-- **Codex** — OpenAI's Codex CLI, driven over `codex app-server` (set `CODEX_APP_SERVER=0` to use the ACP adapter instead)
+- **Codex** — OpenAI's Codex CLI, driven over `codex app-server`
 - **Cursor** — the `cursor-agent` CLI via the Agent Client Protocol (JSON-RPC over stdio)
 - **Pi** — open-source coding agent over its JSONL RPC protocol, using your own model providers
 - **Live transcripts** — Watch agents think and work in real time with message counts
@@ -209,7 +209,7 @@ See [AGENTS.md](./AGENTS.md) for detailed architecture.
 | Icons | Lucide React |
 | Font | Geist |
 | Database | SQLite (better-sqlite3, WAL mode) |
-| Agent SDKs / protocols | @anthropic-ai/claude-agent-sdk, @opencode-ai/sdk, `codex app-server`, Agent Client Protocol (Cursor, Codex fallback via @agentclientprotocol/codex-acp), Pi JSONL RPC |
+| Agent SDKs / protocols | @anthropic-ai/claude-agent-sdk, @opencode-ai/sdk, `codex app-server`, Agent Client Protocol (Cursor), Pi JSONL RPC |
 | Testing | Vitest + happy-dom |
 
 ## Contributing
