@@ -300,6 +300,54 @@ export function createTables(db: Database.Database): void {
     -- is a no-op (no rev column), so building them here would fail with
     -- no-such-column before the ALTER TABLE migration runs.
   `)
+
+  // Embedded connector pieces (docs/connectors.md). Timestamps are epoch ms.
+  // New tables only, so CREATE IF NOT EXISTS covers fresh and existing DBs
+  // alike. Everything cascades from connector_instances, and `auth` (safeStorage
+  // ciphertext, never plaintext) lives on the instance row itself.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS connector_instances (
+      id TEXT PRIMARY KEY,
+      piece_name TEXT NOT NULL,
+      piece_version TEXT NOT NULL,
+      display_name TEXT NOT NULL DEFAULT '',
+      config TEXT NOT NULL DEFAULT '{}',
+      auth BLOB,
+      auth_type TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS connector_kv (
+      instance_id TEXT NOT NULL REFERENCES connector_instances(id) ON DELETE CASCADE,
+      scope TEXT NOT NULL CHECK (scope IN ('project', 'flow')),
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (instance_id, scope, key)
+    );
+
+    CREATE TABLE IF NOT EXISTS connector_sync_state (
+      instance_id TEXT PRIMARY KEY REFERENCES connector_instances(id) ON DELETE CASCADE,
+      cursor TEXT,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      next_retry_at INTEGER,
+      last_error TEXT,
+      last_synced_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS connector_dead_letters (
+      id TEXT PRIMARY KEY,
+      instance_id TEXT NOT NULL REFERENCES connector_instances(id) ON DELETE CASCADE,
+      external_id TEXT,
+      payload TEXT NOT NULL DEFAULT 'null',
+      error TEXT NOT NULL DEFAULT '',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_connector_dead_letters_instance ON connector_dead_letters(instance_id, created_at);
+  `)
 }
 
 /**
