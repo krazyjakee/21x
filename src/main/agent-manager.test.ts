@@ -627,6 +627,9 @@ describe('AgentManager worktree setup', () => {
         return null
       }),
       getWorkspaceDir: vi.fn(() => '/tmp/workspaces/task-1'),
+      // No project row: the Default project falls back to the global settings.
+      getProject: vi.fn(() => undefined),
+      getProjectRepos: vi.fn(() => []),
     } as unknown as ConstructorParameters<typeof AgentManager>[0]
 
     const manager = new AgentManager(mockDb)
@@ -666,6 +669,9 @@ describe('AgentManager worktree setup', () => {
         return null
       }),
       getWorkspaceDir: vi.fn(() => '/tmp/workspaces/task-1'),
+      // No project row: the Default project falls back to the global settings.
+      getProject: vi.fn(() => undefined),
+      getProjectRepos: vi.fn(() => []),
     } as unknown as ConstructorParameters<typeof AgentManager>[0]
 
     const manager = new AgentManager(mockDb)
@@ -709,6 +715,9 @@ describe('AgentManager worktree setup', () => {
         return null
       }),
       getWorkspaceDir: vi.fn(() => '/tmp/workspaces/task-1'),
+      // No project row: the Default project falls back to the global settings.
+      getProject: vi.fn(() => undefined),
+      getProjectRepos: vi.fn(() => []),
     } as unknown as ConstructorParameters<typeof AgentManager>[0]
 
     const manager = new AgentManager(mockDb)
@@ -747,6 +756,9 @@ describe('AgentManager worktree setup', () => {
         return null
       }),
       getWorkspaceDir: vi.fn(() => '/tmp/workspaces/task-1'),
+      // No project row: the Default project falls back to the global settings.
+      getProject: vi.fn(() => undefined),
+      getProjectRepos: vi.fn(() => []),
     } as unknown as ConstructorParameters<typeof AgentManager>[0]
 
     const manager = new AgentManager(mockDb)

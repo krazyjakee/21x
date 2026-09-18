@@ -5,13 +5,13 @@
  * mocked between the client and the database, so these tests prove that a
  * session gets its tools without any child process.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { execSync } from 'child_process'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { createTestDb } from '../../test/helpers/db-test-helper'
 import { makeTask } from '../../test/helpers/task-fixtures'
 import type { DatabaseManager } from './database'
-import { getTaskApiToken, startTaskApiServer, stopTaskApiServer, setTaskApiNotifier } from './task-api-server'
+import { getTaskApiToken, startTaskApiServer, stopTaskApiServer, setTaskApiNotifier, setTaskApiAgentController } from './task-api-server'
 import { buildTaskMcpUrl, parseScopeFromUrl } from './task-mcp-endpoint'
 
 let db: DatabaseManager
@@ -22,6 +22,7 @@ beforeEach(() => {
 
 afterEach(() => {
   setTaskApiNotifier(() => undefined)
+  setTaskApiAgentController(null)
   stopTaskApiServer()
 })
 
@@ -41,7 +42,8 @@ describe('buildTaskMcpUrl and parseScopeFromUrl', () => {
     expect(parseScopeFromUrl(new URL(url))).toEqual({
       parentTaskId: null,
       taskId: null,
-      artifactTaskId: null
+      artifactTaskId: null,
+      projectId: null
     })
   })
 
@@ -51,7 +53,18 @@ describe('buildTaskMcpUrl and parseScopeFromUrl', () => {
       parentTaskId: 'task-parent',
       taskId: 'task-child',
       // Artifact writes fall back to the session's own task.
-      artifactTaskId: 'task-child'
+      artifactTaskId: 'task-child',
+      projectId: null
+    })
+  })
+
+  it('round-trips a project-scoped session', () => {
+    const url = buildTaskMcpUrl(1234, 'tok', { projectId: 'proj-1', artifactTaskId: 'task-1' })
+    expect(parseScopeFromUrl(new URL(url))).toEqual({
+      parentTaskId: null,
+      taskId: null,
+      artifactTaskId: 'task-1',
+      projectId: 'proj-1'
     })
   })
 
@@ -256,6 +269,92 @@ describe('MCP endpoint over HTTP', () => {
     await client.callTool({ name: 'list_tasks', arguments: {} })
 
     expect(count()).toBe(before)
+    await client.close()
+  })
+})
+
+describe('project-scoped MCP session (#56)', () => {
+  function twoProjects() {
+    const a = db.createProject({ name: 'A' })!
+    const b = db.createProject({ name: 'B' })!
+    const mine = db.createTask(makeTask({ title: 'Mine in A', project_id: a.id }))!
+    const theirs = db.createTask(makeTask({ title: 'Theirs in B', project_id: b.id }))!
+    return { a, b, mine, theirs }
+  }
+
+  it('cannot see, start, message or stop another project\'s tasks', async () => {
+    const { a, mine, theirs } = twoProjects()
+    const controller = {
+      startTask: vi.fn(async () => ({ action: 'task_started' })),
+      sendByTaskId: vi.fn(async () => ({ sessionId: 's' })),
+      stopByTaskId: vi.fn(async () => ({ sessionId: 's' })),
+      respondToPermission: vi.fn(),
+      findSessionByTaskId: vi.fn(() => ({ sessionId: 's' })),
+      getSessionStatus: vi.fn(() => ({ status: 'waiting_approval' })),
+      getActiveSessionsForTask: vi.fn(() => ['s']),
+      cancelQueuedStart: vi.fn(() => false),
+      notifyParentOfSubtaskCompletion: vi.fn()
+    }
+    setTaskApiAgentController(controller as never)
+    const port = await startTaskApiServer(db)
+    const client = await connect(buildTaskMcpUrl(port, getTaskApiToken(), { projectId: a.id }))
+
+    for (const [name, args] of [
+      ['get_task', { task_id: theirs.id }],
+      ['start_task', { task_id: theirs.id }],
+      ['send_message', { task_id: theirs.id, text: 'hi' }],
+      ['stop_task', { task_id: theirs.id }],
+      ['respond_to_checkpoint', { task_id: theirs.id, approved: true }],
+      ['get_messages', { task_id: theirs.id }],
+      ['update_task', { task_id: theirs.id, description: 'escaped' }]
+    ] as const) {
+      const result = await client.callTool({ name, arguments: args })
+      expect((result as { isError?: boolean }).isError, name).toBe(true)
+      expect(textOf(result), name).toContain('not in this project')
+      expect(textOf(result), name).not.toContain('Theirs in B')
+    }
+    expect(controller.startTask).not.toHaveBeenCalled()
+    expect(controller.sendByTaskId).not.toHaveBeenCalled()
+    expect(controller.stopByTaskId).not.toHaveBeenCalled()
+    expect(controller.respondToPermission).not.toHaveBeenCalled()
+    expect(db.getTask(theirs.id)?.description).not.toBe('escaped')
+
+    // Its own project's task still works.
+    expect(textOf(await client.callTool({ name: 'get_task', arguments: { task_id: mine.id } }))).toContain('Mine in A')
+    await client.close()
+  })
+
+  it('lists only its own project\'s tasks, approvals and activity', async () => {
+    const { a } = twoProjects()
+    setTaskApiAgentController({
+      findSessionByTaskId: vi.fn(() => ({ sessionId: 's' })),
+      getSessionStatus: vi.fn(() => ({ status: 'waiting_approval' }))
+    } as never)
+    const port = await startTaskApiServer(db)
+    const client = await connect(buildTaskMcpUrl(port, getTaskApiToken(), { projectId: a.id }))
+
+    for (const [name, args] of [
+      ['list_tasks', {}],
+      ['find_similar_tasks', {}],
+      ['get_recent_activity', {}],
+      ['list_pending_approvals', {}]
+    ] as const) {
+      const text = textOf(await client.callTool({ name, arguments: args }))
+      expect(text, name).toContain('Mine in A')
+      expect(text, name).not.toContain('Theirs in B')
+    }
+    await client.close()
+  })
+
+  it('creates tasks in its own project, whatever project_id is passed', async () => {
+    const { a, b } = twoProjects()
+    const port = await startTaskApiServer(db)
+    const client = await connect(buildTaskMcpUrl(port, getTaskApiToken(), { projectId: a.id }))
+
+    await client.callTool({ name: 'create_task', arguments: { title: 'Fresh', project_id: b.id } })
+
+    expect(db.getTasks({ projectId: a.id }).map((t) => t.title)).toContain('Fresh')
+    expect(db.getTasks({ projectId: b.id }).map((t) => t.title)).not.toContain('Fresh')
     await client.close()
   })
 })

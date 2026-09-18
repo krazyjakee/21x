@@ -144,7 +144,8 @@ export const sharedTools: Tool[] = [
   }
 ]
 
-// Mastermind-only tools (full access to all tasks)
+// Orchestration tools: the Mastermind and top-level task agents. A project
+// scope limits them to one project (see task-management-core.ts).
 export const mastermindTools: Tool[] = [
   {
     name: 'list_tasks',
@@ -177,6 +178,7 @@ export const mastermindTools: Tool[] = [
         due_date: { type: 'string', description: 'Due date in ISO format' },
         agent_id: { type: 'string', description: 'Assign to an agent by ID (use list_agents to find IDs)' },
         skill_ids: { type: 'array', items: { type: 'string' }, description: 'Skill IDs to assign (use list_skills to find IDs)' },
+        repos: { type: 'array', items: { type: 'string' }, description: 'Repositories for this task, from list_repos. A repo that is not in the project is rejected.' },
         cron: { type: 'string', description: 'Cron expression for recurring tasks (e.g. "0 9 * * 1-5" for weekdays at 9am). Standard 5-field cron syntax: minute hour day-of-month month day-of-week.' },
         auto_start_agent: { type: 'boolean', description: 'Hand the task to its assigned agent automatically as soon as it is created or becomes due, instead of waiting for someone to press start. Set this on a recurring task so every occurrence runs by itself.' },
         auto_complete_without_review: { type: 'boolean', description: 'Complete the task automatically when its agent finishes, instead of leaving it for review. Needed for a task that must finish with no 21x window open.' },
@@ -209,7 +211,7 @@ export const mastermindTools: Tool[] = [
         agent_id: { type: 'string', description: 'Assign to agent' },
         auto_start_agent: { type: 'boolean', description: 'Hand the task to its assigned agent automatically as soon as it is created or becomes due, instead of waiting for someone to press start. Set this on a recurring task so every occurrence runs by itself.' },
         auto_complete_without_review: { type: 'boolean', description: 'Complete the task automatically when its agent finishes, instead of leaving it for review. Needed for a task that must finish with no 21x window open.' },
-        repos: { type: 'array', items: { type: 'string' }, description: 'Set repository paths/URLs for this task' },
+        repos: { type: 'array', items: { type: 'string' }, description: 'Set repositories for this task, from list_repos. A repo that is not in the task\'s project is rejected.' },
         priority: { type: 'string', enum: ['critical', 'high', 'medium', 'low'] },
         status: {
           type: 'string',
@@ -265,7 +267,7 @@ export const mastermindTools: Tool[] = [
   },
   {
     name: 'list_repos',
-    description: 'List all known repositories from historical tasks and the configured GitHub organization.',
+    description: 'List the repositories of this project, each with its provider, org and default branch. Tasks may only use these repos.',
     inputSchema: {
       type: 'object',
       properties: {}
@@ -285,7 +287,7 @@ export const mastermindTools: Tool[] = [
         labels: { type: 'array', items: { type: 'string' }, description: 'Subtask labels' },
         agent_id: { type: 'string', description: 'Assign to an agent by ID' },
         skill_ids: { type: 'array', items: { type: 'string' }, description: 'Skill IDs to assign' },
-        repos: { type: 'array', items: { type: 'string' }, description: 'Repository paths (inherits from parent if not set)' },
+        repos: { type: 'array', items: { type: 'string' }, description: 'Repositories from list_repos (inherits from parent if not set). A repo that is not in the project is rejected.' },
         output_fields: {
           type: 'array',
           description: 'Define expected output fields for this subtask. Each field describes a piece of structured data the agent should produce.',
@@ -747,7 +749,7 @@ export const subtaskTools: Tool[] = [
         labels: { type: 'array', items: { type: 'string' }, description: 'Set labels' },
         skill_ids: { type: 'array', items: { type: 'string' }, description: 'Set task skills' },
         agent_id: { type: 'string', description: 'Assign to agent' },
-        repos: { type: 'array', items: { type: 'string' }, description: 'Set repository paths/URLs for this task' },
+        repos: { type: 'array', items: { type: 'string' }, description: 'Set repositories for this task, from list_repos. A repo that is not in the task\'s project is rejected.' },
         priority: { type: 'string', enum: ['critical', 'high', 'medium', 'low'] },
         status: {
           type: 'string',

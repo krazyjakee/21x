@@ -125,7 +125,14 @@ export function buildTillDoneNudge(todos: Array<{ content: string; status: strin
   return lines.join('\n')
 }
 
-export function buildTriagePrompt(task: TaskRecord): string {
+/**
+ * `projectRepos` are the repos of the task's project (#50): triage may only
+ * pick from them, and update_task rejects any other.
+ */
+export function buildTriagePrompt(task: TaskRecord, projectRepos: string[] = []): string {
+  const repoList = projectRepos.length > 0
+    ? `Project Repos (the ONLY repos you may assign): ${projectRepos.join(', ')}`
+    : 'Project Repos: none. This project has no repos, so do not set repos; the task runs in an empty workspace.'
   return `You are triaging a new task. Your job is to analyze this task and assign the best agent, skills, repos, priority, and labels. Do NOT work on the task itself.
 
 Task ID: ${task.id}
@@ -136,6 +143,7 @@ Current Priority: ${task.priority || 'medium'}
 Current Labels: ${JSON.stringify(task.labels || [])}
 Current Output Fields: ${JSON.stringify(task.output_fields || [])}
 Parent Task: ${task.parent_task_id ? `This is a subtask of task ${task.parent_task_id}` : 'None (top-level task)'}
+${repoList}
 
 IMPORTANT: For ALL task operations below, use ONLY the \`task-management\` MCP server tools (e.g. \`mcp__task-management__update_task\`, \`mcp__task-management__create_subtask\`). Do NOT use integration/sync tools from other MCP servers for updating tasks — those are for external system sync only.
 
@@ -144,11 +152,11 @@ Follow these steps:
 1. Call \`find_similar_tasks\` with individual keywords extracted from the title/description. Pass them as space-separated words in \`title_keywords\` (e.g. "login bug fix" not the full title). Do NOT set \`completed_only\` — search all tasks so you find patterns even if tasks are still in progress.
 2. Call \`list_agents\` to see available agents and their capabilities.
 3. Call \`list_skills\` to see available skills.
-4. Call \`list_repos\` to see known repositories.
+4. Call \`list_repos\` to see this project's repositories, with provider and default branch. Pick repos only from that list; any other repo is rejected.
 5. Based on the similar tasks and available resources, determine:
  - The best agent_id to assign (REQUIRED — you must set this)
  - Relevant skill_ids (if any match the task)
- - Appropriate repos (if the task relates to specific repositories)
+ - Appropriate repos from the project's repos (if the task relates to specific repositories)
  - Priority (critical/high/medium/low) — adjust if the current priority seems wrong
  - Labels — suggest relevant labels based on similar tasks
  - output_fields — define the expected structured outputs for this task. Think about what concrete deliverables or data the agent should produce. Each output field needs an id (snake_case), name (human-readable), and type (text, number, url, file, boolean, textarea, list, date, email, country, currency). Mark fields as required if they are essential. Examples:

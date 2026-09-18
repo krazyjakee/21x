@@ -8,10 +8,16 @@
  *   - the stdio entry point, kept for a direct `node task-management-mcp.js`
  *     run, which forwards over HTTP.
  *
- * The scope decides which tools exist. A subtask agent gets the subtask set and
- * reaches only its parent and its siblings. Any other session gets the full
- * orchestration set. Artifact calls are always pinned to one task, so an agent
- * cannot change the workpieces of another task.
+ * The scope decides which tools exist and which tasks they reach:
+ *   - subtask scope: the subtask set, reaching only its parent and siblings;
+ *   - project scope: the full orchestration set, but every list is narrowed to
+ *     one project and every call naming a task outside it is refused. Task
+ *     agents and the Mastermind get this (see mcpOptionsForTask);
+ *   - full access (no scope at all): every task in every project. Only
+ *     internal and debug callers get it: a direct run of the stdio entry point
+ *     without TASK_SCOPE_PROJECT_ID, or a session with no task row behind it.
+ * Artifact calls are always pinned to one task, so an agent cannot change the
+ * workpieces of another task.
  */
 import {
   artifactToolNames,
@@ -28,6 +34,8 @@ export type TaskMcpScope = {
   taskId: string | null
   /** Task that owns any artifact this session writes. */
   artifactTaskId: string | null
+  /** The only project this session may see and act in (project scope). */
+  projectId?: string | null
 }
 
 /** Calls one Task API route. In process this is handleRoute; over stdio it is fetch. */
@@ -39,11 +47,73 @@ export type ToolCallResult = {
   isError?: boolean
 }
 
-export const FULL_ACCESS_SCOPE: TaskMcpScope = { parentTaskId: null, taskId: null, artifactTaskId: null }
+/** Internal and debug use only: see the module comment. */
+export const FULL_ACCESS_SCOPE: TaskMcpScope = { parentTaskId: null, taskId: null, artifactTaskId: null, projectId: null }
 
 /** A session is scoped only when it has both a parent and its own task. */
 export function isScopedSession(scope: TaskMcpScope): boolean {
   return !!(scope.parentTaskId && scope.taskId)
+}
+
+/** A non-subtask session limited to one project. */
+export function isProjectScopedSession(scope: TaskMcpScope): boolean {
+  return !isScopedSession(scope) && !!scope.projectId
+}
+
+// ── Project-scoped dispatch ───────────────────────────────────
+
+/** List and search tools: the project filter is forced onto their arguments. */
+const PROJECT_FILTERED_TOOLS = new Set([
+  'list_tasks',
+  'find_similar_tasks',
+  'get_task_statistics',
+  'get_recent_activity',
+  'list_pending_approvals',
+  'list_repos',
+  'create_task'
+])
+
+const PROJECT_ACCESS_DENIED = { error: 'Access denied: task is not in this project' }
+
+/**
+ * True when the task exists and belongs to the project. A task that does not
+ * exist is refused the same way, so a session cannot probe other projects' ids.
+ */
+async function isTaskInProject(taskId: unknown, projectId: string, invoke: TaskApiInvoke): Promise<boolean> {
+  if (typeof taskId !== 'string' || !taskId) return false
+  const task = await invoke('/get_task', { task_id: taskId }) as Record<string, unknown> | null
+  return !!task && !task.error && task.project_id === projectId
+}
+
+async function handleProjectCall(
+  name: string,
+  args: Record<string, unknown>,
+  projectId: string,
+  invoke: TaskApiInvoke
+): Promise<unknown> {
+  // Lists, searches and create_task: the scope's project wins over any argument.
+  if (PROJECT_FILTERED_TOOLS.has(name)) args.project_id = projectId
+
+  // Every task a call names, as its target or as a parent, must be in the
+  // project. This covers each by-id tool (get_task, update_task, start_task,
+  // send_message, stop_task, respond_to_checkpoint, get_messages, open_task,
+  // the panel, artifact and browser tools) and the subtask tools, without a
+  // list that a new tool could be forgotten from.
+  for (const key of ['task_id', 'parent_task_id'] as const) {
+    if (args[key] === undefined) continue
+    if (!(await isTaskInProject(args[key], projectId, invoke))) return PROJECT_ACCESS_DENIED
+  }
+  if (Array.isArray(args.subtask_ids)) {
+    for (const id of args.subtask_ids) {
+      if (!(await isTaskInProject(id, projectId, invoke))) return PROJECT_ACCESS_DENIED
+    }
+  }
+  if (Array.isArray(args.next_subtask_ids)) {
+    for (const id of args.next_subtask_ids) {
+      if (!(await isTaskInProject(id, projectId, invoke))) return PROJECT_ACCESS_DENIED
+    }
+  }
+  return invoke(`/${name}`, args)
 }
 
 // ── Scoped dispatch (subtask mode) ────────────────────────────
@@ -183,7 +253,9 @@ export async function callToolForScope(
 
     const result = isScopedSession(scope)
       ? await handleScopedCall(name, normalizedArgs, scope, invoke) as Record<string, unknown> | null
-      : await invoke(`/${name}`, normalizedArgs) as Record<string, unknown> | null
+      : isProjectScopedSession(scope)
+        ? await handleProjectCall(name, normalizedArgs, scope.projectId as string, invoke) as Record<string, unknown> | null
+        : await invoke(`/${name}`, normalizedArgs) as Record<string, unknown> | null
 
     if (result?.error) {
       return { content: [{ type: 'text', text: JSON.stringify(result) }], isError: true }

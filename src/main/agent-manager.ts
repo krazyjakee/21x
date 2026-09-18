@@ -30,6 +30,7 @@ import { buildDisplayMessage, buildMessageWithAttachmentContext, syncAttachments
 import { emptySkillSyncResult, syncSkillsFromDirectory, type SkillSyncResult } from './agent-manager/skills-sync'
 import { ARTIFACT_WORKSPACE_INSTRUCTIONS, HEARTBEAT_MONITORING_INSTRUCTIONS, buildSubtaskWakeMessage, buildTaskWorkPrompt, buildTillDoneNudge, buildTriagePrompt } from './agent-manager/prompts'
 import { setupTaskWorktrees } from './agent-manager/worktree-setup'
+import { listProjectRepos, taskProjectId } from './agent-manager/project-repos'
 import { assistantTextKey, dedupStateFromHistory, hasMatchingErrorMessage, pruneDedup } from './agent-manager/output-dedup'
 import { STUCK_SESSION_TIMEOUT_MS, findStuckTool, hasGarbledOutput, isDelegationTool, isWaitingForUserInput, type RunningTool } from './agent-manager/watchdogs'
 import { MAX_CONCURRENT_AGENT_SESSIONS_SETTING, StartQueue, checkAdmission, isExemptFromAdmission, parseGlobalSessionLimit, type AdmissionReason, type CountedSession, type QueuedStartInfo } from './agent-manager/admission'
@@ -373,6 +374,19 @@ export class AgentManager extends EventEmitter {
     this.oauthManager = manager
   }
 
+  /**
+   * The repos of a task's project, for the triage prompt. A failed read must
+   * not stop triage: the agent can still call list_repos.
+   */
+  private projectRepoNames(task: TaskRecord): string[] {
+    try {
+      return listProjectRepos(this.db, taskProjectId(task)).map((repo) => repo.fullName)
+    } catch (error) {
+      console.warn(`[AgentManager] Could not read the project repos of task ${task.id} for triage:`, error)
+      return []
+    }
+  }
+
   private setupWorktreeIfNeeded(taskId: string): Promise<string | undefined> {
     const { worktreeManager, githubManager, gitlabManager, forgejoManager } = this
     return setupTaskWorktrees(this.db, { worktreeManager, githubManager, gitlabManager, forgejoManager }, taskId)
@@ -404,7 +418,7 @@ export class AgentManager extends EventEmitter {
       throw new Error(`Agent not found: ${agentId}`)
     }
     const task = this.db.getTask(taskId)
-    const mcpServers = await this.buildMcpServersForAdapter(agentId, mcpOptionsForTask(taskId, task))
+    const mcpServers = await this.buildMcpServersForAdapter(agentId, mcpOptionsForTask(taskId, task, this.heartbeatScopeTask(taskId, task)))
     // Task context keeps follow-up messages after idle aware of the task;
     // without it doSendAdapterMessage sends a bare prompt. A coordinator row
     // is not work to describe.
@@ -522,7 +536,7 @@ export class AgentManager extends EventEmitter {
     const isTriageSession = isTriageSessionTask(taskId, task)
     await yieldEventLoop()
 
-    const mcpServers = await this.buildMcpServersForAdapter(agentId, mcpOptionsForTask(taskId, task))
+    const mcpServers = await this.buildMcpServersForAdapter(agentId, mcpOptionsForTask(taskId, task, this.heartbeatScopeTask(taskId, task)))
 
     // Written AFTER the MCP map is built so the documentation describes the
     // servers this session really gets, instead of the agent configuration,
@@ -604,7 +618,7 @@ export class AgentManager extends EventEmitter {
     if (!skipInitialPrompt) {
       let promptText: string
       if (isTriageSession && task) {
-        promptText = buildTriagePrompt(task)
+        promptText = buildTriagePrompt(task, this.projectRepoNames(task))
       } else {
         promptText = buildTaskWorkPrompt(this.db, taskId, task ?? this.db.getTask(taskId))
         const attachmentRefs = syncAttachmentsToWorkspace(this.db, taskId, workspaceDir)
@@ -1418,7 +1432,7 @@ export class AgentManager extends EventEmitter {
     const task = this.db.getTask(taskId)
     await yieldEventLoop()
 
-    const mcpServers = await this.buildMcpServersForAdapter(agentId, mcpOptionsForTask(taskId, task))
+    const mcpServers = await this.buildMcpServersForAdapter(agentId, mcpOptionsForTask(taskId, task, this.heartbeatScopeTask(taskId, task)))
     // Task context in the system prompt survives context compaction.
     const taskContext = task && !isCoordinatorTask(task)
       ? `\n\n[Task Context]\nTask: "${task.title}"\n${task.description || ''}`
@@ -1641,6 +1655,12 @@ export class AgentManager extends EventEmitter {
       throw new Error(`No adapter available for agent ${agentId}`)
     }
     return this.startAdapterSession(adapter, agentId, taskId, workspaceDir, skipInitialPrompt)
+  }
+
+  /** The real task a heartbeat pseudo-session checks, used only to scope its MCP tools. */
+  private heartbeatScopeTask(taskId: string, task: TaskRecord | null | undefined): TaskRecord | undefined {
+    if (task || !taskId.startsWith('heartbeat-')) return undefined
+    return this.db.getTask(taskId.slice('heartbeat-'.length)) ?? undefined
   }
 
   /** Resumes a coordinator's persisted session; '' when it cannot be continued. */

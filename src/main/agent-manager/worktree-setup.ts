@@ -7,7 +7,8 @@ import type { WorktreeManager } from '../worktree-manager'
 import type { GitHubManager } from '../github-manager'
 import type { GitLabManager } from '../gitlab-manager'
 import type { ForgejoManager } from '../forgejo-manager'
-import { resolveRepoProvider, type GitProvider } from '../repo-providers'
+import type { GitProvider } from '../repo-providers'
+import { resolveTaskRepos, taskProjectId, type ResolvedRepo } from './project-repos'
 
 interface GitManagers {
   worktreeManager: WorktreeManager | null
@@ -26,7 +27,8 @@ function providerManager(managers: GitManagers, provider: GitProvider): RepoList
 
 /**
  * Sets up git worktrees for a task's repos if needed.
- * Skips for coordinator rows, heartbeat sessions and tasks without repos.
+ * Skips for coordinator rows, heartbeat sessions and tasks without repos: a
+ * task (or a project) with no repos runs in its plain, empty workspace.
  */
 export async function setupTaskWorktrees(
   db: DatabaseManager,
@@ -37,9 +39,6 @@ export async function setupTaskWorktrees(
   if (taskId.startsWith('heartbeat-')) return undefined
 
   if (!worktreeManager) return undefined
-
-  const gitProvider = db.getSetting('git_provider') || 'github'
-  const configuredOrg = db.getSetting('github_org')
 
   const task = db.getTask(taskId)
   if (!task || isCoordinatorTask(task)) return undefined
@@ -57,26 +56,22 @@ export async function setupTaskWorktrees(
   if (task.status === TaskStatus.Triaging && !task.session_id && !missingRepoFolders) return undefined
 
   try {
-    console.log(`[AgentManager] setupWorktreeIfNeeded: defaultProvider=${gitProvider}, configuredOrg=${configuredOrg || 'unset'}, taskRepos=${task.repos.join(', ')}`)
+    // Provider, org and default branch come from the task's project (#50);
+    // see project-repos.ts for the Default project's fallback to the globals.
+    const resolvedRepos = resolveTaskRepos(db, task)
+    console.log(`[AgentManager] setupWorktreeIfNeeded: project=${taskProjectId(task)}, taskRepos=${task.repos.join(', ')}`)
 
     // Group by provider + org: each repo is cloned with the CLI of the
-    // provider it was attached from (see repo-providers.ts).
-    const reposByGroup = new Map<string, { provider: GitProvider; org: string; repoNames: string[] }>()
-    for (const repoName of task.repos) {
-      const org = repoName.includes('/') ? repoName.split('/')[0] : configuredOrg
-      if (!org) {
-        console.warn(`[AgentManager] Skipping repo without org and no configured github_org: ${repoName}`)
+    // provider it belongs to.
+    const reposByGroup = new Map<string, { provider: GitProvider; org: string; repos: ResolvedRepo[] }>()
+    for (const repo of resolvedRepos) {
+      if (!providerManager(managers, repo.provider)) {
+        console.warn(`[AgentManager] No ${repo.provider} manager available, skipping worktree setup for ${repo.fullName}`)
         continue
       }
-      const fullName = repoName.includes('/') ? repoName : `${org}/${repoName}`
-      const provider = resolveRepoProvider(db, fullName)
-      if (!providerManager(managers, provider)) {
-        console.warn(`[AgentManager] No ${provider} manager available, skipping worktree setup for ${fullName}`)
-        continue
-      }
-      const key = `${provider}:${org}`
-      const group = reposByGroup.get(key) || { provider, org, repoNames: [] }
-      group.repoNames.push(fullName)
+      const key = `${repo.provider}:${repo.org}`
+      const group = reposByGroup.get(key) || { provider: repo.provider, org: repo.org, repos: [] }
+      group.repos.push(repo)
       reposByGroup.set(key, group)
     }
 
@@ -84,7 +79,7 @@ export async function setupTaskWorktrees(
 
     let resolvedWorkspaceDir: string | undefined
 
-    for (const { provider, org, repoNames } of reposByGroup.values()) {
+    for (const { provider, org, repos } of reposByGroup.values()) {
       let orgRepos: Array<{ fullName: string; defaultBranch: string; cloneUrl?: string }> = []
 
       try {
@@ -95,9 +90,9 @@ export async function setupTaskWorktrees(
 
       const branchByRepo = new Map(orgRepos.map((repo) => [repo.fullName, repo.defaultBranch]))
       const cloneUrlByRepo = new Map(orgRepos.map((repo) => [repo.fullName, repo.cloneUrl]))
-      const reposForSetup = repoNames.map((fullName) => ({
+      const reposForSetup = repos.map(({ fullName, defaultBranch }) => ({
         fullName,
-        defaultBranch: branchByRepo.get(fullName) || 'main',
+        defaultBranch: defaultBranch || branchByRepo.get(fullName) || 'main',
         cloneUrl: cloneUrlByRepo.get(fullName)
       }))
 

@@ -12,7 +12,8 @@
  * server, so no child process starts and none can leak.
  *
  * The scope travels in the URL as plain query parameters:
- *   /mcp                                        full orchestration tool set
+ *   /mcp                                        full access, every project (internal/debug only)
+ *   /mcp?project=<id>                           orchestration set, limited to one project
  *   /mcp?task=<id>&parent=<id>                  subtask set, parent + siblings only
  *   /mcp?...&artifact=<id>                      pins artifact writes to one task
  *
@@ -45,7 +46,8 @@ export function parseScopeFromUrl(url: URL): TaskMcpScope {
   return {
     parentTaskId: url.searchParams.get('parent') || null,
     taskId: taskId || null,
-    artifactTaskId: url.searchParams.get('artifact') || taskId || null
+    artifactTaskId: url.searchParams.get('artifact') || taskId || null,
+    projectId: url.searchParams.get('project') || null
   }
 }
 
@@ -56,13 +58,14 @@ export function parseScopeFromUrl(url: URL): TaskMcpScope {
 export function buildTaskMcpUrl(
   port: number,
   token: string,
-  scope: { taskId?: string | null; parentTaskId?: string | null; artifactTaskId?: string | null } = {}
+  scope: { taskId?: string | null; parentTaskId?: string | null; artifactTaskId?: string | null; projectId?: string | null } = {}
 ): string {
   // The token rides in the URL because it is the one part of an MCP server
   // config that every agent backend passes through unchanged.
   const params = new URLSearchParams({ token })
   if (scope.taskId) params.set('task', scope.taskId)
   if (scope.parentTaskId) params.set('parent', scope.parentTaskId)
+  if (scope.projectId) params.set('project', scope.projectId)
   // Only needed when it differs from `task`, which already implies it.
   if (scope.artifactTaskId && scope.artifactTaskId !== scope.taskId) {
     params.set('artifact', scope.artifactTaskId)

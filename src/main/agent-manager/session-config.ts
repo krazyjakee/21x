@@ -9,10 +9,13 @@ import { getSecretBrokerPort, writeSecretShellWrapper } from '../secret-broker'
 import { opencodeDisallowedToolMap, readServerToolLimits, resolveAllowedToolNames } from '../mcp-tool-limits'
 import { withMastermindSystemPrompt } from '../prompts/mastermind'
 import { knownBackendModels, orderedSkillIds, resolveSkillModel } from './skill-model'
+import { taskProjectId } from './project-repos'
 
 export interface McpServerOptions {
   ensureTaskManagement?: boolean
   taskScope?: { taskId: string; parentTaskId: string }
+  /** Project scope for a non-subtask session (task-management-core.ts). */
+  projectId?: string
   artifactTaskId?: string
 }
 
@@ -33,14 +36,38 @@ export function shouldEnableTillDone(taskId: string, task?: TaskRecord | null): 
   return true
 }
 
+/**
+ * The project a coordinator row (the Mastermind) orchestrates. Today there is
+ * one Mastermind row and it lives in the Default project; per-project
+ * Masterminds (#55) are rows with their own project_id, so this already gives
+ * each one its own project. Change this, not mcpOptionsForTask, if a
+ * coordinator ever needs to span projects.
+ */
+export function coordinatorProjectScope(task: TaskRecord): string {
+  return taskProjectId(task)
+}
+
 /** Real task sessions always get task-management so they can triage, orchestrate
  *  subtasks, and inspect live task state regardless of per-agent MCP config.
- *  The Mastermind is a task row too, so it gets the same; its artifact calls
- *  stay unpinned, because it is not a workpiece of its own. */
-export function mcpOptionsForTask(taskId: string, task?: TaskRecord | null): McpServerOptions {
+ *  A subtask gets the subtask scope; any other task, and the Mastermind, get
+ *  the project scope of their row's project, so they cannot see or act on
+ *  another project's tasks. Only a session with no task row behind it stays
+ *  unscoped. The Mastermind's artifact calls stay unpinned, because it is not
+ *  a workpiece of its own. */
+export function mcpOptionsForTask(taskId: string, task?: TaskRecord | null, scopeTask?: TaskRecord | null): McpServerOptions {
+  // A pseudo-task session (heartbeat-<id>) has no row of its own, but an agent
+  // that lists task-management explicitly must still be confined to the
+  // checked task's project, never given full access.
+  if (!task && scopeTask) {
+    return { ensureTaskManagement: false, projectId: taskProjectId(scopeTask) }
+  }
+  const taskScope = task?.parent_task_id ? { taskId, parentTaskId: task.parent_task_id } : undefined
   return {
     ensureTaskManagement: !!task,
-    taskScope: task?.parent_task_id ? { taskId, parentTaskId: task.parent_task_id } : undefined,
+    taskScope,
+    projectId: task && !taskScope
+      ? (isCoordinatorTask(task) ? coordinatorProjectScope(task) : taskProjectId(task))
+      : undefined,
     artifactTaskId: task && !isCoordinatorTask(task) ? taskId : undefined
   }
 }
@@ -61,6 +88,7 @@ function buildTaskManagementMcpConfig(opts?: McpServerOptions): McpServerConfig 
     url: buildTaskMcpUrl(apiPort, getTaskApiToken(), {
       taskId: opts?.taskScope?.taskId,
       parentTaskId: opts?.taskScope?.parentTaskId,
+      projectId: opts?.taskScope ? undefined : opts?.projectId,
       artifactTaskId: opts?.artifactTaskId
     })
   }
