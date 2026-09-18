@@ -110,7 +110,7 @@ export function App() {
     return (
       <div className="h-full flex items-center justify-center bg-background p-6">
         <div className="text-center space-y-4 max-w-xs">
-          <div className="text-5xl">📱</div>
+          <svg className="mx-auto h-10 w-10 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/></svg>
           <h2 className="font-semibold text-foreground">Not Connected</h2>
           <p className="text-sm text-muted-foreground">
             Open 20x on your desktop, go to Settings → Connect Phone, and scan the QR code.

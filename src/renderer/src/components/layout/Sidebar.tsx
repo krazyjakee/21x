@@ -202,7 +202,7 @@ export function Sidebar({ tasks, selectedTaskId, overdueCount, onSelectTask, onC
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search tasks..."
-                className="w-full rounded-lg border border-input bg-card pl-9 pr-8 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/20 transition-all"
+                className="w-full rounded-lg border border-input bg-card pl-9 pr-8 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/20 transition-colors"
               />
               {searchQuery && (
                 <button
@@ -328,7 +328,7 @@ export function Sidebar({ tasks, selectedTaskId, overdueCount, onSelectTask, onC
                 value={skillSearchQuery}
                 onChange={(e) => setSkillSearchQuery(e.target.value)}
                 placeholder="Search skills..."
-                className="w-full rounded-lg border border-input bg-card pl-9 pr-8 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/20 transition-all"
+                className="w-full rounded-lg border border-input bg-card pl-9 pr-8 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/20 transition-colors"
               />
               {skillSearchQuery && (
                 <button

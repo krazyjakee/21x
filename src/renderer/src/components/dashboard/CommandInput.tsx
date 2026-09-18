@@ -102,7 +102,7 @@ export function CommandInput({ onSendToMastermind, onCreateTask }: CommandInputP
 
   return (
     <div
-      className="rounded-lg border border-border/80 bg-muted overflow-hidden shadow-sm transition-all duration-200 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/30"
+      className="rounded-lg border border-border/80 bg-muted overflow-hidden shadow-sm transition-colors duration-200 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/30"
       data-voice-composer={VOICE_COMPOSER_KEY}
     >
       {/* Text area */}
@@ -186,7 +186,7 @@ export function CommandInput({ onSendToMastermind, onCreateTask }: CommandInputP
         <button
           onClick={handleSend}
           disabled={!text.trim()}
-          className={`p-1.5 rounded-lg transition-all duration-150 cursor-pointer ${
+          className={`p-1.5 rounded-lg transition-colors duration-150 cursor-pointer ${
             text.trim()
               ? 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm'
               : 'bg-accent text-muted-foreground cursor-not-allowed'

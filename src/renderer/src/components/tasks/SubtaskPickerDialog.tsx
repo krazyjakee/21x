@@ -46,11 +46,11 @@ export function SubtaskPickerDialog({ open, onOpenChange, subtasks, onSelect }: 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" />
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-[var(--overlay)] backdrop-blur-[2px]" />
         <DialogPrimitive.Content
           aria-describedby={undefined}
           onKeyDown={onKeyDown}
-          className="fixed left-1/2 top-[24%] z-50 w-[min(520px,calc(100vw-2rem))] -translate-x-1/2 overflow-hidden rounded-2xl border border-border bg-popover shadow-2xl outline-none"
+          className="fixed left-1/2 top-[24%] z-50 w-[min(520px,calc(100vw-2rem))] -translate-x-1/2 overflow-hidden rounded-2xl border border-border bg-popover shadow-float outline-none"
         >
           <DialogPrimitive.Title className="border-b border-border/60 px-4 py-3 text-sm font-semibold">
             Open subtask

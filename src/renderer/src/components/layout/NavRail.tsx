@@ -21,7 +21,7 @@ export function NavRail() {
               setSidebarView(key)
             }}
             aria-label={label}
-            className={`group relative grid h-9 w-9 place-items-center rounded-lg transition-all duration-150 cursor-pointer ${
+            className={`group relative grid h-9 w-9 place-items-center rounded-lg transition-colors duration-150 cursor-pointer ${
               active
                 ? 'bg-primary/12 text-primary'
                 : 'text-muted-foreground hover:bg-accent hover:text-foreground'

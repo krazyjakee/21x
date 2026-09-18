@@ -253,7 +253,7 @@ function GitProviderRow({
               key={opt.value}
               type="button"
               onClick={() => onSelect(selected === opt.value ? ProviderChoiceValue.NONE : opt.value)}
-              className={`px-3 py-1.5 rounded-md border text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-md border text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
                 selected === opt.value
                   ? 'border-primary bg-primary/5 text-foreground'
                   : 'border-border text-muted-foreground hover:border-muted-foreground/40'
@@ -475,7 +475,7 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
                     key={agent.type}
                     type="button"
                     onClick={() => setSelectedAgent(agent.type)}
-                    className={`group relative flex flex-col items-center gap-2 rounded-xl border-2 p-3 transition-all cursor-pointer ${
+                    className={`group relative flex flex-col items-center gap-2 rounded-xl border-2 p-3 transition-colors cursor-pointer ${
                       isSelected
                         ? 'border-primary bg-primary/5 shadow-md'
                         : 'border-border hover:border-muted-foreground/40 hover:bg-muted/20'

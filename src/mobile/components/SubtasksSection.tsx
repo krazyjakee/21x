@@ -1,6 +1,7 @@
 import { useRef, useState, type TouchEvent } from 'react'
 import { TaskStatus } from '@shared/constants'
-import { cn, STATUS_DOT_COLORS } from '../lib/utils'
+import { cn } from '../lib/utils'
+import { taskStatusDotClass } from '@shared/task-status-styles'
 import type { Task } from '../stores/task-store'
 import { ChevronRightIcon } from './icons'
 
@@ -103,7 +104,7 @@ export function SubtasksSection({ subtasks, onNavigateToTask, onReorderSubtasks 
               onClick={() => { if (dragIndex === null) onNavigateToTask(subtask.id) }}
               className="flex-1 flex items-center gap-3 text-left min-w-0 pr-2"
             >
-              <div className={cn('h-1.5 w-1.5 rounded-full shrink-0', STATUS_DOT_COLORS[subtask.status] || 'bg-muted-foreground')} />
+              <div className={cn('h-1.5 w-1.5 rounded-full shrink-0', taskStatusDotClass(subtask.status))} />
               <div className="min-w-0 flex-1">
                 <div className="text-sm truncate">{subtask.title}</div>
               </div>

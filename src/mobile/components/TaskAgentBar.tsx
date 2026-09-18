@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Task } from '../stores/task-store'
 import type { Agent } from '../stores/agent-store'
+import { MENU_ITEM_CLASS, MENU_PANEL_CLASS } from '@shared/menu-styles'
+import { taskStatusDotClass } from '@shared/task-status-styles'
 
 /** Top-bar agent switcher, mirroring desktop TaskHeaderBar so the agent can be changed without opening Details. */
 export function TaskAgentBar({ task, agents, assignedAgentName, onAssignAgent }: {
@@ -39,13 +41,13 @@ export function TaskAgentBar({ task, agents, assignedAgentName, onAssignAgent }:
           <svg className="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
         </button>
         {agentMenuOpen && (
-          <div role="menu" aria-label="Agent" className="absolute left-0 top-7 z-50 w-48 overflow-hidden rounded-lg border border-border/50 bg-popover p-1 shadow-xl">
+          <div role="menu" aria-label="Agent" className={`${MENU_PANEL_CLASS} left-0`}>
             <button
               type="button"
               role="menuitemradio"
               aria-checked={!task.agent_id}
               onClick={() => { setAgentMenuOpen(false); if (task.agent_id) onAssignAgent(null) }}
-              className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-xs text-foreground active:bg-accent"
+              className={`${MENU_ITEM_CLASS} active:bg-accent`}
               data-testid="mobile-header-agent-option-unassigned"
             >
               <span>Unassigned</span>
@@ -58,7 +60,7 @@ export function TaskAgentBar({ task, agents, assignedAgentName, onAssignAgent }:
                 role="menuitemradio"
                 aria-checked={task.agent_id === a.id}
                 onClick={() => { setAgentMenuOpen(false); if (task.agent_id !== a.id) onAssignAgent(a.id) }}
-                className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-xs text-foreground active:bg-accent"
+                className={`${MENU_ITEM_CLASS} active:bg-accent`}
                 data-testid={`mobile-header-agent-option-${a.id}`}
               >
                 <span className="truncate">{a.name}</span>
@@ -69,7 +71,7 @@ export function TaskAgentBar({ task, agents, assignedAgentName, onAssignAgent }:
         )}
       </div>
       <span className="ml-auto text-[11px] text-muted-foreground flex items-center gap-1">
-        <span className={`h-1.5 w-1.5 rounded-full ${task.status === 'completed' ? 'bg-emerald-400' : task.status === 'agent_working' ? 'bg-amber-400' : 'bg-muted-foreground'}`} />
+        <span className={`h-1.5 w-1.5 rounded-full ${taskStatusDotClass(task.status)}`} />
         {task.status}
       </span>
     </div>

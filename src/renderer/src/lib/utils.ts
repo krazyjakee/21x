@@ -5,82 +5,14 @@ export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs))
 }
 
-export function formatDate(dateString: string | null): string {
-  if (!dateString) return ''
-  const date = new Date(dateString)
-  return date.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric'
-  })
-}
-
-export function formatRelativeDate(dateString: string): string {
-  const date = new Date(dateString)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMins = Math.floor(diffMs / 60000)
-  const diffHours = Math.floor(diffMs / 3600000)
-  const diffDays = Math.floor(diffMs / 86400000)
-
-  if (diffMins < 1) return 'Just now'
-  if (diffMins < 60) return `${diffMins}m ago`
-  if (diffHours < 24) return `${diffHours}h ago`
-  if (diffDays < 7) return `${diffDays}d ago`
-  return formatDate(dateString)
-}
-
-export function formatRelativeFuture(dateString: string): string {
-  const date = new Date(dateString)
-  const now = new Date()
-  const diffMs = date.getTime() - now.getTime()
-
-  if (diffMs <= 0) return 'soon'
-
-  const diffMins = Math.ceil(diffMs / 60000)
-  const diffHours = Math.floor(diffMs / 3600000)
-
-  if (diffMins <= 1) return 'in <1m'
-  if (diffMins < 60) return `in ${diffMins}m`
-  if (diffHours < 24) return `in ${diffHours}h`
-  return formatDate(dateString)
-}
-
-function startOfDay(date: Date): Date {
-  const d = new Date(date)
-  d.setHours(0, 0, 0, 0)
-  return d
-}
-
-export function isOverdue(dueDate: string | null): boolean {
-  if (!dueDate) return false
-  return startOfDay(new Date(dueDate)) < startOfDay(new Date())
-}
-
-export function isDueSoon(dueDate: string | null): boolean {
-  if (!dueDate) return false
-  const due = startOfDay(new Date(dueDate))
-  const today = startOfDay(new Date())
-  if (due < today) return false
-  return due.getTime() - today.getTime() <= 24 * 60 * 60 * 1000
-}
-
-export function isSnoozed(snoozedUntil: string | null): boolean {
-  if (!snoozedUntil) return false
-  return new Date(snoozedUntil) > new Date()
-}
-
-/** Binary size for attachments, e.g. "12.3 KB"; "—" when the size is unknown. */
-export function formatFileSize(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '—'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-/** Decimal (SI) size for downloads, e.g. "42 MB" or "1.2 GB". */
-export function formatBytes(bytes: number): string {
-  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`
-  if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`
-  return `${Math.round(bytes / 1e3)} kB`
-}
+export {
+  formatDate,
+  formatRelativeDate,
+  formatRelativeFuture,
+  formatDueDistance,
+  isOverdue,
+  isDueSoon,
+  isSnoozed,
+  formatFileSize,
+  formatBytes
+} from '@shared/date-format'

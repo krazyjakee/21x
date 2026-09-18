@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@source "../../../shared";
 
 /* ══════════════════════════════════════════════════════════════════════════
    20x Design System — "Aperture"
@@ -175,6 +176,8 @@
 :root:not(.dark) {
   --color-zinc-400: #71717a;
   --color-zinc-300: #52525b;
+  --color-gray-400: #6b7280;
+  --color-gray-300: #4b5563;
   --color-slate-400: #64748b;
   --color-slate-300: #475569;
   --color-red-400: #dc2626;

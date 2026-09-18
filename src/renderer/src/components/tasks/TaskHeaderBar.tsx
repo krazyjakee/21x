@@ -6,6 +6,7 @@ import { TaskPriorityBadge } from './TaskPriorityBadge'
 import { TaskStatusBadge } from './TaskStatusBadge'
 import { CodingAgentType, TASK_STATUSES, TaskStatus } from '@/types'
 import type { Agent, Task } from '@/types'
+import { MENU_ITEM_CLASS, MENU_PANEL_CLASS } from '@shared/menu-styles'
 
 export enum TaskPrimaryAction {
   START = 'start',
@@ -177,7 +178,7 @@ export function TaskHeaderBar({
           <ChevronDown className="h-3 w-3 text-muted-foreground transition-colors group-hover:text-foreground" />
         </button>
         {statusMenuOpen && (
-          <div role="menu" aria-label="Task status" className="absolute right-0 top-7 z-50 w-48 overflow-hidden rounded-lg border border-border/50 bg-popover p-1 shadow-xl">
+          <div role="menu" aria-label="Task status" className={`${MENU_PANEL_CLASS} right-0`}>
             {TASK_STATUSES.map((status) => (
               <button
                 key={status.value}
@@ -188,7 +189,7 @@ export function TaskHeaderBar({
                   setStatusMenuOpen(false)
                   if (task.status !== status.value) void onStatusChange?.(status.value)
                 }}
-                className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-xs text-foreground hover:bg-accent"
+                className={`${MENU_ITEM_CLASS} hover:bg-accent`}
               >
                 <span>{status.label}</span>
                 {task.status === status.value && <Check className="h-3.5 w-3.5 text-primary" />}
@@ -215,7 +216,7 @@ export function TaskHeaderBar({
               <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
             </button>
             {agentMenuOpen && (
-              <div role="menu" aria-label="Agent" className="absolute right-0 top-7 z-50 w-48 overflow-hidden rounded-lg border border-border/50 bg-popover p-1 shadow-xl">
+              <div role="menu" aria-label="Agent" className={`${MENU_PANEL_CLASS} right-0`}>
                 <button
                   type="button"
                   role="menuitemradio"
@@ -224,7 +225,7 @@ export function TaskHeaderBar({
                     setAgentMenuOpen(false)
                     if (task.agent_id) void onAssignAgent(null)
                   }}
-                  className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-xs text-foreground hover:bg-accent"
+                  className={`${MENU_ITEM_CLASS} hover:bg-accent`}
                   data-testid="header-agent-option-unassigned"
                 >
                   <span>Unassigned</span>
@@ -242,7 +243,7 @@ export function TaskHeaderBar({
                         setAgentMenuOpen(false)
                         if (task.agent_id !== a.id) void onAssignAgent(a.id)
                       }}
-                      className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-xs text-foreground hover:bg-accent"
+                      className={`${MENU_ITEM_CLASS} hover:bg-accent`}
                       data-testid={`header-agent-option-${a.id}`}
                     >
                       <span className="flex min-w-0 items-center gap-1.5">

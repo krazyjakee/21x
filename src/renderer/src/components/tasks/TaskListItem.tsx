@@ -6,15 +6,7 @@ import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { TaskStatus } from '@/types'
 import type { Task } from '@/types'
 import { formatRecurrenceShort } from './recurrence-format'
-
-const statusDotColor: Record<TaskStatus, string> = {
-  [TaskStatus.NotStarted]: 'bg-muted-foreground',
-  [TaskStatus.Triaging]: 'bg-muted-foreground animate-pulse',
-  [TaskStatus.AgentWorking]: 'bg-amber-400',
-  [TaskStatus.ReadyForReview]: 'bg-pink-400',
-  [TaskStatus.AgentLearning]: 'bg-blue-400',
-  [TaskStatus.Completed]: 'bg-emerald-400'
-}
+import { taskListDotClass } from '@shared/task-status-styles'
 
 interface TaskListItemProps {
   task: Task
@@ -33,20 +25,11 @@ export const TaskListItem = memo(function TaskListItem({ task, isSelected, onSel
   const sessionStatus = useAgentStore((s) => s.sessions.get(task.id)?.status)
   const hasActiveAgent = sessionStatus != null && sessionStatus !== SessionStatus.IDLE
 
-  // Determine status indicator color — memoized to avoid recalculation on every render
-  const statusColor = useMemo(() => {
-    // Check task status first - AgentLearning/Triaging takes priority over session status
-    if (task.status === TaskStatus.AgentLearning) {
-      return 'bg-blue-400 animate-pulse' // Agent learning
-    }
-    if (task.status === TaskStatus.Triaging) {
-      return 'bg-muted-foreground animate-pulse' // Triaging
-    }
-    if (hasActiveAgent) {
-      return 'bg-amber-400 animate-pulse' // Agent working
-    }
-    return statusDotColor[task.status] // Task status
-  }, [task.status, hasActiveAgent])
+  // Determine status indicator color — shared with the mobile list
+  const statusColor = useMemo(
+    () => taskListDotClass(task.status, hasActiveAgent),
+    [task.status, hasActiveAgent]
+  )
 
   return (
     <button
