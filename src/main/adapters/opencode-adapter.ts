@@ -292,7 +292,8 @@ export class OpencodeAdapter implements CodingAgentAdapter {
           continue
         }
 
-        console.log(`[OpencodeAdapter] Registering MCP server: ${name}`, serialized)
+        // Only the transport type: the config carries auth headers, env secrets and the task API token.
+        console.log(`[OpencodeAdapter] Registering MCP server: ${name} (${mcpAddConfig.type})`)
         known.set(name, serialized)
 
         // Add MCP server
