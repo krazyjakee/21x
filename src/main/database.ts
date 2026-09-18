@@ -949,8 +949,9 @@ function deserializeInstalledPlugin(row: InstalledPluginRow): InstalledPluginRec
  * they build the schema from `CREATE TABLE`, not from the migration path.
  *
  * 8 → 9: tasks.complete_at_source
+ * 10 → 11: preserve existing Claude Code agents' permission behaviour
  */
-const SCHEMA_VERSION = 10
+const SCHEMA_VERSION = 11
 
 export class DatabaseManager {
   public db!: Database.Database
@@ -1698,6 +1699,41 @@ export class DatabaseManager {
     // Migration v10: 20x is local-only. Remove hosted-service data left by
     // older releases without losing any local work.
     this.removeHostedServiceData()
+
+    // Migration v11: the Claude Code adapter now honours permission_mode.
+    this.preserveClaudeCodePermissionBehaviour()
+  }
+
+  /**
+   * The Claude Code adapter used to ignore `permission_mode` and always run
+   * with permission checks bypassed, while the agent form showed (and saved)
+   * 'ask' by default. Now that the setting is honoured, record what existing
+   * Claude Code agents actually did, 'allow', so upgrading does not suddenly
+   * stop every unattended run at an approval prompt. The form then shows the
+   * real behaviour and the user can switch to 'ask'.
+   *
+   * Runs once, guarded by a settings flag, because runMigrations() runs again
+   * on every later schema bump and must not undo a choice made after this.
+   */
+  private preserveClaudeCodePermissionBehaviour(): void {
+    const flag = 'migration:claude-code-permission-mode'
+    if (this.getSetting(flag)) return
+
+    const agents = this.db.prepare('SELECT id, config FROM agents').all() as { id: string; config: string }[]
+    for (const agent of agents) {
+      let config: Record<string, unknown>
+      try {
+        config = JSON.parse(agent.config || '{}') as Record<string, unknown>
+      } catch {
+        continue
+      }
+      if (config.coding_agent !== 'claude-code' || config.permission_mode === 'allow') continue
+      config.permission_mode = 'allow'
+      this.db.prepare('UPDATE agents SET config = ? WHERE id = ?').run(JSON.stringify(config), agent.id)
+      console.log(`[Database Migration] Kept automatic permissions for Claude Code agent ${agent.id}`)
+    }
+
+    this.setSetting(flag, '1')
   }
 
   /**

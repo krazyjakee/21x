@@ -102,4 +102,55 @@ describe('DatabaseManager migrations on an existing install', () => {
     // Documents the coupling: a new migration is only reachable by raising this.
     expect(Number(stored.value)).toBeGreaterThanOrEqual(9)
   })
+
+  /**
+   * The Claude Code adapter used to bypass permissions whatever permission_mode
+   * said. Upgrading must keep existing Claude Code agents on automatic
+   * permissions, once, and never override a choice made afterwards.
+   */
+  it('keeps existing Claude Code agents on automatic permissions exactly once', () => {
+    const first = new DatabaseManager()
+    first.initialize()
+    first.close?.()
+
+    const now = new Date().toISOString()
+    const raw = openRaw()
+    const insert = raw.prepare(
+      'INSERT INTO agents (id, name, server_url, config, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)'
+    )
+    insert.run('claude-ask', 'Claude ask', '', JSON.stringify({ coding_agent: 'claude-code', permission_mode: 'ask' }), now, now)
+    insert.run('claude-unset', 'Claude unset', '', JSON.stringify({ coding_agent: 'claude-code' }), now, now)
+    insert.run('opencode-ask', 'OpenCode ask', '', JSON.stringify({ coding_agent: 'opencode', permission_mode: 'ask' }), now, now)
+    raw.prepare("DELETE FROM settings WHERE key = 'migration:claude-code-permission-mode'").run()
+    raw.prepare("UPDATE settings SET value = ? WHERE key = '__schema_version'").run('10')
+    raw.close()
+
+    const second = new DatabaseManager()
+    second.initialize()
+    second.close?.()
+
+    const modeOf = (db: InstanceType<typeof RawDatabase>, id: string): unknown => {
+      const row = db.prepare('SELECT config FROM agents WHERE id = ?').get(id) as { config: string }
+      return (JSON.parse(row.config) as { permission_mode?: unknown }).permission_mode
+    }
+    const after = openRaw()
+    expect(modeOf(after, 'claude-ask')).toBe('allow')
+    expect(modeOf(after, 'claude-unset')).toBe('allow')
+    expect(modeOf(after, 'opencode-ask')).toBe('ask')
+
+    // The user switches back to 'ask'; a later schema bump must not undo that.
+    after
+      .prepare('UPDATE agents SET config = ? WHERE id = ?')
+      .run(JSON.stringify({ coding_agent: 'claude-code', permission_mode: 'ask' }), 'claude-ask')
+    after.prepare("UPDATE settings SET value = ? WHERE key = '__schema_version'").run('10')
+    after.close()
+
+    const third = new DatabaseManager()
+    third.initialize()
+    third.close?.()
+
+    const final = openRaw()
+    expect(modeOf(final, 'claude-ask')).toBe('ask')
+    final.close()
+  })
 })
