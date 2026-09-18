@@ -101,6 +101,16 @@ const mockElectronAPI = {
     fetchOrgRepos: vi.fn().mockResolvedValue([]),
     fetchUserRepos: vi.fn().mockResolvedValue([])
   },
+  forgejo: {
+    checkCli: vi.fn().mockResolvedValue({ installed: false, authenticated: false, logins: [], code: 'not-installed' }),
+    setLogin: vi.fn().mockResolvedValue({ installed: false, authenticated: false, logins: [], code: 'not-installed' }),
+    fetchOrgs: vi.fn().mockResolvedValue([]),
+    fetchOrgRepos: vi.fn().mockResolvedValue([]),
+    fetchUserRepos: vi.fn().mockResolvedValue([])
+  },
+  git: {
+    recordRepoProviders: vi.fn().mockResolvedValue(undefined)
+  },
   worktree: {
     setup: vi.fn().mockResolvedValue(''),
     cleanup: vi.fn().mockResolvedValue(undefined)

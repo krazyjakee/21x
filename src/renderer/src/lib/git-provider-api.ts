@@ -1,11 +1,11 @@
 /**
- * Unified Git provider API that delegates to GitHub or GitLab
+ * Unified Git provider API that delegates to GitHub, GitLab, or Forgejo
  * based on the user's configured git_provider setting.
  *
- * When both GitHub and GitLab are authenticated, orgs from both
- * providers are merged so the user sees everything in one list.
+ * When several providers are authenticated, orgs from all of them
+ * are merged so the user sees everything in one list.
  */
-import { githubApi, gitlabApi } from './ipc-client'
+import { githubApi, gitlabApi, forgejoApi } from './ipc-client'
 import type { GhCliStatus, GitHubRepo } from '@/types/electron'
 import type { GitProvider } from '@/stores/settings-store'
 
@@ -34,6 +34,15 @@ export function getGitProviderApi(provider: GitProvider | null): GitProviderApi 
       fetchOrgs: gitlabApi.fetchOrgs,
       fetchOrgRepos: gitlabApi.fetchOrgRepos,
       fetchUserRepos: gitlabApi.fetchUserRepos
+    }
+  }
+
+  if (provider === 'forgejo') {
+    return {
+      checkCli: forgejoApi.checkCli,
+      fetchOrgs: forgejoApi.fetchOrgs,
+      fetchOrgRepos: forgejoApi.fetchOrgRepos,
+      fetchUserRepos: forgejoApi.fetchUserRepos
     }
   }
 
@@ -79,17 +88,20 @@ export async function fetchAllProviderOrgs(): Promise<OrgEntry[]> {
     }
   }
 
-  const [ghEntries, glEntries] = await Promise.all([
+  const [ghEntries, glEntries, fjEntries] = await Promise.all([
     tryProvider('github', githubApi.checkCli, githubApi.fetchOrgs, 'GitHub'),
-    tryProvider('gitlab', gitlabApi.checkCli, gitlabApi.fetchOrgs, 'GitLab')
+    tryProvider('gitlab', gitlabApi.checkCli, gitlabApi.fetchOrgs, 'GitLab'),
+    tryProvider('forgejo', forgejoApi.checkCli, forgejoApi.fetchOrgs, 'Forgejo')
   ])
 
-  return [...ghEntries, ...glEntries]
+  return [...ghEntries, ...glEntries, ...fjEntries]
 }
 
 /**
  * Returns a human-readable label for the provider.
  */
 export function getProviderLabel(provider: GitProvider | null): string {
-  return provider === 'gitlab' ? 'GitLab' : 'GitHub'
+  if (provider === 'gitlab') return 'GitLab'
+  if (provider === 'forgejo') return 'Forgejo'
+  return 'GitHub'
 }

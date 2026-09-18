@@ -33,7 +33,8 @@ enum DetectKey {
   CURSOR = 'cursor',
   PI = 'pi',
   GH = 'gh',
-  GLAB = 'glab'
+  GLAB = 'glab',
+  TEA = 'tea'
 }
 
 enum ProviderChoiceValue {
@@ -225,7 +226,8 @@ interface GitProviderOption {
 
 const GIT_PROVIDER_OPTIONS: GitProviderOption[] = [
   { value: 'github', label: 'GitHub', cliKey: DetectKey.GH, cliName: 'gh' },
-  { value: 'gitlab', label: 'GitLab', cliKey: DetectKey.GLAB, cliName: 'glab' }
+  { value: 'gitlab', label: 'GitLab', cliKey: DetectKey.GLAB, cliName: 'glab' },
+  { value: 'forgejo', label: 'Forgejo', cliKey: DetectKey.TEA, cliName: 'tea' }
 ]
 
 function GitProviderRow({

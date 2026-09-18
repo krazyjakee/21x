@@ -133,9 +133,12 @@ export function RepoSelectorPage({
 
   const handleConfirm = useCallback(async () => {
     if (!task) return
+    if (selectedProvider && selected.size > 0) {
+      await api.git.recordRepoProviders(Array.from(selected).filter((repo) => repo.startsWith(`${selectedOrg}/`)), selectedProvider).catch(() => {})
+    }
     const success = await updateTask(task.id, { repos: Array.from(selected) })
     if (success) onNavigate({ page: 'detail', taskId })
-  }, [task, selected, updateTask, onNavigate, taskId])
+  }, [task, selected, selectedOrg, selectedProvider, updateTask, onNavigate, taskId])
 
   return (
     <div className="flex flex-col h-full">

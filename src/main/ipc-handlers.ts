@@ -34,6 +34,8 @@ import { TaskStatus } from '../shared/constants'
 import { isVoiceTtsEngineId } from '../shared/voice-tts'
 import type { GitHubManager } from './github-manager'
 import type { GitLabManager } from './gitlab-manager'
+import type { ForgejoManager } from './forgejo-manager'
+import { FORGEJO_LOGIN_SETTING, isGitProvider, recordRepoProviders, type GitProvider } from './repo-providers'
 import type { WorktreeManager } from './worktree-manager'
 import type { SyncManager } from './sync-manager'
 import type { PluginRegistry } from './plugins/registry'
@@ -88,7 +90,8 @@ export function registerIpcHandlers(
   gitlabManager?: GitLabManager,
   workspaceCleanupScheduler?: import('./workspace-cleanup-scheduler').WorkspaceCleanupScheduler,
   voiceSessionManager?: import('./voice/voice-session-manager').VoiceSessionManager,
-  taskAutomationScheduler?: import('./task-automation-scheduler').TaskAutomationScheduler
+  taskAutomationScheduler?: import('./task-automation-scheduler').TaskAutomationScheduler,
+  forgejoManager?: ForgejoManager
 ): void {
   ipcMain.handle('db:getTasks', () => {
     return db.getTasks()
@@ -554,6 +557,11 @@ export function registerIpcHandlers(
   })
 
   ipcMain.handle('github:fetchPullRequestDetails', async (_, url: string) => {
+    // Pull request artifacts share one channel; Forgejo URLs are recognised by
+    // matching their host against the configured tea logins.
+    if (forgejoManager && !/^https:\/\/github\.com\//i.test(url) && await forgejoManager.isForgejoUrl(url)) {
+      return await forgejoManager.fetchPullRequestDetails(url)
+    }
     return await githubManager.fetchPullRequestDetails(url)
   })
 
@@ -585,9 +593,43 @@ export function registerIpcHandlers(
     return await gitlabManager.fetchUserRepos()
   })
 
+  // Forgejo handlers — everything goes through the tea CLI and its logins
+  ipcMain.handle('forgejo:checkCli', async () => {
+    if (!forgejoManager) return { installed: false, authenticated: false, logins: [], code: 'not-installed' }
+    return await forgejoManager.checkTeaCli()
+  })
+
+  ipcMain.handle('forgejo:setLogin', async (_, loginName: string | null) => {
+    db.setSetting(FORGEJO_LOGIN_SETTING, loginName ?? '')
+    if (!forgejoManager) return { installed: false, authenticated: false, logins: [], code: 'not-installed' }
+    return await forgejoManager.checkTeaCli()
+  })
+
+  ipcMain.handle('forgejo:fetchOrgs', async () => {
+    if (!forgejoManager) return []
+    return await forgejoManager.fetchUserOrgs()
+  })
+
+  ipcMain.handle('forgejo:fetchOrgRepos', async (_, org: string) => {
+    if (!forgejoManager) return []
+    return await forgejoManager.fetchOrgRepos(org)
+  })
+
+  ipcMain.handle('forgejo:fetchUserRepos', async () => {
+    if (!forgejoManager) return []
+    return await forgejoManager.fetchUserRepos()
+  })
+
+  ipcMain.handle('git:recordRepoProviders', (_, repoFullNames: string[], provider: GitProvider) => {
+    if (!isGitProvider(provider) || !Array.isArray(repoFullNames)) return
+    recordRepoProviders(db, repoFullNames, provider)
+  })
+
   // Worktree handlers
-  ipcMain.handle('worktree:setup', async (_, taskId: string, repos: { fullName: string; defaultBranch: string; cloneUrl?: string }[], org: string, provider?: 'github' | 'gitlab') => {
-    const resolvedProvider = provider || (db.getSetting('git_provider') as 'github' | 'gitlab' | null) || 'github'
+  ipcMain.handle('worktree:setup', async (_, taskId: string, repos: { fullName: string; defaultBranch: string; cloneUrl?: string }[], org: string, provider?: GitProvider) => {
+    const configured = db.getSetting('git_provider')
+    const resolvedProvider: GitProvider = provider || (isGitProvider(configured) ? configured : 'github')
+    if (provider) recordRepoProviders(db, repos.map((repo) => repo.fullName), provider)
     return await worktreeManager.setupWorkspaceForTask(taskId, repos, org, resolvedProvider)
   })
 

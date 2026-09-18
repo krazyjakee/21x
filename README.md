@@ -65,6 +65,7 @@ Most AI tools make you copy-paste context between tabs. 20x flips it: **your tas
 - **HubSpot** — Sync tickets and workflows
 - **YouTrack** — Connect JetBrains YouTrack projects and tasks
 - **GitLab** — Full GitLab integration for task sourcing and repositories
+- **Forgejo** — Repositories, issues, pull requests, and CI status through your existing [tea](https://gitea.com/gitea/tea) logins (no separate sign-in; multiple logins selectable in Settings → Advanced)
 - **Notion** — Sync Notion databases with full property and attachment support
 - **GitHub Issues** — Pull issues directly from GitHub repositories
 - **OAuth built-in** — Secure authentication flows
@@ -77,7 +78,7 @@ Most AI tools make you copy-paste context between tabs. 20x flips it: **your tas
 
 ### Developer-First
 - **Git worktree management** — Isolated branches per task
-- **Repository context** — Agents know which repos to work on (GitHub & GitLab)
+- **Repository context** — Agents know which repos to work on (GitHub, GitLab & Forgejo)
 - **MCP servers** — Connect Model Context Protocol tools with auto-registration
 - **Browser MCP tools** — Expose console logs and network activity from browser panels to agents
 - **Idle workspace cleanup** — Prunes `node_modules` in workspaces idle for 7+ days to reclaim disk
@@ -122,6 +123,7 @@ Release builds (see `build` in `package.json`):
 - **Git** (for worktree features)
 - **GitHub CLI** (optional, for GitHub repo features) — 20x uses your existing `gh` session and never asks for or stores a GitHub token. Sign in once with `gh auth login` in your terminal; `gh auth status` shows the current state.
 - **GitLab CLI** (optional, for GitLab repo features)
+- **tea CLI** (optional, for Forgejo repo features — run `tea login add` first)
 
 ### Installation
 

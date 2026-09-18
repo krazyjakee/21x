@@ -87,6 +87,18 @@ describe('artifact projector', () => {
     expect(projected).toEqual([expect.objectContaining({ type: ArtifactType.PR, url: 'https://github.com/peakflo/20x/pull/42' })])
   })
 
+  it('recognizes Forgejo pull-request URLs but not REST API URLs', () => {
+    const forgejo = artifactsFromMessage('task-1', part({
+      name: 'command', status: 'success', output: 'Created http://forgejo.local:3000/team/app/pulls/7'
+    }))
+    expect(forgejo).toEqual([expect.objectContaining({ type: ArtifactType.PR, url: 'http://forgejo.local:3000/team/app/pulls/7' })])
+
+    const api = artifactsFromMessage('task-1', part({
+      name: 'command', status: 'success', output: 'GET http://forgejo.local:3000/api/v1/repos/team/app/pulls/7 and https://api.github.com/repos/o/r/pulls/7'
+    }))
+    expect(api).toEqual([])
+  })
+
   it('does not promote pull-request examples found while reading source files', () => {
     const projected = artifactsFromMessage('task-1', part({
       name: 'Read', status: 'success', output: 'Example: https://github.com/org/repo/pull/123'

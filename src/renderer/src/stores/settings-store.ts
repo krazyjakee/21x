@@ -1,13 +1,16 @@
 import { create } from 'zustand'
-import { settingsApi, githubApi, gitlabApi } from '@/lib/ipc-client'
-import type { GhCliStatus, GlabCliStatus } from '@/types/electron'
+import { settingsApi, githubApi, gitlabApi, forgejoApi } from '@/lib/ipc-client'
+import type { GhCliStatus, GlabCliStatus, TeaCliStatus } from '@/types/electron'
 
-export type GitProvider = 'github' | 'gitlab'
+export type GitProvider = 'github' | 'gitlab' | 'forgejo'
+
+const GIT_PROVIDERS: readonly string[] = ['github', 'gitlab', 'forgejo']
 
 interface SettingsState {
   githubOrg: string | null
   ghCliStatus: GhCliStatus | null
   glabCliStatus: GlabCliStatus | null
+  teaCliStatus: TeaCliStatus | null
   gitProvider: GitProvider | null
   isLoading: boolean
 
@@ -17,12 +20,15 @@ interface SettingsState {
   checkGhCli: () => Promise<GhCliStatus>
   checkGlabCli: () => Promise<GlabCliStatus>
   startGlabAuth: () => Promise<void>
+  checkTeaCli: () => Promise<TeaCliStatus>
+  setForgejoLogin: (loginName: string | null) => Promise<TeaCliStatus>
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
   githubOrg: null,
   ghCliStatus: null,
   glabCliStatus: null,
+  teaCliStatus: null,
   gitProvider: null,
   isLoading: false,
 
@@ -32,8 +38,8 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       const all = await settingsApi.getAll()
       set({
         githubOrg: all.github_org || null,
-        gitProvider: all.git_provider === 'github' || all.git_provider === 'gitlab'
-          ? all.git_provider
+        gitProvider: GIT_PROVIDERS.includes(all.git_provider)
+          ? all.git_provider as GitProvider
           : null,
         isLoading: false
       })
@@ -69,5 +75,17 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     // Re-check status after auth
     const status = await gitlabApi.checkCli()
     set({ glabCliStatus: status })
+  },
+
+  checkTeaCli: async () => {
+    const status = await forgejoApi.checkCli()
+    set({ teaCliStatus: status })
+    return status
+  },
+
+  setForgejoLogin: async (loginName: string | null) => {
+    const status = await forgejoApi.setLogin(loginName)
+    set({ teaCliStatus: status })
+    return status
   }
 }))

@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } f
 import { readdir } from 'fs/promises'
 import { isAbsolute, join, relative, resolve, sep, win32 } from 'path'
 import { app, type BrowserWindow } from 'electron'
+import type { ForgejoManager } from './forgejo-manager'
 
 const execFileAsync = promisify(execFile)
 
@@ -60,9 +61,14 @@ function isWithinRoot(rootPath: string, candidatePath: string): boolean {
 
 export class WorktreeManager {
   private mainWindow: BrowserWindow | null = null
+  private forgejoManager: ForgejoManager | null = null
 
   setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window
+  }
+
+  setForgejoManager(manager: ForgejoManager): void {
+    this.forgejoManager = manager
   }
 
   private sendProgress(taskId: string, repo: string, step: string, done: boolean, error?: string): void {
@@ -170,7 +176,10 @@ export class WorktreeManager {
     const orgDir = join(REPOS_DIR, org)
     mkdirSync(orgDir, { recursive: true })
 
-    if (provider === 'gitlab') {
+    if (provider === 'forgejo') {
+      if (!this.forgejoManager) throw new Error('Forgejo support is not initialized')
+      await this.forgejoManager.cloneBare(fullName, barePath, cloneUrl)
+    } else if (provider === 'gitlab') {
       console.log(`[WorktreeManager]   Executing: glab repo clone ${fullName} ${barePath} -- --bare`)
       await execFileAsync('glab', ['repo', 'clone', fullName, barePath, '--', '--bare'], {
         timeout: 300000
@@ -460,12 +469,15 @@ export class WorktreeManager {
         let prTitle: string | undefined
         let ciStatus: 'passing' | 'failing' | 'pending' | 'none' | undefined
         if (branch) {
-          let provider: 'github' | 'gitlab' | 'other' = 'other'
+          let provider: 'github' | 'gitlab' | 'forgejo' | 'other' = 'other'
+          let remoteUrl = ''
           try {
             const { stdout } = await execFileAsync('git', ['remote', 'get-url', 'origin'], { cwd: wtPath, ...gitOpts })
-            const url = stdout.toLowerCase()
+            remoteUrl = stdout.trim()
+            const url = remoteUrl.toLowerCase()
             if (url.includes('gitlab')) provider = 'gitlab'
             else if (url.includes('github')) provider = 'github'
+            else if (this.forgejoManager && await this.forgejoManager.isForgejoUrl(remoteUrl)) provider = 'forgejo'
           } catch { /* ignore */ }
 
           try {
@@ -498,6 +510,9 @@ export class WorktreeManager {
               const { stdout } = await execFileAsync('glab', ['mr', 'list', '--source-branch', branch, '--output', 'json'], { cwd: wtPath, timeout: 8000, ...gitOpts })
               const arr = JSON.parse(stdout) as Array<{ iid?: number; web_url?: string; state?: string; title?: string }>
               if (Array.isArray(arr) && arr[0]) { prNumber = arr[0].iid; prUrl = arr[0].web_url; prState = arr[0].state; prTitle = arr[0].title }
+            } else if (provider === 'forgejo' && this.forgejoManager) {
+              const pr = await this.forgejoManager.getBranchPullRequest(remoteUrl, branch)
+              if (pr) { prNumber = pr.number; prUrl = pr.url; prState = pr.state; prTitle = pr.title; ciStatus = pr.ciStatus }
             }
           } catch { /* no PR/MR, or CLI unavailable */ }
         }

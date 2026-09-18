@@ -203,6 +203,7 @@ export interface DepsStatus {
   git: ToolStatus
   gh: ToolStatus
   glab: ToolStatus
+  tea: ToolStatus
   claudeCode: ToolStatus
   opencode: ToolStatus
   codex: ToolStatus
@@ -214,6 +215,36 @@ export interface GlabCliStatus {
   installed: boolean
   authenticated: boolean
   username?: string
+}
+
+export type TeaStatusCode =
+  | 'ready'
+  | 'not-installed'
+  | 'no-login'
+  | 'login-selection-required'
+  | 'login-not-found'
+  | 'unauthorized'
+  | 'unreachable'
+  | 'error'
+
+export interface TeaLogin {
+  name: string
+  url: string
+  sshHost: string
+  user: string
+  isDefault: boolean
+}
+
+/** Status of the tea CLI used for Forgejo. Credentials stay inside tea. */
+export interface TeaCliStatus {
+  installed: boolean
+  authenticated: boolean
+  username?: string
+  login?: string
+  serverUrl?: string
+  logins: TeaLogin[]
+  code: TeaStatusCode
+  message?: string
 }
 
 interface ElectronAPI {
@@ -318,8 +349,18 @@ interface ElectronAPI {
     fetchOrgRepos: (org: string) => Promise<GitHubRepo[]>
     fetchUserRepos: () => Promise<GitHubRepo[]>
   }
+  forgejo: {
+    checkCli: () => Promise<TeaCliStatus>
+    setLogin: (loginName: string | null) => Promise<TeaCliStatus>
+    fetchOrgs: () => Promise<string[]>
+    fetchOrgRepos: (org: string) => Promise<GitHubRepo[]>
+    fetchUserRepos: () => Promise<GitHubRepo[]>
+  }
+  git: {
+    recordRepoProviders: (repoFullNames: string[], provider: 'github' | 'gitlab' | 'forgejo') => Promise<void>
+  }
   worktree: {
-    setup: (taskId: string, repos: { fullName: string; defaultBranch: string }[], org: string, provider: 'github' | 'gitlab') => Promise<string>
+    setup: (taskId: string, repos: { fullName: string; defaultBranch: string }[], org: string, provider: 'github' | 'gitlab' | 'forgejo') => Promise<string>
     cleanup: (taskId: string, repos: { fullName: string }[], org: string, removeTaskDir?: boolean) => Promise<void>
     changes: (taskId: string, repos: { fullName: string }[]) => Promise<Array<{ repo: string; diff: string; allFiles?: string[]; workspace?: boolean; error?: string; noWorktree?: boolean; path?: string; branch?: string; pushed?: boolean; prNumber?: number; prUrl?: string; prState?: string; prTitle?: string; ciStatus?: 'passing' | 'failing' | 'pending' | 'none' }>>
     files: (taskId: string, repos: { fullName: string }[]) => Promise<Array<{ repo: string; allFiles: string[]; workspace?: boolean; error?: string; noWorktree?: boolean; path?: string }>>
