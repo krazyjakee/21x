@@ -12,6 +12,10 @@
  * other, and its running agents lost every task-management tool. The selection
  * below is therefore scoped: only our own descendants, plus processes that have
  * already lost their parent, are killed.
+ *
+ * Windows used to run `taskkill /FI "WINDOWTITLE eq task-management-mcp*"`,
+ * which matched nothing: a windowless node.exe has no title. It now reads the
+ * process table through CIM and goes through the same scoped selection.
  */
 
 /** One row of the process table. */
@@ -21,12 +25,22 @@ export type ProcessRow = { pid: number; ppid: number; command: string }
 export const MCP_SCRIPT_MARKERS = ['task-management-mcp.js'] as const
 
 /**
- * Parses the output of `ps -eo pid=,ppid=,command=`.
- * Rows that do not start with two integers are ignored.
+ * PowerShell script that prints the Windows process table in the same
+ * `pid ppid command` shape as `ps -eo pid=,ppid=,command=`, so both platforms
+ * share one parser. Contains no double quotes, so it survives being passed as a
+ * single `-Command` argument.
+ */
+export const WINDOWS_PROCESS_TABLE_SCRIPT =
+  "Get-CimInstance Win32_Process | ForEach-Object { '{0} {1} {2}' -f $_.ProcessId, $_.ParentProcessId, $_.CommandLine }"
+
+/**
+ * Parses the output of `ps -eo pid=,ppid=,command=` (or
+ * {@link WINDOWS_PROCESS_TABLE_SCRIPT}). Rows that do not start with two
+ * integers are ignored.
  */
 export function parseProcessTable(psOutput: string): ProcessRow[] {
   const rows: ProcessRow[] = []
-  for (const line of psOutput.split('\n')) {
+  for (const line of psOutput.split(/\r?\n/)) {
     const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line)
     if (!match) continue
     rows.push({ pid: Number(match[1]), ppid: Number(match[2]), command: match[3] })
@@ -60,21 +74,29 @@ export function collectDescendantPids(rows: ProcessRow[], rootPid: number): Set<
 /**
  * The MCP server processes that this instance may kill:
  *   - its own descendants, which no other instance can be using, and
- *   - orphans (ppid 1), whose owner is already gone.
+ *   - orphans, whose owner is already gone.
+ *
+ * On Unix an orphan is reparented to pid 1. Windows does not reparent, so there
+ * an orphan is a process whose parent pid is no longer in the table. A reused
+ * parent pid only hides an orphan; it never exposes a live instance's child.
  *
  * MCP servers held by a live process that is not ours are left alone.
  */
 export function selectKillableMcpPids(
   rows: ProcessRow[],
   ownPid: number,
-  markers: readonly string[] = MCP_SCRIPT_MARKERS
+  markers: readonly string[] = MCP_SCRIPT_MARKERS,
+  platform: NodeJS.Platform = process.platform
 ): number[] {
   const descendants = collectDescendantPids(rows, ownPid)
+  const livePids = new Set(rows.map((row) => row.pid))
+  const isOrphan = (row: ProcessRow): boolean =>
+    platform === 'win32' ? !livePids.has(row.ppid) : row.ppid === 1
   const killable: number[] = []
   for (const row of rows) {
     if (row.pid === ownPid) continue
     if (!markers.some((marker) => row.command.includes(marker))) continue
-    if (descendants.has(row.pid) || row.ppid === 1) killable.push(row.pid)
+    if (descendants.has(row.pid) || isOrphan(row)) killable.push(row.pid)
   }
   return killable
 }

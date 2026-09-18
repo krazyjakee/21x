@@ -1,4 +1,4 @@
-import { execFile, execSync } from 'child_process'
+import { execFile, execFileSync, execSync } from 'child_process'
 import { readdirSync } from 'fs'
 import { app, BrowserWindow, dialog, net, protocol, session, shell, Tray, Menu, nativeImage } from 'electron'
 import { join } from 'path'
@@ -27,7 +27,7 @@ import { HeartbeatScheduler } from './heartbeat-scheduler'
 import { TaskAutomationScheduler } from './task-automation-scheduler'
 import { WorkspaceCleanupScheduler } from './workspace-cleanup-scheduler'
 import { ClaudePluginManager } from './claude-plugin-manager'
-import { parseProcessTable, selectKillableMcpPids } from './mcp-process-cleanup'
+import { parseProcessTable, selectKillableMcpPids, WINDOWS_PROCESS_TABLE_SCRIPT } from './mcp-process-cleanup'
 import { buildWorkspaceStates, sweepLeakedWorkspaceProcesses, readDiskSpace, workspacePressureWarning, SHUTDOWN_GRACE_MS } from './workspace-process-cleanup'
 import { WORKSPACES_DIR, listWorkspaceDirs } from './workspace-paths'
 import { handleRoute, setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTaskAutomationTrigger, setTranscriptProvider, stopTaskApiServer } from './task-api-server'
@@ -186,13 +186,15 @@ function watchAgentAnswersForSpeech(agents: AgentManager, database: DatabaseMana
  */
 function sweepLeakedMcpProcesses(): void {
   try {
-    if (process.platform === 'win32') {
-      // No cheap ancestry query on Windows; keep the previous image-name filter.
-      execSync('taskkill /F /FI "IMAGENAME eq node.exe" /FI "WINDOWTITLE eq task-management-mcp*"', { stdio: 'ignore' })
-      return
-    }
-
-    const psOutput = execSync('ps -eo pid=,ppid=,command=', { encoding: 'utf-8', maxBuffer: 8 * 1024 * 1024 })
+    const psOutput =
+      process.platform === 'win32'
+        ? execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', WINDOWS_PROCESS_TABLE_SCRIPT], {
+            encoding: 'utf-8',
+            maxBuffer: 8 * 1024 * 1024,
+            timeout: 15_000,
+            windowsHide: true
+          })
+        : execSync('ps -eo pid=,ppid=,command=', { encoding: 'utf-8', maxBuffer: 8 * 1024 * 1024 })
     const pids = selectKillableMcpPids(parseProcessTable(psOutput), process.pid)
     for (const pid of pids) {
       try {
