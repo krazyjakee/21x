@@ -205,7 +205,7 @@ jobs:
           path: dist/latest.yml
 
   build-linux:
-    runs-on: ubicloud-standard-2
+    runs-on: ubuntu-latest
     environment: release
     permissions:
       contents: write
