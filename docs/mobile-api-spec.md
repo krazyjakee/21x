@@ -135,6 +135,58 @@ List active (non-archived) projects in sidebar order.
 | `task_count`      | `number`  | User tasks in the project (coordinator rows excluded) |
 | `open_task_count` | `number`  | Of those, tasks not `completed` |
 
+#### `GET /api/projects/status`
+
+The all-projects overview (#63): every active project's status at a glance,
+the same rows the desktop's Projects view shows. Read-only; the phone refetches
+it on `task:*` and `agent:status` events (debounced) and every 15 s while visible.
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "project_id": "clproj456",
+    "name": "Website relaunch",
+    "brief": "Marketing site rebuild. Repos: acme/web.",
+    "is_default": false,
+    "sort_order": 1,
+    "status": {
+      "project_id": "clproj456",
+      "counts": { "running": 2, "queued": 1, "awaiting_review": 1, "awaiting_approval": 1, "blocked": 0 },
+      "summary": "Two features in flight; the checkout PR waits for review.",
+      "top_blockers": ["Stripe sandbox keys missing"],
+      "updated_at": "2026-09-18T10:12:00.000Z",
+      "limits": { "projectId": "clproj456", "paused": false, "allProjectsPaused": false, "runningAgents": 2, "queued": [], "blockedBy": null, "...": "see ProjectLimitState" }
+    },
+    "pending_approvals": 1,
+    "held_actions": 0,
+    "running_agents": 2,
+    "paused": false,
+    "all_projects_paused": false,
+    "blocked_by": null,
+    "last_activity_at": "2026-09-18T10:40:21.000Z",
+    "needs_attention": true
+  }
+]
+```
+
+| Field                 | Type             | Description |
+|-----------------------|------------------|-------------|
+| `status`              | `ProjectStatus`  | Counts from the task rows and live sessions, plus the Mastermind's narrative (`summary`, `top_blockers`, `updated_at`). `limits` is present when the agent manager is running. |
+| `pending_approvals`   | `number`         | Live sessions waiting for the user to approve a step (`status.counts.awaiting_approval`) |
+| `held_actions`        | `number`         | Mastermind calls held by the project's escalation policy, waiting for the user |
+| `running_agents`      | `number`         | Working sessions of the project's tasks right now |
+| `paused`              | `boolean`        | The project's own pause |
+| `all_projects_paused` | `boolean`        | The global pause: nothing starts anywhere while true |
+| `blocked_by`          | `string \| null` | Why the next start would wait: `project_limit`, `project_daily_cap`, `project_paused`, `global_pause`, or `null` |
+| `last_activity_at`    | `string \| null` | ISO time of the newest task change or status write; `null` for an untouched project |
+| `needs_attention`     | `boolean`        | `pending_approvals > 0`, `held_actions > 0` or `awaiting_review > 0`: the project waits on the user |
+
+Archived projects are not listed. Every number is counted (task rows, live
+sessions, held calls); only `status.summary` and `status.top_blockers` come from
+the Mastermind.
+
 ---
 
 ### Tasks

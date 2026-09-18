@@ -6,7 +6,7 @@ import { useProjectStore } from './project-store'
 export type SortField = 'created_at' | 'updated_at' | 'priority' | 'due_date' | 'title' | 'status'
 export type SortDirection = 'asc' | 'desc'
 export type ActiveModal = 'create' | 'edit' | 'delete' | 'settings' | 'repo-selector' | 'gh-setup' | null
-export type SidebarView = 'tasks' | 'skills' | 'dashboard' | 'canvas' | 'commander'
+export type SidebarView = 'tasks' | 'skills' | 'dashboard' | 'canvas' | 'commander' | 'overview'
 
 // ── Persisted sidebar layout (localStorage) ──
 const SIDEBAR_WIDTH_KEY = 'ui-sidebar-width'

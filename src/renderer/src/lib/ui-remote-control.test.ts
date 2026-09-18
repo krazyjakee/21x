@@ -133,6 +133,42 @@ describe('a task from another project', () => {
   })
 })
 
+describe('switch_project', () => {
+  beforeEach(() => {
+    useProjectStore.setState({
+      projects: [
+        { id: 'default', name: 'Default', archived: false },
+        { id: 'p2', name: 'Two', archived: false },
+        { id: 'p3', name: 'Gone', archived: true },
+      ] as never,
+      currentProjectId: 'default',
+    })
+  })
+
+  afterEach(() => {
+    useProjectStore.setState({ projects: [], currentProjectId: 'default' })
+  })
+
+  it('shows the project, and leaves the Commander view for the dashboard', () => {
+    useUIStore.getState().setSidebarView('commander')
+    expect(applyUiCommand({ kind: 'switch_project', projectId: 'p2' })).toEqual({ applied: true })
+    expect(useProjectStore.getState().currentProjectId).toBe('p2')
+    expect(useUIStore.getState().sidebarView).toBe('dashboard')
+  })
+
+  it('keeps a project view where it is', () => {
+    useUIStore.getState().setSidebarView('canvas')
+    applyUiCommand({ kind: 'switch_project', projectId: 'p2' })
+    expect(useUIStore.getState().sidebarView).toBe('canvas')
+  })
+
+  it('refuses an unknown or archived project', () => {
+    expect(applyUiCommand({ kind: 'switch_project', projectId: 'nope' }).applied).toBe(false)
+    expect(applyUiCommand({ kind: 'switch_project', projectId: 'p3' }).applied).toBe(false)
+    expect(useProjectStore.getState().currentProjectId).toBe('default')
+  })
+})
+
 describe('navigate', () => {
   it('switches view', () => {
     expect(applyUiCommand({ kind: 'navigate', view: 'canvas' })).toEqual({ applied: true })

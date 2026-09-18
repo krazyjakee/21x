@@ -1,11 +1,12 @@
 /**
  * Chip text for a Commander tool call.
  *
- * The delegation tools arrive with #61; whatever their exact names, a call
- * that names a project reads "Asked <project>…", and anything else falls back
- * to the humanized tool name.
+ * Delegation calls read "Asked <project>…". Project administration calls use
+ * their action name so a rename or archive is not presented as delegation.
  */
 
+/** Tools that hand a message to a project (`ask_project` is the pre-#61 name kept for stored rows). */
+const DELEGATION_TOOLS = new Set(['ask_mastermind', 'ask_project'])
 const PROJECT_KEYS = ['project_name', 'projectName', 'project', 'project_id', 'projectId'] as const
 const TEXT_KEYS = ['message', 'question', 'request', 'task', 'prompt', 'text'] as const
 const SNIPPET_CHARS = 60
@@ -30,6 +31,7 @@ export function toolCallProject(input: Record<string, unknown> | undefined): str
 export function toolCallLabel(name: string, input: Record<string, unknown> | undefined): string {
   const project = toolCallProject(input)
   if (!project) return humanizeToolName(name)
+  if (!DELEGATION_TOOLS.has(name)) return `${humanizeToolName(name)} · ${project}`
   const text = input ? firstString(input, TEXT_KEYS) : null
   if (!text) return `Asked ${project}…`
   const snippet = text.length > SNIPPET_CHARS ? `${text.slice(0, SNIPPET_CHARS).trimEnd()}…` : text

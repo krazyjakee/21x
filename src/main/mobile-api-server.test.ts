@@ -623,6 +623,65 @@ describe('mobile-api-server: projects', () => {
     expect(projects.find(p => p.id === 'default')?.current).toBe(false)
   })
 
+  it('GET /api/projects/status returns every active project with counts, approvals and limit state', async () => {
+    let alphaId = ''
+    let approvalTaskId = ''
+    let queuedTaskId = ''
+    const agentManager = {
+      getStartQueue: () => [{ taskId: queuedTaskId, agentId: 'a1', reason: 'agent_limit', queuedAt: new Date().toISOString(), position: 1 }],
+      findSessionByTaskId: (taskId: string) => (taskId === approvalTaskId ? { sessionId: 's-approval' } : undefined),
+      getSessionStatus: (sessionId: string) => (sessionId === 's-approval' ? { status: 'waiting_approval' } : undefined),
+      getProjectLimitState: (projectId: string) => ({
+        projectId, paused: projectId === alphaId, allProjectsPaused: false, maxConcurrentAgents: null, runningAgents: 1,
+        dailySessionCap: null, sessionsStartedToday: 0, dailyTokenCap: null, tokensToday: 0, queued: [],
+        blockedBy: projectId === alphaId ? 'project_paused' : null
+      })
+    }
+    const { db, get } = await start(agentManager)
+    const alpha = db.createProject({ name: 'Alpha', description: 'The alpha brief' })!
+    alphaId = alpha.id
+    const archived = db.createProject({ name: 'Old' })!
+    db.archiveProject(archived.id)
+    const working = db.createTask(makeTask({ title: 'Working', project_id: alpha.id }))!
+    db.updateTask(working.id, { status: 'agent_working' })
+    const review = db.createTask(makeTask({ title: 'Review me', project_id: alpha.id }))!
+    db.updateTask(review.id, { status: 'ready_for_review' })
+    approvalTaskId = working.id
+    queuedTaskId = db.createTask(makeTask({ title: 'Queued', project_id: alpha.id }))!.id
+    db.createTask(makeTask({ title: 'Idle default task' }))
+
+    const response = await get('/api/projects/status')
+    const entries = await response.json() as Array<Record<string, unknown>>
+
+    expect(response.status).toBe(200)
+    expect(entries.map(e => e.project_id)).toEqual(['default', alpha.id])
+    const alphaEntry = entries.find(e => e.project_id === alpha.id)!
+    expect(alphaEntry).toMatchObject({
+      name: 'Alpha', brief: 'The alpha brief', is_default: false,
+      pending_approvals: 1, held_actions: 0, running_agents: 1,
+      paused: true, all_projects_paused: false, blocked_by: 'project_paused', needs_attention: true
+    })
+    expect((alphaEntry.status as { counts: unknown }).counts).toEqual({ running: 1, queued: 1, awaiting_review: 1, awaiting_approval: 1, blocked: 0 })
+    expect(typeof alphaEntry.last_activity_at).toBe('string')
+    expect(entries.find(e => e.project_id === 'default')).toMatchObject({
+      is_default: true, needs_attention: false, pending_approvals: 0, paused: false
+    })
+    expect((entries.find(e => e.project_id === 'default')!.status as { counts: { blocked: number } }).counts.blocked).toBe(1)
+  })
+
+  it('GET /api/projects/status answers with zero live counts when no agent manager is wired', async () => {
+    const { db, get } = await start()
+    db.createProject({ name: 'Alpha' })
+
+    const entries = await (await get('/api/projects/status')).json() as Array<Record<string, unknown>>
+
+    expect(entries).toHaveLength(2)
+    for (const entry of entries) {
+      expect(entry).toMatchObject({ running_agents: 0, paused: false, blocked_by: null, needs_attention: false, last_activity_at: null })
+      expect((entry.status as { counts: { queued: number; awaiting_approval: number } }).counts).toMatchObject({ queued: 0, awaiting_approval: 0 })
+    }
+  })
+
   it('filters GET /api/tasks by project_id', async () => {
     const { db, get } = await start()
     const alpha = db.createProject({ name: 'Alpha' })!

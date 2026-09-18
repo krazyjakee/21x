@@ -7,6 +7,7 @@ import type { TranscriptPartRecord } from '@shared/transcript/types'
 import { getAuthToken } from './auth'
 import type { Artifact, ArtifactContent, PullRequestDetails } from '@shared/artifacts'
 import type { VoiceCapabilities } from '@shared/voice'
+import type { ProjectOverviewEntry } from '@shared/project-overview'
 
 const MOBILE_API_PORT = '20620'
 // When served via a reverse proxy (Cloudflare tunnel, https with no explicit port),
@@ -75,7 +76,9 @@ export interface SessionStartResult {
 
 export const api = {
   projects: {
-    list: () => get<MobileProject[]>('/api/projects')
+    list: () => get<MobileProject[]>('/api/projects'),
+    /** The all-projects overview (#63): status counts, approvals, agents and limit state per active project. */
+    status: () => get<ProjectOverviewEntry[]>('/api/projects/status')
   },
   tasks: {
     list: (params?: Record<string, string>) => {

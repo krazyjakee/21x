@@ -62,10 +62,12 @@ import type { CliMcpMutationResult, CliMcpProbeResult, CliMcpServerRef, CliMcpSn
 import type {
   ProjectRecord, CreateProjectData, UpdateProjectData,
   ProjectRepoRecord, CreateProjectRepoData, UpdateProjectRepoData,
-  ProjectResourceRecord, CreateProjectResourceData, UpdateProjectResourceData
+  ProjectResourceRecord, CreateProjectResourceData, UpdateProjectResourceData,
+  ProjectChangedEvent
 } from '@shared/projects'
 import type { HeldAction, ProjectLimitState } from '@shared/project-limit-types'
 import type { ProjectStatus } from '@shared/project-status'
+import type { ProjectOverviewEntry } from '@shared/project-overview'
 import type { MastermindMemory } from '@shared/mastermind-memory'
 
 export interface AgentSessionStartResult {
@@ -375,6 +377,7 @@ interface ElectronAPI {
     reorder: (orderedIds: string[]) => Promise<void>
     getMastermindMemory: (projectId: string) => Promise<MastermindMemory | null>
     moveTask: (taskId: string, projectId: string) => Promise<Task[] | null>
+    onChanged: (callback: (event: ProjectChangedEvent) => void) => () => void
     /** Project status (#58). */
     getStatus: (projectId: string) => Promise<ProjectStatus>
     onStatusChanged: (callback: (event: { projectId: string }) => void) => () => void
@@ -405,6 +408,10 @@ interface ElectronAPI {
     approve: (id: string) => Promise<{ ok: boolean; result?: unknown; error?: string }>
     reject: (id: string, note?: string) => Promise<boolean>
     onHeldChanged: (callback: (event: { held: HeldAction[] }) => void) => () => void
+  }
+  /** The all-projects overview (#63). */
+  overview: {
+    getAllStatuses: () => Promise<ProjectOverviewEntry[]>
   }
   skills: {
     getAll: () => Promise<Skill[]>
@@ -472,6 +479,7 @@ interface ElectronAPI {
     requestNotificationPermission: () => Promise<'granted' | 'denied'>
     getMinimizeToTray: () => Promise<boolean>
     setMinimizeToTray: (enabled: boolean) => Promise<boolean>
+    setTitleBarOverlay: (colors: { color: string; symbolColor: string }) => Promise<void>
   }
   mobile: {
     getInfo: () => Promise<{

@@ -5,7 +5,8 @@ import { UI_COMMAND_CHANNEL, type UiCommand } from '../shared/ui-commands'
 import type {
   ProjectRecord, CreateProjectData, UpdateProjectData,
   ProjectRepoRecord, CreateProjectRepoData, UpdateProjectRepoData,
-  ProjectResourceRecord, CreateProjectResourceData, UpdateProjectResourceData
+  ProjectResourceRecord, CreateProjectResourceData, UpdateProjectResourceData,
+  ProjectChangedEvent
 } from '../shared/projects'
 import type { MastermindMemory } from '../shared/mastermind-memory'
 
@@ -300,6 +301,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('project:getMastermindMemory', projectId),
     moveTask: (taskId: string, projectId: string): Promise<unknown[] | null> =>
       ipcRenderer.invoke('project:moveTask', taskId, projectId),
+    onChanged: (callback: (event: ProjectChangedEvent) => void): (() => void) => {
+      const handler = (_: unknown, event: ProjectChangedEvent): void => callback(event)
+      ipcRenderer.on('project:changed', handler)
+      return () => ipcRenderer.removeListener('project:changed', handler)
+    },
     // Project status (#58): live counts plus the Mastermind's summary, and a
     // ping when the Mastermind writes a new summary.
     getStatus: (projectId: string): Promise<unknown> => ipcRenderer.invoke('project:getStatus', projectId),
@@ -345,6 +351,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('escalation:heldChanged', handler)
       return () => ipcRenderer.removeListener('escalation:heldChanged', handler)
     }
+  },
+  // The all-projects overview (#63): every active project's status in one call.
+  overview: {
+    getAllStatuses: (): Promise<unknown[]> => ipcRenderer.invoke('project:getAllStatuses')
   },
   skills: {
     getAll: (): Promise<unknown[]> => ipcRenderer.invoke('skills:getAll'),
@@ -460,7 +470,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getMinimizeToTray: (): Promise<boolean> =>
       ipcRenderer.invoke('app:getMinimizeToTray'),
     setMinimizeToTray: (enabled: boolean): Promise<boolean> =>
-      ipcRenderer.invoke('app:setMinimizeToTray', enabled)
+      ipcRenderer.invoke('app:setMinimizeToTray', enabled),
+    setTitleBarOverlay: (colors: { color: string; symbolColor: string }): Promise<void> =>
+      ipcRenderer.invoke('app:setTitleBarOverlay', colors)
   },
   mobile: {
     getInfo: (): Promise<{

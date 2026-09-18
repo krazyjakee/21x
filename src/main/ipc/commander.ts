@@ -1,13 +1,18 @@
 import { ipcMain, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import { COMMANDER_EVENT_CHANNEL, type CommanderEvent, type CommanderListSessionsRequest } from '../../shared/commander'
+import { UI_COMMAND_CHANNEL, type UiCommand } from '../../shared/ui-commands'
 import { createChatProviderFromSettings } from '../chat/provider-factory'
 import type { ChatProvider } from '../chat/providers/types'
 import type { ChatToolDefinition } from '../chat/tools'
 import { CommanderService, type CommanderToolContext } from '../commander/commander-service'
 import { CommanderStore } from '../commander/commander-store'
+import { createCommanderProjectTools, ProjectMutationConfirmations } from '../commander/project-tools'
+import { listHeldActions } from '../escalation'
 import { guardedIpcSend } from '../guarded-ipc-send'
 import { assertTrustedSender } from '../ipc-sender'
+import { notifyRenderer, uiState } from '../task-api/state'
 import type { IpcDeps } from './deps'
+import { broadcastProjectChanged } from './projects'
 
 /**
  * Commander chat sessions (docs/commander.md): session CRUD, message history,
@@ -18,7 +23,7 @@ import type { IpcDeps } from './deps'
 
 export interface CommanderIpcOptions {
   createProvider?: (deps: IpcDeps) => ChatProvider
-  /** The Commander's tools (#61). */
+  /** Replaces the default project tool registry (tests, integrations). */
   getTools?: (context: CommanderToolContext) => ChatToolDefinition[]
 }
 
@@ -27,7 +32,7 @@ const MAX_SEARCH_INPUT = 200
 
 let service: CommanderService | null = null
 
-/** The running service, for main-process integrations (#61 tools, #62 report routing). */
+/** The running service, for main-process integrations (#62 report routing). */
 export function getCommanderService(): CommanderService | null {
   return service
 }
@@ -35,6 +40,14 @@ export function getCommanderService(): CommanderService | null {
 function requireString(value: unknown, name: string): string {
   if (typeof value !== 'string' || !value) throw new Error(`${name} is required`)
   return value
+}
+
+/** Pushes one UI command to the window the Task API knows about, or says why it cannot. */
+function sendUiCommand(command: UiCommand): { ok: true } | { ok: false; detail: string } {
+  if (!uiState.available) return { ok: false, detail: 'No 21x window is open.' }
+  if (!notifyRenderer) return { ok: false, detail: 'The window cannot be reached.' }
+  notifyRenderer(UI_COMMAND_CHANNEL, command)
+  return { ok: true }
 }
 
 export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOptions = {}): CommanderService {
@@ -49,13 +62,39 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
     }
   }
   const createProvider = options.createProvider ?? ((d: IpcDeps) => createChatProviderFromSettings(d.db))
+  // One challenge table for the app: a token issued in a session is only
+  // valid for that session's next confirmed call.
+  const confirmations = new ProjectMutationConfirmations()
   // The connection is read on use, so registering never touches the database.
   const store = new CommanderStore({ get db() { return deps.db.db } })
-  const commander = new CommanderService({
+  const commander: CommanderService = new CommanderService({
     store,
     emit,
     createProvider: () => createProvider(deps),
-    getTools: options.getTools
+    getTools: options.getTools ?? ((context) => createCommanderProjectTools({
+      db: deps.db,
+      context,
+      confirmations,
+      agents: deps.agentManager,
+      listHeldActions,
+      sendUiCommand,
+      onProjectChanged: (projectId, kind) => broadcastProjectChanged({ projectId, kind }),
+      // The tool already returned "sent"; the failure reaches the user the
+      // same way an answer would, as a report on the session.
+      onDeliveryFailed: (dispatch, error) => {
+        const reason = error instanceof Error ? error.message : String(error)
+        try {
+          commander.appendReport({
+            sessionId: dispatch.sessionId,
+            content: `Your request could not be delivered to the Mastermind of "${dispatch.projectName}": ${reason}`,
+            projectId: dispatch.projectId,
+            correlationId: dispatch.correlationId
+          })
+        } catch (err) {
+          console.error('[Commander] Could not record the delivery failure:', err)
+        }
+      }
+    }))
   })
   service = commander
 

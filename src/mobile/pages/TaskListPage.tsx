@@ -171,6 +171,19 @@ export function TaskListPage({ onNavigate }: { onNavigate: (route: Route) => voi
             <h1 className="text-lg font-semibold">Tasks</h1>
           )}
           <div className="flex items-center gap-1">
+            {projects.length > 1 && (
+              <button
+                onClick={() => onNavigate({ page: 'overview' })}
+                className="p-2 active:opacity-60 hover:bg-accent rounded-md transition-colors"
+                aria-label="Projects overview"
+                title="All projects"
+              >
+                <svg className="w-4 h-4 text-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" />
+                  <rect x="14" y="14" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" />
+                </svg>
+              </button>
+            )}
             <button
               onClick={() => syncAndFetch()}
               disabled={isLoading || isSyncing}

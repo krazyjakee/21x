@@ -14,7 +14,7 @@ import { useAgentStore } from '@/stores/agent-store'
 import { useProjectStore } from '@/stores/project-store'
 import { useAgentAutoStart } from '@/hooks/use-agent-auto-start'
 import { useOverdueNotifications } from '@/hooks/use-overdue-notifications'
-import { settingsApi, onTaskSourceActionFailed } from '@/lib/ipc-client'
+import { settingsApi, projectApi, onTaskSourceActionFailed } from '@/lib/ipc-client'
 import { isOverdue, isSnoozed } from '@/lib/utils'
 import { onShortcutFeedback } from '@/lib/keyboard-shortcuts'
 import { TaskStatus } from '@/types'
@@ -36,6 +36,7 @@ const SkillWorkspace = lazy(() => import('@/components/skills/SkillWorkspace').t
 const SettingsWorkspace = lazy(() => import('@/components/settings/SettingsWorkspace').then(m => ({ default: m.SettingsWorkspace })))
 const DashboardWorkspace = lazy(() => import('@/components/dashboard/DashboardWorkspace').then(m => ({ default: m.DashboardWorkspace })))
 const CommanderWorkspace = lazy(() => import('@/components/commander/CommanderWorkspace').then(m => ({ default: m.CommanderWorkspace })))
+const OverviewWorkspace = lazy(() => import('@/components/overview/OverviewWorkspace').then(m => ({ default: m.OverviewWorkspace })))
 const OrchestratorPanel = lazy(() => import('@/components/orchestrator/OrchestratorPanel').then(m => ({ default: m.OrchestratorPanel })))
 
 const workspaceFallback = <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Loading...</div>
@@ -62,6 +63,7 @@ export function AppLayout() {
     fetchAgents()
     // Restores the persisted current project; task views scope to it.
     void useProjectStore.getState().init()
+    return projectApi.onChanged(() => { void useProjectStore.getState().fetchProjects() })
   }, [])
 
   const [toast, setToast] = useState<{ message: string; isError?: boolean } | null>(null)
@@ -205,7 +207,7 @@ export function AppLayout() {
       <div className="app-chrome-field flex flex-1 min-h-0 overflow-hidden bg-background">
         <NavRail />
 
-        {sidebarView !== 'dashboard' && sidebarView !== 'canvas' && sidebarView !== 'commander' && !sidebarCollapsed && (
+        {sidebarView !== 'dashboard' && sidebarView !== 'canvas' && sidebarView !== 'commander' && sidebarView !== 'overview' && !sidebarCollapsed && (
           <Sidebar
             tasks={tasks}
             selectedTaskId={selectedTask?.id || null}
@@ -241,6 +243,10 @@ export function AppLayout() {
             ) : sidebarView === 'commander' ? (
               <Suspense fallback={workspaceFallback}>
                 <CommanderWorkspace />
+              </Suspense>
+            ) : sidebarView === 'overview' ? (
+              <Suspense fallback={workspaceFallback}>
+                <OverviewWorkspace />
               </Suspense>
             ) : sidebarView !== 'canvas' ? (
               <TaskWorkspace

@@ -12,6 +12,7 @@ import { SkillSelectorPage } from './pages/SkillSelectorPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { PairPage } from './pages/PairPage'
 import { ArtifactViewerPage } from './pages/ArtifactViewerPage'
+import { ProjectsOverviewPage } from './pages/ProjectsOverviewPage'
 import { getPairCodeFromUrl, hasSessionToken } from './api/auth'
 
 export type Route =
@@ -24,6 +25,7 @@ export type Route =
   | { page: 'create' }
   | { page: 'edit'; taskId: string }
   | { page: 'settings' }
+  | { page: 'overview' }
 
 export function App() {
   const pairCode = getPairCodeFromUrl()
@@ -157,6 +159,9 @@ export function App() {
       )}
       {route.page === 'settings' && (
         <SettingsPage onNavigate={navigate} />
+      )}
+      {route.page === 'overview' && (
+        <ProjectsOverviewPage onNavigate={navigate} />
       )}
     </div>
   )
