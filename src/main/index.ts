@@ -209,7 +209,7 @@ function createWindow(): void {
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    backgroundColor: '#1E2127',
+    backgroundColor: '#141414',
     // Electron 44 native window-state persistence: remember position, size and
     // display mode across launches instead of always reopening at 1400x900.
     windowStatePersistence: true,
@@ -218,7 +218,7 @@ function createWindow(): void {
       ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 12, y: 12 } }
       : {
           titleBarStyle: 'hidden' as const,
-          titleBarOverlay: { color: '#1E2127', symbolColor: '#535D71', height: 36 },
+          titleBarOverlay: { color: '#141414', symbolColor: '#8e8d91', height: 36 },
           icon: is.dev ? join(__dirname, '../../resources/icon.ico') : join(process.resourcesPath, 'icon.ico')
         }),
     show: false,

@@ -9,9 +9,8 @@ import logo20x from '@/assets/logos/20x.svg'
 import { ThemeToggle } from './ThemeToggle'
 import { ProjectSwitcher } from './ProjectSwitcher'
 import { NAV_ITEMS } from './nav-items'
-import { isWindows, modKey } from '@/lib/platform'
-
-const WINDOWS_TITLEBAR_ACTION_RIGHT = 168
+import { modKey } from '@/lib/platform'
+import { useTitleBarOverlayTheme } from '@/hooks/use-title-bar-overlay-theme'
 
 /** Drag region with logo + breadcrumb (left), command launcher (center), and global actions (right). */
 export function TopBar({ onOpenCommandPalette }: { onOpenCommandPalette: () => void }) {
@@ -25,6 +24,8 @@ export function TopBar({ onOpenCommandPalette }: { onOpenCommandPalette: () => v
 
   const [updateAvailableVersion, setUpdateAvailableVersion] = useState<string | null>(null)
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
+
+  useTitleBarOverlayTheme()
 
   useEffect(() => {
     const cleanupStatus = updaterApi.onStatus((data) => {
@@ -111,11 +112,8 @@ export function TopBar({ onOpenCommandPalette }: { onOpenCommandPalette: () => v
           <kbd className="shrink-0 rounded border border-border bg-background/60 px-1.5 py-0.5 text-2xs">{modKey}K</kbd>
         </button>
 
-        {/* Offset on Windows to avoid the native window controls. */}
-        <div
-          className="no-drag absolute right-4 flex items-center gap-1 windows-titlebar-actions"
-          style={isWindows ? { right: WINDOWS_TITLEBAR_ACTION_RIGHT } : undefined}
-        >
+        {/* Offset past the native window controls on Windows/Linux. */}
+        <div className="no-drag absolute flex items-center gap-1 windows-titlebar-actions">
           <ThemeToggle />
           <button
             onClick={openSettings}
