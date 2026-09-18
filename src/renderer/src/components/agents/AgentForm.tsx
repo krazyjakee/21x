@@ -530,7 +530,7 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
               )}
               {!openaiApiKey && hasOpenaiEnv && (
                 <p className="text-xs text-muted-foreground">
-                  ✓ Using OPENAI_API_KEY from environment
+                  Using OPENAI_API_KEY from environment
                 </p>
               )}
               {!openaiApiKey && !hasOpenaiEnv && (
@@ -583,7 +583,7 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
                 <p className="text-xs text-muted-foreground">Using provided API key</p>
               )}
               {!cursorApiKey && hasCursorEnv && (
-                <p className="text-xs text-muted-foreground">✓ Using CURSOR_API_KEY from environment</p>
+                <p className="text-xs text-muted-foreground">Using CURSOR_API_KEY from environment</p>
               )}
               {!cursorApiKey && !hasCursorEnv && (
                 <p className="text-xs text-destructive">
@@ -638,7 +638,7 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
               )}
               {!anthropicApiKey && hasAnthropicEnv && (
                 <p className="text-xs text-muted-foreground">
-                  ✓ Using ANTHROPIC_API_KEY from environment
+                  Using ANTHROPIC_API_KEY from environment
                 </p>
               )}
               {!anthropicApiKey && !hasAnthropicEnv && (

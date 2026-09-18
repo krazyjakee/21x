@@ -40,6 +40,8 @@ let syncManagerRef: SyncManager | null = null
 let pluginRegistryRef: PluginRegistry | null = null
 let notifyDesktop: ((channel: string, data: unknown) => void) | null = null
 let pendingPin: { pin: string; pairCodeId: string; expiresAt: number } | null = null
+let boundHost: string | null = null
+let boundPort: number | null = null
 
 export function getPendingPin(): { pin: string; pairCodeId: string; expiresAt: number } | null {
   if (!pendingPin) return null
@@ -55,8 +57,48 @@ const wsClients = new Set<WebSocket>()
 const PIN_EXPIRY_SECONDS = 60
 const PIN_MAX_ATTEMPTS = 3
 
+export const MOBILE_API_PORT = 20620
+/** Settings keys. Mobile access and LAN exposure are both opt-in. */
+export const MOBILE_ACCESS_ENABLED_SETTING = 'mobile_access_enabled'
+export const MOBILE_LAN_ACCESS_SETTING = 'mobile_lan_access'
+export const MOBILE_SESSION_IDLE_DAYS_SETTING = 'mobile_session_idle_days'
+export const DEFAULT_MOBILE_SESSION_IDLE_DAYS = 7
+
+/**
+ * Global (not per-IP) budget for /api/auth/pair/*. Every request through the
+ * cloudflared tunnel arrives from 127.0.0.1, so a per-client limit would not
+ * hold back an internet attacker.
+ */
+export const PAIR_RATE_LIMIT_MAX = 20
+export const PAIR_RATE_LIMIT_WINDOW_MS = 60_000
+let pairWindowStart = 0
+let pairWindowCount = 0
+
+function allowPairRequest(): boolean {
+  const now = Date.now()
+  if (now - pairWindowStart >= PAIR_RATE_LIMIT_WINDOW_MS) {
+    pairWindowStart = now
+    pairWindowCount = 0
+  }
+  pairWindowCount++
+  return pairWindowCount <= PAIR_RATE_LIMIT_MAX
+}
+
 function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex')
+}
+
+export function isMobileAccessEnabled(db: DatabaseManager): boolean {
+  return db.getSetting(MOBILE_ACCESS_ENABLED_SETTING) === 'true'
+}
+
+export function isMobileLanAccessEnabled(db: DatabaseManager): boolean {
+  return db.getSetting(MOBILE_LAN_ACCESS_SETTING) === 'true'
+}
+
+export function getMobileSessionIdleDays(db: DatabaseManager): number {
+  const days = Number(db.getSetting(MOBILE_SESSION_IDLE_DAYS_SETTING))
+  return Number.isFinite(days) && days > 0 ? days : DEFAULT_MOBILE_SESSION_IDLE_DAYS
 }
 
 function validateSession(provided: string | null | undefined): boolean {
@@ -64,6 +106,12 @@ function validateSession(provided: string | null | undefined): boolean {
   const hash = hashToken(provided)
   const session = dbRef.getMobileSessionByTokenHash(hash)
   if (!session) return false
+  const idleSeconds = Math.floor(Date.now() / 1000) - session.last_seen
+  if (idleSeconds > getMobileSessionIdleDays(dbRef) * 86_400) {
+    // Idle too long: revoke so the device also drops off the connected list.
+    dbRef.revokeMobileSession(session.id)
+    return false
+  }
   dbRef.touchMobileSession(hash)
   return true
 }
@@ -78,9 +126,10 @@ export function startMobileApiServer(
   syncManager?: SyncManager | null,
   pluginRegistry?: PluginRegistry | null,
   gitlabManager?: GitLabManager | null,
-  forgejoManager?: ForgejoManager | null
+  forgejoManager?: ForgejoManager | null,
+  host = '127.0.0.1'
 ): Promise<number> {
-  if (server) return Promise.resolve(port)
+  if (server) return Promise.resolve(boundPort ?? port)
 
   dbRef = db
   agentRef = agentManager
@@ -89,6 +138,8 @@ export function startMobileApiServer(
   forgejoRef = forgejoManager ?? null
   syncManagerRef = syncManager ?? null
   pluginRegistryRef = pluginRegistry ?? null
+  pairWindowStart = 0
+  pairWindowCount = 0
 
   return new Promise((resolve, reject) => {
     server = createServer(handleHttpRequest)
@@ -142,15 +193,71 @@ export function startMobileApiServer(
       }
     })
 
-    server.listen(port, '0.0.0.0', () => {
-      const address = server?.address()
-      const boundPort = typeof address === 'object' && address ? address.port : port
-      console.log(`[MobileAPI] Started on port ${boundPort} — http://0.0.0.0:${boundPort}`)
+    const starting = server
+    server.listen(port, host, () => {
+      const address = starting.address()
+      boundPort = typeof address === 'object' && address ? address.port : port
+      boundHost = host
+      console.log(`[MobileAPI] Started on port ${boundPort} — http://${host}:${boundPort}`)
       resolve(boundPort)
     })
 
-    server.on('error', reject)
+    starting.on('error', (err) => {
+      if (server === starting) {
+        wss?.close()
+        wss = null
+        server = null
+      }
+      reject(err)
+    })
   })
+}
+
+export interface MobileApiDeps {
+  db: DatabaseManager
+  agentManager: AgentManager
+  githubManager: GitHubManager
+  syncManager?: SyncManager | null
+  pluginRegistry?: PluginRegistry | null
+  gitlabManager?: GitLabManager | null
+  forgejoManager?: ForgejoManager | null
+}
+
+let mobileDeps: MobileApiDeps | null = null
+let applyQueue: Promise<unknown> = Promise.resolve()
+
+export function setMobileApiDeps(deps: MobileApiDeps): void {
+  mobileDeps = deps
+}
+
+/**
+ * Starts, stops or rebinds the server to match the mobile access settings:
+ * off → nothing listens; on → 127.0.0.1 only, or 0.0.0.0 when LAN access is
+ * opted into. Calls are serialized so rapid toggles cannot race.
+ * Resolves to the bound port, or null when mobile access is off.
+ */
+export function applyMobileAccessSettings(port = MOBILE_API_PORT): Promise<number | null> {
+  const run = async (): Promise<number | null> => {
+    const deps = mobileDeps
+    if (!deps || !isMobileAccessEnabled(deps.db)) {
+      await stopMobileApiServer()
+      return null
+    }
+    const host = isMobileLanAccessEnabled(deps.db) ? '0.0.0.0' : '127.0.0.1'
+    if (server && boundHost === host) return boundPort
+    await stopMobileApiServer()
+    return startMobileApiServer(
+      deps.db, deps.agentManager, deps.githubManager, port, deps.syncManager,
+      deps.pluginRegistry, deps.gitlabManager, deps.forgejoManager, host
+    )
+  }
+  const result = applyQueue.then(run, run)
+  applyQueue = result.catch(() => {})
+  return result
+}
+
+export function getMobileApiBinding(): { host: string; port: number } | null {
+  return server && boundHost && boundPort != null ? { host: boundHost, port: boundPort } : null
 }
 
 /** Notifies the desktop renderer of events that originate from a phone. */
@@ -158,15 +265,23 @@ export function setMobileApiNotifier(fn: (channel: string, data: unknown) => voi
   notifyDesktop = fn
 }
 
-export function stopMobileApiServer(): void {
+export function stopMobileApiServer(): Promise<void> {
   for (const ws of wsClients) {
     ws.close()
   }
   wsClients.clear()
   wss?.close()
   wss = null
-  server?.close()
+  const closing = server
   server = null
+  boundHost = null
+  boundPort = null
+  if (!closing) return Promise.resolve()
+  return new Promise((resolve) => {
+    closing.close(() => resolve())
+    // Drop keep-alive sockets so the port is released now, not on idle timeout.
+    closing.closeAllConnections()
+  })
 }
 
 /**
@@ -213,6 +328,11 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
   const pathname = url.pathname
 
   // Pairing endpoints — no session required
+  if (pathname.startsWith('/api/auth/pair/') && !allowPairRequest()) {
+    res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': String(Math.ceil(PAIR_RATE_LIMIT_WINDOW_MS / 1000)) })
+    res.end(JSON.stringify({ error: 'Too many pairing attempts. Try again in a minute.' }))
+    return
+  }
   if (pathname === '/api/auth/pair/initiate' || pathname === '/api/auth/pair/verify') {
     void handleApiRoute(req, res, pathname, url)
     return
@@ -742,8 +862,11 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
   if (pathname === '/api/sessions/start') {
     const { agentId, taskId, skipInitialPrompt } = params as { agentId: string; taskId: string; skipInitialPrompt?: boolean }
     if (!agentId || !taskId) throw Object.assign(new Error('agentId and taskId are required'), { status: 400 })
-    const sessionId = await agent.startSession(agentId, taskId, undefined, skipInitialPrompt as boolean | undefined)
-    return { sessionId }
+    // Admission-controlled: over a concurrency limit the start waits in the
+    // main-process queue and starts on its own when a slot frees.
+    const outcome = await agent.requestSession(agentId, taskId, undefined, skipInitialPrompt as boolean | undefined)
+    if (outcome.status === 'queued') return { sessionId: '', queued: true, queuePosition: outcome.position, queueReason: outcome.reason }
+    return { sessionId: outcome.sessionId }
   }
 
   // POST /api/sessions/:sessionId/resume

@@ -2,6 +2,7 @@ import { join } from 'path'
 import { existsSync } from 'fs'
 import type { DatabaseManager } from '../database'
 import { TaskStatus } from '../../shared/constants'
+import { isCoordinatorTask } from '../../shared/task-roles'
 import type { WorktreeManager } from '../worktree-manager'
 import type { GitHubManager } from '../github-manager'
 import type { GitLabManager } from '../gitlab-manager'
@@ -25,7 +26,7 @@ function providerManager(managers: GitManagers, provider: GitProvider): RepoList
 
 /**
  * Sets up git worktrees for a task's repos if needed.
- * Skips for mastermind sessions or tasks without repos.
+ * Skips for coordinator rows, heartbeat sessions and tasks without repos.
  */
 export async function setupTaskWorktrees(
   db: DatabaseManager,
@@ -33,7 +34,7 @@ export async function setupTaskWorktrees(
   taskId: string
 ): Promise<string | undefined> {
   const { worktreeManager } = managers
-  if (taskId === 'mastermind-session' || taskId.startsWith('heartbeat-')) return undefined
+  if (taskId.startsWith('heartbeat-')) return undefined
 
   if (!worktreeManager) return undefined
 
@@ -41,7 +42,7 @@ export async function setupTaskWorktrees(
   const configuredOrg = db.getSetting('github_org')
 
   const task = db.getTask(taskId)
-  if (!task) return undefined
+  if (!task || isCoordinatorTask(task)) return undefined
   if (!task.repos || !Array.isArray(task.repos) || task.repos.length === 0) return undefined
 
   const workspaceDir = db.getWorkspaceDir(taskId)

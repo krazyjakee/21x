@@ -77,6 +77,7 @@ interface JsonRpcRequestForTest {
 
 // Minimal session type for tests (mirrors private AcpSession)
 interface AcpSessionForTest {
+  pendingSystemPrompt?: string
   sessionId: string
   acpSessionId: string | null
   process: ChildProcess
@@ -1991,6 +1992,33 @@ describe('AcpAdapter - sendPrompt clears stale messageBuffer', () => {
     // Now poll — should get NO messages (buffer was cleared)
     const parts = await adapter.pollMessages('sess-idle', new Set(), new Set(), new Map(), {} as never)
     expect(parts).toEqual([])
+  })
+})
+
+describe('AcpAdapter - system prompt delivery', () => {
+  it('sends the system prompt with the first prompt only and keeps it out of the transcript', async () => {
+    const adapter = new AcpAdapter('cursor')
+    const priv = adapterPrivate(adapter)
+    const session = createMockSession('sess-sys')
+    session.permanentMessages = []
+    session.pendingSystemPrompt = 'You are the Mastermind.'
+    const write = vi.fn((_data: string, cb?: (err?: Error | null) => void) => { if (cb) cb(null) })
+    session.process = { stdin: { write } } as unknown as ChildProcess
+    priv.sessions.set('sess-sys', session)
+
+    await adapter.sendPrompt('sess-sys', [{ type: MessagePartType.TEXT, text: 'Plan the release' }], {} as never)
+    session.status = SessionStatusType.IDLE
+    await adapter.sendPrompt('sess-sys', [{ type: MessagePartType.TEXT, text: 'Next step' }], {} as never)
+
+    const prompts = write.mock.calls
+      .map(([data]) => JSON.parse(String(data).trim()))
+      .filter((msg) => msg.method === 'session/prompt')
+      .map((msg) => msg.params.prompt[0].text as string)
+    expect(prompts[0]).toBe('<system_instructions>\nYou are the Mastermind.\n</system_instructions>\n\nPlan the release')
+    expect(prompts[1]).toBe('Next step')
+
+    const transcript = JSON.stringify(session.permanentMessages)
+    expect(transcript).not.toContain('You are the Mastermind.')
   })
 })
 

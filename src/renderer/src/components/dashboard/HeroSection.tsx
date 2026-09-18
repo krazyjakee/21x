@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useAgentStore, type AgentMessage } from '@/stores/agent-store'
 import { Bot, User } from 'lucide-react'
-import { MASTERMIND_SESSION_ID } from '@/lib/voice-dictation-target'
+import { useCoordinatorStore } from '@/stores/coordinator-store'
 
 // Stable empty list — a fresh `[]` per render would invalidate memos keyed on it.
 const EMPTY_MESSAGES: AgentMessage[] = []
@@ -19,15 +19,15 @@ function MessageRow({ message }: { message: AgentMessage }) {
   if (!content) return null
 
   return (
-    <div className="flex items-start gap-3 py-2 first:pt-0 last:pb-0">
+    <div className="flex items-start gap-3 py-2.5 first:pt-0 last:pb-0">
       <div className={`mt-0.5 h-6 w-6 rounded-full flex items-center justify-center shrink-0 ${
         isAssistant
           ? 'bg-primary/10 text-primary'
           : 'bg-muted text-muted-foreground'
       }`}>
-        {isAssistant ? <Bot className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
+        {isAssistant ? <Bot className="size-icon-sm" /> : <User className="size-icon-sm" />}
       </div>
-      <p className="text-sm text-foreground/80 line-clamp-1 leading-6 min-w-0">
+      <p className="text-base text-foreground/80 line-clamp-1 leading-6 min-w-0">
         {content}
       </p>
     </div>
@@ -41,7 +41,8 @@ interface HeroSectionProps {
 export function HeroSection({ onSeeFullConversation }: HeroSectionProps) {
   const [titleIndex, setTitleIndex] = useState(0)
 
-  const session = useAgentStore((s) => s.sessions.get(MASTERMIND_SESSION_ID))
+  const mastermindTaskId = useCoordinatorStore((s) => s.mastermindTaskId)
+  const session = useAgentStore((s) => (mastermindTaskId ? s.sessions.get(mastermindTaskId) : undefined))
   const messages = session?.messages || EMPTY_MESSAGES
 
   // Rotate title every 5 seconds
@@ -66,7 +67,7 @@ export function HeroSection({ onSeeFullConversation }: HeroSectionProps) {
   return (
     <div className="space-y-3">
       {/* Rotating title */}
-      <h1 className="text-xl font-semibold tracking-tight text-foreground transition-opacity duration-500">
+      <h1 className="text-2xl font-semibold tracking-tight text-foreground transition-opacity duration-500">
         {ROTATING_TITLES[titleIndex]}
       </h1>
 
@@ -80,7 +81,7 @@ export function HeroSection({ onSeeFullConversation }: HeroSectionProps) {
           </div>
           <button
             onClick={onSeeFullConversation}
-            className="mt-3 flex items-center gap-1.5 text-xs text-foreground/60 hover:text-primary transition-colors cursor-pointer"
+            className="mt-3 flex items-center gap-2 py-1 text-sm text-foreground/60 hover:text-primary transition-colors cursor-pointer"
           >
             <span className="tracking-wider">&middot; &middot; &middot;</span>
             <span>See full conversation</span>

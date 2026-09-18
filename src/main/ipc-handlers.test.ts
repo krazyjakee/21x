@@ -32,6 +32,8 @@ vi.mock('child_process', () => ({
 }))
 
 import { ipcMain } from 'electron'
+import { join } from 'path'
+import { pathToFileURL } from 'url'
 import { registerIpcHandlers } from './ipc-handlers'
 import type { IpcDeps } from './ipc/deps'
 import { setTaskSchedulers } from './task-updates'
@@ -97,6 +99,34 @@ describe('registerIpcHandlers', () => {
     expect(sender.send).toHaveBeenCalledWith('task:created', { task })
   })
 
+  it('never returns raw API keys to the renderer and ignores the marker on save', async () => {
+    const settings: Record<string, string> = { anthropic_api_key: 'sk-ant-raw', openai_api_key: '', theme: 'dark' }
+    const setSetting = vi.fn()
+    register({
+      db: {
+        getSetting: (key: string) => settings[key],
+        getAllSettings: () => ({ ...settings }),
+        setSetting
+      }
+    })
+    const handlers = (ipcMain.handle as ReturnType<typeof vi.fn>).mock.calls as [string, (...args: unknown[]) => unknown][]
+    const handler = (channel: string) => handlers.filter(([name]) => name === channel).pop()![1]
+
+    const all = await handler('settings:getAll')({}) as Record<string, string>
+    expect(JSON.stringify(all)).not.toContain('sk-ant-raw')
+    expect(all.anthropic_api_key).toBeTruthy()
+    expect(all.openai_api_key).toBe('')
+    expect(all.theme).toBe('dark')
+
+    const single = await handler('settings:get')({}, 'anthropic_api_key')
+    expect(single).toBe(all.anthropic_api_key)
+
+    await handler('settings:set')({}, 'anthropic_api_key', all.anthropic_api_key)
+    expect(setSetting).not.toHaveBeenCalled()
+    await handler('settings:set')({}, 'anthropic_api_key', 'sk-ant-new')
+    expect(setSetting).toHaveBeenCalledWith('anthropic_api_key', 'sk-ant-new')
+  })
+
   it('voice handlers stay safe when the voice manager is absent', async () => {
     register()
 
@@ -143,8 +173,10 @@ describe('registerIpcHandlers', () => {
     expect(createHandler).toBeDefined()
     expect(killHandler).toBeDefined()
 
-    const sender = { isDestroyed: () => false, send: vi.fn() }
-    await createHandler?.({ sender }, { id: 'panel-1', cols: 80, rows: 24 })
+    const sender = { isDestroyed: () => false, send: vi.fn(), getType: () => 'window' }
+    // terminal:create only accepts the main window's own frame.
+    const senderFrame = { url: pathToFileURL(join(__dirname, '../renderer/index.html')).href, parent: null }
+    await createHandler?.({ sender, senderFrame }, { id: 'panel-1', cols: 80, rows: 24 })
 
     await killHandler?.({}, { id: 'panel-1', expectedPid: 9999 })
     expect(mockChildKill).not.toHaveBeenCalled()
@@ -152,6 +184,23 @@ describe('registerIpcHandlers', () => {
     await killHandler?.({}, { id: 'panel-1', expectedPid: 4242 })
     expect(mockChildKill).toHaveBeenCalledTimes(1)
     expect(mockChildKill).toHaveBeenCalledWith('SIGTERM')
+  })
+
+  it('terminal:create refuses a sender that is not the main window frame', async () => {
+    register()
+
+    const handleCalls = (ipcMain.handle as ReturnType<typeof vi.fn>).mock.calls as [string, (...args: unknown[]) => unknown][]
+    const createHandler = handleCalls.find((call) => call[0] === 'terminal:create')?.[1]
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const sender = { isDestroyed: () => false, send: vi.fn(), getType: () => 'webview' }
+    const senderFrame = { url: 'https://evil.example/', parent: null }
+
+    await expect(createHandler?.({ sender, senderFrame }, { id: 'panel-evil', cols: 80, rows: 24 }))
+      .rejects.toThrow(/terminal:create/)
+    expect(mockSpawn).not.toHaveBeenCalled()
+
+    warn.mockRestore()
   })
 })
 

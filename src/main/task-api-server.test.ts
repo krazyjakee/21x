@@ -877,3 +877,28 @@ describe('successor edges over the task API', () => {
     expect(db.getSubtasks(parent.id).map((t) => t.title)).not.toContain('Bad')
   })
 })
+
+describe('task API request logging', () => {
+  it('logs route names and sizes but never request or response content', async () => {
+    const task = db.createTask(makeTask({ title: 'response-title-marker' }))!
+    const port = await startTaskApiServer(db)
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/get_task`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getTaskApiToken()}` },
+        body: JSON.stringify({ task_id: task.id, text: 'hunter2-typed-password' })
+      })
+      expect((await response.json() as { title: string }).title).toBe('response-title-marker')
+
+      const output = log.mock.calls.map((call) => call.map(String).join(' ')).join('\n')
+      expect(output).toContain('/get_task')
+      expect(output).toMatch(/bytes/)
+      expect(output).not.toContain('hunter2-typed-password')
+      expect(output).not.toContain('response-title-marker')
+      expect(output).not.toContain(task.id)
+    } finally {
+      log.mockRestore()
+    }
+  })
+})

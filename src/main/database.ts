@@ -4,10 +4,11 @@ import { join } from 'path'
 import { mkdirSync, rmSync } from 'fs'
 import { createId } from '@paralleldrive/cuid2'
 import { TaskStatus } from '../shared/constants'
-import { startTaskApiServer } from './task-api-server'
 import { WORKSPACES_DIR, taskAttachmentsDir } from './workspace-paths'
 import { applySchema } from './database/schema'
-import { seedDefaultAgent, seedOrchestratorSkill, seedTaskManagementMcpServer } from './database/seed'
+import { seedDefaultAgent, seedMastermindTask, seedOrchestratorSkill, seedTaskManagementMcpServer } from './database/seed'
+import { userTaskRoleFilter } from './database/task-roles'
+import { TASK_ROLE_MASTERMIND, type TaskRole } from '../shared/task-roles'
 import {
   JSON_COLUMNS,
   UPDATABLE_COLUMNS,
@@ -21,7 +22,12 @@ import {
   deserializeSkill,
   deserializeTask,
   deserializeTaskSource,
+  decryptSettingValue,
   encryptSecret,
+  encryptSettingValue,
+  isApiKeySetting,
+  isEncryptedSettingValue,
+  normalizePreferredModel,
   parseJsonArray
 } from './database/serializers'
 import type {
@@ -99,13 +105,16 @@ export class DatabaseManager {
     this.db.pragma('busy_timeout = 5000') // Retry on SQLITE_BUSY for up to 5s
 
     if (applySchema(this.db)) seedDefaultAgent(this.db)
+    try {
+      const migrated = this.encryptPlaintextApiKeys()
+      if (migrated) console.log(`[Database] Encrypted ${migrated} stored API key(s)`)
+    } catch (err) {
+      console.error('[Database] Failed to encrypt stored API keys:', err)
+    }
 
-    // The MCP server script calls back into this HTTP API.
-    startTaskApiServer(this).catch(err =>
-      console.error('[Database] Failed to start task API server:', err)
-    )
     seedTaskManagementMcpServer(this.db)
     seedOrchestratorSkill(this.db)
+    seedMastermindTask(this.db)
   }
 
   getWorkspaceDir(taskId: string): string {
@@ -125,14 +134,32 @@ export class DatabaseManager {
     rmSync(taskAttachmentsDir(taskId), { recursive: true, force: true })
   }
 
-  getTasks(): TaskRecord[] {
+  /**
+   * The user's tasks. Coordinator rows (see `role`) are left out, so the board,
+   * the sidebar, mobile, the MCP tools and every other consumer inherit the
+   * same rule. Pass `includeCoordinators` only for bookkeeping over every row,
+   * such as deciding which workspace directories belong to something.
+   */
+  getTasks(opts?: { includeCoordinators?: boolean }): TaskRecord[] {
     if (!this.ensureDbOpen()) return []
 
+    const where = opts?.includeCoordinators ? '' : ` WHERE ${userTaskRoleFilter()}`
     const rows = this.prepare(
-      'SELECT * FROM tasks ORDER BY created_at DESC'
+      `SELECT * FROM tasks${where} ORDER BY created_at DESC`
     ).all() as TaskRow[]
 
     return rows.map(deserializeTask)
+  }
+
+  /** The row that hosts a coordinator conversation, e.g. the Mastermind. */
+  getCoordinatorTask(role: TaskRole = TASK_ROLE_MASTERMIND): TaskRecord | undefined {
+    if (!this.ensureDbOpen()) return undefined
+
+    const row = this.prepare(
+      'SELECT * FROM tasks WHERE role = ? ORDER BY created_at ASC LIMIT 1'
+    ).get(role) as TaskRow | undefined
+
+    return row ? deserializeTask(row) : undefined
   }
 
   getTask(id: string): TaskRecord | undefined {
@@ -329,10 +356,10 @@ export class DatabaseManager {
         labels, attachments, repos, output_fields, external_id, source_id, source,
         is_recurring, recurrence_pattern, recurrence_parent_id,
         auto_start_agent, auto_complete_without_review,
-        parent_task_id, next_subtask_ids, sort_order,
+        parent_task_id, next_subtask_ids, sort_order, role,
         created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       data.title,
@@ -357,6 +384,7 @@ export class DatabaseManager {
       data.parent_task_id ?? null,
       JSON.stringify(data.next_subtask_ids ?? []),
       sortOrder,
+      data.role ?? 'task',
       now,
       now
     )
@@ -806,10 +834,11 @@ export class DatabaseManager {
     const uses = data.uses ?? 0
     const lastUsed = data.last_used ?? null
     const tags = JSON.stringify(data.tags ?? [])
+    const preferredModel = normalizePreferredModel(data.preferred_model)
     this.prepare(`
-      INSERT INTO skills (id, name, description, content, version, confidence, uses, last_used, tags, is_deleted, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, 0, ?, ?)
-    `).run(id, data.name, data.description, data.content, confidence, uses, lastUsed, tags, now, now)
+      INSERT INTO skills (id, name, description, content, version, confidence, uses, last_used, tags, preferred_model, is_deleted, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 0, ?, ?)
+    `).run(id, data.name, data.description, data.content, confidence, uses, lastUsed, tags, preferredModel, now, now)
     return this.getSkill(id)
   }
 
@@ -827,12 +856,16 @@ export class DatabaseManager {
     if (data.uses !== undefined) { setClauses.push('uses = ?'); values.push(data.uses) }
     if (data.last_used !== undefined) { setClauses.push('last_used = ?'); values.push(data.last_used) }
     if (data.tags !== undefined) { setClauses.push('tags = ?'); values.push(JSON.stringify(data.tags)) }
+    if (data.preferred_model !== undefined) {
+      setClauses.push('preferred_model = ?'); values.push(normalizePreferredModel(data.preferred_model))
+    }
 
     if (setClauses.length === 0) return existing
 
     // Only increment version for content changes, not usage updates (uses / last_used)
     const isContentChange = data.name !== undefined || data.description !== undefined ||
-      data.content !== undefined || data.confidence !== undefined || data.tags !== undefined
+      data.content !== undefined || data.confidence !== undefined || data.tags !== undefined ||
+      data.preferred_model !== undefined
     if (isContentChange) {
       setClauses.push('version = version + 1')
     }
@@ -950,13 +983,34 @@ export class DatabaseManager {
 
   // ── Settings CRUD ──────────────────────────────────────────
 
+  // API keys are encrypted at rest; callers in the main process always see plaintext.
   getSetting(key: string): string | undefined {
     const row = this.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined
-    return row?.value
+    if (!row) return undefined
+    return isApiKeySetting(key) ? decryptSettingValue(row.value) : row.value
   }
 
   setSetting(key: string, value: string): void {
-    this.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, value)
+    const stored = isApiKeySetting(key) ? encryptSettingValue(value) : value
+    this.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, stored)
+  }
+
+  /**
+   * Re-encrypts API keys saved in plaintext by older versions (or while the
+   * keychain was unavailable). Runs on every startup and is a no-op once done.
+   */
+  encryptPlaintextApiKeys(): number {
+    const rows = this.prepare("SELECT key, value FROM settings WHERE key LIKE '%\\_api\\_key' ESCAPE '\\'")
+      .all() as { key: string; value: string }[]
+    let migrated = 0
+    for (const row of rows) {
+      if (!isApiKeySetting(row.key) || !row.value || isEncryptedSettingValue(row.value)) continue
+      const encrypted = encryptSettingValue(row.value)
+      if (encrypted === row.value) continue // keychain unavailable: keep the fallback
+      this.prepare('UPDATE settings SET value = ? WHERE key = ?').run(encrypted, row.key)
+      migrated++
+    }
+    return migrated
   }
 
   deleteSetting(key: string): void {
@@ -966,7 +1020,7 @@ export class DatabaseManager {
   getAllSettings(): Record<string, string> {
     const rows = this.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[]
     const result: Record<string, string> = {}
-    for (const row of rows) result[row.key] = row.value
+    for (const row of rows) result[row.key] = isApiKeySetting(row.key) ? decryptSettingValue(row.value) : row.value
     return result
   }
 

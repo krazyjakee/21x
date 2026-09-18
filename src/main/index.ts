@@ -22,6 +22,7 @@ import { NotionPlugin } from './plugins/notion-plugin'
 import { YouTrackPlugin } from './plugins/youtrack-plugin'
 import { registerIpcHandlers } from './ipc-handlers'
 import { panelBrowserBroker } from './panel-browser-broker'
+import { hardenWebviewPreferences } from './webview-hardening'
 import { VoiceSessionManager } from './voice/voice-session-manager'
 import { voiceEventSenders, watchAgentAnswersForSpeech } from './voice/voice-bridge'
 import { loadPlatformShellEnv } from './shell-env'
@@ -33,11 +34,11 @@ import { ClaudePluginManager } from './claude-plugin-manager'
 import { parseProcessTable, selectKillableMcpPids, WINDOWS_PROCESS_TABLE_SCRIPT } from './mcp-process-cleanup'
 import { buildWorkspaceStates, sweepLeakedWorkspaceProcesses, readDiskSpace, workspacePressureWarning, SHUTDOWN_GRACE_MS } from './workspace-process-cleanup'
 import { WORKSPACES_DIR, listWorkspaceDirs, taskAttachmentsDir } from './workspace-paths'
-import { setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTranscriptProvider, stopTaskApiServer } from './task-api-server'
+import { setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTranscriptProvider, startTaskApiServer, stopTaskApiServer } from './task-api-server'
 import { setTaskAutomationTrigger, setTaskSchedulers } from './task-updates'
 import { startSecretBroker, stopSecretBroker, writeSecretShellWrapper } from './secret-broker'
 import { isMainWindowUrl } from './main-window-url'
-import { startMobileApiServer, stopMobileApiServer, broadcastToMobileClients, setMobileApiNotifier } from './mobile-api-server'
+import { applyMobileAccessSettings, setMobileApiDeps, stopMobileApiServer, broadcastToMobileClients, setMobileApiNotifier } from './mobile-api-server'
 import { registerUpdaterIpc, initAutoUpdater, isUpdateDownloaded, getPendingVersion } from './auto-updater'
 import { initCrashLogger } from './crash-logger'
 import { installProcessStreamErrorHandlers } from './process-stream-errors'
@@ -137,7 +138,7 @@ async function sweepLeakedWorkspaces(graceMs?: number, orphansIgnoreTaskState = 
       console.warn('[Cleanup] Skipping the workspace sweep: the workspaces directory could not be read.')
       return
     }
-    const tasks = db ? db.getTasks().map((task) => ({ id: task.id, status: String(task.status) })) : []
+    const tasks = db ? db.getTasks({ includeCoordinators: true }).map((task) => ({ id: task.id, status: String(task.status) })) : []
     if (tasks.length === 0 && dirs.length > 0) {
       // Not credible: workspaces exist but the task table is empty. Far more
       // likely a closed or damaged database than a genuinely empty one — and
@@ -215,7 +216,12 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      // The preload bundle only imports `electron` (contextBridge, ipcRenderer,
+      // webUtils — all available to sandboxed preloads) plus type-only shared
+      // modules, so the renderer can run inside the OS sandbox. Anything the UI
+      // needs from Node already goes through IPC. Keep it that way: adding a
+      // Node `require` to the preload would fail at run time with this on.
+      sandbox: true,
       webviewTag: true,
       // Keep processing agent transcript IPC/timers while the window is
       // hidden or minimized — throttling a hidden renderer stalls streamed
@@ -673,6 +679,10 @@ app.whenReady().then(async () => {
 
   db = new DatabaseManager()
   db.initialize()
+  // The task-management MCP server script calls back into this HTTP API.
+  startTaskApiServer(db).catch(err =>
+    console.error('[Main] Failed to start task API server:', err)
+  )
 
   // The BOOT sweep for workspace processes. It runs here rather than beside the
   // MCP sweep above because it needs the task table to tell a leaked workspace
@@ -786,11 +796,13 @@ app.whenReady().then(async () => {
     console.error('[Main] Failed to start secret broker:', err)
   }
 
-  // Start mobile API server
+  // Start mobile API server — only when mobile access is enabled in Settings.
+  // The mobile IPC handlers re-apply the settings when they change.
   try {
     agentManager.addExternalListener(broadcastToMobileClients)
-    const mobilePort = await startMobileApiServer(db, agentManager, githubManager!, undefined, syncManager, pluginRegistry, gitlabManager, forgejoManager)
-    console.log(`[Main] Mobile API server started on port ${mobilePort}`)
+    setMobileApiDeps({ db, agentManager, githubManager: githubManager!, syncManager, pluginRegistry, gitlabManager, forgejoManager })
+    const mobilePort = await applyMobileAccessSettings()
+    console.log(mobilePort == null ? '[Main] Mobile access disabled; mobile API server not started' : `[Main] Mobile API server started on port ${mobilePort}`)
   } catch (err) {
     console.error('[Main] Failed to start mobile API server:', err)
   }
@@ -870,6 +882,12 @@ app.whenReady().then(async () => {
   // Inject anti-bot JS patches into webview pages (handles client-side
   // fingerprinting that Akamai runs after the page loads).
   app.on('web-contents-created', (_event, contents) => {
+    // Before any <webview> attaches, drop whatever preload / Node settings its
+    // markup asked for. Guest pages get no bridge into this process.
+    contents.on('will-attach-webview', (_e, webPreferences, params) => {
+      hardenWebviewPreferences(webPreferences, params as unknown as Record<string, unknown>)
+    })
+
     if (contents.getType() === 'webview') {
       // Intercept window.open calls from webviews — open valid URLs externally,
       // silently ignore about:blank and other invalid URLs to prevent the macOS

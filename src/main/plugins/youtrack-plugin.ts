@@ -12,6 +12,7 @@ import type { TaskRecord } from '../database'
 import type { SourceUser, ReassignResult } from '../../shared/types'
 import { TaskStatus } from '../../shared/constants'
 import { replaceRemoteImageUrlsInTask } from './replace-image-urls'
+import { upsertSourcedTask } from './sourced-tasks'
 import { normalizeUrlForComparison, buildNormalizedUrlSet } from './url-utils'
 import { saveTaskAttachment } from './attachments'
 import { sniffMimeType } from '../mime'
@@ -259,43 +260,29 @@ export class YouTrackPlugin implements TaskSourcePlugin {
           // Build description with issue details
           const description = buildDescription(issue, client.getBaseUrl())
 
-          const existing = ctx.db.getTaskByExternalId(sourceId, issue.id)
-
-          let taskId: string
-          if (existing) {
-            ctx.db.updateTask(existing.id, {
-              title: mapped.title,
-              description,
-              status: mapped.status,
-              priority: mapped.priority,
-              assignee: mapped.assignee,
-              labels: mapped.labels
-            })
-            taskId = existing.id
-            result.updated++
-          } else {
-            const created = ctx.db.createTask({
-              title: mapped.title,
-              description,
-              type: mapped.type || 'general',
-              priority: mapped.priority || 'medium',
-              status: mapped.status || TaskStatus.NotStarted,
-              assignee: mapped.assignee,
-              labels: mapped.labels,
-              external_id: issue.id,
-              source_id: sourceId,
-              source: 'YouTrack'
-            })
-            if (!created) {
-              console.error(
-                '[youtrack] Failed to create task for issue:',
-                issue.idReadable
-              )
-              continue
-            }
-            taskId = created.id
-            result.imported++
+          const upserted = upsertSourcedTask(ctx, sourceId, issue.id, {
+            title: mapped.title,
+            description,
+            status: mapped.status,
+            priority: mapped.priority,
+            assignee: mapped.assignee,
+            labels: mapped.labels
+          }, {
+            title: mapped.title,
+            type: mapped.type || 'general',
+            priority: 'medium',
+            source: 'YouTrack'
+          })
+          if (!upserted) {
+            console.error(
+              '[youtrack] Failed to create task for issue:',
+              issue.idReadable
+            )
+            continue
           }
+          const taskId = upserted.task.id
+          if (upserted.created) result.imported++
+          else result.updated++
 
           // Download attachments
           if (issue.attachments && issue.attachments.length > 0) {

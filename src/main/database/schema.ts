@@ -17,8 +17,10 @@ import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
  * 9 → 10: remove hosted-service data (removeHostedServiceData)
  * 10 → 11: preserve existing Claude Code agents' permission behaviour
  * 11 → 12: tasks.next_subtask_ids
+ * 12 → 13: tasks.role (coordinator rows such as the Mastermind)
+ * 13 → 14: skills.preferred_model
  */
-const SCHEMA_VERSION = 12
+const SCHEMA_VERSION = 14
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -116,6 +118,7 @@ export function createTables(db: Database.Database): void {
       parent_task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
       next_subtask_ids TEXT NOT NULL DEFAULT '[]',
       sort_order INTEGER NOT NULL DEFAULT 0,
+      role TEXT NOT NULL DEFAULT 'task',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -123,7 +126,6 @@ export function createTables(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
     CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority);
     CREATE INDEX IF NOT EXISTS idx_tasks_source ON tasks(source);
-    CREATE INDEX IF NOT EXISTS idx_tasks_next_occurrence ON tasks(next_occurrence_at) WHERE is_recurring = 1;
 
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,
@@ -180,6 +182,7 @@ export function createTables(db: Database.Database): void {
       uses INTEGER NOT NULL DEFAULT 0,
       last_used TEXT,
       tags TEXT NOT NULL DEFAULT '[]',
+      preferred_model TEXT DEFAULT NULL,
       is_deleted INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -348,6 +351,7 @@ function rebuildTasksTable(db: Database.Database, columnNames: Set<string>): voi
       auto_start_agent INTEGER NOT NULL DEFAULT 0,
       auto_complete_without_review INTEGER NOT NULL DEFAULT 0,
       complete_at_source INTEGER DEFAULT NULL,
+      role TEXT NOT NULL DEFAULT 'task',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
@@ -355,7 +359,11 @@ function rebuildTasksTable(db: Database.Database, columnNames: Set<string>): voi
 
   // Dynamically find columns shared between old and new tables
   const newCols = (db.pragma('table_info(tasks_new)') as { name: string }[]).map(c => c.name)
-  const sharedCols = newCols.filter(c => columnNames.has(c))
+  // Read the live columns: earlier migrations in the same run ALTER the table
+  // without updating the caller's set (e.g. session_id), and trusting it would
+  // drop those columns' data here.
+  const oldCols = new Set((db.pragma('table_info(tasks)') as { name: string }[]).map(c => c.name))
+  const sharedCols = newCols.filter(c => oldCols.has(c))
 
   const colList = sharedCols.join(', ')
   db.exec(`INSERT INTO tasks_new (${colList}) SELECT ${colList} FROM tasks`)
@@ -550,11 +558,14 @@ export function runMigrations(db: Database.Database): void {
     db.exec(`UPDATE agents SET coding_agent = 'opencode' WHERE coding_agent IS NULL OR coding_agent = ''`)
   }
 
-  // Migrate task_sources: make mcp_server_id nullable (for plugins that don't need MCP)
-  const tsInfo = db.pragma('table_info(task_sources)') as Array<{name: string, notnull: number}>
+  // Migrate task_sources: make mcp_server_id nullable (for plugins that don't
+  // need MCP), and drop the legacy 'peakflo' default on plugin_id. Both need a
+  // table rebuild, so either one triggers it.
+  const tsInfo = db.pragma('table_info(task_sources)') as Array<{name: string, notnull: number, dflt_value: string | null}>
   const mcpServerIdCol = tsInfo.find(col => col.name === 'mcp_server_id')
+  const pluginIdCol = tsInfo.find(col => col.name === 'plugin_id')
 
-  if (mcpServerIdCol && mcpServerIdCol.notnull === 1) {
+  if ((mcpServerIdCol && mcpServerIdCol.notnull === 1) || (pluginIdCol && pluginIdCol.dflt_value !== "''")) {
     // Column exists and is NOT NULL, need to recreate table
     db.exec(`
       PRAGMA foreign_keys = OFF;
@@ -575,7 +586,14 @@ export function runMigrations(db: Database.Database): void {
         updated_at TEXT NOT NULL
       );
 
-      INSERT INTO task_sources_new SELECT * FROM task_sources;
+    `)
+    // Copy by name: an older table has fewer columns, or the same ones in a
+    // different order, so a positional SELECT * would scramble rows.
+    const newTsCols = (db.pragma('table_info(task_sources_new)') as { name: string }[]).map(c => c.name)
+    const oldTsCols = new Set((db.pragma('table_info(task_sources)') as { name: string }[]).map(c => c.name))
+    const tsCols = newTsCols.filter(c => oldTsCols.has(c)).join(', ')
+    db.exec(`
+      INSERT INTO task_sources_new (${tsCols}) SELECT ${tsCols} FROM task_sources;
 
       DROP TABLE task_sources;
 
@@ -644,9 +662,10 @@ export function runMigrations(db: Database.Database): void {
   }
   if (!columnNames.has('next_occurrence_at')) {
     db.exec(`ALTER TABLE tasks ADD COLUMN next_occurrence_at TEXT DEFAULT NULL`)
-    // Create index for efficient querying of recurring tasks
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_next_occurrence ON tasks(next_occurrence_at) WHERE is_recurring = 1`)
   }
+  // Built here rather than in createTables(): on a database older than
+  // recurring tasks the column only exists after the ALTER above.
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_next_occurrence ON tasks(next_occurrence_at) WHERE is_recurring = 1`)
 
   // Add heartbeat columns to tasks
   if (!columnNames.has('heartbeat_enabled')) {
@@ -689,6 +708,12 @@ export function runMigrations(db: Database.Database): void {
     db.exec(`ALTER TABLE tasks ADD COLUMN auto_complete_without_review INTEGER NOT NULL DEFAULT 0`)
   }
 
+  // Coordinator rows (the Mastermind) live in `tasks` so their session and
+  // transcript persist like any task's, and `role` keeps them out of every list.
+  if (!columnNames.has('role')) {
+    db.exec(`ALTER TABLE tasks ADD COLUMN role TEXT NOT NULL DEFAULT 'task'`)
+  }
+
   // Create heartbeat_logs table
   const heartbeatLogsTable = db.prepare(
     "SELECT name FROM sqlite_master WHERE type='table' AND name='heartbeat_logs'"
@@ -728,6 +753,12 @@ export function runMigrations(db: Database.Database): void {
   }
 
   db.exec(`CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name)`)
+
+  // Migration v14: optional per-skill preferred model (null = no preference).
+  const skillCols = new Set((db.pragma('table_info(skills)') as { name: string }[]).map((c) => c.name))
+  if (!skillCols.has('preferred_model')) {
+    db.exec(`ALTER TABLE skills ADD COLUMN preferred_model TEXT DEFAULT NULL`)
+  }
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)

@@ -1,4 +1,5 @@
 import { safeStorage } from 'electron'
+import { TASK_ROLE_TASK, isCoordinatorRole, type TaskRole } from '../../shared/task-roles'
 import type {
   AgentConfigRecord, AgentRecord, AgentRow,
   FileAttachmentRecord,
@@ -21,6 +22,35 @@ export function encryptSecret(value: string): Buffer {
 
 function decryptSecret(value: Buffer): string {
   return safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(value) : value.toString('utf8')
+}
+
+/** Settings rows that hold provider API keys (e.g. `anthropic_api_key`). */
+export function isApiKeySetting(key: string): boolean {
+  return key.endsWith('_api_key')
+}
+
+/** Marks a settings value (TEXT column) as safeStorage ciphertext in base64. */
+const ENCRYPTED_SETTING_PREFIX = 'safeStorage:v1:'
+
+export function isEncryptedSettingValue(value: string): boolean {
+  return value.startsWith(ENCRYPTED_SETTING_PREFIX)
+}
+
+/** Same policy as encryptSecret: keychain when available, plaintext fallback. */
+export function encryptSettingValue(value: string): string {
+  if (!value || !safeStorage.isEncryptionAvailable()) return value
+  return ENCRYPTED_SETTING_PREFIX + safeStorage.encryptString(value).toString('base64')
+}
+
+/** Plaintext (legacy or fallback) values pass through; unreadable ciphertext yields ''. */
+export function decryptSettingValue(value: string): string {
+  if (!isEncryptedSettingValue(value)) return value
+  if (!safeStorage.isEncryptionAvailable()) return ''
+  try {
+    return safeStorage.decryptString(Buffer.from(value.slice(ENCRYPTED_SETTING_PREFIX.length), 'base64'))
+  } catch {
+    return ''
+  }
 }
 
 export const UPDATABLE_COLUMNS = new Set([
@@ -106,7 +136,8 @@ export function deserializeTask(row: TaskRow): TaskRecord {
     auto_start_agent: (row.auto_start_agent ?? 0) === 1,
     auto_complete_without_review: (row.auto_complete_without_review ?? 0) === 1,
     complete_at_source: row.complete_at_source == null ? null : row.complete_at_source === 1,
-    next_subtask_ids: parseJsonArray(row.next_subtask_ids)
+    next_subtask_ids: parseJsonArray(row.next_subtask_ids),
+    role: isCoordinatorRole(row.role) ? (row.role as TaskRole) : TASK_ROLE_TASK
   }
 }
 
@@ -155,6 +186,12 @@ export function deserializeAgent(row: AgentRow): AgentRecord {
   }
 }
 
+/** Trim a skill's preferred model; blank or missing means "no preference". */
+export function normalizePreferredModel(value: string | null | undefined): string | null {
+  const trimmed = typeof value === 'string' ? value.trim() : ''
+  return trimmed || null
+}
+
 export function deserializeSkill(row: SkillRow): SkillRecord {
   let tags: string[] = []
   try {
@@ -172,6 +209,7 @@ export function deserializeSkill(row: SkillRow): SkillRecord {
     uses: row.uses,
     last_used: row.last_used,
     tags,
+    preferred_model: normalizePreferredModel(row.preferred_model),
     created_at: row.created_at,
     updated_at: row.updated_at
   }

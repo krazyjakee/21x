@@ -28,6 +28,38 @@ export const VOICE_RUNTIME_PACKAGE = 'sherpa-onnx-node'
 /** Roughly how much disk the runtime and its platform binaries need. */
 export const VOICE_RUNTIME_APPROX_BYTES = 180 * 1024 * 1024
 
+/**
+ * The platforms `sherpa-onnx-node` ships prebuilt binaries for. Anything else
+ * would fail deep inside npm with a message nobody can act on, so it is
+ * refused up front with a plain one.
+ */
+const SUPPORTED_TARGETS: ReadonlySet<string> = new Set([
+  'darwin-arm64',
+  'darwin-x64',
+  'linux-x64',
+  'linux-arm64',
+  'win32-x64',
+])
+
+/**
+ * Says why this computer cannot run the local speech runtime, or null when it
+ * can. Checked before the install and before a model download, so the user
+ * hears it once, early, rather than after 650 MB.
+ */
+export function unsupportedHardwareReason(
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch
+): string | null {
+  const target = `${platform}-${arch}`
+  if (SUPPORTED_TARGETS.has(target)) return null
+  const names: Record<string, string> = { darwin: 'macOS', win32: 'Windows', linux: 'Linux' }
+  const os = names[platform] ?? platform
+  return (
+    `The local speech runtime has no build for ${os} on ${arch}. ` +
+    'Voice control needs macOS (Apple silicon or Intel), Windows x64, or Linux x64/arm64.'
+  )
+}
+
 export interface RuntimeProgress {
   stage: 'starting' | 'installing' | 'complete' | 'error'
   output: string
@@ -94,6 +126,12 @@ export async function installVoiceRuntime(
   onProgress: (progress: RuntimeProgress) => void
 ): Promise<VoiceRuntimeStatus> {
   onProgress({ stage: 'starting', output: 'Preparing the download…\n', percent: 0 })
+
+  const unsupported = unsupportedHardwareReason()
+  if (unsupported) {
+    onProgress({ stage: 'error', output: `${unsupported}\n`, percent: 100 })
+    throw new Error(unsupported)
+  }
 
   if (!(await isNpmAvailable())) {
     const message =

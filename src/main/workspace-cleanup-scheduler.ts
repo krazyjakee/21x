@@ -171,7 +171,7 @@ export class WorkspaceCleanupScheduler {
     const errors: string[] = []
 
     // Phase 1: Clean workspaces for completed tasks past retention
-    const allTasks = this.dbManager.getTasks()
+    const allTasks = this.dbManager.getTasks({ includeCoordinators: true })
     const completedTasks = allTasks.filter(
       (t) =>
         t.status === TaskStatus.Completed &&
@@ -378,7 +378,7 @@ export class WorkspaceCleanupScheduler {
     if (!this.isNodeModulesGcEnabled()) return { pruned: 0, errors: [] }
     const days = this.getNodeModulesGcDays()
     const dirs = listWorkspaceDirs() ?? []
-    const allTasks = this.dbManager.getTasks()
+    const allTasks = this.dbManager.getTasks({ includeCoordinators: true })
 
     let skip = await findWorkspacesWithLiveProcesses(WORKSPACES_DIR, dirs)
     if (skip === null) skip = activeStatusWorkspaceIds(allTasks)

@@ -1,6 +1,8 @@
-const DAY_NAMES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']
+import { SNOOZE_SOMEDAY } from '@shared/date-format'
 
-export const SNOOZE_SOMEDAY = '9999-12-31T00:00:00.000Z'
+export { SNOOZE_SOMEDAY }
+
+const DAY_NAMES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']
 
 export interface SnoozeOption {
   label: string

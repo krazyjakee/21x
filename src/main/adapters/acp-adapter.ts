@@ -81,6 +81,11 @@ interface AcpSession extends AcpTurnState, JsonRpcPeer {
   codexUseApiKey: boolean
   /** Auth identity used, surfaced in provider errors for diagnostics */
   codexAuthSummary: string
+  /**
+   * System prompt still to deliver. ACP's session/new has no system-prompt
+   * field, so it rides along with the first prompt of a new session.
+   */
+  pendingSystemPrompt?: string
 }
 
 /**
@@ -89,6 +94,12 @@ interface AcpSession extends AcpTurnState, JsonRpcPeer {
  */
 const MAX_PERMANENT_MESSAGES = 1000
 const MAX_HISTORY_OUTPUT_CHARS = 100_000
+
+/** Prefixes the first prompt of a session with its system prompt, fenced so the agent can tell them apart. */
+export function withSystemPrompt(systemPrompt: string | undefined, promptText: string): string {
+  if (!systemPrompt) return promptText
+  return `<system_instructions>\n${systemPrompt}\n</system_instructions>\n\n${promptText}`
+}
 
 export class AcpAdapter implements CodingAgentAdapter {
   private agentType: AcpAgentType
@@ -276,6 +287,7 @@ export class AcpAdapter implements CodingAgentAdapter {
     })
 
     const acpSessionId = this.extractAcpSessionId(result)
+    if (config.systemPrompt?.trim()) session.pendingSystemPrompt = config.systemPrompt.trim()
     if (acpSessionId) {
       session.acpSessionId = acpSessionId
       this.sessions.delete(sessionId)
@@ -388,13 +400,17 @@ export class AcpAdapter implements CodingAgentAdapter {
       session.status = SessionStatusType.ERROR
       session.lastError = `Failed to send prompt: ${err.message}`
     }
+    // The transcript keeps the user's own text; only the wire copy carries
+    // the system prompt, once, at the start of a new session.
+    const wireText = withSystemPrompt(session.pendingSystemPrompt, promptText)
+    session.pendingSystemPrompt = undefined
     const sent = writeJsonRpc(session, {
       jsonrpc: '2.0',
       id,
       method: 'session/prompt',
       params: {
         sessionId: session.acpSessionId,
-        prompt: [{ type: 'text', text: promptText }]
+        prompt: [{ type: 'text', text: wireText }]
       }
     }, this.label, failPrompt)
     if (!sent) failPrompt(new Error('agent process is not running'))
@@ -521,21 +537,6 @@ export class AcpAdapter implements CodingAgentAdapter {
 
     Object.assign(session, savedTurnState)
     return groupPartsIntoMessages(allParts)
-  }
-
-  async registerMcpServer(
-    _serverName: string,
-    _mcpConfig: {
-      type: 'local' | 'remote'
-      command?: string[]
-      args?: string[]
-      url?: string
-      headers?: Record<string, string>
-      environment?: Record<string, string>
-    },
-    _workspaceDir?: string
-  ): Promise<void> {
-    // MCP servers are passed to session/new and session/load instead.
   }
 
   async checkHealth(): Promise<{ available: boolean; reason?: string }> {

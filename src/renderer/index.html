@@ -3,6 +3,33 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      Content-Security-Policy — defence in depth for the renderer, which holds the
+      whole preload API (terminals, shell, files). What each directive is for:
+
+        script-src   'self' loads the bundle (and, in dev, the Vite HMR client).
+                     No 'unsafe-eval': eval/new Function stay blocked.
+                     blob: is the voice AudioWorklet (see lib/voice-capture.ts).
+                     'unsafe-inline' is required, not optional: the pre-paint theme
+                     script below, the Vite/react-refresh dev preamble, and — the
+                     reason it cannot be swapped for a hash — the sandboxed
+                     `srcdoc` artifact viewer (ArtifactHtmlFrame), which inherits
+                     this policy and would lose its own scripts. Adding a hash or
+                     nonce makes the browser ignore 'unsafe-inline' entirely.
+                     Serving artifact HTML from its own protocol would let this
+                     tighten to a hash later.
+        style-src    Tailwind/Vite inject <style>, xterm and Radix set inline styles.
+        font-src     Web fonts come from jsDelivr (styles/globals.css).
+        img-src      Attachments (app-attachment:), pasted/downscaled images (data:,
+                     blob:) and remote images in markdown/PR avatars.
+        connect-src  Only the app itself plus the dev server's HMR socket.
+        frame-src    Canvas web-page panels embed arbitrary sites.
+        worker-src   blob: workers; object-src/base-uri/form-action are locked down.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: blob: app-attachment: https: http:; media-src 'self' data: blob:; connect-src 'self' data: blob: app-attachment: ws://localhost:* wss://localhost:* ws://127.0.0.1:* http://localhost:* http://127.0.0.1:*; frame-src 'self' data: blob: https: http:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'"
+    />
     <title>20x</title>
     <script>
       // Pre-paint theme resolution — avoids a flash of the wrong theme before React mounts.

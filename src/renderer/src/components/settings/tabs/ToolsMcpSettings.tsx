@@ -3,6 +3,7 @@ import { Plus, Loader2, Wifi, WifiOff, RefreshCw, Edit3, Trash2, KeyRound } from
 import { Button } from '@/components/ui/Button'
 import { SettingsSection } from '../SettingsSection'
 import { McpServerFormDialog } from '../forms/McpServerFormDialog'
+import { GlobalCliMcpSection } from '../GlobalCliMcpSection'
 import { useMcpStore } from '@/stores/mcp-store'
 import type { McpServer, CreateMcpServerDTO } from '@/types'
 
@@ -285,6 +286,9 @@ export function ToolsMcpSettings() {
         oauthConnected={mcpDialog.server ? oauthStatuses[mcpDialog.server.id]?.connected : undefined}
         oauth={oauthCallbacks}
       />
+
+      {/* Global config of the installed CLIs; separate from 20x's own server list above. */}
+      <GlobalCliMcpSection />
     </>
   )
 }

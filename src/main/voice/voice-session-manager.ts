@@ -38,6 +38,7 @@ import {
   detectVoiceRuntime,
   installVoiceRuntime,
   removeVoiceRuntime,
+  unsupportedHardwareReason,
 } from './voice-runtime-installer'
 import { VoiceSpeechService, type VoiceAnswerPart } from './voice-speech-service'
 
@@ -798,8 +799,16 @@ export class VoiceSessionManager {
     return this.listModels()
   }
 
+  /**
+   * Downloads a catalogue model and makes it the one in use. This is also the
+   * migration path off a legacy model: the new model is loaded, the old one
+   * stays on disk until the user deletes it, so nothing is lost if the
+   * download fails half-way.
+   */
   async installModel(id: string): Promise<VoiceModelState> {
     this.cancelTurn()
+    const unsupported = unsupportedHardwareReason()
+    if (unsupported) throw new Error(unsupported)
     const state = await this.models.install(id)
     this.options.db.setSetting(VOICE_SETTING_KEYS.modelId, id)
     await this.prepareEngine()
@@ -811,7 +820,9 @@ export class VoiceSessionManager {
     await this.models.remove(id)
     if (this.activeModelId() === id) {
       // Fall back to another model that is on disk, so voice keeps working.
-      const remaining = (await this.models.list()).find((m) => m.installed && m.id !== id)
+      // A current model is preferred over a legacy one.
+      const installed = (await this.models.list()).filter((m) => m.installed && m.id !== id)
+      const remaining = installed.find((m) => !m.legacy) ?? installed[0]
       this.options.db.setSetting(VOICE_SETTING_KEYS.modelId, remaining?.id ?? DEFAULT_VOICE_MODEL_ID)
       this.worker.unload()
     }

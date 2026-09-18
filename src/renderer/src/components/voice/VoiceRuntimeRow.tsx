@@ -41,9 +41,10 @@ export function VoiceRuntimeRow({ variant = 'full' }: VoiceRuntimeRowProps) {
   const busy = install.running
   const compact = variant === 'compact'
   // One action downloads everything voice needs, so the size shown is the total.
+  // An older model on disk counts: setup does not fetch a second model over it.
   const pendingModelBytes = models.some((m) => m.installed)
     ? 0
-    : (models[0]?.sizeBytes ?? 0)
+    : ((models.find((m) => !m.legacy) ?? models[0])?.sizeBytes ?? 0)
   const totalBytes = (runtime.installed ? 0 : runtime.sizeBytes) + pendingModelBytes
 
   return (
@@ -66,10 +67,10 @@ export function VoiceRuntimeRow({ variant = 'full' }: VoiceRuntimeRowProps) {
             {complete
               ? `Ready to use${runtime.version ? ` — runtime v${runtime.version}` : ''}. Switch it on below.`
               : runtime.installed
-                ? `The speech runtime is installed. One more step downloads the English speech model (about ${formatBytes(
+                ? `The speech runtime is installed. One more step downloads the speech model, Parakeet v3 (about ${formatBytes(
                     pendingModelBytes
                   )}).`
-                : `Dictate and run task commands by speech. This downloads the speech runtime and the English model, about ${formatBytes(
+                : `Dictate and run task commands by speech. This downloads the speech runtime and the Parakeet v3 speech model, about ${formatBytes(
                     totalBytes
                   )} in total, and only if you ask for it.`}
           </p>

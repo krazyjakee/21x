@@ -8,7 +8,7 @@ export interface SkillSyncResult {
   unchanged: string[]
 }
 
-interface ParsedSkill {
+export interface ParsedSkill {
   name: string
   description: string
   content: string
@@ -16,6 +16,8 @@ interface ParsedSkill {
   uses?: number
   last_used?: string | null
   tags?: string[]
+  /** undefined = not in the file (leave as is); null = explicitly cleared. */
+  preferred_model?: string | null
 }
 
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/
@@ -25,7 +27,7 @@ export function emptySkillSyncResult(): SkillSyncResult {
 }
 
 /** Parses `---\nname: ...\ndescription: ...\n---\n\ncontent` plus optional metadata. */
-function parseSkillMd(raw: string): ParsedSkill | null {
+export function parseSkillMd(raw: string): ParsedSkill | null {
   const match = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n\n?([\s\S]*)$/)
   if (!match) return null
 
@@ -50,6 +52,12 @@ function parseSkillMd(raw: string): ParsedSkill | null {
   const usesMatch = frontmatter.match(/^uses:\s*(\d+)$/m)
   const lastUsedMatch = frontmatter.match(/^lastUsed:\s*(.+)$/m)
   const tagsMatch = frontmatter.match(/^tags:\s*\n((?:  - .+\n?)+)/m)
+  const modelMatch = frontmatter.match(/^preferred_model:[ \t]*(.*)$/m)
+  let preferredModel: string | null | undefined
+  if (modelMatch) {
+    const value = stripQuotes(modelMatch[1])
+    preferredModel = value && value !== 'null' && value !== '~' ? value : null
+  }
 
   return {
     name,
@@ -60,7 +68,8 @@ function parseSkillMd(raw: string): ParsedSkill | null {
     last_used: lastUsedMatch ? lastUsedMatch[1].trim() : undefined,
     tags: tagsMatch
       ? tagsMatch[1].split('\n').map(line => line.trim().replace(/^- /, '')).filter(Boolean)
-      : undefined
+      : undefined,
+    preferred_model: preferredModel
   }
 }
 
@@ -134,7 +143,8 @@ export function syncSkillsFromDirectory(db: DatabaseManager, workspaceDir: strin
           confidence: parsed.confidence,
           uses: parsed.uses,
           last_used: parsed.last_used,
-          tags: parsed.tags
+          tags: parsed.tags,
+          preferred_model: parsed.preferred_model ?? null
         })
         result.created.push(parsed.name)
         continue
@@ -146,6 +156,7 @@ export function syncSkillsFromDirectory(db: DatabaseManager, workspaceDir: strin
         || (parsed.uses !== undefined && existing.uses !== parsed.uses)
         || (parsed.last_used !== undefined && existing.last_used !== parsed.last_used)
         || (parsed.tags !== undefined && JSON.stringify(existing.tags) !== JSON.stringify(parsed.tags))
+        || (parsed.preferred_model !== undefined && existing.preferred_model !== parsed.preferred_model)
 
       if (changed) {
         db.updateSkill(existing.id, {
@@ -154,7 +165,8 @@ export function syncSkillsFromDirectory(db: DatabaseManager, workspaceDir: strin
           ...(parsed.confidence !== undefined && { confidence: parsed.confidence }),
           ...(parsed.uses !== undefined && { uses: parsed.uses }),
           ...(parsed.last_used !== undefined && { last_used: parsed.last_used }),
-          ...(parsed.tags !== undefined && { tags: parsed.tags })
+          ...(parsed.tags !== undefined && { tags: parsed.tags }),
+          ...(parsed.preferred_model !== undefined && { preferred_model: parsed.preferred_model })
         })
         result.updated.push(parsed.name)
       } else {

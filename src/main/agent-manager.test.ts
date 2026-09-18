@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest'
 import { AgentManager } from './agent-manager'
+import { FakeAdapter } from '../../test/helpers/fake-adapter'
 import { shouldEnableTillDone } from './agent-manager/session-config'
 import { isDelegationTool } from './agent-manager/watchdogs'
 import type { TaskRecord } from './database'
@@ -72,6 +73,7 @@ vi.mock('./secret-broker', () => ({
 import { mkdir as mkdirAsync, writeFile as writeFileAsync } from 'fs/promises'
 import { existsSync, copyFileSync, mkdirSync, readFileSync } from 'fs'
 import { AcpAdapter } from './adapters/acp-adapter'
+import { ClaudeCodeAdapter } from './adapters/claude-code-adapter'
 import { CodexAppServerAdapter } from './adapters/codex-app-server-adapter'
 import { PiAdapter } from './adapters/pi-adapter'
 import { getTaskApiPort } from './task-api-server'
@@ -101,6 +103,7 @@ function makeSkillRecord(overrides: Partial<{
     is_deleted: false,
     created_at: '2026-03-01',
     updated_at: '2026-03-06',
+    preferred_model: null as string | null,
     ...overrides,
   }
 }
@@ -134,15 +137,41 @@ function createMockDb(agentConfig: Record<string, unknown> = {}) {
     getSetting: vi.fn(() => null),
     getWorkspaceDir: vi.fn(() => '/tmp/test-workspace'),
     updateTask: vi.fn(),
+    getMcpServers: vi.fn(() => []),
+    getSecretsWithValues: vi.fn(() => []),
+    getTranscriptParts: vi.fn(() => []),
+    upsertTranscriptParts: vi.fn(() => ({ maxRev: 0, changedPartIds: [] })),
   } as unknown as ConstructorParameters<typeof AgentManager>[0]
 }
 
 let manager: AgentManager
 
+/**
+ * Routes 'claude-code' agents to the fake through the normal adapter factory
+ * (the mocked ClaudeCodeAdapter constructor returns it), so AgentManager
+ * resolves it exactly as it would a real backend.
+ */
+function installFakeAdapter(fake: FakeAdapter): void {
+  ;(ClaudeCodeAdapter as unknown as Mock).mockImplementation(function () {
+    return fake
+  })
+}
+
+/** Lets fire-and-forget work (background sends, event-loop yields) settle. */
+async function flushEventLoop(turns = 3): Promise<void> {
+  for (let i = 0; i < turns; i++) {
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+}
+
+afterEach(() => {
+  // A fake installed by one test must not leak into the next one's factory.
+  ;(ClaudeCodeAdapter as unknown as Mock).mockReset()
+})
+
 describe('AgentManager skill file paths', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    delete process.env.CODEX_APP_SERVER
   })
 
   describe('getAdapter', () => {
@@ -155,18 +184,6 @@ describe('AgentManager skill file paths', () => {
       expect(adapter).toBeInstanceOf(CodexAppServerAdapter)
       expect(CodexAppServerAdapter).toHaveBeenCalledOnce()
       expect(AcpAdapter).not.toHaveBeenCalled()
-    })
-
-    it('keeps an explicit ACP fallback for Codex agents', () => {
-      process.env.CODEX_APP_SERVER = '0'
-      const mockDb = createMockDb({ coding_agent: 'codex' })
-      manager = new AgentManager(mockDb)
-
-      const adapter = (manager as any).getAdapter('agent-1')
-
-      expect(adapter).toBeInstanceOf(AcpAdapter)
-      expect(AcpAdapter).toHaveBeenCalledWith('codex')
-      expect(CodexAppServerAdapter).not.toHaveBeenCalled()
     })
 
     it('uses ACP for Cursor agents', () => {
@@ -192,7 +209,7 @@ describe('AgentManager skill file paths', () => {
 
   describe('shouldEnableTillDone', () => {
     it('disables tillDone for Mastermind sessions', () => {
-      expect(shouldEnableTillDone('mastermind-session', null)).toBe(false)
+      expect(shouldEnableTillDone('mastermind-task-row', { role: 'mastermind' } as TaskRecord)).toBe(false)
     })
 
     it('disables tillDone for non-work orchestration sessions', () => {
@@ -760,29 +777,60 @@ describe('AgentManager OS notifications', () => {
     notificationInstances.length = 0
   })
 
-  function createManagerWithWindow(opts: { isFocused: boolean; isDestroyed?: boolean }) {
-    const mockDb = createMockDb({})
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  /**
+   * A manager whose 'claude-code' agent runs on a FakeAdapter, with a main
+   * window in the given focus state. Status transitions come from the public
+   * session API, the way a real session produces them.
+   */
+  function createManagerWithWindow(
+    opts: { isFocused: boolean },
+    mockDb: ConstructorParameters<typeof AgentManager>[0] = createMockDb({ coding_agent: 'claude-code' })
+  ) {
+    const fake = new FakeAdapter()
+    installFakeAdapter(fake)
     const mgr = new AgentManager(mockDb)
     const mockWindow = {
-      isDestroyed: vi.fn(() => opts.isDestroyed ?? false),
+      isDestroyed: vi.fn(() => false),
       isFocused: vi.fn(() => opts.isFocused),
       show: vi.fn(),
       focus: vi.fn(),
       webContents: { send: vi.fn() },
     }
     mgr.setMainWindow(mockWindow as any)
-    return { mgr, mockWindow }
+    return { mgr, mockWindow, fake }
   }
 
-  it('shows notification when status transitions from working to idle and window is not focused', () => {
+  /** Starts a session (status: working) and aborts it (status: idle). */
+  async function runSessionToIdle(mgr: AgentManager, taskId = 'task-1'): Promise<string> {
+    const sessionId = await mgr.startSession('agent-1', taskId, '/tmp/ws', true)
+    expect(mgr.getSessionStatus(sessionId)?.status).toBe(SessionStatus.WORKING)
+    await mgr.abortSession(sessionId)
+    expect(mgr.getSessionStatus(sessionId)?.status).toBe(SessionStatus.IDLE)
+    return sessionId
+  }
+
+  function subtaskDb(parentStatus: TaskStatus) {
+    const mockDb = createMockDb({ coding_agent: 'claude-code' })
+    mockDb.getTask = vi.fn((id: string) => {
+      if (id === 'subtask-1') {
+        return { id: 'subtask-1', title: 'Subtask', parent_task_id: 'parent-1', repos: [], skill_ids: [] }
+      }
+      if (id === 'parent-1') {
+        return { id: 'parent-1', title: 'Parent Task', status: parentStatus, repos: [], skill_ids: [] }
+      }
+      return null
+    }) as any
+    return mockDb
+  }
+
+  it('shows notification when the agent stops working and the window is not focused', async () => {
     const { mgr } = createManagerWithWindow({ isFocused: false })
 
-    ;(mgr as any).sendToRenderer('agent:status', {
-      sessionId: 's1', agentId: 'a1', taskId: 'task-1', status: SessionStatus.WORKING
-    })
-    ;(mgr as any).sendToRenderer('agent:status', {
-      sessionId: 's1', agentId: 'a1', taskId: 'task-1', status: SessionStatus.IDLE
-    })
+    await runSessionToIdle(mgr)
 
     expect(notificationInstances).toHaveLength(1)
     expect(notificationInstances[0].opts.title).toBe('Agent finished')
@@ -790,122 +838,65 @@ describe('AgentManager OS notifications', () => {
     expect(notificationInstances[0].show).toHaveBeenCalled()
   })
 
-  it('shows notification when status transitions from working to waiting_approval and window is not focused', () => {
-    const { mgr } = createManagerWithWindow({ isFocused: false })
+  it('shows notification when the agent waits for approval and the window is not focused', async () => {
+    // Only the poll coordinator's timers are faked; setImmediate stays real so
+    // the session start path (which yields to the event loop) runs unassisted.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    const { mgr, fake } = createManagerWithWindow({ isFocused: false })
+    const sessionId = await mgr.startSession('agent-1', 'task-1', '/tmp/ws', true)
 
-    ;(mgr as any).sendToRenderer('agent:status', {
-      sessionId: 's1', agentId: 'a1', taskId: 'task-1', status: SessionStatus.WORKING
-    })
-    ;(mgr as any).sendToRenderer('agent:status', {
-      sessionId: 's1', agentId: 'a1', taskId: 'task-1', status: SessionStatus.WAITING_APPROVAL
-    })
+    fake.setStatus(SessionStatusType.WAITING_APPROVAL)
+    await vi.advanceTimersByTimeAsync(1000) // first poll cycle
+    await flushEventLoop()
 
+    expect(mgr.getSessionStatus(sessionId)?.status).toBe(SessionStatus.WAITING_APPROVAL)
     expect(notificationInstances).toHaveLength(1)
     expect(notificationInstances[0].opts.title).toBe('Agent needs approval')
     expect(notificationInstances[0].opts.body).toContain('Test Task')
     expect(notificationInstances[0].show).toHaveBeenCalled()
   })
 
-  it('does NOT show notification when window is focused', () => {
+  it('does NOT show notification when window is focused', async () => {
     const { mgr } = createManagerWithWindow({ isFocused: true })
 
-    ;(mgr as any).sendToRenderer('agent:status', {
-      sessionId: 's1', agentId: 'a1', taskId: 'task-1', status: SessionStatus.WORKING
-    })
-    ;(mgr as any).sendToRenderer('agent:status', {
-      sessionId: 's1', agentId: 'a1', taskId: 'task-1', status: SessionStatus.IDLE
-    })
+    await runSessionToIdle(mgr)
 
     expect(notificationInstances).toHaveLength(0)
   })
 
-  it('does NOT show notification when status does not transition from working', () => {
+  it('does NOT notify again while the session stays idle', async () => {
     const { mgr } = createManagerWithWindow({ isFocused: false })
+    const sessionId = await runSessionToIdle(mgr)
+    expect(notificationInstances).toHaveLength(1)
 
-    ;(mgr as any).sendToRenderer('agent:status', {
-      sessionId: 's1', agentId: 'a1', taskId: 'task-1', status: SessionStatus.IDLE
-    })
-    ;(mgr as any).sendToRenderer('agent:status', {
-      sessionId: 's1', agentId: 'a1', taskId: 'task-1', status: SessionStatus.IDLE
-    })
+    // idle -> idle is not a transition from working.
+    await mgr.abortSession(sessionId)
+
+    expect(notificationInstances).toHaveLength(1)
+  })
+
+  it('does NOT show notification for subtask of a completed parent task', async () => {
+    const { mgr } = createManagerWithWindow({ isFocused: false }, subtaskDb(TaskStatus.Completed))
+
+    await runSessionToIdle(mgr, 'subtask-1')
 
     expect(notificationInstances).toHaveLength(0)
   })
 
-  it('does NOT show notification for subtask of a completed parent task', () => {
-    const mockDb = createMockDb({})
-    // Override getTask to return a subtask with a completed parent
-    mockDb.getTask = vi.fn((id: string) => {
-      if (id === 'subtask-1') {
-        return { id: 'subtask-1', title: 'Subtask', parent_task_id: 'parent-1', repos: [], skill_ids: [] }
-      }
-      if (id === 'parent-1') {
-        return { id: 'parent-1', title: 'Parent Task', status: TaskStatus.Completed, repos: [], skill_ids: [] }
-      }
-      return null
-    }) as any
-    const mgr = new AgentManager(mockDb)
-    const mockWindow = {
-      isDestroyed: vi.fn(() => false),
-      isFocused: vi.fn(() => false),
-      show: vi.fn(),
-      focus: vi.fn(),
-      webContents: { send: vi.fn() },
-    }
-    mgr.setMainWindow(mockWindow as any)
+  it('shows notification for subtask of a non-completed parent task', async () => {
+    const { mgr } = createManagerWithWindow({ isFocused: false }, subtaskDb(TaskStatus.AgentWorking))
 
-    ;(mgr as any).sendToRenderer('agent:status', {
-      sessionId: 's1', agentId: 'a1', taskId: 'subtask-1', status: SessionStatus.WORKING
-    })
-    ;(mgr as any).sendToRenderer('agent:status', {
-      sessionId: 's1', agentId: 'a1', taskId: 'subtask-1', status: SessionStatus.IDLE
-    })
-
-    expect(notificationInstances).toHaveLength(0)
-  })
-
-  it('shows notification for subtask of a non-completed parent task', () => {
-    const mockDb = createMockDb({})
-    mockDb.getTask = vi.fn((id: string) => {
-      if (id === 'subtask-1') {
-        return { id: 'subtask-1', title: 'Subtask', parent_task_id: 'parent-1', repos: [], skill_ids: [] }
-      }
-      if (id === 'parent-1') {
-        return { id: 'parent-1', title: 'Parent Task', status: TaskStatus.AgentWorking, repos: [], skill_ids: [] }
-      }
-      return null
-    }) as any
-    const mgr = new AgentManager(mockDb)
-    const mockWindow = {
-      isDestroyed: vi.fn(() => false),
-      isFocused: vi.fn(() => false),
-      show: vi.fn(),
-      focus: vi.fn(),
-      webContents: { send: vi.fn() },
-    }
-    mgr.setMainWindow(mockWindow as any)
-
-    ;(mgr as any).sendToRenderer('agent:status', {
-      sessionId: 's1', agentId: 'a1', taskId: 'subtask-1', status: SessionStatus.WORKING
-    })
-    ;(mgr as any).sendToRenderer('agent:status', {
-      sessionId: 's1', agentId: 'a1', taskId: 'subtask-1', status: SessionStatus.IDLE
-    })
+    await runSessionToIdle(mgr, 'subtask-1')
 
     expect(notificationInstances).toHaveLength(1)
     expect(notificationInstances[0].opts.title).toBe('Agent finished')
     expect(notificationInstances[0].opts.body).toContain('Subtask')
   })
 
-  it('clicking notification brings the window to focus', () => {
+  it('clicking notification brings the window to focus', async () => {
     const { mgr, mockWindow } = createManagerWithWindow({ isFocused: false })
 
-    ;(mgr as any).sendToRenderer('agent:status', {
-      sessionId: 's1', agentId: 'a1', taskId: 'task-1', status: SessionStatus.WORKING
-    })
-    ;(mgr as any).sendToRenderer('agent:status', {
-      sessionId: 's1', agentId: 'a1', taskId: 'task-1', status: SessionStatus.IDLE
-    })
+    await runSessionToIdle(mgr)
 
     expect(notificationInstances).toHaveLength(1)
     const clickHandler = notificationInstances[0]._listeners.get('click')
@@ -1634,30 +1625,135 @@ describe('AgentManager transitionToIdle — source task completion after feedbac
 })
 
 describe('AgentManager shutdown', () => {
-  it('stopAllSessions waits for all stopSession promises', async () => {
-    const mockDb = createMockDb({})
-    const mgr = new AgentManager(mockDb)
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
 
-    ;(mgr as any).sessions.set('s1', { taskId: 'task-1' })
-    ;(mgr as any).sessions.set('s2', { taskId: 'task-2' })
-
+  it('stopAllSessions destroys every live session, waits for each, and keeps task status', async () => {
+    const fake = new FakeAdapter({ sessionIds: ['s1', 's2'] })
     let pendingStops = 0
-    vi.spyOn(mgr, 'stopSession').mockImplementation(async () => {
+    fake.destroySession.mockImplementation(async () => {
       pendingStops += 1
-      await new Promise(resolve => setTimeout(resolve, 0))
+      await new Promise((resolve) => setTimeout(resolve, 0))
       pendingStops -= 1
     })
+    installFakeAdapter(fake)
+    // Two parallel sessions need an agent limit of at least 2 (admission control).
+    const mockDb = createMockDb({ coding_agent: 'claude-code', max_parallel_sessions: 2 })
+    const mgr = new AgentManager(mockDb)
+    await mgr.startSession('agent-1', 'task-1', '/tmp/ws', true)
+    await mgr.startSession('agent-1', 'task-2', '/tmp/ws', true)
+    vi.mocked(mockDb.updateTask).mockClear()
 
     await mgr.stopAllSessions()
 
-    expect(mgr.stopSession).toHaveBeenCalledTimes(2)
-    expect(mgr.stopSession).toHaveBeenCalledWith('s1', false)
-    expect(mgr.stopSession).toHaveBeenCalledWith('s2', false)
+    expect(fake.destroySession).toHaveBeenCalledTimes(2)
+    expect(fake.destroySession.mock.calls.map(([id]) => id).sort()).toEqual(['s1', 's2'])
     expect(pendingStops).toBe(0)
+    expect(mgr.getSessionStatus('s1')).toBeNull()
+    expect(mgr.getSessionStatus('s2')).toBeNull()
+    // Shutdown is not a user stop: no task goes back to Not Started.
+    expect(mockDb.updateTask).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ status: TaskStatus.NotStarted })
+    )
   })
 })
 
-describe('AgentManager session ID re-keying redirect', () => {
+describe('AgentManager session ID re-keying (public session API)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // Only the poll coordinator's timers are faked; setImmediate stays real so
+    // the session start path (which yields to the event loop) runs unassisted.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  /**
+   * Starts a session under the adapter's temporary id, then lets the first
+   * poll cycle deliver a part carrying the backend's real id, which re-keys
+   * the session. The renderer may still hold the temporary id afterwards.
+   */
+  async function startRekeyedSession() {
+    const fake = new FakeAdapter({ sessionIds: ['temp-id'] })
+    installFakeAdapter(fake)
+    const mockDb = createMockDb({ coding_agent: 'claude-code' })
+    const mgr = new AgentManager(mockDb)
+
+    const sessionId = await mgr.startSession('agent-1', 'task-1', '/tmp/ws', true)
+    expect(sessionId).toBe('temp-id')
+
+    fake.enqueueParts({ id: 'part-1', type: MessagePartType.TEXT, text: 'working on it', realSessionId: 'real-id' })
+    await vi.advanceTimersByTimeAsync(1000) // first poll cycle
+    await flushEventLoop()
+    expect(mgr.findSessionByTaskId('task-1')?.sessionId).toBe('real-id')
+
+    return { mgr, fake, mockDb }
+  }
+
+  it('records the real id as the resume anchor and keeps resolving the stale id', async () => {
+    const { mgr, mockDb } = await startRekeyedSession()
+
+    expect(mockDb.updateTask).toHaveBeenCalledWith('task-1', { session_id: 'real-id' })
+    expect(mgr.getSessionStatus('temp-id')).toEqual({ status: 'working', agentId: 'agent-1', taskId: 'task-1' })
+  })
+
+  it('respondToPermission resolves a re-keyed session via the stale id', async () => {
+    const { mgr, fake } = await startRekeyedSession()
+
+    await expect(mgr.respondToPermission('temp-id', true, 'Yes')).resolves.toBeUndefined()
+
+    expect(fake.respondToApproval).toHaveBeenCalledWith('real-id', true, 'approved', undefined)
+  })
+
+  it('respondToPermission still throws for truly unknown session IDs', async () => {
+    const { mgr } = await startRekeyedSession()
+
+    await expect(mgr.respondToPermission('unknown-id', true)).rejects.toThrow('Session not found: unknown-id')
+  })
+
+  it('abortSession aborts the re-keyed backend session and marks it idle', async () => {
+    const { mgr, fake } = await startRekeyedSession()
+
+    await mgr.abortSession('temp-id')
+
+    expect(fake.abortPrompt).toHaveBeenCalledWith('real-id', expect.objectContaining({ taskId: 'task-1' }))
+    expect(mgr.getSessionStatus('temp-id')?.status).toBe('idle')
+    expect(mgr.getSessionStatus('real-id')?.status).toBe('idle')
+  })
+
+  it('sendMessage delivers to the re-keyed session instead of starting a new one', async () => {
+    const { mgr, fake } = await startRekeyedSession()
+
+    const result = await mgr.sendMessage('temp-id', 'hello again')
+    await flushEventLoop()
+
+    expect(result.newSessionId).toBeUndefined()
+    expect(fake.createSession).toHaveBeenCalledTimes(1)
+    expect(fake.sendPrompt).toHaveBeenCalledTimes(1)
+    const [promptSessionId, parts] = fake.sendPrompt.mock.calls[0]
+    expect(promptSessionId).toBe('real-id')
+    expect(parts[0].text).toContain('hello again')
+  })
+
+  it('stopSession destroys the backend session and forgets the stale id', async () => {
+    const { mgr, fake, mockDb } = await startRekeyedSession()
+
+    await mgr.stopSession('real-id')
+
+    expect(fake.destroySession).toHaveBeenCalledWith('real-id', expect.objectContaining({ taskId: 'task-1' }))
+    expect(mgr.getSessionStatus('temp-id')).toBeNull()
+    expect(mgr.getSessionStatus('real-id')).toBeNull()
+    expect(mgr.findSessionByTaskId('task-1')).toBeUndefined()
+    // A user stop puts the task back to Not Started.
+    expect(mockDb.updateTask).toHaveBeenCalledWith('task-1', { status: TaskStatus.NotStarted })
+  })
+})
+
+describe('AgentManager permission and question routing', () => {
   function createManagerWithSession() {
     const mockDb = {
       getTask: vi.fn(() => ({ id: 'task-1', title: 'Test', agent_id: 'agent-1' })),
@@ -1694,24 +1790,6 @@ describe('AgentManager session ID re-keying redirect', () => {
 
     return { mgr, session }
   }
-
-  it('respondToPermission resolves re-keyed session via redirect map', async () => {
-    const { mgr, session } = createManagerWithSession()
-
-    // Simulate re-keying: move session from temp-id to real-id
-    ;(mgr as any).sessions.delete('temp-id')
-    ;(mgr as any).sessions.set('real-id', session)
-    ;(mgr as any).sessionIdRedirects.set('temp-id', 'real-id')
-
-    // This would throw "Session not found: temp-id" before the fix
-    await expect(mgr.respondToPermission('temp-id', true, 'Yes')).resolves.not.toThrow()
-  })
-
-  it('respondToPermission still throws for truly unknown session IDs', async () => {
-    const { mgr } = createManagerWithSession()
-
-    await expect(mgr.respondToPermission('unknown-id', true)).rejects.toThrow('Session not found: unknown-id')
-  })
 
   it('routes an explicit question response to the question method when the adapter also handles permissions', async () => {
     const { mgr, session } = createManagerWithSession()
@@ -1823,57 +1901,6 @@ describe('AgentManager session ID re-keying redirect', () => {
         update: true,
       },
     })
-  })
-
-  it('abortSession resolves re-keyed session via redirect map', async () => {
-    const { mgr, session } = createManagerWithSession()
-
-    // Simulate re-keying
-    ;(mgr as any).sessions.delete('temp-id')
-    ;(mgr as any).sessions.set('real-id', session)
-    ;(mgr as any).sessionIdRedirects.set('temp-id', 'real-id')
-
-    vi.spyOn(mgr as any, 'stopAdapterPolling').mockImplementation(() => undefined)
-    vi.spyOn(mgr as any, 'getAdapter').mockReturnValue(session.adapter)
-    vi.spyOn(mgr as any, 'buildSessionConfig').mockResolvedValue({})
-
-    // Should not silently return — should actually abort the re-keyed session
-    await mgr.abortSession('temp-id')
-    expect(session.status).toBe('idle')
-  })
-
-  it('sendMessage resolves re-keyed session via redirect map', async () => {
-    const { mgr, session } = createManagerWithSession()
-
-    // Simulate re-keying
-    ;(mgr as any).sessions.delete('temp-id')
-    ;(mgr as any).sessions.set('real-id', session)
-    ;(mgr as any).sessionIdRedirects.set('temp-id', 'real-id')
-
-    const doSendSpy = vi.spyOn(mgr as any, 'doSendAdapterMessage').mockResolvedValue(undefined)
-
-    const result = await mgr.sendMessage('temp-id', 'hello')
-    expect(doSendSpy).toHaveBeenCalledOnce()
-    // Should not return a newSessionId since session was found via redirect
-    expect(result.newSessionId).toBeUndefined()
-  })
-
-  it('stopSession cleans up redirect entries pointing to destroyed session', async () => {
-    const { mgr, session } = createManagerWithSession()
-
-    // Set up redirect and session under real-id
-    ;(mgr as any).sessions.delete('temp-id')
-    ;(mgr as any).sessions.set('real-id', session)
-    ;(mgr as any).sessionIdRedirects.set('temp-id', 'real-id')
-
-    vi.spyOn(mgr as any, 'stopAdapterPolling').mockImplementation(() => undefined)
-    vi.spyOn(mgr as any, 'getAdapter').mockReturnValue(null)
-
-    await mgr.stopSession('real-id')
-
-    // Redirect should be cleaned up
-    expect((mgr as any).sessionIdRedirects.has('temp-id')).toBe(false)
-    expect((mgr as any).sessions.has('real-id')).toBe(false)
   })
 
   it('cleanupHeartbeatSession fully tears down heartbeat sessions without resetting task status', async () => {
@@ -3437,7 +3464,7 @@ describe('AgentManager event-driven parent wake-up', () => {
     expect(wakeSpy).toHaveBeenCalledOnce()
   })
 
-  it('does not follow successor edges until the subtask is completed', async () => {
+  it('does not follow successor edges from review when the chain has not opted in', async () => {
     const inReview = {
       id: 'sub-1', title: 'Child A', status: TaskStatus.ReadyForReview,
       parent_task_id: 'parent-1', next_subtask_ids: ['sub-2']
@@ -3449,6 +3476,62 @@ describe('AgentManager event-driven parent wake-up', () => {
     await mgr.notifyParentOfSubtaskCompletion('parent-1', 'sub-1')
 
     expect(startSpy).not.toHaveBeenCalled()
+  })
+
+  it('follows successor edges from ready_for_review when the parent runs unattended', async () => {
+    const inReview = {
+      id: 'sub-1', title: 'Child A', status: TaskStatus.ReadyForReview,
+      parent_task_id: 'parent-1', next_subtask_ids: ['sub-2']
+    }
+    const successor = { id: 'sub-2', title: 'Child B', status: TaskStatus.NotStarted, parent_task_id: 'parent-1', agent_id: 'agent-2' }
+    const { mgr, wakeSpy } = buildManager(
+      { 'parent-1': { ...parentTask, auto_start_agent: true }, 'sub-1': inReview, 'sub-2': successor },
+      [inReview, successor]
+    )
+    const startSpy = vi.spyOn(mgr, 'startTask').mockResolvedValue({ action: 'task_started' })
+
+    await mgr.notifyParentOfSubtaskCompletion('parent-1', 'sub-1')
+
+    expect(startSpy).toHaveBeenCalledWith('sub-2', { preferSubtasks: false, allowTriage: false })
+    expect(wakeSpy).not.toHaveBeenCalled()
+    // The finished step stays in review — a human still accepts it.
+    expect(inReview.status).toBe(TaskStatus.ReadyForReview)
+  })
+
+  it('runs a successor chain to the end unattended, every step waiting in review', async () => {
+    const chain = [
+      { id: 'sub-1', title: 'Child A', status: TaskStatus.NotStarted, parent_task_id: 'parent-1', agent_id: 'agent-1', next_subtask_ids: ['sub-2'] },
+      { id: 'sub-2', title: 'Child B', status: TaskStatus.NotStarted, parent_task_id: 'parent-1', agent_id: 'agent-2', next_subtask_ids: ['sub-3'] },
+      { id: 'sub-3', title: 'Child C', status: TaskStatus.NotStarted, parent_task_id: 'parent-1', agent_id: 'agent-3', next_subtask_ids: [] }
+    ]
+    const { mgr, wakeSpy } = buildManager(
+      {
+        'parent-1': { ...parentTask, auto_complete_without_review: true },
+        'sub-1': chain[0], 'sub-2': chain[1], 'sub-3': chain[2]
+      },
+      chain
+    )
+    const started: string[] = []
+    // A started subtask runs, parks in review, and reports back — as
+    // transitionToIdle does in production.
+    vi.spyOn(mgr, 'startTask').mockImplementation(async (taskId: string) => {
+      started.push(taskId)
+      const subtask = chain.find((c) => c.id === taskId)!
+      subtask.status = TaskStatus.ReadyForReview
+      await mgr.notifyParentOfSubtaskCompletion('parent-1', taskId)
+      return { action: 'task_started', startedTaskId: taskId }
+    })
+
+    // The first step is started by a scheduler; nobody reviews anything after that.
+    await mgr.startTask('sub-1')
+
+    expect(started).toEqual(['sub-1', 'sub-2', 'sub-3'])
+    expect(chain.map((c) => c.status)).toEqual([
+      TaskStatus.ReadyForReview, TaskStatus.ReadyForReview, TaskStatus.ReadyForReview
+    ])
+    // Only the end of the chain wakes the parent, which consolidates and reviews.
+    expect(wakeSpy).toHaveBeenCalledOnce()
+    expect(wakeSpy.mock.calls[0][0]).toBe('parent-1')
   })
 
   it('wakes the parent at once when a selected successor cannot start, even mid-pipeline', async () => {

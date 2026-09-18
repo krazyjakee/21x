@@ -17,7 +17,8 @@ import {
 } from '@/components/ui/AlertDialog'
 import { useSkillStore } from '@/stores/skill-store'
 import { formatRelativeDate } from '@/lib/utils'
-import type { Skill } from '@/types'
+import type { Skill, UpdateSkillDTO } from '@/types'
+import { SkillModelPicker } from './SkillModelPicker'
 
 const NAME_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
@@ -41,7 +42,7 @@ export function SkillWorkspace() {
 
 function SkillEditor({ skill, onUpdate, onDelete, onDeselect }: {
   skill: Skill
-  onUpdate: (id: string, data: { name?: string; description?: string; content?: string; confidence?: number; tags?: string[] }) => Promise<Skill | null>
+  onUpdate: (id: string, data: UpdateSkillDTO) => Promise<Skill | null>
   onDelete: (id: string) => Promise<boolean>
   onDeselect: () => void
 }) {
@@ -50,6 +51,7 @@ function SkillEditor({ skill, onUpdate, onDelete, onDeselect }: {
   const [confidence, setConfidence] = useState(skill.confidence)
   const [tagsInput, setTagsInput] = useState(skill.tags.join(', '))
   const [content, setContent] = useState(skill.content)
+  const [preferredModel, setPreferredModel] = useState(skill.preferred_model ?? '')
   const [showDelete, setShowDelete] = useState(false)
   const [nameError, setNameError] = useState<string | null>(null)
 
@@ -59,6 +61,7 @@ function SkillEditor({ skill, onUpdate, onDelete, onDeselect }: {
     setConfidence(skill.confidence)
     setTagsInput(skill.tags.join(', '))
     setContent(skill.content)
+    setPreferredModel(skill.preferred_model ?? '')
     setNameError(null)
   }, [skill.id])
 
@@ -66,7 +69,8 @@ function SkillEditor({ skill, onUpdate, onDelete, onDeselect }: {
                   description !== skill.description ||
                   confidence !== skill.confidence ||
                   tagsInput !== skill.tags.join(', ') ||
-                  content !== skill.content
+                  content !== skill.content ||
+                  preferredModel.trim() !== (skill.preferred_model ?? '')
 
   const handleSave = async () => {
     if (!NAME_PATTERN.test(name)) {
@@ -78,7 +82,7 @@ function SkillEditor({ skill, onUpdate, onDelete, onDeselect }: {
     }
     setNameError(null)
 
-    const data: { name?: string; description?: string; content?: string; confidence?: number; tags?: string[] } = {}
+    const data: UpdateSkillDTO = {}
     if (name !== skill.name) data.name = name
     if (description !== skill.description) data.description = description
     if (confidence !== skill.confidence) data.confidence = confidence
@@ -88,6 +92,8 @@ function SkillEditor({ skill, onUpdate, onDelete, onDeselect }: {
     if (tagsInput !== skill.tags.join(', ')) data.tags = newTags
 
     if (content !== skill.content) data.content = content
+    // An empty picker clears the preference.
+    if (preferredModel.trim() !== (skill.preferred_model ?? '')) data.preferred_model = preferredModel.trim() || null
 
     if (Object.keys(data).length > 0) {
       await onUpdate(skill.id, data)
@@ -184,6 +190,8 @@ function SkillEditor({ skill, onUpdate, onDelete, onDeselect }: {
             />
             <p className="text-[10px] text-muted-foreground">Separate tags with commas</p>
           </div>
+
+          <SkillModelPicker value={preferredModel} onChange={setPreferredModel} />
 
           <div className="space-y-1.5">
             <Label htmlFor="skill-content">Content (Markdown)</Label>

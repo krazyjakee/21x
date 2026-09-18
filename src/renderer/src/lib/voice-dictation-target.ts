@@ -1,3 +1,5 @@
+import { getMastermindTaskId } from '@/stores/coordinator-store'
+
 /**
  * Where dictated words go.
  *
@@ -34,25 +36,19 @@ export const DASHBOARD_COMPOSER_KEY = 'dashboard-command'
  * send on their own behalf.
  */
 /**
- * The Mastermind session's own id.
- *
- * It is a session like any other, so it can name itself. It used to name
- * nothing, and main then armed an expectation that matched the first answer
- * from ANY task — so speaking to the drawer made 20x read out whatever the
- * open task happened to write next.
- */
-export const MASTERMIND_SESSION_ID = 'mastermind-session'
-
-/**
  * Which session a composer speaks to.
  *
  * Both the drawer and the dashboard command box send to Mastermind, so both
- * name the Mastermind session. Everything else is a task, and its key is the
- * task id. Speech in and speech out are tied to one session either way.
+ * name the Mastermind session — the id of its task row, which it can name
+ * because it is a session like any other. It used to name nothing, and main
+ * then armed an expectation that matched the first answer from ANY task — so
+ * speaking to the drawer made 20x read out whatever the open task happened to
+ * write next. Everything else is a task, and its key is the task id. Speech in
+ * and speech out are tied to one session either way.
  */
 export function taskIdOfComposer(key: string | null): string | undefined {
   if (!key) return undefined
-  if (key === MASTERMIND_COMPOSER_KEY || key === DASHBOARD_COMPOSER_KEY) return MASTERMIND_SESSION_ID
+  if (key === MASTERMIND_COMPOSER_KEY || key === DASHBOARD_COMPOSER_KEY) return getMastermindTaskId() ?? undefined
   return key
 }
 

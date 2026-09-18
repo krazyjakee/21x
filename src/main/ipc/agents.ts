@@ -4,19 +4,30 @@ import { transcriptDisplayPart } from '../transcript-display'
 import { ipcMain } from 'electron'
 import type { CreateAgentData, UpdateAgentData } from '../database'
 import type { IpcDeps } from './deps'
+import { flattenProviderModels, rememberBackendModels } from '../agent-manager/skill-model'
 
 type MessageAttachment = { id: string; filename: string; size: number; mime_type: string }
 
 export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
   ipcMain.handle('agent:getAll', () => db.getAgents())
   ipcMain.handle('agent:create', (_, data: CreateAgentData) => db.createAgent(data))
-  ipcMain.handle('agent:update', (_, id: string, data: UpdateAgentData) => db.updateAgent(id, data))
+  ipcMain.handle('agent:update', (_, id: string, data: UpdateAgentData) => {
+    const updated = db.updateAgent(id, data)
+    // A raised max_parallel_sessions frees slots now, not at the next idle.
+    agentManager.drainStartQueue()
+    return updated
+  })
   ipcMain.handle('agent:delete', (_, id: string) => db.deleteAgent(id))
 
+  // Over a concurrency limit the start is queued in the main process: the
+  // reply carries an empty sessionId plus the queue position.
   ipcMain.handle('agentSession:start', async (_, agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean) => {
-    const sessionId = await agentManager.startSession(agentId, taskId, workspaceDir, skipInitialPrompt)
-    return { sessionId }
+    const outcome = await agentManager.requestSession(agentId, taskId, workspaceDir, skipInitialPrompt)
+    if (outcome.status === 'queued') return { sessionId: '', queued: true, queuePosition: outcome.position, queueReason: outcome.reason }
+    return { sessionId: outcome.sessionId }
   })
+
+  ipcMain.handle('agent:getStartQueue', () => agentManager.getStartQueue())
 
   ipcMain.handle('agentSession:resume', async (_, agentId: string, taskId: string, ocSessionId: string) => {
     const sessionId = await agentManager.resumeSession(agentId, taskId, ocSessionId)
@@ -89,7 +100,10 @@ export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
   })
 
   ipcMain.handle('agentConfig:getProviders', async (_, serverUrl?: string, backendType?: string) => {
-    return agentManager.getProviders(serverUrl, undefined, backendType)
+    const result = await agentManager.getProviders(serverUrl, undefined, backendType)
+    // Lets session setup validate skill preferred models against this listing.
+    if (backendType) rememberBackendModels(backendType, flattenProviderModels(result))
+    return result
   })
 
   ipcMain.handle('agent-installer:detect', async () => {

@@ -1,4 +1,5 @@
 import { TaskStatus } from '@shared/constants'
+import { taskListDotClass } from '@shared/task-status-styles'
 import { TaskPriorityBadge } from '@/components/tasks/TaskPriorityBadge'
 import type { TaskPriority } from '@/types'
 import { formatDate } from '@/lib/utils'
@@ -23,19 +24,8 @@ export function TaskListItem({ task, onSelect, sessionStatus, isSubtask, subtask
   const dueSoon = isActive && !overdue && isDueSoon(task.due_date)
   const hasActiveAgent = sessionStatus && sessionStatus !== SessionStatus.IDLE
 
-  // Status indicator color — matches desktop TaskListItem exactly
-  const statusDotColor = (() => {
-    if (task.status === TaskStatus.AgentLearning) return 'bg-blue-400 animate-pulse'
-    if (task.status === TaskStatus.Triaging) return 'bg-muted-foreground animate-pulse'
-    if (hasActiveAgent) return 'bg-amber-400 animate-pulse'
-    const map: Record<string, string> = {
-      [TaskStatus.NotStarted]: 'bg-muted-foreground',
-      [TaskStatus.AgentWorking]: 'bg-amber-400',
-      [TaskStatus.ReadyForReview]: 'bg-pink-400',
-      [TaskStatus.Completed]: 'bg-emerald-400',
-    }
-    return map[task.status] || 'bg-muted-foreground'
-  })()
+  // Status indicator color — shared with desktop TaskListItem
+  const statusDotColor = taskListDotClass(task.status, Boolean(hasActiveAgent))
 
   return (
     <button

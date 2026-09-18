@@ -4,9 +4,13 @@ import {
   OnboardingWizard,
   shouldShowOnboarding,
   isForceOnboarding,
-  pickFreeModel
+  pickFreeModel,
+  getAvailableBackends,
+  resolveDefaultBackend,
+  FALLBACK_BACKEND
 } from './OnboardingWizard'
 import { CodingAgentType } from '@/types'
+import type { ToolStatus } from '@/types/electron'
 
 // Access mock electronAPI from test/setup-renderer.ts
 const mockAgentInstaller = window.electronAPI.agentInstaller as unknown as {
@@ -27,6 +31,33 @@ const mockSettings = window.electronAPI.settings as unknown as {
   getAll: Mock
 }
 
+const mockAgentConfig = window.electronAPI.agentConfig as unknown as {
+  getProviders: Mock
+}
+
+const NOT_INSTALLED: ToolStatus = { installed: false, version: null }
+
+/** Detection snapshot with only the named backends installed. */
+function detection(installed: Record<string, ToolStatus> = {}): Record<string, ToolStatus> {
+  return {
+    nodejs: { installed: true, version: '20.0.0' },
+    npm: { installed: true, version: '10.0.0' },
+    git: { installed: true, version: '2.40.0' },
+    claudeCode: NOT_INSTALLED,
+    opencode: NOT_INSTALLED,
+    codex: NOT_INSTALLED,
+    cursor: NOT_INSTALLED,
+    pi: { installed: false, version: null, supported: false, reason: 'Pi CLI is not installed.' },
+    ...installed
+  }
+}
+
+/** Radix Dialog may render duplicate nodes — read the last card for a backend. */
+function backendCard(type: CodingAgentType): HTMLElement {
+  const cards = screen.getAllByTestId(`backend-card-${type}`)
+  return cards[cards.length - 1]
+}
+
 describe('pickFreeModel', () => {
   it.each([
     ['array model ID', [{ id: 'kimi-k2.5-free', name: 'Kimi K2.5' }], 'opencode/kimi-k2.5-free'],
@@ -39,6 +70,38 @@ describe('pickFreeModel', () => {
 
   it('returns null when no free model exists', () => {
     expect(pickFreeModel('opencode', { 'paid-model': { name: 'Paid Model' } })).toBeNull()
+  })
+})
+
+describe('backend discovery helpers', () => {
+  it('lists every detected backend, in card order, with no single-selection limit', () => {
+    const status = detection({
+      claudeCode: { installed: true, version: '1.0.0' },
+      codex: { installed: true, version: '0.4.0' },
+      opencode: { installed: true, version: '0.6.0' },
+      pi: { installed: true, version: '0.79.0', supported: false, reason: 'too old' }
+    })
+    expect(getAvailableBackends(status)).toEqual([
+      CodingAgentType.CLAUDE_CODE,
+      CodingAgentType.OPENCODE,
+      CodingAgentType.CODEX
+    ])
+    expect(getAvailableBackends(null)).toEqual([])
+  })
+
+  it('derives the default backend from what is installed, else OpenCode', () => {
+    expect(resolveDefaultBackend(detection({ codex: { installed: true, version: '0.4.0' } }), null))
+      .toBe(CodingAgentType.CODEX)
+    expect(resolveDefaultBackend(detection(), null)).toBe(FALLBACK_BACKEND)
+    expect(resolveDefaultBackend(null, null)).toBe(CodingAgentType.OPENCODE)
+  })
+
+  it('honours an explicit default choice over detection order', () => {
+    const status = detection({
+      claudeCode: { installed: true, version: '1.0.0' },
+      codex: { installed: true, version: '0.4.0' }
+    })
+    expect(resolveDefaultBackend(status, CodingAgentType.CODEX)).toBe(CodingAgentType.CODEX)
   })
 })
 
@@ -102,25 +165,23 @@ describe('OnboardingWizard', () => {
     vi.clearAllMocks()
     localStorage.clear()
 
-    mockAgentInstaller.detect.mockResolvedValue({
-      nodejs: { installed: true, version: '20.0.0' },
-      npm: { installed: true, version: '10.0.0' },
-      git: { installed: true, version: '2.40.0' },
+    mockAgentInstaller.detect.mockResolvedValue(detection({
       claudeCode: { installed: true, version: '1.0.0' },
-      opencode: { installed: false, version: null },
-      codex: { installed: false, version: null },
-      cursor: { installed: false, version: null },
-      pi: { installed: false, version: null, supported: false, reason: 'Pi CLI is not installed.' }
-    })
+      codex: { installed: true, version: '0.4.0' }
+    }))
     mockAgentInstaller.install.mockResolvedValue({
       success: true,
       error: null,
-      newStatus: {
+      newStatus: detection({
+        claudeCode: { installed: true, version: '1.0.0' },
+        codex: { installed: true, version: '0.4.0' },
         pi: { installed: true, version: '0.84.3', supported: true, reason: null }
-      }
+      })
     })
     mockAgentInstaller.onProgress.mockImplementation(() => vi.fn())
     mockAgents.getAll.mockResolvedValue([])
+    mockAgents.create.mockResolvedValue({ id: 'a1' })
+    mockAgentConfig.getProviders.mockResolvedValue(null)
     mockSettings.getAll.mockResolvedValue({})
   })
 
@@ -142,47 +203,144 @@ describe('OnboardingWizard', () => {
     expect(screen.queryByText(/Sign up|Log in|Cloud/i)).not.toBeInTheDocument()
   })
 
-  it('should display all coding agent options', () => {
+  it('should display every supported backend, including Cursor', () => {
     render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
-    expect(screen.getAllByText('Claude Code').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('OpenCode').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Codex').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Pi').length).toBeGreaterThan(0)
+    for (const type of Object.values(CodingAgentType)) {
+      expect(screen.getAllByTestId(`backend-card-${type}`).length).toBeGreaterThan(0)
+    }
   })
 
-  it('should show button disabled when no agent is selected', () => {
+  it('should detect tools on mount', async () => {
     render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
-    const btns = screen.getAllByRole('button', { name: /get started/i })
-    expect(btns.some((b) => b.hasAttribute('disabled'))).toBe(true)
-  })
-
-  it('should show "Get Started" when a BYO agent is selected', async () => {
-    render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
-    const agents = screen.getAllByText('Claude Code')
-    fireEvent.click(agents[0])
-
     await waitFor(() => {
-      // Button contains "Get Started" text alongside icon elements
-      const btns = screen.getAllByText('Get Started')
-      expect(btns.length).toBeGreaterThan(0)
+      expect(mockAgentInstaller.detect).toHaveBeenCalled()
     })
   })
 
-  it('installs Pi before creating the selected agent', async () => {
+  it('marks every detected backend as available without any selection', async () => {
+    render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(backendCard(CodingAgentType.CLAUDE_CODE)).toHaveAttribute('data-available', 'true')
+      expect(backendCard(CodingAgentType.CODEX)).toHaveAttribute('data-available', 'true')
+    })
+    expect(backendCard(CodingAgentType.OPENCODE)).toHaveAttribute('data-available', 'false')
+    expect(backendCard(CodingAgentType.CURSOR)).toHaveAttribute('data-available', 'false')
+    expect(backendCard(CodingAgentType.PI)).toHaveAttribute('data-available', 'false')
+
+    const summaries = screen.getAllByTestId('backend-summary')
+    expect(summaries[summaries.length - 1]).toHaveTextContent('Claude Code, Codex')
+
+    // No radio group / single-agent selection gate
+    expect(screen.queryAllByRole('radio')).toHaveLength(0)
+  })
+
+  it('keeps per-backend health details visible without gating', async () => {
+    mockAgentInstaller.detect.mockResolvedValue(detection({
+      pi: { installed: true, version: '0.79.0', supported: false, reason: 'Pi 0.79.0 is unsupported.' }
+    }))
+    render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(backendCard(CodingAgentType.PI)).toHaveTextContent('Update required')
+    })
+    expect(backendCard(CodingAgentType.PI).querySelector('[title="Pi 0.79.0 is unsupported."]')).not.toBeNull()
+    expect(backendCard(CodingAgentType.CURSOR)).toHaveTextContent('Install from cursor.com')
+    // Still allowed to continue
+    const btns = screen.getAllByRole('button', { name: /get started/i })
+    expect(btns.every((b) => !b.hasAttribute('disabled'))).toBe(true)
+  })
+
+  it('enables Get Started with no selection and uses the first detected backend as default', async () => {
+    const onOpenChange = vi.fn()
+    render(<OnboardingWizard open={true} onOpenChange={onOpenChange} />)
+    await waitFor(() => expect(backendCard(CodingAgentType.CLAUDE_CODE)).toHaveAttribute('data-available', 'true'))
+
+    const btns = screen.getAllByRole('button', { name: /get started/i })
+    expect(btns[0].hasAttribute('disabled')).toBe(false)
+    fireEvent.click(btns[0])
+
+    await waitFor(() => {
+      expect(mockAgents.create).toHaveBeenCalledWith(expect.objectContaining({
+        is_default: true,
+        config: expect.objectContaining({
+          coding_agent: CodingAgentType.CLAUDE_CODE,
+          model: 'claude-fable-5-1'
+        })
+      }))
+      expect(onOpenChange).toHaveBeenCalledWith(false)
+    })
+    expect(mockAgentInstaller.install).not.toHaveBeenCalled()
+  })
+
+  it('completes onboarding with no backend installed and explains installing later', async () => {
+    mockAgentInstaller.detect.mockResolvedValue(detection())
     const onOpenChange = vi.fn()
     render(<OnboardingWizard open={true} onOpenChange={onOpenChange} />)
 
-    await screen.findAllByText('Not installed')
-    const piTaglines = screen.getAllByText('Open-source coding agent')
-    fireEvent.click(piTaglines[piTaglines.length - 1].closest('button')!)
-    fireEvent.click(await screen.findByRole('button', { name: /install & get started/i }))
+    const notices = await screen.findAllByTestId('no-backend-notice')
+    expect(notices[notices.length - 1]).toHaveTextContent(/install one later/i)
+
+    fireEvent.click(screen.getAllByRole('button', { name: /get started/i })[0])
+
+    await waitFor(() => {
+      expect(mockAgents.create).toHaveBeenCalledWith(expect.objectContaining({
+        config: expect.objectContaining({ coding_agent: FALLBACK_BACKEND })
+      }))
+      expect(onOpenChange).toHaveBeenCalledWith(false)
+    })
+    // An absent backend is never asked for its model list
+    expect(mockAgentConfig.getProviders).not.toHaveBeenCalled()
+    expect(mockAgentInstaller.install).not.toHaveBeenCalled()
+  })
+
+  it('lets the default backend be chosen separately from discovery', async () => {
+    render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
+    await waitFor(() => expect(backendCard(CodingAgentType.CODEX)).toHaveAttribute('data-available', 'true'))
+
+    const groups = screen.getAllByRole('group', { name: /default backend/i })
+    const group = groups[groups.length - 1]
+    const codexChip = Array.from(group.querySelectorAll('button')).find((b) => b.textContent?.includes('Codex'))!
+    fireEvent.click(codexChip)
+    expect(codexChip).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(screen.getAllByRole('button', { name: /get started/i })[0])
+    await waitFor(() => {
+      expect(mockAgents.create).toHaveBeenCalledWith(expect.objectContaining({
+        config: expect.objectContaining({ coding_agent: CodingAgentType.CODEX })
+      }))
+    })
+  })
+
+  it('installs a backend from its own card without gating Get Started', async () => {
+    render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
+    await waitFor(() => expect(backendCard(CodingAgentType.PI)).toHaveTextContent('Not installed'))
+
+    fireEvent.click(screen.getAllByRole('button', { name: /install pi/i })[0])
 
     await waitFor(() => {
       expect(mockAgentInstaller.install).toHaveBeenCalledWith('pi')
-      expect(mockAgents.create).toHaveBeenCalledWith(expect.objectContaining({
-        config: expect.objectContaining({ coding_agent: CodingAgentType.PI })
-      }))
-      expect(onOpenChange).toHaveBeenCalledWith(false)
+      expect(backendCard(CodingAgentType.PI)).toHaveAttribute('data-available', 'true')
+    })
+    expect(mockAgents.create).not.toHaveBeenCalled()
+  })
+
+  it('re-running detection reflects newly installed and removed backends', async () => {
+    render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
+    await waitFor(() => expect(backendCard(CodingAgentType.CLAUDE_CODE)).toHaveAttribute('data-available', 'true'))
+    expect(backendCard(CodingAgentType.OPENCODE)).toHaveAttribute('data-available', 'false')
+
+    // Claude Code removed, OpenCode installed since the first run
+    mockAgentInstaller.detect.mockResolvedValue(detection({
+      codex: { installed: true, version: '0.4.0' },
+      opencode: { installed: true, version: '0.6.0' }
+    }))
+    fireEvent.click(screen.getAllByRole('button', { name: /re-check installed agents/i })[0])
+
+    await waitFor(() => {
+      expect(mockAgentInstaller.detect).toHaveBeenCalledTimes(2)
+      expect(backendCard(CodingAgentType.OPENCODE)).toHaveAttribute('data-available', 'true')
+      expect(backendCard(CodingAgentType.CLAUDE_CODE)).toHaveAttribute('data-available', 'false')
     })
   })
 
@@ -194,38 +352,12 @@ describe('OnboardingWizard', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
-  it('should detect tools on mount', async () => {
+  it('should always show git provider options', async () => {
     render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
-    await waitFor(() => {
-      expect(mockAgentInstaller.detect).toHaveBeenCalled()
-    })
-  })
-
-  it('should show git provider options when BYO agent is selected', async () => {
-    render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
-    const agents = screen.getAllByText('OpenCode')
-    fireEvent.click(agents[0])
-
     await waitFor(() => {
       expect(screen.getAllByText(/Where are your repos/i).length).toBeGreaterThan(0)
       expect(screen.getAllByText('GitHub').length).toBeGreaterThan(0)
       expect(screen.getAllByText('GitLab').length).toBeGreaterThan(0)
-    })
-  })
-
-  it('should enable Get Started button when BYO agent is selected and not blocked', async () => {
-    render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
-
-    // Select Claude Code (which is installed per mock)
-    const agents = screen.getAllByText('Claude Code')
-    fireEvent.click(agents[0])
-
-    // The Get Started button should appear and be enabled (agent is installed, no blocking)
-    await waitFor(() => {
-      const getStarted = screen.getAllByText('Get Started')
-      const btn = getStarted[0].closest('button')
-      expect(btn).toBeTruthy()
-      expect(btn!.hasAttribute('disabled')).toBe(false)
     })
   })
 

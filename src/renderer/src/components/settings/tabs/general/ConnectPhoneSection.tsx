@@ -32,7 +32,12 @@ function CopyableUrl({ url }: { url: string }) {
 
 export function ConnectPhoneSection() {
   const [loading, setLoading] = useState(true)
-  const [mobileLanUrl, setMobileLanUrl] = useState('')
+  const [accessEnabled, setAccessEnabled] = useState(false)
+  const [lanAccess, setLanAccess] = useState(false)
+  const [idleDaysInput, setIdleDaysInput] = useState('7')
+  const [accessLoading, setAccessLoading] = useState(false)
+  const [accessError, setAccessError] = useState<string | null>(null)
+  const [mobileLanUrl, setMobileLanUrl] = useState<string | null>(null)
   const [mobileTunnelUrl, setMobileTunnelUrl] = useState<string | null>(null)
   const [tunnelActive, setTunnelActive] = useState(false)
   const [tunnelLoading, setTunnelLoading] = useState(false)
@@ -42,25 +47,46 @@ export function ConnectPhoneSection() {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const { pairingPin, pinSecondsLeft, sessions, revokeSession, revokeAllSessions } = useMobilePairing()
 
+  const loadInfo = async () => {
+    const info = await mobileApi.getInfo()
+    setAccessEnabled(info.enabled)
+    setLanAccess(info.lanAccess)
+    setIdleDaysInput(String(info.sessionIdleDays))
+    setMobileLanUrl(info.lanUrl)
+    setMobileTunnelUrl(info.tunnelUrl)
+    setTunnelActive(info.tunnelActive)
+    setRemoteMode(info.remoteMode)
+    setCustomUrlInput(info.customUrl ?? '')
+    // Only a LAN or remote URL is reachable from a phone.
+    const qrUrl = info.enabled ? info.tunnelUrl ?? info.lanUrl : null
+    setQrDataUrl(qrUrl ? await toQrDataUrl(qrUrl) : null)
+  }
+
   useEffect(() => {
-    const load = async () => {
-      try {
-        const info = await mobileApi.getInfo()
-        setMobileLanUrl(info.lanUrl)
-        setMobileTunnelUrl(info.tunnelUrl)
-        setTunnelActive(info.tunnelActive)
-        setRemoteMode(info.remoteMode)
-        setCustomUrlInput(info.customUrl ?? '')
-        const qrUrl = info.tunnelUrl ?? info.lanUrl ?? info.url
-        if (qrUrl) setQrDataUrl(await toQrDataUrl(qrUrl))
-      } catch (error) {
-        console.error('Failed to load mobile URL:', error)
-      } finally {
-        setLoading(false)
-      }
-    }
-    load()
+    loadInfo()
+      .catch((error) => console.error('Failed to load mobile URL:', error))
+      .finally(() => setLoading(false))
   }, [])
+
+  const updateAccess = async (options: { enabled?: boolean; lanAccess?: boolean; sessionIdleDays?: number }) => {
+    setAccessLoading(true)
+    setAccessError(null)
+    try {
+      await mobileApi.setAccess(options)
+    } catch (err) {
+      setAccessError(err instanceof Error ? err.message : 'Failed to update mobile access')
+    }
+    try {
+      await loadInfo()
+    } catch { /* keep the previous view */ }
+    setAccessLoading(false)
+  }
+
+  const handleIdleDaysBlur = () => {
+    const days = Number(idleDaysInput)
+    if (Number.isFinite(days) && days > 0) void updateAccess({ sessionIdleDays: days })
+    else void loadInfo().catch(() => {})
+  }
 
   // Single place that applies a new active remote URL (null falls back to the
   // LAN URL) so the quick-tunnel switch, custom-URL button and mode switch
@@ -69,7 +95,7 @@ export function ConnectPhoneSection() {
     setMobileTunnelUrl(url)
     setTunnelActive(Boolean(url))
     const qrUrl = url ?? mobileLanUrl
-    if (qrUrl) setQrDataUrl(await toQrDataUrl(qrUrl))
+    setQrDataUrl(qrUrl ? await toQrDataUrl(qrUrl) : null)
   }
 
   const runTunnelAction = async (action: () => Promise<void>, fallbackError: string, logFailure = false) => {
@@ -119,7 +145,7 @@ export function ConnectPhoneSection() {
   const regenerateQr = async () => {
     try {
       const info = await mobileApi.getInfo()
-      const qrUrl = info.tunnelUrl ?? info.lanUrl ?? info.url
+      const qrUrl = info.enabled ? info.tunnelUrl ?? info.lanUrl : null
       if (qrUrl) setQrDataUrl(await toQrDataUrl(qrUrl))
     } catch { /* ignore */ }
   }
@@ -132,16 +158,66 @@ export function ConnectPhoneSection() {
       <div className="space-y-4">
         <div className="flex items-center justify-between py-2 border-b border-border">
           <div className="space-y-0.5">
-            <Label>Local network</Label>
-            <p className="text-xs text-muted-foreground">Works on same Wi-Fi</p>
+            <Label>Mobile access</Label>
+            <p className="text-xs text-muted-foreground">
+              {accessEnabled ? 'The mobile API server is running' : 'Off: nothing listens for phone connections'}
+            </p>
           </div>
-          {mobileLanUrl ? (
-            <CopyableUrl url={mobileLanUrl} />
-          ) : loading ? (
-            <span className="text-sm text-muted-foreground">Loading...</span>
-          ) : (
-            <span className="text-sm text-muted-foreground">Unavailable</span>
-          )}
+          <Switch
+            checked={accessEnabled}
+            disabled={loading || accessLoading}
+            onCheckedChange={(checked) => updateAccess({ enabled: checked })}
+          />
+        </div>
+        {accessError && (
+          <p className="text-xs text-destructive -mt-1 mb-2">{accessError}</p>
+        )}
+
+        {accessEnabled && (<>
+        <div className="flex items-center justify-between py-2 border-b border-border">
+          <div className="space-y-0.5">
+            <Label>Allow LAN access</Label>
+            <p className="text-xs text-muted-foreground">
+              {lanAccess
+                ? 'Anyone on this network can reach the server over unencrypted HTTP'
+                : 'Off: the server listens on this computer only (127.0.0.1)'}
+            </p>
+          </div>
+          <Switch
+            checked={lanAccess}
+            disabled={accessLoading}
+            onCheckedChange={(checked) => updateAccess({ lanAccess: checked })}
+          />
+        </div>
+
+        {lanAccess && (
+          <div className="flex items-center justify-between py-2 border-b border-border">
+            <div className="space-y-0.5">
+              <Label>Local network</Label>
+              <p className="text-xs text-muted-foreground">Works on same Wi-Fi</p>
+            </div>
+            {mobileLanUrl ? (
+              <CopyableUrl url={mobileLanUrl} />
+            ) : (
+              <span className="text-sm text-muted-foreground">Unavailable</span>
+            )}
+          </div>
+        )}
+
+        <div className="flex items-center justify-between py-2 border-b border-border">
+          <div className="space-y-0.5">
+            <Label>Sign out idle devices</Label>
+            <p className="text-xs text-muted-foreground">Days without use before a paired device must pair again</p>
+          </div>
+          <Input
+            type="number"
+            min={1}
+            value={idleDaysInput}
+            onChange={(e) => setIdleDaysInput(e.target.value)}
+            onBlur={handleIdleDaysBlur}
+            className="w-20"
+            disabled={accessLoading}
+          />
         </div>
 
         <div className="flex items-center justify-between py-2 border-b border-border">
@@ -241,6 +317,10 @@ export function ConnectPhoneSection() {
             </button>
           </div>
         )}
+        {!qrDataUrl && (
+          <p className="text-xs text-muted-foreground">Turn on remote access or LAN access to get a pairing QR code.</p>
+        )}
+        </>)}
 
         {sessions.length > 0 && (
           <div className="pt-2 space-y-2">

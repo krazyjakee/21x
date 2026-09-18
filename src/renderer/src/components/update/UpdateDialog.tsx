@@ -1,8 +1,110 @@
-import { useState, useEffect } from 'react'
+import { Fragment, useState, useEffect, useMemo, type JSX, type ReactNode } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogBody, DialogTitle, DialogDescription } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
+import { Markdown } from '@/components/ui/Markdown'
 import { updaterApi } from '@/lib/ipc-client'
 import { Download, RotateCw, Loader2, ExternalLink, Check, RefreshCw } from 'lucide-react'
+
+/**
+ * Release notes come from a GitHub release — text this app does not control —
+ * and used to be dropped into `dangerouslySetInnerHTML`. They are now either
+ * Markdown (rendered by `Markdown`, which never emits raw HTML) or HTML, which
+ * is re-built from an allow-list below: unknown elements are dropped, every
+ * attribute except a safe `href` is dropped, and `<script>` / `on*` handlers
+ * therefore cannot survive the round trip.
+ */
+const RELEASE_NOTE_TAGS: Record<string, keyof JSX.IntrinsicElements> = {
+  P: 'p', BR: 'br', HR: 'hr', DIV: 'div', SPAN: 'span',
+  STRONG: 'strong', B: 'strong', EM: 'em', I: 'em', DEL: 'del', S: 'del',
+  CODE: 'code', PRE: 'pre', BLOCKQUOTE: 'blockquote',
+  UL: 'ul', OL: 'ol', LI: 'li',
+  H1: 'h4', H2: 'h4', H3: 'h5', H4: 'h5', H5: 'h6', H6: 'h6',
+  A: 'a'
+}
+
+/** Only these tags mean "this is HTML, not Markdown". */
+const HTML_NOTES = /<(p|div|ul|ol|li|h[1-6]|br|a|strong|em|b|i|code|pre|blockquote)\b[^>]*>/i
+
+function safeHref(value: string | null): string | null {
+  if (!value) return null
+  try {
+    const { protocol } = new URL(value, 'https://github.com')
+    return protocol === 'http:' || protocol === 'https:' ? new URL(value, 'https://github.com').href : null
+  } catch {
+    return null
+  }
+}
+
+function toReactNodes(node: Node, keyPrefix: string): ReactNode[] {
+  const out: ReactNode[] = []
+  node.childNodes.forEach((child, index) => {
+    const key = `${keyPrefix}-${index}`
+    if (child.nodeType === 3 /* text */) {
+      if (child.nodeValue) out.push(<Fragment key={key}>{child.nodeValue}</Fragment>)
+      return
+    }
+    if (child.nodeType !== 1 /* element */) return
+
+    const element = child as Element
+    const tag = RELEASE_NOTE_TAGS[element.tagName]
+    const children = toReactNodes(element, key)
+
+    // <script>, <style>, <iframe>, <img onerror> and friends: not on the
+    // allow-list, so neither the element nor its contents are rendered.
+    if (!tag) {
+      if (element.tagName === 'SCRIPT' || element.tagName === 'STYLE') return
+      out.push(<Fragment key={key}>{children}</Fragment>)
+      return
+    }
+
+    if (tag === 'a') {
+      const href = safeHref(element.getAttribute('href'))
+      out.push(
+        <a
+          key={key}
+          href={href ?? undefined}
+          className="text-primary underline"
+          onClick={(event) => {
+            event.preventDefault()
+            if (href) window.electronAPI?.shell?.openExternal(href)
+          }}
+        >
+          {children}
+        </a>
+      )
+      return
+    }
+
+    // No attributes are copied over — that is what removes `onclick` & co.
+    if (tag === 'br') {
+      out.push(<br key={key} />)
+      return
+    }
+    if (tag === 'hr') {
+      out.push(<hr key={key} />)
+      return
+    }
+    const Tag = tag as 'p'
+    out.push(<Tag key={key}>{children}</Tag>)
+  })
+  return out
+}
+
+/** Renders GitHub release notes without ever handing raw HTML to the DOM. */
+export function ReleaseNotes({ notes }: { notes: string }) {
+  const content = useMemo(() => {
+    if (!HTML_NOTES.test(notes)) return <Markdown size="xs">{notes}</Markdown>
+    // DOMParser builds an inert document: nothing in it runs or loads.
+    const parsed = new DOMParser().parseFromString(notes, 'text/html')
+    return <>{toReactNodes(parsed.body, 'n')}</>
+  }, [notes])
+
+  return (
+    <div className="text-xs text-foreground prose prose-invert prose-xs max-w-none [&_a]:text-primary [&_a]:underline [&_ul]:list-disc [&_ul]:pl-4 [&_li]:my-0.5">
+      {content}
+    </div>
+  )
+}
 
 interface UpdateDialogProps {
   open: boolean
@@ -154,16 +256,13 @@ export function UpdateDialog({ open, onClose }: UpdateDialogProps) {
               </div>
             )}
 
-            {/* Release notes (may be HTML from GitHub or markdown) */}
+            {/* Release notes (may be HTML from GitHub or markdown) — never raw HTML */}
             {hasUpdate && state.releaseNotes && (
               <div className="border border-border rounded-lg p-4 max-h-64 overflow-y-auto">
                 <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                   What&apos;s New
                 </h4>
-                <div
-                  className="text-xs text-foreground prose prose-invert prose-xs max-w-none [&_a]:text-primary [&_a]:underline [&_ul]:list-disc [&_ul]:pl-4 [&_li]:my-0.5"
-                  dangerouslySetInnerHTML={{ __html: state.releaseNotes }}
-                />
+                <ReleaseNotes notes={state.releaseNotes} />
               </div>
             )}
 

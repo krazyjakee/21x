@@ -2,6 +2,7 @@ import { setTimeout as sleep } from 'timers/promises'
 import type { CreateTaskData, DatabaseManager, TaskRecord, UpdateTaskData } from '../database'
 import type { TaskRow } from '../database/types'
 import { deserializeTask } from '../database/serializers'
+import { userTaskRoleFilter } from '../database/task-roles'
 import { TaskStatus } from '../../shared/constants'
 import { buildSimilarTasksQuery } from '../task-search'
 import { afterTaskCreated, afterTaskUpdated, triggerTaskAutomation } from '../task-updates'
@@ -48,8 +49,9 @@ function createTask(db: DatabaseManager, data: CreateTaskData, params: Record<st
 }
 
 function listTasks(db: DatabaseManager, params: Record<string, unknown>): ApiTask[] {
-  // Recurring parent templates are not actionable tasks.
-  let query = 'SELECT * FROM tasks WHERE NOT (is_recurring = 1 AND recurrence_parent_id IS NULL)'
+  // Recurring parent templates are not actionable tasks, and coordinator rows
+  // (the Mastermind) are conversations, not tasks.
+  let query = `SELECT * FROM tasks WHERE NOT (is_recurring = 1 AND recurrence_parent_id IS NULL) AND ${userTaskRoleFilter()}`
   const qParams: unknown[] = []
 
   if (params.status) { query += ' AND status = ?'; qParams.push(params.status) }
@@ -78,8 +80,8 @@ function findSimilarTasks(db: DatabaseManager, params: Record<string, unknown>):
 
   if (!query) {
     // No keywords at all: recent tasks.
-    const status = params.completed_only ? ' WHERE status = ?' : ''
-    const rows = db.db.prepare(`SELECT * FROM tasks${status} ORDER BY created_at DESC LIMIT ?`)
+    const status = params.completed_only ? ' AND status = ?' : ''
+    const rows = db.db.prepare(`SELECT * FROM tasks WHERE ${userTaskRoleFilter()}${status} ORDER BY created_at DESC LIMIT ?`)
       .all(...(params.completed_only ? ['completed'] : []), limit) as TaskRow[]
     return rows.map(rowToApiTask)
   }
@@ -96,7 +98,7 @@ function findSimilarTasks(db: DatabaseManager, params: Record<string, unknown>):
     SELECT t.*, bm25(tasks_fts, 10.0, 5.0, 2.0, 1.0) AS rank, ${tier} AS exact_tier
     FROM tasks_fts
     JOIN tasks t ON tasks_fts.rowid = t.rowid
-    WHERE tasks_fts MATCH ?`
+    WHERE tasks_fts MATCH ? AND ${userTaskRoleFilter('t.role')}`
   // Bind order follows the SQL text: the tier subquery precedes the WHERE.
   const baseParams: unknown[] = query.exactMatch ? [query.exactMatch, query.match] : [query.match]
   const run = (completedOnly: boolean): TaskRow[] =>
@@ -112,7 +114,7 @@ function findSimilarTasks(db: DatabaseManager, params: Record<string, unknown>):
 function getTaskStatistics(db: DatabaseManager, metric: unknown): unknown {
   switch (metric) {
     case 'label_usage': {
-      const rows = db.db.prepare('SELECT labels FROM tasks').all() as Array<{ labels: string | null }>
+      const rows = db.db.prepare(`SELECT labels FROM tasks WHERE ${userTaskRoleFilter()}`).all() as Array<{ labels: string | null }>
       const counts = new Map<string, number>()
       rows.forEach((row) => {
         JSON.parse(row.labels || '[]').forEach((l: string) => counts.set(l, (counts.get(l) || 0) + 1))
@@ -123,10 +125,10 @@ function getTaskStatistics(db: DatabaseManager, metric: unknown): unknown {
       return db.db.prepare(`
         SELECT agent_id, COUNT(*) as task_count,
                SUM(CASE WHEN status = 'agent_working' THEN 1 ELSE 0 END) as active_count
-        FROM tasks WHERE agent_id IS NOT NULL GROUP BY agent_id
+        FROM tasks WHERE agent_id IS NOT NULL AND ${userTaskRoleFilter()} GROUP BY agent_id
       `).all()
     case 'priority_distribution': {
-      const dist = db.db.prepare('SELECT priority, COUNT(*) as count FROM tasks GROUP BY priority').all() as Array<{ priority: string; count: number }>
+      const dist = db.db.prepare(`SELECT priority, COUNT(*) as count FROM tasks WHERE ${userTaskRoleFilter()} GROUP BY priority`).all() as Array<{ priority: string; count: number }>
       return Object.fromEntries(dist.map((d) => [d.priority, d.count]))
     }
     case 'completion_rate': {
@@ -135,7 +137,7 @@ function getTaskStatistics(db: DatabaseManager, metric: unknown): unknown {
                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
                SUM(CASE WHEN status = 'agent_working' THEN 1 ELSE 0 END) as in_progress,
                SUM(CASE WHEN status = 'not_started' THEN 1 ELSE 0 END) as not_started
-        FROM tasks
+        FROM tasks WHERE ${userTaskRoleFilter()}
       `).get() as { total: number; completed: number; in_progress: number; not_started: number }
       return { ...stats, completion_rate: stats.total > 0 ? (stats.completed / stats.total * 100).toFixed(1) + '%' : '0%' }
     }
@@ -324,7 +326,7 @@ export async function handleTaskRoute(db: DatabaseManager, route: string, params
       return getTaskStatistics(db, params.metric)
 
     case '/list_repos': {
-      const rows = db.db.prepare('SELECT repos FROM tasks WHERE repos IS NOT NULL AND repos != \'[]\'').all() as Array<{ repos: string }>
+      const rows = db.db.prepare(`SELECT repos FROM tasks WHERE repos IS NOT NULL AND repos != '[]' AND ${userTaskRoleFilter()}`).all() as Array<{ repos: string }>
       const repoSet = new Set<string>()
       rows.forEach((row) => {
         try {

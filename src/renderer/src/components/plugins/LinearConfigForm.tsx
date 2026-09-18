@@ -54,7 +54,7 @@ export function LinearConfigForm({ value, onChange, sourceId, onRequestSave }: P
         <div className="space-y-1.5">
           <Label>OAuth Setup</Label>
           <p className="text-xs text-muted-foreground">
-            👉 Create OAuth app at{' '}
+            Create OAuth app at{' '}
             <button
               type="button"
               onClick={() =>
@@ -133,16 +133,16 @@ export function LinearConfigForm({ value, onChange, sourceId, onRequestSave }: P
             variant={oauthConnected ? 'outline' : 'default'}
             className="w-full"
           >
-            {oauthConnected ? '✓ Connected to Linear' : 'Connect to Linear'}
+            {oauthConnected ? 'Connected to Linear' : 'Connect to Linear'}
           </Button>
           {!sourceId && !hasCredentials && (
             <p className="text-xs text-muted-foreground">
-              ℹ️ Fill in Client ID and Client Secret above to continue
+              Fill in Client ID and Client Secret above to continue
             </p>
           )}
           {!sourceId && hasCredentials ? (
             <p className="text-xs text-muted-foreground">
-              ℹ️ Click to save source and start OAuth flow
+              Click to save source and start OAuth flow
             </p>
           ) : null}
         </div>

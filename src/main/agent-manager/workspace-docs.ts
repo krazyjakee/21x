@@ -56,7 +56,9 @@ export async function writeSkillFiles(
         await mkdir(dir, { recursive: true })
         const safeName = sanitizeYamlValue(skill.name)
         const safeDesc = sanitizeYamlValue(skill.description || skill.name)
-        const content = `---\nname: "${safeName}"\ndescription: "${safeDesc}"\n---\n\n${skill.content}`
+        // preferred_model round-trips through syncSkillsFromDirectory.
+        const modelLine = skill.preferred_model ? `preferred_model: "${sanitizeYamlValue(skill.preferred_model)}"\n` : ''
+        const content = `---\nname: "${safeName}"\ndescription: "${safeDesc}"\n${modelLine}---\n\n${skill.content}`
         await writeFile(join(dir, 'SKILL.md'), content, 'utf-8')
       }
       console.log(`[AgentManager] Wrote ${skills.length} SKILL.md file(s) to ${skillsDir}`)

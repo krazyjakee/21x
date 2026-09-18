@@ -21,7 +21,8 @@ import {
 } from './types'
 import { HubSpotClient, type HubSpotAttachment, type HubSpotTicket, type HubSpotPipeline } from './hubspot-client'
 import { saveTaskAttachment } from './attachments'
-import { extensionForMimeType, hasKnownExtension, mimeTypeForPath } from '../mime'
+import { upsertSourcedTask } from './sourced-tasks'
+import { extensionForMimeType, hasKnownExtension, mimeTypeForPath, sniffMimeType } from '../mime'
 
 export class HubSpotPlugin implements TaskSourcePlugin {
   id = 'hubspot'
@@ -212,34 +213,24 @@ export class HubSpotPlugin implements TaskSourcePlugin {
 
           const mapped = await this.mapHubSpotTicket(ticket, ownerName, contactInfo, pipelines, client)
 
-          // Incremental syncs also return recently closed tickets; skip them.
-          if (mapped.status === 'completed') {
+          // Incremental syncs also return recently closed tickets. Closing an
+          // already-imported ticket completes its task; a ticket that was
+          // closed before it was ever imported is not brought in.
+          if (mapped.status === TaskStatus.Completed && !ctx.db.getTaskByExternalId(sourceId, ticket.id)) {
             continue
           }
 
-          const existing = ctx.db.getTaskByExternalId(sourceId, ticket.id)
-
-          let taskId: string
-          if (existing) {
-            ctx.db.updateTask(existing.id, mapped)
-            taskId = existing.id
-            result.updated++
-          } else {
-            const created = ctx.db.createTask({
-              ...mapped,
-              title: mapped.title || ticket.properties.subject || 'Untitled Ticket',
-              source_id: sourceId,
-              external_id: ticket.id,
-              source: 'HubSpot',
-              status: mapped.status || 'not_started'
-            })
-            if (!created) {
-              console.error('[hubspot-plugin] Failed to create task:', ticket.id)
-              continue
-            }
-            taskId = created.id
-            result.imported++
+          const upserted = upsertSourcedTask(ctx, sourceId, ticket.id, mapped, {
+            title: ticket.properties.subject || 'Untitled Ticket',
+            source: 'HubSpot'
+          })
+          if (!upserted) {
+            console.error('[hubspot-plugin] Failed to create task:', ticket.id)
+            continue
           }
+          const taskId = upserted.task.id
+          if (upserted.created) result.imported++
+          else result.updated++
 
           const hubspotAttachments = await client.getTicketAttachments(ticket.id)
           if (hubspotAttachments.length > 0) {
@@ -651,12 +642,18 @@ export class HubSpotPlugin implements TaskSourcePlugin {
 
       try {
         const buffer = await client.downloadAttachment(attachment.url)
-        const extension = attachment.extension ? `.${attachment.extension}` : extensionForMimeType(attachment.type)
+        // HubSpot's file `type` is a category ("IMG", "DOCUMENT"), not a MIME
+        // type, so it only counts when it looks like one.
+        const declaredMime = attachment.type?.includes('/') ? attachment.type : undefined
+        const sniffedMime = sniffMimeType(buffer)
+        const extension = attachment.extension
+          ? `.${attachment.extension}`
+          : extensionForMimeType(declaredMime ?? sniffedMime ?? '')
         const filename = `${attachment.name}${extension}`
         saveTaskAttachment(ctx, taskId, {
           buffer,
           filename,
-          mimeType: attachment.type || mimeTypeForPath(filename),
+          mimeType: declaredMime ?? (hasKnownExtension(filename) ? mimeTypeForPath(filename) : sniffedMime ?? mimeTypeForPath(filename)),
           extra: { hubspot_file_id: attachment.id, hubspot_url: attachment.url },
           replaces: (existing) => existing.hubspot_file_id === attachment.id
         })

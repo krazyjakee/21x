@@ -44,13 +44,14 @@ describe('DatabaseManager migrations on an existing install', () => {
 
     const raw = openRaw()
     expect(taskColumns(raw)).toContain('complete_at_source')
-    // First-run seed: a default agent wired to the built-in skill and MCP server.
+    // First-run seed: a default agent wired to the built-in MCP server. The
+    // Mastermind persona is a built-in system prompt, so no skill is seeded.
     const agents = raw.prepare('SELECT config FROM agents WHERE is_default = 1').all() as { config: string }[]
     expect(agents).toHaveLength(1)
-    const config = JSON.parse(agents[0].config) as { skill_ids: string[]; mcp_servers: string[] }
-    const skill = raw.prepare("SELECT id FROM skills WHERE name = 'Mastermind'").get() as { id: string }
+    const config = JSON.parse(agents[0].config) as { skill_ids?: string[]; mcp_servers: string[] }
     const server = raw.prepare("SELECT id FROM mcp_servers WHERE name = 'task-management'").get() as { id: string }
-    expect(config.skill_ids).toEqual([skill.id])
+    expect(config.skill_ids ?? []).toEqual([])
+    expect(raw.prepare("SELECT id FROM skills WHERE name = 'Mastermind'").get()).toBeUndefined()
     expect(config.mcp_servers).toEqual([server.id])
     raw.close()
   })

@@ -391,6 +391,34 @@ describe('TaskAutomationScheduler — parents and subtasks', () => {
     expect(agentManager.startTask).toHaveBeenCalledWith(childIds[1])
   })
 
+  it('runs a three-step chain to the end with no human action, then waits in review', async () => {
+    const { parentId, childIds } = parentWithChildren(
+      { auto_start_agent: true },
+      [{ title: 'child 1' }, { title: 'child 2' }, { title: 'child 3' }]
+    )
+    db.updateTask(parentId, { status: TaskStatus.ReadyForReview })
+    // A child run ends in ready_for_review: it cannot accept its own result.
+    const agentManager = mockAgentManager({
+      startTask: vi.fn(async (taskId: string) => {
+        db.updateTask(taskId, { status: TaskStatus.ReadyForReview }, 'task-source')
+        return { action: 'task_started', startedTaskId: taskId }
+      })
+    })
+    const scheduler = new TaskAutomationScheduler(db, agentManager)
+
+    // One sweep per step, with nobody reviewing anything in between.
+    for (let i = 0; i < 3; i++) await scheduler.runNow()
+
+    const started = (agentManager.startTask as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0])
+    expect(started).toEqual(childIds)
+    for (const childId of childIds) {
+      expect(db.getTask(childId)?.status).toBe(TaskStatus.ReadyForReview)
+    }
+    // Nothing is completed: acceptance is still a human's call.
+    expect(db.getTask(parentId)?.status).toBe(TaskStatus.ReadyForReview)
+    expect(agentManager.completeTaskWithoutReview).not.toHaveBeenCalled()
+  })
+
   it('starts the first child by sort_order even when successor edges are set', async () => {
     const { parentId, childIds } = parentWithChildren(
       { auto_start_agent: true },

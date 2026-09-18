@@ -17,7 +17,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   tasks: {
     getWorkspaceDir: (taskId: string): Promise<string> =>
-      ipcRenderer.invoke('tasks:getWorkspaceDir', taskId)
+      ipcRenderer.invoke('tasks:getWorkspaceDir', taskId),
+    getCoordinatorTaskId: (): Promise<string | null> =>
+      ipcRenderer.invoke('tasks:getCoordinatorTaskId')
   },
   artifacts: {
     scan: (taskId: string): Promise<ArtifactFileEntry[]> =>
@@ -75,7 +77,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('agent:create', data),
     update: (id: string, data: Record<string, unknown>): Promise<unknown> =>
       ipcRenderer.invoke('agent:update', id, data),
-    delete: (id: string): Promise<boolean> => ipcRenderer.invoke('agent:delete', id)
+    delete: (id: string): Promise<boolean> => ipcRenderer.invoke('agent:delete', id),
+    getStartQueue: (): Promise<unknown[]> => ipcRenderer.invoke('agent:getStartQueue')
   },
   mcpServers: {
     getAll: (): Promise<unknown[]> => ipcRenderer.invoke('mcp:getAll'),
@@ -97,8 +100,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     submitManualClientId: (mcpServerId: string, clientId: string): Promise<{ needsManualClientId?: boolean }> =>
       ipcRenderer.invoke('mcp:submitManualClientId', mcpServerId, clientId)
   },
+  // Global MCP config of the installed coding-agent CLIs (Claude Code, OpenCode, Codex).
+  cliMcp: {
+    snapshot: (): Promise<unknown> => ipcRenderer.invoke('cliMcp:snapshot'),
+    upsert: (request: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('cliMcp:upsert', request),
+    remove: (ref: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('cliMcp:remove', ref),
+    setEnabled: (ref: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('cliMcp:setEnabled', ref),
+    setToolEnabled: (ref: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('cliMcp:setToolEnabled', ref),
+    probe: (ref: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('cliMcp:probe', ref)
+  },
   agentSession: {
-    start: (agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<{ sessionId: string }> =>
+    start: (agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<{ sessionId: string; queued?: boolean; queuePosition?: number; queueReason?: string }> =>
       ipcRenderer.invoke('agentSession:start', agentId, taskId, workspaceDir, skipInitialPrompt),
     resume: (agentId: string, taskId: string, ocSessionId: string): Promise<{ sessionId: string; ended?: boolean }> =>
       ipcRenderer.invoke('agentSession:resume', agentId, taskId, ocSessionId),
@@ -165,6 +177,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_: unknown, data: unknown): void => callback(data)
     ipcRenderer.on('agent:status', handler)
     return () => ipcRenderer.removeListener('agent:status', handler)
+  },
+  onAgentStartQueueChanged: (callback: (event: unknown) => void): (() => void) => {
+    const handler = (_: unknown, data: unknown): void => callback(data)
+    ipcRenderer.on('agent:startQueueChanged', handler)
+    return () => ipcRenderer.removeListener('agent:startQueueChanged', handler)
   },
   onAgentIncompatibleSession: (callback: (event: unknown) => void): (() => void) => {
     const handler = (_: unknown, data: unknown): void => callback(data)
@@ -366,14 +383,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   mobile: {
     getInfo: (): Promise<{
+      enabled: boolean
+      lanAccess: boolean
+      sessionIdleDays: number
       url: string
       port: number
-      lanUrl: string
+      lanUrl: string | null
       tunnelUrl: string | null
       tunnelActive: boolean
       remoteMode: 'quick' | 'custom'
       customUrl: string | null
     }> => ipcRenderer.invoke('mobile:getInfo'),
+    setAccess: (options: { enabled?: boolean; lanAccess?: boolean; sessionIdleDays?: number }): Promise<{ enabled: boolean; lanAccess: boolean; sessionIdleDays: number; listening: boolean }> =>
+      ipcRenderer.invoke('mobile:setAccess', options),
     startTunnel: (): Promise<{ tunnelUrl: string }> =>
       ipcRenderer.invoke('mobile:startTunnel'),
     stopTunnel: (): Promise<{ success: boolean }> =>
@@ -612,6 +634,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('voice:tts:modelProgress', handler)
         return () => ipcRenderer.removeListener('voice:tts:modelProgress', handler)
       }
+    }
+  },
+  // Lightweight chat runtime (docs/chat-runtime.md). One `chat:start` per turn;
+  // tokens and tool events stream back on `chat:event` tagged with the turnId.
+  chat: {
+    start: (payload: Record<string, unknown>): Promise<{ turnId: string; provider: string; model: string }> =>
+      ipcRenderer.invoke('chat:start', payload),
+    cancel: (turnId: string): Promise<{ cancelled: boolean }> => ipcRenderer.invoke('chat:cancel', { turnId }),
+    onEvent: (callback: (data: unknown) => void): (() => void) => {
+      const handler = (_: unknown, d: unknown): void => callback(d)
+      ipcRenderer.on('chat:event', handler)
+      return () => ipcRenderer.removeListener('chat:event', handler)
     }
   },
   browser: {

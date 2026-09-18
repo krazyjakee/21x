@@ -293,10 +293,41 @@ describe('YouTrackPlugin', () => {
         'task-existing',
         expect.objectContaining({
           title: 'Test Issue',
-          status: TaskStatus.NotStarted,
           priority: 'medium',
           assignee: 'John Doe'
-        })
+        }),
+        'task-source'
+      )
+      // The task is open on both sides, so its local workflow status is kept.
+      expect(mockDb.updateTask.mock.calls[0][1]).not.toHaveProperty('status')
+    })
+
+    it('completes an existing task when the issue is resolved in YouTrack', async () => {
+      const issue = makeIssue({
+        customFields: [
+          { name: 'State', value: { name: 'Fixed' }, projectCustomField: { field: { name: 'State', fieldType: { id: 'state[1]' } } } }
+        ]
+      })
+      mockClientInstance.getAllIssues.mockResolvedValue([issue])
+
+      const existingTask = { id: 'task-existing', status: TaskStatus.AgentWorking, attachments: [] }
+      const ctx = makeContext()
+      const mockDb = ctx.db as unknown as {
+        getTaskByExternalId: ReturnType<typeof vi.fn>
+        getTask: ReturnType<typeof vi.fn>
+        updateTask: ReturnType<typeof vi.fn>
+      }
+      mockDb.getTaskByExternalId.mockReturnValue(existingTask)
+      mockDb.getTask.mockReturnValue(existingTask)
+
+      const result = await plugin.importTasks('src-1', defaultConfig, ctx)
+
+      expect(result.errors).toEqual([])
+      expect(result.updated).toBe(1)
+      expect(mockDb.updateTask).toHaveBeenCalledWith(
+        'task-existing',
+        expect.objectContaining({ status: TaskStatus.Completed }),
+        'task-source'
       )
     })
 

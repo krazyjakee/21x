@@ -1,6 +1,17 @@
 import { spawn } from 'child_process'
 import { getTaskApiEnv } from '../task-api-server'
 import { guardChildStreams, writeToChildStdin } from '../child-stream-guards'
+import {
+  MCP_INITIALIZE_ID,
+  MCP_TOOLS_LIST_ID,
+  mcpErrorMessage,
+  mcpInitializeRequest,
+  mcpInitializedNotification,
+  mcpToolsListRequest,
+  summarizeMcpTools,
+  type McpRpcResponse,
+  type McpToolSummary
+} from '../mcp-client-messages'
 
 export interface McpServerProbeInput {
   name: string
@@ -17,12 +28,14 @@ export interface McpServerProbeResult {
   error?: string
   errorDetail?: string
   toolCount?: number
-  tools?: { name: string; description: string }[]
+  tools?: McpToolSummary[]
 }
 
 /**
  * Tests an MCP server by speaking the MCP protocol directly
- * (JSON-RPC over stdio for local, HTTP POST for remote).
+ * (JSON-RPC over stdio for local, HTTP POST for remote). The handshake
+ * messages live in mcp-client-messages.ts; see there for why the SDK client
+ * is not used.
  */
 export function testMcpServer(serverData: McpServerProbeInput): Promise<McpServerProbeResult> {
   return serverData.type === 'remote' ? testRemoteMcpServer(serverData) : testLocalMcpServer(serverData)
@@ -71,20 +84,22 @@ function testLocalMcpServer(serverData: McpServerProbeInput): Promise<McpServerP
       stderrBuf += chunk.toString()
     })
 
-    const handleMessage = (msg: { id?: number; error?: { message?: string }; result?: { tools?: { name?: string; description?: string }[] } }): void => {
+    const send = (message: Record<string, unknown>): void => {
+      writeToChildStdin(proc, JSON.stringify(message) + '\n', 'mcp-probe')
+    }
+
+    const handleMessage = (msg: McpRpcResponse): void => {
       if (msg.error) {
-        finish({ status: 'failed', error: msg.error.message || JSON.stringify(msg.error) })
+        finish({ status: 'failed', error: mcpErrorMessage(msg.error, 'MCP server returned an error') })
         return
       }
 
-      if (phase === 'init' && msg.id === 1 && msg.result) {
+      if (phase === 'init' && msg.id === MCP_INITIALIZE_ID && msg.result) {
         phase = 'tools'
-        // Send initialized notification + tools/list request
-        writeToChildStdin(proc, JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n', 'mcp-probe')
-        writeToChildStdin(proc, JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) + '\n', 'mcp-probe')
-      } else if (phase === 'tools' && msg.id === 2 && msg.result) {
-        const rawTools = Array.isArray(msg.result.tools) ? msg.result.tools : []
-        const tools = rawTools.map((t) => ({ name: t.name || '', description: t.description || '' }))
+        send(mcpInitializedNotification())
+        send(mcpToolsListRequest())
+      } else if (phase === 'tools' && msg.id === MCP_TOOLS_LIST_ID && msg.result) {
+        const tools = summarizeMcpTools(msg.result)
         finish({ status: 'connected', toolCount: tools.length, tools })
       }
     }
@@ -121,16 +136,7 @@ function testLocalMcpServer(serverData: McpServerProbeInput): Promise<McpServerP
       finish({ status: 'failed', error: errMsg, errorDetail: detail || undefined })
     })
 
-    writeToChildStdin(proc, JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'initialize',
-      params: {
-        protocolVersion: '2024-11-05',
-        capabilities: {},
-        clientInfo: { name: 'pf-desktop', version: '1.0.0' }
-      }
-    }) + '\n', 'mcp-probe')
+    send(mcpInitializeRequest())
   })
 }
 
@@ -146,10 +152,7 @@ async function testRemoteMcpServer(serverData: McpServerProbeInput): Promise<Mcp
     const initRes = await fetch(serverData.url, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        jsonrpc: '2.0', id: 1, method: 'initialize',
-        params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'pf-desktop', version: '1.0.0' } }
-      }),
+      body: JSON.stringify(mcpInitializeRequest()),
       signal: AbortSignal.timeout(10000)
     })
 
@@ -160,24 +163,23 @@ async function testRemoteMcpServer(serverData: McpServerProbeInput): Promise<Mcp
     const contentType = initRes.headers.get('content-type') || ''
 
     if (contentType.includes('application/json')) {
-      const initData = await initRes.json()
+      const initData = await initRes.json() as McpRpcResponse
       if (initData.error) {
-        return { status: 'failed', error: initData.error.message || 'Initialize failed' }
+        return { status: 'failed', error: mcpErrorMessage(initData.error, 'Initialize failed') }
       }
 
       fetch(serverData.url, {
         method: 'POST', headers,
-        body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })
+        body: JSON.stringify(mcpInitializedNotification())
       }).catch(() => {})
 
       const toolsRes = await fetch(serverData.url, {
         method: 'POST', headers,
-        body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }),
+        body: JSON.stringify(mcpToolsListRequest()),
         signal: AbortSignal.timeout(10000)
       })
-      const toolsData = await toolsRes.json()
-      const rawTools = Array.isArray(toolsData.result?.tools) ? toolsData.result.tools : []
-      const tools = rawTools.map((t: { name?: string; description?: string }) => ({ name: t.name || '', description: t.description || '' }))
+      const toolsData = await toolsRes.json() as McpRpcResponse
+      const tools = summarizeMcpTools(toolsData.result)
       return { status: 'connected', toolCount: tools.length, tools }
     }
 

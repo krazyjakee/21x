@@ -149,6 +149,10 @@ export async function handleSessionRoute(db: DatabaseManager, route: string, par
       if (!agentController) return { error: 'Agent controller not available' }
       const taskId = String(params.task_id)
       if (agentController.getActiveSessionsForTask(taskId).length === 0) {
+        // A start still waiting for a slot is withdrawn instead.
+        if (agentController.cancelQueuedStart(taskId)) {
+          return { success: true, task_id: taskId, session_id: null, cancelled_queued_start: true }
+        }
         return { success: false, task_id: taskId, reason: 'nothing_running' }
       }
       const result = await agentController.stopByTaskId(taskId)
@@ -163,6 +167,15 @@ export async function handleSessionRoute(db: DatabaseManager, route: string, par
         allowTriage: params.allow_triage !== false
       })
       const startedTask = result.startedTaskId ? db.getTask(result.startedTaskId) : null
+      if (result.action === 'queued') {
+        return {
+          success: true,
+          ...result,
+          queue_position: result.queuePosition,
+          message: `Queued at position ${result.queuePosition}: the ${result.queueReason === 'global_limit' ? 'global' : "agent's"} concurrent session limit is reached. It starts automatically when a running session finishes; do not call start_task again for it.`,
+          task: startedTask
+        }
+      }
       return { success: result.action !== 'no_action', ...result, task: startedTask }
     }
 

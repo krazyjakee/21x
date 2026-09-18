@@ -6,15 +6,7 @@ import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { TaskStatus } from '@/types'
 import type { Task } from '@/types'
 import { formatRecurrenceShort } from './recurrence-format'
-
-const statusDotColor: Record<TaskStatus, string> = {
-  [TaskStatus.NotStarted]: 'bg-muted-foreground',
-  [TaskStatus.Triaging]: 'bg-muted-foreground animate-pulse',
-  [TaskStatus.AgentWorking]: 'bg-amber-400',
-  [TaskStatus.ReadyForReview]: 'bg-pink-400',
-  [TaskStatus.AgentLearning]: 'bg-blue-400',
-  [TaskStatus.Completed]: 'bg-emerald-400'
-}
+import { taskListDotClass } from '@shared/task-status-styles'
 
 interface TaskListItemProps {
   task: Task
@@ -33,20 +25,11 @@ export const TaskListItem = memo(function TaskListItem({ task, isSelected, onSel
   const sessionStatus = useAgentStore((s) => s.sessions.get(task.id)?.status)
   const hasActiveAgent = sessionStatus != null && sessionStatus !== SessionStatus.IDLE
 
-  // Determine status indicator color — memoized to avoid recalculation on every render
-  const statusColor = useMemo(() => {
-    // Check task status first - AgentLearning/Triaging takes priority over session status
-    if (task.status === TaskStatus.AgentLearning) {
-      return 'bg-blue-400 animate-pulse' // Agent learning
-    }
-    if (task.status === TaskStatus.Triaging) {
-      return 'bg-muted-foreground animate-pulse' // Triaging
-    }
-    if (hasActiveAgent) {
-      return 'bg-amber-400 animate-pulse' // Agent working
-    }
-    return statusDotColor[task.status] // Task status
-  }, [task.status, hasActiveAgent])
+  // Determine status indicator color — shared with the mobile list
+  const statusColor = useMemo(
+    () => taskListDotClass(task.status, hasActiveAgent),
+    [task.status, hasActiveAgent]
+  )
 
   return (
     <button
@@ -61,7 +44,7 @@ export const TaskListItem = memo(function TaskListItem({ task, isSelected, onSel
     >
       <div className="flex items-start gap-3">
         <div className={cn(
-          'mt-[7px] h-2 w-2 rounded-full shrink-0',
+          'mt-1.5 h-2 w-2 rounded-full shrink-0',
           isSubtask && 'mt-[5px] h-1.5 w-1.5',
           statusColor
         )} />
@@ -72,10 +55,11 @@ export const TaskListItem = memo(function TaskListItem({ task, isSelected, onSel
               <span
                 role="button"
                 onClick={(e) => { e.stopPropagation(); onToggleExpand(task.id) }}
-                className="shrink-0 flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
+                aria-label={isExpanded ? 'Collapse subtasks' : 'Expand subtasks'}
+                className="shrink-0 -my-1 flex h-6 min-w-6 items-center justify-center gap-1 rounded-md px-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
               >
                 {subtaskCount}
-                <ChevronRight className={cn('h-3 w-3 transition-transform', isExpanded && 'rotate-90')} />
+                <ChevronRight className={cn('size-icon-sm transition-transform', isExpanded && 'rotate-90')} />
               </span>
             )}
           </div>
@@ -83,40 +67,40 @@ export const TaskListItem = memo(function TaskListItem({ task, isSelected, onSel
             <TaskPriorityBadge priority={task.priority} />
             {task.due_date && (
               <span className={cn('flex items-center gap-1 text-xs', overdue ? 'text-destructive' : dueSoon ? 'text-amber-400' : 'text-muted-foreground')}>
-                <Calendar className="h-3 w-3" />
+                <Calendar className="size-icon-sm" />
                 {formatDate(task.due_date)}
               </span>
             )}
             {isSnoozed(task.snoozed_until) && (
-              <AlarmClockOff className="h-3 w-3 text-muted-foreground" />
+              <AlarmClockOff className="size-icon-sm text-muted-foreground" />
             )}
             {task.is_recurring && !task.recurrence_parent_id && task.recurrence_pattern && (
               <span
                 className="flex items-center gap-1 text-xs text-muted-foreground"
                 title={task.next_occurrence_at ? `Next: ${formatDate(task.next_occurrence_at)}` : undefined}
               >
-                <Repeat className="h-3 w-3" />
+                <Repeat className="size-icon-sm" />
                 {formatRecurrenceShort(task.recurrence_pattern)}
               </span>
             )}
             {task.recurrence_parent_id && (
               <span title="From recurring template">
-                <Repeat className="h-3 w-3 text-muted-foreground opacity-50" />
+                <Repeat className="size-icon-sm text-muted-foreground opacity-50" />
               </span>
             )}
             {task.heartbeat_enabled && (
               <span title="Heartbeat monitoring active">
-                <HeartPulse className="h-3 w-3 text-rose-400" />
+                <HeartPulse className="size-icon-sm text-rose-400" />
               </span>
             )}
             {subtaskCount != null && subtaskCount > 0 && !onToggleExpand && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground" title={`${subtaskCount} subtask${subtaskCount !== 1 ? 's' : ''}`}>
-                <ListTree className="h-3 w-3" />
+                <ListTree className="size-icon-sm" />
                 {subtaskCount}
               </span>
             )}
             {task.source !== 'local' && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent text-muted-foreground">{task.source}</span>
+              <span className="text-2xs px-1.5 py-0.5 rounded-md bg-accent text-muted-foreground">{task.source}</span>
             )}
           </div>
         </div>

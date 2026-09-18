@@ -2,20 +2,26 @@ import { ipcMain, shell, Notification, app } from 'electron'
 import { existsSync, statSync, readFileSync } from 'fs'
 import { setTaskApiUiState } from '../task-api-server'
 import type { IpcDeps } from './deps'
+import { assertTrustedSender } from '../ipc-sender'
 
 const TEXT_PREVIEW_MAX_BYTES = 50 * 1024
 
 /** App preferences, OS shell integration and notifications. */
 export function registerAppHandlers({ db }: IpcDeps): void {
-  ipcMain.handle('shell:openPath', (_, filePath: string) => {
+  // Opening, revealing and reading arbitrary paths is main-window-only:
+  // a webview or embedded frame must never reach the user's disk.
+  ipcMain.handle('shell:openPath', (event, filePath: string) => {
+    assertTrustedSender(event, 'shell:openPath')
     if (existsSync(filePath)) shell.openPath(filePath)
   })
 
-  ipcMain.handle('shell:showItemInFolder', (_, filePath: string) => {
+  ipcMain.handle('shell:showItemInFolder', (event, filePath: string) => {
+    assertTrustedSender(event, 'shell:showItemInFolder')
     if (existsSync(filePath)) shell.showItemInFolder(filePath)
   })
 
-  ipcMain.handle('shell:readTextFile', (_, filePath: string): { content: string; size: number } | null => {
+  ipcMain.handle('shell:readTextFile', (event, filePath: string): { content: string; size: number } | null => {
+    assertTrustedSender(event, 'shell:readTextFile')
     if (!existsSync(filePath)) return null
     const { size } = statSync(filePath)
     if (size > TEXT_PREVIEW_MAX_BYTES) return { content: '', size }

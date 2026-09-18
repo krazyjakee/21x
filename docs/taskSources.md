@@ -24,7 +24,8 @@ Task sources allow importing tasks from external systems (Linear, HubSpot, GitHu
 | `src/main/database.ts` | Task source CRUD methods |
 | `src/main/plugins/types.ts` | `TaskSourcePlugin` and `PluginContext` interfaces |
 | `src/main/plugins/registry.ts` | `PluginRegistry` (plugins are registered in `src/main/index.ts`) |
-| `src/main/plugins/*-plugin.ts` | Linear, HubSpot, GitHub Issues, Notion, YouTrack plugins |
+| `src/main/plugins/*-plugin.ts` | Linear, HubSpot, GitHub Issues, Forgejo, Notion, YouTrack plugins |
+| `src/main/plugins/sourced-tasks.ts` | `upsertSourcedTask` — the shared create/refresh write path every plugin imports through |
 | `src/main/sync-manager.ts` | Import, export and action logic, delegated to the source's plugin |
 | `src/main/ipc/task-sources.ts` | IPC handlers for `taskSource:*`, `plugin:*` and `oauth:*` channels |
 | `src/renderer/src/stores/task-source-store.ts` | Zustand store for task sources |
@@ -75,8 +76,18 @@ Triggered manually — user clicks the sync button in the sidebar header or "Syn
 
 1. `SyncManager.importTasks(sourceId)` is called
 2. Fetches the `TaskSourceRecord` and looks up its plugin in the `PluginRegistry` by `plugin_id`
-3. `plugin.importTasks(sourceId, config, ctx)` fetches tasks from the external system and upserts them by `(source_id, external_id)`
+3. `plugin.importTasks(sourceId, config, ctx)` fetches items from the external system and writes each one through `upsertSourcedTask(ctx, sourceId, externalId, fields, createDefaults)`, which upserts by `(source_id, external_id)` and writes with the `'task-source'` origin (`DatabaseManager.updateTask` only lets that origin close a sourced task)
 4. `last_synced_at` is updated on the source
+
+**Status rule (all plugins).** The source decides whether a task is open or closed; 20x owns the workflow state (triaging, agent working, ready for review, …) while the task is open:
+
+| At the source | Locally | Result |
+|---------------|---------|--------|
+| Closed | Any open status | Task is completed |
+| Open | Completed | Task is reopened as Not Started |
+| Open | Open | Local status is kept (the source's in-between states are ignored) |
+
+A task the user completed in 20x only (`complete_at_source: false`) stays completed: `DatabaseManager.updateTask` re-applies `completed` so a refresh never reopens it. New tasks are created with the status mapped from the source. HubSpot additionally skips items that were already closed before they were ever imported, because its incremental query returns recently closed tickets.
 
 ### 3. Export (Two-Way Sync)
 

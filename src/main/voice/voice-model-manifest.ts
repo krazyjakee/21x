@@ -9,12 +9,19 @@
  * is refused. `VoiceModelManager` will not download an entry whose checksum is
  * empty, so an unverified model can never reach a user.
  *
- * Every entry is a streaming transducer with the same four roles, so the worker
- * loads them all through one code path. The files are stored under fixed local
- * names, whatever they are called upstream.
+ * Every entry is a transducer with the same four roles — encoder, decoder,
+ * joiner, tokens — stored under fixed local names, whatever they are called
+ * upstream. The worker chooses between two code paths by `kind`: a streaming
+ * model decodes each frame as it arrives; an offline model (Parakeet) decodes
+ * one utterance at a time.
+ *
+ * The one model offered today is NVIDIA Parakeet TDT 0.6B v3. The streaming
+ * models that came before it stay in the catalogue as `legacy` entries: an
+ * install of one is still recognised, still runs, and can be deleted from
+ * Voice settings — but it is never downloaded again.
  */
 
-import type { VoiceModelManifestEntry } from '../../shared/voice'
+import type { VoiceModelManifestEntry, VoiceModelKind } from '../../shared/voice'
 
 const GB = 1024 * 1024 * 1024
 
@@ -22,6 +29,9 @@ const GB = 1024 * 1024 * 1024
  * Pinned revisions. Never use a branch name here: a moving branch would break
  * every checksum below.
  */
+const PARAKEET_V3 =
+  'https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/' +
+  '2bda32ec70b097a55adaa07d9a7173915b43cc78'
 const ZIPFORMER_EN =
   'https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/' +
   '672fbf1b30579d6585301139bb363f42a0ad4a24'
@@ -40,15 +50,68 @@ const ROLES = {
   tokens: 'tokens.txt',
 } as const
 
+/** The 25 European languages Parakeet v3 detects and transcribes on its own. */
+const PARAKEET_V3_LANGUAGES = [
+  'bg', 'hr', 'cs', 'da', 'nl', 'en', 'et', 'fi', 'fr', 'de', 'el', 'hu', 'it',
+  'lv', 'lt', 'mt', 'pl', 'pt', 'ro', 'sk', 'sl', 'es', 'sv', 'ru', 'uk',
+]
+
+export const PARAKEET_V3_MODEL_ID = 'nemo-parakeet-tdt-0.6b-v3'
+
 export const VOICE_MODEL_MANIFEST: VoiceModelManifestEntry[] = [
   {
+    id: PARAKEET_V3_MODEL_ID,
+    label: 'Parakeet v3 — 25 languages',
+    description:
+      'NVIDIA Parakeet TDT 0.6B v3. Detects the language itself, writes normal capitals and punctuation. ' +
+      'Words appear when you pause, not while you speak.',
+    languages: PARAKEET_V3_LANGUAGES,
+    license: 'CC-BY-4.0',
+    licenseUrl: 'https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3',
+    minMemoryBytes: 4 * GB,
+    kind: 'offline',
+    files: [
+      {
+        name: ROLES.encoder,
+        url: `${PARAKEET_V3}/encoder.int8.onnx`,
+        sha256: 'acfc2b4456377e15d04f0243af540b7fe7c992f8d898d751cf134c3a55fd2247',
+        sizeBytes: 652_184_281,
+      },
+      {
+        name: ROLES.decoder,
+        url: `${PARAKEET_V3}/decoder.int8.onnx`,
+        sha256: '179e50c43d1a9de79c8a24149a2f9bac6eb5981823f2a2ed88d655b24248db4e',
+        sizeBytes: 11_845_275,
+      },
+      {
+        name: ROLES.joiner,
+        url: `${PARAKEET_V3}/joiner.int8.onnx`,
+        sha256: '3164c13fc2821009440d20fcb5fdc78bff28b4db2f8d0f0b329101719c0948b3',
+        sizeBytes: 6_355_277,
+      },
+      {
+        name: ROLES.tokens,
+        url: `${PARAKEET_V3}/tokens.txt`,
+        sha256: 'd58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d',
+        sizeBytes: 93_939,
+      },
+    ],
+    roles: { ...ROLES },
+  },
+
+  // ── Legacy streaming models ───────────────────────────────
+  // Kept so an existing install is recognised and can be deleted. Not offered.
+
+  {
     id: 'sherpa-streaming-zipformer-en',
-    label: 'English — small',
-    description: 'Fast and light. Good for task commands and short dictation.',
+    label: 'English — small (legacy)',
+    description: 'Streaming Zipformer. No longer offered; Parakeet v3 replaces it.',
     languages: ['en'],
     license: 'Apache-2.0',
     licenseUrl: 'https://github.com/k2-fsa/sherpa-onnx/blob/master/LICENSE',
     minMemoryBytes: 2 * GB,
+    kind: 'streaming',
+    legacy: true,
     files: [
       {
         name: ROLES.encoder,
@@ -80,12 +143,14 @@ export const VOICE_MODEL_MANIFEST: VoiceModelManifestEntry[] = [
 
   {
     id: 'nemo-fast-conformer-en-480ms',
-    label: 'English — balanced',
-    description: 'NVIDIA FastConformer, 480 ms chunks. Better words for free dictation.',
+    label: 'English — balanced (legacy)',
+    description: 'Streaming NVIDIA FastConformer. No longer offered; Parakeet v3 replaces it.',
     languages: ['en'],
     license: 'CC-BY-4.0',
     licenseUrl: 'https://huggingface.co/nvidia/stt_en_fastconformer_hybrid_large_streaming_multi',
     minMemoryBytes: 2 * GB,
+    kind: 'streaming',
+    legacy: true,
     files: [
       {
         name: ROLES.encoder,
@@ -117,13 +182,14 @@ export const VOICE_MODEL_MANIFEST: VoiceModelManifestEntry[] = [
 
   {
     id: 'nemotron-streaming-en-560ms',
-    label: 'English — most accurate',
-    description:
-      'NVIDIA Nemotron 0.6B, 560 ms chunks. Writes normal capitals and punctuation. Large, and it needs a fast computer.',
+    label: 'English — most accurate (legacy)',
+    description: 'Streaming NVIDIA Nemotron 0.6B. No longer offered; Parakeet v3 replaces it.',
     languages: ['en'],
     license: 'NVIDIA Open Model License',
     licenseUrl: 'https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b',
     minMemoryBytes: 4 * GB,
+    kind: 'streaming',
+    legacy: true,
     files: [
       {
         name: ROLES.encoder,
@@ -155,7 +221,7 @@ export const VOICE_MODEL_MANIFEST: VoiceModelManifestEntry[] = [
 ]
 
 /** The one installed automatically by the single setup action. */
-export const DEFAULT_VOICE_MODEL_ID = VOICE_MODEL_MANIFEST[0].id
+export const DEFAULT_VOICE_MODEL_ID = PARAKEET_V3_MODEL_ID
 
 export function findManifestEntry(id: string): VoiceModelManifestEntry | undefined {
   return VOICE_MODEL_MANIFEST.find((entry) => entry.id === id)
@@ -168,4 +234,14 @@ export function isManifestVerified(entry: VoiceModelManifestEntry): boolean {
 
 export function manifestSizeBytes(entry: VoiceModelManifestEntry): number {
   return entry.files.reduce((total, f) => total + f.sizeBytes, 0)
+}
+
+/** Every entry before Parakeet was a streaming model, so that is the default. */
+export function manifestKind(entry: Pick<VoiceModelManifestEntry, 'kind'>): VoiceModelKind {
+  return entry.kind ?? 'streaming'
+}
+
+/** The entries a fresh install is offered: everything that is not legacy. */
+export function offeredManifestEntries(): VoiceModelManifestEntry[] {
+  return VOICE_MODEL_MANIFEST.filter((entry) => !entry.legacy)
 }

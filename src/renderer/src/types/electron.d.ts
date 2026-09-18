@@ -56,9 +56,31 @@ import type {
   VoiceTtsModelState,
   VoiceTtsSnapshot
 } from '@shared/voice-tts'
+import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
+import type { CliMcpMutationResult, CliMcpProbeResult, CliMcpServerRef, CliMcpSnapshot, CliMcpUpsertRequest } from '@shared/cli-mcp-config'
 
 export interface AgentSessionStartResult {
   sessionId: string
+  /** True when the main process queued the start behind a concurrency limit; sessionId is then ''. */
+  queued?: boolean
+  queuePosition?: number
+  queueReason?: 'agent_limit' | 'global_limit'
+}
+
+/** A session start waiting in the main-process queue for a free slot. */
+export interface QueuedAgentStart {
+  taskId: string
+  agentId: string
+  reason: 'agent_limit' | 'global_limit'
+  queuedAt: string
+  /** 1-based. */
+  position: number
+}
+
+export interface AgentStartQueueChangedEvent {
+  queue: QueuedAgentStart[]
+  /** Set when a queued start was attempted and failed. */
+  failed?: { taskId: string; error: string }
 }
 
 export interface AgentSessionSuccessResult {
@@ -213,6 +235,7 @@ interface ElectronAPI {
   }
   tasks: {
     getWorkspaceDir: (taskId: string) => Promise<string>
+    getCoordinatorTaskId: () => Promise<string | null>
   }
   /** The preload bridge always exposes every artifact capability, including
    * the desktop-only file clipboard action. */
@@ -229,11 +252,20 @@ interface ElectronAPI {
     probeForAuth: (serverUrl: string) => Promise<{ requiresAuth: boolean }>
     submitManualClientId: (mcpServerId: string, clientId: string) => Promise<{ needsManualClientId?: boolean }>
   }
+  cliMcp: {
+    snapshot: () => Promise<CliMcpSnapshot>
+    upsert: (request: CliMcpUpsertRequest) => Promise<CliMcpMutationResult>
+    remove: (ref: CliMcpServerRef) => Promise<CliMcpMutationResult>
+    setEnabled: (ref: CliMcpServerRef & { enabled: boolean }) => Promise<CliMcpMutationResult>
+    setToolEnabled: (ref: CliMcpServerRef & { tool: string; enabled: boolean }) => Promise<CliMcpMutationResult>
+    probe: (ref: CliMcpServerRef) => Promise<CliMcpProbeResult>
+  }
   agents: {
     getAll: () => Promise<Agent[]>
     create: (data: CreateAgentDTO) => Promise<Agent>
     update: (id: string, data: UpdateAgentDTO) => Promise<Agent | undefined>
     delete: (id: string) => Promise<boolean>
+    getStartQueue: () => Promise<QueuedAgentStart[]>
   }
   agentSession: {
     start: (agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean) => Promise<AgentSessionStartResult>
@@ -376,14 +408,18 @@ interface ElectronAPI {
   }
   mobile: {
     getInfo: () => Promise<{
+      enabled: boolean
+      lanAccess: boolean
+      sessionIdleDays: number
       url: string
       port: number
-      lanUrl: string
+      lanUrl: string | null
       tunnelUrl: string | null
       tunnelActive: boolean
       remoteMode: 'quick' | 'custom'
       customUrl: string | null
     }>
+    setAccess: (options: { enabled?: boolean; lanAccess?: boolean; sessionIdleDays?: number }) => Promise<{ enabled: boolean; lanAccess: boolean; sessionIdleDays: number; listening: boolean }>
     startTunnel: () => Promise<{ tunnelUrl: string }>
     stopTunnel: () => Promise<{ success: boolean }>
     setCustomUrl: (url: string) => Promise<{ url: string }>
@@ -428,6 +464,7 @@ interface ElectronAPI {
   onArtifactUpdated: (callback: (event: { taskId: string; artifact: import('@shared/artifacts').Artifact }) => void) => () => void
   onTranscriptChanged: (callback: (event: TranscriptChangedEvent) => void) => () => void
   onAgentStatus: (callback: (event: AgentStatusEvent) => void) => () => void
+  onAgentStartQueueChanged: (callback: (event: AgentStartQueueChangedEvent) => void) => () => void
   onAgentIncompatibleSession: (callback: (event: { taskId: string; agentId: string; error: string }) => void) => () => void
   onTaskUpdated: (callback: (event: { taskId: string; updates: Partial<Task> }) => void) => () => void
   onTaskSourceActionFailed: (callback: (event: { taskId: string; taskTitle: string; error: string }) => void) => () => void
@@ -509,6 +546,12 @@ interface ElectronAPI {
       onStatus: (callback: (event: VoiceTtsSnapshot) => void) => () => void
       onModelProgress: (callback: (event: { model: VoiceTtsModelState }) => void) => () => void
     }
+  }
+  /** Lightweight chat runtime (docs/chat-runtime.md). */
+  chat: {
+    start: (payload: ChatStartRequest) => Promise<{ turnId: string; provider: string; model: string }>
+    cancel: (turnId: string) => Promise<{ cancelled: boolean }>
+    onEvent: (callback: (event: ChatIpcEvent) => void) => () => void
   }
   onOAuthCallback: (callback: (event: { code: string; state: string }) => void) => () => void
 }

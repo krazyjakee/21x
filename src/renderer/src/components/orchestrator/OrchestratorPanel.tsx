@@ -5,7 +5,7 @@ import { AgentTranscriptPanel } from '@/components/agents/AgentTranscriptPanel'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useAgentSession } from '@/hooks/use-agent-session'
 import { agentApi, settingsApi } from '@/lib/ipc-client'
-import { MASTERMIND_SESSION_ID } from '@/lib/voice-dictation-target'
+import { useCoordinatorStore } from '@/stores/coordinator-store'
 import type { Agent } from '@/types'
 
 /** Start the agent at app start, so the first sentence does not wait for it. */
@@ -18,8 +18,12 @@ interface OrchestratorPanelProps {
 export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   const [agents, setAgents] = useState<Agent[]>([])
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
-  const { start, stop, sendMessage, approve } = useAgentSession(MASTERMIND_SESSION_ID)
-  const currentSession = useAgentStore((state) => state.sessions.get(MASTERMIND_SESSION_ID))
+  // The Mastermind is a task row (hidden from every list); its id is asked
+  // for by role. Nothing starts until it is known.
+  const mastermindTaskId = useCoordinatorStore((state) => state.mastermindTaskId)
+  const loadCoordinator = useCoordinatorStore((state) => state.load)
+  const { start, stop, sendMessage, approve } = useAgentSession(mastermindTaskId ?? undefined)
+  const currentSession = useAgentStore((state) => (mastermindTaskId ? state.sessions.get(mastermindTaskId) : undefined))
   const removeSession = useAgentStore((state) => state.removeSession)
   /** The start in flight, shared so a message can wait for it instead of racing. */
   const startingRef = useRef<Promise<void> | null>(null)
@@ -44,6 +48,10 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
     }
   }, [])
 
+  useEffect(() => {
+    void loadCoordinator()
+  }, [loadCoordinator])
+
   // Load agents on mount
   useEffect(() => {
     agentApi.getAll().then((allAgents) => {
@@ -61,9 +69,9 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   const handleAgentChange = async (newAgentId: string) => {
     selectedAgentIdRef.current = newAgentId
     setSelectedAgentId(newAgentId)
-    if (currentSession?.sessionId) {
+    if (currentSession?.sessionId && mastermindTaskId) {
       await stop()
-      removeSession(MASTERMIND_SESSION_ID)
+      removeSession(mastermindTaskId)
     }
   }
 
@@ -76,7 +84,9 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
    * dropped, because there is no session yet and one is already being made.
    */
   const ensureSession = useCallback(async (): Promise<boolean> => {
-    const live = useAgentStore.getState().sessions.get(MASTERMIND_SESSION_ID)
+    const taskId = mastermindTaskId
+    if (!taskId) return false
+    const live = useAgentStore.getState().sessions.get(taskId)
     if (live?.sessionId) return true
 
     const agentId = selectedAgentIdRef.current
@@ -85,9 +95,11 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
     if (!startingRef.current) {
       startingRef.current = (async () => {
         // Clean up any old session data first
-        removeSession(MASTERMIND_SESSION_ID)
-        // skipInitialPrompt keeps the agent quiet until the user speaks.
-        await start(agentId, MASTERMIND_SESSION_ID, undefined, true)
+        removeSession(taskId)
+        // skipInitialPrompt keeps the agent quiet until the user speaks. Main
+        // resumes the persisted conversation when there is one, so a restart
+        // continues where the last one left off.
+        await start(agentId, taskId, undefined, true)
         // Small delay to ensure session is fully initialized
         await new Promise((resolve) => setTimeout(resolve, 100))
       })().finally(() => {
@@ -97,12 +109,12 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
 
     try {
       await startingRef.current
-      return Boolean(useAgentStore.getState().sessions.get(MASTERMIND_SESSION_ID)?.sessionId)
+      return Boolean(useAgentStore.getState().sessions.get(taskId)?.sessionId)
     } catch (err) {
       console.error('Failed to start mastermind session:', err)
       return false
     }
-  }, [start, removeSession])
+  }, [mastermindTaskId, start, removeSession])
 
   // Send message - the session is usually warm already, so this just sends.
   const handleSendMessage = useCallback(
@@ -110,7 +122,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
       if (!(await ensureSession())) return
 
       // Question answers should use approve() instead of sendMessage()
-      const live = useAgentStore.getState().sessions.get(MASTERMIND_SESSION_ID)
+      const live = mastermindTaskId ? useAgentStore.getState().sessions.get(mastermindTaskId) : undefined
       const messages = live?.messages || []
       const lastMessage = messages[messages.length - 1]
       if (lastMessage?.partType === 'question' && lastMessage?.tool?.questions) {
@@ -119,7 +131,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
         await sendMessage(message)
       }
     },
-    [ensureSession, sendMessage, approve]
+    [mastermindTaskId, ensureSession, sendMessage, approve]
   )
 
   /**
@@ -134,9 +146,9 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
    * process. Failure is silent: the first message starts the session as before.
    */
   useEffect(() => {
-    if (!prewarm || !selectedAgentId || currentSession?.sessionId) return
+    if (!prewarm || !selectedAgentId || !mastermindTaskId || currentSession?.sessionId) return
     void ensureSession()
-  }, [prewarm, selectedAgentId, currentSession?.sessionId, ensureSession])
+  }, [prewarm, selectedAgentId, mastermindTaskId, currentSession?.sessionId, ensureSession])
 
   // Listen for pre-fill messages from the dashboard command input
   useEffect(() => {

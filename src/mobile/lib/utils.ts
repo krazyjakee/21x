@@ -1,71 +1,22 @@
-import { TaskStatus } from '@shared/constants'
-
-// Date helpers below intentionally differ from desktop's (exact-timestamp due
-// checks, no year in relative dates); formatDate is shared via '@/lib/utils'.
+// Date/size helpers and task-status colours are shared with the desktop
+// renderer (`@shared/date-format`, `@shared/task-status-styles`) so both UIs
+// agree on overdue / due-soon state and on status styling.
+export {
+  formatDate,
+  formatRelativeDate,
+  formatRelativeFuture,
+  formatDueDistance,
+  isOverdue,
+  isDueSoon,
+  isSnoozed,
+  formatFileSize,
+  formatBytes,
+  SNOOZE_SOMEDAY
+} from '@shared/date-format'
 
 /** Merge class names, filtering out falsy values */
 export function cn(...classes: (string | false | null | undefined)[]): string {
   return classes.filter(Boolean).join(' ')
-}
-
-export function isSnoozed(snoozedUntil: string | null): boolean {
-  if (!snoozedUntil) return false
-  if (snoozedUntil === '9999-12-31T00:00:00.000Z') return true
-  return new Date(snoozedUntil) > new Date()
-}
-
-export function isOverdue(dueDate: string | null): boolean {
-  if (!dueDate) return false
-  return new Date(dueDate) < new Date()
-}
-
-export function isDueSoon(dueDate: string | null): boolean {
-  if (!dueDate) return false
-  const due = new Date(dueDate)
-  const now = new Date()
-  const hoursUntil = (due.getTime() - now.getTime()) / (1000 * 60 * 60)
-  return hoursUntil > 0 && hoursUntil <= 24
-}
-
-export function formatRelativeDate(dateStr: string): string {
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMin = Math.floor(diffMs / 60000)
-  const diffHrs = Math.floor(diffMin / 60)
-  const diffDays = Math.floor(diffHrs / 24)
-
-  if (diffMin < 1) return 'just now'
-  if (diffMin < 60) return `${diffMin}m ago`
-  if (diffHrs < 24) return `${diffHrs}h ago`
-  if (diffDays < 7) return `${diffDays}d ago`
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
-
-export function formatRelativeFuture(dateStr: string): string {
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diffMs = date.getTime() - now.getTime()
-
-  if (diffMs <= 0) return 'soon'
-
-  const diffMin = Math.ceil(diffMs / 60000)
-  const diffHrs = Math.floor(diffMs / 3600000)
-
-  if (diffMin <= 1) return 'in <1m'
-  if (diffMin < 60) return `in ${diffMin}m`
-  if (diffHrs < 24) return `in ${diffHrs}h`
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
-
-// Matches desktop TaskListItem statusDotColor exactly
-export const STATUS_DOT_COLORS: Record<string, string> = {
-  [TaskStatus.NotStarted]: 'bg-muted-foreground',
-  [TaskStatus.Triaging]: 'bg-muted-foreground animate-pulse',
-  [TaskStatus.AgentWorking]: 'bg-amber-400',
-  [TaskStatus.ReadyForReview]: 'bg-pink-400',
-  [TaskStatus.AgentLearning]: 'bg-blue-400',
-  [TaskStatus.Completed]: 'bg-emerald-400'
 }
 
 // Badge variant mappings — matches desktop Badge.tsx variants
@@ -88,13 +39,4 @@ export const PRIORITY_VARIANT: Record<string, { label: string; variant: BadgeVar
   high: { label: 'High', variant: 'orange' },
   medium: { label: 'Medium', variant: 'yellow' },
   low: { label: 'Low', variant: 'default' }
-}
-
-export const STATUS_VARIANT: Record<string, { label: string; variant: BadgeVariant }> = {
-  [TaskStatus.NotStarted]: { label: 'Not Started', variant: 'default' },
-  [TaskStatus.Triaging]: { label: 'Triaging', variant: 'default' },
-  [TaskStatus.AgentWorking]: { label: 'Agent Working', variant: 'yellow' },
-  [TaskStatus.ReadyForReview]: { label: 'Ready for Review', variant: 'pink' },
-  [TaskStatus.AgentLearning]: { label: 'Agent Learning', variant: 'blue' },
-  [TaskStatus.Completed]: { label: 'Completed', variant: 'green' }
 }

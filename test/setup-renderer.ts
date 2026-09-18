@@ -47,7 +47,8 @@ const mockElectronAPI = {
     get: vi.fn().mockResolvedValue(undefined),
     create: vi.fn().mockResolvedValue({}),
     update: vi.fn().mockResolvedValue({}),
-    delete: vi.fn().mockResolvedValue(true)
+    delete: vi.fn().mockResolvedValue(true),
+    getStartQueue: vi.fn().mockResolvedValue([])
   },
   agentSession: {
     start: vi.fn().mockResolvedValue({ sessionId: 'test-session-id' }),
@@ -166,6 +167,9 @@ const mockElectronAPI = {
     return vi.fn()
   }),
   onAgentIncompatibleSession: vi.fn((_cb: (event: { taskId: string; agentId: string; error: string }) => void) => {
+    return vi.fn()
+  }),
+  onAgentStartQueueChanged: vi.fn((_cb: (event: unknown) => void) => {
     return vi.fn()
   }),
   onTaskUpdated: vi.fn((cb: (event: { taskId: string; updates: Partial<Task> }) => void) => {

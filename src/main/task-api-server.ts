@@ -96,13 +96,15 @@ export function startTaskApiServer(db: DatabaseManager): Promise<number> {
 
         res.setHeader('Content-Type', 'application/json')
         const params = parseJsonBody(body)
-        console.log(`[TaskApiServer] → ${route}`, JSON.stringify(params).slice(0, 200))
+        // Only route names and sizes are logged: bodies can carry typed
+        // passwords (browser_type) and other sensitive content.
+        console.log(`[TaskApiServer] → ${route} (${body.length} bytes)`)
         const resultStr = JSON.stringify(await handleRoute(db, route, params))
-        console.log(`[TaskApiServer] ← ${route} (${resultStr.length} bytes)`, resultStr.slice(0, 200))
+        console.log(`[TaskApiServer] ← ${route} 200 (${resultStr.length} bytes)`)
         res.writeHead(200)
         res.end(resultStr)
       } catch (err: unknown) {
-        console.error(`[TaskApiServer] ERROR ${req.url}:`, (err as Error).message)
+        console.error(`[TaskApiServer] ERROR ${new URL(req.url || '/', 'http://localhost').pathname}:`, (err as Error).message)
         // The MCP endpoint may have written its headers already; writing them
         // twice throws and would take the whole server down.
         if (res.headersSent) {

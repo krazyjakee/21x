@@ -60,6 +60,10 @@ export function registerTaskHandlers(deps: IpcDeps): void {
 
   ipcMain.handle('tasks:getWorkspaceDir', (_, taskId: string): string => db.getWorkspaceDir(taskId))
 
+  // The Mastermind's row id. Never in db:getTasks (coordinator rows are hidden),
+  // so the renderer asks for it by role instead of carrying a fixed string.
+  ipcMain.handle('tasks:getCoordinatorTaskId', (): string | null => db.getCoordinatorTask()?.id ?? null)
+
   ipcMain.handle('attachments:pick', async () => {
     const result = await dialog.showOpenDialog({ properties: ['openFile', 'multiSelections'] })
     return result.canceled ? [] : result.filePaths

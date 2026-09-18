@@ -53,7 +53,7 @@ Most AI tools make you copy-paste context between tabs. 20x flips it: **your tas
 ### Multi-Agent Support
 - **Claude Code** — runs through Anthropic's `@anthropic-ai/claude-agent-sdk`
 - **OpenCode** — open-source coding agent, driven through `@opencode-ai/sdk`
-- **Codex** — OpenAI's Codex CLI, driven over `codex app-server` (set `CODEX_APP_SERVER=0` to use the ACP adapter instead)
+- **Codex** — OpenAI's Codex CLI, driven over `codex app-server`
 - **Cursor** — the `cursor-agent` CLI via the Agent Client Protocol (JSON-RPC over stdio)
 - **Pi** — open-source coding agent over its JSONL RPC protocol, using your own model providers
 - **Live transcripts** — Watch agents think and work in real time with message counts
@@ -209,7 +209,7 @@ See [AGENTS.md](./AGENTS.md) for detailed architecture.
 | Icons | Lucide React |
 | Font | Geist |
 | Database | SQLite (better-sqlite3, WAL mode) |
-| Agent SDKs / protocols | @anthropic-ai/claude-agent-sdk, @opencode-ai/sdk, `codex app-server`, Agent Client Protocol (Cursor, Codex fallback via @agentclientprotocol/codex-acp), Pi JSONL RPC |
+| Agent SDKs / protocols | @anthropic-ai/claude-agent-sdk, @opencode-ai/sdk, `codex app-server`, Agent Client Protocol (Cursor), Pi JSONL RPC |
 | Testing | Vitest + happy-dom |
 
 ## Contributing
@@ -256,7 +256,7 @@ See [SECURITY.md](./SECURITY.md) for reporting vulnerabilities.
 - **Windows secret injection is untested.** Secrets reach agent shells through a PowerShell wrapper on Windows (`src/main/secret-broker.ts`); the wrapper tests are skipped on Windows.
 - **Windows process cleanup is coarse.** On quit, leaked task-management MCP processes are killed with `taskkill` by image name and window title rather than by process ancestry as on macOS/Linux.
 - **Starting OpenCode kills stray OpenCode servers.** Before starting its server the OpenCode adapter kills whatever listens on port 4096 (macOS/Linux) or every `opencode.exe` (Windows).
-- **Windows installer asks for admin.** The NSIS build sets `requestedExecutionLevel: requireAdministrator`.
+- **Windows installer asks for admin.** The NSIS installer runs elevated; the installed app and its agents run unelevated (`asInvoker`). Installing Node.js or Git from the app shows its own UAC prompt.
 
 ## License
 

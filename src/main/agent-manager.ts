@@ -10,6 +10,8 @@ import { powerSaveBlocker } from 'electron'
 import type { BrowserWindow } from 'electron'
 import type { AgentRecord, DatabaseManager, TaskRecord } from './database'
 import { TaskStatus } from '../shared/constants'
+import { isCoordinatorTask } from '../shared/task-roles'
+import { findBlockingSibling, isSuccessorGraphInProgress, successorsFireOnReview } from '../shared/subtask-graph'
 import type { WorktreeManager } from './worktree-manager'
 import type { GitHubManager } from './github-manager'
 import type { GitLabManager } from './gitlab-manager'
@@ -30,6 +32,7 @@ import { ARTIFACT_WORKSPACE_INSTRUCTIONS, HEARTBEAT_MONITORING_INSTRUCTIONS, bui
 import { setupTaskWorktrees } from './agent-manager/worktree-setup'
 import { assistantTextKey, dedupStateFromHistory, hasMatchingErrorMessage, pruneDedup } from './agent-manager/output-dedup'
 import { STUCK_SESSION_TIMEOUT_MS, findStuckTool, hasGarbledOutput, isDelegationTool, isWaitingForUserInput, type RunningTool } from './agent-manager/watchdogs'
+import { MAX_CONCURRENT_AGENT_SESSIONS_SETTING, StartQueue, checkAdmission, isExemptFromAdmission, parseGlobalSessionLimit, type AdmissionReason, type CountedSession, type QueuedStartInfo } from './agent-manager/admission'
 import { collectMissedParts, debugTranscript, emitArtifactUpdatesFromParts, textTranscript, type DebugTranscriptMessage, notifyStatusTransition, transcriptPartsFromEvent, transcriptPartsFromMessages, type OutputMessage } from './agent-manager/transcript-events'
 
 // Default OpenCode server URL (matches database default)
@@ -39,6 +42,11 @@ const DONE_TODO_STATUSES = ['completed', 'cancelled', 'done', 'removed']
 /** Yields to the event loop between bursts of synchronous DB / FS calls so IPC
  *  and rendering are not starved (better-sqlite3 calls block the main thread). */
 const yieldEventLoop = (): Promise<void> => new Promise((r) => setImmediate(r))
+
+/** Outcome of a session start that went through admission control. */
+export type SessionStartOutcome =
+  | { status: 'started'; sessionId: string }
+  | { status: 'queued'; position: number; reason: AdmissionReason }
 
 interface TodoItem {
   content: string
@@ -194,6 +202,14 @@ export class AgentManager extends EventEmitter {
   // Track last sent status per session to detect transitions for OS notifications
   private lastSentStatus: Map<string, string> = new Map()
 
+  // ── Admission control (see agent-manager/admission.ts) ──
+  /** Starts waiting for a free slot, FIFO, one per task. */
+  private startQueue = new StartQueue()
+  /** taskId → agentId of admitted starts whose session is not registered yet.
+   *  They hold their slot so concurrent requests cannot all slip past. */
+  private admittedStarts: Map<string, string> = new Map()
+  private startQueueDrainScheduled = false
+
   constructor(db: DatabaseManager) {
     super()
     this.db = db
@@ -266,6 +282,9 @@ export class AgentManager extends EventEmitter {
   }
 
   private async reapInactiveSessions(): Promise<void> {
+    // Safety net for limits raised in settings or the agent form: nothing
+    // else signals those, so re-check the queue on every sweep.
+    this.scheduleStartQueueDrain()
     const now = Date.now()
     for (const [sessionId, session] of [...this.sessions.entries()]) {
       // Only idle sessions are candidates — an active turn is never reaped.
@@ -275,7 +294,9 @@ export class AgentManager extends EventEmitter {
       if (idleForMs < AgentManager.IDLE_SESSION_REAP_THRESHOLD_MS) continue
 
       const task = this.db.getTask(session.taskId)
-      // Pseudo-tasks (mastermind, heartbeat-*) have no DB row — leave them alone.
+      // Pseudo-tasks (heartbeat-*) have no DB row — leave them alone. The
+      // Mastermind has one, so it is released like any task and resumed by
+      // the next message from its persisted session_id.
       if (!task) continue
       // No persisted resume anchor — releasing the runtime would lose the
       // conversation, so keep it in memory.
@@ -385,8 +406,9 @@ export class AgentManager extends EventEmitter {
     const task = this.db.getTask(taskId)
     const mcpServers = await this.buildMcpServersForAdapter(agentId, mcpOptionsForTask(taskId, task))
     // Task context keeps follow-up messages after idle aware of the task;
-    // without it doSendAdapterMessage sends a bare prompt.
-    const taskContext = task
+    // without it doSendAdapterMessage sends a bare prompt. A coordinator row
+    // is not work to describe.
+    const taskContext = task && !isCoordinatorTask(task)
       ? `\n\n[Task Context]\nTask: "${task.title}"\n${task.description || ''}${ARTIFACT_WORKSPACE_INSTRUCTIONS}`
       : ''
     return assembleSessionConfig(this.db, agent, {
@@ -454,6 +476,8 @@ export class AgentManager extends EventEmitter {
 
   private emitStatus(sessionId: string, owner: { agentId: string; taskId: string }, status: AgentSession['status']): void {
     this.sendToRenderer('agent:status', { sessionId, agentId: owner.agentId, taskId: owner.taskId, status })
+    // Every idle transition and every stop ends here: a slot may have freed.
+    if (status === 'idle' || status === 'error') this.scheduleStartQueueDrain()
   }
 
   private emitSystemError(sessionId: string, taskId: string, id: string, content: string): void {
@@ -514,7 +538,8 @@ export class AgentManager extends EventEmitter {
       workspaceDir,
       mcpServers,
       systemPrompt: agent.config?.system_prompt,
-      secretToken
+      secretToken,
+      onModelNotice: (notice) => this.emitSystemError('', taskId, `skill-model-${Date.now()}`, notice)
     })
     await yieldEventLoop()
 
@@ -562,8 +587,8 @@ export class AgentManager extends EventEmitter {
     this.updateTaskFromLocalAgent(taskId, { session_id: adapterSessionId })
     console.log(`[SessionTracker] CREATED session=${adapterSessionId} task=${taskId} agent=${agentId} reason=new_session`)
 
-    // Triage sessions keep the Triaging status.
-    if (!isTriageSession) {
+    // Triage sessions keep the Triaging status; coordinator rows have none.
+    if (!isTriageSession && !isCoordinatorTask(task)) {
       this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.AgentWorking })
       this.sendToRenderer('task:updated', {
         taskId,
@@ -1395,7 +1420,7 @@ export class AgentManager extends EventEmitter {
 
     const mcpServers = await this.buildMcpServersForAdapter(agentId, mcpOptionsForTask(taskId, task))
     // Task context in the system prompt survives context compaction.
-    const taskContext = task
+    const taskContext = task && !isCoordinatorTask(task)
       ? `\n\n[Task Context]\nTask: "${task.title}"\n${task.description || ''}`
       : ''
     const secretToken = this.setupSecretSession(agentId)
@@ -1433,6 +1458,13 @@ export class AgentManager extends EventEmitter {
         // Don't show the alarming "incompatible" dialog — just clear the session_id
         // so the UI shows "Start" instead. This commonly happens with subtask sessions.
         const currentTask = this.db.getTask(taskId)
+        // A coordinator conversation the backend no longer has is simply over;
+        // the caller opens a new one. There is no task to ask the user about.
+        if (isCoordinatorTask(currentTask)) {
+          console.log(`[AgentManager] Coordinator session ${adapterSessionId} is gone — clearing session_id for ${taskId}`)
+          this.updateTaskFromLocalAgent(taskId, { session_id: null })
+          return ''
+        }
         const pendingFeedback = currentTask?.status === TaskStatus.AgentLearning
           && this.db.getSetting(`session-feedback-completion:${taskId}`)
         if (currentTask && (currentTask.status === TaskStatus.ReadyForReview || currentTask.status === TaskStatus.Completed || pendingFeedback)) {
@@ -1504,10 +1536,18 @@ export class AgentManager extends EventEmitter {
     return adapterSessionId
   }
 
-  /** A running agent must not pull a task back out of session learning. */
+  /**
+   * A running agent must not pull a task back out of session learning, and a
+   * coordinator row has no lifecycle at all: it is never working, in review or
+   * done, only resumable. Its session_id still persists like any task's.
+   */
   private updateTaskFromLocalAgent(taskId: string, updates: Parameters<DatabaseManager['updateTask']>[1]): TaskRecord | undefined {
     const fields = { ...updates }
-    if (fields.status === TaskStatus.AgentWorking && this.db.getTask(taskId)?.status === TaskStatus.AgentLearning) delete fields.status
+    if (fields.status !== undefined) {
+      const current = this.db.getTask(taskId)
+      if (isCoordinatorTask(current)) delete fields.status
+      else if (fields.status === TaskStatus.AgentWorking && current?.status === TaskStatus.AgentLearning) delete fields.status
+    }
     if (Object.keys(fields).length === 0) return this.db.getTask(taskId)
     return this.db.updateTask(taskId, fields)
   }
@@ -1517,9 +1557,79 @@ export class AgentManager extends EventEmitter {
    * Uses promptAsync to send the initial prompt without blocking.
    */
   async startSession(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<string> {
+    const outcome = await this.requestSession(agentId, taskId, workspaceDir, skipInitialPrompt)
+    // '' = queued behind the concurrency limits; it starts on its own later.
+    return outcome.status === 'started' ? outcome.sessionId : ''
+  }
+
+  /**
+   * The admission-controlled start every entry point goes through. Starts the
+   * session when it fits under the per-agent and global limits, otherwise
+   * queues it (once per task) and reports its position. Coordinator,
+   * heartbeat and triage sessions bypass the limits (see admission.ts).
+   */
+  async requestSession(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<SessionStartOutcome> {
     const agent = this.db.getAgent(agentId)
     if (!agent) {
       throw new Error(`Agent not found: ${agentId}`)
+    }
+
+    const task = this.db.getTask(taskId)
+    if (!isExemptFromAdmission(taskId, task)) {
+      const alreadyQueued = this.startQueue.list().find((entry) => entry.taskId === taskId)
+      if (alreadyQueued) {
+        return { status: 'queued', position: alreadyQueued.position, reason: alreadyQueued.reason }
+      }
+      const decision = checkAdmission({ agentId, taskId, task, agent }, this.countedSessions(), this.admissionLimits())
+      if (!decision.admitted) {
+        const { position } = this.startQueue.enqueue({
+          taskId,
+          agentId,
+          workspaceDir,
+          skipInitialPrompt,
+          reason: decision.reason,
+          queuedAt: new Date().toISOString()
+        })
+        console.log(
+          `[AgentManager] Start of task ${taskId} queued at position ${position}: ${decision.reason} ` +
+          `(${decision.running}/${decision.limit} running)`
+        )
+        this.emitStartQueueChanged()
+        return { status: 'queued', position, reason: decision.reason }
+      }
+    }
+
+    this.admittedStarts.set(taskId, agentId)
+    try {
+      return { status: 'started', sessionId: await this.startSessionNow(agentId, taskId, workspaceDir, skipInitialPrompt) }
+    } catch (error) {
+      // The reserved slot is free again (released in finally, before the
+      // deferred drain runs).
+      this.scheduleStartQueueDrain()
+      throw error
+    } finally {
+      this.admittedStarts.delete(taskId)
+    }
+  }
+
+  /** Starts without admission control — callers are exempt or already admitted. */
+  private async startSessionNow(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<string> {
+    const agent = this.db.getAgent(agentId)
+    if (!agent) {
+      throw new Error(`Agent not found: ${agentId}`)
+    }
+
+    // A coordinator conversation outlives its runtime. Rejoin the live session
+    // or resume the persisted one, so a restart (or a reaped runtime) continues
+    // the same Mastermind conversation instead of opening a blank one.
+    const task = this.db.getTask(taskId)
+    if (isCoordinatorTask(task)) {
+      const live = this.findSessionByTaskId(taskId)
+      if (live) return live.sessionId
+      if (task?.session_id) {
+        const resumed = await this.resumeCoordinatorSession(agentId, taskId, task.session_id)
+        if (resumed) return resumed
+      }
     }
 
     if (!workspaceDir) {
@@ -1531,6 +1641,21 @@ export class AgentManager extends EventEmitter {
       throw new Error(`No adapter available for agent ${agentId}`)
     }
     return this.startAdapterSession(adapter, agentId, taskId, workspaceDir, skipInitialPrompt)
+  }
+
+  /** Resumes a coordinator's persisted session; '' when it cannot be continued. */
+  private async resumeCoordinatorSession(agentId: string, taskId: string, sessionId: string): Promise<string> {
+    const adapter = this.getAdapter(agentId)
+    if (!adapter) return ''
+    try {
+      return await this.resumeAdapterSession(adapter, agentId, taskId, sessionId)
+    } catch (error) {
+      // Backend restarted, files gone, or a different backend than the one
+      // that made it. The next session starts fresh; nothing to ask the user.
+      console.warn(`[AgentManager] Could not resume coordinator session ${sessionId} for ${taskId}; starting a new one:`, error)
+      this.updateTaskFromLocalAgent(taskId, { session_id: null })
+      return ''
+    }
   }
 
   /**
@@ -1586,10 +1711,14 @@ export class AgentManager extends EventEmitter {
   }
 
   async startTask(taskId: string, opts?: { preferSubtasks?: boolean; allowTriage?: boolean }): Promise<{
-    action: 'task_started' | 'subtask_started' | 'triage_started' | 'already_running' | 'no_action'
+    /** `queued`: over a concurrency limit; it starts on its own when a slot frees. */
+    action: 'task_started' | 'subtask_started' | 'triage_started' | 'already_running' | 'queued' | 'no_action'
     sessionId?: string
     startedTaskId?: string
     agentId?: string
+    /** 1-based place in the start queue when `action` is `queued`. */
+    queuePosition?: number
+    queueReason?: AdmissionReason
   }> {
     const task = this.db.getTask(taskId)
     if (!task) {
@@ -1603,12 +1732,9 @@ export class AgentManager extends EventEmitter {
       const subtasks = this.db.getSubtasks(taskId)
         .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
 
-      const activeSubtask = subtasks.find((subtask) =>
-        subtask.status === TaskStatus.AgentWorking ||
-        subtask.status === TaskStatus.ReadyForReview ||
-        subtask.status === TaskStatus.Triaging ||
-        subtask.status === TaskStatus.AgentLearning
-      )
+      // Same rule as the schedulers: only a running sibling blocks; one in
+      // ready_for_review has finished its run and cannot accept itself.
+      const activeSubtask = findBlockingSibling(subtasks)
       if (activeSubtask) {
         return {
           action: 'already_running',
@@ -1617,12 +1743,18 @@ export class AgentManager extends EventEmitter {
         }
       }
 
-      const nextSubtask = subtasks.find((subtask) => subtask.status === TaskStatus.NotStarted && !!subtask.agent_id)
+      // Once successor edges drive the run, never pick the next one by list order.
+      const nextSubtask = isSuccessorGraphInProgress(subtasks)
+        ? undefined
+        : subtasks.find((subtask) => subtask.status === TaskStatus.NotStarted && !!subtask.agent_id)
       if (nextSubtask?.agent_id) {
-        const sessionId = await this.startSession(nextSubtask.agent_id, nextSubtask.id)
+        const outcome = await this.requestSession(nextSubtask.agent_id, nextSubtask.id)
+        if (outcome.status === 'queued') {
+          return { action: 'queued', startedTaskId: nextSubtask.id, agentId: nextSubtask.agent_id, queuePosition: outcome.position, queueReason: outcome.reason }
+        }
         return {
           action: 'subtask_started',
-          sessionId,
+          sessionId: outcome.sessionId,
           startedTaskId: nextSubtask.id,
           agentId: nextSubtask.agent_id
         }
@@ -1655,6 +1787,7 @@ export class AgentManager extends EventEmitter {
         updates: { status: TaskStatus.Triaging }
       })
 
+      // Triage is exempt from the limits, so this never queues.
       const sessionId = await this.startSession(defaultAgentId, taskId)
       return {
         action: 'triage_started',
@@ -1664,10 +1797,13 @@ export class AgentManager extends EventEmitter {
       }
     }
 
-    const sessionId = await this.startSession(task.agent_id, taskId)
+    const outcome = await this.requestSession(task.agent_id, taskId)
+    if (outcome.status === 'queued') {
+      return { action: 'queued', startedTaskId: taskId, agentId: task.agent_id, queuePosition: outcome.position, queueReason: outcome.reason }
+    }
     return {
       action: 'task_started',
-      sessionId,
+      sessionId: outcome.sessionId,
       startedTaskId: taskId,
       agentId: task.agent_id
     }
@@ -1687,7 +1823,7 @@ export class AgentManager extends EventEmitter {
       // The real task's workspace dir gives the agent repo context.
       const workspaceDir = this.db.getWorkspaceDir(taskId)
       console.log(`[AgentManager] Heartbeat: creating heartbeat session for task ${taskId}`)
-      sessionId = await this.startSession(agentId, heartbeatTaskId, workspaceDir, true /* skipInitialPrompt */)
+      sessionId = await this.startSessionNow(agentId, heartbeatTaskId, workspaceDir, true /* skipInitialPrompt */)
     }
 
     console.log(`[AgentManager] Heartbeat: sending check via heartbeat session ${sessionId} for task ${taskId}`)
@@ -1705,7 +1841,8 @@ export class AgentManager extends EventEmitter {
 
     if (!sessionId) {
       console.log(`[AgentManager] Heartbeat: no session for task ${taskId}, creating new session`)
-      sessionId = await this.startSession(agentId, taskId, undefined, true /* skipInitialPrompt */)
+      // Heartbeat follow-ups act on work already under way; they bypass admission.
+      sessionId = await this.startSessionNow(agentId, taskId, undefined, true /* skipInitialPrompt */)
     }
 
     console.log(`[AgentManager] Heartbeat: forwarding action to task session ${sessionId} for task ${taskId}`)
@@ -1787,6 +1924,9 @@ export class AgentManager extends EventEmitter {
    * - A completed subtask with `next_subtask_ids` starts those siblings instead
    *   of waking the parent. The parent is woken at once (even mid-pipeline) if
    *   a selected successor is missing, has no agent, or fails to start.
+   * - When the chain opts in ({@link successorsFireOnReview}), a subtask in
+   *   ready_for_review starts its successors too. It stays in review: the
+   *   chain advances, but accepting the result is still a human's call.
    */
   async notifyParentOfSubtaskCompletion(parentTaskId: string, subtaskId: string): Promise<void> {
     const parentTask = this.db.getTask(parentTaskId)
@@ -1794,9 +1934,10 @@ export class AgentManager extends EventEmitter {
     if (parentTask.status === TaskStatus.Completed) return
 
     const completedSubtask = this.db.getTask(subtaskId)
-    const nextSubtaskIds = completedSubtask?.status === TaskStatus.Completed
-      ? completedSubtask.next_subtask_ids ?? []
-      : []
+    const routesSuccessors =
+      completedSubtask?.status === TaskStatus.Completed ||
+      (completedSubtask?.status === TaskStatus.ReadyForReview && successorsFireOnReview(parentTask, completedSubtask))
+    const nextSubtaskIds = routesSuccessors ? completedSubtask?.next_subtask_ids ?? [] : []
     let routingIssue: string | null = null
 
     if (nextSubtaskIds.length > 0) {
@@ -2151,12 +2292,13 @@ export class AgentManager extends EventEmitter {
     session.lastActivityAt = Date.now()
     console.log(`[AgentManager] Session ${sessionId} → idle`)
 
-    // Pseudo-tasks (e.g. mastermind) have no DB row.
+    // Pseudo-tasks (heartbeat-*) have no DB row, and a coordinator row has no
+    // lifecycle: neither goes to review, grows a heartbeat or wakes a parent.
     const task = this.db.getTask(session.taskId)
     await yieldEventLoop()
 
-    if (!task) {
-      console.log(`[AgentManager] No task found for ${session.taskId}, sending idle status only`)
+    if (!task || isCoordinatorTask(task)) {
+      console.log(`[AgentManager] No lifecycle for ${session.taskId}, sending idle status only`)
       this.emitStatus(sessionId, session, 'idle')
       return
     }
@@ -2350,6 +2492,8 @@ export class AgentManager extends EventEmitter {
    * is broken (Session: none) and the normal stop-by-sessionId path fails.
    */
   async stopByTaskId(taskId: string): Promise<{ sessionId: string | null }> {
+    // Stopping a task also withdraws a start still waiting for a slot.
+    this.cancelQueuedStart(taskId)
     const found = this.findSessionByTaskId(taskId)
     if (!found) {
       console.log(`[AgentManager] stopByTaskId: no active session found for task ${taskId}`)
@@ -2358,6 +2502,113 @@ export class AgentManager extends EventEmitter {
     console.log(`[AgentManager] stopByTaskId: found session ${found.sessionId} for task ${taskId}, stopping`)
     await this.stopSession(found.sessionId)
     return { sessionId: found.sessionId }
+  }
+
+  // ── Admission control: start queue ─────────────────────────────
+
+  /** Starts waiting for a free slot, in queue order. */
+  getStartQueue(): QueuedStartInfo[] {
+    return this.startQueue.list()
+  }
+
+  /** Withdraws a queued start; true when one was waiting. */
+  cancelQueuedStart(taskId: string): boolean {
+    if (!this.startQueue.remove(taskId)) return false
+    console.log(`[AgentManager] Queued start of task ${taskId} cancelled`)
+    this.emitStartQueueChanged()
+    return true
+  }
+
+  /** Sessions holding a slot: working real-task sessions plus admitted starts in flight. */
+  private countedSessions(): CountedSession[] {
+    const counted = new Map<string, string>()
+    for (const session of this.sessions.values()) {
+      if (session.status !== 'working' && session.status !== 'waiting_approval') continue
+      if (session.isTriageSession) continue
+      if (isExemptFromAdmission(session.taskId, this.db.getTask(session.taskId))) continue
+      counted.set(session.taskId, session.agentId)
+    }
+    for (const [taskId, agentId] of this.admittedStarts) {
+      if (!counted.has(taskId)) counted.set(taskId, agentId)
+    }
+    return [...counted].map(([taskId, agentId]) => ({ taskId, agentId }))
+  }
+
+  private admissionLimits(): { globalLimit: number | null } {
+    return { globalLimit: parseGlobalSessionLimit(this.db.getSetting(MAX_CONCURRENT_AGENT_SESSIONS_SETTING)) }
+  }
+
+  private emitStartQueueChanged(): void {
+    this.sendToRenderer('agent:startQueueChanged', { queue: this.startQueue.list() })
+  }
+
+  /** Deferred so the transition that freed the slot finishes first. */
+  private scheduleStartQueueDrain(): void {
+    if (this.startQueue.size === 0 || this.startQueueDrainScheduled) return
+    this.startQueueDrainScheduled = true
+    setImmediate(() => {
+      this.startQueueDrainScheduled = false
+      this.drainStartQueue()
+    })
+  }
+
+  /**
+   * Starts every queued entry that now fits, in FIFO order. An entry blocked
+   * by its own agent's limit does not hold back entries for other agents.
+   * Entries whose task is gone, finished, reassigned or already running are
+   * dropped.
+   */
+  drainStartQueue(): void {
+    let changed = false
+    for (const entry of this.startQueue.snapshot()) {
+      const agent = this.db.getAgent(entry.agentId)
+      const task = this.db.getTask(entry.taskId)
+      const stale =
+        !agent ? 'agent deleted'
+        : !task ? 'task deleted'
+        : task.status === TaskStatus.Completed ? 'task completed'
+        : task.agent_id && task.agent_id !== entry.agentId ? 'task reassigned'
+        : this.hasActiveSessionForTask(entry.taskId) ? 'task already running'
+        : null
+      if (stale) {
+        console.log(`[AgentManager] Dropping queued start of task ${entry.taskId}: ${stale}`)
+        this.startQueue.remove(entry.taskId)
+        changed = true
+        continue
+      }
+
+      const decision = checkAdmission(
+        { agentId: entry.agentId, taskId: entry.taskId, task, agent: agent! },
+        this.countedSessions(),
+        this.admissionLimits()
+      )
+      if (!decision.admitted) {
+        if (decision.reason === 'global_limit') break
+        continue
+      }
+
+      this.startQueue.remove(entry.taskId)
+      changed = true
+      // Reserve the slot now: the start below is async and the next entry's
+      // check must already see it.
+      this.admittedStarts.set(entry.taskId, entry.agentId)
+      console.log(`[AgentManager] Starting queued task ${entry.taskId} (agent ${entry.agentId})`)
+      void this.startSessionNow(entry.agentId, entry.taskId, entry.workspaceDir, entry.skipInitialPrompt)
+        .catch((error) => {
+          // Not re-queued: a start that throws would throw again. The task
+          // stays not_started, so the automation sweep or the user can retry.
+          console.error(`[AgentManager] Queued start of task ${entry.taskId} failed:`, error)
+          this.sendToRenderer('agent:startQueueChanged', {
+            queue: this.startQueue.list(),
+            failed: { taskId: entry.taskId, error: error instanceof Error ? error.message : String(error) }
+          })
+        })
+        .finally(() => {
+          this.admittedStarts.delete(entry.taskId)
+          this.scheduleStartQueueDrain()
+        })
+    }
+    if (changed) this.emitStartQueueChanged()
   }
 
   /**
@@ -2396,7 +2647,8 @@ export class AgentManager extends EventEmitter {
 
     // Session gone from memory: RESUME first (keeps the conversation), else start a new one.
     if (!session && taskId) {
-      // Regular tasks carry their agent; mastermind passes it in.
+      // Regular tasks carry their agent; the Mastermind (a coordinator row
+      // with no agent_id) passes it in.
       const task = this.db.getTask(taskId)
       const resolvedAgentId = task?.agent_id || agentId
 
@@ -2428,7 +2680,9 @@ export class AgentManager extends EventEmitter {
 
         if (!session) {
           console.log(`[AgentManager] Creating new session for task ${taskId}`)
-          const newSessionId = await this.startSession(resolvedAgentId, taskId, undefined, true)
+          // A direct message continues existing work; it is not held back by
+          // the concurrency limits.
+          const newSessionId = await this.startSessionNow(resolvedAgentId, taskId, undefined, true)
           session = this.sessions.get(newSessionId)
           if (!session) throw new Error('Failed to restart session')
           sessionId = newSessionId
@@ -2700,6 +2954,9 @@ export class AgentManager extends EventEmitter {
 
   async stopAllSessions(): Promise<void> {
     console.log(`[AgentManager] Stopping all ${this.sessions.size} sessions`)
+
+    // Shutdown: the stops below free slots, which must not start queued work.
+    this.startQueue.clear()
 
     if (this.pollingTimer) {
       clearTimeout(this.pollingTimer)

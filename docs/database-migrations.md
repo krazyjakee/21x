@@ -20,6 +20,14 @@ All schema migrations live in `src/main/database/schema.ts` as plain functions o
    ```
 4. **Bump `SCHEMA_VERSION`** by 1 — otherwise existing users with the old version stored will skip `runMigrations()` entirely.
 
+### Rows that must survive every migration
+
+`tasks.role` marks coordinator rows (the Mastermind, `role = 'mastermind'`).
+The column is declared in all three places above and `seedMastermindTask()`
+runs on every startup, so a returning user gets the row exactly once. Never
+default `role` to anything but `'task'`: an old row with a missing column must
+stay a user task.
+
 ## Adding a column to other tables
 
 Same pattern: update `createTables()`, add a guarded `ALTER TABLE` in `runMigrations()`, and bump `SCHEMA_VERSION`.

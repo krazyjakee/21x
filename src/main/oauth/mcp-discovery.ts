@@ -10,6 +10,8 @@
  * @see https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization
  */
 
+import { mcpInitializeRequest } from '../mcp-client-messages'
+
 const FETCH_TIMEOUT = 10_000
 
 /** RFC 9728 Protected Resource Metadata */
@@ -124,12 +126,7 @@ export class McpDiscovery {
       const response = await fetch(serverUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          method: 'initialize',
-          params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: '20x', version: '1.0' } },
-          id: 1
-        }),
+        body: JSON.stringify(mcpInitializeRequest()),
         signal: AbortSignal.timeout(FETCH_TIMEOUT)
       })
 

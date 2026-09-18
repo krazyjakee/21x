@@ -25,7 +25,7 @@ interface QuickChipsProps {
 
 export function QuickChips({ onAskMastermind, onCreateTask }: QuickChipsProps) {
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className="flex flex-wrap gap-2">
       {CHIPS.map((chip) => {
         const isMastermind = chip.type === 'mastermind'
         return (
@@ -38,12 +38,12 @@ export function QuickChips({ onAskMastermind, onCreateTask }: QuickChipsProps) {
                 onCreateTask(chip.label)
               }
             }}
-            className="group flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs text-foreground/70 border border-border bg-card/50 hover:border-border hover:text-foreground hover:bg-card transition-all duration-150 cursor-pointer"
+            className="group flex items-center gap-2 px-3.5 py-1.5 rounded-full text-sm text-foreground/70 border border-border bg-card/50 hover:border-border hover:text-foreground hover:bg-card transition-colors duration-150 cursor-pointer"
           >
             {isMastermind ? (
-              <MessageSquare className="h-3 w-3 opacity-70 group-hover:opacity-100 transition-opacity" />
+              <MessageSquare className="size-icon-sm opacity-70 group-hover:opacity-100 transition-opacity" />
             ) : (
-              <ListPlus className="h-3 w-3 opacity-70 group-hover:opacity-100 transition-opacity" />
+              <ListPlus className="size-icon-sm opacity-70 group-hover:opacity-100 transition-opacity" />
             )}
             {chip.label}
           </button>

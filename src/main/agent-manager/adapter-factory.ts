@@ -32,7 +32,7 @@ export function createAdapter(backendType: string, db: DatabaseManager): CodingA
     case CodingAgentType.CLAUDE_CODE:
       return new ClaudeCodeAdapter()
     case CodingAgentType.CODEX:
-      return process.env.CODEX_APP_SERVER === '0' ? new AcpAdapter('codex') : new CodexAppServerAdapter()
+      return new CodexAppServerAdapter()
     case CodingAgentType.CURSOR:
       return new AcpAdapter('cursor')
     case CodingAgentType.PI:

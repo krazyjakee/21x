@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { execFile } from 'child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'fs'
+import { execFile, spawnSync } from 'child_process'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
 import { join } from 'path'
 import { app } from 'electron'
 import type { DatabaseManager } from './database'
@@ -67,6 +68,62 @@ describe('secret broker', () => {
     expect(body).not.toContain('BAD')
     expect(body.split('\n').filter((line) => line.startsWith('export '))).toHaveLength(1)
   })
+})
+
+describe('secret broker base64 format', () => {
+  afterEach(() => stopSecretBroker())
+
+  it('returns one NAME=<base64> line per secret so multi-line values survive line splitting', async () => {
+    const port = await startSecretBroker(fakeDb)
+    registerSecretSession('token-a', 'agent-a', ['s1', 's2', 's3'])
+
+    const body = await (await fetch(`http://127.0.0.1:${port}/secrets/export?token=token-a&format=base64`)).text()
+    const lines = body.split(/\r?\n/)
+
+    expect(lines).toHaveLength(2)
+    const decoded = Object.fromEntries(lines.map((line) => {
+      const match = /^([A-Za-z_][A-Za-z0-9_]*)=([A-Za-z0-9+/=]*)$/.exec(line)
+      expect(match).not.toBeNull()
+      return [match![1], Buffer.from(match![2], 'base64').toString('utf8')]
+    }))
+    expect(decoded).toEqual({ API_KEY: SECRETS[0].value, OTHER_KEY: SECRETS[1].value })
+  })
+})
+
+function findPwsh(): string | null {
+  const result = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['pwsh'], { encoding: 'utf8' })
+  return result.status === 0 ? result.stdout.split(/\r?\n/)[0].trim() || null : null
+}
+
+const pwsh = findPwsh()
+
+describe.skipIf(!pwsh)('Windows secret shell wrapper (PowerShell)', () => {
+  let dir: string
+
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), '21x-secret-shell-')) })
+  afterEach(() => {
+    stopSecretBroker()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('passes a multi-line secret to the command unchanged', async () => {
+    const port = await startSecretBroker(fakeDb)
+    registerSecretSession('token-a', 'agent-a', ['s1'])
+    const wrapper = join(dir, 'secret-shell.ps1')
+    writeFileSync(wrapper, buildWindowsSecretShellScript(join(dir, 'debug.log')), 'utf8')
+
+    const output = await new Promise<string>((resolve, reject) => {
+      execFile(
+        pwsh!,
+        ['-NoProfile', '-NonInteractive', '-File', wrapper,
+          pwsh!, '-NoProfile', '-NonInteractive', '-Command', '[Console]::Out.Write($env:API_KEY)'],
+        { env: { ...process.env, _20X_SB_PORT: String(port), _20X_SB_TOKEN: 'token-a' } },
+        (error, stdout) => (error ? reject(error) : resolve(stdout))
+      )
+    })
+
+    expect(output).toBe(SECRETS[0].value)
+  }, 30_000)
 })
 
 describe.skipIf(process.platform === 'win32')('secret shell wrapper', () => {
@@ -139,10 +196,11 @@ describe('buildWindowsSecretShellScript', () => {
     expect(script).toContain('$env:_20X_SB_TOKEN')
   })
 
-  it('parses bash-style export lines into environment variables', () => {
+  it('requests base64 values and decodes them into environment variables', () => {
     const script = buildWindowsSecretShellScript('C:\\logs\\debug.log')
 
-    expect(script).toContain('^export\\s+([^=]+)=(.*)$')
+    expect(script).toContain('&format=base64')
+    expect(script).toContain('[System.Convert]::FromBase64String($Matches[2])')
     expect(script).toContain('[Environment]::SetEnvironmentVariable')
   })
 

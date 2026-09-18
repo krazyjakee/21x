@@ -1,7 +1,7 @@
 import type { DatabaseManager, TaskRecord } from './database'
 import type { AgentManager } from './agent-manager'
 import { TaskStatus } from '../shared/constants'
-import { isSuccessorGraphInProgress } from '../shared/subtask-graph'
+import { findBlockingSibling, isSuccessorGraphInProgress } from '../shared/subtask-graph'
 
 /**
  * TaskAutomationScheduler — makes `auto_start_agent` and
@@ -120,6 +120,11 @@ export class TaskAutomationScheduler {
 
     // Sequential: startTask sets up worktrees and spawns a CLI agent. Firing
     // them all at once on a catch-up sweep would stampede the machine.
+    // Concurrency limits are not checked here: startTask goes through
+    // AgentManager's admission control, which queues a start that is over a
+    // limit (action `queued`, deduped per task) and starts it when a slot
+    // frees. A queued task stays not_started, so later sweeps ask again and
+    // just get its queue position back.
     for (const task of tasks) {
       if (this.inFlight.has(task.id)) continue
       if (this.agentManager.hasActiveSessionForTask(task.id)) continue
@@ -127,7 +132,11 @@ export class TaskAutomationScheduler {
       this.inFlight.add(task.id)
       try {
         const result = await this.agentManager.startTask(task.id)
-        console.log(`[TaskAutomation] Auto-started "${task.title}" (${task.id}): ${result.action}`)
+        console.log(
+          result.action === 'queued'
+            ? `[TaskAutomation] Auto-start of "${task.title}" (${task.id}) queued at position ${result.queuePosition}`
+            : `[TaskAutomation] Auto-started "${task.title}" (${task.id}): ${result.action}`
+        )
         this.failedStarts.delete(task.id)
       } catch (err) {
         const attempts = (this.failedStarts.get(task.id) ?? 0) + 1
@@ -202,13 +211,10 @@ export class TaskAutomationScheduler {
    * The one subtask that should run next, or null.
    *
    * Subtasks run strictly in `sort_order`, one at a time. Only a genuinely
-   * running state blocks the next one.
-   *
-   * The renderer also blocked on `ready_for_review`, which deadlocks an
-   * unattended chain: a child that finishes stops there (a subtask does not
-   * carry `auto_complete_without_review`), so nothing would ever start the
-   * child after it. A child in review has finished its agent run, and
-   * notifyParentOfSubtaskCompletion already counts that state as terminal.
+   * running state blocks the next one ({@link findBlockingSibling}, shared
+   * with the renderer and AgentManager.startTask): a child in
+   * `ready_for_review` has finished its agent run and cannot accept itself,
+   * so blocking on it would deadlock an unattended chain.
    */
   private getNextStartableSubtaskId(parentId: string): string | null {
     const subtasks = this.dbManager.getSubtasks(parentId)
@@ -218,13 +224,7 @@ export class TaskAutomationScheduler {
     // starts the selected successors or wakes the parent to decide.
     if (isSuccessorGraphInProgress(subtasks)) return null
 
-    const active = subtasks.some(
-      (subtask) =>
-        subtask.status === TaskStatus.AgentWorking ||
-        subtask.status === TaskStatus.Triaging ||
-        subtask.status === TaskStatus.AgentLearning
-    )
-    if (active) return null
+    if (findBlockingSibling(subtasks)) return null
 
     const next = subtasks.find((subtask) => subtask.status === TaskStatus.NotStarted && !!subtask.agent_id)
     return next?.id ?? null

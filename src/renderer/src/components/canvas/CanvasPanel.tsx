@@ -506,10 +506,10 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
       onMouseDown={handleMouseDown}
       onMouseEnter={handlePanelMouseEnter}
       onMouseLeave={handlePanelMouseLeave}
-      className={`absolute rounded-xl border bg-[var(--canvas-chrome)] shadow-2xl flex flex-col transition-shadow duration-150 group/panel ${cfg.border} ${
-        isDragging ? 'shadow-indigo-500/10 ring-1 ring-indigo-500/30' : ''
+      className={`absolute rounded-xl border bg-[var(--canvas-chrome)] shadow-float flex flex-col transition-shadow duration-150 group/panel ${cfg.border} ${
+        isDragging ? 'ring-1 ring-indigo-500/30' : ''
       } ${isConnectingLocal ? 'ring-2 ring-orange-500/50' : ''} ${
-        isProximityTarget ? 'ring-2 ring-orange-500/60 shadow-orange-500/20 shadow-2xl' : ''
+        isProximityTarget ? 'ring-2 ring-orange-500/60 shadow-float' : ''
       }`}
       style={panelStyle}
     >
@@ -681,7 +681,7 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
               window.addEventListener('mousemove', onMove)
               window.addEventListener('mouseup', onUp)
             }}
-            className="flex items-center justify-center w-8 h-8 rounded-full bg-orange-500/20 border border-orange-500/40 hover:bg-orange-500/30 hover:border-orange-500/60 hover:scale-110 transition-all duration-150 cursor-pointer shadow-lg shadow-orange-500/10"
+            className="flex items-center justify-center w-8 h-8 rounded-full bg-orange-500/20 border border-orange-500/40 hover:bg-orange-500/30 hover:border-orange-500/60 hover:scale-110 transition-all duration-150 cursor-pointer shadow-pop"
             title="Click to add browser · Drag to connect to existing browser"
           >
             <Globe className="h-3.5 w-3.5 text-orange-400" />
@@ -695,7 +695,7 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
           className="absolute inset-0 flex items-center justify-center pointer-events-none z-50"
           style={{ background: 'rgba(0,0,0,0.5)', borderRadius: 'inherit' }}
         >
-          <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-500/90 shadow-2xl shadow-indigo-500/40 border border-indigo-400/50">
+          <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-500/90 shadow-float border border-indigo-400/50">
             <span className="text-3xl font-bold text-white tabular-nums">
               {panelIndex + 1}
             </span>

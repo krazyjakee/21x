@@ -6,29 +6,27 @@ import { useTaskStore } from '@/stores/task-store'
 import { useAgentStore } from '@/stores/agent-store'
 import { useUIStore } from '@/stores/ui-store'
 import { useSnoozeTick } from '@/hooks/use-snooze-tick'
-import { isSnoozed } from '@/lib/utils'
+import { isSnoozed, isOverdue, formatDueDistance } from '@/lib/utils'
+import { TASK_STATUS_STYLES, type TaskStatusStyle } from '@shared/task-status-styles'
 import { TaskStatus, CodingAgentType } from '@/types'
 import type { Task, Agent } from '@/types'
 
-// ── Status column definitions (matching 20x local TaskStatus enum) ──
-// Completed is excluded from columns — shown as a count-only summary instead.
+// ── Status column definitions ─────────────────────────────────
+// Styling comes from the shared status map so the board, the task lists and
+// the mobile UI stay in step. Completed is excluded from columns — shown as a
+// count-only summary instead.
 
-interface StatusColumn {
+interface StatusColumn extends TaskStatusStyle {
   key: TaskStatus
-  label: string
-  color: string
-  dotColor: string
-  headerBg: string
-  columnBg: string
 }
 
 const COLUMNS: StatusColumn[] = [
-  { key: TaskStatus.NotStarted, label: 'Not Started', color: 'text-gray-400', dotColor: 'bg-gray-400', headerBg: 'bg-gray-500/8', columnBg: 'bg-gray-500/[0.03]' },
-  { key: TaskStatus.Triaging, label: 'Triaging', color: 'text-slate-300', dotColor: 'bg-slate-400', headerBg: 'bg-slate-500/8', columnBg: 'bg-slate-500/[0.03]' },
-  { key: TaskStatus.AgentWorking, label: 'Agent Working', color: 'text-amber-400', dotColor: 'bg-amber-400', headerBg: 'bg-amber-500/8', columnBg: 'bg-amber-500/[0.03]' },
-  { key: TaskStatus.ReadyForReview, label: 'Ready for Review', color: 'text-pink-400', dotColor: 'bg-pink-400', headerBg: 'bg-pink-500/8', columnBg: 'bg-pink-500/[0.03]' },
-  { key: TaskStatus.AgentLearning, label: 'Agent Learning', color: 'text-blue-400', dotColor: 'bg-blue-400', headerBg: 'bg-blue-500/8', columnBg: 'bg-blue-500/[0.03]' }
-]
+  TaskStatus.NotStarted,
+  TaskStatus.Triaging,
+  TaskStatus.AgentWorking,
+  TaskStatus.ReadyForReview,
+  TaskStatus.AgentLearning
+].map((key) => ({ key, ...TASK_STATUS_STYLES[key] }))
 
 const PRIORITY_ORDER: Record<string, number> = {
   critical: 0,
@@ -73,27 +71,6 @@ function getPriorityAccent(priority: string): string {
     default:
       return 'border-l-gray-500/15'
   }
-}
-
-function formatRelativeDate(dateStr: string | null): string {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffHours = Math.floor(Math.abs(diffMs) / (1000 * 60 * 60))
-  const isFuture = diffMs < 0
-
-  if (diffHours < 1) return isFuture ? 'in <1h' : '<1h ago'
-  if (diffHours < 24) return isFuture ? `in ${diffHours}h` : `${diffHours}h ago`
-  const diffDays = Math.floor(diffHours / 24)
-  if (diffDays === 1) return isFuture ? 'tomorrow' : 'yesterday'
-  if (diffDays < 30) return isFuture ? `in ${diffDays}d` : `${diffDays}d ago`
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
-
-function isOverdue(dateStr: string | null): boolean {
-  if (!dateStr) return false
-  return new Date(dateStr) < new Date()
 }
 
 // ── Initials Avatar ──────────────────────────────────────────
@@ -177,7 +154,7 @@ const TaskCard = memo(function TaskCard({ task, onSelect, agent }: { task: Task;
 
   return (
     <div
-      className={`group rounded-lg border border-border/30 bg-card/80 backdrop-blur-sm p-3.5 hover:border-border/60 hover:bg-card hover:shadow-md hover:shadow-black/10 transition-all duration-200 cursor-pointer border-l-2 ${getPriorityAccent(task.priority)}`}
+      className={`group rounded-lg border border-border/30 bg-card/80 p-3.5 hover:border-border/60 hover:bg-card hover:shadow-pop transition-colors duration-200 cursor-pointer border-l-2 ${getPriorityAccent(task.priority)}`}
       onClick={() => onSelect(task.id)}
       role="button"
       tabIndex={0}
@@ -202,17 +179,17 @@ const TaskCard = memo(function TaskCard({ task, onSelect, agent }: { task: Task;
 
       {/* Labels */}
       {task.labels && task.labels.length > 0 && (
-        <div className="flex flex-wrap gap-1 mb-2">
+        <div className="flex flex-wrap gap-1.5 mb-2">
           {task.labels.slice(0, 3).map((label) => (
             <span
               key={label}
-              className="text-2xs font-medium px-1.5 py-0.5 rounded-full bg-muted/30 text-muted-foreground"
+              className="text-xs font-medium px-2 py-0.5 rounded-full bg-muted/30 text-muted-foreground"
             >
               {label}
             </span>
           ))}
           {task.labels.length > 3 && (
-            <span className="text-2xs text-muted-foreground/60 px-1 py-0.5">
+            <span className="text-xs text-muted-foreground/60 px-1 py-0.5">
               +{task.labels.length - 3}
             </span>
           )}
@@ -221,16 +198,16 @@ const TaskCard = memo(function TaskCard({ task, onSelect, agent }: { task: Task;
 
       {/* Footer: metadata + assignee/agent */}
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-2xs text-muted-foreground min-w-0">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground min-w-0">
           {task.due_date && (
-            <span className={`flex items-center gap-1 shrink-0 ${overdue ? 'text-red-400 font-medium' : ''}`}>
-              {overdue ? <AlertCircle className="h-3 w-3" /> : <Clock className="h-3 w-3 opacity-60" />}
-              {formatRelativeDate(task.due_date)}
+            <span className={`flex items-center gap-1.5 shrink-0 ${overdue ? 'text-red-400 font-medium' : ''}`}>
+              {overdue ? <AlertCircle className="size-icon-sm" /> : <Clock className="size-icon-sm opacity-60" />}
+              {formatDueDistance(task.due_date)}
             </span>
           )}
           {sourceConfig && (
-            <span className={`flex items-center gap-1 text-2xs px-1.5 py-0.5 rounded-full border shrink-0 ${sourceConfig.color}`}>
-              <ExternalLink className="h-2.5 w-2.5" />
+            <span className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border shrink-0 ${sourceConfig.color}`}>
+              <ExternalLink className="size-icon-xs" />
               {sourceConfig.label}
             </span>
           )}
@@ -241,8 +218,8 @@ const TaskCard = memo(function TaskCard({ task, onSelect, agent }: { task: Task;
             if (!agentDisplay) return null
             const { name, Logo } = agentDisplay
             return (
-              <span className="flex items-center gap-1 text-2xs text-muted-foreground min-w-0" title={name}>
-                <Logo className="h-3 w-3 opacity-70 shrink-0" />
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0" title={name}>
+                <Logo className="size-icon-sm opacity-70 shrink-0" />
                 <span className="truncate">{name}</span>
               </span>
             )
@@ -260,10 +237,10 @@ const TaskCard = memo(function TaskCard({ task, onSelect, agent }: { task: Task;
 
 const ColumnHeader = memo(function ColumnHeader({ column, count }: { column: StatusColumn; count: number }) {
   return (
-    <div className="flex items-center gap-2 px-3 py-2.5">
-      <div className={`h-2.5 w-2.5 rounded-full ${column.dotColor} ring-2 ring-black/20`} />
-      <span className={`text-xs font-semibold tracking-wide ${column.color}`}>{column.label}</span>
-      <span className={`text-2xs font-medium rounded-full px-2 py-0.5 min-w-[22px] text-center ${column.headerBg} ${column.color}`}>
+    <div className="flex items-center gap-2 px-3 py-3">
+      <div className={`h-2.5 w-2.5 rounded-full ${column.dot} ring-2 ring-black/20`} />
+      <span className={`text-sm font-semibold tracking-wide ${column.text}`}>{column.label}</span>
+      <span className={`text-xs font-medium rounded-full px-2 py-0.5 min-w-[24px] text-center ${column.headerBg} ${column.text}`}>
         {count}
       </span>
     </div>
@@ -354,15 +331,15 @@ export function TaskBoard() {
     <section>
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-sm font-semibold tracking-wide">Task Board</h2>
+        <h2 className="text-base font-semibold tracking-wide">Task Board</h2>
         <div className="flex items-center gap-3">
           {tasksByStatus.completedCount > 0 && (
             <span className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full">
-              <CheckCircle2 className="h-3 w-3" />
+              <CheckCircle2 className="size-icon-sm" />
               {tasksByStatus.completedCount} completed
             </span>
           )}
-          <span className="text-xs text-muted-foreground">
+          <span className="text-sm text-muted-foreground">
             {activeTasks} active task{activeTasks !== 1 ? 's' : ''}
           </span>
         </div>
@@ -372,10 +349,10 @@ export function TaskBoard() {
         <div className="flex gap-3 pb-2 overflow-x-auto">
           {COLUMNS.map((col) => (
             <div key={col.key} className={`min-w-[248px] max-w-[340px] flex-1 rounded-xl ${col.columnBg} border border-border/15`}>
-              <div className="px-3 py-2.5 border-b border-border/15">
+              <div className="px-3 py-3 border-b border-border/15">
                 <div className="flex items-center gap-2">
-                  <div className={`h-2.5 w-2.5 rounded-full ${col.dotColor} opacity-40`} />
-                  <span className="text-xs font-semibold text-muted-foreground/50">{col.label}</span>
+                  <div className={`h-2.5 w-2.5 rounded-full ${col.dot} opacity-40`} />
+                  <span className="text-sm font-semibold text-muted-foreground/50">{col.label}</span>
                 </div>
               </div>
               <div className="p-2 space-y-2">

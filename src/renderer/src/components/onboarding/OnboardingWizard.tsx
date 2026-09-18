@@ -5,6 +5,9 @@ import {
   AlertTriangle,
   ArrowRight,
   Download,
+  Info,
+  MousePointer2,
+  RefreshCw,
   Sparkles
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -48,6 +51,9 @@ const STORAGE_KEYS = {
 
 const DEFAULT_AGENT_NAME = 'Robo'
 
+/** Backend used for the default agent when nothing is installed yet. */
+export const FALLBACK_BACKEND = CodingAgentType.OPENCODE
+
 /* ─── Force-onboarding flag ─── */
 
 export function isForceOnboarding(): boolean {
@@ -76,6 +82,10 @@ interface AgentOption {
   label: string
   tagline: string
   Logo: React.ComponentType<{ className?: string }>
+  /** Whether the in-app installer can install this backend. */
+  installable: boolean
+  /** Shown instead of an Install button when the backend is not installable here. */
+  setupHint?: string
 }
 
 const AGENT_OPTIONS: AgentOption[] = [
@@ -83,25 +93,37 @@ const AGENT_OPTIONS: AgentOption[] = [
     type: CodingAgentType.CLAUDE_CODE,
     label: 'Claude Code',
     tagline: 'Anthropic',
-    Logo: AnthropicLogo
+    Logo: AnthropicLogo,
+    installable: true
   },
   {
     type: CodingAgentType.OPENCODE,
     label: 'OpenCode',
     tagline: 'Open-source, free models',
-    Logo: OpenCodeLogo
+    Logo: OpenCodeLogo,
+    installable: true
   },
   {
     type: CodingAgentType.CODEX,
     label: 'Codex',
     tagline: 'OpenAI',
-    Logo: OpenAILogo
+    Logo: OpenAILogo,
+    installable: true
+  },
+  {
+    type: CodingAgentType.CURSOR,
+    label: 'Cursor',
+    tagline: 'cursor-agent CLI',
+    Logo: MousePointer2,
+    installable: false,
+    setupHint: 'Install from cursor.com'
   },
   {
     type: CodingAgentType.PI,
     label: 'Pi',
     tagline: 'Open-source coding agent',
-    Logo: PiLogo
+    Logo: PiLogo,
+    installable: true
   }
 ]
 
@@ -120,6 +142,36 @@ function getAgentToolKey(type: CodingAgentType): DetectKey {
     case CodingAgentType.PI:
       return DetectKey.PI
   }
+}
+
+/** Installed and not flagged unsupported. */
+function isBackendReady(status: ToolStatus | undefined): boolean {
+  return !!status && status.installed && status.supported !== false
+}
+
+/**
+ * Every detected backend, in card order. Installation alone determines
+ * availability — there is no single-selection gate.
+ */
+export function getAvailableBackends(
+  toolStatus: Record<string, ToolStatus> | null
+): CodingAgentType[] {
+  if (!toolStatus) return []
+  return AGENT_OPTIONS
+    .map((a) => a.type)
+    .filter((type) => isBackendReady(toolStatus[getAgentToolKey(type)]))
+}
+
+/**
+ * Backend for the default agent: the user's explicit (optional) choice,
+ * else the first detected backend, else OpenCode.
+ */
+export function resolveDefaultBackend(
+  toolStatus: Record<string, ToolStatus> | null,
+  preferred: CodingAgentType | null
+): CodingAgentType {
+  if (preferred) return preferred
+  return getAvailableBackends(toolStatus)[0] ?? FALLBACK_BACKEND
 }
 
 /* ─── Auto-select best default model ─── */
@@ -253,7 +305,7 @@ function GitProviderRow({
               key={opt.value}
               type="button"
               onClick={() => onSelect(selected === opt.value ? ProviderChoiceValue.NONE : opt.value)}
-              className={`px-3 py-1.5 rounded-md border text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-md border text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
                 selected === opt.value
                   ? 'border-primary bg-primary/5 text-foreground'
                   : 'border-border text-muted-foreground hover:border-muted-foreground/40'
@@ -275,6 +327,50 @@ function GitProviderRow({
   )
 }
 
+/* ─── Default backend (separate, optional) ─── */
+
+function DefaultBackendRow({
+  toolStatus,
+  preferred,
+  onSelect
+}: {
+  toolStatus: Record<string, ToolStatus> | null
+  preferred: CodingAgentType | null
+  onSelect: (type: CodingAgentType | null) => void
+}) {
+  const effective = resolveDefaultBackend(toolStatus, preferred)
+  return (
+    <div>
+      <p className="text-xs text-muted-foreground mb-2">
+        Default backend for new agents{' '}
+        <span className="opacity-60">(optional — uses the first installed one)</span>
+      </p>
+      <div className="flex gap-2 flex-wrap" role="group" aria-label="Default backend">
+        {AGENT_OPTIONS.map((agent) => {
+          const active = effective === agent.type
+          const ready = isBackendReady(toolStatus?.[getAgentToolKey(agent.type)])
+          return (
+            <button
+              key={agent.type}
+              type="button"
+              aria-pressed={active}
+              onClick={() => onSelect(preferred === agent.type ? null : agent.type)}
+              className={`px-3 py-1.5 rounded-md border text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
+                active
+                  ? 'border-primary bg-primary/5 text-foreground'
+                  : 'border-border text-muted-foreground hover:border-muted-foreground/40'
+              } ${!ready ? 'opacity-70' : ''}`}
+            >
+              {agent.label}
+              {active && <Check className="inline size-3" />}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 /* ─── Main OnboardingWizard ─── */
 
 interface OnboardingWizardProps {
@@ -283,9 +379,10 @@ interface OnboardingWizardProps {
 }
 
 export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) {
-  const [selectedAgent, setSelectedAgent] = useState<CodingAgentType | null>(null)
+  const [preferredBackend, setPreferredBackend] = useState<CodingAgentType | null>(null)
   const [providerChoice, setProviderChoice] = useState<ProviderChoice | null>(null)
   const [toolStatus, setToolStatus] = useState<Record<string, ToolStatus> | null>(null)
+  const [detecting, setDetecting] = useState(false)
   const [creating, setCreating] = useState(false)
   const [installing, setInstalling] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -293,18 +390,32 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
   const { fetchAgents, agents, createAgent, updateAgent } = useAgentStore()
   const { fetchSettings, setGitProvider } = useSettingsStore()
 
+  /** Re-probe every backend; reflects installs/removals since the last run. */
+  const runDetection = useCallback(async () => {
+    setDetecting(true)
+    try {
+      const fresh = await window.electronAPI.agentInstaller.detect()
+      setToolStatus(fresh)
+      return fresh
+    } catch {
+      return null
+    } finally {
+      setDetecting(false)
+    }
+  }, [])
+
   // Initialize state on open
   useEffect(() => {
     if (!open) return
     setError(null)
 
     Promise.all([fetchAgents(), fetchSettings()]).then(() => {
-      // Pre-select agent if one is already configured
+      // Restore an explicit default backend if one is already configured
       const existing = useAgentStore.getState().agents.find(
         (a) => a.is_default && a.config.coding_agent
       )
       if (existing?.config.coding_agent) {
-        setSelectedAgent(existing.config.coding_agent as CodingAgentType)
+        setPreferredBackend(existing.config.coding_agent as CodingAgentType)
       }
       // Restore git provider choice
       const gp = useSettingsStore.getState().gitProvider
@@ -312,11 +423,8 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
     })
 
     // Detect tools in background
-    window.electronAPI.agentInstaller
-      .detect()
-      .then(setToolStatus)
-      .catch(() => {})
-  }, [open, fetchAgents, fetchSettings])
+    void runDetection()
+  }, [open, fetchAgents, fetchSettings, runDetection])
 
   // Listen for install progress events
   useEffect(() => {
@@ -325,15 +433,12 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
       (data: { stage: string }) => {
         if (data.stage === 'complete' || data.stage === 'error') {
           setInstalling(null)
-          window.electronAPI.agentInstaller
-            .detect()
-            .then(setToolStatus)
-            .catch(() => {})
+          void runDetection()
         }
       }
     )
     return cleanup
-  }, [open])
+  }, [open, runDetection])
 
   const handleInstall = useCallback(async (toolKey: string) => {
     setError(null)
@@ -347,8 +452,7 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
       if (result?.newStatus) {
         setToolStatus(result.newStatus)
       } else {
-        const fresh = await window.electronAPI.agentInstaller.detect()
-        setToolStatus(fresh)
+        await runDetection()
       }
       if (!result?.success) {
         setError(result?.error || 'Installation failed. Try again or install the agent manually.')
@@ -361,14 +465,13 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
       }
       return true
     } catch {
-      const fresh = await window.electronAPI.agentInstaller.detect()
-      setToolStatus(fresh)
+      await runDetection()
       setError('Installation failed. Try again or install the agent manually.')
       return false
     } finally {
       setInstalling(null)
     }
-  }, [])
+  }, [runDetection])
 
   const handleProviderSelect = useCallback(
     async (p: ProviderChoice) => {
@@ -379,8 +482,9 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
   )
 
   const createDefaultAgent = useCallback(
-    async (agentType: CodingAgentType) => {
-      const model = await getDefaultModel(agentType)
+    async (agentType: CodingAgentType, backendReady: boolean) => {
+      // Only ask an installed backend for its models; an absent one can't answer.
+      const model = backendReady ? await getDefaultModel(agentType) : ''
 
       const existingDefault = agents.find(
         (a) => a.is_default && (!a.config.coding_agent || !a.config.model)
@@ -410,20 +514,12 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
   )
 
   const handleStart = async () => {
-    if (!selectedAgent) return
     setError(null)
-
-    // Install or update the selected runtime before creating
-    // an agent that depends on it.
     setCreating(true)
     try {
-      const toolKey = getAgentToolKey(selectedAgent)
-      const status = toolStatus?.[toolKey]
-      if (status && (!status.installed || status.supported === false)) {
-        const ready = await handleInstall(toolKey)
-        if (!ready) return
-      }
-      await createDefaultAgent(selectedAgent)
+      const backend = resolveDefaultBackend(toolStatus, preferredBackend)
+      const ready = isBackendReady(toolStatus?.[getAgentToolKey(backend)])
+      await createDefaultAgent(backend, ready)
       onOpenChange(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to set up agent. You can configure it later in Settings.')
@@ -436,20 +532,16 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
     onOpenChange(false)
   }
 
-  // Compute tool health for the selected agent
-  const selectedAgentStatus =
-    selectedAgent && toolStatus
-      ? toolStatus[getAgentToolKey(selectedAgent)]
-      : null
-  const agentReady = selectedAgentStatus
-    ? selectedAgentStatus.installed && selectedAgentStatus.supported !== false
-    : null
+  const availableBackends = getAvailableBackends(toolStatus)
+  const availableLabels = AGENT_OPTIONS
+    .filter((a) => availableBackends.includes(a.type))
+    .map((a) => a.label)
 
   /* ─── Render ─── */
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && handleSkip()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle>Welcome to 20x</DialogTitle>
           <DialogDescription>
@@ -458,34 +550,47 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
         </DialogHeader>
 
         <DialogBody className="space-y-5">
-          {/* ── Agent options ── */}
+          {/* ── Installed backends ── */}
           <div>
-            <p className="text-xs text-muted-foreground mb-2">
-              Choose your agent:
-            </p>
-            <div className="grid grid-cols-4 gap-2.5">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs text-muted-foreground">
+                Installed coding agents{' '}
+                <span className="opacity-60">(every installed agent is available)</span>
+              </p>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 px-2 text-[11px]"
+                disabled={detecting || !!installing}
+                onClick={() => void runDetection()}
+                aria-label="Re-check installed agents"
+              >
+                {detecting ? (
+                  <Loader2 className="size-3 animate-spin mr-1" />
+                ) : (
+                  <RefreshCw className="size-3 mr-1" />
+                )}
+                Re-check
+              </Button>
+            </div>
+            <div className="grid grid-cols-5 gap-2.5">
               {AGENT_OPTIONS.map((agent) => {
-                const isSelected = selectedAgent === agent.type
                 const toolKey = getAgentToolKey(agent.type)
                 const detected = toolStatus?.[toolKey]
                 const isInstalled = detected?.installed === true
-                const isReady = isInstalled && detected.supported !== false
+                const isReady = isBackendReady(detected)
                 return (
-                  <button
+                  <div
                     key={agent.type}
-                    type="button"
-                    onClick={() => setSelectedAgent(agent.type)}
-                    className={`group relative flex flex-col items-center gap-2 rounded-xl border-2 p-3 transition-all cursor-pointer ${
-                      isSelected
-                        ? 'border-primary bg-primary/5 shadow-md'
-                        : 'border-border hover:border-muted-foreground/40 hover:bg-muted/20'
+                    data-testid={`backend-card-${agent.type}`}
+                    data-available={isReady ? 'true' : 'false'}
+                    className={`relative flex flex-col items-center gap-2 rounded-xl border-2 p-3 transition-colors ${
+                      isReady
+                        ? 'border-emerald-500/50 bg-emerald-500/5'
+                        : 'border-border'
                     }`}
                   >
-                    <agent.Logo
-                      className={`size-9 transition-transform ${
-                        isSelected ? 'scale-110' : 'group-hover:scale-105'
-                      }`}
-                    />
+                    <agent.Logo className="size-9" />
                     <div className="text-center">
                       <p className="text-xs font-semibold text-foreground leading-tight">
                         {agent.label}
@@ -494,11 +599,18 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
                         {agent.tagline}
                       </p>
                     </div>
-                    {/* Detected status */}
+                    {/* Health / detected status — informational, never a gate */}
                     {toolStatus && (
-                      <span className={`text-[10px] flex items-center gap-0.5 ${
-                        isReady ? 'text-emerald-400' : detected?.supported === false ? 'text-amber-400' : 'text-muted-foreground/50'
-                      }`}>
+                      <span
+                        className={`text-[10px] flex items-center gap-0.5 ${
+                          isReady
+                            ? 'text-emerald-400'
+                            : detected?.supported === false && isInstalled
+                              ? 'text-amber-400'
+                              : 'text-muted-foreground/50'
+                        }`}
+                        title={detected?.reason || undefined}
+                      >
                         {isReady ? (
                           <>
                             <Check className="size-2.5" />
@@ -511,63 +623,88 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
                         )}
                       </span>
                     )}
-                    {isSelected && (
-                      <div className="absolute top-1.5 right-1.5">
-                        <Check className="size-3.5 text-primary" />
-                      </div>
+                    {toolStatus && !isReady && (
+                      agent.installable ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-5 px-1.5 text-[10px]"
+                          disabled={!!installing || detecting}
+                          onClick={() => handleInstall(toolKey)}
+                          aria-label={`Install ${agent.label}`}
+                        >
+                          {installing === toolKey ? (
+                            <Loader2 className="size-3 animate-spin" />
+                          ) : (
+                            <>
+                              <Download className="size-2.5 mr-0.5" />
+                              {isInstalled ? 'Update' : 'Install'}
+                            </>
+                          )}
+                        </Button>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground/70 text-center">
+                          {agent.setupHint}
+                        </span>
+                      )
                     )}
-                  </button>
+                  </div>
                 )
               })}
             </div>
           </div>
 
-          {/* ── Git provider (optional) ── */}
-          {selectedAgent && (
-            <GitProviderRow
-              selected={providerChoice}
-              onSelect={handleProviderSelect}
-              toolStatus={toolStatus}
-            />
+          {/* ── Availability summary / install-later notice ── */}
+          {toolStatus && (
+            availableBackends.length > 0 ? (
+              <p className="text-xs text-muted-foreground" data-testid="backend-summary">
+                Ready to use: <span className="text-foreground">{availableLabels.join(', ')}</span>
+              </p>
+            ) : (
+              <div
+                className="flex items-start gap-2.5 px-3 py-2 rounded-lg border border-border bg-muted/20 text-xs"
+                data-testid="no-backend-notice"
+              >
+                <Info className="size-4 text-muted-foreground shrink-0 mt-0.5" />
+                <span className="text-muted-foreground">
+                  No coding agent is installed yet. You can finish setup now and install one
+                  later — use the Install buttons above or Settings &rarr; Agent &amp; Tool Setup.
+                  Any agent you install will be picked up automatically.
+                </span>
+              </div>
+            )
           )}
+
+          {/* ── Default backend (separate from discovery, optional) ── */}
+          <DefaultBackendRow
+            toolStatus={toolStatus}
+            preferred={preferredBackend}
+            onSelect={setPreferredBackend}
+          />
+
+          {/* ── Git provider (optional) ── */}
+          <GitProviderRow
+            selected={providerChoice}
+            onSelect={handleProviderSelect}
+            toolStatus={toolStatus}
+          />
 
           {/* ── Voice control (optional extra download) ── */}
           <VoiceRuntimeRow variant="compact" />
 
-          {/* ── Install prompt (only when selected agent is not installed) ── */}
-          {toolStatus && selectedAgent && agentReady === false && (
-            <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-border bg-muted/20 text-xs">
-              <AlertTriangle className="size-4 text-amber-400 shrink-0" />
-              <span className="text-muted-foreground flex-1">
-                {selectedAgentStatus?.reason || `${AGENT_OPTIONS.find((a) => a.type === selectedAgent)?.label} will be installed automatically`}
-              </span>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-5 px-1.5 text-[10px]"
-                disabled={!!installing}
-                onClick={() => handleInstall(getAgentToolKey(selectedAgent))}
-              >
-                {installing === getAgentToolKey(selectedAgent) ? (
-                  <Loader2 className="size-3 animate-spin" />
-                ) : (
-                  <>
-                    <Download className="size-2.5 mr-0.5" />
-                    Install now
-                  </>
-                )}
-              </Button>
-            </div>
-          )}
-
           {/* ── Error ── */}
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          {error && (
+            <p className="text-xs text-destructive flex items-center gap-1.5">
+              <AlertTriangle className="size-3.5 shrink-0" />
+              {error}
+            </p>
+          )}
 
           {/* ── Actions ── */}
           <div className="flex items-center gap-3">
             <Button
               onClick={handleStart}
-              disabled={!selectedAgent || creating}
+              disabled={creating}
               className="flex-1"
             >
               {creating ? (
@@ -575,7 +712,7 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
               ) : (
                 <Sparkles className="size-4 mr-1.5" />
               )}
-              {agentReady === false ? 'Install & Get Started' : 'Get Started'}
+              Get Started
               {!creating && <ArrowRight className="size-4 ml-1.5" />}
             </Button>
             <Button

@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@source "../../shared";
 
 /* ══════════════════════════════════════════════════════════════════════════
    20x Mobile — shares the "Aperture" design system with the desktop app.
@@ -80,6 +81,10 @@
 
 /* Mode-aware accent palette (see desktop globals for rationale) */
 :root:not(.dark) {
+  --color-gray-400: #6b7280;
+  --color-gray-300: #4b5563;
+  --color-slate-400: #64748b;
+  --color-slate-300: #475569;
   --color-red-400: #dc2626;
   --color-orange-400: #ea580c;
   --color-amber-400: #b45309;

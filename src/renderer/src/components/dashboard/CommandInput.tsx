@@ -102,7 +102,7 @@ export function CommandInput({ onSendToMastermind, onCreateTask }: CommandInputP
 
   return (
     <div
-      className="rounded-lg border border-border/80 bg-muted overflow-hidden shadow-sm transition-all duration-200 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/30"
+      className="rounded-lg border border-border/80 bg-muted overflow-hidden shadow-sm transition-colors duration-200 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/30"
       data-voice-composer={VOICE_COMPOSER_KEY}
     >
       {/* Text area */}
@@ -114,23 +114,23 @@ export function CommandInput({ onSendToMastermind, onCreateTask }: CommandInputP
           onKeyDown={handleKeyDown}
           placeholder="Ask Mastermind or describe a task..."
           rows={1}
-          className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground resize-none outline-none leading-relaxed max-h-32 min-h-[32px]"
+          className="w-full bg-transparent text-base text-foreground placeholder:text-muted-foreground resize-none outline-none leading-relaxed max-h-32 min-h-[32px]"
         />
       </div>
 
       {/* Toolbar */}
-      <div className="flex items-center gap-1 px-3 pb-2.5 pt-1.5 border-t border-border">
+      <div className="flex items-center gap-1 px-2.5 pb-2 pt-2 border-t border-border">
         {/* Agent selector pill */}
         <div className="relative" ref={dropdownRef}>
           <button
             onClick={() => setShowAgentDropdown(!showAgentDropdown)}
             title="Choose agent"
             aria-expanded={showAgentDropdown}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs text-foreground/70 hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
+            className="flex h-8 items-center gap-1.5 px-2.5 rounded-md text-sm text-foreground/70 hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
           >
-            <Settings className="h-3.5 w-3.5" />
+            <Settings className="size-icon-sm" />
             <span className="max-w-[120px] truncate">{selectedAgent?.name || 'Select agent'}</span>
-            <ChevronDown className="h-3 w-3" />
+            <ChevronDown className="size-icon-xs" />
           </button>
 
           {showAgentDropdown && (
@@ -142,7 +142,7 @@ export function CommandInput({ onSendToMastermind, onCreateTask }: CommandInputP
                     setSelectedAgentId(agent.id)
                     setShowAgentDropdown(false)
                   }}
-                  className={`w-full text-left px-3 py-1.5 text-xs transition-colors cursor-pointer ${
+                  className={`w-full text-left px-3 py-2 text-sm transition-colors cursor-pointer ${
                     agent.id === selectedAgentId
                       ? 'bg-primary/10 text-primary'
                       : 'text-foreground hover:bg-accent'
@@ -156,19 +156,19 @@ export function CommandInput({ onSendToMastermind, onCreateTask }: CommandInputP
         </div>
 
         {/* Separator */}
-        <div className="w-px h-4 bg-border mx-1" />
+        <div className="w-px h-5 bg-border mx-1" />
 
         {/* Attach file */}
         <button
-          className="p-1.5 rounded-md text-foreground/60 hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
+          className="grid size-hit place-items-center rounded-md text-foreground/60 hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
           title="Attach file"
           aria-label="Attach file"
         >
-          <Paperclip className="h-4 w-4" />
+          <Paperclip className="size-icon" />
         </button>
 
         {/* Dictate. With "Keep talking" on, each pause sends to Mastermind. */}
-        <VoiceMicButton mode="dictation" onSubmit={submitField} className="h-[30px] w-[30px]" />
+        <VoiceMicButton mode="dictation" onSubmit={submitField} />
 
         {/* Spacer */}
         <div className="flex-1" />
@@ -176,9 +176,9 @@ export function CommandInput({ onSendToMastermind, onCreateTask }: CommandInputP
         {/* Create task button */}
         <button
           onClick={handleCreateTask}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-foreground/70 hover:text-foreground hover:bg-accent border border-border transition-colors cursor-pointer"
+          className="flex h-8 items-center gap-1.5 px-3 rounded-lg text-sm font-medium text-foreground/70 hover:text-foreground hover:bg-accent border border-border transition-colors cursor-pointer"
         >
-          <Plus className="h-3.5 w-3.5" />
+          <Plus className="size-icon-sm" />
           Create task
         </button>
 
@@ -186,7 +186,7 @@ export function CommandInput({ onSendToMastermind, onCreateTask }: CommandInputP
         <button
           onClick={handleSend}
           disabled={!text.trim()}
-          className={`p-1.5 rounded-lg transition-all duration-150 cursor-pointer ${
+          className={`grid size-hit place-items-center rounded-lg transition-colors duration-150 cursor-pointer ${
             text.trim()
               ? 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm'
               : 'bg-accent text-muted-foreground cursor-not-allowed'
@@ -194,7 +194,7 @@ export function CommandInput({ onSendToMastermind, onCreateTask }: CommandInputP
           title="Send to Mastermind"
           aria-label="Send to Mastermind"
         >
-          <ArrowUp className="h-4 w-4" />
+          <ArrowUp className="size-icon" />
         </button>
       </div>
     </div>

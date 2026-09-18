@@ -1,6 +1,9 @@
 import type Database from 'better-sqlite3'
 import { join } from 'path'
 import { createId } from '@paralleldrive/cuid2'
+import { FULL_ACCESS_SCOPE, listToolsForScope } from '../mcp-servers/task-management-core'
+import { TaskStatus } from '../../shared/constants'
+import { TASK_ROLE_MASTERMIND } from '../../shared/task-roles'
 
 /** First-run and every-startup rows the app relies on existing. */
 
@@ -12,6 +15,21 @@ export function seedDefaultAgent(db: Database.Database): void {
     INSERT INTO agents (id, name, server_url, config, is_default, created_at, updated_at)
     VALUES (?, ?, ?, ?, 1, ?, ?)
   `).run(createId(), 'Default Agent', 'http://localhost:4096', '{}', now, now)
+}
+
+/**
+ * The Mastermind's own row. It is a task row so its session_id and transcript
+ * persist and resume like any task's; `role` keeps it out of every task list.
+ * Idempotent: one row per install, found by role rather than by a fixed id.
+ */
+export function seedMastermindTask(db: Database.Database): void {
+  const existing = db.prepare('SELECT id FROM tasks WHERE role = ? LIMIT 1').get(TASK_ROLE_MASTERMIND)
+  if (existing) return
+  const now = new Date().toISOString()
+  db.prepare(`
+    INSERT INTO tasks (id, title, description, type, priority, status, assignee, labels, source, role, created_at, updated_at)
+    VALUES (?, ?, ?, 'general', 'medium', ?, '', '[]', 'local', ?, ?, ?)
+  `).run(createId(), 'Mastermind', 'The Mastermind conversation. Not a task: never listed, never scheduled.', TaskStatus.NotStarted, TASK_ROLE_MASTERMIND, now, now)
 }
 
 /** Append `id` to an array in the default agent's config unless already present. */
@@ -35,7 +53,12 @@ function addToDefaultAgent(db: Database.Database, key: 'skill_ids' | 'mcp_server
   db.prepare('UPDATE agents SET config = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(config), now, defaultAgent.id)
 }
 
-const MASTERMIND_SKILL_CONTENT = `# Mastermind Skill
+/**
+ * The text 20x used to seed as the "Mastermind" skill. The persona now lives in
+ * code (src/main/prompts/mastermind.ts); this copy exists only so startup can
+ * tell an untouched seeded skill from one the user edited. Never change it.
+ */
+export const LEGACY_MASTERMIND_SKILL_CONTENT = `# Mastermind Skill
 
 You are helping the user manage their tasks. When analyzing tasks or making recommendations:
 
@@ -106,42 +129,45 @@ You:
 
 Remember: Be helpful, concise, and proactive. Learn from history, but adapt to context.`
 
+/**
+ * Retires the seeded "Mastermind" skill now that the Mastermind has a built-in
+ * system prompt. Nothing is seeded any more. A copy whose content is still the
+ * seeded text is soft-deleted and detached from every agent; a copy the user
+ * edited is left alone, attached as before, as an ordinary user skill.
+ * Idempotent: once the untouched copy is gone there is nothing left to match.
+ */
 export function seedOrchestratorSkill(db: Database.Database): void {
-  if (db.prepare('SELECT 1 FROM skills WHERE name = ? AND is_deleted = 0').get('Mastermind')) return
+  const stale = db.prepare('SELECT id FROM skills WHERE name = ? AND content = ? AND is_deleted = 0')
+    .all('Mastermind', LEGACY_MASTERMIND_SKILL_CONTENT) as { id: string }[]
+  if (stale.length === 0) return
 
+  const staleIds = new Set(stale.map((row) => row.id))
   const now = new Date().toISOString()
-  const skillId = createId()
-  db.prepare(`
-    INSERT INTO skills (id, name, description, content, version, confidence, uses, last_used, tags, is_deleted, created_at, updated_at)
-    VALUES (?, ?, ?, ?, 1, ?, 0, NULL, ?, 0, ?, ?)
-  `).run(
-    skillId,
-    'Mastermind',
-    'Helps agents analyze tasks, make recommendations based on historical patterns, and manage task metadata intelligently',
-    MASTERMIND_SKILL_CONTENT,
-    0.8, // Higher confidence since this is a system skill
-    JSON.stringify(['mastermind', 'task-management', 'system']),
-    now,
-    now
-  )
-  addToDefaultAgent(db, 'skill_ids', skillId, now)
+  const agents = db.prepare('SELECT id, config FROM agents').all() as { id: string; config: string }[]
+  const updateAgent = db.prepare('UPDATE agents SET config = ?, updated_at = ? WHERE id = ?')
+  const deleteSkill = db.prepare('UPDATE skills SET is_deleted = 1, updated_at = ? WHERE id = ?')
+
+  db.transaction(() => {
+    for (const agent of agents) {
+      let config: Record<string, unknown>
+      try {
+        config = JSON.parse(agent.config) as Record<string, unknown>
+      } catch {
+        continue
+      }
+      const skillIds = config.skill_ids
+      if (!Array.isArray(skillIds) || !skillIds.some((id) => staleIds.has(id))) continue
+      config.skill_ids = skillIds.filter((id) => !staleIds.has(id))
+      updateAgent.run(JSON.stringify(config), now, agent.id)
+    }
+    for (const id of staleIds) deleteSkill.run(now, id)
+  })()
 }
 
-const TASK_MANAGEMENT_TOOLS = [
-  { name: 'list_tasks', description: 'List all tasks with optional filters (status, priority, agent, labels)' },
-  { name: 'create_task', description: 'Create a new task with title, description, type, priority, labels, assignee, agent_id, skill_ids, due date. Use cron field for recurring tasks (e.g. "0 9 * * 1-5")' },
-  { name: 'get_task', description: 'Get detailed information about a specific task by ID' },
-  { name: 'update_task', description: 'Update task metadata (labels, skills, agent assignment, priority, status)' },
-  { name: 'create_artifact', description: 'Create a durable task-scoped artifact workpiece' },
-  { name: 'list_artifacts', description: 'List explicitly registered artifacts and their files' },
-  { name: 'read_artifact_file', description: 'Read a file owned by an artifact workpiece' },
-  { name: 'write_artifact_file', description: 'Write a file owned by an artifact workpiece' },
-  { name: 'edit_artifact_file', description: 'Edit a file owned by an artifact workpiece' },
-  { name: 'list_agents', description: 'List all available agents with their configurations' },
-  { name: 'list_skills', description: 'List all available skills with their descriptions' },
-  { name: 'find_similar_tasks', description: 'Find historical tasks similar to given criteria for pattern analysis' },
-  { name: 'get_task_statistics', description: 'Get aggregated statistics about tasks (label usage, agent workload, completion rate)' }
-]
+/** The full-access tool set the server actually serves, in the row's {name, description} shape. */
+export function taskManagementToolRecords(): { name: string; description: string }[] {
+  return listToolsForScope(FULL_ACCESS_SCOPE).map((tool) => ({ name: tool.name, description: tool.description ?? '' }))
+}
 
 /** Create or refresh the built-in task-management MCP server row (path, command
  * and tools change between releases) and attach it to the default agent. */
@@ -163,6 +189,7 @@ export function seedTaskManagementMcpServer(db: Database.Database): void {
 
   const existingServer = db.prepare('SELECT id FROM mcp_servers WHERE name = ?')
     .get('task-management') as { id: string } | undefined
+  const tools = JSON.stringify(taskManagementToolRecords())
 
   const mcpServerId = existingServer?.id ?? createId()
   if (!existingServer) {
@@ -171,13 +198,13 @@ export function seedTaskManagementMcpServer(db: Database.Database): void {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       mcpServerId, 'task-management', 'local', mcpCommand,
-      JSON.stringify([mcpServerPath]), JSON.stringify(mcpEnv), JSON.stringify(TASK_MANAGEMENT_TOOLS), now, now
+      JSON.stringify([mcpServerPath]), JSON.stringify(mcpEnv), tools, now, now
     )
   } else {
     db.prepare(`
       UPDATE mcp_servers SET command = ?, args = ?, environment = ?, tools = ?, updated_at = ? WHERE id = ?
     `).run(
-      mcpCommand, JSON.stringify([mcpServerPath]), JSON.stringify(mcpEnv), JSON.stringify(TASK_MANAGEMENT_TOOLS), now, mcpServerId
+      mcpCommand, JSON.stringify([mcpServerPath]), JSON.stringify(mcpEnv), tools, now, mcpServerId
     )
   }
 

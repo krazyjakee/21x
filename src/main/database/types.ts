@@ -1,3 +1,4 @@
+import type { TaskRole } from '../../shared/task-roles'
 import type { ReasoningEffort } from '../../shared/reasoning-effort'
 
 export interface AgentRow {
@@ -263,6 +264,7 @@ export interface TaskRow {
   parent_task_id: string | null
   next_subtask_ids: string
   sort_order: number
+  role: string
   created_at: string
   updated_at: string
 }
@@ -347,6 +349,8 @@ export interface TaskRecord {
   complete_at_source: boolean | null
   parent_task_id: string | null
   next_subtask_ids: string[]
+  /** 'task' for the user's work; a coordinator role for rows that only host a conversation. */
+  role: TaskRole
   sort_order: number
   created_at: string
   updated_at: string
@@ -383,6 +387,8 @@ export interface CreateTaskData {
   complete_at_source?: boolean | null
   parent_task_id?: string | null
   next_subtask_ids?: string[]
+  /** Defaults to 'task'. Only the seed creates coordinator rows. */
+  role?: TaskRole
   /** Cron expression — if provided, sets is_recurring=true and stores as recurrence_pattern */
   cron?: string
 }
@@ -435,6 +441,7 @@ export interface SkillRow {
   uses: number
   last_used: string | null
   tags: string
+  preferred_model: string | null
   is_deleted: number
   created_at: string
   updated_at: string
@@ -450,6 +457,8 @@ export interface SkillRecord {
   uses: number
   last_used: string | null
   tags: string[]
+  /** Model id this skill runs best with; null = no preference. */
+  preferred_model: string | null
   created_at: string
   updated_at: string
 }
@@ -462,6 +471,7 @@ export interface CreateSkillData {
   uses?: number
   last_used?: string | null
   tags?: string[]
+  preferred_model?: string | null
 }
 
 export interface UpdateSkillData {
@@ -472,6 +482,8 @@ export interface UpdateSkillData {
   uses?: number
   last_used?: string | null
   tags?: string[]
+  /** null (or empty string) clears the preference. */
+  preferred_model?: string | null
 }
 
 export interface SecretRow {

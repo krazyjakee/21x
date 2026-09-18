@@ -128,7 +128,7 @@ export function HubSpotConfigForm({ value, onChange, sourceId, onRequestSave }: 
             <div className="space-y-1.5">
               <Label>OAuth Setup</Label>
               <p className="text-xs text-muted-foreground">
-                👉 Follow the{' '}
+                Follow the{' '}
                 <button
                   type="button"
                   onClick={() =>
@@ -187,16 +187,16 @@ export function HubSpotConfigForm({ value, onChange, sourceId, onRequestSave }: 
                 variant={oauthConnected ? 'outline' : 'default'}
                 className="w-full"
               >
-                {oauthConnected ? '✓ Connected to HubSpot' : 'Connect to HubSpot'}
+                {oauthConnected ? 'Connected to HubSpot' : 'Connect to HubSpot'}
               </Button>
               {!sourceId && !hasOAuthCredentials && (
                 <p className="text-xs text-muted-foreground">
-                  ℹ️ Fill in Client ID and Client Secret above to continue
+                  Fill in Client ID and Client Secret above to continue
                 </p>
               )}
               {!sourceId && hasOAuthCredentials ? (
                 <p className="text-xs text-muted-foreground">
-                  ℹ️ Click to save source and start OAuth flow
+                  Click to save source and start OAuth flow
                 </p>
               ) : null}
             </div>

@@ -1,15 +1,15 @@
 import { Badge } from './Badge'
 import { PriorityBadge } from './PriorityBadge'
 import { TaskStatusDot } from './TaskStatusDot'
-import { STATUS_VARIANT } from '../lib/utils'
+import { taskStatusStyle } from '@shared/task-status-styles'
 import type { Task } from '../stores/task-store'
 
 export function TaskBadges({ task }: { task: Pick<Task, 'status' | 'priority' | 'type'> }) {
-  const statusVariant = STATUS_VARIANT[task.status]
+  const status = taskStatusStyle(task.status)
   return (
     <>
       <TaskStatusDot status={task.status} />
-      {statusVariant && <Badge variant={statusVariant.variant}>{statusVariant.label}</Badge>}
+      <Badge variant={status.variant}>{status.label}</Badge>
       <PriorityBadge priority={task.priority} />
       {task.type !== 'general' && (
         <Badge variant={task.type === 'coding' ? 'blue' : task.type === 'review' ? 'teal' : 'default'}>

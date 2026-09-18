@@ -103,6 +103,13 @@ export function VoiceSettings() {
     void settingsApi.set(VOICE_SETTING_KEYS.advancedStt, next ? 'true' : 'false')
   }
 
+  // Rows the user can act on: every current model, and an older one only
+  // while it is still on disk. An older model is never offered for download.
+  const visibleModels = models.filter((model) => !model.legacy || model.installed)
+  const legacyInstalled = models.filter((model) => model.legacy && model.installed)
+  const currentInstalled = models.some((model) => !model.legacy && model.installed)
+  const legacyBytes = legacyInstalled.reduce((total, model) => total + model.sizeBytes, 0)
+
   // Say what is wrong, and nothing when nothing is wrong.
   const listeningProblem =
     permission === 'denied'
@@ -147,10 +154,21 @@ export function VoiceSettings() {
           <div className="space-y-3">
             <Label>Speech models</Label>
             <p className="-mt-1 text-xs text-muted-foreground">
-              Downloaded on request, checked against a SHA-256 value, and kept in the app data directory.
+              Downloaded on request, checked against a SHA-256 value, and kept in the app data directory. Speech
+              is recognised on this computer only.
             </p>
-            {models.length === 0 && <p className="text-sm text-muted-foreground">No model is listed.</p>}
-            {models.map((model) => (
+            {legacyInstalled.length > 0 && (
+              <p
+                className="rounded-lg border border-yellow-500/40 bg-yellow-500/5 p-3 text-xs text-yellow-500"
+                data-testid="voice-legacy-notice"
+              >
+                {currentInstalled
+                  ? `An older speech model is still on disk (${formatBytes(legacyBytes)}). Parakeet v3 has replaced it; delete the older model below to get the space back.`
+                  : `An older speech model is still on disk (${formatBytes(legacyBytes)}). It keeps working, but it is no longer offered. Download Parakeet v3, then delete the older model to get the space back.`}
+              </p>
+            )}
+            {visibleModels.length === 0 && <p className="text-sm text-muted-foreground">No model is listed.</p>}
+            {visibleModels.map((model) => (
               <div
                 key={model.id}
                 className={`rounded-lg border p-3 ${
@@ -168,20 +186,41 @@ export function VoiceSettings() {
                           In use
                         </span>
                       )}
+                      {model.legacy && (
+                        <span
+                          className="inline-flex items-center rounded-full bg-yellow-500/15 px-2 py-0.5 text-[10px] font-medium text-yellow-500"
+                          data-testid={`voice-model-legacy-${model.id}`}
+                        >
+                          Older model
+                        </span>
+                      )}
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">{model.description}</p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {formatBytes(model.sizeBytes)} · {model.languages.join(', ')} ·{' '}
-                      <a
-                        href={model.licenseUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="underline decoration-dotted underline-offset-2 hover:text-foreground"
-                      >
-                        {model.license}
-                      </a>
+                      {formatBytes(model.sizeBytes)}
+                      {model.languages.length > 0 && (
+                        <>
+                          {' · '}
+                          {model.languages.length > 6
+                            ? `${model.languages.length} languages`
+                            : model.languages.join(', ')}
+                        </>
+                      )}
+                      {model.licenseUrl ? (
+                        <>
+                          {' · '}
+                          <a
+                            href={model.licenseUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="underline decoration-dotted underline-offset-2 hover:text-foreground"
+                          >
+                            {model.license}
+                          </a>
+                        </>
+                      ) : null}
                     </p>
-                    {!model.downloadable && (
+                    {!model.downloadable && !model.legacy && !model.installed && (
                       <p className="mt-1 text-xs text-yellow-500">The checksum for this model is not recorded yet.</p>
                     )}
                     {model.error && <p className="mt-1 text-xs text-red-400">{model.error}</p>}
@@ -223,7 +262,11 @@ export function VoiceSettings() {
                         ) : (
                           <Download className="mr-1.5 h-3.5 w-3.5" />
                         )}
-                        {model.installing ? `${Math.round(model.progress * 100)}%` : 'Download'}
+                        {model.installing
+                          ? model.phase === 'verifying'
+                            ? 'Verifying…'
+                            : `${Math.round(model.progress * 100)}%`
+                          : 'Download'}
                       </Button>
                     )}
                   </div>
@@ -408,14 +451,15 @@ export function VoiceSettings() {
                   <Label htmlFor="voice-model-dir">Use another model directory (optional)</Label>
                   <p className="text-xs text-muted-foreground">
                     Only for a model you installed by hand. The directory must hold an encoder, a decoder, a joiner and
-                    a tokens file.
+                    a tokens file. A Parakeet (non-streaming) model is recognised by its directory name: keep
+                    “parakeet” in it, as the sherpa-onnx releases do.
                   </p>
                   <div className="flex gap-2">
                     <Input
                       id="voice-model-dir"
                       value={customDir}
                       onChange={(e) => setCustomDir(e.target.value)}
-                      placeholder="/path/to/sherpa-onnx-streaming-model"
+                      placeholder="/path/to/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
                     />
                     <Button variant="outline" onClick={() => void pickDir()}>
                       <FolderOpen className="mr-1.5 h-3.5 w-3.5" />

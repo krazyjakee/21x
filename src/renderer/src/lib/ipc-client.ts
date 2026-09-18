@@ -1,5 +1,5 @@
 import type { Task, CreateTaskDTO, UpdateTaskDTO, FileAttachment, Agent, CreateAgentDTO, UpdateAgentDTO, McpServer, CreateMcpServerDTO, UpdateMcpServerDTO, Skill, CreateSkillDTO, UpdateSkillDTO, Secret, CreateSecretDTO, UpdateSecretDTO, TaskSource, CreateTaskSourceDTO, UpdateTaskSourceDTO, SyncResult, PluginMeta, ConfigFieldOption, ActionResult, SourceUser, ReassignResult, MarketplaceSource, InstalledPlugin, DiscoverablePlugin, MarketplaceCatalog, PluginResources } from '@/types'
-import type { AgentOutputEvent, AgentOutputBatchEvent, AgentStatusEvent, GhCliStatus, GlabCliStatus, TeaCliStatus, GitHubRepo, WorktreeProgressEvent, WorkspaceCleanupProgressEvent, McpTestResult, AgentMessageAttachment, TranscriptPartRecord, TranscriptChangedEvent } from '@/types/electron'
+import type { AgentOutputEvent, AgentOutputBatchEvent, AgentStatusEvent, GhCliStatus, GlabCliStatus, TeaCliStatus, GitHubRepo, WorktreeProgressEvent, WorkspaceCleanupProgressEvent, McpTestResult, AgentMessageAttachment, TranscriptPartRecord, TranscriptChangedEvent, AgentSessionStartResult, AgentStartQueueChangedEvent, QueuedAgentStart } from '@/types/electron'
 import type { ArtifactApi } from '@shared/artifacts'
 import type {
   MicrophonePermission,
@@ -21,6 +21,8 @@ import type {
   VoiceTtsModelState,
   VoiceTtsSnapshot
 } from '@shared/voice-tts'
+import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
+import type { CliMcpMutationResult, CliMcpProbeResult, CliMcpServerRef, CliMcpSnapshot, CliMcpUpsertRequest } from '@shared/cli-mcp-config'
 
 export const taskApi = {
   getAll: (): Promise<Task[]> => {
@@ -49,6 +51,11 @@ export const taskApi = {
 
   reorderSubtasks: (parentId: string, orderedIds: string[]): Promise<boolean> => {
     return window.electronAPI.db.reorderSubtasks(parentId, orderedIds)
+  },
+
+  /** The Mastermind's task row id. Hidden from getAll, so it is asked for by role. */
+  getCoordinatorTaskId: (): Promise<string | null> => {
+    return window.electronAPI.tasks.getCoordinatorTaskId()
   }
 }
 
@@ -115,11 +122,16 @@ export const agentApi = {
 
   delete: (id: string): Promise<boolean> => {
     return window.electronAPI.agents.delete(id)
+  },
+
+  /** Starts the main process is holding back behind concurrency limits. */
+  getStartQueue: (): Promise<QueuedAgentStart[]> => {
+    return window.electronAPI.agents.getStartQueue()
   }
 }
 
 export const agentSessionApi = {
-  start: (agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<{ sessionId: string }> => {
+  start: (agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<AgentSessionStartResult> => {
     return window.electronAPI.agentSession.start(agentId, taskId, workspaceDir, skipInitialPrompt)
   },
 
@@ -244,6 +256,10 @@ export const onAgentStatus = (callback: (event: AgentStatusEvent) => void): (() 
   return window.electronAPI.onAgentStatus(callback)
 }
 
+export const onAgentStartQueueChanged = (callback: (event: AgentStartQueueChangedEvent) => void): (() => void) => {
+  return window.electronAPI.onAgentStartQueueChanged(callback)
+}
+
 export const onAgentIncompatibleSession = (callback: (event: { taskId: string; agentId: string; error: string }) => void): (() => void) => {
   return window.electronAPI.onAgentIncompatibleSession(callback)
 }
@@ -302,9 +318,12 @@ export const updaterApi = {
 
 export const mobileApi = {
   getInfo: (): Promise<{
+    enabled: boolean
+    lanAccess: boolean
+    sessionIdleDays: number
     url: string
     port: number
-    lanUrl: string
+    lanUrl: string | null
     tunnelUrl: string | null
     tunnelActive: boolean
     remoteMode: 'quick' | 'custom'
@@ -312,7 +331,13 @@ export const mobileApi = {
   }> => {
     return (
       window.electronAPI?.mobile?.getInfo() ??
-      Promise.resolve({ url: '', port: 0, lanUrl: '', tunnelUrl: null, tunnelActive: false, remoteMode: 'quick', customUrl: null })
+      Promise.resolve({ enabled: false, lanAccess: false, sessionIdleDays: 7, url: '', port: 0, lanUrl: null, tunnelUrl: null, tunnelActive: false, remoteMode: 'quick', customUrl: null })
+    )
+  },
+  setAccess: (options: { enabled?: boolean; lanAccess?: boolean; sessionIdleDays?: number }): Promise<{ enabled: boolean; lanAccess: boolean; sessionIdleDays: number; listening: boolean }> => {
+    return (
+      window.electronAPI?.mobile?.setAccess(options) ??
+      Promise.resolve({ enabled: false, lanAccess: false, sessionIdleDays: 7, listening: false })
     )
   },
   startTunnel: (): Promise<{ tunnelUrl: string }> => {
@@ -673,4 +698,29 @@ export const browserRecordingApi = {
   status: (panelId: string) => window.electronAPI?.browser?.recordingStatus
     ? window.electronAPI.browser.recordingStatus(panelId)
     : Promise.resolve({ recording: null }),
+}
+
+// ── Chat runtime ────────────────────────────────────────────
+// A pass-through for the lightweight chat loop (docs/chat-runtime.md). The
+// renderer sends history and draws events; every model and tool call happens
+// in the main process.
+
+export const chatApi = {
+  start: (payload: ChatStartRequest): Promise<{ turnId: string; provider: string; model: string }> =>
+    window.electronAPI.chat.start(payload),
+  cancel: (turnId: string): Promise<{ cancelled: boolean }> => window.electronAPI.chat.cancel(turnId),
+  onEvent: (callback: (event: ChatIpcEvent) => void): (() => void) => window.electronAPI.chat.onEvent(callback)
+}
+
+// ── Global MCP config of the coding-agent CLIs ───────────────
+// Claude Code, OpenCode and Codex global MCP servers (docs/mcp-global-config.md).
+
+export const cliMcpApi = {
+  snapshot: (): Promise<CliMcpSnapshot> => window.electronAPI.cliMcp.snapshot(),
+  upsert: (request: CliMcpUpsertRequest): Promise<CliMcpMutationResult> => window.electronAPI.cliMcp.upsert(request),
+  remove: (ref: CliMcpServerRef): Promise<CliMcpMutationResult> => window.electronAPI.cliMcp.remove(ref),
+  setEnabled: (ref: CliMcpServerRef & { enabled: boolean }): Promise<CliMcpMutationResult> => window.electronAPI.cliMcp.setEnabled(ref),
+  setToolEnabled: (ref: CliMcpServerRef & { tool: string; enabled: boolean }): Promise<CliMcpMutationResult> =>
+    window.electronAPI.cliMcp.setToolEnabled(ref),
+  probe: (ref: CliMcpServerRef): Promise<CliMcpProbeResult> => window.electronAPI.cliMcp.probe(ref)
 }

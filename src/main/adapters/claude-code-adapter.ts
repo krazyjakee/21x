@@ -934,23 +934,6 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     )
   }
 
-  async registerMcpServer(
-    _serverName: string,
-    _mcpConfig: {
-      type: 'local' | 'remote'
-      command?: string[]
-      args?: string[]
-      url?: string
-      headers?: Record<string, string>
-      environment?: Record<string, string>
-    },
-    _workspaceDir?: string
-  ): Promise<void> {
-    // Claude Code handles MCP servers via the mcpServers option
-    // They're passed per-session in createSession/resumeSession/sendPrompt
-    // No global registration needed
-  }
-
   async checkHealth(): Promise<{ available: boolean; reason?: string }> {
     try {
       await this.ensureSDKLoaded()

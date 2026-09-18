@@ -372,7 +372,7 @@ describe('useAgentAutoStart', () => {
     expect(startedTaskIds).not.toContain('sub-2')
   })
 
-  it('does not start next subtask while sibling is in ReadyForReview', async () => {
+  it('starts the next subtask while a sibling waits in review — an unattended chain must not stall', async () => {
     const parentTask = makeTask({
       id: 'parent-1',
       title: 'Parent task',
@@ -410,10 +410,53 @@ describe('useAgentAutoStart', () => {
       await Promise.resolve()
     })
 
-    // Should NOT start subtask 2 — subtask 1 is still in ReadyForReview
+    // Subtask 1 has finished its agent run and cannot accept itself, so it
+    // does not block subtask 2 — it just stays in review for a human.
     const startCalls = (mockElectronAPI.agentSession.start as unknown as Mock).mock.calls
     const sub2StartCalls = startCalls.filter((call: unknown[]) => call[1] === 'sub-2')
-    expect(sub2StartCalls).toHaveLength(0)
+    expect(sub2StartCalls).toHaveLength(1)
+  })
+
+  it('does not start the next subtask while a sibling is still being worked on', async () => {
+    const parentTask = makeTask({
+      id: 'parent-1',
+      title: 'Parent task',
+      agent_id: 'agent-1',
+      status: TaskStatus.NotStarted
+    })
+    const subtask1 = makeTask({
+      id: 'sub-1',
+      title: 'Subtask 1',
+      parent_task_id: 'parent-1',
+      agent_id: 'agent-1',
+      sort_order: 0,
+      status: TaskStatus.AgentWorking
+    })
+    const subtask2 = makeTask({
+      id: 'sub-2',
+      title: 'Subtask 2',
+      parent_task_id: 'parent-1',
+      agent_id: 'agent-1',
+      sort_order: 1,
+      status: TaskStatus.NotStarted
+    })
+    const agent = makeAgent({ id: 'agent-1', is_default: true })
+
+    renderHook(() =>
+      useAgentAutoStart({
+        tasks: [parentTask, subtask1, subtask2],
+        agents: [agent],
+        showToast: vi.fn()
+      })
+    )
+
+    await act(async () => {
+      vi.advanceTimersByTime(350)
+      await Promise.resolve()
+    })
+
+    const startCalls = (mockElectronAPI.agentSession.start as unknown as Mock).mock.calls
+    expect(startCalls.filter((call: unknown[]) => call[1] === 'sub-2')).toHaveLength(0)
   })
 
   it('starts first subtask instead of parent after triage creates subtasks', async () => {
@@ -493,14 +536,14 @@ describe('useAgentAutoStart', () => {
       agent_id: 'agent-next',
       status: TaskStatus.NotStarted
     })
-    // Start with subtask1 in ReadyForReview — prevents subtask2 from auto-starting initially
+    // Start with subtask1 still running — the only state that blocks subtask2
     const subtask1 = makeTask({
       id: 'sub-next-1',
       title: 'Subtask 1',
       parent_task_id: 'parent-next',
       agent_id: 'agent-next',
       sort_order: 0,
-      status: TaskStatus.ReadyForReview
+      status: TaskStatus.AgentWorking
     })
     const subtask2 = makeTask({
       id: 'sub-next-2',
@@ -529,7 +572,7 @@ describe('useAgentAutoStart', () => {
       })
     )
 
-    // Wait for initial render + debounce — subtask2 should NOT be started (sibling in ReadyForReview)
+    // Wait for initial render + debounce — subtask2 should NOT be started (sibling running)
     await act(async () => {
       vi.advanceTimersByTime(350)
       await Promise.resolve()
@@ -569,7 +612,8 @@ describe('useAgentAutoStart', () => {
       agent_id: 'agent-next',
       status: TaskStatus.NotStarted
     })
-    // Start with subtask1 in ReadyForReview — prevents subtask2 from auto-starting initially
+    // Subtask1 is in review with a successor edge: the graph, not list order,
+    // decides what runs next, so subtask2 must never be picked here.
     const subtask1 = makeTask({
       id: 'sub-next-1',
       title: 'Subtask 1',
@@ -615,7 +659,7 @@ describe('useAgentAutoStart', () => {
       })
     )
 
-    // Wait for initial render + debounce — subtask2 should NOT be started (sibling in ReadyForReview)
+    // Wait for initial render + debounce — subtask2 should NOT be started (successor edges own sequencing)
     await act(async () => {
       vi.advanceTimersByTime(350)
       await Promise.resolve()

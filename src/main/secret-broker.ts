@@ -9,8 +9,9 @@
  * Flow:
  *   1. Agent session starts → registerSecretSession(token, agentId, secretIds)
  *   2. Agent's SHELL is set to secret-shell.sh wrapper
- *   3. Wrapper calls GET /secrets/export?token=<token>
+ *   3. Wrapper calls GET /secrets/export?token=<token>[&format=base64]
  *   4. Broker decrypts secrets from SQLite, returns export KEY='val' statements
+ *      (or KEY=<base64> lines for the PowerShell wrapper)
  *   5. Wrapper evals exports, unsets broker vars, exec's real shell
  *   6. The real shell command runs with secrets in env — agent process never has them
  */
@@ -72,16 +73,18 @@ export function startSecretBroker(db: DatabaseManager): Promise<number> {
         const secrets = dbRef.getSecretsWithValues(session.secretIds)
         console.log(`[SecretBroker] Found ${secrets.length} secret(s): [${secrets.map(s => `${s.env_var_name}(${s.value.length} chars)`).join(', ')}]`)
 
-        // The wrapper evals this body, so names are restricted to shell
+        const valid = secrets.filter(s => {
+          if (SHELL_IDENTIFIER.test(s.env_var_name)) return true
+          console.warn(`[SecretBroker] Skipping secret with invalid variable name: ${JSON.stringify(s.env_var_name)}`)
+          return false
+        })
+        // The bash wrapper evals this body, so names are restricted to shell
         // identifiers and values are single-quoted with embedded quotes escaped.
-        const exports = secrets
-          .filter(s => {
-            if (SHELL_IDENTIFIER.test(s.env_var_name)) return true
-            console.warn(`[SecretBroker] Skipping secret with invalid variable name: ${JSON.stringify(s.env_var_name)}`)
-            return false
-          })
-          .map(s => `export ${s.env_var_name}='${s.value.replace(/'/g, "'\\''")}'`)
-          .join('\n')
+        // The PowerShell wrapper parses line by line, so it asks for
+        // NAME=<base64 utf-8> lines that keep multi-line values intact.
+        const exports = url.searchParams.get('format') === 'base64'
+          ? valid.map(s => `${s.env_var_name}=${Buffer.from(s.value, 'utf8').toString('base64')}`).join('\n')
+          : valid.map(s => `export ${s.env_var_name}='${s.value.replace(/'/g, "'\\''")}'`).join('\n')
 
         console.log(`[SecretBroker] Response body length: ${exports.length} bytes`)
         res.writeHead(200, { 'Content-Type': 'text/plain' })
@@ -184,19 +187,18 @@ $ErrorActionPreference = "SilentlyContinue"
 
 if ($env:_20X_SB_PORT -and $env:_20X_SB_TOKEN) {
     try {
-        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$($env:_20X_SB_PORT)/secrets/export?token=$($env:_20X_SB_TOKEN)" -UseBasicParsing -TimeoutSec 5
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$($env:_20X_SB_PORT)/secrets/export?token=$($env:_20X_SB_TOKEN)&format=base64" -UseBasicParsing -TimeoutSec 5
         $secrets = $response.Content
 
         $timestamp = Get-Date -Format "HH:mm:ss"
         Add-Content -Path "${debugLog}" -Value "[secret-shell $timestamp] port=$($env:_20X_SB_PORT) status=$($response.StatusCode) body_len=$($secrets.Length)"
 
         if ($secrets) {
-            # Parse KEY=VALUE lines and set as environment variables
-            $secrets -split "\\n" | ForEach-Object {
-                if ($_ -match "^export\\s+([^=]+)=(.*)$") {
+            # Parse NAME=<base64 utf-8> lines; base64 keeps multi-line values intact
+            $secrets -split "\\r?\\n" | ForEach-Object {
+                if ($_ -match "^([A-Za-z_][A-Za-z0-9_]*)=([A-Za-z0-9+/=]*)$") {
                     $key = $Matches[1]
-                    # Values arrive single-quoted with ' written as '\\''
-                    $val = ($Matches[2] -replace "^'|'$", "") -replace "'\\\\''", "'"
+                    $val = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($Matches[2]))
                     [Environment]::SetEnvironmentVariable($key, $val, "Process")
                 }
             }

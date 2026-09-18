@@ -18,12 +18,18 @@ const agentApi = vi.hoisted(() => ({
     { id: 'other-agent', name: 'Codex', is_default: false },
   ]),
 }))
+/** The Mastermind is a hidden task row; the panel asks main for its id. */
+const MASTERMIND = 'mastermind-row-1'
+const taskApi = vi.hoisted(() => ({
+  getCoordinatorTaskId: vi.fn(async () => 'mastermind-row-1' as string | null),
+}))
 
 vi.mock('@/lib/ipc-client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/ipc-client')>()),
   agentApi,
   settingsApi,
   agentSessionApi,
+  taskApi,
 }))
 
 /**
@@ -41,6 +47,7 @@ vi.mock('@/components/agents/AgentTranscriptPanel', () => ({
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { OrchestratorPanel } from './OrchestratorPanel'
 import { useAgentStore } from '@/stores/agent-store'
+import { useCoordinatorStore } from '@/stores/coordinator-store'
 
 /**
  * Mastermind starts before there is anything to say.
@@ -50,7 +57,6 @@ import { useAgentStore } from '@/stores/agent-store'
  * must wait for the session, not be dropped.
  */
 
-const MASTERMIND = 'mastermind-session'
 
 /** Resolves `start` by hand, so the warm-up can be held mid-flight. */
 function deferredStart(): { resolve: () => void } {
@@ -68,6 +74,8 @@ beforeEach(() => {
   cleanup()
   vi.clearAllMocks()
   useAgentStore.setState({ sessions: new Map() })
+  useCoordinatorStore.setState({ mastermindTaskId: null })
+  taskApi.getCoordinatorTaskId.mockResolvedValue(MASTERMIND)
   settingsApi.get.mockResolvedValue(null)
   agentSessionApi.start.mockResolvedValue({ sessionId: 'session-1' })
   composer.send = null
