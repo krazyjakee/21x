@@ -235,8 +235,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     fetchUserRepos: (): Promise<unknown[]> =>
       ipcRenderer.invoke('gitlab:fetchUserRepos')
   },
+  forgejo: {
+    checkCli: (): Promise<unknown> => ipcRenderer.invoke('forgejo:checkCli'),
+    setLogin: (loginName: string | null): Promise<unknown> => ipcRenderer.invoke('forgejo:setLogin', loginName),
+    fetchOrgs: (): Promise<string[]> => ipcRenderer.invoke('forgejo:fetchOrgs'),
+    fetchOrgRepos: (org: string): Promise<unknown[]> =>
+      ipcRenderer.invoke('forgejo:fetchOrgRepos', org),
+    fetchUserRepos: (): Promise<unknown[]> =>
+      ipcRenderer.invoke('forgejo:fetchUserRepos')
+  },
+  git: {
+    recordRepoProviders: (repoFullNames: string[], provider: 'github' | 'gitlab' | 'forgejo'): Promise<void> =>
+      ipcRenderer.invoke('git:recordRepoProviders', repoFullNames, provider)
+  },
   worktree: {
-    setup: (taskId: string, repos: { fullName: string; defaultBranch: string }[], org: string, provider: 'github' | 'gitlab'): Promise<string> =>
+    setup: (taskId: string, repos: { fullName: string; defaultBranch: string }[], org: string, provider: 'github' | 'gitlab' | 'forgejo'): Promise<string> =>
       ipcRenderer.invoke('worktree:setup', taskId, repos, org, provider),
     cleanup: (taskId: string, repos: { fullName: string }[], org: string, removeTaskDir?: boolean): Promise<void> =>
       ipcRenderer.invoke('worktree:cleanup', taskId, repos, org, removeTaskDir),

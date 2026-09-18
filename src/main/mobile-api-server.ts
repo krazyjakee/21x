@@ -16,6 +16,8 @@ import type { DatabaseManager } from './database'
 import type { AgentManager } from './agent-manager'
 import type { GitHubManager } from './github-manager'
 import type { GitLabManager } from './gitlab-manager'
+import type { ForgejoManager } from './forgejo-manager'
+import { isGitProvider, recordRepoProviders } from './repo-providers'
 import type { SyncManager } from './sync-manager'
 import type { PluginRegistry } from './plugins/registry'
 import { listTaskArtifactEntries, readTaskArtifact } from './artifacts'
@@ -31,6 +33,7 @@ let dbRef: DatabaseManager | null = null
 let agentRef: AgentManager | null = null
 let githubRef: GitHubManager | null = null
 let gitlabRef: GitLabManager | null = null
+let forgejoRef: ForgejoManager | null = null
 let syncManagerRef: SyncManager | null = null
 let pluginRegistryRef: PluginRegistry | null = null
 let notifyDesktop: ((channel: string, data: unknown) => void) | null = null
@@ -72,7 +75,8 @@ export function startMobileApiServer(
   port = 20620,
   syncManager?: SyncManager | null,
   pluginRegistry?: PluginRegistry | null,
-  gitlabManager?: GitLabManager | null
+  gitlabManager?: GitLabManager | null,
+  forgejoManager?: ForgejoManager | null
 ): Promise<number> {
   if (server) return Promise.resolve(port)
 
@@ -80,6 +84,7 @@ export function startMobileApiServer(
   agentRef = agentManager
   githubRef = githubManager
   gitlabRef = gitlabManager ?? null
+  forgejoRef = forgejoManager ?? null
   syncManagerRef = syncManager ?? null
   pluginRegistryRef = pluginRegistry ?? null
 
@@ -427,9 +432,12 @@ async function routeGet(pathname: string, url: URL): Promise<unknown> {
 
   // GET /api/github/pull-request?url=... — authenticated, read-only PR details.
   if (pathname === '/api/github/pull-request') {
-    if (!githubRef) throw Object.assign(new Error('GitHub not configured'), { status: 500 })
     const pullRequestUrl = url.searchParams.get('url')
     if (!pullRequestUrl) throw Object.assign(new Error('url is required'), { status: 400 })
+    if (forgejoRef && !/^https:\/\/github\.com\//i.test(pullRequestUrl) && await forgejoRef.isForgejoUrl(pullRequestUrl)) {
+      return forgejoRef.fetchPullRequestDetails(pullRequestUrl)
+    }
+    if (!githubRef) throw Object.assign(new Error('GitHub not configured'), { status: 500 })
     return githubRef.fetchPullRequestDetails(pullRequestUrl)
   }
 
@@ -556,6 +564,22 @@ async function routeGet(pathname: string, url: URL): Promise<unknown> {
           }
         }
       } catch { /* GitLab not available — skip */ }
+    }
+
+    // Try Forgejo (via the tea login selected in 20x)
+    if (forgejoRef) {
+      try {
+        const status = await forgejoRef.checkTeaCli()
+        if (status.authenticated) {
+          const orgs = await forgejoRef.fetchUserOrgs()
+          if (status.username) {
+            owners.push({ value: status.username, label: `${status.username} (Forgejo personal)`, provider: 'forgejo' })
+          }
+          for (const orgName of orgs) {
+            owners.push({ value: orgName, label: `${orgName} (Forgejo)`, provider: 'forgejo' })
+          }
+        }
+      } catch { /* Forgejo not available — skip */ }
     }
 
     if (owners.length === 0) {
@@ -893,9 +917,24 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
       return repos
     }
 
+    if (provider === 'forgejo') {
+      if (!forgejoRef) throw Object.assign(new Error('Forgejo not configured'), { status: 500 })
+      return await forgejoRef.fetchOrgRepos(org)
+    }
+
     if (!githubRef) throw Object.assign(new Error('GitHub not configured'), { status: 500 })
     const repos = await githubRef.fetchOrgRepos(org)
     return repos
+  }
+
+  // POST /api/git/repo-providers — remember which provider attached repos came from
+  if (pathname === '/api/git/repo-providers') {
+    const { repos, provider } = params as { repos?: unknown; provider?: unknown }
+    if (!Array.isArray(repos) || !isGitProvider(provider)) {
+      throw Object.assign(new Error('repos and a valid provider are required'), { status: 400 })
+    }
+    recordRepoProviders(db, repos.filter((repo): repo is string => typeof repo === 'string'), provider)
+    return { success: true }
   }
 
   // POST /api/github/org — set configured github org

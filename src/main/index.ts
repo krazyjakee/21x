@@ -9,6 +9,7 @@ import { DatabaseManager, type TranscriptPartRecord } from './database'
 import { AgentManager } from './agent-manager'
 import { GitHubManager } from './github-manager'
 import { GitLabManager } from './gitlab-manager'
+import { ForgejoManager } from './forgejo-manager'
 import { WorktreeManager } from './worktree-manager'
 import { McpToolCaller } from './mcp-tool-caller'
 import { SyncManager } from './sync-manager'
@@ -17,6 +18,7 @@ import { PluginRegistry } from './plugins/registry'
 import { LinearPlugin } from './plugins/linear-plugin'
 import { HubSpotPlugin } from './plugins/hubspot-plugin'
 import { GitHubIssuesPlugin } from './plugins/github-issues-plugin'
+import { ForgejoIssuesPlugin } from './plugins/forgejo-issues-plugin'
 import { NotionPlugin } from './plugins/notion-plugin'
 import { YouTrackPlugin } from './plugins/youtrack-plugin'
 import { registerIpcHandlers } from './ipc-handlers'
@@ -62,6 +64,7 @@ let db: DatabaseManager | null = null
 let agentManager: AgentManager | null = null
 let githubManager: GitHubManager | null = null
 let gitlabManager: GitLabManager | null = null
+let forgejoManager: ForgejoManager | null = null
 let worktreeManager: WorktreeManager | null = null
 let mcpToolCaller: McpToolCaller | null = null
 let syncManager: SyncManager | null = null
@@ -955,8 +958,11 @@ app.whenReady().then(async () => {
   agentManager = new AgentManager(db)
   githubManager = new GitHubManager()
   gitlabManager = new GitLabManager()
+  const settingsDb = db
+  forgejoManager = new ForgejoManager((key) => settingsDb.getSetting(key))
   worktreeManager = new WorktreeManager()
-  agentManager.setManagers(githubManager, worktreeManager, gitlabManager ?? undefined)
+  worktreeManager.setForgejoManager(forgejoManager)
+  agentManager.setManagers(githubManager, worktreeManager, gitlabManager ?? undefined, forgejoManager)
 
   mcpToolCaller = new McpToolCaller()
   // Run task-management tools in this process instead of spawning a child that
@@ -973,6 +979,7 @@ app.whenReady().then(async () => {
   pluginRegistry.register(new LinearPlugin())
   pluginRegistry.register(new HubSpotPlugin())
   pluginRegistry.register(new GitHubIssuesPlugin(githubManager))
+  pluginRegistry.register(new ForgejoIssuesPlugin(forgejoManager))
   pluginRegistry.register(new NotionPlugin())
   pluginRegistry.register(new YouTrackPlugin())
 
@@ -1001,7 +1008,7 @@ app.whenReady().then(async () => {
   void voiceSessionManager.initialize()
   watchAgentAnswersForSpeech(agentManager, db)
 
-  registerIpcHandlers(db, agentManager, githubManager, worktreeManager, syncManager, pluginRegistry, mcpToolCaller, oauthManager, recurrenceScheduler, claudePluginManager, heartbeatScheduler, gitlabManager ?? undefined, workspaceCleanupScheduler ?? undefined, voiceSessionManager ?? undefined, taskAutomationScheduler ?? undefined)
+  registerIpcHandlers(db, agentManager, githubManager, worktreeManager, syncManager, pluginRegistry, mcpToolCaller, oauthManager, recurrenceScheduler, claudePluginManager, heartbeatScheduler, gitlabManager ?? undefined, workspaceCleanupScheduler ?? undefined, voiceSessionManager ?? undefined, taskAutomationScheduler ?? undefined, forgejoManager ?? undefined)
 
   // ── Media permission handler (design §5.9) ────────────────────────────────
   // Grant the microphone only to the 20x renderer, and only while voice is on.
@@ -1041,7 +1048,7 @@ app.whenReady().then(async () => {
   // Start mobile API server
   try {
     agentManager.addExternalListener(broadcastToMobileClients)
-    const mobilePort = await startMobileApiServer(db, agentManager, githubManager!, undefined, syncManager, pluginRegistry, gitlabManager)
+    const mobilePort = await startMobileApiServer(db, agentManager, githubManager!, undefined, syncManager, pluginRegistry, gitlabManager, forgejoManager)
     console.log(`[Main] Mobile API server started on port ${mobilePort}`)
   } catch (err) {
     console.error('[Main] Failed to start mobile API server:', err)

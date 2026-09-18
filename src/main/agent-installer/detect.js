@@ -143,13 +143,14 @@ export async function detectInstalledAgents() {
   }
 
   // Run all probes in parallel — shell:true on Windows resolves .cmd automatically
-  const [nodejs, npm, pnpm, git, gh, glab, claudeCode, opencode, codex, cursor, pi] = await Promise.all([
+  const [nodejs, npm, pnpm, git, gh, glab, tea, claudeCode, opencode, codex, cursor, pi] = await Promise.all([
     probe('node', ['--version']),
     probe('npm', ['--version']),
     probe('pnpm', ['--version']),
     probe('git', ['--version']),
     probe('gh', ['--version']),
     probe('glab', ['--version']),
+    probe('tea', ['--version']),
     probe('claude', ['--version']),
     probe('opencode', ['--version']),
     probe('codex', ['--version']),
@@ -157,5 +158,5 @@ export async function detectInstalledAgents() {
     probePi()
   ])
 
-  return { nodejs, npm, pnpm, git, gh, glab, claudeCode, opencode, codex, cursor, pi }
+  return { nodejs, npm, pnpm, git, gh, glab, tea, claudeCode, opencode, codex, cursor, pi }
 }

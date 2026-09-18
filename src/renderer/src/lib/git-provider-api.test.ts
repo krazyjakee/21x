@@ -14,6 +14,12 @@ vi.mock('./ipc-client', () => ({
     fetchOrgs: vi.fn(),
     fetchOrgRepos: vi.fn(),
     fetchUserRepos: vi.fn()
+  },
+  forgejoApi: {
+    checkCli: vi.fn(),
+    fetchOrgs: vi.fn(),
+    fetchOrgRepos: vi.fn(),
+    fetchUserRepos: vi.fn()
   }
 }))
 
@@ -37,6 +43,13 @@ describe('getGitProviderApi', () => {
     expect(api.checkCli).toBeDefined()
   })
 
+  it('returns forgejo API when provider is "forgejo"', async () => {
+    const { forgejoApi } = await import('./ipc-client')
+    const api = getGitProviderApi('forgejo')
+    expect(api.checkCli).toBe(forgejoApi.checkCli)
+    expect(api.fetchOrgRepos).toBe(forgejoApi.fetchOrgRepos)
+  })
+
   it('returns different API instances for different providers', async () => {
     const ghApi = getGitProviderApi('github')
     const glApi = getGitProviderApi('gitlab')
@@ -56,5 +69,9 @@ describe('getProviderLabel', () => {
 
   it('returns "GitLab" for gitlab', () => {
     expect(getProviderLabel('gitlab')).toBe('GitLab')
+  })
+
+  it('returns "Forgejo" for forgejo', () => {
+    expect(getProviderLabel('forgejo')).toBe('Forgejo')
   })
 })

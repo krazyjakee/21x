@@ -1,5 +1,5 @@
 import type { Task, CreateTaskDTO, UpdateTaskDTO, FileAttachment, Agent, CreateAgentDTO, UpdateAgentDTO, McpServer, CreateMcpServerDTO, UpdateMcpServerDTO, Skill, CreateSkillDTO, UpdateSkillDTO, Secret, CreateSecretDTO, UpdateSecretDTO, TaskSource, CreateTaskSourceDTO, UpdateTaskSourceDTO, SyncResult, PluginMeta, ConfigFieldSchema, ConfigFieldOption, PluginAction, ActionResult, SourceUser, ReassignResult, MarketplaceSource, InstalledPlugin, DiscoverablePlugin, MarketplaceCatalog, PluginResources } from '@/types'
-import type { AgentOutputEvent, AgentOutputBatchEvent, AgentStatusEvent, AgentApprovalRequest, GhCliStatus, GlabCliStatus, GitHubRepo, GitHubCollaborator, WorktreeProgressEvent, WorkspaceCleanupProgressEvent, McpTestResult, SkillSyncResult, DepsStatus, AgentMessageAttachment, TranscriptPartRecord, TranscriptChangedEvent } from '@/types/electron'
+import type { AgentOutputEvent, AgentOutputBatchEvent, AgentStatusEvent, AgentApprovalRequest, GhCliStatus, GlabCliStatus, TeaCliStatus, GitHubRepo, GitHubCollaborator, WorktreeProgressEvent, WorkspaceCleanupProgressEvent, McpTestResult, SkillSyncResult, DepsStatus, AgentMessageAttachment, TranscriptPartRecord, TranscriptChangedEvent } from '@/types/electron'
 import type { ArtifactApi } from '@shared/artifacts'
 import type {
   MicrophonePermission,
@@ -407,6 +407,30 @@ export const gitlabApi = {
   }
 }
 
+export const forgejoApi = {
+  checkCli: (): Promise<TeaCliStatus> => {
+    return window.electronAPI.forgejo.checkCli()
+  },
+  setLogin: (loginName: string | null): Promise<TeaCliStatus> => {
+    return window.electronAPI.forgejo.setLogin(loginName)
+  },
+  fetchOrgs: (): Promise<string[]> => {
+    return window.electronAPI.forgejo.fetchOrgs()
+  },
+  fetchOrgRepos: (org: string): Promise<GitHubRepo[]> => {
+    return window.electronAPI.forgejo.fetchOrgRepos(org)
+  },
+  fetchUserRepos: (): Promise<GitHubRepo[]> => {
+    return window.electronAPI.forgejo.fetchUserRepos()
+  }
+}
+
+export const gitApi = {
+  recordRepoProviders: (repoFullNames: string[], provider: 'github' | 'gitlab' | 'forgejo'): Promise<void> => {
+    return window.electronAPI.git.recordRepoProviders(repoFullNames, provider)
+  }
+}
+
 export const taskSourceApi = {
   getAll: (): Promise<TaskSource[]> => {
     return window.electronAPI.taskSources.getAll()
@@ -568,7 +592,7 @@ export const claudePluginApi = {
 }
 
 export const worktreeApi = {
-  setup: (taskId: string, repos: { fullName: string; defaultBranch: string }[], org: string, provider: 'github' | 'gitlab'): Promise<string> => {
+  setup: (taskId: string, repos: { fullName: string; defaultBranch: string }[], org: string, provider: 'github' | 'gitlab' | 'forgejo'): Promise<string> => {
     return window.electronAPI.worktree.setup(taskId, repos, org, provider)
   },
   cleanup: (taskId: string, repos: { fullName: string }[], org: string, removeTaskDir?: boolean): Promise<void> => {

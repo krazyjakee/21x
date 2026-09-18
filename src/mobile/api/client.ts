@@ -85,7 +85,9 @@ export const api = {
     list: () => get<unknown[]>('/api/skills')
   },
   git: {
-    getProvider: () => get<{ provider: string }>('/api/git/provider')
+    getProvider: () => get<{ provider: string }>('/api/git/provider'),
+    recordRepoProviders: (repos: string[], provider: string) =>
+      post<{ success: boolean }>('/api/git/repo-providers', { repos, provider })
   },
   github: {
     getOrg: () => get<{ org: string }>('/api/github/org'),

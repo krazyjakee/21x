@@ -14,6 +14,8 @@ import { TaskStatus, SessionStatus } from '../shared/constants'
 import type { WorktreeManager } from './worktree-manager'
 import type { GitHubManager } from './github-manager'
 import type { GitLabManager } from './gitlab-manager'
+import type { ForgejoManager } from './forgejo-manager'
+import { resolveRepoProvider, type GitProvider } from './repo-providers'
 import { OpencodeAdapter } from './adapters/opencode-adapter'
 import { ClaudeCodeAdapter } from './adapters/claude-code-adapter'
 import { AcpAdapter } from './adapters/acp-adapter'
@@ -155,6 +157,7 @@ export class AgentManager extends EventEmitter {
   private worktreeManager: WorktreeManager | null = null
   private githubManager: GitHubManager | null = null
   private gitlabManager: GitLabManager | null = null
+  private forgejoManager: ForgejoManager | null = null
   private oauthManager: import('./oauth/oauth-manager').OAuthManager | null = null
   private externalListeners: Array<(channel: string, data: unknown) => void> = []
 
@@ -469,10 +472,17 @@ export class AgentManager extends EventEmitter {
     this.mainWindow = window
   }
 
-  setManagers(githubManager: GitHubManager, worktreeManager: WorktreeManager, gitlabManager?: GitLabManager): void {
+  setManagers(githubManager: GitHubManager, worktreeManager: WorktreeManager, gitlabManager?: GitLabManager, forgejoManager?: ForgejoManager): void {
     this.githubManager = githubManager
     this.worktreeManager = worktreeManager
     this.gitlabManager = gitlabManager ?? null
+    this.forgejoManager = forgejoManager ?? null
+  }
+
+  private getProviderManager(provider: GitProvider): { fetchOrgRepos(org: string): Promise<Array<{ fullName: string; defaultBranch: string; cloneUrl?: string }>> } | null {
+    if (provider === 'gitlab') return this.gitlabManager
+    if (provider === 'forgejo') return this.forgejoManager
+    return this.githubManager
   }
 
   setOAuthManager(manager: import('./oauth/oauth-manager').OAuthManager): void {
@@ -507,18 +517,11 @@ export class AgentManager extends EventEmitter {
     if (task.status === TaskStatus.Triaging && !task.session_id && !missingRepoFolders) return undefined
 
     try {
-      console.log(`[AgentManager] setupWorktreeIfNeeded: provider=${gitProvider}, configuredOrg=${configuredOrg || 'unset'}, taskRepos=${task.repos.join(', ')}`)
+      console.log(`[AgentManager] setupWorktreeIfNeeded: defaultProvider=${gitProvider}, configuredOrg=${configuredOrg || 'unset'}, taskRepos=${task.repos.join(', ')}`)
 
-      if (gitProvider === 'gitlab' && !this.gitlabManager) {
-        console.warn(`[AgentManager] No ${gitProvider} manager available, skipping worktree setup`)
-        return undefined
-      }
-      if (gitProvider !== 'gitlab' && !this.githubManager) {
-        console.warn(`[AgentManager] No ${gitProvider} manager available, skipping worktree setup`)
-        return undefined
-      }
-
-      const reposByOrg = new Map<string, string[]>()
+      // Group by provider + org: each repo is cloned with the CLI of the
+      // provider it was attached from (see repo-providers.ts).
+      const reposByGroup = new Map<string, { provider: GitProvider; org: string; repoNames: string[] }>()
       for (const repoName of task.repos) {
         const org = repoName.includes('/') ? repoName.split('/')[0] : configuredOrg
         if (!org) {
@@ -526,26 +529,28 @@ export class AgentManager extends EventEmitter {
           continue
         }
         const fullName = repoName.includes('/') ? repoName : `${org}/${repoName}`
-        const existing = reposByOrg.get(org) || []
-        existing.push(fullName)
-        reposByOrg.set(org, existing)
+        const provider = resolveRepoProvider(this.db, fullName)
+        if (!this.getProviderManager(provider)) {
+          console.warn(`[AgentManager] No ${provider} manager available, skipping worktree setup for ${fullName}`)
+          continue
+        }
+        const key = `${provider}:${org}`
+        const group = reposByGroup.get(key) || { provider, org, repoNames: [] }
+        group.repoNames.push(fullName)
+        reposByGroup.set(key, group)
       }
 
-      if (reposByOrg.size === 0) return undefined
+      if (reposByGroup.size === 0) return undefined
 
       let resolvedWorkspaceDir: string | undefined
 
-      for (const [org, repoNames] of reposByOrg.entries()) {
+      for (const { provider, org, repoNames } of reposByGroup.values()) {
         let orgRepos: Array<{ fullName: string; defaultBranch: string; cloneUrl?: string }> = []
 
         try {
-          if (gitProvider === 'gitlab' && this.gitlabManager) {
-            orgRepos = await this.gitlabManager.fetchOrgRepos(org)
-          } else if (this.githubManager) {
-            orgRepos = await this.githubManager.fetchOrgRepos(org)
-          }
+          orgRepos = await this.getProviderManager(provider)?.fetchOrgRepos(org) ?? []
         } catch (error) {
-          console.warn(`[AgentManager] Failed to fetch repo metadata for org "${org}", falling back to task repo names:`, error)
+          console.warn(`[AgentManager] Failed to fetch ${provider} repo metadata for org "${org}", falling back to task repo names:`, error)
         }
 
         const branchByRepo = new Map(orgRepos.map((repo) => [repo.fullName, repo.defaultBranch]))
@@ -556,20 +561,20 @@ export class AgentManager extends EventEmitter {
           cloneUrl: cloneUrlByRepo.get(fullName)
         }))
 
-        console.log(`[AgentManager] Setting up ${reposForSetup.length} repo(s) for org "${org}": ${reposForSetup.map((repo) => repo.fullName).join(', ')}`)
+        console.log(`[AgentManager] Setting up ${reposForSetup.length} ${provider} repo(s) for org "${org}": ${reposForSetup.map((repo) => repo.fullName).join(', ')}`)
 
         const workspaceDirForOrg = await this.worktreeManager.setupWorkspaceForTask(
           taskId,
           reposForSetup,
           org,
-          gitProvider
+          provider
         )
         resolvedWorkspaceDir = resolvedWorkspaceDir || workspaceDirForOrg
       }
 
       return resolvedWorkspaceDir
     } catch (error) {
-      console.error(`[AgentManager] Worktree setup failed for ${gitProvider}:`, error)
+      console.error(`[AgentManager] Worktree setup failed:`, error)
       return undefined
     }
   }

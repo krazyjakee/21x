@@ -23,7 +23,7 @@ import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useSettingsStore, type GitProvider } from '@/stores/settings-store'
 import { useTaskStore } from '@/stores/task-store'
 import { useProgressToastStore } from '@/stores/progress-toast-store'
-import { taskApi, worktreeApi, taskSourceApi, onAgentIncompatibleSession, onWorktreeProgress, attachmentApi } from '@/lib/ipc-client'
+import { taskApi, worktreeApi, taskSourceApi, onAgentIncompatibleSession, onWorktreeProgress, attachmentApi, gitApi } from '@/lib/ipc-client'
 import { subscribe } from '@/lib/shared-ipc-listeners'
 import { memo, useEffect, useLayoutEffect, useCallback, useRef, useState, useMemo, type PointerEvent as ReactPointerEvent } from 'react'
 import { TaskStatus } from '@/types'
@@ -114,6 +114,7 @@ function TaskWorkspaceComponent({
   const githubOrg = useSettingsStore((s) => s.githubOrg)
   const checkGhCli = useSettingsStore((s) => s.checkGhCli)
   const checkGlabCli = useSettingsStore((s) => s.checkGlabCli)
+  const checkTeaCli = useSettingsStore((s) => s.checkTeaCli)
   const setGithubOrg = useSettingsStore((s) => s.setGithubOrg)
   const fetchSettings = useSettingsStore((s) => s.fetchSettings)
 
@@ -409,12 +410,14 @@ function TaskWorkspaceComponent({
 
   const handleAddRepos = useCallback(async () => {
     // Check if at least one git provider is authenticated
-    const [ghStatus, glabStatus] = await Promise.all([
+    const [ghStatus, glabStatus, teaStatus] = await Promise.all([
       checkGhCli().catch(() => ({ installed: false, authenticated: false })),
-      checkGlabCli().catch(() => ({ installed: false, authenticated: false }))
+      checkGlabCli().catch(() => ({ installed: false, authenticated: false })),
+      checkTeaCli().catch(() => ({ installed: false, authenticated: false }))
     ])
     const anyAuthed = (ghStatus.installed && ghStatus.authenticated) ||
-                      (glabStatus.installed && glabStatus.authenticated)
+                      (glabStatus.installed && glabStatus.authenticated) ||
+                      (teaStatus.installed && teaStatus.authenticated)
     if (!anyAuthed) {
       setShowGhSetup(true)
       return
@@ -424,7 +427,7 @@ function TaskWorkspaceComponent({
       return
     }
     setShowRepoSelector(true)
-  }, [githubOrg, checkGhCli, checkGlabCli])
+  }, [githubOrg, checkGhCli, checkGlabCli, checkTeaCli])
 
   const handleReposConfirmed = useCallback(async (selectedRepos: GitHubRepo[], selectedOrg: string, selectedProvider: GitProvider) => {
     if (!task) return
@@ -437,6 +440,8 @@ function TaskWorkspaceComponent({
 
     const repoNames = selectedRepos.map((r) => r.fullName)
     const merged = [...new Set([...task.repos, ...repoNames])]
+    // Remember the provider so the workspace is later cloned with its CLI.
+    await gitApi.recordRepoProviders(repoNames, selectedProvider).catch(() => {})
 
     // If the task already has a live or persisted coding session, provision the
     // new repo worktrees immediately so the agent can use them without restart.

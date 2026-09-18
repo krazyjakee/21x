@@ -139,7 +139,9 @@ export interface ArtifactUIState {
   railExpanded: boolean
 }
 
-const PULL_REQUEST_URL_PATTERN = /https?:\/\/[^\s)\]>'"]+\/(?:pull|merge_requests)\/\d+(?:\b|\/)/i
+// GitHub `/pull/N`, GitLab `/merge_requests/N`, Forgejo/Gitea `/pulls/N`. The
+// lookahead skips REST API URLs (api.github.com/repos/…/pulls/N, /api/v1/…).
+const PULL_REQUEST_URL_PATTERN = /https?:\/\/(?!api\.)(?![^\s)\]>'"]*\/api\/v\d+\/)[^\s)\]>'"]+\/(?:pulls?|merge_requests)\/\d+(?:\b|\/)/i
 const COMMAND_TOOL_PATTERN = /(?:^|[_:-])(bash|command|exec|shell|terminal)(?:$|[_:-])/
 
 function pullRequestUrlIn(value: unknown): string | undefined {
@@ -195,8 +197,9 @@ export function pullRequestUrlFromTool(value: unknown): string | undefined {
   const text = typeof output === 'string'
     ? output
     : typeof parsedOutput?.stdout === 'string' ? parsedOutput.stdout : ''
-  const standalone = text.match(/(?:^|\n)\s*(?:created\s+(?:pull request\s+)?)?(https?:\/\/[^\s)\]>'"]+\/(?:pull|merge_requests)\/\d+(?:\b|\/))\s*(?:\n|$)/i)
-  return standalone?.[1]
+  const standalone = text.match(/(?:^|\n)\s*(?:created\s+(?:pull request\s+)?)?(https?:\/\/[^\s)\]>'"]+\/(?:pulls?|merge_requests)\/\d+(?:\b|\/))\s*(?:\n|$)/i)
+  const url = standalone?.[1]
+  return url && PULL_REQUEST_URL_PATTERN.test(url) ? url : undefined
 }
 
 /** Directories that form an explicit deliverable boundary. Files elsewhere in

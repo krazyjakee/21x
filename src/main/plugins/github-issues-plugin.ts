@@ -32,6 +32,44 @@ function isPriorityLabel(name: string): boolean {
   return name.toLowerCase() in PRIORITY_LABELS
 }
 
+// ── Mapping helpers (shared with the Forgejo Issues plugin) ──
+
+export function mapIssueToTask(issue: GitHubIssue): Partial<TaskRecord> {
+  const labelNames = issue.labels.map((l) => l.name)
+  return {
+    title: issue.title,
+    description: issue.body || '',
+    status: mapIssueStatus(issue.state, labelNames),
+    priority: extractPriority(labelNames),
+    assignee: issue.assignees[0]?.login || '',
+    due_date: issue.milestone?.due_on?.split('T')[0] || null,
+    labels: labelNames.filter((n) => !isPriorityLabel(n))
+  }
+}
+
+function mapIssueStatus(state: string, labels: string[]): TaskStatus {
+  if (state === 'closed') return TaskStatus.Completed
+
+  const lower = labels.map((l) => l.toLowerCase())
+  if (lower.some((l) => l.includes('in progress') || l === 'wip')) return TaskStatus.AgentWorking
+  if (lower.some((l) => l.includes('review'))) return TaskStatus.ReadyForReview
+
+  return TaskStatus.NotStarted
+}
+
+export function mapLocalStatusToIssueState(localStatus: string): string {
+  if (localStatus === TaskStatus.Completed) return 'closed'
+  return 'open'
+}
+
+function extractPriority(labels: string[]): string {
+  for (const label of labels) {
+    const mapped = PRIORITY_LABELS[label.toLowerCase()]
+    if (mapped) return mapped
+  }
+  return 'medium'
+}
+
 export class GitHubIssuesPlugin implements TaskSourcePlugin {
   id = 'github-issues'
   displayName = 'GitHub Issues'
@@ -196,7 +234,7 @@ export class GitHubIssuesPlugin implements TaskSourcePlugin {
 
       for (const issue of issues) {
         try {
-          const mapped = this.mapIssue(issue)
+          const mapped = mapIssueToTask(issue)
           const externalId = String(issue.number)
           const existing = ctx.db.getTaskByExternalId(sourceId, externalId)
 
@@ -247,7 +285,7 @@ export class GitHubIssuesPlugin implements TaskSourcePlugin {
     if (changedFields.description) updates.body = changedFields.description as string
 
     if (changedFields.status) {
-      updates.state = this.mapStatusToGitHub(changedFields.status as string)
+      updates.state = mapLocalStatusToIssueState(changedFields.status as string)
     }
 
     if (changedFields.assignee) {
@@ -347,44 +385,6 @@ export class GitHubIssuesPlugin implements TaskSourcePlugin {
       const msg = err instanceof Error ? err.message : 'Unknown error'
       return { success: false, error: msg }
     }
-  }
-
-  // ── Mapping helpers ──────────────────────────────────────
-
-  private mapIssue(issue: GitHubIssue): Partial<TaskRecord> {
-    const labelNames = issue.labels.map((l) => l.name)
-    return {
-      title: issue.title,
-      description: issue.body || '',
-      status: this.mapStatusFromGitHub(issue.state, labelNames),
-      priority: this.extractPriority(labelNames),
-      assignee: issue.assignees[0]?.login || '',
-      due_date: issue.milestone?.due_on?.split('T')[0] || null,
-      labels: labelNames.filter((n) => !isPriorityLabel(n))
-    }
-  }
-
-  private mapStatusFromGitHub(state: string, labels: string[]): TaskStatus {
-    if (state === 'closed') return TaskStatus.Completed
-
-    const lower = labels.map((l) => l.toLowerCase())
-    if (lower.some((l) => l.includes('in progress') || l === 'wip')) return TaskStatus.AgentWorking
-    if (lower.some((l) => l.includes('review'))) return TaskStatus.ReadyForReview
-
-    return TaskStatus.NotStarted
-  }
-
-  private mapStatusToGitHub(localStatus: string): string {
-    if (localStatus === TaskStatus.Completed) return 'closed'
-    return 'open'
-  }
-
-  private extractPriority(labels: string[]): string {
-    for (const label of labels) {
-      const mapped = PRIORITY_LABELS[label.toLowerCase()]
-      if (mapped) return mapped
-    }
-    return 'medium'
   }
 
   getSetupDocumentation(): string {

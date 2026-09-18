@@ -7,6 +7,7 @@ import { SettingsSection } from '../SettingsSection'
 import { useSettingsStore } from '@/stores/settings-store'
 import { settingsApi } from '@/lib/ipc-client'
 import { GhCliGuidance } from '@/components/github/GhCliGuidance'
+import { ForgejoIntegrationSection } from '@/components/forgejo/ForgejoIntegrationSection'
 
 export function AdvancedSettings() {
   const { githubOrg, ghCliStatus, setGithubOrg, checkGhCli } = useSettingsStore()
@@ -81,6 +82,8 @@ export function AdvancedSettings() {
           </div>
         </div>
       </SettingsSection>
+
+      <ForgejoIntegrationSection />
 
       <SettingsSection
         title="API Keys"
