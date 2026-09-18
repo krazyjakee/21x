@@ -61,6 +61,26 @@ import type { CliMcpMutationResult, CliMcpProbeResult, CliMcpServerRef, CliMcpSn
 
 export interface AgentSessionStartResult {
   sessionId: string
+  /** True when the main process queued the start behind a concurrency limit; sessionId is then ''. */
+  queued?: boolean
+  queuePosition?: number
+  queueReason?: 'agent_limit' | 'global_limit'
+}
+
+/** A session start waiting in the main-process queue for a free slot. */
+export interface QueuedAgentStart {
+  taskId: string
+  agentId: string
+  reason: 'agent_limit' | 'global_limit'
+  queuedAt: string
+  /** 1-based. */
+  position: number
+}
+
+export interface AgentStartQueueChangedEvent {
+  queue: QueuedAgentStart[]
+  /** Set when a queued start was attempted and failed. */
+  failed?: { taskId: string; error: string }
 }
 
 export interface AgentSessionSuccessResult {
@@ -245,6 +265,7 @@ interface ElectronAPI {
     create: (data: CreateAgentDTO) => Promise<Agent>
     update: (id: string, data: UpdateAgentDTO) => Promise<Agent | undefined>
     delete: (id: string) => Promise<boolean>
+    getStartQueue: () => Promise<QueuedAgentStart[]>
   }
   agentSession: {
     start: (agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean) => Promise<AgentSessionStartResult>
@@ -443,6 +464,7 @@ interface ElectronAPI {
   onArtifactUpdated: (callback: (event: { taskId: string; artifact: import('@shared/artifacts').Artifact }) => void) => () => void
   onTranscriptChanged: (callback: (event: TranscriptChangedEvent) => void) => () => void
   onAgentStatus: (callback: (event: AgentStatusEvent) => void) => () => void
+  onAgentStartQueueChanged: (callback: (event: AgentStartQueueChangedEvent) => void) => () => void
   onAgentIncompatibleSession: (callback: (event: { taskId: string; agentId: string; error: string }) => void) => () => void
   onTaskUpdated: (callback: (event: { taskId: string; updates: Partial<Task> }) => void) => () => void
   onTaskSourceActionFailed: (callback: (event: { taskId: string; taskTitle: string; error: string }) => void) => () => void

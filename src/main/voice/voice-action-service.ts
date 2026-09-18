@@ -248,7 +248,9 @@ export class VoiceActionService {
             ? `“${task.title}” is already running.`
             : result.action === 'no_action'
               ? `“${task.title}” could not be started.`
-              : `Started “${task.title}”.`
+              : result.action === 'queued'
+                ? `“${task.title}” is queued and will start when an agent slot frees up.`
+                : `Started “${task.title}”.`
         return { status: 'executed', turnId, intent: intent.type, message, taskId: task.id }
       }
 

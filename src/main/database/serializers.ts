@@ -186,6 +186,12 @@ export function deserializeAgent(row: AgentRow): AgentRecord {
   }
 }
 
+/** Trim a skill's preferred model; blank or missing means "no preference". */
+export function normalizePreferredModel(value: string | null | undefined): string | null {
+  const trimmed = typeof value === 'string' ? value.trim() : ''
+  return trimmed || null
+}
+
 export function deserializeSkill(row: SkillRow): SkillRecord {
   let tags: string[] = []
   try {
@@ -203,6 +209,7 @@ export function deserializeSkill(row: SkillRow): SkillRecord {
     uses: row.uses,
     last_used: row.last_used,
     tags,
+    preferred_model: normalizePreferredModel(row.preferred_model),
     created_at: row.created_at,
     updated_at: row.updated_at
   }

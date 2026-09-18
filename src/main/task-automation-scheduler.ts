@@ -120,6 +120,11 @@ export class TaskAutomationScheduler {
 
     // Sequential: startTask sets up worktrees and spawns a CLI agent. Firing
     // them all at once on a catch-up sweep would stampede the machine.
+    // Concurrency limits are not checked here: startTask goes through
+    // AgentManager's admission control, which queues a start that is over a
+    // limit (action `queued`, deduped per task) and starts it when a slot
+    // frees. A queued task stays not_started, so later sweeps ask again and
+    // just get its queue position back.
     for (const task of tasks) {
       if (this.inFlight.has(task.id)) continue
       if (this.agentManager.hasActiveSessionForTask(task.id)) continue
@@ -127,7 +132,11 @@ export class TaskAutomationScheduler {
       this.inFlight.add(task.id)
       try {
         const result = await this.agentManager.startTask(task.id)
-        console.log(`[TaskAutomation] Auto-started "${task.title}" (${task.id}): ${result.action}`)
+        console.log(
+          result.action === 'queued'
+            ? `[TaskAutomation] Auto-start of "${task.title}" (${task.id}) queued at position ${result.queuePosition}`
+            : `[TaskAutomation] Auto-started "${task.title}" (${task.id}): ${result.action}`
+        )
         this.failedStarts.delete(task.id)
       } catch (err) {
         const attempts = (this.failedStarts.get(task.id) ?? 0) + 1

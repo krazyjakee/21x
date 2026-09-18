@@ -1,9 +1,8 @@
 import { useEffect, useRef, useCallback } from 'react'
-import { useShallow } from 'zustand/react/shallow'
 import { useAgentSchedulerStore } from '@/stores/agent-scheduler-store'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useAgentSessionActions } from './use-agent-session'
-import { onAgentStatus, onTaskUpdated, onTaskCreated, taskApi } from '@/lib/ipc-client'
+import { onAgentStatus, onAgentStartQueueChanged, onTaskUpdated, onTaskCreated, taskApi } from '@/lib/ipc-client'
 import { TaskStatus } from '@/types'
 import { findBlockingSibling, isSuccessorGraphInProgress } from '@shared/subtask-graph'
 import type { Task, Agent, TaskPriority } from '@/types'
@@ -62,30 +61,19 @@ interface UseAgentAutoStartProps {
   showToast: (message: string, isError?: boolean) => void
 }
 
+/**
+ * Sidebar auto-run: decides *what* to start (triage, next subtask, eligible
+ * tasks by priority). Whether a start may run now is the main process's call
+ * (AgentManager admission control, #47): over an agent's
+ * `max_parallel_sessions` or the global cap it queues the start itself and
+ * runs it when a slot frees, window open or not. This hook keeps no running
+ * counts or queue of its own.
+ */
 export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStartProps) {
   // Sessions are read non-reactively: subscribing would re-render the whole
   // AppLayout on every agent message.
   const getSessionsSnapshot = useCallback(() => useAgentStore.getState().sessions, [])
-  // Select only the flag and the (stable) actions; the running/queue maps
-  // change constantly and would re-render AppLayout on every change.
   const isEnabled = useAgentSchedulerStore((s) => s.isEnabled)
-  const {
-    incrementRunningCount,
-    decrementRunningCount,
-    getRunningCount,
-    addToQueue,
-    removeFromQueue,
-    getNextQueuedTask,
-    clearQueues
-  } = useAgentSchedulerStore(useShallow((s) => ({
-    incrementRunningCount: s.incrementRunningCount,
-    decrementRunningCount: s.decrementRunningCount,
-    getRunningCount: s.getRunningCount,
-    addToQueue: s.addToQueue,
-    removeFromQueue: s.removeFromQueue,
-    getNextQueuedTask: s.getNextQueuedTask,
-    clearQueues: s.clearQueues
-  })))
 
   // tasks/agents/showToast live in refs so callbacks and IPC listeners stay
   // stable. Recreating them on every task:updated event re-subscribed every
@@ -98,6 +86,26 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
   showToastRef.current = showToast
 
   const { start } = useAgentSessionActions(undefined)
+
+  // Asks the main process to start; it either starts or queues the task.
+  // A queued start keeps its pre-registered (empty) session in the store, so
+  // this hook does not ask again while it waits.
+  const launch = useCallback(
+    async (agent: Agent, task: Pick<Task, 'id' | 'title'>, kind = '') => {
+      try {
+        const sessionId = await start(agent.id, task.id)
+        showToastRef.current(
+          sessionId
+            ? `Started ${kind}"${task.title}" with ${agent.name}`
+            : `Queued ${kind}"${task.title}" for ${agent.name} — it starts when a slot frees`
+        )
+      } catch (error) {
+        console.error(`[AutoStart] Failed to start task ${task.id}:`, error)
+        showToastRef.current(`Failed to start task: ${error}`, true)
+      }
+    },
+    [start]
+  )
 
   const processedUpdatesRef = useRef<Set<string>>(new Set())
   const triagingRef = useRef<Set<string>>(new Set())
@@ -140,20 +148,7 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
           return
         }
 
-        const maxParallel = subtaskAgent.config.max_parallel_sessions || 1
-        const currentRunning = getRunningCount(nextSubtask.agent_id)
-        if (currentRunning < maxParallel) {
-          incrementRunningCount(nextSubtask.agent_id)
-          try {
-            await start(nextSubtask.agent_id, nextSubtask.id)
-            showToastRef.current(`Started subtask "${nextSubtask.title}" with ${subtaskAgent.name}`)
-          } catch (error) {
-            console.error(`[AutoStart] Failed to start subtask ${nextSubtask.id}:`, error)
-            decrementRunningCount(nextSubtask.agent_id)
-          }
-        } else {
-          addToQueue(nextSubtask.agent_id, nextSubtask.id)
-        }
+        await launch(subtaskAgent, nextSubtask, 'subtask ')
       } catch (error) {
         console.error(`[AutoStart] startNextSubtask error for parent ${parentId}:`, error)
       } finally {
@@ -161,7 +156,7 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
         setTimeout(() => launchingSubtaskForRef.current.delete(parentId), 2000)
       }
     },
-    [getRunningCount, incrementRunningCount, start, decrementRunningCount, addToQueue]
+    [launch]
   )
 
   // Tasks with no agent that need triage. Subtasks are excluded: the
@@ -201,7 +196,6 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
 
       try {
         await taskApi.update(taskId, { status: TaskStatus.Triaging })
-        incrementRunningCount(defaultAgent.id)
         await start(defaultAgent.id, taskId)
       } catch (error) {
         console.error(`[AutoStart] Failed to start triage for task ${taskId}:`, error)
@@ -211,11 +205,9 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
         } catch {
           // ignore revert error
         }
-
-        decrementRunningCount(defaultAgent.id)
       }
     },
-    [incrementRunningCount, start, decrementRunningCount]
+    [start]
   )
 
   // Auto-start candidates grouped by agent, each list ordered by priority.
@@ -272,104 +264,17 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
     []
   )
 
-  // Starts as many tasks as the agent has free slots for; queues the rest.
+  // Requests each task in priority order; the main process starts as many as
+  // the limits allow and queues the rest in the same order.
   const startTasksForAgent = useCallback(
-    async (agentId: string, taskIds: string[], agent: Agent) => {
-      const maxParallel = agent.config.max_parallel_sessions || 1
-      const availableSlots = maxParallel - getRunningCount(agentId)
-
-      if (availableSlots <= 0) {
-        taskIds.forEach((taskId) => addToQueue(agentId, taskId))
-        return
-      }
-
-      taskIds.slice(availableSlots).forEach((taskId) => addToQueue(agentId, taskId))
-
-      for (const taskId of taskIds.slice(0, availableSlots)) {
-        try {
-          const task = tasksRef.current.find((t) => t.id === taskId)
-          if (!task) continue
-
-          incrementRunningCount(agentId)
-          await start(agentId, taskId)
-
-          showToastRef.current(`Started "${task.title}" with ${agent.name}`)
-        } catch (error) {
-          console.error(`Failed to start task ${taskId}:`, error)
-          decrementRunningCount(agentId)
-          showToastRef.current(`Failed to start task: ${error}`, true)
-        }
+    async (_agentId: string, taskIds: string[], agent: Agent) => {
+      for (const taskId of taskIds) {
+        const task = tasksRef.current.find((t) => t.id === taskId)
+        if (!task || getSessionsSnapshot().has(taskId)) continue
+        await launch(agent, task)
       }
     },
-    [getRunningCount, addToQueue, incrementRunningCount, start, decrementRunningCount]
-  )
-
-  const processNextTask = useCallback(
-    async (agentId: string) => {
-      const agent = agentsRef.current.find((a) => a.id === agentId)
-      if (!agent) return
-
-      const maxParallel = agent.config.max_parallel_sessions || 1
-      const currentRunning = getRunningCount(agentId)
-
-      if (currentRunning >= maxParallel) return
-
-      const nextTaskId = getNextQueuedTask(agentId)
-      if (!nextTaskId) return
-
-      const task = tasksRef.current.find((t) => t.id === nextTaskId)
-      if (!task) {
-        removeFromQueue(agentId, nextTaskId)
-        return
-      }
-
-      if (
-        isRecurringTemplate(task) ||
-        task.status !== TaskStatus.NotStarted ||
-        task.agent_id !== agentId ||
-        isSnoozed(task.snoozed_until) ||
-        getSessionsSnapshot().has(task.id)
-      ) {
-        removeFromQueue(agentId, nextTaskId)
-        return
-      }
-
-      if (task.parent_task_id) {
-        const parentId = task.parent_task_id
-        const currentTasks = tasksRef.current
-        const gate = familyGate(
-          currentTasks.find((t) => t.id === parentId),
-          currentTasks.filter((t) => t.parent_task_id === parentId)
-        )
-        // An active sibling keeps this subtask queued until the sibling finishes.
-        if (gate.state === 'wait') return
-        if (!subtaskMayStart(task, gate)) {
-          removeFromQueue(agentId, nextTaskId)
-          return
-        }
-      }
-
-      try {
-        removeFromQueue(agentId, nextTaskId)
-        incrementRunningCount(agentId)
-        await start(agentId, nextTaskId)
-
-        showToastRef.current(`Started "${task.title}" with ${agent.name}`)
-      } catch (error) {
-        console.error(`Failed to start task ${nextTaskId}:`, error)
-        decrementRunningCount(agentId)
-        showToastRef.current(`Failed to start task: ${error}`, true)
-      }
-    },
-    [
-      getSessionsSnapshot,
-      getRunningCount,
-      getNextQueuedTask,
-      removeFromQueue,
-      incrementRunningCount,
-      start,
-      decrementRunningCount
-    ]
+    [getSessionsSnapshot, launch]
   )
 
   // Debounced so a burst of task/agent changes starts work once.
@@ -392,7 +297,8 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
     return () => clearTimeout(timeoutId)
   }, [isEnabled, tasks, agents, getSessionsSnapshot, selectEligibleTasks, selectTriageCandidates, startTasksForAgent, startTriage])
 
-  // An agent going idle frees a slot (and may finish a triage).
+  // An agent going idle may finish a triage. Freed slots are the main
+  // process's business: it drains its own start queue.
   useEffect(() => {
     if (!isEnabled) return
 
@@ -404,7 +310,6 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
 
       if (triagingRef.current.has(taskId)) {
         triagingRef.current.delete(taskId)
-        decrementRunningCount(agentId)
 
         // The triage session must go, or the task never becomes eligible
         // for auto-start (eligibility requires no session).
@@ -436,21 +341,11 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
               return
             }
 
-            const maxParallel = assignedAgent.config.max_parallel_sessions || 1
-            const currentRunning = getRunningCount(assignedAgentId)
-            if (currentRunning < maxParallel) {
-              void startTasksForAgent(assignedAgentId, [taskId], assignedAgent)
-            } else {
-              addToQueue(assignedAgentId, taskId)
-            }
+            void startTasksForAgent(assignedAgentId, [taskId], assignedAgent)
           }
         }, 500)
-
-        setTimeout(() => processNextTask(agentId), 100)
         return
       }
-
-      decrementRunningCount(agentId)
 
       const task = tasksRef.current.find((t) => t.id === event.taskId)
       if (task?.status === TaskStatus.Completed) {
@@ -459,12 +354,22 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
           showToastRef.current(`"${task.title}" completed by ${agent.name}`)
         }
       }
-
-      setTimeout(() => processNextTask(agentId), 100)
     })
 
     return unsubscribe
-  }, [isEnabled, decrementRunningCount, processNextTask, getRunningCount, addToQueue, startTasksForAgent, startNextSubtask])
+  }, [isEnabled, startTasksForAgent, startNextSubtask])
+
+  // A queued start that failed in the main process leaves this hook's
+  // pre-registered session behind; drop it so the task can be retried.
+  useEffect(() => {
+    if (!isEnabled) return
+    return onAgentStartQueueChanged((event) => {
+      if (!event.failed) return
+      const session = useAgentStore.getState().sessions.get(event.failed.taskId)
+      if (session && !session.sessionId) useAgentStore.getState().removeSession(event.failed.taskId)
+      showToastRef.current(`Queued start failed: ${event.failed.error}`, true)
+    })
+  }, [isEnabled])
 
   // New top-level tasks without an agent are triaged.
   useEffect(() => {
@@ -550,14 +455,7 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
             // If subtask check fails, proceed with normal start
           }
 
-          const maxParallel = agent.config.max_parallel_sessions || 1
-          const currentRunning = getRunningCount(agentId)
-
-          if (currentRunning < maxParallel) {
-            startTasksForAgent(agentId, [task.id], agent)
-          } else {
-            addToQueue(agentId, task.id)
-          }
+          void startTasksForAgent(agentId, [task.id], agent)
         }, 100)
       }
 
@@ -578,18 +476,10 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
   }, [
     isEnabled,
     getSessionsSnapshot,
-    getRunningCount,
-    addToQueue,
     startTasksForAgent,
     startTriage,
     startNextSubtask
   ])
-
-  useEffect(() => {
-    if (!isEnabled) {
-      clearQueues()
-    }
-  }, [isEnabled, clearQueues])
 
   // Safety net: rescan every minute so nothing stays stuck if an event was missed.
   useEffect(() => {
@@ -604,12 +494,10 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
 
       selectEligibleTasks(latestTasks, sessions).forEach((taskIds, agentId) => {
         const agent = latestAgents.find((a) => a.id === agentId)
-        if (!agent) return
-        const availableSlots = (agent.config.max_parallel_sessions || 1) - getRunningCount(agentId)
-        if (availableSlots > 0 && taskIds.length > 0) startTasksForAgent(agentId, taskIds, agent)
+        if (agent && taskIds.length > 0) void startTasksForAgent(agentId, taskIds, agent)
       })
     }, 60000)
 
     return () => clearInterval(intervalId)
-  }, [isEnabled, getSessionsSnapshot, selectEligibleTasks, selectTriageCandidates, getRunningCount, startTasksForAgent, startTriage])
+  }, [isEnabled, getSessionsSnapshot, selectEligibleTasks, selectTriageCandidates, startTasksForAgent, startTriage])
 }

@@ -27,6 +27,7 @@ import {
   encryptSettingValue,
   isApiKeySetting,
   isEncryptedSettingValue,
+  normalizePreferredModel,
   parseJsonArray
 } from './database/serializers'
 import type {
@@ -833,10 +834,11 @@ export class DatabaseManager {
     const uses = data.uses ?? 0
     const lastUsed = data.last_used ?? null
     const tags = JSON.stringify(data.tags ?? [])
+    const preferredModel = normalizePreferredModel(data.preferred_model)
     this.prepare(`
-      INSERT INTO skills (id, name, description, content, version, confidence, uses, last_used, tags, is_deleted, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, 0, ?, ?)
-    `).run(id, data.name, data.description, data.content, confidence, uses, lastUsed, tags, now, now)
+      INSERT INTO skills (id, name, description, content, version, confidence, uses, last_used, tags, preferred_model, is_deleted, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 0, ?, ?)
+    `).run(id, data.name, data.description, data.content, confidence, uses, lastUsed, tags, preferredModel, now, now)
     return this.getSkill(id)
   }
 
@@ -854,12 +856,16 @@ export class DatabaseManager {
     if (data.uses !== undefined) { setClauses.push('uses = ?'); values.push(data.uses) }
     if (data.last_used !== undefined) { setClauses.push('last_used = ?'); values.push(data.last_used) }
     if (data.tags !== undefined) { setClauses.push('tags = ?'); values.push(JSON.stringify(data.tags)) }
+    if (data.preferred_model !== undefined) {
+      setClauses.push('preferred_model = ?'); values.push(normalizePreferredModel(data.preferred_model))
+    }
 
     if (setClauses.length === 0) return existing
 
     // Only increment version for content changes, not usage updates (uses / last_used)
     const isContentChange = data.name !== undefined || data.description !== undefined ||
-      data.content !== undefined || data.confidence !== undefined || data.tags !== undefined
+      data.content !== undefined || data.confidence !== undefined || data.tags !== undefined ||
+      data.preferred_model !== undefined
     if (isContentChange) {
       setClauses.push('version = version + 1')
     }

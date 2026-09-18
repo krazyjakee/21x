@@ -77,7 +77,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('agent:create', data),
     update: (id: string, data: Record<string, unknown>): Promise<unknown> =>
       ipcRenderer.invoke('agent:update', id, data),
-    delete: (id: string): Promise<boolean> => ipcRenderer.invoke('agent:delete', id)
+    delete: (id: string): Promise<boolean> => ipcRenderer.invoke('agent:delete', id),
+    getStartQueue: (): Promise<unknown[]> => ipcRenderer.invoke('agent:getStartQueue')
   },
   mcpServers: {
     getAll: (): Promise<unknown[]> => ipcRenderer.invoke('mcp:getAll'),
@@ -109,7 +110,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     probe: (ref: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('cliMcp:probe', ref)
   },
   agentSession: {
-    start: (agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<{ sessionId: string }> =>
+    start: (agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<{ sessionId: string; queued?: boolean; queuePosition?: number; queueReason?: string }> =>
       ipcRenderer.invoke('agentSession:start', agentId, taskId, workspaceDir, skipInitialPrompt),
     resume: (agentId: string, taskId: string, ocSessionId: string): Promise<{ sessionId: string; ended?: boolean }> =>
       ipcRenderer.invoke('agentSession:resume', agentId, taskId, ocSessionId),
@@ -176,6 +177,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_: unknown, data: unknown): void => callback(data)
     ipcRenderer.on('agent:status', handler)
     return () => ipcRenderer.removeListener('agent:status', handler)
+  },
+  onAgentStartQueueChanged: (callback: (event: unknown) => void): (() => void) => {
+    const handler = (_: unknown, data: unknown): void => callback(data)
+    ipcRenderer.on('agent:startQueueChanged', handler)
+    return () => ipcRenderer.removeListener('agent:startQueueChanged', handler)
   },
   onAgentIncompatibleSession: (callback: (event: unknown) => void): (() => void) => {
     const handler = (_: unknown, data: unknown): void => callback(data)

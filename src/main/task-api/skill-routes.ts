@@ -6,6 +6,9 @@ function validateSkillParams(params: Record<string, unknown>): { error: string }
     if (!Number.isFinite(c) || c < 0 || c > 1) return { error: 'confidence must be a number between 0.0 and 1.0' }
   }
   if (params.tags !== undefined && !Array.isArray(params.tags)) return { error: 'tags must be an array of strings' }
+  if (params.preferred_model !== undefined && params.preferred_model !== null && typeof params.preferred_model !== 'string') {
+    return { error: 'preferred_model must be a string (or null to clear)' }
+  }
   return null
 }
 
@@ -38,7 +41,8 @@ export async function handleSkillRoute(db: DatabaseManager, route: string, param
         description,
         content,
         confidence: params.confidence !== undefined ? Number(params.confidence) : undefined,
-        tags: Array.isArray(params.tags) ? (params.tags as string[]) : undefined
+        tags: Array.isArray(params.tags) ? (params.tags as string[]) : undefined,
+        preferred_model: (params.preferred_model as string | null | undefined) ?? null
       })
       return skill ? { success: true, skill } : { error: 'Failed to create skill' }
     }
@@ -52,6 +56,7 @@ export async function handleSkillRoute(db: DatabaseManager, route: string, param
       if (params.content !== undefined) data.content = params.content as string
       if (params.confidence !== undefined) data.confidence = Number(params.confidence)
       if (params.tags !== undefined) data.tags = params.tags as string[]
+      if (params.preferred_model !== undefined) data.preferred_model = params.preferred_model as string | null
       if (Object.keys(data).length === 0) return { error: 'No updates provided' }
 
       const skill = db.updateSkill(String(params.skill_id), data)

@@ -862,8 +862,11 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
   if (pathname === '/api/sessions/start') {
     const { agentId, taskId, skipInitialPrompt } = params as { agentId: string; taskId: string; skipInitialPrompt?: boolean }
     if (!agentId || !taskId) throw Object.assign(new Error('agentId and taskId are required'), { status: 400 })
-    const sessionId = await agent.startSession(agentId, taskId, undefined, skipInitialPrompt as boolean | undefined)
-    return { sessionId }
+    // Admission-controlled: over a concurrency limit the start waits in the
+    // main-process queue and starts on its own when a slot frees.
+    const outcome = await agent.requestSession(agentId, taskId, undefined, skipInitialPrompt as boolean | undefined)
+    if (outcome.status === 'queued') return { sessionId: '', queued: true, queuePosition: outcome.position, queueReason: outcome.reason }
+    return { sessionId: outcome.sessionId }
   }
 
   // POST /api/sessions/:sessionId/resume

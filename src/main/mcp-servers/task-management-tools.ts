@@ -108,7 +108,8 @@ export const sharedTools: Tool[] = [
         description: { type: 'string', description: 'Skill description (1-1024 chars)' },
         content: { type: 'string', description: 'Skill content (the full skill file body, markdown)' },
         confidence: { type: 'number', description: 'Confidence score (0.0 to 1.0, defaults to 0.5)' },
-        tags: { type: 'array', items: { type: 'string' }, description: 'Tags for categorization' }
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags for categorization' },
+        preferred_model: { type: 'string', description: 'Optional model id this skill runs best with. Used for the session when the backend offers it; otherwise the agent model is kept.' }
       },
       required: ['name', 'description', 'content']
     }
@@ -124,7 +125,8 @@ export const sharedTools: Tool[] = [
         description: { type: 'string', description: 'Skill description' },
         content: { type: 'string', description: 'Skill content (the full skill file body)' },
         confidence: { type: 'number', description: 'Confidence score (0.0 to 1.0)' },
-        tags: { type: 'array', items: { type: 'string' }, description: 'Tags for categorization' }
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags for categorization' },
+        preferred_model: { type: 'string', description: 'Preferred model id; an empty string clears it' }
       },
       required: ['skill_id']
     }

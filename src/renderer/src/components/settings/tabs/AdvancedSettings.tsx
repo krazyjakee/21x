@@ -9,6 +9,9 @@ import { settingsApi } from '@/lib/ipc-client'
 import { GhCliGuidance } from '@/components/github/GhCliGuidance'
 import { ForgejoIntegrationSection } from '@/components/forgejo/ForgejoIntegrationSection'
 
+/** Global cap on concurrently working agent sessions, enforced by the main process. Empty/0 = unlimited. */
+const MAX_CONCURRENT_AGENT_SESSIONS_SETTING = 'max_concurrent_agent_sessions'
+
 export function AdvancedSettings() {
   const { githubOrg, ghCliStatus, setGithubOrg, checkGhCli } = useSettingsStore()
   const [orgInput, setOrgInput] = useState(githubOrg || '')
@@ -80,6 +83,8 @@ export function AdvancedSettings() {
 
       <ForgejoIntegrationSection />
 
+      <AgentConcurrencySection />
+
       <SettingsSection
         title="API Keys"
         description="Configure API keys for AI providers (stored securely locally)"
@@ -114,6 +119,57 @@ export function AdvancedSettings() {
         </div>
       </SettingsSection>
     </div>
+  )
+}
+
+/**
+ * Starts over this cap (or over an agent's own "max parallel sessions") wait
+ * in a queue and start on their own when a running session finishes.
+ * Mastermind, heartbeat and triage sessions are not counted.
+ */
+function AgentConcurrencySection() {
+  const [saved, setSaved] = useState('')
+  const [value, setValue] = useState('')
+
+  useEffect(() => {
+    settingsApi.get(MAX_CONCURRENT_AGENT_SESSIONS_SETTING).then((stored) => {
+      const normalized = stored && parseInt(stored, 10) > 0 ? String(parseInt(stored, 10)) : ''
+      setSaved(normalized)
+      setValue(normalized)
+    })
+  }, [])
+
+  const normalizedInput = value.trim() && parseInt(value, 10) > 0 ? String(parseInt(value, 10)) : ''
+
+  const save = async () => {
+    await settingsApi.set(MAX_CONCURRENT_AGENT_SESSIONS_SETTING, normalizedInput)
+    setSaved(normalizedInput)
+    setValue(normalizedInput)
+  }
+
+  return (
+    <SettingsSection
+      title="Agent Concurrency"
+      description="Maximum agent sessions working at once across all agents. Extra starts are queued and run when a slot frees. Leave empty for no global limit; each agent's own limit still applies. The Mastermind, heartbeat checks and triage are not counted."
+    >
+      <div className="space-y-1.5">
+        <Label htmlFor="max-concurrent-agent-sessions">Max concurrent agent sessions</Label>
+        <div className="flex items-center gap-2">
+          <Input
+            id="max-concurrent-agent-sessions"
+            type="number"
+            min={0}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="Unlimited"
+            className="flex-1"
+          />
+          <Button size="sm" variant="outline" disabled={normalizedInput === saved} onClick={save}>
+            Save
+          </Button>
+        </div>
+      </div>
+    </SettingsSection>
   )
 }
 

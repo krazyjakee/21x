@@ -18,8 +18,9 @@ import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
  * 10 → 11: preserve existing Claude Code agents' permission behaviour
  * 11 → 12: tasks.next_subtask_ids
  * 12 → 13: tasks.role (coordinator rows such as the Mastermind)
+ * 13 → 14: skills.preferred_model
  */
-const SCHEMA_VERSION = 13
+const SCHEMA_VERSION = 14
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -182,6 +183,7 @@ export function createTables(db: Database.Database): void {
       uses INTEGER NOT NULL DEFAULT 0,
       last_used TEXT,
       tags TEXT NOT NULL DEFAULT '[]',
+      preferred_model TEXT DEFAULT NULL,
       is_deleted INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -737,6 +739,12 @@ export function runMigrations(db: Database.Database): void {
   }
 
   db.exec(`CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name)`)
+
+  // Migration v14: optional per-skill preferred model (null = no preference).
+  const skillCols = new Set((db.pragma('table_info(skills)') as { name: string }[]).map((c) => c.name))
+  if (!skillCols.has('preferred_model')) {
+    db.exec(`ALTER TABLE skills ADD COLUMN preferred_model TEXT DEFAULT NULL`)
+  }
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)

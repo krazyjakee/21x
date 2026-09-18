@@ -473,6 +473,8 @@ export interface Skill {
   uses: number
   last_used: string | null
   tags: string[]
+  /** Model this skill runs best with; null = use the agent's model. */
+  preferred_model: string | null
   created_at: string
   updated_at: string
 }
@@ -485,6 +487,7 @@ export interface CreateSkillDTO {
   uses?: number
   last_used?: string | null
   tags?: string[]
+  preferred_model?: string | null
 }
 
 export interface UpdateSkillDTO {
@@ -495,6 +498,8 @@ export interface UpdateSkillDTO {
   uses?: number
   last_used?: string | null
   tags?: string[]
+  /** null clears the preference. */
+  preferred_model?: string | null
 }
 
 // ── Secret types ──────────────────────────────────────────────

@@ -8,6 +8,7 @@ import { buildTaskMcpUrl } from '../task-mcp-endpoint'
 import { getSecretBrokerPort, writeSecretShellWrapper } from '../secret-broker'
 import { opencodeDisallowedToolMap, readServerToolLimits, resolveAllowedToolNames } from '../mcp-tool-limits'
 import { withMastermindSystemPrompt } from '../prompts/mastermind'
+import { knownBackendModels, orderedSkillIds, resolveSkillModel } from './skill-model'
 
 export interface McpServerOptions {
   ensureTaskManagement?: boolean
@@ -152,6 +153,37 @@ function buildSecretsSystemPrompt(secrets: SecretRecord[]): string {
 }
 
 /**
+ * The model for this session: the first attached skill's usable preferred
+ * model, else the agent's model (see skill-model.ts). Session only: the
+ * agent record is not touched.
+ */
+function sessionModel(
+  db: DatabaseManager,
+  agent: AgentRecord,
+  params: { task?: TaskRecord | null; availableModels?: string[] | null; onModelNotice?: (notice: string) => void }
+): string | undefined {
+  const skillIds = orderedSkillIds(params.task?.skill_ids, agent.config?.skill_ids)
+  if (skillIds.length === 0) return agent.config?.model
+  const byId = new Map(db.getSkillsByIds(skillIds).map((skill) => [skill.id, skill]))
+  const skills = skillIds.flatMap((id) => byId.get(id) ?? [])
+  const backend = agent.config?.coding_agent || 'opencode'
+  const resolution = resolveSkillModel({
+    agentModel: agent.config?.model,
+    backend,
+    skills,
+    availableModels: params.availableModels !== undefined ? params.availableModels : knownBackendModels(backend)
+  })
+  if (resolution.source === 'skill') {
+    console.log(`[AgentManager] Session model ${resolution.model} from skill "${resolution.skillName}" (agent model ${agent.config?.model || 'default'})`)
+  }
+  if (resolution.notice) {
+    console.warn(`[AgentManager] ${resolution.notice}`)
+    params.onModelNotice?.(resolution.notice)
+  }
+  return resolution.model
+}
+
+/**
  * Builds the adapter session config shared by start, resume and follow-up
  * sends. Secret broker fields are attached only when a broker token exists;
  * decrypted secret values and the secrets prompt come from the agent config.
@@ -169,13 +201,17 @@ export function assembleSessionConfig(
     mcpServers: Record<string, McpServerConfig>
     systemPrompt?: string
     secretToken?: string
+    /** Backend model ids to validate skill preferred models against; defaults to the last listing. */
+    availableModels?: string[] | null
+    /** Told why a skill's preferred model was not used (the session still runs). */
+    onModelNotice?: (notice: string) => void
   }
 ): SessionConfig {
   const config: SessionConfig = {
     agentId: params.agentId,
     taskId: params.taskId,
     workspaceDir: params.workspaceDir,
-    model: agent.config?.model,
+    model: sessionModel(db, agent, params),
     reasoningEffort: agent.config?.reasoning_effort,
     systemPrompt: isCoordinatorTask(params.task)
       ? withMastermindSystemPrompt(params.systemPrompt)

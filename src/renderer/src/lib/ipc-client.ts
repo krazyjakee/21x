@@ -1,5 +1,5 @@
 import type { Task, CreateTaskDTO, UpdateTaskDTO, FileAttachment, Agent, CreateAgentDTO, UpdateAgentDTO, McpServer, CreateMcpServerDTO, UpdateMcpServerDTO, Skill, CreateSkillDTO, UpdateSkillDTO, Secret, CreateSecretDTO, UpdateSecretDTO, TaskSource, CreateTaskSourceDTO, UpdateTaskSourceDTO, SyncResult, PluginMeta, ConfigFieldOption, ActionResult, SourceUser, ReassignResult, MarketplaceSource, InstalledPlugin, DiscoverablePlugin, MarketplaceCatalog, PluginResources } from '@/types'
-import type { AgentOutputEvent, AgentOutputBatchEvent, AgentStatusEvent, GhCliStatus, GlabCliStatus, TeaCliStatus, GitHubRepo, WorktreeProgressEvent, WorkspaceCleanupProgressEvent, McpTestResult, AgentMessageAttachment, TranscriptPartRecord, TranscriptChangedEvent } from '@/types/electron'
+import type { AgentOutputEvent, AgentOutputBatchEvent, AgentStatusEvent, GhCliStatus, GlabCliStatus, TeaCliStatus, GitHubRepo, WorktreeProgressEvent, WorkspaceCleanupProgressEvent, McpTestResult, AgentMessageAttachment, TranscriptPartRecord, TranscriptChangedEvent, AgentSessionStartResult, AgentStartQueueChangedEvent, QueuedAgentStart } from '@/types/electron'
 import type { ArtifactApi } from '@shared/artifacts'
 import type {
   MicrophonePermission,
@@ -122,11 +122,16 @@ export const agentApi = {
 
   delete: (id: string): Promise<boolean> => {
     return window.electronAPI.agents.delete(id)
+  },
+
+  /** Starts the main process is holding back behind concurrency limits. */
+  getStartQueue: (): Promise<QueuedAgentStart[]> => {
+    return window.electronAPI.agents.getStartQueue()
   }
 }
 
 export const agentSessionApi = {
-  start: (agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<{ sessionId: string }> => {
+  start: (agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<AgentSessionStartResult> => {
     return window.electronAPI.agentSession.start(agentId, taskId, workspaceDir, skipInitialPrompt)
   },
 
@@ -249,6 +254,10 @@ export const onTranscriptChanged = (callback: (event: TranscriptChangedEvent) =>
 
 export const onAgentStatus = (callback: (event: AgentStatusEvent) => void): (() => void) => {
   return window.electronAPI.onAgentStatus(callback)
+}
+
+export const onAgentStartQueueChanged = (callback: (event: AgentStartQueueChangedEvent) => void): (() => void) => {
+  return window.electronAPI.onAgentStartQueueChanged(callback)
 }
 
 export const onAgentIncompatibleSession = (callback: (event: { taskId: string; agentId: string; error: string }) => void): (() => void) => {

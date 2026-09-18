@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import type { CreateSkillData, UpdateSkillData, CreateSecretData, UpdateSecretData } from '../database'
 import type { IpcDeps } from './deps'
 import { isApiKeySetting } from '../database/serializers'
+import { MAX_CONCURRENT_AGENT_SESSIONS_SETTING } from '../agent-manager/admission'
 
 /**
  * The renderer only needs to know whether an API key is saved, never its value.
@@ -14,7 +15,7 @@ function forRenderer(key: string, value: string): string {
 }
 
 /** Key/value settings plus the skill and secret libraries. */
-export function registerSettingsHandlers({ db }: IpcDeps): void {
+export function registerSettingsHandlers({ db, agentManager }: IpcDeps): void {
   ipcMain.handle('settings:get', (_, key: string) => {
     const value = db.getSetting(key)
     return value === undefined ? null : forRenderer(key, value)
@@ -24,6 +25,7 @@ export function registerSettingsHandlers({ db }: IpcDeps): void {
     // Echoing the marker back must not overwrite the real key.
     if (isApiKeySetting(key) && value === API_KEY_SET_MARKER) return
     db.setSetting(key, value)
+    if (key === MAX_CONCURRENT_AGENT_SESSIONS_SETTING) agentManager.drainStartQueue()
   })
 
   ipcMain.handle('settings:getAll', () => {

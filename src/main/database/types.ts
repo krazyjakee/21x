@@ -441,6 +441,7 @@ export interface SkillRow {
   uses: number
   last_used: string | null
   tags: string
+  preferred_model: string | null
   is_deleted: number
   created_at: string
   updated_at: string
@@ -456,6 +457,8 @@ export interface SkillRecord {
   uses: number
   last_used: string | null
   tags: string[]
+  /** Model id this skill runs best with; null = no preference. */
+  preferred_model: string | null
   created_at: string
   updated_at: string
 }
@@ -468,6 +471,7 @@ export interface CreateSkillData {
   uses?: number
   last_used?: string | null
   tags?: string[]
+  preferred_model?: string | null
 }
 
 export interface UpdateSkillData {
@@ -478,6 +482,8 @@ export interface UpdateSkillData {
   uses?: number
   last_used?: string | null
   tags?: string[]
+  /** null (or empty string) clears the preference. */
+  preferred_model?: string | null
 }
 
 export interface SecretRow {
