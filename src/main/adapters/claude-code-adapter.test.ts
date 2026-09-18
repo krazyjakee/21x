@@ -1509,3 +1509,111 @@ describe('canUseTool approval bridge', () => {
     expect(adapter.getPendingApproval('s1')).toBeNull()
   })
 })
+
+/**
+ * MCP isolation and per-agent tool limits. These call the builders the
+ * options literal spreads rather than driving sendPrompt.
+ */
+describe('ClaudeCodeAdapter MCP isolation and tool limits', () => {
+  const config = (mcpServers: Record<string, any>, extra: Record<string, any> = {}): any => ({
+    agentId: 'a-1',
+    taskId: 't-1',
+    workspaceDir: '/tmp/ws',
+    mcpServers,
+    ...extra,
+  })
+
+  const limitedChat = {
+    type: 'http',
+    url: 'https://chat.example/mcp',
+    headers: {},
+    enabledTools: ['list_channels', 'send_message'],
+    knownTools: ['list_channels', 'send_message', 'delete_channel'],
+  }
+
+  async function runHook(hooks: any, toolName: string): Promise<any> {
+    const matchers = hooks.PreToolUse.filter((m: any) => new RegExp(m.matcher).test(toolName))
+    const results: any[] = []
+    for (const matcher of matchers) {
+      for (const hook of matcher.hooks) {
+        results.push(await hook({ hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: {} }, 'id', { signal: new AbortController().signal }))
+      }
+    }
+    return results.find((r) => r.hookSpecificOutput?.permissionDecision === 'deny') ?? {}
+  }
+
+  it('passes strictMcpConfig so an on-disk .mcp.json cannot add a server', () => {
+    const options = (new ClaudeCodeAdapter() as any).buildIsolationOptions(config({
+      chat: { type: 'http', url: 'https://chat.example/mcp', headers: {} },
+    }))
+    expect(options.strictMcpConfig).toBe(true)
+    // User and project settings (CLAUDE.md, plugins, env) keep loading.
+    expect(options.settingSources).toBeUndefined()
+  })
+
+  it('turns a per-agent tool limit into disallowedTools', () => {
+    const options = (new ClaudeCodeAdapter() as any).buildIsolationOptions(config({ chat: limitedChat }))
+    expect(options.disallowedTools).toEqual(['mcp__chat__delete_channel'])
+  })
+
+  it('normalizes server names in disallowedTools the way Claude Code does', () => {
+    const options = (new ClaudeCodeAdapter() as any).buildIsolationOptions(config({ 'Team Chat': limitedChat }))
+    expect(options.disallowedTools).toEqual(['mcp__Team_Chat__delete_channel'])
+  })
+
+  it('sends NO disallowedTools and no hook for an unrestricted server', () => {
+    const adapter = new ClaudeCodeAdapter() as any
+    const unrestricted = config({ chat: { type: 'http', url: 'https://chat.example/mcp', headers: {} } })
+    expect(adapter.buildIsolationOptions(unrestricted).disallowedTools).toBeUndefined()
+    expect(adapter.buildMcpToolLimitHooks(unrestricted)).toBeUndefined()
+  })
+
+  it('blocks tools outside the limit with a hook, including ones added after the limit was saved', async () => {
+    const hooks = (new ClaudeCodeAdapter() as any).buildMcpToolLimitHooks(config({ chat: limitedChat }))
+
+    expect(await runHook(hooks, 'mcp__chat__send_message')).toEqual({})
+    expect((await runHook(hooks, 'mcp__chat__delete_channel')).hookSpecificOutput.permissionDecision).toBe('deny')
+    // Not in knownTools, so disallowedTools cannot name it; the hook still denies it.
+    expect((await runHook(hooks, 'mcp__chat__brand_new_tool')).hookSpecificOutput.permissionDecision).toBe('deny')
+    // Other servers and built-in tools are untouched.
+    expect(await runHook(hooks, 'mcp__other__anything')).toEqual({})
+  })
+
+  it('keeps the secret-injection hook alongside the tool-limit hook', async () => {
+    const queryMock = vi.mocked(query) as any
+    queryMock.mockClear()
+    queryMock.mockImplementation(() => ({
+      async *[Symbol.asyncIterator]() {
+        // no messages
+      },
+    }))
+    const adapter = new ClaudeCodeAdapter() as any
+    await adapter.ensureSDKLoaded()
+    adapter.claudeExecutablePath = '/usr/local/bin/claude'
+    const cfg = config({ chat: limitedChat }, { secretEnvVars: { TOKEN: 'x' } })
+    const session: any = {
+      sessionId: '', queryIterator: null, abortController: null, status: 'idle',
+      messageBuffer: [], messageCursor: 0, streamTask: null, lastError: null, config: cfg,
+      isResumed: false, backgroundTasks: new Map(), sawResult: false, enqueuePrompt: null, releasePrompt: null,
+        pendingApprovals: [],
+    }
+    adapter.sessions.set('s1', session)
+
+    await adapter.sendPrompt('s1', [{ type: MessagePartType.TEXT, text: 'hi' }], cfg)
+    await session.streamTask
+
+    const options = queryMock.mock.calls[0][0].options
+    expect(options.hooks.PreToolUse.map((m: any) => m.matcher)).toEqual(['Bash', 'mcp__.*'])
+    expect(options.strictMcpConfig).toBe(true)
+    expect(options.disallowedTools).toEqual(['mcp__chat__delete_channel'])
+    expect(options.mcpServers.chat.enabledTools).toBeUndefined()
+    expect(options.mcpServers.chat.knownTools).toBeUndefined()
+  })
+
+  it('strips 21x bookkeeping fields before handing servers to the SDK', () => {
+    const cleaned = (new ClaudeCodeAdapter() as any).buildClaudeMcpServers(config({ chat: limitedChat }))
+    expect(cleaned.chat.enabledTools).toBeUndefined()
+    expect(cleaned.chat.knownTools).toBeUndefined()
+    expect(cleaned.chat.url).toBe('https://chat.example/mcp')
+  })
+})

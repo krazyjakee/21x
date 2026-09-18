@@ -23,6 +23,11 @@ import type { CodingAgentAdapter, SessionConfig, MessagePart, SessionMessage, Mc
 import { SessionStatusType, MessagePartType, MessageRole } from './adapters/coding-agent-adapter'
 import { getTaskApiEnv, getTaskApiPort, getTaskApiToken, waitForTaskApiServer } from './task-api-server'
 import { buildTaskMcpUrl } from './task-mcp-endpoint'
+import {
+  opencodeDisallowedToolMap,
+  readServerToolLimits,
+  resolveAllowedToolNames
+} from './mcp-tool-limits'
 import { guardChildStreams, writeToChildStdin } from './child-stream-guards'
 import { randomUUID } from 'crypto'
 import { registerSecretSession, unregisterSecretSession, getSecretBrokerPort, writeSecretShellWrapper } from './secret-broker'
@@ -624,6 +629,22 @@ export class AgentManager extends EventEmitter {
   }
 
   /**
+   * The per-tool limit for one server, in the shape an adapter config carries.
+   * Returns nothing for an unrestricted server, so its config is exactly what
+   * it always was.
+   */
+  private toolLimitFor(
+    mcpServer: McpServerRecord,
+    limit: string[] | undefined
+  ): { enabledTools?: string[]; knownTools?: string[] } {
+    if (limit === undefined) return {}
+    return {
+      enabledTools: resolveAllowedToolNames({ serverTools: mcpServer.tools, limit }),
+      knownTools: (mcpServer.tools || []).map(tool => tool.name).filter(Boolean)
+    }
+  }
+
+  /**
    * Builds MCP servers config for adapters (Claude Code, etc.)
    * Converts from database format to adapter format
    */
@@ -631,6 +652,10 @@ export class AgentManager extends EventEmitter {
     const agent = this.db.getAgent(agentId)
     const mcpEntries = agent?.config?.mcp_servers || []
     const result: Record<string, McpServerConfig> = {}
+    // Per-agent tool limits travel with each server so adapters can enforce
+    // them. resolveDocumentedMcpServers reads them through the same parser, so
+    // the tools AGENTS.md lists and the tools the session gets cannot diverge.
+    const toolLimits = readServerToolLimits(mcpEntries)
     // Ensure the task API server is ready before building MCP configs
     // (startTaskApiServer is fire-and-forget during DB init, may not be done yet)
     await waitForTaskApiServer()
@@ -654,7 +679,8 @@ export class AgentManager extends EventEmitter {
           type: 'stdio',
           command: mcpServer.command,
           args: mcpServer.args,
-          env: { ...mcpServer.environment }
+          env: { ...mcpServer.environment },
+          ...this.toolLimitFor(mcpServer, toolLimits.get(serverId))
         }
       } else if (mcpServer.type === 'remote') {
         // Inject OAuth Bearer token if the server has one
@@ -669,7 +695,8 @@ export class AgentManager extends EventEmitter {
         result[mcpServer.name] = {
           type: 'http',
           url: mcpServer.url,
-          headers: finalHeaders
+          headers: finalHeaders,
+          ...this.toolLimitFor(mcpServer, toolLimits.get(serverId))
         }
       }
     }
@@ -739,6 +766,9 @@ export class AgentManager extends EventEmitter {
       reasoningEffort: agent.config?.reasoning_effort,
       systemPrompt: baseSystemPrompt + taskContext,
       mcpServers,
+      // OpenCode enforces per-agent MCP tool limits through session.prompt's
+      // tool map (Claude Code reads enabledTools from mcpServers directly).
+      tools: opencodeDisallowedToolMap(mcpServers),
       authMethod: agent.config?.auth_method,
       permissionMode: agent.config?.permission_mode,
       sandboxMode: agent.config?.sandbox_mode,
@@ -1109,13 +1139,14 @@ export class AgentManager extends EventEmitter {
     const agent = this.db.getAgent(agentId)
     const entries = agent?.config?.mcp_servers || []
 
+    // Same parser as buildMcpServersForAdapter, so documentation and
+    // enforcement agree on each server's limit.
+    const limits = readServerToolLimits(entries)
     const configured = new Map<string, DocumentedMcpServer>()
-    for (const entry of entries) {
-      const serverId = typeof entry === 'string' ? entry : (entry as AgentMcpServerEntry).serverId
-      const enabledTools = typeof entry === 'string' ? undefined : (entry as AgentMcpServerEntry).enabledTools
+    for (const serverId of limits.keys()) {
       const server = this.db.getMcpServer(serverId)
       if (!server) continue
-      configured.set(server.name, { server, enabledTools })
+      configured.set(server.name, { server, enabledTools: limits.get(serverId) })
     }
 
     if (!injectedServers) return [...configured.values()]
@@ -1471,6 +1502,9 @@ export class AgentManager extends EventEmitter {
       reasoningEffort: agent.config?.reasoning_effort,
       systemPrompt: agent.config?.system_prompt,
       mcpServers,
+      // OpenCode enforces per-agent MCP tool limits through session.prompt's
+      // tool map (Claude Code reads enabledTools from mcpServers directly).
+      tools: opencodeDisallowedToolMap(mcpServers),
       authMethod: agent.config?.auth_method,
       permissionMode: agent.config?.permission_mode,
       sandboxMode: agent.config?.sandbox_mode,
@@ -2734,6 +2768,9 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
       reasoningEffort: agent.config?.reasoning_effort,
       systemPrompt: baseSystemPrompt + taskContext,
       mcpServers,
+      // OpenCode enforces per-agent MCP tool limits through session.prompt's
+      // tool map (Claude Code reads enabledTools from mcpServers directly).
+      tools: opencodeDisallowedToolMap(mcpServers),
       authMethod: agent.config?.auth_method,
       permissionMode: agent.config?.permission_mode,
       sandboxMode: agent.config?.sandbox_mode,
