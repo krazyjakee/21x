@@ -23,6 +23,35 @@ function decryptSecret(value: Buffer): string {
   return safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(value) : value.toString('utf8')
 }
 
+/** Settings rows that hold provider API keys (e.g. `anthropic_api_key`). */
+export function isApiKeySetting(key: string): boolean {
+  return key.endsWith('_api_key')
+}
+
+/** Marks a settings value (TEXT column) as safeStorage ciphertext in base64. */
+const ENCRYPTED_SETTING_PREFIX = 'safeStorage:v1:'
+
+export function isEncryptedSettingValue(value: string): boolean {
+  return value.startsWith(ENCRYPTED_SETTING_PREFIX)
+}
+
+/** Same policy as encryptSecret: keychain when available, plaintext fallback. */
+export function encryptSettingValue(value: string): string {
+  if (!value || !safeStorage.isEncryptionAvailable()) return value
+  return ENCRYPTED_SETTING_PREFIX + safeStorage.encryptString(value).toString('base64')
+}
+
+/** Plaintext (legacy or fallback) values pass through; unreadable ciphertext yields ''. */
+export function decryptSettingValue(value: string): string {
+  if (!isEncryptedSettingValue(value)) return value
+  if (!safeStorage.isEncryptionAvailable()) return ''
+  try {
+    return safeStorage.decryptString(Buffer.from(value.slice(ENCRYPTED_SETTING_PREFIX.length), 'base64'))
+  } catch {
+    return ''
+  }
+}
+
 export const UPDATABLE_COLUMNS = new Set([
   'external_id', 'source_id', 'source',
   'title',

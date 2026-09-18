@@ -97,6 +97,34 @@ describe('registerIpcHandlers', () => {
     expect(sender.send).toHaveBeenCalledWith('task:created', { task })
   })
 
+  it('never returns raw API keys to the renderer and ignores the marker on save', async () => {
+    const settings: Record<string, string> = { anthropic_api_key: 'sk-ant-raw', openai_api_key: '', theme: 'dark' }
+    const setSetting = vi.fn()
+    register({
+      db: {
+        getSetting: (key: string) => settings[key],
+        getAllSettings: () => ({ ...settings }),
+        setSetting
+      }
+    })
+    const handlers = (ipcMain.handle as ReturnType<typeof vi.fn>).mock.calls as [string, (...args: unknown[]) => unknown][]
+    const handler = (channel: string) => handlers.filter(([name]) => name === channel).pop()![1]
+
+    const all = await handler('settings:getAll')({}) as Record<string, string>
+    expect(JSON.stringify(all)).not.toContain('sk-ant-raw')
+    expect(all.anthropic_api_key).toBeTruthy()
+    expect(all.openai_api_key).toBe('')
+    expect(all.theme).toBe('dark')
+
+    const single = await handler('settings:get')({}, 'anthropic_api_key')
+    expect(single).toBe(all.anthropic_api_key)
+
+    await handler('settings:set')({}, 'anthropic_api_key', all.anthropic_api_key)
+    expect(setSetting).not.toHaveBeenCalled()
+    await handler('settings:set')({}, 'anthropic_api_key', 'sk-ant-new')
+    expect(setSetting).toHaveBeenCalledWith('anthropic_api_key', 'sk-ant-new')
+  })
+
   it('voice handlers stay safe when the voice manager is absent', async () => {
     register()
 

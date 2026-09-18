@@ -21,7 +21,11 @@ import {
   deserializeSkill,
   deserializeTask,
   deserializeTaskSource,
+  decryptSettingValue,
   encryptSecret,
+  encryptSettingValue,
+  isApiKeySetting,
+  isEncryptedSettingValue,
   parseJsonArray
 } from './database/serializers'
 import type {
@@ -99,6 +103,12 @@ export class DatabaseManager {
     this.db.pragma('busy_timeout = 5000') // Retry on SQLITE_BUSY for up to 5s
 
     if (applySchema(this.db)) seedDefaultAgent(this.db)
+    try {
+      const migrated = this.encryptPlaintextApiKeys()
+      if (migrated) console.log(`[Database] Encrypted ${migrated} stored API key(s)`)
+    } catch (err) {
+      console.error('[Database] Failed to encrypt stored API keys:', err)
+    }
 
     // The MCP server script calls back into this HTTP API.
     startTaskApiServer(this).catch(err =>
@@ -950,13 +960,34 @@ export class DatabaseManager {
 
   // ── Settings CRUD ──────────────────────────────────────────
 
+  // API keys are encrypted at rest; callers in the main process always see plaintext.
   getSetting(key: string): string | undefined {
     const row = this.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined
-    return row?.value
+    if (!row) return undefined
+    return isApiKeySetting(key) ? decryptSettingValue(row.value) : row.value
   }
 
   setSetting(key: string, value: string): void {
-    this.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, value)
+    const stored = isApiKeySetting(key) ? encryptSettingValue(value) : value
+    this.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, stored)
+  }
+
+  /**
+   * Re-encrypts API keys saved in plaintext by older versions (or while the
+   * keychain was unavailable). Runs on every startup and is a no-op once done.
+   */
+  encryptPlaintextApiKeys(): number {
+    const rows = this.prepare("SELECT key, value FROM settings WHERE key LIKE '%\\_api\\_key' ESCAPE '\\'")
+      .all() as { key: string; value: string }[]
+    let migrated = 0
+    for (const row of rows) {
+      if (!isApiKeySetting(row.key) || !row.value || isEncryptedSettingValue(row.value)) continue
+      const encrypted = encryptSettingValue(row.value)
+      if (encrypted === row.value) continue // keychain unavailable: keep the fallback
+      this.prepare('UPDATE settings SET value = ? WHERE key = ?').run(encrypted, row.key)
+      migrated++
+    }
+    return migrated
   }
 
   deleteSetting(key: string): void {
@@ -966,7 +997,7 @@ export class DatabaseManager {
   getAllSettings(): Record<string, string> {
     const rows = this.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[]
     const result: Record<string, string> = {}
-    for (const row of rows) result[row.key] = row.value
+    for (const row of rows) result[row.key] = isApiKeySetting(row.key) ? decryptSettingValue(row.value) : row.value
     return result
   }
 

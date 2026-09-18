@@ -3,7 +3,8 @@ import { once } from 'node:events'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { safeStorage } from 'electron'
 import RawDatabase from 'better-sqlite3'
 import { createTestDb } from '../../test/helpers/db-test-helper'
 import { makeTask, makeAgent, makeSkill } from '../../test/helpers/task-fixtures'
@@ -893,5 +894,68 @@ describe('hosted service data removal on upgrade', () => {
     seedLegacyData(rawDb)
     removeHostedServiceData(rawDb)
     expect(() => removeHostedServiceData(rawDb)).not.toThrow()
+  })
+})
+
+describe('API key settings encryption', () => {
+  const fakeCipher = (value: string) => Buffer.from(`cipher(${value})`, 'utf8')
+
+  beforeEach(() => {
+    vi.mocked(safeStorage.isEncryptionAvailable).mockReturnValue(true)
+    vi.mocked(safeStorage.encryptString).mockImplementation(fakeCipher)
+    vi.mocked(safeStorage.decryptString).mockImplementation((buf: Buffer) => {
+      const match = /^cipher\((.*)\)$/s.exec(buf.toString('utf8'))
+      if (!match) throw new Error('bad ciphertext')
+      return match[1]
+    })
+  })
+
+  afterEach(() => {
+    vi.mocked(safeStorage.isEncryptionAvailable).mockReturnValue(false)
+    vi.mocked(safeStorage.encryptString).mockImplementation((value: string) => Buffer.from(value, 'utf8'))
+    vi.mocked(safeStorage.decryptString).mockImplementation((value: Buffer) => value.toString('utf8'))
+  })
+
+  const rawValue = (rawDb: InstanceType<typeof RawDatabase>, key: string) =>
+    (rawDb.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string }).value
+
+  it('stores API keys encrypted and returns plaintext to main-process callers', () => {
+    const { db: manager, rawDb } = createTestDb()
+    manager.setSetting('anthropic_api_key', 'sk-ant-secret')
+    manager.setSetting('theme', 'dark')
+
+    expect(rawValue(rawDb, 'anthropic_api_key')).not.toContain('sk-ant-secret')
+    expect(rawValue(rawDb, 'theme')).toBe('dark')
+    expect(manager.getSetting('anthropic_api_key')).toBe('sk-ant-secret')
+    expect(manager.getAllSettings()).toMatchObject({ anthropic_api_key: 'sk-ant-secret', theme: 'dark' })
+  })
+
+  it('migrates plaintext API keys left by older versions', () => {
+    const { db: manager, rawDb } = createTestDb()
+    const insert = rawDb.prepare('INSERT INTO settings (key, value) VALUES (?, ?)')
+    insert.run('openai_api_key', 'sk-legacy')
+    insert.run('google_api_key', '')
+    insert.run('github_org', 'acme')
+
+    expect(manager.encryptPlaintextApiKeys()).toBe(1)
+    expect(manager.encryptPlaintextApiKeys()).toBe(0)
+
+    expect(rawValue(rawDb, 'openai_api_key')).not.toContain('sk-legacy')
+    expect(rawValue(rawDb, 'github_org')).toBe('acme')
+    expect(manager.getSetting('openai_api_key')).toBe('sk-legacy')
+    expect(manager.getSetting('google_api_key')).toBe('')
+  })
+
+  it('falls back to plaintext when the keychain is unavailable and migrates later', () => {
+    const { db: manager, rawDb } = createTestDb()
+    vi.mocked(safeStorage.isEncryptionAvailable).mockReturnValue(false)
+    manager.setSetting('anthropic_api_key', 'sk-fallback')
+    expect(manager.encryptPlaintextApiKeys()).toBe(0)
+    expect(manager.getSetting('anthropic_api_key')).toBe('sk-fallback')
+
+    vi.mocked(safeStorage.isEncryptionAvailable).mockReturnValue(true)
+    expect(manager.encryptPlaintextApiKeys()).toBe(1)
+    expect(rawValue(rawDb, 'anthropic_api_key')).not.toContain('sk-fallback')
+    expect(manager.getSetting('anthropic_api_key')).toBe('sk-fallback')
   })
 })
