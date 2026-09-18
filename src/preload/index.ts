@@ -341,6 +341,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     executeAction: (actionId: string, taskId: string, sourceId: string, input?: string): Promise<unknown> =>
       ipcRenderer.invoke('plugin:executeAction', actionId, taskId, sourceId, input)
   },
+  // Connector-bridge task source form (docs/connectors.md). Credentials go in; none come back.
+  connectors: {
+    bridgePieces: (): Promise<unknown[]> => ipcRenderer.invoke('connectors:bridgePieces'),
+    ensureInstance: (pieceName: string, instanceId?: string): Promise<unknown> =>
+      ipcRenderer.invoke('connectors:ensureInstance', pieceName, instanceId),
+    credentialStatus: (instanceId: string): Promise<unknown> => ipcRenderer.invoke('connectors:credentialStatus', instanceId),
+    setCredentials: (instanceId: string, input: Record<string, string>, storage?: 'persistent' | 'session'): Promise<unknown> =>
+      ipcRenderer.invoke('connectors:setCredentials', instanceId, input, storage),
+    clearCredentials: (instanceId: string): Promise<void> => ipcRenderer.invoke('connectors:clearCredentials', instanceId),
+    syncStatus: (instanceId: string): Promise<unknown> => ipcRenderer.invoke('connectors:syncStatus', instanceId)
+  },
   claudePlugins: {
     getMarketplaceSources: (): Promise<unknown[]> =>
       ipcRenderer.invoke('claudePlugin:getMarketplaceSources'),

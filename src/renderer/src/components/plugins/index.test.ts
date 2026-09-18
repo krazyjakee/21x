@@ -14,7 +14,7 @@ describe('Plugin Forms Registry', () => {
   })
 
   it('includes all expected plugins', () => {
-    const expectedPlugins = ['linear', 'hubspot', 'github-issues', 'notion', 'youtrack']
+    const expectedPlugins = ['linear', 'hubspot', 'github-issues', 'notion', 'youtrack', 'connector-bridge']
     for (const pluginId of expectedPlugins) {
       expect(PLUGIN_FORMS).toHaveProperty(pluginId)
     }

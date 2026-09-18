@@ -20,6 +20,8 @@ import { GitHubIssuesPlugin } from './plugins/github-issues-plugin'
 import { ForgejoIssuesPlugin } from './plugins/forgejo-issues-plugin'
 import { NotionPlugin } from './plugins/notion-plugin'
 import { YouTrackPlugin } from './plugins/youtrack-plugin'
+import { ConnectorBridgePlugin } from './plugins/connector-bridge-plugin'
+import { disposeConnectorRuntime } from './connectors/bridge/runtime'
 import { registerIpcHandlers } from './ipc-handlers'
 import { panelBrowserBroker } from './panel-browser-broker'
 import { hardenWebviewPreferences } from './webview-hardening'
@@ -71,6 +73,7 @@ let forgejoManager: ForgejoManager | null = null
 let worktreeManager: WorktreeManager | null = null
 let syncManager: SyncManager | null = null
 let pluginRegistry: PluginRegistry | null = null
+let connectorBridgePlugin: ConnectorBridgePlugin | null = null
 let oauthManager: OAuthManager | null = null
 let recurrenceScheduler: RecurrenceScheduler | null = null
 let heartbeatScheduler: HeartbeatScheduler | null = null
@@ -177,6 +180,8 @@ async function shutdownAppServices(): Promise<void> {
   await agentManager?.stopServer()
 
   oauthManager?.destroy()
+  connectorBridgePlugin?.stopPolling()
+  if (db) disposeConnectorRuntime(db)
   stopSecretBroker()
   stopMobileApiServer()
   stopTaskApiServer()
@@ -739,6 +744,12 @@ app.whenReady().then(async () => {
   pluginRegistry.register(new ForgejoIssuesPlugin(forgejoManager))
   pluginRegistry.register(new NotionPlugin())
   pluginRegistry.register(new YouTrackPlugin())
+  connectorBridgePlugin = new ConnectorBridgePlugin()
+  pluginRegistry.register(connectorBridgePlugin)
+  connectorBridgePlugin.startPolling({
+    db,
+    onSynced: () => guardedIpcSend(mainWindow?.webContents, 'tasks:refresh')
+  })
 
   syncManager = new SyncManager(db, pluginRegistry, oauthManager)
   agentManager.setSyncManager(syncManager)

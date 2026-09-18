@@ -16,6 +16,7 @@ import { registerExternalAuthHandlers } from './ipc/external-auth'
 import { registerVoiceHandlers } from './ipc/voice'
 import { registerChatHandlers } from './ipc/chat'
 import { registerCommanderHandlers } from './ipc/commander'
+import { registerConnectorHandlers } from './ipc/connectors'
 
 export function registerIpcHandlers(deps: IpcDeps): void {
   registerTaskHandlers(deps)
@@ -35,4 +36,5 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   registerVoiceHandlers(deps)
   registerChatHandlers(deps)
   registerCommanderHandlers(deps)
+  registerConnectorHandlers(deps)
 }

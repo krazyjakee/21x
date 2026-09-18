@@ -23,6 +23,15 @@ import type {
 } from '@shared/voice-tts'
 import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
 import type { CommanderEvent, CommanderListSessionsRequest, CommanderMessage, CommanderSession } from '@shared/commander'
+import type {
+  ConnectorBridgeCredentialInput,
+  ConnectorBridgeCredentialStatus,
+  ConnectorBridgeCredentialStorage,
+  ConnectorBridgeInstance,
+  ConnectorBridgePiece,
+  ConnectorBridgeSetCredentialsResult,
+  ConnectorBridgeSyncStatus
+} from '@shared/connector-bridge'
 import type { CliMcpMutationResult, CliMcpProbeResult, CliMcpServerRef, CliMcpSnapshot, CliMcpUpsertRequest } from '@shared/cli-mcp-config'
 import type {
   ProjectRecord, CreateProjectData, UpdateProjectData,
@@ -550,6 +559,23 @@ export const pluginApi = {
   executeAction: (actionId: string, taskId: string, sourceId: string, input?: string): Promise<ActionResult> => {
     return window.electronAPI.plugins.executeAction(actionId, taskId, sourceId, input)
   }
+}
+
+// ── Connector-bridge task source (docs/connectors.md) ─────────
+// Credentials are write-only: no call returns them.
+
+export const connectorBridgeApi = {
+  bridgePieces: (): Promise<ConnectorBridgePiece[]> => window.electronAPI.connectors.bridgePieces(),
+  ensureInstance: (pieceName: string, instanceId?: string): Promise<ConnectorBridgeInstance> =>
+    window.electronAPI.connectors.ensureInstance(pieceName, instanceId),
+  credentialStatus: (instanceId: string): Promise<ConnectorBridgeCredentialStatus> => window.electronAPI.connectors.credentialStatus(instanceId),
+  setCredentials: (
+    instanceId: string,
+    input: ConnectorBridgeCredentialInput,
+    storage?: ConnectorBridgeCredentialStorage
+  ): Promise<ConnectorBridgeSetCredentialsResult> => window.electronAPI.connectors.setCredentials(instanceId, input, storage),
+  clearCredentials: (instanceId: string): Promise<void> => window.electronAPI.connectors.clearCredentials(instanceId),
+  syncStatus: (instanceId: string): Promise<ConnectorBridgeSyncStatus> => window.electronAPI.connectors.syncStatus(instanceId)
 }
 
 export const claudePluginApi = {

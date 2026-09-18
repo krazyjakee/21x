@@ -404,6 +404,18 @@ interface ElectronAPI {
     resolveOptions: (pluginId: string, resolverKey: string, config: Record<string, unknown>, mcpServerId?: string, sourceId?: string) => Promise<ConfigFieldOption[]>
     executeAction: (actionId: string, taskId: string, sourceId: string, input?: string) => Promise<ActionResult>
   }
+  connectors: {
+    bridgePieces: () => Promise<import('@shared/connector-bridge').ConnectorBridgePiece[]>
+    ensureInstance: (pieceName: string, instanceId?: string) => Promise<import('@shared/connector-bridge').ConnectorBridgeInstance>
+    credentialStatus: (instanceId: string) => Promise<import('@shared/connector-bridge').ConnectorBridgeCredentialStatus>
+    setCredentials: (
+      instanceId: string,
+      input: import('@shared/connector-bridge').ConnectorBridgeCredentialInput,
+      storage?: import('@shared/connector-bridge').ConnectorBridgeCredentialStorage
+    ) => Promise<import('@shared/connector-bridge').ConnectorBridgeSetCredentialsResult>
+    clearCredentials: (instanceId: string) => Promise<void>
+    syncStatus: (instanceId: string) => Promise<import('@shared/connector-bridge').ConnectorBridgeSyncStatus>
+  }
   claudePlugins: {
     getMarketplaceSources: () => Promise<MarketplaceSource[]>
     addMarketplaceSource: (data: { name: string; source_type?: string; source_url: string; auto_update?: boolean }) => Promise<MarketplaceSource>
