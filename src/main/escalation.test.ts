@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createTestDb } from '../../test/helpers/db-test-helper'
 import { makeAgent, makeTask } from '../../test/helpers/task-fixtures'
-import { callToolForScope, setCoordinatorCallGate, type TaskMcpScope } from './mcp-servers/task-management-core'
+import { callToolForScope, setCoordinatorCallGate, type TaskApiInvoke, type TaskMcpScope } from './mcp-servers/task-management-core'
 import {
   actionForToolCall,
   approveHeldAction,
@@ -36,7 +36,7 @@ interface Harness {
   taskId: string
   coordinatorScope: TaskMcpScope
   taskAgentScope: TaskMcpScope
-  invoke: ReturnType<typeof vi.fn>
+  invoke: ReturnType<typeof vi.fn<TaskApiInvoke>>
   notifyUser: ReturnType<typeof vi.fn>
   notifyRenderer: ReturnType<typeof vi.fn>
   tellMastermind: ReturnType<typeof vi.fn>
@@ -51,7 +51,7 @@ function setup(policy: Partial<EscalationPolicy>): Harness {
   db.updateTask(task.id, { agent_id: agentId })
 
   // The routes, faked: membership checks read /get_task from the real rows.
-  const invoke = vi.fn(async (route: string, params: Record<string, unknown>) => {
+  const invoke = vi.fn<TaskApiInvoke>(async (route, params) => {
     if (route === '/get_task') return db.getTask(String(params.task_id)) ?? { error: 'Task not found' }
     if (route === '/start_task') return { success: true, action: 'task_started', task_id: params.task_id }
     return { success: true, route, params }
