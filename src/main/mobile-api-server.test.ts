@@ -2,10 +2,21 @@ import { SyncManager } from './sync-manager'
 import { finishSessionFeedback, updateTaskFromUser } from './session-feedback'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createHash } from 'crypto'
+import { WebSocket } from 'ws'
 import { createTestDb } from '../../test/helpers/db-test-helper'
 import { makeTask } from '../../test/helpers/task-fixtures'
 import type { DatabaseManager } from './database'
-import { startMobileApiServer, stopMobileApiServer } from './mobile-api-server'
+import {
+  applyMobileAccessSettings,
+  getMobileApiBinding,
+  MOBILE_ACCESS_ENABLED_SETTING,
+  MOBILE_LAN_ACCESS_SETTING,
+  MOBILE_SESSION_IDLE_DAYS_SETTING,
+  PAIR_RATE_LIMIT_MAX,
+  setMobileApiDeps,
+  startMobileApiServer,
+  stopMobileApiServer
+} from './mobile-api-server'
 
 // We test the database-level route logic for the create task feature,
 // which is the new functionality we're testing.
@@ -388,5 +399,174 @@ describe('mobile API: all four feedback/source combinations', () => {
     expect(sourceAction).toHaveBeenCalledTimes(completeAtSource ? 1 : 0)
     expect(notionRecord.status).toBe(completeAtSource ? 'closed' : 'open')
     db.close()
+  })
+})
+
+describe('mobile-api-server: pairing rate limit', () => {
+  afterEach(async () => {
+    await stopMobileApiServer()
+    vi.restoreAllMocks()
+  })
+
+  async function start() {
+    const { db } = createTestDb()
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    const port = await startMobileApiServer(db, {} as never, {} as never, 0)
+    const post = (path: string, body: unknown) => fetch(`http://127.0.0.1:${port}${path}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    })
+    return { db, port, post }
+  }
+
+  it('answers 429 once the global pairing budget is spent, across both pairing endpoints', async () => {
+    const { post } = await start()
+
+    for (let i = 0; i < PAIR_RATE_LIMIT_MAX; i++) {
+      const response = i % 2 === 0
+        ? await post('/api/auth/pair/initiate', { code: `bogus-${i}` })
+        : await post('/api/auth/pair/verify', { pairCodeId: `bogus-${i}`, pin: '000000' })
+      expect(response.status).toBe(401)
+    }
+
+    const limitedInitiate = await post('/api/auth/pair/initiate', { code: 'bogus' })
+    expect(limitedInitiate.status).toBe(429)
+    expect(limitedInitiate.headers.get('retry-after')).toBeTruthy()
+    const limitedVerify = await post('/api/auth/pair/verify', { pairCodeId: 'bogus', pin: '000000' })
+    expect(limitedVerify.status).toBe(429)
+  })
+
+  it('rejects a valid init code while rate limited and accepts it once the window passes', async () => {
+    const { db, post } = await start()
+    db.setSetting('mobile_init_code_real', '1')
+    db.setSetting('mobile_init_code_real_exp', String(Math.floor(Date.now() / 1000) + 300))
+    for (let i = 0; i < PAIR_RATE_LIMIT_MAX; i++) await post('/api/auth/pair/initiate', { code: `bogus-${i}` })
+
+    expect((await post('/api/auth/pair/initiate', { code: 'real' })).status).toBe(429)
+    // The init code is still unused: a limited request never reaches the handler.
+    expect(db.getSetting('mobile_init_code_real')).toBe('1')
+
+    const realNow = Date.now()
+    vi.spyOn(Date, 'now').mockReturnValue(realNow + 61_000)
+    expect((await post('/api/auth/pair/initiate', { code: 'real' })).status).toBe(200)
+  })
+
+  it('does not count authenticated API traffic against the pairing budget', async () => {
+    const { db, port, post } = await start()
+    const token = 'rate-limit-token'
+    db.createMobileSession('rate-session', createHash('sha256').update(token).digest('hex'), 'test-device')
+
+    for (let i = 0; i < PAIR_RATE_LIMIT_MAX + 5; i++) {
+      const response = await fetch(`http://127.0.0.1:${port}/api/tasks`, { headers: { Authorization: `Bearer ${token}` } })
+      expect(response.status).toBe(200)
+    }
+    expect((await post('/api/auth/pair/initiate', { code: 'bogus' })).status).toBe(401)
+  })
+})
+
+describe('mobile-api-server: session idle expiry', () => {
+  afterEach(async () => {
+    await stopMobileApiServer()
+    vi.restoreAllMocks()
+  })
+
+  const DAY_MS = 86_400_000
+
+  async function startWithSession() {
+    const { db } = createTestDb()
+    const token = 'idle-token'
+    db.createMobileSession('idle-session', createHash('sha256').update(token).digest('hex'), 'test-device')
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    const port = await startMobileApiServer(db, {} as never, {} as never, 0)
+    const get = () => fetch(`http://127.0.0.1:${port}/api/tasks`, { headers: { Authorization: `Bearer ${token}` } })
+    return { db, get }
+  }
+
+  it('keeps a session that was used within the default 7 days', async () => {
+    const { get } = await startWithSession()
+    const realNow = Date.now()
+    vi.spyOn(Date, 'now').mockReturnValue(realNow + 6 * DAY_MS)
+
+    expect((await get()).status).toBe(200)
+  })
+
+  it('rejects and revokes a session idle for longer than the default 7 days', async () => {
+    const { db, get } = await startWithSession()
+    const realNow = Date.now()
+    vi.spyOn(Date, 'now').mockReturnValue(realNow + 8 * DAY_MS)
+
+    expect((await get()).status).toBe(401)
+    expect(db.getMobileSessions()).toHaveLength(0)
+    // Going back in time does not resurrect it.
+    vi.spyOn(Date, 'now').mockReturnValue(realNow)
+    expect((await get()).status).toBe(401)
+  })
+
+  it('honours a configured idle period', async () => {
+    const { db, get } = await startWithSession()
+    db.setSetting(MOBILE_SESSION_IDLE_DAYS_SETTING, '1')
+    const realNow = Date.now()
+    vi.spyOn(Date, 'now').mockReturnValue(realNow + 2 * DAY_MS)
+
+    expect((await get()).status).toBe(401)
+  })
+
+  it('refuses the WebSocket upgrade for an expired session', async () => {
+    const { db } = createTestDb()
+    const token = 'idle-ws-token'
+    db.createMobileSession('idle-ws-session', createHash('sha256').update(token).digest('hex'), 'test-device')
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    const port = await startMobileApiServer(db, {} as never, {} as never, 0)
+    const realNow = Date.now()
+    vi.spyOn(Date, 'now').mockReturnValue(realNow + 8 * DAY_MS)
+
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`)
+    const outcome = await new Promise<string>((resolve) => {
+      ws.on('open', () => resolve('open'))
+      ws.on('error', () => resolve('rejected'))
+    })
+    ws.close()
+
+    expect(outcome).toBe('rejected')
+    expect(db.getMobileSessions()).toHaveLength(0)
+  })
+})
+
+describe('mobile-api-server: mobile access settings', () => {
+  afterEach(async () => {
+    await stopMobileApiServer()
+    vi.restoreAllMocks()
+  })
+
+  function setup() {
+    const { db } = createTestDb()
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    setMobileApiDeps({ db, agentManager: {} as never, githubManager: {} as never })
+    return db
+  }
+
+  it('does not listen when mobile access is off (the default)', async () => {
+    setup()
+
+    expect(await applyMobileAccessSettings(0)).toBeNull()
+    expect(getMobileApiBinding()).toBeNull()
+  })
+
+  it('binds to 127.0.0.1 unless LAN access is opted into, and rebinds on change', async () => {
+    const db = setup()
+    db.setSetting(MOBILE_ACCESS_ENABLED_SETTING, 'true')
+
+    const port = await applyMobileAccessSettings(0)
+    expect(port).toBeGreaterThan(0)
+    expect(getMobileApiBinding()).toEqual({ host: '127.0.0.1', port })
+    expect((await fetch(`http://127.0.0.1:${port}/api/tasks`)).status).toBe(401)
+
+    db.setSetting(MOBILE_LAN_ACCESS_SETTING, 'true')
+    const lanPort = await applyMobileAccessSettings(0)
+    expect(getMobileApiBinding()).toEqual({ host: '0.0.0.0', port: lanPort })
+
+    db.setSetting(MOBILE_ACCESS_ENABLED_SETTING, 'false')
+    expect(await applyMobileAccessSettings(0)).toBeNull()
+    expect(getMobileApiBinding()).toBeNull()
+    await expect(fetch(`http://127.0.0.1:${lanPort}/api/tasks`)).rejects.toThrow()
   })
 })

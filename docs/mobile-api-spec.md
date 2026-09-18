@@ -1,7 +1,11 @@
 # 20x Mobile API Specification
 
 > HTTP + WebSocket API served by the Electron main process for mobile clients.
-> Default port: `20620`, bound to `0.0.0.0` for Tailscale/LAN access.
+> Default port: `20620`. The server only runs while **mobile access** is on in
+> Settings → General → Connect Phone, and binds to `127.0.0.1` unless **LAN
+> access** is explicitly opted into (which exposes plain HTTP to the local
+> network). Remote access goes through the HTTPS cloudflared tunnel (or a
+> custom URL), which dials `http://127.0.0.1:20620` locally.
 
 ---
 
@@ -21,7 +25,8 @@
 
 ## Authentication
 
-All requests (HTTP and WebSocket) require a bearer token when mobile auth is enabled.
+All requests (HTTP and WebSocket) other than the pairing endpoints require a
+session bearer token, obtained by pairing (QR init code → 6-digit PIN).
 
 ```
 Authorization: Bearer <token>
@@ -33,7 +38,38 @@ For WebSocket connections, pass the token as a query parameter:
 ws://<host>:20620/ws?token=<token>
 ```
 
-The token is configured in Settings → General → Mobile Access.
+### Exposure
+
+| Setting | Key | Default | Effect |
+|---------|-----|---------|--------|
+| Mobile access | `mobile_access_enabled` | `false` | Off: nothing listens on 20620 |
+| Allow LAN access | `mobile_lan_access` | `false` | Off: bind `127.0.0.1`; on: bind `0.0.0.0` |
+| Sign out idle devices | `mobile_session_idle_days` | `7` | Idle days before a session expires |
+
+Toggling either switch starts, stops or rebinds the server immediately — no
+app restart. Turning mobile access off also stops the cloudflared tunnel.
+
+### Session expiry
+
+Every authenticated request (and WebSocket upgrade) refreshes the session's
+`last_seen`. A session unused for longer than `mobile_session_idle_days` is
+revoked on its next use: the request answers `401` and the device disappears
+from the connected devices list, so it must pair again.
+
+### Pairing rate limit
+
+`/api/auth/pair/*` shares one global budget of **20 requests per 60 s** across
+all clients (the tunnel makes every request look local, so a per-IP limit would
+not hold). Requests over the budget answer:
+
+```
+429 Too Many Requests
+Retry-After: 60
+{ "error": "Too many pairing attempts. Try again in a minute." }
+```
+
+Rate-limited requests never reach the handler, so a one-time init code or PIN
+attempt is not consumed.
 
 ---
 
@@ -638,8 +674,11 @@ Fully destroy a session. Removes from memory, resets task status to `not_started
 ### Connection
 
 ```
-ws://<host>:20620/ws?token=<auth_token>
+ws://<host>:20620/ws?token=<session_token>
 ```
+
+The upgrade is refused with `401` when the token is unknown, revoked or
+expired.
 
 After connection, the server streams all real-time events as JSON messages. The client does not send messages over WebSocket (all actions go through REST API).
 

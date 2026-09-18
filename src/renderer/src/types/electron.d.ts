@@ -376,14 +376,18 @@ interface ElectronAPI {
   }
   mobile: {
     getInfo: () => Promise<{
+      enabled: boolean
+      lanAccess: boolean
+      sessionIdleDays: number
       url: string
       port: number
-      lanUrl: string
+      lanUrl: string | null
       tunnelUrl: string | null
       tunnelActive: boolean
       remoteMode: 'quick' | 'custom'
       customUrl: string | null
     }>
+    setAccess: (options: { enabled?: boolean; lanAccess?: boolean; sessionIdleDays?: number }) => Promise<{ enabled: boolean; lanAccess: boolean; sessionIdleDays: number; listening: boolean }>
     startTunnel: () => Promise<{ tunnelUrl: string }>
     stopTunnel: () => Promise<{ success: boolean }>
     setCustomUrl: (url: string) => Promise<{ url: string }>

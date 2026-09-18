@@ -2,10 +2,20 @@ import { ipcMain } from 'electron'
 import { networkInterfaces } from 'os'
 import { randomUUID } from 'crypto'
 import { startTunnel, stopTunnel, getTunnelUrl, isTunnelActive } from '../tunnel-manager'
-import { getPendingPin } from '../mobile-api-server'
+import {
+  applyMobileAccessSettings,
+  getMobileSessionIdleDays,
+  getPendingPin,
+  isMobileAccessEnabled,
+  isMobileLanAccessEnabled,
+  MOBILE_ACCESS_ENABLED_SETTING,
+  MOBILE_API_PORT,
+  MOBILE_LAN_ACCESS_SETTING,
+  MOBILE_SESSION_IDLE_DAYS_SETTING
+} from '../mobile-api-server'
 import type { IpcDeps } from './deps'
 
-const MOBILE_PORT = 20620
+const MOBILE_PORT = MOBILE_API_PORT
 const INIT_CODE_TTL_SECONDS = 300
 const INVALID_URL_MESSAGE = 'Enter a valid URL starting with http:// or https://'
 
@@ -31,24 +41,51 @@ export function registerMobileHandlers({ db }: IpcDeps): void {
 
   ipcMain.handle('mobile:getInfo', () => {
     const initCode = generateInitCode()
+    const enabled = isMobileAccessEnabled(db)
+    const lanAccess = isMobileLanAccessEnabled(db)
     const lanIp = firstLanIPv4()
     const remoteMode: 'quick' | 'custom' = db.getSetting('mobile_remote_mode') === 'custom' ? 'custom' : 'quick'
     const customUrl = db.getSetting('mobile_custom_url') || null
     const remoteBaseUrl = remoteMode === 'custom' ? customUrl : getTunnelUrl()
-    const baseUrl = remoteBaseUrl ?? `http://${lanIp}:${MOBILE_PORT}`
+    // Without LAN access the server listens on 127.0.0.1 only, so a LAN URL
+    // would not work from a phone.
+    const lanUrl = enabled && lanAccess ? `http://${lanIp}:${MOBILE_PORT}/pair?code=${initCode}` : null
+    const baseUrl = remoteBaseUrl ?? `http://${lanAccess ? lanIp : '127.0.0.1'}:${MOBILE_PORT}`
 
     return {
+      enabled,
+      lanAccess,
+      sessionIdleDays: getMobileSessionIdleDays(db),
       url: `${baseUrl}/pair?code=${initCode}`,
       port: MOBILE_PORT,
-      lanUrl: `http://${lanIp}:${MOBILE_PORT}/pair?code=${initCode}`,
-      tunnelUrl: remoteBaseUrl ? `${remoteBaseUrl}/pair?code=${initCode}` : null,
+      lanUrl,
+      tunnelUrl: enabled && remoteBaseUrl ? `${remoteBaseUrl}/pair?code=${initCode}` : null,
       tunnelActive: remoteMode === 'custom' ? Boolean(customUrl) : isTunnelActive(),
       remoteMode,
       customUrl
     }
   })
 
+  // Mobile access and LAN exposure are opt-in; changing either starts, stops
+  // or rebinds the mobile API server immediately.
+  ipcMain.handle('mobile:setAccess', async (_, options: { enabled?: boolean; lanAccess?: boolean; sessionIdleDays?: number }) => {
+    if (typeof options.enabled === 'boolean') db.setSetting(MOBILE_ACCESS_ENABLED_SETTING, options.enabled ? 'true' : 'false')
+    if (typeof options.lanAccess === 'boolean') db.setSetting(MOBILE_LAN_ACCESS_SETTING, options.lanAccess ? 'true' : 'false')
+    if (typeof options.sessionIdleDays === 'number' && Number.isFinite(options.sessionIdleDays) && options.sessionIdleDays > 0) {
+      db.setSetting(MOBILE_SESSION_IDLE_DAYS_SETTING, String(options.sessionIdleDays))
+    }
+    if (options.enabled === false) stopTunnel()
+    const port = await applyMobileAccessSettings()
+    return {
+      enabled: isMobileAccessEnabled(db),
+      lanAccess: isMobileLanAccessEnabled(db),
+      sessionIdleDays: getMobileSessionIdleDays(db),
+      listening: port != null
+    }
+  })
+
   ipcMain.handle('mobile:startTunnel', async () => {
+    if (!isMobileAccessEnabled(db)) throw new Error('Turn on mobile access first.')
     const url = await startTunnel(MOBILE_PORT)
     // Only persist 'quick' mode once the tunnel actually connects — if
     // startTunnel() throws, the mode setting must stay whatever it was before

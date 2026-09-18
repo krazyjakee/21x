@@ -366,14 +366,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   mobile: {
     getInfo: (): Promise<{
+      enabled: boolean
+      lanAccess: boolean
+      sessionIdleDays: number
       url: string
       port: number
-      lanUrl: string
+      lanUrl: string | null
       tunnelUrl: string | null
       tunnelActive: boolean
       remoteMode: 'quick' | 'custom'
       customUrl: string | null
     }> => ipcRenderer.invoke('mobile:getInfo'),
+    setAccess: (options: { enabled?: boolean; lanAccess?: boolean; sessionIdleDays?: number }): Promise<{ enabled: boolean; lanAccess: boolean; sessionIdleDays: number; listening: boolean }> =>
+      ipcRenderer.invoke('mobile:setAccess', options),
     startTunnel: (): Promise<{ tunnelUrl: string }> =>
       ipcRenderer.invoke('mobile:startTunnel'),
     stopTunnel: (): Promise<{ success: boolean }> =>

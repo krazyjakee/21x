@@ -302,9 +302,12 @@ export const updaterApi = {
 
 export const mobileApi = {
   getInfo: (): Promise<{
+    enabled: boolean
+    lanAccess: boolean
+    sessionIdleDays: number
     url: string
     port: number
-    lanUrl: string
+    lanUrl: string | null
     tunnelUrl: string | null
     tunnelActive: boolean
     remoteMode: 'quick' | 'custom'
@@ -312,7 +315,13 @@ export const mobileApi = {
   }> => {
     return (
       window.electronAPI?.mobile?.getInfo() ??
-      Promise.resolve({ url: '', port: 0, lanUrl: '', tunnelUrl: null, tunnelActive: false, remoteMode: 'quick', customUrl: null })
+      Promise.resolve({ enabled: false, lanAccess: false, sessionIdleDays: 7, url: '', port: 0, lanUrl: null, tunnelUrl: null, tunnelActive: false, remoteMode: 'quick', customUrl: null })
+    )
+  },
+  setAccess: (options: { enabled?: boolean; lanAccess?: boolean; sessionIdleDays?: number }): Promise<{ enabled: boolean; lanAccess: boolean; sessionIdleDays: number; listening: boolean }> => {
+    return (
+      window.electronAPI?.mobile?.setAccess(options) ??
+      Promise.resolve({ enabled: false, lanAccess: false, sessionIdleDays: 7, listening: false })
     )
   },
   startTunnel: (): Promise<{ tunnelUrl: string }> => {

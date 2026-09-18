@@ -37,7 +37,7 @@ import { setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTr
 import { setTaskAutomationTrigger, setTaskSchedulers } from './task-updates'
 import { startSecretBroker, stopSecretBroker, writeSecretShellWrapper } from './secret-broker'
 import { isMainWindowUrl } from './main-window-url'
-import { startMobileApiServer, stopMobileApiServer, broadcastToMobileClients, setMobileApiNotifier } from './mobile-api-server'
+import { applyMobileAccessSettings, setMobileApiDeps, stopMobileApiServer, broadcastToMobileClients, setMobileApiNotifier } from './mobile-api-server'
 import { registerUpdaterIpc, initAutoUpdater, isUpdateDownloaded, getPendingVersion } from './auto-updater'
 import { initCrashLogger } from './crash-logger'
 import { installProcessStreamErrorHandlers } from './process-stream-errors'
@@ -786,11 +786,13 @@ app.whenReady().then(async () => {
     console.error('[Main] Failed to start secret broker:', err)
   }
 
-  // Start mobile API server
+  // Start mobile API server — only when mobile access is enabled in Settings.
+  // The mobile IPC handlers re-apply the settings when they change.
   try {
     agentManager.addExternalListener(broadcastToMobileClients)
-    const mobilePort = await startMobileApiServer(db, agentManager, githubManager!, undefined, syncManager, pluginRegistry, gitlabManager, forgejoManager)
-    console.log(`[Main] Mobile API server started on port ${mobilePort}`)
+    setMobileApiDeps({ db, agentManager, githubManager: githubManager!, syncManager, pluginRegistry, gitlabManager, forgejoManager })
+    const mobilePort = await applyMobileAccessSettings()
+    console.log(mobilePort == null ? '[Main] Mobile access disabled; mobile API server not started' : `[Main] Mobile API server started on port ${mobilePort}`)
   } catch (err) {
     console.error('[Main] Failed to start mobile API server:', err)
   }
