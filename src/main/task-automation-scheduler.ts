@@ -1,6 +1,7 @@
 import type { DatabaseManager, TaskRecord } from './database'
 import type { AgentManager } from './agent-manager'
 import { TaskStatus } from '../shared/constants'
+import { isSuccessorGraphInProgress } from '../shared/subtask-graph'
 
 /**
  * TaskAutomationScheduler — makes `auto_start_agent` and
@@ -213,6 +214,9 @@ export class TaskAutomationScheduler {
     const subtasks = this.dbManager.getSubtasks(parentId)
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
     if (subtasks.length === 0) return null
+    // Successor edges own sequencing once the run has begun: AgentManager
+    // starts the selected successors or wakes the parent to decide.
+    if (isSuccessorGraphInProgress(subtasks)) return null
 
     const active = subtasks.some(
       (subtask) =>

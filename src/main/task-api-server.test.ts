@@ -931,7 +931,7 @@ describe('/create_subtask automation inheritance', () => {
     expect(flagsOf(created.task.id).auto_complete_without_review).toBe(1)
   })
 
-  it('does not pass auto_start_agent down — children run through their parent, in order', async () => {
+  it('does not pass auto_start_agent down — the parent and successor graph start children', async () => {
     const parent = db.createTask(makeTask({ title: 'Parent', auto_start_agent: true }))!
     const port = await startTaskApiServer(db)
 
@@ -978,5 +978,52 @@ describe('/create_subtask automation inheritance', () => {
 
     expect(trigger).toHaveBeenCalled()
     setTaskAutomationTrigger(null)
+  })
+})
+
+describe('successor edges over the task API', () => {
+  const post = async <T>(port: number, route: string, body: Record<string, unknown>): Promise<T> => {
+    const response = await fetch(`http://127.0.0.1:${port}${route}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getTaskApiToken()}` },
+      body: JSON.stringify(body)
+    })
+    return (await response.json()) as T
+  }
+
+  it('sets sibling successors through /update_task and rejects non-siblings', async () => {
+    const parent = db.createTask(makeTask({ title: 'Parent' }))!
+    const first = db.createTask(makeTask({ title: 'First', parent_task_id: parent.id }))!
+    const second = db.createTask(makeTask({ title: 'Second', parent_task_id: parent.id }))!
+    const outsider = db.createTask(makeTask({ title: 'Outsider' }))!
+    const port = await startTaskApiServer(db)
+
+    const ok = await post<{ task: { next_subtask_ids: string[] } }>(port, '/update_task', {
+      task_id: first.id, next_subtask_ids: [second.id]
+    })
+    expect(ok.task.next_subtask_ids).toEqual([second.id])
+
+    const rejected = await post<{ error?: string }>(port, '/update_task', {
+      task_id: first.id, next_subtask_ids: [outsider.id]
+    })
+    expect(rejected.error).toContain('must be a sibling')
+    expect(db.getTask(first.id)?.next_subtask_ids).toEqual([second.id])
+  })
+
+  it('creates a subtask with successors and drops it when the edge is invalid', async () => {
+    const parent = db.createTask(makeTask({ title: 'Parent' }))!
+    const existing = db.createTask(makeTask({ title: 'Existing', parent_task_id: parent.id }))!
+    const port = await startTaskApiServer(db)
+
+    const created = await post<{ task: { id: string; next_subtask_ids: string[] } }>(port, '/create_subtask', {
+      parent_task_id: parent.id, title: 'New', next_subtask_ids: [existing.id]
+    })
+    expect(created.task.next_subtask_ids).toEqual([existing.id])
+
+    const rejected = await post<{ error?: string }>(port, '/create_subtask', {
+      parent_task_id: parent.id, title: 'Bad', next_subtask_ids: ['missing-task']
+    })
+    expect(rejected.error).toContain('must be a sibling')
+    expect(db.getSubtasks(parent.id).map((t) => t.title)).not.toContain('Bad')
   })
 })

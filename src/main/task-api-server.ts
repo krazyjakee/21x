@@ -493,6 +493,10 @@ export async function handleRoute(db: DatabaseManager, route: string, params: Re
       }
       if (params.priority) data.priority = params.priority as UpdateTaskData['priority']
       if (params.output_fields !== undefined) data.output_fields = params.output_fields as UpdateTaskData['output_fields']
+      if (params.next_subtask_ids !== undefined) {
+        if (!Array.isArray(params.next_subtask_ids)) return { error: 'next_subtask_ids must be an array' }
+        data.next_subtask_ids = params.next_subtask_ids as string[]
+      }
 
       if (Object.keys(data).length === 0) return { error: 'No updates provided' }
 
@@ -1064,7 +1068,7 @@ export async function handleRoute(db: DatabaseManager, route: string, params: Re
         // A child of a parent told to finish without review must not stop for
         // one either, or an unattended chain parks in review at the first step.
         // auto_start_agent is deliberately NOT inherited: children are started
-        // through their parent, one at a time, in sort_order.
+        // through their parent and then by explicit successor edges.
         params.auto_complete_without_review === undefined
           ? (parentTask.auto_complete_without_review ? 1 : 0)
           : (params.auto_complete_without_review === true ? 1 : 0),
@@ -1073,7 +1077,17 @@ export async function handleRoute(db: DatabaseManager, route: string, params: Re
       )
 
       const subtask = rawDb.prepare('SELECT * FROM tasks WHERE id = ?').get(subtaskId) as Record<string, unknown>
-      const parsedSubtask = parseTask(subtask)
+      let parsedSubtask = parseTask(subtask)
+
+      if (params.next_subtask_ids !== undefined) {
+        try {
+          db.updateTask(subtaskId, { next_subtask_ids: params.next_subtask_ids as string[] })
+          parsedSubtask = parseTask(rawDb.prepare('SELECT * FROM tasks WHERE id = ?').get(subtaskId) as Record<string, unknown>)
+        } catch (err) {
+          rawDb.prepare('DELETE FROM tasks WHERE id = ?').run(subtaskId)
+          return { error: err instanceof Error ? err.message : String(err) }
+        }
+      }
 
       // Notify renderer
       if (notifyRenderer) {
@@ -1350,6 +1364,7 @@ function parseTask(task: Record<string, unknown>) {
   task.attachments = safeParseArray(task.attachments as string)
   task.output_fields = safeParseArray(task.output_fields as string)
   task.repos = safeParseArray(task.repos as string)
+  task.next_subtask_ids = safeParseArray(task.next_subtask_ids as string)
   task.feedback_rating = task.feedback_rating ?? null
   task.feedback_comment = task.feedback_comment ?? null
   return task

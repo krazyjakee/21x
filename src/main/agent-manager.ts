@@ -220,6 +220,8 @@ export class AgentManager extends EventEmitter {
   /** Parents currently being woken after subtask completion (dedupe guard so
    *  several subtasks finishing at once produce a single wake-up). */
   private wakingParents: Set<string> = new Set()
+  /** Completed subtasks whose explicit successor edges are being followed. */
+  private routingCompletedSubtasks: Set<string> = new Set()
 
   /** Sessions currently being re-registered for polling after late adapter data
    *  (dedupe guard so a burst of buffered messages produces a single wake-up). */
@@ -3243,11 +3245,59 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
    *   parent with several children still gets a single wake-up instead of one
    *   per child.
    * - A dedupe set prevents double-wakes when several children finish at once.
+   * - A completed subtask with `next_subtask_ids` starts those siblings instead
+   *   of waking the parent. The parent is woken at once (even mid-pipeline) if
+   *   a selected successor is missing, has no agent, or fails to start.
    */
   async notifyParentOfSubtaskCompletion(parentTaskId: string, subtaskId: string): Promise<void> {
     const parentTask = this.db.getTask(parentTaskId)
     if (!parentTask) return
     if (parentTask.status === TaskStatus.Completed) return
+
+    const completedSubtask = this.db.getTask(subtaskId)
+    const nextSubtaskIds = completedSubtask?.status === TaskStatus.Completed
+      ? completedSubtask.next_subtask_ids ?? []
+      : []
+    let routingIssue: string | null = null
+
+    if (nextSubtaskIds.length > 0) {
+      if (this.routingCompletedSubtasks.has(subtaskId)) return
+      this.routingCompletedSubtasks.add(subtaskId)
+      try {
+        const siblings = new Map(this.db.getSubtasks(parentTaskId).map((task) => [task.id, task]))
+        let hasPendingSuccessor = false
+        for (const nextSubtaskId of nextSubtaskIds) {
+          const nextSubtask = siblings.get(nextSubtaskId)
+          if (!nextSubtask) {
+            routingIssue = `Selected successor ${nextSubtaskId} no longer exists.`
+            continue
+          }
+          if (nextSubtask.status === TaskStatus.Completed) continue
+          if (nextSubtask.status !== TaskStatus.NotStarted) {
+            hasPendingSuccessor = true
+            continue
+          }
+          if (!nextSubtask.agent_id) {
+            routingIssue = `Selected successor ${nextSubtaskId} has no agent assigned.`
+            continue
+          }
+          try {
+            const result = await this.startTask(nextSubtaskId, { preferSubtasks: false, allowTriage: false })
+            if (result.action === 'no_action') routingIssue = `Selected successor ${nextSubtaskId} could not start.`
+            else hasPendingSuccessor = true
+          } catch (err) {
+            console.error(`[AgentManager] Failed to start successor ${nextSubtaskId} after subtask ${subtaskId}:`, err)
+            routingIssue = `Selected successor ${nextSubtaskId} failed to start.`
+          }
+        }
+        if (!hasPendingSuccessor && !routingIssue) {
+          routingIssue = 'All selected successors are already completed.'
+        }
+      } finally {
+        this.routingCompletedSubtasks.delete(subtaskId)
+      }
+      if (!routingIssue) return
+    }
 
     const live = this.findSessionByTaskId(parentTaskId)
     if (live && live.session.status !== 'idle') {
@@ -3265,10 +3315,11 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
     // children and then went idle must be told the pipeline drained so it can
     // start the next not_started child, spawn follow-ups, or consolidate,
     // instead of being left suspended while work sits in not_started.
+    // A successor-routing problem needs a decision now, even mid-pipeline.
     const stillWorking = subtasks.some(
       (s) => s.status === TaskStatus.AgentWorking || s.status === TaskStatus.Triaging
     )
-    if (stillWorking) {
+    if (!routingIssue && stillWorking) {
       console.log(
         `[AgentManager] Subtask ${subtaskId} terminal, but parent ${parentTaskId} still has a subtask being worked on — deferring wake-up`
       )
@@ -3284,16 +3335,22 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
       const allTerminal = subtasks.every(
         (s) => s.status === TaskStatus.ReadyForReview || s.status === TaskStatus.Completed
       )
-      const instructions = allTerminal
-        ? `Use \`get_task\` / \`list_subtasks\` via the task-management MCP server to review their outputs, ` +
-          `then continue coordination: consolidate results, fill in the parent task's output fields, ` +
-          `and complete the task — or create follow-up subtasks if more work is needed.`
-        : `Use \`get_task\` / \`list_subtasks\` via the task-management MCP server to review the ready subtask's outputs, ` +
-          `then continue coordination: start the next not_started subtask, create follow-up subtasks if more work ` +
-          `is needed, or consolidate results and complete the task.`
-      const header = allTerminal
-        ? 'All subtasks of this task have reached a terminal state.'
-        : 'No subtask of this task is in agent_working anymore — the last one reached ready_for_review.'
+      const instructions = routingIssue
+        ? `Use \`get_task\` / \`list_subtasks\` via the task-management MCP server to review the current agenda, ` +
+          `then decide which sibling subtask to start next, fix its successor links or agent assignment, ` +
+          `or complete the task if no more work is needed.`
+        : allTerminal
+          ? `Use \`get_task\` / \`list_subtasks\` via the task-management MCP server to review their outputs, ` +
+            `then continue coordination: consolidate results, fill in the parent task's output fields, ` +
+            `and complete the task — or create follow-up subtasks if more work is needed.`
+          : `Use \`get_task\` / \`list_subtasks\` via the task-management MCP server to review the ready subtask's outputs, ` +
+            `then continue coordination: start the next not_started subtask, create follow-up subtasks if more work ` +
+            `is needed, or consolidate results and complete the task.`
+      const header = routingIssue
+        ? `Subtask ${subtaskId} completed, but its selected next subtasks could not all be started: ${routingIssue}`
+        : allTerminal
+          ? 'All subtasks of this task have reached a terminal state.'
+          : 'No subtask of this task is in agent_working anymore — the last one reached ready_for_review.'
       // Subtask titles are agent-authored text. Fencing them and stating the authority
       // boundary keeps a wake-up from reading as a human go-ahead for privileged work.
       const message = buildSystemMessage(
@@ -3307,7 +3364,7 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
         summary,
         instructions
       )
-      console.log(`[AgentManager] Waking parent coordinator ${parentTaskId}: no subtask in agent_working (${subtasks.length} subtask(s))`)
+      console.log(`[AgentManager] Waking parent coordinator ${parentTaskId} after subtask ${subtaskId}${routingIssue ? ' (successor routing issue)' : ''}`)
       await this.sendByTaskId(parentTaskId, message)
     } finally {
       this.wakingParents.delete(parentTaskId)

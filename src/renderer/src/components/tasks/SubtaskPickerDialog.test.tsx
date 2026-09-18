@@ -38,6 +38,7 @@ function makeTask(id: string, title: string, status = TaskStatus.NotStarted): Ta
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     parent_task_id: 'parent-1',
+    next_subtask_ids: [],
     sort_order: 0
   }
 }
