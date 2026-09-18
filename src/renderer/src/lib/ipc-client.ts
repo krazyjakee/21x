@@ -1,5 +1,5 @@
-import type { Task, CreateTaskDTO, UpdateTaskDTO, FileAttachment, Agent, CreateAgentDTO, UpdateAgentDTO, McpServer, CreateMcpServerDTO, UpdateMcpServerDTO, Skill, CreateSkillDTO, UpdateSkillDTO, Secret, CreateSecretDTO, UpdateSecretDTO, TaskSource, CreateTaskSourceDTO, UpdateTaskSourceDTO, SyncResult, PluginMeta, ConfigFieldSchema, ConfigFieldOption, PluginAction, ActionResult, SourceUser, ReassignResult, MarketplaceSource, InstalledPlugin, DiscoverablePlugin, MarketplaceCatalog, PluginResources } from '@/types'
-import type { AgentOutputEvent, AgentOutputBatchEvent, AgentStatusEvent, AgentApprovalRequest, GhCliStatus, GlabCliStatus, GitHubRepo, GitHubCollaborator, WorktreeProgressEvent, WorkspaceCleanupProgressEvent, McpTestResult, SkillSyncResult, DepsStatus, AgentMessageAttachment, TranscriptPartRecord, TranscriptChangedEvent } from '@/types/electron'
+import type { Task, CreateTaskDTO, UpdateTaskDTO, FileAttachment, Agent, CreateAgentDTO, UpdateAgentDTO, McpServer, CreateMcpServerDTO, UpdateMcpServerDTO, Skill, CreateSkillDTO, UpdateSkillDTO, Secret, CreateSecretDTO, UpdateSecretDTO, TaskSource, CreateTaskSourceDTO, UpdateTaskSourceDTO, SyncResult, PluginMeta, ConfigFieldOption, ActionResult, SourceUser, ReassignResult, MarketplaceSource, InstalledPlugin, DiscoverablePlugin, MarketplaceCatalog, PluginResources } from '@/types'
+import type { AgentOutputEvent, AgentOutputBatchEvent, AgentStatusEvent, GhCliStatus, GlabCliStatus, GitHubRepo, WorktreeProgressEvent, WorkspaceCleanupProgressEvent, McpTestResult, AgentMessageAttachment, TranscriptPartRecord, TranscriptChangedEvent } from '@/types/electron'
 import type { ArtifactApi } from '@shared/artifacts'
 import type {
   MicrophonePermission,
@@ -63,10 +63,6 @@ export const mcpServerApi = {
     return window.electronAPI.mcpServers.getAll()
   },
 
-  getById: (id: string): Promise<McpServer | undefined> => {
-    return window.electronAPI.mcpServers.get(id)
-  },
-
   create: (data: CreateMcpServerDTO): Promise<McpServer> => {
     return window.electronAPI.mcpServers.create(data)
   },
@@ -107,10 +103,6 @@ export const mcpServerApi = {
 export const agentApi = {
   getAll: (): Promise<Agent[]> => {
     return window.electronAPI.agents.getAll()
-  },
-
-  getById: (id: string): Promise<Agent | undefined> => {
-    return window.electronAPI.agents.get(id)
   },
 
   create: (data: CreateAgentDTO): Promise<Agent> => {
@@ -163,18 +155,6 @@ export const agentSessionApi = {
     if (requestId) return window.electronAPI.agentSession.approve(sessionId, approved, message, responseType, requestId)
     if (responseType) return window.electronAPI.agentSession.approve(sessionId, approved, message, responseType)
     return window.electronAPI.agentSession.approve(sessionId, approved, message)
-  },
-
-  syncSkills: (sessionId: string): Promise<SkillSyncResult> => {
-    return window.electronAPI.agentSession.syncSkills(sessionId)
-  },
-
-  syncSkillsForTask: (taskId: string): Promise<SkillSyncResult> => {
-    return window.electronAPI.agentSession.syncSkillsForTask(taskId)
-  },
-
-  learnFromSession: (sessionId: string, message: string): Promise<SkillSyncResult> => {
-    return window.electronAPI.agentSession.learnFromSession(sessionId, message)
   },
 
   getRawTranscript: (taskId: string): Promise<Array<{ role: string; parts: Array<{ type: string; content?: string; tool?: { name: string; status?: string; input?: string; output?: string; error?: string } }> }>> => {
@@ -262,10 +242,6 @@ export const onTranscriptChanged = (callback: (event: TranscriptChangedEvent) =>
 
 export const onAgentStatus = (callback: (event: AgentStatusEvent) => void): (() => void) => {
   return window.electronAPI.onAgentStatus(callback)
-}
-
-export const onAgentApproval = (callback: (event: AgentApprovalRequest) => void): (() => void) => {
-  return window.electronAPI.onAgentApproval(callback)
 }
 
 export const onAgentIncompatibleSession = (callback: (event: { taskId: string; agentId: string; error: string }) => void): (() => void) => {
@@ -363,11 +339,11 @@ export const mobileApi = {
   revokeAllSessions: (): Promise<{ success: boolean }> => {
     return window.electronAPI?.mobile?.revokeAllSessions() ?? Promise.resolve({ success: false })
   },
-  onPairingInitiated: (fn: (data: { pin: string; pairCodeId: string; expiresAt: number }) => void): void => {
-    window.electronAPI?.mobile?.onPairingInitiated(fn)
+  onPairingInitiated: (fn: (data: { pin: string; pairCodeId: string; expiresAt: number }) => void): (() => void) => {
+    return window.electronAPI?.mobile?.onPairingInitiated(fn) ?? (() => {})
   },
-  onDeviceConnected: (fn: (data: { sessionId: string; deviceName: string }) => void): void => {
-    window.electronAPI?.mobile?.onDeviceConnected(fn)
+  onDeviceConnected: (fn: (data: { sessionId: string; deviceName: string }) => void): (() => void) => {
+    return window.electronAPI?.mobile?.onDeviceConnected(fn) ?? (() => {})
   }
 }
 
@@ -383,18 +359,12 @@ export const githubApi = {
   },
   fetchUserRepos: (): Promise<GitHubRepo[]> => {
     return window.electronAPI.github.fetchUserRepos()
-  },
-  fetchCollaborators: (owner: string, repo: string): Promise<GitHubCollaborator[]> => {
-    return window.electronAPI.github.fetchCollaborators(owner, repo)
   }
 }
 
 export const gitlabApi = {
   checkCli: (): Promise<GlabCliStatus> => {
     return window.electronAPI.gitlab.checkCli()
-  },
-  startAuth: (): Promise<void> => {
-    return window.electronAPI.gitlab.startAuth()
   },
   fetchOrgs: (): Promise<string[]> => {
     return window.electronAPI.gitlab.fetchOrgs()
@@ -410,10 +380,6 @@ export const gitlabApi = {
 export const taskSourceApi = {
   getAll: (): Promise<TaskSource[]> => {
     return window.electronAPI.taskSources.getAll()
-  },
-
-  getById: (id: string): Promise<TaskSource | undefined> => {
-    return window.electronAPI.taskSources.get(id)
   },
 
   create: (data: CreateTaskSourceDTO): Promise<TaskSource> => {
@@ -450,10 +416,6 @@ export const skillApi = {
     return window.electronAPI.skills.getAll()
   },
 
-  getById: (id: string): Promise<Skill | undefined> => {
-    return window.electronAPI.skills.get(id)
-  },
-
   create: (data: CreateSkillDTO): Promise<Skill> => {
     return window.electronAPI.skills.create(data)
   },
@@ -472,10 +434,6 @@ export const secretApi = {
     return window.electronAPI.secrets.getAll()
   },
 
-  getById: (id: string): Promise<Secret | undefined> => {
-    return window.electronAPI.secrets.get(id)
-  },
-
   create: (data: CreateSecretDTO): Promise<Secret> => {
     return window.electronAPI.secrets.create(data)
   },
@@ -489,19 +447,9 @@ export const secretApi = {
   }
 }
 
-export const depsApi = {
-  check: (): Promise<DepsStatus> => window.electronAPI.deps.check(),
-  setOpencodePath: (dirPath: string): Promise<{ success: boolean; error?: string }> =>
-    window.electronAPI.deps.setOpencodePath(dirPath)
-}
-
 export const pluginApi = {
   list: (): Promise<PluginMeta[]> => {
     return window.electronAPI.plugins.list()
-  },
-
-  getConfigSchema: (pluginId: string): Promise<ConfigFieldSchema[]> => {
-    return window.electronAPI.plugins.getConfigSchema(pluginId)
   },
 
   getDocumentation: (pluginId: string): Promise<string | null> => {
@@ -510,10 +458,6 @@ export const pluginApi = {
 
   resolveOptions: (pluginId: string, resolverKey: string, config: Record<string, unknown>, mcpServerId?: string, sourceId?: string): Promise<ConfigFieldOption[]> => {
     return window.electronAPI.plugins.resolveOptions(pluginId, resolverKey, config, mcpServerId, sourceId)
-  },
-
-  getActions: (pluginId: string, config: Record<string, unknown>): Promise<PluginAction[]> => {
-    return window.electronAPI.plugins.getActions(pluginId, config)
   },
 
   executeAction: (actionId: string, taskId: string, sourceId: string, input?: string): Promise<ActionResult> => {
@@ -622,7 +566,6 @@ export const voiceApi = {
   getRuntime: (): Promise<VoiceRuntimeStatus> => window.electronAPI.voice.getRuntime(),
   installRuntime: (): Promise<VoiceRuntimeStatus> => window.electronAPI.voice.installRuntime(),
   removeRuntime: (): Promise<VoiceRuntimeStatus> => window.electronAPI.voice.removeRuntime(),
-  listModels: (): Promise<VoiceModelState[]> => window.electronAPI.voice.listModels(),
   installModel: (id: string): Promise<VoiceModelState> => window.electronAPI.voice.installModel(id),
   removeModel: (id: string): Promise<VoiceModelState[]> => window.electronAPI.voice.removeModel(id),
   selectModel: (id: string): Promise<VoiceModelState[]> => window.electronAPI.voice.selectModel(id),

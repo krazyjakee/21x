@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { getGitProviderApi, getProviderLabel } from './git-provider-api'
+import { getGitProviderApi } from './git-provider-api'
 
 // Mock the ipc-client module
 vi.mock('./ipc-client', () => ({
@@ -42,19 +42,5 @@ describe('getGitProviderApi', () => {
     const glApi = getGitProviderApi('gitlab')
     // They should be different objects referencing different underlying APIs
     expect(ghApi.checkCli).not.toBe(glApi.checkCli)
-  })
-})
-
-describe('getProviderLabel', () => {
-  it('returns "GitHub" for null', () => {
-    expect(getProviderLabel(null)).toBe('GitHub')
-  })
-
-  it('returns "GitHub" for github', () => {
-    expect(getProviderLabel('github')).toBe('GitHub')
-  })
-
-  it('returns "GitLab" for gitlab', () => {
-    expect(getProviderLabel('gitlab')).toBe('GitLab')
   })
 })

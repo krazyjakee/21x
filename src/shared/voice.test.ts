@@ -2,8 +2,6 @@ import { describe, it, expect } from 'vitest'
 import {
   canTransition,
   MOBILE_VOICE_CAPABILITIES,
-  VOICE_FRAME_SAMPLES,
-  VOICE_SAMPLE_RATE,
   VOICE_TRANSITIONS,
   type VoiceState,
 } from './voice'
@@ -42,13 +40,6 @@ describe('voice state machine', () => {
 
   it('treats a repeated state as legal', () => {
     for (const state of ALL_STATES) expect(canTransition(state, state)).toBe(true)
-  })
-})
-
-describe('voice audio format', () => {
-  it('uses 16 kHz mono with 20 ms frames', () => {
-    expect(VOICE_SAMPLE_RATE).toBe(16000)
-    expect(VOICE_FRAME_SAMPLES / VOICE_SAMPLE_RATE).toBeCloseTo(0.02)
   })
 })
 

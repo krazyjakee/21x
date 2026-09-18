@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest'
 import { vi } from 'vitest'
-import type { AgentOutputEvent, AgentOutputBatchEvent, AgentStatusEvent, AgentApprovalRequest, WorktreeProgressEvent } from '../src/renderer/src/types/electron'
+import type { AgentOutputEvent, AgentOutputBatchEvent, AgentStatusEvent, WorktreeProgressEvent } from '../src/renderer/src/types/electron'
 import type { Task } from '../src/renderer/src/types/index'
 
 // Suppress React act() warnings in happy-dom
@@ -12,7 +12,6 @@ export const eventCallbacks = {
   onAgentOutputBatch: null as ((event: AgentOutputBatchEvent) => void) | null,
   onTranscriptChanged: null as ((event: unknown) => void) | null,
   onAgentStatus: null as ((event: AgentStatusEvent) => void) | null,
-  onAgentApproval: null as ((event: AgentApprovalRequest) => void) | null,
   onOverdueCheck: null as (() => void) | null,
   onTaskUpdated: null as ((event: { taskId: string; updates: Partial<Task> }) => void) | null,
   onTaskDeleted: null as ((event: { taskId: string }) => void) | null,
@@ -154,10 +153,6 @@ const mockElectronAPI = {
   }),
   onAgentStatus: vi.fn((cb: (event: AgentStatusEvent) => void) => {
     eventCallbacks.onAgentStatus = cb
-    return vi.fn()
-  }),
-  onAgentApproval: vi.fn((cb: (event: AgentApprovalRequest) => void) => {
-    eventCallbacks.onAgentApproval = cb
     return vi.fn()
   }),
   onAgentIncompatibleSession: vi.fn((_cb: (event: { taskId: string; agentId: string; error: string }) => void) => {

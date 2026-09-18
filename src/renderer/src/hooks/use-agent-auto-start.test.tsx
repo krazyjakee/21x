@@ -103,7 +103,6 @@ describe('useAgentAutoStart', () => {
       useAgentAutoStart({
         tasks: [task],
         agents: [triageAgent],
-        sessions: new Map(),
         showToast: vi.fn()
       })
     )
@@ -135,7 +134,6 @@ describe('useAgentAutoStart', () => {
       useAgentAutoStart({
         tasks: [templateTask],
         agents: [triageAgent],
-        sessions: new Map(),
         showToast: vi.fn()
       })
     )
@@ -166,7 +164,6 @@ describe('useAgentAutoStart', () => {
       useAgentAutoStart({
         tasks: [templateTask],
         agents: [agent],
-        sessions: new Map(),
         showToast: vi.fn()
       })
     )
@@ -193,7 +190,6 @@ describe('useAgentAutoStart', () => {
       useAgentAutoStart({
         tasks: [instanceTask],
         agents: [triageAgent],
-        sessions: new Map(),
         showToast: vi.fn()
       })
     )
@@ -223,7 +219,6 @@ describe('useAgentAutoStart', () => {
       useAgentAutoStart({
         tasks: [task],
         agents: [triageAgent, assignedAgent],
-        sessions: new Map(),
         showToast: vi.fn()
       })
     )
@@ -277,7 +272,6 @@ describe('useAgentAutoStart', () => {
       useAgentAutoStart({
         tasks: [parentTask, subtask],
         agents: [agent],
-        sessions: new Map(),
         showToast: vi.fn()
       })
     )
@@ -315,7 +309,6 @@ describe('useAgentAutoStart', () => {
       useAgentAutoStart({
         tasks: [parentTask, subtask],
         agents: [agent],
-        sessions: new Map(),
         showToast: vi.fn()
       })
     )
@@ -362,7 +355,6 @@ describe('useAgentAutoStart', () => {
       useAgentAutoStart({
         tasks: [parentTask, subtask1, subtask2],
         agents: [agent],
-        sessions: new Map(),
         showToast: vi.fn()
       })
     )
@@ -408,7 +400,6 @@ describe('useAgentAutoStart', () => {
       useAgentAutoStart({
         tasks: [parentTask, subtask1, subtask2],
         agents: [agent],
-        sessions: new Map(),
         showToast: vi.fn()
       })
     )
@@ -461,7 +452,6 @@ describe('useAgentAutoStart', () => {
       useAgentAutoStart({
         tasks: [task],
         agents: [triageAgent, subtaskAgent],
-        sessions: new Map(),
         showToast: vi.fn()
       })
     )
@@ -534,7 +524,6 @@ describe('useAgentAutoStart', () => {
       useAgentAutoStart({
         tasks: [parentTask, subtask1, subtask2],
         agents: [agent],
-        sessions: new Map(),
         showToast: vi.fn()
       })
     )
@@ -607,7 +596,6 @@ describe('useAgentAutoStart', () => {
       useAgentAutoStart({
         tasks: [parentTask, subtask1, subtask2],
         agents: [agent],
-        sessions: new Map(),
         showToast: vi.fn()
       })
     )
@@ -660,7 +648,6 @@ describe('useAgentAutoStart', () => {
       useAgentAutoStart({
         tasks: [parentTask, subtask],
         agents: [agent],
-        sessions: new Map(),
         showToast: vi.fn()
       })
     )
@@ -697,7 +684,6 @@ describe('useAgentAutoStart', () => {
       useAgentAutoStart({
         tasks: [parentTask, subtask],
         agents: [agent],
-        sessions: new Map(),
         showToast: vi.fn()
       })
     )
@@ -734,7 +720,6 @@ describe('useAgentAutoStart', () => {
       useAgentAutoStart({
         tasks: [parentTask, subtask],
         agents: [agent],
-        sessions: new Map(),
         showToast: vi.fn()
       })
     )
@@ -790,7 +775,6 @@ describe('useAgentAutoStart', () => {
       useAgentAutoStart({
         tasks: [parentTask, subtask1, subtask2],
         agents: [agent],
-        sessions: new Map(),
         showToast: vi.fn()
       })
     )
@@ -834,7 +818,7 @@ describe('useAgentAutoStart', () => {
     it('does not start a recurring instance flagged auto_start_agent', async () => {
       const agent = makeAgent()
       renderHook(() =>
-        useAgentAutoStart({ tasks: [], agents: [agent], sessions: new Map(), showToast: vi.fn() })
+        useAgentAutoStart({ tasks: [], agents: [agent], showToast: vi.fn() })
       )
 
       // Fan out to EVERY registered listener, not just the last one — a
@@ -866,7 +850,7 @@ describe('useAgentAutoStart', () => {
     it('does not auto-complete a task that reaches ready_for_review', async () => {
       const task = makeTask({ id: 'task-ac', auto_complete_without_review: true })
       renderHook(() =>
-        useAgentAutoStart({ tasks: [task], agents: [makeAgent()], sessions: new Map(), showToast: vi.fn() })
+        useAgentAutoStart({ tasks: [task], agents: [makeAgent()], showToast: vi.fn() })
       )
 
       const updatedCallbacks = (mockElectronAPI.onTaskUpdated as unknown as Mock).mock.calls

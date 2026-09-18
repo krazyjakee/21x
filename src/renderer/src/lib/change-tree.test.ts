@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DiffFile } from './diff-parser'
-import { buildChangeTree, buildFileTree } from './change-tree'
+import { buildFileTree } from './change-tree'
 
 function file(path: string, additions: number, deletions: number): DiffFile {
   return {
@@ -15,14 +15,15 @@ function file(path: string, additions: number, deletions: number): DiffFile {
   }
 }
 
-describe('buildChangeTree', () => {
+describe('buildFileTree', () => {
   it('groups changed files into a sorted directory hierarchy with aggregate stats', () => {
-    const tree = buildChangeTree([
+    const files = [
       file('src/z.ts', 2, 1),
       file('README.md', 1, 0),
       file('src/components/Button.tsx', 5, 3),
       file('src/a.ts', 4, 2)
-    ])
+    ]
+    const tree = buildFileTree(files.map((entry) => entry.path), files)
 
     expect(tree.files.map((entry) => entry.path)).toEqual(['README.md'])
     expect(tree.directories.map((entry) => entry.path)).toEqual(['src'])

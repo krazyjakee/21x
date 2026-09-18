@@ -1,241 +1,23 @@
-import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react'
+import { useRef, useEffect, useState, useMemo, useCallback, type MouseEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { StopCircle, Loader2, Terminal, Send, ChevronRight, ChevronDown, Wrench, AlertTriangle, CheckCircle2, Circle, Clock, RotateCcw, ListTodo, FileText, ArrowDown, ArrowUp, Paperclip, Search, X, Image as ImageIcon, GitPullRequest, MonitorPlay } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
-import { Markdown } from '@/components/ui/Markdown'
+import { Loader2, Terminal, AlertTriangle, ArrowDown } from 'lucide-react'
 import type { AgentMessage } from '@/hooks/use-agent-session'
 import { SessionStatus } from '@/stores/agent-store'
 import { serializeTranscriptForDebug, type RawTranscriptMessage } from '@/lib/serialize-transcript-debug'
-import { agentSessionApi, artifactApi, voiceApi } from '@/lib/ipc-client'
+import { agentSessionApi } from '@/lib/ipc-client'
 import { cn } from '@/lib/utils'
 import { useArtifactStore } from '@/stores/artifact-store'
-import { ArtifactContentKind, ArtifactType, type Artifact } from '@shared/artifacts'
-import { VoiceMicButton } from '@/components/voice/VoiceMicButton'
-import { SpeakMessageButton } from '@/components/voice/SpeakMessageButton'
-import { MASTERMIND_COMPOSER_KEY, registerComposer } from '@/lib/voice-dictation-target'
-import { dispatchShortcutFeedback } from '@/lib/keyboard-shortcuts'
+import type { Artifact } from '@shared/artifacts'
+import { buildTranscriptItems, findActiveQuestionId, findLatestTodos } from '@shared/transcript/transcript-items'
+import { ActivityMessageGroup } from './transcript/ActivityMessageGroup'
+import { MessageBubble } from './transcript/MessageBubble'
+import { TodoSummary } from './transcript/TodoMessages'
+import { TranscriptComposer, type ComposerAttachment, type SendHandler } from './transcript/TranscriptComposer'
+import { TranscriptHeader, TranscriptSearchBar } from './transcript/TranscriptHeader'
+import { useTranscriptAutoScroll } from './transcript/useTranscriptAutoScroll'
+import { useTranscriptSearch } from './transcript/useTranscriptSearch'
 
 const EMPTY_ARTIFACTS: Artifact[] = []
-
-function formatStepMeta(meta: NonNullable<AgentMessage['stepMeta']>): string {
-  const parts: string[] = []
-  if (meta.durationMs != null) {
-    const sec = (meta.durationMs / 1000).toFixed(1)
-    parts.push(`${sec}s`)
-  }
-  if (meta.tokens) {
-    const t = meta.tokens
-    const items = [`in:${t.input}`, `out:${t.output}`]
-    if (t.cache) items.push(`cache:${t.cache}`)
-    parts.push(items.join(' '))
-  }
-  return parts.join(' · ')
-}
-
-/**
- * Truncates large content (like base64 data) for display
- */
-function sanitizeToolContent(content: unknown): string {
-  // Handle null/undefined
-  if (content == null) {
-    return ''
-  }
-
-  // Handle objects (like image data from Read tool)
-  if (typeof content === 'object') {
-    // Check if it's an image object
-    const obj = content as Record<string, unknown>
-    if (obj.type === 'image' && obj.source) {
-      const source = obj.source as Record<string, unknown>
-      const dataLength = (typeof source.data === 'string' ? source.data.length : 0)
-      return `[Image content: ${dataLength} characters of base64 data]`
-    }
-    // For other objects, stringify but truncate
-    const stringified = JSON.stringify(content, null, 2)
-    if (stringified.length > 1000) {
-      return `[Object: ${stringified.substring(0, 1000)}...]`
-    }
-    return stringified
-  }
-
-  // Convert to string if not already
-  const str = String(content)
-  const MAX_DISPLAY_LENGTH = 5000 // Max chars to display
-
-  if (str.length <= MAX_DISPLAY_LENGTH) {
-    return str
-  }
-
-  // Check if it looks like base64 data
-  const base64Chars = (str.match(/[A-Za-z0-9+/=]/g) || []).length
-  const isLikelyBase64 = base64Chars / str.length > 0.9
-
-  if (isLikelyBase64) {
-    return `[Binary content: ${str.length} characters]`
-  }
-
-  return str.substring(0, MAX_DISPLAY_LENGTH) + `\n\n... (${str.length - MAX_DISPLAY_LENGTH} more characters)`
-}
-
-function parseToolInput(input: unknown): Record<string, unknown> | null {
-  if (!input) return null
-  if (typeof input === 'object') return input as Record<string, unknown>
-  if (typeof input !== 'string') return null
-
-  try {
-    const parsed = JSON.parse(input)
-    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null
-  } catch {
-    return null
-  }
-}
-
-function basenameFromPath(value: string): string {
-  const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '')
-  return normalized.split('/').filter(Boolean).pop() || value
-}
-
-function isFilePathTool(toolName: string): boolean {
-  return ['read', 'edit', 'multiedit', 'write', 'notebookedit'].includes(toolName.toLowerCase())
-}
-
-function deriveToolDescription(tool: AgentMessage['tool']): string {
-  if (!tool) return ''
-  if (tool.description) return tool.description
-
-  const input = parseToolInput(tool.input)
-  const description = input?.description
-  return typeof description === 'string' ? description : ''
-}
-
-function deriveToolCommand(tool: AgentMessage['tool']): string {
-  if (!tool) return ''
-
-  const input = parseToolInput(tool.input)
-  const command = input?.command
-  if (Array.isArray(command)) return command.map(String).join(' ')
-  if (typeof command === 'string') return command
-
-  if (tool.name.toLowerCase() === 'command' && typeof tool.input === 'string') {
-    return tool.input
-  }
-
-  return ''
-}
-
-function deriveToolSubtitle(tool?: AgentMessage['tool']): string {
-  if (!tool) return ''
-
-  const description = deriveToolDescription(tool)
-  if (description) return description
-
-  if (tool.title) {
-    if (tool.title === tool.name) return ''
-    return isFilePathTool(tool.name) ? basenameFromPath(tool.title) : tool.title
-  }
-
-  if (tool.name === 'command' && typeof tool.input === 'string') {
-    const firstLine = tool.input.split('\n').map((line) => line.trim()).find(Boolean)
-    return firstLine ? firstLine.slice(0, 120) : ''
-  }
-
-  const input = parseToolInput(tool.input)
-  const filePath = input?.file_path || input?.path || input?.filename
-  if (isFilePathTool(tool.name) && typeof filePath === 'string') {
-    return basenameFromPath(filePath)
-  }
-
-  return ''
-}
-
-function isCompactActivityMessage(message: AgentMessage): boolean {
-  return (message.partType === 'tool' && !!message.tool) || message.partType === 'reasoning'
-}
-
-type TranscriptItem =
-  | { type: 'message'; key: string; message: AgentMessage }
-  | { type: 'activity'; key: string; messages: AgentMessage[] }
-
-function collectSearchableText(value: unknown, output: string[]): void {
-  if (value == null) return
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-    output.push(String(value))
-    return
-  }
-  if (Array.isArray(value)) {
-    value.forEach((item) => collectSearchableText(item, output))
-    return
-  }
-  if (typeof value === 'object') {
-    Object.values(value as Record<string, unknown>).forEach((item) => collectSearchableText(item, output))
-  }
-}
-
-// Cache per message object: search runs over the whole transcript on every
-// keystroke AND every streamed delta, and serializing large tool payloads each
-// time allocates megabytes. Message objects are identity-stable per part
-// (store projection cache), so a WeakMap makes this compute-once-per-message.
-const messageSearchTextCache = new WeakMap<AgentMessage, string>()
-
-function getMessageSearchText(message: AgentMessage): string {
-  const cached = messageSearchTextCache.get(message)
-  if (cached !== undefined) return cached
-  const parts: string[] = []
-  collectSearchableText(message.role, parts)
-  collectSearchableText(message.partType, parts)
-  collectSearchableText(message.content, parts)
-  collectSearchableText(message.tool, parts)
-  collectSearchableText(message.taskProgress, parts)
-  const text = parts.join('\n').toLowerCase()
-  messageSearchTextCache.set(message, text)
-  return text
-}
-
-function getTranscriptItemSearchText(item: TranscriptItem): string {
-  if (item.type === 'activity') {
-    return item.messages.map(getMessageSearchText).join('\n')
-  }
-  return getMessageSearchText(item.message)
-}
-
-function getMessageContentLength(message: AgentMessage): number {
-  return typeof message.content === 'string' ? message.content.length : 0
-}
-
-function getTranscriptItemContentLength(item: TranscriptItem | undefined): number {
-  if (!item) return 0
-  if (item.type === 'activity') {
-    return item.messages.reduce((total, message) => total + getMessageContentLength(message), 0)
-  }
-  return getMessageContentLength(item.message)
-}
-
-function HighlightedText({ text, query }: { text: string; query?: string }) {
-  const normalizedQuery = query?.trim()
-  if (!normalizedQuery) return <>{text}</>
-
-  const lowerText = text.toLowerCase()
-  const lowerQuery = normalizedQuery.toLowerCase()
-  const parts: React.ReactNode[] = []
-  let cursor = 0
-  let matchIndex = lowerText.indexOf(lowerQuery)
-
-  while (matchIndex !== -1) {
-    if (matchIndex > cursor) parts.push(text.slice(cursor, matchIndex))
-    const match = text.slice(matchIndex, matchIndex + normalizedQuery.length)
-    parts.push(
-      <mark key={`${matchIndex}-${match}`} className="rounded-sm bg-yellow-300/80 px-0.5 text-black">
-        {match}
-      </mark>
-    )
-    cursor = matchIndex + normalizedQuery.length
-    matchIndex = lowerText.indexOf(lowerQuery, cursor)
-  }
-
-  if (cursor < text.length) parts.push(text.slice(cursor))
-  return <>{parts}</>
-}
-
 
 interface AgentTranscriptPanelProps {
   title?: string
@@ -244,7 +26,7 @@ interface AgentTranscriptPanelProps {
   onStop: () => void
   onRestart?: () => void
   /** May be async: a rejected send is reported to the user instead of vanishing. */
-  onSend?: (message: string, options?: { attachments?: ComposerAttachment[] }) => void | Promise<void>
+  onSend?: SendHandler
   onPickAttachments?: () => Promise<ComposerAttachment[]>
   onAddAttachmentPaths?: (filePaths: string[]) => Promise<ComposerAttachment[]>
   className?: string
@@ -254,544 +36,8 @@ interface AgentTranscriptPanelProps {
   sessionId?: string | null
   taskId?: string
   agentId?: string
-  /** Pending approval request for debug diagnostics */
-  pendingApproval?: { action: string; description: string } | null
   /** User sent a message and the backend is still resuming the session. */
   pendingSend?: boolean
-}
-
-export interface ComposerAttachment {
-  id: string
-  filename: string
-  size: number
-  mime_type: string
-}
-
-function QuestionMessage({ message, onAnswer, canAnswer, searchQuery }: { message: AgentMessage; onAnswer?: (answer: string) => void; canAnswer: boolean; searchQuery?: string }) {
-  const questions = message.tool?.questions || []
-  const [answers, setAnswers] = useState<Record<number, string>>({})
-  const [textInputs, setTextInputs] = useState<Record<number, string>>({})
-  const [submitted, setSubmitted] = useState(false)
-  const isLocked = submitted || !canAnswer
-
-  const handleSelect = (qi: number, optionLabel: string) => {
-    if (isLocked) return
-    setAnswers(prev => ({ ...prev, [qi]: optionLabel }))
-  }
-
-  const handleTextChange = (qi: number, value: string) => {
-    if (isLocked) return
-    setTextInputs(prev => ({ ...prev, [qi]: value }))
-    setAnswers(prev => ({ ...prev, [qi]: value }))
-  }
-
-  const allAnswered = questions.every((_, qi) => answers[qi]?.trim())
-
-  const handleSubmit = () => {
-    if (!allAnswered || isLocked) return
-    setSubmitted(true)
-    // Format: single answer for 1 question, JSON for multiple
-    if (questions.length === 1) {
-      onAnswer?.(answers[0])
-    } else {
-      const formatted = questions.map((q, qi) => `${q.header || q.question}: ${answers[qi]}`).join('\n')
-      onAnswer?.(formatted)
-    }
-  }
-
-  return (
-    <div className="rounded-md bg-card border border-primary/30 overflow-hidden">
-      {questions.map((q, qi) => {
-        const hasOptions = q.options && q.options.length > 0
-        return (
-          <div key={qi} className="px-4 py-3 space-y-2.5">
-            {q.header && <span className="text-[10px] text-primary font-medium uppercase tracking-wide"><HighlightedText text={q.header} query={searchQuery} /></span>}
-            <p className="text-xs text-foreground"><HighlightedText text={q.question} query={searchQuery} /></p>
-            {hasOptions ? (
-              <div className="space-y-1.5">
-                {q.options.map((opt, oi) => {
-                  const isSelected = answers[qi] === opt.label
-                  return (
-                    <button
-                      key={oi}
-                      onClick={() => handleSelect(qi, opt.label)}
-                      disabled={isLocked}
-                      className={`w-full text-left rounded px-3 py-2 text-xs transition-colors border ${
-                        isSelected
-                          ? 'bg-primary/20 border-primary/50 text-foreground'
-                          : isLocked
-                            ? 'border-border/30 text-muted-foreground opacity-50 cursor-default'
-                            : 'border-border/50 hover:bg-white/5 hover:border-border text-foreground/80 cursor-pointer'
-                      }`}
-                    >
-                      <span className="font-medium"><HighlightedText text={opt.label} query={searchQuery} /></span>
-                      {opt.description && (
-                        <span className="block text-[11px] text-muted-foreground mt-0.5"><HighlightedText text={opt.description} query={searchQuery} /></span>
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
-            ) : (
-              <input
-                type="text"
-                value={textInputs[qi] || ''}
-                onChange={(e) => handleTextChange(qi, e.target.value)}
-                disabled={isLocked}
-                placeholder="Type your answer..."
-                className="w-full bg-input border border-border/50 rounded px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50"
-                onKeyDown={(e) => { if (e.key === 'Enter' && allAnswered) handleSubmit() }}
-              />
-            )}
-          </div>
-        )
-      })}
-      {!isLocked && (
-        <div className="px-4 py-3 border-t border-border/30">
-          <button
-            onClick={handleSubmit}
-            disabled={!allAnswered}
-            className={`px-4 py-1.5 rounded text-xs font-medium transition-colors ${
-              allAnswered
-                ? 'bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer'
-                : 'bg-muted text-muted-foreground cursor-not-allowed'
-            }`}
-          >
-            Submit
-          </button>
-        </div>
-      )}
-      <div className="px-4 pb-2">
-        <span className="text-[10px] text-muted-foreground">{message.timestamp.toLocaleTimeString()}</span>
-      </div>
-    </div>
-  )
-}
-
-function TodoWriteMessage({ message, searchQuery }: { message: AgentMessage; searchQuery?: string }) {
-  const todos = message.tool?.todos || []
-  const completed = todos.filter((t) => t.status === 'completed').length
-
-  const statusIcon = (status: string) => {
-    switch (status) {
-      case 'completed': return <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0" />
-      case 'in_progress': return <Clock className="h-3.5 w-3.5 text-yellow-400 shrink-0" />
-      default: return <Circle className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-    }
-  }
-
-  return (
-    <div className="rounded-md bg-card border border-border/50 overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border/30">
-        <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">Tasks</span>
-        <span className="text-[10px] text-muted-foreground ml-auto">{completed}/{todos.length} done</span>
-      </div>
-      <div className="px-3 py-2 space-y-1">
-        {todos.map((todo) => (
-          <div
-            key={todo.id}
-            className={`flex items-start gap-2.5 rounded px-2 py-1.5 text-xs ${
-              todo.status === 'completed' ? 'opacity-60' : ''
-            }`}
-          >
-            {statusIcon(todo.status)}
-            <span className={`${todo.status === 'completed' ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
-              <HighlightedText text={todo.content} query={searchQuery} />
-            </span>
-          </div>
-        ))}
-      </div>
-      <div className="px-4 pb-2">
-        <span className="text-[10px] text-muted-foreground">{message.timestamp.toLocaleTimeString()}</span>
-      </div>
-    </div>
-  )
-}
-
-function PlanReviewMessage({ message, searchQuery }: { message: AgentMessage; searchQuery?: string }) {
-  const tool = message.tool
-  const label = tool?.title || message.content || 'Plan mode'
-  const rawOutput = tool?.output || ''
-  // Filter out confirmation prompts — not useful content
-  const details = /^(exit|enter) plan mode\??$/i.test(rawOutput.trim()) ? '' : rawOutput
-
-  return (
-    <div className="rounded-md bg-card border border-border/50 overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2 text-xs font-mono">
-        <FileText className="h-3 w-3 text-muted-foreground shrink-0" />
-        <span className="text-foreground"><HighlightedText text={label} query={searchQuery} /></span>
-      </div>
-      {details && (
-        <div className="px-3 py-2 border-t border-border/30 max-h-[60vh] overflow-y-auto">
-          <Markdown size="xs" highlightQuery={searchQuery}>{details}</Markdown>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function formatDuration(ms: number): string {
-  const seconds = Math.floor(ms / 1000)
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  const remainingSeconds = seconds % 60
-  return `${minutes}m ${remainingSeconds}s`
-}
-
-function TaskProgressMessage({ message, searchQuery }: { message: AgentMessage; searchQuery?: string }) {
-  const [expanded, setExpanded] = useState(false)
-  const tp = message.taskProgress!
-  const isRunning = tp.status === 'started' || tp.status === 'running'
-  const isError = tp.status === 'failed'
-  const isDone = tp.status === 'completed'
-  const isStopped = tp.status === 'stopped'
-
-  return (
-    <div className={`rounded-md bg-card border overflow-hidden ${
-      isError ? 'border-red-500/30' : isStopped ? 'border-yellow-500/30' : isDone ? 'border-border/50' : 'border-blue-500/30'
-    }`}>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-xs font-mono hover:bg-white/5 transition-colors"
-      >
-        <ChevronRight className={`h-3 w-3 text-muted-foreground shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`} />
-        <Terminal className="h-3 w-3 text-blue-400 shrink-0" />
-        <span className="text-foreground truncate"><HighlightedText text={tp.description || 'Subagent task'} query={searchQuery} /></span>
-        {tp.lastToolName && isRunning && (
-          <span className="text-muted-foreground text-[10px] truncate">· <HighlightedText text={tp.lastToolName} query={searchQuery} /></span>
-        )}
-        <span className="ml-auto flex items-center gap-1.5 shrink-0">
-          {tp.usage && (
-            <span className="text-[10px] text-muted-foreground">
-              {tp.usage.tool_uses} tools · {formatDuration(tp.usage.duration_ms)}
-            </span>
-          )}
-          {isRunning && <Loader2 className="h-3 w-3 text-blue-400 animate-spin" />}
-          {isError && <AlertTriangle className="h-3 w-3 text-red-400" />}
-          {isStopped && <Circle className="h-3 w-3 text-yellow-400" />}
-        </span>
-      </button>
-      {expanded && (
-        <div className="border-t border-border/30 px-3 py-2 space-y-2">
-          {tp.summary && (
-            <div className="text-xs">
-              <Markdown size="sm" highlightQuery={searchQuery}>{tp.summary}</Markdown>
-            </div>
-          )}
-          {tp.usage && (
-            <div className="flex items-center gap-3 text-[10px] text-muted-foreground font-mono">
-              <span>{tp.usage.tool_uses} tool uses</span>
-              <span>{tp.usage.total_tokens.toLocaleString()} tokens</span>
-              <span>{formatDuration(tp.usage.duration_ms)}</span>
-            </div>
-          )}
-          {!tp.summary && !tp.usage && (
-            <div className="text-[11px] text-muted-foreground">No additional details available</div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function ToolCallMessage({ message, searchQuery }: { message: AgentMessage; searchQuery?: string }) {
-  const [expanded, setExpanded] = useState(false)
-  const tool = message.tool!
-  const isRunning = !tool.status || tool.status === 'in_progress' || tool.status === 'running' || tool.status === 'pending'
-  const isError = tool.status === 'error' || tool.status === 'failed'
-  // Both derivations JSON.parse the (potentially large) tool input — memoize so
-  // they only run when the tool payload actually changes, not on every render.
-  const subtitle = useMemo(() => deriveToolSubtitle(tool), [tool])
-  const command = useMemo(() => deriveToolCommand(tool), [tool])
-
-  return (
-    <div className="group/tool w-full min-w-0 overflow-hidden">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex h-6 w-full items-center gap-2 rounded-sm px-1 text-xs font-mono text-muted-foreground hover:bg-white/5 hover:text-foreground transition-colors"
-      >
-        <ChevronRight className={`h-3 w-3 text-muted-foreground shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`} />
-        <Wrench className="h-3 w-3 text-muted-foreground shrink-0" />
-        <span className="text-foreground/80 shrink-0"><HighlightedText text={tool.name} query={searchQuery} /></span>
-        {subtitle && <span className="min-w-0 flex-1 truncate text-muted-foreground"><HighlightedText text={subtitle} query={searchQuery} /></span>}
-        {!subtitle && <span className="flex-1" />}
-        <span className="w-20 shrink-0 text-right text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover/tool:opacity-100">
-          {message.timestamp.toLocaleTimeString()}
-        </span>
-        {isRunning && <Loader2 className="h-3 w-3 shrink-0 text-muted-foreground animate-spin" />}
-        {isError && <AlertTriangle className="h-3 w-3 shrink-0 text-red-400" />}
-      </button>
-      {expanded && (
-        <div className="ml-5 border-l border-border/40 pl-3 py-1.5 text-[11px] font-mono space-y-2">
-          {command && (
-            <div>
-              <span className="text-muted-foreground">Command:</span>
-              <pre className="mt-0.5 text-muted-foreground whitespace-pre-wrap break-words max-h-40 overflow-y-auto"><HighlightedText text={command} query={searchQuery} /></pre>
-            </div>
-          )}
-          {tool.input && (
-            <div>
-              <span className="text-muted-foreground">Input:</span>
-              <pre className="mt-0.5 text-muted-foreground whitespace-pre-wrap break-words max-h-40 overflow-y-auto"><HighlightedText text={sanitizeToolContent(tool.input)} query={searchQuery} /></pre>
-            </div>
-          )}
-          {tool.output && (
-            <div>
-              <span className="text-muted-foreground">Output:</span>
-              <pre className="mt-0.5 text-muted-foreground whitespace-pre-wrap break-words max-h-40 overflow-y-auto"><HighlightedText text={sanitizeToolContent(tool.output)} query={searchQuery} /></pre>
-            </div>
-          )}
-          {tool.error && (
-            <div>
-              <span className="text-red-400">Error:</span>
-              <pre className="mt-0.5 text-red-300 whitespace-pre-wrap break-words"><HighlightedText text={tool.error} query={searchQuery} /></pre>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function ReasoningMessage({ message, searchQuery }: { message: AgentMessage; searchQuery?: string }) {
-  const [expanded, setExpanded] = useState(false)
-  const summary = message.content.split('\n').map((line) => line.trim()).find(Boolean) || 'Thinking'
-
-  return (
-    <div className="group/tool w-full min-w-0 overflow-hidden">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex h-6 w-full items-center gap-2 rounded-sm px-1 text-xs font-mono text-teal-700/90 dark:text-teal-300/80 hover:bg-accent hover:text-teal-700 dark:hover:text-teal-200 transition-colors"
-      >
-        <ChevronRight className={`h-3 w-3 shrink-0 text-teal-600/70 dark:text-teal-300/60 transition-transform ${expanded ? 'rotate-90' : ''}`} />
-        <span className="shrink-0 text-teal-700 dark:text-teal-300">Thinking</span>
-        <span className="min-w-0 flex-1 truncate text-muted-foreground"><HighlightedText text={summary} query={searchQuery} /></span>
-        <span className="w-20 shrink-0 text-right text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover/tool:opacity-100">
-          {message.timestamp.toLocaleTimeString()}
-        </span>
-      </button>
-      {expanded && (
-        <div className="ml-5 border-l border-teal-500/30 pl-3 py-1.5 text-foreground/75">
-          <Markdown size="sm" highlightQuery={searchQuery}>{message.content}</Markdown>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function findMessageArtifact(message: AgentMessage, artifacts: Artifact[]): Artifact | undefined {
-  if (!message.tool || !['success', 'succeeded', 'complete', 'completed'].includes(message.tool.status?.toLowerCase?.() || '')) return undefined
-  let haystack = `${message.tool.title || ''}\n${message.content || ''}`
-  try { haystack += `\n${typeof message.tool.input === 'string' ? message.tool.input : JSON.stringify(message.tool.input)}\n${typeof message.tool.output === 'string' ? message.tool.output : JSON.stringify(message.tool.output)}` } catch { /* ignore unserializable tool payloads */ }
-  return artifacts.find((artifact) => {
-    const target = artifact.path || artifact.url
-    return !!target && (haystack.includes(target) || haystack.replace(/\\/g, '/').includes(target.replace(/\\/g, '/')))
-  })
-}
-
-function ArtifactTranscriptCard({ artifact, onOpen }: { artifact: Artifact; onOpen: (artifact: Artifact) => void }) {
-  const [thumbnail, setThumbnail] = useState<string | null>(artifact.url && artifact.type === ArtifactType.IMAGE ? artifact.url : null)
-  useEffect(() => {
-    if (artifact.type !== ArtifactType.IMAGE || !artifact.path) return
-    let cancelled = false
-    void artifactApi.read(artifact.taskId, artifact.path).then((content) => {
-      if (!cancelled && content?.kind === ArtifactContentKind.DATA_URL) setThumbnail(content.content)
-    }).catch(() => undefined)
-    return () => { cancelled = true }
-  }, [artifact.path, artifact.reloadTrigger, artifact.taskId, artifact.type])
-
-  const Icon = artifact.type === ArtifactType.IMAGE ? ImageIcon
-    : artifact.type === ArtifactType.HTML ? MonitorPlay
-      : artifact.type === ArtifactType.PR ? GitPullRequest
-        : FileText
-  const noun = artifact.type === ArtifactType.IMAGE ? 'Screenshot'
-    : artifact.type === ArtifactType.HTML ? 'Preview'
-      : artifact.type === ArtifactType.PR ? 'Pull request'
-        : artifact.type === ArtifactType.MARKDOWN ? 'Markdown' : 'File'
-
-  return (
-    <button onClick={() => onOpen(artifact)} className="my-1 ml-1 flex w-[min(420px,calc(100%-8px))] items-center gap-3 rounded-lg border border-border/50 bg-card p-2 text-left transition-colors hover:border-primary/40 hover:bg-accent/40">
-      <span className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-md border border-border/40 bg-muted/40">
-        {thumbnail ? <img src={thumbnail} alt="" className="h-full w-full object-cover" /> : <Icon className="h-4 w-4 text-muted-foreground" />}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-xs font-medium text-foreground">{artifact.title}</span>
-        <span className="mt-0.5 block text-[11px] text-muted-foreground">{noun} · Click to open</span>
-      </span>
-      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-    </button>
-  )
-}
-
-function ActivityMessageGroup({ messages, searchQuery, artifacts = EMPTY_ARTIFACTS, onOpenArtifact }: { messages: AgentMessage[]; searchQuery?: string; artifacts?: Artifact[]; onOpenArtifact?: (artifact: Artifact) => void }) {
-  return (
-    <div className="w-full border-l border-border/30 pl-2 py-0.5">
-      {messages.map((message) => {
-        if (message.partType === 'reasoning') {
-          return <ReasoningMessage key={message.id} message={message} searchQuery={searchQuery} />
-        }
-        const artifact = findMessageArtifact(message, artifacts)
-        return (
-          <React.Fragment key={message.id}>
-            <ToolCallMessage message={message} searchQuery={searchQuery} />
-            {artifact && onOpenArtifact && <ArtifactTranscriptCard artifact={artifact} onOpen={onOpenArtifact} />}
-          </React.Fragment>
-        )
-      })}
-    </div>
-  )
-}
-
-function MessageBubble({ message, onAnswer, canAnswerQuestion = false, searchQuery }: { message: AgentMessage; onAnswer?: (answer: string) => void; canAnswerQuestion?: boolean; searchQuery?: string }) {
-  if (message.partType === 'question' && message.tool?.questions) {
-    return <QuestionMessage message={message} onAnswer={onAnswer} canAnswer={canAnswerQuestion} searchQuery={searchQuery} />
-  }
-
-  if (message.partType === 'todowrite' && message.tool?.todos) {
-    return <TodoWriteMessage message={message} searchQuery={searchQuery} />
-  }
-
-  if (message.partType === 'planreview') {
-    return <PlanReviewMessage message={message} searchQuery={searchQuery} />
-  }
-
-  if (isCompactActivityMessage(message)) {
-    return <ActivityMessageGroup messages={[message]} searchQuery={searchQuery} />
-  }
-
-  if (message.partType === 'task_progress' && message.taskProgress) {
-    return <TaskProgressMessage message={message} searchQuery={searchQuery} />
-  }
-
-  // Step markers are absorbed into message stepMeta — skip if any slip through
-  // System status messages are absorbed into session.systemStatus — skip if any slip through
-  if (message.partType === 'step-start' || message.partType === 'step-finish' || message.partType === 'system-status') {
-    return null
-  }
-
-  const isUser = message.role === 'user'
-  const isSystem = message.role === 'system'
-  const isError = message.partType === 'error' || message.partType === 'retry'
-
-  return (
-    <div className={`flex gap-2 ${isUser ? 'justify-end' : 'justify-start'} ${!isUser ? 'w-full' : ''}`}>
-      <div
-        className={`overflow-hidden min-w-0 ${
-          isError
-            ? 'w-full text-red-200 border-l border-red-500/40 pl-3 py-1'
-            : isUser
-              ? 'max-w-[90%] rounded-md px-3 py-2 bg-secondary text-foreground'
-              : isSystem
-                ? 'w-full text-yellow-200 border-l border-yellow-500/40 pl-3 py-1'
-                : 'w-full text-foreground/80 py-1'
-        }`}
-      >
-        {isError && (
-          <span className="text-[10px] text-red-400 flex items-center gap-1 mb-1">
-            <AlertTriangle className="h-3 w-3" /> Error
-          </span>
-        )}
-        <Markdown size="sm" highlightQuery={searchQuery}>{message.content}</Markdown>
-        <div className={`flex items-center gap-2 mt-1 ${!isUser ? 'opacity-70' : ''}`}>
-          <span className="text-[10px] text-muted-foreground">{message.timestamp.toLocaleTimeString()}</span>
-          {message.stepMeta && (
-            <span className="text-[10px] text-muted-foreground">{formatStepMeta(message.stepMeta)}</span>
-          )}
-          {/* Only a plain agent answer can be read aloud. An error and a system
-              line are not answers, and a user message is the user's own words. */}
-          {!isUser && !isSystem && !isError && <SpeakMessageButton text={message.content} />}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-const MemoizedMessageBubble = React.memo(MessageBubble)
-
-// Activity groups are the majority of rows while an agent runs. Their
-// `messages` array is rebuilt (new identity) whenever the transcript changes,
-// so compare element identity instead — message objects are stable per part
-// thanks to the store's projection cache, letting untouched groups skip
-// re-rendering entirely during streaming.
-const MemoizedActivityGroup = React.memo(
-  ActivityMessageGroup,
-  (prev, next) =>
-    prev.searchQuery === next.searchQuery &&
-    prev.artifacts === next.artifacts &&
-    prev.onOpenArtifact === next.onOpenArtifact &&
-    prev.messages.length === next.messages.length &&
-    prev.messages.every((message, index) => message === next.messages[index])
-)
-
-function TodoSummary({ todos }: { todos: NonNullable<AgentMessage['tool']>['todos'] }) {
-  const [expanded, setExpanded] = useState(true)
-  if (!todos || todos.length === 0) return null
-
-  const completed = todos.filter((t) => t.status === 'completed').length
-  const inProgress = todos.filter((t) => t.status === 'in_progress').length
-
-  const statusIcon = (status: string) => {
-    switch (status) {
-      case 'completed': return <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0" />
-      case 'in_progress': return <Clock className="h-3 w-3 text-yellow-400 shrink-0 animate-pulse" />
-      default: return <Circle className="h-3 w-3 text-muted-foreground shrink-0" />
-    }
-  }
-
-  return (
-    <div className="border-b border-border/50 shrink-0">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-4 py-2 text-xs hover:bg-white/5 transition-colors"
-      >
-        {expanded
-          ? <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
-          : <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
-        }
-        <ListTodo className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-        <span className="text-muted-foreground font-medium">Tasks</span>
-        <span className="text-muted-foreground ml-auto tabular-nums">
-          {completed}/{todos.length}
-          {inProgress > 0 && <span className="text-yellow-400 ml-1.5">({inProgress} active)</span>}
-        </span>
-      </button>
-      {expanded && (
-        <div className="px-4 pb-2.5 space-y-0.5">
-          {todos.map((todo) => (
-            <div
-              key={todo.id}
-              className={`flex items-start gap-2 rounded px-2 py-1 text-xs ${
-                todo.status === 'completed' ? 'opacity-50' : ''
-              }`}
-            >
-              {statusIcon(todo.status)}
-              <span className={todo.status === 'completed' ? 'line-through text-muted-foreground' : 'text-foreground'}>
-                {todo.content}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function formatAttachmentSize(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '—'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function mergeAttachments(current: ComposerAttachment[], added: ComposerAttachment[]): ComposerAttachment[] {
-  const seen = new Set(current.map((attachment) => attachment.id))
-  const merged = [...current]
-  for (const item of added) {
-    if (seen.has(item.id)) continue
-    seen.add(item.id)
-    merged.push(item)
-  }
-  return merged
 }
 
 export function AgentTranscriptPanel({
@@ -808,20 +54,12 @@ export function AgentTranscriptPanel({
   sessionId,
   taskId,
   agentId,
-  pendingApproval,
   pendingSend
 }: AgentTranscriptPanelProps) {
   // The user sent and the backend is still resuming — status still reads idle.
   const isStarting = !!pendingSend && status !== SessionStatus.WORKING && status !== SessionStatus.WAITING_APPROVAL
   const scrollRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLTextAreaElement>(null)
-  const searchInputRef = useRef<HTMLInputElement>(null)
-  const [isSearchOpen, setIsSearchOpen] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [activeSearchResult, setActiveSearchResult] = useState(0)
-  const [pendingAttachments, setPendingAttachments] = useState<ComposerAttachment[]>([])
-  const [isDragOverComposer, setIsDragOverComposer] = useState(false)
   const [debugCopyToast, setDebugCopyToast] = useState(false)
   const taskArtifacts = useArtifactStore((state) => taskId ? (state.artifactsByTask[taskId] || EMPTY_ARTIFACTS) : EMPTY_ARTIFACTS)
   const selectArtifactTab = useArtifactStore((state) => state.selectTab)
@@ -829,14 +67,19 @@ export function AgentTranscriptPanel({
     selectArtifactTab(artifact.taskId, artifact.id, true)
   }, [selectArtifactTab])
 
-  // ── Hidden debug copy: Cmd/Ctrl+Shift+D ──
-  // Read messages through a ref: depending on `messages` (new identity per
-  // streamed delta) would re-create this callback and tear down / re-register
-  // the global keydown listener 10–20×/s per open transcript panel.
+  const transcriptItems = useMemo(() => buildTranscriptItems(messages), [messages])
+  const latestTodos = useMemo(() => findLatestTodos(messages), [messages])
+  const activeQuestionId = useMemo(() => findActiveQuestionId(messages), [messages])
+  const search = useTranscriptSearch(transcriptItems)
+  const openSearch = search.open
+
+  // Hidden debug copy (Cmd/Ctrl+Shift+D or header right-click). Read messages
+  // through a ref: depending on `messages` (new identity per streamed delta)
+  // would re-create this callback and tear down / re-register the global
+  // keydown listener 10–20×/s per open transcript panel.
   const messagesRef = useRef(messages)
   messagesRef.current = messages
   const copyDebugInfo = useCallback(async () => {
-    // Fetch raw coding agent transcript from main process
     let rawTranscript: RawTranscriptMessage[] | undefined
     if (taskId) {
       try {
@@ -853,8 +96,7 @@ export function AgentTranscriptPanel({
       agentId,
       status,
       systemStatus,
-      messageCount: currentMessages.length,
-      pendingApproval: pendingApproval ?? null
+      messageCount: currentMessages.length
     }, rawTranscript)
     navigator.clipboard.writeText(debugText).then(() => {
       setDebugCopyToast(true)
@@ -862,153 +104,33 @@ export function AgentTranscriptPanel({
     }).catch((err) => {
       console.error('Failed to copy debug info:', err)
     })
-  }, [sessionId, taskId, agentId, status, systemStatus, pendingApproval])
+  }, [sessionId, taskId, agentId, status, systemStatus])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Cmd/Ctrl+Shift+D — copy debug transcript
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'd') {
-        // Only fire when this panel (or a descendant) has focus
-        if (!panelRef.current?.contains(document.activeElement) && document.activeElement !== panelRef.current) return
-        e.preventDefault()
-        copyDebugInfo()
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
-        if (!panelRef.current?.contains(document.activeElement) && document.activeElement !== panelRef.current) return
-        e.preventDefault()
-        setIsSearchOpen(true)
-        requestAnimationFrame(() => searchInputRef.current?.focus())
-      }
+      if (!(e.metaKey || e.ctrlKey)) return
+      const key = e.key.toLowerCase()
+      const isDebugCopy = e.shiftKey && key === 'd'
+      if (!isDebugCopy && key !== 'f') return
+      // Only fire when this panel (or a descendant) has focus.
+      if (!panelRef.current?.contains(document.activeElement) && document.activeElement !== panelRef.current) return
+      e.preventDefault()
+      if (isDebugCopy) void copyDebugInfo()
+      else openSearch()
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [copyDebugInfo])
+  }, [copyDebugInfo, openSearch])
 
-  // Context menu handler for the header area
-  const handleHeaderContextMenu = useCallback((e: React.MouseEvent) => {
+  const handleHeaderContextMenu = useCallback((e: MouseEvent) => {
     e.preventDefault()
-    copyDebugInfo()
+    void copyDebugInfo()
   }, [copyDebugInfo])
 
-  // Find the latest todowrite message to show as a pinned summary
-  const latestTodos = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].partType === 'todowrite' && messages[i].tool?.todos?.length) {
-        return messages[i].tool!.todos!
-      }
-    }
-    return null
-  }, [messages])
-
-  const activeQuestionId = useMemo(() => {
-    let questionIndex = -1
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].partType === 'question' && messages[i].tool?.questions) {
-        questionIndex = i
-        break
-      }
-    }
-    if (questionIndex === -1) return null
-
-    const hasUserReplyAfter = messages.slice(questionIndex + 1).some((m) => m.role === 'user')
-    if (hasUserReplyAfter) return null
-
-    // Primary path: explicit waiting status from backend.
-    if (status === SessionStatus.WAITING_APPROVAL) return messages[questionIndex].id
-
-    // Fallback: if an unanswered question is the latest actionable item,
-    // allow selection even when status propagation lags.
-    return messages[questionIndex].id
-  }, [messages, status])
-
-  /**
-   * Announce this composer for as long as it is on screen.
-   *
-   * Starting an agent session rebuilds this panel, so a conversation must find
-   * the new text field and the new send function. The key stays the same across
-   * that rebuild, and the callbacks are read through a ref, so a conversation
-   * carries on into the panel that replaced this one.
-   */
-  const composerKey = taskId ?? MASTERMIND_COMPOSER_KEY
-  const sendRef = useRef<(() => void) | null>(null)
-  useEffect(() => {
-    if (!onSend) return undefined
-    return registerComposer(composerKey, {
-      getField: () => inputRef.current,
-      submit: () => sendRef.current?.(),
-      sendMessage: (message) => onSend(message),
-    })
-  }, [composerKey, onSend])
-
-  /** Auto-resize the textarea to fit its content, up to a max height */
-  const autoResize = useCallback(() => {
-    const el = inputRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 128)}px` // max ~6 lines
-  }, [])
-
-  // Detect if the session ended due to an error (last message is error/retry and status is idle)
-  const lastErrorMessage = useMemo(() => {
-    if (status !== SessionStatus.IDLE || messages.length === 0) return null
-    const last = messages[messages.length - 1]
-    if (last.partType === 'error' || last.partType === 'retry') return last
-    return null
-  }, [messages, status])
-  const showErrorBanner = !!lastErrorMessage && lastErrorMessage.partType !== 'error'
-
-  const atBottomRef = useRef(true)
-  const scrollRafRef = useRef<number | null>(null)
-  const autoScrollRafRef = useRef<number | null>(null)
-  const [showScrollToBottom, setShowScrollToBottom] = useState(false)
-  const transcriptItems = useMemo<TranscriptItem[]>(() => {
-    const items: TranscriptItem[] = []
-    for (let index = 0; index < messages.length; index += 1) {
-      const message = messages[index]
-      if (!isCompactActivityMessage(message)) {
-        items.push({ type: 'message', key: message.id, message })
-        continue
-      }
-
-      const group: AgentMessage[] = [message]
-      while (index + 1 < messages.length && isCompactActivityMessage(messages[index + 1])) {
-        index += 1
-        group.push(messages[index])
-      }
-      // Key on the first member only: the trailing group grows as the agent
-      // streams tool calls, and a key built from all member ids would change on
-      // every addition — remounting the whole group (losing expanded state) and
-      // forcing the virtualizer to re-measure the row from scratch.
-      items.push({ type: 'activity', key: group[0].id, messages: group })
-    }
-    return items
-  }, [messages])
-
-  const normalizedSearchQuery = searchQuery.trim().toLowerCase()
-  const searchResultIndexes = useMemo(() => {
-    if (!normalizedSearchQuery) return []
-    return transcriptItems.reduce<number[]>((matches, item, index) => {
-      if (getTranscriptItemSearchText(item).includes(normalizedSearchQuery)) {
-        matches.push(index)
-      }
-      return matches
-    }, [])
-  }, [normalizedSearchQuery, transcriptItems])
-  const activeSearchItemIndex = searchResultIndexes[activeSearchResult] ?? -1
-  const lastTranscriptItemContentLength = useMemo(
-    () => getTranscriptItemContentLength(transcriptItems[transcriptItems.length - 1]),
-    [transcriptItems]
-  )
-
-  useEffect(() => {
-    setActiveSearchResult(0)
-  }, [normalizedSearchQuery])
-
-  useEffect(() => {
-    if (activeSearchResult >= searchResultIndexes.length) {
-      setActiveSearchResult(Math.max(searchResultIndexes.length - 1, 0))
-    }
-  }, [activeSearchResult, searchResultIndexes.length])
+  // A retry that ended the session gets a banner; a final error message is
+  // already visible in the transcript.
+  const lastMessage = messages[messages.length - 1]
+  const errorBannerMessage = status === SessionStatus.IDLE && lastMessage?.partType === 'retry' ? lastMessage : null
 
   const virtualizer = useVirtualizer({
     count: transcriptItems.length,
@@ -1017,313 +139,46 @@ export function AgentTranscriptPanel({
     // grouped. Keep measured heights attached to the message/group itself,
     // rather than allowing an index to inherit the previous row's height.
     getItemKey: (index) => transcriptItems[index]?.key ?? index,
-    // Realistic estimate for average message height (tool calls, markdown blocks, etc.)
-    // — reduces layout thrash and improves scroll smoothness vs the previous 60px default
     estimateSize: () => 120,
-    // Increased overscan to reduce blank flashes during fast scrolling
     overscan: 8,
   })
   const virtualRows = virtualizer.getVirtualItems()
   const virtualWindowOffset = virtualRows[0]?.start ?? 0
-
-  const handleScroll = useCallback(() => {
-    if (scrollRafRef.current !== null) return
-    scrollRafRef.current = requestAnimationFrame(() => {
-      scrollRafRef.current = null
-      const el = scrollRef.current
-      if (!el) return
-      const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-      const isAtBottom = distanceFromBottom < 100
-      atBottomRef.current = isAtBottom
-      setShowScrollToBottom(!isAtBottom)
-    })
-  }, [])
-
-  const scrollToBottom = useCallback(() => {
-    if (transcriptItems.length > 0) {
-      virtualizer.scrollToIndex(transcriptItems.length - 1, { align: 'end' })
-      atBottomRef.current = true
-      setShowScrollToBottom(false)
-    }
-  }, [transcriptItems.length, virtualizer])
-
-  useEffect(() => {
-    if (activeSearchItemIndex >= 0) return
-    if (transcriptItems.length > 0 && atBottomRef.current) {
-      if (autoScrollRafRef.current !== null) {
-        cancelAnimationFrame(autoScrollRafRef.current)
-      }
-      autoScrollRafRef.current = requestAnimationFrame(() => {
-        autoScrollRafRef.current = null
-        if (!atBottomRef.current) return
-        virtualizer.scrollToIndex(transcriptItems.length - 1, { align: 'end' })
-      })
-    }
-    return () => {
-      if (autoScrollRafRef.current !== null) {
-        cancelAnimationFrame(autoScrollRafRef.current)
-        autoScrollRafRef.current = null
-      }
-    }
-  }, [activeSearchItemIndex, lastTranscriptItemContentLength, transcriptItems.length, virtualizer])
-
-  useEffect(() => {
-    return () => {
-      if (scrollRafRef.current !== null) {
-        cancelAnimationFrame(scrollRafRef.current)
-      }
-      if (autoScrollRafRef.current !== null) {
-        cancelAnimationFrame(autoScrollRafRef.current)
-      }
-    }
-  }, [])
-
-  useEffect(() => {
-    if (activeSearchItemIndex >= 0) {
-      virtualizer.scrollToIndex(activeSearchItemIndex, { align: 'center' })
-      atBottomRef.current = false
-      setShowScrollToBottom(true)
-    }
-  }, [activeSearchItemIndex, virtualizer])
-
-  const goToSearchResult = useCallback((direction: 1 | -1) => {
-    if (searchResultIndexes.length === 0) return
-    setActiveSearchResult((current) => (current + direction + searchResultIndexes.length) % searchResultIndexes.length)
-  }, [searchResultIndexes.length])
-
-  const closeSearch = useCallback(() => {
-    setSearchQuery('')
-    setIsSearchOpen(false)
-    setActiveSearchResult(0)
-  }, [])
-
-  const getStatusColor = () => {
-    if (isStarting) return 'text-green-400'
-    switch (status) {
-      case SessionStatus.WORKING: return 'text-green-400'
-      case SessionStatus.ERROR: return 'text-red-400'
-      case SessionStatus.WAITING_APPROVAL: return 'text-yellow-400'
-      default: return 'text-muted-foreground'
-    }
-  }
-
-  const getStatusLabel = () => {
-    if (isStarting) return 'Starting…'
-    switch (status) {
-      case SessionStatus.WORKING: return 'Working'
-      case SessionStatus.ERROR: return 'Error'
-      case SessionStatus.WAITING_APPROVAL: return 'Waiting for approval'
-      default: return 'Idle'
-    }
-  }
-
-  const handleSend = () => {
-    const value = inputRef.current?.value.trim()
-    if (value && onSend) {
-      // Whatever answer was expected by voice is not the answer that is now
-      // coming, so it is dropped and this reply is not read aloud. A spoken
-      // sentence goes through here too and arms a fresh expectation of its own
-      // straight afterwards, so the conversation loop is unaffected.
-      void voiceApi.answerNotExpected(taskId)
-      const attachmentsAtSend = pendingAttachments
-      const sent = onSend(value, attachmentsAtSend.length > 0 ? { attachments: attachmentsAtSend } : undefined)
-      inputRef.current!.value = ''
-      // Reset textarea height back to single row
-      inputRef.current!.style.height = 'auto'
-      setPendingAttachments([])
-      // The composer clears the text before the send resolves, so a rejected
-      // send used to leave no trace at all — no message, no session, no error.
-      // The text goes back into the box and the failure is announced.
-      void Promise.resolve(sent).catch((error: unknown) => {
-        console.error('[AgentTranscriptPanel] Message send failed:', error)
-        if (inputRef.current && !inputRef.current.value) inputRef.current.value = value
-        setPendingAttachments(attachmentsAtSend)
-        const detail = error instanceof Error && error.message ? error.message.trim() : String(error ?? '').trim()
-        // Surface the real failure (e.g. provider "name must be at most 64
-        // characters") instead of a generic "session did not start" — the text
-        // is restored above so nothing is lost and the user can retry.
-        const feedback = detail && detail !== 'No taskId'
-          ? `Could not send the message — ${detail.slice(0, 280)}`
-          : 'Could not send the message — the agent session did not start'
-        dispatchShortcutFeedback(feedback, true)
-      })
-    }
-  }
-  // The registration calls through this ref, so a conversation always uses the
-  // send function of the current render, never one captured earlier.
-  sendRef.current = handleSend
-
-  const handleAddAttachments = async () => {
-    if (!onPickAttachments) return
-    const picked = await onPickAttachments()
-    if (!picked.length) return
-    setPendingAttachments((prev) => mergeAttachments(prev, picked))
-  }
-
-  const handleAddAttachmentPaths = async (filePaths: string[]) => {
-    if (!onAddAttachmentPaths || filePaths.length === 0) return
-    const added = await onAddAttachmentPaths(filePaths)
-    if (!added.length) return
-    setPendingAttachments((prev) => mergeAttachments(prev, added))
-  }
-
-  const handleRemoveAttachment = (id: string) => {
-    setPendingAttachments((prev) => prev.filter((att) => att.id !== id))
-  }
-
-  const handleComposerDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    if (!onAddAttachmentPaths || !Array.from(e.dataTransfer.types).includes('Files')) return
-    e.preventDefault()
-    e.stopPropagation()
-    e.dataTransfer.dropEffect = 'copy'
-    setIsDragOverComposer(true)
-  }
-
-  const handleComposerDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
-    if (!onAddAttachmentPaths) return
-    e.preventDefault()
-    e.stopPropagation()
-    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
-    setIsDragOverComposer(false)
-  }
-
-  const handleComposerDrop = async (e: React.DragEvent<HTMLDivElement>) => {
-    if (!onAddAttachmentPaths) return
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragOverComposer(false)
-
-    const filePaths = Array.from(e.dataTransfer.files)
-      .map((file) => window.electronAPI.webUtils.getPathForFile(file))
-      .filter(Boolean)
-
-    await handleAddAttachmentPaths(filePaths)
-  }
+  const { handleScroll, scrollToBottom, showScrollToBottom } = useTranscriptAutoScroll({
+    items: transcriptItems,
+    virtualizer,
+    scrollRef,
+    activeSearchItemIndex: search.activeItemIndex,
+    bottomThreshold: 100
+  })
 
   return (
     <div ref={panelRef} tabIndex={-1} className={cn('flex flex-col min-h-0 bg-background border-l border-border relative', className)}>
-      {/* Debug copy toast — only visible briefly after copy */}
       {debugCopyToast && (
         <div className="absolute top-12 left-1/2 -translate-x-1/2 z-50 bg-card border border-border rounded-md px-3 py-1.5 text-xs text-foreground shadow-lg animate-in fade-in duration-150">
           Debug info copied to clipboard
         </div>
       )}
-      {/* Header — windows-titlebar-safe adds right padding on Windows to avoid title bar overlay */}
-      <div
-        className="flex items-center justify-between px-4 py-3 border-b border-border/60 shrink-0 windows-titlebar-safe"
+      <TranscriptHeader
+        title={title}
+        messageCount={messages.length}
+        status={status}
+        isStarting={isStarting}
+        onToggleSearch={search.toggle}
+        onRestart={onRestart}
+        onStop={onStop}
         onContextMenu={handleHeaderContextMenu}
-        title="Right-click to copy debug info"
-      >
-        <div className="flex items-center gap-2">
-          <Terminal className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm font-medium">
-            {title}
-            <span className="ml-2 text-xs font-mono text-muted-foreground">
-              ({messages.length})
-            </span>
-          </span>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className={`text-xs flex items-center gap-1 ${getStatusColor()}`}>
-            {(isStarting || status === SessionStatus.WORKING) && <Loader2 className="h-3 w-3 animate-spin" />}
-            {getStatusLabel()}
-          </span>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setIsSearchOpen((open) => {
-                  const nextOpen = !open
-                  if (nextOpen) requestAnimationFrame(() => searchInputRef.current?.focus())
-                  return nextOpen
-                })
-              }}
-              className="h-7 px-2"
-              title="Search transcript"
-            >
-              <Search className="h-3.5 w-3.5" />
-            </Button>
-            {onRestart && messages.length > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onRestart}
-                className="h-7 px-2"
-                title="Restart session"
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-              </Button>
-            )}
-            {(status === SessionStatus.WORKING || status === SessionStatus.WAITING_APPROVAL) && (
-              <Button variant="ghost" size="sm" onClick={onStop} className="h-7 px-2" title="Stop session">
-                <StopCircle className="h-3.5 w-3.5" />
-              </Button>
-            )}
-          </div>
-        </div>
-      </div>
+      />
 
-      {isSearchOpen && (
-        <div className="flex items-center gap-2 border-b border-border/50 px-4 py-2 shrink-0">
-          <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <input
-              ref={searchInputRef}
-              type="search"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') closeSearch()
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  goToSearchResult(e.shiftKey ? -1 : 1)
-                }
-              }}
-              placeholder="Search transcript..."
-              className="h-8 w-full rounded-md border border-input bg-transparent pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring/30"
-            />
-          </div>
-          <span className="w-16 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
-            {normalizedSearchQuery ? `${searchResultIndexes.length ? activeSearchResult + 1 : 0}/${searchResultIndexes.length}` : '0/0'}
-          </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={() => goToSearchResult(-1)}
-            disabled={searchResultIndexes.length === 0}
-            className="h-8 w-8"
-            title="Previous result"
-          >
-            <ArrowUp className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={() => goToSearchResult(1)}
-            disabled={searchResultIndexes.length === 0}
-            className="h-8 w-8"
-            title="Next result"
-          >
-            <ArrowDown className="h-3.5 w-3.5" />
-          </Button>
-          <Button type="button" variant="ghost" size="icon" onClick={closeSearch} className="h-8 w-8" title="Close search">
-            <X className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      )}
+      {search.isOpen && <TranscriptSearchBar search={search} />}
 
-      {/* Error banner */}
-      {showErrorBanner && lastErrorMessage && (
+      {errorBannerMessage && (
         <div className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 border-b border-red-500/20 shrink-0">
           <AlertTriangle className="h-3.5 w-3.5 text-red-400 shrink-0" />
-          <span className="text-xs text-red-300 truncate">{lastErrorMessage.content}</span>
+          <span className="text-xs text-red-300 truncate">{errorBannerMessage.content}</span>
         </div>
       )}
 
-      {/* System status bar (e.g. 'Compacting conversation history…') */}
       {systemStatus && (
         <div className="flex items-center gap-2 px-4 py-1.5 bg-yellow-500/10 border-b border-yellow-500/20 shrink-0">
           <Loader2 className="h-3 w-3 text-yellow-400 animate-spin shrink-0" />
@@ -1331,10 +186,8 @@ export function AgentTranscriptPanel({
         </div>
       )}
 
-      {/* Pinned todo summary */}
       {latestTodos && <TodoSummary todos={latestTodos} />}
 
-      {/* Messages */}
       <div className="relative flex-1 min-h-0">
         <div
           ref={scrollRef}
@@ -1377,13 +230,13 @@ export function AgentTranscriptPanel({
                       >
                         <div className="pb-2">
                           {item.type === 'activity' ? (
-                            <MemoizedActivityGroup messages={item.messages} searchQuery={normalizedSearchQuery} artifacts={taskArtifacts} onOpenArtifact={handleOpenArtifact} />
+                            <ActivityMessageGroup messages={item.messages} searchQuery={search.normalizedQuery} artifacts={taskArtifacts} onOpenArtifact={handleOpenArtifact} />
                           ) : (
-                            <MemoizedMessageBubble
+                            <MessageBubble
                               message={item.message}
                               onAnswer={onSend}
                               canAnswerQuestion={item.message.id === activeQuestionId}
-                              searchQuery={normalizedSearchQuery}
+                              searchQuery={search.normalizedQuery}
                             />
                           )}
                         </div>
@@ -1402,7 +255,6 @@ export function AgentTranscriptPanel({
           )}
         </div>
 
-        {/* Scroll to bottom button */}
         {showScrollToBottom && messages.length > 0 && (
           <button
             onClick={scrollToBottom}
@@ -1415,80 +267,15 @@ export function AgentTranscriptPanel({
         )}
       </div>
 
-      {/* Input + Footer */}
       <div className="border-t border-border shrink-0">
         {onSend && (
-          <div
-            data-testid="transcript-composer"
-            data-voice-composer={composerKey}
-            className={`relative px-4 py-3 space-y-2.5 transition-colors ${isDragOverComposer ? 'bg-primary/5' : ''}`}
-            onDragOver={handleComposerDragOver}
-            onDragEnter={handleComposerDragOver}
-            onDragLeave={handleComposerDragLeave}
-            onDrop={handleComposerDrop}
-          >
-            {isDragOverComposer && (
-              <div className="pointer-events-none absolute inset-2 z-10 flex items-center justify-center rounded-xl border border-dashed border-primary/40 bg-background/90">
-                <span className="text-xs font-medium text-primary">Drop files to attach them to this message</span>
-              </div>
-            )}
-            {pendingAttachments.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {pendingAttachments.map((attachment) => (
-                  <span
-                    key={attachment.id}
-                    className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border/60 bg-muted/40 px-2 py-1 text-[11px] text-foreground"
-                    title={`${attachment.filename} (${formatAttachmentSize(attachment.size)})`}
-                  >
-                    <FileText className="h-3 w-3 shrink-0 text-muted-foreground" />
-                    <span className="truncate max-w-[220px]">{attachment.filename}</span>
-                    <span className="text-muted-foreground">{formatAttachmentSize(attachment.size)}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveAttachment(attachment.id)}
-                      className="text-muted-foreground hover:text-foreground"
-                      aria-label={`Remove ${attachment.filename}`}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
-            <div className="flex items-end gap-2">
-              <textarea
-                ref={inputRef}
-                rows={1}
-                disabled={isStarting}
-                placeholder={isStarting ? 'Starting agent…' : 'Write a message...'}
-                className="flex-1 bg-input border border-border rounded-lg px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/30 resize-none overflow-hidden max-h-32 min-h-[32px] disabled:opacity-60"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault()
-                    handleSend()
-                  }
-                }}
-                onInput={autoResize}
-              />
-              <VoiceMicButton mode="dictation" onSubmit={handleSend} />
-              {onPickAttachments && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={handleAddAttachments}
-                className="h-[32px] w-[32px] shrink-0 rounded-lg"
-                title="Attach files"
-                aria-label="Attach files"
-              >
-                <Paperclip className="h-4 w-4" />
-              </Button>
-            )}
-              <Button variant="default" size="icon" onClick={handleSend} className="h-[32px] w-[32px] shrink-0 rounded-lg" aria-label="Send message">
-                <Send className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
+          <TranscriptComposer
+            onSend={onSend}
+            onPickAttachments={onPickAttachments}
+            onAddAttachmentPaths={onAddAttachmentPaths}
+            taskId={taskId}
+            isStarting={isStarting}
+          />
         )}
       </div>
     </div>

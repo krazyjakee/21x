@@ -208,17 +208,6 @@ const ARTIFACT_OUTPUT_DIRECTORIES = new Set([
   'reports'
 ])
 
-/**
- * Decide whether a workspace file is a logical user-facing deliverable.
- *
- * This mirrors Cloudflare OS's workpiece boundary: a file is not an artifact
- * merely because it can be previewed. Root preview files are treated as
- * standalone deliverables, while nested files require an explicit output
- * directory. Generic code/text files are allowed only inside that boundary.
- */
-export function isArtifactDeliverablePath(path: string, type: ArtifactType): boolean {
-  return artifactWorkpieceForPath(path, type) !== null
-}
 
 export interface ArtifactWorkpiece {
   key: string

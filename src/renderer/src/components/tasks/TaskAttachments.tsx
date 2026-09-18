@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { Paperclip, X, FileText, Download } from 'lucide-react'
 import { attachmentApi } from '@/lib/ipc-client'
 import type { FileAttachment } from '@/types'
+import { formatFileSize } from '@/lib/utils'
 
 export interface PendingFile {
   id: string
@@ -17,13 +18,6 @@ interface TaskAttachmentsProps {
   readOnly?: boolean
   pendingFiles?: PendingFile[]
   onPendingChange?: (files: PendingFile[]) => void
-}
-
-function formatFileSize(bytes: number): string {
-  if (!bytes || !Number.isFinite(bytes)) return '—'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 export function TaskAttachments({

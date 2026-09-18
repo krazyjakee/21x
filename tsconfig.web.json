@@ -3,7 +3,8 @@
   "include": [
     "src/renderer/src/**/*",
     "src/renderer/src/**/*.d.ts",
-    "src/shared/**/*"
+    "src/shared/**/*",
+    "src/mobile/**/*"
   ],
   "compilerOptions": {
     "composite": true,

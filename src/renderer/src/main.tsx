@@ -5,6 +5,7 @@ import './styles/globals.css'
 // Eagerly boot the theme store so it applies the persisted theme and starts
 // listening for OS-level light/dark changes before first paint.
 import '@/stores/theme-store'
+import { platform } from '@/lib/platform'
 
 // Suppress xterm.js internal "toFixed is not a function" crash.
 // xterm's _reportWindowsOptions() calls .toFixed() on dimension values that
@@ -18,13 +19,7 @@ window.addEventListener('error', (e) => {
 })
 
 // Tag <html> with platform so CSS can adapt (e.g. Windows title-bar padding)
-if (navigator.userAgent.includes('Windows')) {
-  document.documentElement.setAttribute('data-platform', 'win32')
-} else if (navigator.userAgent.includes('Mac')) {
-  document.documentElement.setAttribute('data-platform', 'darwin')
-} else {
-  document.documentElement.setAttribute('data-platform', 'linux')
-}
+document.documentElement.setAttribute('data-platform', platform)
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

@@ -15,7 +15,7 @@ import type { ResolvedModel } from './voice-model-manager'
 import type { VoiceEngineStatus } from '../../shared/voice'
 
 /** Release the model after this much idle time to give the memory back. */
-export const VOICE_IDLE_UNLOAD_MS = 5 * 60 * 1000
+const VOICE_IDLE_UNLOAD_MS = 5 * 60 * 1000
 
 interface WorkerMessage {
   t: 'status' | 'partial' | 'segment' | 'final' | 'error' | 'pong'
@@ -29,15 +29,6 @@ interface WorkerMessage {
   engine?: string
   loadMs?: number
   rss?: number
-}
-
-export interface VoiceWorkerEvents {
-  status: (status: VoiceEngineStatus) => void
-  partial: (turnId: string, text: string) => void
-  /** One finished sentence inside an open conversation. */
-  segment: (turnId: string, text: string, index: number) => void
-  final: (turnId: string, text: string) => void
-  error: (message: string, code?: string) => void
 }
 
 export class VoiceWorkerClient extends EventEmitter {
@@ -286,6 +277,6 @@ export class VoiceWorkerClient extends EventEmitter {
 }
 
 /** The worker is copied next to the main bundle by `electron.vite.config.ts`. */
-export function defaultWorkerScript(): string {
+function defaultWorkerScript(): string {
   return join(__dirname, 'voice', 'voice-worker.js')
 }

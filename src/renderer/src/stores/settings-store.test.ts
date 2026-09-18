@@ -113,17 +113,4 @@ describe('useSettingsStore', () => {
       expect(useSettingsStore.getState().glabCliStatus).toEqual(status)
     })
   })
-
-  describe('startGlabAuth', () => {
-    it('starts GitLab auth and re-checks status', async () => {
-      const status = { installed: true, authenticated: true, username: 'gitlab-user' }
-      ;(mockElectronAPI.gitlab.checkCli as unknown as Mock).mockResolvedValue(status)
-
-      await useSettingsStore.getState().startGlabAuth()
-
-      expect(mockElectronAPI.gitlab.startAuth).toHaveBeenCalled()
-      expect(mockElectronAPI.gitlab.checkCli).toHaveBeenCalled()
-      expect(useSettingsStore.getState().glabCliStatus).toEqual(status)
-    })
-  })
 })

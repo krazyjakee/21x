@@ -5,10 +5,11 @@
  *
  * Key differences from OpenCode:
  * - Uses AsyncGenerator streaming API instead of HTTP client
- * - File-based session persistence (~/.claude/sessions/)
+ * - File-based session persistence (~/.claude/projects/)
  * - Different message format (SDKMessage vs OpenCode messages)
  */
 
+import { randomUUID } from 'crypto'
 import type {
   CodingAgentAdapter,
   SessionConfig,
@@ -17,7 +18,11 @@ import type {
   MessagePart,
 } from './coding-agent-adapter'
 import { SessionStatusType, MessagePartType, MessageRole } from './coding-agent-adapter'
+import { findClaudeExecutable } from './claude-code-executable'
+import { cleanSessionFile, isValidClaudeSessionId, loadSessionHistory } from './claude-code-history'
+import { buildToolTitle, ClaudeSystemSubtype, convertSDKMessageToParts, resultErrorText } from './claude-code-message-converter'
 import { claudeCodePermissionMode } from './permission-mode'
+import { buildShellExports } from './shared/shell-exports'
 
 type ClaudeSDK = typeof import('@anthropic-ai/claude-agent-sdk')
 type Query = import('@anthropic-ai/claude-agent-sdk').Query
@@ -32,26 +37,8 @@ type PermissionUpdate = import('@anthropic-ai/claude-agent-sdk').PermissionUpdat
 
 let ClaudeAgentSDK: ClaudeSDK | null = null
 
-/** Module-level cache for the resolved Claude executable path (persists across adapter instances) */
-let resolvedClaudeExecutablePath: string | null = null
-
 /** Maximum number of messages to keep in the buffer per session */
 const MAX_MESSAGE_BUFFER_SIZE = 500
-
-export enum ClaudeSystemSubtype {
-  INIT = 'init',
-  TASK_STARTED = 'task_started',
-  TASK_PROGRESS = 'task_progress',
-  TASK_NOTIFICATION = 'task_notification',
-  TASK_UPDATED = 'task_updated',
-  /** Authoritative in-flight background-task list. Emitted by the CLI but NOT
-   *  surfaced by SDK >= 0.3.x (absent from the SDKMessage union) — older bundled
-   *  SDKs (e.g. 0.2.x) do pass it through, so it is handled defensively both as a
-   *  status source and as a transcript-suppression case. */
-  BACKGROUND_TASKS_CHANGED = 'background_tasks_changed',
-  STATUS = 'status',
-  THINKING_TOKENS = 'thinking_tokens',
-}
 
 /**
  * Terminal states for a Claude Code background task. Once a task reports one of
@@ -98,7 +85,8 @@ const DENY_APPROVAL_OPTIONS = new Set(['abort', 'deny', 'reject', 'cancel', 'den
 const ALWAYS_APPROVAL_OPTIONS = new Set(['approved-for-session', 'allow-always'])
 
 interface ClaudeSession {
-  sessionId: string // Claude's internal session ID
+  /** Claude's internal session ID, known once the first stream message arrives */
+  sessionId: string
   queryIterator: Query | null
   abortController: AbortController | null
   status: 'idle' | 'busy' | 'error'
@@ -107,8 +95,9 @@ interface ClaudeSession {
   messageCursor: number
   streamTask: Promise<void> | null
   lastError: string | null
-  config: SessionConfig // Store config for later use
-  isResumed?: boolean // True if this session was resumed from persistence
+  config: SessionConfig
+  /** True when the next query must `resume` the persisted session */
+  isResumed?: boolean
   /**
    * Subagent / bash tasks Claude Code is currently running in the background.
    * Claude Code backgrounds Task-tool subagents by default: the tool call returns
@@ -134,10 +123,29 @@ interface ClaudeSession {
   pendingApprovals: PendingClaudeApproval[]
 }
 
+function newClaudeSession(sessionId: string, config: SessionConfig, isResumed: boolean): ClaudeSession {
+  return {
+    sessionId,
+    queryIterator: null,
+    abortController: null,
+    status: 'idle',
+    messageBuffer: [],
+    messageCursor: 0,
+    streamTask: null,
+    lastError: null,
+    config,
+    isResumed,
+    backgroundTasks: new Map(),
+    sawResult: false,
+    enqueuePrompt: null,
+    releasePrompt: null,
+    pendingApprovals: [],
+  }
+}
+
 export class ClaudeCodeAdapter implements CodingAgentAdapter {
   private sessions = new Map<string, ClaudeSession>()
   private sdkLoading: Promise<void> | null = null
-  private claudeExecutablePath: string | null = null
 
   /**
    * Callback set by agent-manager to trigger an immediate poll cycle
@@ -148,154 +156,6 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
 
   constructor() {
     this.sdkLoading = this.loadSDK()
-  }
-
-  /**
-   * Find the Claude CLI executable path
-   */
-  private async findClaudeExecutable(): Promise<string> {
-    if (this.claudeExecutablePath) {
-      return this.claudeExecutablePath
-    }
-
-    // Check module-level cache (persists across adapter instances)
-    if (resolvedClaudeExecutablePath) {
-      this.claudeExecutablePath = resolvedClaudeExecutablePath
-      return this.claudeExecutablePath
-    }
-
-    const isWin = process.platform === 'win32'
-
-    try {
-      const { execFile } = await import('child_process')
-      const { promisify } = await import('util')
-      const execFileAsync = promisify(execFile)
-
-      // Try to find claude in PATH
-      const whichCmd = isWin ? 'where' : 'which'
-      const binaryName = 'claude'
-      const { stdout } = await execFileAsync(whichCmd, [binaryName])
-      let found = stdout.trim().split(/\r?\n/)[0]
-
-      // On Windows, the SDK spawns the executable directly without shell,
-      // so .cmd files fail with EINVAL. Resolve .cmd → the underlying cli.js
-      // so the SDK uses `node cli.js` instead.
-      if (isWin) {
-        found = await this.resolveWindowsCmdToJs(found)
-      }
-
-      this.claudeExecutablePath = found
-      resolvedClaudeExecutablePath = found
-      console.log(`[ClaudeCodeAdapter] Found claude executable at: ${this.claudeExecutablePath}`)
-      return this.claudeExecutablePath
-    } catch {
-      // Common installation locations — must cover Homebrew, npm globals,
-      // pnpm globals, Volta, and NVM paths so the binary is found even when
-      // the shell PATH wasn't fully resolved (packaged macOS GUI app).
-      const home = process.env.HOME || process.env.USERPROFILE || ''
-      const commonPaths = isWin
-        ? [
-            `${home}\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js`,
-            `${home}\\AppData\\Roaming\\npm\\claude.cmd`,
-            `${home}\\AppData\\Roaming\\npm\\claude.exe`,
-            `${home}\\.local\\bin\\claude.cmd`,
-            `${home}\\.local\\bin\\claude.exe`
-          ]
-        : [
-            '/usr/local/bin/claude',
-            '/opt/homebrew/bin/claude',
-            `${home}/.local/bin/claude`,
-            `${home}/.npm-global/bin/claude`,
-            `${home}/Library/pnpm/claude`,
-            `${home}/.volta/bin/claude`,
-          ]
-
-      // Dynamically detect NVM-managed npm global bin (avoids hardcoding a Node version)
-      if (!isWin && home) {
-        try {
-          const { join } = await import('path')
-          const { readdirSync } = await import('fs')
-          const nvmDir = join(home, '.nvm', 'versions', 'node')
-          const versions = readdirSync(nvmDir)
-          versions.sort((a: string, b: string) => b.localeCompare(a, undefined, { numeric: true }))
-          for (const v of versions) {
-            commonPaths.push(join(nvmDir, v, 'bin', 'claude'))
-          }
-        } catch {
-          // NVM not installed — skip
-        }
-      }
-
-      const { existsSync } = await import('fs')
-      for (const path of commonPaths) {
-        if (existsSync(path)) {
-          let resolved = path
-          if (isWin && path.endsWith('.cmd')) {
-            resolved = await this.resolveWindowsCmdToJs(path)
-          }
-          this.claudeExecutablePath = resolved
-          resolvedClaudeExecutablePath = resolved
-          console.log(`[ClaudeCodeAdapter] Found claude executable at: ${this.claudeExecutablePath}`)
-          return this.claudeExecutablePath
-        }
-      }
-
-      throw new Error('Claude CLI not found. Install it with: npm install -g @anthropic-ai/claude-code')
-    }
-  }
-
-  /**
-   * On Windows, .cmd wrapper files can't be spawned directly by the SDK
-   * (no shell: true). Resolve claude.cmd → the underlying cli.js path.
-   */
-  private async resolveWindowsCmdToJs(cmdPath: string): Promise<string> {
-    try {
-      const { readFileSync, existsSync } = await import('fs')
-      const { join, dirname } = await import('path')
-
-      // Try the known npm global layout first: same dir as .cmd → node_modules/@anthropic-ai/claude-code/cli.js
-      const cmdDir = dirname(cmdPath)
-      const cliJs = join(cmdDir, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js')
-      if (existsSync(cliJs)) {
-        console.log(`[ClaudeCodeAdapter] Resolved .cmd → ${cliJs}`)
-        return cliJs
-      }
-
-      // Parse the .cmd file to extract the JS path
-      const content = readFileSync(cmdPath, 'utf8')
-      const match = content.match(/"[^"]*node(?:\.exe)?"[^"]*"([^"]+\.js)"/)
-        || content.match(/node(?:\.exe)?\s+"([^"]+\.js)"/)
-        || content.match(/node(?:\.exe)?\s+([^\s]+\.js)/)
-      if (match?.[1]) {
-        const resolvedJs = match[1].includes('%dp0%')
-          ? match[1].replace(/%dp0%/g, cmdDir + '\\')
-          : match[1]
-        if (existsSync(resolvedJs)) {
-          console.log(`[ClaudeCodeAdapter] Parsed .cmd → ${resolvedJs}`)
-          return resolvedJs
-        }
-      }
-    } catch (err) {
-      console.warn(`[ClaudeCodeAdapter] Failed to resolve .cmd to .js:`, err)
-    }
-
-    // Fall back to original .cmd path
-    return cmdPath
-  }
-
-  /**
-   * Build environment variables for Claude process
-   * Removes CLAUDECODE to prevent nested session errors.
-   * When secrets are configured, sets SHELL to the secret-shell.sh wrapper
-   * so every bash command fetches secrets from the broker transparently.
-   */
-  private buildClaudeEnvironment(): Record<string, string> {
-    const env = { ...process.env } as Record<string, string>
-
-    // Remove CLAUDECODE to prevent nested session error
-    delete env.CLAUDECODE
-
-    return env
   }
 
   /**
@@ -310,10 +170,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       return undefined
     }
 
-    // Build shell export lines — single-quote values, escape embedded quotes
-    const exportLines = Object.entries(secretEnvVars)
-      .map(([k, v]) => `export ${k}='${v.replace(/'/g, "'\\''")}'`)
-      .join('\n')
+    const exportLines = buildShellExports(secretEnvVars)
 
     console.log(`[ClaudeCodeAdapter] Registering PreToolUse hook for secrets: [${Object.keys(secretEnvVars).join(', ')}]`)
 
@@ -323,7 +180,6 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
         return {}
       }
 
-      // Prepend secret exports to the bash command
       const originalCommand = toolInput.command as string
       const modifiedCommand = exportLines + '\n' + originalCommand
 
@@ -371,7 +227,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       }
 
       return new Promise<PermissionResult>((resolve) => {
-        const detail = this.buildToolTitle(toolName, input)
+        const detail = buildToolTitle(toolName, input)
         const approval: PendingClaudeApproval = {
           requestId: toolUseID,
           toolCallId: toolUseID,
@@ -439,111 +295,13 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       throw new Error('Claude Agent SDK not loaded')
     }
 
-    // Create session state (without starting a query yet)
-    // The first sendPrompt call will start the actual query
-    const session: ClaudeSession = {
-      sessionId: '', // Will be set from first message
-      queryIterator: null,
-      abortController: null,
-      status: 'idle',
-      messageBuffer: [],
-      messageCursor: 0,
-      streamTask: null,
-      lastError: null,
-      config, // Store config for use in sendPrompt
-      isResumed: false, // New session, not resumed
-      backgroundTasks: new Map(),
-      sawResult: false,
-      enqueuePrompt: null,
-      releasePrompt: null,
-      pendingApprovals: [],
-    }
-
-    // Generate UUID-format session ID (required by Claude Code)
-    const { randomUUID } = await import('crypto')
+    // Claude Code requires UUID-format session IDs. The real ID arrives with the
+    // first stream message; the first sendPrompt starts the query.
     const sessionId = randomUUID()
-    this.sessions.set(sessionId, session)
+    this.sessions.set(sessionId, newClaudeSession('', config, false))
 
     console.log(`[ClaudeCodeAdapter] Session created: ${sessionId}`)
     return sessionId
-  }
-
-  /**
-   * Check if a session ID is valid for Claude Code (UUID format)
-   */
-  private isValidClaudeSessionId(sessionId: string): boolean {
-    // Claude Code expects UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-    return uuidRegex.test(sessionId)
-  }
-
-
-  /**
-   * Load conversation history from Claude session file
-   */
-  /**
-   * Cleans the session file by removing messages with empty text blocks
-   * This prevents API errors when resuming sessions
-   */
-  private async cleanSessionFile(sessionId: string, workspaceDir: string): Promise<void> {
-    try {
-      const { readFileSync, writeFileSync, existsSync } = await import('fs')
-      const { join } = await import('path')
-      const { homedir } = await import('os')
-
-      const claudeDir = join(homedir(), '.claude', 'projects')
-      // Claude Code CLI encodes workspace paths by replacing all non-alphanumeric/non-hyphen chars with '-'
-      const encodedWorkspace = workspaceDir.replace(/[^a-zA-Z0-9-]/g, '-')
-      const sessionFile = join(claudeDir, encodedWorkspace, `${sessionId}.jsonl`)
-
-      console.log(`[ClaudeCodeAdapter] Cleaning session file: ${sessionFile}`)
-
-      // Check if session file exists
-      if (!existsSync(sessionFile)) {
-        console.log(`[ClaudeCodeAdapter] Session file not found, skipping clean: ${sessionFile}`)
-        return
-      }
-
-      const content = readFileSync(sessionFile, 'utf-8')
-      const lines = content.trim().split('\n')
-      const cleanedLines: string[] = []
-
-      for (const line of lines) {
-        const entry = JSON.parse(line)
-
-        // Keep non-message entries as-is
-        if (entry.type !== 'user' && entry.type !== 'assistant') {
-          cleanedLines.push(line)
-          continue
-        }
-
-        // Check if message has content with empty text blocks
-        if (entry.message?.content) {
-          let hasEmptyText = false
-          for (const contentPart of entry.message.content) {
-            if (contentPart.type === 'text' && (!contentPart.text || contentPart.text.trim() === '')) {
-              hasEmptyText = true
-              break
-            }
-          }
-
-          // Skip messages with empty text blocks
-          if (hasEmptyText) {
-            console.log(`[ClaudeCodeAdapter] Removing message with empty text block: ${entry.uuid}`)
-            continue
-          }
-        }
-
-        cleanedLines.push(line)
-      }
-
-      // Write cleaned content back
-      writeFileSync(sessionFile, cleanedLines.join('\n') + '\n', 'utf-8')
-      console.log(`[ClaudeCodeAdapter] Session file cleaned: ${lines.length} -> ${cleanedLines.length} lines`)
-    } catch (error) {
-      console.warn(`[ClaudeCodeAdapter] Failed to clean session file:`, error)
-      // Don't throw - let resume attempt proceed even if cleaning fails
-    }
   }
 
   /**
@@ -555,166 +313,8 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     const workspaceDir = config.workspaceDir
     if (!workspaceDir) return []
     try {
-      return await this.loadSessionHistory(sessionId, workspaceDir)
+      return loadSessionHistory(sessionId, workspaceDir)
     } catch {
-      return []
-    }
-  }
-
-  private async loadSessionHistory(sessionId: string, workspaceDir: string): Promise<SessionMessage[]> {
-    try {
-      const { readFileSync, existsSync } = await import('fs')
-      const { join } = await import('path')
-      const { homedir } = await import('os')
-
-      // Session files are stored in: ~/.claude/projects/[encoded-workspace]/[sessionId].jsonl
-      // Claude Code CLI encodes workspace paths by replacing all non-alphanumeric/non-hyphen chars with '-'
-      const claudeDir = join(homedir(), '.claude', 'projects')
-      const encodedWorkspace = workspaceDir.replace(/[^a-zA-Z0-9-]/g, '-')
-      const sessionFile = join(claudeDir, encodedWorkspace, `${sessionId}.jsonl`)
-
-      console.log(`[ClaudeCodeAdapter] Loading session history from: ${sessionFile}`)
-
-      // Check if session file exists
-      if (!existsSync(sessionFile)) {
-        console.warn(`[ClaudeCodeAdapter] Session file not found: ${sessionFile}`)
-        throw new Error('SESSION_FILE_NOT_FOUND: The Claude Code session file does not exist. This may happen if the session was deleted or never synced.')
-      }
-
-      const content = readFileSync(sessionFile, 'utf-8')
-      const lines = content.trim().split('\n')
-      const messages: SessionMessage[] = []
-      // Map tool_use_id → part reference so tool_result can merge into it
-      const toolUseParts = new Map<string, MessagePart['tool']>()
-
-      for (const line of lines) {
-        const entry = JSON.parse(line)
-
-        // Skip non-message entries (queue-operation, etc.)
-        if (entry.type !== 'user' && entry.type !== 'assistant') continue
-
-        const message: SessionMessage = {
-          id: entry.uuid,
-          role: entry.type === 'user' ? MessageRole.USER : MessageRole.ASSISTANT,
-          parts: []
-        }
-
-        // Parse message content
-        // Use the stable API message ID for part IDs — must match the pattern
-        // in convertSDKMessageToParts so that dedup state from loadSessionHistory
-        // correctly prevents re-emission of historical messages during streaming replay.
-        const stableId = entry.message?.id || entry.uuid || entry.type
-        if (entry.message?.content) {
-          for (let blockIdx = 0; blockIdx < entry.message.content.length; blockIdx++) {
-            const contentPart = entry.message.content[blockIdx]
-            if (contentPart.type === 'text') {
-              // Skip empty text blocks (corrupt messages)
-              if (!contentPart.text || contentPart.text.trim() === '') continue
-
-              message.parts.push({
-                id: `${stableId}-text-${blockIdx}`,
-                type: MessagePartType.TEXT,
-                text: contentPart.text,
-                content: contentPart.text
-              })
-            } else if (contentPart.type === 'thinking') {
-              if (!contentPart.thinking || contentPart.thinking.trim() === '') continue
-
-              message.parts.push({
-                id: `${stableId}-thinking-${blockIdx}`,
-                type: MessagePartType.REASONING,
-                text: contentPart.thinking,
-                content: contentPart.thinking
-              })
-            } else if (contentPart.type === 'tool_use') {
-              const rawInput = contentPart.input as Record<string, unknown> | undefined
-              const toolName = contentPart.name || 'unknown'
-              const title = this.buildToolTitle(toolName, rawInput)
-              const input = rawInput ? JSON.stringify(rawInput, null, 2) : undefined
-              const toolObj: MessagePart['tool'] = {
-                name: toolName,
-                status: 'pending',
-                title,
-                input,
-              }
-
-              // Detect TodoWrite → set todowrite type and extract todos
-              let partType: string = MessagePartType.TOOL
-              let todos = rawInput?.todos
-              if (typeof todos === 'string') { try { todos = JSON.parse(todos) } catch {} }
-              if (Array.isArray(todos) && todos.length > 0) {
-                partType = 'todowrite'
-                toolObj.todos = todos.map((t: Record<string, unknown>, i: number) => ({
-                  id: t.id || `todo-${i}`,
-                  content: t.content || '',
-                  status: t.status || 'pending',
-                  priority: t.priority,
-                }))
-              }
-
-              // Detect AskUserQuestion → set question type and extract questions
-              let questions = rawInput?.questions
-              if (typeof questions === 'string') { try { questions = JSON.parse(questions) } catch {} }
-              if (Array.isArray(questions) && questions.length > 0) {
-                partType = 'question'
-                toolObj.questions = questions
-              }
-
-              // Detect EnterPlanMode / ExitPlanMode → set planreview type
-              // For ExitPlanMode, the plan content is in input.plan (not in tool_result)
-              if (toolName === 'EnterPlanMode' || toolName === 'ExitPlanMode') {
-                partType = 'planreview'
-                toolObj.title = toolName === 'EnterPlanMode' ? 'Enter plan mode' : 'Exit plan mode'
-                if (toolName === 'ExitPlanMode' && rawInput?.plan) {
-                  toolObj.output = String(rawInput.plan).slice(0, 50000)
-                }
-              }
-
-              const toolPartId = contentPart.id ? `tool-${contentPart.id}` : `${stableId}-tool_use-${contentPart.id || blockIdx}`
-              message.parts.push({ id: toolPartId, type: partType as MessagePartType, tool: toolObj })
-              if (contentPart.id) toolUseParts.set(contentPart.id, toolObj)
-            } else if (contentPart.type === 'tool_result' && contentPart.tool_use_id) {
-              // Merge result into the matching tool_use part instead of creating separate entry
-              const matchingTool = toolUseParts.get(contentPart.tool_use_id)
-              if (matchingTool) {
-                matchingTool.status = 'success'
-                // Plan content should not be truncated (cap at 50K for safety)
-                const isPlan = matchingTool.name === 'ExitPlanMode' || matchingTool.name === 'EnterPlanMode'
-                const rawContent = contentPart.content ? String(contentPart.content) : undefined
-                // Filter out confirmation prompts like "Exit/Enter plan mode?"
-                const sanitized = isPlan && rawContent && /^(exit|enter) plan mode\??$/i.test(rawContent.trim())
-                  ? undefined : rawContent
-                matchingTool.output = sanitized
-                  ? (isPlan ? sanitized.slice(0, 50000) : sanitized.slice(0, 2000))
-                  : undefined
-              }
-              // Don't push a separate part — result is merged into tool_use
-            }
-          }
-        }
-
-        if (message.parts.length > 0) {
-          // Preserve the ORIGINAL event time from the session log so replay/
-          // rehydration shows real timestamps (and the durable projection stores
-          // them as created_at) instead of defaulting to "now" on every reload.
-          const receivedAt = entry.timestamp ? Date.parse(entry.timestamp) : NaN
-          if (!Number.isNaN(receivedAt)) {
-            for (const part of message.parts) part.receivedAt = receivedAt
-          }
-          messages.push(message)
-        }
-      }
-
-      console.log(`[ClaudeCodeAdapter] Loaded ${messages.length} messages from session history`)
-      return messages
-    } catch (error: unknown) {
-      // Re-throw session file not found errors
-      const errMsg = error instanceof Error ? error.message : String(error)
-      if (errMsg.includes('SESSION_FILE_NOT_FOUND')) {
-        throw error
-      }
-      // For other errors, warn and return empty array
-      console.warn(`[ClaudeCodeAdapter] Failed to load session history:`, errMsg)
       return []
     }
   }
@@ -728,44 +328,20 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       throw new Error('Claude Agent SDK not loaded')
     }
 
-    // Validate session ID format
-    if (!this.isValidClaudeSessionId(sessionId)) {
+    if (!isValidClaudeSessionId(sessionId)) {
       console.warn(`[ClaudeCodeAdapter] Invalid session ID format: ${sessionId}`)
       throw new Error(
         'INCOMPATIBLE_SESSION_ID: This session was created with a different coding agent and cannot be resumed with Claude Code.'
       )
     }
 
-    // Clean session file to remove empty text blocks before resuming
-    await this.cleanSessionFile(sessionId, config.workspaceDir)
+    cleanSessionFile(sessionId, config.workspaceDir)
 
-    // Create session state (idle until user sends a message)
-    const session: ClaudeSession = {
-      sessionId,
-      queryIterator: null, // Will be created when user sends first message
-      abortController: null,
-      status: 'idle',
-      messageBuffer: [],
-      messageCursor: 0,
-      streamTask: null,
-      lastError: null,
-      config, // Store config for later use
-      isResumed: true, // Resumed from persistence
-      backgroundTasks: new Map(),
-      sawResult: false,
-      enqueuePrompt: null,
-      releasePrompt: null,
-      pendingApprovals: [],
-    }
-
-    this.sessions.set(sessionId, session)
-
-    // Don't start query yet - wait for user to send a message
-    // The query will be started in sendPrompt with resume option
+    // The query starts (with `resume`) when the user sends the next prompt.
+    this.sessions.set(sessionId, newClaudeSession(sessionId, config, true))
     console.log(`[ClaudeCodeAdapter] Session resumed: ${sessionId} (waiting for user prompt)`)
 
-    // Load conversation history from session file
-    const messages = await this.loadSessionHistory(sessionId, config.workspaceDir)
+    const messages = loadSessionHistory(sessionId, config.workspaceDir)
 
     console.log(`[ClaudeCodeAdapter] Session loaded with ${messages.length} messages`)
 
@@ -786,7 +362,6 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       throw new Error('Claude Agent SDK not loaded')
     }
 
-    // Extract text from parts
     const promptText = parts
       .filter((p) => p.type === 'text' && p.text)
       .map((p) => p.text!)
@@ -799,7 +374,6 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     // Note: Don't add user message to buffer - agent-manager already shows it
     // to avoid duplicate messages in UI
 
-    // Check if this is the first prompt (no query running yet)
     const isFirstPrompt = !session.queryIterator
 
     // A live query owns a persistent prompt stream. Add the next turn to that
@@ -820,7 +394,6 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       session.releasePrompt = null
       session.enqueuePrompt = null
       session.abortController?.abort()
-      // Wait for stream cleanup to complete to avoid race conditions
       if (session.streamTask) {
         try {
           await session.streamTask
@@ -830,14 +403,11 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       }
     }
 
-    // Find Claude executable
-    const claudePath = await this.findClaudeExecutable()
+    const claudePath = await findClaudeExecutable()
 
-    // Create new abort controller
     const abortController = new AbortController()
     session.abortController = abortController
 
-    // Build options
     const secretHooks = this.buildSecretHooks(config)
     const effort = config.reasoningEffort === 'minimal' ? undefined : config.reasoningEffort
     const claudePermissionMode = claudeCodePermissionMode(config)
@@ -944,7 +514,6 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       }
     })()
 
-    // Start new query
     const query = ClaudeAgentSDK.query({
       prompt: promptStream,
       options,
@@ -965,7 +534,6 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       session.isResumed = false
     }
 
-    // Start consuming stream
     session.streamTask = this.consumeStream(sessionId, session)
   }
 
@@ -1047,11 +615,9 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       const msgId = this.getMessageId(sdkMsg)
       if (!msgId) continue
 
-      // Convert SDKMessage to MessagePart
       const parts = this.convertSDKMessageToParts(sdkMsg, seenPartIds, partContentLengths)
       newParts.push(...parts)
     }
-    // Advance cursor past processed messages
     session.messageCursor = bufferLen
 
     // If we have the real Claude session ID and it's different from the map key,
@@ -1079,7 +645,6 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     this.rejectPendingApprovals(session, 'The session was stopped.')
     session.abortController?.abort()
 
-    // Wait for stream to finish cleanup
     if (session.streamTask) {
       console.log(`[ClaudeCodeAdapter] Waiting for stream cleanup...`)
       try {
@@ -1100,7 +665,6 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       return
     }
 
-    // Abort any ongoing query
     session.releasePrompt?.()
     session.releasePrompt = null
     session.enqueuePrompt = null
@@ -1108,7 +672,6 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     this.rejectPendingApprovals(session, 'The session was stopped.')
     session.abortController?.abort()
 
-    // Wait for stream task to complete
     if (session.streamTask) {
       try {
         await session.streamTask
@@ -1152,18 +715,15 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     let messageIdCounter = 0
 
     for (const msg of session.messageBuffer) {
-      // Derive role from message type
       const msgRecord = msg as unknown as Record<string, unknown>
       const roleStr = (msgRecord.role || (msg.type === 'user' ? 'user' : 'assistant')) as string
       const role = roleStr === 'user' ? MessageRole.USER :
                    roleStr === 'system' ? MessageRole.SYSTEM :
                    MessageRole.ASSISTANT
 
-      // Convert using the full SDK message parser
       const parts = this.convertSDKMessageToParts(msg, seenPartIds, partContentLengths)
       if (parts.length === 0) continue
 
-      // Start new message if role changed
       if (!currentMessage || currentMessage.role !== role) {
         if (currentMessage) {
           messages.push(currentMessage)
@@ -1178,7 +738,6 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       currentMessage!.parts.push(...parts)
     }
 
-    // Push last message
     if (currentMessage) {
       messages.push(currentMessage)
     }
@@ -1295,13 +854,6 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     }
   }
 
-  // ========================================================================
-  // Private Helper Methods
-  // ========================================================================
-
-  /**
-   * Safely logs a message by truncating large base64 content
-   */
   /**
    * Lightweight message logger — only logs type/subtype to avoid blocking
    * the event loop with expensive JSON serialization on every streaming chunk.
@@ -1379,10 +931,8 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
           await new Promise<void>((r) => setImmediate(r))
         }
 
-        // Log message with truncation for large content
         this.safeLogMessage(message)
 
-        // Extract real Claude Code session ID from first message
         if (!session.sessionId && 'session_id' in msg) {
           const realSessionId = msg.session_id as string
           session.sessionId = realSessionId
@@ -1418,29 +968,8 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
         // Handle error result messages (e.g., rate limits) before treating as normal
         if (msg.type === 'result' && msg.is_error) {
           const raw = msg as Record<string, unknown>
-          // Extract meaningful error text from all available fields:
-          // - `result` may be a string or object
-          // - `errors` may be an array of error strings
-          // - `error` may be a string
-          const resultField = raw.result
-          const errorsField = Array.isArray(raw.errors) ? raw.errors : []
-          const errorField = typeof raw.error === 'string' ? raw.error : ''
-          const subtypeField = typeof raw.subtype === 'string' ? raw.subtype : ''
-
-          let errorText: string
-          if (typeof resultField === 'string' && resultField.length > 0) {
-            errorText = resultField
-          } else if (errorsField.length > 0) {
-            errorText = errorsField.map(String).join('; ')
-          } else if (errorField) {
-            errorText = errorField
-          } else if (resultField && typeof resultField === 'object') {
-            errorText = JSON.stringify(resultField)
-          } else if (subtypeField) {
-            errorText = `Error during ${subtypeField}`
-          } else {
-            errorText = 'Unknown error (no details in result message)'
-          }
+          const errorText = resultErrorText(raw)
+            ?? (typeof raw.subtype === 'string' && raw.subtype ? `Error during ${raw.subtype}` : 'Unknown error (no details in result message)')
 
           console.warn('[ClaudeCodeAdapter] Received error result:', errorText)
           console.warn('[ClaudeCodeAdapter] Full error result message:', JSON.stringify(raw, null, 2))
@@ -1465,7 +994,6 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
           session.lastError = text || 'Claude Code API error'
         }
 
-        // Buffer message (only if we didn't throw above)
         session.messageBuffer.push(message)
 
         // Cap buffer size to prevent unbounded memory growth.
@@ -1487,7 +1015,6 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
         // finished while children are still running.
         this.trackBackgroundTask(sessionId, session, message)
 
-        // Update status based on message type
         if (msg.type === 'status') {
           console.log(`[ClaudeCodeAdapter] Status update: ${msg.subtype}`)
           if (msg.subtype === 'busy') {
@@ -1508,7 +1035,6 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
         // running in the background.
         this.settleTurnIfComplete(sessionId, session)
 
-        // Log stderr/stdout if present
         if (msg.type === 'stream_event' && msg.stderr) {
           console.error('[ClaudeCodeAdapter] Claude stderr:', msg.stderr)
         }
@@ -1565,9 +1091,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       session.releasePrompt?.()
       session.releasePrompt = null
       session.enqueuePrompt = null
-      if (session.status === 'error') {
-        // Error path: queryIterator already null above; no extra work needed.
-      } else {
+      if (session.status !== 'error') {
         session.status = 'idle'
         // Mark as resumed so the next sendPrompt uses --resume with the exact
         // session ID rather than --continue (which targets most-recent in dir).
@@ -1710,619 +1234,21 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     return null
   }
 
-  /**
-   * Converts SDKMessage to MessagePart[] format
-   */
   private convertSDKMessageToParts(
     msg: SDKMessage,
     seenPartIds: Set<string>,
     partContentLengths: Map<string, string>
   ): MessagePart[] {
-    const parts: MessagePart[] = []
-    const msgWithProps = msg as {
-      type?: string
-      uuid?: string
-      content?: unknown[]
-      message?: {
-        content?: unknown[]
-        text?: string
-        role?: string
-        id?: string
-      }
-      tool_use_id?: string
-      tool_name?: string
-      status?: string | null
-      output?: unknown
-      subtype?: string
-      text?: string
-      tool_use_result?: {
-        content?: string
-        filenames?: string[]
-        mode?: string
-        durationMs?: number
-      }
-      // SDKToolProgressMessage fields
-      elapsed_time_seconds?: number
-      parent_tool_use_id?: string | null
-      // SDKThinkingTokensMessage fields
-      estimated_tokens?: number
-      estimated_tokens_delta?: number
-      session_id?: string
-      // SDKTaskNotificationMessage / SDKTaskProgressMessage / SDKTaskStartedMessage fields
-      task_id?: string
-      summary?: string
-      output_file?: string
-      description?: string
-      last_tool_name?: string
-      usage?: { total_tokens: number; tool_uses: number; duration_ms: number }
-      task_type?: string
-      prompt?: string
-      isApiErrorMessage?: boolean
-    }
-
-    // ── Skip messages from inside a subtask ──
-    // Messages originating from a subagent task have a non-null parent_tool_use_id.
-    // These would otherwise leak as top-level user messages / tool calls in the
-    // transcript.  The task_started / task_progress / task_notification events
-    // already provide the high-level summary, so we suppress the inner messages.
-    // Exception: system messages (task_started, task_progress, task_notification,
-    // status) do NOT carry parent_tool_use_id and must always be processed.
-    if (msgWithProps.parent_tool_use_id) {
-      return parts
-    }
-
-    // Handle assistant_message type
-    if (msgWithProps.type === 'assistant' || msgWithProps.type === 'assistant_message') {
-      // Content is nested inside message.content for Claude Code SDK format
-      const content = msgWithProps.message?.content || (Array.isArray(msgWithProps.content) ? msgWithProps.content : [])
-      const partType = msgWithProps.isApiErrorMessage ? MessagePartType.ERROR : MessagePartType.TEXT
-
-      // Use the stable API message ID (e.g. msg_01FG7...) for dedup, not the streaming UUID.
-      // Claude Code sends multiple streaming chunks with different UUIDs but the same API message ID
-      // and the same text block, which would otherwise create duplicate text bubbles in the UI.
-      const stableId = msgWithProps.message?.id || msgWithProps.uuid || msgWithProps.type
-
-      for (let blockIdx = 0; blockIdx < content.length; blockIdx++) {
-        const block = content[blockIdx]
-        const blockWithProps = block as { type?: string; text?: string; thinking?: string; name?: string; input?: unknown; id?: string }
-        // For text blocks (no id), use stable message ID + block index for consistent dedup.
-        // For tool_use blocks, blockWithProps.id is the tool_use_id which is already stable.
-        const partId = `${stableId}-${blockWithProps.type}-${blockWithProps.id || blockIdx}`
-
-        if (blockWithProps.type === 'text') {
-          const text = blockWithProps.text || ''
-          if (seenPartIds.has(partId)) {
-            // Check if text content has grown since last seen (streaming update).
-            // Without this, the first chunk (possibly empty/partial) gets recorded
-            // and all subsequent chunks with the actual text are silently dropped,
-            // causing missing assistant responses in the UI.
-            const previousLength = partContentLengths.get(partId)
-            if (previousLength !== undefined && String(text.length) !== previousLength && text.length > 0) {
-              partContentLengths.set(partId, String(text.length))
-              parts.push({
-                id: partId,
-                type: partType,
-                text,
-                update: true,
-              })
-            }
-            continue
-          }
-          seenPartIds.add(partId)
-          partContentLengths.set(partId, String(text.length))
-          parts.push({
-            id: partId,
-            type: partType,
-            text,
-          })
-        } else if (blockWithProps.type === 'thinking') {
-          const thinking = blockWithProps.thinking || ''
-          if (seenPartIds.has(partId)) {
-            const previousLength = partContentLengths.get(partId)
-            if (previousLength !== undefined && String(thinking.length) !== previousLength && thinking.length > 0) {
-              partContentLengths.set(partId, String(thinking.length))
-              parts.push({
-                id: partId,
-                type: MessagePartType.REASONING,
-                text: thinking,
-                role: 'assistant',
-                update: true,
-              })
-            }
-            continue
-          }
-          seenPartIds.add(partId)
-          partContentLengths.set(partId, String(thinking.length))
-          parts.push({
-            id: partId,
-            type: MessagePartType.REASONING,
-            text: thinking,
-            role: 'assistant',
-          })
-        } else if (seenPartIds.has(partId)) {
-          continue
-        } else if (blockWithProps.type === 'tool_use') {
-          seenPartIds.add(partId)
-          const toolName = blockWithProps.name || 'unknown'
-          const rawInput = blockWithProps.input as Record<string, unknown> | undefined
-          const input = rawInput ? JSON.stringify(rawInput, null, 2) : undefined
-          const toolUseId = blockWithProps.id || ''
-
-          // Use tool_use_id as partId so we can update it when result arrives
-          const toolPartId = `tool-${toolUseId}`
-          if (seenPartIds.has(toolPartId)) continue
-          seenPartIds.add(toolPartId)
-
-          // Build a human-readable title from tool input (mirrors buildPartPayload for OpenCode)
-          const title = this.buildToolTitle(toolName, rawInput)
-
-          // Detect AskUserQuestion → render as interactive question
-          let questions = rawInput?.questions
-          if (typeof questions === 'string') {
-            try { questions = JSON.parse(questions) } catch {}
-          }
-          if (Array.isArray(questions) && questions.length > 0) {
-            partContentLengths.set(toolPartId, `pending:${toolName}`)
-            parts.push({
-              id: toolPartId,
-              type: 'question' as MessagePartType,
-              content: title || 'Question',
-              tool: { name: toolName, status: 'pending', title, input, questions },
-            })
-            continue
-          }
-
-          // Detect TodoWrite → render as todo list
-          let todos = rawInput?.todos
-          if (typeof todos === 'string') {
-            try { todos = JSON.parse(todos) } catch {}
-          }
-          if (Array.isArray(todos) && todos.length > 0) {
-            // Normalize: ensure each todo has an id (Claude Code SDK omits it)
-            const normalizedTodos = todos.map((t: Record<string, unknown>, i: number) => ({
-              id: t.id || `todo-${i}`,
-              content: t.content || '',
-              status: t.status || 'pending',
-              priority: t.priority,
-            }))
-            partContentLengths.set(toolPartId, `pending:${toolName}`)
-            parts.push({
-              id: toolPartId,
-              type: 'todowrite' as MessagePartType,
-              content: title || 'Todo List',
-              tool: { name: toolName, status: 'pending', title, input, todos: normalizedTodos },
-            })
-            continue
-          }
-
-          // Detect EnterPlanMode / ExitPlanMode → render as plan mode indicator
-          // For ExitPlanMode, the plan content is in input.plan (not in tool_result)
-          if (toolName === 'EnterPlanMode' || toolName === 'ExitPlanMode') {
-            const planTitle = toolName === 'EnterPlanMode' ? 'Enter plan mode' : 'Exit plan mode'
-            const planContent = toolName === 'ExitPlanMode' && rawInput?.plan
-              ? String(rawInput.plan).slice(0, 50000) : undefined
-            partContentLengths.set(toolPartId, `pending:${toolName}`)
-            parts.push({
-              id: toolPartId,
-              type: 'planreview' as MessagePartType,
-              content: planTitle,
-              tool: { name: toolName, status: 'pending', title: planTitle, input, output: planContent },
-            })
-            continue
-          }
-
-          // Regular tool call
-          partContentLengths.set(toolPartId, `pending:${toolName}`)
-          parts.push({
-            id: toolPartId,
-            type: MessagePartType.TOOL,
-            content: title ? `${toolName} — ${title}` : toolName,
-            tool: { name: toolName, status: 'pending', title, input },
-          })
-        }
-      }
-    } else if (msgWithProps.type === 'user' || msgWithProps.type === 'user_message') {
-      // User messages contain tool results or text
-      const content = msgWithProps.message?.content || (Array.isArray(msgWithProps.content) ? msgWithProps.content : [])
-
-      for (const block of content) {
-        const blockWithProps = block as {
-          type?: string
-          tool_use_id?: string
-          content?: string
-          text?: string
-        }
-
-        // Handle user text messages
-        if (blockWithProps.type === 'text' && blockWithProps.text) {
-          const partId = `${msgWithProps.uuid || 'user'}-text`
-          if (!seenPartIds.has(partId)) {
-            seenPartIds.add(partId)
-            const text = blockWithProps.text
-            partContentLengths.set(partId, String(text.length))
-            parts.push({
-              id: partId,
-              type: MessagePartType.TEXT,
-              text,
-              role: 'user', // User messages
-            })
-          }
-        } else if (blockWithProps.type === 'tool_result' && blockWithProps.tool_use_id) {
-          const toolPartId = `tool-${blockWithProps.tool_use_id}`
-          const resultContent = blockWithProps.content || ''
-
-          // Check if we already sent the pending tool call
-          const previousContent = partContentLengths.get(toolPartId)
-          // Plan mode tools should not be truncated (cap at 50K for safety)
-          const isPlanReview = previousContent?.endsWith(':ExitPlanMode') || previousContent?.endsWith(':EnterPlanMode')
-          // Filter out confirmation prompts like "Exit plan mode?" / "Enter plan mode?" — not useful content
-          const sanitizedResult = isPlanReview && /^(exit|enter) plan mode\??$/i.test(resultContent.trim())
-            ? '' : resultContent
-          const outputContent = isPlanReview
-            ? sanitizedResult.slice(0, 50000)
-            : resultContent.slice(0, 2000)
-
-          if (previousContent) {
-            const toolName = previousContent.split(':')[1] || 'tool'
-            // Update the existing tool part - mark as completed
-            partContentLengths.set(toolPartId, `success:${resultContent.length}`)
-            // For plan review: don't send empty output (would overwrite plan from input.plan)
-            parts.push({
-              id: toolPartId,
-              type: isPlanReview ? ('planreview' as MessagePartType) : MessagePartType.TOOL,
-              content: isPlanReview ? (toolName === 'EnterPlanMode' ? 'Enter plan mode' : 'Exit plan mode') : `Tool completed`,
-              tool: {
-                name: toolName,
-                status: 'success',
-                ...(outputContent ? { output: outputContent } : {}),
-              },
-              update: true, // Mark as update to existing message
-            })
-          } else {
-            // Tool call wasn't seen yet, send result only
-            if (!seenPartIds.has(toolPartId)) {
-              seenPartIds.add(toolPartId)
-              partContentLengths.set(toolPartId, `success:${resultContent.length}`)
-              parts.push({
-                id: toolPartId,
-                type: isPlanReview ? ('planreview' as MessagePartType) : MessagePartType.TOOL,
-                content: isPlanReview ? 'Plan mode' : `Tool result`,
-                tool: {
-                  name: isPlanReview ? 'ExitPlanMode' : 'tool',
-                  status: 'success',
-                  output: outputContent,
-                },
-              })
-            }
-          }
-        }
-      }
-    } else if (msgWithProps.type === 'tool_use_summary') {
-      const partId = `tool-${msgWithProps.tool_use_id || Date.now()}`
-      const toolName = msgWithProps.tool_name || 'unknown'
-      const status = msgWithProps.status || 'unknown'
-      const isPlanReview = toolName === 'ExitPlanMode' || toolName === 'EnterPlanMode'
-      const rawOutput = msgWithProps.output ? String(msgWithProps.output) : undefined
-      // Filter out confirmation prompts like "Exit/Enter plan mode?"
-      const sanitizedOutput = isPlanReview && rawOutput && /^(exit|enter) plan mode\??$/i.test(rawOutput.trim())
-        ? undefined : rawOutput
-      const output = sanitizedOutput
-        ? (isPlanReview ? sanitizedOutput.slice(0, 50000) : sanitizedOutput.slice(0, 2000))
-        : undefined
-      const partType = isPlanReview ? ('planreview' as MessagePartType) : MessagePartType.TOOL
-      const planLabel = toolName === 'EnterPlanMode' ? 'Enter plan mode' : 'Exit plan mode'
-
-      if (seenPartIds.has(partId)) {
-        // Tool_use was already emitted — send an UPDATE to merge the result into it
-        partContentLengths.set(partId, `${status}:${output?.length || 0}`)
-        parts.push({
-          id: partId,
-          type: partType,
-          content: isPlanReview ? planLabel : `${toolName} — ${status}`,
-          tool: { name: toolName, status, output },
-          update: true,
-        })
-      } else {
-        // First time seeing this tool — add as new entry
-        seenPartIds.add(partId)
-        partContentLengths.set(partId, `${status}:${output?.length || 0}`)
-        parts.push({
-          id: partId,
-          type: partType,
-          content: isPlanReview ? planLabel : `${toolName} — ${status}`,
-          tool: { name: toolName, status, output },
-        })
-      }
-    } else if (msgWithProps.type === 'tool_progress') {
-      // SDKToolProgressMessage — periodic progress updates for running tools.
-      // Update the existing tool part with elapsed time so the UI shows a timer.
-      const toolUseId = msgWithProps.tool_use_id
-      if (toolUseId) {
-        const partId = `tool-${toolUseId}`
-        const toolName = msgWithProps.tool_name || 'tool'
-        const elapsed = msgWithProps.elapsed_time_seconds ?? 0
-        const elapsedLabel = elapsed >= 60
-          ? `${Math.floor(elapsed / 60)}m ${Math.round(elapsed % 60)}s`
-          : `${Math.round(elapsed)}s`
-
-        if (seenPartIds.has(partId)) {
-          // Tool was already emitted — send an update with elapsed time
-          parts.push({
-            id: partId,
-            type: MessagePartType.TOOL,
-            tool: {
-              name: toolName,
-              status: 'running',
-              title: `Running… ${elapsedLabel}`,
-            },
-            update: true,
-          })
-        }
-        // If tool hasn't been seen yet, skip — progress before tool_use is meaningless
-      }
-    } else if (msgWithProps.type === 'result') {
-      // Surface error result messages (e.g., rate limit errors) to the UI
-      const resultMsg = msg as Record<string, unknown>
-      if (resultMsg.is_error) {
-        // Extract error text from all available fields (result, errors, error)
-        const resultField = resultMsg.result
-        const errorsField = Array.isArray(resultMsg.errors) ? resultMsg.errors : []
-        const errorField = typeof resultMsg.error === 'string' ? resultMsg.error : ''
-
-        let errorText: string
-        if (typeof resultField === 'string' && resultField.length > 0) {
-          errorText = resultField
-        } else if (errorsField.length > 0) {
-          errorText = errorsField.map(String).join('; ')
-        } else if (errorField) {
-          errorText = errorField
-        } else if (resultField && typeof resultField === 'object') {
-          errorText = JSON.stringify(resultField)
-        } else {
-          errorText = 'An error occurred (no details available)'
-        }
-
-        const partId = `result-error-${msgWithProps.uuid || Date.now()}`
-        if (!seenPartIds.has(partId)) {
-          seenPartIds.add(partId)
-          partContentLengths.set(partId, String(errorText.length))
-          parts.push({
-            id: partId,
-            type: MessagePartType.ERROR,
-            text: errorText,
-            role: 'system',
-          })
-        }
-      } else {
-        // Non-error result: extract the final assistant text as a safety net.
-        // Normally the text was already sent in a preceding assistant message event,
-        // but if the first streaming chunk had empty text and no subsequent chunk
-        // updated it, the result message is the only source of the final response.
-        const resultText = typeof resultMsg.result === 'string' ? resultMsg.result : ''
-        if (resultText) {
-          // Check if any assistant text part was already emitted with non-empty content.
-          // If so, skip — the text is already shown.  If not, emit it now.
-          let hasNonEmptyText = false
-          for (const [pid, len] of partContentLengths) {
-            if (pid.includes('-text-') && parseInt(len, 10) > 0) {
-              hasNonEmptyText = true
-              break
-            }
-          }
-          if (!hasNonEmptyText) {
-            const partId = `result-text-${msgWithProps.uuid || Date.now()}`
-            if (!seenPartIds.has(partId)) {
-              seenPartIds.add(partId)
-              partContentLengths.set(partId, String(resultText.length))
-              parts.push({
-                id: partId,
-                type: MessagePartType.TEXT,
-                text: resultText,
-              })
-            }
-          }
-        }
-      }
-    } else if (msgWithProps.type === 'system') {
-      // Skip system init messages - they're internal session setup
-      if (msgWithProps.subtype === ClaudeSystemSubtype.INIT) {
-        return parts
-      }
-
-      // SDKTaskStartedMessage — subagent task started
-      if (msgWithProps.subtype === ClaudeSystemSubtype.TASK_STARTED) {
-        const taskId = msgWithProps.task_id || msgWithProps.uuid || `task-${Date.now()}`
-        const partId = `task-${taskId}`
-        if (!seenPartIds.has(partId)) {
-          seenPartIds.add(partId)
-          partContentLengths.set(partId, `started:${taskId}`)
-          parts.push({
-            id: partId,
-            type: MessagePartType.TASK_PROGRESS,
-            content: msgWithProps.description || 'Subagent task started',
-            taskProgress: {
-              taskId,
-              status: 'started',
-              description: msgWithProps.description || '',
-            }
-          })
-        }
-        return parts
-      }
-
-      // SDKTaskProgressMessage — periodic progress updates for running subagent tasks
-      if (msgWithProps.subtype === ClaudeSystemSubtype.TASK_PROGRESS) {
-        const taskId = msgWithProps.task_id || `task-${Date.now()}`
-        const partId = `task-${taskId}`
-        const usage = msgWithProps.usage
-        const alreadySeen = seenPartIds.has(partId)
-
-        if (!alreadySeen) {
-          // Missed task_started — create the entry
-          seenPartIds.add(partId)
-        }
-        partContentLengths.set(partId, `running:${taskId}`)
-        parts.push({
-          id: partId,
-          type: MessagePartType.TASK_PROGRESS,
-          content: msgWithProps.description || 'Subagent task in progress',
-          taskProgress: {
-            taskId,
-            status: 'running',
-            description: msgWithProps.description || '',
-            lastToolName: msgWithProps.last_tool_name,
-            summary: msgWithProps.summary,
-            usage,
-          },
-          update: alreadySeen,
-        })
-        return parts
-      }
-
-      // SDKTaskNotificationMessage — subtask completion notifications
-      if (msgWithProps.subtype === ClaudeSystemSubtype.TASK_NOTIFICATION) {
-        const taskId = msgWithProps.task_id || `task-${Date.now()}`
-        const partId = `task-${taskId}`
-        const taskStatus = (msgWithProps.status || 'completed') as 'completed' | 'failed' | 'stopped'
-        const summary = msgWithProps.summary || `Task ${taskStatus}`
-        const usage = msgWithProps.usage
-        const alreadySeen = seenPartIds.has(partId)
-
-        if (!alreadySeen) {
-          seenPartIds.add(partId)
-        }
-        partContentLengths.set(partId, `${taskStatus}:${taskId}`)
-        parts.push({
-          id: partId,
-          type: MessagePartType.TASK_PROGRESS,
-          content: summary,
-          taskProgress: {
-            taskId,
-            status: taskStatus,
-            description: summary,
-            summary,
-            usage,
-          },
-          update: alreadySeen,
-        })
-        return parts
-      }
-
-      // ── Internal background-task bookkeeping — never rendered ──
-      // `task_updated` carries wire-level status patches and `background_tasks_changed`
-      // carries the in-flight list. Both are consumed by trackBackgroundTask(); the
-      // user-visible progress is already covered by task_started / task_progress /
-      // task_notification. Without this they fall through to the generic system
-      // handler below, which pushes the raw subtype string as a text bubble —
-      // spamming the transcript with literal "task_updated" /
-      // "background_tasks_changed" messages between every subagent update.
-      if (
-        msgWithProps.subtype === ClaudeSystemSubtype.TASK_UPDATED ||
-        msgWithProps.subtype === ClaudeSystemSubtype.BACKGROUND_TASKS_CHANGED
-      ) {
-        return parts
-      }
-
-      // SDKStatusMessage — transient status indicators (e.g. 'compacting')
-      if (msgWithProps.subtype === ClaudeSystemSubtype.STATUS) {
-        // null status means "cleared" — skip
-        if (!msgWithProps.status) return parts
-        const partId = `system-status-${msgWithProps.uuid || Date.now()}`
-        if (!seenPartIds.has(partId)) {
-          seenPartIds.add(partId)
-          const statusLabel = msgWithProps.status === 'compacting'
-            ? 'Compacting conversation history…'
-            : String(msgWithProps.status)
-          partContentLengths.set(partId, String(statusLabel.length))
-          parts.push({
-            id: partId,
-            type: 'system-status' as MessagePartType,
-            content: statusLabel,
-            role: 'system',
-          })
-        }
-        return parts
-      }
-
-      // SDKThinkingTokensMessage — reasoning/thinking token updates from Claude Code
-      if (msgWithProps.subtype === ClaudeSystemSubtype.THINKING_TOKENS) {
-        const partId = `thinking-tokens-${msgWithProps.session_id || 'session'}`
-        const alreadySeen = seenPartIds.has(partId)
-        const estimatedTokens = typeof msgWithProps.estimated_tokens === 'number'
-          ? msgWithProps.estimated_tokens
-          : undefined
-        const content = estimatedTokens !== undefined
-          ? `Estimated thinking tokens: ${estimatedTokens}`
-          : 'Estimating thinking tokens...'
-
-        if (!alreadySeen) {
-          seenPartIds.add(partId)
-        }
-        partContentLengths.set(partId, String(content.length))
-        parts.push({
-          id: partId,
-          type: MessagePartType.REASONING,
-          text: content,
-          role: 'assistant',
-          update: alreadySeen,
-        })
-        return parts
-      }
-
-      const partId = `system-${msgWithProps.uuid || Date.now()}`
-      if (!seenPartIds.has(partId)) {
-        seenPartIds.add(partId)
-
-        const content = msgWithProps.subtype || 'System message'
-        partContentLengths.set(partId, String(content.length))
-        parts.push({
-          id: partId,
-          type: MessagePartType.TEXT,
-          content,
-        })
-      }
-    }
-
-    return parts
+    return convertSDKMessageToParts(msg, seenPartIds, partContentLengths)
   }
 
   /**
-   * Builds a human-readable title for a tool call from its input.
-   * Mirrors the titles that OpenCode/buildPartPayload produces.
+   * Environment for the Claude process. CLAUDECODE is removed so the CLI does
+   * not refuse to start as a nested session.
    */
-  private buildToolTitle(toolName: string, input?: Record<string, unknown>): string {
-    if (!input) return ''
-
-    switch (toolName) {
-      case 'Bash':
-        return input.command ? String(input.command) : (input.description ? String(input.description) : '')
-      case 'Read':
-        return input.file_path ? String(input.file_path) : ''
-      case 'Edit':
-      case 'Write':
-        return input.file_path ? String(input.file_path) : ''
-      case 'Grep':
-        return input.pattern
-          ? `${input.pattern}${input.path ? ` in ${input.path}` : ''}`
-          : ''
-      case 'Glob':
-        return input.pattern ? String(input.pattern) : ''
-      case 'Task':
-        return input.description ? String(input.description) : ''
-      case 'WebFetch':
-        return input.url ? String(input.url) : ''
-      case 'WebSearch':
-        return input.query ? String(input.query) : ''
-      case 'TodoWrite':
-        return 'Todo List'
-      case 'AskUserQuestion':
-        return 'Question'
-      case 'EnterPlanMode':
-        return 'Enter plan mode'
-      case 'ExitPlanMode':
-        return 'Exit plan mode'
-      default:
-        return ''
-    }
+  private buildClaudeEnvironment(): Record<string, string> {
+    const env = { ...process.env } as Record<string, string>
+    delete env.CLAUDECODE
+    return env
   }
 }

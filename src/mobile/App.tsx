@@ -122,7 +122,6 @@ export function App() {
 
   return (
     <div className="h-full flex flex-col bg-background text-foreground">
-      {/* Connection indicator */}
       {!connected && (
         <div className="bg-amber-500/20 text-amber-300 text-xs text-center py-1 px-2 shrink-0">
           Connecting...

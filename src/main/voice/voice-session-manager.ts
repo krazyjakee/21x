@@ -40,7 +40,6 @@ import {
   removeVoiceRuntime,
 } from './voice-runtime-installer'
 import { VoiceSpeechService, type VoiceAnswerPart } from './voice-speech-service'
-import type { VoiceTtsEngineId, VoiceTtsSnapshot } from '../../shared/voice-tts'
 
 export interface VoiceSessionManagerOptions {
   db: VoiceActionDb & { setSetting: (key: string, value: string) => void }
@@ -114,7 +113,8 @@ export class VoiceSessionManager {
   private readonly models: VoiceModelManager
   private readonly worker: VoiceWorkerClient
   private readonly actions: VoiceActionService
-  private readonly speech: VoiceSpeechService
+  /** Spoken-answer settings and playback; the IPC layer calls it directly. */
+  readonly speech: VoiceSpeechService
   /** Stops `waiting_for_agent` lasting for ever when no answer arrives. */
   private answerTimer: NodeJS.Timeout | null = null
 
@@ -670,50 +670,6 @@ export class VoiceSessionManager {
   }
 
   // ── Spoken answers (design §5.7) ──────────────────────────
-
-  ttsSnapshot(): Promise<VoiceTtsSnapshot> {
-    return this.speech.snapshot()
-  }
-
-  setTtsEnabled(enabled: boolean): Promise<VoiceTtsSnapshot> {
-    return this.speech.setEnabled(enabled)
-  }
-
-  setTtsEngine(engine: VoiceTtsEngineId): Promise<VoiceTtsSnapshot> {
-    return this.speech.setEngine(engine)
-  }
-
-  setTtsVoice(voiceId: string): Promise<VoiceTtsSnapshot> {
-    return this.speech.setVoice(voiceId)
-  }
-
-  setTtsSpeed(speed: number): Promise<VoiceTtsSnapshot> {
-    return this.speech.setSpeed(speed)
-  }
-
-  setTtsMaxChars(maxChars: number): Promise<VoiceTtsSnapshot> {
-    return this.speech.setMaxChars(maxChars)
-  }
-
-  setTtsSpeakActionResults(on: boolean): Promise<VoiceTtsSnapshot> {
-    return this.speech.setSpeakActionResults(on)
-  }
-
-  setTtsOnlyVoiceTurns(on: boolean): Promise<VoiceTtsSnapshot> {
-    return this.speech.setOnlyVoiceTurns(on)
-  }
-
-  installTtsModel(id: string): Promise<VoiceTtsSnapshot> {
-    return this.speech.installModel(id)
-  }
-
-  selectTtsModel(id: string): Promise<VoiceTtsSnapshot> {
-    return this.speech.selectModel(id)
-  }
-
-  removeTtsModel(id: string): Promise<VoiceTtsSnapshot> {
-    return this.speech.removeModel(id)
-  }
 
   /** Plays one short sample in the speaker the user is looking at. */
   speakPreview(voiceId: string): Promise<boolean> {

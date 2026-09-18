@@ -1,5 +1,3 @@
-import { updateTaskFromUser } from './session-feedback'
-import { getTaskCompletionAction } from '../shared/task-completion'
 /**
  * Mobile API server — HTTP + WebSocket for controlling 20x from a mobile device.
  * Runs inside the Electron main process, shares DatabaseManager and AgentManager.
@@ -12,7 +10,7 @@ import { join, sep } from 'path'
 import { existsSync, readFileSync, statSync } from 'fs'
 import { WebSocketServer, WebSocket } from 'ws'
 import { randomUUID, createHash, randomInt } from 'crypto'
-import type { DatabaseManager } from './database'
+import type { CreateTaskData, DatabaseManager, UpdateTaskData } from './database'
 import type { AgentManager } from './agent-manager'
 import type { GitHubManager } from './github-manager'
 import type { GitLabManager } from './gitlab-manager'
@@ -23,6 +21,10 @@ import type { Artifact, ArtifactFileEntry } from '../shared/artifacts'
 import { MOBILE_VOICE_CAPABILITIES } from '../shared/voice'
 import { TaskStatus } from '../shared/constants'
 import { guardStream } from './child-stream-guards'
+import { bearerToken, readJsonBody } from './http-utils'
+import { completeTaskAtSource, updateTaskFromUser } from './session-feedback'
+import { afterTaskCreated, afterTaskUpdated } from './task-updates'
+import { mimeTypeForPath } from './mime'
 
 // ── State ────────────────────────────────────────────────────
 let server: HttpServer | null = null
@@ -146,30 +148,7 @@ export function startMobileApiServer(
   })
 }
 
-/**
- * Set a callback to notify the desktop (Electron renderer) of events
- * originating from the mobile API (e.g. task created/updated).
- */
-/**
- * Runs one auto-start / auto-complete reconciliation pass.
- *
- * Mobile writes go straight to `db.updateTask`, which emits nothing, so
- * without this a flag set from a phone waits for the next 60s sweep.
- */
-let taskAutomationTrigger: (() => void) | null = null
-
-export function setMobileApiTaskAutomationTrigger(fn: (() => void) | null): void {
-  taskAutomationTrigger = fn
-}
-
-function triggerTaskAutomation(): void {
-  try {
-    taskAutomationTrigger?.()
-  } catch (err) {
-    console.error('[MobileAPI] Task automation trigger failed:', err)
-  }
-}
-
+/** Notifies the desktop renderer of events that originate from a phone. */
 export function setMobileApiNotifier(fn: (channel: string, data: unknown) => void): void {
   notifyDesktop = fn
 }
@@ -198,21 +177,6 @@ export function broadcastToMobileClients(channel: string, data: unknown): void {
       ws.send(message)
     }
   }
-}
-
-// ── MIME types for static file serving ───────────────────────
-const MIME: Record<string, string> = {
-  '.html': 'text/html',
-  '.js': 'application/javascript',
-  '.css': 'text/css',
-  '.json': 'application/json',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.ttf': 'font/ttf'
 }
 
 // ── HTTP request handler ─────────────────────────────────────
@@ -251,9 +215,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
 
   // All other API routes — require valid session
   if (pathname.startsWith('/api/')) {
-    const authHeader = req.headers.authorization
-    const provided = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null
-    if (!validateSession(provided)) {
+    if (!validateSession(bearerToken(req))) {
       res.writeHead(401, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ error: 'Unauthorized' }))
       return
@@ -269,60 +231,29 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
 
 // ── API router ───────────────────────────────────────────────
 
+const MAX_BODY_BYTES = 1_048_576
+
 async function handleApiRoute(req: IncomingMessage, res: ServerResponse, pathname: string, url: URL): Promise<void> {
   res.setHeader('Content-Type', 'application/json')
 
-  // Collect body for POST requests
-  if (req.method === 'POST') {
-    const MAX_BODY = 1_048_576 // 1 MB
-    let body = ''
-    let overflow = false
-    req.on('data', (chunk) => {
-      body += chunk
-      if (body.length > MAX_BODY) { overflow = true; req.destroy() }
-    })
-    req.on('end', async () => {
-      if (overflow) {
-        res.writeHead(413)
-        res.end(JSON.stringify({ error: 'Request body too large' }))
-        return
-      }
-      let params: Record<string, unknown> = {}
-      if (body) {
-        try { params = JSON.parse(body) } catch { /* ignore */ }
-      }
-
-      try {
-        const result = await routePost(pathname, params, req)
-        res.writeHead(200)
-        res.end(JSON.stringify(result))
-      } catch (err: unknown) {
-        const status = (err as { status?: number }).status || 500
-        const message = err instanceof Error ? err.message : String(err)
-        res.writeHead(status)
-        res.end(JSON.stringify({ error: message }))
-      }
-    })
+  if (req.method !== 'POST' && req.method !== 'GET') {
+    res.writeHead(405)
+    res.end(JSON.stringify({ error: 'Method not allowed' }))
     return
   }
 
-  // GET requests
-  if (req.method === 'GET') {
-    try {
-      const result = await routeGet(pathname, url)
-      res.writeHead(200)
-      res.end(JSON.stringify(result))
-    } catch (err: unknown) {
-      const status = (err as { status?: number }).status || 500
-      const message = err instanceof Error ? err.message : String(err)
-      res.writeHead(status)
-      res.end(JSON.stringify({ error: message }))
-    }
-    return
+  try {
+    const result = req.method === 'POST'
+      ? await routePost(pathname, await readJsonBody(req, MAX_BODY_BYTES), req)
+      : await routeGet(pathname, url)
+    res.writeHead(200)
+    res.end(JSON.stringify(result))
+  } catch (err: unknown) {
+    const status = (err as { status?: number }).status || 500
+    const message = err instanceof Error ? err.message : String(err)
+    res.writeHead(status)
+    res.end(JSON.stringify({ error: message }))
   }
-
-  res.writeHead(405)
-  res.end(JSON.stringify({ error: 'Method not allowed' }))
 }
 
 // ── GET routes ───────────────────────────────────────────────
@@ -660,10 +591,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     const { resolverKey, config } = params as { resolverKey?: string; config?: Record<string, unknown> }
     if (!resolverKey) throw Object.assign(new Error('resolverKey is required'), { status: 400 })
 
-    // YouTrack and other non-MCP plugins don't use toolCaller, but the type requires it
-    const ctx = { db } as Parameters<typeof plugin.resolveOptions>[2]
-    const options = await plugin.resolveOptions(resolverKey, config || {}, ctx)
-    return options
+    return plugin.resolveOptions(resolverKey, config || {}, { db })
   }
 
   // POST /api/task-sources — create a new task source
@@ -720,13 +648,13 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
 
   // POST /api/tasks — create task (must be checked before the :id update route)
   if (pathname === '/api/tasks') {
-    const { title } = params as { title?: string }
-    if (!title) throw Object.assign(new Error('title is required'), { status: 400 })
-    const task = db.createTask(params as unknown as Parameters<DatabaseManager['createTask']>[0])
-    if (!task) throw Object.assign(new Error('Failed to create task'), { status: 500 })
+    if (!params.title) throw Object.assign(new Error('title is required'), { status: 400 })
+    const created = db.createTask(pickCreateTaskFields(params))
+    if (!created) throw Object.assign(new Error('Failed to create task'), { status: 500 })
+    afterTaskCreated(created)
+    const task = db.getTask(created.id) ?? created
     broadcastToMobileClients('task:created', { task })
     if (notifyDesktop) notifyDesktop('task:created', { task })
-    if (task.auto_start_agent) triggerTaskAutomation()
     return task
   }
 
@@ -745,16 +673,12 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
       updateTaskFromUser(db, taskId, { status: TaskStatus.ReadyForReview })
     }
     if (!task.source_id || !completeAtSource) {
-      const fresh = db.updateTask(taskId, { status: TaskStatus.Completed, ...(task.source_id ? { complete_at_source: false } : {}) })
+      const data: UpdateTaskData = { status: TaskStatus.Completed, ...(task.source_id ? { complete_at_source: false } : {}) }
+      const fresh = db.updateTask(taskId, data)
       if (fresh) {
         broadcastToMobileClients('task:updated', { taskId, updates: fresh })
         if (notifyDesktop) notifyDesktop('task:updated', { taskId, updates: fresh })
-        triggerTaskAutomation()
-        if (fresh.parent_task_id && task.status !== TaskStatus.Completed) {
-          agent.notifyParentOfSubtaskCompletion(fresh.parent_task_id, taskId).catch(err => {
-            console.error('[MobileAPI] Failed to wake parent after local completion:', err)
-          })
-        }
+        afterTaskUpdated(db, agent, task, data, fresh)
       }
       return { completed: true, status: fresh?.status }
     }
@@ -762,14 +686,16 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
       throw Object.assign(new Error('Task source is unavailable.'), { status: 409 })
     }
     db.updateTask(taskId, { complete_at_source: true })
-    const result = await syncManagerRef.executeAction(getTaskCompletionAction(task.output_fields), task, undefined, task.source_id)
-    if (!result.success) throw Object.assign(new Error(result.error || 'Completion is pending.'), { status: 409 })
-    const completed = true
+    try {
+      await completeTaskAtSource(syncManagerRef, task)
+    } catch (err) {
+      throw Object.assign(err as Error, { status: 409 })
+    }
     const fresh = db.getTask(taskId)
     if (fresh) {
       broadcastToMobileClients('task:updated', { taskId, updates: fresh })
     }
-    return { completed, status: fresh?.status }
+    return { completed: true, status: fresh?.status }
   }
 
   // POST /api/tasks/:id — update task
@@ -778,30 +704,12 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     const taskId = taskUpdateMatch[1]
     const existing = db.getTask(taskId)
     if (!existing) throw Object.assign(new Error('Task not found'), { status: 404 })
-    const updated = updateTaskFromUser(db, taskId, params as Parameters<DatabaseManager['updateTask']>[1])
+    const data = params as UpdateTaskData
+    const updated = updateTaskFromUser(db, taskId, data)
     if (updated) {
       broadcastToMobileClients('task:updated', { taskId, updates: updated })
       if (notifyDesktop) notifyDesktop('task:updated', { taskId, updates: updated })
-      const changed = params as Record<string, unknown>
-      if (
-        changed.status !== undefined ||
-        changed.auto_start_agent !== undefined ||
-        changed.auto_complete_without_review !== undefined
-      ) {
-        triggerTaskAutomation()
-      }
-      // Event-driven coordinator wake-up: a subtask moved into a terminal state
-      // from a phone must wake its parent coordinator, same as every other
-      // status-changing route.
-      if (
-        updated.parent_task_id &&
-        existing.status !== updated.status &&
-        (updated.status === TaskStatus.ReadyForReview || updated.status === TaskStatus.Completed)
-      ) {
-        agent.notifyParentOfSubtaskCompletion(updated.parent_task_id, taskId).catch((err) => {
-          console.error(`[MobileAPI] Failed to wake parent ${updated.parent_task_id} after subtask ${taskId} update:`, err)
-        })
-      }
+      afterTaskUpdated(db, agent, existing, data, updated)
     }
     return updated
   }
@@ -911,6 +819,22 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
 
 // ── Helpers ──────────────────────────────────────────────────
 
+// A phone creates local tasks only: the source link (source_id, external_id,
+// source) and recurrence-instance fields are owned by sync and the scheduler.
+const CREATE_TASK_FIELDS = [
+  'title', 'description', 'type', 'priority', 'status', 'assignee', 'due_date', 'labels', 'attachments',
+  'repos', 'output_fields', 'is_recurring', 'recurrence_pattern', 'cron', 'auto_start_agent',
+  'auto_complete_without_review', 'parent_task_id'
+] as const satisfies ReadonlyArray<keyof CreateTaskData>
+
+function pickCreateTaskFields(params: Record<string, unknown>): CreateTaskData {
+  const data: Record<string, unknown> = {}
+  for (const key of CREATE_TASK_FIELDS) {
+    if (params[key] !== undefined) data[key] = params[key]
+  }
+  return data as unknown as CreateTaskData
+}
+
 function parseDeviceName(userAgent: string): string {
   if (/iPhone/i.test(userAgent)) return 'iPhone'
   if (/iPad/i.test(userAgent)) return 'iPad'
@@ -999,9 +923,6 @@ function serveMobileSPA(res: ServerResponse, pathname: string): void {
     return
   }
 
-  const ext = filePath.substring(filePath.lastIndexOf('.'))
-  const mime = MIME[ext] || 'application/octet-stream'
-
-  res.writeHead(200, { 'Content-Type': mime })
+  res.writeHead(200, { 'Content-Type': mimeTypeForPath(filePath) })
   res.end(readFileSync(filePath))
 }

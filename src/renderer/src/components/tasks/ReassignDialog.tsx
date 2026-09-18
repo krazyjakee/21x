@@ -2,11 +2,8 @@ import { useEffect } from 'react'
 import { Users, Loader2 } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/Dialog'
 import { VisuallyHidden } from '@/components/ui/VisuallyHidden'
-import { useUserStore } from '@/stores/user-store'
+import { useSourceUsers, useUserStore } from '@/stores/user-store'
 import { cn } from '@/lib/utils'
-import type { SourceUser } from '@/types'
-
-const EMPTY_USERS: SourceUser[] = []
 
 interface ReassignDialogProps {
   open: boolean
@@ -17,7 +14,7 @@ interface ReassignDialogProps {
 }
 
 export function ReassignDialog({ open, onOpenChange, sourceId, currentAssignee, onReassign }: ReassignDialogProps) {
-  const users = useUserStore((s) => s.cache.get(sourceId)?.users ?? EMPTY_USERS)
+  const users = useSourceUsers(sourceId)
   const loading = useUserStore((s) => s.loadingSourceIds.has(sourceId))
   const isMe = useUserStore((s) => s.isMe)
 

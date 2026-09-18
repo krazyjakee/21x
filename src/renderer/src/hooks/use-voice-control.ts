@@ -3,7 +3,6 @@ import { voiceApi } from '@/lib/ipc-client'
 import { useVoiceStore } from '@/stores/voice-store'
 import { useUIStore } from '@/stores/ui-store'
 import { useTaskStore } from '@/stores/task-store'
-import { useAgentStore } from '@/stores/agent-store'
 import {
   MASTERMIND_COMPOSER_KEY,
   clearActiveComposer,
@@ -46,12 +45,10 @@ export function useVoiceControl(): void {
     setContextProvider((): VoiceUiContext => {
       const selectedTaskId = useTaskStore.getState().selectedTaskId
       const view = useUIStore.getState().sidebarView
-      const session = selectedTaskId ? useAgentStore.getState().sessions.get(selectedTaskId) : undefined
-      const approval = session?.pendingApproval
       return {
         selectedTaskId,
         view,
-        pendingApproval: approval && selectedTaskId ? { taskId: selectedTaskId, sessionId: approval.sessionId } : null,
+        pendingApproval: null,
         visibleTaskIds: useTaskStore
           .getState()
           .tasks.slice(0, 50)

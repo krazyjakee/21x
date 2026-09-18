@@ -7,13 +7,11 @@
  */
 
 import { spawn, type ChildProcess } from 'child_process'
-import { existsSync, mkdtempSync, readFileSync } from 'fs'
-import { guardChildStreams, writeToChildStdin } from '../child-stream-guards'
+import { existsSync, readFileSync } from 'fs'
+import { guardChildStreams } from '../child-stream-guards'
 import { parseProcessTable } from '../mcp-process-cleanup'
 import { selectUntrackedAppServerPids } from '../codex-app-server-sweep'
-import { homedir, tmpdir } from 'os'
-import { basename, isAbsolute, join, relative, resolve } from 'path'
-import { promisify } from 'util'
+import { isAbsolute, join, relative, resolve } from 'path'
 import type {
   CodingAgentAdapter,
   SessionConfig,
@@ -22,9 +20,34 @@ import type {
   MessagePart,
   McpServerConfig
 } from './coding-agent-adapter'
-import { MessagePartType, MessageRole, SessionStatusType } from './coding-agent-adapter'
+import { MessagePartType, SessionStatusType } from './coding-agent-adapter'
+import {
+  asString,
+  computeThreadItemKey,
+  convertEventToMessageParts,
+  extractFailedTurnError,
+  extractThreadId,
+  isObject,
+  summarizeAppServerError,
+  type CodexItemState,
+  type RunningTool
+} from './codex-app-server-items'
+import { applyCodexAuthEnv } from './shared/codex-auth'
+import { execFileAsync, findExecutable } from '../find-executable'
+import {
+  sendJsonRpcRequest,
+  writeJsonRpc,
+  type JsonRpcMessage,
+  type JsonRpcNotification,
+  type JsonRpcPeer,
+  type JsonRpcRequest,
+  type JsonRpcResponse
+} from './shared/json-rpc'
+import { onJsonLines } from './shared/jsonl'
+import { groupPartsIntoMessages } from './shared/session-messages'
 
 const DEFAULT_CODEX_APP_SERVER_MODEL = 'gpt-6-astra'
+const LABEL = 'CodexAppServerAdapter'
 
 /**
  * How long an app-server gets to honour SIGTERM before it is killed outright.
@@ -47,40 +70,11 @@ const APP_SERVER_KILL_GRACE_MS = 1000
  * otherwise go unnoticed until the machine ran out of memory again.
  */
 const ORPHAN_SWEEP_INTERVAL_MS = 5 * 60_000
-const MAX_IPC_TOOL_INPUT_CHARS = 20_000
-const MAX_IPC_TOOL_OUTPUT_CHARS = 100_000
-const MIN_THREAD_LEVEL_ASSISTANT_DEDUPE_CHARS = 40
 
 type CodexSandboxPolicy =
   | { type: 'readOnly'; networkAccess: boolean }
   | { type: 'workspaceWrite'; networkAccess: boolean; writableRoots: string[] }
   | { type: 'dangerFullAccess' }
-
-interface JsonRpcRequest {
-  jsonrpc: '2.0'
-  id: string | number
-  method: string
-  params?: unknown
-}
-
-interface JsonRpcNotification {
-  jsonrpc: '2.0'
-  method: string
-  params?: unknown
-}
-
-interface JsonRpcResponse {
-  jsonrpc: '2.0'
-  id: string | number
-  result?: unknown
-  error?: {
-    code: number
-    message: string
-    data?: unknown
-  }
-}
-
-type JsonRpcMessage = JsonRpcRequest | JsonRpcNotification | JsonRpcResponse
 
 interface PendingApproval {
   requestId: string | number
@@ -94,12 +88,11 @@ interface PendingApproval {
   responseKind: 'execCommand' | 'commandExecution' | 'fileChange' | 'permissions' | 'elicitation' | 'userInput' | 'generic'
 }
 
-interface AppServerSession {
+interface AppServerSession extends CodexItemState, JsonRpcPeer {
   sessionId: string
   threadId: string | null
   activeTurnId: string | null
   process: ChildProcess
-  stdoutBuffer: string
   status: SessionStatusType
   messageBuffer: unknown[]
   permanentMessages: unknown[]
@@ -107,24 +100,9 @@ interface AppServerSession {
   pendingCompletionRefreshes: number
   sawThreadStatusNotification: boolean
   pendingThreadIdle: boolean
-  pendingRequests: Map<string | number, {
-    resolve: (value: unknown) => void
-    reject: (error: Error) => void
-  }>
   pendingApproval: PendingApproval | null
-  nextRequestId: number
   lastError: string | null
   config: SessionConfig
-  streamedTextByItemId: Map<string, string>
-  assistantTextKeysByTurn: Map<string, Set<string>>
-  runningTools: Map<string, {
-    partId: string
-    toolName: string
-    startTime?: number
-    lastActivityTime?: number
-    lastActivityMonotonicTime?: number
-    input?: Record<string, unknown>
-  }>
   codexUseApiKey: boolean
   codexAuthSummary: string
   /**
@@ -137,208 +115,6 @@ interface AppServerSession {
 /** The message of a thrown value, for a teardown log line. */
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value)
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined
-}
-
-function extractThreadId(value: unknown): string | null {
-  if (!isObject(value)) return null
-  const direct = asString(value.threadId) || asString(value.thread_id) || asString(value.id)
-  if (direct) return direct
-  if (isObject(value.thread)) {
-    return asString(value.thread.id) || asString(value.thread.threadId) || asString(value.thread.thread_id) || null
-  }
-  return null
-}
-
-/**
- * Deterministic 32-bit string hash (djb2). Used to build stable dedup keys for
- * thread items that carry no id — never use Date.now()/random here, or the same
- * item would produce a new key on every reconcile pass and be re-emitted.
- */
-function hashString(value: string): string {
-  let hash = 5381
-  for (let i = 0; i < value.length; i++) {
-    hash = ((hash << 5) + hash + value.charCodeAt(i)) | 0
-  }
-  return (hash >>> 0).toString(36)
-}
-
-/**
- * Derives a STABLE identity for a Codex thread item. Many item types
- * (function_call_output, custom_tool_call_output, tool_search_output, and
- * user/developer input messages) have no top-level `id` — only a `call_id`, or
- * nothing at all. This must return the same value across reconcile passes for the
- * same logical item, otherwise the transcript repeats older messages after every
- * idle. Returns null when no id-like field exists (caller falls back to a
- * content-based key).
- */
-function deriveItemIdentity(item: Record<string, unknown> | undefined): string | null {
-  if (!item) return null
-  const direct = asString(item.id) || asString(item.itemId) || asString(item.item_id)
-  if (direct) return direct
-  const callId = asString(item.call_id) || asString(item.callId)
-  if (callId) {
-    const type = asString(item.type) || 'item'
-    return `${type}:${callId}`
-  }
-  return null
-}
-
-function extractItemId(params: Record<string, unknown>): string {
-  const item = isObject(params.item) ? params.item : undefined
-  const identity = asString(params.itemId) || deriveItemIdentity(item)
-  if (identity) return identity
-  // Last resort: a deterministic key derived from the item's content so the same
-  // item maps to the same part id across reconciles (was `item-${Date.now()}`,
-  // which minted a new id every pass and duplicated the message on each idle).
-  const fingerprint = item ? `${asString(item.type) || 'item'}:${extractText(item)}` : 'item'
-  return `item-${hashString(fingerprint)}`
-}
-
-function extractText(value: unknown): string {
-  if (!value) return ''
-  if (typeof value === 'string') return value
-  if (Array.isArray(value)) return value.map(extractText).filter(Boolean).join('\n')
-  if (!isObject(value)) return ''
-
-  for (const key of ['text', 'content', 'delta', 'message', 'output']) {
-    const text = extractText(value[key])
-    if (text) return text
-  }
-
-  return ''
-}
-
-const DEFAULT_APP_SERVER_ERROR = 'Codex app-server error'
-
-/**
- * Codex `codexErrorInfo` is either a plain enum string (`serverOverloaded`,
- * `usageLimitExceeded`, ...) or a single-key object such as
- * `{ responseStreamDisconnected: { httpStatusCode: 502 } }`.
- */
-function describeCodexErrorInfo(info: unknown): string | null {
-  if (typeof info === 'string') return info || null
-  if (!isObject(info)) return null
-  const [kind] = Object.keys(info)
-  if (!kind) return null
-  const detail = isObject(info[kind]) ? info[kind] : {}
-  const httpStatus = typeof detail.httpStatusCode === 'number' ? ` HTTP ${detail.httpStatusCode}` : ''
-  return `${kind}${httpStatus}`
-}
-
-interface AppServerErrorSummary {
-  /** Human-readable message, suffixed with the Codex error code when known. */
-  message: string
-  code: string | null
-  /** Codex retries the request itself; the turn is still alive. */
-  willRetry: boolean
-}
-
-/**
- * Codex app-server `error` notifications carry `{ error: { message,
- * codexErrorInfo, additionalDetails }, willRetry, threadId, turnId }` and a
- * failed `turn/completed` carries `turn.error` with the same `TurnError` shape.
- * `extractText` does not descend into `error`, which is why every provider
- * failure used to surface as the bare "Codex app-server error".
- */
-function summarizeAppServerError(params: Record<string, unknown>): AppServerErrorSummary {
-  const error = isObject(params.error) ? params.error : null
-  const code = describeCodexErrorInfo(error?.codexErrorInfo ?? error?.codex_error_info)
-  const message = (error ? asString(error.message) : undefined) || extractText(params) || DEFAULT_APP_SERVER_ERROR
-  const details = error ? asString(error.additionalDetails) : undefined
-  const lines = [message.trim()]
-  if (details && details.trim() && !message.includes(details.trim())) lines.push(details.trim())
-  const text = lines.join('\n')
-  return {
-    message: code ? `${text} (${code})` : text,
-    code,
-    willRetry: params.willRetry === true || params.will_retry === true
-  }
-}
-
-function extractFailedTurnError(params: Record<string, unknown>): AppServerErrorSummary | null {
-  const turn = isObject(params.turn) ? params.turn : null
-  if (!turn || asString(turn.status) !== 'failed' || !isObject(turn.error)) return null
-  return summarizeAppServerError({ error: turn.error })
-}
-
-function extractRole(item: Record<string, unknown>): string {
-  return (asString(item.role) || asString(item.author) || asString(item.sender) || '').toLowerCase()
-}
-
-function extractToolName(item: Record<string, unknown>): string {
-  const server = asString(item.server)
-  const tool = asString(item.tool)
-  if ((item.type === 'mcpToolCall' || server || tool) && (server || tool)) {
-    return [server, tool].filter(Boolean).join('.')
-  }
-
-  return (
-    asString(item.toolName) ||
-    asString(item.tool_name) ||
-    asString(item.name) ||
-    asString(item.type) ||
-    'tool'
-  )
-}
-
-function extractToolTitle(item: Record<string, unknown>, toolName: string): string {
-  if (item.type === 'commandExecution') {
-    const actionCommand = Array.isArray(item.commandActions)
-      ? item.commandActions
-        .filter(isObject)
-        .map((action) => asString(action.command))
-        .find(Boolean)
-      : undefined
-    const command = actionCommand || asString(item.command)
-    if (command) return command
-  }
-
-  if (item.type === 'fileChange') {
-    const paths = Array.isArray(item.changes)
-      ? item.changes
-        .filter(isObject)
-        .map((change) => asString(change.path))
-        .filter((path): path is string => !!path)
-      : []
-    const directPath = asString(item.path)
-    if (paths.length === 1) return basename(paths[0])
-    if (paths.length > 1) return `${basename(paths[0])} +${paths.length - 1}`
-    if (directPath) return basename(directPath)
-  }
-
-  return toolName
-}
-
-function truncateForIpc(value: string, maxChars: number): string {
-  if (value.length <= maxChars) return value
-  return `${value.slice(0, maxChars)}\n... (truncated for display)`
-}
-
-function stringifyForIpc(value: unknown, maxChars: number): string | undefined {
-  if (value == null) return undefined
-  if (typeof value === 'string') return truncateForIpc(value, maxChars)
-  try {
-    const seen = new WeakSet<object>()
-    return truncateForIpc(JSON.stringify(value, (_key, nested) => {
-      if (typeof nested === 'bigint') return nested.toString()
-      if (typeof nested === 'function' || typeof nested === 'symbol') return undefined
-      if (nested && typeof nested === 'object') {
-        if (seen.has(nested)) return '[Circular]'
-        seen.add(nested)
-      }
-      return nested
-    }, 2), maxChars)
-  } catch {
-    return truncateForIpc(String(value), maxChars)
-  }
 }
 
 function normalizeCodexMcpServerName(name: string): string {
@@ -437,14 +213,8 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     await this.initializeAppServer(session)
 
     const result = await this.sendRpcRequest(session, 'thread/start', {
-      cwd: config.workspaceDir,
-      model: config.model || DEFAULT_CODEX_APP_SERVER_MODEL,
-      approvalPolicy: config.permissionMode === 'allow' ? 'never' : 'on-request',
-      approvalsReviewer: 'user',
-      sandbox: this.resolveSandboxMode(config),
-      developerInstructions: config.systemPrompt || null,
-      runtimeWorkspaceRoots: this.buildRuntimeWorkspaceRoots(config.workspaceDir),
-      config: this.buildConfigOverrides(config)
+      ...this.buildThreadParams(config),
+      developerInstructions: config.systemPrompt || null
     })
 
     const threadId = extractThreadId(result)
@@ -496,15 +266,9 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     await this.initializeAppServer(session)
 
     await this.sendRpcRequest(session, 'thread/resume', {
+      ...this.buildThreadParams(config),
       threadId: sessionId,
-      cwd: config.workspaceDir,
-      model: config.model || DEFAULT_CODEX_APP_SERVER_MODEL,
-      approvalPolicy: config.permissionMode === 'allow' ? 'never' : 'on-request',
-      approvalsReviewer: 'user',
-      sandbox: this.resolveSandboxMode(config),
-      runtimeWorkspaceRoots: this.buildRuntimeWorkspaceRoots(config.workspaceDir),
-      initialTurnsPage: { limit: 50 },
-      config: this.buildConfigOverrides(config)
+      initialTurnsPage: { limit: 50 }
     })
 
     void this.logMcpServerInventory(session, sessionId, 'thread/resume')
@@ -555,17 +319,11 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     session.lastError = null
 
     const result = await this.sendRpcRequest(session, 'turn/start', {
+      ...this.buildThreadParams(config),
       threadId: session.threadId,
       input: [{ type: 'text', text: promptText }],
-      cwd: config.workspaceDir,
-      model: config.model || DEFAULT_CODEX_APP_SERVER_MODEL,
       effort: config.reasoningEffort && config.reasoningEffort !== 'max' ? config.reasoningEffort : null,
-      approvalPolicy: config.permissionMode === 'allow' ? 'never' : 'on-request',
-      approvalsReviewer: 'user',
-      sandbox: this.resolveSandboxMode(config),
-      sandboxPolicy: this.buildSandboxPolicy(config),
-      runtimeWorkspaceRoots: this.buildRuntimeWorkspaceRoots(config.workspaceDir),
-      config: this.buildConfigOverrides(config)
+      sandboxPolicy: this.buildSandboxPolicy(config)
     })
 
     if (isObject(result)) {
@@ -606,55 +364,16 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     const seenMessageIds = new Set<string>()
     const seenPartIds = new Set<string>()
     const partContentLengths = new Map<string, string>()
-    const partsByIdAndRole = new Map<string, MessagePart>()
 
     const assistantTextKeysByTurn = session.assistantTextKeysByTurn
     session.assistantTextKeysByTurn = new Map()
     try {
-      for (const event of session.permanentMessages) {
-        const parts = this.convertEventToMessageParts(event, seenMessageIds, seenPartIds, partContentLengths, session)
-        for (const part of parts) {
-          const key = `${part.id || `part-${partsByIdAndRole.size}`}-${part.role || MessageRole.ASSISTANT}`
-          if (!partsByIdAndRole.has(key) || part.update) {
-            partsByIdAndRole.set(key, part)
-          }
-        }
-      }
+      return groupPartsIntoMessages(session.permanentMessages.flatMap((event) =>
+        this.convertEventToMessageParts(event, seenMessageIds, seenPartIds, partContentLengths, session)
+      ))
     } finally {
       session.assistantTextKeysByTurn = assistantTextKeysByTurn
     }
-
-    const messages: SessionMessage[] = []
-    let currentMessage: SessionMessage | null = null
-    let previousPart: MessagePart | null = null
-    let messageCounter = 0
-
-    for (const part of partsByIdAndRole.values()) {
-      const role = part.role === MessageRole.USER
-        ? MessageRole.USER
-        : part.role === MessageRole.SYSTEM
-          ? MessageRole.SYSTEM
-          : MessageRole.ASSISTANT
-      const startsNewMessage = !currentMessage
-        || currentMessage.role !== role
-        || !previousPart
-        || part.id !== previousPart.id
-
-      if (startsNewMessage) {
-        if (currentMessage) messages.push(currentMessage)
-        currentMessage = {
-          id: `msg-${messageCounter++}`,
-          role,
-          parts: []
-        }
-      }
-
-      currentMessage!.parts.push(part)
-      previousPart = part
-    }
-
-    if (currentMessage) messages.push(currentMessage)
-    return messages
   }
 
   async abortPrompt(sessionId: string, _config: SessionConfig): Promise<void> {
@@ -752,7 +471,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
   private async sweepOrphanedAppServers(): Promise<void> {
     if (process.platform === 'win32') return // No cheap ancestry query on Windows.
     try {
-      const { stdout } = await this.execFileAsync('ps', ['-eo', 'pid=,ppid=,command='], {
+      const { stdout } = await execFileAsync('ps', ['-eo', 'pid=,ppid=,command='], {
         timeout: 10_000,
         maxBuffer: 16 * 1024 * 1024
       })
@@ -760,7 +479,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
       for (const session of this.liveSessions) {
         if (typeof session.process.pid === 'number') tracked.add(session.process.pid)
       }
-      const leaked = selectUntrackedAppServerPids(parseProcessTable(stdout), process.pid, tracked)
+      const leaked = selectUntrackedAppServerPids(parseProcessTable(String(stdout)), process.pid, tracked)
       for (const pid of leaked) {
         try {
           process.kill(pid, 'SIGTERM')
@@ -803,7 +522,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
   async checkHealth(): Promise<{ available: boolean; reason?: string }> {
     try {
       const executable = await this.findCodexExecutable()
-      await this.execFileAsync(executable, ['app-server', '--help'], { timeout: 5000 })
+      await execFileAsync(executable, ['app-server', '--help'], { timeout: 5000 })
       return { available: true }
     } catch (error) {
       return {
@@ -836,25 +555,17 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     }
   }
 
-  async getRunningTools(sessionId: string, _config: SessionConfig): Promise<Array<{
-    partId: string
-    toolName: string
-    startTime?: number
-    lastActivityTime?: number
-    lastActivityMonotonicTime?: number
-    input?: Record<string, unknown>
-  }>> {
+  async getRunningTools(sessionId: string, _config: SessionConfig): Promise<RunningTool[]> {
     return Array.from(this.sessions.get(sessionId)?.runningTools.values() || [])
   }
 
   private async startAppServerProcess(config: SessionConfig, sessionId: string): Promise<AppServerSession> {
     const executable = await this.findCodexExecutable()
     const authEnv = this.buildEnvironment(config)
-    const env = authEnv.env
     const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(executable)
     const child = spawn(executable, ['app-server', '--stdio'], {
       cwd: config.workspaceDir,
-      env,
+      env: authEnv.env,
       stdio: ['pipe', 'pipe', 'pipe'],
       ...(needsShell ? { shell: true } : {})
     })
@@ -862,14 +573,13 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     // Every pipe needs an error listener before the first write. The app server
     // can exit at any moment, and an unhandled EPIPE on its stdin crashes the
     // main process.
-    guardChildStreams(child, 'CodexAppServerAdapter')
+    guardChildStreams(child, LABEL)
 
     const session: AppServerSession = {
       sessionId,
       threadId: null,
       activeTurnId: null,
       process: child,
-      stdoutBuffer: '',
       status: SessionStatusType.IDLE,
       messageBuffer: [],
       permanentMessages: [],
@@ -896,7 +606,13 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     this.liveSessions.add(session)
     this.startOrphanSweep()
 
-    this.setupStdoutParser(child, session)
+    onJsonLines(child.stdout, (line) => {
+      try {
+        this.handleRpcMessage(session, JSON.parse(line) as JsonRpcMessage)
+      } catch (error) {
+        console.error('[CodexAppServerAdapter] Failed to parse JSON-RPC:', line, error)
+      }
+    })
     child.stderr?.on('data', (chunk: Buffer) => {
       console.log('[CodexAppServerAdapter] stderr:', chunk.toString())
     })
@@ -929,22 +645,10 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
 
   private async findCodexExecutable(): Promise<string> {
     if (this.codexExecutablePath) return this.codexExecutablePath
-    const isWin = process.platform === 'win32'
-    const finder = isWin ? 'where' : 'which'
-    const binary = isWin ? 'codex.cmd' : 'codex'
-    const { stdout } = await this.execFileAsync(finder, [binary])
-    this.codexExecutablePath = stdout.trim().split(/\r?\n/)[0]
-    return this.codexExecutablePath
-  }
-
-  private async execFileAsync(
-    command: string,
-    args: string[],
-    options?: { timeout?: number; maxBuffer?: number }
-  ): Promise<{ stdout: string }> {
-    const { execFile } = await import('child_process')
-    const execFileAsync = promisify(execFile)
-    return await execFileAsync(command, args, options) as { stdout: string }
+    const found = await findExecutable(process.platform === 'win32' ? 'codex.cmd' : 'codex')
+    if (!found) throw new Error('Codex CLI not found on PATH')
+    this.codexExecutablePath = found
+    return found
   }
 
   private buildEnvironment(config: SessionConfig): {
@@ -952,45 +656,20 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     usesApiKey: boolean
     summary: string
   } {
-    const env: NodeJS.ProcessEnv = { ...process.env }
+    const env: NodeJS.ProcessEnv = { ...process.env, ...config.secretEnvVars }
+    return { env, ...applyCodexAuthEnv(env, config) }
+  }
 
-    for (const [key, value] of Object.entries(config.secretEnvVars || {})) {
-      env[key] = value
-    }
-
-    const explicitApiKey = config.apiKeys?.openai
-    const useApiKey =
-      config.authMethod === 'api_key' ? true
-      : config.authMethod === 'subscription' ? false
-      : !!explicitApiKey
-
-    if (useApiKey) {
-      const key = explicitApiKey || env.OPENAI_API_KEY || env.CODEX_API_KEY
-      if (key) {
-        env.OPENAI_API_KEY = key
-        env.CODEX_API_KEY = key
-      }
-      env.NO_BROWSER = '1'
-      env.CODEX_HOME = mkdtempSync(join(tmpdir(), 'codex-app-server-session-'))
-      return {
-        env,
-        usesApiKey: true,
-        summary: `API key (authMethod=${config.authMethod ?? 'legacy'}, isolated CODEX_HOME)`
-      }
-    }
-
-    if (!useApiKey) {
-      delete env.OPENAI_API_KEY
-      delete env.CODEX_API_KEY
-      if (!env.CODEX_HOME) {
-        env.CODEX_HOME = join(homedir(), '.codex')
-      }
-    }
-
+  /** Parameters shared by thread/start, thread/resume and turn/start. */
+  private buildThreadParams(config: SessionConfig): Record<string, unknown> {
     return {
-      env,
-      usesApiKey: false,
-      summary: `subscription (authMethod=${config.authMethod ?? 'legacy'}, CODEX_HOME=${env.CODEX_HOME ?? 'default'})`
+      cwd: config.workspaceDir,
+      model: config.model || DEFAULT_CODEX_APP_SERVER_MODEL,
+      approvalPolicy: config.permissionMode === 'allow' ? 'never' : 'on-request',
+      approvalsReviewer: 'user',
+      sandbox: this.resolveSandboxMode(config),
+      runtimeWorkspaceRoots: this.buildRuntimeWorkspaceRoots(config.workspaceDir),
+      config: this.buildConfigOverrides(config)
     }
   }
 
@@ -1097,23 +776,6 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     } catch (error) {
       console.warn('[CodexAppServerAdapter] Failed to list MCP inventory:', error)
     }
-  }
-
-  private setupStdoutParser(process: ChildProcess, session: AppServerSession): void {
-    process.stdout?.on('data', (chunk: Buffer) => {
-      session.stdoutBuffer += chunk.toString()
-      let newlineIndex: number
-      while ((newlineIndex = session.stdoutBuffer.indexOf('\n')) !== -1) {
-        const line = session.stdoutBuffer.slice(0, newlineIndex).trim()
-        session.stdoutBuffer = session.stdoutBuffer.slice(newlineIndex + 1)
-        if (!line) continue
-        try {
-          this.handleRpcMessage(session, JSON.parse(line) as JsonRpcMessage)
-        } catch (error) {
-          console.error('[CodexAppServerAdapter] Failed to parse JSON-RPC:', line, error)
-        }
-      }
-    })
   }
 
   private handleRpcMessage(session: AppServerSession, message: JsonRpcMessage): void {
@@ -1368,7 +1030,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
   ): void {
     let stableItemId: string | undefined
     if (isObject(item)) {
-      stableItemId = this.computeThreadItemKey(item, turnId)
+      stableItemId = computeThreadItemKey(item, turnId)
       if (session.bufferedThreadItemIds.has(stableItemId)) return
       session.bufferedThreadItemIds.add(stableItemId)
     }
@@ -1381,17 +1043,6 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
         ...(stableItemId ? { itemId: stableItemId } : {})
       }
     })
-  }
-
-  private computeThreadItemKey(item: Record<string, unknown>, turnId: string | undefined): string {
-    const identity = deriveItemIdentity(item)
-    if (identity) return identity
-    // No id-like field (e.g. user/developer input messages). Build a deterministic
-    // key from turn + type + role + content so the same item maps to the same key
-    // across reconcile passes instead of duplicating.
-    const type = asString(item.type) || 'item'
-    const role = extractRole(item)
-    return `synthetic:${turnId || 'noturn'}:${type}:${role}:${hashString(extractText(item))}`
   }
 
   private async bufferAllThreadItems(session: AppServerSession, threadId: string): Promise<void> {
@@ -1471,356 +1122,33 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     this.onDataAvailable?.(session.threadId || session.sessionId)
   }
 
+
+  private sendRpcRequest(session: AppServerSession, method: string, params?: unknown): Promise<unknown> {
+    // Writing to a stopped child's stdin is silent — the guard swallows the
+    // EPIPE — so the request would sit on its 30 s timeout instead of
+    // failing. Say so at once.
+    if (session.terminated) {
+      return Promise.reject(new Error(`Codex app-server is stopped, cannot send ${method}`))
+    }
+    return sendJsonRpcRequest(session, method, params, LABEL)
+  }
+
+  private sendRpcResponse(session: AppServerSession, id: string | number, result: unknown): void {
+    writeJsonRpc(session, { jsonrpc: '2.0', id, result }, LABEL)
+  }
+
+  private sendRpcNotification(session: AppServerSession, method: string, params?: unknown): void {
+    writeJsonRpc(session, { jsonrpc: '2.0', method, params }, LABEL)
+  }
+
   private convertEventToMessageParts(
     event: unknown,
-    seenMessageIds: Set<string>,
-    seenPartIds: Set<string>,
-    partContentLengths: Map<string, string>,
-    session: AppServerSession
-  ): MessagePart[] {
-    if (!isObject(event) || !asString(event.method)) return []
-    const method = event.method
-    const params = isObject(event.params) ? event.params : {}
-    const item = isObject(params.item) ? params.item : undefined
-
-    if (method === 'item/agentMessage/delta') {
-      const itemId = asString(params.itemId) || `agent-${Date.now()}`
-      const partId = `agent-${itemId}`
-      const delta = asString(params.delta) || ''
-      const previous = session.streamedTextByItemId.get(itemId) || ''
-      const next = previous + delta
-      const update = seenPartIds.has(partId)
-      seenPartIds.add(partId)
-      session.streamedTextByItemId.set(itemId, next)
-      this.markAssistantTextForTurn(session, params, {}, next)
-      partContentLengths.set(partId, String(next.length))
-      return [{
-        id: partId,
-        type: MessagePartType.TEXT,
-        text: next,
-        role: MessageRole.ASSISTANT,
-        update
-      }]
-    }
-
-    if (method === 'item/reasoning/textDelta' || method === 'item/reasoning/summaryTextDelta') {
-      const itemId = asString(params.itemId) || `reasoning-${Date.now()}`
-      const partId = `reasoning-${itemId}`
-      const text = asString(params.delta) || ''
-      if (!text && seenPartIds.has(partId)) return []
-      seenPartIds.add(partId)
-      partContentLengths.set(partId, String(text.length))
-      return [{
-        id: partId,
-        type: MessagePartType.REASONING,
-        text,
-        role: MessageRole.ASSISTANT
-      }]
-    }
-
-    if (
-      method === 'item/commandExecution/outputDelta' ||
-      method === 'command/exec/outputDelta' ||
-      method === 'process/outputDelta'
-    ) {
-      return this.convertOutputDeltaEvent('command', params, seenPartIds, partContentLengths, session)
-    }
-
-    if (
-      method === 'item/fileChange/outputDelta' ||
-      method === 'item/fileChange/patchUpdated'
-    ) {
-      return this.convertOutputDeltaEvent('file_change', params, seenPartIds, partContentLengths, session)
-    }
-
-    if (
-      method === 'item/plan/delta' ||
-      method === 'turn/plan/updated'
-    ) {
-      return this.convertOutputDeltaEvent('plan', params, seenPartIds, partContentLengths, session)
-    }
-
-    if (method === 'item/mcpToolCall/progress') {
-      return this.convertOutputDeltaEvent('mcp_tool', params, seenPartIds, partContentLengths, session)
-    }
-
-    if ((method === 'item/started' || method === 'item/completed') && item) {
-      return this.convertThreadItem(method, item, params, seenMessageIds, seenPartIds, partContentLengths, session)
-    }
-
-    if (method === 'error') {
-      const failure = summarizeAppServerError(params)
-      const turnId = asString(params.turnId) || asString(params.turn_id) || `${Date.now()}`
-      if (failure.willRetry) {
-        return [{
-          id: `retry-${turnId}-${Date.now()}`,
-          type: MessagePartType.RETRY,
-          text: `Codex is retrying after a recoverable error: ${failure.message}`,
-          role: MessageRole.ASSISTANT
-        }]
-      }
-      // One fatal error per turn: the failed `turn/completed` that follows
-      // carries the same TurnError and must not print a second copy.
-      const partId = `error-${turnId}`
-      if (seenPartIds.has(partId)) return []
-      seenPartIds.add(partId)
-      return [{
-        id: partId,
-        type: MessagePartType.ERROR,
-        text: failure.message,
-        role: MessageRole.ASSISTANT
-      }]
-    }
-
-    if (method === 'turn/completed') {
-      const failure = extractFailedTurnError(params)
-      if (!failure) return []
-      const turn = isObject(params.turn) ? params.turn : {}
-      const partId = `error-${asString(turn.id) || Date.now()}`
-      if (seenPartIds.has(partId)) return []
-      seenPartIds.add(partId)
-      return [{
-        id: partId,
-        type: MessagePartType.ERROR,
-        text: failure.message,
-        role: MessageRole.ASSISTANT
-      }]
-    }
-
-    return []
-  }
-
-  private convertOutputDeltaEvent(
-    toolName: string,
-    params: Record<string, unknown>,
-    seenPartIds: Set<string>,
-    partContentLengths: Map<string, string>,
-    session: AppServerSession
-  ): MessagePart[] {
-    const itemId = asString(params.itemId) || asString(params.processId) || asString(params.turnId) || `${toolName}-${Date.now()}`
-    const partId = `tool-${itemId}`
-    const previous = session.streamedTextByItemId.get(partId) || ''
-    const next = truncateForIpc(previous + extractText(params), MAX_IPC_TOOL_OUTPUT_CHARS)
-    const update = seenPartIds.has(partId)
-    const runningTool = session.runningTools.get(partId)
-    if (runningTool) {
-      runningTool.lastActivityTime = Date.now()
-      runningTool.lastActivityMonotonicTime = performance.now()
-    }
-    seenPartIds.add(partId)
-    session.streamedTextByItemId.set(partId, next)
-    partContentLengths.set(partId, `${next.length}:${toolName}`)
-
-    return [{
-      id: partId,
-      type: MessagePartType.TOOL,
-      role: MessageRole.ASSISTANT,
-      tool: {
-        name: toolName,
-        status: 'running',
-        title: toolName,
-        input: stringifyForIpc(params, MAX_IPC_TOOL_INPUT_CHARS),
-        output: next
-      },
-      update
-    }]
-  }
-
-  private convertThreadItem(
-    method: string,
-    item: Record<string, unknown>,
-    params: Record<string, unknown>,
     _seenMessageIds: Set<string>,
     seenPartIds: Set<string>,
     partContentLengths: Map<string, string>,
     session: AppServerSession
   ): MessagePart[] {
-    const itemId = extractItemId(params)
-    const type = asString(item.type) || ''
-    const role = extractRole(item)
-    const text = extractText(item)
-
-    if (type.includes('reasoning')) {
-      const partId = `reasoning-${itemId}`
-      if (seenPartIds.has(partId)) return []
-      seenPartIds.add(partId)
-      partContentLengths.set(partId, String(text.length))
-      return [{
-        id: partId,
-        type: MessagePartType.REASONING,
-        text,
-        role: MessageRole.ASSISTANT
-      }]
-    }
-
-    if (role === 'user' || type.includes('user') || type === 'user_message') {
-      const partId = `user-${itemId}`
-      if (seenPartIds.has(partId)) return []
-      seenPartIds.add(partId)
-      partContentLengths.set(partId, String(text.length))
-      return [{
-        id: partId,
-        type: MessagePartType.TEXT,
-        text,
-        role: MessageRole.USER
-      }]
-    }
-
-    if (role === 'assistant' || type.includes('agent') || type.includes('assistant') || (!type && text)) {
-      const partId = `agent-${itemId}`
-      if (seenPartIds.has(partId) && method !== 'item/completed') return []
-      const finalText = text || session.streamedTextByItemId.get(itemId) || ''
-      const alreadySeen = seenPartIds.has(partId)
-      if (!alreadySeen && method === 'item/completed' && this.hasSeenAssistantTextForTurn(session, params, item, finalText)) {
-        return []
-      }
-      seenPartIds.add(partId)
-      if (method === 'item/completed') {
-        this.markAssistantTextForTurn(session, params, item, finalText)
-      }
-      partContentLengths.set(partId, String(finalText.length))
-      return [{
-        id: partId,
-        type: MessagePartType.TEXT,
-        text: finalText,
-        role: MessageRole.ASSISTANT,
-        update: method === 'item/completed' && session.streamedTextByItemId.has(itemId)
-      }]
-    }
-
-    const toolName = extractToolName(item)
-    const toolTitle = extractToolTitle(item, toolName)
-    const partId = `tool-${itemId}`
-    const isCompleted = method === 'item/completed'
-    if (!isCompleted && seenPartIds.has(partId)) return []
-    seenPartIds.add(partId)
-
-    const part: MessagePart = {
-      id: partId,
-      type: MessagePartType.TOOL,
-      role: MessageRole.ASSISTANT,
-      tool: {
-        name: toolName,
-        status: isCompleted ? 'completed' : 'running',
-        title: toolTitle,
-        input: stringifyForIpc(item, MAX_IPC_TOOL_INPUT_CHARS),
-        output: isCompleted ? stringifyForIpc(extractText(item) || item, MAX_IPC_TOOL_OUTPUT_CHARS) : undefined
-      },
-      update: isCompleted
-    }
-
-    if (isCompleted) {
-      session.runningTools.delete(partId)
-    } else {
-      const startedAt = typeof params.startedAtMs === 'number' ? params.startedAtMs : Date.now()
-      const observedAt = performance.now()
-      session.runningTools.set(partId, {
-        partId,
-        toolName,
-        startTime: startedAt,
-        lastActivityTime: Date.now(),
-        lastActivityMonotonicTime: observedAt,
-        input: item
-      })
-    }
-
-    partContentLengths.set(partId, `${part.tool?.status}:${toolName}`)
-    return [part]
-  }
-
-  private hasSeenAssistantTextForTurn(
-    session: AppServerSession,
-    params: Record<string, unknown>,
-    item: Record<string, unknown>,
-    text: string
-  ): boolean {
-    const key = this.buildAssistantTextKey(text)
-    if (!key) return false
-    for (const scopeKey of this.extractAssistantTextScopeKeys(params, item, key)) {
-      if (session.assistantTextKeysByTurn.get(scopeKey)?.has(key)) return true
-    }
-    return false
-  }
-
-  private markAssistantTextForTurn(
-    session: AppServerSession,
-    params: Record<string, unknown>,
-    item: Record<string, unknown>,
-    text: string
-  ): void {
-    const key = this.buildAssistantTextKey(text)
-    if (!key) return
-    for (const scopeKey of this.extractAssistantTextScopeKeys(params, item, key)) {
-      const seenForScope = session.assistantTextKeysByTurn.get(scopeKey) ?? new Set<string>()
-      seenForScope.add(key)
-      session.assistantTextKeysByTurn.set(scopeKey, seenForScope)
-    }
-  }
-
-  private extractTurnKey(params: Record<string, unknown>, item: Record<string, unknown>): string {
-    const metadata = isObject(item.internal_chat_message_metadata_passthrough)
-      ? item.internal_chat_message_metadata_passthrough
-      : {}
-    return (
-      asString(params.turnId) ||
-      asString(params.turn_id) ||
-      asString(item.turnId) ||
-      asString(item.turn_id) ||
-      asString(metadata.turn_id) ||
-      asString(metadata.turnId) ||
-      asString(params.threadId) ||
-      'unknown-turn'
-    )
-  }
-
-  private extractAssistantTextScopeKeys(
-    params: Record<string, unknown>,
-    item: Record<string, unknown>,
-    textKey: string
-  ): string[] {
-    const keys = new Set<string>([this.extractTurnKey(params, item)])
-    const threadKey = asString(params.threadId) || asString(item.threadId) || asString(item.thread_id)
-    if (threadKey && textKey.length >= MIN_THREAD_LEVEL_ASSISTANT_DEDUPE_CHARS) {
-      keys.add(`thread:${threadKey}`)
-    }
-    return Array.from(keys)
-  }
-
-  private buildAssistantTextKey(text: string): string {
-    return text.trim().replace(/\s+/g, ' ')
-  }
-
-  private sendRpcRequest(session: AppServerSession, method: string, params?: unknown): Promise<unknown> {
-    return new Promise((resolve, reject) => {
-      // Writing to a stopped child's stdin is silent — the guard swallows the
-      // EPIPE — so the request would sit on its 30 s timeout instead of
-      // failing. Say so at once.
-      if (session.terminated) {
-        reject(new Error(`Codex app-server is stopped, cannot send ${method}`))
-        return
-      }
-      const id = session.nextRequestId++
-      session.pendingRequests.set(id, { resolve, reject })
-      this.writeJson(session, { jsonrpc: '2.0', id, method, params })
-      setTimeout(() => {
-        if (!session.pendingRequests.has(id)) return
-        session.pendingRequests.delete(id)
-        reject(new Error(`Codex app-server RPC timed out: ${method}`))
-      }, 30000)
-    })
-  }
-
-  private sendRpcResponse(session: AppServerSession, id: string | number, result: unknown): void {
-    this.writeJson(session, { jsonrpc: '2.0', id, result })
-  }
-
-  private sendRpcNotification(session: AppServerSession, method: string, params?: unknown): void {
-    this.writeJson(session, { jsonrpc: '2.0', method, params })
-  }
-
-  private writeJson(session: AppServerSession, payload: unknown): void {
-    // A dead app server must not take the application with it.
-    writeToChildStdin(session.process, `${JSON.stringify(payload)}\n`, 'CodexAppServerAdapter')
+    return convertEventToMessageParts(event, seenPartIds, partContentLengths, session)
   }
 
   private requireSession(sessionId: string): AppServerSession {

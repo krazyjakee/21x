@@ -203,24 +203,24 @@ describe('activeStatusWorkspaceIds', () => {
 })
 
 describe('findWorkspacesWithLiveProcesses', () => {
-  it('returns an empty set when there is nothing to check', () => {
-    expect(findWorkspacesWithLiveProcesses('/nonexistent-root', [])).toEqual(new Set())
+  it('returns an empty set when there is nothing to check', async () => {
+    expect(await findWorkspacesWithLiveProcesses('/nonexistent-root', [])).toEqual(new Set())
   })
 
-  it('sees the current process when it runs inside a workspace dir', () => {
+  it('sees the current process when it runs inside a workspace dir', async () => {
     if (process.platform === 'win32') return
     // process.cwd() is the repo checkout, not a workspace — use a fake root that
     // cannot match, and assert the shape (a Set) rather than membership.
-    const result = findWorkspacesWithLiveProcesses('/nonexistent-root', ['task-1'])
+    const result = await findWorkspacesWithLiveProcesses('/nonexistent-root', ['task-1'])
     expect(result === null || result instanceof Set).toBe(true)
   })
 
-  it('marks the real cwd workspace as active', () => {
+  it('marks the real cwd workspace as active', async () => {
     if (process.platform === 'win32') return
     const cwd = process.cwd()
     // Derive a fake workspaces root one level above cwd so cwd looks like a workspace.
     void statSync(cwd)
-    const result = findWorkspacesWithLiveProcesses(dirname(cwd), [basename(cwd)])
+    const result = await findWorkspacesWithLiveProcesses(dirname(cwd), [basename(cwd)])
     // The current process (vitest/electron) has cwd inside it, so it must be active —
     // unless the platform cannot report cwds, in which case null is the honest answer.
     if (result !== null) expect(result.has(basename(cwd))).toBe(true)

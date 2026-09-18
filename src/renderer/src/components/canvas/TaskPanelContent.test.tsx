@@ -1,4 +1,3 @@
-import { taskCompletionCommand } from '../../../../shared/task-write-contract'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { TaskPanelContent } from './TaskPanelContent'
@@ -200,21 +199,11 @@ describe('TaskPanelContent', () => {
 
   it('issues server completion for a sourced canvas task without writing local completion', async () => {
     taskList[0].source_id = 'src-1'
-    const apiRequest = vi.fn()
-    // Bridge the renderer command to the real API encoder. Credentials stay in main.
-    executeActionMock.mockImplementation(async () => {
-      const command = taskCompletionCommand('remote-1', { action: 'complete' }, 7)
-      apiRequest(command.method, command.path, command.body, command.headers)
-      return { success: true }
-    })
     render(<TaskPanelContent panelId="panel-1" taskId="task-1" panelLayout="both" />)
     fireEvent.click(screen.getByText('Complete task'))
     expect(executeActionMock).not.toHaveBeenCalled()
     fireEvent.click(screen.getByTestId('complete-at-source'))
-    await waitFor(() => expect(apiRequest).toHaveBeenCalledWith('POST', '/api/tasks/remote-1/action',
-      { outputs: { action: 'complete' }, expectedVersion: 7 },
-      { 'x-task-contract-version': '2', 'x-task-actor': 'human' }))
-    expect(executeActionMock).toHaveBeenCalledExactlyOnceWith('complete', 'task-1', 'src-1')
+    await waitFor(() => expect(executeActionMock).toHaveBeenCalledExactlyOnceWith('complete', 'task-1', 'src-1'))
     expect(updateTaskMock).toHaveBeenCalledWith('task-1', {complete_at_source: true})
     // The dialog closes after the source confirms completion.
     expect(screen.queryByRole('dialog')).toBeNull()

@@ -1,5 +1,7 @@
 import { afterEach, describe, it, expect, vi } from 'vitest'
 import { OpencodeAdapter } from './opencode-adapter'
+import { waitForMcpServersReady } from './opencode-mcp'
+import { setTillDoneSession } from './opencode-runtime-plugins'
 import { SessionStatusType } from './coding-agent-adapter'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
@@ -148,8 +150,8 @@ describe('OpencodeAdapter', () => {
           tillDone: true
         })
 
-        ;(adapter as any).writeTillDoneSessionConfig('regular-session', true)
-        ;(adapter as any).writeTillDoneSessionConfig('triage-session', false)
+        setTillDoneSession((adapter as any).tillDoneConfigPath, 'regular-session', true)
+        setTillDoneSession((adapter as any).tillDoneConfigPath, 'triage-session', false)
 
         const supportPaths = (adapter as any).runtimeSupportFilePaths as string[]
         const tillDoneConfigPath = supportPaths.find(path => path.endsWith('.20x-tilldone-config.json'))!
@@ -183,7 +185,7 @@ describe('OpencodeAdapter', () => {
           workspaceDir,
           tillDone: true
         })
-        ;(adapter as any).writeTillDoneSessionConfig('regular-session', true)
+        setTillDoneSession((adapter as any).tillDoneConfigPath, 'regular-session', true)
 
         const supportPaths = (adapter as any).runtimeSupportFilePaths as string[]
         const tillDoneConfigPath = supportPaths.find(path => path.endsWith('.20x-tilldone-config.json'))!
@@ -284,7 +286,6 @@ describe('OpencodeAdapter', () => {
 
   describe('waitForMcpServersReady', () => {
     it('prefers SDK mcp.list when available', async () => {
-      const adapter = new OpencodeAdapter()
       const list = vi.fn().mockResolvedValue({
         data: [
           { name: 'server-a', status: 'connected' },
@@ -294,8 +295,8 @@ describe('OpencodeAdapter', () => {
       const status = vi.fn()
       const mockClient = { mcp: { list, status } }
 
-      const result = await (adapter as any).waitForMcpServersReady(
-        mockClient,
+      const result = await waitForMcpServersReady(
+        mockClient as any,
         ['server-a', 'server-b'],
         '/tmp/ws',
         1,
@@ -309,7 +310,6 @@ describe('OpencodeAdapter', () => {
     })
 
     it('falls back to SDK mcp.status and batches checks per attempt', async () => {
-      const adapter = new OpencodeAdapter()
       const status = vi
         .fn()
         .mockResolvedValueOnce({
@@ -326,8 +326,8 @@ describe('OpencodeAdapter', () => {
         })
       const mockClient = { mcp: { status } }
 
-      const result = await (adapter as any).waitForMcpServersReady(
-        mockClient,
+      const result = await waitForMcpServersReady(
+        mockClient as any,
         ['server-a', 'server-b'],
         '/tmp/ws',
         2,
@@ -340,7 +340,6 @@ describe('OpencodeAdapter', () => {
     })
 
     it('marks unresolved servers as timeout', async () => {
-      const adapter = new OpencodeAdapter()
       const status = vi.fn().mockResolvedValue({
         data: {
           'server-a': { status: 'connecting' }
@@ -348,8 +347,8 @@ describe('OpencodeAdapter', () => {
       })
       const mockClient = { mcp: { status } }
 
-      const result = await (adapter as any).waitForMcpServersReady(
-        mockClient,
+      const result = await waitForMcpServersReady(
+        mockClient as any,
         ['server-a'],
         '/tmp/ws',
         2,

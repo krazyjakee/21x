@@ -45,15 +45,14 @@ enum TaskStatus {
               └──────┬──────┘                                │
                      │  agent goes idle                      │
                      ▼                                       │
-              ┌────────────────┐                             │
-              │ready_for_review│                             │
-              └───────┬────────┘                             │
-                      │  user completes                      │
-                      ▼                                      │
-              ┌───────────────┐   feedback    ┌────────────┐│
-              │   completed   │ ────────────> │agent_learning│
-              └───────────────┘ <──────────── └────────────┘
-                                  learning done
+              ┌────────────────┐   feedback    ┌──────────────┐
+              │ready_for_review│ ────────────> │agent_learning│
+              └───────┬────────┘               └──────┬───────┘
+                      │  user completes               │ learning done
+                      ▼                               │
+              ┌───────────────┐                       │
+              │   completed   │ <─────────────────────┘
+              └───────────────┘
 ```
 
 ### Transition Details
@@ -65,9 +64,10 @@ enum TaskStatus {
 | `triaging` | `not_started` | Triage agent finishes (agent_id now assigned) |
 | `not_started` | `agent_working` | Auto-run picks up task (has agent_id), or manual start |
 | `agent_working` | `ready_for_review` | Agent session goes idle (`transitionToIdle`) |
-| `ready_for_review` | `completed` | User clicks "Complete Task" |
-| `completed` | `agent_learning` | User submits feedback; `learnFromSession` starts |
-| `agent_learning` | `completed` | Skill extraction finishes |
+| `ready_for_review` | `completed` | User clicks "Complete Task" (no session, or feedback skipped) |
+| `ready_for_review` | `agent_learning` | User submits feedback; the feedback prompt is sent to the session |
+| `agent_learning` | `completed` | Session goes idle; skills synced (`finishSessionFeedback`) |
+| `agent_learning` | `ready_for_review` | Skill sync or source completion fails |
 
 ## Auto-Run
 
@@ -222,8 +222,9 @@ Uses SQL `LIKE` substring matching — not semantic search:
 | File | Role |
 |------|------|
 | `src/shared/constants.ts` | `TaskStatus` enum |
-| `src/main/agent-manager.ts` | Session lifecycle, `buildTriagePrompt`, `transitionToIdle` |
-| `src/main/task-api-server.ts` | HTTP API routes (`/update_task` status guard, `/list_repos`) |
+| `src/main/agent-manager.ts` | Session lifecycle, `transitionToIdle` |
+| `src/main/agent-manager/prompts.ts` | `buildTriagePrompt` |
+| `src/main/task-api/task-routes.ts` | HTTP API routes (`/update_task` status guard, `/list_repos`) |
 | `src/main/mcp-servers/task-management-mcp.ts` | MCP tool definitions |
 | `src/main/task-automation-scheduler.ts` | `auto_start_agent` / `auto_complete_without_review` reconciliation |
 | `src/renderer/src/hooks/use-agent-auto-start.ts` | Auto-run scheduler + triage trigger |

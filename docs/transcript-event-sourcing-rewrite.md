@@ -37,7 +37,7 @@ no rehydration-as-a-special-case, no replay push, no re-key dance.
   persists every non-ephemeral part with real `receivedAt` → `created_at`. `agent-manager.ts`.
 - Ordering by real time: `getTranscriptParts` `ORDER BY created_at, seq`. `database.ts`.
 - One-time full-history backfill from the adapter session (`getPersistedMessages`). `agent-manager.ts`.
-- Snapshot IPC `agentSession:getTranscriptSnapshot`. `ipc-handlers.ts` / preload / `ipc-client.ts`.
+- Snapshot IPC `agentSession:getTranscriptSnapshot`. `ipc/agents.ts` / preload / `ipc-client.ts`.
 - `AgentTranscriptPanel` already renders from a `messages: AgentMessage[]` prop and groups
   tool/reasoning parts — it can stay almost as-is; we only change where `messages` comes from.
 
@@ -106,7 +106,7 @@ Changes:
    - Remove the resume replay-to-renderer push (see “delete” list). Resume still ingests to the
      projection (backfill), which triggers `transcript:changed` naturally.
 
-3. IPC wiring (5 files): `ipc-handlers.ts` (`agentSession:getTranscriptDelta`), `preload/index.ts`,
+3. IPC wiring (5 files): `ipc/agents.ts` (`agentSession:getTranscriptDelta`), `preload/index.ts`,
    `renderer/src/types/electron.d.ts`, `renderer/src/lib/ipc-client.ts`, plus an
    `onTranscriptChanged(cb)` subscription (mirror `onAgentOutput`).
 

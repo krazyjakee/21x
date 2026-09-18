@@ -49,7 +49,6 @@ interface ArtifactState {
   endTurn: (taskId: string) => void
   projectTranscriptParts: (taskId: string, parts: TranscriptPartRecord[]) => Artifact[]
   hydrate: (taskId: string, artifactApi: ArtifactApi) => Promise<void>
-  resetTask: (taskId: string) => void
 }
 
 function readPersistedState(): PersistedState {
@@ -62,16 +61,86 @@ function readPersistedState(): PersistedState {
   }
 }
 
-function persist(state: Pick<ArtifactState, 'artifactsByTask' | 'uiByTask'>): void {
+// Serialising every task's artifacts is expensive, and streamed tool results
+// mutate the store many times per second, so writes are coalesced.
+const PERSIST_DELAY_MS = 500
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+
+function writePersistedState(): void {
+  if (persistTimer) clearTimeout(persistTimer)
+  persistTimer = null
   try {
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        artifactsByTask: state.artifactsByTask,
-        uiByTask: state.uiByTask
-      }))
+      const { artifactsByTask, uiByTask } = useArtifactStore.getState()
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ artifactsByTask, uiByTask }))
     }
   } catch {
     // Preferences are best-effort (private windows and quota errors are safe).
+  }
+}
+
+function persist(): void {
+  if (!persistTimer) persistTimer = setTimeout(writePersistedState, PERSIST_DELAY_MS)
+}
+
+function sameArtifact(previous: Artifact, candidate: Omit<Artifact, 'id' | 'reloadTrigger'>): boolean {
+  return previous.taskId === candidate.taskId
+    && previous.type === candidate.type
+    && previous.title === candidate.title
+    && previous.path === candidate.path
+    && previous.url === candidate.url
+    && previous.workpieceKey === candidate.workpieceKey
+    && JSON.stringify(previous.files) === JSON.stringify(candidate.files)
+    && previous.updatedAt === candidate.updatedAt
+}
+
+function mergeArtifact(previous: Artifact | undefined, candidate: Omit<Artifact, 'id' | 'reloadTrigger'>, id: string): Artifact {
+  return {
+    ...previous,
+    ...candidate,
+    id,
+    reloadTrigger: previous
+      ? previous.reloadTrigger + (candidate.updatedAt > previous.updatedAt ? 1 : 0)
+      : 0
+  }
+}
+
+type ArtifactMaps = Pick<ArtifactState, 'artifactsByTask' | 'uiByTask'>
+
+/** Applies one upsert to the maps; returns the same maps object when nothing changed. */
+function applyUpsert(
+  state: ArtifactState,
+  maps: ArtifactMaps,
+  candidate: ProjectedArtifact,
+  follow: boolean
+): { maps: ArtifactMaps; result: Artifact } {
+  const target = candidate.path || candidate.url
+  if (!target && !candidate.id && !candidate.workpieceKey) throw new Error('Artifact requires an identity, path, or URL')
+  const id = candidate.id || identity(candidate.taskId, candidate.type, target, candidate.workpieceKey)
+  const current = maps.artifactsByTask[candidate.taskId] || []
+  const index = current.findIndex((artifact) => artifact.id === id)
+  const previous = index >= 0 ? current[index] : undefined
+  const turn = state.turnsByTask[candidate.taskId]
+  const shouldFollow = follow && turn?.active && !turn.userSelectedTab
+  const currentUI = maps.uiByTask[candidate.taskId] || DEFAULT_UI
+
+  if (previous && sameArtifact(previous, candidate) && (!shouldFollow || (currentUI.open && currentUI.activeTabId === id))) {
+    return { maps, result: previous }
+  }
+
+  const result = mergeArtifact(previous, candidate, id)
+  const next = [...current]
+  if (index >= 0) next[index] = result
+  else next.push(result)
+
+  return {
+    result,
+    maps: {
+      artifactsByTask: { ...maps.artifactsByTask, [candidate.taskId]: next },
+      uiByTask: shouldFollow
+        ? { ...maps.uiByTask, [candidate.taskId]: { ...currentUI, open: true, activeTabId: id } }
+        : maps.uiByTask
+    }
   }
 }
 
@@ -247,54 +316,13 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
   getUI: (taskId) => get().uiByTask[taskId] || DEFAULT_UI,
 
   upsertArtifact: (candidate, follow = false) => {
-    const target = candidate.path || candidate.url
-    if (!target && !candidate.id && !candidate.workpieceKey) throw new Error('Artifact requires an identity, path, or URL')
-    const id = candidate.id || identity(candidate.taskId, candidate.type, target, candidate.workpieceKey)
     let result!: Artifact
     set((state) => {
-      const current = state.artifactsByTask[candidate.taskId] || []
-      const index = current.findIndex((artifact) => artifact.id === id)
-      const previous = index >= 0 ? current[index] : undefined
-      const turn = state.turnsByTask[candidate.taskId]
-      const shouldFollow = follow && turn?.active && !turn.userSelectedTab
-      const currentUI = state.getUI(candidate.taskId)
-
-      if (
-        previous
-        && previous.taskId === candidate.taskId
-        && previous.type === candidate.type
-        && previous.title === candidate.title
-        && previous.path === candidate.path
-        && previous.url === candidate.url
-        && previous.workpieceKey === candidate.workpieceKey
-        && JSON.stringify(previous.files) === JSON.stringify(candidate.files)
-        && previous.updatedAt === candidate.updatedAt
-        && (!shouldFollow || (currentUI.open && currentUI.activeTabId === id))
-      ) {
-        result = previous
-        return state
-      }
-
-      result = {
-        ...previous,
-        ...candidate,
-        id,
-        reloadTrigger: previous
-          ? previous.reloadTrigger + (candidate.updatedAt > previous.updatedAt ? 1 : 0)
-          : 0
-      }
-      const next = [...current]
-      if (index >= 0) next[index] = result
-      else next.push(result)
-
-      const nextState = {
-        artifactsByTask: { ...state.artifactsByTask, [candidate.taskId]: next },
-        uiByTask: shouldFollow
-          ? { ...state.uiByTask, [candidate.taskId]: { ...state.getUI(candidate.taskId), open: true, activeTabId: id } }
-          : state.uiByTask
-      }
-      persist(nextState)
-      return nextState
+      const applied = applyUpsert(state, state, candidate, follow)
+      result = applied.result
+      if (applied.maps === state) return state
+      persist()
+      return applied.maps
     })
     return result
   },
@@ -305,23 +333,22 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
     const nextUI = currentUI.activeTabId === artifactId
       ? { ...currentUI, activeTabId: null }
       : currentUI
-    const nextState = {
+    persist()
+    return {
       artifactsByTask: { ...state.artifactsByTask, [taskId]: nextArtifacts },
       uiByTask: { ...state.uiByTask, [taskId]: nextUI }
     }
-    persist(nextState)
-    return nextState
   }),
 
   setOpen: (taskId, open) => set((state) => {
     const next = { ...state.uiByTask, [taskId]: { ...state.getUI(taskId), open } }
-    persist({ artifactsByTask: state.artifactsByTask, uiByTask: next })
+    persist()
     return { uiByTask: next }
   }),
 
   setRailExpanded: (taskId, railExpanded) => set((state) => {
     const next = { ...state.uiByTask, [taskId]: { ...state.getUI(taskId), railExpanded } }
-    persist({ artifactsByTask: state.artifactsByTask, uiByTask: next })
+    persist()
     return { uiByTask: next }
   }),
 
@@ -331,7 +358,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
     const nextTurns = manual && turn?.active
       ? { ...state.turnsByTask, [taskId]: { ...turn, userSelectedTab: true } }
       : state.turnsByTask
-    persist({ artifactsByTask: state.artifactsByTask, uiByTask: nextUI })
+    persist()
     return { uiByTask: nextUI, turnsByTask: nextTurns }
   }),
 
@@ -349,7 +376,20 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
 
   projectTranscriptParts: (taskId, parts) => {
     const projected = parts.flatMap((part) => artifactsFromTranscriptPart(taskId, part))
-    return projected.map((artifact) => get().upsertArtifact(artifact, true))
+    if (projected.length === 0) return []
+    const results: Artifact[] = []
+    set((state) => {
+      let maps: ArtifactMaps = state
+      for (const artifact of projected) {
+        const applied = applyUpsert(state, maps, artifact, true)
+        maps = applied.maps
+        results.push(applied.result)
+      }
+      if (maps === state) return state
+      persist()
+      return { artifactsByTask: maps.artifactsByTask, uiByTask: maps.uiByTask }
+    })
+    return results
   },
 
   hydrate: async (taskId, artifactApi) => {
@@ -389,51 +429,24 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
         if (!target && !candidate.workpieceKey) continue
         const id = identity(taskId, candidate.type, target, candidate.workpieceKey)
         const previous = byId.get(id)
-        if (
-          previous
-          && previous.type === candidate.type
-          && previous.title === candidate.title
-          && previous.path === candidate.path
-          && previous.url === candidate.url
-          && previous.workpieceKey === candidate.workpieceKey
-          && JSON.stringify(previous.files) === JSON.stringify(candidate.files)
-          && previous.updatedAt === candidate.updatedAt
-        ) continue
-
-        byId.set(id, {
-          ...previous,
-          ...candidate,
-          id,
-          reloadTrigger: previous
-            ? previous.reloadTrigger + (candidate.updatedAt > previous.updatedAt ? 1 : 0)
-            : 0
-        })
+        if (previous && sameArtifact(previous, candidate)) continue
+        byId.set(id, mergeArtifact(previous, candidate, id))
         changed = true
       }
 
       if (!changed) return state
-      const nextState = {
-        artifactsByTask: { ...state.artifactsByTask, [taskId]: [...byId.values()] },
-        uiByTask: state.uiByTask
-      }
-      persist(nextState)
-      return nextState
+      persist()
+      return { artifactsByTask: { ...state.artifactsByTask, [taskId]: [...byId.values()] } }
     })
-  },
+  }
 
-  resetTask: (taskId) => set((state) => {
-    const artifactsByTask = { ...state.artifactsByTask }
-    const uiByTask = { ...state.uiByTask }
-    const turnsByTask = { ...state.turnsByTask }
-    const hydratedTasks = { ...state.hydratedTasks }
-    delete artifactsByTask[taskId]
-    delete uiByTask[taskId]
-    delete turnsByTask[taskId]
-    delete hydratedTasks[taskId]
-    persist({ artifactsByTask, uiByTask })
-    return { artifactsByTask, uiByTask, turnsByTask, hydratedTasks }
-  })
 }))
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => {
+    if (persistTimer) writePersistedState()
+  })
+}
 
 if (typeof window !== 'undefined' && typeof window.electronAPI?.onArtifactUpdated === 'function') {
   onArtifactUpdated(({ artifact }) => {

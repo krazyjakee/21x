@@ -16,7 +16,6 @@ interface PluginMeta {
   displayName: string
   description: string
   icon: string
-  requiresMcpServer: boolean
 }
 
 interface SettingsPageProps {

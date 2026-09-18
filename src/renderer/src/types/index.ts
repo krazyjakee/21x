@@ -527,9 +527,6 @@ export interface PluginMeta {
   displayName: string
   description: string
   icon: string
-  requiresMcpServer: boolean
-  requiresOAuth?: boolean
-  oauthProvider?: string
 }
 
 export type ConfigFieldType =
@@ -674,21 +671,4 @@ export interface MarketplaceCatalog {
     repository?: string
     license?: string
   }>
-}
-
-// ── OAuth types ──────────────────────────────────────────────
-
-export type OAuthProvider = 'linear'
-
-export interface OAuthToken {
-  id: string
-  provider: OAuthProvider
-  source_id: string
-  access_token: string
-  refresh_token: string | null
-  expires_at: string
-  scope: string | null
-  token_type: string
-  created_at: string
-  updated_at: string
 }

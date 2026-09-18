@@ -1,59 +1,12 @@
 import { create } from 'zustand'
-import { api, type TranscriptPartRecord } from '../api/client'
+import { SessionStatus } from '@shared/constants'
+import type { AgentMessage, TranscriptPartRecord } from '@shared/transcript/types'
+import { applyPartsToProjection, createProjection, projectMessages, type TranscriptProjection } from '@shared/transcript/projection'
+import { api } from '../api/client'
 import { onEvent } from '../api/websocket'
 
-// ── Message types (mirrors desktop agent-store) ──────────────
-
-export interface StepMeta {
-  durationMs?: number
-  tokens?: { input: number; output: number; cache: number }
-}
-
-export interface TaskProgressData {
-  taskId: string
-  status: 'started' | 'running' | 'completed' | 'failed' | 'stopped'
-  description: string
-  lastToolName?: string
-  summary?: string
-  usage?: { total_tokens: number; tool_uses: number; duration_ms: number }
-}
-
-export interface AgentMessage {
-  id: string
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  timestamp: Date
-  partType?: string
-  stepMeta?: StepMeta
-  tool?: {
-    name: string
-    status: string
-    title?: string
-    description?: string
-    input?: string
-    output?: string
-    error?: string
-    questions?: Array<{
-      header: string
-      question: string
-      options: Array<{ label: string; description: string }>
-    }>
-    todos?: Array<{
-      id: string
-      content: string
-      status: 'pending' | 'in_progress' | 'completed'
-      priority?: string
-    }>
-  }
-  taskProgress?: TaskProgressData
-}
-
-export enum SessionStatus {
-  IDLE = 'idle',
-  WORKING = 'working',
-  ERROR = 'error',
-  WAITING_APPROVAL = 'waiting_approval',
-}
+export { SessionStatus }
+export type { AgentMessage }
 
 export interface TaskSession {
   sessionId: string | null
@@ -91,17 +44,10 @@ export interface Skill {
 }
 
 // ── Projection cache (SINGLE source of truth for the transcript) ──
-// Identical model to the desktop store: the main process owns the durable
-// transcript; the mobile client keeps a per-task cache keyed by stable part id
-// and renders a derived sorted list. One write path: applyParts(), fed by a
-// full snapshot on bind (REST) and idempotent `transcript:changed` deltas (WS).
+// Same model as the desktop store: one write path, applyParts(), fed by a full
+// snapshot on bind (REST) and idempotent `transcript:changed` deltas (WS).
 
-interface ProjectionCache {
-  parts: Map<string, TranscriptPartRecord>
-  rev: number
-}
-
-const projections = new Map<string, ProjectionCache>()
+const projections = new Map<string, TranscriptProjection>()
 const bindingTasks = new Set<string>()
 
 /** Test-only: reset the module-level projection cache between tests. */
@@ -110,40 +56,10 @@ export function __clearProjectionsForTest(): void {
   bindingTasks.clear()
 }
 
-function getProjection(taskId: string): ProjectionCache {
+function getProjection(taskId: string): TranscriptProjection {
   let p = projections.get(taskId)
-  if (!p) { p = { parts: new Map(), rev: 0 }; projections.set(taskId, p) }
+  if (!p) { p = createProjection(); projections.set(taskId, p) }
   return p
-}
-
-// Memoize the part → message projection per part record. Unchanged parts keep
-// their exact record reference across deltas (applyParts only replaces changed
-// entries), so reusing the derived AgentMessage preserves object identity and
-// lets React.memo'd rows skip re-rendering the entire transcript on every
-// streamed delta. Entries are GC'd with their part records (WeakMap).
-const messageProjectionCache = new WeakMap<TranscriptPartRecord, AgentMessage>()
-
-function toAgentMessage(p: TranscriptPartRecord): AgentMessage {
-  const cached = messageProjectionCache.get(p)
-  if (cached) return cached
-  const payload = (p.payload || {}) as { taskProgress?: unknown }
-  const message: AgentMessage = {
-    id: p.partId,
-    role: p.role === 'user' ? 'user' : p.role === 'assistant' ? 'assistant' : 'system',
-    content: p.content,
-    timestamp: new Date(p.createdAt),
-    partType: p.partType,
-    tool: p.tool as AgentMessage['tool'],
-    taskProgress: payload.taskProgress as AgentMessage['taskProgress']
-  }
-  messageProjectionCache.set(p, message)
-  return message
-}
-
-function deriveMessages(cache: ProjectionCache): AgentMessage[] {
-  return [...cache.parts.values()]
-    .sort((a, b) => (a.createdAt - b.createdAt) || (a.seq - b.seq))
-    .map(toAgentMessage)
 }
 
 function findBySessionId(sessions: Map<string, TaskSession>, sid: string): TaskSession | undefined {
@@ -177,7 +93,7 @@ interface AgentState {
 
 export const useAgentStore = create<AgentState>((set, get) => {
   const commitMessages = (taskId: string): void => {
-    const messages = deriveMessages(getProjection(taskId))
+    const messages = projectMessages(getProjection(taskId))
     set((state) => {
       const existing = state.sessions.get(taskId)
       const session: TaskSession = existing
@@ -189,9 +105,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
 
   const applyParts = (taskId: string, parts: TranscriptPartRecord[], maxRev?: number): void => {
     if (parts.length === 0 && maxRev == null) return
-    const cache = getProjection(taskId)
-    for (const p of parts) cache.parts.set(p.partId, p)
-    if (typeof maxRev === 'number') cache.rev = Math.max(cache.rev, maxRev)
+    applyPartsToProjection(getProjection(taskId), parts, maxRev)
     commitMessages(taskId)
   }
 
@@ -200,9 +114,13 @@ export const useAgentStore = create<AgentState>((set, get) => {
     bindingTasks.add(taskId)
     try {
       const snapshot = await api.transcript.snapshot(taskId)
-      if (!Array.isArray(snapshot) || snapshot.length === 0) return
+      if (!Array.isArray(snapshot) || snapshot.length === 0) {
+        // Keep the (empty) projection so live deltas reach the bound view.
+        getProjection(taskId)
+        return
+      }
       const maxRev = snapshot.reduce((m, p) => Math.max(m, p.rev || 0), 0)
-      projections.set(taskId, { parts: new Map(snapshot.map((p) => [p.partId, p])), rev: maxRev })
+      projections.set(taskId, createProjection(snapshot, maxRev))
       commitMessages(taskId)
     } catch (e) {
       console.error(`[mobile] bindTranscript failed for ${taskId}:`, e)
@@ -228,7 +146,9 @@ export const useAgentStore = create<AgentState>((set, get) => {
   onEvent('transcript:changed', (payload) => {
     const event = payload as { taskId?: string; parts?: TranscriptPartRecord[]; maxRev?: number }
     if (!event?.taskId) return
-    applyParts(event.taskId, event.parts || [], event.maxRev)
+    // Only bound tasks or tasks with a known session have a consumer; others
+    // load the authoritative snapshot when they gain one.
+    if (projections.has(event.taskId) || get().sessions.has(event.taskId)) applyParts(event.taskId, event.parts || [], event.maxRev)
   })
 
   // Session state only (status / sessionId) — never messages.
@@ -244,9 +164,11 @@ export const useAgentStore = create<AgentState>((set, get) => {
             agentId: event.agentId || '',
             taskId: event.taskId,
             status: event.status,
-            messages: deriveMessages(getProjection(event.taskId))
+            messages: projectMessages(getProjection(event.taskId))
           })
         })
+        // Deltas that arrived before this session was known were skipped.
+        void bindTranscript(event.taskId)
       } else if (event.taskId && event.status === SessionStatus.IDLE) {
         void bindTranscript(event.taskId)
       }
@@ -316,7 +238,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
               agentId: active.agentId,
               taskId: active.taskId,
               status: active.status as SessionStatus,
-              messages: existing?.messages || deriveMessages(getProjection(active.taskId))
+              messages: existing?.messages || projectMessages(getProjection(active.taskId))
             })
           }
           return { sessions: nextSessions }
@@ -337,7 +259,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
             agentId,
             taskId,
             status: existing?.status || SessionStatus.WORKING,
-            messages: existing?.messages || deriveMessages(getProjection(taskId))
+            messages: existing?.messages || projectMessages(getProjection(taskId))
           })
         }
       })

@@ -1,16 +1,15 @@
 import { guardedIpcSend } from './guarded-ipc-send'
-import { execFile, execFileSync, execSync } from 'child_process'
+import { execFileSync, execSync } from 'child_process'
 import { readdirSync } from 'fs'
 import { app, BrowserWindow, dialog, net, protocol, session, shell, Tray, Menu, nativeImage } from 'electron'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
 import { is } from '@electron-toolkit/utils'
-import { DatabaseManager, type TranscriptPartRecord } from './database'
+import { DatabaseManager } from './database'
 import { AgentManager } from './agent-manager'
 import { GitHubManager } from './github-manager'
 import { GitLabManager } from './gitlab-manager'
 import { WorktreeManager } from './worktree-manager'
-import { McpToolCaller } from './mcp-tool-caller'
 import { SyncManager } from './sync-manager'
 import { OAuthManager } from './oauth/oauth-manager'
 import { PluginRegistry } from './plugins/registry'
@@ -22,7 +21,8 @@ import { YouTrackPlugin } from './plugins/youtrack-plugin'
 import { registerIpcHandlers } from './ipc-handlers'
 import { panelBrowserBroker } from './panel-browser-broker'
 import { VoiceSessionManager } from './voice/voice-session-manager'
-import { assistantTextParts, sinceLastUserMessage } from './voice/voice-answer-parts'
+import { voiceEventSenders, watchAgentAnswersForSpeech } from './voice/voice-bridge'
+import { loadPlatformShellEnv } from './shell-env'
 import { RecurrenceScheduler } from './recurrence-scheduler'
 import { HeartbeatScheduler } from './heartbeat-scheduler'
 import { TaskAutomationScheduler } from './task-automation-scheduler'
@@ -30,15 +30,15 @@ import { WorkspaceCleanupScheduler } from './workspace-cleanup-scheduler'
 import { ClaudePluginManager } from './claude-plugin-manager'
 import { parseProcessTable, selectKillableMcpPids, WINDOWS_PROCESS_TABLE_SCRIPT } from './mcp-process-cleanup'
 import { buildWorkspaceStates, sweepLeakedWorkspaceProcesses, readDiskSpace, workspacePressureWarning, SHUTDOWN_GRACE_MS } from './workspace-process-cleanup'
-import { WORKSPACES_DIR, listWorkspaceDirs } from './workspace-paths'
-import { handleRoute, setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTaskAutomationTrigger, setTranscriptProvider, stopTaskApiServer } from './task-api-server'
+import { WORKSPACES_DIR, listWorkspaceDirs, taskAttachmentsDir } from './workspace-paths'
+import { setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTranscriptProvider, stopTaskApiServer } from './task-api-server'
+import { setTaskAutomationTrigger, setTaskSchedulers } from './task-updates'
 import { startSecretBroker, stopSecretBroker, writeSecretShellWrapper } from './secret-broker'
 import { isMainWindowUrl } from './main-window-url'
-import { startMobileApiServer, stopMobileApiServer, broadcastToMobileClients, setMobileApiNotifier, setMobileApiTaskAutomationTrigger } from './mobile-api-server'
+import { startMobileApiServer, stopMobileApiServer, broadcastToMobileClients, setMobileApiNotifier } from './mobile-api-server'
 import { registerUpdaterIpc, initAutoUpdater, isUpdateDownloaded, getPendingVersion } from './auto-updater'
 import { initCrashLogger } from './crash-logger'
 import { installProcessStreamErrorHandlers } from './process-stream-errors'
-import { getWindowsPathEntries, prependMissingWindowsPaths } from './windows-runtime-paths'
 
 /**
  * Validate that a URL is safe to open via shell.openExternal.
@@ -63,7 +63,6 @@ let agentManager: AgentManager | null = null
 let githubManager: GitHubManager | null = null
 let gitlabManager: GitLabManager | null = null
 let worktreeManager: WorktreeManager | null = null
-let mcpToolCaller: McpToolCaller | null = null
 let syncManager: SyncManager | null = null
 let pluginRegistry: PluginRegistry | null = null
 let oauthManager: OAuthManager | null = null
@@ -74,109 +73,6 @@ let workspaceCleanupScheduler: WorkspaceCleanupScheduler | null = null
 let claudePluginManager: ClaudePluginManager | null = null
 let voiceSessionManager: VoiceSessionManager | null = null
 let isShuttingDown = false
-
-/**
- * Sends one voice event to the desktop renderer and to the mobile clients.
- * Voice actions reuse the normal task and agent events, so both clients stay in
- * step without a second state writer (design §5.11).
- */
-function broadcastVoiceEvent(channel: string, data: unknown): void {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    guardedIpcSend(mainWindow.webContents, channel, data)
-  }
-  broadcastToMobileClients(channel, data)
-}
-
-/**
- * Sends one voice event to the desktop window only.
- *
- * Spoken answers use this. The audio is produced on this computer and played by
- * this window; a phone cannot play a raw sample stream from the local
- * WebSocket, and sending it would push megabytes of samples through a text
- * channel for nothing (design §5.11).
- */
-function sendVoiceEventToRenderer(channel: string, data: unknown): void {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    guardedIpcSend(mainWindow.webContents, channel, data)
-  }
-}
-
-/**
- * Reads an agent answer aloud as it is written (design §5.7).
- *
- * The answer arrives a few words at a time. Waiting for the agent to stop
- * before saying the first word would put the whole spoken answer behind the
- * agent — on a long answer, minutes behind — so the transcript is followed as
- * it changes and every finished sentence is read straight away.
- *
- * The `working -> idle` edge then closes the passage, and it is also the
- * fallback: an answer that produced no transcript event this session is read in
- * one piece from what was stored.
- *
- * This listener never decides to speak. It hands the passage to the speech
- * service, which speaks it only when the user asked for it by voice.
- */
-function watchAgentAnswersForSpeech(agents: AgentManager, database: DatabaseManager): void {
-  const lastStatus = new Map<string, string>()
-  /** The newest assistant text of each task, as it is written. */
-  const writing = new Map<string, true>()
-
-  agents.addExternalListener((channel, data) => {
-    try {
-      if (channel === 'transcript:changed') {
-        const event = data as { taskId?: string; parts?: TranscriptPartRecord[] }
-        if (!event?.taskId || !event.parts?.length) return
-        // Every message that changed, in order. A turn can hold several: the
-        // agent says something, uses a tool, and says something else. Taking
-        // only the newest skipped the first message entirely whenever both
-        // landed in one flush.
-        const parts = assistantTextParts(event.parts)
-        if (parts.length === 0) return
-        writing.set(event.taskId, true)
-        void voiceSessionManager
-          ?.streamAgentAnswer(event.taskId, parts)
-          .catch((err) => console.error('[voice] reading the answer failed:', err))
-        return
-      }
-
-      if (channel !== 'agent:status') return
-      const event = data as { sessionId?: string; taskId?: string; status?: string }
-      if (!event?.sessionId || !event.taskId || !event.status) return
-
-      const previous = lastStatus.get(event.sessionId)
-      if (event.status === 'idle') lastStatus.delete(event.sessionId)
-      else lastStatus.set(event.sessionId, event.status)
-      if (event.status !== 'idle' || previous !== 'working') return
-
-      // Close the passage with the last words, which may have arrived after
-      // the final transcript event. Only this turn's messages are considered:
-      // everything the agent wrote since the user last spoke.
-      const stored = database.getTranscriptParts(event.taskId)
-      const all = assistantTextParts(sinceLastUserMessage(stored))
-      // Whatever the user talked over is left out here too. Otherwise the
-      // one-piece fallback below reads the whole interrupted answer at the
-      // moment the agent stops.
-      const parts = voiceSessionManager?.audibleAnswerParts(event.taskId, all) ?? all
-      const open = writing.get(event.taskId)
-      writing.delete(event.taskId)
-      if (parts.length > 0 && voiceSessionManager?.finishAgentAnswer(event.taskId, parts)) {
-        return
-      }
-
-      // Nothing was read as it was written — no transcript event reached us —
-      // so the answer is read in one piece instead, every message of it.
-      if (open) return
-      const text = parts.map((part) => part.content).join('\n\n')
-      if (!text.trim()) return
-      void voiceSessionManager?.speakAgentAnswer(event.taskId, text).catch((err) => {
-        console.error('[voice] speaking the answer failed:', err)
-      })
-    } catch (err) {
-      // Speech must never disturb the agent stream.
-      console.error('[voice] reading the answer failed:', err)
-    }
-  })
-}
 
 /**
  * Kills stdio MCP server processes that this instance leaked.
@@ -274,7 +170,6 @@ async function shutdownAppServices(): Promise<void> {
   await agentManager?.stopAllSessions()
   await agentManager?.stopServer()
 
-  mcpToolCaller?.destroy()
   oauthManager?.destroy()
   stopSecretBroker()
   stopMobileApiServer()
@@ -329,26 +224,22 @@ function createWindow(): void {
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show()
 
-    // Initialize auto-updater (only in production)
     if (!is.dev && mainWindow) {
       initAutoUpdater(mainWindow)
     }
 
-    // Start recurrence scheduler
     if (recurrenceScheduler && mainWindow) {
       recurrenceScheduler.start(mainWindow)
     }
 
-    // Start heartbeat scheduler
     if (heartbeatScheduler && mainWindow) {
       heartbeatScheduler.start(mainWindow)
     }
 
-    // Start task automation scheduler (auto-start / auto-complete reconciliation).
-    // Deliberately window-independent: the flags must hold with no window open.
+    // Auto-start / auto-complete reconciliation is deliberately
+    // window-independent: the flags must hold with no window open.
     taskAutomationScheduler?.start()
 
-    // Start workspace cleanup scheduler
     if (workspaceCleanupScheduler && mainWindow) {
       workspaceCleanupScheduler.start(mainWindow)
     }
@@ -405,7 +296,6 @@ function createWindow(): void {
     }
   })
 
-  // Log renderer console errors
   mainWindow.webContents.on('console-message', (_event, level, message) => {
     if (level >= 2) { // 2 = warning, 3 = error
       console.error(`[Renderer ${level === 3 ? 'ERROR' : 'WARN'}] ${message}`)
@@ -465,7 +355,6 @@ function createWindow(): void {
         event.preventDefault()
         mainWindow?.hide()
 
-        // Create tray if it doesn't exist
         if (!tray && db) {
           createTray()
         }
@@ -480,11 +369,9 @@ function createWindow(): void {
     setTaskApiUiState(null)
   })
 
-  // Set main window for managers
   agentManager?.setMainWindow(mainWindow)
   worktreeManager?.setMainWindow(mainWindow)
 
-  // Wire up task-api-server notifications to the renderer
   setTaskApiNotifier((channel, data) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       guardedIpcSend(mainWindow.webContents, channel, data)
@@ -497,9 +384,6 @@ function createWindow(): void {
   setTaskAutomationTrigger(() => {
     void taskAutomationScheduler?.runNow()
   })
-  setMobileApiTaskAutomationTrigger(() => {
-    void taskAutomationScheduler?.runNow()
-  })
 
   // Wire up transcript provider for subtask MCP agents to access sibling transcripts
   if (agentManager) {
@@ -507,7 +391,6 @@ function createWindow(): void {
     setTaskApiAgentController(agentManager)
   }
 
-  // Wire up mobile-api-server notifications to the renderer
   setMobileApiNotifier((channel, data) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       guardedIpcSend(mainWindow.webContents, channel, data)
@@ -636,7 +519,6 @@ function createTray(): void {
   tray.setToolTip('20x')
   tray.setContextMenu(contextMenu)
 
-  // Show window on tray icon click (platform specific)
   tray.on('click', () => {
     mainWindow?.show()
   })
@@ -664,7 +546,6 @@ app.on('open-url', (event, url) => {
     const parsedUrl = new URL(url)
     console.log('[OAuth] Parsed URL - protocol:', parsedUrl.protocol, 'hostname:', parsedUrl.hostname, 'pathname:', parsedUrl.pathname)
 
-    // Check if this is an OAuth callback (nuanu://oauth/callback)
     if (parsedUrl.protocol === 'nuanu:' && parsedUrl.hostname === 'oauth' && parsedUrl.pathname === '/callback') {
       const code = parsedUrl.searchParams.get('code')
       const state = parsedUrl.searchParams.get('state')
@@ -682,7 +563,6 @@ app.on('open-url', (event, url) => {
               guardedIpcSend(mainWindow.webContents, 'oauth:callback', { code, state })
             }
           }, 100)
-          // Timeout after 10 seconds
           setTimeout(() => clearInterval(checkWindow), 10000)
         } else {
           console.log('[OAuth] Sending callback to renderer')
@@ -699,150 +579,6 @@ app.on('open-url', (event, url) => {
   }
 })
 
-// Load shell environment for GUI apps (async to avoid blocking startup)
-// macOS GUI apps (launched from /Applications) do NOT inherit the user's shell
-// environment, so CLI tools like codex, claude, gh etc. cannot be found and
-// auth env vars like CODEX_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY are
-// missing. We read the values from a login shell and apply them to process.env.
-function loadPlatformShellEnv(): Promise<void> {
-  if (process.platform === 'win32') {
-    // On Windows, GUI apps can miss PATH updates from installers. Rehydrate the
-    // usual runtime locations, including the python.org user install path used
-    // by the NSIS bootstrap.
-    process.env.PATH = prependMissingWindowsPaths(
-      process.env.PATH || '',
-      getWindowsPathEntries(process.env)
-    )
-    return Promise.resolve()
-  }
-  if (process.platform !== 'darwin') return Promise.resolve()
-
-  // We need the interactive shell (`-i`) because tools like NVM, pnpm, bun,
-  // etc. add their paths in `.zshrc` / `.bashrc` (interactive config), NOT in
-  // `.zprofile` / `.bash_profile` (login-only config).
-  //
-  // Problem: interactive mode also causes shell init scripts (oh-my-zsh,
-  // powerlevel10k, gitstatus, etc.) to emit escape codes, error messages,
-  // and prompt strings that corrupt the output.
-  //
-  // Solution: use unique markers around the PATH value so we can reliably
-  // extract it from the noisy output.
-  const PATH_START = '__20X_PATH_START__'
-  const PATH_END = '__20X_PATH_END__'
-  const OPENAI_API_KEY_START = '__20X_OPENAI_API_KEY_START__'
-  const OPENAI_API_KEY_END = '__20X_OPENAI_API_KEY_END__'
-  const CODEX_API_KEY_START = '__20X_CODEX_API_KEY_START__'
-  const CODEX_API_KEY_END = '__20X_CODEX_API_KEY_END__'
-  const ANTHROPIC_API_KEY_START = '__20X_ANTHROPIC_API_KEY_START__'
-  const ANTHROPIC_API_KEY_END = '__20X_ANTHROPIC_API_KEY_END__'
-  // CODEX_HOME: if the user's terminal `codex` uses a custom CODEX_HOME (e.g. a
-  // work profile / a different ChatGPT account than ~/.codex), 20x must read the
-  // SAME one — otherwise codex-acp authenticates as whatever account lives in the
-  // default ~/.codex, which may be a free/over-limit account ("Upgrade to Plus")
-  // while the terminal subscription works fine.
-  const CODEX_HOME_START = '__20X_CODEX_HOME_START__'
-  const CODEX_HOME_END = '__20X_CODEX_HOME_END__'
-
-  const command = [
-    `printf '%s%s%s\\n' "${PATH_START}" "$PATH" "${PATH_END}"`,
-    `printf '%s%s%s\\n' "${OPENAI_API_KEY_START}" "$OPENAI_API_KEY" "${OPENAI_API_KEY_END}"`,
-    `printf '%s%s%s\\n' "${CODEX_API_KEY_START}" "$CODEX_API_KEY" "${CODEX_API_KEY_END}"`,
-    `printf '%s%s%s\\n' "${ANTHROPIC_API_KEY_START}" "$ANTHROPIC_API_KEY" "${ANTHROPIC_API_KEY_END}"`,
-    `printf '%s%s%s\\n' "${CODEX_HOME_START}" "$CODEX_HOME" "${CODEX_HOME_END}"`
-  ].join('; ')
-
-  const extractMarkedValue = (stdout: string, start: string, end: string): string | undefined => {
-    const match = stdout.match(new RegExp(`${start}([\\s\\S]*?)${end}`))
-    return match?.[1] || undefined
-  }
-
-  return new Promise((resolve) => {
-    const userShell = process.env.SHELL || '/bin/zsh'
-    execFile(
-      userShell,
-      ['-ilc', command],
-      { timeout: 5000, encoding: 'utf8' },
-      (err, stdout) => {
-        if (!err && stdout) {
-          const pathFromShell = extractMarkedValue(stdout, PATH_START, PATH_END)
-          if (pathFromShell) {
-            console.log('[Main] Setting PATH from shell:', userShell)
-            process.env.PATH = pathFromShell
-          } else {
-            console.error('[Main] Failed to read shell PATH, using fallback')
-            process.env.PATH = buildFallbackPath()
-          }
-
-          const openAiApiKey = extractMarkedValue(stdout, OPENAI_API_KEY_START, OPENAI_API_KEY_END)
-          if (openAiApiKey) process.env.OPENAI_API_KEY = openAiApiKey
-
-          const codexApiKey = extractMarkedValue(stdout, CODEX_API_KEY_START, CODEX_API_KEY_END)
-          if (codexApiKey) process.env.CODEX_API_KEY = codexApiKey
-
-          const anthropicApiKey = extractMarkedValue(stdout, ANTHROPIC_API_KEY_START, ANTHROPIC_API_KEY_END)
-          if (anthropicApiKey) process.env.ANTHROPIC_API_KEY = anthropicApiKey
-
-          // Inherit a custom CODEX_HOME so codex-acp authenticates as the SAME
-          // ChatGPT account the user's terminal `codex` uses.
-          const codexHome = extractMarkedValue(stdout, CODEX_HOME_START, CODEX_HOME_END)
-          if (codexHome) {
-            process.env.CODEX_HOME = codexHome
-            console.log('[Main] Inherited CODEX_HOME from shell:', codexHome)
-          }
-
-          resolve()
-          return
-        }
-
-        console.error('[Main] Failed to read shell PATH, using fallback:', err?.message)
-        process.env.PATH = buildFallbackPath()
-        resolve()
-      }
-    )
-  })
-}
-
-/**
- * Build a comprehensive fallback PATH when the shell invocation fails.
- * Covers Homebrew, system bins, npm/pnpm/volta globals, and NVM.
- */
-function buildFallbackPath(): string {
-  const home = process.env.HOME || ''
-  const commonPaths = [
-    '/opt/homebrew/bin',
-    '/opt/homebrew/sbin',
-    '/usr/local/bin',
-    '/usr/bin',
-    '/bin',
-    '/usr/sbin',
-    '/sbin',
-    `${home}/.local/bin`,
-    `${home}/.npm-global/bin`,
-    `${home}/Library/pnpm`,
-    `${home}/.volta/bin`,
-  ]
-
-  // Dynamically detect NVM current version path instead of hardcoding
-  if (home) {
-    try {
-      const nvmVersionsDir = join(home, '.nvm', 'versions', 'node')
-      const versions = readdirSync(nvmVersionsDir) as string[]
-      if (versions.length > 0) {
-        // Sort descending to pick the latest installed version
-        versions.sort((a: string, b: string) => b.localeCompare(a, undefined, { numeric: true }))
-        commonPaths.push(join(nvmVersionsDir, versions[0], 'bin'))
-      }
-    } catch {
-      // NVM not installed — skip
-    }
-  }
-
-  const existingPath = process.env.PATH || ''
-  return [...new Set([...commonPaths, ...existingPath.split(':')])]
-    .filter(Boolean)
-    .join(':')
-}
-
 // Register app-attachment:// as a privileged scheme before app is ready.
 // This allows the renderer to load local attachment images via <img src="app-attachment://...">.
 protocol.registerSchemesAsPrivileged([
@@ -857,7 +593,6 @@ protocol.registerSchemesAsPrivileged([
   }
 ])
 
-// Initialize crash logger as early as possible
 initCrashLogger()
 
 // NOTE: The app intentionally does NOT expose a --remote-debugging-port.
@@ -917,7 +652,7 @@ app.whenReady().then(async () => {
         return new Response('Not found', { status: 404 })
       }
 
-      const dir = join(app.getPath('userData'), 'attachments', taskId)
+      const dir = taskAttachmentsDir(taskId)
       const files = readdirSync(dir) // throws if dir missing — caught below
       const match = files.find((f) => f.startsWith(`${attachmentId}-`))
       if (!match) {
@@ -958,15 +693,7 @@ app.whenReady().then(async () => {
   worktreeManager = new WorktreeManager()
   agentManager.setManagers(githubManager, worktreeManager, gitlabManager ?? undefined)
 
-  mcpToolCaller = new McpToolCaller()
-  // Run task-management tools in this process instead of spawning a child that
-  // would only forward them back here.
-  mcpToolCaller.setTaskManagementInvoker((route, params) => handleRoute(db!, route, params))
-
   oauthManager = new OAuthManager(db)
-
-  // Wire OAuth manager into McpToolCaller and AgentManager for automatic token injection
-  mcpToolCaller.setOAuthManager(oauthManager)
   agentManager.setOAuthManager(oauthManager)
 
   pluginRegistry = new PluginRegistry()
@@ -976,7 +703,7 @@ app.whenReady().then(async () => {
   pluginRegistry.register(new NotionPlugin())
   pluginRegistry.register(new YouTrackPlugin())
 
-  syncManager = new SyncManager(db, mcpToolCaller, pluginRegistry, oauthManager)
+  syncManager = new SyncManager(db, pluginRegistry, oauthManager)
   agentManager.setSyncManager(syncManager)
 
   recurrenceScheduler = new RecurrenceScheduler(db)
@@ -986,6 +713,7 @@ app.whenReady().then(async () => {
   recurrenceScheduler.setOnInstancesCreated(() => {
     void taskAutomationScheduler?.runNow()
   })
+  setTaskSchedulers({ recurrence: recurrenceScheduler, heartbeat: heartbeatScheduler })
   workspaceCleanupScheduler = new WorkspaceCleanupScheduler(db, worktreeManager)
 
   claudePluginManager = new ClaudePluginManager(db)
@@ -995,13 +723,25 @@ app.whenReady().then(async () => {
   voiceSessionManager = new VoiceSessionManager({
     db,
     agents: agentManager,
-    notify: broadcastVoiceEvent,
-    notifyRenderer: sendVoiceEventToRenderer
+    ...voiceEventSenders(() => mainWindow)
   })
   void voiceSessionManager.initialize()
-  watchAgentAnswersForSpeech(agentManager, db)
+  watchAgentAnswersForSpeech(agentManager, db, voiceSessionManager)
 
-  registerIpcHandlers(db, agentManager, githubManager, worktreeManager, syncManager, pluginRegistry, mcpToolCaller, oauthManager, recurrenceScheduler, claudePluginManager, heartbeatScheduler, gitlabManager ?? undefined, workspaceCleanupScheduler ?? undefined, voiceSessionManager ?? undefined, taskAutomationScheduler ?? undefined)
+  registerIpcHandlers({
+    db,
+    agentManager,
+    githubManager,
+    worktreeManager,
+    syncManager,
+    pluginRegistry,
+    oauthManager,
+    claudePluginManager,
+    heartbeatScheduler,
+    gitlabManager,
+    workspaceCleanupScheduler,
+    voiceSessionManager
+  })
 
   // ── Media permission handler (design §5.9) ────────────────────────────────
   // Grant the microphone only to the 20x renderer, and only while voice is on.
@@ -1134,34 +874,26 @@ app.whenReady().then(async () => {
       })
 
       contents.on('dom-ready', () => {
-        contents.executeJavaScript(`
-          try {
-            Object.defineProperty(navigator, 'webdriver', {
-              get: () => false, configurable: true,
-            });
-          } catch(e) {}
-          try {
+        // Each patch is best effort: a page that already locked a property
+        // (non-configurable) keeps its own value, and the rest still apply.
+        // Wrapped in a function so nothing leaks into (or clashes with) page globals.
+        contents.executeJavaScript(`(() => {
+          const patch = (apply) => { try { apply() } catch { /* locked by the page */ } };
+          const define = (prop, get) => patch(() => Object.defineProperty(navigator, prop, { get, configurable: true }));
+          define('webdriver', () => false);
+          patch(() => {
             if (!window.chrome) { window.chrome = {}; }
-            if (!window.chrome.runtime) {
-              window.chrome.runtime = { id: undefined };
-            }
-          } catch(e) {}
-          try {
-            Object.defineProperty(navigator, 'plugins', {
-              get: () => [
-                { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
-                { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
-                { name: 'Native Client', filename: 'internal-nacl-plugin' },
-              ],
-              configurable: true,
-            });
-          } catch(e) {}
-          try {
-            Object.defineProperty(navigator, 'languages', {
-              get: () => ['en-US', 'en'], configurable: true,
-            });
-          } catch(e) {}
-        `).catch(() => {})
+            if (!window.chrome.runtime) { window.chrome.runtime = { id: undefined }; }
+          });
+          define('plugins', () => [
+            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
+            { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+            { name: 'Native Client', filename: 'internal-nacl-plugin' },
+          ]);
+          define('languages', () => ['en-US', 'en']);
+        })()`).catch(() => {
+          // The page navigated away or was destroyed before the script ran.
+        })
       })
     }
   })

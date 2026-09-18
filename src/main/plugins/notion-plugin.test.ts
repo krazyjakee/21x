@@ -51,7 +51,6 @@ function makeContext(overrides: Partial<PluginContext> = {}): PluginContext {
       updateTaskSourceLastSynced: vi.fn(),
       getAttachmentsDir: vi.fn().mockReturnValue(TEST_ATTACHMENTS_DIR)
     } as unknown as DatabaseManager,
-    toolCaller: {} as PluginContext['toolCaller'],
     ...overrides
   }
 }
@@ -107,7 +106,6 @@ describe('NotionPlugin', () => {
   it('has correct metadata', () => {
     expect(plugin.id).toBe('notion')
     expect(plugin.displayName).toBe('Notion')
-    expect(plugin.requiresMcpServer).toBe(false)
   })
 
   it('returns config schema with token, data source, filters, and statuses', () => {
@@ -121,34 +119,11 @@ describe('NotionPlugin', () => {
     ])
   })
 
-  it('returns field mapping', () => {
-    const mapping = plugin.getFieldMapping({})
-    expect(mapping.external_id).toBe('id')
-    expect(mapping.title).toBe('title')
-    expect(mapping.status).toBe('status')
-  })
-
   it('returns change_status and update_priority actions', () => {
     const actions = plugin.getActions({})
     expect(actions).toHaveLength(2)
     expect(actions[0].id).toBe('change_status')
     expect(actions[1].id).toBe('update_priority')
-  })
-
-  // ── validateConfig ──────────────────────────────────────
-
-  describe('validateConfig', () => {
-    it('returns null for valid config', () => {
-      expect(plugin.validateConfig({ api_token: 'ntn_123', data_source_id: 'db-1' })).toBeNull()
-    })
-
-    it('rejects missing api_token', () => {
-      expect(plugin.validateConfig({ data_source_id: 'db-1' })).toBe('Integration token is required')
-    })
-
-    it('rejects missing data_source_id', () => {
-      expect(plugin.validateConfig({ api_token: 'ntn_123' })).toBe('Data source is required')
-    })
   })
 
   describe('resolveOptions', () => {

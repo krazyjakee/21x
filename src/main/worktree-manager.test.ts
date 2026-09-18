@@ -181,6 +181,31 @@ describe('WorktreeManager', () => {
     )
   })
 
+  it('keeps untracked patches and repos in order when git calls finish out of order', async () => {
+    existsSyncMock.mockReturnValue(true)
+    execFileMock.mockImplementation((file: string, args: string[], options: { cwd: string }, callback: (error: (Error & { stdout?: string }) | null, stdout?: string, stderr?: string) => void) => {
+      const command = `${file} ${args.join(' ')}`
+      const repo = path.basename(options.cwd)
+      if (command.includes('ls-files --others --exclude-standard -z')) {
+        callback(null, 'a.txt\0b.txt\0c.txt\0', '')
+      } else if (command.includes('--no-index')) {
+        const name = args[args.length - 1]
+        const delay = { 'a.txt': 30, 'b.txt': 0, 'c.txt': 15 }[name] ?? 0
+        // --no-index exits 1 with the patch on stdout.
+        setTimeout(() => callback(Object.assign(new Error('exit 1'), { stdout: `${repo}:${name}\n` })), delay + (repo === 'one' ? 20 : 0))
+      } else {
+        callback(new Error(`Unexpected command: ${command}`))
+      }
+    })
+
+    const result = await new WorktreeManager().getTaskChanges('task-order', [{ fullName: 'org/one' }, { fullName: 'org/two' }])
+
+    expect(result.slice(1).map((entry) => [entry.repo, entry.diff])).toEqual([
+      ['org/one', 'one:a.txt\none:b.txt\none:c.txt\n'],
+      ['org/two', 'two:a.txt\ntwo:b.txt\ntwo:c.txt\n']
+    ])
+  })
+
   it('returns files outside linked repositories as a task workspace tree', async () => {
     const workspacePath = path.join('/tmp/20x-user-data', 'workspaces', 'task-4')
     existsSyncMock.mockImplementation((candidate: string) => candidate === workspacePath)

@@ -8,6 +8,7 @@ import RawDatabase from 'better-sqlite3'
 import { createTestDb } from '../../test/helpers/db-test-helper'
 import { makeTask, makeAgent, makeSkill } from '../../test/helpers/task-fixtures'
 import { DatabaseManager as RealDatabaseManager, type DatabaseManager } from './database'
+import { createTables, ensureTranscriptRevColumn, removeHostedServiceData } from './database/schema'
 
 let db: DatabaseManager
 
@@ -483,7 +484,8 @@ describe('Settings CRUD', () => {
     db.setSetting('a', '1')
     db.setSetting('b', '2')
     const all = db.getAllSettings()
-    expect(all).toEqual({ a: '1', b: '2' })
+    // The one-time Claude Code permission migration records its run flag.
+    expect(all).toEqual({ a: '1', b: '2', 'migration:claude-code-permission-mode': '1' })
   })
 
   it('deleteSetting removes entry', () => {
@@ -609,7 +611,6 @@ describe('Durable transcript projection', () => {
     const delta = db.getTranscriptParts('task-1', 1)
     expect(delta).toHaveLength(1)
     expect(delta[0].partId).toBe('p2')
-    expect(db.getTranscriptMaxSeq('task-1')).toBe(2)
   })
 
   it('hasTranscriptParts and deletion cleanup', () => {
@@ -668,6 +669,24 @@ describe('Durable transcript — rev cursor + delta (event-sourced)', () => {
     expect(r3.maxRev).toBeGreaterThan(r2.maxRev)
     const parts = db.getTranscriptParts('t1')
     expect(parts.find((p) => p.partId === 'a')!.rev).toBe(r3.maxRev)
+  })
+
+  it('does not bump rev or report a part that is re-sent unchanged', () => {
+    db.upsertTranscriptParts('t1', [{ id: 'a', role: 'assistant', content: 'same', tool: { name: 'bash' } }])
+    const before = db.getTranscriptMaxRev('t1')
+
+    const resend = db.upsertTranscriptParts('t1', [{ id: 'a', role: 'assistant', content: 'same', tool: { name: 'bash' } }])
+    expect(resend.changedPartIds).toEqual([])
+    expect(db.getTranscriptMaxRev('t1')).toBe(before)
+    expect(db.getTranscriptDelta('t1', before).parts).toHaveLength(0)
+
+    // Mixed batch: only the changed part gets a rev, and revs stay contiguous.
+    const mixed = db.upsertTranscriptParts('t1', [
+      { id: 'a', role: 'assistant', content: 'same' },
+      { id: 'b', role: 'assistant', content: 'new' }
+    ])
+    expect(mixed.changedPartIds).toEqual(['b'])
+    expect(mixed.maxRev).toBe(before + 1)
   })
 
   it('getTranscriptDelta returns only parts changed after sinceRev (incl. updates)', () => {
@@ -737,10 +756,8 @@ describe('transcript_parts.rev migration on a legacy DB (no rev column)', () => 
     const { manager, rawDb } = makeLegacyManager()
 
     // Previously threw "no such column: rev" inside createTables.
-    expect(() => (manager as unknown as { createTables(): void }).createTables()).not.toThrow()
-    expect(() =>
-      (manager as unknown as { ensureTranscriptRevColumn(): void }).ensureTranscriptRevColumn()
-    ).not.toThrow()
+    expect(() => createTables(rawDb)).not.toThrow()
+    expect(() => ensureTranscriptRevColumn(rawDb)).not.toThrow()
 
     // Column now exists.
     const cols = rawDb.prepare('PRAGMA table_info(transcript_parts)').all() as Array<{ name: string }>
@@ -754,24 +771,22 @@ describe('transcript_parts.rev migration on a legacy DB (no rev column)', () => 
     expect(rows[0].rev).toBeLessThan(rows[1].rev)
     expect(rows[1].rev).toBeLessThan(rows[2].rev)
 
-    // The rev index is present after migration.
-    const idx = rawDb
-      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_transcript_parts_task_rev'")
-      .get()
-    expect(idx).toBeDefined()
+    // Both rev indexes are present after migration.
+    const indexes = (rawDb
+      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='transcript_parts'")
+      .all() as Array<{ name: string }>).map((r) => r.name)
+    expect(indexes).toEqual(expect.arrayContaining(['idx_transcript_parts_task_rev', 'idx_transcript_parts_rev']))
 
     // Delta queries work against the migrated DB.
     expect(manager.getTranscriptDelta('t1', 0).parts).toHaveLength(3)
   })
 
   it('is idempotent when the column already exists', () => {
-    const { manager, rawDb } = makeLegacyManager()
-    ;(manager as unknown as { ensureTranscriptRevColumn(): void }).ensureTranscriptRevColumn()
+    const { rawDb } = makeLegacyManager()
+    ensureTranscriptRevColumn(rawDb)
     const before = (rawDb.prepare('SELECT COALESCE(MAX(rev),0) AS m FROM transcript_parts').get() as { m: number }).m
     // Second run must not throw or re-backfill.
-    expect(() =>
-      (manager as unknown as { ensureTranscriptRevColumn(): void }).ensureTranscriptRevColumn()
-    ).not.toThrow()
+    expect(() => ensureTranscriptRevColumn(rawDb)).not.toThrow()
     const after = (rawDb.prepare('SELECT COALESCE(MAX(rev),0) AS m FROM transcript_parts').get() as { m: number }).m
     expect(after).toBe(before)
   })
@@ -796,9 +811,9 @@ describe('hosted service data removal on upgrade', () => {
         model: 'm',
         mcp_servers: ['mcp-hosted', { serverId: 'mcp-third-party' }]
       }), now, now)
-    rawDb.prepare(`INSERT INTO task_sources (id, name, plugin_id, created_at, updated_at) VALUES (?, ?, 'peakflo', ?, ?)`)
+    rawDb.prepare(`INSERT INTO task_sources (id, name, plugin_id, list_tool, created_at, updated_at) VALUES (?, ?, 'peakflo', '', ?, ?)`)
       .run('src-hosted', '[Workflo] My tasks', now, now)
-    rawDb.prepare(`INSERT INTO task_sources (id, name, plugin_id, created_at, updated_at) VALUES (?, ?, 'linear', ?, ?)`)
+    rawDb.prepare(`INSERT INTO task_sources (id, name, plugin_id, list_tool, created_at, updated_at) VALUES (?, ?, 'linear', '', ?, ?)`)
       .run('src-linear', 'Linear', now, now)
     rawDb.prepare(`INSERT INTO skills (id, name, description, content, enterprise_skill_id, created_at, updated_at) VALUES (?, ?, '', 'body', ?, ?, ?)`)
       .run('skill-1', 'Synced skill', 'remote-skill', now, now)
@@ -812,9 +827,6 @@ describe('hosted service data removal on upgrade', () => {
     }
   }
 
-  function run(manager: DatabaseManager) {
-    ;(manager as unknown as { removeHostedServiceData(): void }).removeHostedServiceData()
-  }
 
   it('keeps local data and removes only what needs the hosted service', () => {
     const { db: manager, rawDb } = createTestDb()
@@ -822,7 +834,7 @@ describe('hosted service data removal on upgrade', () => {
     const hostedTask = manager.createTask(makeTask({ title: 'Synced task', source_id: 'src-hosted', external_id: 'remote-1', source: '[Workflo] My tasks' }))!
     const linearTask = manager.createTask(makeTask({ title: 'Linear task', source_id: 'src-linear', external_id: 'LIN-1', source: 'Linear' }))!
 
-    run(manager)
+    removeHostedServiceData(rawDb)
 
     const detached = manager.getTask(hostedTask.id)!
     expect(detached.title).toBe('Synced task')
@@ -845,13 +857,13 @@ describe('hosted service data removal on upgrade', () => {
     expect(skillColumns).not.toContain('enterprise_skill_id')
     expect(skillColumns).not.toContain('uses_at_last_sync')
 
-    expect(manager.getAllSettings()).toEqual({ theme: 'dark' })
+    expect(manager.getAllSettings()).toEqual({ theme: 'dark', 'migration:claude-code-permission-mode': '1' })
   })
 
   it('is safe to run again', () => {
-    const { db: manager, rawDb } = createTestDb()
+    const { rawDb } = createTestDb()
     seedLegacyData(rawDb)
-    run(manager)
-    expect(() => run(manager)).not.toThrow()
+    removeHostedServiceData(rawDb)
+    expect(() => removeHostedServiceData(rawDb)).not.toThrow()
   })
 })

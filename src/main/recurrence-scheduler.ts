@@ -99,13 +99,11 @@ export class RecurrenceScheduler {
     this.mainWindow = mainWindow
     console.log('[RecurrenceScheduler] Starting scheduler...')
 
-    // Repair recurring templates missing next_occurrence_at
     this.repairMissingNextOccurrence()
 
     // Run immediately on startup to catch up on missed occurrences
     this.checkAndCreateDueInstances()
 
-    // Then run every 60 seconds
     this.intervalId = setInterval(() => {
       this.checkAndCreateDueInstances()
     }, this.CHECK_INTERVAL)
@@ -164,7 +162,6 @@ export class RecurrenceScheduler {
 
       const now = new Date().toISOString()
 
-      // Query templates where next_occurrence_at <= NOW()
       const dueTemplates = this.dbManager.db.prepare(`
         SELECT * FROM tasks
         WHERE is_recurring = 1
@@ -180,7 +177,6 @@ export class RecurrenceScheduler {
 
       console.log(`[RecurrenceScheduler] Found ${dueTemplates.length} due templates`)
 
-      // Process each template
       for (const templateRow of dueTemplates) {
         try {
           const template = this.deserializeTaskRow(templateRow)
@@ -190,7 +186,6 @@ export class RecurrenceScheduler {
         }
       }
 
-      // Notify renderer to refresh tasks
       if (this.mainWindow && !this.mainWindow.isDestroyed()) {
         guardedIpcSend(this.mainWindow.webContents, 'tasks:refresh')
       }
@@ -423,7 +418,6 @@ export class RecurrenceScheduler {
         return null
     }
 
-    // Check endDate constraint
     if (pattern.endDate && nextDate > new Date(pattern.endDate)) {
       return null
     }

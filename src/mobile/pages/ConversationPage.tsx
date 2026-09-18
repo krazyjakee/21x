@@ -1,76 +1,24 @@
-import { memo, useRef, useEffect, useCallback, useMemo, useState } from 'react'
+import { memo, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
+import { buildTranscriptItems, findActiveQuestionId, findLatestTodos, type TranscriptItem } from '@shared/transcript/transcript-items'
+import { useTranscriptAutoScroll } from '@/components/agents/transcript/useTranscriptAutoScroll'
+import { useTranscriptSearch } from '@/components/agents/transcript/useTranscriptSearch'
 import { useTaskStore } from '../stores/task-store'
 import { useAgentStore, SessionStatus, type AgentMessage } from '../stores/agent-store'
 import { api } from '../api/client'
 import { useSessionControls } from '../hooks/useSessionControls'
-import { MessageActivityGroup, MessageBubble, isCompactActivityMessage } from '../components/MessageBubble'
+import { MessageActivityGroup, MessageBubble } from '../components/MessageBubble'
 import { ArtifactCard } from '../components/ArtifactCard'
-import { ChatInput, type ChatInputAttachment } from '../components/ChatInput'
+import type { ChatInputAttachment } from '../components/ChatInput'
+import { ConversationHeader, ConversationSearchBar } from '../components/ConversationHeader'
+import { ConversationInput } from '../components/ConversationInput'
+import { PinnedTodoSummary } from '../components/PinnedTodoSummary'
 import { useArtifactStore } from '../stores/artifact-store'
-import { cn } from '../lib/utils'
 import type { Route } from '../App'
-
-function collectSearchableText(value: unknown, output: string[]): void {
-  if (value == null) return
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-    output.push(String(value))
-    return
-  }
-  if (Array.isArray(value)) {
-    value.forEach((item) => collectSearchableText(item, output))
-    return
-  }
-  if (typeof value === 'object') {
-    Object.values(value as Record<string, unknown>).forEach((item) => collectSearchableText(item, output))
-  }
-}
 
 // Stable empty list — a fresh `[]` per render would invalidate every memo and
 // effect keyed on `messages` while no session exists.
 const EMPTY_MESSAGES: AgentMessage[] = []
-
-// Cache per message object: search runs over the whole transcript on every
-// keystroke AND every streamed delta. Message objects are identity-stable per
-// part (store projection cache), so a WeakMap makes this compute-once.
-const messageSearchTextCache = new WeakMap<AgentMessage, string>()
-
-function getMessageSearchText(message: AgentMessage): string {
-  const cached = messageSearchTextCache.get(message)
-  if (cached !== undefined) return cached
-  const parts: string[] = []
-  collectSearchableText(message.role, parts)
-  collectSearchableText(message.partType, parts)
-  collectSearchableText(message.content, parts)
-  collectSearchableText(message.tool, parts)
-  collectSearchableText(message.taskProgress, parts)
-  const text = parts.join('\n').toLowerCase()
-  messageSearchTextCache.set(message, text)
-  return text
-}
-
-type TranscriptItem =
-  | { type: 'message'; key: string; message: AgentMessage }
-  | { type: 'activity'; key: string; messages: AgentMessage[] }
-
-function getTranscriptItemSearchText(item: TranscriptItem): string {
-  if (item.type === 'activity') {
-    return item.messages.map(getMessageSearchText).join('\n')
-  }
-  return getMessageSearchText(item.message)
-}
-
-function getMessageContentLength(message: AgentMessage): number {
-  return typeof message.content === 'string' ? message.content.length : 0
-}
-
-function getTranscriptItemContentLength(item: TranscriptItem | undefined): number {
-  if (!item) return 0
-  if (item.type === 'activity') {
-    return item.messages.reduce((total, message) => total + getMessageContentLength(message), 0)
-  }
-  return getMessageContentLength(item.message)
-}
 
 const TranscriptRow = memo(function TranscriptRow({
   item,
@@ -119,81 +67,20 @@ export function ConversationPage({ taskId, onNavigate }: { taskId: string; onNav
   }, [hydrateArtifacts, taskId])
 
   const scrollRef = useRef<HTMLDivElement>(null)
-  const searchInputRef = useRef<HTMLInputElement>(null)
-  const isAtBottomRef = useRef(true)
-  const scrollRafRef = useRef<number | null>(null)
-  const autoScrollRafRef = useRef<number | null>(null)
-  const [todosExpanded, setTodosExpanded] = useState(false)
-  const [showScrollToBottom, setShowScrollToBottom] = useState(false)
-  const [isSearchOpen, setIsSearchOpen] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [activeSearchResult, setActiveSearchResult] = useState(0)
-  const [showAttachmentPicker, setShowAttachmentPicker] = useState(false)
-  const [messageAttachments, setMessageAttachments] = useState<ChatInputAttachment[]>([])
-
-  // Stable empty list — a fresh `[]` per render would invalidate every memo and
-  // effect keyed on `messages` while no session exists.
   const messages = session?.messages || EMPTY_MESSAGES
-  const normalizedSearchQuery = searchQuery.trim().toLowerCase()
+  const transcriptItems = useMemo(() => buildTranscriptItems(messages), [messages])
+  const search = useTranscriptSearch(transcriptItems)
+  const normalizedSearchQuery = search.normalizedQuery
 
-  const transcriptItems = useMemo<TranscriptItem[]>(() => {
-    const items: TranscriptItem[] = []
-    for (let index = 0; index < messages.length; index += 1) {
-      const message = messages[index]
-      if (!isCompactActivityMessage(message)) {
-        items.push({ type: 'message', key: message.id, message })
-        continue
-      }
-
-      const group: AgentMessage[] = [message]
-      while (index + 1 < messages.length && isCompactActivityMessage(messages[index + 1])) {
-        index += 1
-        group.push(messages[index])
-      }
-      items.push({ type: 'activity', key: group[0].id, messages: group })
-    }
-    return items
-  }, [messages])
-
-  const searchResultIndexes = useMemo(() => {
-    if (!normalizedSearchQuery) return []
-    return transcriptItems.reduce<number[]>((matches, item, index) => {
-      if (getTranscriptItemSearchText(item).includes(normalizedSearchQuery)) {
-        matches.push(index)
-      }
-      return matches
-    }, [])
-  }, [normalizedSearchQuery, transcriptItems])
-  const activeSearchItemIndex = searchResultIndexes[activeSearchResult] ?? -1
-  const lastTranscriptItemContentLength = useMemo(
-    () => getTranscriptItemContentLength(transcriptItems[transcriptItems.length - 1]),
-    [transcriptItems]
-  )
-
-  // Determine if the agent is actively working
   const isWorking = session?.status === SessionStatus.WORKING
   const isWaitingApproval = session?.status === SessionStatus.WAITING_APPROVAL
   const hasSession = !!session?.sessionId
   // The user sent a message and the backend is still resuming the session.
   const isStarting = !!session?.pendingSend && !isWorking && !isWaitingApproval
 
-  const activeQuestionId = useMemo(() => {
-    let questionIndex = -1
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].partType === 'question' && messages[i].tool?.questions) {
-        questionIndex = i
-        break
-      }
-    }
-    if (questionIndex === -1) return null
+  const activeQuestionId = useMemo(() => findActiveQuestionId(messages), [messages])
 
-    const hasUserReplyAfter = messages.slice(questionIndex + 1).some((m) => m.role === 'user')
-    if (hasUserReplyAfter) return null
-
-    return messages[questionIndex].id
-  }, [messages])
-
-  // Smart routing: detect if last message is a question
+  // An unanswered question routes the composer's text as its answer.
   const isQuestion = !!activeQuestionId
 
   // Can the user send input? Blocked while the session is starting (resuming)
@@ -204,17 +91,8 @@ export function ConversationPage({ taskId, onNavigate }: { taskId: string; onNav
     [task?.attachments]
   )
 
-  // Extract latest todos from messages — matches desktop TodoSummary logic
-  const latestTodos = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].tool?.todos && messages[i].tool!.todos!.length > 0) {
-        return messages[i].tool!.todos!
-      }
-    }
-    return null
-  }, [messages])
+  const latestTodos = useMemo(() => findLatestTodos(messages), [messages])
 
-  // Input placeholder — matches desktop AgentTranscriptPanel
   const placeholder = useMemo(() => {
     if (!hasSession) return 'No active session'
     if (isStarting) return 'Starting agent…'
@@ -223,12 +101,12 @@ export function ConversationPage({ taskId, onNavigate }: { taskId: string; onNav
     return 'Write a message...'
   }, [hasSession, isStarting, isQuestion, isWaitingApproval])
 
-  // Smart send handler — mirrors desktop TaskWorkspace.handleSend logic
+  // Mirrors desktop TaskWorkspace.handleSend.
   const handleSend = useCallback(
-    async (message: string, options?: { attachments?: ChatInputAttachment[] }) => {
-      // Get latest session from store, not from closure, to avoid stale closure bug
+    async (message: string, options?: { attachments?: ChatInputAttachment[] }): Promise<boolean> => {
+      // Read the latest session from the store; the closure's copy may be stale.
       const currentSession = useAgentStore.getState().sessions.get(taskId)
-      if (!currentSession?.sessionId) return
+      if (!currentSession?.sessionId) return false
       try {
         if (isQuestion) {
           const activeQuestion = currentSession.messages.find((item) => item.id === activeQuestionId)
@@ -251,20 +129,18 @@ export function ConversationPage({ taskId, onNavigate }: { taskId: string; onNav
             initSession(taskId, result.newSessionId, currentSession.agentId)
           }
         }
-        setMessageAttachments([])
-        setShowAttachmentPicker(false)
+        return true
       } catch (e) {
         console.error('Failed to send message:', e)
         endSend(taskId)
+        return false
       }
     },
     [taskId, isQuestion, activeQuestionId, initSession, beginSend, endSend]
   )
 
-  // Handle question answer from QuestionMessage options
   const handleAnswer = useCallback(
     async (answer: string) => {
-      // Get latest session from store, not from closure, to avoid stale closure bug
       const currentSession = useAgentStore.getState().sessions.get(taskId)
       if (!currentSession?.sessionId || !activeQuestionId) return
       try {
@@ -277,34 +153,6 @@ export function ConversationPage({ taskId, onNavigate }: { taskId: string; onNav
     },
     [taskId, activeQuestionId]
   )
-
-  const toggleAttachment = useCallback((attachment: ChatInputAttachment) => {
-    setMessageAttachments((prev) => {
-      const exists = prev.some((att) => att.id === attachment.id)
-      if (exists) return prev.filter((att) => att.id !== attachment.id)
-      return [...prev, attachment]
-    })
-  }, [])
-
-  const removeAttachment = useCallback((attachmentId: string) => {
-    setMessageAttachments((prev) => prev.filter((att) => att.id !== attachmentId))
-  }, [])
-
-  useEffect(() => {
-    // Prune selections when task attachments change
-    const validIds = new Set(taskAttachments.map((att) => att.id))
-    setMessageAttachments((prev) => prev.filter((att) => validIds.has(att.id)))
-  }, [taskAttachments])
-
-  useEffect(() => {
-    setActiveSearchResult(0)
-  }, [normalizedSearchQuery])
-
-  useEffect(() => {
-    if (activeSearchResult >= searchResultIndexes.length) {
-      setActiveSearchResult(Math.max(searchResultIndexes.length - 1, 0))
-    }
-  }, [activeSearchResult, searchResultIndexes.length])
 
   // Session controls (shared hook provides double-click protection and rollback)
   const { handleStart: _startSession, handleResume: _resumeSession, handleStop: _stopSession, handleRestart: _restartSession } = useSessionControls(taskId)
@@ -331,77 +179,13 @@ export function ConversationPage({ taskId, onNavigate }: { taskId: string; onNav
     estimateSize: () => 120,
     overscan: 8
   })
-
-  useEffect(() => {
-    if (activeSearchItemIndex < 0) return
-    virtualizer.scrollToIndex(activeSearchItemIndex, { align: 'center' })
-    isAtBottomRef.current = false
-    setShowScrollToBottom(true)
-  }, [activeSearchItemIndex, virtualizer])
-
-  // Auto-scroll to bottom when new rows arrive or the last row streams content.
-  useEffect(() => {
-    if (activeSearchItemIndex >= 0) return
-    if (transcriptItems.length > 0 && isAtBottomRef.current) {
-      if (autoScrollRafRef.current !== null) {
-        cancelAnimationFrame(autoScrollRafRef.current)
-      }
-      autoScrollRafRef.current = requestAnimationFrame(() => {
-        autoScrollRafRef.current = null
-        if (!isAtBottomRef.current) return
-        virtualizer.scrollToIndex(transcriptItems.length - 1, { align: 'end' })
-      })
-    }
-    return () => {
-      if (autoScrollRafRef.current !== null) {
-        cancelAnimationFrame(autoScrollRafRef.current)
-        autoScrollRafRef.current = null
-      }
-    }
-  }, [activeSearchItemIndex, lastTranscriptItemContentLength, transcriptItems.length, virtualizer])
-
-  // Track scroll position
-  const handleScroll = useCallback(() => {
-    if (scrollRafRef.current !== null) return
-    scrollRafRef.current = requestAnimationFrame(() => {
-      scrollRafRef.current = null
-      if (!scrollRef.current) return
-      const { scrollTop, scrollHeight, clientHeight } = scrollRef.current
-      const isAtBottom = scrollHeight - scrollTop - clientHeight < 80
-      isAtBottomRef.current = isAtBottom
-      setShowScrollToBottom(!isAtBottom)
-    })
-  }, [])
-
-  useEffect(() => {
-    return () => {
-      if (scrollRafRef.current !== null) {
-        cancelAnimationFrame(scrollRafRef.current)
-      }
-      if (autoScrollRafRef.current !== null) {
-        cancelAnimationFrame(autoScrollRafRef.current)
-      }
-    }
-  }, [])
-
-  const scrollToBottom = useCallback(() => {
-    if (transcriptItems.length > 0) {
-      virtualizer.scrollToIndex(transcriptItems.length - 1, { align: 'end' })
-      isAtBottomRef.current = true
-      setShowScrollToBottom(false)
-    }
-  }, [transcriptItems.length, virtualizer])
-
-  const goToSearchResult = useCallback((direction: 1 | -1) => {
-    if (searchResultIndexes.length === 0) return
-    setActiveSearchResult((current) => (current + direction + searchResultIndexes.length) % searchResultIndexes.length)
-  }, [searchResultIndexes.length])
-
-  const closeSearch = useCallback(() => {
-    setSearchQuery('')
-    setIsSearchOpen(false)
-    setActiveSearchResult(0)
-  }, [])
+  const { handleScroll, scrollToBottom, showScrollToBottom } = useTranscriptAutoScroll({
+    items: transcriptItems,
+    virtualizer,
+    scrollRef,
+    activeSearchItemIndex: search.activeItemIndex,
+    bottomThreshold: 80
+  })
 
   // Session state flags — matches TaskDetailPage logic
   const isSessionRunning = session?.sessionId && (session.status === SessionStatus.WORKING || session.status === SessionStatus.WAITING_APPROVAL)
@@ -411,237 +195,27 @@ export function ConversationPage({ taskId, onNavigate }: { taskId: string; onNav
 
   return (
     <div className="flex flex-col h-full bg-background">
-      {/* Header — matches desktop AgentTranscriptPanel header */}
-      <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-border/50">
-        <div className="flex items-center gap-2 min-w-0">
-          <button onClick={() => onNavigate({ page: 'detail', taskId })} className="p-1.5 shrink-0 active:opacity-60 hover:bg-accent rounded-md transition-colors">
-            <svg className="w-4 h-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m15 18-6-6 6-6" />
-            </svg>
-          </button>
-          {/* Terminal icon */}
-          <svg className="h-4 w-4 text-muted-foreground shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/>
-          </svg>
-          <span className="text-sm font-medium truncate">
-            {task?.title || 'Agent transcript'}
-            <span className="ml-2 text-xs font-mono text-muted-foreground">
-              ({messages.length})
-            </span>
-          </span>
-        </div>
-        <div className="flex items-center gap-3 shrink-0">
-          {/* Status indicator — matches desktop */}
-          {session && (
-            <span className={cn(
-              'text-xs flex items-center gap-1',
-              isStarting && 'text-green-400',
-              !isStarting && session.status === SessionStatus.WORKING && 'text-green-400',
-              !isStarting && session.status === SessionStatus.ERROR && 'text-red-400',
-              !isStarting && session.status === SessionStatus.WAITING_APPROVAL && 'text-yellow-400',
-              !isStarting && session.status === SessionStatus.IDLE && 'text-muted-foreground'
-            )}>
-              {(isStarting || session.status === SessionStatus.WORKING) && (
-                <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
-              )}
-              {isStarting ? 'Starting…' : (
-                <>
-                  {session.status === SessionStatus.WORKING && 'Working'}
-                  {session.status === SessionStatus.IDLE && 'Idle'}
-                  {session.status === SessionStatus.ERROR && '● Error'}
-                  {session.status === SessionStatus.WAITING_APPROVAL && '● Waiting'}
-                </>
-              )}
-            </span>
-          )}
-          {/* Icon buttons — matches desktop AgentTranscriptPanel */}
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => {
-                setIsSearchOpen((open) => {
-                  const nextOpen = !open
-                  if (nextOpen) requestAnimationFrame(() => searchInputRef.current?.focus())
-                  return nextOpen
-                })
-              }}
-              title="Search transcript"
-              className="inline-flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:bg-white/5 hover:text-foreground active:opacity-60 transition-colors"
-            >
-              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
-              </svg>
-            </button>
-            {/* Restart — matches desktop RotateCcw icon */}
-            {messages.length > 0 && hasSession && (
-              <button
-                onClick={handleRestart}
-                title="Restart session"
-                className="inline-flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:bg-white/5 hover:text-foreground active:opacity-60 transition-colors"
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                  <path d="M3 3v5h5"/>
-                </svg>
-              </button>
-            )}
-            {/* Stop — matches desktop StopCircle icon */}
-            {canStop && (
-              <button
-                onClick={handleStop}
-                title="Stop session"
-                className="inline-flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:bg-white/5 hover:text-foreground active:opacity-60 transition-colors"
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6"/>
-                </svg>
-              </button>
-            )}
-            {/* Start / Resume — only when no active session */}
-            {canStart && (
-              <button
-                onClick={handleStart}
-                title="Start agent"
-                className="inline-flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:bg-white/5 hover:text-foreground active:opacity-60 transition-colors"
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="6 3 20 12 6 21 6 3"/>
-                </svg>
-              </button>
-            )}
-            {canResume && (
-              <button
-                onClick={handleResume}
-                title="Resume session"
-                className="inline-flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:bg-white/5 hover:text-foreground active:opacity-60 transition-colors"
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="6 3 20 12 6 21 6 3"/>
-                </svg>
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
+      <ConversationHeader
+        title={task?.title || 'Agent transcript'}
+        messageCount={messages.length}
+        status={session?.status}
+        isStarting={isStarting}
+        canRestart={messages.length > 0 && hasSession}
+        canStop={!!canStop}
+        canStart={!!canStart}
+        canResume={!!canResume}
+        onBack={() => onNavigate({ page: 'detail', taskId })}
+        onToggleSearch={search.toggle}
+        onRestart={handleRestart}
+        onStop={handleStop}
+        onStart={handleStart}
+        onResume={handleResume}
+      />
 
-      {isSearchOpen && (
-        <div className="shrink-0 flex items-center gap-2 px-4 py-2 border-b border-border/50">
-          <div className="relative min-w-0 flex-1">
-            <svg className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
-            </svg>
-            <input
-              ref={searchInputRef}
-              type="search"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') closeSearch()
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  goToSearchResult(e.shiftKey ? -1 : 1)
-                }
-              }}
-              placeholder="Search transcript..."
-              className="h-8 w-full rounded-md border border-input bg-transparent pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring/30"
-            />
-          </div>
-          <span className="w-14 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
-            {normalizedSearchQuery ? `${searchResultIndexes.length ? activeSearchResult + 1 : 0}/${searchResultIndexes.length}` : '0/0'}
-          </span>
-          <button
-            onClick={() => goToSearchResult(-1)}
-            disabled={searchResultIndexes.length === 0}
-            title="Previous result"
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-white/5 hover:text-foreground disabled:opacity-40"
-          >
-            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m18 15-6-6-6 6"/>
-            </svg>
-          </button>
-          <button
-            onClick={() => goToSearchResult(1)}
-            disabled={searchResultIndexes.length === 0}
-            title="Next result"
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-white/5 hover:text-foreground disabled:opacity-40"
-          >
-            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m6 9 6 6 6-6"/>
-            </svg>
-          </button>
-          <button
-            onClick={closeSearch}
-            title="Close search"
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-white/5 hover:text-foreground"
-          >
-            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
-            </svg>
-          </button>
-        </div>
-      )}
+      {search.isOpen && <ConversationSearchBar search={search} />}
 
-      {/* Pinned todo summary — matches desktop TodoSummary subheader */}
-      {latestTodos && (
-        <div className="border-b border-border/50 shrink-0">
-          <button
-            onClick={() => setTodosExpanded(!todosExpanded)}
-            className="w-full flex items-center gap-2 px-4 py-2 text-xs hover:bg-white/5 transition-colors"
-          >
-            {/* Chevron */}
-            <svg className={cn('h-3 w-3 text-muted-foreground shrink-0 transition-transform', todosExpanded && 'rotate-90')} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m9 18 6-6-6-6"/>
-            </svg>
-            {/* ListTodo icon */}
-            <svg className="h-3.5 w-3.5 text-muted-foreground shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="5" width="6" height="6" rx="1"/><path d="m3 17 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/>
-            </svg>
-            <span className="text-muted-foreground font-medium">Tasks</span>
-            <span className="text-muted-foreground ml-auto tabular-nums">
-              {latestTodos.filter((t) => t.status === 'completed').length}/{latestTodos.length}
-              {latestTodos.filter((t) => t.status === 'in_progress').length > 0 && (
-                <span className="text-yellow-400 ml-1.5">
-                  ({latestTodos.filter((t) => t.status === 'in_progress').length} active)
-                </span>
-              )}
-            </span>
-          </button>
-          {todosExpanded && (
-            <div className="px-4 pb-2.5 space-y-0.5">
-              {latestTodos.map((todo) => (
-                <div
-                  key={todo.id}
-                  className={cn(
-                    'flex items-start gap-2 rounded px-2 py-1 text-xs',
-                    todo.status === 'completed' && 'opacity-50'
-                  )}
-                >
-                  {/* Status icon */}
-                  {todo.status === 'completed' && (
-                    <svg className="h-3.5 w-3.5 text-green-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/>
-                    </svg>
-                  )}
-                  {todo.status === 'in_progress' && (
-                    <svg className="h-3.5 w-3.5 text-yellow-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-                    </svg>
-                  )}
-                  {todo.status === 'pending' && (
-                    <svg className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="10"/>
-                    </svg>
-                  )}
-                  <span className={todo.status === 'completed' ? 'line-through text-muted-foreground' : 'text-foreground'}>
-                    {todo.content}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {latestTodos && <PinnedTodoSummary todos={latestTodos} />}
 
-      {/* Messages area — matches desktop transcript panel */}
       <div className="relative flex-1 min-h-0">
         <div
           ref={scrollRef}
@@ -736,7 +310,6 @@ export function ConversationPage({ taskId, onNavigate }: { taskId: string; onNav
             </div>
           )}
 
-          {/* Working indicator */}
           {isWorking && messages.length > 0 && (
             <div className="flex items-center gap-2 px-3 py-2">
               <div className="flex gap-1">
@@ -749,7 +322,6 @@ export function ConversationPage({ taskId, onNavigate }: { taskId: string; onNav
           )}
         </div>
 
-        {/* Scroll to bottom button */}
         {showScrollToBottom && messages.length > 0 && (
           <button
             onClick={scrollToBottom}
@@ -764,51 +336,12 @@ export function ConversationPage({ taskId, onNavigate }: { taskId: string; onNav
         )}
       </div>
 
-      {/* Input area — matches desktop transcript panel input */}
-      <div className="shrink-0 border-t border-border/50">
-        {showAttachmentPicker && taskAttachments.length > 0 && (
-          <div className="border-b border-border/50 px-3 py-2 max-h-40 overflow-y-auto bg-muted/20">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-muted-foreground">Attach files to this message</span>
-              <button
-                type="button"
-                onClick={() => setShowAttachmentPicker(false)}
-                className="text-xs text-muted-foreground hover:text-foreground"
-              >
-                Done
-              </button>
-            </div>
-            <div className="space-y-1">
-              {taskAttachments.map((attachment) => {
-                const checked = messageAttachments.some((att) => att.id === attachment.id)
-                return (
-                  <button
-                    key={attachment.id}
-                    type="button"
-                    onClick={() => toggleAttachment(attachment)}
-                    className={cn(
-                      'w-full text-left rounded-md px-2 py-1.5 border text-xs transition-colors',
-                      checked
-                        ? 'border-primary/40 bg-primary/10 text-foreground'
-                        : 'border-border/50 text-muted-foreground hover:text-foreground hover:bg-white/5'
-                    )}
-                  >
-                    {attachment.filename}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        )}
-        <ChatInput
-          onSend={handleSend}
-          disabled={!canSendInput}
-          placeholder={placeholder}
-          attachments={messageAttachments}
-          onRemoveAttachment={removeAttachment}
-          onOpenAttachmentPicker={taskAttachments.length > 0 ? () => setShowAttachmentPicker((prev) => !prev) : undefined}
-        />
-      </div>
+      <ConversationInput
+        onSend={handleSend}
+        disabled={!canSendInput}
+        placeholder={placeholder}
+        taskAttachments={taskAttachments}
+      />
     </div>
   )
 }

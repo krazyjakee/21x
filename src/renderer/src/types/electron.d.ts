@@ -1,3 +1,4 @@
+import type { TranscriptPartRecord } from '@shared/transcript/types'
 import type { BrowserRecordingManifest } from '@shared/browser-recording'
 import type { UiCommand } from '@shared/ui-commands'
 import type {
@@ -22,9 +23,7 @@ import type {
   UpdateTaskSourceDTO,
   SyncResult,
   PluginMeta,
-  ConfigFieldSchema,
   ConfigFieldOption,
-  PluginAction,
   ActionResult,
   SourceUser,
   ReassignResult,
@@ -93,26 +92,8 @@ export interface AgentStatusEvent {
   status: import('@/stores/agent-store').SessionStatus
 }
 
-export interface AgentApprovalRequest {
-  sessionId: string
-  action: string
-  description: string
-}
-
 /** A durable transcript projection part (the single source of truth for rendering). */
-export interface TranscriptPartRecord {
-  taskId: string
-  partId: string
-  seq: number
-  role: string
-  content: string
-  partType?: string
-  tool?: unknown
-  payload?: unknown
-  createdAt: number
-  updatedAt: number
-  rev: number
-}
+export type { TranscriptPartRecord }
 
 /** Payload of the transcript:changed delta push. */
 export interface TranscriptChangedEvent {
@@ -120,12 +101,6 @@ export interface TranscriptChangedEvent {
   taskId: string
   parts: TranscriptPartRecord[]
   maxRev: number
-}
-
-export interface SkillSyncResult {
-  created: string[]
-  updated: string[]
-  unchanged: string[]
 }
 
 export interface McpTestResult {
@@ -149,12 +124,6 @@ export interface GitHubRepo {
   cloneUrl: string
   description: string
   isPrivate: boolean
-}
-
-export interface GitHubCollaborator {
-  login: string
-  avatar_url: string
-  type: string
 }
 
 export interface HeartbeatStatusResult {
@@ -196,20 +165,6 @@ export interface ToolStatus {
   reason?: string | null
 }
 
-export interface DepsStatus {
-  nodejs: ToolStatus
-  npm: ToolStatus
-  pnpm: ToolStatus
-  git: ToolStatus
-  gh: ToolStatus
-  glab: ToolStatus
-  claudeCode: ToolStatus
-  opencode: ToolStatus
-  codex: ToolStatus
-  cursor: ToolStatus
-  pi: ToolStatus
-}
-
 export interface GlabCliStatus {
   installed: boolean
   authenticated: boolean
@@ -234,7 +189,6 @@ interface ElectronAPI {
   artifacts: Required<ArtifactApi>
   mcpServers: {
     getAll: () => Promise<McpServer[]>
-    get: (id: string) => Promise<McpServer | undefined>
     create: (data: CreateMcpServerDTO) => Promise<McpServer>
     update: (id: string, data: UpdateMcpServerDTO) => Promise<McpServer | undefined>
     delete: (id: string) => Promise<boolean>
@@ -247,7 +201,6 @@ interface ElectronAPI {
   }
   agents: {
     getAll: () => Promise<Agent[]>
-    get: (id: string) => Promise<Agent | undefined>
     create: (data: CreateAgentDTO) => Promise<Agent>
     update: (id: string, data: UpdateAgentDTO) => Promise<Agent | undefined>
     delete: (id: string) => Promise<boolean>
@@ -262,9 +215,6 @@ interface ElectronAPI {
     send: (sessionId: string, message: string, taskId?: string, agentId?: string, attachments?: AgentMessageAttachment[]) => Promise<AgentSessionSuccessResult & { newSessionId?: string }>
     sendByTaskId: (taskId: string, message: string, attachments?: AgentMessageAttachment[]) => Promise<AgentSessionSuccessResult & { sessionId: string | null; newSessionId?: string }>
     approve: (sessionId: string, approved: boolean, message?: string, responseType?: 'permission' | 'question', requestId?: string) => Promise<AgentSessionSuccessResult>
-    syncSkills: (sessionId: string) => Promise<SkillSyncResult>
-    syncSkillsForTask: (taskId: string) => Promise<SkillSyncResult>
-    learnFromSession: (sessionId: string, message: string) => Promise<SkillSyncResult>
     getRawTranscript: (taskId: string) => Promise<Array<{ role: string; parts: Array<{ type: string; content?: string; tool?: { name: string; status?: string; input?: string; output?: string; error?: string } }> }>>
     getTranscriptSnapshot: (taskId: string, sinceSeq?: number) => Promise<TranscriptPartRecord[]>
     getTranscriptDelta: (taskId: string, sinceRev: number) => Promise<{ parts: TranscriptPartRecord[]; maxRev: number }>
@@ -308,12 +258,10 @@ interface ElectronAPI {
     fetchOrgs: () => Promise<string[]>
     fetchOrgRepos: (org: string) => Promise<GitHubRepo[]>
     fetchUserRepos: () => Promise<GitHubRepo[]>
-    fetchCollaborators: (owner: string, repo: string) => Promise<GitHubCollaborator[]>
     fetchPullRequestDetails: (url: string) => Promise<PullRequestDetails>
   }
   gitlab: {
     checkCli: () => Promise<GlabCliStatus>
-    startAuth: () => Promise<void>
     fetchOrgs: () => Promise<string[]>
     fetchOrgRepos: (org: string) => Promise<GitHubRepo[]>
     fetchUserRepos: () => Promise<GitHubRepo[]>
@@ -328,7 +276,6 @@ interface ElectronAPI {
   }
   taskSources: {
     getAll: () => Promise<TaskSource[]>
-    get: (id: string) => Promise<TaskSource | undefined>
     create: (data: CreateTaskSourceDTO) => Promise<TaskSource>
     update: (id: string, data: UpdateTaskSourceDTO) => Promise<TaskSource | undefined>
     delete: (id: string) => Promise<boolean>
@@ -339,28 +286,20 @@ interface ElectronAPI {
   }
   skills: {
     getAll: () => Promise<Skill[]>
-    get: (id: string) => Promise<Skill | undefined>
     create: (data: CreateSkillDTO) => Promise<Skill>
     update: (id: string, data: UpdateSkillDTO) => Promise<Skill | undefined>
     delete: (id: string) => Promise<boolean>
   }
   secrets: {
     getAll: () => Promise<Secret[]>
-    get: (id: string) => Promise<Secret | undefined>
     create: (data: CreateSecretDTO) => Promise<Secret>
     update: (id: string, data: UpdateSecretDTO) => Promise<Secret | undefined>
     delete: (id: string) => Promise<boolean>
   }
-  deps: {
-    check: () => Promise<DepsStatus>
-    setOpencodePath: (dirPath: string) => Promise<{ success: boolean; error?: string }>
-  }
   plugins: {
     list: () => Promise<PluginMeta[]>
-    getConfigSchema: (pluginId: string) => Promise<ConfigFieldSchema[]>
     getDocumentation: (pluginId: string) => Promise<string | null>
     resolveOptions: (pluginId: string, resolverKey: string, config: Record<string, unknown>, mcpServerId?: string, sourceId?: string) => Promise<ConfigFieldOption[]>
-    getActions: (pluginId: string, config: Record<string, unknown>) => Promise<PluginAction[]>
     executeAction: (actionId: string, taskId: string, sourceId: string, input?: string) => Promise<ActionResult>
   }
   claudePlugins: {
@@ -413,8 +352,8 @@ interface ElectronAPI {
     getSessions: () => Promise<{ id: string; device_name: string; paired_at: number; last_seen: number }[]>
     revokeSession: (sessionId: string) => Promise<{ success: boolean }>
     revokeAllSessions: () => Promise<{ success: boolean }>
-    onPairingInitiated: (fn: (data: { pin: string; pairCodeId: string; expiresAt: number }) => void) => void
-    onDeviceConnected: (fn: (data: { sessionId: string; deviceName: string }) => void) => void
+    onPairingInitiated: (fn: (data: { pin: string; pairCodeId: string; expiresAt: number }) => void) => () => void
+    onDeviceConnected: (fn: (data: { sessionId: string; deviceName: string }) => void) => () => void
   }
   updater: {
     check: () => Promise<{ success: boolean; version?: string; error?: string }>
@@ -427,7 +366,6 @@ interface ElectronAPI {
   agentInstaller: {
     detect: () => Promise<Record<string, { installed: boolean; version: string | null }>>
     install: (agentName: string) => Promise<{ success: boolean; error: string | null; newStatus: Record<string, { installed: boolean; version: string | null }> }>
-    getCommand: (agentName: string) => Promise<string>
     onProgress: (callback: (data: { agentName: string; stage: string; output: string; percent: number }) => void) => () => void
   }
   webUtils: {
@@ -450,7 +388,6 @@ interface ElectronAPI {
   onArtifactUpdated: (callback: (event: { taskId: string; artifact: import('@shared/artifacts').Artifact }) => void) => () => void
   onTranscriptChanged: (callback: (event: TranscriptChangedEvent) => void) => () => void
   onAgentStatus: (callback: (event: AgentStatusEvent) => void) => () => void
-  onAgentApproval: (callback: (event: AgentApprovalRequest) => void) => () => void
   onAgentIncompatibleSession: (callback: (event: { taskId: string; agentId: string; error: string }) => void) => () => void
   onTaskUpdated: (callback: (event: { taskId: string; updates: Partial<Task> }) => void) => () => void
   onTaskSourceActionFailed: (callback: (event: { taskId: string; taskTitle: string; error: string }) => void) => () => void
@@ -489,7 +426,6 @@ interface ElectronAPI {
     getRuntime: () => Promise<VoiceRuntimeStatus>
     installRuntime: () => Promise<VoiceRuntimeStatus>
     removeRuntime: () => Promise<VoiceRuntimeStatus>
-    listModels: () => Promise<VoiceModelState[]>
     installModel: (id: string) => Promise<VoiceModelState>
     removeModel: (id: string) => Promise<VoiceModelState[]>
     selectModel: (id: string) => Promise<VoiceModelState[]>
@@ -534,7 +470,6 @@ interface ElectronAPI {
       onModelProgress: (callback: (event: { model: VoiceTtsModelState }) => void) => () => void
     }
   }
-  onGitlabDeviceCode: (callback: (code: string) => void) => () => void
   onOAuthCallback: (callback: (event: { code: string; state: string }) => void) => () => void
 }
 

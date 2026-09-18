@@ -1,6 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { AgentManager } from './agent-manager'
+import { shouldEnableTillDone } from './agent-manager/session-config'
+import { isDelegationTool } from './agent-manager/watchdogs'
+import type { TaskRecord } from './database'
+import { generateAgentsMd, generateClaudeMd, getMemoryFileName, writeAgentsDocumentation, writeSkillFiles } from './agent-manager/workspace-docs'
+import { buildMessageWithAttachmentContext, syncAttachmentsToWorkspace } from './agent-manager/attachments'
 import { SessionStatus, TaskStatus } from '../shared/constants'
 import { MessagePartType, MessageRole, SessionStatusType } from './adapters/coding-agent-adapter'
 import { unregisterSecretSession } from './secret-broker'
@@ -187,27 +192,18 @@ describe('AgentManager skill file paths', () => {
 
   describe('shouldEnableTillDone', () => {
     it('disables tillDone for Mastermind sessions', () => {
-      const mockDb = createMockDb({ coding_agent: 'opencode' })
-      manager = new AgentManager(mockDb)
-
-      expect((manager as any).shouldEnableTillDone('mastermind-session', null)).toBe(false)
+      expect(shouldEnableTillDone('mastermind-session', null)).toBe(false)
     })
 
     it('disables tillDone for non-work orchestration sessions', () => {
-      const mockDb = createMockDb({ coding_agent: 'opencode' })
-      manager = new AgentManager(mockDb)
-
-      expect((manager as any).shouldEnableTillDone('heartbeat-task-1', null)).toBe(false)
-      expect((manager as any).shouldEnableTillDone('task-1', { status: TaskStatus.Triaging })).toBe(false)
-      expect((manager as any).shouldEnableTillDone('task-1', { status: TaskStatus.NotStarted, agent_id: null })).toBe(false)
-      expect((manager as any).shouldEnableTillDone('task-1', { status: TaskStatus.AgentLearning })).toBe(false)
+      expect(shouldEnableTillDone('heartbeat-task-1', null)).toBe(false)
+      expect(shouldEnableTillDone('task-1', { status: TaskStatus.Triaging } as TaskRecord)).toBe(false)
+      expect(shouldEnableTillDone('task-1', { status: TaskStatus.NotStarted, agent_id: null } as TaskRecord)).toBe(false)
+      expect(shouldEnableTillDone('task-1', { status: TaskStatus.AgentLearning } as TaskRecord)).toBe(false)
     })
 
     it('enables tillDone for regular task sessions', () => {
-      const mockDb = createMockDb({ coding_agent: 'opencode' })
-      manager = new AgentManager(mockDb)
-
-      expect((manager as any).shouldEnableTillDone('task-1', { status: TaskStatus.NotStarted, agent_id: 'agent-1' })).toBe(true)
+      expect(shouldEnableTillDone('task-1', { status: TaskStatus.NotStarted, agent_id: 'agent-1' } as TaskRecord)).toBe(true)
     })
   })
 
@@ -231,9 +227,8 @@ describe('AgentManager skill file paths', () => {
         getSkills: vi.fn(() => [taskSkill, sharedSkill, agentSkill, unselectedSkill]),
         getSkillsByIds: vi.fn(() => [taskSkill, sharedSkill, agentSkill]),
       } as unknown as ConstructorParameters<typeof AgentManager>[0]
-      manager = new AgentManager(mockDb)
 
-      await (manager as any).writeSkillFiles('task-1', 'agent-1', '/tmp/test-workspace')
+      await writeSkillFiles(mockDb, 'task-1', 'agent-1', '/tmp/test-workspace')
 
       const writes = mockedWriteFileAsync.mock.calls
       const writeFilePaths = writes.map(c => c[0] as string)
@@ -272,9 +267,8 @@ describe('AgentManager skill file paths', () => {
         getSkills: vi.fn(() => [makeSkillRecord()]),
         getSkillsByIds: vi.fn(() => [makeSkillRecord()]),
       } as unknown as ConstructorParameters<typeof AgentManager>[0]
-      manager = new AgentManager(mockDb)
 
-      await (manager as any).writeSkillFiles('task-1', 'agent-1', '/tmp/test-workspace')
+      await writeSkillFiles(mockDb, 'task-1', 'agent-1', '/tmp/test-workspace')
 
       const writes = mockedWriteFileAsync.mock.calls
       expect(writes.some(c => (c[0] as string).endsWith('/SKILL.md'))).toBe(false)
@@ -289,10 +283,9 @@ describe('AgentManager skill file paths', () => {
 
     it('writes SKILL.md files to .claude/skills/ for Claude Code agents', async () => {
       const mockDb = createMockDb({ coding_agent: 'claude-code' })
-      manager = new AgentManager(mockDb)
 
       const workspaceDir = '/tmp/test-workspace'
-      await (manager as any).writeSkillFiles('task-1', 'agent-1', workspaceDir)
+      await writeSkillFiles(mockDb, 'task-1', 'agent-1', workspaceDir)
 
       // Verify SKILL.md was written under .claude/skills/ (now uses async fs/promises)
       const mkdirCalls = mockedMkdirAsync.mock.calls.map(c => c[0])
@@ -310,10 +303,9 @@ describe('AgentManager skill file paths', () => {
 
     it('writes SKILL.md files to .agents/skills/ for OpenCode agents', async () => {
       const mockDb = createMockDb({ coding_agent: 'opencode' })
-      manager = new AgentManager(mockDb)
 
       const workspaceDir = '/tmp/test-workspace'
-      await (manager as any).writeSkillFiles('task-1', 'agent-1', workspaceDir)
+      await writeSkillFiles(mockDb, 'task-1', 'agent-1', workspaceDir)
 
       const writeFilePaths = mockedWriteFileAsync.mock.calls.map(c => c[0] as string)
       expect(writeFilePaths).toContainEqual(
@@ -327,10 +319,9 @@ describe('AgentManager skill file paths', () => {
 
     it('writes SKILL.md files to .agents/skills/ for Codex agents', async () => {
       const mockDb = createMockDb({ coding_agent: 'codex' })
-      manager = new AgentManager(mockDb)
 
       const workspaceDir = '/tmp/test-workspace'
-      await (manager as any).writeSkillFiles('task-1', 'agent-1', workspaceDir)
+      await writeSkillFiles(mockDb, 'task-1', 'agent-1', workspaceDir)
 
       const writeFilePaths = mockedWriteFileAsync.mock.calls.map(c => c[0] as string)
       expect(writeFilePaths).toContainEqual(
@@ -344,10 +335,9 @@ describe('AgentManager skill file paths', () => {
 
     it('defaults to .agents/skills/ when no coding_agent is configured', async () => {
       const mockDb = createMockDb({})
-      manager = new AgentManager(mockDb)
 
       const workspaceDir = '/tmp/test-workspace'
-      await (manager as any).writeSkillFiles('task-1', 'agent-1', workspaceDir)
+      await writeSkillFiles(mockDb, 'task-1', 'agent-1', workspaceDir)
 
       const writeFilePaths = mockedWriteFileAsync.mock.calls.map(c => c[0] as string)
       expect(writeFilePaths).toContainEqual(
@@ -365,9 +355,8 @@ describe('AgentManager skill file paths', () => {
           }),
         ]),
       } as unknown as ConstructorParameters<typeof AgentManager>[0]
-      manager = new AgentManager(mockDb)
 
-      await (manager as any).writeSkillFiles('task-1', 'agent-1', '/tmp/test-workspace')
+      await writeSkillFiles(mockDb, 'task-1', 'agent-1', '/tmp/test-workspace')
 
       const writeFileCall = mockedWriteFileAsync.mock.calls.find(c =>
         (c[0] as string).endsWith('SKILL.md')
@@ -384,13 +373,12 @@ describe('AgentManager skill file paths', () => {
   describe('writeAgentsDocumentation', () => {
     it('writes AGENTS.md and CLAUDE.md to workspace root, not .agents/', async () => {
       const mockDb = createMockDb({ coding_agent: 'claude-code' })
-      manager = new AgentManager(mockDb)
 
       const workspaceDir = '/tmp/test-workspace'
       const skills = [makeSkillRecord()]
       const repos = ['org/repo']
 
-      await (manager as any).writeAgentsDocumentation(workspaceDir, skills, repos, 'agent-1')
+      await writeAgentsDocumentation(mockDb, workspaceDir, skills, repos, 'agent-1')
 
       const writeFilePaths = mockedWriteFileAsync.mock.calls.map(c => c[0] as string)
 
@@ -407,10 +395,9 @@ describe('AgentManager skill file paths', () => {
 
     it('does not create .agents/ directory for documentation files', async () => {
       const mockDb = createMockDb({})
-      manager = new AgentManager(mockDb)
 
       const workspaceDir = '/tmp/test-workspace'
-      await (manager as any).writeAgentsDocumentation(workspaceDir, [], [], 'agent-1')
+      await writeAgentsDocumentation(mockDb, workspaceDir, [], [], 'agent-1')
 
       // mkdir (async) should NOT be called for .agents/ directory
       const mkdirCalls = mockedMkdirAsync.mock.calls.map(c => c[0] as string)
@@ -422,10 +409,9 @@ describe('AgentManager skill file paths', () => {
   describe('generateClaudeMd', () => {
     it('generates skill links with .claude/skills/ paths', () => {
       const mockDb = createMockDb({})
-      manager = new AgentManager(mockDb)
 
       const skills = [makeSkillRecord({ name: 'code-testing' })]
-      const result: string = (manager as any).generateClaudeMd(skills, ['org/repo'], '/tmp/ws')
+      const result: string = generateClaudeMd(mockDb, skills, ['org/repo'], '/tmp/ws')
 
       // Should use .claude/skills/ paths in Quick Reference
       expect(result).toContain('(.claude/skills/code-testing/SKILL.md)')
@@ -439,9 +425,8 @@ describe('AgentManager skill file paths', () => {
 
     it('generates valid markdown with no skills', () => {
       const mockDb = createMockDb({})
-      manager = new AgentManager(mockDb)
 
-      const result: string = (manager as any).generateClaudeMd([], ['org/repo'], '/tmp/ws')
+      const result: string = generateClaudeMd(mockDb, [], ['org/repo'], '/tmp/ws')
       expect(result).toContain('No skills are available for this session.')
       expect(result).not.toContain('.claude/skills/')
       expect(result).not.toContain('.agents/skills/')
@@ -451,10 +436,9 @@ describe('AgentManager skill file paths', () => {
   describe('generateAgentsMd', () => {
     it('generates skill links with .agents/skills/ paths', () => {
       const mockDb = createMockDb({})
-      manager = new AgentManager(mockDb)
 
       const skills = [makeSkillRecord({ name: 'code-testing' })]
-      const result: string = (manager as any).generateAgentsMd(skills, ['org/repo'], '/tmp/ws')
+      const result: string = generateAgentsMd(mockDb, skills, ['org/repo'], '/tmp/ws')
 
       // Should use .agents/skills/ paths
       expect(result).toContain('(.agents/skills/code-testing/SKILL.md)')
@@ -466,9 +450,8 @@ describe('AgentManager skill file paths', () => {
 
     it('generates valid markdown with no skills', () => {
       const mockDb = createMockDb({})
-      manager = new AgentManager(mockDb)
 
-      const result: string = (manager as any).generateAgentsMd([], ['org/repo'], '/tmp/ws')
+      const result: string = generateAgentsMd(mockDb, [], ['org/repo'], '/tmp/ws')
       expect(result).toContain('No skills configured for this session.')
       expect(result).not.toContain('.agents/skills/')
       expect(result).not.toContain('.claude/skills/')
@@ -504,9 +487,9 @@ describe('AgentManager skill file paths', () => {
     }
 
     it('documents a force-added server that the agent config does not list', () => {
-      manager = new AgentManager(makeMcpDb())
+      const db = makeMcpDb()
 
-      const md: string = (manager as any).generateAgentsMd([], [], '/tmp/ws', 'agent-1', {
+      const md: string = generateAgentsMd(db, [], [], '/tmp/ws', 'agent-1', {
         'configured-server': { type: 'stdio', command: '/bin/configured', args: ['a.js'] },
         'task-management': { type: 'http', url: 'http://127.0.0.1:5555/mcp?task=t1&parent=p1' }
       })
@@ -517,9 +500,9 @@ describe('AgentManager skill file paths', () => {
     })
 
     it('omits a configured server that is not attached to the session', () => {
-      manager = new AgentManager(makeMcpDb())
+      const db = makeMcpDb()
 
-      const md: string = (manager as any).generateAgentsMd([], [], '/tmp/ws', 'agent-1', {
+      const md: string = generateAgentsMd(db, [], [], '/tmp/ws', 'agent-1', {
         'task-management': { type: 'http', url: 'http://127.0.0.1:5555/mcp' }
       })
 
@@ -529,9 +512,9 @@ describe('AgentManager skill file paths', () => {
     })
 
     it('omits the MCP section when no server is attached', () => {
-      manager = new AgentManager(makeMcpDb())
+      const db = makeMcpDb()
 
-      const md: string = (manager as any).generateAgentsMd([], [], '/tmp/ws', 'agent-1', {})
+      const md: string = generateAgentsMd(db, [], [], '/tmp/ws', 'agent-1', {})
 
       expect(md).not.toContain('Available MCP Servers & Tools')
     })
@@ -540,9 +523,9 @@ describe('AgentManager skill file paths', () => {
       // The stored record still describes an Electron command, because the stdio
       // entry point survives for a direct run. A session reaches the server over
       // HTTP in this process, so the documentation must say that instead.
-      manager = new AgentManager(makeMcpDb())
+      const db = makeMcpDb()
 
-      const md: string = (manager as any).generateAgentsMd([], [], '/tmp/ws', 'agent-1', {
+      const md: string = generateAgentsMd(db, [], [], '/tmp/ws', 'agent-1', {
         'task-management': { type: 'http', url: 'http://127.0.0.1:5555/mcp?token=session-secret&task=t1&parent=p1' }
       })
 
@@ -554,18 +537,18 @@ describe('AgentManager skill file paths', () => {
     })
 
     it('falls back to the agent config when the caller gives no server list', () => {
-      manager = new AgentManager(makeMcpDb())
+      const db = makeMcpDb()
 
-      const md: string = (manager as any).generateAgentsMd([], [], '/tmp/ws', 'agent-1')
+      const md: string = generateAgentsMd(db, [], [], '/tmp/ws', 'agent-1')
 
       expect(md).toContain('### configured-server')
       expect(md).not.toContain('### task-management')
     })
 
     it('applies the same rule to CLAUDE.md', () => {
-      manager = new AgentManager(makeMcpDb())
+      const db = makeMcpDb()
 
-      const md: string = (manager as any).generateClaudeMd([], [], '/tmp/ws', 'agent-1', {
+      const md: string = generateClaudeMd(db, [], [], '/tmp/ws', 'agent-1', {
         'task-management': { type: 'http', url: 'http://127.0.0.1:5555/mcp' }
       })
 
@@ -578,33 +561,29 @@ describe('AgentManager skill file paths', () => {
   describe('getMemoryFileName', () => {
     it('returns CLAUDE.md for Claude Code agents', () => {
       const mockDb = createMockDb({ coding_agent: 'claude-code' })
-      manager = new AgentManager(mockDb)
 
-      const result: string = (manager as any).getMemoryFileName('agent-1')
+      const result: string = getMemoryFileName(mockDb, 'agent-1')
       expect(result).toBe('CLAUDE.md')
     })
 
     it('returns AGENTS.md for OpenCode agents', () => {
       const mockDb = createMockDb({ coding_agent: 'opencode' })
-      manager = new AgentManager(mockDb)
 
-      const result: string = (manager as any).getMemoryFileName('agent-1')
+      const result: string = getMemoryFileName(mockDb, 'agent-1')
       expect(result).toBe('AGENTS.md')
     })
 
     it('returns AGENTS.md for Codex agents', () => {
       const mockDb = createMockDb({ coding_agent: 'codex' })
-      manager = new AgentManager(mockDb)
 
-      const result: string = (manager as any).getMemoryFileName('agent-1')
+      const result: string = getMemoryFileName(mockDb, 'agent-1')
       expect(result).toBe('AGENTS.md')
     })
 
     it('returns AGENTS.md when no coding_agent is configured', () => {
       const mockDb = createMockDb({})
-      manager = new AgentManager(mockDb)
 
-      const result: string = (manager as any).getMemoryFileName('agent-1')
+      const result: string = getMemoryFileName(mockDb, 'agent-1')
       expect(result).toBe('AGENTS.md')
     })
   })
@@ -998,7 +977,6 @@ describe('AgentManager implicit resume behavior', () => {
     vi.spyOn(manager as any, 'getAdapter').mockReturnValue(adapter)
     vi.spyOn(manager as any, 'buildMcpServersForAdapter').mockResolvedValue({})
     vi.spyOn(manager as any, 'setupSecretSession').mockReturnValue(null)
-    vi.spyOn(manager as any, 'buildSecretsSystemPrompt').mockReturnValue('')
 
     const sendToRendererSpy = vi.spyOn(manager as any, 'sendToRenderer').mockImplementation(() => undefined)
     const doSendAdapterMessageSpy = vi.spyOn(manager as any, 'doSendAdapterMessage').mockResolvedValue(undefined)
@@ -1048,7 +1026,6 @@ describe('AgentManager implicit resume behavior', () => {
     vi.spyOn(manager as any, 'getAdapter').mockReturnValue(adapter)
     vi.spyOn(manager as any, 'buildMcpServersForAdapter').mockResolvedValue({})
     vi.spyOn(manager as any, 'setupSecretSession').mockReturnValue(null)
-    vi.spyOn(manager as any, 'buildSecretsSystemPrompt').mockReturnValue('')
 
     const sendToRendererSpy = vi.spyOn(manager as any, 'sendToRenderer').mockImplementation(() => undefined)
 
@@ -1904,7 +1881,6 @@ describe('AgentManager resumeAdapterSession — SESSION_ENDED for completed task
     vi.spyOn(mgr as any, 'getAdapter').mockReturnValue(adapter)
     vi.spyOn(mgr as any, 'buildMcpServersForAdapter').mockResolvedValue({})
     vi.spyOn(mgr as any, 'setupSecretSession').mockReturnValue(null)
-    vi.spyOn(mgr as any, 'buildSecretsSystemPrompt').mockReturnValue('')
 
     // Should NOT throw — returns empty string to signal session ended
     const result = await mgr.resumeSession('agent-1', 'task-1', 'old-session-id')
@@ -1948,7 +1924,6 @@ describe('AgentManager resumeAdapterSession — SESSION_ENDED for completed task
     vi.spyOn(mgr as any, 'getAdapter').mockReturnValue(adapter)
     vi.spyOn(mgr as any, 'buildMcpServersForAdapter').mockResolvedValue({})
     vi.spyOn(mgr as any, 'setupSecretSession').mockReturnValue(null)
-    vi.spyOn(mgr as any, 'buildSecretsSystemPrompt').mockReturnValue('')
 
     // Should still throw for non-completed tasks
     await expect(mgr.resumeSession('agent-1', 'task-1', 'old-session-id')).rejects.toThrow()
@@ -1974,7 +1949,6 @@ describe('syncAttachmentsToWorkspace', () => {
       getAttachmentsDir: vi.fn(() => '/data/attachments/task-1'),
     } as unknown as ConstructorParameters<typeof AgentManager>[0]
 
-    const mgr = new AgentManager(mockDb)
 
     // All source files exist
     mockedExistsSync.mockImplementation((p: any) => {
@@ -1985,7 +1959,7 @@ describe('syncAttachmentsToWorkspace', () => {
       return false
     })
 
-    const refs = (mgr as any).syncAttachmentsToWorkspace('task-1', '/tmp/ws')
+    const refs = syncAttachmentsToWorkspace(mockDb, 'task-1', '/tmp/ws')
 
     // Should create the destination directory
     expect(mockedMkdirSync).toHaveBeenCalledWith('/tmp/ws/attachments', { recursive: true })
@@ -2017,9 +1991,8 @@ describe('syncAttachmentsToWorkspace', () => {
       })),
     } as unknown as ConstructorParameters<typeof AgentManager>[0]
 
-    const mgr = new AgentManager(mockDb)
 
-    const refs = (mgr as any).syncAttachmentsToWorkspace('task-1', '/tmp/ws')
+    const refs = syncAttachmentsToWorkspace(mockDb, 'task-1', '/tmp/ws')
     expect(refs).toEqual([])
     expect(mockedCopyFileSync).not.toHaveBeenCalled()
   })
@@ -2038,7 +2011,6 @@ describe('syncAttachmentsToWorkspace', () => {
       getAttachmentsDir: vi.fn(() => '/data/attachments/task-1'),
     } as unknown as ConstructorParameters<typeof AgentManager>[0]
 
-    const mgr = new AgentManager(mockDb)
 
     mockedExistsSync.mockImplementation((p: any) => {
       const path = String(p)
@@ -2048,7 +2020,7 @@ describe('syncAttachmentsToWorkspace', () => {
       return false
     })
 
-    const refs = (mgr as any).syncAttachmentsToWorkspace('task-1', '/tmp/ws')
+    const refs = syncAttachmentsToWorkspace(mockDb, 'task-1', '/tmp/ws')
 
     // Only the existing file should be copied
     expect(mockedCopyFileSync).toHaveBeenCalledTimes(1)
@@ -2066,14 +2038,13 @@ describe('buildMessageWithAttachmentContext', () => {
   })
 
   it('includes attachment references and a bounded preview for small text files', () => {
-    const mgr = new AgentManager(createMockDb({}))
     const session = { workspaceDir: '/tmp/ws' } as { workspaceDir: string }
 
     mockedExistsSync.mockImplementation((p: any) => String(p).includes('/tmp/ws/attachments/spec.md'))
     mockedReadFileSync.mockImplementation(() => 'A'.repeat(1500))
 
-    const result = (mgr as any).buildMessageWithAttachmentContext(
-      session,
+    const result = buildMessageWithAttachmentContext(
+      session.workspaceDir,
       'Please use attached context',
       [{ id: 'att-1', filename: 'spec.md', size: 1024, mime_type: 'text/markdown' }]
     ) as string
@@ -2086,7 +2057,6 @@ describe('buildMessageWithAttachmentContext', () => {
   })
 
   it('caps attachment references and reports omitted items', () => {
-    const mgr = new AgentManager(createMockDb({}))
     const session = { workspaceDir: '/tmp/ws' } as { workspaceDir: string }
     const attachments = Array.from({ length: 12 }, (_, i) => ({
       id: `att-${i + 1}`,
@@ -2096,7 +2066,7 @@ describe('buildMessageWithAttachmentContext', () => {
     }))
 
     mockedExistsSync.mockReturnValue(false)
-    const result = (mgr as any).buildMessageWithAttachmentContext(session, 'Use files', attachments) as string
+    const result = buildMessageWithAttachmentContext(session.workspaceDir, 'Use files', attachments) as string
 
     expect(result).toContain('... and 2 more attachment(s) omitted')
     expect((result.match(/- attachments\/file-/g) || []).length).toBe(10)
@@ -2143,7 +2113,6 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
-      undefined,
       existingSession
     )
 
@@ -2182,7 +2151,6 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
-      undefined,
       session
     )
 
@@ -2223,7 +2191,6 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
-      undefined,
       session
     )
 
@@ -2269,7 +2236,6 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
-      undefined,
       session
     )
 
@@ -2404,7 +2370,6 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
-      undefined,
       session
     )
 
@@ -2421,7 +2386,6 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
-      undefined,
       session
     )
 
@@ -2478,7 +2442,6 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
-      undefined,
       session
     )
 
@@ -2528,7 +2491,6 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
-      undefined,
       session
     )
 
@@ -2675,7 +2637,6 @@ describe('AgentManager tillDone nudge on idle', () => {
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
-      undefined,
       session
     )
 
@@ -2732,7 +2693,6 @@ describe('AgentManager tillDone nudge on idle', () => {
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
-      undefined,
       session
     )
 
@@ -2775,7 +2735,6 @@ describe('AgentManager tillDone nudge on idle', () => {
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
-      undefined,
       session
     )
 
@@ -2821,7 +2780,6 @@ describe('AgentManager tillDone nudge on idle', () => {
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
-      undefined,
       session
     )
 
@@ -2861,7 +2819,6 @@ describe('AgentManager tillDone nudge on idle', () => {
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
-      undefined,
       session
     )
 
@@ -2991,7 +2948,6 @@ describe('AgentManager delegation-aware watchdogs', () => {
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
-      undefined,
       session
     )
     const entry = (mgr as any).pollingEntries.get('session-1')
@@ -3000,21 +2956,20 @@ describe('AgentManager delegation-aware watchdogs', () => {
   }
 
   it('classifies delegation tools correctly', () => {
-    const isDelegation = (AgentManager as any).isDelegationTool.bind(AgentManager)
     // Subagent spawn tools
-    expect(isDelegation('task')).toBe(true)
-    expect(isDelegation('Task')).toBe(true)
-    expect(isDelegation('agent')).toBe(true)
+    expect(isDelegationTool('task')).toBe(true)
+    expect(isDelegationTool('Task')).toBe(true)
+    expect(isDelegationTool('agent')).toBe(true)
     // Subtask orchestration tools (various MCP name manglings)
-    expect(isDelegation('wait_for_subtasks')).toBe(true)
-    expect(isDelegation('mcp__task-management__wait_for_subtasks')).toBe(true)
-    expect(isDelegation('task-management_wait_for_subtasks')).toBe(true)
-    expect(isDelegation('start_task')).toBe(true)
+    expect(isDelegationTool('wait_for_subtasks')).toBe(true)
+    expect(isDelegationTool('mcp__task-management__wait_for_subtasks')).toBe(true)
+    expect(isDelegationTool('task-management_wait_for_subtasks')).toBe(true)
+    expect(isDelegationTool('start_task')).toBe(true)
     // Ordinary tools are not delegation
-    expect(isDelegation('read')).toBe(false)
-    expect(isDelegation('bash')).toBe(false)
-    expect(isDelegation('todowrite')).toBe(false)
-    expect(isDelegation(undefined)).toBe(false)
+    expect(isDelegationTool('read')).toBe(false)
+    expect(isDelegationTool('bash')).toBe(false)
+    expect(isDelegationTool('todowrite')).toBe(false)
+    expect(isDelegationTool(undefined)).toBe(false)
   })
 
   it('stuck-tool detector does NOT abort a long-running delegation tool', async () => {

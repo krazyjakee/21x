@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { api } from '../api/client'
+import { formatFileSize } from '@/lib/utils'
 
 export interface ChatInputAttachment {
   id: string
@@ -15,13 +16,6 @@ interface ChatInputProps {
   attachments?: ChatInputAttachment[]
   onRemoveAttachment?: (attachmentId: string) => void
   onOpenAttachmentPicker?: () => void
-}
-
-function formatFileSize(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '—'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 export function ChatInput({

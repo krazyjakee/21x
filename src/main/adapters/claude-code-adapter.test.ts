@@ -12,11 +12,17 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
 // Mock child_process and fs to avoid real filesystem operations
 vi.mock('child_process', () => ({ execFile: vi.fn() }))
 vi.mock('fs', () => ({ existsSync: vi.fn(() => false) }))
+// The executable lookup shells out (`execFile` is mocked to never call back),
+// so resolve it to a fixed path.
+vi.mock('./claude-code-executable', () => ({
+  findClaudeExecutable: vi.fn(async () => '/usr/local/bin/claude'),
+}))
 
 // Same mocked `query` the adapter resolves through its dynamic import, so tests
 // can inspect exactly what the adapter handed the SDK.
 import { query } from '@anthropic-ai/claude-agent-sdk'
-import { ClaudeCodeAdapter, ClaudeSystemSubtype } from './claude-code-adapter'
+import { ClaudeCodeAdapter } from './claude-code-adapter'
+import { ClaudeSystemSubtype } from './claude-code-message-converter'
 import { MessagePartType } from './coding-agent-adapter'
 
 /**
@@ -1310,9 +1316,8 @@ describe('ClaudeCodeAdapter abort classification (regression)', () => {
 describe('sendPrompt permission mode', () => {
   /**
    * Runs the real `sendPrompt` and returns the adapter, the session and the
-   * `options` object `query` received. `claudeExecutablePath` is primed so the
-   * executable lookup does not shell out (`execFile` is mocked to never call
-   * back).
+   * `options` object `query` received. `findClaudeExecutable` is mocked above
+   * so the executable lookup does not shell out.
    */
   async function runPrompt(config: any): Promise<{ adapter: ClaudeCodeAdapter; session: any; options: any }> {
     const queryMock = vi.mocked(query) as any
@@ -1327,7 +1332,6 @@ describe('sendPrompt permission mode', () => {
 
     const adapter = new ClaudeCodeAdapter()
     await (adapter as any).ensureSDKLoaded()
-    ;(adapter as any).claudeExecutablePath = '/usr/local/bin/claude'
 
     const session: any = {
       sessionId: '',

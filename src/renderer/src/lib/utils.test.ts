@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { cn, formatDate, formatRelativeDate, isOverdue, isDueSoon } from './utils'
+import { cn, formatDate, formatFileSize, formatRelativeDate, isOverdue, isDueSoon } from './utils'
 
 describe('cn()', () => {
   it('merges class names', () => {
@@ -127,5 +127,19 @@ describe('isDueSoon()', () => {
 
   it('returns false for 2+ days in the future', () => {
     expect(isDueSoon('2024-06-17')).toBe(false)
+  })
+})
+
+describe('formatFileSize()', () => {
+  it('uses binary units', () => {
+    expect(formatFileSize(512)).toBe('512 B')
+    expect(formatFileSize(1536)).toBe('1.5 KB')
+    expect(formatFileSize(5 * 1024 * 1024)).toBe('5.0 MB')
+  })
+
+  it('returns a dash for unknown sizes', () => {
+    expect(formatFileSize(0)).toBe('—')
+    expect(formatFileSize(-1)).toBe('—')
+    expect(formatFileSize(NaN)).toBe('—')
   })
 })

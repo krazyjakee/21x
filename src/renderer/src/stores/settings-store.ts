@@ -16,7 +16,6 @@ interface SettingsState {
   setGitProvider: (provider: GitProvider | null) => Promise<void>
   checkGhCli: () => Promise<GhCliStatus>
   checkGlabCli: () => Promise<GlabCliStatus>
-  startGlabAuth: () => Promise<void>
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
@@ -62,12 +61,5 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     const status = await gitlabApi.checkCli()
     set({ glabCliStatus: status })
     return status
-  },
-
-  startGlabAuth: async () => {
-    await gitlabApi.startAuth()
-    // Re-check status after auth
-    const status = await gitlabApi.checkCli()
-    set({ glabCliStatus: status })
   }
 }))

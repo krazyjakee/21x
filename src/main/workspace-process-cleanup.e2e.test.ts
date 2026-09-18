@@ -191,7 +191,7 @@ describe.skipIf(!canReadProcessCwd())('workspace process cleanup, end to end', (
 
     // BEFORE: the watcher is alive and has lost its parent.
     expect(alive(watcherPid), 'the watcher survives its parent').toBe(true)
-    const before = readProcessSnapshot()
+    const before = await readProcessSnapshot()
     const orphan = before.rows.find((row) => row.pid === watcherPid)
     expect(orphan, 'the watcher is still in the process table').toBeDefined()
     // Its launcher is dead, so its parent must now be either init or a
@@ -220,7 +220,7 @@ describe.skipIf(!canReadProcessCwd())('workspace process cleanup, end to end', (
     expect(leak!.reason).toContain(reparentedToInit ? 'orphaned (ppid 1)' : 'our descendant')
     await settle()
     expect(alive(watcherPid), 'the watcher is gone after the boot sweep').toBe(false)
-    expect(readProcessSnapshot().rows.some((row) => row.pid === watcherPid)).toBe(false)
+    expect((await readProcessSnapshot()).rows.some((row) => row.pid === watcherPid)).toBe(false)
   }, 90000)
 
   it('EXIT TEST 2 (again, at the selection) — an identical command line outside the root is never selected', async () => {
@@ -230,7 +230,7 @@ describe.skipIf(!canReadProcessCwd())('workspace process cleanup, end to end', (
     const outside = await startWatcher(outsideDir, fx.script)
     outside.unref()
 
-    const { rows, cwdRows } = readProcessSnapshot()
+    const { rows, cwdRows } = await readProcessSnapshot()
     const selected = selectLeakedWorkspacePids({
       rows,
       cwdRows,
@@ -283,7 +283,7 @@ describe.skipIf(!canReadProcessCwd())('workspace process cleanup, end to end', (
 
   it('never selects this process, though its own cwd is inside the root it is given', async () => {
     // The dev build of 20x is normally checked out into a task workspace.
-    const { rows, cwdRows } = readProcessSnapshot()
+    const { rows, cwdRows } = await readProcessSnapshot()
     const parentOfCwd = join(process.cwd(), '..')
     for (const selected of [
       selectLeakedWorkspacePids({ rows, cwdRows, workspacesRoot: parentOfCwd, ownPid: process.pid, workspaceState: () => ({ status: 'completed', exists: true }) }),

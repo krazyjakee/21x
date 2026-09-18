@@ -5,8 +5,9 @@ import { join } from 'path'
 import { createTestDb } from '../../test/helpers/db-test-helper'
 import { makeTask, makeAgent } from '../../test/helpers/task-fixtures'
 import type { DatabaseManager } from './database'
-import { getTaskApiToken, handleRoute, setTaskApiAgentController, setTaskApiNotifier, setTaskAutomationTrigger, startTaskApiServer, stopTaskApiServer } from './task-api-server'
+import { getTaskApiToken, handleRoute, setTaskApiAgentController, setTaskApiNotifier, startTaskApiServer, stopTaskApiServer } from './task-api-server'
 import { TaskStatus } from '../shared/constants'
+import { setTaskAutomationTrigger, setTaskSchedulers } from './task-updates'
 
 let db: DatabaseManager
 let rawDb: import('better-sqlite3').Database
@@ -90,6 +91,18 @@ describe('authentication', () => {
     expect(db.getTask(task.id)!.title).toBe('Untouched')
   })
 
+  it('answers a malformed JSON body with 400', async () => {
+    const port = await startTaskApiServer(db)
+
+    const response = await fetch(`http://127.0.0.1:${port}/list_agents`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${getTaskApiToken()}` },
+      body: '{not json'
+    })
+
+    expect(response.status).toBe(400)
+  })
+
   it('rejects the MCP endpoint without the token', async () => {
     const port = await startTaskApiServer(db)
 
@@ -169,230 +182,170 @@ describe('/update_task - triage status guard', () => {
 })
 
 describe('/update_task - repos field', () => {
-  it('updates repos field via JSON serialization', () => {
+  it('accepts an array or a single repo string', async () => {
     const task = db.createTask(makeTask({ title: 'Task with repos' }))!
-    expect(task.repos).toEqual([])
 
-    // Simulate what handleRoute does for repos
-    const repos = ['org/repo-1', 'org/repo-2']
-    rawDb.prepare('UPDATE tasks SET repos = ?, updated_at = ? WHERE id = ?')
-      .run(JSON.stringify(repos), new Date().toISOString(), task.id)
+    await handleRoute(db, '/update_task', { task_id: task.id, repos: ['org/repo-1', 'org/repo-2'] })
+    expect(db.getTask(task.id)!.repos).toEqual(['org/repo-1', 'org/repo-2'])
 
-    const updatedTask = db.getTask(task.id)!
-    expect(updatedTask.repos).toEqual(['org/repo-1', 'org/repo-2'])
+    await handleRoute(db, '/update_task', { task_id: task.id, repos: 'org/solo' })
+    expect(db.getTask(task.id)!.repos).toEqual(['org/solo'])
+  })
+})
+
+describe('task response shape', () => {
+  it('keeps the legacy row shape: 0/1 flags, parsed arrays, raw recurrence pattern', async () => {
+    const result = await handleRoute(db, '/create_task', {
+      title: 'Nightly',
+      cron: '0 9 * * *',
+      labels: ['ops'],
+      auto_complete_without_review: true
+    }) as { task: Record<string, unknown> }
+
+    expect(result.task).toMatchObject({
+      title: 'Nightly',
+      labels: ['ops'],
+      skill_ids: [],
+      is_recurring: 1,
+      recurrence_pattern: '0 9 * * *',
+      auto_start_agent: 0,
+      auto_complete_without_review: 1,
+      heartbeat_enabled: 0,
+      complete_at_source: null
+    })
+    expect(result.task.id).not.toMatch(/^task_/)
+    expect(await handleRoute(db, '/get_task', { task_id: result.task.id })).toEqual(result.task)
+  })
+
+  it('assigns the agent and skills a caller passes to /create_task', async () => {
+    const agent = db.createAgent(makeAgent({ name: 'Assignee' }))!
+
+    const result = await handleRoute(db, '/create_task', { title: 'Assigned', agent_id: agent.id, skill_ids: ['s1'] }) as { task: Record<string, unknown> }
+
+    expect(result.task).toMatchObject({ agent_id: agent.id, skill_ids: ['s1'] })
+  })
+
+  it('reports a missing task', async () => {
+    expect(await handleRoute(db, '/get_task', { task_id: 'missing' })).toEqual({ error: 'Task not found' })
+  })
+
+  it('hands a new recurring task to the recurrence scheduler', async () => {
+    const initializeRecurringTask = vi.fn()
+    setTaskSchedulers({ recurrence: { initializeRecurringTask } })
+    try {
+      const result = await handleRoute(db, '/create_task', { title: 'Weekly', cron: '0 9 * * 1' }) as { task: { id: string } }
+      expect(initializeRecurringTask).toHaveBeenCalledWith(result.task.id)
+    } finally {
+      setTaskSchedulers({ recurrence: null })
+    }
   })
 })
 
 describe('/list_repos', () => {
-  it('returns distinct repos from historical tasks', () => {
-    // Create tasks with repos
+  it('returns distinct repos from historical tasks and the configured org', async () => {
     db.createTask(makeTask({ title: 'Task 1', repos: ['org/repo-a', 'org/repo-b'] }))
     db.createTask(makeTask({ title: 'Task 2', repos: ['org/repo-b', 'org/repo-c'] }))
     db.createTask(makeTask({ title: 'Task 3', repos: [] }))
-
-    // Simulate /list_repos route logic
-    const tasks = rawDb.prepare("SELECT repos FROM tasks WHERE repos IS NOT NULL AND repos != '[]'").all() as Record<string, unknown>[]
-    const repoSet = new Set<string>()
-    tasks.forEach((t) => {
-      try {
-        const repos = JSON.parse((t.repos as string) || '[]')
-        repos.forEach((r: string) => repoSet.add(r))
-      } catch { /* ignore */ }
-    })
-
-    const result = Array.from(repoSet)
-    expect(result).toContain('org/repo-a')
-    expect(result).toContain('org/repo-b')
-    expect(result).toContain('org/repo-c')
-    expect(result).toHaveLength(3) // No duplicates
-  })
-
-  it('returns empty array when no tasks have repos', () => {
-    db.createTask(makeTask({ title: 'No repos', repos: [] }))
-
-    const tasks = rawDb.prepare("SELECT repos FROM tasks WHERE repos IS NOT NULL AND repos != '[]'").all()
-    expect(tasks).toHaveLength(0)
-  })
-
-  it('returns github_org from settings', () => {
     db.setSetting('github_org', 'my-org')
 
-    const orgRow = rawDb.prepare('SELECT value FROM settings WHERE key = ?').get('github_org') as { value: string } | undefined
-    expect(orgRow!.value).toBe('my-org')
+    const result = await handleRoute(db, '/list_repos', {}) as { repos: string[]; github_org: string | null }
+
+    expect(result.repos.sort()).toEqual(['org/repo-a', 'org/repo-b', 'org/repo-c'])
+    expect(result.github_org).toBe('my-org')
   })
 
-  it('returns null github_org when not set', () => {
-    const orgRow = rawDb.prepare('SELECT value FROM settings WHERE key = ?').get('github_org') as { value: string } | undefined
-    expect(orgRow).toBeUndefined()
+  it('returns no repos and a null org when there are none', async () => {
+    expect(await handleRoute(db, '/list_repos', {})).toEqual({ repos: [], github_org: null })
   })
 })
 
-describe('/list_skills - excludes content', () => {
-  it('returns skills without content field', () => {
-    db.createSkill({ name: 'Test Skill', description: 'A test skill', content: 'SECRET CONTENT HERE' })
+describe('skill routes', () => {
+  it('lists skills by confidence without their content', async () => {
+    db.createSkill({ name: 'Low', description: 'd', content: 'SECRET CONTENT HERE', confidence: 0.2 })
+    db.createSkill({ name: 'High', description: 'd', content: 'SECRET CONTENT HERE', confidence: 0.9 })
 
-    const skills = rawDb
-      .prepare('SELECT id, name, description, version, confidence, uses, last_used, tags, created_at, updated_at FROM skills WHERE is_deleted = 0 ORDER BY confidence DESC, uses DESC')
-      .all() as Record<string, unknown>[]
-    skills.forEach((s) => { s.tags = JSON.parse((s.tags as string) || '[]') })
+    const skills = await handleRoute(db, '/list_skills', {}) as Array<Record<string, unknown>>
 
-    expect(skills).toHaveLength(1)
-    expect(skills[0].name).toBe('Test Skill')
-    expect(skills[0].description).toBe('A test skill')
+    expect(skills.map((s) => s.name)).toEqual(['High', 'Low'])
     expect(skills[0]).not.toHaveProperty('content')
   })
-})
 
-describe('/get_skill - returns full details', () => {
-  it('returns skill with content', () => {
+  it('returns a skill with its content, or an error', async () => {
     const created = db.createSkill({ name: 'Full Skill', description: 'Desc', content: 'Full content body' })!
 
-    const skill = rawDb.prepare('SELECT * FROM skills WHERE id = ? AND is_deleted = 0').get(created.id) as Record<string, unknown>
-    skill.tags = JSON.parse((skill.tags as string) || '[]')
-
-    expect(skill.name).toBe('Full Skill')
-    expect(skill.content).toBe('Full content body')
+    expect(await handleRoute(db, '/get_skill', { skill_id: created.id })).toMatchObject({ name: 'Full Skill', content: 'Full content body' })
+    expect(await handleRoute(db, '/get_skill', { skill_id: 'nonexistent' })).toEqual({ error: 'Skill not found' })
   })
 
-  it('returns error for non-existent skill', () => {
-    const skill = rawDb.prepare('SELECT * FROM skills WHERE id = ? AND is_deleted = 0').get('nonexistent') as Record<string, unknown> | undefined
-    expect(skill).toBeUndefined()
-  })
-})
+  it('refuses a duplicate name on create', async () => {
+    const created = db.createSkill({ name: 'Taken', description: 'd', content: 'c' })!
 
-describe('/update_skill', () => {
-  it('updates skill fields and increments version', () => {
+    const result = await handleRoute(db, '/create_skill', { name: 'Taken', description: 'd', content: 'c' }) as { error: string }
+
+    expect(result.error).toContain(created.id)
+  })
+
+  it('updates skill fields and increments version', async () => {
     const created = db.createSkill({ name: 'Old Name', description: 'Old Desc', content: 'Old Content', tags: ['old'] })!
-    expect(created.version).toBe(1)
 
-    // Simulate handleRoute /update_skill
-    const skillUpdates: string[] = []
-    const skillParams: unknown[] = []
-    skillUpdates.push('name = ?'); skillParams.push('New Name')
-    skillUpdates.push('description = ?'); skillParams.push('New Desc')
-    skillUpdates.push('content = ?'); skillParams.push('New Content')
-    skillUpdates.push('tags = ?'); skillParams.push(JSON.stringify(['new', 'updated']))
-    skillUpdates.push('version = version + 1')
-    skillUpdates.push('updated_at = ?'); skillParams.push(new Date().toISOString())
-    skillParams.push(created.id)
+    const result = await handleRoute(db, '/update_skill', {
+      skill_id: created.id, name: 'New Name', description: 'New Desc', content: 'New Content', tags: ['new', 'updated']
+    })
 
-    const result = rawDb.prepare(
-      `UPDATE skills SET ${skillUpdates.join(', ')} WHERE id = ? AND is_deleted = 0`
-    ).run(...skillParams)
-
-    expect(result.changes).toBe(1)
-
-    const updated = db.getSkill(created.id)!
-    expect(updated.name).toBe('New Name')
-    expect(updated.description).toBe('New Desc')
-    expect(updated.content).toBe('New Content')
-    expect(updated.tags).toEqual(['new', 'updated'])
-    expect(updated.version).toBe(2)
+    expect(result).toMatchObject({
+      success: true,
+      skill: { name: 'New Name', description: 'New Desc', content: 'New Content', tags: ['new', 'updated'], version: 2 }
+    })
+    expect(await handleRoute(db, '/update_skill', { skill_id: 'nonexistent', name: 'x' })).toEqual({ error: 'Skill not found' })
+    expect(await handleRoute(db, '/update_skill', { skill_id: created.id })).toEqual({ error: 'No updates provided' })
   })
 
-  it('returns 0 changes for non-existent skill', () => {
-    const result = rawDb.prepare(
-      'UPDATE skills SET name = ?, version = version + 1, updated_at = ? WHERE id = ? AND is_deleted = 0'
-    ).run('Name', new Date().toISOString(), 'nonexistent')
-    expect(result.changes).toBe(0)
-  })
-})
-
-describe('/delete_skill', () => {
-  it('soft-deletes a skill', () => {
+  it('soft-deletes a skill once', async () => {
     const created = db.createSkill({ name: 'To Delete', description: 'Will be deleted', content: 'Content' })!
 
-    const result = rawDb.prepare(
-      'UPDATE skills SET is_deleted = 1, updated_at = ? WHERE id = ? AND is_deleted = 0'
-    ).run(new Date().toISOString(), created.id)
-
-    expect(result.changes).toBe(1)
-
-    // Should not appear in normal queries
-    const skill = db.getSkill(created.id)
-    expect(skill).toBeUndefined()
-  })
-
-  it('returns 0 changes for already deleted skill', () => {
-    const created = db.createSkill({ name: 'Already Deleted', description: 'Desc', content: 'Content' })!
-    db.deleteSkill(created.id)
-
-    const result = rawDb.prepare(
-      'UPDATE skills SET is_deleted = 1, updated_at = ? WHERE id = ? AND is_deleted = 0'
-    ).run(new Date().toISOString(), created.id)
-
-    expect(result.changes).toBe(0)
+    expect(await handleRoute(db, '/delete_skill', { skill_id: created.id })).toEqual({ success: true })
+    expect(db.getSkill(created.id)).toBeUndefined()
+    expect(await handleRoute(db, '/delete_skill', { skill_id: created.id })).toEqual({ error: 'Skill not found' })
   })
 })
 
 describe('/create_subtask', () => {
-  it('creates a subtask under a parent task', () => {
+  it('creates a subtask under a parent, inheriting its repos and priority', async () => {
     const parentTask = db.createTask(makeTask({ title: 'Parent Task', repos: ['org/repo-1'], priority: 'high' }))!
 
-    const subtaskId = `task_${Date.now()}_subtask1`
-    const now = new Date().toISOString()
+    const result = await handleRoute(db, '/create_subtask', { parent_task_id: parentTask.id, title: 'Subtask 1', type: 'coding' }) as { task: { id: string } }
 
-    rawDb.prepare(`
-      INSERT INTO tasks (id, title, description, type, priority, status, assignee, due_date, labels, attachments, repos, output_fields, source, agent_id, skill_ids, parent_task_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, 'not_started', '', NULL, '[]', '[]', ?, '[]', 'local', NULL, NULL, ?, ?, ?)
-    `).run(
-      subtaskId, 'Subtask 1', 'A subtask', 'coding', 'high',
-      JSON.stringify(['org/repo-1']),
-      parentTask.id, now, now
-    )
-
-    const subtask = db.getTask(subtaskId)!
-    expect(subtask.title).toBe('Subtask 1')
-    expect(subtask.parent_task_id).toBe(parentTask.id)
-    expect(subtask.repos).toEqual(['org/repo-1'])
-    expect(subtask.priority).toBe('high')
+    expect(db.getTask(result.task.id)).toMatchObject({
+      title: 'Subtask 1',
+      type: 'coding',
+      parent_task_id: parentTask.id,
+      repos: ['org/repo-1'],
+      priority: 'high'
+    })
   })
 
-  it('inherits repos from parent when not specified', () => {
-    const parentTask = db.createTask(makeTask({ title: 'Parent', repos: ['org/repo-a', 'org/repo-b'] }))!
-
-    // Simulate /create_subtask - repos from parent
-    const subtaskId = `task_${Date.now()}_inherit`
-    const now = new Date().toISOString()
-    const parentRow = rawDb.prepare('SELECT repos FROM tasks WHERE id = ?').get(parentTask.id) as { repos: string }
-
-    rawDb.prepare(`
-      INSERT INTO tasks (id, title, description, type, priority, status, assignee, due_date, labels, attachments, repos, output_fields, source, parent_task_id, created_at, updated_at)
-      VALUES (?, ?, '', 'general', 'medium', 'not_started', '', NULL, '[]', '[]', ?, '[]', 'local', ?, ?, ?)
-    `).run(subtaskId, 'Inherited repos subtask', parentRow.repos, parentTask.id, now, now)
-
-    const subtask = db.getTask(subtaskId)!
-    expect(subtask.repos).toEqual(['org/repo-a', 'org/repo-b'])
+  it('refuses an unknown parent', async () => {
+    expect(await handleRoute(db, '/create_subtask', { parent_task_id: 'missing', title: 'x' })).toEqual({ error: 'Parent task not found' })
   })
 })
 
 describe('/list_subtasks', () => {
-  it('returns subtasks for a parent task ordered by sort_order', () => {
+  it('returns subtasks in creation order, then as reordered', async () => {
     const parent = db.createTask(makeTask({ title: 'Parent' }))!
-    const now = new Date().toISOString()
+    const first = await handleRoute(db, '/create_subtask', { parent_task_id: parent.id, title: 'Sub 1' }) as { task: { id: string } }
+    const second = await handleRoute(db, '/create_subtask', { parent_task_id: parent.id, title: 'Sub 2' }) as { task: { id: string } }
 
-    // Create two subtasks with explicit sort_order
-    rawDb.prepare(`
-      INSERT INTO tasks (id, title, description, type, priority, status, assignee, labels, attachments, repos, output_fields, source, parent_task_id, sort_order, created_at, updated_at)
-      VALUES (?, ?, '', 'general', 'medium', 'not_started', '', '[]', '[]', '[]', '[]', 'local', ?, ?, ?, ?)
-    `).run('sub1', 'Sub 1', parent.id, 1, now, now)
+    const titles = async (): Promise<unknown[]> =>
+      (await handleRoute(db, '/list_subtasks', { parent_task_id: parent.id }) as Array<Record<string, unknown>>).map((t) => t.title)
 
-    rawDb.prepare(`
-      INSERT INTO tasks (id, title, description, type, priority, status, assignee, labels, attachments, repos, output_fields, source, parent_task_id, sort_order, created_at, updated_at)
-      VALUES (?, ?, '', 'general', 'medium', 'not_started', '', '[]', '[]', '[]', '[]', 'local', ?, ?, ?, ?)
-    `).run('sub2', 'Sub 2', parent.id, 0, now, now)
-
-    const subtasks = rawDb.prepare('SELECT * FROM tasks WHERE parent_task_id = ? ORDER BY sort_order ASC, created_at ASC').all(parent.id) as Record<string, unknown>[]
-    expect(subtasks).toHaveLength(2)
-    // Sub 2 has sort_order=0, Sub 1 has sort_order=1
-    expect(subtasks[0].title).toBe('Sub 2')
-    expect(subtasks[1].title).toBe('Sub 1')
+    expect(await titles()).toEqual(['Sub 1', 'Sub 2'])
+    db.reorderSubtasks(parent.id, [second.task.id, first.task.id])
+    expect(await titles()).toEqual(['Sub 2', 'Sub 1'])
   })
 
-  it('returns empty array when no subtasks exist', () => {
+  it('returns empty array when no subtasks exist', async () => {
     const parent = db.createTask(makeTask({ title: 'No subtasks parent' }))!
-    const subtasks = rawDb.prepare('SELECT * FROM tasks WHERE parent_task_id = ?').all(parent.id)
-    expect(subtasks).toHaveLength(0)
+    expect(await handleRoute(db, '/list_subtasks', { parent_task_id: parent.id })).toEqual([])
   })
 })
 
@@ -453,43 +406,6 @@ describe('/wait_for_subtasks', () => {
     expect(result.timed_out).toBe(false)
     expect((result.subtasks as Array<Record<string, unknown>>)[0].id).toBe(subtask.id)
     expect((result.subtasks as Array<Record<string, unknown>>)[0].status).toBe(TaskStatus.ReadyForReview)
-  })
-})
-
-describe('/reorder_subtasks', () => {
-  it('reorders subtasks by updating sort_order', () => {
-    const parent = db.createTask(makeTask({ title: 'Parent' }))!
-    const now = new Date().toISOString()
-
-    // Create three subtasks with initial sort_order
-    rawDb.prepare(`
-      INSERT INTO tasks (id, title, description, type, priority, status, assignee, labels, attachments, repos, output_fields, source, parent_task_id, sort_order, created_at, updated_at)
-      VALUES (?, ?, '', 'general', 'medium', 'not_started', '', '[]', '[]', '[]', '[]', 'local', ?, ?, ?, ?)
-    `).run('sub-a', 'Sub A', parent.id, 0, now, now)
-
-    rawDb.prepare(`
-      INSERT INTO tasks (id, title, description, type, priority, status, assignee, labels, attachments, repos, output_fields, source, parent_task_id, sort_order, created_at, updated_at)
-      VALUES (?, ?, '', 'general', 'medium', 'not_started', '', '[]', '[]', '[]', '[]', 'local', ?, ?, ?, ?)
-    `).run('sub-b', 'Sub B', parent.id, 1, now, now)
-
-    rawDb.prepare(`
-      INSERT INTO tasks (id, title, description, type, priority, status, assignee, labels, attachments, repos, output_fields, source, parent_task_id, sort_order, created_at, updated_at)
-      VALUES (?, ?, '', 'general', 'medium', 'not_started', '', '[]', '[]', '[]', '[]', 'local', ?, ?, ?, ?)
-    `).run('sub-c', 'Sub C', parent.id, 2, now, now)
-
-    // Reorder: C first, then A, then B
-    const reorderStmt = rawDb.prepare('UPDATE tasks SET sort_order = ?, updated_at = ? WHERE id = ? AND parent_task_id = ?')
-    const reorderNow = new Date().toISOString()
-    const newOrder = ['sub-c', 'sub-a', 'sub-b']
-    for (let i = 0; i < newOrder.length; i++) {
-      reorderStmt.run(i, reorderNow, newOrder[i], parent.id)
-    }
-
-    const subtasks = rawDb.prepare('SELECT * FROM tasks WHERE parent_task_id = ? ORDER BY sort_order ASC').all(parent.id) as Record<string, unknown>[]
-    expect(subtasks).toHaveLength(3)
-    expect(subtasks[0].title).toBe('Sub C')
-    expect(subtasks[1].title).toBe('Sub A')
-    expect(subtasks[2].title).toBe('Sub B')
   })
 })
 
@@ -565,78 +481,47 @@ describe('Triage task status lifecycle', () => {
 })
 
 describe('/update_task - output_fields', () => {
-  it('updates output_fields via JSON serialization', () => {
+  it('updates output_fields', async () => {
     const task = db.createTask(makeTask({ title: 'Task with outputs' }))!
-    expect(task.output_fields).toEqual([])
-
-    // Simulate what handleRoute does for output_fields
     const outputFields = [
       { id: 'pr_url', name: 'Pull Request URL', type: 'url', required: true },
       { id: 'summary', name: 'Summary', type: 'textarea', required: false }
     ]
-    rawDb.prepare('UPDATE tasks SET output_fields = ?, updated_at = ? WHERE id = ?')
-      .run(JSON.stringify(outputFields), new Date().toISOString(), task.id)
 
-    const updatedTask = db.getTask(task.id)!
-    expect(updatedTask.output_fields).toEqual(outputFields)
-    expect(updatedTask.output_fields).toHaveLength(2)
-    expect(updatedTask.output_fields[0].id).toBe('pr_url')
-    expect(updatedTask.output_fields[0].type).toBe('url')
-    expect(updatedTask.output_fields[0].required).toBe(true)
-    expect(updatedTask.output_fields[1].id).toBe('summary')
+    await handleRoute(db, '/update_task', { task_id: task.id, output_fields: outputFields })
+
+    expect(db.getTask(task.id)!.output_fields).toEqual(outputFields)
   })
 
-  it('preserves existing output_fields when not included in update', () => {
-    const outputFields = [
-      { id: 'result', name: 'Result', type: 'text', required: true }
-    ]
+  it('preserves existing output_fields when not included in update', async () => {
+    const outputFields = [{ id: 'result', name: 'Result', type: 'text', required: true }]
     const task = db.createTask(makeTask({ title: 'Pre-defined outputs', output_fields: outputFields }))!
-    expect(task.output_fields).toEqual(outputFields)
 
-    // Update only labels, not output_fields
-    db.updateTask(task.id, { labels: ['test'] })
-    const updatedTask = db.getTask(task.id)!
-    expect(updatedTask.output_fields).toEqual(outputFields)
-    expect(updatedTask.labels).toEqual(['test'])
+    await handleRoute(db, '/update_task', { task_id: task.id, labels: ['test'] })
+
+    expect(db.getTask(task.id)).toMatchObject({ output_fields: outputFields, labels: ['test'] })
   })
 })
 
 describe('/create_subtask - output_fields', () => {
-  it('creates subtask with output_fields', () => {
+  it('creates subtask with output_fields', async () => {
     const parentTask = db.createTask(makeTask({ title: 'Parent' }))!
-
-    const subtaskId = `task_${Date.now()}_with_outputs`
-    const now = new Date().toISOString()
     const outputFields = [
       { id: 'findings', name: 'Findings', type: 'textarea', required: true },
       { id: 'approved', name: 'Approved', type: 'boolean', required: true }
     ]
 
-    rawDb.prepare(`
-      INSERT INTO tasks (id, title, description, type, priority, status, assignee, due_date, labels, attachments, repos, output_fields, source, agent_id, skill_ids, parent_task_id, created_at, updated_at)
-      VALUES (?, ?, '', 'general', 'medium', 'not_started', '', NULL, '[]', '[]', '[]', ?, 'local', NULL, NULL, ?, ?, ?)
-    `).run(subtaskId, 'Subtask with outputs', JSON.stringify(outputFields), parentTask.id, now, now)
+    const result = await handleRoute(db, '/create_subtask', { parent_task_id: parentTask.id, title: 'With outputs', output_fields: outputFields }) as { task: { id: string } }
 
-    const subtask = db.getTask(subtaskId)!
-    expect(subtask.output_fields).toEqual(outputFields)
-    expect(subtask.output_fields).toHaveLength(2)
-    expect(subtask.output_fields[0].id).toBe('findings')
-    expect(subtask.output_fields[1].type).toBe('boolean')
+    expect(db.getTask(result.task.id)!.output_fields).toEqual(outputFields)
   })
 
-  it('defaults to empty output_fields when not specified', () => {
+  it('defaults to empty output_fields when not specified', async () => {
     const parentTask = db.createTask(makeTask({ title: 'Parent' }))!
 
-    const subtaskId = `task_${Date.now()}_no_outputs`
-    const now = new Date().toISOString()
+    const result = await handleRoute(db, '/create_subtask', { parent_task_id: parentTask.id, title: 'No outputs' }) as { task: { output_fields: unknown[] } }
 
-    rawDb.prepare(`
-      INSERT INTO tasks (id, title, description, type, priority, status, assignee, due_date, labels, attachments, repos, output_fields, source, agent_id, skill_ids, parent_task_id, created_at, updated_at)
-      VALUES (?, ?, '', 'general', 'medium', 'not_started', '', NULL, '[]', '[]', '[]', '[]', 'local', NULL, NULL, ?, ?, ?)
-    `).run(subtaskId, 'Subtask no outputs', parentTask.id, now, now)
-
-    const subtask = db.getTask(subtaskId)!
-    expect(subtask.output_fields).toEqual([])
+    expect(result.task.output_fields).toEqual([])
   })
 })
 
@@ -709,49 +594,14 @@ describe('Triage lifecycle with output_fields', () => {
 })
 
 describe('/list_tasks - excludes recurring parent templates', () => {
-  it('excludes recurring parent template tasks from list_tasks results', () => {
-    // Create a normal task
+  it('lists instances and ordinary tasks but not recurring templates', async () => {
     db.createTask(makeTask({ title: 'Normal Task' }))
+    const template = db.createTask(makeTask({ title: 'Daily Standup Template', cron: '0 9 * * *' }))!
+    db.createTask(makeTask({ title: 'Daily Standup - Apr 9', recurrence_parent_id: template.id }))
 
-    // Create a recurring template (is_recurring=1, recurrence_parent_id=NULL)
-    const template = db.createTask(makeTask({ title: 'Daily Standup Template' }))!
-    rawDb.prepare('UPDATE tasks SET is_recurring = 1, recurrence_pattern = ? WHERE id = ?')
-      .run('0 9 * * *', template.id)
+    const tasks = await handleRoute(db, '/list_tasks', {}) as Array<Record<string, unknown>>
 
-    // Create a recurring instance (is_recurring=0, recurrence_parent_id set)
-    const instance = db.createTask(makeTask({ title: 'Daily Standup - Apr 9' }))!
-    rawDb.prepare('UPDATE tasks SET recurrence_parent_id = ? WHERE id = ?')
-      .run(template.id, instance.id)
-
-    // Simulate /list_tasks query — should exclude recurring parent templates
-    const query = 'SELECT * FROM tasks WHERE NOT (is_recurring = 1 AND recurrence_parent_id IS NULL) ORDER BY created_at DESC'
-    const tasks = rawDb.prepare(query).all() as Record<string, unknown>[]
-
-    expect(tasks).toHaveLength(2)
-    const titles = tasks.map((t) => t.title)
-    expect(titles).toContain('Normal Task')
-    expect(titles).toContain('Daily Standup - Apr 9')
-    expect(titles).not.toContain('Daily Standup Template')
-  })
-
-  it('includes recurring instances (tasks with recurrence_parent_id)', () => {
-    const template = db.createTask(makeTask({ title: 'Template' }))!
-    rawDb.prepare('UPDATE tasks SET is_recurring = 1, recurrence_pattern = ? WHERE id = ?')
-      .run('0 9 * * *', template.id)
-
-    // Create two instances from the template
-    const i1 = db.createTask(makeTask({ title: 'Instance 1' }))!
-    rawDb.prepare('UPDATE tasks SET recurrence_parent_id = ? WHERE id = ?').run(template.id, i1.id)
-    const i2 = db.createTask(makeTask({ title: 'Instance 2' }))!
-    rawDb.prepare('UPDATE tasks SET recurrence_parent_id = ? WHERE id = ?').run(template.id, i2.id)
-
-    const query = 'SELECT * FROM tasks WHERE NOT (is_recurring = 1 AND recurrence_parent_id IS NULL) ORDER BY created_at DESC'
-    const tasks = rawDb.prepare(query).all() as Record<string, unknown>[]
-
-    const titles = tasks.map((t) => t.title)
-    expect(titles).toContain('Instance 1')
-    expect(titles).toContain('Instance 2')
-    expect(titles).not.toContain('Template')
+    expect(tasks.map((t) => t.title).sort()).toEqual(['Daily Standup - Apr 9', 'Normal Task'])
   })
 })
 

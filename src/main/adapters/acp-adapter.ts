@@ -1,101 +1,53 @@
 /**
  * Unified ACP (Agent Client Protocol) adapter for all ACP-compatible coding agents.
- * Supports: codex-acp and other ACP-compliant agent processes.
+ * Supports: codex-acp and cursor-agent.
  *
  * Protocol: JSON-RPC 2.0 over stdio (newline-delimited JSON)
  * Spec: https://github.com/agentclientprotocol/typescript-sdk
  */
 
-import { spawn, execFile, ChildProcess } from 'child_process'
-import { randomUUID } from 'crypto'
+import { spawn, ChildProcess } from 'child_process'
 import { guardChildStreams } from '../child-stream-guards'
-import { mkdtempSync } from 'fs'
-import { homedir, tmpdir } from 'os'
-import { dirname, join } from 'path'
-import { promisify } from 'util'
 import type {
   CodingAgentAdapter,
   SessionConfig,
   SessionMessage,
   SessionStatus,
-  MessagePart,
-  McpServerConfig
+  MessagePart
 } from './coding-agent-adapter'
-import { SessionStatusType, MessagePartType, MessageRole } from './coding-agent-adapter'
+import { SessionStatusType } from './coding-agent-adapter'
+import {
+  acpModelValue,
+  applyCursorAuthEnv,
+  convertAcpMcpServers,
+  getAcpAgentConfig,
+  pickAcpAuthMethod,
+  type AcpAgentConfig,
+  type AcpAgentType
+} from './acp-agent-config'
+import {
+  convertAcpEventToMessageParts,
+  extractTextFromUpdateContent,
+  isAssistantChunkUpdateType,
+  mergeStreamingText,
+  type AcpTurnState,
+  type SessionUpdate
+} from './acp-event-converter'
+import { applyCodexAuthEnv } from './shared/codex-auth'
+import { execFileAsync } from '../find-executable'
+import {
+  sendJsonRpcRequest,
+  writeJsonRpc,
+  type JsonRpcError,
+  type JsonRpcMessage,
+  type JsonRpcNotification,
+  type JsonRpcPeer,
+  type JsonRpcRequest,
+  type JsonRpcResponse
+} from './shared/json-rpc'
+import { onJsonLines } from './shared/jsonl'
+import { groupPartsIntoMessages } from './shared/session-messages'
 
-// ACP Agent Types
-export type AcpAgentType = 'codex' | 'cursor'
-
-const execFileAsync = promisify(execFile)
-
-const CURSOR_ACP_MODEL_VALUES: Record<string, string> = {
-  'composer-2.5': 'composer-2.5[fast=true]',
-  'grok-4.5': 'grok-4.5[effort=high,fast=true]'
-}
-
-// ACP Agent Process Configuration
-interface AcpAgentConfig {
-  command: string  // e.g., 'codex-acp'
-  args: string[]   // Additional arguments
-  env?: Record<string, string>  // Environment variables
-}
-
-// JSON-RPC 2.0 Types
-interface JsonRpcRequest {
-  jsonrpc: '2.0'
-  id: string | number
-  method: string
-  params?: unknown
-}
-
-interface JsonRpcNotification {
-  jsonrpc: '2.0'
-  method: string
-  params?: unknown
-}
-
-interface JsonRpcResponse {
-  jsonrpc: '2.0'
-  id: string | number
-  result?: unknown
-  error?: {
-    code: number
-    message: string
-    data?: unknown
-  }
-}
-
-interface JsonRpcError {
-  jsonrpc: '2.0'
-  id: string | number
-  error: {
-    code: number
-    message: string
-    data?: unknown
-  }
-}
-
-type JsonRpcMessage = JsonRpcRequest | JsonRpcNotification | JsonRpcResponse | JsonRpcError
-
-// ACP Session Update Notification
-interface SessionUpdate {
-  sessionUpdate?: string
-  messageId?: string
-  toolCallId?: string
-  title?: string
-  kind?: string
-  status?: string
-  rawInput?: unknown
-  rawOutput?: unknown
-  content?: unknown
-  entries?: Array<{
-    content: string
-    priority: string
-    status: string
-  }>
-}
-
-// ACP Permission Request
 interface AcpPermissionRequest {
   requestId: string | number
   toolCallId: string
@@ -107,623 +59,272 @@ interface AcpPermissionRequest {
   }>
 }
 
-// ACP Session State
-interface AcpSession {
-  sessionId: string  // Our internal session ID
-  acpSessionId: string | null  // ACP protocol session ID
+interface AcpSession extends AcpTurnState, JsonRpcPeer {
+  /** Our internal session ID */
+  sessionId: string
+  /** ACP protocol session ID */
+  acpSessionId: string | null
   process: ChildProcess
-  stdoutBuffer: string
   status: SessionStatusType
-  messageBuffer: unknown[]  // Buffered ACP events (cleared after poll)
-  permanentMessages: unknown[]  // All messages (never cleared, for getAllMessages)
-  pendingRequests: Map<string | number, {
-    resolve: (value: unknown) => void
-    reject: (error: Error) => void
-  }>
-  nextRequestId: number
-  pendingApproval: AcpPermissionRequest | null  // Permission request awaiting user response
+  /** Buffered ACP events (cleared after poll) */
+  messageBuffer: unknown[]
+  /** All messages (never cleared, replayed by getAllMessages) */
+  permanentMessages: unknown[]
+  /** Permission request awaiting user response */
+  pendingApproval: AcpPermissionRequest | null
   config: SessionConfig
-  promptRequestId: number | null  // ID of the current session/prompt request
-  responseCounter: number  // Counter for unique message IDs per response turn
-  currentUserTurnId: number  // Auto-incremented ID for each detected user turn
-  lastChunkTime: number | null  // Timestamp of last agent_message_chunk
-  currentTurnId: number  // Auto-incremented ID for each detected response turn
-  lastSessionUpdateType: string | null
-  activeTurnId: number | null  // Current turn tied to an in-flight session/prompt
-  pendingAssistantTurnSplit: boolean  // True after tool activity; next assistant chunk must start a new turn
-  toolCallMetadata: Map<string, { name: string; input: string; title?: string }>  // Cached metadata from initial tool_call events
-  lastError: string | null  // Last error message (e.g., quota exceeded) for status reporting
-  codexUseApiKey: boolean  // True when Codex auth uses an API key (vs. ChatGPT subscription / CLI login)
-  codexAuthSummary: string  // Human-readable auth identity used (for diagnostics, surfaced in errors)
+  /** ID of the current session/prompt request */
+  promptRequestId: number | null
+  /** Last error (e.g. quota exceeded) for status reporting */
+  lastError: string | null
+  /** True when Codex auth uses an API key (vs. ChatGPT subscription / CLI login) */
+  codexUseApiKey: boolean
+  /** Auth identity used, surfaced in provider errors for diagnostics */
+  codexAuthSummary: string
 }
 
 /**
- * Unified ACP adapter for all ACP-compatible agents
+ * Maximum number of raw JSON-RPC messages kept for replay on resume. 1,000
+ * events cover ~50-100 turns; each event can be multi-KB (tool outputs).
  */
+const MAX_PERMANENT_MESSAGES = 1000
+const MAX_HISTORY_OUTPUT_CHARS = 100_000
+
 export class AcpAdapter implements CodingAgentAdapter {
   private agentType: AcpAgentType
   private agentConfig: AcpAgentConfig
   private sessions = new Map<string, AcpSession>()
   private debugRpcLogs: boolean
 
-  /**
-   * Maximum number of raw JSON-RPC messages to keep in permanent history.
-   * This is used for replaying transcripts upon session resume.
-   * 1,000 events is enough for ~50-100 turns.  Lowered from 2,000 to reduce
-   * memory footprint — each event can be multi-KB (tool outputs).
-   */
-  private static readonly MAX_PERMANENT_MESSAGES = 1000
-
-  /**
-   * Maximum number of entries in toolCallMetadata before pruning.
-   * This map caches tool_call metadata for in-progress tool calls and should
-   * be pruned if it grows beyond what's reasonable (e.g. due to un-cleaned
-   * entries from tool calls that never completed).
-   */
-  private static readonly MAX_TOOL_CALL_METADATA = 500
-
   /** Callback set by agent-manager to trigger an immediate poll cycle */
   onDataAvailable?: (sessionId: string) => void
 
   constructor(agentType: AcpAgentType) {
     this.agentType = agentType
-    this.agentConfig = this.getAgentConfig(agentType)
-    this.debugRpcLogs = AcpAdapter.isDebugLogLevel(process.env.LOG_LEVEL)
+    this.agentConfig = getAcpAgentConfig(agentType)
+    const logLevel = process.env.LOG_LEVEL?.trim().toLowerCase()
+    this.debugRpcLogs = logLevel === 'debug' || logLevel === 'trace'
   }
 
-  private static isDebugLogLevel(value: string | undefined): boolean {
-    if (!value) return false
-    const normalized = value.trim().toLowerCase()
-    return normalized === 'debug' || normalized === 'trace'
+  private get label(): string {
+    return `AcpAdapter/${this.agentType}`
   }
 
-  /**
-   * Resolve the codex-acp entrypoint.
-   *
-   * New package (@agentclientprotocol/codex-acp >=1.x) ships as a Node.js
-   * entrypoint (dist/index.js) that internally spawns the bundled @openai/codex.
-   * It is NOT a native binary, so we spawn it via `node <entry>`.
-   *
-   * Old package (@zed-industries/codex-acp 0.16.0) shipped as native binaries
-   * per platform (codex-acp-darwin-arm64 etc). That package is deprecated and
-   * has been removed from dependencies; we keep a fallback resolver for users
-   * who still have it on disk or in an unpacked ASAR.
-   */
-  private resolveCodexBinary(): string {
-    // Prefer new package
-    try {
-      const entry = require.resolve('@agentclientprotocol/codex-acp/dist/index.js')
-      console.log(`[AcpAdapter/codex] Resolved new codex-acp entry: ${entry}`)
-      return entry
-    } catch {
-      // Fallback to deprecated native binary
-    }
-
-    const platformMap: Record<string, Record<string, string>> = {
-      darwin: { arm64: 'codex-acp-darwin-arm64', x64: 'codex-acp-darwin-x64' },
-      linux: { arm64: 'codex-acp-linux-arm64', x64: 'codex-acp-linux-x64' },
-      win32: { arm64: 'codex-acp-win32-arm64', x64: 'codex-acp-win32-x64' },
-    }
-
-    const packages = platformMap[process.platform]
-    if (!packages) throw new Error(`Unsupported platform for codex-acp: ${process.platform}`)
-    const packageName = packages[process.arch]
-    if (!packageName) throw new Error(`Unsupported arch for codex-acp: ${process.arch} on ${process.platform}`)
-
-    const binaryName = process.platform === 'win32' ? 'codex-acp.exe' : 'codex-acp'
-
-    // Resolve from deprecated package's own directory so pnpm's nested optional deps are found.
-    const codexAcpDir = dirname(require.resolve('@zed-industries/codex-acp/package.json'))
-    let binaryPath = require.resolve(
-      `@zed-industries/${packageName}/bin/${binaryName}`,
-      { paths: [codexAcpDir] }
-    )
-
-    // In a packaged Electron app, require.resolve returns an ASAR path like:
-    //   /Applications/20x.app/Contents/Resources/app.asar/node_modules/.../bin/codex-acp
-    // The native binary is auto-unpacked to app.asar.unpacked, so fix the path.
-    if (binaryPath.includes('app.asar')) {
-      binaryPath = binaryPath.replace('app.asar', 'app.asar.unpacked')
-    }
-
-    console.log(`[AcpAdapter/codex] Resolved native binary (deprecated package): ${binaryPath}`)
-    return binaryPath
-  }
-
-  private isNewCodexPackage(entryPath: string): boolean {
-    return entryPath.includes('@agentclientprotocol') || entryPath.endsWith('dist/index.js')
-  }
-
-  private getAgentConfig(agentType: AcpAgentType): AcpAgentConfig {
-    switch (agentType) {
-      case 'codex': {
-        const resolved = this.resolveCodexBinary()
-        if (this.isNewCodexPackage(resolved)) {
-          // New package is a Node script — spawn via node/electron's Node
-          return {
-            command: process.execPath,
-            args: [resolved],
-            env: {}
-          }
-        }
-        // Legacy native binary
-        return {
-          command: resolved,
-          args: [],
-          env: {}
-        }
-      }
-      case 'cursor':
-        return {
-          command: 'cursor-agent',
-          args: ['acp'],
-          env: {}
-        }
-      default:
-        throw new Error(`Unsupported ACP agent type: ${agentType}`)
-    }
-  }
-
-  /**
-   * Decide how Codex authenticates for this session and mutate `env` accordingly.
-   * Returns true when API-key auth is used, false when the ChatGPT subscription /
-   * Codex CLI login is used.
-   *
-   * The user's explicit choice in the agent configuration (config.authMethod) is
-   * the source of truth:
-   *   - 'subscription' -> use the Codex CLI login (~/.codex), exactly like running
-   *     `codex` in a terminal. Any ambient OPENAI_API_KEY/CODEX_API_KEY inherited
-   *     from the user's shell is STRIPPED so it cannot hijack auth into API-key
-   *     mode (which bills a separate, often-exhausted quota and made 20x show
-   *     "out of rate limits" even though the terminal subscription worked fine).
-   *   - 'api_key' -> use an API key (the per-agent config key if set, otherwise the
-   *     ambient one) in an isolated temp CODEX_HOME so keys can differ per session.
-   *
-   * When authMethod is unset (legacy agents), fall back to the historical rule but
-   * WITHOUT the ambient-key hijack: only an explicitly-configured per-agent API
-   * key implies API-key mode; otherwise default to the subscription/login path.
-   */
+  /** Returns true when Codex uses API-key auth; see applyCodexAuthEnv. */
   private configureCodexAuthEnv(env: Record<string, string | undefined>, config: SessionConfig): boolean {
     if (this.agentType !== 'codex') return false
-
-    const explicitApiKey = config.apiKeys?.openai
-    const useApiKey =
-      config.authMethod === 'api_key' ? true
-      : config.authMethod === 'subscription' ? false
-      : !!explicitApiKey // legacy default: only an explicit key opts into API-key mode
-
-    if (useApiKey) {
-      const key = explicitApiKey || env.OPENAI_API_KEY || env.CODEX_API_KEY
-      if (key) {
-        env.OPENAI_API_KEY = key
-        env.CODEX_API_KEY = key
-      }
-      env.NO_BROWSER = '1'
-      env.CODEX_HOME = mkdtempSync(join(tmpdir(), 'codex-session-'))
-      console.log(`[AcpAdapter/codex] Auth: API key (authMethod=${config.authMethod ?? 'legacy'}, isolated CODEX_HOME)`)
-      return true
-    }
-
-    // Subscription / Codex CLI login path. Strip ambient keys so they can't
-    // hijack auth away from the ChatGPT subscription in the default CODEX_HOME.
-    delete env.OPENAI_API_KEY
-    delete env.CODEX_API_KEY
-    // Pin CODEX_HOME to the same dir the `codex` CLI uses in a terminal, so
-    // codex-acp reads the exact subscription login the user already has. We only
-    // set it when not already provided (a user who runs `codex` with a custom
-    // CODEX_HOME will have it in their shell env, which we inherit and preserve).
-    if (!env.CODEX_HOME) {
-      env.CODEX_HOME = join(homedir(), '.codex')
-    }
-    console.log(`[AcpAdapter/codex] Auth: ChatGPT subscription / Codex CLI login (authMethod=${config.authMethod ?? 'legacy'}, CODEX_HOME=${env.CODEX_HOME})`)
-    return false
+    const { usesApiKey, summary } = applyCodexAuthEnv(env, config)
+    console.log(`[${this.label}] Auth: ${summary}`)
+    return usesApiKey
   }
 
   private configureCursorAuthEnv(env: Record<string, string | undefined>, config: SessionConfig): void {
-    if (this.agentType !== 'cursor') return
-
-    const explicitApiKey = config.apiKeys?.cursor
-    const useApiKey = config.authMethod === 'api_key'
-      || (config.authMethod !== 'subscription' && !!explicitApiKey)
-
-    if (useApiKey) {
-      const key = explicitApiKey || env.CURSOR_API_KEY
-      if (!key) {
-        throw new Error('Cursor API-key authentication requires a configured key or CURSOR_API_KEY')
-      }
-      env.CURSOR_API_KEY = key
-      delete env.CURSOR_AUTH_TOKEN
-      console.log('[AcpAdapter/cursor] Auth: API key')
-      return
-    }
-
-    // CLI login is authoritative in subscription mode; ambient keys must not
-    // silently switch billing/authentication away from the logged-in account.
-    delete env.CURSOR_API_KEY
-    delete env.CURSOR_AUTH_TOKEN
-    console.log('[AcpAdapter/cursor] Auth: Cursor CLI login')
+    if (this.agentType === 'cursor') applyCursorAuthEnv(env, config)
   }
 
   async initialize(): Promise<void> {
-    // Verify agent process is available
     const health = await this.checkHealth()
     if (!health.available) {
       throw new Error(health.reason || 'ACP agent not available')
     }
-    console.log(`[AcpAdapter/${this.agentType}] Initialized successfully`)
+    console.log(`[${this.label}] Initialized successfully`)
   }
 
-  /**
-   * Authenticate the session if required
-   */
   private async authenticateSession(session: AcpSession, initResult: unknown): Promise<void> {
     const initObj = initResult as Record<string, unknown> | undefined
     const authMethods = (Array.isArray(initObj?.authMethods) ? initObj.authMethods : []) as Array<{ id: string; [key: string]: unknown }>
 
-    if (authMethods.length > 0) {
-      // Use the auth mode decided in configureCodexAuthEnv() rather than sniffing
-      // ambient env vars. An ambient OPENAI_API_KEY in the user's shell must not
-      // flip a subscription user into API-key auth (and filter out "chatgpt").
-      const hasOpenAiKey = session.codexUseApiKey
+    if (authMethods.length === 0) {
+      console.log(`[${this.label}] No auth methods advertised by agent (already authenticated); codexUseApiKey=${session.codexUseApiKey}`)
+      return
+    }
 
-      // When using an API key, filter out "chatgpt" browser-based auth so
-      // codex-acp uses the key instead of opening an OAuth popup. On the
-      // subscription path, allow all methods including chatgpt (Codex CLI login).
-      const usableMethods = (this.agentType === 'codex' && hasOpenAiKey)
-        ? authMethods.filter((m) => m.id !== 'chatgpt')
-        : authMethods
+    // Use the auth mode decided in configureCodexAuthEnv() rather than sniffing
+    // env vars: an ambient OPENAI_API_KEY must not flip a subscription user into
+    // API-key auth.
+    const authMethod = pickAcpAuthMethod(this.agentType, authMethods, session.codexUseApiKey)
+    console.log(`[${this.label}] Available auth methods: [${authMethods.map((m) => m.id).join(', ')}]; codexUseApiKey=${session.codexUseApiKey}`)
 
-      const apiKeyMethod = usableMethods.find((m) =>
-        m.id === 'openai-api-key' || m.id === 'codex-api-key'
-      )
+    if (!authMethod) {
+      console.log(`[${this.label}] No usable auth method found; skipping authenticate`)
+      return
+    }
 
-      // Select an API-key method when a key is available, otherwise fall back to
-      // any non-key auth method (e.g. existing Codex CLI login via chatgpt).
-      const authMethod = hasOpenAiKey
-        ? (apiKeyMethod || usableMethods[0])
-        : (usableMethods.find((m) => m.id !== 'openai-api-key' && m.id !== 'codex-api-key') || apiKeyMethod || null)
+    // No `logout` first: with an API key, CODEX_HOME is a per-session temp
+    // directory, so there are no stale disk credentials and keys can differ
+    // per session.
+    console.log(`[${this.label}] Authenticating with method: ${authMethod.id}`)
+    session.codexAuthSummary = `${session.codexUseApiKey ? 'API key' : 'subscription'} via authenticate(${authMethod.id})`
+    await this.sendRpcRequest(session, 'authenticate', { methodId: authMethod.id })
+  }
 
-      console.log(`[AcpAdapter/${this.agentType}] Available auth methods: [${authMethods.map((m) => m.id).join(', ')}]; codexUseApiKey=${session.codexUseApiKey}`)
+  /**
+   * Spawns the agent process, registers the session under `sessionId`, and runs
+   * the ACP initialize + authenticate handshake.
+   */
+  private async startSession(sessionId: string, acpSessionId: string | null, config: SessionConfig): Promise<AcpSession> {
+    const env: Record<string, string | undefined> = {
+      ...process.env,
+      ...this.agentConfig.env,
+      ...(config.apiKeys?.anthropic ? { ANTHROPIC_API_KEY: config.apiKeys.anthropic } : {}),
+      ...config.secretEnvVars
+    }
 
-      if (!authMethod) {
-        console.log(`[AcpAdapter/${this.agentType}] No usable auth method found; skipping authenticate`)
-        return
+    // Auth is decided LAST so it is authoritative over injected secrets.
+    const codexUseApiKey = this.configureCodexAuthEnv(env, config)
+    this.configureCursorAuthEnv(env, config)
+    const codexAuthSummary = this.agentType === 'codex'
+      ? `${codexUseApiKey ? 'API key' : 'subscription'} (authMethod=${config.authMethod ?? 'legacy'}, CODEX_HOME=${env.CODEX_HOME ?? 'default'})`
+      : ''
+
+    // On Windows, .cmd/.bat wrappers need shell:true to resolve
+    const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(this.agentConfig.command)
+    const acpProcess = spawn(this.agentConfig.command, this.agentConfig.args, {
+      cwd: config.workspaceDir,
+      env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      ...(needsShell ? { shell: true } : {})
+    })
+
+    // Every pipe needs an error listener before the first write. The agent can
+    // exit at any moment, and an unhandled EPIPE on its stdin takes the whole
+    // main process down with a crash dialog.
+    guardChildStreams(acpProcess, this.label)
+
+    const session: AcpSession = {
+      sessionId,
+      acpSessionId,
+      process: acpProcess,
+      status: SessionStatusType.IDLE,
+      messageBuffer: [],
+      permanentMessages: [],
+      pendingRequests: new Map(),
+      nextRequestId: 1,
+      pendingApproval: null,
+      config,
+      promptRequestId: null,
+      currentUserTurnId: 0,
+      lastChunkTime: null,
+      currentTurnId: 0,
+      lastSessionUpdateType: null,
+      activeTurnId: null,
+      pendingAssistantTurnSplit: false,
+      toolCallMetadata: new Map(),
+      lastError: null,
+      codexUseApiKey,
+      codexAuthSummary
+    }
+    this.sessions.set(sessionId, session)
+
+    onJsonLines(acpProcess.stdout, (line) => {
+      try {
+        this.handleRpcMessage(session, JSON.parse(line) as JsonRpcMessage)
+      } catch (error) {
+        console.error(`[${this.label}] Failed to parse JSON-RPC message:`, line, error)
       }
+    })
+    acpProcess.stderr?.on('data', (chunk: Buffer) => {
+      console.log(`[${this.label}] stderr:`, chunk.toString())
+    })
+    acpProcess.on('exit', (code, signal) => {
+      console.log(`[${this.label}] Process exited: code=${code}, signal=${signal}`)
+      session.status = code === 0 ? SessionStatusType.IDLE : SessionStatusType.ERROR
+    })
 
-      // Note: we do NOT call `logout` before authenticate. When an API key is
-      // provided, CODEX_HOME points to a per-session temp directory so there are
-      // no stale disk credentials. This allows different API keys per session.
+    const initResult = await this.sendRpcRequest(session, 'initialize', {
+      protocolVersion: 1,
+      clientCapabilities: {
+        fs: { readTextFile: false, writeTextFile: false },
+        terminal: false
+      },
+      clientInfo: {
+        name: 'pf-desktop',
+        version: '0.0.1'
+      }
+    })
+    await this.authenticateSession(session, initResult)
+    return session
+  }
 
-      console.log(`[AcpAdapter/${this.agentType}] Authenticating with method: ${authMethod.id}`)
-      session.codexAuthSummary = `${session.codexUseApiKey ? 'API key' : 'subscription'} via authenticate(${authMethod.id})`
-
-      await this.sendRpcRequest(session, 'authenticate', {
-        methodId: authMethod.id
+  /** Applies an optional session config option; the agent keeps its default on failure. */
+  private async setConfigOption(session: AcpSession, configId: string, value: string): Promise<void> {
+    try {
+      await this.sendRpcRequest(session, 'session/set_config_option', {
+        sessionId: session.acpSessionId,
+        configId,
+        value
       })
-    } else {
-      console.log(`[AcpAdapter/${this.agentType}] No auth methods advertised by agent (already authenticated); codexUseApiKey=${session.codexUseApiKey}`)
+      console.log(`[${this.label}] ${configId} set to: ${value}`)
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : String(error)
+      console.warn(`[${this.label}] Failed to set ${configId}: ${errMsg}`)
     }
   }
 
   async createSession(config: SessionConfig): Promise<string> {
     const sessionId = config.taskId
+    console.log(`[${this.label}] Creating session ${sessionId}`)
 
-    console.log(`[AcpAdapter/${this.agentType}] Creating session ${sessionId}`)
+    const session = await this.startSession(sessionId, null, config)
 
-    // Prepare environment with API keys
-    const env = {
-      ...process.env,
-      ...this.agentConfig.env
-    }
-
-    if (config.apiKeys?.anthropic) {
-      env.ANTHROPIC_API_KEY = config.apiKeys.anthropic
-    }
-
-    // Inject secret env vars directly into process environment
-    if (config.secretEnvVars && Object.keys(config.secretEnvVars).length > 0) {
-      for (const [key, value] of Object.entries(config.secretEnvVars)) {
-        env[key] = value
-      }
-    }
-
-    // Decide Codex auth (subscription vs API key) LAST so it is authoritative.
-    // It must run after secret-env injection: a user secret named OPENAI_API_KEY /
-    // CODEX_API_KEY would otherwise be re-added to env after subscription mode
-    // stripped it, re-hijacking Codex into API-key auth (stale "out of rate
-    // limits" that survives restarts because the secret lives in the DB).
-    const codexUseApiKey = this.configureCodexAuthEnv(env, config)
-    this.configureCursorAuthEnv(env, config)
-    const codexAuthSummary = this.agentType === 'codex'
-      ? `${codexUseApiKey ? 'API key' : 'subscription'} (authMethod=${config.authMethod ?? 'legacy'}, CODEX_HOME=${env.CODEX_HOME ?? 'default'})`
-      : ''
-
-    // Spawn ACP agent process
-    // On Windows, .cmd/.bat wrappers need shell:true to resolve
-    const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(this.agentConfig.command)
-    const acpProcess = spawn(
-      this.agentConfig.command,
-      this.agentConfig.args,
-      {
-        cwd: config.workspaceDir,
-        env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        ...(needsShell ? { shell: true } : {})
-      }
-    )
-
-    // Every pipe needs an error listener before the first write. The agent can
-    // exit at any moment, and an unhandled EPIPE on its stdin takes the whole
-    // main process down with a crash dialog.
-    guardChildStreams(acpProcess, `AcpAdapter/${this.agentType}`)
-
-    const session: AcpSession = {
-      sessionId,
-      acpSessionId: null,
-      process: acpProcess,
-      stdoutBuffer: '',
-      status: SessionStatusType.IDLE,
-      messageBuffer: [],
-      permanentMessages: [],
-      pendingRequests: new Map(),
-      nextRequestId: 1,
-      pendingApproval: null,
-      config,
-      promptRequestId: null,
-      responseCounter: 0,
-      currentUserTurnId: 0,
-      lastChunkTime: null,
-      currentTurnId: 0,
-      lastSessionUpdateType: null,
-      activeTurnId: null,
-      pendingAssistantTurnSplit: false,
-      toolCallMetadata: new Map(),
-      lastError: null,
-      codexUseApiKey,
-      codexAuthSummary
-    }
-
-    // Temporarily store with workspace ID, will re-key after getting ACP session ID
-    this.sessions.set(sessionId, session)
-
-    // Set up stdout parser
-    this.setupStdoutParser(acpProcess, session)
-
-    // Set up stderr logging
-    acpProcess.stderr?.on('data', (chunk: Buffer) => {
-      console.log(`[AcpAdapter/${this.agentType}] stderr:`, chunk.toString())
-    })
-
-    // Handle process exit
-    acpProcess.on('exit', (code, signal) => {
-      console.log(`[AcpAdapter/${this.agentType}] Process exited: code=${code}, signal=${signal}`)
-      session.status = code === 0 ? SessionStatusType.IDLE : SessionStatusType.ERROR
-    })
-
-    // Initialize ACP protocol
-    const initResult = await this.sendRpcRequest(session, 'initialize', {
-      protocolVersion: 1,
-      clientCapabilities: {
-        fs: { readTextFile: false, writeTextFile: false },
-        terminal: false
-      },
-      clientInfo: {
-        name: 'pf-desktop',
-        version: '0.0.1'
-      }
-    })
-
-    // Authenticate if required
-    await this.authenticateSession(session, initResult)
-
-    // Create ACP session (only accepts cwd and mcpServers per ACP spec)
-    const convertedMcpServers = this.convertMcpServers(config.mcpServers) || []
-    console.log(`[AcpAdapter/${this.agentType}] session/new mcpServers:`, JSON.stringify(convertedMcpServers))
+    // session/new only accepts cwd and mcpServers per the ACP spec.
+    const mcpServers = convertAcpMcpServers(config.mcpServers)
+    console.log(`[${this.label}] session/new mcpServers:`, JSON.stringify(mcpServers))
     const result = await this.sendRpcRequest(session, 'session/new', {
       cwd: config.workspaceDir,
-      mcpServers: convertedMcpServers
+      mcpServers
     })
 
-    // Extract session ID from result
     const acpSessionId = this.extractAcpSessionId(result)
     if (acpSessionId) {
       session.acpSessionId = acpSessionId
-      // Re-key the session map with the ACP session ID
       this.sessions.delete(sessionId)
       this.sessions.set(acpSessionId, session)
-    }
 
-    // Set model if specified
-    if (config.model && acpSessionId) {
-      try {
-        const modelValue = this.agentType === 'cursor'
-          ? CURSOR_ACP_MODEL_VALUES[config.model] ?? config.model
-          : config.model
-        await this.sendRpcRequest(session, 'session/set_config_option', {
-          sessionId: acpSessionId,
-          configId: 'model',
-          value: modelValue
-        })
-        console.log(`[AcpAdapter/${this.agentType}] Model set to: ${config.model}`)
-      } catch (error: unknown) {
-        const errMsg = error instanceof Error ? error.message : String(error)
-        console.warn(`[AcpAdapter/${this.agentType}] Failed to set model: ${errMsg}`)
-        // Continue even if model setting fails (agent will use default)
+      if (config.model) {
+        await this.setConfigOption(session, 'model', acpModelValue(this.agentType, config.model))
+      }
+      if (config.reasoningEffort && config.reasoningEffort !== 'max') {
+        await this.setConfigOption(session, 'model_reasoning_effort', config.reasoningEffort)
       }
     }
 
-    if (config.reasoningEffort && config.reasoningEffort !== 'max' && acpSessionId) {
-      try {
-        await this.sendRpcRequest(session, 'session/set_config_option', {
-          sessionId: acpSessionId,
-          configId: 'model_reasoning_effort',
-          value: config.reasoningEffort
-        })
-        console.log(`[AcpAdapter/${this.agentType}] Reasoning effort set to: ${config.reasoningEffort}`)
-      } catch (error: unknown) {
-        const errMsg = error instanceof Error ? error.message : String(error)
-        console.warn(`[AcpAdapter/${this.agentType}] Failed to set reasoning effort: ${errMsg}`)
-        // Continue even if reasoning effort setting fails (agent will use default)
-      }
-    }
-
-    console.log(`[AcpAdapter/${this.agentType}] Session created: ${sessionId} (ACP: ${acpSessionId})`)
-
-    // Return the ACP session ID so it can be persisted and used for resuming
+    console.log(`[${this.label}] Session created: ${sessionId} (ACP: ${acpSessionId})`)
+    // The ACP session ID is persisted and used for resuming.
     return acpSessionId || sessionId
   }
 
   async resumeSession(sessionId: string, config: SessionConfig): Promise<SessionMessage[]> {
-    console.log(`[AcpAdapter/${this.agentType}] Resuming session ${sessionId}`)
-    console.log(`[AcpAdapter/${this.agentType}] Config API keys:`, {
-      hasApiKeys: !!config.apiKeys,
-      hasOpenai: !!config.apiKeys?.openai,
-      hasAnthropic: !!config.apiKeys?.anthropic,
-      anthropicKeyLength: config.apiKeys?.anthropic?.length
-    })
+    console.log(`[${this.label}] Resuming session ${sessionId}`)
 
-    // Prepare environment with API keys
-    const env = {
-      ...process.env,
-      ...this.agentConfig.env
-    }
+    // sessionId is the ACP session ID returned by createSession.
+    const session = await this.startSession(sessionId, sessionId, config)
 
-    if (config.apiKeys?.anthropic) {
-      env.ANTHROPIC_API_KEY = config.apiKeys.anthropic
-    }
-
-    // Inject secret env vars directly into process environment
-    if (config.secretEnvVars && Object.keys(config.secretEnvVars).length > 0) {
-      for (const [key, value] of Object.entries(config.secretEnvVars)) {
-        env[key] = value
-      }
-    }
-
-    // Decide Codex auth (subscription vs API key) LAST so it is authoritative —
-    // see createSession for why this must run after secret-env injection.
-    const codexUseApiKey = this.configureCodexAuthEnv(env, config)
-    this.configureCursorAuthEnv(env, config)
-    const codexAuthSummary = this.agentType === 'codex'
-      ? `${codexUseApiKey ? 'API key' : 'subscription'} (authMethod=${config.authMethod ?? 'legacy'}, CODEX_HOME=${env.CODEX_HOME ?? 'default'})`
-      : ''
-
-    console.log(`[AcpAdapter/${this.agentType}] Environment after config:`, {
-      hasAnthropicInEnv: !!env.ANTHROPIC_API_KEY,
-      anthropicKeyLength: env.ANTHROPIC_API_KEY?.length,
-      anthropicKeyPrefix: env.ANTHROPIC_API_KEY?.substring(0, 5)
-    })
-
-    // Spawn ACP agent process
-    // On Windows, .cmd/.bat wrappers need shell:true to resolve
-    const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(this.agentConfig.command)
-    const acpProcess = spawn(
-      this.agentConfig.command,
-      this.agentConfig.args,
-      {
-        cwd: config.workspaceDir,
-        env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        ...(needsShell ? { shell: true } : {})
-      }
-    )
-
-    // Every pipe needs an error listener before the first write. The agent can
-    // exit at any moment, and an unhandled EPIPE on its stdin takes the whole
-    // main process down with a crash dialog.
-    guardChildStreams(acpProcess, `AcpAdapter/${this.agentType}`)
-
-    const session: AcpSession = {
-      sessionId,
-      acpSessionId: sessionId, // sessionId is now the Codex UUID from database
-      process: acpProcess,
-      stdoutBuffer: '',
-      status: SessionStatusType.IDLE,
-      messageBuffer: [],
-      permanentMessages: [],
-      pendingRequests: new Map(),
-      nextRequestId: 1,
-      pendingApproval: null,
-      config,
-      promptRequestId: null,
-      responseCounter: 0,
-      currentUserTurnId: 0,
-      lastChunkTime: null,
-      currentTurnId: 0,
-      lastSessionUpdateType: null,
-      activeTurnId: null,
-      pendingAssistantTurnSplit: false,
-      toolCallMetadata: new Map(),
-      lastError: null,
-      codexUseApiKey,
-      codexAuthSummary
-    }
-
-    // Store with the Codex UUID (same as sessionId since we now return UUID from createSession)
-    this.sessions.set(sessionId, session)
-
-    // Set up stdout parser
-    this.setupStdoutParser(acpProcess, session)
-
-    // Set up stderr logging
-    acpProcess.stderr?.on('data', (chunk: Buffer) => {
-      console.log(`[AcpAdapter/${this.agentType}] stderr:`, chunk.toString())
-    })
-
-    // Handle process exit
-    acpProcess.on('exit', (code, signal) => {
-      console.log(`[AcpAdapter/${this.agentType}] Process exited: code=${code}, signal=${signal}`)
-      session.status = code === 0 ? SessionStatusType.IDLE : SessionStatusType.ERROR
-    })
-
-    // Initialize ACP protocol
-    const initResult = await this.sendRpcRequest(session, 'initialize', {
-      protocolVersion: 1,
-      clientCapabilities: {
-        fs: { readTextFile: false, writeTextFile: false },
-        terminal: false
-      },
-      clientInfo: {
-        name: 'pf-desktop',
-        version: '0.0.1'
-      }
-    })
-
-    // Authenticate if required
-    await this.authenticateSession(session, initResult)
-
-    // Try to load existing session
     try {
       await this.sendRpcRequest(session, 'session/load', {
-        sessionId: sessionId,
+        sessionId,
         cwd: config.workspaceDir,
-        mcpServers: this.convertMcpServers(config.mcpServers) || []
+        mcpServers: convertAcpMcpServers(config.mcpServers)
       })
+      console.log(`[${this.label}] Session loaded successfully: ${sessionId}`)
 
-      console.log(`[AcpAdapter/${this.agentType}] Session loaded successfully: ${sessionId}`)
-
-      // Convert replayed notifications (buffered during session/load) to SessionMessages.
+      // Notifications replayed during session/load become the returned history.
       // Without this, the renderer sees status:'idle' + messages:[] and hides the panel.
       const messages = await this.getAllMessages(sessionId, config)
 
-      // Drain replayed notifications from the live poll buffer. Otherwise the
-      // first poll after resume/send will emit the whole old transcript again.
+      // Drain the replay from the live poll buffer, or the first poll after
+      // resume would emit the whole old transcript again.
       session.messageBuffer = []
-
       return messages
     } catch (error: unknown) {
-      // Check if session not found
       const errMsg = error instanceof Error ? error.message : String(error)
       if (errMsg.includes('not found') || errMsg.includes('does not exist')) {
-        // Clean up process
-        acpProcess.kill('SIGTERM')
+        session.process.kill('SIGTERM')
         this.sessions.delete(sessionId)
-
         throw new Error(
           `INCOMPATIBLE_SESSION_ID: This ${this.agentType} session does not exist or has expired. Please start a new session.`
         )
       }
-
-      // Re-throw other errors
       throw error
     }
   }
@@ -738,7 +339,6 @@ export class AcpAdapter implements CodingAgentAdapter {
       throw new Error(`Session not found: ${sessionId}`)
     }
 
-    // Extract text from message parts
     const promptText = parts
       .filter(p => p.type === 'text' && p.text)
       .map(p => p.text)
@@ -748,21 +348,17 @@ export class AcpAdapter implements CodingAgentAdapter {
       throw new Error('No text content in message parts')
     }
 
-    console.log(`[AcpAdapter/${this.agentType}] Sending prompt to session ${sessionId} (${promptText.length} chars)`)
+    console.log(`[${this.label}] Sending prompt to session ${sessionId} (${promptText.length} chars)`)
 
-    // Clear stale buffered events from the previous turn. Between the last
-    // pollMessages() call (which empties the buffer) and the idle detection
-    // that stops polling, new ACP notifications can still arrive.  When the
-    // next prompt triggers a fresh PollingEntry (with empty seenPartIds),
-    // those stale events would be re-processed with a new turnId, creating
+    // Clear stale buffered events from the previous turn. Notifications can
+    // arrive between the last poll and idle detection; a fresh PollingEntry
+    // (empty seenPartIds) would re-process them under a new turnId and
     // duplicate messages in the transcript.
     session.messageBuffer = []
 
-    // Store a synthetic user_message event in permanentMessages so that the
-    // user's prompt survives session resume / replay.  During session/load,
-    // the ACP agent may not echo user_message_chunk events, which means
-    // getAllMessages() would return no user parts and the transcript would
-    // show only agent responses.
+    // Record the prompt in permanent history: during session/load the agent may
+    // not echo user_message_chunk events, so resume would otherwise show only
+    // agent responses.
     this.addToPermanentMessages(session, {
       jsonrpc: '2.0',
       method: 'session/update',
@@ -773,26 +369,35 @@ export class AcpAdapter implements CodingAgentAdapter {
           messageId: `user-prompt-${session.currentTurnId + 1}`
         }
       }
-    } as unknown as JsonRpcNotification)
+    })
 
     session.status = SessionStatusType.BUSY
-    session.lastError = null  // Clear any previous error (e.g., quota limit) for recovery
+    session.lastError = null
     session.currentTurnId++
     session.activeTurnId = session.currentTurnId
     session.lastChunkTime = null
 
-    // Send prompt via ACP (prompt must be an array of ContentBlock objects)
-    // Note: session/prompt is a long-running operation that responds via session/update notifications
-    // We send the request but don't await the response to avoid timeout
-    this.sendRpcRequestNoWait(session, 'session/prompt', {
-      sessionId: session.acpSessionId,
-      prompt: [
-        {
-          type: 'text',
-          text: promptText
-        }
-      ]
-    })
+    // session/prompt is long-running and reports progress via session/update
+    // notifications, so it is not awaited (it would hit the RPC timeout). Its
+    // response is matched through promptRequestId in handleRpcMessage.
+    const id = session.nextRequestId++
+    session.promptRequestId = id
+    const failPrompt = (err: Error): void => {
+      if (session.promptRequestId !== id) return
+      session.promptRequestId = null
+      session.status = SessionStatusType.ERROR
+      session.lastError = `Failed to send prompt: ${err.message}`
+    }
+    const sent = writeJsonRpc(session, {
+      jsonrpc: '2.0',
+      id,
+      method: 'session/prompt',
+      params: {
+        sessionId: session.acpSessionId,
+        prompt: [{ type: 'text', text: promptText }]
+      }
+    }, this.label, failPrompt)
+    if (!sent) failPrompt(new Error('agent process is not running'))
   }
 
   async getStatus(sessionId: string, _config: SessionConfig): Promise<SessionStatus> {
@@ -819,17 +424,10 @@ export class AcpAdapter implements CodingAgentAdapter {
       return []
     }
 
-    const newParts: MessagePart[] = []
-
-    // Process buffered ACP events
-    for (const event of session.messageBuffer) {
-      const converted = this.convertAcpEventToMessageParts(event, seenMessageIds, seenPartIds, partContentLengths, session)
-      newParts.push(...converted)
-    }
-
-    // Clear processed events
+    const newParts = session.messageBuffer.flatMap((event) =>
+      this.convertAcpEventToMessageParts(event, seenMessageIds, seenPartIds, partContentLengths, session)
+    )
     session.messageBuffer = []
-
     return newParts
   }
 
@@ -839,15 +437,15 @@ export class AcpAdapter implements CodingAgentAdapter {
       throw new Error(`Session not found: ${sessionId}`)
     }
 
-    console.log(`[AcpAdapter/${this.agentType}] Sending session/cancel for ${sessionId}`)
+    console.log(`[${this.label}] Sending session/cancel for ${sessionId}`)
 
-    // Send session/cancel notification (not a request - no response expected)
-    this.sendRpcNotification(session, 'session/cancel', {
-      sessionId: session.acpSessionId
-    })
-
-    // The agent will respond to the original session/prompt with stopReason: cancelled
-    // Status will be updated when we receive that response
+    // session/cancel is a notification. The agent answers the original
+    // session/prompt with stopReason: cancelled, which settles the status.
+    writeJsonRpc(session, {
+      jsonrpc: '2.0',
+      method: 'session/cancel',
+      params: { sessionId: session.acpSessionId }
+    }, this.label)
   }
 
   async destroySession(sessionId: string, _config: SessionConfig): Promise<void> {
@@ -856,12 +454,9 @@ export class AcpAdapter implements CodingAgentAdapter {
       return
     }
 
-    console.log(`[AcpAdapter/${this.agentType}] Destroying session ${sessionId}`)
+    console.log(`[${this.label}] Destroying session ${sessionId}`)
 
-    // Kill process
     session.process.kill('SIGTERM')
-
-    // Wait a bit, then force kill if needed
     setTimeout(() => {
       if (!session.process.killed) {
         session.process.kill('SIGKILL')
@@ -874,7 +469,6 @@ export class AcpAdapter implements CodingAgentAdapter {
     session.toolCallMetadata.clear()
     session.pendingRequests.clear()
 
-    // Remove session
     this.sessions.delete(sessionId)
   }
 
@@ -884,26 +478,18 @@ export class AcpAdapter implements CodingAgentAdapter {
       return []
     }
 
-    // Convert all permanent messages to SessionMessages
     const seenMessageIds = new Set<string>()
     const seenPartIds = new Set<string>()
     const partContentLengths = new Map<string, string>()
 
-    // Use a Map to keep only the latest version of each part (by ID)
-    const partsByIdAndRole = new Map<string, MessagePart>()
-
-    // Snapshot turn-related session state before processing.
-    // convertAcpEventToMessageParts() mutates turn counters (currentTurnId,
-    // activeTurnId, pendingAssistantTurnSplit, etc.) as it processes events.
-    // When getAllMessages() is called from replayMissedTranscriptPartsBeforeIdle
-    // AFTER a follow-up response, the session state has already advanced.
-    // Re-processing all permanent messages from the beginning with that
-    // advanced state produces DIFFERENT turn-based IDs (e.g. agent-response-5
-    // instead of agent-response-1), which bypass the seenPartIds dedup and
-    // cause every historical message to appear again in the transcript.
-    // By resetting to zero and restoring afterward, we ensure getAllMessages()
-    // always generates deterministic, stable IDs from the permanent history.
-    const savedTurnState = {
+    // convertAcpEventToMessageParts() mutates the turn counters. When this runs
+    // after a follow-up response (replayMissedTranscriptPartsBeforeIdle), the
+    // live state has already advanced; replaying history with it yields
+    // different turn-based IDs (agent-response-5 instead of agent-response-1)
+    // that bypass seenPartIds dedup and duplicate the whole transcript. Replay
+    // from a zeroed state and restore the live state afterwards so IDs are
+    // deterministic.
+    const savedTurnState: AcpTurnState = {
       currentTurnId: session.currentTurnId,
       activeTurnId: session.activeTurnId,
       currentUserTurnId: session.currentUserTurnId,
@@ -912,95 +498,29 @@ export class AcpAdapter implements CodingAgentAdapter {
       pendingAssistantTurnSplit: session.pendingAssistantTurnSplit,
       toolCallMetadata: new Map(session.toolCallMetadata),
     }
+    Object.assign(session, {
+      currentTurnId: 0,
+      activeTurnId: null,
+      currentUserTurnId: 0,
+      lastChunkTime: null,
+      lastSessionUpdateType: null,
+      pendingAssistantTurnSplit: false,
+      toolCallMetadata: new Map(),
+    } satisfies AcpTurnState)
 
-    // Reset to initial state so turn IDs are computed deterministically
-    session.currentTurnId = 0
-    session.activeTurnId = null
-    session.currentUserTurnId = 0
-    session.lastChunkTime = null
-    session.lastSessionUpdateType = null
-    session.pendingAssistantTurnSplit = false
-    session.toolCallMetadata = new Map()
-
-    // Process all permanent messages
+    const allParts: MessagePart[] = []
     for (const event of session.permanentMessages) {
-      const parts = this.convertAcpEventToMessageParts(
-        event,
-        seenMessageIds,
-        seenPartIds,
-        partContentLengths,
-        session
-      )
-
-      // Propagate original arrival time from the permanent event to each part
+      const parts = this.convertAcpEventToMessageParts(event, seenMessageIds, seenPartIds, partContentLengths, session)
+      // Preserve the original arrival time for replay timestamps.
       const receivedAt = (event as Record<string, unknown>)?._receivedAt as number | undefined
-
-      // Keep only latest version of each part
       for (const part of parts) {
         if (receivedAt) part.receivedAt = receivedAt
-        const key = `${part.id}-${part.role || 'assistant'}`
-        // Only keep if newer or doesn't exist
-        if (!partsByIdAndRole.has(key) || part.update) {
-          partsByIdAndRole.set(key, part)
-        }
+        allParts.push(part)
       }
     }
 
-    // Restore live session state so polling / follow-up prompts continue
-    // from where they left off. The turn IDs computed above are only used
-    // for the returned messages — they must not leak into the live session.
-    session.currentTurnId = savedTurnState.currentTurnId
-    session.activeTurnId = savedTurnState.activeTurnId
-    session.currentUserTurnId = savedTurnState.currentUserTurnId
-    session.lastChunkTime = savedTurnState.lastChunkTime
-    session.lastSessionUpdateType = savedTurnState.lastSessionUpdateType
-    session.pendingAssistantTurnSplit = savedTurnState.pendingAssistantTurnSplit
-    session.toolCallMetadata = savedTurnState.toolCallMetadata
-
-    const allParts = Array.from(partsByIdAndRole.values())
-
-    // Convert MessageParts to SessionMessages
-    const messages: SessionMessage[] = []
-
-    // Start a new message whenever the role changes OR the part itself is a
-    // new top-level transcript item. This keeps assistant text that arrives
-    // after tool calls in a separate message instead of appending it to the
-    // earlier assistant text during resume reconstruction.
-    let currentMessage: SessionMessage | null = null
-    let previousPart: MessagePart | null = null
-    let messageIdCounter = 0
-
-    for (const part of allParts) {
-      const roleStr = part.role || 'assistant'
-      const role = roleStr === 'user' ? MessageRole.USER :
-                   roleStr === 'system' ? MessageRole.SYSTEM :
-                   MessageRole.ASSISTANT
-
-      const startsNewMessage = !currentMessage
-        || currentMessage.role !== role
-        || !previousPart
-        || part.id !== previousPart.id
-
-      if (startsNewMessage) {
-        if (currentMessage) {
-          messages.push(currentMessage)
-        }
-        currentMessage = {
-          id: `msg-${messageIdCounter++}`,
-          role,
-          parts: []
-        }
-      }
-
-      currentMessage!.parts.push(part)
-      previousPart = part
-    }
-
-    if (currentMessage) {
-      messages.push(currentMessage)
-    }
-
-    return messages
+    Object.assign(session, savedTurnState)
+    return groupPartsIntoMessages(allParts)
   }
 
   async registerMcpServer(
@@ -1015,67 +535,42 @@ export class AcpAdapter implements CodingAgentAdapter {
     },
     _workspaceDir?: string
   ): Promise<void> {
-    // MCP server registration is handled during session creation
-    console.log(`[AcpAdapter/${this.agentType}] MCP server registration deferred to session creation`)
+    // MCP servers are passed to session/new and session/load instead.
   }
 
   async checkHealth(): Promise<{ available: boolean; reason?: string }> {
-    try {
-      if (this.agentType === 'cursor') {
+    if (this.agentType === 'cursor') {
+      try {
         await execFileAsync(this.agentConfig.command, ['--version'], {
           timeout: 10000,
           windowsHide: true,
           shell: process.platform === 'win32'
         })
         return { available: true }
+      } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : String(error)
+        return { available: false, reason: `Cursor Agent CLI is unavailable. Install it and run cursor-agent login. (${errMsg})` }
       }
+    }
 
-      // Verify the ACP agent package is installed (new or legacy)
-      const candidates = [
-        '@agentclientprotocol/codex-acp/dist/index.js',
-        '@zed-industries/codex-acp/bin/codex-acp.js',
-      ]
-      let found = false
-      for (const entry of candidates) {
-        try {
-          require.resolve(entry)
-          found = true
-          break
-        } catch {}
-      }
-      if (!found) {
-        return {
-          available: false,
-          reason: `@agentclientprotocol/codex-acp not found. Install with: pnpm add @agentclientprotocol/codex-acp`
-        }
-      }
-
-      // Note: We don't check API keys here because they can be provided
-      // via UI configuration (agent.config.api_keys) at session creation time
-
+    // API keys are not checked here: they can come from the agent's UI
+    // configuration at session creation time.
+    try {
+      require.resolve('@agentclientprotocol/codex-acp/dist/index.js')
       return { available: true }
-    } catch (error: unknown) {
-      const errMsg = error instanceof Error ? error.message : String(error)
+    } catch {
       return {
         available: false,
-        reason: this.agentType === 'cursor'
-          ? `Cursor Agent CLI is unavailable. Install it and run cursor-agent login. (${errMsg})`
-          : errMsg
+        reason: '@agentclientprotocol/codex-acp not found. Install with: pnpm add @agentclientprotocol/codex-acp'
       }
     }
   }
 
-  /**
-   * Get pending approval request for a session
-   */
   getPendingApproval(sessionId: string): AcpPermissionRequest | null {
     const session = this.sessions.get(sessionId)
     return session?.pendingApproval || null
   }
 
-  /**
-   * Respond to a pending approval request
-   */
   async respondToApproval(
     sessionId: string,
     approved: boolean,
@@ -1083,13 +578,11 @@ export class AcpAdapter implements CodingAgentAdapter {
   ): Promise<void> {
     const session = this.sessions.get(sessionId)
     if (!session || !session.pendingApproval) {
-      console.warn(`[AcpAdapter/${this.agentType}] No pending approval for session ${sessionId}`)
+      console.warn(`[${this.label}] No pending approval for session ${sessionId}`)
       return
     }
 
     const approval = session.pendingApproval
-
-    // Determine the outcome based on user choice
     let selectedOptionId = approval.options.some((option) => option.optionId === optionId)
       ? optionId
       : undefined
@@ -1099,10 +592,9 @@ export class AcpAdapter implements CodingAgentAdapter {
         : approval.options.find((option) => option.optionId === 'reject-once')?.optionId || 'abort'
     }
 
-    console.log(`[AcpAdapter/${this.agentType}] Responding to approval with: ${selectedOptionId}`)
+    console.log(`[${this.label}] Responding to approval with: ${selectedOptionId}`)
 
-    // Send response to agent with correct ACP format
-    // Based on TypeScript SDK: outcome has double nesting with outcome field
+    // The ACP TypeScript SDK nests the outcome: { outcome: { outcome, optionId } }
     this.sendRpcResponse(session, approval.requestId, {
       result: {
         outcome: {
@@ -1112,51 +604,31 @@ export class AcpAdapter implements CodingAgentAdapter {
       }
     })
 
-    // Clear pending approval
     session.pendingApproval = null
   }
 
-
-  // ========================================================================
-  // Private Helper Methods
-  // ========================================================================
-
-  private setupStdoutParser(process: ChildProcess, session: AcpSession): void {
-    process.stdout?.on('data', (chunk: Buffer) => {
-      session.stdoutBuffer += chunk.toString()
-
-      // Parse newline-delimited JSON messages
-      let newlineIndex: number
-      while ((newlineIndex = session.stdoutBuffer.indexOf('\n')) !== -1) {
-        const line = session.stdoutBuffer.slice(0, newlineIndex).trim()
-        session.stdoutBuffer = session.stdoutBuffer.slice(newlineIndex + 1)
-
-        if (!line) continue
-
-        try {
-          const message = JSON.parse(line) as JsonRpcMessage
-          this.handleRpcMessage(session, message)
-        } catch (error) {
-          console.error(`[AcpAdapter/${this.agentType}] Failed to parse JSON-RPC message:`, line, error)
-        }
-      }
-    })
+  private convertAcpEventToMessageParts(
+    event: unknown,
+    _seenMessageIds: Set<string>,
+    seenPartIds: Set<string>,
+    partContentLengths: Map<string, string>,
+    session?: AcpSession
+  ): MessagePart[] {
+    return convertAcpEventToMessageParts(event, seenPartIds, partContentLengths, session, this.debugRpcLogs)
   }
 
   private handleRpcMessage(session: AcpSession, message: JsonRpcMessage): void {
     if (this.debugRpcLogs) {
-      console.log(`[AcpAdapter/${this.agentType}] Received RPC message:`, JSON.stringify(message))
+      console.log(`[${this.label}] Received RPC message:`, JSON.stringify(message))
     }
 
-    // Handle responses to our requests
+    // Responses to our requests
     if ('id' in message && message.id !== undefined && !('method' in message)) {
+      const response = message as JsonRpcResponse
       const pending = session.pendingRequests.get(message.id)
       if (pending) {
         session.pendingRequests.delete(message.id)
-
-        const response = message as JsonRpcResponse | JsonRpcError
-        if ('error' in response && response.error) {
-          // Check for quota/usage limit errors from the provider
+        if (response.error) {
           const errorInfo = this.extractCodexErrorInfo(response.error)
           if (errorInfo) {
             this.handleQuotaError(session, errorInfo)
@@ -1168,18 +640,15 @@ export class AcpAdapter implements CodingAgentAdapter {
         return
       }
 
-      // No pending request - could be error for permission response or other async operation
-      const response = message as JsonRpcResponse | JsonRpcError
-      if ('error' in response && response.error) {
-        // Check for quota/usage limit errors from the provider
+      // No pending request: e.g. an error for a permission response.
+      if (response.error) {
         const errorInfo = this.extractCodexErrorInfo(response.error)
         if (errorInfo) {
           this.handleQuotaError(session, errorInfo)
           return
         }
 
-        console.error(`[AcpAdapter/${this.agentType}] Unexpected error response:`, response.error)
-        // Push error to message buffers
+        console.error(`[${this.label}] Unexpected error response:`, response.error)
         const errorEvent = {
           _isError: true,
           message: response.error.message,
@@ -1191,25 +660,23 @@ export class AcpAdapter implements CodingAgentAdapter {
         return
       }
 
-      // Check if this is a response to session/prompt
       if (session.promptRequestId === message.id && 'result' in response) {
         const result = response.result as Record<string, unknown> | undefined
         if (result?.stopReason) {
-          console.log(`[AcpAdapter/${this.agentType}] Prompt completed with stopReason: ${result.stopReason}`)
+          console.log(`[${this.label}] Prompt completed with stopReason: ${result.stopReason}`)
           session.status = SessionStatusType.IDLE
           session.activeTurnId = null
-          // Don't clear promptRequestId - keep it for late-arriving events
-          // It will be updated when the next prompt is sent
+          // promptRequestId is kept for late-arriving events; the next prompt replaces it.
         }
         return
       }
     }
 
-    // Handle requests from agent (e.g., session/request_permission)
+    // Requests from the agent (e.g. session/request_permission)
     if ('method' in message && 'id' in message && message.id !== undefined) {
       const request = message as JsonRpcRequest
       if (this.debugRpcLogs) {
-        console.log(`[AcpAdapter/${this.agentType}] << Request: ${request.method}`)
+        console.log(`[${this.label}] << Request: ${request.method}`)
       }
 
       if (request.method === 'session/request_permission') {
@@ -1231,46 +698,37 @@ export class AcpAdapter implements CodingAgentAdapter {
         return
       }
 
-      // Unknown request - send error response
       this.sendRpcResponse(session, request.id, {
         error: { code: -32601, message: `Method not found: ${request.method}` }
       })
       return
     }
 
-    // Handle notifications from agent
+    // Notifications. Turn detection happens at poll time (time gaps and tool
+    // calls), so notifications are buffered as-is.
     if ('method' in message && !('id' in message)) {
       const notification = message as JsonRpcNotification
 
       if (this.debugRpcLogs) {
-        console.log(`[AcpAdapter/${this.agentType}] << Notification: ${notification.method}`)
+        console.log(`[${this.label}] << Notification: ${notification.method}`)
         if (notification.method === 'session/update') {
           const params = notification.params as { update?: SessionUpdate } | undefined
-          console.log(`[AcpAdapter/${this.agentType}]    sessionUpdate: ${params?.update?.sessionUpdate}`)
+          console.log(`[${this.label}]    sessionUpdate: ${params?.update?.sessionUpdate}`)
         }
       }
 
-      // Store notification directly (no wrapping needed)
-      // Turn detection happens automatically based on time gaps and tool calls
-      // Buffer notification for polling (gets cleared after each poll)
       session.messageBuffer.push(notification)
-
-      // Also store permanently for getAllMessages (replayed on resume).
       this.addToPermanentMessages(session, notification)
-
       this.onDataAvailable?.(session.sessionId)
-
-      // Update session status based on notification
       this.updateSessionStatus(session, notification)
     }
   }
 
   /**
-   * Extract codex-specific error info from an RPC error response.
-   * Returns a user-friendly error message if this is a known codex error type,
-   * or null if it's a generic error that should be handled normally.
+   * Maps a Codex-specific RPC error to a user-facing message, or returns null
+   * for generic errors that should be handled normally.
    */
-  private extractCodexErrorInfo(error: { code: number; message: string; data?: unknown }): {
+  private extractCodexErrorInfo(error: JsonRpcError): {
     errorType: string
     userMessage: string
   } | null {
@@ -1299,61 +757,39 @@ export class AcpAdapter implements CodingAgentAdapter {
     }
   }
 
-  /**
-   * Handle a quota/usage limit error by setting session state and surfacing
-   * a clear, actionable error message to the user.
-   */
   private handleQuotaError(session: AcpSession, errorInfo: { errorType: string; userMessage: string }): void {
-    // Append the auth identity 20x used so the user (and we) can see whether the
-    // limit came from their subscription or an API key — the whole point of the
-    // "terminal works but 20x doesn't" investigation.
+    // Include the auth identity 20x used, so it is visible whether the limit
+    // came from the subscription or an API key.
     const authNote = session.codexAuthSummary ? ` [20x auth: ${session.codexAuthSummary}]` : ''
     const userMessage = `${errorInfo.userMessage}${authNote}`
 
-    console.warn(
-      `[AcpAdapter/${this.agentType}] Provider error (${errorInfo.errorType}):`,
-      userMessage
-    )
+    console.warn(`[${this.label}] Provider error (${errorInfo.errorType}):`, userMessage)
 
     session.status = SessionStatusType.ERROR
     session.lastError = userMessage
     session.activeTurnId = null
 
-    // Push a user-friendly error event to the LIVE message buffer only.
-    //
-    // IMPORTANT: Quota/rate-limit errors are TRANSIENT conditions tied to a
-    // point in time. They must NOT be written to permanentMessages, because
-    // permanentMessages is replayed on every session resume (getAllMessages).
-    // If we persisted them, the "Quota exceeded / Rate limit reached" message
-    // would re-appear at the end of the transcript forever — even after the
-    // user upgrades their Codex plan, re-logs in, or simply waits for the
-    // window to reset. That stale message is exactly what makes 20x keep
-    // "showing limits" after the underlying limit is gone. session.lastError
-    // is already cleared on the next sendPrompt() for recovery, so keeping the
-    // event out of the permanent history fully clears the stale state on resume.
-    const errorEvent = {
+    // LIVE buffer only. Quota/rate-limit errors are transient; permanentMessages
+    // is replayed on every resume, so persisting them would show a stale
+    // "Quota exceeded" at the end of the transcript forever, even after the
+    // limit resets. lastError is cleared by the next sendPrompt().
+    session.messageBuffer.push({
       _isError: true,
       message: userMessage,
       data: null  // Don't expose raw error data for known error types
-    }
-    session.messageBuffer.push(errorEvent)
+    })
     this.onDataAvailable?.(session.sessionId)
   }
 
   private updateSessionStatus(session: AcpSession, notification: JsonRpcNotification): void {
-    // Handle session/update notifications
     if (notification.method === 'session/update') {
-      const params = notification.params as { update?: SessionUpdate }
-      const update = params?.update
-
+      const update = (notification.params as { update?: SessionUpdate } | undefined)?.update
       if (!update) return
 
-      // Update status based on update type.
-      // IMPORTANT: Do NOT modify turn-related state (activeTurnId, pendingAssistantTurnSplit)
-      // here — this runs in real-time when notifications arrive, but pollMessages processes
-      // events in buffer order. Modifying turn state here would "leak" future event state
-      // into earlier events during polling, causing incorrect turn splits and duplication.
-      // Turn state is managed exclusively in convertAcpEventToMessageParts().
+      // Do NOT touch turn state here. This runs when notifications arrive, but
+      // pollMessages processes events later in buffer order; changing turn state
+      // now would leak future state into earlier events and split/duplicate
+      // turns. Turn state belongs to convertAcpEventToMessageParts().
       if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
         session.status = SessionStatusType.BUSY
       } else if (update.sessionUpdate === 'error' || update.sessionUpdate === 'failed') {
@@ -1361,10 +797,7 @@ export class AcpAdapter implements CodingAgentAdapter {
       } else if (update.sessionUpdate === 'completed' || update.sessionUpdate === 'finished') {
         session.status = SessionStatusType.IDLE
       }
-      // For 'available_commands_update' and other notifications, keep current status
-    }
-    // Legacy: Handle other notification types by method name
-    else if (notification.method.includes('completed') || notification.method.includes('finished')) {
+    } else if (notification.method.includes('completed') || notification.method.includes('finished')) {
       session.status = SessionStatusType.IDLE
     } else if (notification.method.includes('error') || notification.method.includes('failed')) {
       session.status = SessionStatusType.ERROR
@@ -1374,21 +807,15 @@ export class AcpAdapter implements CodingAgentAdapter {
   }
 
   /**
-   * Adds a notification or event to the permanent message history, with
-   * consolidation and size-based pruning to prevent OOM.
+   * Adds an event to the permanent history, consolidating consecutive chunks
+   * and pruning by count to prevent OOM.
    *
-   * IMPORTANT: events are stored as deep clones. The incoming `event` object is
-   * the SAME object that handleRpcMessage() pushed into session.messageBuffer
-   * for live polling. This method mutates stored events in two ways:
-   *   1. chunk consolidation rewrites content.text on the last stored event
-   *   2. tool outputs are truncated to 100KB for history
-   * Without cloning, those mutations corrupted the un-polled live buffer:
-   * when several agent_message_chunk deltas arrived between polls (always the
-   * case at the START of a response — the first token burst lands before the
-   * first poll cycle), consolidation silently rewrote the FIRST buffered chunk
-   * into the full accumulated text while the later buffered chunks stayed raw
-   * deltas. pollMessages() then appended those deltas again after the already
-   * complete text, scrambling the beginning of the message
+   * Events are stored as deep clones. The incoming event is the SAME object
+   * handleRpcMessage() queued in messageBuffer for live polling, and history
+   * mutates stored events (chunk consolidation rewrites content.text; tool
+   * outputs are truncated). Without cloning, a burst of chunks arriving before
+   * the first poll had its first buffered chunk rewritten to the accumulated
+   * text while later deltas stayed raw, and polling appended them again
    * ("Hello world, how are you? world, how are you?").
    */
   private addToPermanentMessages(session: AcpSession, event: unknown): void {
@@ -1397,41 +824,32 @@ export class AcpAdapter implements CodingAgentAdapter {
     let consolidated = false
 
     if (lastMsg?.method === 'session/update' && notification.method === 'session/update') {
-      const lastParams = lastMsg.params as { update?: SessionUpdate } | undefined
-      const nextParams = notification.params as { update?: SessionUpdate } | undefined
-      const lastUpdate = lastParams?.update
-      const nextUpdate = nextParams?.update
+      const lastUpdate = (lastMsg.params as { update?: SessionUpdate } | undefined)?.update
+      const nextUpdate = (notification.params as { update?: SessionUpdate } | undefined)?.update
 
-      if (lastUpdate && nextUpdate && lastUpdate.sessionUpdate === nextUpdate.sessionUpdate && this.isAssistantChunkUpdateType(nextUpdate.sessionUpdate)) {
-        // Merge consecutive assistant/thought chunks
-        const lastText = this.extractTextFromUpdateContent(lastUpdate.content)
-        const nextText = this.extractTextFromUpdateContent(nextUpdate.content)
+      if (lastUpdate && nextUpdate && lastUpdate.sessionUpdate === nextUpdate.sessionUpdate && isAssistantChunkUpdateType(nextUpdate.sessionUpdate)) {
+        const lastText = extractTextFromUpdateContent(lastUpdate.content)
+        const nextText = extractTextFromUpdateContent(nextUpdate.content)
         if (typeof lastUpdate.content === 'object' && lastUpdate.content !== null) {
-          (lastUpdate.content as Record<string, unknown>).text = this.mergeStreamingText(lastText, nextText)
+          (lastUpdate.content as Record<string, unknown>).text = mergeStreamingText(lastText, nextText)
           consolidated = true
         }
       }
     }
 
     if (!consolidated) {
-      // Deep-clone before storing so history-only mutations (chunk
-      // consolidation above on later events, output truncation below) never
-      // leak into the identical object still queued in session.messageBuffer.
       const stored = structuredClone(notification)
 
-      // Capping tool output size in permanent messages (replayed on resume).
-      // The full output is still delivered to the UI during the live session,
-      // but truncated here to keep the history bounded.
+      // Cap tool output in history; the live session still gets the full output.
       if (stored.method === 'session/update') {
         const update = (stored.params as { update?: SessionUpdate })?.update
         if (update?.rawOutput && typeof update.rawOutput === 'object') {
           const ro = update.rawOutput as Record<string, unknown>
-          const MAX_HISTORY_OUTPUT_CHARS = 100_000 // 100KB per tool output in history
-          if (typeof ro.stdout === 'string' && ro.stdout.length > MAX_HISTORY_OUTPUT_CHARS) {
-            ro.stdout = ro.stdout.slice(0, MAX_HISTORY_OUTPUT_CHARS) + '\n... (truncated in history)'
-          }
-          if (typeof ro.formatted_output === 'string' && ro.formatted_output.length > MAX_HISTORY_OUTPUT_CHARS) {
-            ro.formatted_output = ro.formatted_output.slice(0, MAX_HISTORY_OUTPUT_CHARS) + '\n... (truncated in history)'
+          for (const key of ['stdout', 'formatted_output']) {
+            const value = ro[key]
+            if (typeof value === 'string' && value.length > MAX_HISTORY_OUTPUT_CHARS) {
+              ro[key] = value.slice(0, MAX_HISTORY_OUTPUT_CHARS) + '\n... (truncated in history)'
+            }
           }
         }
       }
@@ -1441,112 +859,26 @@ export class AcpAdapter implements CodingAgentAdapter {
       session.permanentMessages.push(stored)
     }
 
-    // Enforce absolute limit on permanent history to prevent OOM.
-    // Discard oldest 25% to amortise pruning cost (was 10% which caused frequent re-pruning).
-    if (session.permanentMessages.length > AcpAdapter.MAX_PERMANENT_MESSAGES) {
-      session.permanentMessages.splice(0, Math.ceil(AcpAdapter.MAX_PERMANENT_MESSAGES * 0.25))
+    // Discard the oldest 25% at once to amortise the pruning cost.
+    if (session.permanentMessages.length > MAX_PERMANENT_MESSAGES) {
+      session.permanentMessages.splice(0, Math.ceil(MAX_PERMANENT_MESSAGES * 0.25))
     }
   }
 
-  private async sendRpcRequest(
-    session: AcpSession,
-    method: string,
-    params?: unknown
-  ): Promise<unknown> {
-    const id = session.nextRequestId++
-
-    const request: JsonRpcRequest = {
-      jsonrpc: '2.0',
-      id,
-      method,
-      params
-    }
-
-    return new Promise((resolve, reject) => {
-      // Register pending request
-      session.pendingRequests.set(id, { resolve, reject })
-
-      // Send request
-      const jsonString = JSON.stringify(request) + '\n'
-      session.process.stdin?.write(jsonString, (error) => {
-        if (error) {
-          session.pendingRequests.delete(id)
-          reject(new Error(`Failed to send request: ${error.message}`))
-        }
-      })
-
-      // Timeout after 30 seconds
-      setTimeout(() => {
-        if (session.pendingRequests.has(id)) {
-          session.pendingRequests.delete(id)
-          reject(new Error(`Request timeout: ${method}`))
-        }
-      }, 30000)
-    })
-  }
-
-  private sendRpcRequestNoWait(
-    session: AcpSession,
-    method: string,
-    params?: unknown
-  ): void {
-    const id = session.nextRequestId++
-
-    // Track session/prompt request ID so we can handle the response
-    if (method === 'session/prompt') {
-      session.promptRequestId = id
-    }
-
-    const request: JsonRpcRequest = {
-      jsonrpc: '2.0',
-      id,
-      method,
-      params
-    }
-
-    // Send request without waiting for response
-    // The response will be handled in handleRpcMessage when it arrives
-    const jsonString = JSON.stringify(request) + '\n'
-    session.process.stdin?.write(jsonString, (error) => {
-      if (error) {
-        console.error(`[AcpAdapter/${this.agentType}] Error sending ${method}:`, error)
-      }
-    })
+  private sendRpcRequest(session: AcpSession, method: string, params?: unknown): Promise<unknown> {
+    return sendJsonRpcRequest(session, method, params, this.label)
   }
 
   private sendRpcResponse(
     session: AcpSession,
     id: string | number,
-    response: { result?: unknown; error?: { code: number; message: string; data?: unknown } }
+    response: { result?: unknown; error?: JsonRpcError }
   ): void {
-    const rpcResponse: JsonRpcResponse | JsonRpcError = {
-      jsonrpc: '2.0',
-      id,
-      ...(response.error ? { error: response.error } : { result: response.result })
-    } as JsonRpcResponse | JsonRpcError
-
-    const jsonString = JSON.stringify(rpcResponse) + '\n'
-    console.log(`[AcpAdapter/${this.agentType}] Sending RPC response:`, jsonString.trim())
-    session.process.stdin?.write(jsonString, (error) => {
-      if (error) console.error(`[AcpAdapter/${this.agentType}] Error sending response:`, error)
-    })
-  }
-
-  private sendRpcNotification(
-    session: AcpSession,
-    method: string,
-    params?: unknown
-  ): void {
-    const notification: JsonRpcNotification = {
-      jsonrpc: '2.0',
-      method,
-      params
-    }
-
-    const jsonString = JSON.stringify(notification) + '\n'
-    session.process.stdin?.write(jsonString, (error) => {
-      if (error) console.error(`[AcpAdapter/${this.agentType}] Error sending notification ${method}:`, error)
-    })
+    const payload = response.error
+      ? { jsonrpc: '2.0', id, error: response.error }
+      : { jsonrpc: '2.0', id, result: response.result }
+    console.log(`[${this.label}] Sending RPC response:`, JSON.stringify(payload))
+    writeJsonRpc(session, payload, this.label)
   }
 
   private handlePermissionRequest(session: AcpSession, request: JsonRpcRequest): void {
@@ -1561,31 +893,25 @@ export class AcpAdapter implements CodingAgentAdapter {
       options?: Array<{ optionId: string; name: string; kind: string }>
     } | undefined
 
-    // Extract permission details
     const toolCall = params?.toolCall
-    const options = params?.options || []
-
-    // Get the question/reason from the tool call
-    const question = toolCall?.rawInput?.reason ||
-                     toolCall?.content?.[0]?.content?.text ||
-                     `Execute: ${toolCall?.title || 'unknown command'}`
-
-    console.log(`[AcpAdapter/${this.agentType}] Permission request for ${toolCall?.kind} ${toolCall?.toolCallId} (options: ${options.map((o) => o.optionId).join(', ')})`)
-
-    const approvalOptions = options.map((o) => ({
+    const approvalOptions = (params?.options || []).map((o) => ({
       optionId: o.optionId,
       name: o.name,
       kind: o.kind
     }))
 
+    console.log(`[${this.label}] Permission request for ${toolCall?.kind} ${toolCall?.toolCallId} (options: ${approvalOptions.map((o) => o.optionId).join(', ')})`)
+
     if (session.config.permissionMode === 'allow') {
-      const autoApprovedOptionId = approvalOptions.find((option) => option.optionId === 'approved-for-session')?.optionId
-        || approvalOptions.find((option) => option.optionId === 'allow-always')?.optionId
-        || approvalOptions.find((option) => option.optionId === 'approved')?.optionId
-        || approvalOptions.find((option) => option.optionId === 'allow-once')?.optionId
+      const offered = (optionId: string): string | undefined =>
+        approvalOptions.find((option) => option.optionId === optionId)?.optionId
+      const autoApprovedOptionId = offered('approved-for-session')
+        || offered('allow-always')
+        || offered('approved')
+        || offered('allow-once')
         || (this.agentType === 'cursor' ? 'allow-once' : 'approved')
 
-      console.log(`[AcpAdapter/${this.agentType}] Auto-approving permission with: ${autoApprovedOptionId}`)
+      console.log(`[${this.label}] Auto-approving permission with: ${autoApprovedOptionId}`)
       this.sendRpcResponse(session, request.id, {
         result: {
           outcome: {
@@ -1597,586 +923,21 @@ export class AcpAdapter implements CodingAgentAdapter {
       return
     }
 
-    // Store the permission request for UI to handle
     session.pendingApproval = {
       requestId: request.id,
       toolCallId: toolCall?.toolCallId || '',
-      question,
+      question: toolCall?.rawInput?.reason
+        || toolCall?.content?.[0]?.content?.text
+        || `Execute: ${toolCall?.title || 'unknown command'}`,
       options: approvalOptions
     }
-
-    // Update session status to waiting for approval
     session.status = SessionStatusType.WAITING_APPROVAL
-
-    console.log(`[AcpAdapter/${this.agentType}] Awaiting user approval...`)
+    console.log(`[${this.label}] Awaiting user approval...`)
   }
 
   private extractAcpSessionId(result: unknown): string | null {
     if (!result || typeof result !== 'object') return null
-
-    // Try common session ID field names
     const obj = result as Record<string, unknown>
     return (obj.sessionId || obj.session_id || obj.id) as string | null
-  }
-
-  /**
-   * Convert internal McpServerConfig map to ACP-spec McpServer array.
-   * ACP spec: https://agentclientprotocol.com/protocol/schema
-   *
-   * - mcpServers is Vec<McpServer> (array, not map)
-   * - stdio variant: { name, command, args: string[], env: EnvVariable[] }
-   * - http variant:  { type: "http", name, url, headers: HttpHeader[] }
-   * - EnvVariable / HttpHeader = { name: string, value: string }
-   */
-  private convertMcpServers(servers?: Record<string, McpServerConfig>): unknown[] {
-    if (!servers) return []
-
-    const result: unknown[] = []
-    for (const [name, config] of Object.entries(servers)) {
-      if (config.type === 'stdio') {
-        // Convert env from Record<string,string> to ACP EnvVariable[]
-        const envArray = config.env
-          ? Object.entries(config.env).map(([k, v]) => ({ name: k, value: v }))
-          : []
-
-        result.push({
-          name,
-          command: config.command,
-          args: config.args || [],
-          env: envArray
-        })
-      } else {
-        // http or sse — ACP requires a "type" discriminator for non-stdio variants
-        // Convert headers from Record<string,string> to ACP HttpHeader[]
-        const headersArray = config.headers
-          ? Object.entries(config.headers).map(([k, v]) => ({ name: k, value: v }))
-          : []
-
-        result.push({
-          type: config.type,
-          name,
-          url: config.url,
-          headers: headersArray
-        })
-      }
-    }
-    return result
-  }
-
-  private extractTextFromUpdateContent(content: SessionUpdate['content']): string {
-    if (!content) return ''
-
-    if (typeof content === 'string') {
-      return content
-    }
-
-    if (Array.isArray(content)) {
-      return content
-        .map((entry) => this.extractTextFromUpdateContent(entry))
-        .filter(Boolean)
-        .join('\n')
-    }
-
-    if (typeof content !== 'object') {
-      return ''
-    }
-
-    const value = content as Record<string, unknown>
-
-    if (typeof value.text === 'string') {
-      return value.text
-    }
-
-    if (typeof value.content === 'string') {
-      return value.content
-    }
-
-    if (value.content) {
-      const nestedContent = this.extractTextFromUpdateContent(value.content)
-      if (nestedContent) return nestedContent
-    }
-
-    if (value.message) {
-      const nestedMessage = this.extractTextFromUpdateContent(value.message)
-      if (nestedMessage) return nestedMessage
-    }
-
-    return ''
-  }
-
-  private mergeStreamingText(currentText: string, incomingChunk: string): string {
-    if (!currentText) return incomingChunk
-    if (!incomingChunk) return currentText
-
-    if (incomingChunk.startsWith(currentText)) {
-      return incomingChunk
-    }
-
-    if (currentText.endsWith(incomingChunk)) {
-      return currentText
-    }
-
-    const MIN_OVERLAP_CHARS = 8
-
-    const maxSkippedPrefix = Math.min(32, currentText.length - MIN_OVERLAP_CHARS)
-    for (let skipped = 1; skipped <= maxSkippedPrefix; skipped++) {
-      const replayedText = currentText.slice(skipped)
-      if (incomingChunk.startsWith(replayedText)) {
-        return currentText.slice(0, skipped) + incomingChunk
-      }
-    }
-
-    const maxOverlap = Math.min(currentText.length, incomingChunk.length)
-    for (let length = maxOverlap; length > 0; length--) {
-      if (length >= MIN_OVERLAP_CHARS && currentText.endsWith(incomingChunk.slice(0, length))) {
-        return currentText + incomingChunk.slice(length)
-      }
-    }
-
-    return currentText + incomingChunk
-  }
-
-  private isUserUpdateType(sessionUpdate?: string | null): boolean {
-    return sessionUpdate === 'user_message_chunk'
-      || sessionUpdate === 'human_message_chunk'
-      || sessionUpdate === 'user_message'
-      || sessionUpdate === 'human_message'
-  }
-
-  private isAssistantChunkUpdateType(sessionUpdate?: string | null): boolean {
-    return sessionUpdate === 'agent_message_chunk'
-      || sessionUpdate === 'assistant_message_chunk'
-      || sessionUpdate === 'agent_thought_chunk'
-  }
-
-  private isToolingUpdateType(sessionUpdate?: string | null): boolean {
-    // Only actual tool calls should trigger turn splits.
-    // `plan` and `available_commands_update` do NOT produce visible message parts
-    // and must NOT cause turn splits — otherwise every such notification fragments
-    // the assistant response into a separate message bubble.
-    return sessionUpdate === 'tool_call'
-      || sessionUpdate === 'tool_call_update'
-  }
-
-  private getAssistantTurnId(session: AcpSession): number {
-    const now = Date.now()
-    const previousType = session.lastSessionUpdateType
-    const mustSplitAfterTool = session.pendingAssistantTurnSplit
-
-    if (
-      session.activeTurnId &&
-      !mustSplitAfterTool &&
-      !this.isToolingUpdateType(previousType) &&
-      !this.isUserUpdateType(previousType)
-    ) {
-      session.lastChunkTime = now
-      return session.activeTurnId
-    }
-
-    const timeSinceLastChunk = session.lastChunkTime ? now - session.lastChunkTime : Infinity
-    const TIME_GAP_THRESHOLD = 2000
-
-    const shouldStartNewTurn = session.currentTurnId === 0
-      || mustSplitAfterTool
-      || this.isUserUpdateType(previousType)
-      || this.isToolingUpdateType(previousType)
-      || (this.isAssistantChunkUpdateType(previousType) && timeSinceLastChunk > TIME_GAP_THRESHOLD)
-
-    if (shouldStartNewTurn) {
-      session.currentTurnId += 1
-      console.log(`[AcpAdapter] Detected NEW assistant turn #${session.currentTurnId} (prev=${previousType}, gap=${timeSinceLastChunk}ms, split=${mustSplitAfterTool})`)
-    }
-
-    session.pendingAssistantTurnSplit = false
-
-    if (session.activeTurnId) {
-      session.activeTurnId = session.currentTurnId
-    }
-
-    session.lastChunkTime = now
-    return session.currentTurnId
-  }
-
-  private getUserTurnId(session: AcpSession): number {
-    if (!this.isUserUpdateType(session.lastSessionUpdateType)) {
-      session.currentUserTurnId += 1
-      console.log(`[AcpAdapter] Detected NEW user turn #${session.currentUserTurnId} (prev=${session.lastSessionUpdateType})`)
-    }
-
-    return session.currentUserTurnId
-  }
-
-  private normalizeToolName(rawToolName?: string): string {
-    switch (rawToolName) {
-      case 'exec_command':
-        return 'command'
-      case 'write_stdin':
-        return 'stdin'
-      case 'update_plan':
-        return 'plan'
-      default:
-        return rawToolName || 'tool'
-    }
-  }
-
-  private buildToolTitle(
-    rawToolName?: string,
-    rawInput?: Record<string, unknown>,
-    fallback?: string
-  ): string | undefined {
-    const trimmedFallback = fallback?.trim()
-
-    switch (rawToolName) {
-      case 'exec_command': {
-        const command = rawInput?.command
-        if (Array.isArray(command)) return command.join(' ') || trimmedFallback
-        if (typeof command === 'string' && command.trim()) return command.trim()
-        const cmd = typeof rawInput?.cmd === 'string' ? rawInput.cmd.trim() : ''
-        if (cmd) return cmd
-        return trimmedFallback
-      }
-      case 'write_stdin': {
-        const chars = typeof rawInput?.chars === 'string' ? rawInput.chars.trim() : ''
-        if (chars) return chars.replace(/\s+/g, ' ').slice(0, 80)
-        return 'poll'
-      }
-      case 'update_plan': {
-        const plan = Array.isArray(rawInput?.plan) ? rawInput.plan : []
-        const firstStep = plan.find((item): item is { step: string } =>
-          typeof item === 'object' && item !== null && typeof (item as { step?: unknown }).step === 'string'
-        )
-        if (firstStep) return `${plan.length} steps: ${firstStep.step}`
-        const explanation = typeof rawInput?.explanation === 'string' ? rawInput.explanation.trim() : ''
-        if (explanation) return explanation.slice(0, 80)
-        return trimmedFallback
-      }
-      default:
-        return trimmedFallback
-    }
-  }
-
-  private convertAcpEventToMessageParts(
-    event: unknown,
-    _seenMessageIds: Set<string>,
-    seenPartIds: Set<string>,
-    partContentLengths: Map<string, string>,
-    session?: AcpSession
-  ): MessagePart[] {
-    const parts: MessagePart[] = []
-
-    // Unwrap event (events may be wrapped with metadata)
-    const wrappedEvent = event as Record<string, unknown>
-    const actualEvent = (wrappedEvent._notification || event) as Record<string, unknown>
-
-    // Handle error events from adapter
-    if (actualEvent._isError) {
-      const errorId = `error-${Date.now()}`
-      if (!seenPartIds.has(errorId)) {
-        seenPartIds.add(errorId)
-        parts.push({
-          id: errorId,
-          type: MessagePartType.TEXT,
-          text: `Error: ${actualEvent.message}${actualEvent.data ? ` - ${actualEvent.data}` : ''}`,
-          role: 'assistant'
-        })
-      }
-      return parts
-    }
-
-    const notification = actualEvent as unknown as JsonRpcNotification
-
-    // Handle session/update notifications (primary ACP notification type)
-    if (notification.method === 'session/update') {
-      const params = notification.params as { update?: SessionUpdate }
-      const update = params?.update
-
-      if (!update) return []
-
-      // Use toolCallId as unique identifier for tool calls
-      const partId = update.toolCallId || randomUUID()
-
-      // Handle different update types
-      if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
-        if (session) {
-          session.pendingAssistantTurnSplit = true
-        }
-
-        // Cache metadata from initial tool_call events (in_progress) so we can
-        // use it when the completed tool_call_update arrives (which may lack
-        // name/input fields).
-        const rawInput = update.rawInput as { cmd?: string; command?: string | string[]; parsed_cmd?: Array<{ cmd?: string }>; tool?: string; server?: string } | undefined
-
-        if (update.status !== 'completed' && session && partId) {
-          const commandFromInput = Array.isArray(rawInput?.command)
-            ? rawInput.command.join(' ')
-            : rawInput?.command
-          const commandFromCmd = rawInput?.cmd
-          const commandFromParsed = rawInput?.parsed_cmd?.map((c) => c.cmd).join('; ')
-          const cachedInput = commandFromInput || commandFromCmd || commandFromParsed || update.title || ''
-          // Derive tool name: kind > rawInput.tool (with server prefix) > title (strip "Tool: " prefix)
-          const toolFromRawInput = rawInput?.tool
-            ? (rawInput.server ? `${rawInput.server}/${rawInput.tool}` : rawInput.tool)
-            : undefined
-          const toolFromTitle = update.title?.startsWith('Tool: ') ? update.title.slice(6) : undefined
-          const cachedName = update.kind || toolFromRawInput || toolFromTitle || ''
-          const cachedTitle = this.buildToolTitle(cachedName || update.title, rawInput as Record<string, unknown>, cachedInput)
-          if (cachedName || cachedInput || cachedTitle) {
-            // Cap toolCallMetadata to prevent unbounded growth from orphaned entries
-            if (session.toolCallMetadata.size >= AcpAdapter.MAX_TOOL_CALL_METADATA) {
-              // Evict oldest half (Maps preserve insertion order)
-              const toEvict = Math.ceil(AcpAdapter.MAX_TOOL_CALL_METADATA * 0.5)
-              let evicted = 0
-              for (const key of session.toolCallMetadata.keys()) {
-                if (evicted >= toEvict) break
-                session.toolCallMetadata.delete(key)
-                evicted++
-              }
-            }
-            session.toolCallMetadata.set(partId, { name: cachedName, input: cachedInput, title: cachedTitle })
-          }
-
-          // Emit an in-progress tool part so the user sees the tool call
-          // immediately (with a spinner) instead of waiting for completion.
-          if (!seenPartIds.has(partId)) {
-            seenPartIds.add(partId)
-            const inProgressToolName = this.normalizeToolName(cachedName || update.title || 'tool')
-            parts.push({
-              id: partId,
-              type: MessagePartType.TOOL,
-              tool: {
-                name: inProgressToolName,
-                title: cachedTitle,
-                status: 'running',
-                input: cachedInput || undefined
-              }
-            })
-          }
-        }
-
-        // Create / update the tool part when completed (with output)
-        if (update.status === 'completed') {
-          const alreadySeen = seenPartIds.has(partId)
-          seenPartIds.add(partId)
-
-          // Look up cached metadata from initial tool_call event
-          const cachedMeta = session?.toolCallMetadata.get(partId)
-
-          // Extract command and output from rawInput/rawOutput
-          const rawOutput = update.rawOutput as {
-            command?: string | string[];
-            stdout?: string;
-            stderr?: string;
-            formatted_output?: string;
-            content?: Array<{ text?: string; type?: string }>;
-            isError?: boolean
-          } | undefined
-
-          // Try to get command from multiple sources (tool_call has rawInput, tool_call_update has it in rawOutput)
-          const commandFromInput = Array.isArray(rawInput?.command)
-            ? rawInput.command.join(' ')
-            : rawInput?.command
-          const commandFromCmd = rawInput?.cmd
-          const commandFromOutput = Array.isArray(rawOutput?.command)
-            ? rawOutput.command.join(' ')
-            : rawOutput?.command
-          const commandFromParsed = rawInput?.parsed_cmd?.map((c) => c.cmd).join('; ')
-
-          // Extract from content array: [{type:"content", content:{type:"text", text:"..."}}]
-          const contentArray = update.content as Array<{ type?: string; content?: { type?: string; text?: string }; text?: string }> | undefined
-          const inputFromContent = Array.isArray(contentArray)
-            ? contentArray.map((c) => c.content?.text || c.text || '').filter(Boolean).join('\n')
-            : undefined
-
-          const command = commandFromInput || commandFromCmd || commandFromOutput || commandFromParsed || update.title || cachedMeta?.input || inputFromContent || 'Unknown'
-
-          // Extract output - handle Codex format: {content: [{text: "...", type: "text"}], isError: false}
-          const outputFromContent = Array.isArray(rawOutput?.content)
-            ? rawOutput.content.map((c) => c.text || '').filter(Boolean).join('\n')
-            : undefined
-          const output = rawOutput?.formatted_output || rawOutput?.stdout || rawOutput?.stderr || outputFromContent || ''
-
-          // Clean up cached metadata
-          if (session) {
-            session.toolCallMetadata.delete(partId)
-          }
-
-          // Derive tool name from multiple sources
-          const completedToolFromTitle = update.title?.startsWith('Tool: ') ? update.title.slice(6) : undefined
-          const rawToolName = update.kind || cachedMeta?.name || completedToolFromTitle || update.title || 'tool'
-          const toolName = this.normalizeToolName(rawToolName)
-          const toolTitle = this.buildToolTitle(
-            rawToolName,
-            rawInput as Record<string, unknown> | undefined,
-            cachedMeta?.title || (command && command !== rawToolName ? command : undefined)
-          )
-
-          parts.push({
-            id: partId,
-            type: MessagePartType.TOOL,
-            tool: {
-              name: toolName,
-              title: toolTitle,
-              status: update.status,
-              input: command,
-              output: output
-            },
-            // If we already emitted an in-progress part for this tool,
-            // mark as update so the renderer replaces rather than adds.
-            update: alreadySeen
-          })
-        }
-      } else if (update.sessionUpdate === 'agent_message_chunk' || update.sessionUpdate === 'assistant_message_chunk') {
-        // Handle streaming text response from agent
-        // Format: { content: { type: 'text', text: '...' } }
-        const turnId = session ? this.getAssistantTurnId(session) : 0
-        const messageId = turnId > 0 ? `agent-response-${turnId}` : 'agent-response'
-        if (this.debugRpcLogs) {
-          console.log(`[AcpAdapter] agent_message_chunk: turnId=${turnId}, messageId=${messageId}`)
-        }
-
-        const chunk = this.extractTextFromUpdateContent(update.content)
-
-        if (chunk) {
-          // Accumulate text across multiple chunks
-          const currentText = partContentLengths.get(messageId) || ''
-          const newText = this.mergeStreamingText(currentText, chunk)
-          partContentLengths.set(messageId, newText)
-
-          // Return update part with accumulated text
-          parts.push({
-            id: messageId,
-            type: MessagePartType.TEXT,
-            text: newText,
-            role: 'assistant',
-            update: seenPartIds.has(messageId) // Mark as update if we've seen this ID before
-          })
-
-          seenPartIds.add(messageId)
-        }
-      } else if (update.sessionUpdate === 'agent_thought_chunk') {
-        // Handle reasoning/thinking chunks
-        // Format: { content: { type: 'text', text: '...' } }
-        const turnId = session ? this.getAssistantTurnId(session) : 0
-        const thinkingId = turnId > 0 ? `agent-thinking-${turnId}` : 'agent-thinking'
-        const chunk = this.extractTextFromUpdateContent(update.content)
-
-        if (chunk) {
-          // Accumulate text across multiple chunks
-          const currentText = partContentLengths.get(thinkingId) || ''
-          const newText = this.mergeStreamingText(currentText, chunk)
-          partContentLengths.set(thinkingId, newText)
-
-          // Return update part with accumulated text
-          parts.push({
-            id: thinkingId,
-            type: MessagePartType.REASONING,
-            text: newText,
-            role: 'assistant',
-            update: seenPartIds.has(thinkingId)
-          })
-
-          seenPartIds.add(thinkingId)
-        }
-      } else if (update.sessionUpdate === 'user_message_chunk' || update.sessionUpdate === 'human_message_chunk') {
-        // Handle streaming user message chunks (usually when user types)
-        const turnId = session ? this.getUserTurnId(session) : 0
-        const userId = turnId > 0 ? `user-message-${turnId}` : 'user-message'
-        const chunk = this.extractTextFromUpdateContent(update.content)
-
-        if (chunk) {
-          // Accumulate text across multiple chunks
-          const currentText = partContentLengths.get(userId) || ''
-          const newText = this.mergeStreamingText(currentText, chunk)
-          partContentLengths.set(userId, newText)
-
-          // Return update part with accumulated text
-          parts.push({
-            id: userId,
-            type: MessagePartType.TEXT,
-            text: newText,
-            role: 'user',
-            update: seenPartIds.has(userId)
-          })
-
-          seenPartIds.add(userId)
-        }
-      } else if (
-        update.sessionUpdate === 'agent_message' ||
-        update.sessionUpdate === 'assistant_message' ||
-        update.sessionUpdate === 'user_message' ||
-        update.sessionUpdate === 'human_message'
-      ) {
-        const text = this.extractTextFromUpdateContent(update.content)
-        if (!text) return parts
-
-        const role = update.sessionUpdate === 'user_message' || update.sessionUpdate === 'human_message'
-          ? 'user'
-          : 'assistant'
-
-        // For assistant messages without a stable messageId, derive a
-        // deterministic ID from the current turn so it matches the streaming
-        // chunk ID (`agent-response-{turnId}`).  This prevents duplicates
-        // where the same text shows up once from chunks and again from
-        // the final agent_message event with a random UUID.
-        let partId: string
-        if (update.messageId) {
-          partId = update.messageId
-        } else if (role === 'assistant' && session) {
-          const turnId = this.getAssistantTurnId(session)
-          partId = turnId > 0 ? `agent-response-${turnId}` : 'agent-response'
-        } else {
-          partId = `${update.sessionUpdate}-${randomUUID()}`
-        }
-
-        const alreadySeen = seenPartIds.has(partId)
-        if (!alreadySeen) {
-          seenPartIds.add(partId)
-          partContentLengths.set(partId, text)
-          parts.push({
-            id: partId,
-            type: MessagePartType.TEXT,
-            text,
-            role
-          })
-        } else if (role === 'assistant') {
-          // Final agent_message may have more complete text than the
-          // accumulated chunks — update the existing entry so the
-          // renderer gets the definitive version.
-          const existingText = partContentLengths.get(partId) || ''
-          if (text.length > existingText.length) {
-            partContentLengths.set(partId, text)
-            parts.push({
-              id: partId,
-              type: MessagePartType.TEXT,
-              text,
-              role,
-              update: true
-            })
-          }
-        }
-      } else if (update.sessionUpdate === 'plan') {
-        // Handle agent plan - we can ignore this for now or display it later
-        // Format: { entries: [{ content: '...', priority: 'high', status: 'pending' }] }
-        console.log(`[AcpAdapter/${this.agentType}] Received plan with ${(update.entries || []).length} entries`)
-      }
-
-      // Only update lastSessionUpdateType for events that affect turn detection.
-      // Non-content events like `plan` and `available_commands_update` must NOT
-      // pollute turn state — otherwise they cause the next assistant chunk to
-      // start a spurious new turn, fragmenting the response into multiple bubbles.
-      if (session && update.sessionUpdate) {
-        const isTurnRelevant =
-          this.isAssistantChunkUpdateType(update.sessionUpdate)
-          || this.isToolingUpdateType(update.sessionUpdate)
-          || this.isUserUpdateType(update.sessionUpdate)
-          || update.sessionUpdate === 'agent_message'
-          || update.sessionUpdate === 'assistant_message'
-        if (isTurnRelevant) {
-          session.lastSessionUpdateType = update.sessionUpdate
-        }
-      }
-    }
-
-    return parts
   }
 }

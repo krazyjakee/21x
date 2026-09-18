@@ -1,8 +1,5 @@
 import React, { useEffect } from 'react'
-import { Pencil, Trash2, Calendar, User, Tag, Clock, Bot, Play, History, GitBranch, Plus, X, BookOpen, AlarmClockOff, BellRing, Folder, Repeat, Star, Sparkles, ListTree, ArrowLeft, ChevronRight, ChevronDown, GripVertical, Layers, Settings2, AlertCircle, SquareArrowOutUpRight, Terminal } from 'lucide-react'
-import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
-import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
+import { Pencil, Trash2, Calendar, User, Tag, Clock, Bot, Play, History, GitBranch, Plus, X, BookOpen, AlarmClockOff, BellRing, Folder, Repeat, Star, Sparkles, Layers, Settings2, Terminal } from 'lucide-react'
 import { CollapsibleDescription } from '@/components/ui/CollapsibleDescription'
 import { Button } from '@/components/ui/Button'
 import { TaskStatusBadge } from './TaskStatusBadge'
@@ -15,340 +12,15 @@ import { OutputFieldsDisplay } from './OutputFieldsDisplay'
 import { useSkillStore } from '@/stores/skill-store'
 import { AssigneeSelect } from './AssigneeSelect'
 import { TaskStatus, CodingAgentType } from '@/types'
-import type { Task, FileAttachment, OutputField, Agent, RecurrencePattern, RecurrencePatternObject } from '@/types'
+import type { Task, FileAttachment, OutputField, Agent } from '@/types'
+import { formatRecurrencePattern } from './recurrence-format'
+import { SNOOZE_SOMEDAY } from '@/lib/snooze-options'
 import { AnthropicLogo, OpenCodeLogo, OpenAILogo, PiLogo } from '@/components/icons/AgentLogos'
 import { HeartbeatSection } from './HeartbeatSection'
 import { useUIStore } from '@/stores/ui-store'
-import { isAgentConfigured, getAgentConfigIssue } from '@shared/agent-utils'
-
-function ordinal(n: number): string {
-  if (n >= 11 && n <= 13) return `${n}th`
-  const last = n % 10
-  if (last === 1) return `${n}st`
-  if (last === 2) return `${n}nd`
-  if (last === 3) return `${n}rd`
-  return `${n}th`
-}
-
-function formatCronExpression(cron: string): string {
-  const parts = cron.trim().split(/\s+/)
-  if (parts.length < 5) return cron
-
-  const [minute, hour, dayOfMonth, , dayOfWeek] = parts
-  const time = `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`
-  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-
-  // Weekly pattern
-  if (dayOfWeek !== '*') {
-    const days = dayOfWeek.split(',').flatMap(part => {
-      if (part.includes('-')) {
-        const [start, end] = part.split('-').map(Number)
-        const result: number[] = []
-        for (let i = start; i <= end; i++) result.push(i)
-        return result
-      }
-      return [parseInt(part)]
-    }).filter(n => !isNaN(n)).map(d => dayNames[d]).join(', ')
-    return `Weekly on ${days} at ${time}`
-  }
-
-  // Monthly pattern
-  if (dayOfMonth !== '*' && !dayOfMonth.startsWith('*/')) {
-    return `Monthly on the ${ordinal(parseInt(dayOfMonth))} at ${time}`
-  }
-
-  // Daily pattern
-  if (dayOfMonth.startsWith('*/')) {
-    const interval = parseInt(dayOfMonth.slice(2))
-    return `Every ${interval} days at ${time}`
-  }
-
-  return `Daily at ${time}`
-}
-
-function formatLegacyPattern(pattern: RecurrencePatternObject): string {
-  const { type, interval, time, weekdays, monthDay } = pattern
-
-  let description = ''
-
-  if (type === 'daily') {
-    description = interval === 1 ? 'Daily' : `Every ${interval} days`
-  } else if (type === 'weekly') {
-    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-    const days = weekdays?.map(d => dayNames[d]).join(', ') || ''
-    description = `Weekly on ${days}`
-  } else if (type === 'monthly') {
-    description = `Monthly on the ${ordinal(monthDay ?? 1)}`
-  } else {
-    description = `Every ${interval} days`
-  }
-
-  return `${description} at ${time}`
-}
-
-function formatRecurrencePattern(pattern: RecurrencePattern): string {
-  if (typeof pattern === 'string') return formatCronExpression(pattern)
-  return formatLegacyPattern(pattern)
-}
-
-const subtaskStatusDotColor: Record<TaskStatus, string> = {
-  [TaskStatus.NotStarted]: 'bg-muted-foreground',
-  [TaskStatus.Triaging]: 'bg-muted-foreground animate-pulse',
-  [TaskStatus.AgentWorking]: 'bg-amber-400 animate-pulse',
-  [TaskStatus.ReadyForReview]: 'bg-pink-400',
-  [TaskStatus.AgentLearning]: 'bg-blue-400 animate-pulse',
-  [TaskStatus.Completed]: 'bg-emerald-400'
-}
-
-function SortableSubtaskItem({ subtask, onNavigateToTask, onOpenSubtaskInWindow }: { subtask: Task; onNavigateToTask?: (taskId: string) => void; onOpenSubtaskInWindow?: (taskId: string) => void }) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging
-  } = useSortable({ id: subtask.id })
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-    zIndex: isDragging ? 10 : undefined,
-  }
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className="flex items-center gap-1 px-1 py-2.5 hover:bg-accent/50 transition-colors"
-    >
-      <button
-        className="shrink-0 cursor-grab active:cursor-grabbing p-1 text-muted-foreground/50 hover:text-muted-foreground touch-none"
-        {...attributes}
-        {...listeners}
-      >
-        <GripVertical className="h-3.5 w-3.5" />
-      </button>
-      <button
-        onClick={() => onNavigateToTask?.(subtask.id)}
-        className="flex-1 flex items-center gap-3 text-left cursor-pointer min-w-0 pr-2"
-      >
-        <div className={`h-2 w-2 rounded-full shrink-0 ${subtaskStatusDotColor[subtask.status]}`} />
-        <div className="min-w-0 flex-1">
-          <div className="text-sm truncate">{subtask.title}</div>
-        </div>
-      </button>
-      {onOpenSubtaskInWindow && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onOpenSubtaskInWindow(subtask.id) }}
-          title="Open in a separate window"
-          aria-label="Open subtask in a separate window"
-          className="shrink-0 p-1 rounded text-muted-foreground/50 hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
-        >
-          <SquareArrowOutUpRight className="h-3.5 w-3.5" />
-        </button>
-      )}
-      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-    </div>
-  )
-}
-
-function SubtasksSection({ subtasks, onNavigateToTask, onOpenSubtaskInWindow, onAddSubtask, onReorderSubtasks }: { subtasks: Task[]; onNavigateToTask?: (taskId: string) => void; onOpenSubtaskInWindow?: (taskId: string) => void; onAddSubtask?: (title: string) => void; onReorderSubtasks?: (orderedIds: string[]) => void }) {
-  const [isAdding, setIsAdding] = React.useState(false)
-  const [newTitle, setNewTitle] = React.useState('')
-  const inputRef = React.useRef<HTMLInputElement>(null)
-  const completedCount = subtasks.filter(s => s.status === TaskStatus.Completed).length
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  )
-
-  React.useEffect(() => {
-    if (isAdding) inputRef.current?.focus()
-  }, [isAdding])
-
-  const handleSubmit = () => {
-    const title = newTitle.trim()
-    if (title && onAddSubtask) {
-      onAddSubtask(title)
-      setNewTitle('')
-      setIsAdding(false)
-    }
-  }
-
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event
-    if (!over || active.id === over.id) return
-
-    const oldIndex = subtasks.findIndex(s => s.id === active.id)
-    const newIndex = subtasks.findIndex(s => s.id === over.id)
-    if (oldIndex === -1 || newIndex === -1) return
-
-    const reordered = arrayMove(subtasks, oldIndex, newIndex)
-    onReorderSubtasks?.(reordered.map(s => s.id))
-  }
-
-  const subtaskIds = subtasks.map(s => s.id)
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <ListTree className="h-3.5 w-3.5" /> Subtasks
-          {subtasks.length > 0 && (
-            <span className="text-xs tabular-nums">({completedCount}/{subtasks.length})</span>
-          )}
-        </div>
-        {onAddSubtask && !isAdding && (
-          <button
-            onClick={() => setIsAdding(true)}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-          >
-            <Plus className="h-3 w-3" /> Add
-          </button>
-        )}
-      </div>
-      <div className="rounded-md border divide-y">
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={subtaskIds} strategy={verticalListSortingStrategy}>
-            {subtasks.map((subtask) => (
-              <SortableSubtaskItem
-                key={subtask.id}
-                subtask={subtask}
-                onNavigateToTask={onNavigateToTask}
-                onOpenSubtaskInWindow={onOpenSubtaskInWindow}
-              />
-            ))}
-          </SortableContext>
-        </DndContext>
-        {isAdding && (
-          <div className="flex items-center gap-2 px-3 py-2">
-            <div className="h-2 w-2 rounded-full shrink-0 bg-muted-foreground" />
-            <input
-              ref={inputRef}
-              type="text"
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleSubmit()
-                if (e.key === 'Escape') { setIsAdding(false); setNewTitle('') }
-              }}
-              onBlur={() => { if (!newTitle.trim()) { setIsAdding(false); setNewTitle('') } }}
-              placeholder="Subtask title..."
-              className="flex-1 text-sm bg-transparent outline-none placeholder:text-muted-foreground/50"
-            />
-            <button onClick={handleSubmit} className="text-xs text-primary hover:text-primary/80 cursor-pointer">Add</button>
-            <button onClick={() => { setIsAdding(false); setNewTitle('') }} className="text-xs text-muted-foreground hover:text-foreground cursor-pointer">
-              <X className="h-3 w-3" />
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function ParentTaskContext({ parentTask, onNavigateToTask }: { parentTask: Task; onNavigateToTask: (taskId: string) => void }) {
-  const [isExpanded, setIsExpanded] = React.useState(false)
-
-  return (
-    <div className="mb-4 rounded-lg border border-border/60 bg-accent/30">
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => setIsExpanded(!isExpanded)}
-          className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2.5 text-left cursor-pointer hover:bg-accent/50 rounded-lg transition-colors"
-        >
-          {isExpanded ? (
-            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-          )}
-          <span className="text-xs text-muted-foreground shrink-0">Parent task:</span>
-          <span className="text-sm truncate">{parentTask.title}</span>
-        </button>
-        <button
-          onClick={() => onNavigateToTask(parentTask.id)}
-          className="shrink-0 mr-2 px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer flex items-center gap-1"
-          title="Go to parent task"
-        >
-          <ArrowLeft className="h-3 w-3" />
-          Go to parent
-        </button>
-      </div>
-      {isExpanded && (
-        <div className="px-4 pb-3 space-y-3 border-t border-border/40">
-          <div className="flex items-center gap-2 pt-3">
-            <TaskStatusBadge status={parentTask.status} />
-            <TaskTypeBadge type={parentTask.type} />
-            <TaskPriorityBadge priority={parentTask.priority} />
-          </div>
-          {parentTask.description && (
-            <CollapsibleDescription
-              taskId={parentTask.id}
-              description={parentTask.description}
-              size="sm"
-              className="text-sm text-muted-foreground"
-            />
-          )}
-          {parentTask.labels.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {parentTask.labels.map((label) => (
-                <Badge key={label} variant="blue" className="text-[10px]">{label}</Badge>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/**
- * Inline warning shown under the Agent row when the task's agent (or, when no
- * agent is assigned, the default agent picked by Triage) is missing a provider
- * or model. Blocks the user from starting/triaging until they fix it.
- */
-function AgentConfigWarning({ task, agents, onEditAgent }: { task: Task; agents: Agent[]; onEditAgent?: (agentId: string) => void }) {
-  // When a specific agent is assigned, warn about that agent.
-  // Otherwise, warn about the default agent used by Triage.
-  const assignedAgent = task.agent_id ? agents.find((a) => a.id === task.agent_id) : null
-  const triageAgent = !task.agent_id ? (agents.find((a) => a.is_default) || agents[0] || null) : null
-  const targetAgent = assignedAgent || triageAgent
-  if (!targetAgent) return null
-  if (isAgentConfigured(targetAgent)) return null
-
-  const issue = getAgentConfigIssue(targetAgent) || 'Agent is not fully configured'
-  const isAssigned = !!assignedAgent
-  const action = isAssigned ? 'Start' : 'Triage'
-  const message = isAssigned
-    ? `${issue}. ${action} is disabled — edit the agent to continue.`
-    : `The default agent "${targetAgent.name}" is not fully configured (${issue.toLowerCase()}). ${action} is disabled — edit the agent to continue.`
-
-  return (
-    <div
-      data-testid="agent-config-warning"
-      className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300"
-    >
-      <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-      <div className="flex-1 min-w-0 space-y-1.5">
-        <p className="leading-snug">{message}</p>
-        {onEditAgent && (
-          <button
-            type="button"
-            onClick={() => onEditAgent(targetAgent.id)}
-            className="inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 text-[11px] font-medium text-amber-200 transition-colors cursor-pointer"
-            data-testid="agent-config-warning-edit"
-          >
-            <Settings2 className="h-3 w-3" />
-            Edit agent
-          </button>
-        )}
-      </div>
-    </div>
-  )
-}
+import { SubtasksSection } from './SubtasksSection'
+import { ParentTaskContext } from './ParentTaskContext'
+import { AgentConfigWarning } from './AgentConfigWarning'
 
 interface TaskDetailViewProps {
   task: Task
@@ -403,7 +75,6 @@ function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttac
   const openTaskOnCanvas = useUIStore((s) => s.openTaskOnCanvas)
   const isActive = task.status !== TaskStatus.Completed
 
-  // Ensure skills are loaded for badge display
   useEffect(() => {
     if (task.agent_id && Array.isArray(task.skill_ids)) {
       fetchSkills()
@@ -658,7 +329,7 @@ function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttac
               <>
                 <span className="text-muted-foreground flex items-center gap-2"><AlarmClockOff className="h-3.5 w-3.5" /> Hidden until</span>
                 <span className="text-muted-foreground">
-                  {task.snoozed_until === '9999-12-31T00:00:00.000Z' ? 'Someday' : formatDate(task.snoozed_until)}
+                  {task.snoozed_until === SNOOZE_SOMEDAY ? 'Someday' : formatDate(task.snoozed_until)}
                 </span>
               </>
             )}
@@ -764,8 +435,6 @@ function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttac
               taskId={task.id}
             />
           </div>
-
-          {/* Heartbeat monitoring — handled inside the properties grid above */}
 
           {showOutputFields && task.output_fields.length > 0 && (
             <div className="rounded-md border p-4">

@@ -8,13 +8,11 @@ vi.mock('../src/mobile/api/client', () => ({
   api: {
     tasks: {
       list: vi.fn().mockResolvedValue([]),
-      get: vi.fn().mockResolvedValue(undefined),
       create: vi.fn().mockResolvedValue({}),
       update: vi.fn().mockResolvedValue({})
     },
     agents: {
-      list: vi.fn().mockResolvedValue([]),
-      get: vi.fn().mockResolvedValue(undefined)
+      list: vi.fn().mockResolvedValue([])
     },
     skills: {
       list: vi.fn().mockResolvedValue([])
@@ -25,8 +23,6 @@ vi.mock('../src/mobile/api/client', () => ({
       resume: vi.fn().mockResolvedValue({ sessionId: 'test-session' }),
       send: vi.fn().mockResolvedValue({ success: true }),
       approve: vi.fn().mockResolvedValue({ success: true }),
-      sync: vi.fn().mockResolvedValue({ success: true, status: 'working' }),
-      abort: vi.fn().mockResolvedValue({ success: true }),
       stop: vi.fn().mockResolvedValue({ success: true })
     },
     transcript: {
@@ -36,9 +32,6 @@ vi.mock('../src/mobile/api/client', () => ({
     artifacts: {
       list: vi.fn().mockResolvedValue([]),
       content: vi.fn().mockResolvedValue(null)
-    },
-    git: {
-      getProvider: vi.fn().mockResolvedValue({ provider: 'github' })
     },
     github: {
       getOrg: vi.fn().mockResolvedValue({ org: '' }),

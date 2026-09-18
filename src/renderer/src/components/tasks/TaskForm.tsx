@@ -27,8 +27,6 @@ export interface TaskFormSubmitData extends CreateTaskDTO {
 interface TaskFormProps {
   task?: Task
   prefill?: { title: string; description: string } | null
-  /** @deprecated Use collapsible section instead — kept for backward compat, ignored */
-  compact?: boolean
   onSubmit: (data: TaskFormSubmitData | UpdateTaskDTO) => Promise<void>
   onCancel: () => void
 }

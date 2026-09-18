@@ -20,7 +20,9 @@ import {
   shareOrDownloadArtifactFile
 } from '@/lib/artifact-clipboard'
 import { api } from '../api/client'
-import { ArtifactType, useArtifactStore, type Artifact } from '../stores/artifact-store'
+import { ArtifactType, type Artifact } from '@shared/artifacts'
+import { useArtifactStore } from '../stores/artifact-store'
+import { BackButton } from '../components/PageHeader'
 import type { Route } from '../App'
 
 const ACTIVE_ARTIFACT_REFRESH_INTERVAL_MS = 30_000
@@ -141,9 +143,7 @@ export function ArtifactViewerPage({ taskId, artifactId, onNavigate }: { taskId:
   return (
     <div className="flex h-full flex-col bg-background">
       <div className="flex shrink-0 items-center gap-2 border-b border-border/50 px-3 py-3">
-        <button type="button" onClick={handleBack} className="rounded-md p-1.5 active:opacity-60" aria-label="Back to task">
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m15 18-6-6 6-6"/></svg>
-        </button>
+        <BackButton onBack={handleBack} className="rounded-md p-1.5 active:opacity-60" iconClassName="h-4 w-4" ariaLabel="Back to task" />
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{artifact?.title || 'Artifact'}</span>
         {artifact && <ArtifactCopyActions key={`${artifact.id}:${artifact.path}`} artifact={artifact} content={content} />}
         {artifact?.type === ArtifactType.PR && externalUrl && (

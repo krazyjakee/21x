@@ -14,11 +14,6 @@
 
 /** Every provider consumes 16 kHz mono signed 16-bit little-endian PCM. */
 export const VOICE_SAMPLE_RATE = 16000
-export const VOICE_CHANNELS_COUNT = 1
-/** Renderer -> main audio chunk size. 20 ms of audio at 16 kHz. */
-export const VOICE_FRAME_SAMPLES = 320
-/** Hard cap on a single spoken turn. Protects memory and the model worker. */
-export const VOICE_MAX_TURN_MS = 60_000
 
 // ── State machine ───────────────────────────────────────────
 
@@ -77,12 +72,6 @@ export function canTransition(from: VoiceState, to: VoiceState): boolean {
  */
 export type VoiceTurnMode = 'dictation' | 'command' | 'conversation'
 
-export interface VoiceTurnStart {
-  turnId: string
-  mode: VoiceTurnMode
-  context: VoiceUiContext
-}
-
 /** What the renderer is showing when the turn starts. Main trusts nothing here. */
 export interface VoiceUiContext {
   selectedTaskId?: string | null
@@ -94,14 +83,6 @@ export interface VoiceUiContext {
 }
 
 export type VoiceViewName = 'tasks' | 'skills' | 'dashboard' | 'canvas' | 'settings'
-
-export const VOICE_VIEW_NAMES: readonly VoiceViewName[] = [
-  'tasks',
-  'skills',
-  'dashboard',
-  'canvas',
-  'settings',
-]
 
 // ── Intents (closed union — see design §5.4) ────────────────
 
@@ -120,17 +101,6 @@ export type VoiceIntent =
 
 export type VoiceIntentType = VoiceIntent['type']
 
-export const VOICE_INTENT_TYPES: readonly VoiceIntentType[] = [
-  'create_task',
-  'assign_agent',
-  'start_task',
-  'reply_to_agent',
-  'approve_checkpoint',
-  'reject_checkpoint',
-  'navigate',
-  'read_last_answer',
-  'cancel',
-]
 
 /**
  * An unresolved reference to a task. The parser never invents a task ID; main
@@ -403,9 +373,3 @@ export const MOBILE_VOICE_CAPABILITIES: VoiceCapabilities = {
   wakeWord: false,
 }
 
-/** What the desktop renderer can do. Kept beside the mobile answer on purpose. */
-export const DESKTOP_VOICE_CAPABILITIES: VoiceCapabilities = {
-  available: true,
-  tts: true,
-  wakeWord: false,
-}

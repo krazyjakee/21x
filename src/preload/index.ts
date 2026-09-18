@@ -71,7 +71,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   agents: {
     getAll: (): Promise<unknown[]> => ipcRenderer.invoke('agent:getAll'),
-    get: (id: string): Promise<unknown> => ipcRenderer.invoke('agent:get', id),
     create: (data: Record<string, unknown>): Promise<unknown> =>
       ipcRenderer.invoke('agent:create', data),
     update: (id: string, data: Record<string, unknown>): Promise<unknown> =>
@@ -80,7 +79,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   mcpServers: {
     getAll: (): Promise<unknown[]> => ipcRenderer.invoke('mcp:getAll'),
-    get: (id: string): Promise<unknown> => ipcRenderer.invoke('mcp:get', id),
     create: (data: Record<string, unknown>): Promise<unknown> =>
       ipcRenderer.invoke('mcp:create', data),
     update: (id: string, data: Record<string, unknown>): Promise<unknown> =>
@@ -122,12 +120,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
         : responseType
           ? ipcRenderer.invoke('agentSession:approve', sessionId, approved, message, responseType)
           : ipcRenderer.invoke('agentSession:approve', sessionId, approved, message),
-    syncSkills: (sessionId: string): Promise<{ created: string[]; updated: string[]; unchanged: string[] }> =>
-      ipcRenderer.invoke('agentSession:syncSkills', sessionId),
-    syncSkillsForTask: (taskId: string): Promise<{ created: string[]; updated: string[]; unchanged: string[] }> =>
-      ipcRenderer.invoke('agentSession:syncSkillsForTask', taskId),
-    learnFromSession: (sessionId: string, message: string): Promise<{ created: string[]; updated: string[]; unchanged: string[] }> =>
-      ipcRenderer.invoke('agentSession:learnFromSession', sessionId, message),
     getRawTranscript: (taskId: string): Promise<Array<{ role: string; parts: Array<{ type: string; content?: string; tool?: { name: string; status?: string; input?: string; output?: string; error?: string } }> }>> =>
       ipcRenderer.invoke('agentSession:getRawTranscript', taskId),
     getTranscriptSnapshot: (taskId: string, sinceSeq?: number): Promise<Array<{ taskId: string; partId: string; seq: number; role: string; content: string; partType?: string; tool?: unknown; payload?: unknown; createdAt: number; updatedAt: number; rev: number }>> =>
@@ -174,11 +166,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('agent:status', handler)
     return () => ipcRenderer.removeListener('agent:status', handler)
   },
-  onAgentApproval: (callback: (event: unknown) => void): (() => void) => {
-    const handler = (_: unknown, data: unknown): void => callback(data)
-    ipcRenderer.on('agent:approval', handler)
-    return () => ipcRenderer.removeListener('agent:approval', handler)
-  },
   onAgentIncompatibleSession: (callback: (event: unknown) => void): (() => void) => {
     const handler = (_: unknown, data: unknown): void => callback(data)
     ipcRenderer.on('agent:incompatible-session', handler)
@@ -220,15 +207,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('github:fetchOrgRepos', org),
     fetchUserRepos: (): Promise<unknown[]> =>
       ipcRenderer.invoke('github:fetchUserRepos'),
-    fetchCollaborators: (owner: string, repo: string): Promise<unknown[]> =>
-      ipcRenderer.invoke('github:fetchCollaborators', owner, repo),
     fetchPullRequestDetails: (url: string): Promise<PullRequestDetails> =>
       ipcRenderer.invoke('github:fetchPullRequestDetails', url)
   },
   gitlab: {
     checkCli: (): Promise<{ installed: boolean; authenticated: boolean; username?: string }> =>
       ipcRenderer.invoke('gitlab:checkCli'),
-    startAuth: (): Promise<void> => ipcRenderer.invoke('gitlab:startAuth'),
     fetchOrgs: (): Promise<string[]> => ipcRenderer.invoke('gitlab:fetchOrgs'),
     fetchOrgRepos: (org: string): Promise<unknown[]> =>
       ipcRenderer.invoke('gitlab:fetchOrgRepos', org),
@@ -251,7 +235,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   taskSources: {
     getAll: (): Promise<unknown[]> => ipcRenderer.invoke('taskSource:getAll'),
-    get: (id: string): Promise<unknown> => ipcRenderer.invoke('taskSource:get', id),
     create: (data: Record<string, unknown>): Promise<unknown> =>
       ipcRenderer.invoke('taskSource:create', data),
     update: (id: string, data: Record<string, unknown>): Promise<unknown> =>
@@ -267,7 +250,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   skills: {
     getAll: (): Promise<unknown[]> => ipcRenderer.invoke('skills:getAll'),
-    get: (id: string): Promise<unknown> => ipcRenderer.invoke('skills:get', id),
     create: (data: Record<string, unknown>): Promise<unknown> =>
       ipcRenderer.invoke('skills:create', data),
     update: (id: string, data: Record<string, unknown>): Promise<unknown> =>
@@ -276,29 +258,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   secrets: {
     getAll: (): Promise<unknown[]> => ipcRenderer.invoke('secrets:getAll'),
-    get: (id: string): Promise<unknown> => ipcRenderer.invoke('secrets:get', id),
     create: (data: Record<string, unknown>): Promise<unknown> =>
       ipcRenderer.invoke('secrets:create', data),
     update: (id: string, data: Record<string, unknown>): Promise<unknown> =>
       ipcRenderer.invoke('secrets:update', id, data),
     delete: (id: string): Promise<boolean> => ipcRenderer.invoke('secrets:delete', id)
   },
-  deps: {
-    check: (): Promise<Record<string, { installed: boolean; version: string | null }>> =>
-      ipcRenderer.invoke('deps:check'),
-    setOpencodePath: (dirPath: string): Promise<{ success: boolean; error?: string }> =>
-      ipcRenderer.invoke('deps:setOpencodePath', dirPath)
-  },
   plugins: {
     list: (): Promise<unknown[]> => ipcRenderer.invoke('plugin:list'),
-    getConfigSchema: (pluginId: string): Promise<unknown[]> =>
-      ipcRenderer.invoke('plugin:getConfigSchema', pluginId),
     getDocumentation: (pluginId: string): Promise<string | null> =>
       ipcRenderer.invoke('plugin:getDocumentation', pluginId),
     resolveOptions: (pluginId: string, resolverKey: string, config: Record<string, unknown>, mcpServerId?: string, sourceId?: string): Promise<unknown[]> =>
       ipcRenderer.invoke('plugin:resolveOptions', pluginId, resolverKey, config, mcpServerId, sourceId),
-    getActions: (pluginId: string, config: Record<string, unknown>): Promise<unknown[]> =>
-      ipcRenderer.invoke('plugin:getActions', pluginId, config),
     executeAction: (actionId: string, taskId: string, sourceId: string, input?: string): Promise<unknown> =>
       ipcRenderer.invoke('plugin:executeAction', actionId, taskId, sourceId, input)
   },
@@ -364,11 +335,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('workspace:cleanup-progress', handler)
     return () => ipcRenderer.removeListener('workspace:cleanup-progress', handler)
   },
-  onGitlabDeviceCode: (callback: (code: string) => void): (() => void) => {
-    const handler = (_: unknown, code: string): void => callback(code)
-    ipcRenderer.on('gitlab:deviceCode', handler)
-    return () => ipcRenderer.removeListener('gitlab:deviceCode', handler)
-  },
   app: {
     getVersion: (): Promise<string> =>
       ipcRenderer.invoke('app:getVersion'),
@@ -411,10 +377,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('mobile:revokeSession', sessionId),
     revokeAllSessions: (): Promise<{ success: boolean }> =>
       ipcRenderer.invoke('mobile:revokeAllSessions'),
-    onPairingInitiated: (fn: (data: { pin: string; pairCodeId: string; expiresAt: number }) => void) =>
-      ipcRenderer.on('mobile:pairing-initiated', (_, data) => fn(data)),
-    onDeviceConnected: (fn: (data: { sessionId: string; deviceName: string }) => void) =>
-      ipcRenderer.on('mobile:device-connected', (_, data) => fn(data))
+    onPairingInitiated: (fn: (data: { pin: string; pairCodeId: string; expiresAt: number }) => void) => {
+      const handler = (_: unknown, data: { pin: string; pairCodeId: string; expiresAt: number }): void => fn(data)
+      ipcRenderer.on('mobile:pairing-initiated', handler)
+      return () => ipcRenderer.removeListener('mobile:pairing-initiated', handler)
+    },
+    onDeviceConnected: (fn: (data: { sessionId: string; deviceName: string }) => void) => {
+      const handler = (_: unknown, data: { sessionId: string; deviceName: string }): void => fn(data)
+      ipcRenderer.on('mobile:device-connected', handler)
+      return () => ipcRenderer.removeListener('mobile:device-connected', handler)
+    }
   },
   updater: {
     check: (): Promise<{ success: boolean; version?: string; error?: string }> =>
@@ -441,8 +413,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('agent-installer:detect'),
     install: (agentName: string): Promise<{ success: boolean; error: string | null; newStatus: Record<string, { installed: boolean; version: string | null }> }> =>
       ipcRenderer.invoke('agent-installer:install', { agentName }),
-    getCommand: (agentName: string): Promise<string> =>
-      ipcRenderer.invoke('agent-installer:get-install-command', { agentName }),
     onProgress: (callback: (data: { agentName: string; stage: string; output: string; percent: number }) => void): (() => void) => {
       const handler = (_: unknown, data: { agentName: string; stage: string; output: string; percent: number }): void => callback(data)
       ipcRenderer.on('agent-installer:progress', handler)
@@ -503,7 +473,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getRuntime: (): Promise<unknown> => ipcRenderer.invoke('voice:getRuntime'),
     installRuntime: (): Promise<unknown> => ipcRenderer.invoke('voice:installRuntime'),
     removeRuntime: (): Promise<unknown> => ipcRenderer.invoke('voice:removeRuntime'),
-    listModels: (): Promise<unknown[]> => ipcRenderer.invoke('voice:listModels'),
     installModel: (id: string): Promise<unknown> => ipcRenderer.invoke('voice:installModel', { id }),
     removeModel: (id: string): Promise<unknown> => ipcRenderer.invoke('voice:removeModel', { id }),
     selectModel: (id: string): Promise<unknown> => ipcRenderer.invoke('voice:selectModel', { id }),

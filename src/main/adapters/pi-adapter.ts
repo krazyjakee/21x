@@ -6,14 +6,12 @@
  */
 
 import { nodeWorkerRuntime } from '../node-worker-runtime'
-import { spawn, execFile } from 'child_process'
+import { spawn } from 'child_process'
 import type { ChildProcessWithoutNullStreams } from 'child_process'
 import { randomUUID } from 'crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
-import { StringDecoder } from 'string_decoder'
-import { promisify } from 'util'
 import type {
   CodingAgentAdapter,
   MessagePart,
@@ -22,147 +20,23 @@ import type {
   SessionStatus,
 } from './coding-agent-adapter'
 import { MessagePartType, MessageRole, SessionStatusType } from './coding-agent-adapter'
+import {
+  PI_PERMISSION_EXTENSION_SOURCE,
+  PI_PERMISSION_MODE_ENV,
+  buildPiMcpConfigDocument,
+  sanitizePiSessionName,
+  withProviderNameLimitHint,
+} from './pi-config'
+import { execFileAsync, findExecutable } from '../find-executable'
+import { onJsonLines } from './shared/jsonl'
 
-const execFileAsync = promisify(execFile)
 const RPC_TIMEOUT_MS = 15_000
 const MAX_BUFFERED_PARTS = 1_000
 const MINIMUM_PI_VERSION = [0, 80, 5] as const
-const PI_PERMISSION_MODE_ENV = 'TWENTYX_PI_PERMISSION_MODE'
 const TERMINAL_ERROR_SETTLE_GRACE_MS = 1_000
 /** Identifies the hosted AI gateway entry older releases wrote to Pi's models file. */
 const LEGACY_GATEWAY_PROVIDER_ID = 'peakflo'
 const LEGACY_GATEWAY_API_KEY_REF = '$PEAKFLO_AI_GATEWAY_API_KEY'
-/**
- * Most model providers cap function/tool `name` at 64 characters. Pi forwards
- * MCP tools as `<server>_<tool>`-style names, so a long MCP server name (e.g.
- * "[Team] Shared Workspace Tools") plus a long tool name overflows the
- * limit and the whole turn fails with "name must be at most 64 characters".
- * Keep server slugs short to leave room for the tool suffix.
- */
-export const MAX_PI_NAME_LENGTH = 64
-export const MAX_PI_MCP_SERVER_SLUG_LENGTH = 24
-
-function slugifyPiName(value: string, maxLength: number): string {
-  return (value
-    .toLowerCase()
-    .replace(/[^a-z0-9-_]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^[-_]+|[-_]+$/g, '')
-    .slice(0, maxLength)
-    .replace(/-+$/g, '') || 'mcp')
-}
-
-/**
- * Generic rule for bracket-prefixed servers ("[Team] My tasks" →
- * "team-my-tasks"). Returns null when the name has no bracket prefix so
- * the caller falls back to plain slugification.
- */
-function slugifyBracketPrefix(name: string): string | null {
-  const match = /^\[([^\]]+)\]\s*(.*)$/.exec(name)
-  if (!match) return null
-  const combined = `${match[1]}-${match[2]}`.trim()
-  if (!combined.replace(/-/g, '')) return null
-  return slugifyPiName(combined, MAX_PI_MCP_SERVER_SLUG_LENGTH)
-}
-
-export function sanitizePiSessionName(taskId: string): string {
-  const slug = taskId
-    .replace(/[^a-zA-Z0-9-_]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^[-_]+|[-_]+$/g, '')
-    .slice(0, MAX_PI_NAME_LENGTH)
-    .replace(/-+$/g, '')
-  return slug || 'pi-session'
-}
-
-export function sanitizePiMcpServerName(name: string, used: Set<string>): string {
-  const base = slugifyBracketPrefix(name) ?? slugifyPiName(name, MAX_PI_MCP_SERVER_SLUG_LENGTH)
-  if (!used.has(base)) {
-    used.add(base)
-    return base
-  }
-  for (let index = 2; index < 1000; index++) {
-    const suffix = `-${index}`
-    const candidate = `${base.slice(0, MAX_PI_MCP_SERVER_SLUG_LENGTH - suffix.length)}${suffix}`
-    if (!used.has(candidate)) {
-      used.add(candidate)
-      return candidate
-    }
-  }
-  const fallback = `mcp-${used.size + 1}`
-  used.add(fallback)
-  return fallback
-}
-
-export function withProviderNameLimitHint(error: string): string {
-  if (!/name must be at most 64/i.test(error)) return error
-  return `${error}\n\nHint: a tool name exceeded the provider 64-character limit. 20x now keeps MCP tools behind short namespace proxies. Stop and start the agent to rebuild its tool list.`
-}
-
-/**
- * Build the pi-mcp-adapter document used by 20x sessions.
- *
- * Keep MCP servers behind namespace proxy tools (`mcp__<server>`). Direct MCP
- * tools concatenate the server and tool names; a 24-character server slug and
- * a 50-character generated workflow tool already produce a 76-character name.
- * Providers commonly reject the entire request when any tool exceeds 64
- * characters, before the model can call a tool.
- */
-export function buildPiMcpConfigDocument(
-  servers: NonNullable<SessionConfig['mcpServers']>,
-  onRename?: (name: string, slug: string) => void,
-): Record<string, unknown> {
-  const usedSlugs = new Set<string>()
-  const mcpServers = Object.fromEntries(Object.entries(servers).map(([name, server]) => {
-    const slug = sanitizePiMcpServerName(name, usedSlugs)
-    if (slug !== name) onRename?.(name, slug)
-    if (server.type === 'stdio') {
-      return [slug, {
-        command: server.command,
-        args: server.args ?? [],
-        env: server.env ?? {},
-      }]
-    }
-    return [slug, {
-      url: server.url,
-      headers: server.headers ?? {},
-    }]
-  }))
-
-  return {
-    settings: {
-      // This must be explicit because MCP_DIRECT_TOOLS and user-level Pi
-      // settings can otherwise expose every `<server>_<tool>` directly.
-      directTools: false,
-    },
-    mcpServers,
-  }
-}
-
-const PI_PERMISSION_EXTENSION_SOURCE = `\
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
-const READ_ONLY_TOOLS = new Set(["read", "grep", "find", "ls"]);
-
-function inputSummary(input: unknown): string {
-  try {
-    return JSON.stringify(input, null, 2).slice(0, 4000);
-  } catch {
-    return String(input).slice(0, 4000);
-  }
-}
-
-export default function permissions(pi: ExtensionAPI) {
-  pi.on("tool_call", async (event, ctx) => {
-    if (process.env.${PI_PERMISSION_MODE_ENV} === "allow" || READ_ONLY_TOOLS.has(event.toolName)) return;
-    const approved = await ctx.ui.confirm(
-      \`Allow \${event.toolName}?\`,
-      inputSummary(event.input),
-    );
-    if (!approved) return { block: true, reason: \`\${event.toolName} was declined in 20x.\` };
-  });
-}
-`
 
 interface PiRpcResponse {
   id?: string
@@ -188,8 +62,6 @@ interface PiSession {
   pending: Map<string, PendingRequest>
   parts: MessagePart[]
   allMessages: SessionMessage[]
-  stdoutBuffer: string
-  stdoutDecoder: StringDecoder
   textByBlock: Map<string, string>
   reasoningByBlock: Map<string, string>
   toolParts: Map<string, MessagePart>
@@ -253,35 +125,25 @@ export class PiAdapter implements CodingAgentAdapter {
 
   private async findPiExecutable(): Promise<string> {
     if (this.piExecutablePath) return this.piExecutablePath
-    const isWin = process.platform === 'win32'
-    try {
-      const { stdout } = await execFileAsync(isWin ? 'where' : 'which', ['pi'], {
-        timeout: 10_000,
-        windowsHide: true,
-      })
-      this.piExecutablePath = stdout.trim().split(/\r?\n/)[0]
-      return this.piExecutablePath
-    } catch {
-      const home = homedir()
-      const candidates = isWin
-        ? [
-            join(home, 'AppData', 'Roaming', 'npm', 'pi.cmd'),
-            join(home, 'AppData', 'Roaming', 'npm', 'pi.exe'),
-          ]
-        : [
-            '/opt/homebrew/bin/pi',
-            '/usr/local/bin/pi',
-            join(home, '.local', 'bin', 'pi'),
-            join(home, '.npm-global', 'bin', 'pi'),
-            join(home, '.volta', 'bin', 'pi'),
-          ]
-      const found = candidates.find(existsSync)
-      if (!found) {
-        throw new Error('Pi CLI not found. Install it with: npm install -g --ignore-scripts @earendil-works/pi-coding-agent')
-      }
-      this.piExecutablePath = found
-      return found
+    const home = homedir()
+    const fallbackPaths = process.platform === 'win32'
+      ? [
+          join(home, 'AppData', 'Roaming', 'npm', 'pi.cmd'),
+          join(home, 'AppData', 'Roaming', 'npm', 'pi.exe'),
+        ]
+      : [
+          '/opt/homebrew/bin/pi',
+          '/usr/local/bin/pi',
+          join(home, '.local', 'bin', 'pi'),
+          join(home, '.npm-global', 'bin', 'pi'),
+          join(home, '.volta', 'bin', 'pi'),
+        ]
+    const found = await findExecutable('pi', fallbackPaths)
+    if (!found) {
+      throw new Error('Pi CLI not found. Install it with: npm install -g --ignore-scripts @earendil-works/pi-coding-agent')
     }
+    this.piExecutablePath = found
+    return found
   }
 
   /**
@@ -393,8 +255,6 @@ export class PiAdapter implements CodingAgentAdapter {
       pending: new Map(),
       parts: [],
       allMessages: [],
-      stdoutBuffer: '',
-      stdoutDecoder: new StringDecoder('utf8'),
       textByBlock: new Map(),
       reasoningByBlock: new Map(),
       toolParts: new Map(),
@@ -493,11 +353,12 @@ export class PiAdapter implements CodingAgentAdapter {
   }
 
   private attachProcess(session: PiSession): void {
-    session.process.stdout.on('data', (chunk: Buffer | string) => {
-      this.consumeStdout(session, typeof chunk === 'string' ? chunk : session.stdoutDecoder.write(chunk))
-    })
-    session.process.stdout.on('end', () => {
-      this.consumeStdout(session, session.stdoutDecoder.end(), true)
+    onJsonLines(session.process.stdout, (line) => {
+      try {
+        this.handleEvent(session, JSON.parse(line) as Record<string, unknown>)
+      } catch (error) {
+        console.warn('[PiAdapter] Invalid RPC output:', error)
+      }
     })
     session.process.stderr.on('data', (chunk: Buffer | string) => {
       const length = chunk.toString().trim().length
@@ -517,32 +378,6 @@ export class PiAdapter implements CodingAgentAdapter {
       this.rejectPending(session, new Error(session.lastError || (session.closing ? 'Pi process closed' : 'Pi process exited')))
       this.onDataAvailable?.(session.id)
     })
-  }
-
-  private consumeStdout(session: PiSession, chunk: string, flush = false): void {
-    session.stdoutBuffer += chunk
-    while (true) {
-      const newline = session.stdoutBuffer.indexOf('\n')
-      if (newline < 0) break
-      const line = session.stdoutBuffer.slice(0, newline)
-      session.stdoutBuffer = session.stdoutBuffer.slice(newline + 1)
-      this.handleJsonlLine(session, line)
-    }
-    if (flush && session.stdoutBuffer.length > 0) {
-      const line = session.stdoutBuffer
-      session.stdoutBuffer = ''
-      this.handleJsonlLine(session, line)
-    }
-  }
-
-  private handleJsonlLine(session: PiSession, rawLine: string): void {
-    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
-    if (!line.trim()) return
-    try {
-      this.handleEvent(session, JSON.parse(line) as Record<string, unknown>)
-    } catch (error) {
-      console.warn('[PiAdapter] Invalid RPC output:', error)
-    }
   }
 
   private rejectPending(session: PiSession, error: Error): void {

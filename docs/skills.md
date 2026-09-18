@@ -16,9 +16,9 @@ Skill {
 ```
 
 Skills can be assigned at two levels:
-- **Task-level**: `task.skill_ids` — takes priority
-- **Agent-level**: `agent.config.skill_ids` — fallback
-- **Unset** (both null): all skills are loaded
+- **Task-level**: `task.skill_ids`
+- **Agent-level**: `agent.config.skill_ids`
+- **Unset** (both null): no skill files are written
 
 ## SKILL.md Format
 
@@ -45,7 +45,7 @@ workspaces/<taskId>/
         SKILL.md
 ```
 
-Written by `AgentManager.writeSkillFiles()` before the OpenCode session is created.
+Written by `writeSkillFiles()` (`src/main/agent-manager/workspace-docs.ts`) before the OpenCode session is created.
 
 ## Discovery
 
@@ -55,11 +55,7 @@ Since each task gets a unique workspace (`workspaces/<taskId>/`), OpenCode creat
 
 ## Skill Resolution Priority
 
-In `writeSkillFiles(taskId, agentId, workspaceDir)`:
-
-1. If `task.skill_ids` is set → use those specific skills
-2. Else if `agent.config.skill_ids` is set → use those
-3. Else → load all skills from DB
+In `writeSkillFiles(db, taskId, agentId, workspaceDir)`, the task and agent selections are merged and deduplicated. Only selected skills are written, never all skills. Claude Code agents get them under `.claude/skills/`; other agents get them under `.agents/skills/`.
 
 ## Feedback Learning Loop
 
@@ -77,31 +73,24 @@ User clicks "Complete Task"
        ├─ Skip → complete immediately
        │
        └─ Submit
-            ├─ Close dialog, mark task completed (non-blocking)
-            └─ Fire-and-forget: learnFromSession(sessionId, prompt)
+            ├─ Close dialog, set task status to agent_learning
+            │  (stores rating, comment, complete-at-source choice)
+            └─ Send the feedback prompt through the normal chat flow
+               (resuming or starting a session if needed)
                  │
-                 Main process:
-                 1. Set learningMode (suppresses task status changes)
-                 2. Send feedback prompt to agent
-                 3. Agent reviews session, updates SKILL.md files
-                 4. syncSkillsFromWorkspace() → compare with DB
-                 5. Create/update changed skills
-                 6. Clean up session
+                 Main process, when the session goes idle (transitionToIdle):
+                 1. syncSkillsFromWorkspace() → compare with DB
+                 2. Create/update changed skills
+                 3. finishSessionFeedback() → mark task completed
+                    (and complete at source if chosen)
+                 On failure → task returns to ready_for_review
 ```
 
-### learnFromSession (agent-manager.ts)
-
-Runs entirely on the main process. The renderer fires and forgets — UI is never blocked.
-
-- Sets `session.learningMode = true` to suppress task status changes during polling (similar to how `isTriageSession` suppresses changes during auto-triage — see `docs/task-lifecycle.md`)
-- Sends the feedback as a prompt to the existing OpenCode session
-- Awaits completion (the prompt call blocks until the agent finishes)
-- Calls `syncSkillsFromWorkspace()` to sync changes back to DB
-- Deletes the session
+The feedback flow lives in `useTaskFeedbackFlow.ts`; the `agent_learning` status is what stops the completed-task effect from stopping the session being reused.
 
 ### syncSkillsFromWorkspace
 
-Scans both `.agents/skills/` and `.opencode/skills/` (legacy) in the workspace. Handles:
+`AgentManager.syncSkillsFromWorkspace()` delegates to `syncSkillsFromDirectory()` in `src/main/agent-manager/skills-sync.ts`, which scans `.claude/skills/`, `.agents/skills/` and `.opencode/skills/` (legacy) in the workspace. Handles:
 
 - **Subdirectory layout**: `skills/<name>/SKILL.md`
 - **Flat file layout**: `skills/<name>.md` (agent-created)
@@ -112,14 +101,6 @@ For each parsed skill:
 - Match by name → update if content/description changed (version auto-increments)
 - No match → create new skill
 - Same content → skip
-
-## IPC API
-
-```
-agentSession:syncSkills(sessionId)      → SkillSyncResult
-agentSession:syncSkillsForTask(taskId)  → SkillSyncResult
-agentSession:learnFromSession(sid, msg) → SkillSyncResult
-```
 
 `SkillSyncResult = { created: string[], updated: string[], unchanged: string[] }`
 
@@ -134,12 +115,12 @@ agentSession:learnFromSession(sid, msg) → SkillSyncResult
 
 | File | Role |
 |------|------|
-| `src/main/agent-manager.ts` | `writeSkillFiles`, `parseSkillMd`, `syncSkillsFromWorkspace`, `learnFromSession` |
+| `src/main/agent-manager/workspace-docs.ts` | `writeSkillFiles` |
+| `src/main/agent-manager/skills-sync.ts` | `parseSkillMd`, `syncSkillsFromDirectory` |
+| `src/main/agent-manager.ts` | `syncSkillsFromWorkspace`, `transitionToIdle` (learning completion) |
+| `src/main/session-feedback.ts` | `updateTaskFromUser`, `finishSessionFeedback` |
 | `src/main/database.ts` | `getSkillByName`, skill CRUD, `getSkillsByIds` |
-| `src/main/ipc-handlers.ts` | IPC handlers for sync/learn |
-| `src/preload/index.ts` | Bridge methods |
-| `src/renderer/src/lib/ipc-client.ts` | `agentSessionApi.syncSkills`, `learnFromSession` |
 | `src/renderer/src/components/tasks/FeedbackDialog.tsx` | Rating dialog |
-| `src/renderer/src/components/tasks/TaskWorkspace.tsx` | Feedback orchestration |
+| `src/renderer/src/components/tasks/workspace/useTaskFeedbackFlow.ts` | Feedback orchestration |
 | `src/renderer/src/components/skills/` | Skill management UI |
 | `src/renderer/src/stores/skill-store.ts` | Zustand store for skills |

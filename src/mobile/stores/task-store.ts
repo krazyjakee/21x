@@ -1,10 +1,6 @@
 import { create } from 'zustand'
 import { api } from '../api/client'
 import { onEvent } from '../api/websocket'
-import type { TaskStatus } from '@shared/constants'
-
-// Re-export for convenience
-export type { TaskStatus }
 
 export interface TaskAttachment {
   id: string
@@ -66,7 +62,6 @@ interface TaskState {
 }
 
 export const useTaskStore = create<TaskState>((set, get) => {
-  // Listen to WebSocket events
   onEvent('task:updated', (payload) => {
     const { taskId, updates } = payload as { taskId: string; updates: Partial<Task> }
     const found = get().tasks.some((t) => t.id === taskId)

@@ -10,12 +10,12 @@ import { DatabaseManager } from './database'
  * These tests exercise the REAL startup path — `initialize()` — instead of the
  * injected in-memory schema used by `createTestDb()`.
  *
- * That distinction matters. `createTestDb()` builds the tables from its own
- * `CREATE TABLE` copy, so it proves nothing about whether a migration actually
- * runs on an existing install. A column added to `runMigrations()` without
- * bumping `SCHEMA_VERSION` passed every other test in this repo and still
- * shipped broken: `initialize()` only calls `runMigrations()` when the stored
- * version is LOWER than `SCHEMA_VERSION`, so returning users never got it.
+ * That distinction matters. `createTestDb()` always runs every migration on an
+ * empty database, so it proves nothing about the version gate on an existing
+ * install. A column added to `runMigrations()` without bumping
+ * `SCHEMA_VERSION` passed every other test in this repo and still shipped
+ * broken: `applySchema()` only calls `runMigrations()` when the stored version
+ * is LOWER than `SCHEMA_VERSION`, so returning users never got it.
  */
 describe('DatabaseManager migrations on an existing install', () => {
   let dir: string
@@ -44,6 +44,14 @@ describe('DatabaseManager migrations on an existing install', () => {
 
     const raw = openRaw()
     expect(taskColumns(raw)).toContain('complete_at_source')
+    // First-run seed: a default agent wired to the built-in skill and MCP server.
+    const agents = raw.prepare('SELECT config FROM agents WHERE is_default = 1').all() as { config: string }[]
+    expect(agents).toHaveLength(1)
+    const config = JSON.parse(agents[0].config) as { skill_ids: string[]; mcp_servers: string[] }
+    const skill = raw.prepare("SELECT id FROM skills WHERE name = 'Mastermind'").get() as { id: string }
+    const server = raw.prepare("SELECT id FROM mcp_servers WHERE name = 'task-management'").get() as { id: string }
+    expect(config.skill_ids).toEqual([skill.id])
+    expect(config.mcp_servers).toEqual([server.id])
     raw.close()
   })
 

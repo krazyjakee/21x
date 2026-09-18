@@ -1,8 +1,5 @@
 import { Agent as UndiciAgent } from 'undici'
-import { mkdirSync, writeFileSync, rmSync, existsSync, unlinkSync, readFileSync } from 'fs'
-import { join, delimiter } from 'path'
 import { homedir } from 'os'
-import { execSync } from 'child_process'
 import { buildMergedOpencodeConfig } from '../utils/opencode-config'
 import type { DatabaseManager } from '../database'
 import type {
@@ -13,7 +10,28 @@ import type {
   SessionMessage,
   MessagePart
 } from './coding-agent-adapter'
-import { SessionStatusType, MessagePartType, MessageRole } from './coding-agent-adapter'
+import { SessionStatusType } from './coding-agent-adapter'
+import { attachAndVerifyMcpServers, disconnectMcpServers, type McpAttachResult } from './opencode-mcp'
+import {
+  removeRuntimePluginFiles,
+  setTillDoneSession,
+  writeRuntimePluginFiles
+} from './opencode-runtime-plugins'
+import {
+  DEFAULT_SERVER_URL,
+  ensureOpencodeBinaryPaths,
+  findAccessibleServer,
+  killServerAndClearDatabase,
+  streamServerEvents
+} from './opencode-server'
+import {
+  convertAllMessages,
+  convertPolledParts,
+  convertResumedMessages,
+  findActiveToolInLastAssistantMessage,
+  listRunningTools,
+  type OpencodeMessage
+} from './opencode-messages'
 
 let OpenCodeSDK: typeof import('@opencode-ai/sdk') | null = null
 
@@ -36,13 +54,22 @@ const QUICK_OP_TIMEOUT_MS = 15_000
 const quickTimeoutAgent = new UndiciAgent({ headersTimeout: QUICK_OP_TIMEOUT_MS, bodyTimeout: QUICK_OP_TIMEOUT_MS })
 const quickTimeoutFetch = (req: unknown) => (globalThis as unknown as Record<string, (...args: unknown[]) => unknown>).fetch(req, { dispatcher: quickTimeoutAgent })
 
-const DEFAULT_SERVER_URL = 'http://localhost:4096'
+type SessionMcpConfig = Record<string, McpServerConfig>
 
-/** Outcome of attaching MCP servers to an OpenCode session. */
-type McpAttachResult = { attached: string[]; failed: string[] }
+interface ProvidersResult {
+  providers: { id: string; name: string; models: unknown; [key: string]: unknown }[]
+  default: Record<string, string>
+}
+
+/** OpenCode permission replies: "once" (allow this time), "always" (remember), "reject" (deny). */
+function permissionReply(approved: boolean, optionId?: string): 'once' | 'always' | 'reject' {
+  if (!approved) return 'reject'
+  return optionId === 'allow-always' || optionId === 'approved-for-session' ? 'always' : 'once'
+}
 
 /**
- * Adapter for OpenCode backend
+ * Adapter for the OpenCode backend. One shared `opencode serve` process (spawned
+ * or adopted) serves every session over HTTP; permission prompts arrive over SSE.
  */
 export class OpencodeAdapter implements CodingAgentAdapter {
   /** Callback set by agent-manager to trigger an immediate poll cycle */
@@ -89,7 +116,7 @@ export class OpencodeAdapter implements CodingAgentAdapter {
   private sessionWorkspaceDirs: Map<string, string> = new Map()
   /** Per-session MCP server configs — retained for re-registration on session resume
    *  (e.g. after 20x restart when stdio MCP server processes are dead). */
-  private sessionMcpConfigs: Map<string, Record<string, { type: string; url?: string; headers?: Record<string, string>; command?: string; args?: string[]; env?: Record<string, string> }>> = new Map()
+  private sessionMcpConfigs: Map<string, SessionMcpConfig> = new Map()
   /** Per-session names of MCP servers that could not be attached. Read by the
    *  agent-manager so the session documentation does not advertise tools that
    *  are not there. */
@@ -126,268 +153,6 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     await this.ensureSDKLoaded()
   }
 
-  /**
-   * Wait for a group of MCP servers to reach a terminal state.
-   * Uses one status query per retry cycle (batched) instead of polling per server.
-   */
-  private async waitForMcpServersReady(
-    ocClient: OpencodeClient,
-    serverNames: string[],
-    workspaceDir?: string,
-    maxAttempts = 5,
-    delayMs = 300
-  ): Promise<Map<string, 'connected' | 'failed' | 'timeout'>> {
-    const pending = new Set(serverNames)
-    const states = new Map<string, 'connected' | 'failed' | 'timeout'>()
-
-    for (let attempt = 0; attempt < maxAttempts && pending.size > 0; attempt++) {
-      try {
-        const statusMap = await this.getMcpStatusMap(ocClient, workspaceDir)
-
-        for (const name of [...pending]) {
-          const serverStatus = statusMap?.[name]
-          if (!serverStatus?.status) continue
-
-          if (serverStatus.status === 'connected') {
-            states.set(name, 'connected')
-            pending.delete(name)
-            console.log(`[OpencodeAdapter] MCP server '${name}' status: connected (attempt ${attempt + 1})`)
-          } else if (serverStatus.status === 'failed') {
-            states.set(name, 'failed')
-            pending.delete(name)
-            console.error(`[OpencodeAdapter] MCP server '${name}' status: failed${serverStatus.error ? ` - ${serverStatus.error}` : ''}`)
-          }
-        }
-      } catch (statusErr) {
-        console.warn('[OpencodeAdapter] Failed to query MCP status:', statusErr)
-      }
-
-      if (pending.size > 0 && attempt < maxAttempts - 1 && delayMs > 0) {
-        await new Promise(resolve => setTimeout(resolve, delayMs))
-      }
-    }
-
-    for (const name of pending) {
-      states.set(name, 'timeout')
-    }
-
-    return states
-  }
-
-  /**
-   * Query MCP status via SDK.
-   * Prefer mcp.list() (same view as `opencode mcp list`), fall back to mcp.status().
-   */
-  private async getMcpStatusMap(
-    ocClient: OpencodeClient,
-    workspaceDir?: string
-  ): Promise<Record<string, { status?: string; error?: string }> | undefined> {
-    const query = workspaceDir ? { query: { directory: workspaceDir } } : {}
-    const mcpClient = ocClient.mcp as unknown as {
-      list?: (args?: unknown) => Promise<{ data?: unknown; error?: unknown }>
-      status: (args?: unknown) => Promise<{ data?: unknown; error?: unknown }>
-    }
-
-    if (typeof mcpClient.list === 'function') {
-      try {
-        const listResult = await mcpClient.list(query)
-        if (!listResult.error) {
-          const parsed = this.parseMcpListData(listResult.data)
-          if (parsed) return parsed
-        }
-      } catch (err) {
-        console.warn('[OpencodeAdapter] mcp.list failed, falling back to mcp.status:', err)
-      }
-    }
-
-    const statusResult = await mcpClient.status(query)
-    return statusResult.data as Record<string, { status?: string; error?: string }> | undefined
-  }
-
-  private parseMcpListData(
-    data: unknown
-  ): Record<string, { status?: string; error?: string }> | undefined {
-    if (!data) return undefined
-
-    if (Array.isArray(data)) {
-      const out: Record<string, { status?: string; error?: string }> = {}
-      for (const item of data) {
-        const rec = item as {
-          name?: string
-          id?: string
-          status?: string
-          state?: string
-          error?: string
-          auth?: { status?: string; error?: string }
-        }
-        const name = rec.name || rec.id
-        if (!name) continue
-        out[name] = {
-          status: rec.status || rec.state || rec.auth?.status,
-          error: rec.error || rec.auth?.error
-        }
-      }
-      return Object.keys(out).length > 0 ? out : undefined
-    }
-
-    if (typeof data === 'object') {
-      const obj = data as Record<string, { status?: string; state?: string; error?: string }>
-      const out: Record<string, { status?: string; error?: string }> = {}
-      for (const [name, value] of Object.entries(obj)) {
-        out[name] = {
-          status: value?.status || value?.state,
-          error: value?.error
-        }
-      }
-      return Object.keys(out).length > 0 ? out : undefined
-    }
-
-    return undefined
-  }
-
-  /**
-   * Register MCP servers with the OpenCode backend (mcp.add + mcp.connect).
-   * Called from both createSession (initial setup) and resumeSession (after 20x
-   * restart when stdio MCP server processes are dead and need re-registration).
-   *
-   * Returns which servers are attached and which are not. The caller MUST act on
-   * the failures: OpenCode receives its MCP servers only through these runtime
-   * calls, so a swallowed failure produces a session that silently has no tools
-   * while AGENTS.md still advertises them.
-   */
-  private async registerMcpServers(
-    ocClient: OpencodeClient,
-    mcpServers: Record<string, McpServerConfig>,
-    workspaceDir?: string
-  ): Promise<McpAttachResult> {
-    const connectCandidates: string[] = []
-    const attached: string[] = []
-    const failed: string[] = []
-
-    for (const [name, mcpConfig] of Object.entries(mcpServers)) {
-      try {
-        const mcpAddConfig = mcpConfig.type === 'http'
-          ? { type: 'remote' as const, url: mcpConfig.url ?? '', headers: mcpConfig.headers }
-          : { type: 'local' as const, command: [mcpConfig.command ?? '', ...(mcpConfig.args ?? [])], environment: mcpConfig.env }
-        console.log(`[OpencodeAdapter] Registering MCP server: ${name}`, JSON.stringify(mcpAddConfig))
-
-        // Add MCP server
-        const addResult = await ocClient.mcp.add({
-          body: { name, config: mcpAddConfig },
-          ...(workspaceDir && { query: { directory: workspaceDir } })
-        })
-
-        if (addResult.error) {
-          console.error(`[OpencodeAdapter] mcp.add error for ${name}:`, addResult.error)
-          failed.push(name)
-          continue
-        }
-
-        // Check the add response for immediate server status
-        const addStatus = addResult.data?.[name] as { status: string; error?: string } | undefined
-        if (addStatus) {
-          console.log(`[OpencodeAdapter] mcp.add status for '${name}': ${addStatus.status}${addStatus.error ? ` - ${addStatus.error}` : ''}`)
-          if (addStatus.status === 'failed') {
-            console.error(`[OpencodeAdapter] MCP server '${name}' failed immediately after add: ${addStatus.error}`)
-            failed.push(name)
-            continue
-          }
-          if (addStatus.status === 'connected') {
-            console.log(`[OpencodeAdapter] Successfully registered MCP server: ${name} (connected via mcp.add)`)
-            attached.push(name)
-            continue
-          }
-        }
-
-        // Connect to MCP server
-        const connectResult = await ocClient.mcp.connect({
-          path: { name },
-          ...(workspaceDir && { query: { directory: workspaceDir } })
-        })
-
-        if (connectResult.error) {
-          console.error(`[OpencodeAdapter] mcp.connect error for ${name}:`, connectResult.error)
-          failed.push(name)
-          continue
-        }
-
-        // Check connect result (returns boolean)
-        if (connectResult.data === false) {
-          console.error(`[OpencodeAdapter] mcp.connect returned false for ${name} — server failed to connect`)
-          failed.push(name)
-          continue
-        }
-        connectCandidates.push(name)
-      } catch (mcpError) {
-        console.error(`[OpencodeAdapter] Failed to register MCP server ${name}:`, mcpError)
-        failed.push(name)
-      }
-    }
-
-    if (connectCandidates.length > 0) {
-      const readiness = await this.waitForMcpServersReady(ocClient, connectCandidates, workspaceDir)
-      for (const name of connectCandidates) {
-        const state = readiness.get(name)
-        if (state === 'connected') {
-          console.log(`[OpencodeAdapter] Successfully registered MCP server: ${name}`)
-          attached.push(name)
-        } else if (state === 'failed') {
-          console.error(`[OpencodeAdapter] MCP server '${name}' failed to connect`)
-          failed.push(name)
-        } else {
-          console.error(`[OpencodeAdapter] MCP server '${name}' did not reach connected status — tools may not work`)
-          failed.push(name)
-        }
-      }
-    }
-
-    return { attached, failed }
-  }
-
-  /**
-   * Attach the MCP servers of a session and verify the result.
-   *
-   * OpenCode keeps MCP servers only in the memory of the `opencode serve`
-   * process, so an attach failure is invisible in the session itself: the agent
-   * simply has no task-management tools while AGENTS.md advertises them. This
-   * helper therefore retries the failures once, and reports what is still
-   * missing so the caller can escalate instead of continuing silently.
-   */
-  private async attachAndVerifyMcpServers(
-    ocClient: OpencodeClient,
-    mcpServers: Record<string, McpServerConfig>,
-    workspaceDir: string | undefined,
-    context: string
-  ): Promise<McpAttachResult> {
-    const first = await this.registerMcpServers(ocClient, mcpServers, workspaceDir)
-    if (first.failed.length === 0) return first
-
-    console.warn(
-      `[OpencodeAdapter] ${context}: MCP servers not attached on first try (${first.failed.join(', ')}) — retrying once`
-    )
-    const retryTargets: Record<string, McpServerConfig> = {}
-    for (const name of first.failed) {
-      const cfg = mcpServers[name]
-      if (cfg) retryTargets[name] = cfg
-    }
-
-    const second = await this.registerMcpServers(ocClient, retryTargets, workspaceDir)
-    const result: McpAttachResult = {
-      attached: [...first.attached, ...second.attached],
-      failed: second.failed
-    }
-
-    if (result.failed.length > 0) {
-      // Loud, single-line marker: this is the failure mode where an agent runs
-      // with no task-management tools while its own AGENTS.md lists 35 of them.
-      console.error(
-        `[OpencodeAdapter] MCP ATTACH FAILED — ${context}: ${result.failed.join(', ')} not attached. ` +
-        `Agent tools from these servers are NOT available in this session.`
-      )
-    }
-    return result
-  }
-
   private setMcpAttachFailures(sessionId: string, failed: string[]): void {
     if (failed.length > 0) {
       this.sessionMcpAttachFailures.set(sessionId, [...failed])
@@ -415,44 +180,16 @@ export class OpencodeAdapter implements CodingAgentAdapter {
    */
   private async disconnectSessionMcpServers(sessionId: string): Promise<void> {
     const ownConfig = this.sessionMcpConfigs.get(sessionId)
-    if (!ownConfig) return
+    const client = this.clients.get(sessionId)
+    if (!ownConfig || !client) return
 
     const stillNeeded = new Set<string>()
     for (const [otherSessionId, otherConfig] of this.sessionMcpConfigs.entries()) {
       if (otherSessionId === sessionId) continue
       for (const name of Object.keys(otherConfig)) stillNeeded.add(name)
     }
-
-    const client = this.clients.get(sessionId)
-    if (!client) return
-    const workspaceDir = this.sessionWorkspaceDirs.get(sessionId)
-    const mcpClient = client.mcp as unknown as {
-      disconnect?: (args: unknown) => Promise<{ error?: unknown }>
-    }
-    if (typeof mcpClient.disconnect !== 'function') return
-
-    for (const name of Object.keys(ownConfig)) {
-      if (stillNeeded.has(name)) continue
-      try {
-        const result = await mcpClient.disconnect({
-          path: { name },
-          ...(workspaceDir && { query: { directory: workspaceDir } })
-        })
-        if (result?.error) {
-          console.warn(`[OpencodeAdapter] mcp.disconnect error for ${name}:`, result.error)
-        } else {
-          console.log(`[OpencodeAdapter] Disconnected MCP server '${name}' for session ${sessionId}`)
-        }
-      } catch (err) {
-        console.warn(`[OpencodeAdapter] mcp.disconnect failed for ${name}:`, err instanceof Error ? err.message : err)
-      }
-    }
-  }
-
-  private getScopedPartId(messageId: string, rawPartId: string | undefined, fallbackIndex?: number): string | undefined {
-    if (rawPartId) return `${messageId}:${rawPartId}`
-    if (fallbackIndex !== undefined) return `${messageId}:part-${fallbackIndex}`
-    return undefined
+    const names = Object.keys(ownConfig).filter((name) => !stillNeeded.has(name))
+    await disconnectMcpServers(client, names, this.sessionWorkspaceDirs.get(sessionId), sessionId)
   }
 
   /**
@@ -542,8 +279,8 @@ export class OpencodeAdapter implements CodingAgentAdapter {
   }
 
   /**
-   * Notify the adapter that provider config has changed (e.g. user edited agent settings,
-   * AI gateway key was rotated).  Pushes the updated config to the running server.
+   * Notify the adapter that provider config has changed (e.g. user edited agent
+   * settings). Pushes the updated config to the running server.
    *
    * Call this from the agent-manager when settings change — do NOT call it on every
    * createSession or getClient, since PATCH /global/config aborts all running sessions.
@@ -557,24 +294,7 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     await this.pushMergedConfigToClient(this.sharedClient)
   }
 
-  async getProviders(
-    serverUrl?: string,
-    directory?: string
-  ): Promise<{
-    providers: { id: string; name: string; models: unknown; [key: string]: unknown }[]
-    default: Record<string, string>
-  } | null> {
-    return this.getProvidersInner(serverUrl, directory, true)
-  }
-
-  private async getProvidersInner(
-    serverUrl?: string,
-    directory?: string,
-    allowRecovery = true
-  ): Promise<{
-    providers: { id: string; name: string; models: unknown; [key: string]: unknown }[]
-    default: Record<string, string>
-  } | null> {
+  async getProviders(serverUrl?: string, directory?: string, allowRecovery = true): Promise<ProvidersResult | null> {
     try {
       const client = await this.getClient(serverUrl, { quick: true })
 
@@ -606,17 +326,14 @@ export class OpencodeAdapter implements CodingAgentAdapter {
         if (allowRecovery && errorStr.includes('SQLiteError')) {
           console.warn('[OpencodeAdapter] SQLite error from server, attempting recovery:', errorStr)
           await this.recoverFromBrokenServer()
-          return this.getProvidersInner(serverUrl, directory, false)
+          return this.getProviders(serverUrl, directory, false)
         }
 
         console.log('[OpencodeAdapter] No providers configured on server:', errorStr)
         return null
       }
 
-      const data = result.data as {
-        providers?: { id: string; name: string; models: unknown; [key: string]: unknown }[]
-        default?: Record<string, string>
-      } | undefined
+      const data = result.data as Partial<ProvidersResult> | undefined
 
       return data ? { providers: data.providers || [], default: data.default || {} } : null
     } catch (error: unknown) {
@@ -633,51 +350,10 @@ export class OpencodeAdapter implements CodingAgentAdapter {
   private async recoverFromBrokenServer(): Promise<void> {
     console.log('[OpencodeAdapter] Starting recovery: stopping broken server and clearing database')
 
-    // 1. Stop the server if we spawned it
-    try {
-      await this.stopServer()
-    } catch {
-      // Already logged in stopServer
-    }
-
-    // 2. Kill any opencode process on the default port (may be a leftover
-    //    from a previous app launch or terminal session).
-    try {
-      if (process.platform === 'win32') {
-        execSync('taskkill /F /IM opencode.exe 2>nul', { stdio: 'ignore' })
-      } else {
-        // Kill processes listening on port 4096 specifically
-        execSync("lsof -ti :4096 | xargs kill -9 2>/dev/null || true", { stdio: 'ignore' })
-      }
-      console.log('[OpencodeAdapter] Killed opencode process on port 4096')
-    } catch {
-      // Process may already be gone
-    }
-
-    // 3. Clear the global database and WAL/SHM sidecar files.
-    //    These can get corrupted after a crash or during opencode version upgrades.
-    const dbDir = join(homedir(), '.local', 'share', 'opencode')
-    const dbFiles = ['opencode.db', 'opencode.db-shm', 'opencode.db-wal']
-    for (const file of dbFiles) {
-      const filePath = join(dbDir, file)
-      try {
-        if (existsSync(filePath)) {
-          unlinkSync(filePath)
-          console.log(`[OpencodeAdapter] Deleted corrupted DB file: ${filePath}`)
-        }
-      } catch (err) {
-        console.warn(`[OpencodeAdapter] Could not delete ${filePath}:`, err)
-      }
-    }
-
-    // 4. Reset adapter state so the next getClient() call spawns a fresh server
-    this.serverUrl = null
-    this.serverInstance = null
-    this.sharedClient = null
-    this.quickClient = null
-    this.v2Client = null
-    this.serverStarting = null
-    this.configPushed = false
+    // stopServer() also resets the client state, so the next getClient()
+    // spawns a fresh server.
+    await this.stopServer()
+    killServerAndClearDatabase()
 
     // Brief pause to let the OS release the port
     await new Promise(resolve => setTimeout(resolve, 500))
@@ -702,64 +378,8 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     }
   }
 
-  private async findAccessibleServer(url: string): Promise<string | null> {
-    const urls = [url]
-
-    if (url.includes('localhost')) {
-      urls.push(url.replace('localhost', '127.0.0.1'))
-    } else if (url.includes('127.0.0.1')) {
-      urls.push(url.replace('127.0.0.1', 'localhost'))
-    }
-
-    for (const testUrl of urls) {
-      try {
-        const response = await fetch(`${testUrl}/global/health`, {
-          signal: AbortSignal.timeout(2000)
-        })
-        if (response.ok) {
-          return testUrl
-        }
-      } catch {
-        // Try next URL
-      }
-    }
-
-    return null
-  }
-
-  /**
-   * Ensures common binary install paths (e.g. ~/.opencode/bin) are in PATH
-   * so the SDK's createOpencode can find the `opencode` binary.
-   */
-  private ensureBinaryPaths(): void {
-    const currentPath = process.env.PATH || ''
-
-    // Include user-configured custom binary path (set via deps:setOpencodePath
-    // in onboarding). Without this the installer finds opencode but the adapter
-    // cannot, because the custom path is only added to PATH during deps:check.
-    const customPath = this.db?.getSetting('OPENCODE_BINARY_PATH') ?? null
-
-    const extraPaths = [
-      ...(customPath ? [customPath] : []),
-      join(homedir(), '.opencode', 'bin'),
-      ...(process.platform === 'win32'
-        ? [join(homedir(), 'AppData', 'Roaming', 'npm')]
-        : ['/usr/local/bin']),
-      join(homedir(), '.local', 'bin')
-    ].filter(p => !currentPath.includes(p))
-
-    if (extraPaths.length > 0) {
-      process.env.PATH = [...extraPaths, currentPath].join(delimiter)
-      console.log('[OpencodeAdapter] Added binary paths to PATH:', extraPaths)
-    }
-  }
-
   private async ensureServerRunning(targetUrl: string = DEFAULT_SERVER_URL): Promise<void> {
-    if (this.serverUrl) {
-      if (this.serverUrl === targetUrl) {
-        return
-      }
-    }
+    if (this.serverUrl === targetUrl) return
 
     if (this.serverStarting) {
       return this.serverStarting
@@ -767,8 +387,7 @@ export class OpencodeAdapter implements CodingAgentAdapter {
 
     await this.ensureSDKLoaded()
 
-    // Ensure common binary install paths are in PATH so the SDK can find `opencode`
-    this.ensureBinaryPaths()
+    ensureOpencodeBinaryPaths(this.db?.getSetting('OPENCODE_BINARY_PATH') ?? null)
 
     // Set bash tool timeout if not already configured.
     // Without this, bash commands inside the agent run indefinitely — a single
@@ -784,7 +403,7 @@ export class OpencodeAdapter implements CodingAgentAdapter {
 
     this.serverStarting = (async () => {
       try {
-        const accessibleUrl = await this.findAccessibleServer(targetUrl)
+        const accessibleUrl = await findAccessibleServer(targetUrl)
         if (accessibleUrl) {
           this.serverUrl = accessibleUrl
           this.serverInstance = null
@@ -860,30 +479,33 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     return this.serverStarting
   }
 
-  async createSession(config: SessionConfig): Promise<string> {
-    // Write runtime plugin files BEFORE server starts so they are discovered at startup.
-    // Plugins that depend on support files read them dynamically, so updates can take
-    // effect without restarting the server.
+  /**
+   * Prepares the server side of a session: writes runtime plugins (BEFORE the
+   * server starts, so they are discovered at startup), creates the session's
+   * clients, registers the plugins, and attaches the MCP servers.
+   *
+   * Config is NOT pushed here. It is pushed once on first server connection;
+   * later changes go through notifyConfigChanged(). Pushing on every session
+   * caused a storm of PATCH /global/config calls that aborted all running
+   * sessions when parallel tasks started.
+   */
+  private async connectSession(config: SessionConfig, context: string): Promise<{
+    ocClient: OpencodeClient
+    promptClient: OpencodeClient
+    attachResult: McpAttachResult
+  }> {
     this.writeRuntimePluginFiles(config)
-
     await this.ensureServerRunning(config.serverUrl || DEFAULT_SERVER_URL)
 
-    // Config is pushed once on first server connection (ensureServerRunning).
-    // Subsequent config changes (key rotation, settings edit) go through
-    // notifyConfigChanged() called by the agent-manager — NOT here.
-    // Pushing config on every createSession caused a storm of PATCH /global/config
-    // calls that aborted all running sessions when parallel tasks started.
-
     const baseUrl = this.serverUrl || config.serverUrl || DEFAULT_SERVER_URL
-    // Default client uses SDK's built-in timeout (60s) for session create, polling, MCP ops, etc.
+    // SDK default timeout (60s) for create, polling, MCP ops, etc.
     const ocClient = OpenCodeSDK!.createOpencodeClient({ baseUrl })
-    // Separate client with no timeout — used ONLY for session.prompt() which runs indefinitely
+    // No timeout — used ONLY for session.prompt(), which runs for the whole agent loop
     const promptClient = OpenCodeSDK!.createOpencodeClient({ baseUrl, fetch: noTimeoutFetch as unknown as (request: Request) => ReturnType<typeof fetch> })
 
-    // Register runtime plugins via directory-scoped config.update().
-    // Using the directory scope avoids side-effects on other sessions — unscoped
-    // config patches can trigger disposeAllInstances on the OpenCode server,
-    // which kills MCP connections for every running session.
+    // Directory-scoped config.update(): unscoped config patches can trigger
+    // disposeAllInstances on the server, killing MCP connections for every
+    // running session.
     if (this.pluginFilePaths.length > 0) {
       try {
         await ocClient.config.update({
@@ -896,19 +518,35 @@ export class OpencodeAdapter implements CodingAgentAdapter {
       }
     }
 
-    // Register MCP servers BEFORE creating session so the session picks them up
-    let attachResult: McpAttachResult = { attached: [], failed: [] }
-    if (config.mcpServers) {
-      attachResult = await this.attachAndVerifyMcpServers(
-        ocClient,
-        config.mcpServers,
-        config.workspaceDir,
-        `createSession task=${config.taskId}`
-      )
-    }
+    // MCP servers are attached before session create so the session picks
+    // them up. On resume after a 20x restart the stdio MCP processes are dead
+    // and remote servers may have lost their SSE connections; OpenCode handles
+    // transient mid-session reconnections itself.
+    const attachResult = config.mcpServers
+      ? await attachAndVerifyMcpServers(ocClient, config.mcpServers, config.workspaceDir, context)
+      : { attached: [], failed: [] }
 
-    // Create OpenCode session
-    const result = await ocClient.session.create({
+    return { ocClient, promptClient, attachResult }
+  }
+
+  private registerSession(
+    sessionId: string,
+    config: SessionConfig,
+    connection: { ocClient: OpencodeClient; promptClient: OpencodeClient; attachResult: McpAttachResult }
+  ): void {
+    setTillDoneSession(this.tillDoneConfigPath, sessionId, config.tillDone !== false)
+    this.clients.set(sessionId, connection.ocClient)
+    this.promptClients.set(sessionId, connection.promptClient)
+    this.sessionPermissionModes.set(sessionId, config.permissionMode || 'ask')
+    if (config.workspaceDir) this.sessionWorkspaceDirs.set(sessionId, config.workspaceDir)
+    if (config.mcpServers) this.sessionMcpConfigs.set(sessionId, config.mcpServers)
+    this.setMcpAttachFailures(sessionId, connection.attachResult.failed)
+  }
+
+  async createSession(config: SessionConfig): Promise<string> {
+    const connection = await this.connectSession(config, `createSession task=${config.taskId}`)
+
+    const result = await connection.ocClient.session.create({
       body: { title: `Task ${config.taskId}` },
       ...(config.workspaceDir && { query: { directory: config.workspaceDir } })
     })
@@ -921,58 +559,13 @@ export class OpencodeAdapter implements CodingAgentAdapter {
       throw new Error('No session ID returned from OpenCode')
     }
 
-    const ocSessionId = result.data.id
-    this.writeTillDoneSessionConfig(ocSessionId, config.tillDone !== false)
-    this.clients.set(ocSessionId, ocClient)
-    this.promptClients.set(ocSessionId, promptClient)
-    this.sessionPermissionModes.set(ocSessionId, config.permissionMode || 'ask')
-    if (config.workspaceDir) this.sessionWorkspaceDirs.set(ocSessionId, config.workspaceDir)
-    if (config.mcpServers) this.sessionMcpConfigs.set(ocSessionId, config.mcpServers as Record<string, { type: string; url?: string; headers?: Record<string, string>; command?: string; args?: string[]; env?: Record<string, string> }>)
-    this.setMcpAttachFailures(ocSessionId, attachResult.failed)
-
-    return ocSessionId
+    this.registerSession(result.data.id, config, connection)
+    return result.data.id
   }
 
   async resumeSession(sessionId: string, config: SessionConfig): Promise<SessionMessage[]> {
-    // Update runtime plugin files before resuming (plugins read support files dynamically)
-    this.writeRuntimePluginFiles(config)
-
-    await this.ensureServerRunning(config.serverUrl || DEFAULT_SERVER_URL)
-
-    const baseUrl = this.serverUrl || config.serverUrl || DEFAULT_SERVER_URL
-    // Default client uses SDK's built-in timeout for polling/status
-    const ocClient = OpenCodeSDK!.createOpencodeClient({ baseUrl })
-    // Separate client with no timeout for session.prompt() only
-    const promptClient = OpenCodeSDK!.createOpencodeClient({ baseUrl, fetch: noTimeoutFetch as unknown as (request: Request) => ReturnType<typeof fetch> })
-
-    // Register runtime plugins via directory-scoped config.update() to avoid
-    // side-effects on other sessions (see createSession comment).
-    if (this.pluginFilePaths.length > 0) {
-      try {
-        await ocClient.config.update({
-          body: { plugin: [...this.pluginFilePaths] } as Record<string, unknown>,
-          ...(config.workspaceDir && { query: { directory: config.workspaceDir } })
-        })
-        console.log('[OpencodeAdapter] Registered runtime plugins via config.update:', this.pluginFilePaths)
-      } catch (err) {
-        console.warn('[OpencodeAdapter] config.update for runtime plugins failed:', err)
-      }
-    }
-
-    // Re-register MCP servers — after a 20x restart, stdio MCP server
-    // processes (task-management, GCP logs) are dead and need re-registration.
-    // Remote MCP servers may also have lost their SSE connections.
-    // OpenCode handles transient mid-session reconnections internally, so this
-    // is only needed on resume, not during normal operation.
-    if (config.mcpServers) {
-      const attachResult = await this.attachAndVerifyMcpServers(
-        ocClient,
-        config.mcpServers,
-        config.workspaceDir,
-        `resumeSession session=${sessionId}`
-      )
-      this.setMcpAttachFailures(sessionId, attachResult.failed)
-    }
+    const connection = await this.connectSession(config, `resumeSession session=${sessionId}`)
+    const { ocClient } = connection
 
     // Validate session exists
     const getResult = await ocClient.session.get({
@@ -1009,40 +602,25 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     // prevents both new prompts and message deletion.
     // Using v2.part.delete is the only way to clear them.
     try {
-      if (OpenCodeV2Client) {
-        const v2 = this.v2Client || OpenCodeV2Client.createOpencodeClient({
-          baseUrl: this.serverUrl || DEFAULT_SERVER_URL
-        })
-        if (!this.v2Client) this.v2Client = v2
-
-        // Scan messages for zombie running tool parts
-        const msgsResult = await ocClient.session.messages({
-          path: { id: sessionId },
-          ...(config.workspaceDir && { query: { directory: config.workspaceDir } }),
-        })
+      const v2 = this.getV2Client()
+      if (v2) {
         let zombieCount = 0
-        if (msgsResult.data && Array.isArray(msgsResult.data)) {
-          for (const msg of msgsResult.data) {
-            const msgId = (msg as Record<string, unknown>).info
-              ? ((msg as Record<string, unknown>).info as Record<string, unknown>).id as string
-              : undefined
-            if (!msgId) continue
-            for (const part of ((msg as Record<string, unknown>).parts as Array<Record<string, unknown>>) || []) {
-              if (part.type !== 'tool') continue
-              const state = part.state as Record<string, unknown> | undefined
-              if (state?.status !== 'running') continue
-
-              try {
-                await v2.part.delete({
-                  sessionID: sessionId,
-                  messageID: msgId,
-                  partID: part.id as string,
-                  ...(config.workspaceDir && { directory: config.workspaceDir }),
-                })
-                zombieCount++
-              } catch {
-                // Part may already have been cleaned up
-              }
+        for (const msg of await this.fetchMessages(ocClient, sessionId, config.workspaceDir)) {
+          const msgId = msg.info?.id
+          if (!msgId) continue
+          for (const part of msg.parts || []) {
+            if (part.type !== 'tool') continue
+            if ((part.state as Record<string, unknown> | undefined)?.status !== 'running') continue
+            try {
+              await v2.part.delete({
+                sessionID: sessionId,
+                messageID: msgId,
+                partID: part.id as string,
+                ...(config.workspaceDir && { directory: config.workspaceDir }),
+              })
+              zombieCount++
+            } catch {
+              // Part may already have been cleaned up
             }
           }
         }
@@ -1081,64 +659,9 @@ export class OpencodeAdapter implements CodingAgentAdapter {
       console.warn(`[OpencodeAdapter] Failed to clean up stale session state on resume:`, err instanceof Error ? err.message : err)
     }
 
-    this.clients.set(sessionId, ocClient)
-    this.promptClients.set(sessionId, promptClient)
-    this.sessionPermissionModes.set(sessionId, config.permissionMode || 'ask')
-    if (config.workspaceDir) this.sessionWorkspaceDirs.set(sessionId, config.workspaceDir)
-    if (config.mcpServers) this.sessionMcpConfigs.set(sessionId, config.mcpServers as Record<string, { type: string; url?: string; headers?: Record<string, string>; command?: string; args?: string[]; env?: Record<string, string> }>)
-    this.writeTillDoneSessionConfig(sessionId, config.tillDone !== false)
+    this.registerSession(sessionId, config, connection)
 
-    // Fetch existing messages
-    const messagesResult = await ocClient.session.messages({
-      path: { id: sessionId },
-      ...(config.workspaceDir && { query: { directory: config.workspaceDir } })
-    })
-
-    const messages: SessionMessage[] = []
-    if (messagesResult.data && Array.isArray(messagesResult.data)) {
-      for (const msg of messagesResult.data) {
-        if (!msg.info) continue
-        const rawParts = msg.parts || []
-        const transformedParts: MessagePart[] = rawParts.map((part: Record<string, unknown>, partIndex: number) => {
-          const scopedPartId = this.getScopedPartId(String(msg.info.id), part.id as string | undefined, partIndex)
-          if (part.type === 'tool') {
-            return {
-              ...this.transformToolPart(part),
-              id: scopedPartId
-            }
-          }
-          return {
-            id: scopedPartId,
-            type: part.type as MessagePartType,
-            text: part.text as string,
-            content: part.text as string
-          }
-        })
-
-        // Surface provider errors stored in msg.info.error (e.g. "Payment
-        // Required", quota exceeded).  OpenCode records these on the message
-        // info but creates no parts for them, so without this they vanish on
-        // resume.
-        const msgError = (msg.info as Record<string, unknown>).error as { name?: string; data?: { message?: string } } | undefined
-        if (msgError && transformedParts.length === 0) {
-          const errorText = msgError.data?.message || msgError.name || 'Unknown provider error'
-          transformedParts.push({
-            id: `error-${msg.info.id}`,
-            type: 'text' as unknown as MessagePartType,
-            text: `⚠️ Provider error: ${errorText}`,
-            content: `⚠️ Provider error: ${errorText}`
-          })
-        }
-
-        messages.push({
-          id: msg.info.id,
-          role: (msg.info.role || 'assistant') as unknown as MessageRole,
-          parts: transformedParts
-        })
-      }
-    }
-
-    return messages
+    return convertResumedMessages(await this.fetchMessages(ocClient, sessionId, config.workspaceDir))
   }
 
   async sendPrompt(sessionId: string, parts: MessagePart[], config: SessionConfig): Promise<void> {
@@ -1228,7 +751,17 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     const maxRetries = OpencodeAdapter.PROMPT_MAX_RETRIES
     const baseDelay = OpencodeAdapter.PROMPT_RETRY_BASE_DELAY_MS
 
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    let attempt = 0
+    /** Waits with exponential backoff and returns true when a transient error may be retried. */
+    const retryAfterBackoff = async (errorMsg: string, kind: string): Promise<boolean> => {
+      if (!this.isRetryablePromptError(errorMsg) || attempt >= maxRetries) return false
+      const delay = baseDelay * Math.pow(2, attempt)
+      console.warn(`[OpencodeAdapter] Retryable ${kind} error "${errorMsg}" for ${sessionId}, retrying (${attempt + 1}/${maxRetries}) after ${delay}ms`)
+      await new Promise(resolve => setTimeout(resolve, delay))
+      return true
+    }
+
+    for (; attempt <= maxRetries; attempt++) {
       if (promptAbort.signal.aborted) return
 
       const promptStartTime = Date.now()
@@ -1271,12 +804,7 @@ export class OpencodeAdapter implements CodingAgentAdapter {
           const errorMsg = promptError.data?.message || promptError.name || 'Unknown provider error'
 
           // Retry transient errors (e.g. "Aborted" from config push tearing down the bus)
-          if (this.isRetryablePromptError(errorMsg) && attempt < maxRetries) {
-            const delay = baseDelay * Math.pow(2, attempt)
-            console.warn(`[OpencodeAdapter] Retryable provider error "${errorMsg}" for ${sessionId}, retrying (${attempt + 1}/${maxRetries}) after ${delay}ms`)
-            await new Promise(resolve => setTimeout(resolve, delay))
-            continue
-          }
+          if (await retryAfterBackoff(errorMsg, 'provider')) continue
 
           console.error(`[OpencodeAdapter] Provider error for ${sessionId}: ${errorMsg}`)
           this.promptErrors.set(sessionId, errorMsg)
@@ -1293,13 +821,7 @@ export class OpencodeAdapter implements CodingAgentAdapter {
 
         const errorMsg = err instanceof Error ? err.message : String(err)
 
-        // Retry transient HTTP-level errors
-        if (this.isRetryablePromptError(errorMsg) && attempt < maxRetries) {
-          const delay = baseDelay * Math.pow(2, attempt)
-          console.warn(`[OpencodeAdapter] Retryable HTTP error "${errorMsg}" for ${sessionId}, retrying (${attempt + 1}/${maxRetries}) after ${delay}ms`)
-          await new Promise(resolve => setTimeout(resolve, delay))
-          continue
-        }
+        if (await retryAfterBackoff(errorMsg, 'HTTP')) continue
 
         console.error('[OpencodeAdapter] prompt error:', err)
         // Surface HTTP-level errors (network failures, 4xx/5xx, connection refused)
@@ -1311,6 +833,14 @@ export class OpencodeAdapter implements CodingAgentAdapter {
         return
       }
     }
+  }
+
+  private async fetchMessages(ocClient: OpencodeClient, sessionId: string, workspaceDir?: string): Promise<OpencodeMessage[]> {
+    const result = await ocClient.session.messages({
+      path: { id: sessionId },
+      ...(workspaceDir && { query: { directory: workspaceDir } })
+    })
+    return Array.isArray(result.data) ? result.data as unknown as OpencodeMessage[] : []
   }
 
   async getStatus(sessionId: string, config: SessionConfig): Promise<SessionStatus> {
@@ -1357,7 +887,8 @@ export class OpencodeAdapter implements CodingAgentAdapter {
 
     // Check for pending questions via V2 SDK
     try {
-      const v2 = this.getV2Client(config)
+      const v2 = this.getV2Client(config.serverUrl)
+      if (!v2) throw new Error('OpenCode V2 SDK not loaded')
       const listResult = await v2.question.list({
         ...(config.workspaceDir && { directory: config.workspaceDir })
       })
@@ -1377,29 +908,10 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     // may have tool calls in flight that the status API doesn't reflect.
     if (sdkType === 'idle') {
       try {
-        const messagesResult = await ocClient.session.messages({
-          path: { id: sessionId },
-          ...(config.workspaceDir && { query: { directory: config.workspaceDir } })
-        })
-        if (messagesResult.data && Array.isArray(messagesResult.data)) {
-          // Check the last assistant message for pending tool parts
-          for (let i = messagesResult.data.length - 1; i >= 0; i--) {
-            const msg = messagesResult.data[i]
-            if (!msg.info || msg.info.role === 'user') continue
-            const parts = msg.parts || []
-            for (const part of parts) {
-              if (part.type === 'tool') {
-                const state = (part as Record<string, unknown>).state as Record<string, unknown> | undefined
-                const toolStatus = state?.status as string | undefined
-                if (toolStatus === 'pending' || toolStatus === 'running') {
-                  console.log(`[OpencodeAdapter] Status API says idle but tool part ${part.id} is ${toolStatus} — reporting BUSY`)
-                  return { type: SessionStatusType.BUSY }
-                }
-              }
-            }
-            // Only check the last assistant message
-            break
-          }
+        const activeTool = findActiveToolInLastAssistantMessage(await this.fetchMessages(ocClient, sessionId, config.workspaceDir))
+        if (activeTool) {
+          console.log(`[OpencodeAdapter] Status API says idle but tool part ${activeTool.id} is ${activeTool.status} — reporting BUSY`)
+          return { type: SessionStatusType.BUSY }
         }
       } catch (err) {
         console.warn('[OpencodeAdapter] Failed to check messages for pending tools:', err)
@@ -1432,55 +944,6 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     return { type: SessionStatusType.IDLE }
   }
 
-  /**
-   * Transforms a raw OpenCode tool part into the structured format the renderer expects.
-   * OpenCode returns tool name as `part.tool` (string) and details in `part.state`.
-   */
-  private transformToolPart(part: Record<string, unknown>): MessagePart {
-    const state = (part.state || {}) as Record<string, unknown>
-    const stateInput = (state.input && typeof state.input === 'object' ? state.input : {}) as Record<string, unknown>
-    const toolName = (part.tool as string) || 'unknown'
-    const status = (state.status as string) || 'unknown'
-    const inputStr = stateInput && Object.keys(stateInput).length > 0
-      ? JSON.stringify(stateInput, null, 2) : undefined
-    const outputStr = state.output
-      ? String(state.output).slice(0, 2000) : undefined
-    const errorStr = status === 'error' && state.error ? String(state.error) : undefined
-
-    // Detect interactive question tools
-    let questions: unknown = stateInput.questions
-    if (typeof questions === 'string') {
-      try { questions = JSON.parse(questions) } catch {}
-    }
-    // Detect TodoWrite tools
-    let todos: unknown = stateInput.todos
-    if (typeof todos === 'string') {
-      try { todos = JSON.parse(todos) } catch {}
-    }
-
-    let partType = 'tool'
-    if (Array.isArray(questions) && questions.length > 0) partType = 'question'
-    else if (Array.isArray(todos) && todos.length > 0) partType = 'todowrite'
-
-    return {
-      id: part.id as string,
-      type: partType as MessagePartType,
-      text: part.text as string,
-      content: part.text as string,
-      tool: {
-        name: toolName,
-        status,
-        title: (state.title as string) || undefined,
-        input: inputStr,
-        output: outputStr,
-        error: errorStr,
-        ...(Array.isArray(questions) && questions.length > 0 && { questions }),
-        ...(Array.isArray(todos) && todos.length > 0 && { todos })
-      },
-      state: part.state as MessagePart['state']
-    }
-  }
-
   async pollMessages(
     sessionId: string,
     seenMessageIds: Set<string>,
@@ -1492,79 +955,8 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     if (!ocClient) {
       return []
     }
-
-    const messagesResult = await ocClient.session.messages({
-      path: { id: sessionId },
-      ...(config.workspaceDir && { query: { directory: config.workspaceDir } })
-    })
-
-    if (!messagesResult.data || !Array.isArray(messagesResult.data)) {
-      return []
-    }
-
-    const newParts: MessagePart[] = []
-
-    for (const msg of messagesResult.data) {
-      if (!msg.info) continue
-      const msgId = msg.info.id
-      const msgRole = msg.info.role // Get role from message
-
-      // Skip if already seen and no parts have changed
-      const isNewMessage = !seenMessageIds.has(msgId)
-      if (isNewMessage) {
-        seenMessageIds.add(msgId)
-      }
-
-      const parts = msg.parts && Array.isArray(msg.parts) ? msg.parts : []
-      for (const [partIndex, part] of parts.entries()) {
-        const partId = this.getScopedPartId(String(msgId), part.id as string | undefined, partIndex)
-        if (!partId) continue
-        // Cast part to a loose record for uniform property access across SDK Part union members
-        const p = part as unknown as Record<string, unknown>
-
-        const isNewPart = !seenPartIds.has(partId)
-        const isUpdatable = part.type === 'text' || part.type === 'reasoning' || part.type === 'tool'
-
-        if (isUpdatable) {
-          const fingerprint = part.type === 'tool'
-            ? `${(p.state as Record<string, unknown> | undefined)?.status}:${part.type}:${(p.text as string | undefined)?.length ?? 0}:${((p.state as Record<string, unknown> | undefined)?.output as string | undefined)?.length ?? 0}`
-            : String((p.text as string | undefined)?.length ?? 0)
-
-          const oldFingerprint = partContentLengths.get(partId)
-          const hasChanged = oldFingerprint !== fingerprint
-
-          if (isNewPart || hasChanged) {
-            seenPartIds.add(partId)
-            partContentLengths.set(partId, fingerprint)
-
-            if (part.type === 'tool') {
-              const transformed = this.transformToolPart(p)
-              newParts.push({ ...transformed, id: partId, role: msgRole, update: !isNewPart })
-            } else {
-              newParts.push({
-                id: partId,
-                type: part.type as unknown as MessagePartType,
-                text: p.text as string,
-                content: p.text as string,
-                role: msgRole,
-                update: !isNewPart
-              })
-            }
-          }
-        } else if (isNewPart) {
-          seenPartIds.add(partId)
-          newParts.push({
-            id: partId,
-            type: part.type as unknown as MessagePartType,
-            text: p.text as string,
-            content: p.text as string,
-            role: msgRole // Include role from message
-          })
-        }
-      }
-    }
-
-    return newParts
+    const messages = await this.fetchMessages(ocClient, sessionId, config.workspaceDir)
+    return convertPolledParts(messages, seenMessageIds, seenPartIds, partContentLengths)
   }
 
   async getRunningTools(sessionId: string, config: SessionConfig): Promise<Array<{
@@ -1577,39 +969,7 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     if (!ocClient) return []
 
     try {
-      const messagesResult = await ocClient.session.messages({
-        path: { id: sessionId },
-        ...(config.workspaceDir && { query: { directory: config.workspaceDir } })
-      })
-
-      if (!messagesResult.data || !Array.isArray(messagesResult.data)) return []
-
-      const running: Array<{
-        partId: string
-        toolName: string
-        startTime?: number
-        input?: Record<string, unknown>
-      }> = []
-
-      for (const msg of messagesResult.data) {
-        const parts = (msg as Record<string, unknown>).parts as Array<Record<string, unknown>> | undefined
-        if (!parts || !Array.isArray(parts)) continue
-        for (const part of parts) {
-          if (part.type !== 'tool') continue
-          const state = part.state as Record<string, unknown> | undefined
-          if (!state || state.status !== 'running') continue
-          const timeObj = state.time as Record<string, unknown> | undefined
-          const input = state.input as Record<string, unknown> | undefined
-          running.push({
-            partId: part.id as string,
-            toolName: (part.tool as string) || 'unknown',
-            startTime: timeObj?.start as number | undefined,
-            input: input || undefined
-          })
-        }
-      }
-
-      return running
+      return listRunningTools(await this.fetchMessages(ocClient, sessionId, config.workspaceDir))
     } catch (err) {
       console.warn(`[OpencodeAdapter] getRunningTools failed for ${sessionId}:`, err instanceof Error ? err.message : err)
       return []
@@ -1657,312 +1017,28 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     this.sessionWorkspaceDirs.delete(sessionId)
     this.sessionMcpConfigs.delete(sessionId)
     this.sessionMcpAttachFailures.delete(sessionId)
-    this.removeTillDoneSessionConfig(sessionId)
+    setTillDoneSession(this.tillDoneConfigPath, sessionId, undefined)
 
     if (this.clients.size > 0) {
       return
     }
 
-    // Clean up generated runtime plugins and any support files they use.
-    for (const filePath of [...this.pluginFilePaths, ...this.runtimeSupportFilePaths]) {
-      if (filePath) {
-        try {
-          if (existsSync(filePath)) {
-            rmSync(filePath)
-            console.log(`[OpencodeAdapter] Removed runtime plugin file: ${filePath}`)
-          }
-        } catch (err) {
-          console.warn(`[OpencodeAdapter] Failed to remove runtime plugin file: ${err}`)
-        }
-      }
-    }
-    this.pluginFilePaths = []
-    this.runtimeSupportFilePaths = []
-    this.tillDoneConfigPath = null
-  }
-
-  /**
-   * Writes all generated runtime plugin files needed for this session.
-   * MUST be called BEFORE ensureServerRunning() so plugins are discovered at startup.
-   */
-  private writeRuntimePluginFiles(config: SessionConfig): void {
-    this.pluginFilePaths = []
-    this.runtimeSupportFilePaths = []
-    this.tillDoneConfigPath = null
-
-    if (!config.workspaceDir) {
-      return
-    }
-
-    const openCodeDir = join(config.workspaceDir, '.opencode')
-    // Do not put generated plugins in `.opencode/plugins`. OpenCode 1.16+
-    // can hang while it auto-discovers project-local plugins (upstream issue
-    // #30904), and it can install another copy of plugin dependencies in each
-    // workspace. We register these files explicitly through config.update().
-    const pluginsDir = join(openCodeDir, '.20x-plugins')
-    mkdirSync(openCodeDir, { recursive: true })
-
-    // Remove files created by older 20x versions so a retry can recover an
-    // already-stuck workspace. Leave user-owned plugins in the directory.
-    const legacyPluginsDir = join(openCodeDir, 'plugins')
-    for (const fileName of ['20x-tilldone.js', '20x-secret-injector.js']) {
-      const legacyPluginPath = join(legacyPluginsDir, fileName)
-      if (existsSync(legacyPluginPath)) {
-        unlinkSync(legacyPluginPath)
-      }
-      const generatedPluginPath = join(pluginsDir, fileName)
-      if (existsSync(generatedPluginPath)) {
-        unlinkSync(generatedPluginPath)
-      }
-    }
-
-    if (config.tillDone !== false) {
-      mkdirSync(pluginsDir, { recursive: true })
-      this.writeTillDonePlugin(openCodeDir, pluginsDir, true)
-    }
-
-    if (config.secretEnvVars && Object.keys(config.secretEnvVars).length > 0) {
-      mkdirSync(pluginsDir, { recursive: true })
-    }
-    this.writeSecretPlugin(config, openCodeDir, pluginsDir)
-  }
-
-  private writeSecretPlugin(config: SessionConfig, openCodeDir: string, pluginsDir: string): void {
-    const secretCount = config.secretEnvVars ? Object.keys(config.secretEnvVars).length : 0
-    console.log(`[OpencodeAdapter] writeSecretFiles: workspaceDir=${config.workspaceDir}, secretCount=${secretCount}`)
-    if (!config.secretEnvVars || secretCount === 0) {
-      console.log(`[OpencodeAdapter] writeSecretFiles: skipping — no secrets or no workspaceDir`)
-      return
-    }
-
-    // 1. Write pre-formatted export commands to a secrets file.
-    //    The plugin reads this file on every bash invocation so updates take effect immediately.
-    const exportLines = Object.entries(config.secretEnvVars)
-      .map(([k, v]) => 'export ' + k + "='" + v.replace(/'/g, "'\\''" ) + "'")
-      .join('\n')
-
-    const secretsPath = join(openCodeDir, '.20x-secrets')
-    writeFileSync(secretsPath, exportLines, 'utf-8')
-    this.runtimeSupportFilePaths.push(secretsPath)
-
-    // 2. Write the plugin JS that reads the secrets file and prepends exports to bash commands.
-    //    Uses tool.execute.before hook (same pattern as Claude Code PreToolUse).
-    const pluginPath = join(pluginsDir, '20x-secret-injector.js')
-    const pluginCode = this.buildSecretInjectorPluginCode(secretsPath)
-
-    writeFileSync(pluginPath, pluginCode, 'utf-8')
-    this.pluginFilePaths.push(pluginPath)
-
-    console.log(`[OpencodeAdapter] Wrote secret files: plugin=${pluginPath}, secrets=${secretsPath} (${Object.keys(config.secretEnvVars).length} secret(s))`)
-  }
-
-  private writeTillDonePlugin(openCodeDir: string, pluginsDir: string, enabled: boolean): void {
-    const statePath = join(openCodeDir, '.20x-tilldone-state.json')
-    if (!existsSync(statePath)) {
-      writeFileSync(statePath, '{}\n', 'utf-8')
-    }
-    this.runtimeSupportFilePaths.push(statePath)
-
-    const configPath = join(openCodeDir, '.20x-tilldone-config.json')
-    const existingConfig = this.readTillDoneConfigFile(configPath)
-    writeFileSync(configPath, JSON.stringify({ defaultEnabled: enabled, sessions: existingConfig.sessions }), 'utf-8')
-    this.runtimeSupportFilePaths.push(configPath)
-    this.tillDoneConfigPath = configPath
-
-    const pluginPath = join(pluginsDir, '20x-tilldone.js')
-    const pluginCode = this.buildTillDonePluginCode(statePath, configPath)
-    writeFileSync(pluginPath, pluginCode, 'utf-8')
-    this.pluginFilePaths.push(pluginPath)
-
-    console.log(`[OpencodeAdapter] Wrote tilldone plugin: plugin=${pluginPath}, state=${statePath}, enabled=${enabled}`)
-  }
-
-  private readTillDoneConfig(): { defaultEnabled: boolean; sessions: Record<string, boolean> } {
-    if (!this.tillDoneConfigPath) {
-      return { defaultEnabled: true, sessions: {} }
-    }
-
-    return this.readTillDoneConfigFile(this.tillDoneConfigPath)
-  }
-
-  private readTillDoneConfigFile(configPath: string): { defaultEnabled: boolean; sessions: Record<string, boolean> } {
-    if (!existsSync(configPath)) {
-      return { defaultEnabled: true, sessions: {} }
-    }
-
-    try {
-      const parsed = JSON.parse(readFileSync(configPath, 'utf-8') || '{}') as {
-        defaultEnabled?: unknown
-        enabled?: unknown
-        sessions?: unknown
-      }
-      const sessions = parsed.sessions && typeof parsed.sessions === 'object' && !Array.isArray(parsed.sessions)
-        ? Object.fromEntries(
-          Object.entries(parsed.sessions as Record<string, unknown>)
-            .filter(([, value]) => typeof value === 'boolean')
-        ) as Record<string, boolean>
-        : {}
-
-      return {
-        defaultEnabled: parsed.defaultEnabled !== undefined
-          ? parsed.defaultEnabled !== false
-          : parsed.enabled !== false,
-        sessions
-      }
-    } catch {
-      return { defaultEnabled: true, sessions: {} }
-    }
-  }
-
-  private writeTillDoneConfig(config: { defaultEnabled: boolean; sessions: Record<string, boolean> }): void {
-    if (!this.tillDoneConfigPath) return
-    writeFileSync(this.tillDoneConfigPath, JSON.stringify(config), 'utf-8')
-  }
-
-  private writeTillDoneSessionConfig(sessionId: string, enabled: boolean): void {
-    const config = this.readTillDoneConfig()
-    this.writeTillDoneConfig({
-      ...config,
-      sessions: {
-        ...config.sessions,
-        [sessionId]: enabled
-      }
+    removeRuntimePluginFiles({
+      pluginFilePaths: this.pluginFilePaths,
+      runtimeSupportFilePaths: this.runtimeSupportFilePaths,
+      tillDoneConfigPath: this.tillDoneConfigPath
     })
+    this.pluginFilePaths = []
+    this.runtimeSupportFilePaths = []
+    this.tillDoneConfigPath = null
   }
 
-  private removeTillDoneSessionConfig(sessionId: string): void {
-    if (!this.tillDoneConfigPath || !existsSync(this.tillDoneConfigPath)) return
-    const config = this.readTillDoneConfig()
-    if (!(sessionId in config.sessions)) return
-    const sessions = { ...config.sessions }
-    delete sessions[sessionId]
-    this.writeTillDoneConfig({ ...config, sessions })
-  }
-
-  private buildSecretInjectorPluginCode(secretsPath: string): string {
-    return [
-      '// Auto-generated by 20x — do not edit. Removed on session destroy.',
-      'import { readFileSync } from "fs";',
-      '',
-      'var SECRETS_PATH = ' + JSON.stringify(secretsPath) + ';',
-      '',
-      'export var SecretInjector = async function() {',
-      '  return {',
-      '    "tool.execute.before": async function(input, output) {',
-      '      if (input.tool === "bash") {',
-      '        try {',
-      '          var exports = readFileSync(SECRETS_PATH, "utf-8").trim();',
-      '          if (exports) output.args.command = exports + "\\n" + output.args.command;',
-      '        } catch(e) {}',
-      '      }',
-      '    }',
-      '  };',
-      '};',
-      ''
-    ].join('\n')
-  }
-
-  private buildTillDonePluginCode(statePath: string, configPath: string): string {
-    const initialTodoPrompt = 'TillDone: before using other tools, call the built-in todowrite tool to create a concise task list for this task. Keep the list current as you work.'
-
-    return [
-      '// Auto-generated by 20x — do not edit. Removed on session destroy.',
-      'import { readFileSync, writeFileSync } from "fs";',
-      '',
-      'var STATE_PATH = ' + JSON.stringify(statePath) + ';',
-      'var CONFIG_PATH = ' + JSON.stringify(configPath) + ';',
-      'var INITIAL_TODO_PROMPT = ' + JSON.stringify(initialTodoPrompt) + ';',
-      '',
-      'function isTillDoneEnabled(sessionId) {',
-      '  if (!sessionId) return false;',
-      '  try {',
-      '    var raw = readFileSync(CONFIG_PATH, "utf-8");',
-      '    var parsed = JSON.parse(raw || "{}");',
-      '    if (parsed?.sessions && typeof parsed.sessions === "object") {',
-      '      if (Object.prototype.hasOwnProperty.call(parsed.sessions, sessionId)) {',
-      '        return parsed.sessions[sessionId] !== false;',
-      '      }',
-      '      return false;',
-      '    }',
-      '    if (Object.prototype.hasOwnProperty.call(parsed || {}, "defaultEnabled")) {',
-      '      return parsed.defaultEnabled !== false;',
-      '    }',
-      '    return parsed?.enabled !== false;',
-      '  } catch (e) {',
-      '    return false;',
-      '  }',
-      '}',
-      '',
-      'function readState() {',
-      '  try {',
-      '    var raw = readFileSync(STATE_PATH, "utf-8");',
-      '    var parsed = JSON.parse(raw || "{}");',
-      '    return parsed && typeof parsed === "object" ? parsed : {};',
-      '  } catch (e) {',
-      '    return {};',
-      '  }',
-      '}',
-      '',
-      'function writeState(state) {',
-      '  try {',
-      '    writeFileSync(STATE_PATH, JSON.stringify(state), "utf-8");',
-      '  } catch (e) {}',
-      '  return state;',
-      '}',
-      '',
-      '// SDK types: tool.execute.before input has { tool, sessionID, callID }',
-      '// SDK types: event hook input has { event: { type, properties: { sessionID, ... } } }',
-      '',
-      'function normalizeTodos(rawTodos) {',
-      '  if (!Array.isArray(rawTodos)) return [];',
-      '  return rawTodos.filter(Boolean).map(function(todo, index) {',
-      '    return {',
-      '      id: todo.id || String(index),',
-      '      content: todo.content || todo.text || todo.title || "",',
-      '      status: todo.status || "pending"',
-      '    };',
-      '  });',
-      '}',
-      '',
-      'export var TillDone = async function({ client }) {',
-      '  return {',
-      '    "tool.execute.before": async function(input) {',
-      '      if (input.tool === "todowrite" || input.tool === "skill" || input.tool === "task") return;',
-      '      var sessionId = input.sessionID;',
-      '      if (!sessionId) return;',
-      '      if (!isTillDoneEnabled(sessionId)) return;',
-      '      var state = readState();',
-      '      var todos = normalizeTodos((state[sessionId] || {}).todos);',
-      '      if (todos.length === 0) {',
-      '        throw new Error(INITIAL_TODO_PROMPT);',
-      '      }',
-      '    },',
-      '    event: async function(input) {',
-      '      var ev = input.event;',
-      '      if (!ev) return;',
-      '      var sessionId = ev.properties?.sessionID;',
-      '      if (!sessionId) return;',
-      '      if (!isTillDoneEnabled(sessionId)) return;',
-      '      var state = readState();',
-      '      var sessionState = state[sessionId] || { todos: [] };',
-      '',
-      '      if (ev.type === "todo.updated") {',
-      '        sessionState.todos = normalizeTodos(ev.properties?.todos || []);',
-      '        state[sessionId] = sessionState;',
-      '        writeState(state);',
-      '        return;',
-      '      }',
-      '',
-      '      if (ev.type === "session.deleted") {',
-      '        delete state[sessionId];',
-      '        writeState(state);',
-      '        return;',
-      '      }',
-      '    }',
-      '  };',
-      '};',
-      ''
-    ].join('\n')
+  /** Must be called BEFORE ensureServerRunning() so plugins are discovered at startup. */
+  private writeRuntimePluginFiles(config: SessionConfig): void {
+    const files = writeRuntimePluginFiles(config)
+    this.pluginFilePaths = files.pluginFilePaths
+    this.runtimeSupportFilePaths = files.runtimeSupportFilePaths
+    this.tillDoneConfigPath = files.tillDoneConfigPath
   }
 
   async getAllMessages(sessionId: string, config: SessionConfig): Promise<SessionMessage[]> {
@@ -1972,35 +1048,7 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     }
 
     try {
-      // Fetch all messages from OpenCode API
-      const messagesResult = await ocClient.session.messages({
-        path: { id: sessionId },
-        ...(config.workspaceDir && { query: { directory: config.workspaceDir } })
-      })
-
-      if (!messagesResult.data || !Array.isArray(messagesResult.data)) {
-        return []
-      }
-
-      // Convert OpenCode messages to SessionMessage format
-      const messages = messagesResult.data.map((msg: Record<string, unknown>, idx: number) => {
-        const msgInfo = msg.info as Record<string, unknown> | undefined
-        const role = (msgInfo?.role as string) || 'assistant'
-        const parts = (msg.parts || []) as Record<string, unknown>[]
-
-        return {
-          id: (msgInfo?.id as string) || `msg-${idx}`,
-          role: (role === 'user' ? MessageRole.USER : MessageRole.ASSISTANT) as MessageRole,
-          parts: parts.map((p: Record<string, unknown>, partIndex: number) => ({
-            id: this.getScopedPartId(String((msgInfo?.id as string) || `msg-${idx}`), p.id as string | undefined, partIndex),
-            type: (p.type as string) as unknown as MessagePartType,
-            text: p.text as string,
-            content: p.text as string
-          }))
-        }
-      })
-
-      return messages
+      return convertAllMessages(await this.fetchMessages(ocClient, sessionId, config.workspaceDir))
     } catch (error) {
       console.error('[OpencodeAdapter] Error fetching messages:', error)
       return []
@@ -2024,12 +1072,12 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     throw new Error('registerMcpServer must be called via AgentManager for now')
   }
 
-  private getV2Client(config: SessionConfig): V2OpencodeClient {
-    if (this.v2Client) return this.v2Client
-    if (!OpenCodeV2Client) throw new Error('OpenCode V2 SDK not loaded')
-
-    const baseUrl = this.serverUrl || config.serverUrl || DEFAULT_SERVER_URL
-    this.v2Client = OpenCodeV2Client.createOpencodeClient({ baseUrl })
+  private getV2Client(serverUrl?: string): V2OpencodeClient | null {
+    if (!this.v2Client && OpenCodeV2Client) {
+      this.v2Client = OpenCodeV2Client.createOpencodeClient({
+        baseUrl: this.serverUrl || serverUrl || DEFAULT_SERVER_URL
+      })
+    }
     return this.v2Client
   }
 
@@ -2038,7 +1086,8 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     answers: Record<string, string>,
     config: SessionConfig
   ): Promise<void> {
-    const v2 = this.getV2Client(config)
+    const v2 = this.getV2Client(config.serverUrl)
+    if (!v2) throw new Error('OpenCode V2 SDK not loaded')
 
     try {
       // List pending questions via V2 SDK
@@ -2157,15 +1206,7 @@ export class OpencodeAdapter implements CodingAgentAdapter {
       this.pendingPermissions.delete(sessionId)
     }
 
-    // OpenCode expects: "once" (allow this time), "always" (remember), or "reject" (deny)
-    let response: string
-    if (!approved) {
-      response = 'reject'
-    } else if (optionId === 'allow-always' || optionId === 'approved-for-session') {
-      response = 'always'
-    } else {
-      response = 'once'
-    }
+    const response = permissionReply(approved, optionId)
 
     console.log(`[OpencodeAdapter] Responding to permission ${pending.permissionId}: ${response}`)
 
@@ -2206,14 +1247,11 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     optionId?: string
   ): Promise<boolean> {
     try {
-      if (!OpenCodeV2Client) {
+      const v2 = this.getV2Client()
+      if (!v2) {
         console.warn(`[OpencodeAdapter] Cannot fetch permissions — V2 SDK not loaded`)
         return false
       }
-      const v2 = this.v2Client || OpenCodeV2Client.createOpencodeClient({
-        baseUrl: this.serverUrl || DEFAULT_SERVER_URL
-      })
-      if (!this.v2Client) this.v2Client = v2
 
       // permission.list() returns ALL pending permissions across all sessions.
       // Filter to the target session.
@@ -2232,14 +1270,7 @@ export class OpencodeAdapter implements CodingAgentAdapter {
 
       const first = sessionPending[0]
 
-      let reply: 'once' | 'always' | 'reject'
-      if (!approved) {
-        reply = 'reject'
-      } else if (optionId === 'allow-always' || optionId === 'approved-for-session') {
-        reply = 'always'
-      } else {
-        reply = 'once'
-      }
+      const reply = permissionReply(approved, optionId)
 
       const directory = this.sessionWorkspaceDirs.get(sessionId)
       console.log(`[OpencodeAdapter] Responding to permission ${first.id} via V2 API: ${reply} (permission=${first.permission}, patterns=${first.patterns.join(', ')})`)
@@ -2270,57 +1301,7 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     this.sseAbort = new AbortController()
 
     // Fire-and-forget — reconnection loop runs in the background
-    this.processEventStream(this.sseAbort.signal).catch(() => {})
-  }
-
-  private async processEventStream(signal: AbortSignal): Promise<void> {
-    const baseUrl = this.serverUrl || DEFAULT_SERVER_URL
-    const url = `${baseUrl}/global/event`
-
-    while (!signal.aborted) {
-      try {
-        const response = await (globalThis as unknown as { fetch: typeof fetch }).fetch(url, {
-          signal,
-          headers: { 'Accept': 'text/event-stream' }
-        })
-
-        const reader = response.body?.getReader()
-        if (!reader) return
-
-        const decoder = new TextDecoder()
-        let buffer = ''
-
-        while (!signal.aborted) {
-          const { done, value } = await reader.read()
-          if (done) break
-
-          buffer += decoder.decode(value, { stream: true })
-
-          // Parse newline-delimited SSE data lines
-          let nlIdx: number
-          while ((nlIdx = buffer.indexOf('\n')) !== -1) {
-            const line = buffer.slice(0, nlIdx).trim()
-            buffer = buffer.slice(nlIdx + 1)
-
-            if (line.startsWith('data: ') || line.startsWith('data:')) {
-              const json = line.startsWith('data: ') ? line.slice(6) : line.slice(5)
-              if (!json) continue
-              try {
-                const event = JSON.parse(json) as Record<string, unknown>
-                this.handleServerEvent(event)
-              } catch {
-                // Not valid JSON — skip
-              }
-            }
-          }
-        }
-      } catch (err: unknown) {
-        if (signal.aborted) return
-        if (err instanceof Error && err.name === 'AbortError') return
-        console.warn('[OpencodeAdapter] SSE connection error, reconnecting in 3s:', err instanceof Error ? err.message : err)
-        await new Promise(resolve => setTimeout(resolve, 3_000))
-      }
-    }
+    streamServerEvents(this.serverUrl, this.sseAbort.signal, (event) => this.handleServerEvent(event)).catch(() => {})
   }
 
   /**
@@ -2393,12 +1374,8 @@ export class OpencodeAdapter implements CodingAgentAdapter {
 
     try {
       // Try V2 SDK first — this is the correct endpoint for V2 permissions
-      if (OpenCodeV2Client) {
-        const v2 = this.v2Client || OpenCodeV2Client.createOpencodeClient({
-          baseUrl: this.serverUrl || DEFAULT_SERVER_URL
-        })
-        if (!this.v2Client) this.v2Client = v2
-
+      const v2 = this.getV2Client()
+      if (v2) {
         await v2.permission.reply({
           requestID: permissionId,
           reply: 'always',

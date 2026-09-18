@@ -2428,19 +2428,6 @@ describe('AcpAdapter process spawning for packaged Electron apps', () => {
     expect(config.args[0]).toContain('dist/index.js')
     expect(config.env).not.toHaveProperty('ELECTRON_RUN_AS_NODE')
   })
-
-  it('codex should replace app.asar with app.asar.unpacked in the binary path', async () => {
-    const fs = await import('fs')
-    const path = await import('path')
-    const source = fs.readFileSync(
-      path.join(__dirname, 'acp-adapter.ts'),
-      'utf8'
-    )
-
-    // Should have the ASAR → unpacked replacement logic
-    expect(source).toContain("app.asar.unpacked")
-    expect(source).toContain("binaryPath.replace('app.asar', 'app.asar.unpacked')")
-  })
 })
 
 describe('AcpAdapter - Codex Quota/Error Handling', () => {

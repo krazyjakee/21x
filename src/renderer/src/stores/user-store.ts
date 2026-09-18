@@ -16,7 +16,6 @@ interface UserStore {
   cacheVersion: number
 
   fetchUsers: (sourceId: string) => Promise<SourceUser[]>
-  getUsersForSource: (sourceId: string) => SourceUser[]
   isMe: (nameOrEmail: string) => boolean
   loadCurrentUser: () => Promise<void>
   invalidateCache: () => void
@@ -60,10 +59,6 @@ export const useUserStore = create<UserStore>((set, get) => ({
     }
   },
 
-  getUsersForSource: (sourceId: string) => {
-    return get().cache.get(sourceId)?.users ?? []
-  },
-
   isMe: (nameOrEmail: string) => {
     const email = get().currentUserEmail
     if (!email || !nameOrEmail) return false
@@ -84,3 +79,10 @@ export const useUserStore = create<UserStore>((set, get) => ({
     set((state) => ({ cache: new Map(), cacheVersion: state.cacheVersion + 1 }))
   }
 }))
+
+// Stable empty list so selectors do not return a fresh array on every store change.
+const EMPTY_USERS: SourceUser[] = []
+
+export function useSourceUsers(sourceId: string | null): SourceUser[] {
+  return useUserStore((s) => (sourceId ? s.cache.get(sourceId)?.users : undefined) ?? EMPTY_USERS)
+}

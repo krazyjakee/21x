@@ -5,9 +5,6 @@ export interface PluginMeta {
   displayName: string
   description: string
   icon: string
-  requiresMcpServer: boolean
-  requiresOAuth?: boolean
-  oauthProvider?: string // e.g., 'linear', 'hubspot'
 }
 
 export class PluginRegistry {
@@ -26,8 +23,7 @@ export class PluginRegistry {
       id: p.id,
       displayName: p.displayName,
       description: p.description,
-      icon: p.icon,
-      requiresMcpServer: p.requiresMcpServer
+      icon: p.icon
     }))
   }
 

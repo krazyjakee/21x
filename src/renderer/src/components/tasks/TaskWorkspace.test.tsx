@@ -2,7 +2,8 @@ import { useProgressToastStore } from '@/stores/progress-toast-store'
 import { useTaskSourceStore } from '@/stores/task-source-store'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, act, fireEvent, screen, waitFor, cleanup } from '@testing-library/react'
-import { clampTranscriptWidth, TaskWorkspace } from './TaskWorkspace'
+import { TaskWorkspace } from './TaskWorkspace'
+import { clampTranscriptWidth } from './workspace/useResizableTranscript'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useArtifactStore } from '@/stores/artifact-store'
@@ -124,7 +125,7 @@ beforeEach(() => {
     gitProvider: 'github',
     isLoading: false
   })
-  useArtifactStore.getState().resetTask('task-1')
+  useArtifactStore.setState({ artifactsByTask: {}, uiByTask: {}, turnsByTask: {}, hydratedTasks: {} })
   vi.clearAllMocks()
   ;(window.electronAPI.settings.getAll as ReturnType<typeof vi.fn>).mockResolvedValue({
     github_org: 'peakflo',
@@ -638,8 +639,7 @@ describe('TaskWorkspace – stale triage session cleanup', () => {
               options: [{ label: 'Stage', description: 'Stage' }]
             }]
           }
-        }],
-        pendingApproval: null
+        }]
       }]])
     })
     vi.mocked(window.electronAPI.agentSession.resume).mockResolvedValue({ sessionId: 'resumed-session-3' })
@@ -683,8 +683,7 @@ describe('TaskWorkspace – stale triage session cleanup', () => {
               content: 'Previous transcript',
               timestamp: new Date()
             }
-          ],
-          pendingApproval: null
+          ]
         }]
       ])
     })

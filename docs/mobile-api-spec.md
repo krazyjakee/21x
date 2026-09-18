@@ -126,6 +126,20 @@ Get a single task by ID.
 
 ---
 
+#### `POST /api/tasks`
+
+Create a local task. Accepted fields: `title` (required), `description`, `type`, `priority`, `status`,
+`assignee`, `due_date`, `labels`, `attachments`, `repos`, `output_fields`, `is_recurring`,
+`recurrence_pattern`, `cron`, `auto_start_agent`, `auto_complete_without_review`, `parent_task_id`.
+Any other field is ignored; in particular a phone cannot link a task to a source
+(`source_id`, `external_id`, `source`).
+
+**Response:** `200 OK` — the created `Task`.
+
+**Error:** `400` — `{ "error": "title is required" }`
+
+---
+
 #### `POST /api/tasks/:id`
 
 Update a task. Only provided fields are updated.
@@ -1032,9 +1046,11 @@ Clients MUST implement message deduplication using the `data.id` field:
 | HTTP Status | Meaning |
 |-------------|---------|
 | `200`       | Success |
-| `400`       | Bad request (missing required fields, invalid params) |
+| `400`       | Bad request (missing required fields, invalid params, a body that is not a JSON object) |
 | `401`       | Unauthorized (missing or invalid auth token) |
 | `404`       | Resource not found (task, agent, session) |
+| `409`       | The task source could not complete the task |
+| `413`       | Request body larger than 1 MB |
 | `500`       | Internal server error |
 
 All error responses include:

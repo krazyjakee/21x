@@ -213,8 +213,10 @@ describe('the surfaces that carry the mark', () => {
   })
 
   it.each([
-    // Top bar, icon rail, and the field the panels float on.
-    ['AppLayout.tsx', 3],
+    ['TopBar.tsx', 1],
+    ['NavRail.tsx', 1],
+    // The field the panels float on.
+    ['AppLayout.tsx', 1],
     ['Sidebar.tsx', 1],
     ['StatusBar.tsx', 1],
   ])('%s marks its chrome', (file, count) => {

@@ -93,15 +93,15 @@ export function findTopLevelNodeModules(workspaceDir: string): string[] {
  * Deliberately unguarded: unlike the kill paths, our own processes also count
  * as activity here. Skipping a workspace we happen to run from is the safe side.
  */
-export function findWorkspacesWithLiveProcesses(
+export async function findWorkspacesWithLiveProcesses(
   workspacesRoot: string,
   dirNames: readonly string[]
-): Set<string> | null {
+): Promise<Set<string> | null> {
   if (!canReadProcessCwd()) return null
   if (dirNames.length === 0) return new Set()
   let snapshot: { cwdRows: { pid: number; cwd: string }[] }
   try {
-    snapshot = readProcessSnapshot()
+    snapshot = await readProcessSnapshot()
   } catch {
     return null
   }

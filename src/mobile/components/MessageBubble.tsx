@@ -1,33 +1,9 @@
-import { memo, useMemo, useState, type ReactNode } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { Markdown } from '@/components/ui/Markdown'
+import { HighlightedText } from '@/components/agents/transcript/HighlightedText'
+import { deriveToolCommand, deriveToolSubtitle, formatDuration, isCompactActivityMessage, sanitizeToolContent } from '@shared/transcript/tool-format'
+import type { AgentMessage } from '@shared/transcript/types'
 import { cn } from '../lib/utils'
-import type { AgentMessage } from '../stores/agent-store'
-
-function HighlightedText({ text, query }: { text: string; query?: string }) {
-  const normalizedQuery = query?.trim()
-  if (!normalizedQuery) return <>{text}</>
-
-  const lowerText = text.toLowerCase()
-  const lowerQuery = normalizedQuery.toLowerCase()
-  const parts: ReactNode[] = []
-  let cursor = 0
-  let matchIndex = lowerText.indexOf(lowerQuery)
-
-  while (matchIndex !== -1) {
-    if (matchIndex > cursor) parts.push(text.slice(cursor, matchIndex))
-    const match = text.slice(matchIndex, matchIndex + normalizedQuery.length)
-    parts.push(
-      <mark key={`${matchIndex}-${match}`} className="rounded-sm bg-yellow-300/80 px-0.5 text-black">
-        {match}
-      </mark>
-    )
-    cursor = matchIndex + normalizedQuery.length
-    matchIndex = lowerText.indexOf(lowerQuery, cursor)
-  }
-
-  if (cursor < text.length) parts.push(text.slice(cursor))
-  return <>{parts}</>
-}
 
 function QuestionMessage({ message, onAnswer, canAnswer, searchQuery }: { message: AgentMessage; onAnswer?: (answer: string) => void; canAnswer: boolean; searchQuery?: string }) {
   const questions = message.tool?.questions || []
@@ -136,13 +112,12 @@ function PlanReviewMessage({ message, searchQuery }: { message: AgentMessage; se
   const tool = message.tool
   const label = tool?.title || message.content || 'Plan mode'
   const rawOutput = tool?.output || ''
-  // Filter out confirmation prompts — not useful content
+  // Confirmation prompts carry no useful content.
   const details = /^(exit|enter) plan mode\??$/i.test(rawOutput.trim()) ? '' : rawOutput
 
   return (
     <div className="rounded-md bg-card border border-border/50 overflow-hidden">
       <div className="flex items-center gap-2 px-3 py-2 font-mono text-xs">
-        {/* FileText icon */}
         <svg className="h-3 w-3 text-muted-foreground shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>
         </svg>
@@ -157,113 +132,6 @@ function PlanReviewMessage({ message, searchQuery }: { message: AgentMessage; se
       )}
     </div>
   )
-}
-
-function deriveToolSubtitle(tool?: AgentMessage['tool']): string {
-  if (!tool) return ''
-
-  const description = deriveToolDescription(tool)
-  if (description) return description
-
-  if (tool.title) {
-    return isFilePathTool(tool.name) ? basenameFromPath(tool.title) : tool.title
-  }
-
-  if (tool.name === 'command' && typeof tool.input === 'string') {
-    const firstLine = tool.input.split('\n').map((line) => line.trim()).find(Boolean)
-    return firstLine ? firstLine.slice(0, 120) : ''
-  }
-
-  const input = parseToolInput(tool.input)
-  const filePath = input?.file_path || input?.path || input?.filename
-  if (isFilePathTool(tool.name) && typeof filePath === 'string') {
-    return basenameFromPath(filePath)
-  }
-
-  return ''
-}
-
-function parseToolInput(input: unknown): Record<string, unknown> | null {
-  if (!input) return null
-  if (typeof input === 'object') return input as Record<string, unknown>
-  if (typeof input !== 'string') return null
-
-  try {
-    const parsed = JSON.parse(input)
-    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null
-  } catch {
-    return null
-  }
-}
-
-function basenameFromPath(value: string): string {
-  const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '')
-  return normalized.split('/').filter(Boolean).pop() || value
-}
-
-function isFilePathTool(toolName: string): boolean {
-  return ['read', 'edit', 'multiedit', 'write', 'notebookedit'].includes(toolName.toLowerCase())
-}
-
-function deriveToolDescription(tool: AgentMessage['tool']): string {
-  if (!tool) return ''
-  if (tool.description) return tool.description
-
-  const input = parseToolInput(tool.input)
-  const description = input?.description
-  return typeof description === 'string' ? description : ''
-}
-
-function deriveToolCommand(tool: AgentMessage['tool']): string {
-  if (!tool) return ''
-
-  const input = parseToolInput(tool.input)
-  const command = input?.command
-  if (Array.isArray(command)) return command.map(String).join(' ')
-  if (typeof command === 'string') return command
-
-  if (tool.name.toLowerCase() === 'command' && typeof tool.input === 'string') {
-    return tool.input
-  }
-
-  return ''
-}
-
-function sanitizeToolContent(content: unknown): string {
-  if (content == null) return ''
-
-  if (typeof content === 'object') {
-    const obj = content as Record<string, unknown>
-    if (obj.type === 'image' && obj.source) {
-      const source = obj.source as Record<string, unknown>
-      const dataLength = typeof source.data === 'string' ? source.data.length : 0
-      return `[Image content: ${dataLength} characters of base64 data]`
-    }
-
-    const stringified = JSON.stringify(content, null, 2)
-    return stringified.length > 1000 ? `[Object: ${stringified.substring(0, 1000)}...]` : stringified
-  }
-
-  const str = String(content)
-  const maxDisplayLength = 5000
-  if (str.length <= maxDisplayLength) return str
-
-  const base64Chars = (str.match(/[A-Za-z0-9+/=]/g) || []).length
-  if (base64Chars / str.length > 0.9) return `[Binary content: ${str.length} characters]`
-
-  return str.substring(0, maxDisplayLength) + `\n\n... (${str.length - maxDisplayLength} more characters)`
-}
-
-function formatDuration(ms: number): string {
-  const seconds = Math.floor(ms / 1000)
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  const remainingSeconds = seconds % 60
-  return `${minutes}m ${remainingSeconds}s`
-}
-
-export function isCompactActivityMessage(message: AgentMessage): boolean {
-  return (message.partType === 'tool' && !!message.tool?.name) || message.partType === 'reasoning'
 }
 
 function TaskProgressMessage({ message, searchQuery }: { message: AgentMessage; searchQuery?: string }) {
@@ -285,7 +153,6 @@ function TaskProgressMessage({ message, searchQuery }: { message: AgentMessage; 
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center gap-2 px-3 py-2 font-mono text-xs hover:bg-white/5 transition-colors"
       >
-        {/* Terminal icon */}
         <svg className="h-3 w-3 text-blue-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="4 17 10 11 4 5" /><line x1="12" x2="20" y1="19" y2="19" />
         </svg>
@@ -363,7 +230,6 @@ function ToolCallMessage({ message, searchQuery }: { message: AgentMessage; sear
           'text-muted-foreground transition-transform text-[10px]',
           expanded && 'rotate-90'
         )}>▶</span>
-        {/* Wrench icon */}
         <svg className="h-3 w-3 text-muted-foreground shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
         </svg>
@@ -482,7 +348,6 @@ function TaskNotificationMessage({ message, searchQuery }: { message: AgentMessa
   return (
     <div className={cn('rounded-md overflow-hidden border', bgColor, borderColor)}>
       <div className="flex items-center gap-2 px-3 py-2">
-        {/* Status icon */}
         {status === 'completed' ? (
           <svg className={cn('h-4 w-4 shrink-0', statusColor)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" />
@@ -519,43 +384,37 @@ interface MessageBubbleProps {
 // Memoized: message objects are identity-stable per part (store projection
 // cache), so bubbles only re-render when their own message actually changes.
 export const MessageBubble = memo(function MessageBubble({ message, onAnswer, canAnswerQuestion = false, searchQuery }: MessageBubbleProps) {
-  // Question — check by data content so it renders correctly regardless of partType
+  // Questions and todos are detected by data content, regardless of partType.
   if (message.tool?.questions && message.tool.questions.length > 0) {
     return <QuestionMessage message={message} onAnswer={onAnswer} canAnswer={canAnswerQuestion} searchQuery={searchQuery} />
   }
 
-  // Todo list — check by data content so it renders correctly regardless of partType
   if (message.tool?.todos && message.tool.todos.length > 0) {
     return <TodoList message={message} searchQuery={searchQuery} />
   }
 
-  // Plan review
   if (message.partType === 'planreview') {
     return <PlanReviewMessage message={message} searchQuery={searchQuery} />
   }
 
-  // Tool call — require a name to avoid rendering ghost entries with no tool name
   if (isCompactActivityMessage(message)) {
     return <MessageActivityGroup messages={[message]} searchQuery={searchQuery} />
   }
 
-  // Task progress — live subagent task tracking
   if (message.partType === 'task_progress' && message.taskProgress) {
     return <TaskProgressMessage message={message} searchQuery={searchQuery} />
   }
 
-  // Task notification — subtask completion/failure/stopped
   if (message.partType === 'task-notification') {
     return <TaskNotificationMessage message={message} searchQuery={searchQuery} />
   }
 
-  // Step markers and system status — skip (absorbed by store)
+  // Step markers and system status are absorbed by the store.
   if (message.partType === 'step-start' || message.partType === 'step-finish' || message.partType === 'system-status') return null
 
   // Skip tool messages that have no content and no recognizable tool name
   if (message.partType === 'tool' && !message.content) return null
 
-  // Regular text message — matches desktop AgentTranscriptPanel exactly
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
   const isError = message.partType === 'error'
