@@ -158,7 +158,7 @@ export function Sidebar({ tasks, selectedTaskId, overdueCount, onSelectTask, onC
     // radius, same hairline, same shadow. Sitting flush against the rail while
     // the work had rounded corners read as unfinished.
     <aside
-      className="app-chrome relative flex flex-col shrink-0 overflow-hidden rounded-2xl border border-border bg-card text-sidebar-foreground shadow-card my-2 ml-2"
+      className="ui-scale app-chrome relative flex flex-col shrink-0 overflow-hidden rounded-2xl border border-border bg-card text-sidebar-foreground shadow-card my-1.5 ml-1.5"
       style={{ width: sidebarWidth }}
     >
       {sidebarView === 'tasks' ? (
@@ -167,15 +167,15 @@ export function Sidebar({ tasks, selectedTaskId, overdueCount, onSelectTask, onC
             <div className="flex items-center gap-2">
               <h2 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Tasks</h2>
               {overdueCount > 0 && (
-                <span className="flex items-center justify-center min-w-5 h-5 rounded-full bg-red-500/15 text-red-400 text-[11px] font-medium px-1.5">
+                <span className="flex items-center justify-center min-w-5 h-5 rounded-full bg-red-500/15 text-red-400 text-2xs font-medium px-1.5">
                   {overdueCount}
                 </span>
               )}
             </div>
             <div className="flex items-center gap-1">
               {sources.length > 0 && (
-                <Button size="sm" variant="ghost" onClick={handleSyncAll} disabled={isSyncingAll || syncingIds.size > 0} title="Sync all sources">
-                  {isSyncingAll ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                <Button size="sm" variant="ghost" onClick={handleSyncAll} disabled={isSyncingAll || syncingIds.size > 0} title="Sync all sources" aria-label="Sync all sources">
+                  {isSyncingAll ? <Loader2 className="size-icon-sm animate-spin" /> : <RefreshCw className="size-icon-sm" />}
                 </Button>
               )}
               <Button
@@ -183,11 +183,12 @@ export function Sidebar({ tasks, selectedTaskId, overdueCount, onSelectTask, onC
                 variant={isAutoStartEnabled ? 'default' : 'ghost'}
                 onClick={toggleAutoStart}
                 title={isAutoStartEnabled ? 'Disable auto-run' : 'Enable auto-run'}
+                aria-label={isAutoStartEnabled ? 'Disable auto-run' : 'Enable auto-run'}
               >
-                {isAutoStartEnabled ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                {isAutoStartEnabled ? <Pause className="size-icon-sm" /> : <Play className="size-icon-sm" />}
               </Button>
               <Button size="sm" onClick={onCreateTask}>
-                <Plus className="h-3.5 w-3.5" />
+                <Plus className="size-icon-sm" />
                 New
               </Button>
             </div>
@@ -195,21 +196,22 @@ export function Sidebar({ tasks, selectedTaskId, overdueCount, onSelectTask, onC
 
           <div className="no-drag px-3 pb-3">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-icon-sm text-muted-foreground pointer-events-none" />
               <input
                 data-keyboard-shortcut-search="tasks"
                 type="search"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search tasks..."
-                className="w-full rounded-lg border border-input bg-card pl-9 pr-8 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/20 transition-colors"
+                className="w-full rounded-lg border border-input bg-card pl-9 pr-10 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/20 transition-colors"
               />
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  aria-label="Clear search"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 grid size-hit place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
                 >
-                  <X className="h-3.5 w-3.5" />
+                  <X className="size-icon-sm" />
                 </button>
               )}
             </div>
@@ -218,12 +220,12 @@ export function Sidebar({ tasks, selectedTaskId, overdueCount, onSelectTask, onC
           <div className="no-drag px-3 pb-3 flex items-center gap-2">
             <button
               onClick={() => setFiltersOpen(!filtersOpen)}
-              className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
+              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
             >
-              <ChevronDown className={`h-3 w-3 transition-transform ${filtersOpen ? 'rotate-180' : ''}`} />
+              <ChevronDown className={`size-icon-xs transition-transform ${filtersOpen ? 'rotate-180' : ''}`} />
               Filters
               {hasActiveFilters && (
-                <span className="bg-primary/20 text-primary rounded-full px-1.5 text-[10px]">
+                <span className="bg-primary/20 text-primary rounded-full px-1.5 text-2xs">
                   {(statusFilter !== 'all' ? 1 : 0) + (priorityFilter !== 'all' ? 1 : 0) + (sourceFilter !== 'all' ? 1 : 0)}
                 </span>
               )}
@@ -280,7 +282,7 @@ export function Sidebar({ tasks, selectedTaskId, overdueCount, onSelectTask, onC
                   onClick={() => setSearchQuery('bill')}
                   className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 cursor-pointer"
                 >
-                  <FileText className="h-3 w-3" />
+                  <FileText className="size-icon-xs" />
                   Find all bills
                 </button>
               </div>
@@ -289,7 +291,7 @@ export function Sidebar({ tasks, selectedTaskId, overdueCount, onSelectTask, onC
                   onClick={() => { setStatusFilter('all'); setPriorityFilter('all'); setSourceFilter('all') }}
                   className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
                 >
-                  <X className="h-3 w-3" /> Clear filters
+                  <X className="size-icon-xs" /> Clear filters
                 </button>
               )}
             </div>
@@ -314,28 +316,29 @@ export function Sidebar({ tasks, selectedTaskId, overdueCount, onSelectTask, onC
           <div className="no-drag flex items-center justify-between px-4 pt-4 pb-4">
             <h2 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Skills</h2>
             <Button size="sm" onClick={handleCreateSkill}>
-              <Plus className="h-3.5 w-3.5" />
+              <Plus className="size-icon-sm" />
               New
             </Button>
           </div>
 
           <div className="no-drag px-3 pb-3">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-icon-sm text-muted-foreground pointer-events-none" />
               <input
                 data-keyboard-shortcut-search="skills"
                 type="search"
                 value={skillSearchQuery}
                 onChange={(e) => setSkillSearchQuery(e.target.value)}
                 placeholder="Search skills..."
-                className="w-full rounded-lg border border-input bg-card pl-9 pr-8 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/20 transition-colors"
+                className="w-full rounded-lg border border-input bg-card pl-9 pr-10 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/20 transition-colors"
               />
               {skillSearchQuery && (
                 <button
                   onClick={() => setSkillSearchQuery('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  aria-label="Clear search"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 grid size-hit place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
                 >
-                  <X className="h-3.5 w-3.5" />
+                  <X className="size-icon-sm" />
                 </button>
               )}
             </div>

@@ -266,14 +266,14 @@ describe('DashboardWorkspace', () => {
 })
 
 describe('DashboardWorkspace — readability', () => {
-  it('opts the dashboard into the larger type and spacing scale', () => {
+  it('opts the dashboard into the shared type and spacing scale', () => {
     const { container } = render(<DashboardWorkspace />)
-    expect(container.firstElementChild?.classList.contains('dashboard-scale')).toBe(true)
+    expect(container.firstElementChild?.classList.contains('ui-scale')).toBe(true)
   })
 
-  it('defines readable dashboard tokens in the shared stylesheet', () => {
+  it('defines readable scale tokens in the shared stylesheet', () => {
     const css = readFileSync(resolve(__dirname, '../../styles/globals.css'), 'utf8')
-    const block = css.match(/\.dashboard-scale\s*\{([^}]*)\}/)?.[1] ?? ''
+    const block = css.match(/\.ui-scale\s*\{([^}]*)\}/)?.[1] ?? ''
     const px = (token: string): number =>
       Number(block.match(new RegExp(`--${token}:\\s*([\\d.]+)px`))?.[1] ?? 0)
 
@@ -281,8 +281,22 @@ describe('DashboardWorkspace — readability', () => {
     expect(px('text-2xs')).toBeGreaterThanOrEqual(11)
     expect(px('text-xs')).toBeGreaterThanOrEqual(12)
     expect(px('text-sm')).toBeGreaterThanOrEqual(13)
-    // h-3 icons render at 12px and p-1.5 + h-4 buttons reach 28px.
+    // Spacing at 4px makes h-8 controls 32px.
     expect(px('spacing')).toBeGreaterThanOrEqual(4)
+  })
+
+  it('defines fixed icon and hit-area tokens shared by the dashboard and chrome', () => {
+    const css = readFileSync(resolve(__dirname, '../../styles/globals.css'), 'utf8')
+    const px = (token: string): number =>
+      Number(css.match(new RegExp(`--spacing-${token}:\\s*([\\d.]+)px`))?.[1] ?? 0)
+
+    expect(px('icon-xs')).toBeGreaterThanOrEqual(12)
+    expect(px('icon-sm')).toBeGreaterThanOrEqual(14)
+    expect(px('icon')).toBeGreaterThanOrEqual(16)
+    expect(px('icon-lg')).toBeGreaterThanOrEqual(20)
+    // Desktop icon-only controls are at least 32px square.
+    expect(px('hit')).toBeGreaterThanOrEqual(32)
+    expect(px('hit-lg')).toBeGreaterThanOrEqual(px('hit'))
   })
 
   it('uses shared type tokens instead of fixed pixel sizes on task cards', () => {
@@ -309,9 +323,32 @@ describe('DashboardWorkspace — readability', () => {
     expect(fixed).toEqual([])
   })
 
-  it('gives icon-only command controls accessible names', () => {
+  it('gives icon-only command controls accessible names and a full hit area', () => {
     render(<DashboardWorkspace />)
-    expect(screen.getByRole('button', { name: 'Attach file' })).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Send to Mastermind' })).toBeDefined()
+    for (const name of ['Attach file', 'Send to Mastermind']) {
+      const button = screen.getByRole('button', { name })
+      expect(button.classList.contains('size-hit')).toBe(true)
+    }
+  })
+
+  it('sizes card icons with the shared icon tokens instead of raw spacing steps', () => {
+    useTaskStore.setState({
+      tasks: [
+        makeTask({
+          id: 'task-icons',
+          title: 'Icon task',
+          due_date: '2026-01-01T00:00:00Z',
+          source: 'github'
+        })
+      ]
+    })
+    const { container } = render(<DashboardWorkspace />)
+    // The microphone is a shared voice control with its own sizing.
+    const icons = Array.from(container.querySelectorAll('svg.lucide')).filter(
+      (el) => !el.closest('[data-testid="voice-mic-button"]')
+    )
+    expect(icons.length).toBeGreaterThan(0)
+    const raw = icons.filter((el) => /\bh-\d/.test(el.getAttribute('class') ?? ''))
+    expect(raw.map((el) => el.getAttribute('class'))).toEqual([])
   })
 })

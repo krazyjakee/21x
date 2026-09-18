@@ -49,22 +49,25 @@ export function TopBar({ onOpenCommandPalette }: { onOpenCommandPalette: () => v
 
   return (
     <>
-      <div className="app-chrome drag-region bg-background h-11 flex-shrink-0 flex items-center justify-center px-3 pt-2 windows-titlebar-pad">
+      <div className="ui-scale app-chrome drag-region bg-background h-9 flex-shrink-0 flex items-center justify-center px-3 windows-titlebar-pad">
         {/* The white logo mark always sits on a brand-gradient tile, so it stays visible in both themes. */}
         <div className="no-drag absolute left-3 flex items-center gap-1.5 macos-titlebar-pad">
           <div className="relative grid h-6 w-6 place-items-center rounded-md bg-gradient-to-br from-primary to-primary/75 shadow-sm ring-1 ring-black/5">
-            <img src={logo20x} className="h-3.5 w-3.5" alt="20x" />
+            <img src={logo20x} className="size-icon-sm" alt="20x" />
             {updateAvailableVersion && (
               <button
                 onClick={() => {
                   setUpdateDialogOpen(true)
                 }}
-                className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-warning ring-2 ring-[var(--chrome-solid)] cursor-pointer animate-pulse"
+                className="absolute -top-2 -right-2 grid h-5 w-5 place-items-center rounded-full cursor-pointer"
                 title={`Update available: v${updateAvailableVersion}`}
-              />
+                aria-label={`Update available: v${updateAvailableVersion}`}
+              >
+                <span className="h-2.5 w-2.5 rounded-full bg-warning ring-2 ring-[var(--chrome-solid)] animate-pulse" />
+              </button>
             )}
           </div>
-          <span className="text-[13px] font-semibold tracking-tight text-foreground">20x</span>
+          <span className="text-sm font-semibold tracking-tight text-foreground">20x</span>
 
           {/* Only views with a contextual sidebar get the collapse toggle */}
           {(sidebarView === 'tasks' || sidebarView === 'skills') && activeModal !== 'settings' && (
@@ -72,17 +75,17 @@ export function TopBar({ onOpenCommandPalette }: { onOpenCommandPalette: () => v
               onClick={toggleSidebarCollapsed}
               title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
               aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
-              className="ml-0.5 grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors cursor-pointer"
+              className="ml-0.5 grid size-hit place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors cursor-pointer"
             >
-              {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+              {sidebarCollapsed ? <PanelLeftOpen className="size-icon" /> : <PanelLeftClose className="size-icon" />}
             </button>
           )}
 
           {breadcrumb && BreadcrumbIcon && (
             <div className="flex items-center gap-1.5">
-              <span className="text-border/80 text-[13px]">/</span>
-              <BreadcrumbIcon className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-[13px] font-medium text-foreground/90">{breadcrumb.label}</span>
+              <span className="text-border/80 text-sm">/</span>
+              <BreadcrumbIcon className="size-icon-sm text-muted-foreground" />
+              <span className="text-sm font-medium text-foreground/90">{breadcrumb.label}</span>
             </div>
           )}
         </div>
@@ -92,11 +95,11 @@ export function TopBar({ onOpenCommandPalette }: { onOpenCommandPalette: () => v
             onOpenCommandPalette()
           }}
           title="Search or run a command"
-          className="no-drag flex h-8 w-[260px] max-w-[34vw] items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 text-[12px] text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
+          className="no-drag flex h-8 w-[260px] max-w-[34vw] items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 text-sm text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
         >
-          <Search className="h-3.5 w-3.5 shrink-0" />
+          <Search className="size-icon-sm shrink-0" />
           <span className="flex-1 truncate text-left">Search or run a command…</span>
-          <kbd className="shrink-0 rounded border border-border bg-background/60 px-1.5 py-0.5 text-[11px]">{modKey}K</kbd>
+          <kbd className="shrink-0 rounded border border-border bg-background/60 px-1.5 py-0.5 text-2xs">{modKey}K</kbd>
         </button>
 
         {/* Offset on Windows to avoid the native window controls. */}
@@ -109,11 +112,11 @@ export function TopBar({ onOpenCommandPalette }: { onOpenCommandPalette: () => v
             onClick={openSettings}
             title="Settings"
             aria-label="Settings"
-            className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
+            className="grid size-hit place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
           >
-            <Settings className="h-4 w-4" />
+            <Settings className="size-icon" />
           </button>
-          <div className="mx-1 h-4 w-px bg-border/70" />
+          <div className="mx-1 h-5 w-px bg-border/70" />
           {/* Start talking to Mastermind from any view. Hidden until voice is on. */}
           <TopBarVoiceButton />
           {/* Quieter than the microphone beside it: typing to Mastermind is
@@ -124,8 +127,8 @@ export function TopBar({ onOpenCommandPalette }: { onOpenCommandPalette: () => v
             onClick={toggleOrchestrator}
             className="h-8 px-2.5"
           >
-            <MessageSquare className="h-3.5 w-3.5" />
-            <span className="text-[12px]">Mastermind</span>
+            <MessageSquare className="size-icon-sm" />
+            <span className="text-sm">Mastermind</span>
           </Button>
         </div>
       </div>

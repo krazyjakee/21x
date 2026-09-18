@@ -32,7 +32,7 @@ export function DashboardWorkspace() {
   }, [setShowOrchestrator])
 
   return (
-    <div className="dashboard-scale h-full overflow-y-auto overflow-x-hidden">
+    <div className="ui-scale h-full overflow-y-auto overflow-x-hidden">
       {/* Command center — centered narrow column */}
       <div className="max-w-3xl mx-auto px-6 pt-8 pb-6 space-y-5">
         {/* 1. Hero — Recent Mastermind Messages */}
