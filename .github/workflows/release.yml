@@ -1,14 +1,25 @@
 name: Release
 
+# Releases are manual and unsigned (issue #26): push a v* tag, or run this
+# workflow by hand with the tag to build. There is no auto-tagging on version
+# bumps, and no Apple or Windows signing secrets are needed. See README,
+# "Releases".
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and release (e.g. v1.2.3)'
+        required: true
+
+env:
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
   build-mac:
     runs-on: ${{ matrix.runner }}
-    environment: release
     permissions:
       contents: write
 
@@ -23,6 +34,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - uses: pnpm/action-setup@v4
 
@@ -40,37 +53,10 @@ jobs:
       - name: Build app
         run: pnpm build
 
-      - name: Validate signing secrets
+      - name: Package for macOS (unsigned, ad-hoc signature)
         env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          test -n "$CSC_LINK"
-          test -n "$CSC_KEY_PASSWORD"
-          test -n "$APPLE_ID"
-          test -n "$APPLE_APP_SPECIFIC_PASSWORD"
-          test -n "$APPLE_TEAM_ID"
-
-      - name: Import Apple Developer ID certificate
-        uses: apple-actions/import-codesign-certs@v3
-        with:
-          p12-file-base64: ${{ secrets.CSC_LINK }}
-          p12-password: ${{ secrets.CSC_KEY_PASSWORD }}
-
-      - name: Inspect signing identities
-        run: |
-          security find-identity -v -p codesigning
-          security list-keychains
-
-      - name: Package for macOS
-        env:
-          DEBUG: electron-builder,electron-notarize*
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-        run: pnpm exec electron-builder --config ./scripts/electron-builder-ci-mac-config.js --mac --${{ matrix.arch }} --publish never
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm exec electron-builder --config ./scripts/electron-builder-ci-mac-config.js --mac --${{ matrix.arch }} --publish never -c.mac.sign=./scripts/adhoc-sign-mac.js
 
       - name: Resolve mac artifacts
         id: mac-artifacts
@@ -94,35 +80,6 @@ jobs:
           echo "ZIP: ${{ steps.mac-artifacts.outputs.zip_path }}"
           echo "DMG: ${{ steps.mac-artifacts.outputs.dmg_path }}"
 
-      - name: Notarize mac ZIP and staple app
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          xcrun notarytool submit "${{ steps.mac-artifacts.outputs.zip_path }}" \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
-            --wait
-          xcrun stapler staple "${{ steps.mac-artifacts.outputs.app_path }}"
-          xcrun stapler validate "${{ steps.mac-artifacts.outputs.app_path }}"
-          spctl --assess --type execute --verbose=4 "${{ steps.mac-artifacts.outputs.app_path }}"
-
-      - name: Notarize and staple mac DMG
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          xcrun notarytool submit "${{ steps.mac-artifacts.outputs.dmg_path }}" \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
-            --wait
-          xcrun stapler staple "${{ steps.mac-artifacts.outputs.dmg_path }}"
-          xcrun stapler validate "${{ steps.mac-artifacts.outputs.dmg_path }}"
-
       - name: Rename arch-specific update manifest
         run: cp dist/latest-mac.yml dist/latest-mac-${{ matrix.arch }}.yml
 
@@ -134,6 +91,7 @@ jobs:
       - name: Upload release assets directly
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: |
             dist/*.dmg
             dist/*.zip
@@ -150,12 +108,13 @@ jobs:
     # which the bundled node-gyp 11.5.0 can't detect, breaking the from-source
     # rebuild of better-sqlite3. windows-2022 has VS 2022 + the C++ workload.
     runs-on: windows-2022
-    environment: release
     permissions:
       contents: write
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - uses: pnpm/action-setup@v4
 
@@ -173,7 +132,9 @@ jobs:
       - name: Build app
         run: pnpm build
 
-      - name: Package for Windows
+      - name: Package for Windows (unsigned)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: pnpm exec electron-builder --win --x64 --publish never
 
       - name: Create stable asset names
@@ -182,6 +143,7 @@ jobs:
       - name: Upload release assets directly
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: |
             dist/*.exe
             dist/*.blockmap
@@ -194,12 +156,13 @@ jobs:
 
   build-linux:
     runs-on: ubuntu-latest
-    environment: release
     permissions:
       contents: write
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - uses: pnpm/action-setup@v4
 
@@ -213,6 +176,26 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+
+      # Supply-chain controls (issue #18, docs/connectors-security.md). Run once,
+      # on Linux: the dependency tree is the same for every platform.
+      - name: Check connector pieces (allowlist, pins, licenses)
+        run: node scripts/check-connector-pieces.mjs
+
+      - name: Audit production dependencies
+        run: pnpm audit --prod
+
+      - name: Verify npm registry signatures and provenance
+        run: npm audit signatures
+
+      - name: Generate CycloneDX SBOM
+        run: pnpm dlx @cyclonedx/cdxgen@11 -t js --required-only --no-install-deps -o sbom.cdx.json .
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
 
       - name: Build app
         run: pnpm build
@@ -226,6 +209,7 @@ jobs:
       - name: Upload release assets directly
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: dist/*.AppImage
 
       - name: Upload manifest artifact
@@ -286,5 +270,6 @@ jobs:
       - name: Upload manifests to release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: manifests/*.yml
           generate_release_notes: true

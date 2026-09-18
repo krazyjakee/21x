@@ -247,6 +247,15 @@ See [AGENTS.md](./AGENTS.md) for detailed architecture.
 | Agent SDKs / protocols | @anthropic-ai/claude-agent-sdk, @opencode-ai/sdk, `codex app-server`, Agent Client Protocol (Cursor), Pi JSONL RPC |
 | Testing | Vitest + happy-dom |
 
+## Releases and telemetry
+
+**Releases are manual and unsigned.** Nothing is tagged or released automatically when `package.json` changes. To publish a release, push a `v*` tag (for example `git tag v1.2.3 && git push origin v1.2.3`), or run the **Release** workflow by hand with an existing tag. It builds for macOS (x64 and arm64), Windows and Linux without signing certificates:
+
+- **macOS:** the app carries an ad-hoc signature only, so Gatekeeper treats it as from an unidentified developer. Open it the first time with right-click, then **Open**. In-app updates can't install unsigned macOS builds; download new versions from the Releases page. To produce signed and notarized builds yourself, see [docs/macos-signing-notarization.md](docs/macos-signing-notarization.md).
+- **Windows:** SmartScreen may warn that the installer is from an unknown publisher.
+
+**No telemetry.** 21x sends no analytics, crash reports or session recordings anywhere. Crash logs stay in the app's data directory on your machine.
+
 ## Contributing
 
 We welcome contributions! Here's how:
