@@ -13,6 +13,9 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
 vi.mock('child_process', () => ({ execFile: vi.fn() }))
 vi.mock('fs', () => ({ existsSync: vi.fn(() => false) }))
 
+// Same mocked `query` the adapter resolves through its dynamic import, so tests
+// can inspect exactly what the adapter handed the SDK.
+import { query } from '@anthropic-ai/claude-agent-sdk'
 import { ClaudeCodeAdapter, ClaudeSystemSubtype } from './claude-code-adapter'
 import { MessagePartType } from './coding-agent-adapter'
 
@@ -39,6 +42,7 @@ function createAdapterWithSession(
     backgroundTasks: new Map(),
     sawResult: false,
     releasePrompt: null,
+    pendingApprovals: [],
   }
   ;(adapter as any).sessions.set(sessionId, session)
   return { adapter, session }
@@ -219,6 +223,7 @@ describe('ClaudeCodeAdapter error result handling', () => {
         backgroundTasks: new Map(),
         sawResult: false,
         releasePrompt: null,
+        pendingApprovals: [],
         abortController: null,
         status: 'idle',
         messageBuffer: [],
@@ -257,6 +262,7 @@ describe('ClaudeCodeAdapter error result handling', () => {
         backgroundTasks: new Map(),
         sawResult: false,
         releasePrompt: null,
+        pendingApprovals: [],
         abortController: null,
         status: 'idle' as const,
         messageBuffer: [],
@@ -291,6 +297,7 @@ describe('ClaudeCodeAdapter error result handling', () => {
         backgroundTasks: new Map(),
         sawResult: false,
         releasePrompt: null,
+        pendingApprovals: [],
         abortController: null,
         status: 'busy' as const,
         messageBuffer: [],
@@ -325,6 +332,7 @@ describe('ClaudeCodeAdapter error result handling', () => {
         backgroundTasks: new Map(),
         sawResult: false,
         releasePrompt: null,
+        pendingApprovals: [],
         abortController: null,
         status: 'busy',
         messageBuffer: [],
@@ -363,6 +371,7 @@ describe('ClaudeCodeAdapter error result handling', () => {
         backgroundTasks: new Map(),
         sawResult: false,
         releasePrompt: null,
+        pendingApprovals: [],
         abortController: null,
         status: 'busy' as const,
         messageBuffer: [] as any[],
@@ -478,6 +487,7 @@ describe('ClaudeCodeAdapter error result handling', () => {
         backgroundTasks: new Map(),
         sawResult: false,
         releasePrompt: null, // Process still alive
+        pendingApprovals: [],
         isResumed: false,
       }
 
@@ -944,6 +954,7 @@ describe('ClaudeCodeAdapter background subagent lifecycle', () => {
       backgroundTasks: new Map(),
       sawResult: false,
       releasePrompt: null,
+      pendingApprovals: [],
       abortController: null,
       status: 'busy',
       messageBuffer: [],
@@ -1096,6 +1107,7 @@ describe('ClaudeCodeAdapter background task safety cap', () => {
       }]]),
       sawResult: true,
       releasePrompt: null,
+      pendingApprovals: [],
     }
     ;(adapter as any).sessions.set('s1', session)
 
@@ -1117,6 +1129,7 @@ describe('ClaudeCodeAdapter background task safety cap', () => {
       }]]),
       sawResult: true,
       releasePrompt: null,
+      pendingApprovals: [],
     }
     ;(adapter as any).sessions.set('s1', session)
 
@@ -1168,7 +1181,7 @@ describe('ClaudeCodeAdapter background-task system messages', () => {
 
   it('rebuilds the in-flight set from background_tasks_changed when the SDK passes it through', () => {
     const adapter = new ClaudeCodeAdapter()
-    const session: any = { backgroundTasks: new Map(), sawResult: false, releasePrompt: null, status: 'busy' }
+    const session: any = { backgroundTasks: new Map(), sawResult: false, releasePrompt: null, pendingApprovals: [], status: 'busy' }
 
     ;(adapter as any).trackBackgroundTask('s1', session, {
       type: 'system', subtype: ClaudeSystemSubtype.BACKGROUND_TASKS_CHANGED,
@@ -1198,7 +1211,7 @@ describe('ClaudeCodeAdapter background-task system messages', () => {
     const oldStart = Date.now() - 120_000
     const session: any = {
       backgroundTasks: new Map([['a', { taskId: 'a', taskType: 'local_agent', startedAt: oldStart }]]),
-      sawResult: false, releasePrompt: null, status: 'busy',
+      sawResult: false, releasePrompt: null, pendingApprovals: [], status: 'busy',
     }
 
     ;(adapter as any).trackBackgroundTask('s1', session, {
@@ -1229,6 +1242,7 @@ describe('ClaudeCodeAdapter abort classification (regression)', () => {
       backgroundTasks: new Map(),
       sawResult: false,
       releasePrompt: null,
+      pendingApprovals: [],
       enqueuePrompt: null,
       abortController,
       status: 'busy',
@@ -1285,5 +1299,213 @@ describe('ClaudeCodeAdapter abort classification (regression)', () => {
 
     expect(session.status).toBe('error')
     expect(session.lastError).toBe('socket hang up')
+  })
+})
+
+/**
+ * The adapter must honour the agent's permission mode instead of hardcoding
+ * `bypassPermissions`. These drive the real `sendPrompt` against the mocked SDK
+ * and assert on the options `query` was actually handed.
+ */
+describe('sendPrompt permission mode', () => {
+  /**
+   * Runs the real `sendPrompt` and returns the adapter, the session and the
+   * `options` object `query` received. `claudeExecutablePath` is primed so the
+   * executable lookup does not shell out (`execFile` is mocked to never call
+   * back).
+   */
+  async function runPrompt(config: any): Promise<{ adapter: ClaudeCodeAdapter; session: any; options: any }> {
+    const queryMock = vi.mocked(query) as any
+    queryMock.mockClear()
+    // An async-iterable that ends immediately, so the stream task settles
+    // without a real Claude Code process.
+    queryMock.mockImplementation(() => ({
+      async *[Symbol.asyncIterator]() {
+        // no messages: the turn ends the moment it starts
+      },
+    }))
+
+    const adapter = new ClaudeCodeAdapter()
+    await (adapter as any).ensureSDKLoaded()
+    ;(adapter as any).claudeExecutablePath = '/usr/local/bin/claude'
+
+    const session: any = {
+      sessionId: '',
+      queryIterator: null,
+      abortController: null,
+      status: 'idle',
+      messageBuffer: [],
+      messageCursor: 0,
+      streamTask: null,
+      lastError: null,
+      config,
+      isResumed: false,
+      backgroundTasks: new Map(),
+      sawResult: false,
+      enqueuePrompt: null,
+      releasePrompt: null,
+      pendingApprovals: [],
+    }
+    ;(adapter as any).sessions.set('s1', session)
+
+    await adapter.sendPrompt('s1', [{ type: MessagePartType.TEXT, text: 'hello' }] as any, config)
+    await session.streamTask
+
+    expect(queryMock).toHaveBeenCalledTimes(1)
+    return { adapter, session, options: queryMock.mock.calls[0][0].options }
+  }
+
+  const base = { agentId: 'a', taskId: 't', workspaceDir: '/tmp/ws' }
+
+  it("passes 'default', no bypass flag and a canUseTool bridge for permissionMode 'ask'", async () => {
+    const { options } = await runPrompt({ ...base, permissionMode: 'ask' })
+
+    expect(options.permissionMode).toBe('default')
+    // The flag must be ABSENT: the SDK treats its presence as consent.
+    expect(Object.prototype.hasOwnProperty.call(options, 'allowDangerouslySkipPermissions')).toBe(false)
+    // Without canUseTool the SDK has nobody to ask and denies every request.
+    expect(typeof options.canUseTool).toBe('function')
+  })
+
+  it("passes 'bypassPermissions' with the bypass flag and no canUseTool for permissionMode 'allow'", async () => {
+    const { options } = await runPrompt({ ...base, permissionMode: 'allow' })
+
+    expect(options.permissionMode).toBe('bypassPermissions')
+    expect(options.allowDangerouslySkipPermissions).toBe(true)
+    expect(options.canUseTool).toBeUndefined()
+  })
+
+  it("passes 'plan' for permissionMode 'ask' with a read-only sandbox", async () => {
+    const { options } = await runPrompt({ ...base, permissionMode: 'ask', sandboxMode: 'read-only' })
+
+    expect(options.permissionMode).toBe('plan')
+    expect(options.allowDangerouslySkipPermissions).toBeUndefined()
+  })
+
+  it("never reaches 'bypassPermissions' from a config that sets no permission mode", async () => {
+    const { options } = await runPrompt(base)
+
+    expect(options.permissionMode).toBe('default')
+    expect(Object.prototype.hasOwnProperty.call(options, 'allowDangerouslySkipPermissions')).toBe(false)
+    expect(typeof options.canUseTool).toBe('function')
+  })
+})
+
+describe('canUseTool approval bridge', () => {
+  function setup() {
+    const adapter = new ClaudeCodeAdapter()
+    const session: any = {
+      sessionId: 's1',
+      queryIterator: null,
+      abortController: null,
+      status: 'busy',
+      messageBuffer: [],
+      messageCursor: 0,
+      streamTask: null,
+      lastError: null,
+      config: { agentId: 'a', taskId: 't', workspaceDir: '/tmp/ws', permissionMode: 'ask' },
+      isResumed: false,
+      backgroundTasks: new Map(),
+      sawResult: false,
+      enqueuePrompt: null,
+      releasePrompt: null,
+      pendingApprovals: [],
+    }
+    ;(adapter as any).sessions.set('s1', session)
+    const onDataAvailable = vi.fn()
+    adapter.onDataAvailable = onDataAvailable
+    const canUseTool = (adapter as any).buildCanUseTool('s1', session)
+    return { adapter, session, canUseTool, onDataAvailable }
+  }
+
+  function request(canUseTool: any, toolName: string, input: any, toolUseID: string, extra: any = {}) {
+    return canUseTool(toolName, input, { signal: new AbortController().signal, toolUseID, ...extra })
+  }
+
+  it('surfaces a request as a pending approval and WAITING_APPROVAL status', async () => {
+    const { adapter, canUseTool, onDataAvailable } = setup()
+    void request(canUseTool, 'Bash', { command: 'rm -rf build' }, 'tool-1')
+
+    expect(onDataAvailable).toHaveBeenCalledWith('s1')
+    const status = await adapter.getStatus('s1', {} as any)
+    expect(status.type).toBe('waiting_approval')
+    const approval = adapter.getPendingApproval('s1')
+    expect(approval?.requestId).toBe('tool-1')
+    expect(approval?.question).toBe('Allow Bash: rm -rf build')
+    expect(approval?.options.map((o) => o.name)).toEqual(['Yes', 'Always', 'No'])
+  })
+
+  it('allows the tool when the user approves', async () => {
+    const { adapter, canUseTool } = setup()
+    const input = { command: 'ls' }
+    const pending = request(canUseTool, 'Bash', input, 'tool-1')
+
+    expect(await adapter.respondToApproval('s1', true, 'approved', 'tool-1')).toBe(true)
+    await expect(pending).resolves.toEqual({ behavior: 'allow', updatedInput: input })
+    expect(adapter.getPendingApproval('s1')).toBeNull()
+    expect((await adapter.getStatus('s1', {} as any)).type).toBe('busy')
+  })
+
+  it("denies the tool when the user picks 'No', even though the renderer sends approved=true", async () => {
+    const { adapter, canUseTool } = setup()
+    const pending = request(canUseTool, 'Write', { file_path: '/etc/passwd' }, 'tool-1')
+
+    await adapter.respondToApproval('s1', true, 'abort', 'tool-1')
+    await expect(pending).resolves.toMatchObject({ behavior: 'deny', interrupt: true })
+  })
+
+  it("keeps 'Always' in memory for this session instead of writing settings files", async () => {
+    const { adapter, canUseTool } = setup()
+    const suggestions = [{ type: 'addRules', rules: [{ toolName: 'Bash' }], behavior: 'allow', destination: 'localSettings' }]
+    const pending = request(canUseTool, 'Bash', { command: 'ls' }, 'tool-1', { suggestions })
+
+    await adapter.respondToApproval('s1', true, 'approved-for-session', 'tool-1')
+    const result = await pending
+    expect(result.behavior).toBe('allow')
+    expect(result.updatedPermissions).toEqual([{ ...suggestions[0], destination: 'session' }])
+  })
+
+  it('reports a stale response so the card can be expired', async () => {
+    const { adapter } = setup()
+    expect(await adapter.respondToApproval('s1', true, 'approved', 'gone')).toBe(false)
+  })
+
+  it('answers parallel requests by request id', async () => {
+    const { adapter, canUseTool } = setup()
+    const first = request(canUseTool, 'Bash', { command: 'a' }, 'tool-1')
+    const second = request(canUseTool, 'Bash', { command: 'b' }, 'tool-2')
+
+    await adapter.respondToApproval('s1', true, 'abort', 'tool-2')
+    await expect(second).resolves.toMatchObject({ behavior: 'deny' })
+    expect(adapter.getPendingApproval('s1')?.requestId).toBe('tool-1')
+    await adapter.respondToApproval('s1', true, 'approved', 'tool-1')
+    await expect(first).resolves.toMatchObject({ behavior: 'allow' })
+  })
+
+  it('leaves AskUserQuestion to the question flow', async () => {
+    const { adapter, canUseTool } = setup()
+    const result = await request(canUseTool, 'AskUserQuestion', { questions: [] }, 'tool-1')
+
+    expect(result).toMatchObject({ behavior: 'deny', interrupt: true })
+    expect(adapter.getPendingApproval('s1')).toBeNull()
+  })
+
+  it('denies outstanding requests when the prompt is aborted', async () => {
+    const { adapter, canUseTool } = setup()
+    const pending = request(canUseTool, 'Bash', { command: 'ls' }, 'tool-1')
+
+    await adapter.abortPrompt('s1', {} as any)
+    await expect(pending).resolves.toMatchObject({ behavior: 'deny' })
+    expect(adapter.getPendingApproval('s1')).toBeNull()
+  })
+
+  it('denies a request whose SDK signal aborts', async () => {
+    const { adapter, canUseTool } = setup()
+    const controller = new AbortController()
+    const pending = canUseTool('Bash', { command: 'ls' }, { signal: controller.signal, toolUseID: 'tool-1' })
+
+    controller.abort()
+    await expect(pending).resolves.toMatchObject({ behavior: 'deny' })
+    expect(adapter.getPendingApproval('s1')).toBeNull()
   })
 })

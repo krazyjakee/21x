@@ -17,6 +17,7 @@ import type {
   MessagePart,
 } from './coding-agent-adapter'
 import { SessionStatusType, MessagePartType, MessageRole } from './coding-agent-adapter'
+import { claudeCodePermissionMode } from './permission-mode'
 
 type ClaudeSDK = typeof import('@anthropic-ai/claude-agent-sdk')
 type Query = import('@anthropic-ai/claude-agent-sdk').Query
@@ -25,6 +26,9 @@ type Options = import('@anthropic-ai/claude-agent-sdk').Options
 type McpServerConfig = import('@anthropic-ai/claude-agent-sdk').McpServerConfig
 type HookCallback = import('@anthropic-ai/claude-agent-sdk').HookCallback
 type HookCallbackMatcher = import('@anthropic-ai/claude-agent-sdk').HookCallbackMatcher
+type CanUseTool = import('@anthropic-ai/claude-agent-sdk').CanUseTool
+type PermissionResult = import('@anthropic-ai/claude-agent-sdk').PermissionResult
+type PermissionUpdate = import('@anthropic-ai/claude-agent-sdk').PermissionUpdate
 
 let ClaudeAgentSDK: ClaudeSDK | null = null
 
@@ -74,6 +78,25 @@ interface BackgroundTask {
   startedAt: number
 }
 
+/**
+ * A Claude Code tool-permission request waiting for the user. Created by the
+ * SDK's `canUseTool` callback when the agent's permission mode is 'ask', and
+ * surfaced to the UI through getPendingApproval()/respondToApproval().
+ */
+interface PendingClaudeApproval {
+  requestId: string
+  toolCallId: string
+  question: string
+  options: Array<{ optionId: string; name: string; kind: string }>
+  suggestions?: PermissionUpdate[]
+  input: Record<string, unknown>
+  resolve: (result: PermissionResult) => void
+}
+
+/** Option ids (and renderer answer labels mapped by agent-manager) that deny a request. */
+const DENY_APPROVAL_OPTIONS = new Set(['abort', 'deny', 'reject', 'cancel', 'denied'])
+const ALWAYS_APPROVAL_OPTIONS = new Set(['approved-for-session', 'allow-always'])
+
 interface ClaudeSession {
   sessionId: string // Claude's internal session ID
   queryIterator: Query | null
@@ -107,6 +130,8 @@ interface ClaudeSession {
    * calls this. Only abort, destroy, or unexpected process exit closes it.
    */
   releasePrompt: (() => void) | null
+  /** Tool-permission requests awaiting the user, oldest first ('ask' mode only). */
+  pendingApprovals: PendingClaudeApproval[]
 }
 
 export class ClaudeCodeAdapter implements CodingAgentAdapter {
@@ -321,6 +346,67 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     }
   }
 
+  /**
+   * Routes Claude Code's tool-permission requests to the 21x approval UI.
+   *
+   * Only installed when the agent's permission mode is not 'allow'. Without a
+   * canUseTool callback the SDK has nobody to ask, so every request that needs
+   * approval (Bash, Edit, Write, ...) would be denied outright.
+   */
+  private buildCanUseTool(sessionKey: string, session: ClaudeSession): CanUseTool {
+    return (toolName, input, { signal, suggestions, toolUseID, title }) => {
+      // AskUserQuestion is answered through the question flow: the tool_use is
+      // rendered as a question and the answer arrives as the next prompt (see
+      // respondToQuestion). End the turn so the agent waits for it.
+      if (toolName === 'AskUserQuestion') {
+        return Promise.resolve({
+          behavior: 'deny',
+          message: 'The question has been shown to the user. Their answer will arrive as the next message.',
+          interrupt: true,
+        })
+      }
+
+      if (signal.aborted) {
+        return Promise.resolve({ behavior: 'deny', message: 'The request was cancelled.', interrupt: true })
+      }
+
+      return new Promise<PermissionResult>((resolve) => {
+        const detail = this.buildToolTitle(toolName, input)
+        const approval: PendingClaudeApproval = {
+          requestId: toolUseID,
+          toolCallId: toolUseID,
+          question: title || (detail ? `Allow ${toolName}: ${detail}` : `Allow ${toolName}?`),
+          options: [
+            { optionId: 'approved', name: 'Yes', kind: 'allow' },
+            { optionId: 'approved-for-session', name: 'Always', kind: 'allow' },
+            { optionId: 'abort', name: 'No', kind: 'reject' },
+          ],
+          suggestions,
+          input,
+          resolve,
+        }
+
+        signal.addEventListener('abort', () => {
+          const index = session.pendingApprovals.indexOf(approval)
+          if (index >= 0) session.pendingApprovals.splice(index, 1)
+          resolve({ behavior: 'deny', message: 'The request was cancelled.', interrupt: true })
+        }, { once: true })
+
+        session.pendingApprovals.push(approval)
+        console.log(`[ClaudeCodeAdapter] Permission requested for ${toolName} (${toolUseID}) in session ${sessionKey}`)
+        this.onDataAvailable?.(sessionKey)
+      })
+    }
+  }
+
+  /** Deny every outstanding permission request, e.g. when the turn is torn down. */
+  private rejectPendingApprovals(session: ClaudeSession, message: string): void {
+    const pending = session.pendingApprovals.splice(0)
+    for (const approval of pending) {
+      approval.resolve({ behavior: 'deny', message, interrupt: true })
+    }
+  }
+
   private async loadSDK(): Promise<void> {
     try {
       ClaudeAgentSDK = await import('@anthropic-ai/claude-agent-sdk')
@@ -370,6 +456,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       sawResult: false,
       enqueuePrompt: null,
       releasePrompt: null,
+      pendingApprovals: [],
     }
 
     // Generate UUID-format session ID (required by Claude Code)
@@ -668,6 +755,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       sawResult: false,
       enqueuePrompt: null,
       releasePrompt: null,
+      pendingApprovals: [],
     }
 
     this.sessions.set(sessionId, session)
@@ -752,6 +840,8 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     // Build options
     const secretHooks = this.buildSecretHooks(config)
     const effort = config.reasoningEffort === 'minimal' ? undefined : config.reasoningEffort
+    const claudePermissionMode = claudeCodePermissionMode(config)
+
     const options: Options = {
       cwd: config.workspaceDir,
       pathToClaudeCodeExecutable: claudePath,
@@ -761,8 +851,16 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       effort,
       systemPrompt: config.systemPrompt,
       abortController,
-      permissionMode: 'bypassPermissions', // Auto-approve all actions (user has already chosen to run agent)
-      allowDangerouslySkipPermissions: true, // Required for bypassPermissions mode
+      // The agent's own permission setting (see ./permission-mode.ts). Only an
+      // explicit 'allow' bypasses permission checks; 'ask' and an unset mode
+      // run in Claude Code's asking mode, with each request routed to the 21x
+      // approval UI through canUseTool.
+      permissionMode: claudePermissionMode,
+      // The SDK requires this flag to honour 'bypassPermissions'. Passing it for
+      // any other mode would make that mode decorative.
+      ...(claudePermissionMode === 'bypassPermissions'
+        ? { allowDangerouslySkipPermissions: true }
+        : { canUseTool: this.buildCanUseTool(sessionId, session) }),
       ...(secretHooks ? { hooks: secretHooks } : {}),
     }
 
@@ -881,6 +979,10 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       return { type: SessionStatusType.ERROR, message: session.lastError }
     }
 
+    if (session.pendingApprovals.length > 0) {
+      return { type: SessionStatusType.WAITING_APPROVAL }
+    }
+
     // getStatus is the 2s poll path, so it is also where a stalled background
     // task gets aged out and a turn that finished between stream messages gets
     // settled — otherwise a lost terminal notification would pin BUSY forever.
@@ -974,6 +1076,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     session.releasePrompt = null
     session.enqueuePrompt = null
     session.backgroundTasks.clear()
+    this.rejectPendingApprovals(session, 'The session was stopped.')
     session.abortController?.abort()
 
     // Wait for stream to finish cleanup
@@ -1002,6 +1105,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     session.releasePrompt = null
     session.enqueuePrompt = null
     session.backgroundTasks.clear()
+    this.rejectPendingApprovals(session, 'The session was stopped.')
     session.abortController?.abort()
 
     // Wait for stream task to complete
@@ -1080,6 +1184,64 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     }
 
     return messages
+  }
+
+  /**
+   * The oldest tool-permission request waiting for the user, in the shape
+   * agent-manager renders as a permission card. Only 'ask' mode creates these.
+   */
+  getPendingApproval(sessionId: string): {
+    requestId: string
+    toolCallId: string
+    question: string
+    options: Array<{ optionId: string; name: string; kind: string }>
+  } | null {
+    const approval = this.sessions.get(sessionId)?.pendingApprovals[0]
+    if (!approval) return null
+    const { requestId, toolCallId, question, options } = approval
+    return { requestId, toolCallId, question, options }
+  }
+
+  /**
+   * Answers a permission request from the approval UI. Returns false when the
+   * request no longer exists (the turn ended or the app restarted), so
+   * agent-manager can mark the card as expired.
+   */
+  async respondToApproval(
+    sessionId: string,
+    approved: boolean,
+    optionId?: string,
+    requestId?: string
+  ): Promise<boolean> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return false
+
+    const index = requestId
+      ? session.pendingApprovals.findIndex((approval) => approval.requestId === requestId)
+      : 0
+    const approval = index >= 0 ? session.pendingApprovals[index] : undefined
+    if (!approval) return false
+    session.pendingApprovals.splice(index, 1)
+
+    const allow = approved && !(optionId && DENY_APPROVAL_OPTIONS.has(optionId))
+    console.log(`[ClaudeCodeAdapter] Permission ${approval.requestId} ${allow ? 'approved' : 'denied'} (${optionId ?? 'no option'})`)
+
+    if (!allow) {
+      approval.resolve({ behavior: 'deny', message: 'The user denied this request.', interrupt: true })
+    } else if (optionId && ALWAYS_APPROVAL_OPTIONS.has(optionId) && approval.suggestions?.length) {
+      // "Always" lasts for this session only. Claude Code's suggestions may
+      // target settings files; keep them in memory rather than write to disk.
+      approval.resolve({
+        behavior: 'allow',
+        updatedInput: approval.input,
+        updatedPermissions: approval.suggestions.map((update) => ({ ...update, destination: 'session' as const })),
+      })
+    } else {
+      approval.resolve({ behavior: 'allow', updatedInput: approval.input })
+    }
+
+    this.onDataAvailable?.(sessionId)
+    return true
   }
 
   async respondToQuestion(
@@ -1399,6 +1561,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       session.queryIterator = null
       // The process is gone, so nothing can still be running in the background.
       session.backgroundTasks.clear()
+      this.rejectPendingApprovals(session, 'The session ended.')
       session.releasePrompt?.()
       session.releasePrompt = null
       session.enqueuePrompt = null
