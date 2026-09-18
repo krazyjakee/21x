@@ -6,7 +6,7 @@ import { required, type IpcDeps } from './deps'
 
 /** Task sources, the plugins behind them, and the OAuth flows they use. */
 export function registerTaskSourceHandlers({ db, syncManager, pluginRegistry, oauthManager }: IpcDeps): void {
-  ipcMain.handle('taskSource:getAll', () => db.getTaskSources())
+  ipcMain.handle('taskSource:getAll', (_, projectId?: string) => db.getTaskSources(projectId || undefined))
   ipcMain.handle('taskSource:create', (_, data: CreateTaskSourceData) => db.createTaskSource(data))
   ipcMain.handle('taskSource:update', (_, id: string, data: UpdateTaskSourceData) => db.updateTaskSource(id, data))
   ipcMain.handle('taskSource:delete', (_, id: string) => db.deleteTaskSource(id))

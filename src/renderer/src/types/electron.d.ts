@@ -231,7 +231,7 @@ export interface TeaCliStatus {
 
 interface ElectronAPI {
   db: {
-    getTasks: () => Promise<Task[]>
+    getTasks: (projectId?: string) => Promise<Task[]>
     getTask: (id: string) => Promise<Task | undefined>
     createTask: (data: CreateTaskDTO) => Promise<Task>
     updateTask: (id: string, data: UpdateTaskDTO) => Promise<Task | undefined>
@@ -353,7 +353,7 @@ interface ElectronAPI {
     runCleanupNow: () => Promise<{ cleaned: number; errors: string[]; nodeModulesCleaned: number }>
   }
   taskSources: {
-    getAll: () => Promise<TaskSource[]>
+    getAll: (projectId?: string) => Promise<TaskSource[]>
     create: (data: CreateTaskSourceDTO) => Promise<TaskSource>
     update: (id: string, data: UpdateTaskSourceDTO) => Promise<TaskSource | undefined>
     delete: (id: string) => Promise<boolean>
@@ -370,6 +370,7 @@ interface ElectronAPI {
     update: (id: string, data: UpdateProjectData) => Promise<ProjectRecord | undefined>
     archive: (id: string, archived?: boolean) => Promise<ProjectRecord | undefined>
     reorder: (orderedIds: string[]) => Promise<void>
+    moveTask: (taskId: string, projectId: string) => Promise<Task[] | null>
     repos: {
       list: (projectId: string) => Promise<ProjectRepoRecord[]>
       add: (projectId: string, data: CreateProjectRepoData) => Promise<ProjectRepoRecord | undefined>

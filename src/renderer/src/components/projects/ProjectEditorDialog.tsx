@@ -1,0 +1,447 @@
+import { useEffect, useMemo, useState } from 'react'
+import {
+  ArrowDown, ArrowUp, Archive, ArchiveRestore, FolderGit2, Link2, Loader2, Plus, Trash2, Eye, Pencil
+} from 'lucide-react'
+import { Dialog, DialogContent, DialogHeader, DialogBody, DialogTitle, DialogDescription } from '@/components/ui/Dialog'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
+import { Label } from '@/components/ui/Label'
+import { Select } from '@/components/ui/Select'
+import { Textarea } from '@/components/ui/Textarea'
+import { Badge } from '@/components/ui/Badge'
+import { Markdown } from '@/components/ui/Markdown'
+import { RepoSelectorDialog } from '@/components/github/RepoSelectorDialog'
+import { useUIStore } from '@/stores/ui-store'
+import { useProjectStore } from '@/stores/project-store'
+import { useAgentStore } from '@/stores/agent-store'
+import { useSettingsStore, type GitProvider } from '@/stores/settings-store'
+import { projectApi } from '@/lib/ipc-client'
+import {
+  GIT_PROVIDER_LABELS,
+  draftFromProject,
+  emptyProjectDraft,
+  isValidResourceUrl,
+  moveItem,
+  newDraftKey,
+  parseRepoInput,
+  repoIdentity,
+  saveProjectDraft,
+  validateProjectDraft,
+  type GitProviderId,
+  type ProjectDraft,
+  type ProjectDraftOriginal,
+  type RepoDraft,
+  type ResourceDraft
+} from '@/lib/project-editor'
+import { DEFAULT_PROJECT_ID } from '@shared/projects'
+import type { GitHubRepo } from '@/types/electron'
+
+const PROVIDER_IDS = Object.keys(GIT_PROVIDER_LABELS) as GitProviderId[]
+const NO_INITIAL_REPOS: string[] = []
+
+function providerLabel(provider: string): string {
+  return GIT_PROVIDER_LABELS[provider as GitProviderId] ?? provider
+}
+
+function MoveButtons({ index, count, onMove }: { index: number; count: number; onMove: (delta: -1 | 1) => void }) {
+  return (
+    <div className="flex items-center">
+      <Button variant="ghost" size="icon" className="h-7 w-7" disabled={index === 0} onClick={() => onMove(-1)} title="Move up" aria-label="Move up">
+        <ArrowUp className="size-icon-xs" />
+      </Button>
+      <Button variant="ghost" size="icon" className="h-7 w-7" disabled={index === count - 1} onClick={() => onMove(1)} title="Move down" aria-label="Move down">
+        <ArrowDown className="size-icon-xs" />
+      </Button>
+    </div>
+  )
+}
+
+/**
+ * Create or edit a project: details, brief, agents, git provider/org, repos
+ * and resources. Opened with `useUIStore().openProjectEditor(id | 'new')`.
+ * Nothing is written until Save; a new project may be saved with no repos.
+ */
+export function ProjectEditorDialog() {
+  const target = useUIStore((s) => s.projectEditorTarget)
+  const close = useUIStore((s) => s.closeProjectEditor)
+  const projects = useProjectStore((s) => s.projects)
+  const setCurrentProject = useProjectStore((s) => s.setCurrentProject)
+  const archiveProject = useProjectStore((s) => s.archiveProject)
+  const agents = useAgentStore((s) => s.agents)
+  const globalOrg = useSettingsStore((s) => s.githubOrg)
+  const globalProvider = useSettingsStore((s) => s.gitProvider)
+
+  const isNew = target === 'new'
+  const project = !isNew && target ? projects.find((p) => p.id === target) : undefined
+
+  const [draft, setDraft] = useState<ProjectDraft>(emptyProjectDraft)
+  const [original, setOriginal] = useState<ProjectDraftOriginal>({ repos: [], resources: [] })
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [showPreview, setShowPreview] = useState(false)
+  const [repoInput, setRepoInput] = useState('')
+  const [repoInputProvider, setRepoInputProvider] = useState<GitProviderId>('github')
+  const [repoPickerOpen, setRepoPickerOpen] = useState(false)
+
+  // Load the draft each time the editor opens.
+  useEffect(() => {
+    if (!target) return undefined
+    setError(null)
+    setShowPreview(false)
+    setRepoInput('')
+    void useSettingsStore.getState().fetchSettings()
+    if (useAgentStore.getState().agents.length === 0) void useAgentStore.getState().fetchAgents()
+    if (target === 'new') {
+      setDraft(emptyProjectDraft())
+      setOriginal({ repos: [], resources: [] })
+      return undefined
+    }
+    const record = useProjectStore.getState().projects.find((p) => p.id === target)
+    if (!record) return undefined
+    let cancelled = false
+    setLoading(true)
+    Promise.all([projectApi.listRepos(target), projectApi.listResources(target)])
+      .then(([repos, resources]) => {
+        if (cancelled) return
+        setDraft(draftFromProject(record, repos, resources))
+        setOriginal({ repos, resources })
+      })
+      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [target])
+
+  const effectiveProvider = (draft.git_provider || globalProvider || 'github') as GitProviderId
+  const effectiveOrg = draft.git_org ?? globalOrg ?? ''
+
+  useEffect(() => { setRepoInputProvider(effectiveProvider) }, [effectiveProvider])
+
+  const problems = useMemo(() => validateProjectDraft(draft), [draft])
+  const patch = (fields: Partial<ProjectDraft>) => setDraft((d) => ({ ...d, ...fields }))
+
+  const agentOptions = useMemo(() => [
+    { value: '', label: 'App default' },
+    ...agents.map((a) => ({ value: a.id, label: a.name }))
+  ], [agents])
+
+  // ── Repos ──
+  const addRepos = (repos: Omit<RepoDraft, 'key'>[]) => {
+    setDraft((d) => {
+      const seen = new Set(d.repos.map(repoIdentity))
+      const fresh = repos
+        .filter((r) => !seen.has(repoIdentity(r)))
+        .map((r) => ({ ...r, key: newDraftKey() }))
+      return { ...d, repos: [...d.repos, ...fresh] }
+    })
+  }
+  const addRepoByHand = () => {
+    const parsed = parseRepoInput(repoInput, effectiveOrg)
+    if (!parsed) {
+      setError('Enter a repo as name, org/name or a clone URL.')
+      return
+    }
+    setError(null)
+    addRepos([{ provider: parsed.provider ?? repoInputProvider, org: parsed.org, name: parsed.name, default_branch: '' }])
+    setRepoInput('')
+  }
+  const handlePickedRepos = (repos: GitHubRepo[], org: string, provider: GitProvider) => {
+    addRepos(repos.map((r) => ({ provider, org, name: r.name, default_branch: '' })))
+    setRepoPickerOpen(false)
+  }
+  const updateRepo = (key: string, fields: Partial<RepoDraft>) =>
+    setDraft((d) => ({ ...d, repos: d.repos.map((r) => (r.key === key ? { ...r, ...fields } : r)) }))
+  const removeRepo = (key: string) => setDraft((d) => ({ ...d, repos: d.repos.filter((r) => r.key !== key) }))
+
+  // ── Resources ──
+  const addResource = () =>
+    setDraft((d) => ({ ...d, resources: [...d.resources, { key: newDraftKey(), label: '', url: '', notes: '' }] }))
+  const updateResource = (key: string, fields: Partial<ResourceDraft>) =>
+    setDraft((d) => ({ ...d, resources: d.resources.map((r) => (r.key === key ? { ...r, ...fields } : r)) }))
+  const removeResource = (key: string) => setDraft((d) => ({ ...d, resources: d.resources.filter((r) => r.key !== key) }))
+
+  const handleSave = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      const saved = await saveProjectDraft(isNew ? null : project?.id ?? null, draft, original)
+      // A project just created is the one the user wants to work in.
+      if (isNew) setCurrentProject(saved.id)
+      close()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleArchiveToggle = async () => {
+    if (!project) return
+    await archiveProject(project.id, !project.archived)
+    close()
+  }
+
+  const open = !!target && (isNew || !!project)
+
+  return (
+    <>
+      <Dialog open={open} onOpenChange={(v) => { if (!v) close() }}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{isNew ? 'New project' : `Edit ${project?.name ?? 'project'}`}</DialogTitle>
+            <DialogDescription>
+              A project groups tasks and task sources, and gives its agents a brief, repos and resources as context.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody className="space-y-8">
+            {loading ? (
+              <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
+                <Loader2 className="size-icon-sm mr-2 animate-spin" /> Loading project…
+              </div>
+            ) : (
+              <>
+                {/* ── Details ── */}
+                <section className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="project-name">Name</Label>
+                    <Input
+                      id="project-name"
+                      autoFocus={isNew}
+                      value={draft.name}
+                      onChange={(e) => patch({ name: e.target.value })}
+                      placeholder="e.g. Website relaunch"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="project-brief">Brief</Label>
+                      <button
+                        type="button"
+                        onClick={() => setShowPreview((v) => !v)}
+                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+                      >
+                        {showPreview ? <><Pencil className="size-icon-xs" /> Edit</> : <><Eye className="size-icon-xs" /> Preview</>}
+                      </button>
+                    </div>
+                    {showPreview ? (
+                      <div className="min-h-[120px] rounded-lg border border-border bg-card px-3 py-2">
+                        {draft.description.trim()
+                          ? <Markdown>{draft.description}</Markdown>
+                          : <p className="text-sm text-muted-foreground">Nothing to preview yet.</p>}
+                      </div>
+                    ) : (
+                      <Textarea
+                        id="project-brief"
+                        value={draft.description}
+                        onChange={(e) => patch({ description: e.target.value })}
+                        placeholder="What this project is for, who it serves, conventions to follow. Markdown is supported. The project's Mastermind reads this."
+                        className="min-h-[120px] font-mono text-[13px]"
+                      />
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="project-default-agent">Default agent</Label>
+                      <Select
+                        id="project-default-agent"
+                        value={draft.default_agent_id ?? ''}
+                        onChange={(e) => patch({ default_agent_id: e.target.value || null })}
+                        options={agentOptions}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="project-mastermind-agent">Mastermind agent</Label>
+                      <Select
+                        id="project-mastermind-agent"
+                        value={draft.mastermind_agent_id ?? ''}
+                        onChange={(e) => patch({ mastermind_agent_id: e.target.value || null })}
+                        options={agentOptions}
+                      />
+                    </div>
+                  </div>
+                </section>
+
+                {/* ── Git ── */}
+                <section className="space-y-3">
+                  <h3 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Git</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="project-git-provider">Provider</Label>
+                      <Select
+                        id="project-git-provider"
+                        value={draft.git_provider ?? ''}
+                        onChange={(e) => patch({ git_provider: e.target.value || null })}
+                        options={[
+                          { value: '', label: `App setting (${providerLabel(globalProvider ?? 'github')})` },
+                          ...PROVIDER_IDS.map((id) => ({ value: id, label: GIT_PROVIDER_LABELS[id] }))
+                        ]}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="project-git-org">Organization</Label>
+                      <Input
+                        id="project-git-org"
+                        value={draft.git_org ?? ''}
+                        onChange={(e) => patch({ git_org: e.target.value.trim() ? e.target.value : null })}
+                        placeholder={globalOrg ? `App setting (${globalOrg})` : 'Owner or group'}
+                      />
+                    </div>
+                  </div>
+                </section>
+
+                {/* ── Repos ── */}
+                <section className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Repositories</h3>
+                    <Button size="sm" variant="outline" onClick={() => setRepoPickerOpen(true)}>
+                      <FolderGit2 className="size-icon-sm" /> Add from {effectiveOrg || 'an organization'}
+                    </Button>
+                  </div>
+
+                  {draft.repos.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-border px-4 py-5 text-center">
+                      <p className="text-sm text-foreground/80">Add repos, or skip — a project doesn’t need any.</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Repos let coding agents open worktrees. Projects about documents, research or operations work fine without them.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {draft.repos.map((repo, index) => (
+                        <div key={repo.key} className="flex items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5">
+                          <MoveButtons
+                            index={index}
+                            count={draft.repos.length}
+                            onMove={(delta) => setDraft((d) => ({ ...d, repos: moveItem(d.repos, index, delta) }))}
+                          />
+                          <Badge>{providerLabel(repo.provider)}</Badge>
+                          <span className="min-w-0 flex-1 truncate text-sm font-medium" title={`${repo.org}/${repo.name}`}>
+                            {repo.org ? <span className="text-muted-foreground">{repo.org}/</span> : null}{repo.name}
+                          </span>
+                          <Input
+                            value={repo.default_branch}
+                            onChange={(e) => updateRepo(repo.key, { default_branch: e.target.value })}
+                            placeholder="Default branch"
+                            aria-label={`Default branch for ${repo.name}`}
+                            className="h-8 w-36 text-xs"
+                          />
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => removeRepo(repo.key)} title="Remove repo" aria-label={`Remove ${repo.name}`}>
+                            <Trash2 className="size-icon-xs" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2">
+                    <Select
+                      value={repoInputProvider}
+                      onChange={(e) => setRepoInputProvider(e.target.value as GitProviderId)}
+                      options={PROVIDER_IDS.map((id) => ({ value: id, label: GIT_PROVIDER_LABELS[id] }))}
+                      aria-label="Provider for a repo added by hand"
+                      className="w-32"
+                    />
+                    <Input
+                      value={repoInput}
+                      onChange={(e) => setRepoInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addRepoByHand() } }}
+                      placeholder={`name, org/name or a clone URL${effectiveOrg ? ` (org defaults to ${effectiveOrg})` : ''}`}
+                      aria-label="Add a repo by hand"
+                    />
+                    <Button size="sm" variant="secondary" onClick={addRepoByHand} disabled={!repoInput.trim()}>
+                      <Plus className="size-icon-sm" /> Add
+                    </Button>
+                  </div>
+                </section>
+
+                {/* ── Resources ── */}
+                <section className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Resources</h3>
+                      <p className="text-xs text-muted-foreground">Links and notes agents get as context — a drive folder, docs, a dashboard. Nothing is connected or fetched.</p>
+                    </div>
+                    <Button size="sm" variant="outline" onClick={addResource}>
+                      <Link2 className="size-icon-sm" /> Add resource
+                    </Button>
+                  </div>
+                  {draft.resources.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No resources.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {draft.resources.map((resource, index) => {
+                        const urlInvalid = !isValidResourceUrl(resource.url)
+                        return (
+                          <div key={resource.key} className="space-y-2 rounded-lg border border-border bg-card p-2.5">
+                            <div className="flex items-center gap-2">
+                              <MoveButtons
+                                index={index}
+                                count={draft.resources.length}
+                                onMove={(delta) => setDraft((d) => ({ ...d, resources: moveItem(d.resources, index, delta) }))}
+                              />
+                              <Input
+                                value={resource.label}
+                                onChange={(e) => updateResource(resource.key, { label: e.target.value })}
+                                placeholder="Label"
+                                aria-label="Resource label"
+                                className="h-8 w-48 text-sm"
+                              />
+                              <Input
+                                value={resource.url}
+                                onChange={(e) => updateResource(resource.key, { url: e.target.value })}
+                                placeholder="https://… (optional)"
+                                aria-label="Resource URL"
+                                aria-invalid={urlInvalid}
+                                className={`h-8 flex-1 text-sm ${urlInvalid ? 'border-destructive focus:border-destructive' : ''}`}
+                              />
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => removeResource(resource.key)} title="Remove resource" aria-label="Remove resource">
+                                <Trash2 className="size-icon-xs" />
+                              </Button>
+                            </div>
+                            {urlInvalid && <p className="pl-16 text-xs text-destructive">That doesn’t look like a URL.</p>}
+                            <Textarea
+                              value={resource.notes}
+                              onChange={(e) => updateResource(resource.key, { notes: e.target.value })}
+                              placeholder="Notes for agents (optional)"
+                              aria-label="Resource notes"
+                              className="min-h-[48px] text-sm"
+                            />
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </section>
+              </>
+            )}
+
+            {error && <p className="text-sm text-destructive">{error}</p>}
+
+            <div className="flex items-center gap-2 border-t border-border pt-4">
+              {project && project.id !== DEFAULT_PROJECT_ID && (
+                <Button variant="ghost" size="sm" onClick={handleArchiveToggle}>
+                  {project.archived ? <><ArchiveRestore className="size-icon-sm" /> Restore</> : <><Archive className="size-icon-sm" /> Archive</>}
+                </Button>
+              )}
+              <div className="flex-1" />
+              <Button variant="ghost" onClick={close}>Cancel</Button>
+              <Button onClick={handleSave} disabled={saving || loading || problems.length > 0} title={problems[0]}>
+                {saving && <Loader2 className="size-icon-sm animate-spin" />}
+                {isNew ? (draft.repos.length === 0 ? 'Create without repos' : 'Create project') : 'Save'}
+              </Button>
+            </div>
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
+
+      <RepoSelectorDialog
+        open={repoPickerOpen}
+        onOpenChange={setRepoPickerOpen}
+        org={effectiveOrg}
+        orgProvider={effectiveProvider}
+        initialRepos={NO_INITIAL_REPOS}
+        onConfirm={handlePickedRepos}
+      />
+    </>
+  )
+}

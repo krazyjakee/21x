@@ -1,5 +1,6 @@
 import { useUIStore } from '@/stores/ui-store'
 import { useTaskStore } from '@/stores/task-store'
+import { filterToProject, getCurrentProjectId } from '@/stores/project-store'
 import { useCanvasStore } from '@/stores/canvas-store'
 import { useArtifactStore } from '@/stores/artifact-store'
 import { SETTINGS_TABS, SettingsTab } from '@/types'
@@ -164,7 +165,7 @@ export function collectUiState(): UiStateSnapshot {
     settingsTab: ui.activeModal === 'settings' ? ui.settingsTab : null,
     // Agent approval requests are not surfaced in the renderer.
     waitingForYou: false,
-    visibleTaskIds: tasks.tasks.slice(0, 50).map((task) => task.id),
+    visibleTaskIds: filterToProject(tasks.tasks, getCurrentProjectId()).slice(0, 50).map((task) => task.id),
     canvas: {
       viewport: canvas.viewport,
       // Capped: a canvas can hold more panels than a tool reply should carry.

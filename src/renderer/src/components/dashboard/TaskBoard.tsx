@@ -3,6 +3,7 @@ import { Clock, AlertCircle, CheckCircle2, ExternalLink, Bot, Terminal } from 'l
 import { Badge } from '@/components/ui/Badge'
 import { OpenCodeLogo, AnthropicLogo, OpenAILogo, PiLogo } from '@/components/icons/AgentLogos'
 import { useTaskStore } from '@/stores/task-store'
+import { useProjectTasks } from '@/hooks/use-project-tasks'
 import { useAgentStore } from '@/stores/agent-store'
 import { useUIStore } from '@/stores/ui-store'
 import { useSnoozeTick } from '@/hooks/use-snooze-tick'
@@ -275,7 +276,8 @@ const BoardColumn = memo(function BoardColumn({ column, tasks, onSelect, agentMa
 
 export function TaskBoard() {
   // Use individual selectors to prevent re-renders from unrelated store changes
-  const tasks = useTaskStore((s) => s.tasks)
+  // The board shows the current project's tasks only.
+  const tasks = useProjectTasks()
   const isLoading = useTaskStore((s) => s.isLoading)
   const agents = useAgentStore((s) => s.agents)
   const openDashboardPreview = useUIStore((s) => s.openDashboardPreview)

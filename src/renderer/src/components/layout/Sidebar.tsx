@@ -6,6 +6,7 @@ import { SkillList } from '@/components/skills/SkillList'
 import { useUIStore, type SortField } from '@/stores/ui-store'
 import { useTaskSourceStore } from '@/stores/task-source-store'
 import { useTaskStore } from '@/stores/task-store'
+import { useProjectTaskSources } from '@/hooks/use-project-tasks'
 import { useUserStore } from '@/stores/user-store'
 import { useSkillStore } from '@/stores/skill-store'
 import { useAgentSchedulerStore } from '@/stores/agent-scheduler-store'
@@ -53,7 +54,8 @@ export function Sidebar({ tasks, selectedTaskId, overdueCount, onSelectTask, onC
   const sidebarWidth = useUIStore((s) => s.sidebarWidth)
   const setSidebarWidth = useUIStore((s) => s.setSidebarWidth)
 
-  const sources = useTaskSourceStore((s) => s.sources)
+  // The current project's sources only: the filter and "sync all" never reach another project.
+  const sources = useProjectTaskSources()
   const syncingIds = useTaskSourceStore((s) => s.syncingIds)
   const fetchSources = useTaskSourceStore((s) => s.fetchSources)
   const syncAllEnabled = useTaskSourceStore((s) => s.syncAllEnabled)

@@ -11,6 +11,7 @@ import { useRecordingChrome } from '@/hooks/use-recording-chrome'
 import { useTasks } from '@/hooks/use-tasks'
 import { useUIStore } from '@/stores/ui-store'
 import { useAgentStore } from '@/stores/agent-store'
+import { useProjectStore } from '@/stores/project-store'
 import { useAgentAutoStart } from '@/hooks/use-agent-auto-start'
 import { useOverdueNotifications } from '@/hooks/use-overdue-notifications'
 import { settingsApi, onTaskSourceActionFailed } from '@/lib/ipc-client'
@@ -25,6 +26,7 @@ import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog'
 import { TopBar } from './TopBar'
 import { NavRail } from './NavRail'
 import { TaskDialogs } from './TaskDialogs'
+import { ProjectEditorDialog } from '@/components/projects/ProjectEditorDialog'
 import { useActiveTaskActions } from './hooks/use-active-task-actions'
 import { useGlobalShortcuts } from './hooks/use-global-shortcuts'
 
@@ -39,7 +41,7 @@ const OrchestratorPanel = lazy(() => import('@/components/orchestrator/Orchestra
 const workspaceFallback = <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Loading...</div>
 
 export function AppLayout() {
-  const { tasks, allTasks, selectedTask, updateTask, selectTask } = useTasks()
+  const { tasks, allTasks, everyTask, selectedTask, updateTask, selectTask } = useTasks()
   // Individual selectors so unrelated agent store changes (e.g. session messages) don't re-render the layout
   const agents = useAgentStore((s) => s.agents)
   const fetchAgents = useAgentStore((s) => s.fetchAgents)
@@ -58,6 +60,8 @@ export function AppLayout() {
 
   useEffect(() => {
     fetchAgents()
+    // Restores the persisted current project; task views scope to it.
+    void useProjectStore.getState().init()
   }, [])
 
   const [toast, setToast] = useState<{ message: string; isError?: boolean } | null>(null)
@@ -136,7 +140,8 @@ export function AppLayout() {
     [tasks]
   )
 
-  useOverdueNotifications(tasks)
+  // Every project's tasks: reminders from other projects still arrive, named by project.
+  useOverdueNotifications(everyTask)
 
   const [onboardingOpen, setOnboardingOpen] = useState(false)
 
@@ -162,8 +167,9 @@ export function AppLayout() {
   }
 
   // Sessions are read non-reactively via getState() inside the hook
+  // Auto-start runs for every project, not only the one on screen.
   useAgentAutoStart({
-    tasks: allTasks,
+    tasks: everyTask,
     agents,
     showToast
   })
@@ -281,6 +287,8 @@ export function AppLayout() {
       />
 
       <OnboardingWizard open={onboardingOpen} onOpenChange={handleOnboardingChange} />
+
+      <ProjectEditorDialog />
 
       {toast && (
         <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 border rounded-lg shadow-lg text-sm animate-in fade-in slide-in-from-bottom-2 ${toast.isError ? 'bg-destructive text-destructive-foreground' : 'bg-card'}`}>

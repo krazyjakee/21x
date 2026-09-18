@@ -2,7 +2,8 @@ import { useCallback, useMemo } from 'react'
 import { TaskWorkspace } from '@/components/tasks/TaskWorkspace'
 import { TaskForm, type TaskFormSubmitData } from '@/components/tasks/TaskForm'
 import { DeleteConfirmDialog } from '@/components/tasks/DeleteConfirmDialog'
-import { Dialog, DialogContent, DialogHeader, DialogBody, DialogTitle } from '@/components/ui/Dialog'
+import { Dialog, DialogContent, DialogHeader, DialogBody, DialogTitle, DialogDescription } from '@/components/ui/Dialog'
+import { useCurrentProject } from '@/hooks/use-project-tasks'
 import { useUIStore } from '@/stores/ui-store'
 import { useTaskStore } from '@/stores/task-store'
 import { useAgentStore } from '@/stores/agent-store'
@@ -35,6 +36,7 @@ export function TaskDialogs({
   const deleteTask = useTaskStore((s) => s.deleteTask)
   const selectTask = useTaskStore((s) => s.selectTask)
   const stopAndRemoveSessionForTask = useAgentStore((s) => s.stopAndRemoveSessionForTask)
+  const currentProject = useCurrentProject()
 
   const activeModal = useUIStore((s) => s.activeModal)
   const closeModal = useUIStore((s) => s.closeModal)
@@ -152,6 +154,8 @@ export function TaskDialogs({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Create Task</DialogTitle>
+            {/* createTask files the task under the current project. */}
+            <DialogDescription>In {currentProject?.name ?? 'Default'}</DialogDescription>
           </DialogHeader>
           <DialogBody>
             <TaskForm prefill={createTaskPrefill} onSubmit={handleCreate} onCancel={closeCreate} />

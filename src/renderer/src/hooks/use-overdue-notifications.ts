@@ -3,6 +3,14 @@ import { isOverdue, isDueSoon, isSnoozed } from '@/lib/utils'
 import { notificationApi, onOverdueCheck } from '@/lib/ipc-client'
 import { TaskStatus } from '@/types'
 import type { Task } from '@/types'
+import { useProjectStore, projectIdOf, projectName } from '@/stores/project-store'
+
+/** Names the project when the task is not in the one on screen, so a reminder from elsewhere says where it is from. */
+export function notificationTitle(title: string, task: Task): string {
+  const { currentProjectId, projects } = useProjectStore.getState()
+  const projectId = projectIdOf(task)
+  return projectId === currentProjectId ? title : `${title} · ${projectName(projects, projectId)}`
+}
 
 export function useOverdueNotifications(tasks: Task[]): void {
   const notifiedRef = useRef<Set<string>>(new Set())
@@ -36,7 +44,7 @@ export function useOverdueNotifications(tasks: Task[]): void {
         // Snooze wake-up: snoozed_until is in the past → task just reappeared
         if (task.snoozed_until && !isSnoozed(task.snoozed_until) && !snoozeNotified.has(task.id)) {
           snoozeNotified.add(task.id)
-          notificationApi.show('Task Reminder', `"${task.title}" is back from snooze`)
+          notificationApi.show(notificationTitle('Task Reminder', task), `"${task.title}" is back from snooze`)
         }
 
         // Skip overdue/due-soon for currently snoozed tasks
@@ -45,10 +53,10 @@ export function useOverdueNotifications(tasks: Task[]): void {
 
         if (isOverdue(task.due_date)) {
           notified.add(task.id)
-          notificationApi.show('Task Overdue', `"${task.title}" is past due`)
+          notificationApi.show(notificationTitle('Task Overdue', task), `"${task.title}" is past due`)
         } else if (isDueSoon(task.due_date)) {
           notified.add(task.id)
-          notificationApi.show('Task Due Soon', `"${task.title}" is due within 24 hours`)
+          notificationApi.show(notificationTitle('Task Due Soon', task), `"${task.title}" is due within 24 hours`)
         }
       }
     })

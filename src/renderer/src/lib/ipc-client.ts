@@ -31,8 +31,9 @@ import type {
 } from '@shared/projects'
 
 export const taskApi = {
-  getAll: (): Promise<Task[]> => {
-    return window.electronAPI.db.getTasks()
+  /** Every project's tasks, or one project's when `projectId` is given. */
+  getAll: (projectId?: string): Promise<Task[]> => {
+    return window.electronAPI.db.getTasks(projectId)
   },
 
   getById: (id: string): Promise<Task | undefined> => {
@@ -433,8 +434,9 @@ export const gitApi = {
 }
 
 export const taskSourceApi = {
-  getAll: (): Promise<TaskSource[]> => {
-    return window.electronAPI.taskSources.getAll()
+  /** Every project's sources, or one project's when `projectId` is given. */
+  getAll: (projectId?: string): Promise<TaskSource[]> => {
+    return window.electronAPI.taskSources.getAll(projectId)
   },
 
   create: (data: CreateTaskSourceDTO): Promise<TaskSource> => {
@@ -474,6 +476,8 @@ export const projectApi = {
   update: (id: string, data: UpdateProjectData): Promise<ProjectRecord | undefined> => window.electronAPI.projects.update(id, data),
   archive: (id: string, archived?: boolean): Promise<ProjectRecord | undefined> => window.electronAPI.projects.archive(id, archived),
   reorder: (orderedIds: string[]): Promise<void> => window.electronAPI.projects.reorder(orderedIds),
+  /** Moves a top-level task with its subtasks; resolves to the moved rows, or null when refused. */
+  moveTask: (taskId: string, projectId: string): Promise<Task[] | null> => window.electronAPI.projects.moveTask(taskId, projectId),
 
   listRepos: (projectId: string): Promise<ProjectRepoRecord[]> => window.electronAPI.projects.repos.list(projectId),
   addRepo: (projectId: string, data: CreateProjectRepoData): Promise<ProjectRepoRecord | undefined> =>

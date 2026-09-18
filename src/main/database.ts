@@ -345,6 +345,43 @@ export class DatabaseManager {
   }
 
   /**
+   * Moves a top-level task to another project, with everything that must share
+   * its project: its subtasks (at any depth) and its recurrence instances. One
+   * transaction, so a failure leaves no task split from its parent.
+   * A subtask cannot be moved on its own — it belongs to its parent's project.
+   * Returns the moved rows, or undefined when the task, the project or the
+   * move is not valid.
+   */
+  moveTaskToProject(taskId: string, projectId: string): TaskRecord[] | undefined {
+    if (!this.ensureDbOpen()) return undefined
+
+    const task = this.prepare('SELECT id, parent_task_id FROM tasks WHERE id = ?').get(taskId) as
+      { id: string; parent_task_id: string | null } | undefined
+    if (!task || task.parent_task_id) return undefined
+    const project = this.prepare('SELECT id FROM projects WHERE id = ?').get(projectId)
+    if (!project) return undefined
+
+    const run = this.db.transaction(() => {
+      const ids = (this.prepare(`
+        WITH RECURSIVE tree(id) AS (
+          SELECT ?
+          UNION
+          SELECT t.id FROM tasks t JOIN tree ON t.parent_task_id = tree.id OR t.recurrence_parent_id = tree.id
+        )
+        SELECT id FROM tree
+      `).all(taskId) as { id: string }[]).map((row) => row.id)
+      const now = new Date().toISOString()
+      const stmt = this.prepare('UPDATE tasks SET project_id = ?, updated_at = ? WHERE id = ?')
+      for (const id of ids) stmt.run(projectId, now, id)
+      return ids
+    })
+    const movedIds = run()
+    return movedIds
+      .map((id) => this.getTask(id))
+      .filter((moved): moved is TaskRecord => !!moved)
+  }
+
+  /**
    * `tasks.project_id` is NOT NULL in effect but not in the schema (see
    * migrateToProjects in database/schema.ts), so every write picks one here:
    * a subtask or recurrence instance shares its parent's project; anything

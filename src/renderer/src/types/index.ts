@@ -2,6 +2,7 @@
 
 export enum SettingsTab {
   GENERAL = 'general',
+  PROJECTS = 'projects',
   AGENTS = 'agents',
   TOOLS_MCP = 'tools-mcp',
   SECRETS = 'secrets',
@@ -13,6 +14,7 @@ export enum SettingsTab {
 
 export const SETTINGS_TABS: { value: SettingsTab; label: string; icon: string }[] = [
   { value: SettingsTab.GENERAL, label: 'General', icon: 'Settings' },
+  { value: SettingsTab.PROJECTS, label: 'Projects', icon: 'FolderKanban' },
   { value: SettingsTab.AGENTS, label: 'Agents', icon: 'Users' },
   { value: SettingsTab.TOOLS_MCP, label: 'Tools & MCP', icon: 'Server' },
   { value: SettingsTab.SECRETS, label: 'Secrets', icon: 'KeyRound' },
@@ -326,6 +328,8 @@ export interface Task {
   parent_task_id: string | null
   next_subtask_ids: string[]
   sort_order: number
+  /** The project the task belongs to; a subtask always shares its parent's. */
+  project_id?: string
   created_at: string
   updated_at: string
 }
@@ -350,6 +354,8 @@ export interface CreateTaskDTO {
   complete_at_source?: boolean | null
   parent_task_id?: string | null
   next_subtask_ids?: string[]
+  /** Defaults to the current project; a subtask always joins its parent's. */
+  project_id?: string
 }
 
 export interface UpdateTaskDTO {
@@ -427,6 +433,8 @@ export interface TaskSource {
   update_tool_args: Record<string, unknown>
   last_synced_at: string | null
   enabled: boolean
+  /** The project its synced tasks land in. */
+  project_id?: string
   created_at: string
   updated_at: string
 }
@@ -435,6 +443,8 @@ export interface CreateTaskSourceDTO {
   mcp_server_id: string | null
   name: string
   plugin_id: string
+  /** Defaults to the current project. */
+  project_id?: string
   config?: Record<string, unknown>
   list_tool?: string
   list_tool_args?: Record<string, unknown>

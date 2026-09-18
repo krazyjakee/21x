@@ -1,7 +1,10 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useAgentStore, type AgentMessage } from '@/stores/agent-store'
-import { Bot, User } from 'lucide-react'
+import { Bot, User, FolderKanban } from 'lucide-react'
 import { useCoordinatorStore } from '@/stores/coordinator-store'
+import { useUIStore } from '@/stores/ui-store'
+import { useProjectTasks, useCurrentProject } from '@/hooks/use-project-tasks'
+import { TaskStatus } from '@/types'
 
 // Stable empty list — a fresh `[]` per render would invalidate memos keyed on it.
 const EMPTY_MESSAGES: AgentMessage[] = []
@@ -44,6 +47,18 @@ export function HeroSection({ onSeeFullConversation }: HeroSectionProps) {
   const mastermindTaskId = useCoordinatorStore((s) => s.mastermindTaskId)
   const session = useAgentStore((s) => (mastermindTaskId ? s.sessions.get(mastermindTaskId) : undefined))
   const messages = session?.messages || EMPTY_MESSAGES
+  const project = useCurrentProject()
+  const projectTasks = useProjectTasks()
+  // Pending approvals: this project's tasks waiting on the user's review.
+  const awaitingReview = useMemo(
+    () => projectTasks.filter((t) => t.status === TaskStatus.ReadyForReview && !t.parent_task_id).length,
+    [projectTasks]
+  )
+  const showAwaitingReview = () => {
+    const ui = useUIStore.getState()
+    ui.setStatusFilter(TaskStatus.ReadyForReview)
+    ui.setSidebarView('tasks')
+  }
 
   // Rotate title every 5 seconds
   useEffect(() => {
@@ -66,6 +81,20 @@ export function HeroSection({ onSeeFullConversation }: HeroSectionProps) {
 
   return (
     <div className="space-y-3">
+      {/* The project this dashboard is scoped to */}
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <FolderKanban className="size-icon-xs" />
+        <span className="font-medium text-foreground/80">{project?.name ?? 'Default'}</span>
+        {awaitingReview > 0 && (
+          <>
+            <span aria-hidden>·</span>
+            <button onClick={showAwaitingReview} className="text-pink-400 hover:underline cursor-pointer">
+              {awaitingReview} awaiting your review
+            </button>
+          </>
+        )}
+      </div>
+
       {/* Rotating title */}
       <h1 className="text-2xl font-semibold tracking-tight text-foreground transition-opacity duration-500">
         {ROTATING_TITLES[titleIndex]}
