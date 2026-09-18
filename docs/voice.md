@@ -21,7 +21,8 @@ feasibility for 20x desktop"). Section numbers below refer to that document.
 - Live partial text and one final transcript for each turn.
 - A closed set of task commands, each with a validation and a confirmation step.
 - A voice surface in the app: audio state, transcript bubble, confirmation card.
-- Voice settings: enable, permission state, model download, global shortcut.
+- Voice settings: enable, permission state, model download (Parakeet v3),
+  legacy-model clean-up, global shortcut.
 
 ## What phase 1 does not contain
 
@@ -53,7 +54,7 @@ main process
         │  control over Node IPC, audio over stdin
         ▼
 voice worker (separate process)
-  local runtime, streaming recognition, partial and final text
+  local runtime, streaming or offline recognition, partial and final text
 ```
 
 | File | Role |
@@ -441,50 +442,122 @@ test passes while the real application dies.
 
 ## Models (§5.10)
 
-Three English models are offered. **Settings → Voice** downloads, deletes, and
-chooses between them; the one in use is marked, and a second click on **Use**
-switches the worker to another downloaded model.
+One model is offered: **NVIDIA Parakeet TDT 0.6B v3**, in the int8 ONNX
+export that `sherpa-onnx` publishes
+(`csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8`, pinned to revision
+`2bda32ec`). **Settings → Voice** downloads it, deletes it, and shows which
+model is in use.
 
-| Model | Size | Licence | Use it for |
-|---|---:|---|---|
-| English — small (Zipformer) | 73 MB | Apache-2.0 | task commands, short dictation (default) |
-| English — balanced (NeMo FastConformer, 480 ms) | 137 MB | CC-BY-4.0 | free dictation |
-| English — most accurate (Nemotron 0.6B, 560 ms) | 662 MB | NVIDIA Open Model | long dictation; writes normal capitals and punctuation |
+| Model | Size on disk | Licence | Languages | What it does |
+|---|---:|---|---|---|
+| Parakeet v3 (`nemo-parakeet-tdt-0.6b-v3`) | 671 MB (encoder 652 MB, decoder 12 MB, joiner 6 MB, tokens 94 KB) | CC-BY-4.0 | 25 European languages, detected automatically | capitals and punctuation; one transcript per sentence |
 
-The NVIDIA Open Model License was reviewed and accepted for the Nemotron entry.
+Facts below marked *(model card)* come from
+<https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3>; *(sherpa-onnx)* from the
+runtime's documentation; *(measured)* from this repository. Anything not so
+marked has **not been measured on this integration yet** and is listed as
+unknown rather than guessed.
 
-All three are streaming transducers with the same four roles — encoder, decoder,
-joiner, tokens — so one code path in the worker loads every one of them. Adding
-a fourth is a manifest entry and four checksums, no code.
+### Hardware, operating systems, memory and latency
 
-Measured on an Apple Silicon machine, CPU only, feeding 16.4 s of audio in the
-20 ms frames the renderer really sends:
+| | |
+|---|---|
+| Execution | CPU only, through `sherpa-onnx-node` with `provider: 'cpu'`. The int8 export is a CPU quantisation. *(sherpa-onnx)* NVIDIA's own figures are for GPU inference through NeMo, which this integration does not use *(model card)*; there is no GPU path in the worker. |
+| Operating systems | The runtime ships prebuilt binaries for macOS arm64, macOS x64, Windows x64, Linux x64 and Linux arm64. `unsupportedHardwareReason()` refuses the install and the download anywhere else with a message that names those targets. Only macOS arm64 has been exercised with real speech so far *(measured, streaming models)*; Parakeet on any target is **not measured yet**. |
+| Threads | The worker gives the offline recogniser `min(4, max(2, cores − 1))` threads; streaming models keep two. |
+| Parameters | 600 M *(model card)*. |
+| Memory | The download is refused on a machine with less than 4 GB of RAM (`minMemoryBytes`). Resident memory of the loaded int8 model is **unknown**; measure it with the `ping`/`pong` `rss` figure the worker already reports before this number is published. |
+| Input | 16 kHz mono *(model card)*, which is what the renderer already sends. |
+| Utterance length | The model card gives 24 minutes with full attention on an A100 *(model card)*; on CPU through sherpa-onnx the practical limit is **unknown**. The worker caps a dictation turn at 60 s and a conversation at 10 min regardless. |
+| Latency | **Unknown for this integration.** For an offline model the cost is one decode of the whole sentence after the pause, so the delay before the words appear is `pause length + decode time`, where decode time is `real-time factor × sentence length`. Record the real-time factor per target in the table under "Proven against the real runtime" before release. |
+| Partial text | Periodic rather than per frame: the worker decodes the sentence so far every 1.5 s of speech while it is under 20 s long, and backs off when a decode takes longer than 400 ms, so a slow machine sees fewer partials instead of a stalled worker. |
 
-| Model | Load | Processing | Real-time factor | Segments found |
-|---|---:|---:|---:|---:|
-| small | 1.2 s | 0.8 s | 0.05 | 2 |
-| balanced | 0.9 s | 0.7 s | 0.04 | 2 |
-| most accurate (Nemotron) | 2.1 s | 2.5 s | 0.15 | 2 |
+### How an offline model runs behind the streaming protocol
 
-All three keep up with a live conversation with room to spare, and all three
-segment correctly. Nemotron is the only one that writes capitals **and**
-punctuation.
+Parakeet is a **non-streaming** model: it decodes a whole utterance at once
+rather than frame by frame. The worker keeps main's protocol unchanged — the
+same `partial`, `segment` and `final` messages — and handles the difference
+itself:
 
-An earlier note in this file said Nemotron was close to real time. That was
-wrong: it came from pushing a whole clip in one call, which is not how
-streaming works. Measure with real frame sizes.
+1. Frames are buffered per sentence. Silence before the first word is dropped.
+2. A frame is *speech* when its RMS is at or above `SPEECH_RMS` (0.014 on the
+   renderer's −1..1 scale, about −37 dBFS; `VOICE_SPEECH_RMS` overrides it).
+3. Once at least 300 ms of speech has been heard and the signal has then been
+   quiet for the configured pause (**Settings → Voice → A pause this long ends
+   a sentence**, never less than 0.8 s), the buffer is decoded. In a
+   conversation that is one `segment` and the microphone stays open; in a
+   single-shot turn it is the `final`.
+4. Ending the turn by hand decodes whatever is buffered as the `final`.
+5. Less than 300 ms of sound followed by silence is a click, not a sentence,
+   and produces nothing.
 
-`VoiceModelManager` downloads on request, shows the size, the language and the
-licence first, verifies a SHA-256 for each file, resumes an interrupted
-download, and can delete one model or all of them. Deleting the model in use
-falls back to another one that is on disk.
+The threshold in step 2 is a fixed starting value and **needs calibrating on
+real microphones** (a laptop in a quiet room, a headset, a noisy office). A
+level too high loses the first word of a quiet speaker; too low never ends a
+sentence in a noisy room.
+
+The streaming models are still loaded through `OnlineRecognizer` with the
+recogniser's own endpoint rule, exactly as before; `kind` in the catalogue
+entry chooses the path.
+
+### Legacy models
+
+Earlier releases offered three streaming English models (Zipformer small,
+NeMo FastConformer 480 ms, Nemotron 0.6B 560 ms). They remain in the catalogue
+as `legacy` entries so that an install of one is still recognised:
+
+- An installed legacy model keeps working and stays selected until the user
+  changes it. It is shown with an "Older model" badge and a notice that
+  Parakeet v3 replaces it.
+- It is never offered for download again. `VoiceModelManager.install()`
+  refuses a legacy id with a message pointing at Parakeet v3, and the
+  settings page hides a legacy row that is not on disk.
+- Migration is one download and one delete, in either order: downloading
+  Parakeet v3 makes it the model in use; deleting the legacy model in use
+  falls back to another installed *current* model first, then to the default.
+  Nothing is deleted automatically.
+- A directory under `voice-models/` that no catalogue entry names (a model
+  from a release older than the catalogue) is listed as "Older model (…)" with
+  its size, cannot be loaded, and can be deleted.
+
+### Download, verification, removal
+
+`VoiceModelManager` downloads on request, shows the size, the language count
+and the licence first, verifies a SHA-256 for each file, resumes an interrupted
+download, and can delete one model or all of them. While a download runs the
+row reports a `phase`: **downloading** while bytes move, **verifying** while
+the checksum is computed, so 100 % never looks stuck. Failures are turned into
+one line the user can act on (server status, network, disk full, checksum
+mismatch, too little memory, unsupported hardware), with the raw error kept at
+the end for a diagnostic report.
 
 Each URL is pinned to one model revision, never to a branch, so a checksum
 cannot go stale under the app. A model whose checksum is empty is refused.
 
 A model directory installed by hand is still accepted, in
-**Settings → Voice → Use another model directory**. Choosing a catalogue model
-clears it, so the choice is always what runs.
+**Settings → Voice → Use another model directory**. The four files are found
+by name (`encoder`, `decoder`, `joiner`, `tokens.txt`). Whether the directory
+is decoded as streaming or offline is decided by its **name**: one containing
+`parakeet` or `offline` is offline, anything else is streaming. Keep the
+sherpa-onnx release name (`sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8`) and it
+just works. Choosing a catalogue model clears the custom directory, so the
+choice is always what runs.
+
+### Licences
+
+- **Parakeet TDT 0.6B v3** — [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)
+  *(model card)*. Attribution is required: the settings row links the model
+  card, and a release note that lists bundled or downloaded models must name
+  "NVIDIA Parakeet TDT 0.6B v3" and link to it. The ONNX export is published
+  by the sherpa-onnx project under the same licence.
+- **sherpa-onnx / sherpa-onnx-node** — Apache-2.0.
+- Legacy entries: Zipformer Apache-2.0; FastConformer CC-BY-4.0; Nemotron
+  NVIDIA Open Model License (reviewed and accepted when it was offered).
+
+No model is inside the installer or the application bundle
+(`package.json → build.files` lists only `out/**`), so release packaging
+carries no model files and no model licence text; both live in this document
+and in the catalogue.
 
 ## The local runtime — an optional install
 
@@ -511,7 +584,9 @@ then does all of this, and nothing is left to do by hand:
    `package.json` there keeps npm from walking up into the app. npm output is
    streamed to the user, so a failure is readable, and when npm itself is
    missing the installer says so and downloads nothing.
-2. the default English speech model, if none is present, checksum-verified.
+2. the default speech model, Parakeet v3, if no model is present,
+   checksum-verified. An installed legacy model counts as present: setup does
+   not fetch a second model over it.
 3. the model is selected and loaded in the worker.
 
 The runtime is the first 60 % of the reported progress, the model the rest. If
@@ -573,8 +648,19 @@ Both are handled, and both are easy to reintroduce:
 
 ## Proven against the real runtime
 
-The recogniser configuration was verified against `sherpa-onnx-node` 1.13.4 with
-the catalogue model. Real speech through the real worker, over the real
+**Parakeet v3 has not been run through the real worker yet.** The offline
+configuration (`OfflineRecognizer`, `modelType: 'nemo_transducer'`, greedy
+search) is the one the sherpa-onnx Node examples use for Parakeet TDT v2, and
+`voice-worker-client.test.ts` holds a check that loads it whenever
+`voice-models/nemo-parakeet-tdt-0.6b-v3` and the runtime are both installed on
+the developer's machine. Until that has passed on real hardware, treat the
+Parakeet rows in the tables above as design, not evidence. Parakeet v3 needs a
+`sherpa-onnx-node` release from August 2025 or later; the exact minimum version
+is **unknown** — the worker turns a constructor failure into "the installed
+speech runtime is too old to run Parakeet v3; remove it and install it again".
+
+The streaming recogniser configuration was verified against `sherpa-onnx-node`
+1.13.4 with the (now legacy) Zipformer model. Real speech through the real worker, over the real
 protocol, produced streaming partials and this final transcript:
 
 ```text
@@ -595,12 +681,20 @@ this shape cannot drift again. It skips elsewhere, so CI stays green.
 From design §8, these gates are not met yet and must be closed before the
 feature is offered to users:
 
-- [x] Record a SHA-256 for every catalogue model file.
-- [ ] Pin an exact `sherpa-onnx-node` version in `voice-runtime-installer.ts`.
-- [x] Start `sherpa-onnx-node` on macOS arm64 with real speech.
-- [ ] Package and start `sherpa-onnx-node` on the other three desktop targets.
+- [x] Record a SHA-256 for every catalogue model file (Parakeet v3 included).
+- [ ] Pin an exact `sherpa-onnx-node` version in `voice-runtime-installer.ts`,
+      one that is known to load Parakeet v3.
+- [x] Start `sherpa-onnx-node` on macOS arm64 with real speech (streaming model).
+- [ ] Load Parakeet v3 through the real worker and transcribe a complete turn
+      (the skipped check in `voice-worker-client.test.ts`).
+- [ ] Calibrate `SPEECH_RMS` on real microphones; confirm a conversation
+      segments correctly with Parakeet.
+- [ ] Measure Parakeet load time, resident memory and real-time factor on each
+      target, and fill in the "unknown" cells above.
+- [ ] Package and start `sherpa-onnx-node` on the other desktop targets.
 - [ ] Measure partial and final latency against the §3.5 targets on each target.
-- [ ] Licence review of the runtime, the model and the tokens file.
+- [ ] Licence review of the runtime, the model and the tokens file
+      (Parakeet v3: CC-BY-4.0, attribution in release notes).
 - [ ] Packaged-system tests from §7 (microphone grant, denial, device change,
       8 GB machine, offline start, app update with installed models).
 

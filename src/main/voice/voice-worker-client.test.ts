@@ -194,6 +194,145 @@ describe('VoiceWorkerClient', () => {
 })
 
 /**
+ * Parakeet is an offline model: the worker buffers a sentence and decodes it
+ * when the speaker pauses. The mock engine returns fixed text, so what is
+ * under test is the endpointing and the messages main receives — the same
+ * `partial`, `segment` and `final` a streaming model sends.
+ */
+const OFFLINE_MODEL: ResolvedModel = { ...MODEL, id: 'mock-offline', dir: '/nowhere-offline', kind: 'offline' }
+
+/** 20 ms of speech-level noise, in the int16 frames the renderer sends. */
+function loudFrame(): Buffer {
+  const frame = Buffer.alloc(640)
+  for (let i = 0; i < 320; i++) frame.writeInt16LE(i % 2 === 0 ? 6000 : -6000, i * 2)
+  return frame
+}
+const SILENT_FRAME = Buffer.alloc(640)
+
+async function loadOffline(endpointSilence = 0.8): Promise<VoiceWorkerClient> {
+  client = new VoiceWorkerClient(SCRIPT)
+  const ready = waitFor<VoiceEngineStatus>((resolve) => {
+    client!.on('status', (status: VoiceEngineStatus) => {
+      if (status.state === 'ready') resolve(status)
+    })
+  })
+  await client.load(OFFLINE_MODEL, endpointSilence)
+  expect(await ready).toMatchObject({ state: 'ready', modelId: 'mock-offline' })
+  return client
+}
+
+function push(frames: Buffer[]): void {
+  for (const frame of frames) client!.pushAudio(frame)
+}
+
+describe('an offline model (Parakeet)', () => {
+  it('ends a dictation turn by itself once the speaker pauses, with a final and no segment', async () => {
+    await loadOffline(0.8)
+    const segments: string[] = []
+    client!.on('segment', (_turnId: string, text: string) => segments.push(text))
+    const final = waitFor<{ turnId: string; text: string }>((resolve) => {
+      client!.on('final', (turnId: string, text: string) => resolve({ turnId, text }))
+    })
+
+    client!.startTurn('offline-dictation', 'dictation')
+    // 600 ms of speech, then 1 s of silence: longer than the 0.8 s pause.
+    push(Array.from({ length: 30 }, loudFrame))
+    push(Array.from({ length: 50 }, () => SILENT_FRAME))
+
+    expect(await final).toEqual({ turnId: 'offline-dictation', text: MOCK_TEXT })
+    expect(segments).toEqual([])
+  })
+
+  it('sends one segment per pause in a conversation and keeps the turn open', async () => {
+    await loadOffline(0.8)
+    const segments: Array<{ text: string; index: number }> = []
+    const finals: string[] = []
+    client!.on('final', (_turnId: string, text: string) => finals.push(text))
+    const twoSegments = waitFor<void>((resolve) => {
+      client!.on('segment', (_turnId: string, text: string, index: number) => {
+        segments.push({ text, index })
+        if (segments.length === 2) resolve()
+      })
+    })
+
+    client!.startTurn('offline-conversation', 'conversation')
+    for (let sentence = 0; sentence < 2; sentence++) {
+      push(Array.from({ length: 30 }, loudFrame))
+      push(Array.from({ length: 50 }, () => SILENT_FRAME))
+    }
+
+    await twoSegments
+    expect(segments).toEqual([
+      { text: MOCK_TEXT, index: 1 },
+      { text: MOCK_TEXT, index: 2 },
+    ])
+    expect(finals).toEqual([])
+    expect(client!.isRunning).toBe(true)
+  })
+
+  it('decodes what is buffered when the user ends the turn before any pause', async () => {
+    await loadOffline(2)
+    const final = waitFor<{ turnId: string; text: string }>((resolve) => {
+      client!.on('final', (turnId: string, text: string) => resolve({ turnId, text }))
+    })
+
+    client!.startTurn('offline-ended', 'dictation')
+    push(Array.from({ length: 30 }, loudFrame))
+    client!.endTurn('offline-ended')
+
+    expect(await final).toEqual({ turnId: 'offline-ended', text: MOCK_TEXT })
+  })
+
+  it('ignores a click of noise shorter than a word', async () => {
+    await loadOffline(0.8)
+    const finals: string[] = []
+    client!.on('final', (_turnId: string, text: string) => finals.push(text))
+    const segments: string[] = []
+    client!.on('segment', (_turnId: string, text: string) => segments.push(text))
+
+    client!.startTurn('offline-click', 'dictation')
+    // 100 ms of noise, then a long silence: nothing was said.
+    push(Array.from({ length: 5 }, loudFrame))
+    push(Array.from({ length: 60 }, () => SILENT_FRAME))
+    await new Promise((resolve) => setTimeout(resolve, 300))
+
+    expect(finals).toEqual([])
+    expect(segments).toEqual([])
+  })
+
+  it('reports a partial while the speaker is still talking', async () => {
+    await loadOffline(2)
+    const partial = waitFor<string>((resolve) => {
+      client!.on('partial', (_turnId: string, text: string) => resolve(text))
+    })
+
+    client!.startTurn('offline-partial', 'dictation')
+    // 2 s of speech: past the 1.5 s the first partial waits for.
+    push(Array.from({ length: 100 }, loudFrame))
+
+    expect(await partial).toBe(MOCK_TEXT)
+  })
+
+  it('leaves a streaming model on the streaming path', async () => {
+    client = new VoiceWorkerClient(SCRIPT)
+    const ready = waitFor<VoiceEngineStatus>((resolve) => {
+      client!.on('status', (status: VoiceEngineStatus) => {
+        if (status.state === 'ready') resolve(status)
+      })
+    })
+    await client.load({ ...MODEL, kind: 'streaming' })
+    await ready
+    const final = waitFor<string>((resolve) => {
+      client!.on('final', (_turnId: string, text: string) => resolve(text))
+    })
+    client.startTurn('streaming-still')
+    push(Array.from({ length: 10 }, () => SILENT_FRAME))
+    client.endTurn('streaming-still')
+    expect(await final).toBe(MOCK_TEXT)
+  })
+})
+
+/**
  * Runs only on a machine where the user has installed the runtime and a model.
  * It is the one check that proves the recogniser config shape against the real
  * library — a flat config is rejected with "Errors in config!", and only a real
@@ -203,6 +342,7 @@ const realRuntime = join(homedir(), 'Library', 'Application Support', '20x', 'vo
   'node_modules', 'sherpa-onnx-node')
 const voiceModelsRoot = join(homedir(), 'Library', 'Application Support', '20x', 'voice-models')
 const realModelDir = join(voiceModelsRoot, 'sherpa-streaming-zipformer-en')
+const realParakeetDir = join(voiceModelsRoot, 'nemo-parakeet-tdt-0.6b-v3')
 /** A short spoken passage, downloaded next to the model by the developer. */
 const SPEECH_WAV = '/tmp/speech.wav'
 
@@ -302,6 +442,61 @@ describe.skipIf(!hasRealEngine || installedModelIds.length === 0)('the conversat
       })
       expect(segments[0]).toMatch(/nightfall/i)
       expect(client.isRunning).toBe(true)
+    } finally {
+      process.env.VOICE_ENGINE = 'mock'
+      delete process.env.VOICE_ENGINE_MODULE
+    }
+  }, 240_000)
+})
+
+/**
+ * Runs only where Parakeet v3 has been downloaded. This is the check that the
+ * offline recogniser config — `OfflineRecognizer`, `modelType: 'nemo_transducer'`
+ * — is accepted by the installed runtime, and that a whole spoken turn comes
+ * back as one final transcript with capitals and punctuation.
+ */
+const hasRealParakeet =
+  process.platform === 'darwin' &&
+  existsSync(realRuntime) &&
+  existsSync(join(realParakeetDir, 'tokens.txt')) &&
+  existsSync(SPEECH_WAV)
+
+describe.skipIf(!hasRealParakeet)('Parakeet v3 with the installed runtime', () => {
+  it('loads the offline recogniser and transcribes a complete turn', async () => {
+    process.env.VOICE_ENGINE = 'real'
+    process.env.VOICE_ENGINE_MODULE = realRuntime
+    try {
+      client = new VoiceWorkerClient(SCRIPT)
+      const ready = waitFor<VoiceEngineStatus>((resolve) => {
+        client!.on('status', (s: VoiceEngineStatus) => {
+          if (s.state !== 'loading') resolve(s)
+        })
+      }, REAL_MODEL_LOAD_MS)
+      await client.load(
+        {
+          id: 'nemo-parakeet-tdt-0.6b-v3',
+          dir: realParakeetDir,
+          encoder: join(realParakeetDir, 'encoder.onnx'),
+          decoder: join(realParakeetDir, 'decoder.onnx'),
+          joiner: join(realParakeetDir, 'joiner.onnx'),
+          tokens: join(realParakeetDir, 'tokens.txt'),
+          kind: 'offline',
+        },
+        1.2
+      )
+      expect(await ready).toMatchObject({ state: 'ready', engine: 'sherpa-onnx' })
+
+      const final = waitFor<string>((resolve) => {
+        client!.on('final', (_turnId: string, text: string) => resolve(text))
+      }, REAL_MODEL_DECODE_MS)
+      const speech = readFileSync(SPEECH_WAV).subarray(44)
+      client.startTurn('parakeet-turn', 'dictation')
+      for (let i = 0; i < speech.length; i += 640) {
+        client.pushAudio(speech.subarray(i, Math.min(i + 640, speech.length)))
+      }
+      client.endTurn('parakeet-turn')
+
+      expect(await final).toMatch(/nightfall/i)
     } finally {
       process.env.VOICE_ENGINE = 'mock'
       delete process.env.VOICE_ENGINE_MODULE

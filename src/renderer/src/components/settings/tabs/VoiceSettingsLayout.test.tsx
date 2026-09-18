@@ -202,3 +202,77 @@ describe('Settings → Voice', () => {
     expect(screen.getByTestId('tts-status')).toHaveTextContent('Download “English — fast”.')
   })
 })
+
+/**
+ * A model from an earlier release is shown only while it is on disk, and only
+ * with a way off it: a notice, a badge, and Delete — never Download.
+ */
+describe('Settings → Voice with an older model on disk', () => {
+  const PARAKEET = {
+    id: 'nemo-parakeet-tdt-0.6b-v3',
+    label: 'Parakeet v3 — 25 languages',
+    description: 'NVIDIA Parakeet TDT 0.6B v3.',
+    license: 'CC-BY-4.0',
+    licenseUrl: 'https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3',
+    languages: ['en', 'de', 'fr', 'es', 'it', 'nl', 'pl'],
+    installed: false,
+    active: false,
+    installing: false,
+    progress: 0,
+    sizeBytes: 670_000_000,
+    downloadable: true,
+    kind: 'offline' as const,
+  }
+  const LEGACY = {
+    id: 'sherpa-streaming-zipformer-en',
+    label: 'English — small (legacy)',
+    description: 'No longer offered.',
+    license: 'Apache-2.0',
+    licenseUrl: 'https://example.invalid',
+    languages: ['en'],
+    installed: true,
+    active: true,
+    installing: false,
+    progress: 0,
+    sizeBytes: 73_000_000,
+    downloadable: false,
+    kind: 'streaming' as const,
+    legacy: true,
+  }
+
+  it('offers Parakeet v3 for download and the older model for deletion', () => {
+    useVoiceStore.setState({ models: [PARAKEET, LEGACY] })
+    render(<VoiceSettings />)
+
+    expect(screen.getByTestId('voice-legacy-notice')).toHaveTextContent(/Download Parakeet v3/)
+    expect(screen.getByTestId('voice-model-download-nemo-parakeet-tdt-0.6b-v3')).toBeEnabled()
+    expect(screen.getByTestId('voice-model-legacy-sherpa-streaming-zipformer-en')).toBeInTheDocument()
+    expect(screen.getByTestId('voice-model-delete-sherpa-streaming-zipformer-en')).toBeInTheDocument()
+    expect(screen.queryByTestId('voice-model-download-sherpa-streaming-zipformer-en')).toBeNull()
+    // A model with 25 languages is summarised, not listed.
+    expect(screen.getByTestId('voice-model-nemo-parakeet-tdt-0.6b-v3')).toHaveTextContent('7 languages')
+  })
+
+  it('says the older model can go once Parakeet v3 is installed', () => {
+    useVoiceStore.setState({ models: [{ ...PARAKEET, installed: true, active: true }, { ...LEGACY, active: false }] })
+    render(<VoiceSettings />)
+
+    expect(screen.getByTestId('voice-legacy-notice')).toHaveTextContent(/delete the older model/)
+  })
+
+  it('hides an older model that is not on disk, so nothing invites a download of it', () => {
+    useVoiceStore.setState({ models: [PARAKEET, { ...LEGACY, installed: false, active: false }] })
+    render(<VoiceSettings />)
+
+    expect(screen.queryByTestId('voice-legacy-notice')).toBeNull()
+    expect(screen.queryByTestId('voice-model-sherpa-streaming-zipformer-en')).toBeNull()
+    expect(screen.getByTestId('voice-model-nemo-parakeet-tdt-0.6b-v3')).toBeInTheDocument()
+  })
+
+  it('shows that a download is being verified, not stuck at 100 %', () => {
+    useVoiceStore.setState({ models: [{ ...PARAKEET, installing: true, progress: 1, phase: 'verifying' }] })
+    render(<VoiceSettings />)
+
+    expect(screen.getByTestId('voice-model-download-nemo-parakeet-tdt-0.6b-v3')).toHaveTextContent('Verifying')
+  })
+})

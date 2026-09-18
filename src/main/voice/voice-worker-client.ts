@@ -87,6 +87,9 @@ export class VoiceWorkerClient extends EventEmitter {
         decoder: model.decoder,
         joiner: model.joiner,
         tokens: model.tokens,
+        // `offline` (Parakeet) builds an OfflineRecognizer; anything else the
+        // streaming one. The worker defaults to streaming when this is absent.
+        kind: model.kind ?? 'streaming',
       },
       endpointSilence: this.endpointSilence,
     })

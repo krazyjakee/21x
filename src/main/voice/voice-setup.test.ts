@@ -10,6 +10,7 @@ const installer = vi.hoisted(() => ({
   detectVoiceRuntime: vi.fn(),
   installVoiceRuntime: vi.fn(),
   removeVoiceRuntime: vi.fn(async () => undefined),
+  unsupportedHardwareReason: vi.fn((): string | null => null),
   VOICE_RUNTIME_APPROX_BYTES: 180 * 1024 * 1024,
 }))
 vi.mock('./voice-runtime-installer', () => installer)
@@ -33,7 +34,9 @@ const RESOLVED_MODEL = {
   decoder: '/data/voice-models/en/decoder.onnx',
   joiner: '/data/voice-models/en/joiner.onnx',
   tokens: '/data/voice-models/en/tokens.txt',
+  kind: 'offline' as const,
 }
+const LEGACY_ID = 'sherpa-streaming-zipformer-en'
 
 class FakeWorker extends EventEmitter {
   load = vi.fn(async () => {
@@ -56,6 +59,7 @@ function makeManager(modelPresent: boolean) {
   const worker = new FakeWorker()
   const models = {
     list: vi.fn(async () => [] as never[]),
+    listLegacyInstalled: vi.fn(async () => [] as never[]),
     install: vi.fn(async () => ({ id: DEFAULT_VOICE_MODEL_ID, installed: true })),
     resolve: vi.fn(async () => (modelPresent ? RESOLVED_MODEL : null)),
     remove: vi.fn(async () => undefined),
@@ -93,9 +97,14 @@ function progressStages(notify: ReturnType<typeof vi.fn>): string[] {
 beforeEach(() => {
   installer.detectVoiceRuntime.mockReset()
   installer.installVoiceRuntime.mockReset()
+  installer.unsupportedHardwareReason.mockReset().mockReturnValue(null)
 })
 
 describe('one-action voice setup', () => {
+  it('offers Parakeet v3 to a fresh install', () => {
+    expect(DEFAULT_VOICE_MODEL_ID).toBe('nemo-parakeet-tdt-0.6b-v3')
+  })
+
   it('installs the runtime and the model, then loads it', async () => {
     // Absent at the first check, present after the install.
     installer.detectVoiceRuntime
@@ -161,6 +170,85 @@ describe('one-action voice setup', () => {
     await expect(ctx.manager.installRuntime()).rejects.toThrow(/npm was not found/)
     expect(ctx.models.install).not.toHaveBeenCalled()
     expect(progressStages(ctx.notify).at(-1)).toBe('error')
+  })
+
+  it('refuses a model download on hardware the runtime has no build for', async () => {
+    installer.detectVoiceRuntime.mockResolvedValue(PRESENT)
+    installer.unsupportedHardwareReason.mockReturnValue('The local speech runtime has no build for Windows on arm64.')
+    const ctx = makeManager(false)
+
+    await expect(ctx.manager.installModel(DEFAULT_VOICE_MODEL_ID)).rejects.toThrow(/no build for Windows on arm64/)
+    expect(ctx.models.install).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * A model from before Parakeet stays usable until the user moves off it. The
+ * move is one download and one delete, in either order, and neither step can
+ * leave voice without a model.
+ */
+describe('a legacy model already on disk', () => {
+  const LEGACY_RESOLVED = { ...RESOLVED_MODEL, id: LEGACY_ID, kind: 'streaming' as const }
+
+  it('is kept by the one-action setup rather than downloading a second model over it', async () => {
+    installer.detectVoiceRuntime.mockResolvedValue(PRESENT)
+    const ctx = makeManager(true)
+    ctx.store.voice_model_id = LEGACY_ID
+    ctx.models.resolve.mockResolvedValue(LEGACY_RESOLVED)
+
+    await ctx.manager.installRuntime()
+
+    expect(ctx.models.install).not.toHaveBeenCalled()
+    expect(ctx.worker.load).toHaveBeenCalledWith(LEGACY_RESOLVED, expect.any(Number))
+    expect(ctx.store.voice_model_id).toBe(LEGACY_ID)
+  })
+
+  it('is replaced by Parakeet v3 when that is downloaded, and stays on disk until deleted', async () => {
+    installer.detectVoiceRuntime.mockResolvedValue(PRESENT)
+    const ctx = makeManager(true)
+    ctx.store.voice_model_id = LEGACY_ID
+
+    await ctx.manager.installModel(DEFAULT_VOICE_MODEL_ID)
+
+    expect(ctx.models.install).toHaveBeenCalledWith(DEFAULT_VOICE_MODEL_ID)
+    expect(ctx.store.voice_model_id).toBe(DEFAULT_VOICE_MODEL_ID)
+    expect(ctx.models.remove).not.toHaveBeenCalled()
+  })
+
+  it('falls back to Parakeet v3, not to another legacy model, when the one in use is deleted', async () => {
+    installer.detectVoiceRuntime.mockResolvedValue(PRESENT)
+    const ctx = makeManager(true)
+    ctx.store.voice_model_id = LEGACY_ID
+    ctx.models.list.mockResolvedValue([
+      { id: LEGACY_ID, installed: true, legacy: true },
+      { id: 'nemotron-streaming-en-560ms', installed: true, legacy: true },
+      { id: DEFAULT_VOICE_MODEL_ID, installed: true },
+    ] as never)
+
+    await ctx.manager.removeModel(LEGACY_ID)
+
+    expect(ctx.store.voice_model_id).toBe(DEFAULT_VOICE_MODEL_ID)
+  })
+
+  it('falls back to the default when nothing else is installed, so setup offers Parakeet v3', async () => {
+    installer.detectVoiceRuntime.mockResolvedValue(PRESENT)
+    const ctx = makeManager(false)
+    ctx.store.voice_model_id = LEGACY_ID
+    ctx.models.list.mockResolvedValue([{ id: LEGACY_ID, installed: false, legacy: true }] as never)
+
+    await ctx.manager.removeModel(LEGACY_ID)
+
+    expect(ctx.store.voice_model_id).toBe(DEFAULT_VOICE_MODEL_ID)
+    expect(ctx.manager.getState()).toBe('model_needed')
+  })
+
+  it('removes a directory the catalogue no longer names', async () => {
+    installer.detectVoiceRuntime.mockResolvedValue(PRESENT)
+    const ctx = makeManager(true)
+
+    await ctx.manager.removeModel('some-model-from-2024')
+
+    expect(ctx.models.remove).toHaveBeenCalledWith('some-model-from-2024')
   })
 })
 

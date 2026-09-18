@@ -15,6 +15,7 @@ const {
   isNpmAvailable,
   removeVoiceRuntime,
   runtimeModulePath,
+  unsupportedHardwareReason,
 } = await import('./voice-runtime-installer')
 
 /**
@@ -155,5 +156,33 @@ describe('removeVoiceRuntime', () => {
     await removeVoiceRuntime(root)
     expect((await detectVoiceRuntime(root)).installed).toBe(false)
     await expect(stat(root)).rejects.toThrow()
+  })
+})
+
+/**
+ * The runtime ships prebuilt binaries for five targets. Anywhere else, npm
+ * would fail deep inside a build step with nothing the user can act on, so
+ * the answer comes first and in plain words.
+ */
+describe('unsupportedHardwareReason', () => {
+  it.each([
+    ['darwin', 'arm64'],
+    ['darwin', 'x64'],
+    ['linux', 'x64'],
+    ['linux', 'arm64'],
+    ['win32', 'x64'],
+  ] as const)('accepts %s-%s', (platform, arch) => {
+    expect(unsupportedHardwareReason(platform, arch)).toBeNull()
+  })
+
+  it.each([
+    ['win32', 'arm64', /Windows on arm64/],
+    ['win32', 'ia32', /Windows on ia32/],
+    ['linux', 'riscv64', /Linux on riscv64/],
+    ['freebsd', 'x64', /freebsd on x64/],
+  ] as const)('refuses %s-%s and names the supported targets', (platform, arch, expected) => {
+    const reason = unsupportedHardwareReason(platform, arch)
+    expect(reason).toMatch(expected)
+    expect(reason).toMatch(/macOS.*Windows x64.*Linux/)
   })
 })

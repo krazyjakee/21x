@@ -226,6 +226,18 @@ export interface VoiceModelFile {
   sizeBytes: number
 }
 
+/**
+ * How the worker decodes a model.
+ *
+ * `streaming` models decode every frame as it arrives and find the end of a
+ * sentence themselves. `offline` models (Parakeet) decode a whole utterance at
+ * once, so the worker buffers the turn and ends a sentence on silence.
+ */
+export type VoiceModelKind = 'streaming' | 'offline'
+
+/** Where a model is in its install. Absent once it is installed or idle. */
+export type VoiceModelPhase = 'downloading' | 'verifying'
+
 export interface VoiceModelManifestEntry {
   id: string
   label: string
@@ -249,6 +261,14 @@ export interface VoiceModelManifestEntry {
   files: VoiceModelFile[]
   /** Role of each file for the worker. Values are `files[].name` entries. */
   roles: { encoder: string; decoder: string; joiner: string; tokens: string }
+  /** Defaults to `streaming`, the shape of every entry before Parakeet. */
+  kind?: VoiceModelKind
+  /**
+   * A model that is no longer offered. It stays in the catalogue so an
+   * existing install is recognised, can still be used, and can be deleted;
+   * it is never downloaded again.
+   */
+  legacy?: boolean
 }
 
 export interface VoiceModelState {
@@ -268,6 +288,11 @@ export interface VoiceModelState {
   /** False when the manifest has no verified checksum yet. */
   downloadable: boolean
   error?: string
+  kind?: VoiceModelKind
+  /** Set while `installing`; tells the user whether bytes or checksums are moving. */
+  phase?: VoiceModelPhase
+  /** An older model found on disk. Offered for deletion, never for download. */
+  legacy?: boolean
 }
 
 // ── Settings keys (stored in the `settings` table as strings) ──
