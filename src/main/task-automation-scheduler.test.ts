@@ -391,6 +391,38 @@ describe('TaskAutomationScheduler — parents and subtasks', () => {
     expect(agentManager.startTask).toHaveBeenCalledWith(childIds[1])
   })
 
+  it('starts the first child by sort_order even when successor edges are set', async () => {
+    const { parentId, childIds } = parentWithChildren(
+      { auto_start_agent: true },
+      [{ title: 'child 1' }, { title: 'child 2' }, { title: 'child 3' }]
+    )
+    db.updateTask(childIds[0], { next_subtask_ids: [childIds[2]] })
+    db.updateTask(parentId, { status: TaskStatus.ReadyForReview })
+    const agentManager = mockAgentManager()
+
+    await new TaskAutomationScheduler(db, agentManager).runNow()
+
+    expect(agentManager.startTask).toHaveBeenCalledTimes(1)
+    expect(agentManager.startTask).toHaveBeenCalledWith(childIds[0])
+  })
+
+  it('leaves sequencing to successor edges once the run has begun', async () => {
+    // child 1 → child 3. AgentManager starts child 3 on completion; picking
+    // child 2 by list order here would race it.
+    const { parentId, childIds } = parentWithChildren(
+      { auto_start_agent: true },
+      [{ title: 'child 1' }, { title: 'child 2' }, { title: 'child 3' }]
+    )
+    db.updateTask(childIds[0], { next_subtask_ids: [childIds[2]] })
+    db.updateTask(childIds[0], { status: TaskStatus.Completed }, 'task-source')
+    db.updateTask(parentId, { status: TaskStatus.ReadyForReview })
+    const agentManager = mockAgentManager()
+
+    await new TaskAutomationScheduler(db, agentManager).runNow()
+
+    expect(agentManager.startTask).not.toHaveBeenCalled()
+  })
+
   it('does not start the parent itself while it has children to run', async () => {
     const { parentId } = parentWithChildren({ auto_start_agent: true }, [{ title: 'child 1' }])
     const agentManager = mockAgentManager()

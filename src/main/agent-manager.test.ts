@@ -3377,6 +3377,78 @@ describe('AgentManager event-driven parent wake-up', () => {
 
     expect(wakeSpy).not.toHaveBeenCalled()
   })
+
+  it('starts each selected sibling when a subtask completes', async () => {
+    const completed = {
+      id: 'sub-1', title: 'Child A', status: TaskStatus.Completed,
+      parent_task_id: 'parent-1', next_subtask_ids: ['sub-2', 'sub-3']
+    }
+    const successorA = { id: 'sub-2', title: 'Child B', status: TaskStatus.NotStarted, parent_task_id: 'parent-1', agent_id: 'agent-2' }
+    const successorB = { id: 'sub-3', title: 'Child C', status: TaskStatus.NotStarted, parent_task_id: 'parent-1', agent_id: 'agent-3' }
+    const { mgr, wakeSpy } = buildManager({
+      'parent-1': parentTask,
+      'sub-1': completed,
+      'sub-2': successorA,
+      'sub-3': successorB,
+    }, [completed, successorA, successorB])
+    const startSpy = vi.spyOn(mgr, 'startTask').mockResolvedValue({ action: 'task_started' })
+
+    await mgr.notifyParentOfSubtaskCompletion('parent-1', 'sub-1')
+
+    expect(startSpy).toHaveBeenCalledTimes(2)
+    expect(startSpy).toHaveBeenCalledWith('sub-2', { preferSubtasks: false, allowTriage: false })
+    expect(startSpy).toHaveBeenCalledWith('sub-3', { preferSubtasks: false, allowTriage: false })
+    expect(wakeSpy).not.toHaveBeenCalled()
+  })
+
+  it('keeps the usual drain wake-up when a completed subtask has no selected successor', async () => {
+    const completed = {
+      id: 'sub-1', title: 'Child A', status: TaskStatus.Completed,
+      parent_task_id: 'parent-1', next_subtask_ids: []
+    }
+    const pending = { id: 'sub-2', title: 'Child B', status: TaskStatus.NotStarted, parent_task_id: 'parent-1', agent_id: 'agent-2' }
+    const { mgr, wakeSpy } = buildManager({ 'parent-1': parentTask, 'sub-1': completed }, [completed, pending])
+    const startSpy = vi.spyOn(mgr, 'startTask')
+
+    await mgr.notifyParentOfSubtaskCompletion('parent-1', 'sub-1')
+
+    expect(startSpy).not.toHaveBeenCalled()
+    expect(wakeSpy).toHaveBeenCalledOnce()
+  })
+
+  it('does not follow successor edges until the subtask is completed', async () => {
+    const inReview = {
+      id: 'sub-1', title: 'Child A', status: TaskStatus.ReadyForReview,
+      parent_task_id: 'parent-1', next_subtask_ids: ['sub-2']
+    }
+    const successor = { id: 'sub-2', title: 'Child B', status: TaskStatus.NotStarted, parent_task_id: 'parent-1', agent_id: 'agent-2' }
+    const { mgr } = buildManager({ 'parent-1': parentTask, 'sub-1': inReview, 'sub-2': successor }, [inReview, successor])
+    const startSpy = vi.spyOn(mgr, 'startTask')
+
+    await mgr.notifyParentOfSubtaskCompletion('parent-1', 'sub-1')
+
+    expect(startSpy).not.toHaveBeenCalled()
+  })
+
+  it('wakes the parent at once when a selected successor cannot start, even mid-pipeline', async () => {
+    const completed = {
+      id: 'sub-1', title: 'Child A', status: TaskStatus.Completed,
+      parent_task_id: 'parent-1', next_subtask_ids: ['sub-2']
+    }
+    const noAgent = { id: 'sub-2', title: 'Child B', status: TaskStatus.NotStarted, parent_task_id: 'parent-1', agent_id: null }
+    const working = { id: 'sub-3', title: 'Child C', status: TaskStatus.AgentWorking, parent_task_id: 'parent-1', agent_id: 'agent-3' }
+    const { mgr, wakeSpy } = buildManager(
+      { 'parent-1': parentTask, 'sub-1': completed, 'sub-2': noAgent, 'sub-3': working },
+      [completed, noAgent, working]
+    )
+    const startSpy = vi.spyOn(mgr, 'startTask')
+
+    await mgr.notifyParentOfSubtaskCompletion('parent-1', 'sub-1')
+
+    expect(startSpy).not.toHaveBeenCalled()
+    expect(wakeSpy).toHaveBeenCalledOnce()
+    expect(wakeSpy.mock.calls[0][1]).toContain('Selected successor sub-2 has no agent assigned.')
+  })
 })
 
 describe('AgentManager durable transcript write-through', () => {

@@ -4,6 +4,7 @@ import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useAgentSession } from './use-agent-session'
 import { onAgentStatus, onTaskUpdated, onTaskCreated, taskApi } from '@/lib/ipc-client'
 import { TaskStatus } from '@/types'
+import { isSuccessorGraphInProgress } from '@shared/subtask-graph'
 import type { Task, Agent, TaskPriority } from '@/types'
 import type { AgentStatusEvent } from '@/types/electron.d'
 import type { TaskSession } from '@/stores/agent-store'
@@ -109,6 +110,13 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
         if (sorted.every((s: Task) => s.status === TaskStatus.Completed)) {
           console.log(`[AutoStart] All subtasks completed for parent ${parentId}, marking parent as ready for review`)
           await taskApi.update(parentId, { status: TaskStatus.ReadyForReview })
+          return
+        }
+
+        // Once successor edges drive this parent, the main process starts the
+        // selected successors or wakes the parent — never pick by list order.
+        if (isSuccessorGraphInProgress(sorted)) {
+          console.log(`[AutoStart] Parent ${parentId} is sequenced by successor edges, not starting by list order`)
           return
         }
 
@@ -266,6 +274,12 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
             .filter((t) => t.parent_task_id === task.parent_task_id)
             .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
 
+          // Successor edges own sequencing once the run has begun.
+          if (isSuccessorGraphInProgress(siblings)) {
+            console.log(`[AutoStart] Subtask "${task.title}" skipped: siblings are sequenced by successor edges`)
+            return
+          }
+
           // Don't start if any sibling is actively being worked on or awaiting review
           const hasActiveSibling = siblings.some(
             (s) =>
@@ -413,6 +427,10 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
         }
 
         const siblings = currentTasks.filter((t) => t.parent_task_id === task.parent_task_id)
+        if (isSuccessorGraphInProgress(siblings)) {
+          removeFromQueue(agentId, nextTaskId)
+          return
+        }
         const hasActiveSibling = siblings.some(
           (s) =>
             s.id !== task.id &&
