@@ -28,6 +28,19 @@ describe('subtask successor links', () => {
     expect(() => db.updateTask(first.id, { next_subtask_ids: [second.id, second.id] })).toThrow('duplicates')
     expect(() => db.updateTask(first.id, { next_subtask_ids: [outsider.id] })).toThrow('must be a sibling')
   })
+
+  it('drops a deleted subtask from its siblings\' successor links', () => {
+    const parent = db.createTask(makeTask({ title: 'Parent' }))!
+    const first = db.createTask(makeTask({ title: 'First', parent_task_id: parent.id }))!
+    const second = db.createTask(makeTask({ title: 'Second', parent_task_id: parent.id }))!
+    const third = db.createTask(makeTask({ title: 'Third', parent_task_id: parent.id }))!
+    db.updateTask(first.id, { next_subtask_ids: [second.id, third.id] })
+
+    db.deleteTask(second.id)
+
+    expect(db.getTask(first.id)?.next_subtask_ids).toEqual([third.id])
+    expect(() => db.updateTask(first.id, { next_subtask_ids: [third.id] })).not.toThrow()
+  })
 })
 
 describe('Task CRUD', () => {

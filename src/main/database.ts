@@ -2544,7 +2544,22 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
     }
   }
 
+  /** Drop `taskId` from its siblings' successor links. A stale ID would make
+   *  every later edit of those links fail sibling validation. */
+  private removeFromSiblingSuccessors(taskId: string, parentTaskId: string): void {
+    const rows = this.db.prepare(
+      'SELECT id, next_subtask_ids FROM tasks WHERE parent_task_id = ? AND id != ?'
+    ).all(parentTaskId, taskId) as { id: string; next_subtask_ids: string }[]
+    const update = this.db.prepare('UPDATE tasks SET next_subtask_ids = ? WHERE id = ?')
+    for (const row of rows) {
+      const ids = parseJsonArray(row.next_subtask_ids)
+      if (ids.includes(taskId)) update.run(JSON.stringify(ids.filter((nextId) => nextId !== taskId)), row.id)
+    }
+  }
+
   deleteTask(id: string): boolean {
+    const parentTaskId = this.getTask(id)?.parent_task_id
+    if (parentTaskId) this.removeFromSiblingSuccessors(id, parentTaskId)
     this.deleteTaskAttachments(id)
     this.deleteTranscriptParts(id)
     const result = this.db.prepare('DELETE FROM tasks WHERE id = ?').run(id)
