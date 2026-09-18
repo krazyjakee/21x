@@ -77,6 +77,9 @@ const VIEW_ALIASES: Record<string, VoiceViewName> = {
   canvas: 'canvas',
   board: 'canvas',
   commander: 'commander',
+  overview: 'overview',
+  projects: 'overview',
+  'projects overview': 'overview',
   setting: 'settings',
   settings: 'settings',
   preferences: 'settings',
@@ -265,7 +268,7 @@ export function isVoiceIntent(value: unknown): value is VoiceIntent {
     case 'navigate':
       return (
         typeof v.destination === 'string' &&
-        ['tasks', 'skills', 'dashboard', 'canvas', 'commander', 'settings'].includes(v.destination) &&
+        ['tasks', 'skills', 'dashboard', 'canvas', 'commander', 'overview', 'settings'].includes(v.destination) &&
         (v.taskRef === undefined || isRef(v.taskRef))
       )
     case 'cancel':
