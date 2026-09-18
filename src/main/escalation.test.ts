@@ -25,7 +25,9 @@ import { FINDINGS_BEGIN, SYSTEM_MESSAGE_MARKER } from '../shared/system-authorit
 import type { DatabaseManager } from './database'
 
 vi.mock('electron', () => ({
-  Notification: class { show = vi.fn(); on = vi.fn(); static isSupported = vi.fn(() => false) }
+  app: { getPath: vi.fn(() => '/tmp') },
+  Notification: class { show = vi.fn(); on = vi.fn(); static isSupported = vi.fn(() => false) },
+  powerSaveBlocker: { start: vi.fn(() => 1), stop: vi.fn(), isStarted: vi.fn(() => false) }
 }))
 
 interface Harness {

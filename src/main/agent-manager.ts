@@ -2799,8 +2799,7 @@ export class AgentManager extends EventEmitter {
       FINDINGS_BEGIN,
       `Task "${task.title}" (${task.id}) is waiting to start: ${describeQueueReason(decision.reason, decision.limit, decision.running)}`,
       FINDINGS_END
-    ].join('
-')
+    ].join('\n')
     this.sendMessage(live.sessionId, message, coordinator.id, live.session.agentId).catch((error) => {
       console.warn(`[AgentManager] Could not tell the Mastermind of project ${projectId} about the queued start:`, error)
       this.projectLimitNotices.delete(key)
