@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { useDrawingStore } from './drawing-store'
 import { settingsApi } from '@/lib/ipc-client'
+import { useProjectStore } from './project-store'
 import type { DrawingObject } from '@/components/canvas/drawing/types'
 
 // Mock settingsApi to prevent actual IPC calls during tests
@@ -10,8 +11,24 @@ vi.mock('@/lib/ipc-client', () => ({
     set: vi.fn().mockResolvedValue(undefined),
     getAll: vi.fn().mockResolvedValue({}),
   },
+  projectApi: {
+    getAll: vi.fn().mockResolvedValue([]),
+  },
   onTaskDeleted: vi.fn(() => vi.fn()),
 }))
+
+/**
+ * A settings table the store can read back from — persistence is the point
+ * of these tests, and a restart is "empty the store, load again from here".
+ */
+function fakeSettings(seed: Record<string, string> = {}): Map<string, string> {
+  const table = new Map(Object.entries(seed))
+  vi.mocked(settingsApi.get).mockImplementation(async (key) => table.get(key) ?? null)
+  vi.mocked(settingsApi.set).mockImplementation(async (key, value) => {
+    table.set(key, value)
+  })
+  return table
+}
 
 const makeRect = (over: {
   id?: string
@@ -217,15 +234,16 @@ describe('drawing-store', () => {
 
   // ── persistence ───────────────────────────────────────────
 
-  it('persists objects after the debounce', () => {
+  it('persists objects after the debounce, under the loaded project', () => {
     vi.useFakeTimers()
+    useDrawingStore.setState({ isLoaded: true, projectId: 'default' })
     useDrawingStore.getState().addObject(toNewFigure(makeRect()))
     expect(settingsApi.set).not.toHaveBeenCalled()
 
     vi.advanceTimersByTime(1000)
     expect(settingsApi.set).toHaveBeenCalledTimes(1)
     const [key, raw] = vi.mocked(settingsApi.set).mock.calls[0]
-    expect(key).toBe('drawing_state')
+    expect(key).toBe('drawing_state:default')
     const data = JSON.parse(String(raw))
     expect(data.objects).toHaveLength(1)
     expect(data.nextZIndex).toBe(2)
@@ -233,6 +251,7 @@ describe('drawing-store', () => {
 
   it('debounces rapid changes into a single save', () => {
     vi.useFakeTimers()
+    useDrawingStore.setState({ isLoaded: true, projectId: 'default' })
     useDrawingStore.getState().addObject(toNewFigure(makeRect()))
     useDrawingStore.getState().addObject(toNewFigure(makeRect()))
     vi.advanceTimersByTime(1000)
@@ -273,5 +292,98 @@ describe('drawing-store', () => {
     vi.mocked(settingsApi.get).mockResolvedValue('not-json{')
     await useDrawingStore.getState().loadDrawings()
     expect(useDrawingStore.getState().isLoaded).toBe(true)
+  })
+
+  // ── per-project persistence ───────────────────────────────
+
+  describe('per project', () => {
+    const restart = () =>
+      useDrawingStore.setState({ objects: [], nextZIndex: 1, isLoaded: false, projectId: 'default' })
+
+    afterEach(() => {
+      useProjectStore.setState({ currentProjectId: 'default' })
+      vi.mocked(settingsApi.get).mockResolvedValue(null)
+      vi.mocked(settingsApi.set).mockResolvedValue(undefined)
+    })
+
+    it('keeps two projects\' drawings apart across a restart', async () => {
+      vi.useFakeTimers()
+      fakeSettings()
+      const drawings = useDrawingStore.getState()
+
+      await drawings.loadDrawings('p1')
+      drawings.addObject(toNewFigure(makeRect({ x: 1 })))
+      vi.advanceTimersByTime(1000)
+
+      await drawings.loadDrawings('p2')
+      expect(useDrawingStore.getState().objects).toEqual([])
+      drawings.addObject(toNewFigure(makeRect({ x: 2 })))
+      drawings.addObject(toNewFigure(makeRect({ x: 3 })))
+      vi.advanceTimersByTime(1000)
+
+      restart()
+      await useDrawingStore.getState().loadDrawings('p1')
+      expect(useDrawingStore.getState().objects.map((o) => o.x)).toEqual([1])
+
+      await useDrawingStore.getState().loadDrawings('p2')
+      expect(useDrawingStore.getState().objects.map((o) => o.x)).toEqual([2, 3])
+    })
+
+    it('moves the pre-project drawings into Default once, and never again', async () => {
+      const legacy = JSON.stringify({ objects: [makeRect({ id: 'figure-1-1', x: 9 })], nextZIndex: 2 })
+      const table = fakeSettings({ drawing_state: legacy })
+
+      await useDrawingStore.getState().loadDrawings('default')
+      expect(useDrawingStore.getState().objects.map((o) => o.x)).toEqual([9])
+      expect(table.get('drawing_state:default')).toBe(legacy)
+      expect(table.get('drawing_state_migrated_to_projects')).toBe('1')
+
+      // The user clears the Default drawings; the old blob must not come back.
+      table.set('drawing_state:default', JSON.stringify({ objects: [], nextZIndex: 1 }))
+      restart()
+      await useDrawingStore.getState().loadDrawings('default')
+      expect(useDrawingStore.getState().objects).toEqual([])
+
+      await useDrawingStore.getState().loadDrawings('p1')
+      expect(useDrawingStore.getState().objects).toEqual([])
+    })
+
+    it('writes a save still pending for the project left behind under that project, never the next', async () => {
+      vi.useFakeTimers()
+      const table = fakeSettings()
+      await useDrawingStore.getState().loadDrawings('p1')
+      useDrawingStore.getState().addObject(toNewFigure(makeRect({ x: 1 })))
+
+      // The project switches while the debounced save is still pending.
+      useProjectStore.setState({ currentProjectId: 'p2' })
+      expect(useDrawingStore.getState().projectId).toBe('p2')
+      vi.advanceTimersByTime(1000)
+      await vi.waitFor(() => expect(useDrawingStore.getState().isLoaded).toBe(true))
+
+      expect(JSON.parse(table.get('drawing_state:p1')!).objects.map((o: { x: number }) => o.x)).toEqual([1])
+      expect(table.has('drawing_state:p2')).toBe(false)
+    })
+
+    it('does not write over a project\'s saved drawings while they are still being read', async () => {
+      vi.useFakeTimers()
+      const saved = JSON.stringify({ objects: [makeRect({ id: 'figure-1-1', x: 7 })], nextZIndex: 2 })
+      const table = fakeSettings({ 'drawing_state:p2': saved })
+      let release!: (value: string | null) => void
+      vi.mocked(settingsApi.get).mockImplementation((key) =>
+        key === 'drawing_state:p2'
+          ? new Promise<string | null>((resolve) => { release = resolve })
+          : Promise.resolve(table.get(key) ?? null)
+      )
+
+      const loading = useDrawingStore.getState().loadDrawings('p2')
+      await vi.waitFor(() => expect(release).toBeDefined())
+      useDrawingStore.getState().addObject(toNewFigure(makeRect({ x: 1 })))
+      vi.advanceTimersByTime(1000)
+      expect(table.get('drawing_state:p2')).toBe(saved)
+
+      release(saved)
+      await loading
+      expect(useDrawingStore.getState().objects.map((o) => o.x)).toEqual([7])
+    })
   })
 })

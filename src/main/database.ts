@@ -6,7 +6,7 @@ import { createId } from '@paralleldrive/cuid2'
 import { TaskStatus } from '../shared/constants'
 import { WORKSPACES_DIR, taskAttachmentsDir } from './workspace-paths'
 import { applySchema } from './database/schema'
-import { seedDefaultAgent, seedMastermindTask, seedOrchestratorSkill, seedTaskManagementMcpServer } from './database/seed'
+import { ensureProjectMastermind, seedDefaultAgent, seedMastermindTasks, seedOrchestratorSkill, seedTaskManagementMcpServer } from './database/seed'
 import { userTaskRoleFilter } from './database/task-roles'
 import { TASK_ROLE_MASTERMIND, type TaskRole } from '../shared/task-roles'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
@@ -119,7 +119,7 @@ export class DatabaseManager {
 
     seedTaskManagementMcpServer(this.db)
     seedOrchestratorSkill(this.db)
-    seedMastermindTask(this.db)
+    seedMastermindTasks(this.db)
   }
 
   getWorkspaceDir(taskId: string): string {
@@ -165,15 +165,37 @@ export class DatabaseManager {
     return rows.map(deserializeTask)
   }
 
-  /** The row that hosts a coordinator conversation, e.g. the Mastermind. */
-  getCoordinatorTask(role: TaskRole = TASK_ROLE_MASTERMIND): TaskRecord | undefined {
+  /**
+   * The row that hosts a project's coordinator conversation: its Mastermind.
+   * One per project (#55); the Default project's is the one every install has.
+   */
+  getCoordinatorTask(projectId: string = DEFAULT_PROJECT_ID, role: TaskRole = TASK_ROLE_MASTERMIND): TaskRecord | undefined {
     if (!this.ensureDbOpen()) return undefined
 
     const row = this.prepare(
-      'SELECT * FROM tasks WHERE role = ? ORDER BY created_at ASC LIMIT 1'
-    ).get(role) as TaskRow | undefined
+      'SELECT * FROM tasks WHERE role = ? AND project_id = ? ORDER BY created_at ASC LIMIT 1'
+    ).get(role, projectId) as TaskRow | undefined
 
     return row ? deserializeTask(row) : undefined
+  }
+
+  /** Every coordinator row of a role, one per project, in project creation order. */
+  getCoordinatorTasks(role: TaskRole = TASK_ROLE_MASTERMIND): TaskRecord[] {
+    if (!this.ensureDbOpen()) return []
+    const rows = this.prepare(
+      'SELECT * FROM tasks WHERE role = ? ORDER BY created_at ASC'
+    ).all(role) as TaskRow[]
+    return rows.map(deserializeTask)
+  }
+
+  /**
+   * The project's Mastermind row, created if the project exists and has none
+   * (a project made before per-project Masterminds, or one restored from an
+   * archive). Undefined for an unknown project: no row is invented for it.
+   */
+  ensureCoordinatorTask(projectId: string): TaskRecord | undefined {
+    if (!this.ensureDbOpen() || !this.getProject(projectId)) return undefined
+    return this.getTask(ensureProjectMastermind(this.db, projectId))
   }
 
   getTask(id: string): TaskRecord | undefined {
@@ -844,6 +866,9 @@ export class DatabaseManager {
       now,
       now
     )
+    // A project is born with its Mastermind (#55); the conversation is ready
+    // before the user opens the drawer.
+    ensureProjectMastermind(this.db, id)
     return this.getProject(id)
   }
 
@@ -869,11 +894,16 @@ export class DatabaseManager {
     return this.getProject(id)
   }
 
-  /** Archive (or restore) a project. The Default project always stays active. */
+  /**
+   * Archive (or restore) a project. The Default project always stays active.
+   * The project's Mastermind row is left alone either way: archiving keeps
+   * the conversation (its row is hidden anyway), restoring finds it again.
+   */
   archiveProject(id: string, archived = true): ProjectRecord | undefined {
     if (archived && id === DEFAULT_PROJECT_ID) throw new Error('The Default project cannot be archived.')
     this.prepare('UPDATE projects SET archived = ?, updated_at = ? WHERE id = ?')
       .run(archived ? 1 : 0, new Date().toISOString(), id)
+    if (!archived && this.getProject(id)) ensureProjectMastermind(this.db, id)
     return this.getProject(id)
   }
 

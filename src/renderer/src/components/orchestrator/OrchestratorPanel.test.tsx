@@ -18,10 +18,15 @@ const agentApi = vi.hoisted(() => ({
     { id: 'other-agent', name: 'Codex', is_default: false },
   ]),
 }))
-/** The Mastermind is a hidden task row; the panel asks main for its id. */
+/** Each project's Mastermind is a hidden task row; the panel asks main for the current project's id. */
 const MASTERMIND = 'mastermind-row-1'
+const MASTERMIND_B = 'mastermind-row-b'
 const taskApi = vi.hoisted(() => ({
-  getCoordinatorTaskId: vi.fn(async () => 'mastermind-row-1' as string | null),
+  getCoordinatorTaskId: vi.fn(async (projectId?: string) =>
+    (projectId === 'proj-b' ? 'mastermind-row-b' : 'mastermind-row-1') as string | null),
+}))
+const projectApi = vi.hoisted(() => ({
+  getAll: vi.fn(async () => []),
 }))
 
 vi.mock('@/lib/ipc-client', async (importOriginal) => ({
@@ -30,6 +35,7 @@ vi.mock('@/lib/ipc-client', async (importOriginal) => ({
   settingsApi,
   agentSessionApi,
   taskApi,
+  projectApi,
 }))
 
 /**
@@ -48,6 +54,24 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { OrchestratorPanel } from './OrchestratorPanel'
 import { useAgentStore } from '@/stores/agent-store'
 import { useCoordinatorStore } from '@/stores/coordinator-store'
+import { useProjectStore } from '@/stores/project-store'
+import { DEFAULT_PROJECT_ID, type ProjectRecord } from '@shared/projects'
+
+function projectRecord(overrides: Partial<ProjectRecord> & { id: string; name: string }): ProjectRecord {
+  return {
+    description: '',
+    default_agent_id: null,
+    mastermind_agent_id: null,
+    git_provider: null,
+    git_org: null,
+    settings: {},
+    sort_order: 0,
+    archived: false,
+    created_at: '2026-01-01T00:00:00.000Z',
+    updated_at: '2026-01-01T00:00:00.000Z',
+    ...overrides,
+  }
+}
 
 /**
  * Mastermind starts before there is anything to say.
@@ -74,8 +98,10 @@ beforeEach(() => {
   cleanup()
   vi.clearAllMocks()
   useAgentStore.setState({ sessions: new Map() })
-  useCoordinatorStore.setState({ mastermindTaskId: null })
-  taskApi.getCoordinatorTaskId.mockResolvedValue(MASTERMIND)
+  useCoordinatorStore.setState({ mastermindTaskIds: {} })
+  useProjectStore.setState({ projects: [], currentProjectId: DEFAULT_PROJECT_ID })
+  taskApi.getCoordinatorTaskId.mockImplementation(async (projectId?: string) =>
+    projectId === 'proj-b' ? MASTERMIND_B : MASTERMIND)
   settingsApi.get.mockResolvedValue(null)
   agentSessionApi.start.mockResolvedValue({ sessionId: 'session-1' })
   composer.send = null
@@ -194,5 +220,61 @@ describe('OrchestratorPanel — warming the session', () => {
     // No second start: the whole point of warming.
     expect(agentSessionApi.start).toHaveBeenCalledTimes(1)
     expect(agentSessionApi.send).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * One Mastermind per project (#55). The drawer shows the current project's
+ * conversation, runs it on the project's agent, and follows a project switch.
+ */
+describe('OrchestratorPanel — the current project\'s Mastermind', () => {
+  const alpha = projectRecord({ id: 'proj-a', name: 'Alpha', mastermind_agent_id: 'other-agent' })
+  const beta = projectRecord({ id: 'proj-b', name: 'Beta', default_agent_id: 'other-agent' })
+
+  it("names the project and warms its Mastermind on the project's agent", async () => {
+    useProjectStore.setState({ projects: [alpha, beta], currentProjectId: 'proj-a' })
+    await act(async () => {
+      render(<OrchestratorPanel onClose={vi.fn()} />)
+    })
+
+    await waitFor(() => expect(agentSessionApi.start).toHaveBeenCalledTimes(1))
+    expect(taskApi.getCoordinatorTaskId).toHaveBeenCalledWith('proj-a')
+    // Alpha's Mastermind agent, not the app default.
+    expect(agentSessionApi.start).toHaveBeenCalledWith('other-agent', MASTERMIND, undefined, true)
+    expect(screen.getByTestId('mastermind-project')).toHaveTextContent('Alpha')
+  })
+
+  it("falls back to the project's default agent, then the app default", async () => {
+    useProjectStore.setState({ projects: [alpha, beta], currentProjectId: 'proj-b' })
+    await act(async () => {
+      render(<OrchestratorPanel onClose={vi.fn()} />)
+    })
+    await waitFor(() => expect(agentSessionApi.start).toHaveBeenCalledTimes(1))
+    expect(agentSessionApi.start).toHaveBeenCalledWith('other-agent', MASTERMIND_B, undefined, true)
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('other-agent')
+  })
+
+  it('switches to the other project\'s conversation when the project changes', async () => {
+    useProjectStore.setState({ projects: [alpha, beta], currentProjectId: 'proj-a' })
+    await act(async () => {
+      render(<OrchestratorPanel onClose={vi.fn()} />)
+    })
+    await waitFor(() => expect(agentSessionApi.start).toHaveBeenCalledTimes(1))
+
+    await act(async () => {
+      useProjectStore.getState().setCurrentProject('proj-b')
+    })
+
+    // Beta's Mastermind is asked for, warmed, and shown; Alpha's session is left alone.
+    await waitFor(() => expect(agentSessionApi.start).toHaveBeenCalledTimes(2))
+    expect(taskApi.getCoordinatorTaskId).toHaveBeenCalledWith('proj-b')
+    expect(agentSessionApi.start).toHaveBeenLastCalledWith('other-agent', MASTERMIND_B, undefined, true)
+    expect(agentSessionApi.stop).not.toHaveBeenCalled()
+    expect(screen.getByTestId('mastermind-project')).toHaveTextContent('Beta')
+
+    await act(async () => {
+      await (composer.send as (t: string) => Promise<unknown>)('status?')
+    })
+    expect(agentSessionApi.send).toHaveBeenCalledWith('session-1', 'status?', MASTERMIND_B, 'other-agent', undefined)
   })
 })

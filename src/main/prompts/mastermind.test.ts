@@ -24,6 +24,22 @@ describe('buildMastermindSystemPrompt', () => {
     expect(withContext).toContain('## Project context\n\nUse pnpm.')
   })
 
+  it('adds the memory section with its rule, path and content (#55)', () => {
+    const memory = { path: '/ws/mm/MEMORY.md', content: '- Convention: squash merges.', truncated: false }
+    const prompt = buildMastermindSystemPrompt({ projectContext: 'Project Alpha.', memory })
+    expect(prompt.indexOf('## Project context')).toBeLessThan(prompt.indexOf('## Project memory'))
+    expect(prompt).toContain('Your memory file is /ws/mm/MEMORY.md.')
+    expect(prompt).toContain('- Convention: squash merges.')
+    expect(prompt).not.toContain('cut here')
+
+    const cut = buildMastermindSystemPrompt({ memory: { ...memory, truncated: true } })
+    expect(cut).toContain('cut here')
+
+    const empty = buildMastermindSystemPrompt({ memory: { ...memory, content: '' } })
+    expect(empty).toContain('_The file does not exist yet.')
+    expect(empty).not.toContain('Current content:')
+  })
+
   it('puts the agent prompt after the built-in prompt', () => {
     const prompt = withMastermindSystemPrompt('Be terse.')
     expect(prompt.startsWith(buildMastermindSystemPrompt())).toBe(true)

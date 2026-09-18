@@ -179,7 +179,10 @@ describe('project CRUD', () => {
     expect(db.removeProjectResource(s1.id)).toBe(true)
     expect(db.getProjectResources(p.id).map((r) => r.id)).toEqual([s2.id])
 
-    // Repos and resources go with their project.
+    // Repos and resources go with their project. Projects are archived, not
+    // deleted, in the app; a raw delete first has to remove the project's own
+    // Mastermind row (#55), which references it.
+    rawDb.prepare('DELETE FROM tasks WHERE project_id = ?').run(p.id)
     rawDb.prepare('DELETE FROM projects WHERE id = ?').run(p.id)
     expect(db.getProjectRepos(p.id)).toEqual([])
     expect(db.getProjectResources(p.id)).toEqual([])

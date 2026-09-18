@@ -19,18 +19,36 @@ export function seedDefaultAgent(db: Database.Database): void {
 }
 
 /**
- * The Mastermind's own row. It is a task row so its session_id and transcript
- * persist and resume like any task's; `role` keeps it out of every task list.
- * Idempotent: one row per install, found by role rather than by a fixed id.
+ * The Mastermind rows: one per project (#55). Each is a task row so its
+ * session_id and transcript persist and resume like any task's; `role` keeps
+ * it out of every task list, `project_id` says which project it coordinates.
+ *
+ * Idempotent: a project that already has a row keeps it (the Default
+ * project's row predates per-project Masterminds and is kept as it is; a
+ * row written before projects existed is adopted by the Default project).
+ * Archived projects keep theirs too, so restoring a project restores its
+ * conversation. `createProject` calls `ensureProjectMastermind` for new rows.
  */
-export function seedMastermindTask(db: Database.Database): void {
-  const existing = db.prepare('SELECT id FROM tasks WHERE role = ? LIMIT 1').get(TASK_ROLE_MASTERMIND)
-  if (existing) return
+export function seedMastermindTasks(db: Database.Database): void {
+  db.prepare('UPDATE tasks SET project_id = ? WHERE role = ? AND project_id IS NULL')
+    .run(DEFAULT_PROJECT_ID, TASK_ROLE_MASTERMIND)
+  const projects = db.prepare('SELECT id FROM projects').all() as { id: string }[]
+  for (const project of projects) ensureProjectMastermind(db, project.id)
+}
+
+/** The project's Mastermind row id, creating the row when the project has none. */
+export function ensureProjectMastermind(db: Database.Database, projectId: string): string {
+  const existing = db.prepare(
+    'SELECT id FROM tasks WHERE role = ? AND project_id = ? ORDER BY created_at ASC LIMIT 1'
+  ).get(TASK_ROLE_MASTERMIND, projectId) as { id: string } | undefined
+  if (existing) return existing.id
+  const id = createId()
   const now = new Date().toISOString()
   db.prepare(`
     INSERT INTO tasks (id, title, description, type, priority, status, assignee, labels, source, role, project_id, created_at, updated_at)
     VALUES (?, ?, ?, 'general', 'medium', ?, '', '[]', 'local', ?, ?, ?, ?)
-  `).run(createId(), 'Mastermind', 'The Mastermind conversation. Not a task: never listed, never scheduled.', TaskStatus.NotStarted, TASK_ROLE_MASTERMIND, DEFAULT_PROJECT_ID, now, now)
+  `).run(id, 'Mastermind', 'The Mastermind conversation. Not a task: never listed, never scheduled.', TaskStatus.NotStarted, TASK_ROLE_MASTERMIND, projectId, now, now)
+  return id
 }
 
 /** Append `id` to an array in the default agent's config unless already present. */

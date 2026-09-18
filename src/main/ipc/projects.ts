@@ -6,6 +6,7 @@ import type {
 } from '../database'
 import type { IpcDeps } from './deps'
 import { guardedIpcSend } from '../guarded-ipc-send'
+import { readMastermindMemory, type MastermindMemory } from '../agent-manager/mastermind-context'
 
 /** Projects, their repos and their context-only resources. */
 export function registerProjectHandlers({ db }: IpcDeps): void {
@@ -16,6 +17,12 @@ export function registerProjectHandlers({ db }: IpcDeps): void {
   ipcMain.handle('project:update', (_, id: string, data: UpdateProjectData) => db.updateProject(id, data))
   ipcMain.handle('project:archive', (_, id: string, archived?: boolean) => db.archiveProject(id, archived ?? true))
   ipcMain.handle('project:reorder', (_, orderedIds: string[]) => db.reorderProjects(orderedIds))
+  // The memory file the project's Mastermind keeps in its workspace (#55),
+  // read-only for the project editor. Null when the project has no Mastermind.
+  ipcMain.handle('project:getMastermindMemory', (_, projectId: string): MastermindMemory | null => {
+    const coordinator = db.getCoordinatorTask(projectId)
+    return coordinator ? readMastermindMemory(db.getWorkspaceDir(coordinator.id)) : null
+  })
   // Moves a top-level task, its subtasks and recurrence instances into another project.
   ipcMain.handle('project:moveTask', (event, taskId: string, projectId: string) => {
     const moved = db.moveTaskToProject(taskId, projectId)

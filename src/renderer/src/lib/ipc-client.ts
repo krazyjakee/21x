@@ -38,6 +38,7 @@ import type {
   ProjectRepoRecord, CreateProjectRepoData, UpdateProjectRepoData,
   ProjectResourceRecord, CreateProjectResourceData, UpdateProjectResourceData
 } from '@shared/projects'
+import type { MastermindMemory } from '@shared/mastermind-memory'
 
 export const taskApi = {
   /** Every project's tasks, or one project's when `projectId` is given. */
@@ -69,9 +70,9 @@ export const taskApi = {
     return window.electronAPI.db.reorderSubtasks(parentId, orderedIds)
   },
 
-  /** The Mastermind's task row id. Hidden from getAll, so it is asked for by role. */
-  getCoordinatorTaskId: (): Promise<string | null> => {
-    return window.electronAPI.tasks.getCoordinatorTaskId()
+  /** A project's Mastermind task row id (#55). Hidden from getAll, so it is asked for by project. */
+  getCoordinatorTaskId: (projectId?: string): Promise<string | null> => {
+    return window.electronAPI.tasks.getCoordinatorTaskId(projectId)
   }
 }
 
@@ -485,6 +486,9 @@ export const projectApi = {
   update: (id: string, data: UpdateProjectData): Promise<ProjectRecord | undefined> => window.electronAPI.projects.update(id, data),
   archive: (id: string, archived?: boolean): Promise<ProjectRecord | undefined> => window.electronAPI.projects.archive(id, archived),
   reorder: (orderedIds: string[]): Promise<void> => window.electronAPI.projects.reorder(orderedIds),
+  /** The memory file the project's Mastermind keeps (#55); null when the project has no Mastermind. */
+  getMastermindMemory: (projectId: string): Promise<MastermindMemory | null> =>
+    window.electronAPI.projects.getMastermindMemory(projectId),
   /** Moves a top-level task with its subtasks; resolves to the moved rows, or null when refused. */
   moveTask: (taskId: string, projectId: string): Promise<Task[] | null> => window.electronAPI.projects.moveTask(taskId, projectId),
 

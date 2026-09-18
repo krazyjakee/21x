@@ -151,3 +151,98 @@ Task-source config: `piece_name`, `connector_instance_id`, `props` and
 create the instance, store or clear credentials (write-only, with the
 session-only fallback when the keychain is unavailable) and read sync status.
 Nothing in the bridge is exposed to coding agents through MCP or the task API.
+
+## Trello proof of concept (#16)
+
+`src/main/connectors/bridge/trello-poc.test.ts` drives the **real pinned
+`@activepieces/piece-trello` 0.6.0 bundle** through the real piece-host runtime
+(in-process behind a fake transport, loaded by the production
+`piece-registry.ts`) and the connector bridge, against a fake Trello HTTP API.
+pieces-common 0.12.5, which the piece bundles, sends every request through the
+global `fetch`, so the fake API replaces `globalThis.fetch`; nothing reaches
+the network. The allowlist and the Trello mapping under test are the
+production ones.
+
+### Wiring
+
+Trello is wired with three declarative entries and nothing else:
+
+| Where | What |
+| --- | --- |
+| `allowlist.ts` | `@activepieces/piece-trello@0.6.0`, 13 actions, the `deadline` polling trigger |
+| `bridge/mappings.ts` | import through `list_cards_in_board` (`filter: all`), fields `id`/`name`/`desc`/`due`/`url`/`labels[].name`/`closed`, update through `update_card` (`name`, `due`, `closed`) |
+| `piece-host/piece-registry.ts` | the static `require` line for the bundled package |
+
+A test walks `src/main/connectors/**` and asserts those are the only
+non-test files that mention Trello, and that the mapping survives a JSON round
+trip (pure data, no functions). Outside the connector layer the word appears
+only in user-facing strings (the plugin description and setup text, the
+source-label colour in `TaskBoard.tsx`). There is no Trello client code.
+
+### Test matrix
+
+| Case | Result |
+| --- | --- |
+| Import: cards → canonical fields (title, description + link, due date or null, labels, open/closed); archived cards never create tasks | Pass |
+| Round trip: complete closes the card first (`PUT /1/cards/{id}` `{closed:true}`), then the task completes; title and due date pushed; Not Started reopens; workflow states never sent; next import reads back what was pushed | Pass |
+| Pagination | The action asks once, with no page cursor; Trello returns the board in one response. The bridge imports the first 1000 items and reports the rest (tested with 1001). See limits below. |
+| 429 | Backs off, blocks manual syncs for the window, recovers. The `Retry-After` header is **not** honoured with the real piece (see below). |
+| 5xx | Exponential backoff, then dead letter after `maxAttempts`; cached tasks untouched and still editable throughout |
+| 401 / revoked token | One clear permanent error (`Permission denied…` on import, `HTTP 401: invalid token` on the completion gate), no retries, no dead letter, no task changes, no secret in errors, sync state or host logs |
+| Cancellation mid-sync | Fails cleanly (`…cancelled. Existing tasks were kept.`), no backoff, host killed, next sync uses a fresh host |
+| Restart during a sync | Attempt count, `next_retry_at` and the cursor resume from `connector_sync_state`; the scheduler waits until due. A sync interrupted in flight writes nothing before the piece answers, and an orphaned run converges on the same tasks (idempotent). |
+| Duplicate items | The same card twice in one response and across syncs yields one task |
+| Piece crash | `PieceHostCrashedError` is retried with backoff; the host is restarted on the next call |
+| Piece timeout | A hung request hits the call timeout, the host is killed, the sync fails with `attempt n of m`; the next sync succeeds on a fresh host |
+| 100 items | 100 cards imported (99 plus one per-item mapping error reported as `Trello item c-100: …`), 99 updates pushed; a card deleted at the source dead-letters with `HTTP 404: The requested resource was not found.`, a transient 503 is queued and lands on the next sync; the local edit wins until then |
+| Polling trigger cursor | The real `deadline` trigger keeps `lastPoll` in `connector_kv` (scope `flow`) across a restart and only emits new cards |
+
+### What needed fixing
+
+- `bridge/retry.ts` `errorMessage()`: pieces-common's `HttpError` puts the
+  whole failure in the message as `{"response":{"status":404,"body":…},"request":{"body":…}}`.
+  Users now see `HTTP 404: <body>` in per-item errors, sync state, dead letters
+  and the completion-gate error; the request body (task text) is left out.
+  Classification still reads the raw error.
+- No mapping, allowlist or engine bug was found with the real piece.
+
+### Limits found (plainly)
+
+- **`Retry-After` is lost.** pieces-common serialises only status and body into
+  the error, so the bridge cannot see the header; 429s use the bridge's own
+  backoff (30 s, 60 s, …). Trello's 429 is rewritten by the piece to
+  "Trello rate limit exceeded", which the classifier recognises.
+- **No pagination.** `list_cards_in_board` has no page cursor and requests every
+  card field. Real cards are 2–3 KB of JSON, so a board of roughly 1500–2500
+  cards exceeds the 5 MB output cap and the sync fails with a clear, permanent
+  error (tasks are kept). Boards above 1000 cards import only the first 1000.
+  A fix needs a `fields` or `limit` prop upstream, or a per-list import
+  (`list_cards_in_list`).
+- **List moves are not a status.** Archive (`closed`) ↔ Completed is the status
+  round trip. Moving a card to another list changes nothing in 21x, and 21x
+  cannot move cards; that needs a config-valued status mapping
+  (`done_list_id`) that the declarative format does not have yet. Clearing a
+  due date is not pushed either (the piece ignores a falsy `due`).
+- **Cancellation** is driven by the `AbortSignal` on `PieceHostClient.call`;
+  the engine does not expose one, so today only app shutdown (`dispose()`) or
+  a caller-provided runtime wrapper cancels a sync.
+- **Security (fixed):** pieces-common's `sendRequest()` sets
+  `process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"` inside the piece host on
+  every request, which would make the host accept any certificate for
+  `api.trello.com` and expose Trello's key + token (query-string auth) to a
+  man-in-the-middle. `piece-host/tls-guard.ts`, installed by `host-entry.ts`
+  before any piece code runs, clears that override on every fetch and pins
+  `https.globalAgent` to verify peers; `trello-poc.test.ts` checks it holds
+  through a real import.
+
+### Success criteria
+
+| Criterion | Verdict |
+| --- | --- |
+| Allowlist entry + declarative mapping only, no Trello client code | Met (asserted by test) |
+| Round-trip updates reliable | Met for title, due date and open/closed; list moves and due-date clearing are out of the mapping's reach |
+| Cached tasks stay usable when the piece fails | Met for 401, 429, 5xx, crash, timeout, cancellation and deleted cards |
+| Per-piece package cost acceptable | Not decided here. Unpacked size: `src/index.js` 495 KB plus 73 KB of i18n (13 locales), no runtime dependencies, framework and pieces-common inlined. Packaged size, host cold start, memory and 100-item sync timings per platform are #17's measurements. |
+
+The connector layer holds up for Trello with the limits above. The TLS
+finding is the one blocker before a release that bundles the piece.

@@ -116,8 +116,29 @@ export function backoffDelayMs(attempt: number, policy: RetryPolicy = DEFAULT_RE
   return Math.min(exp, policy.maxDelayMs)
 }
 
+/**
+ * pieces-common's HttpError puts the whole failure in the message as
+ * `{"response":{"status":404,"body":...},"request":{"body":...}}` (response
+ * headers are dropped, so Retry-After never reaches us). Users get
+ * `HTTP 404: <body>` instead of that JSON; the request body, which can hold
+ * task text, is left out. Anything else is returned unchanged.
+ */
+function describeHttpError(message: string): string | null {
+  if (!message.startsWith('{')) return null
+  try {
+    const parsed = JSON.parse(message) as { response?: { status?: unknown; body?: unknown } } | null
+    const status = parsed?.response?.status
+    if (typeof status !== 'number') return null
+    const body = parsed?.response?.body
+    const text = body === undefined || body === null ? '' : typeof body === 'string' ? body : JSON.stringify(body)
+    const detail = text.replace(/\s+/g, ' ').trim().slice(0, 200)
+    return detail ? `HTTP ${status}: ${detail}` : `HTTP ${status}`
+  } catch {
+    return null
+  }
+}
+
 export function errorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message || err.name
-  if (typeof err === 'string') return err
-  return 'Unknown error'
+  const raw = err instanceof Error ? err.message || err.name : typeof err === 'string' ? err : 'Unknown error'
+  return describeHttpError(raw) ?? raw
 }

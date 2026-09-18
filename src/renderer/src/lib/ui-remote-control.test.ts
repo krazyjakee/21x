@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // The stores subscribe to IPC as they load, so only the two calls this file
 // would really make are replaced.
@@ -8,9 +8,11 @@ vi.mock('@/lib/ipc-client', async (importOriginal) => ({
 }))
 
 import { applyUiCommand, collectUiState } from './ui-remote-control'
+import { settingsApi } from '@/lib/ipc-client'
 import { useUIStore } from '@/stores/ui-store'
 import { useTaskStore } from '@/stores/task-store'
 import { useCanvasStore } from '@/stores/canvas-store'
+import { useProjectStore } from '@/stores/project-store'
 import { useArtifactStore } from '@/stores/artifact-store'
 import { SettingsTab } from '@/types'
 import { ArtifactType } from '@shared/artifacts'
@@ -29,6 +31,8 @@ function seedTasks(): void {
     tasks: [
       { id: 't1', title: 'Fix login' },
       { id: 't2', title: 'Release notes' },
+      // In another project: its panel lives on that project's canvas.
+      { id: 't3', title: 'Mobile spike', project_id: 'p2' },
     ] as never,
     selectedTaskId: null,
   })
@@ -56,8 +60,77 @@ beforeEach(() => {
     settingsTab: SettingsTab.GENERAL,
     showOrchestrator: false,
   })
-  useCanvasStore.setState({ panels: [], edges: [], pendingViewCommand: null, viewport: { x: 0, y: 0, zoom: 1 } })
+  useProjectStore.setState({ currentProjectId: 'default' })
+  useCanvasStore.setState({
+    panels: [],
+    edges: [],
+    pendingViewCommand: null,
+    viewport: { x: 0, y: 0, zoom: 1 },
+    projectId: 'default',
+    isLoaded: true,
+  })
   useArtifactStore.setState({ artifactsByTask: {}, uiByTask: {} })
+})
+
+describe('a task from another project', () => {
+  /** The canvas saved for project p2: one panel, for t3. */
+  const p2Canvas = JSON.stringify({
+    viewport: { x: 0, y: 0, zoom: 1 },
+    panels: [{ id: 'panel-9', type: 'task', refId: 't3', title: 't3', x: 0, y: 0, width: 100, height: 100, zIndex: 1 }],
+    edges: [],
+    nextZIndex: 2,
+  })
+
+  beforeEach(() => {
+    vi.mocked(settingsApi.get).mockImplementation(async (key) => (key === 'canvas_state:p2' ? p2Canvas : null))
+  })
+
+  afterEach(() => {
+    vi.mocked(settingsApi.get).mockImplementation(async () => null)
+    useProjectStore.setState({ currentProjectId: 'default' })
+  })
+
+  it('open_task on the canvas switches to its project first, then hands the task to that canvas', () => {
+    addTaskPanel('t1')
+    expect(applyUiCommand({ kind: 'open_task', taskId: 't3', where: 'canvas' })).toEqual({ applied: true })
+
+    expect(useProjectStore.getState().currentProjectId).toBe('p2')
+    const ui = useUIStore.getState()
+    expect(ui.sidebarView).toBe('canvas')
+    expect(ui.canvasPendingTaskId).toBe('t3')
+    // The previous project's panels are gone; nothing was focused on them.
+    expect(useCanvasStore.getState().projectId).toBe('p2')
+    expect(useCanvasStore.getState().pendingViewCommand).toBeNull()
+  })
+
+  it('moves the panel on the other project\'s canvas once that canvas has loaded', async () => {
+    const result = applyUiCommand({ kind: 'move_task_panel', taskId: 't3', x: 400, y: -50 })
+    expect(result.applied).toBe(true)
+    expect(useProjectStore.getState().currentProjectId).toBe('p2')
+
+    await vi.waitFor(() => {
+      const panel = useCanvasStore.getState().panels.find((p) => p.refId === 't3')
+      expect([panel?.x, panel?.y]).toEqual([400, -50])
+    })
+    expect(useCanvasStore.getState().projectId).toBe('p2')
+  })
+
+  it('closes the panel on the other project\'s canvas once that canvas has loaded', async () => {
+    applyUiCommand({ kind: 'close_task_panel', taskId: 't3' })
+    await vi.waitFor(() => expect(useCanvasStore.getState().isLoaded).toBe(true))
+    expect(useCanvasStore.getState().projectId).toBe('p2')
+    expect(useCanvasStore.getState().panels).toEqual([])
+  })
+
+  it('leaves the project alone for a task that is already in it', () => {
+    addTaskPanel('t1')
+    applyUiCommand({ kind: 'move_task_panel', taskId: 't1', x: 5, y: 5 })
+    expect(useProjectStore.getState().currentProjectId).toBe('default')
+  })
+
+  it('reports the project on screen with the canvas', () => {
+    expect(collectUiState().projectId).toBe('default')
+  })
 })
 
 describe('navigate', () => {

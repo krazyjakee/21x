@@ -1,5 +1,6 @@
 import { startPieceHost } from './host-runtime'
 import { loadBundledPiece } from './piece-registry'
+import { installTlsGuard } from './tls-guard'
 import type { HostInboundMessage } from './protocol'
 
 /**
@@ -14,6 +15,10 @@ if (!parentPort) {
   console.error('[piece-host] must be started with utilityProcess.fork()')
   process.exit(1)
 }
+
+// Before any piece code runs: pieces-common turns certificate verification
+// off per request, and this keeps it on (see tls-guard.ts).
+installTlsGuard()
 
 startPieceHost(
   {
