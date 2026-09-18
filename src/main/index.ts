@@ -22,6 +22,7 @@ import { NotionPlugin } from './plugins/notion-plugin'
 import { YouTrackPlugin } from './plugins/youtrack-plugin'
 import { registerIpcHandlers } from './ipc-handlers'
 import { panelBrowserBroker } from './panel-browser-broker'
+import { hardenWebviewPreferences } from './webview-hardening'
 import { VoiceSessionManager } from './voice/voice-session-manager'
 import { voiceEventSenders, watchAgentAnswersForSpeech } from './voice/voice-bridge'
 import { loadPlatformShellEnv } from './shell-env'
@@ -215,7 +216,12 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      // The preload bundle only imports `electron` (contextBridge, ipcRenderer,
+      // webUtils — all available to sandboxed preloads) plus type-only shared
+      // modules, so the renderer can run inside the OS sandbox. Anything the UI
+      // needs from Node already goes through IPC. Keep it that way: adding a
+      // Node `require` to the preload would fail at run time with this on.
+      sandbox: true,
       webviewTag: true,
       // Keep processing agent transcript IPC/timers while the window is
       // hidden or minimized — throttling a hidden renderer stalls streamed
@@ -872,6 +878,12 @@ app.whenReady().then(async () => {
   // Inject anti-bot JS patches into webview pages (handles client-side
   // fingerprinting that Akamai runs after the page loads).
   app.on('web-contents-created', (_event, contents) => {
+    // Before any <webview> attaches, drop whatever preload / Node settings its
+    // markup asked for. Guest pages get no bridge into this process.
+    contents.on('will-attach-webview', (_e, webPreferences, params) => {
+      hardenWebviewPreferences(webPreferences, params as unknown as Record<string, unknown>)
+    })
+
     if (contents.getType() === 'webview') {
       // Intercept window.open calls from webviews — open valid URLs externally,
       // silently ignore about:blank and other invalid URLs to prevent the macOS

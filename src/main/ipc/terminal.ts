@@ -5,6 +5,7 @@ import { existsSync } from 'fs'
 import { readlink } from 'fs/promises'
 import { guardChildStreams, writeToChildStdin } from '../child-stream-guards'
 import { execFileAsync } from '../find-executable'
+import { assertTrustedSender } from '../ipc-sender'
 
 // Each terminal is identified by a renderer-chosen ID. The renderer creates,
 // writes and resizes terminals via IPC and receives output via 'terminal:data'.
@@ -245,6 +246,9 @@ export function registerTerminalHandlers(): void {
   const terminals = new Map<string, TerminalHandle>()
 
   ipcMain.handle('terminal:create', async (event, { id, cols, rows, cwd }: { id: string; cols: number; rows: number; cwd?: string }) => {
+    // Spawning a shell — and writing to one — is the highest-value handler in
+    // the app, so only the main window's own frame may ask for it.
+    assertTrustedSender(event, 'terminal:create')
     // Respawn after exit reuses the ID, so replace any existing terminal.
     const existing = terminals.get(id)
     if (existing) {
@@ -279,7 +283,8 @@ export function registerTerminalHandlers(): void {
     return { pid: handle.pid }
   })
 
-  ipcMain.handle('terminal:write', (_, { id, data }: { id: string; data: string }) => {
+  ipcMain.handle('terminal:write', (event, { id, data }: { id: string; data: string }) => {
+    assertTrustedSender(event, 'terminal:write')
     const term = terminals.get(id)
     if (!term) {
       console.log(`[Terminal] write to dead terminal id=${id}`)

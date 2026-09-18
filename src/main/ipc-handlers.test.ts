@@ -32,6 +32,8 @@ vi.mock('child_process', () => ({
 }))
 
 import { ipcMain } from 'electron'
+import { join } from 'path'
+import { pathToFileURL } from 'url'
 import { registerIpcHandlers } from './ipc-handlers'
 import type { IpcDeps } from './ipc/deps'
 import { setTaskSchedulers } from './task-updates'
@@ -171,8 +173,10 @@ describe('registerIpcHandlers', () => {
     expect(createHandler).toBeDefined()
     expect(killHandler).toBeDefined()
 
-    const sender = { isDestroyed: () => false, send: vi.fn() }
-    await createHandler?.({ sender }, { id: 'panel-1', cols: 80, rows: 24 })
+    const sender = { isDestroyed: () => false, send: vi.fn(), getType: () => 'window' }
+    // terminal:create only accepts the main window's own frame.
+    const senderFrame = { url: pathToFileURL(join(__dirname, '../renderer/index.html')).href, parent: null }
+    await createHandler?.({ sender, senderFrame }, { id: 'panel-1', cols: 80, rows: 24 })
 
     await killHandler?.({}, { id: 'panel-1', expectedPid: 9999 })
     expect(mockChildKill).not.toHaveBeenCalled()
@@ -180,6 +184,23 @@ describe('registerIpcHandlers', () => {
     await killHandler?.({}, { id: 'panel-1', expectedPid: 4242 })
     expect(mockChildKill).toHaveBeenCalledTimes(1)
     expect(mockChildKill).toHaveBeenCalledWith('SIGTERM')
+  })
+
+  it('terminal:create refuses a sender that is not the main window frame', async () => {
+    register()
+
+    const handleCalls = (ipcMain.handle as ReturnType<typeof vi.fn>).mock.calls as [string, (...args: unknown[]) => unknown][]
+    const createHandler = handleCalls.find((call) => call[0] === 'terminal:create')?.[1]
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const sender = { isDestroyed: () => false, send: vi.fn(), getType: () => 'webview' }
+    const senderFrame = { url: 'https://evil.example/', parent: null }
+
+    await expect(createHandler?.({ sender, senderFrame }, { id: 'panel-evil', cols: 80, rows: 24 }))
+      .rejects.toThrow(/terminal:create/)
+    expect(mockSpawn).not.toHaveBeenCalled()
+
+    warn.mockRestore()
   })
 })
 

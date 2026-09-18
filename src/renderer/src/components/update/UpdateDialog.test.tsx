@@ -131,6 +131,60 @@ describe('UpdateDialog', () => {
     })
   })
 
+  /** Pushes an `available` status carrying the given release notes. */
+  async function showReleaseNotes(releaseNotes: string): Promise<HTMLElement> {
+    let statusCallback: ((data: Record<string, unknown>) => void) | null = null
+    mockUpdater.onStatus.mockImplementation((cb: (data: Record<string, unknown>) => void) => {
+      statusCallback = cb
+      return vi.fn()
+    })
+
+    const { baseElement } = render(<UpdateDialog open={true} onClose={vi.fn()} />)
+    statusCallback!({ status: 'available', version: '1.0.0', releaseNotes, currentVersion: '0.0.31' })
+    await waitFor(() => expect(screen.getAllByText(/What's New/i).length).toBeGreaterThan(0))
+    return baseElement as HTMLElement
+  }
+
+  it('renders HTML release notes without executing scripts or event handlers', async () => {
+    const hostile = [
+      '<p>Real note</p>',
+      '<script>window.__pwned = true</script>',
+      '<img src="x" onerror="window.__pwned = true">',
+      '<p onclick="window.__pwned = true">Clickable</p>',
+      '<iframe src="https://evil.example"></iframe>'
+    ].join('')
+
+    const baseElement = await showReleaseNotes(hostile)
+
+    expect(screen.getAllByText('Real note').length).toBeGreaterThan(0)
+    expect(baseElement.querySelector('script')).toBeNull()
+    expect(baseElement.querySelector('iframe')).toBeNull()
+    expect(baseElement.querySelector('img')).toBeNull()
+    expect(baseElement.querySelector('[onclick]')).toBeNull()
+    expect(baseElement.querySelector('[onerror]')).toBeNull()
+    expect((window as unknown as { __pwned?: boolean }).__pwned).toBeUndefined()
+  })
+
+  it('keeps safe links and drops javascript: URLs from release notes', async () => {
+    const baseElement = await showReleaseNotes(
+      '<p><a href="https://github.com/krazyjakee/21x">Release</a> <a href="javascript:window.__pwned=true">Bad</a></p>'
+    )
+
+    const links = Array.from(baseElement.querySelectorAll('a'))
+      .map((a) => a.getAttribute('href'))
+      .filter((href): href is string => href !== null)
+    expect(links).toContain('https://github.com/krazyjakee/21x')
+    expect(links.some((href) => href.startsWith('javascript:'))).toBe(false)
+    expect(screen.getAllByText('Bad').length).toBeGreaterThan(0)
+  })
+
+  it('renders markdown release notes as markdown', async () => {
+    const baseElement = await showReleaseNotes('## Bug fixes\n\n- Fixed a crash')
+
+    expect(screen.getAllByText('Fixed a crash').length).toBeGreaterThan(0)
+    expect(baseElement.querySelectorAll('li').length).toBeGreaterThan(0)
+  })
+
   it('should re-trigger check when Check for Updates button is clicked from up-to-date state', async () => {
     let statusCallback: ((data: Record<string, unknown>) => void) | null = null
     mockUpdater.onStatus.mockImplementation((cb: (data: Record<string, unknown>) => void) => {
