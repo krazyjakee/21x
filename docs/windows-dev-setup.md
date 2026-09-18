@@ -119,7 +119,7 @@ pnpm test:run
 pnpm build:win
 ```
 
-Output: `dist/20x-{version}-x64.exe` (x64 only).
+Output: `dist/20x Setup {version}.exe` (x64 only; electron-builder's default NSIS name, since `win` sets no `artifactName`).
 
 The NSIS installer requires administrator elevation (`requestedExecutionLevel: requireAdministrator` in `package.json`) and installs Python if none is found.
 
