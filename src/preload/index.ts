@@ -99,6 +99,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     submitManualClientId: (mcpServerId: string, clientId: string): Promise<{ needsManualClientId?: boolean }> =>
       ipcRenderer.invoke('mcp:submitManualClientId', mcpServerId, clientId)
   },
+  // Global MCP config of the installed coding-agent CLIs (Claude Code, OpenCode, Codex).
+  cliMcp: {
+    snapshot: (): Promise<unknown> => ipcRenderer.invoke('cliMcp:snapshot'),
+    upsert: (request: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('cliMcp:upsert', request),
+    remove: (ref: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('cliMcp:remove', ref),
+    setEnabled: (ref: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('cliMcp:setEnabled', ref),
+    setToolEnabled: (ref: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('cliMcp:setToolEnabled', ref),
+    probe: (ref: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('cliMcp:probe', ref)
+  },
   agentSession: {
     start: (agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<{ sessionId: string }> =>
       ipcRenderer.invoke('agentSession:start', agentId, taskId, workspaceDir, skipInitialPrompt),

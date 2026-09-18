@@ -22,6 +22,7 @@ import type {
   VoiceTtsSnapshot
 } from '@shared/voice-tts'
 import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
+import type { CliMcpMutationResult, CliMcpProbeResult, CliMcpServerRef, CliMcpSnapshot, CliMcpUpsertRequest } from '@shared/cli-mcp-config'
 
 export const taskApi = {
   getAll: (): Promise<Task[]> => {
@@ -700,4 +701,17 @@ export const chatApi = {
     window.electronAPI.chat.start(payload),
   cancel: (turnId: string): Promise<{ cancelled: boolean }> => window.electronAPI.chat.cancel(turnId),
   onEvent: (callback: (event: ChatIpcEvent) => void): (() => void) => window.electronAPI.chat.onEvent(callback)
+}
+
+// ── Global MCP config of the coding-agent CLIs ───────────────
+// Claude Code, OpenCode and Codex global MCP servers (docs/mcp-global-config.md).
+
+export const cliMcpApi = {
+  snapshot: (): Promise<CliMcpSnapshot> => window.electronAPI.cliMcp.snapshot(),
+  upsert: (request: CliMcpUpsertRequest): Promise<CliMcpMutationResult> => window.electronAPI.cliMcp.upsert(request),
+  remove: (ref: CliMcpServerRef): Promise<CliMcpMutationResult> => window.electronAPI.cliMcp.remove(ref),
+  setEnabled: (ref: CliMcpServerRef & { enabled: boolean }): Promise<CliMcpMutationResult> => window.electronAPI.cliMcp.setEnabled(ref),
+  setToolEnabled: (ref: CliMcpServerRef & { tool: string; enabled: boolean }): Promise<CliMcpMutationResult> =>
+    window.electronAPI.cliMcp.setToolEnabled(ref),
+  probe: (ref: CliMcpServerRef): Promise<CliMcpProbeResult> => window.electronAPI.cliMcp.probe(ref)
 }

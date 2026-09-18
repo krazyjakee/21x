@@ -57,6 +57,7 @@ import type {
   VoiceTtsSnapshot
 } from '@shared/voice-tts'
 import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
+import type { CliMcpMutationResult, CliMcpProbeResult, CliMcpServerRef, CliMcpSnapshot, CliMcpUpsertRequest } from '@shared/cli-mcp-config'
 
 export interface AgentSessionStartResult {
   sessionId: string
@@ -230,6 +231,14 @@ interface ElectronAPI {
     revokeOAuthToken: (mcpServerId: string) => Promise<void>
     probeForAuth: (serverUrl: string) => Promise<{ requiresAuth: boolean }>
     submitManualClientId: (mcpServerId: string, clientId: string) => Promise<{ needsManualClientId?: boolean }>
+  }
+  cliMcp: {
+    snapshot: () => Promise<CliMcpSnapshot>
+    upsert: (request: CliMcpUpsertRequest) => Promise<CliMcpMutationResult>
+    remove: (ref: CliMcpServerRef) => Promise<CliMcpMutationResult>
+    setEnabled: (ref: CliMcpServerRef & { enabled: boolean }) => Promise<CliMcpMutationResult>
+    setToolEnabled: (ref: CliMcpServerRef & { tool: string; enabled: boolean }) => Promise<CliMcpMutationResult>
+    probe: (ref: CliMcpServerRef) => Promise<CliMcpProbeResult>
   }
   agents: {
     getAll: () => Promise<Agent[]>
