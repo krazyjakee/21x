@@ -1,7 +1,7 @@
 import { useUIStore } from '@/stores/ui-store'
 import { useTaskStore } from '@/stores/task-store'
-import { filterToProject, getCurrentProjectId } from '@/stores/project-store'
-import { useCanvasStore } from '@/stores/canvas-store'
+import { filterToProject, getCurrentProjectId, projectIdOf, useProjectStore } from '@/stores/project-store'
+import { useCanvasStore, whenCanvasLoaded } from '@/stores/canvas-store'
 import { useArtifactStore } from '@/stores/artifact-store'
 import { SETTINGS_TABS, SettingsTab } from '@/types'
 import {
@@ -40,6 +40,46 @@ function isKnownTask(taskId: string): boolean {
   return useTaskStore.getState().tasks.some((task) => task.id === taskId)
 }
 
+/**
+ * A task's panel lives on its own project's canvas. When that is not the
+ * project on screen, switch to it: the canvas store reloads by itself and the
+ * caller acts once it has. Returns the project the task belongs to, and
+ * whether a switch was made (null when the task is unknown).
+ */
+function ensureTaskProject(taskId: string): { projectId: string; switched: boolean } | null {
+  const task = useTaskStore.getState().tasks.find((t) => t.id === taskId)
+  if (!task) return null
+  const projectId = projectIdOf(task)
+  if (getCurrentProjectId() === projectId) return { projectId, switched: false }
+  useProjectStore.getState().setCurrentProject(projectId)
+  return { projectId, switched: true }
+}
+
+/**
+ * Acts on a task's panel on its project's canvas. When the project had to be
+ * switched the panel is not there yet, so the action waits for the load —
+ * the command has been accepted, and the result reaches the agent through the
+ * published screen.
+ */
+function withTaskPanel(
+  taskId: string,
+  act: (panelId: string) => void
+): UiCommandResult {
+  const target = ensureTaskProject(taskId)
+  if (!target) return { applied: false, detail: 'That task is not loaded' }
+  if (target.switched) {
+    whenCanvasLoaded(target.projectId, () => {
+      const panel = findTaskPanel(taskId)
+      if (panel) act(panel.id)
+    })
+    return { applied: true, detail: "Switched to the task's project first" }
+  }
+  const panel = findTaskPanel(taskId)
+  if (!panel) return { applied: false, detail: 'That task has no panel on the canvas' }
+  act(panel.id)
+  return { applied: true }
+}
+
 function toSettingsTab(value: string | undefined): SettingsTab | null {
   if (!value) return null
   const match = SETTINGS_TABS.find((tab) => tab.value === value)
@@ -69,7 +109,11 @@ export function applyUiCommand(command: UiCommand): UiCommandResult {
       useTaskStore.getState().selectTask(command.taskId)
 
       if (command.where === 'canvas') {
-        const existing = findTaskPanel(command.taskId)
+        // The task opens on its own project's canvas. After a switch the
+        // panels are not loaded yet, so the canvas takes the task from
+        // `openTaskOnCanvas` once they are, and focuses or adds it there.
+        const target = ensureTaskProject(command.taskId)
+        const existing = target?.switched ? undefined : findTaskPanel(command.taskId)
         if (ui.activeModal === 'settings') ui.closeModal()
         if (existing) {
           // Already on the canvas: bring the user to it rather than
@@ -96,20 +140,17 @@ export function applyUiCommand(command: UiCommand): UiCommandResult {
       return { applied: true }
     }
 
-    case 'move_task_panel': {
-      const panel = findTaskPanel(command.taskId)
-      if (!panel) return { applied: false, detail: 'That task has no panel on the canvas' }
-      useCanvasStore.getState().updatePanel(panel.id, { x: command.x, y: command.y })
-      return { applied: true }
-    }
+    case 'move_task_panel':
+      return withTaskPanel(command.taskId, (panelId) => {
+        useCanvasStore.getState().updatePanel(panelId, { x: command.x, y: command.y })
+      })
 
-    case 'close_task_panel': {
-      const panel = findTaskPanel(command.taskId)
-      if (!panel) return { applied: false, detail: 'That task has no panel on the canvas' }
-      useCanvasStore.getState().removePanel(panel.id)
-      return { applied: true }
-    }
+    case 'close_task_panel':
+      return withTaskPanel(command.taskId, (panelId) => {
+        useCanvasStore.getState().removePanel(panelId)
+      })
 
+    // No task to name a project: the view change applies to the current one.
     case 'set_canvas_view': {
       const canvas = useCanvasStore.getState()
       if (command.mode === 'fit_all' && canvas.panels.length === 0) {
@@ -154,9 +195,11 @@ export function collectUiState(): UiStateSnapshot {
   const tasks = useTaskStore.getState()
   const canvas = useCanvasStore.getState()
   const selected = tasks.selectedTaskId
+  const projectId = getCurrentProjectId()
 
   return {
     view: ui.sidebarView,
+    projectId,
     modal: ui.activeModal,
     selectedTaskId: selected,
     selectedTaskTitle: tasks.tasks.find((task) => task.id === selected)?.title ?? null,
@@ -165,7 +208,8 @@ export function collectUiState(): UiStateSnapshot {
     settingsTab: ui.activeModal === 'settings' ? ui.settingsTab : null,
     // Agent approval requests are not surfaced in the renderer.
     waitingForYou: false,
-    visibleTaskIds: filterToProject(tasks.tasks, getCurrentProjectId()).slice(0, 50).map((task) => task.id),
+    visibleTaskIds: filterToProject(tasks.tasks, projectId).slice(0, 50).map((task) => task.id),
+    // The current project's canvas — the only one loaded in the window.
     canvas: {
       viewport: canvas.viewport,
       // Capped: a canvas can hold more panels than a tool reply should carry.

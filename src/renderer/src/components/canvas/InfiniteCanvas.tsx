@@ -4,6 +4,7 @@ import { getLiveViewport } from '@/stores/canvas-live-viewport'
 import { useUIStore } from '@/stores/ui-store'
 import { useTaskStore } from '@/stores/task-store'
 import { useDrawingStore } from '@/stores/drawing-store'
+import { projectIdOf, useProjectStore } from '@/stores/project-store'
 import { DrawingLayer } from './drawing/DrawingLayer'
 import { DrawingToolbar } from './drawing/DrawingToolbar'
 import { DrawingProperties } from './drawing/DrawingProperties'
@@ -50,19 +51,25 @@ export function InfiniteCanvas() {
   const drawingUiVisible =
     drawingTool !== 'select' || drawingSelectedCount > 0 || drawingEditingTextId !== null
 
+  // The canvas on screen is the current project's. Both stores also reload on
+  // a project switch by themselves; a load already under way for the same
+  // project is joined, not repeated.
+  const loadedProjectId = useCanvasStore((s) => s.projectId)
+  const currentProjectId = useProjectStore((s) => s.currentProjectId)
   useEffect(() => {
-    if (!isLoaded) {
-      // Figures load in parallel with the canvas (same settings table).
-      void loadDrawings()
-      loadCanvas().then(() => {
-        const container = containerRef.current
-        if (container && useCanvasStore.getState().panels.length > 0) {
-          const rect = container.getBoundingClientRect()
-          fitToContent(rect.width, rect.height)
-        }
-      })
-    }
-  }, [isLoaded, loadCanvas, fitToContent, loadDrawings])
+    if (isLoaded && loadedProjectId === currentProjectId) return
+    // Figures load in parallel with the canvas (same settings table).
+    void loadDrawings(currentProjectId)
+    loadCanvas(currentProjectId).then(() => {
+      const container = containerRef.current
+      const canvas = useCanvasStore.getState()
+      // Only the project that was asked for gets fitted.
+      if (container && canvas.projectId === currentProjectId && canvas.panels.length > 0) {
+        const rect = container.getBoundingClientRect()
+        fitToContent(rect.width, rect.height)
+      }
+    })
+  }, [isLoaded, loadedProjectId, currentProjectId, loadCanvas, fitToContent, loadDrawings])
 
   const [isPanning, setIsPanning] = useState(false)
   const panStartRef = useRef({ x: 0, y: 0 })
@@ -104,18 +111,36 @@ export function InfiniteCanvas() {
 
   const { statusHighlights, dismissHighlight } = useStatusHighlights(allTasks, panels)
 
-  // Consume a task sent here by "Open in Canvas".
+  // Consume a task sent here by "Open in Canvas". A task opens on its own
+  // project's canvas: when it belongs to another project the app switches
+  // there first, and the task waits here until that canvas has loaded.
   useEffect(() => {
     if (!canvasPendingTaskId) return
-    // Clear immediately to prevent double-fire on re-render
-    clearCanvasPendingTask()
 
     const task = allTasks.find((t) => t.id === canvasPendingTaskId)
-    if (!task) return
+    if (!task) {
+      clearCanvasPendingTask()
+      return
+    }
+
+    const taskProjectId = projectIdOf(task)
+    const projects = useProjectStore.getState()
+    if (projects.currentProjectId !== taskProjectId) {
+      projects.setCurrentProject(taskProjectId)
+      return // the stores reload; this effect runs again once they have
+    }
+    if (!isLoaded || loadedProjectId !== taskProjectId) return
+
+    // Clear only once acted on, so a project switch cannot lose the task.
+    clearCanvasPendingTask()
 
     // Read from the store directly to avoid a stale closure.
-    const { panels: currentPanels, viewport: vp } = useCanvasStore.getState()
-    if (currentPanels.some((p) => p.type === 'task' && p.refId === canvasPendingTaskId)) return
+    const { panels: currentPanels, viewport: vp, requestViewCommand } = useCanvasStore.getState()
+    if (currentPanels.some((p) => p.type === 'task' && p.refId === canvasPendingTaskId)) {
+      // Already here: bring the user to it rather than opening a second copy.
+      requestViewCommand({ kind: 'focus_task', taskId: canvasPendingTaskId })
+      return
+    }
 
     const rect = containerRef.current?.getBoundingClientRect()
     const center = rect ? containerToCanvas(rect.width / 2, rect.height / 2, vp) : null
@@ -129,7 +154,7 @@ export function InfiniteCanvas() {
       width: DEFAULT_PANEL_WIDTH,
       height: DEFAULT_PANEL_HEIGHT,
     })
-  }, [canvasPendingTaskId])
+  }, [canvasPendingTaskId, isLoaded, loadedProjectId])
 
   // `fitToContent` and `focusPanel` need the container size, which only this
   // component knows. A caller without an element (an agent tool, a voice

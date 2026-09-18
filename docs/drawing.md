@@ -165,7 +165,7 @@ interface DrawingState {
 }
 ```
 
-- **Persistence:** `drawing_state` key in the same SQLite settings table, 1000 ms debounce — identical `scheduleSave` pattern to `canvas-store`. Loaded in parallel with `loadCanvas()` in `InfiniteCanvas`'s mount effect.
+- **Persistence:** one `drawing_state:<projectId>` key per project in the same SQLite settings table, 1000 ms debounce — identical `scheduleSave` pattern to `canvas-store`. Loaded in parallel with `loadCanvas()` in `InfiniteCanvas`'s mount effect, and reloaded by the store itself when the current project changes. The pre-project `drawing_state` blob is copied into the Default project once (marker `drawing_state_migrated_to_projects`). See [canvas.md](./canvas.md) for the per-project rules the two stores share.
 - **Transient state** (activeTool, toolOptions, selection, editing, liveObject) is never persisted.
 - `setLiveObject` bails out on structural equality (same pattern as `setSnapGuides`/`setProximityEdge`).
 - `addObject` assigns `figure-${++counter}-${Date.now()}` IDs; `loadDrawings` restores the counter from persisted IDs (same as panels/edges).
@@ -212,7 +212,7 @@ Shown when `selectedIds.length > 0`: delete, duplicate, bring-to-front, and (for
    - **Ctrl/Cmd+V** on the canvas (not while editing text) pastes an image.
 3. **Keyboard shortcuts** — V/R/O/L/A/T/I tool switching in the existing keydown handler, guarded by `isInputFocused` like the other shortcuts.
 4. **Context menu** — `CanvasContextMenu` gains a "Draw" section (Rectangle, Ellipse, Line, Arrow, Text, Image) that sets `activeTool` and closes the menu.
-5. **Persistence** — `drawing_state` key, same debounced settings table; `loadDrawings()` called alongside `loadCanvas()`.
+5. **Persistence** — `drawing_state:<projectId>` key, same debounced settings table; `loadDrawings(projectId)` called alongside `loadCanvas(projectId)`, and again on a project switch.
 6. **Minimap / fitToContent** — v1: unchanged. Follow-up: include figure bounds in `fitToContent` and render figure dots on the minimap.
 7. **Mobile** — desktop only (canvas does not exist in `src/mobile`).
 

@@ -14,6 +14,7 @@ import {
   type UiCommand,
   type UiOpenTaskTarget
 } from '../../shared/ui-commands'
+import { DEFAULT_PROJECT_ID } from '../../shared/projects'
 import { listRegisteredTaskArtifacts } from '../artifacts'
 import { notifyRenderer, uiState } from './state'
 
@@ -35,9 +36,18 @@ function resolveOpenTaskTarget(): 'workspace' | 'canvas' | 'modal' {
   return 'workspace'
 }
 
-/** Refuses when that task has no panel, so a move cannot silently do nothing. */
-function requireCanvasPanel(taskId: string): { error: string } | null {
+/**
+ * Refuses when that task has no panel, so a move cannot silently do nothing.
+ *
+ * The window publishes only the current project's canvas. A task from another
+ * project cannot be checked here: the renderer switches to that project and
+ * acts on its canvas, so the command is passed through.
+ */
+function requireCanvasPanel(db: DatabaseManager, taskId: string): { error: string } | null {
   if (readCanvasPanels().some((panel) => panel.taskId === taskId)) return null
+  const task = db.getTask(taskId)
+  const shownProject = typeof uiState.projectId === 'string' ? uiState.projectId : null
+  if (task && shownProject && (task.project_id ?? DEFAULT_PROJECT_ID) !== shownProject) return null
   return { error: 'That task has no panel on the canvas. Open it there first.' }
 }
 
@@ -90,13 +100,13 @@ export async function handleUiRoute(db: DatabaseManager, route: string, params: 
       if (!Number.isFinite(x) || !Number.isFinite(y)) return { error: 'x and y must be numbers' }
       const taskId = String(params.task_id)
       if (!db.getTask(taskId)) return { error: 'Task not found' }
-      return requireCanvasPanel(taskId) ?? sendUiCommand({ kind: 'move_task_panel', taskId, x, y })
+      return requireCanvasPanel(db, taskId) ?? sendUiCommand({ kind: 'move_task_panel', taskId, x, y })
     }
 
     case '/close_task_panel': {
       if (!params.task_id) return { error: 'task_id is required' }
       const taskId = String(params.task_id)
-      return requireCanvasPanel(taskId) ?? sendUiCommand({ kind: 'close_task_panel', taskId })
+      return requireCanvasPanel(db, taskId) ?? sendUiCommand({ kind: 'close_task_panel', taskId })
     }
 
     case '/set_canvas_view': {

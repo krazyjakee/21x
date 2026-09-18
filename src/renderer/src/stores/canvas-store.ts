@@ -1,10 +1,25 @@
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { settingsApi } from '@/lib/ipc-client'
+import { migrateLegacySettingToDefaultProject, projectScopedKey } from '@/lib/project-scoped-setting'
+import { getCurrentProjectId, useProjectStore } from '@/stores/project-store'
+import { DEFAULT_PROJECT_ID } from '@shared/projects'
 
-const CANVAS_STORAGE_KEY = 'canvas_state'
+/**
+ * The canvas is kept once per project under `canvas_state:<projectId>`. The
+ * bare key is the pre-project blob, copied into Default on first load.
+ */
+export const CANVAS_STORAGE_KEY = 'canvas_state'
+export function canvasStorageKey(projectId: string): string {
+  return projectScopedKey(CANVAS_STORAGE_KEY, projectId)
+}
+
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 const SAVE_DEBOUNCE_MS = 1000
+/** Bumped per load so a slow load for the project left behind is dropped. */
+let loadSeq = 0
+/** The load under way, so a second request for the same project joins it. */
+let inflightLoad: { projectId: string; promise: Promise<void> } | null = null
 
 // Verbose browser/terminal edge-wiring logs are off by default (they trace a
 // multi-step async connection flow). Opt in at runtime with:
@@ -207,8 +222,16 @@ interface CanvasState {
   clearViewCommand: () => void
 
   // Persistence
+  /** The project this canvas belongs to — set as a load starts, before it lands. */
+  projectId: string
+  /** True once `projectId`'s canvas has been read from settings. */
   isLoaded: boolean
-  loadCanvas: () => Promise<void>
+  /**
+   * Loads a project's canvas (the current project when none is named). Any
+   * save still pending for the project left behind is written first, under
+   * that project's key.
+   */
+  loadCanvas: (projectId?: string) => Promise<void>
 
   // Viewport actions
   setViewport: (viewport: Partial<Viewport>) => void
@@ -248,20 +271,66 @@ interface CanvasState {
 let panelCounter = 0
 let edgeCounter = 0
 
+/**
+ * Writes the canvas under `projectId`'s key — unless the store has moved on.
+ * The id is captured when the save is scheduled, so a save that was meant for
+ * project A can never land under project B after a switch, and nothing is
+ * written while a project's canvas is still being read (that would clobber
+ * the saved canvas with the empty placeholder).
+ */
+function persistNow(projectId: string): void {
+  const state = useCanvasStore.getState()
+  if (state.projectId !== projectId || !state.isLoaded) return
+  const { viewport, panels, edges, nextZIndex } = state
+  const data: CanvasPersistedState = { viewport, panels, edges, nextZIndex }
+  settingsApi.set(canvasStorageKey(projectId), JSON.stringify(data)).catch((err) => {
+    console.error('[Canvas] Failed to persist state:', err)
+  })
+}
+
 /** Debounced persist of canvas state to SQLite settings table */
 function scheduleSave() {
+  const { projectId } = useCanvasStore.getState()
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
-    const { viewport, panels, edges, nextZIndex } = useCanvasStore.getState()
-    const data: CanvasPersistedState = { viewport, panels, edges, nextZIndex }
-    settingsApi.set(CANVAS_STORAGE_KEY, JSON.stringify(data)).catch((err) => {
-      console.error('[Canvas] Failed to persist state:', err)
-    })
+    saveTimer = null
+    persistNow(projectId)
   }, SAVE_DEBOUNCE_MS)
 }
 
+/** Writes a pending save now, before the state it describes is replaced. */
+function flushSave(): void {
+  if (!saveTimer) return
+  clearTimeout(saveTimer)
+  saveTimer = null
+  persistNow(useCanvasStore.getState().projectId)
+}
+
+const EMPTY_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 }
+
+/**
+ * Runs `fn` once the canvas of `projectId` is loaded — at once when it already
+ * is. Gives up quietly if the canvas moves to a different project first.
+ */
+export function whenCanvasLoaded(projectId: string, fn: () => void): void {
+  const now = useCanvasStore.getState()
+  if (now.isLoaded && now.projectId === projectId) {
+    fn()
+    return
+  }
+  const off = useCanvasStore.subscribe((state) => {
+    if (state.projectId !== projectId) {
+      off()
+      return
+    }
+    if (!state.isLoaded) return
+    off()
+    fn()
+  })
+}
+
 export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, get) => ({
-  viewport: { x: 0, y: 0, zoom: 1 },
+  viewport: EMPTY_VIEWPORT,
   panels: [],
   edges: [],
   nextZIndex: 1,
@@ -271,41 +340,72 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
   proximityEdge: null,
   liveDrag: null,
   pendingViewCommand: null,
+  projectId: DEFAULT_PROJECT_ID,
   isLoaded: false,
 
-  loadCanvas: async () => {
-    try {
-      const raw = await settingsApi.get(CANVAS_STORAGE_KEY)
-      if (!raw) {
+  loadCanvas: async (projectId = getCurrentProjectId()) => {
+    if (inflightLoad?.projectId === projectId) return inflightLoad.promise
+    const seq = ++loadSeq
+
+    // The project left behind keeps what it had: write its pending save under
+    // its own key before the state is replaced.
+    flushSave()
+    set({
+      projectId,
+      isLoaded: false,
+      viewport: EMPTY_VIEWPORT,
+      panels: [],
+      edges: [],
+      nextZIndex: 1,
+      draggingPanelId: null,
+      snapGuides: [],
+      connectingFromId: null,
+      proximityEdge: null,
+      liveDrag: null,
+    })
+
+    const promise = (async () => {
+      try {
+        await migrateLegacySettingToDefaultProject(CANVAS_STORAGE_KEY)
+        const raw = await settingsApi.get(canvasStorageKey(projectId))
+        // Another project was asked for while this one was being read.
+        if (seq !== loadSeq) return
+        if (!raw) {
+          set({ isLoaded: true })
+          return
+        }
+        const data = JSON.parse(raw) as CanvasPersistedState
+        // Restore counters from persisted panel/edge IDs
+        for (const p of data.panels) {
+          const match = p.id.match(/^panel-(\d+)/)
+          if (match) panelCounter = Math.max(panelCounter, parseInt(match[1], 10))
+        }
+        for (const e of data.edges) {
+          const match = e.id.match(/^edge-(\d+)/)
+          if (match) edgeCounter = Math.max(edgeCounter, parseInt(match[1], 10))
+        }
+        // Application panels embedded hosted workflows, which no longer exist.
+        // Drop any a previous release saved, along with their edges.
+        const panels = data.panels.filter((p) => (p.type as string) !== 'app')
+        const panelIds = new Set(panels.map((p) => p.id))
+        const edges = data.edges.filter((e) => panelIds.has(e.fromPanelId) && panelIds.has(e.toPanelId))
+        set({
+          viewport: data.viewport,
+          panels,
+          edges,
+          nextZIndex: data.nextZIndex,
+          isLoaded: true,
+        })
+      } catch (err) {
+        if (seq !== loadSeq) return
+        console.error('[Canvas] Failed to load persisted state:', err)
         set({ isLoaded: true })
-        return
+      } finally {
+        if (inflightLoad?.projectId === projectId && seq === loadSeq) inflightLoad = null
       }
-      const data = JSON.parse(raw) as CanvasPersistedState
-      // Restore counters from persisted panel/edge IDs
-      for (const p of data.panels) {
-        const match = p.id.match(/^panel-(\d+)/)
-        if (match) panelCounter = Math.max(panelCounter, parseInt(match[1], 10))
-      }
-      for (const e of data.edges) {
-        const match = e.id.match(/^edge-(\d+)/)
-        if (match) edgeCounter = Math.max(edgeCounter, parseInt(match[1], 10))
-      }
-      // Application panels embedded hosted workflows, which no longer exist.
-      // Drop any a previous release saved, along with their edges.
-      const panels = data.panels.filter((p) => (p.type as string) !== 'app')
-      const panelIds = new Set(panels.map((p) => p.id))
-      const edges = data.edges.filter((e) => panelIds.has(e.fromPanelId) && panelIds.has(e.toPanelId))
-      set({
-        viewport: data.viewport,
-        panels,
-        edges,
-        nextZIndex: data.nextZIndex,
-        isLoaded: true,
-      })
-    } catch (err) {
-      console.error('[Canvas] Failed to load persisted state:', err)
-      set({ isLoaded: true })
-    }
+    })()
+    inflightLoad = { projectId, promise }
+    return promise
   },
 
   setViewport: (partial) => {
@@ -524,6 +624,14 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
     set({ proximityEdge: edge })
   }
 })))
+
+// The canvas follows the current project whether or not it is on screen: an
+// agent tool or the published UI state must never see the previous project's
+// panels after a switch.
+useProjectStore.subscribe((state, previous) => {
+  if (state.currentProjectId === previous.currentProjectId) return
+  void useCanvasStore.getState().loadCanvas(state.currentProjectId)
+})
 
 // ── Snapping utility ──────────────────────────────────────
 

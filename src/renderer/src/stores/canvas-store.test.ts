@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   useCanvasStore,
   MIN_ZOOM,
@@ -12,6 +12,7 @@ import {
 } from './canvas-store'
 import type { CanvasPanelData } from './canvas-store'
 import { settingsApi } from '@/lib/ipc-client'
+import { useProjectStore } from './project-store'
 
 // Mock settingsApi to prevent actual IPC calls during tests
 vi.mock('@/lib/ipc-client', () => ({
@@ -20,8 +21,33 @@ vi.mock('@/lib/ipc-client', () => ({
     set: vi.fn().mockResolvedValue(undefined),
     getAll: vi.fn().mockResolvedValue({}),
   },
+  projectApi: {
+    getAll: vi.fn().mockResolvedValue([]),
+  },
   onTaskDeleted: vi.fn(() => vi.fn()),
 }))
+
+/**
+ * A settings table the store can read back from — persistence is the point
+ * of these tests, and a restart is "empty the store, load again from here".
+ */
+function fakeSettings(seed: Record<string, string> = {}): Map<string, string> {
+  const table = new Map(Object.entries(seed))
+  vi.mocked(settingsApi.get).mockImplementation(async (key) => table.get(key) ?? null)
+  vi.mocked(settingsApi.set).mockImplementation(async (key, value) => {
+    table.set(key, value)
+  })
+  return table
+}
+
+const savedPanel = (id: string, type: string, refId?: string) =>
+  ({ id, type, refId, title: id, x: 0, y: 0, width: 400, height: 300, zIndex: 1 })
+
+const savedCanvas = (panels: unknown[], edges: unknown[] = []) =>
+  JSON.stringify({ viewport: { x: 0, y: 0, zoom: 1 }, panels, edges, nextZIndex: panels.length + 1 })
+
+const restart = () =>
+  useCanvasStore.setState({ panels: [], edges: [], nextZIndex: 1, isLoaded: false, projectId: 'default' })
 
 describe('canvas-store', () => {
   beforeEach(() => {
@@ -41,23 +67,148 @@ describe('canvas-store', () => {
   // ── Persistence ───────────────────────────────────────────
 
   describe('loadCanvas', () => {
-    it('drops application panels saved by older releases, with their edges', async () => {
-      const panel = (id: string, type: string) => ({ id, type, title: id, x: 0, y: 0, width: 400, height: 300, zIndex: 1 })
-      vi.mocked(settingsApi.get).mockResolvedValueOnce(JSON.stringify({
-        viewport: { x: 0, y: 0, zoom: 1 },
-        panels: [panel('panel-1', 'task'), panel('panel-2', 'app'), panel('panel-3', 'webpage')],
-        edges: [
-          { id: 'edge-1', fromPanelId: 'panel-1', toPanelId: 'panel-2' },
-          { id: 'edge-2', fromPanelId: 'panel-1', toPanelId: 'panel-3' },
-        ],
-        nextZIndex: 4,
-      }))
+    beforeEach(() => {
+      vi.mocked(settingsApi.get).mockReset()
+      vi.mocked(settingsApi.set).mockReset()
+    })
 
-      await useCanvasStore.getState().loadCanvas()
+    afterEach(() => {
+      vi.useRealTimers()
+      useProjectStore.setState({ currentProjectId: 'default' })
+      vi.mocked(settingsApi.get).mockResolvedValue(null)
+      vi.mocked(settingsApi.set).mockResolvedValue(undefined)
+    })
+
+    it('drops application panels saved by older releases, with their edges', async () => {
+      fakeSettings({
+        'canvas_state:default': savedCanvas(
+          [savedPanel('panel-1', 'task'), savedPanel('panel-2', 'app'), savedPanel('panel-3', 'webpage')],
+          [
+            { id: 'edge-1', fromPanelId: 'panel-1', toPanelId: 'panel-2' },
+            { id: 'edge-2', fromPanelId: 'panel-1', toPanelId: 'panel-3' },
+          ]
+        ),
+      })
+
+      await useCanvasStore.getState().loadCanvas('default')
 
       const { panels, edges } = useCanvasStore.getState()
       expect(panels.map((p) => p.id)).toEqual(['panel-1', 'panel-3'])
       expect(edges.map((e) => e.id)).toEqual(['edge-2'])
+    })
+
+    it('keeps two projects\' canvases — panels, browser panels and their edges — apart across a restart', async () => {
+      vi.useFakeTimers()
+      const table = fakeSettings()
+      const canvas = useCanvasStore.getState()
+
+      await canvas.loadCanvas('p1')
+      canvas.addPanel({ type: 'task', refId: 't1', title: 'Task 1', x: 0, y: 0, width: 100, height: 100 })
+      vi.advanceTimersByTime(1000)
+
+      await canvas.loadCanvas('p2')
+      expect(useCanvasStore.getState().panels).toEqual([])
+      // No refId on purpose: a browser edge to a task with one tells the
+      // task's agent about it, and no agent is running here.
+      const taskId = canvas.addPanel({ type: 'task', title: 'Task 2', x: 0, y: 0, width: 100, height: 100 })
+      const browserId = canvas.addPanel({ type: 'browser', title: 'Browser', x: 200, y: 0, width: 100, height: 100 })
+      canvas.addEdge(taskId, browserId, 'browser')
+      vi.advanceTimersByTime(1000)
+
+      expect(table.has('canvas_state:p1')).toBe(true)
+      expect(table.has('canvas_state:p2')).toBe(true)
+
+      restart()
+      await useCanvasStore.getState().loadCanvas('p1')
+      expect(useCanvasStore.getState().panels.map((p) => p.refId)).toEqual(['t1'])
+      expect(useCanvasStore.getState().edges).toEqual([])
+
+      await useCanvasStore.getState().loadCanvas('p2')
+      const p2 = useCanvasStore.getState()
+      expect(p2.panels.map((p) => p.type)).toEqual(['task', 'browser'])
+      expect(p2.edges).toEqual([expect.objectContaining({ fromPanelId: taskId, toPanelId: browserId, edgeType: 'browser' })])
+    })
+
+    it('moves the pre-project canvas into Default once, and never again', async () => {
+      const table = fakeSettings({ canvas_state: savedCanvas([savedPanel('panel-1', 'task', 'old')]) })
+
+      await useCanvasStore.getState().loadCanvas('default')
+      expect(useCanvasStore.getState().panels.map((p) => p.refId)).toEqual(['old'])
+      expect(table.get('canvas_state:default')).toBe(table.get('canvas_state'))
+      expect(table.get('canvas_state_migrated_to_projects')).toBe('1')
+
+      // The user clears the Default canvas; the old blob must not come back.
+      table.set('canvas_state:default', savedCanvas([]))
+      restart()
+      await useCanvasStore.getState().loadCanvas('default')
+      expect(useCanvasStore.getState().panels).toEqual([])
+
+      // Nor does it leak into another project.
+      await useCanvasStore.getState().loadCanvas('p1')
+      expect(useCanvasStore.getState().panels).toEqual([])
+    })
+
+    it('writes a save still pending for the project left behind under that project, never the next', async () => {
+      vi.useFakeTimers()
+      const table = fakeSettings()
+      await useCanvasStore.getState().loadCanvas('p1')
+      useCanvasStore.getState().addPanel({ type: 'task', refId: 't1', title: 'Task 1', x: 0, y: 0, width: 100, height: 100 })
+
+      // The project switches while the debounced save is still pending.
+      useProjectStore.setState({ currentProjectId: 'p2' })
+      expect(useCanvasStore.getState().projectId).toBe('p2')
+      vi.advanceTimersByTime(1000)
+      await vi.waitFor(() => expect(useCanvasStore.getState().isLoaded).toBe(true))
+
+      expect(JSON.parse(table.get('canvas_state:p1')!).panels.map((p: { refId: string }) => p.refId)).toEqual(['t1'])
+      expect(table.has('canvas_state:p2')).toBe(false)
+    })
+
+    it('does not write over a project\'s saved canvas while it is still being read', async () => {
+      vi.useFakeTimers()
+      const saved = savedCanvas([savedPanel('panel-1', 'task', 'kept')])
+      const table = fakeSettings({ 'canvas_state:p2': saved })
+      let release!: (value: string | null) => void
+      vi.mocked(settingsApi.get).mockImplementation((key) =>
+        key === 'canvas_state:p2'
+          ? new Promise<string | null>((resolve) => { release = resolve })
+          : Promise.resolve(table.get(key) ?? null)
+      )
+
+      const loading = useCanvasStore.getState().loadCanvas('p2')
+      await vi.waitFor(() => expect(release).toBeDefined())
+      // An edit lands while the read is in flight — it must not be persisted
+      // as the whole canvas, which is still the empty placeholder.
+      useCanvasStore.getState().addPanel({ type: 'task', refId: 'early', title: 'Early', x: 0, y: 0, width: 100, height: 100 })
+      vi.advanceTimersByTime(1000)
+      expect(table.get('canvas_state:p2')).toBe(saved)
+
+      release(saved)
+      await loading
+      expect(useCanvasStore.getState().panels.map((p) => p.refId)).toEqual(['kept'])
+    })
+
+    it('drops a slower load for the project left behind', async () => {
+      const table = fakeSettings({
+        'canvas_state:p1': savedCanvas([savedPanel('panel-1', 'task', 'one')]),
+        'canvas_state:p2': savedCanvas([savedPanel('panel-2', 'task', 'two')]),
+      })
+      let releaseP1!: (value: string | null) => void
+      vi.mocked(settingsApi.get).mockImplementation((key) =>
+        key === 'canvas_state:p1'
+          ? new Promise<string | null>((resolve) => { releaseP1 = resolve })
+          : Promise.resolve(table.get(key) ?? null)
+      )
+
+      const first = useCanvasStore.getState().loadCanvas('p1')
+      await useCanvasStore.getState().loadCanvas('p2')
+      await vi.waitFor(() => expect(releaseP1).toBeDefined())
+      releaseP1(table.get('canvas_state:p1')!)
+      await first
+
+      const state = useCanvasStore.getState()
+      expect(state.projectId).toBe('p2')
+      expect(state.panels.map((p) => p.refId)).toEqual(['two'])
     })
   })
 

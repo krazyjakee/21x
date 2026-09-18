@@ -64,6 +64,8 @@ export interface UiCanvasSummary {
 /** The published screen. `get_ui_state` returns this plus `available`. */
 export interface UiStateSnapshot {
   view: string
+  /** The project on screen; `canvas` below is that project's canvas. */
+  projectId: string
   modal: string | null
   selectedTaskId: string | null
   selectedTaskTitle: string | null
