@@ -256,7 +256,7 @@ See [SECURITY.md](./SECURITY.md) for reporting vulnerabilities.
 - **Windows secret injection is untested.** Secrets reach agent shells through a PowerShell wrapper on Windows (`src/main/secret-broker.ts`); the wrapper tests are skipped on Windows.
 - **Windows process cleanup is coarse.** On quit, leaked task-management MCP processes are killed with `taskkill` by image name and window title rather than by process ancestry as on macOS/Linux.
 - **Starting OpenCode kills stray OpenCode servers.** Before starting its server the OpenCode adapter kills whatever listens on port 4096 (macOS/Linux) or every `opencode.exe` (Windows).
-- **Windows installer asks for admin.** The NSIS build sets `requestedExecutionLevel: requireAdministrator`.
+- **Windows installer asks for admin.** The NSIS installer runs elevated; the installed app and its agents run unelevated (`asInvoker`). Installing Node.js or Git from the app shows its own UAC prompt.
 
 ## License
 

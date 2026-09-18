@@ -152,7 +152,7 @@
         }
       ],
       "icon": "resources/icon.ico",
-      "requestedExecutionLevel": "requireAdministrator"
+      "requestedExecutionLevel": "asInvoker"
     },
     "linux": {
       "target": [

@@ -121,7 +121,7 @@ pnpm build:win
 
 Output: `dist/20x Setup {version}.exe` (x64 only; electron-builder's default NSIS name, since `win` sets no `artifactName`).
 
-The NSIS installer requires administrator elevation (`requestedExecutionLevel: requireAdministrator` in `package.json`) and installs Python if none is found.
+The NSIS installer runs elevated (`RequestExecutionLevel admin` in `resources/installer.nsh`) and installs Python if none is found. The installed app runs with the user's normal privileges (`requestedExecutionLevel: asInvoker` in `package.json`), so agents, shells and MCP servers are not elevated. Dependency installers that need admin rights (Node.js MSI, Git for Windows) ask for elevation on their own through a UAC prompt.
 
 ## Local data paths
 
