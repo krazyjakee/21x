@@ -21,6 +21,8 @@ import { join } from 'path'
 import { app } from 'electron'
 import type { DatabaseManager } from './database'
 
+const SHELL_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
+
 let server: HttpServer | null = null
 let port: number | null = null
 let dbRef: DatabaseManager | null = null
@@ -70,9 +72,14 @@ export function startSecretBroker(db: DatabaseManager): Promise<number> {
         const secrets = dbRef.getSecretsWithValues(session.secretIds)
         console.log(`[SecretBroker] Found ${secrets.length} secret(s): [${secrets.map(s => `${s.env_var_name}(${s.value.length} chars)`).join(', ')}]`)
 
-        // Return shell export statements
-        // Single-quote values and escape embedded single quotes
+        // The wrapper evals this body, so names are restricted to shell
+        // identifiers and values are single-quoted with embedded quotes escaped.
         const exports = secrets
+          .filter(s => {
+            if (SHELL_IDENTIFIER.test(s.env_var_name)) return true
+            console.warn(`[SecretBroker] Skipping secret with invalid variable name: ${JSON.stringify(s.env_var_name)}`)
+            return false
+          })
           .map(s => `export ${s.env_var_name}='${s.value.replace(/'/g, "'\\''")}'`)
           .join('\n')
 
@@ -138,18 +145,19 @@ _real_shell="\${_20X_REAL_SHELL:-/bin/bash}"
 
 # Fetch secrets from broker and export them
 if [ -n "\$_20X_SB_PORT" ] && [ -n "\$_20X_SB_TOKEN" ]; then
-  _20x_http_code=\$(curl -sf -o /tmp/_20x_secrets_body -w "%{http_code}" "http://127.0.0.1:\${_20X_SB_PORT}/secrets/export?token=\${_20X_SB_TOKEN}" 2>/dev/null)
-  _20x_secrets=\$(cat /tmp/_20x_secrets_body 2>/dev/null)
-  rm -f /tmp/_20x_secrets_body
+  # Keep the response in memory: a shared temp file would be readable by other
+  # users and would race between concurrent agent sessions.
+  _20x_secrets=\$(curl -sf --max-time 5 "http://127.0.0.1:\${_20X_SB_PORT}/secrets/export?token=\${_20X_SB_TOKEN}" 2>/dev/null)
+  _20x_curl_exit=\$?
 
-  # Debug logging
-  echo "[secret-shell \$(date '+%H:%M:%S')] port=\$_20X_SB_PORT http_code=\$_20x_http_code body_len=\${#_20x_secrets} args=\$*" >> "${debugLog}"
+  # Command arguments are not logged; they can contain secrets.
+  echo "[secret-shell \$(date '+%H:%M:%S')] port=\$_20X_SB_PORT curl_exit=\$_20x_curl_exit body_len=\${#_20x_secrets}" >> "${debugLog}"
 
   if [ -n "\$_20x_secrets" ]; then
     eval "\$_20x_secrets"
   fi
   # Clean up broker vars so they don't leak into command output
-  unset _20X_SB_PORT _20X_SB_TOKEN _20X_REAL_SHELL _20x_secrets _20x_http_code
+  unset _20X_SB_PORT _20X_SB_TOKEN _20X_REAL_SHELL _20x_secrets _20x_curl_exit
 fi
 
 # Execute the real shell with original arguments
@@ -181,16 +189,16 @@ if ($env:_20X_SB_PORT -and $env:_20X_SB_TOKEN) {
         $response = Invoke-WebRequest -Uri "http://127.0.0.1:$($env:_20X_SB_PORT)/secrets/export?token=$($env:_20X_SB_TOKEN)" -UseBasicParsing -TimeoutSec 5
         $secrets = $response.Content
 
-        # Debug logging
         $timestamp = Get-Date -Format "HH:mm:ss"
-        Add-Content -Path "${debugLog}" -Value "[secret-shell $timestamp] port=$($env:_20X_SB_PORT) status=$($response.StatusCode) body_len=$($secrets.Length) args=$args"
+        Add-Content -Path "${debugLog}" -Value "[secret-shell $timestamp] port=$($env:_20X_SB_PORT) status=$($response.StatusCode) body_len=$($secrets.Length)"
 
         if ($secrets) {
             # Parse KEY=VALUE lines and set as environment variables
             $secrets -split "\\n" | ForEach-Object {
                 if ($_ -match "^export\\s+([^=]+)=(.*)$") {
                     $key = $Matches[1]
-                    $val = $Matches[2] -replace "^['\"]|['\"]$", ""
+                    # Values arrive single-quoted with ' written as '\\''
+                    $val = ($Matches[2] -replace "^'|'$", "") -replace "'\\\\''", "'"
                     [Environment]::SetEnvironmentVariable($key, $val, "Process")
                 }
             }

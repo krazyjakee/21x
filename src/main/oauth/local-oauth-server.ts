@@ -133,129 +133,13 @@ export class LocalOAuthServer {
     }
   }
 
-  /**
-   * Send success page to browser
-   */
   private sendSuccessPage(res: ServerResponse): void {
-    const html = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Authentication Successful</title>
-          <style>
-            body {
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              height: 100vh;
-              margin: 0;
-              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-              color: white;
-            }
-            .container {
-              text-align: center;
-              background: rgba(255, 255, 255, 0.1);
-              padding: 3rem;
-              border-radius: 1rem;
-              backdrop-filter: blur(10px);
-            }
-            .icon {
-              font-size: 4rem;
-              margin-bottom: 1rem;
-            }
-            h1 {
-              margin: 0 0 0.5rem 0;
-              font-size: 2rem;
-            }
-            p {
-              margin: 0;
-              opacity: 0.9;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="icon">✓</div>
-            <h1>Authentication Successful!</h1>
-            <p>You can close this window and return to the app.</p>
-          </div>
-        </body>
-      </html>
-    `
-    res.writeHead(200, { 'Content-Type': 'text/html' })
-    res.end(html)
+    sendPage(res, 'Authentication successful', 'You can close this window and return to the app.')
   }
 
-  /**
-   * Send error page to browser
-   */
   private sendErrorPage(res: ServerResponse, error: string, description: string | null): void {
-    const html = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Authentication Failed</title>
-          <style>
-            body {
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              height: 100vh;
-              margin: 0;
-              background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-              color: white;
-            }
-            .container {
-              text-align: center;
-              background: rgba(255, 255, 255, 0.1);
-              padding: 3rem;
-              border-radius: 1rem;
-              backdrop-filter: blur(10px);
-              max-width: 500px;
-            }
-            .icon {
-              font-size: 4rem;
-              margin-bottom: 1rem;
-            }
-            h1 {
-              margin: 0 0 0.5rem 0;
-              font-size: 2rem;
-            }
-            p {
-              margin: 0.5rem 0 0 0;
-              opacity: 0.9;
-            }
-            .error-details {
-              margin-top: 1rem;
-              padding: 1rem;
-              background: rgba(0, 0, 0, 0.2);
-              border-radius: 0.5rem;
-              font-size: 0.875rem;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="icon">✗</div>
-            <h1>Authentication Failed</h1>
-            <p>There was a problem authenticating with the service.</p>
-            <div class="error-details">
-              <strong>Error:</strong> ${error}<br>
-              ${description ? `<strong>Details:</strong> ${description}` : ''}
-            </div>
-            <p style="margin-top: 1.5rem;">Please close this window and try again.</p>
-          </div>
-        </body>
-      </html>
-    `
-    res.writeHead(200, { 'Content-Type': 'text/html' })
-    res.end(html)
+    const details = description ? `${error}: ${description}` : error
+    sendPage(res, 'Authentication failed', 'Close this window and try again.', details)
   }
 
   /**
@@ -271,11 +155,36 @@ export class LocalOAuthServer {
     this.resolver = null
     this.rejecter = null
   }
+}
 
-  /**
-   * Get the current redirect URI
-   */
-  getRedirectUri(): string {
-    return `http://localhost:${this.port}/callback`
-  }
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+// The error text comes from the callback query string, so it is escaped
+// before it reaches the page.
+function sendPage(res: ServerResponse, title: string, message: string, details?: string): void {
+  const html = `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>${escapeHtml(title)}</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 32rem; margin: 20vh auto; padding: 0 1.5rem; color: #1f1f23; }
+      pre { white-space: pre-wrap; background: #f2f2ef; padding: 0.75rem; border-radius: 6px; font-size: 0.875rem; }
+    </style>
+  </head>
+  <body>
+    <h1>${escapeHtml(title)}</h1>
+    <p>${escapeHtml(message)}</p>
+    ${details ? `<pre>${escapeHtml(details)}</pre>` : ''}
+  </body>
+</html>`
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+  res.end(html)
 }
