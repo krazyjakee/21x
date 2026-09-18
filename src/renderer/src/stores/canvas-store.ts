@@ -31,7 +31,7 @@ function releaseBrokerPanel(panelId: string): void {
 
 // ── Panel types ────────────────────────────────────────────
 
-export type CanvasPanelType = 'task' | 'transcript' | 'app' | 'webpage' | 'terminal' | 'browser' | 'placeholder'
+export type CanvasPanelType = 'task' | 'transcript' | 'webpage' | 'terminal' | 'browser' | 'placeholder'
 
 export interface CanvasPanelData {
   id: string
@@ -294,10 +294,15 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
         const match = e.id.match(/^edge-(\d+)/)
         if (match) edgeCounter = Math.max(edgeCounter, parseInt(match[1], 10))
       }
+      // Application panels embedded hosted workflows, which no longer exist.
+      // Drop any a previous release saved, along with their edges.
+      const panels = data.panels.filter((p) => (p.type as string) !== 'app')
+      const panelIds = new Set(panels.map((p) => p.id))
+      const edges = data.edges.filter((e) => panelIds.has(e.fromPanelId) && panelIds.has(e.toPanelId))
       set({
         viewport: data.viewport,
-        panels: data.panels,
-        edges: data.edges,
+        panels,
+        edges,
         nextZIndex: data.nextZIndex,
         isLoaded: true,
       })

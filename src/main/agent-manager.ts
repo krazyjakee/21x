@@ -1,5 +1,4 @@
 import { finishSessionFeedback, updateTaskFromUser } from './session-feedback'
-import { serverTaskSnapshot } from './workflo-task-sync'
 import { EventEmitter } from 'events'
 import { spawn } from 'child_process'
 import { join } from 'path'
@@ -7,7 +6,7 @@ import { existsSync, copyFileSync, mkdirSync, readFileSync, readdirSync, statSyn
 import { mkdir, writeFile } from 'fs/promises'
 import { Notification, powerSaveBlocker } from 'electron'
 import type { BrowserWindow } from 'electron'
-import type { DatabaseManager, AgentMcpServerEntry, McpServerRecord, McpServerSource, OutputFieldRecord, SecretRecord, SkillRecord, TaskRecord } from './database'
+import type { DatabaseManager, AgentMcpServerEntry, McpServerRecord, OutputFieldRecord, SecretRecord, SkillRecord, TaskRecord } from './database'
 import { TaskStatus, SessionStatus } from '../shared/constants'
 import type { WorktreeManager } from './worktree-manager'
 import type { GitHubManager } from './github-manager'
@@ -19,12 +18,11 @@ import { CodexAppServerAdapter } from './adapters/codex-app-server-adapter'
 import { PiAdapter } from './adapters/pi-adapter'
 import type { CodingAgentAdapter, SessionConfig, MessagePart, SessionMessage, McpServerConfig } from './adapters/coding-agent-adapter'
 import { SessionStatusType, MessagePartType, MessageRole } from './adapters/coding-agent-adapter'
-import { getTaskApiPort, waitForTaskApiServer } from './task-api-server'
+import { getTaskApiEnv, getTaskApiPort, getTaskApiToken, waitForTaskApiServer } from './task-api-server'
 import { buildTaskMcpUrl } from './task-mcp-endpoint'
 import { guardChildStreams, writeToChildStdin } from './child-stream-guards'
 import { randomUUID } from 'crypto'
 import { registerSecretSession, unregisterSecretSession, getSecretBrokerPort, writeSecretShellWrapper } from './secret-broker'
-import { registerMcpProxyTarget, getMcpAuthProxyPort } from './mcp-auth-proxy'
 import { analytics } from './analytics-service'
 import { inspectTaskArtifact } from './artifacts'
 import { ArtifactType, pullRequestUrlFromTool, type Artifact } from '../shared/artifacts'
@@ -47,29 +45,6 @@ For every standalone user-facing deliverable, first call \`create_artifact\` on 
 
 // Default OpenCode server URL (matches database default)
 const DEFAULT_SERVER_URL = 'http://localhost:4096'
-const WORKFLO_MCP_DEV_PATH = '/api/mcp/dev/mcp'
-
-/**
- * Agent backends do not all pass the MCP `initialize.instructions` field to
- * the model. Put the same discovery rule in the workspace context so it is
- * present for Codex, Claude Code, OpenCode, Pi, and ACP sessions even when the
- * server's cached tool list is empty.
- */
-const WORKFLO_WORKSPACE_DISCOVERY_GUIDANCE = `### Organisation Workspace discovery
-
-The Organisation Workspace is the source of truth for this tenant's live data. When a request can depend on the tenant's workflows, connected apps, tables, reports, or Business Context, do a short read-only discovery pass before you plan or answer. Do not wait for the user to name a tool.
-
-First inspect the tools that this session exposes. Permissions, toolset settings, and connected services can hide a category or an individual tool. The names below are possible routes, not a guaranteed tool list. Use a route only when its tools are available:
-
-- Workflows, when available: \`workflow_list\`, then \`workflow_get\` when one is relevant.
-- Connected apps, when available: \`integrations_list\`, then \`integration_mcp_tools_list\` before a permitted \`integration_mcp_tool_call\`.
-- Tables, when available: \`table_list\`, then \`table_schema\` and \`table_query\` or \`table_sql\`.
-- Reports and analytics, when available: \`report_schema\`, then \`report_schema_detail\` and \`report_query\`.
-- Business Context, when available: \`datastore_list\` and \`datastore_query\`, or \`datastore_discover\` and \`datastore_get_document\` for provisioned reference documents.
-
-These first calls inspect available data. Use execute or write tools only when the task requires a change. Treat an empty successful result as useful evidence. A missing tool or a permission error is not evidence that the data does not exist. Report the access limit clearly.
-
-`
 
 interface TodoItem {
   content: string
@@ -106,75 +81,12 @@ interface AgentSession {
   lastActivityAt?: number
 }
 
-function normalizeUrlPath(pathname: string): string {
-  return pathname.replace(/\/+$/, '') || '/'
-}
-
-function isWorkfloMcpDevServerUrl(serverUrl?: string): boolean {
-  if (!serverUrl) return false
-
-  try {
-    return normalizeUrlPath(new URL(serverUrl).pathname) === WORKFLO_MCP_DEV_PATH
-  } catch {
-    return false
-  }
-}
-
-function hasUserSuppliedAuthHeader(headers?: Record<string, string>): boolean {
-  if (!headers) return false
-  for (const key of Object.keys(headers)) {
-    if (key.toLowerCase() === 'authorization' && headers[key]) return true
-  }
-  return false
-}
-
 function isCodexAppServerAdapter(adapter: CodingAgentAdapter): boolean {
   return adapter instanceof CodexAppServerAdapter || adapter.constructor?.name === 'CodexAppServerAdapter'
 }
 
 function getAgentProvider(agent: { config?: { coding_agent?: string } } | null | undefined): string {
   return agent?.config?.coding_agent || CodingAgentType.OPENCODE
-}
-
-/**
- * The MCP server that 20x should auto-manage (URL canonicalisation + JWT
- * injection via mcp-auth-proxy) is exactly: an enterprise-sourced row whose
- * URL points at the Workflo MCP Dev endpoint.
- *
- * Identification is by the `source` column (set by EnterpriseSyncManager
- * when the row is created — see enterprise-sync.ts and database.ts). This
- * is deterministic and immune to user-chosen names, name collisions, or
- * future renames of the canonical entry.
- *
- * The header-based defence-in-depth (`hasUserSuppliedAuthHeader`) is kept
- * for the unusual case where a row gets mislabelled as 'enterprise' but
- * the user has manually pasted in their own credential — we still honour
- * their explicit intent.
- */
-function isEnterpriseMcpDevServer(mcpServer: {
-  source?: McpServerSource
-  url?: string | null
-  headers?: Record<string, string>
-}): boolean {
-  if (mcpServer.source !== 'enterprise') return false
-  if (hasUserSuppliedAuthHeader(mcpServer.headers)) return false
-  return isWorkfloMcpDevServerUrl(mcpServer.url ?? undefined)
-}
-
-function resolveEnterpriseMcpDevUrl(currentUrl: string | undefined, enterpriseApiUrl: string): string {
-  if (!currentUrl) return `${enterpriseApiUrl}${WORKFLO_MCP_DEV_PATH}`
-
-  try {
-    const current = new URL(currentUrl)
-    const enterprise = new URL(enterpriseApiUrl)
-    if (normalizeUrlPath(current.pathname) === WORKFLO_MCP_DEV_PATH && current.origin !== enterprise.origin) {
-      return `${enterpriseApiUrl}${WORKFLO_MCP_DEV_PATH}`
-    }
-  } catch {
-    return currentUrl
-  }
-
-  return currentUrl
 }
 
 /** Entry tracked by the centralized polling coordinator */
@@ -229,14 +141,6 @@ interface DocumentedMcpServer {
   injected?: McpServerConfig
 }
 
-function hasWorkfloMcpDevServer(entries: DocumentedMcpServer[]): boolean {
-  return entries.some(({ server, injected }) => {
-    if (isWorkfloMcpDevServerUrl(server.url ?? undefined)) return true
-    if (injected?.type !== 'http' && injected?.type !== 'sse') return false
-    return isWorkfloMcpDevServerUrl(injected.url)
-  })
-}
-
 export class AgentManager extends EventEmitter {
   private sessions: Map<string, AgentSession> = new Map()
   /** Maps old (temp) session IDs to their re-keyed (real) IDs so that
@@ -249,9 +153,7 @@ export class AgentManager extends EventEmitter {
   private githubManager: GitHubManager | null = null
   private gitlabManager: GitLabManager | null = null
   private oauthManager: import('./oauth/oauth-manager').OAuthManager | null = null
-  private enterpriseAuth: import('./enterprise-auth').EnterpriseAuth | null = null
   private externalListeners: Array<(channel: string, data: unknown) => void> = []
-  private enterpriseStateSync: import('./enterprise-state-sync').EnterpriseStateSync | null = null
 
   // ── Centralized Polling Coordinator ──
   // Instead of N independent setTimeout loops (one per session),
@@ -549,23 +451,7 @@ export class AgentManager extends EventEmitter {
   }
 
   /**
-   * Set the enterprise state sync manager for recording agent events.
-   * Called when enterprise auth succeeds.
-   */
-  setEnterpriseStateSync(stateSync: import('./enterprise-state-sync').EnterpriseStateSync | null): void {
-    this.enterpriseStateSync = stateSync
-  }
-
-  /**
-   * Set the enterprise auth instance for injecting JWT tokens into MCP Dev Server requests.
-   * Called when enterprise auth succeeds.
-   */
-  setEnterpriseAuth(auth: import('./enterprise-auth').EnterpriseAuth | null): void {
-    this.enterpriseAuth = auth
-  }
-
-  /**
-   * Set the sync manager for executing enterprise actions (e.g. completing tasks on Workflo).
+   * Set the sync manager for executing task source actions (e.g. completing tasks at the source).
    * Called after both AgentManager and SyncManager are created.
    */
   private syncManager?: import('./sync-manager').SyncManager
@@ -727,7 +613,7 @@ export class AgentManager extends EventEmitter {
         break
       case CodingAgentType.PI:
         console.log('[AgentManager] Creating new PiAdapter')
-        adapter = new PiAdapter(this.db)
+        adapter = new PiAdapter()
         break
       default:
         console.warn(`[AgentManager] Unknown coding agent type: ${backendType}`)
@@ -782,35 +668,9 @@ export class AgentManager extends EventEmitter {
           }
         }
 
-        // Inject enterprise JWT for Workflo MCP Dev Server — route through auth proxy
-        let finalUrl = mcpServer.url
-        if (
-          this.enterpriseAuth &&
-          isEnterpriseMcpDevServer({ source: mcpServer.source, url: mcpServer.url, headers: finalHeaders })
-        ) {
-          finalUrl = resolveEnterpriseMcpDevUrl(mcpServer.url, this.enterpriseAuth.getApiUrl())
-          const proxyPort = getMcpAuthProxyPort()
-          const proxyUrl = proxyPort ? registerMcpProxyTarget(finalUrl, mcpServer.name) : null
-          if (proxyUrl) {
-            finalUrl = proxyUrl
-            // Don't send static Authorization — proxy injects fresh JWT per request
-            delete finalHeaders['Authorization']
-            console.log(`[AgentManager] MCP Dev Server routed through auth proxy: ${proxyUrl} -> ${resolveEnterpriseMcpDevUrl(mcpServer.url, this.enterpriseAuth.getApiUrl())}`)
-          } else {
-            // Fallback: static JWT (proxy not running)
-            try {
-              const jwt = await this.enterpriseAuth.getJwt()
-              finalHeaders = { ...finalHeaders, Authorization: `Bearer ${jwt}` }
-              console.log('[AgentManager] MCP Dev Server using static JWT (proxy not available)')
-            } catch (err) {
-              console.warn('[AgentManager] Failed to inject enterprise JWT for MCP Dev Server:', err)
-            }
-          }
-        }
-
         result[mcpServer.name] = {
           type: 'http',
-          url: finalUrl,
+          url: mcpServer.url,
           headers: finalHeaders
         }
       }
@@ -844,7 +704,7 @@ export class AgentManager extends EventEmitter {
     }
     return {
       type: 'http',
-      url: buildTaskMcpUrl(apiPort, {
+      url: buildTaskMcpUrl(apiPort, getTaskApiToken(), {
         taskId: opts?.taskScope?.taskId,
         parentTaskId: opts?.taskScope?.parentTaskId,
         artifactTaskId: opts?.artifactTaskId
@@ -1128,7 +988,7 @@ export class AgentManager extends EventEmitter {
    * double quotes in the frontmatter template.  This avoids the class of
    * bugs where colons, brackets, or other YAML-special characters in skill
    * names/descriptions cause "mapping values are not allowed" parse errors
-   * (e.g. a description containing "latest: true" or a name like "[Workflo] foo").
+   * (e.g. a description containing "latest: true" or a name like "[Team] foo").
    */
   private static sanitizeYamlValue(value: string): string {
     return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').trim()
@@ -1288,7 +1148,7 @@ export class AgentManager extends EventEmitter {
   private static describeMcpTransport(entry: DocumentedMcpServer): { type: string; detail: string } {
     const injected = entry.injected
     if (injected?.type === 'http' || injected?.type === 'sse') {
-      return { type: 'Local (HTTP, in-process)', detail: `**Endpoint:** \`${injected.url}\`` }
+      return { type: 'Local (HTTP, in-process)', detail: `**Endpoint:** \`${withoutToken(injected.url ?? '')}\`` }
     }
     if (injected?.type === 'stdio') {
       return { type: 'Local (stdio)', detail: `**Command:** \`${injected.command} ${(injected.args || []).join(' ')}\`` }
@@ -1320,10 +1180,6 @@ export class AgentManager extends EventEmitter {
       if (documentedServers.length > 0) {
         md += `## Available MCP Servers & Tools\n\n`
         md += `This session has access to the following Model Context Protocol (MCP) servers and their tools:\n\n`
-
-        if (hasWorkfloMcpDevServer(documentedServers)) {
-          md += WORKFLO_WORKSPACE_DISCOVERY_GUIDANCE
-        }
 
         for (const entry of documentedServers) {
           const { server: mcpServer, enabledTools } = entry
@@ -1441,10 +1297,6 @@ export class AgentManager extends EventEmitter {
       if (documentedServers.length > 0) {
         md += `## MCP Tools Available\n\n`
         md += `You have access to the following tools through Model Context Protocol (MCP) servers:\n\n`
-
-        if (hasWorkfloMcpDevServer(documentedServers)) {
-          md += WORKFLO_WORKSPACE_DISCOVERY_GUIDANCE
-        }
 
         for (const { server: mcpServer, enabledTools } of documentedServers) {
           if (mcpServer.tools && mcpServer.tools.length > 0) {
@@ -1571,7 +1423,6 @@ export class AgentManager extends EventEmitter {
     workspaceDir?: string,
     skipInitialPrompt?: boolean
   ): Promise<string> {
-    this.assertLocalHelpAllowed(taskId)
     // Helper: yield event loop between bursts of synchronous DB / FS calls
     // so the renderer can process IPC and paint frames during session setup.
     const yieldEL = (): Promise<void> => new Promise((r) => setImmediate(r))
@@ -1648,22 +1499,6 @@ export class AgentManager extends EventEmitter {
       }
     }
     await yieldEL()
-
-    // Refresh the AI gateway virtual key before building the provider config
-    // so the adapter gets the latest key from the backend (handles key rotation,
-    // admin plan changes, etc.). Best-effort — fall back to the cached key.
-    // Note: we do NOT call adapter.notifyConfigChanged() here because that would
-    // push config to the OpenCode server and abort all running sessions. The config
-    // is already pushed once on first server connection (ensureServerRunning), and
-    // the key rarely rotates mid-session. If it does, the retry mechanism handles
-    // transient auth errors, and the next server reconnection picks up the new key.
-    if (this.enterpriseAuth) {
-      try {
-        await this.enterpriseAuth.refreshAiGatewayVirtualKey()
-      } catch (err) {
-        console.warn('[AgentManager] AI gateway key refresh failed (will use cached key):', err)
-      }
-    }
 
     // Initialize adapter
     console.log(`[AgentManager] startAdapterSession: agent=${agent.name}, coding_agent=${agent.config?.coding_agent || 'opencode'}, model=${agent.config?.model}, adapter=${adapter.constructor.name}`)
@@ -1744,11 +1579,6 @@ export class AgentManager extends EventEmitter {
       status: 'working'
     })
 
-    // Record enterprise sync event: agent run started
-    if (this.enterpriseStateSync && task && !isTriageSession && taskId !== 'mastermind-session' && !taskId.startsWith('heartbeat-')) {
-      this.enterpriseStateSync.recordAgentRunStarted(task, agent.name)
-    }
-
     // Start polling adapter for messages.
     // Pass initialPromptSent=true BEFORE starting the poller so the first
     // tick() won't forward the duplicate user message echoed by the adapter.
@@ -1798,7 +1628,7 @@ export class AgentManager extends EventEmitter {
             }
           }
           promptText += '\n\nYou can call `list_subtasks` or `get_task` via the `task-management` MCP server at any time for live data on parent and sibling tasks.'
-          promptText += '\nIMPORTANT: For all task operations (update_task, get_task, list_subtasks), use ONLY the `task-management` MCP server tools. Do NOT use integration tools like `pf-workflo-integrations` — those are for external system sync only.'
+          promptText += '\nIMPORTANT: For all task operations (update_task, get_task, list_subtasks), use ONLY the `task-management` MCP server tools. Do NOT use integration tools from other MCP servers for these updates — those are for external system sync only.'
         }
 
         // If this task has subtasks, mention them
@@ -2529,18 +2359,6 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
             taskId: config.taskId,
             status: 'error'
           })
-
-          // Record enterprise sync event: agent run failed
-          const task = this.db.getTask(config.taskId)
-          if (this.enterpriseStateSync && task && !session.isTriageSession && session.taskId !== 'mastermind-session' && !session.taskId.startsWith('heartbeat-')) {
-            const durationMinutes = (Date.now() - session.createdAt.getTime()) / (1000 * 60)
-            const agent = this.db.getAgent(session.agentId)
-            this.enterpriseStateSync.recordAgentRunCompleted(task, {
-              agentName: agent?.name,
-              durationMinutes: Math.round(durationMinutes * 10) / 10,
-              success: false
-            })
-          }
         }
         this.stopAdapterPolling(sessionId)
         return
@@ -2866,7 +2684,6 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
     taskId: string,
     adapterSessionId: string
   ): Promise<string> {
-    this.assertLocalHelpAllowed(taskId)
     // Helper: yield event loop between bursts of sync DB/FS calls
     const yieldEL = (): Promise<void> => new Promise((r) => setImmediate(r))
 
@@ -3088,30 +2905,19 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
     return adapterSessionId
   }
 
-  /**
-   * Creates an OpenCode session and returns the sessionId immediately.
-   * Uses promptAsync to send the initial prompt without blocking.
-   */
-  private assertLocalHelpAllowed(taskId: string): void {
-    if (this.db.getSetting(`workflo-upload:${taskId}`)) throw new Error('Wait for the Workflo task upload to finish.')
-    const task = serverTaskSnapshot(this.db, taskId)
-    if (!task) return
-    if (task.executionMode !== 'human') throw new Error('Agent-assigned tasks run through Workflo, not a local help session.')
-    if (task.isRecurring || ['completed', 'cancelled', 'expired'].includes(task.status)) {
-      throw new Error('This Workflo task cannot start a help session.')
-    }
-  }
-
-  /** Local help can save its session and results, but cannot set canonical status. */
+  /** A running agent must not pull a task back out of session learning. */
   private updateTaskFromLocalAgent(taskId: string, updates: Parameters<DatabaseManager['updateTask']>[1]): TaskRecord | undefined {
     const fields = { ...updates }
-    if (serverTaskSnapshot(this.db, taskId) || (fields.status === TaskStatus.AgentWorking && this.db.getTask(taskId)?.status === TaskStatus.AgentLearning)) delete fields.status
+    if (fields.status === TaskStatus.AgentWorking && this.db.getTask(taskId)?.status === TaskStatus.AgentLearning) delete fields.status
     if (Object.keys(fields).length === 0) return this.db.getTask(taskId)
     return this.db.updateTask(taskId, fields)
   }
 
+  /**
+   * Creates an OpenCode session and returns the sessionId immediately.
+   * Uses promptAsync to send the initial prompt without blocking.
+   */
   async startSession(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<string> {
-    this.assertLocalHelpAllowed(taskId)
     const agent = this.db.getAgent(agentId)
     if (!agent) {
       throw new Error(`Agent not found: ${agentId}`)
@@ -3135,7 +2941,6 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
     startedTaskId?: string
     agentId?: string
   }> {
-    this.assertLocalHelpAllowed(taskId)
     const task = this.db.getTask(taskId)
     if (!task) {
       throw new Error(`Task not found: ${taskId}`)
@@ -3644,7 +3449,6 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
    * Replays all messages to the renderer and resumes polling.
    */
   async resumeSession(agentId: string, taskId: string, sessionId: string): Promise<string> {
-    this.assertLocalHelpAllowed(taskId)
     console.log('[AgentManager] resumeSession called:', { agentId, taskId, sessionId })
     const agent = this.db.getAgent(agentId)
     if (!agent) {
@@ -3981,18 +3785,6 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
     this.sendToRenderer('agent:status', {
       sessionId, agentId: session.agentId, taskId: session.taskId, status: 'idle'
     })
-
-    // Record enterprise sync event: agent run completed
-    if (this.enterpriseStateSync && task && !session.isTriageSession && session.taskId !== 'mastermind-session' && !session.taskId.startsWith('heartbeat-')) {
-      const durationMinutes = (Date.now() - session.createdAt.getTime()) / (1000 * 60)
-      const agent = this.db.getAgent(session.agentId)
-      this.enterpriseStateSync.recordAgentRunCompleted(task, {
-        agentName: agent?.name,
-        durationMinutes: Math.round(durationMinutes * 10) / 10,
-        messageCount: session.seenMessageIds.size || undefined,
-        success: true
-      })
-    }
   }
 
   /**
@@ -4335,14 +4127,6 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
       status: 'working'
     })
 
-    // Record enterprise sync event: agent run started (follow-up message)
-    // Each working→idle cycle is a separate agent run. Without this,
-    // follow-up messages produce agent_run_completed without a matching started.
-    if (this.enterpriseStateSync && currentTask && !session.isTriageSession && session.taskId !== 'mastermind-session' && !session.taskId.startsWith('heartbeat-')) {
-      const agent = this.db.getAgent(session.agentId)
-      this.enterpriseStateSync.recordAgentRunStarted(currentTask, agent?.name)
-    }
-
     const userFacingMessage = this.buildDisplayMessage(message, attachments)
 
     // Show user's message in UI
@@ -4657,10 +4441,7 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
 
       // Inject TASK_API_URL for the built-in task-management server
       const extraEnv: Record<string, string> = {}
-      if (serverData.name === 'task-management') {
-        const apiPort = getTaskApiPort()
-        if (apiPort) extraEnv.TASK_API_URL = `http://127.0.0.1:${apiPort}`
-      }
+      if (serverData.name === 'task-management') Object.assign(extraEnv, getTaskApiEnv())
 
       // Spawn directly with args array (no shell quoting) to avoid Windows single-quote issues.
       // Only use shell mode for commands that need it (npx, .cmd/.bat wrappers).
@@ -4756,17 +4537,6 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', ...serverData.headers }
 
-      // Inject enterprise JWT for servers hosted on the enterprise API
-      if (this.enterpriseAuth) {
-        try {
-          const apiUrl = this.enterpriseAuth.getApiUrl()
-          if (serverData.url.startsWith(apiUrl)) {
-            const jwt = await this.enterpriseAuth.getJwt()
-            headers['Authorization'] = `Bearer ${jwt}`
-          }
-        } catch { /* proceed without JWT — will likely get 401/403 */ }
-      }
-
       // Try streamable HTTP — POST initialize directly
       const initRes = await fetch(serverData.url, {
         method: 'POST',
@@ -4838,21 +4608,6 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
         return null
       }
 
-      // Refresh the AI gateway virtual key before querying providers so the
-      // OpenCode server config includes the Peakflo provider. This handles
-      // plans activated after the initial tenant selection (same pattern as
-      // startAdapterSession). Best-effort — fall back to the cached key.
-      // Since this is user-initiated (settings UI), notify the adapter so it
-      // pushes the updated config — this is safe because the user is in settings,
-      // not actively running parallel tasks.
-      if (this.enterpriseAuth) {
-        try {
-          await this.enterpriseAuth.refreshAiGatewayVirtualKey()
-        } catch (err) {
-          console.warn('[AgentManager] AI gateway key refresh before getProviders failed (will use cached key):', err)
-        }
-      }
-
       const adapter = this.getAdapterByType(resolvedBackend)
       if (!adapter?.getProviders) {
         console.log(`[AgentManager] Adapter for "${resolvedBackend}" does not support getProviders`)
@@ -4894,7 +4649,7 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
         adapter = new ClaudeCodeAdapter()
         break
       case CodingAgentType.PI:
-        adapter = new PiAdapter(this.db)
+        adapter = new PiAdapter()
         break
     }
 
@@ -4958,7 +4713,7 @@ Current Labels: ${JSON.stringify(task.labels || [])}
 Current Output Fields: ${JSON.stringify(task.output_fields || [])}
 Parent Task: ${task.parent_task_id ? `This is a subtask of task ${task.parent_task_id}` : 'None (top-level task)'}
 
-IMPORTANT: For ALL task operations below, use ONLY the \`task-management\` MCP server tools (e.g. \`mcp__task-management__update_task\`, \`mcp__task-management__create_subtask\`). Do NOT use integration/sync tools like \`pf-workflo-integrations\` for updating tasks — those are for external system sync only.
+IMPORTANT: For ALL task operations below, use ONLY the \`task-management\` MCP server tools (e.g. \`mcp__task-management__update_task\`, \`mcp__task-management__create_subtask\`). Do NOT use integration/sync tools from other MCP servers for updating tasks — those are for external system sync only.
 
 Follow these steps:
 
@@ -5000,7 +4755,7 @@ Important:
 - If the task already has output_fields defined (from an external source), preserve them and only add additional fields if needed. Do not remove existing output fields.
 - When creating subtasks, the parent task's agent will coordinate — subtask agents handle individual pieces.
 - Subtask agents can see the parent task, all sibling subtasks' status/resolution/outputs, and sibling transcripts for coordination.
-- NEVER use external integration MCP tools (like pf-workflo-integrations) for local task updates — always use task-management tools.`
+- NEVER use external integration MCP tools for local task updates — always use task-management tools.`
   }
 
   /**
@@ -5576,15 +5331,6 @@ Important:
   }
 
   private sendToRenderer(channel: string, data: unknown): void {
-    if (channel === 'task:updated' && data && typeof data === 'object') {
-      const event = data as { taskId?: string; updates?: Record<string, unknown> }
-      if (event.taskId && event.updates && serverTaskSnapshot(this.db, event.taskId)) {
-        const updates = { ...event.updates }
-        delete updates.status
-        if (Object.keys(updates).length === 0) return
-        data = { ...event, updates }
-      }
-    }
     // Durable transcript projection: persist every transcript part BEFORE any
     // client sees it. The main process owns the source of truth; renderer and
     // mobile hydrate from snapshots (transcript:get) instead of depending on
@@ -5662,5 +5408,17 @@ Important:
         }
       }
     }
+  }
+}
+
+// Workspace docs are plain files an agent may copy or commit; the task API
+// token stays in the session config only.
+function withoutToken(url: string): string {
+  try {
+    const parsed = new URL(url)
+    parsed.searchParams.delete('token')
+    return parsed.toString()
+  } catch {
+    return url
   }
 }

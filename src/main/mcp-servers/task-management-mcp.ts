@@ -6,7 +6,7 @@
  * the process that already runs, so no child process starts and none can leak.
  *
  * This file stays for a direct run outside the app, for example
- * `TASK_API_URL=... node task-management-mcp.js`. All tool definitions and all
+ * `TASK_API_URL=... TASK_API_TOKEN=... node task-management-mcp.js`. All tool definitions and all
  * scope rules live in task-management-core.ts, so both paths behave the same.
  */
 import { Server } from '@modelcontextprotocol/server'
@@ -40,7 +40,7 @@ async function callApi(route: string, params: Record<string, unknown> = {}): Pro
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.TASK_API_TOKEN ?? ''}` },
       body: JSON.stringify(params)
     })
     return res.json()

@@ -272,7 +272,7 @@ export interface CodingAgentAdapter {
 
   /**
    * Notify the adapter that provider/auth config has changed (e.g. user edited
-   * agent settings, AI gateway key was rotated).  Adapters that manage a shared
+   * agent settings, provider key was rotated).  Adapters that manage a shared
    * backend server (like OpenCode) should push the updated config.
    *
    * Only call this on actual config changes — NOT on every session creation,

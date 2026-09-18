@@ -13,7 +13,6 @@ import { McpToolCaller } from './mcp-tool-caller'
 import { SyncManager } from './sync-manager'
 import { OAuthManager } from './oauth/oauth-manager'
 import { PluginRegistry } from './plugins/registry'
-import { PeakfloPlugin } from './plugins/peakflo-plugin'
 import { LinearPlugin } from './plugins/linear-plugin'
 import { HubSpotPlugin } from './plugins/hubspot-plugin'
 import { GitHubIssuesPlugin } from './plugins/github-issues-plugin'
@@ -23,7 +22,6 @@ import { registerIpcHandlers } from './ipc-handlers'
 import { panelBrowserBroker } from './panel-browser-broker'
 import { VoiceSessionManager } from './voice/voice-session-manager'
 import { assistantTextParts, sinceLastUserMessage } from './voice/voice-answer-parts'
-import { EnterpriseAuth } from './enterprise-auth'
 import { RecurrenceScheduler } from './recurrence-scheduler'
 import { HeartbeatScheduler } from './heartbeat-scheduler'
 import { TaskAutomationScheduler } from './task-automation-scheduler'
@@ -32,11 +30,9 @@ import { ClaudePluginManager } from './claude-plugin-manager'
 import { parseProcessTable, selectKillableMcpPids } from './mcp-process-cleanup'
 import { buildWorkspaceStates, sweepLeakedWorkspaceProcesses, readDiskSpace, workspacePressureWarning, SHUTDOWN_GRACE_MS } from './workspace-process-cleanup'
 import { WORKSPACES_DIR, listWorkspaceDirs } from './workspace-paths'
-import { EnterpriseHeartbeat } from './enterprise-heartbeat'
-import { EnterpriseStateSync } from './enterprise-state-sync'
 import { handleRoute, setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTaskAutomationTrigger, setTranscriptProvider, stopTaskApiServer } from './task-api-server'
 import { startSecretBroker, stopSecretBroker, writeSecretShellWrapper } from './secret-broker'
-import { startMcpAuthProxy, stopMcpAuthProxy } from './mcp-auth-proxy'
+import { isMainWindowUrl } from './main-window-url'
 import { startMobileApiServer, stopMobileApiServer, broadcastToMobileClients, setMobileApiNotifier, setMobileApiTaskAutomationTrigger } from './mobile-api-server'
 import { registerUpdaterIpc, initAutoUpdater, isUpdateDownloaded, getPendingVersion } from './auto-updater'
 import { initCrashLogger } from './crash-logger'
@@ -71,14 +67,11 @@ let mcpToolCaller: McpToolCaller | null = null
 let syncManager: SyncManager | null = null
 let pluginRegistry: PluginRegistry | null = null
 let oauthManager: OAuthManager | null = null
-let enterpriseAuth: EnterpriseAuth | null = null
 let recurrenceScheduler: RecurrenceScheduler | null = null
 let heartbeatScheduler: HeartbeatScheduler | null = null
 let taskAutomationScheduler: TaskAutomationScheduler | null = null
 let workspaceCleanupScheduler: WorkspaceCleanupScheduler | null = null
 let claudePluginManager: ClaudePluginManager | null = null
-let enterpriseHeartbeatInstance: EnterpriseHeartbeat | null = null
-let enterpriseStateSyncInstance: EnterpriseStateSync | null = null
 let voiceSessionManager: VoiceSessionManager | null = null
 let isShuttingDown = false
 
@@ -272,7 +265,6 @@ async function sweepLeakedWorkspaces(graceMs?: number, orphansIgnoreTaskState = 
 
 async function shutdownAppServices(): Promise<void> {
   voiceSessionManager?.shutdown()
-  enterpriseHeartbeatInstance?.stop()
   heartbeatScheduler?.stop()
   taskAutomationScheduler?.stop()
   workspaceCleanupScheduler?.stop()
@@ -284,7 +276,6 @@ async function shutdownAppServices(): Promise<void> {
   mcpToolCaller?.destroy()
   oauthManager?.destroy()
   stopSecretBroker()
-  stopMcpAuthProxy()
   stopMobileApiServer()
   stopTaskApiServer()
 
@@ -314,7 +305,7 @@ function createWindow(): void {
     windowStatePersistence: true,
     name: 'main',
     ...(isMac
-      ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 12, y: 8 } }
+      ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 12, y: 12 } }
       : {
           titleBarStyle: 'hidden' as const,
           titleBarOverlay: { color: '#1E2127', symbolColor: '#535D71', height: 36 },
@@ -432,11 +423,15 @@ function createWindow(): void {
   // browser panels are addressable by agents, so this should never fire —
   // but if anything ever drives the main window off-app, block it here.
   //
+  const appUrl = is.dev && process.env['ELECTRON_RENDERER_URL']
+    ? process.env['ELECTRON_RENDERER_URL']
+    : null
+  const rendererIndexPath = join(__dirname, '../renderer/index.html')
+  const isAppUrl = (url: string): boolean => isMainWindowUrl(url, appUrl, rendererIndexPath)
+
   // Layer 1: will-navigate (catches user-initiated navigations — NOT CDP)
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    const appOrigins = ['http://localhost:', 'file://']
-    const isAppUrl = appOrigins.some((origin) => url.startsWith(origin))
-    if (!isAppUrl) {
+    if (!isAppUrl(url)) {
       console.warn(`[Main] Blocked navigation of main window to: ${url}`)
       event.preventDefault()
     }
@@ -444,19 +439,14 @@ function createWindow(): void {
 
   // Layer 2: Recovery — snap the app back if the main window ever ends up on a
   // non-app URL despite the guard above. Safety net, not prevention.
-  const appUrl = is.dev && process.env['ELECTRON_RENDERER_URL']
-    ? process.env['ELECTRON_RENDERER_URL']
-    : null // file:// URL set after loadFile
   const mw = mainWindow // capture non-null reference for closure
   mw.webContents.on('did-navigate', (_event, url) => {
-    const appOrigins = ['http://localhost:', 'file://']
-    const isAppUrl = appOrigins.some((origin) => url.startsWith(origin))
-    if (!isAppUrl) {
+    if (!isAppUrl(url)) {
       console.warn(`[Main] Main window navigated to non-app URL: ${url} — recovering...`)
       if (appUrl) {
         mw.loadURL(appUrl)
       } else {
-        mw.loadFile(join(__dirname, '../renderer/index.html'))
+        mw.loadFile(rendererIndexPath)
       }
     }
   })
@@ -603,7 +593,7 @@ function buildAppMenu(): void {
         {
           label: 'View on GitHub',
           click: () => {
-            shell.openExternal('https://github.com/peakflo/20x')
+            shell.openExternal('https://github.com/krazyjakee/21x')
           }
         }
       ]
@@ -947,17 +937,6 @@ app.whenReady().then(async () => {
   db = new DatabaseManager()
   db.initialize()
 
-  // Sync enterprise email into PostHog payloads before any analytics event
-  try {
-    const storedEmail = db.getSetting('enterprise_user_email')
-    if (storedEmail) {
-      const { analytics: getAnalytics } = await import('./analytics-service')
-      getAnalytics()?.setEnterpriseEmail(storedEmail)
-    }
-  } catch {
-    // ignore
-  }
-
   // The BOOT sweep for workspace processes. It runs here rather than beside the
   // MCP sweep above because it needs the task table to tell a leaked workspace
   // from one an agent is working in. This is the call that catches a machine
@@ -996,7 +975,6 @@ app.whenReady().then(async () => {
   agentManager.setOAuthManager(oauthManager)
 
   pluginRegistry = new PluginRegistry()
-  pluginRegistry.register(new PeakfloPlugin())
   pluginRegistry.register(new LinearPlugin())
   pluginRegistry.register(new HubSpotPlugin())
   pluginRegistry.register(new GitHubIssuesPlugin(githubManager))
@@ -1015,13 +993,6 @@ app.whenReady().then(async () => {
   })
   workspaceCleanupScheduler = new WorkspaceCleanupScheduler(db, worktreeManager)
 
-  // Initialize enterprise auth (gracefully — missing env vars just disable the feature)
-  try {
-    enterpriseAuth = new EnterpriseAuth(db)
-  } catch (err) {
-    console.warn('[Main] Enterprise auth initialization failed:', err)
-  }
-
   claudePluginManager = new ClaudePluginManager(db)
 
   // Voice control (design §5.1). It never blocks start-up: when the local
@@ -1035,106 +1006,7 @@ app.whenReady().then(async () => {
   void voiceSessionManager.initialize()
   watchAgentAnswersForSpeech(agentManager, db)
 
-  // Sync enterprise email into PostHog payloads if user is logged in
-  try {
-    const storedEmail = db.getSetting('enterprise_user_email')
-    if (storedEmail) {
-      const { analytics: getAnalytics } = await import('./analytics-service')
-      getAnalytics()?.setEnterpriseEmail(storedEmail)
-    }
-  } catch {
-    // ignore
-  }
-
-  // Eagerly restore enterprise connection on startup so sync works immediately
-  if (enterpriseAuth) {
-    try {
-      console.log('[EnterpriseAuth] auth_session_restore_started')
-      const session = await enterpriseAuth.getSession()
-      console.log('[Main] Enterprise session on startup:', {
-        isAuthenticated: session.isAuthenticated,
-        userId: session.userId,
-        hasTenant: !!session.currentTenant
-      })
-      if (session.userEmail) {
-        const { analytics: getAnalytics } = await import('./analytics-service')
-        getAnalytics()?.setEnterpriseEmail(session.userEmail)
-      }
-      if (session.isAuthenticated && session.currentTenant && session.userId) {
-        const { WorkfloApiClient } = await import('./workflo-api-client')
-        const { EnterpriseSyncManager } = await import('./enterprise-sync')
-
-        const apiClient = new WorkfloApiClient(enterpriseAuth)
-        const enterpriseSyncMgr = new EnterpriseSyncManager(db, apiClient)
-        // Initialize and start enterprise heartbeat + state sync
-        enterpriseHeartbeatInstance = new EnterpriseHeartbeat(apiClient)
-        enterpriseHeartbeatInstance.start({
-          userEmail: session.userEmail || undefined,
-          userName: session.userEmail || undefined
-        })
-
-        enterpriseStateSyncInstance = new EnterpriseStateSync(apiClient)
-        enterpriseStateSyncInstance.setUserName(session.userEmail || 'Unknown')
-
-        // Attach state sync to heartbeat so events flush every 60s
-        enterpriseHeartbeatInstance.setStateSync(enterpriseStateSyncInstance)
-
-        // Wire state sync into agent manager so agent run events are recorded
-        agentManager.setEnterpriseStateSync(enterpriseStateSyncInstance)
-
-        // Wire enterprise auth into agent manager so it can inject JWT into MCP Dev Server requests
-        agentManager.setEnterpriseAuth(enterpriseAuth)
-
-        // Start MCP auth proxy so agent sessions get auto-refreshing JWT
-        // on every MCP tool call (ACP/OpenCode/Claude Code never refresh
-        // MCP headers mid-session — the proxy solves this transparently).
-        try {
-          const proxyPort = await startMcpAuthProxy(enterpriseAuth)
-          console.log(`[Main] MCP auth proxy started on port ${proxyPort}`)
-        } catch (proxyErr) {
-          console.warn('[Main] MCP auth proxy failed to start (MCP JWT will use static headers):', proxyErr)
-        }
-
-        syncManager.setEnterpriseConnection(apiClient, enterpriseSyncMgr, session.userId, enterpriseStateSyncInstance)
-
-        // Eagerly refresh AI gateway virtual key so the Peakflo provider is
-        // available in the DB before the OpenCode adapter starts its server.
-        // Handles plans activated after the initial tenant selection.
-        try {
-          await enterpriseAuth.refreshAiGatewayVirtualKey()
-        } catch (err) {
-          console.warn('[Main] AI gateway key refresh on startup failed (non-fatal):', err)
-        }
-
-        console.log('[Main] Enterprise connection restored on startup (with heartbeat)')
-        console.log('[EnterpriseAuth] auth_session_restore_result {"status":"restored"}')
-      } else {
-        console.log('[Main] Enterprise session not complete — skipping restore')
-        console.log(
-          `[EnterpriseAuth] auth_session_restore_result ${JSON.stringify({
-            status: 'skipped',
-            reason: 'missing_session_fields',
-            hasUserId: !!session.userId,
-            hasTenant: !!session.currentTenant,
-            isAuthenticated: session.isAuthenticated
-          })}`
-        )
-      }
-    } catch (err) {
-      console.warn('[Main] Could not restore enterprise connection on startup:', err)
-      console.warn(
-        `[EnterpriseAuth] auth_session_restore_result ${JSON.stringify({
-          status: 'failed',
-          reason: err instanceof Error ? err.message : String(err)
-        })}`
-      )
-    }
-  } else {
-    console.log('[Main] No enterprise auth instance — skipping restore')
-    console.log('[EnterpriseAuth] auth_session_restore_result {"status":"skipped","reason":"enterprise_auth_not_initialized"}')
-  }
-
-  registerIpcHandlers(db, agentManager, githubManager, worktreeManager, syncManager, pluginRegistry, mcpToolCaller, oauthManager, recurrenceScheduler, enterpriseAuth ?? undefined, claudePluginManager, heartbeatScheduler, enterpriseHeartbeatInstance ?? undefined, enterpriseStateSyncInstance ?? undefined, gitlabManager ?? undefined, workspaceCleanupScheduler ?? undefined, voiceSessionManager ?? undefined, taskAutomationScheduler ?? undefined)
+  registerIpcHandlers(db, agentManager, githubManager, worktreeManager, syncManager, pluginRegistry, mcpToolCaller, oauthManager, recurrenceScheduler, claudePluginManager, heartbeatScheduler, gitlabManager ?? undefined, workspaceCleanupScheduler ?? undefined, voiceSessionManager ?? undefined, taskAutomationScheduler ?? undefined)
 
   // ── Media permission handler (design §5.9) ────────────────────────────────
   // Grant the microphone only to the 20x renderer, and only while voice is on.
@@ -1225,13 +1097,9 @@ app.whenReady().then(async () => {
   // ── Patch Sec-CH-UA on all outgoing requests ──────────────────────────────
   // Electron's Sec-CH-UA omits the "Google Chrome" brand, which Akamai uses
   // as a signal.  We intercept via will-attach-webview to configure each
-  // webview's session without conflicting with enterprise auth handlers.
+  // webview's session.
   //
-  // We modify the defaultSession headers directly.  The onBeforeSendHeaders
-  // handler merges with enterprise auth because enterprise auth only registers
-  // its handler AFTER enableIframeAuth is called (and with a narrow URL filter).
-  // Our handler runs first; if enterprise auth later overrides it with its
-  // scoped filter, that's fine — the scoped handler only affects API URLs.
+  // We modify the defaultSession headers directly.
   session.defaultSession.webRequest.onBeforeSendHeaders(
     { urls: ['http://*/*', 'https://*/*'] },
     (details, callback) => {

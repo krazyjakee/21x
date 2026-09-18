@@ -15,7 +15,7 @@ import { OutputFieldsDisplay } from './OutputFieldsDisplay'
 import { useSkillStore } from '@/stores/skill-store'
 import { AssigneeSelect } from './AssigneeSelect'
 import { TaskStatus, CodingAgentType } from '@/types'
-import type { WorkfloTask, FileAttachment, OutputField, Agent, RecurrencePattern, RecurrencePatternObject } from '@/types'
+import type { Task, FileAttachment, OutputField, Agent, RecurrencePattern, RecurrencePatternObject } from '@/types'
 import { AnthropicLogo, OpenCodeLogo, OpenAILogo, PiLogo } from '@/components/icons/AgentLogos'
 import { HeartbeatSection } from './HeartbeatSection'
 import { useUIStore } from '@/stores/ui-store'
@@ -100,7 +100,7 @@ const subtaskStatusDotColor: Record<TaskStatus, string> = {
   [TaskStatus.Completed]: 'bg-emerald-400'
 }
 
-function SortableSubtaskItem({ subtask, onNavigateToTask, onOpenSubtaskInWindow }: { subtask: WorkfloTask; onNavigateToTask?: (taskId: string) => void; onOpenSubtaskInWindow?: (taskId: string) => void }) {
+function SortableSubtaskItem({ subtask, onNavigateToTask, onOpenSubtaskInWindow }: { subtask: Task; onNavigateToTask?: (taskId: string) => void; onOpenSubtaskInWindow?: (taskId: string) => void }) {
   const {
     attributes,
     listeners,
@@ -154,7 +154,7 @@ function SortableSubtaskItem({ subtask, onNavigateToTask, onOpenSubtaskInWindow 
   )
 }
 
-function SubtasksSection({ subtasks, onNavigateToTask, onOpenSubtaskInWindow, onAddSubtask, onReorderSubtasks }: { subtasks: WorkfloTask[]; onNavigateToTask?: (taskId: string) => void; onOpenSubtaskInWindow?: (taskId: string) => void; onAddSubtask?: (title: string) => void; onReorderSubtasks?: (orderedIds: string[]) => void }) {
+function SubtasksSection({ subtasks, onNavigateToTask, onOpenSubtaskInWindow, onAddSubtask, onReorderSubtasks }: { subtasks: Task[]; onNavigateToTask?: (taskId: string) => void; onOpenSubtaskInWindow?: (taskId: string) => void; onAddSubtask?: (title: string) => void; onReorderSubtasks?: (orderedIds: string[]) => void }) {
   const [isAdding, setIsAdding] = React.useState(false)
   const [newTitle, setNewTitle] = React.useState('')
   const inputRef = React.useRef<HTMLInputElement>(null)
@@ -250,7 +250,7 @@ function SubtasksSection({ subtasks, onNavigateToTask, onOpenSubtaskInWindow, on
   )
 }
 
-function ParentTaskContext({ parentTask, onNavigateToTask }: { parentTask: WorkfloTask; onNavigateToTask: (taskId: string) => void }) {
+function ParentTaskContext({ parentTask, onNavigateToTask }: { parentTask: Task; onNavigateToTask: (taskId: string) => void }) {
   const [isExpanded, setIsExpanded] = React.useState(false)
 
   return (
@@ -310,7 +310,7 @@ function ParentTaskContext({ parentTask, onNavigateToTask }: { parentTask: Workf
  * agent is assigned, the default agent picked by Triage) is missing a provider
  * or model. Blocks the user from starting/triaging until they fix it.
  */
-function AgentConfigWarning({ task, agents, onEditAgent }: { task: WorkfloTask; agents: Agent[]; onEditAgent?: (agentId: string) => void }) {
+function AgentConfigWarning({ task, agents, onEditAgent }: { task: Task; agents: Agent[]; onEditAgent?: (agentId: string) => void }) {
   // When a specific agent is assigned, warn about that agent.
   // Otherwise, warn about the default agent used by Triage.
   const assignedAgent = task.agent_id ? agents.find((a) => a.id === task.agent_id) : null
@@ -351,7 +351,7 @@ function AgentConfigWarning({ task, agents, onEditAgent }: { task: WorkfloTask; 
 }
 
 interface TaskDetailViewProps {
-  task: WorkfloTask
+  task: Task
   agents: Agent[]
   onEdit: () => void
   onDelete: () => void
@@ -380,8 +380,8 @@ interface TaskDetailViewProps {
   onUpdateDescription?: (description: string) => void | Promise<void>
   /** Update auto-start / auto-complete flags for recurring templates */
   onUpdateAutoFlags?: (updates: { auto_start_agent?: boolean; auto_complete_without_review?: boolean }) => void
-  subtasks?: WorkfloTask[]
-  parentTask?: WorkfloTask | null
+  subtasks?: Task[]
+  parentTask?: Task | null
   onNavigateToTask?: (taskId: string) => void
   /** When provided, each subtask shows an action to open it as a separate window/panel. */
   onOpenSubtaskInWindow?: (taskId: string) => void

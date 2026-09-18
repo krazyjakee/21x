@@ -35,10 +35,7 @@ import type { WorktreeManager } from './worktree-manager'
 import type { SyncManager } from './sync-manager'
 import type { PluginRegistry } from './plugins/registry'
 import type { OAuthManager } from './oauth/oauth-manager'
-import type { EnterpriseAuth } from './enterprise-auth'
 import type { ClaudePluginManager } from './claude-plugin-manager'
-import type { EnterpriseHeartbeat } from './enterprise-heartbeat'
-import type { EnterpriseStateSync } from './enterprise-state-sync'
 import { analytics } from './analytics-service'
 import { listTaskArtifactEntries, readTaskArtifact, resolveTaskArtifactFilePath } from './artifacts'
 import { writeArtifactFileToClipboard } from './artifact-clipboard'
@@ -84,19 +81,13 @@ export function registerIpcHandlers(
   mcpToolCaller?: import('./mcp-tool-caller').McpToolCaller,
   oauthManager?: OAuthManager,
   recurrenceScheduler?: import('./recurrence-scheduler').RecurrenceScheduler,
-  enterpriseAuth?: EnterpriseAuth,
   claudePluginManager?: ClaudePluginManager,
   heartbeatScheduler?: import('./heartbeat-scheduler').HeartbeatScheduler,
-  initialEnterpriseHeartbeat?: EnterpriseHeartbeat,
-  initialEnterpriseStateSync?: EnterpriseStateSync,
   gitlabManager?: GitLabManager,
   workspaceCleanupScheduler?: import('./workspace-cleanup-scheduler').WorkspaceCleanupScheduler,
   voiceSessionManager?: import('./voice/voice-session-manager').VoiceSessionManager,
   taskAutomationScheduler?: import('./task-automation-scheduler').TaskAutomationScheduler
 ): void {
-  // Mutable references — created on selectTenant, cleared on logout
-  let enterpriseHeartbeat = initialEnterpriseHeartbeat
-  let enterpriseStateSync = initialEnterpriseStateSync
   ipcMain.handle('db:getTasks', () => {
     return db.getTasks()
   })
@@ -106,15 +97,14 @@ export function registerIpcHandlers(
   })
 
   ipcMain.handle('db:createTask', async (event, data: CreateTaskData) => {
-    if (data.status === TaskStatus.Completed) throw new Error('Workflo must confirm completion.')
     const task = db.createTask(data)
     // Initialize recurring task if it has a recurrence pattern
-    if (task && !task.server_managed && task.is_recurring && recurrenceScheduler) {
+    if (task && task.is_recurring && recurrenceScheduler) {
       recurrenceScheduler.initializeRecurringTask(task.id)
     }
     // Hand a self-starting task straight to the main-process automation loop
     // instead of relying on a renderer listener seeing this one event.
-    if (task?.auto_start_agent && !task.server_managed) {
+    if (task?.auto_start_agent) {
       void taskAutomationScheduler?.runNow()
     }
     // Notify renderer so auto-start hook can trigger triage for UI-created tasks
@@ -138,7 +128,7 @@ export function registerIpcHandlers(
   })
 
   ipcMain.handle('db:updateTask', (_, id: string, data: UpdateTaskData) => {
-    // Capture previous status before updating (for enterprise sync)
+    // Capture previous status before updating (for analytics and parent wake-ups)
     let previousStatus: string | undefined
     if (data.status) {
       const existing = db.getTask(id)
@@ -172,16 +162,6 @@ export function registerIpcHandlers(
       }
     }
 
-    // Record status change event for enterprise sync
-    // Note: for completions, only emit task_completed (not both status_changed + completed)
-    // to avoid double-counting in downstream aggregation
-    if (enterpriseStateSync && previousStatus && updated && data.status) {
-      if (data.status === 'completed') {
-        enterpriseStateSync.recordTaskCompleted(updated)
-      } else {
-        enterpriseStateSync.recordTaskStatusChange(updated, previousStatus, data.status)
-      }
-    }
     if (updated && data.status) {
       analytics()?.record('task.status_changed', {
         previousStatus,
@@ -220,10 +200,6 @@ export function registerIpcHandlers(
         })
     }
 
-    // Record feedback event for enterprise sync
-    if (enterpriseStateSync && data.feedback_rating && updated) {
-      enterpriseStateSync.recordFeedbackSubmitted(updated, data.feedback_rating)
-    }
     if (updated && data.feedback_rating) {
       analytics()?.record('task.feedback_submitted', {
         rating: data.feedback_rating,
@@ -587,12 +563,6 @@ export function registerIpcHandlers(
     return await githubManager.checkGhCli()
   })
 
-  ipcMain.handle('github:startAuth', async (event) => {
-    await githubManager.startWebAuth((code) => {
-      event.sender.send('github:deviceCode', code)
-    })
-  })
-
   ipcMain.handle('github:fetchOrgs', async () => {
     return await githubManager.fetchUserOrgs()
   })
@@ -690,19 +660,8 @@ export function registerIpcHandlers(
   })
 
   ipcMain.handle('taskSource:sync', async (_, sourceId: string) => {
-    const result = await syncManager.importTasks(sourceId)
-
-    // After sync, flush pending events to Workflo (non-blocking)
-    if (enterpriseStateSync) {
-      enterpriseStateSync.flush().catch((err) => {
-        console.warn('[ipc] Enterprise state sync flush error (non-fatal):', err)
-      })
-    }
-
-    return result
+    return await syncManager.importTasks(sourceId)
   })
-
-  ipcMain.handle('taskSource:upload', async (_, taskId: string, autonomous?: boolean) => syncManager.uploadTask(taskId, autonomous === true))
 
   ipcMain.handle('taskSource:exportUpdate', async (event, taskId: string, fields: Record<string, unknown>) => {
     await syncManager.exportTaskUpdate(taskId, fields)
@@ -881,21 +840,6 @@ export function registerIpcHandlers(
   })
 
   ipcMain.handle('mcp:getOAuthStatus', async (_, mcpServerId: string) => {
-    // Enterprise-auth servers use JWT from 20x Cloud login (via MCP auth proxy),
-    // not separate OAuth tokens. Report connected when enterprise session is active.
-    if (enterpriseAuth) {
-      const server = db.getMcpServer(mcpServerId)
-      if (server) {
-        try {
-          const apiUrl = enterpriseAuth.getApiUrl()
-          if (server.url && server.url.startsWith(apiUrl)) {
-            const session = await enterpriseAuth.getSession()
-            return { connected: session.isAuthenticated }
-          }
-        } catch { /* fall through to OAuth check */ }
-      }
-    }
-
     if (!oauthManager) return { connected: false }
     return oauthManager.getMcpServerOAuthStatus(mcpServerId)
   })
@@ -906,18 +850,6 @@ export function registerIpcHandlers(
   })
 
   ipcMain.handle('mcp:probeForAuth', async (_, serverUrl: string) => {
-    // Enterprise-auth servers authenticate via JWT proxy, not OAuth.
-    // Don't flag them as needing OAuth — the 401 is expected (unauthenticated probe)
-    // but is handled by the MCP auth proxy at request time.
-    if (enterpriseAuth) {
-      try {
-        const apiUrl = enterpriseAuth.getApiUrl()
-        if (serverUrl.startsWith(apiUrl)) {
-          return { requiresAuth: false }
-        }
-      } catch { /* fall through to normal probe */ }
-    }
-
     const { OAuthManager: OAuthMgr } = await import('./oauth/oauth-manager')
     return await OAuthMgr.probeForAuth(serverUrl)
   })
@@ -1077,547 +1009,6 @@ export function registerIpcHandlers(
   ipcMain.handle('mobile:revokeAllSessions', () => {
     db.revokeAllMobileSessions()
     return { success: true }
-  })
-
-  // Enterprise auth handlers
-
-  ipcMain.handle('enterprise:signupInBrowser', async (_, mode: 'register' | 'login') => {
-    if (!enterpriseAuth) throw new Error('Enterprise auth not available')
-
-    const { AuthCallbackServer } = await import('./oauth/auth-callback-server')
-    const callbackServer = new AuthCallbackServer()
-
-    try {
-      // Start localhost server and get the redirect URI
-      const redirectUri = await callbackServer.start()
-
-      // Derive the workflow-builder frontend URL from the API URL
-      const apiUrl = enterpriseAuth.getApiUrl()
-      const parsed = new URL(apiUrl)
-      let frontendOrigin: string
-      if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
-        parsed.port = '4000'
-        frontendOrigin = parsed.origin
-      } else {
-        parsed.hostname = parsed.hostname.replace('-api.', '-app.').replace(/^api\./, 'app.')
-        frontendOrigin = parsed.origin
-      }
-
-      const path = mode === 'register' ? '/register' : '/login'
-      const signupUrl = `${frontendOrigin}${path}?redirect_uri=${encodeURIComponent(redirectUri)}`
-
-      // Open the URL in the user's default browser
-      await shell.openExternal(signupUrl)
-
-      // Wait for the callback with tokens
-      const tokens = await callbackServer.waitForCallback()
-
-      // Use the received tokens to log in
-      const result = await enterpriseAuth.loginWithTokens(tokens.access_token, tokens.refresh_token)
-      if (result?.email) {
-        analytics()?.setEnterpriseEmail(result.email)
-      }
-
-      return result
-    } catch (err) {
-      callbackServer.stop()
-      throw err
-    }
-  })
-
-  ipcMain.handle('enterprise:login', async (_, email: string, password: string) => {
-    if (!enterpriseAuth) throw new Error('Enterprise auth not available')
-    const result = await enterpriseAuth.login(email, password)
-    if (result?.email) {
-      analytics()?.setEnterpriseEmail(result.email)
-    }
-    return result
-  })
-
-  ipcMain.handle('enterprise:listCompanies', async () => {
-    if (!enterpriseAuth) throw new Error('Enterprise auth not available')
-    return await enterpriseAuth.listCompanies()
-  })
-
-  ipcMain.handle('enterprise:selectTenant', async (event, tenantId: string) => {
-    if (!enterpriseAuth) throw new Error('Enterprise auth not available')
-    const result = await enterpriseAuth.selectTenant(tenantId)
-    try {
-      const session = await enterpriseAuth.getSession()
-      if (session.userEmail) analytics()?.setEnterpriseEmail(session.userEmail)
-    } catch {
-      // non-fatal
-    }
-
-    // Return auth result immediately — run post-connect setup (sync, MCP, etc.) in background
-    // so the UI shows "Connected" right away with a "Syncing..." indicator.
-    const sender = event.sender
-
-    // Fire-and-forget: run sync and setup in background
-    ;(async () => {
-      try {
-        const { WorkfloApiClient } = await import('./workflo-api-client')
-        const { EnterpriseSyncManager } = await import('./enterprise-sync')
-
-        const apiClient = new WorkfloApiClient(enterpriseAuth!)
-        const enterpriseSyncMgr = new EnterpriseSyncManager(db, apiClient)
-
-        // Get user ID from stored session
-        const session = await enterpriseAuth!.getSession()
-        const userId = session.userId || ''
-
-        // Start enterprise heartbeat (1-min interval)
-        {
-          const { EnterpriseHeartbeat: EHB } = await import('./enterprise-heartbeat')
-          if (!enterpriseHeartbeat) {
-            enterpriseHeartbeat = new EHB(apiClient)
-          } else {
-            enterpriseHeartbeat.setApiClient(apiClient)
-          }
-          enterpriseHeartbeat.start({
-            userEmail: session.userEmail || undefined,
-            userName: session.userEmail || undefined
-          })
-        }
-
-        // Wire enterprise state sync
-        {
-          const { EnterpriseStateSync: ESS } = await import('./enterprise-state-sync')
-          if (!enterpriseStateSync) {
-            enterpriseStateSync = new ESS(apiClient)
-          } else {
-            enterpriseStateSync.setApiClient(apiClient)
-          }
-          enterpriseStateSync.setUserName(session.userEmail || 'Unknown')
-          agentManager.setEnterpriseStateSync(enterpriseStateSync)
-
-          // Attach state sync to heartbeat so events flush every 60s
-          if (enterpriseHeartbeat) {
-            enterpriseHeartbeat.setStateSync(enterpriseStateSync)
-          }
-        }
-
-        // Wire enterprise connection into sync manager (after state sync is ready)
-        syncManager.setEnterpriseConnection(apiClient, enterpriseSyncMgr, userId, enterpriseStateSync)
-
-        // Pass enterprise auth to agent manager so it can inject JWT into MCP Dev Server requests
-        agentManager.setEnterpriseAuth(enterpriseAuth!)
-
-        // Start MCP auth proxy so agent sessions get auto-refreshing JWT
-        try {
-          const { startMcpAuthProxy } = await import('./mcp-auth-proxy')
-          const proxyPort = await startMcpAuthProxy(enterpriseAuth!)
-          console.log(`[enterprise] MCP auth proxy started on port ${proxyPort}`)
-        } catch (proxyErr) {
-          console.warn('[enterprise] MCP auth proxy failed to start:', proxyErr)
-        }
-
-        // Run initial sync (agents, skills, MCP servers)
-        const syncStart = Date.now()
-        console.log('[enterprise] Running initial resource sync...')
-        const syncResult = await enterpriseSyncMgr.syncAll(userId)
-        const syncMs = Date.now() - syncStart
-        console.log(`[enterprise] Initial sync completed in ${syncMs}ms — result:`, JSON.stringify(syncResult))
-
-        // Auto-register MCP Dev Server (Workflo's MCP endpoint that exposes
-        // workflows-as-tools, integrations, datastores, and data tables).
-        // Uses the enterprise JWT for authentication — no separate API key needed.
-        try {
-          const mcpDevServerName = '[Workflo] Organisation Workspace'
-          const legacyMcpDevServerName = '[Workflo] MCP Dev Server'
-          const apiUrl = enterpriseAuth!.getApiUrl()
-          const mcpDevUrl = `${apiUrl}/api/mcp/dev/mcp`
-
-          const localServers = db.getMcpServers()
-          const existingMcpDev =
-            localServers.find((s) => s.name === mcpDevServerName) ??
-            localServers.find(
-              (s) =>
-                s.name === legacyMcpDevServerName &&
-                s.source === 'enterprise'
-            )
-
-          if (existingMcpDev) {
-            // Update URL and ensure source is 'enterprise' (may be missing on
-            // servers created before this fix). Also handles env changes
-            // (e.g. local → stage → prod).
-            const needsUpdate =
-              existingMcpDev.name !== mcpDevServerName ||
-              existingMcpDev.url !== mcpDevUrl ||
-              existingMcpDev.source !== 'enterprise'
-            if (needsUpdate) {
-              db.updateMcpServer(existingMcpDev.id, {
-                name: mcpDevServerName,
-                url: mcpDevUrl,
-                source: 'enterprise'
-              })
-              console.log('[enterprise] Updated Organisation Workspace:', mcpDevUrl)
-            }
-          } else {
-            db.createMcpServer({
-              name: mcpDevServerName,
-              type: 'remote',
-              url: mcpDevUrl,
-              headers: {},
-              source: 'enterprise',
-              // The enterprise JWT is injected dynamically by the MCP transport
-              // layer (via EnterpriseAuth.getJwt()), not stored statically here.
-              // The MCP client retrieves a fresh JWT before each connection.
-            })
-            console.log('[enterprise] Registered Organisation Workspace:', mcpDevUrl)
-          }
-        } catch (mcpErr) {
-          console.warn('[enterprise] Failed to register MCP Dev Server (non-fatal):', mcpErr)
-        }
-
-        // Auto-add all [Workflo] MCP servers to the default agent so they're
-        // immediately available without manual configuration
-        try {
-          const allServers = db.getMcpServers()
-          const workfloServers = allServers.filter((s) => s.name.startsWith('[Workflo]'))
-
-          const defaultAgent = db.getAgents().find((a) => a.is_default)
-          if (defaultAgent && workfloServers.length > 0) {
-            const config = { ...defaultAgent.config }
-            const mcpServers = [...(config.mcp_servers || [])]
-            let added = 0
-
-            for (const server of workfloServers) {
-              const alreadyPresent = mcpServers.some((s) =>
-                typeof s === 'string' ? s === server.id : s.serverId === server.id
-              )
-              if (!alreadyPresent) {
-                mcpServers.push(server.id)
-                added++
-              }
-            }
-
-            if (added > 0) {
-              config.mcp_servers = mcpServers
-              db.updateAgent(defaultAgent.id, { config })
-              console.log(`[enterprise] Added ${added} Workflo MCP server(s) to default agent`)
-            }
-          }
-        } catch (err) {
-          console.warn('[enterprise] Failed to add MCP servers to default agent (non-fatal):', err)
-        }
-
-        // Auto-create Peakflo task source if none exists
-        const existingSources = db.getTaskSources()
-        const hasPeakfloSource = existingSources.some(
-          (s) => s.plugin_id === 'peakflo' && (s.config as Record<string, unknown>).enterprise_mode
-        )
-        if (!hasPeakfloSource) {
-          console.log('[enterprise] Auto-creating Peakflo task source...')
-          db.createTaskSource({
-            mcp_server_id: null,
-            name: `Workflo (${result.tenant.name})`,
-            plugin_id: 'peakflo',
-            config: {
-              enterprise_mode: true,
-              status_filter: 'all',
-              auto_sync_interval: 5
-            },
-            list_tool: '',
-            list_tool_args: {},
-            update_tool: '',
-            update_tool_args: {}
-          })
-        }
-
-        // Notify renderer that background sync is complete (include sync stats)
-        if (!sender.isDestroyed()) {
-          sender.send('enterprise:syncComplete', {
-            success: true,
-            syncMs,
-            syncStats: {
-              agents: syncResult.agents,
-              skills: syncResult.skills,
-              mcpServers: syncResult.mcpServers,
-              taskSources: syncResult.taskSources,
-              errors: syncResult.errors
-            }
-          })
-        }
-      } catch (err) {
-        console.error('[enterprise] Post-connect setup error (non-fatal):', err)
-        if (!sender.isDestroyed()) {
-          sender.send('enterprise:syncComplete', {
-            success: false,
-            error: err instanceof Error ? err.message : String(err)
-          })
-        }
-      }
-    })()
-
-    return result
-  })
-
-  ipcMain.handle('enterprise:logout', async () => {
-    if (!enterpriseAuth) throw new Error('Enterprise auth not available')
-    syncManager.clearEnterpriseConnection()
-    agentManager.setEnterpriseAuth(null)
-
-    // Stop enterprise heartbeat
-    if (enterpriseHeartbeat) {
-      enterpriseHeartbeat.stop()
-    }
-
-    // Clear enterprise state sync from agent manager
-    agentManager.setEnterpriseStateSync(null)
-
-    await enterpriseAuth.logout()
-    analytics()?.setEnterpriseEmail(null)
-
-    try {
-      new Notification({
-        title: '20x Cloud Disconnected',
-        body: 'You have been signed out of 20x Cloud.'
-      }).show()
-    } catch {
-      // Notification may fail in headless / test environments — ignore
-    }
-  })
-
-  ipcMain.handle('enterprise:getSession', async () => {
-    if (!enterpriseAuth) {
-      return { isAuthenticated: false, userEmail: null, userId: null, currentTenant: null }
-    }
-    const session = await enterpriseAuth.getSession()
-    if (session.userEmail) {
-      analytics()?.setEnterpriseEmail(session.userEmail)
-    } else if (!session.isAuthenticated) {
-      analytics()?.setEnterpriseEmail(null)
-    }
-
-    // Restore enterprise connection if authenticated but sync manager not wired
-    if (session.isAuthenticated && session.currentTenant && session.userId) {
-      try {
-        const { WorkfloApiClient } = await import('./workflo-api-client')
-        const { EnterpriseSyncManager } = await import('./enterprise-sync')
-
-        const apiClient = new WorkfloApiClient(enterpriseAuth)
-        const enterpriseSyncMgr = new EnterpriseSyncManager(db, apiClient)
-        // Restore enterprise heartbeat
-        try {
-          const { EnterpriseHeartbeat: EHB } = await import('./enterprise-heartbeat')
-          if (!enterpriseHeartbeat) {
-            enterpriseHeartbeat = new EHB(apiClient)
-          } else {
-            enterpriseHeartbeat.setApiClient(apiClient)
-          }
-          if (!enterpriseHeartbeat.isRunning) {
-            enterpriseHeartbeat.start({
-              userEmail: session.userEmail || undefined,
-              userName: session.userEmail || undefined
-            })
-          }
-        } catch (err) {
-          console.error('[enterprise] Failed to restore heartbeat:', err)
-        }
-
-        // Restore enterprise state sync
-        try {
-          const { EnterpriseStateSync: ESS } = await import('./enterprise-state-sync')
-          if (!enterpriseStateSync) {
-            enterpriseStateSync = new ESS(apiClient)
-          } else {
-            enterpriseStateSync.setApiClient(apiClient)
-          }
-          enterpriseStateSync.setUserName(session.userEmail || 'Unknown')
-          agentManager.setEnterpriseStateSync(enterpriseStateSync)
-
-          // Attach state sync to heartbeat so events flush every 60s
-          if (enterpriseHeartbeat) {
-            enterpriseHeartbeat.setStateSync(enterpriseStateSync)
-          }
-        } catch (err) {
-          console.error('[enterprise] Failed to restore state sync:', err)
-        }
-
-        // Wire enterprise connection (after state sync is ready)
-        syncManager.setEnterpriseConnection(apiClient, enterpriseSyncMgr, session.userId, enterpriseStateSync)
-      } catch (err) {
-        console.error('[enterprise] Failed to restore connection:', err)
-      }
-    }
-
-    return session
-  })
-
-  ipcMain.handle('enterprise:getAiGatewayStatus', async () => {
-    const base = { configured: false, modelCount: 0, keyName: null as string | null, expiresAt: null as string | null, subscription: null as { planName: string; status: string; planId: string; currentPeriodEnd: string | null } | null }
-    try {
-      const { readEnterpriseAiGatewayConfig, AI_GATEWAY_SUBSCRIPTION_STATUS } = await import('./enterprise-ai-gateway')
-      const config = readEnterpriseAiGatewayConfig(db)
-      if (config) {
-        base.configured = true
-        base.modelCount = config.models?.length ?? 0
-        base.keyName = config.keyName ?? null
-        base.expiresAt = config.expiresAt ?? null
-      }
-
-      // Fetch subscription/plan info from the server API
-      if (enterpriseAuth) {
-        try {
-          const planResponse = await enterpriseAuth.apiRequest('GET', '/api/20x/ai-gateway/plan') as {
-            currentSubscription?: {
-              planId: string
-              status: string
-              currentPeriodEnd?: string | null
-            } | null
-            plans?: Array<{ id: string; name: string }>
-          }
-          if (planResponse?.currentSubscription) {
-            const sub = planResponse.currentSubscription
-            const plans = planResponse.plans ?? []
-            const matchedPlan = plans.find(p => p.id === sub.planId)
-            base.subscription = {
-              planId: sub.planId,
-              planName: matchedPlan?.name ?? sub.planId,
-              status: sub.status,
-              currentPeriodEnd: sub.currentPeriodEnd ?? null
-            }
-
-            // Auto-fetch AI gateway key when subscription is active but not yet configured locally.
-            // This handles the case where a plan was activated after the initial tenant selection
-            // (e.g. by an enterprise admin), so the first fetch attempt failed silently.
-            if (sub.status === AI_GATEWAY_SUBSCRIPTION_STATUS.ACTIVE && !base.configured) {
-              try {
-                await enterpriseAuth.refreshAiGatewayVirtualKey()
-                const updatedConfig = readEnterpriseAiGatewayConfig(db)
-                if (updatedConfig) {
-                  base.configured = true
-                  base.modelCount = updatedConfig.models?.length ?? 0
-                  base.keyName = updatedConfig.keyName ?? null
-                  base.expiresAt = updatedConfig.expiresAt ?? null
-                }
-              } catch (keyErr) {
-                console.warn('[enterprise] Auto-fetch of AI gateway key failed:', keyErr)
-              }
-            }
-          }
-        } catch (apiErr) {
-          // Server API may be unavailable (e.g. AI gateway disabled) — that's fine,
-          // we still return the local config status.
-          console.warn('[enterprise] Failed to fetch AI gateway plan from server:', apiErr)
-        }
-      }
-
-      return base
-    } catch (err) {
-      console.error('[enterprise] Failed to read AI gateway status:', err)
-      return base
-    }
-  })
-
-  ipcMain.handle('enterprise:syncResources', async () => {
-    // Refresh AI gateway virtual key alongside resource sync so that
-    // clicking "Sync resources" also picks up newly-activated subscriptions.
-    if (enterpriseAuth) {
-      try {
-        await enterpriseAuth.refreshAiGatewayVirtualKey()
-      } catch (err) {
-        console.warn('[enterprise] AI gateway key refresh during sync failed (non-fatal):', err)
-      }
-    }
-
-    const syncResult = await syncManager.syncEnterpriseResources()
-    if (!syncResult) return null
-    return {
-      agents: syncResult.agents,
-      skills: syncResult.skills,
-      mcpServers: syncResult.mcpServers,
-      taskSources: syncResult.taskSources,
-      errors: syncResult.errors
-    }
-  })
-
-  ipcMain.handle('enterprise:refreshToken', async () => {
-    if (!enterpriseAuth) throw new Error('Enterprise auth not available')
-    return await enterpriseAuth.refreshToken()
-  })
-
-  ipcMain.handle('enterprise:apiRequest', async (_, method: string, path: string, body?: unknown) => {
-    if (!enterpriseAuth) throw new Error('Enterprise auth not available')
-    return await enterpriseAuth.apiRequest(method, path, body)
-  })
-
-  ipcMain.handle('enterprise:getApiUrl', () => {
-    if (!enterpriseAuth) throw new Error('Enterprise auth not available')
-    return enterpriseAuth.getApiUrl()
-  })
-
-  ipcMain.handle('enterprise:getJwt', async () => {
-    if (!enterpriseAuth) throw new Error('Enterprise auth not available')
-    return enterpriseAuth.getJwt()
-  })
-
-  ipcMain.handle('enterprise:getAuthTokens', async () => {
-    if (!enterpriseAuth) throw new Error('Enterprise auth not available')
-    return enterpriseAuth.getAuthTokens()
-  })
-
-  // Inject Authorization header for iframe requests to the enterprise API.
-  // The interceptor is scoped to the API URL so it only affects API-bound requests.
-  //
-  // IMPORTANT: session.defaultSession.webRequest.onBeforeSendHeaders can only
-  // have ONE handler.  index.ts already registers a global handler that rewrites
-  // Sec-CH-UA Client Hints for anti-bot-detection.  When we register here with
-  // a scoped filter, it REPLACES the global handler.  To avoid breaking the
-  // Client Hints fix, we re-apply the Sec-CH-UA rewriting inside this handler too.
-  let iframeAuthEnabled = false
-  let enterpriseApiUrl: string | null = null
-
-  ipcMain.handle('enterprise:enableIframeAuth', async () => {
-    if (!enterpriseAuth) throw new Error('Enterprise auth not available')
-    if (iframeAuthEnabled) return { apiUrl: enterpriseAuth.getApiUrl() }
-
-    enterpriseApiUrl = enterpriseAuth.getApiUrl()
-
-    // Re-register a GLOBAL handler (not scoped) that handles BOTH enterprise
-    // auth AND Client Hints rewriting.  This replaces the handler from index.ts.
-    const chromiumVersion = process.versions.chrome || '136.0.0.0'
-    const chromiumMajor = chromiumVersion.split('.')[0]
-
-    session.defaultSession.webRequest.onBeforeSendHeaders(
-      { urls: ['http://*/*', 'https://*/*'] },
-      async (details, callback) => {
-        const headers = { ...details.requestHeaders }
-
-        // ── Client Hints rewriting (anti-bot-detection) ──
-        for (const key of Object.keys(headers)) {
-          const lower = key.toLowerCase()
-          if (lower === 'sec-ch-ua') {
-            headers[key] = `"Chromium";v="${chromiumMajor}", "Google Chrome";v="${chromiumMajor}", "Not_A Brand";v="24"`
-          } else if (lower === 'sec-ch-ua-full-version-list') {
-            headers[key] = `"Chromium";v="${chromiumVersion}", "Google Chrome";v="${chromiumVersion}", "Not_A Brand";v="24.0.0.0"`
-          }
-        }
-        if (!Object.keys(headers).some((k) => k.toLowerCase() === 'sec-ch-ua')) {
-          headers['Sec-CH-UA'] = `"Chromium";v="${chromiumMajor}", "Google Chrome";v="${chromiumMajor}", "Not_A Brand";v="24"`
-        }
-
-        // ── Enterprise auth injection (only for API URL) ──
-        if (iframeAuthEnabled && enterpriseAuth && enterpriseApiUrl && details.url.startsWith(enterpriseApiUrl)) {
-          try {
-            const jwt = await enterpriseAuth.getJwt()
-            headers['Authorization'] = `Bearer ${jwt}`
-          } catch {
-            // If JWT retrieval fails, proceed without auth
-          }
-        }
-
-        callback({ requestHeaders: headers })
-      }
-    )
-
-    iframeAuthEnabled = true
-    return { apiUrl: enterpriseApiUrl }
-  })
-
-  ipcMain.handle('enterprise:disableIframeAuth', () => {
-    iframeAuthEnabled = false
   })
 
   // ── Claude Plugin Marketplace handlers ─────────────────────

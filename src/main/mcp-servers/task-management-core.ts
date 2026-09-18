@@ -914,8 +914,7 @@ async function handleScopedCall(
           filename: a.name || a.filename || 'unknown',
           size: typeof a.size === 'number' ? a.size : 0,
           mime_type: a.type || a.mime_type || 'application/octet-stream',
-          added_at: a.added_at || new Date().toISOString(),
-          ...(a.path ? { workflo_path: a.path } : {})
+          added_at: a.added_at || new Date().toISOString()
         }))
       }
       return invoke('/update_task', { ...args, task_id: scope.taskId })
@@ -938,8 +937,7 @@ async function handleScopedCall(
           filename: a.name || a.filename || 'unknown',
           size: typeof a.size === 'number' ? a.size : 0,
           mime_type: a.type || a.mime_type || 'application/octet-stream',
-          added_at: a.added_at || new Date().toISOString(),
-          ...(a.path ? { workflo_path: a.path } : {})
+          added_at: a.added_at || new Date().toISOString()
         }))
       }
       return invoke('/update_task', allowed)

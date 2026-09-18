@@ -51,7 +51,7 @@ export function createTestDb(): { db: DatabaseManager; rawDb: InstanceType<typeo
       id TEXT PRIMARY KEY,
       mcp_server_id TEXT REFERENCES mcp_servers(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
-      plugin_id TEXT NOT NULL DEFAULT 'peakflo',
+      plugin_id TEXT NOT NULL DEFAULT '',
       config TEXT NOT NULL DEFAULT '{}',
       list_tool TEXT NOT NULL DEFAULT '',
       list_tool_args TEXT NOT NULL DEFAULT '{}',
@@ -156,8 +156,6 @@ export function createTestDb(): { db: DatabaseManager; rawDb: InstanceType<typeo
       last_used TEXT,
       tags TEXT NOT NULL DEFAULT '[]',
       is_deleted INTEGER NOT NULL DEFAULT 0,
-      enterprise_skill_id TEXT DEFAULT NULL,
-      uses_at_last_sync INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );

@@ -1,10 +1,10 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CodingAgentType, TaskStatus } from '@/types'
-import type { Agent, WorkfloTask } from '@/types'
+import type { Agent, Task } from '@/types'
 import { TaskHeaderBar, TaskPrimaryAction } from './TaskHeaderBar'
 
-function makeTask(status = TaskStatus.NotStarted): WorkfloTask {
+function makeTask(status = TaskStatus.NotStarted): Task {
   return {
     id: 'task-1',
     title: 'Review the redesign',

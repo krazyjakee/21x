@@ -46,8 +46,6 @@ interface UIState {
   dashboardPreviewTaskId: string | null
   /** Task ID to add to canvas when switching to canvas view */
   canvasPendingTaskId: string | null
-  /** App to add to canvas when switching to canvas view */
-  canvasPendingApp: { workflowId: string; name: string } | null
   /** Pre-fill text for the create task modal (from dashboard command input / quick chips) */
   createTaskPrefill: { title: string; description: string } | null
   /** Whether the Mastermind drawer is open (global) */
@@ -79,8 +77,6 @@ interface UIState {
   setCanvasPendingTaskId: (taskId: string) => void
   clearCanvasPendingTask: () => void
   /** Switch to canvas view and queue an app to be added as a panel */
-  openAppOnCanvas: (workflowId: string, name: string) => void
-  clearCanvasPendingApp: () => void
   /** Open create modal with pre-filled text from command input */
   openCreateWithPrefill: (text: string) => void
   /** Clear prefill data after the form has consumed it */
@@ -110,7 +106,6 @@ export const useUIStore = create<UIState>((set) => ({
   settingsTab: SettingsTab.GENERAL,
   dashboardPreviewTaskId: null,
   canvasPendingTaskId: null,
-  canvasPendingApp: null,
   createTaskPrefill: null,
   showOrchestrator: false,
   sidebarCollapsed: readStoredCollapsed(),
@@ -147,8 +142,6 @@ export const useUIStore = create<UIState>((set) => ({
   openTaskOnCanvas: (taskId) => set({ sidebarView: 'canvas', canvasPendingTaskId: taskId, dashboardPreviewTaskId: null }),
   setCanvasPendingTaskId: (taskId) => set({ canvasPendingTaskId: taskId, dashboardPreviewTaskId: null }),
   clearCanvasPendingTask: () => set({ canvasPendingTaskId: null }),
-  openAppOnCanvas: (workflowId, name) => set({ sidebarView: 'canvas', canvasPendingApp: { workflowId, name }, dashboardPreviewTaskId: null }),
-  clearCanvasPendingApp: () => set({ canvasPendingApp: null }),
   openCreateWithPrefill: (text: string) => {
     // Split text: first sentence becomes title, rest becomes description
     const firstSentenceMatch = text.match(/^(.+?[.!?])\s+([\s\S]+)$/)

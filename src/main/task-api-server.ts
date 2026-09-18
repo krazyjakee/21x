@@ -10,9 +10,10 @@
  * only forwarded calls to this same server, so it was pure overhead, and one
  * copy per session stayed alive for as long as the agent CLI did.
  */
-import { createServer, type Server as HttpServer } from 'http'
+import { createServer, type IncomingMessage, type Server as HttpServer } from 'http'
+import { randomBytes, timingSafeEqual } from 'crypto'
 import { CronExpressionParser } from 'cron-parser'
-import type { DatabaseManager } from './database'
+import type { DatabaseManager, UpdateTaskData } from './database'
 import { TASK_MCP_PATH, handleTaskMcpRequest } from './task-mcp-endpoint'
 import { TaskStatus } from '../shared/constants'
 import { ArtifactType } from '../shared/artifacts'
@@ -110,6 +111,29 @@ export function getTaskApiPort(): number | null {
   return port
 }
 
+// Every caller must present this. The server is on loopback, but any local
+// process, and any web page that DNS-rebinds a hostname to 127.0.0.1, can
+// reach it, and its routes drive agents that run shell commands.
+const apiToken = randomBytes(32).toString('hex')
+
+export function getTaskApiToken(): string {
+  return apiToken
+}
+
+/** Environment for a child process that calls the task API directly. */
+export function getTaskApiEnv(): Record<string, string> {
+  return port ? { TASK_API_URL: `http://127.0.0.1:${port}`, TASK_API_TOKEN: apiToken } : {}
+}
+
+function isAuthorized(req: IncomingMessage, url: URL): boolean {
+  const header = req.headers.authorization
+  const presented = header?.startsWith('Bearer ') ? header.slice('Bearer '.length) : url.searchParams.get('token')
+  if (!presented) return false
+  const expected = Buffer.from(apiToken)
+  const actual = Buffer.from(presented)
+  return actual.length === expected.length && timingSafeEqual(actual, expected)
+}
+
 /**
  * Waits for the task API server to finish starting.
  * Returns the port number once available.
@@ -174,6 +198,12 @@ export function startTaskApiServer(db: DatabaseManager): Promise<number> {
         try {
           const url = new URL(req.url || '/', `http://localhost`)
           const route = url.pathname
+
+          if (!isAuthorized(req, url)) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Unauthorized' }))
+            return
+          }
 
           // The MCP endpoint speaks JSON-RPC and sets its own headers, so it
           // must be served before anything below assumes a plain JSON route.
@@ -347,7 +377,6 @@ export async function handleRoute(db: DatabaseManager, route: string, params: Re
     }
 
     case '/create_task': {
-      if (params.status === 'completed') return { error: 'Create the task in Workflo before completing it.' }
       if (!params.title) return { error: 'Title is required' }
 
       const id = `task_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
@@ -409,7 +438,7 @@ export async function handleRoute(db: DatabaseManager, route: string, params: Re
       const task = rawDb.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown>
       const parsed = parseTask(task)
 
-      // Notify renderer using properly deserialized task (matches WorkfloTask shape)
+      // Notify renderer using properly deserialized task (matches the renderer task shape)
       if (notifyRenderer) {
         const properTask = db.getTask(id)
         if (properTask) {
@@ -429,82 +458,62 @@ export async function handleRoute(db: DatabaseManager, route: string, params: Re
     }
 
     case '/update_task': {
-      if (params.status && params.status !== 'in_progress') {
-        try { db.updateTask(params.task_id as string, { status: params.status as never }) }
-        catch (error) { return { error: error instanceof Error ? error.message : 'Task status refused' } }
-      }
-      const updates: string[] = []
-      const qParams: unknown[] = []
+      const taskId = params.task_id as string
+      const current = db.getTask(taskId)
+      if (!current) return { error: 'Task not found' }
 
-      // Normalize legacy 'in_progress' status to 'agent_working'
-      if (params.status === 'in_progress') params.status = 'agent_working'
-
-      // When task is in triaging status, skip status changes from the triage agent
-      if (params.status) {
-        const currentTask = rawDb.prepare('SELECT status FROM tasks WHERE id = ?').get(params.task_id) as { status: string } | undefined
-        if (currentTask?.status === 'triaging') {
-          // Don't allow triage agent to change status — it will be reset by transitionToIdle
-        } else {
-          updates.push('status = ?'); qParams.push(params.status)
-        }
-      }
+      const data: UpdateTaskData = {}
+      // 'in_progress' is the legacy name for 'agent_working'
+      const status = params.status === 'in_progress' ? TaskStatus.AgentWorking : params.status
+      // A triage agent must not move its own task; transitionToIdle sets the
+      // status once triage ends. Other fields (agent, labels, repos) still apply.
+      if (status && current.status !== TaskStatus.Triaging) data.status = status as TaskStatus
 
       if (params.title !== undefined) {
         const title = typeof params.title === 'string' ? params.title.trim() : ''
         if (!title) return { error: 'Title cannot be empty' }
-        updates.push('title = ?'); qParams.push(title)
+        data.title = title
       }
-      if (params.description !== undefined) { updates.push('description = ?'); qParams.push(params.description) }
-      if (params.resolution !== undefined) { updates.push('resolution = ?'); qParams.push(params.resolution) }
-      if (params.attachments !== undefined) { updates.push('attachments = ?'); qParams.push(JSON.stringify(params.attachments)) }
-      if (params.labels !== undefined) { updates.push('labels = ?'); qParams.push(JSON.stringify(params.labels)) }
-      if (params.skill_ids !== undefined) { updates.push('skill_ids = ?'); qParams.push(JSON.stringify(params.skill_ids)) }
-      if (params.agent_id !== undefined) { updates.push('agent_id = ?'); qParams.push(params.agent_id) }
+      if (params.description !== undefined) data.description = params.description as string
+      if (params.resolution !== undefined) data.resolution = params.resolution as string
+      if (params.attachments !== undefined) data.attachments = params.attachments as UpdateTaskData['attachments']
+      if (params.labels !== undefined) data.labels = params.labels as string[]
+      if (params.skill_ids !== undefined) data.skill_ids = params.skill_ids as string[]
+      if (params.agent_id !== undefined) data.agent_id = params.agent_id as string | null
       // Lets a caller with no window hand the task straight to its agent.
-      if (params.auto_start_agent !== undefined) {
-        updates.push('auto_start_agent = ?')
-        qParams.push(params.auto_start_agent === true ? 1 : 0)
-      }
+      if (params.auto_start_agent !== undefined) data.auto_start_agent = params.auto_start_agent === true
       // Lets a caller with no window make a task finish by itself.
       if (params.auto_complete_without_review !== undefined) {
-        updates.push('auto_complete_without_review = ?')
-        qParams.push(params.auto_complete_without_review === true ? 1 : 0)
+        data.auto_complete_without_review = params.auto_complete_without_review === true
       }
       if (params.repos !== undefined) {
-        const normalizedRepos = Array.isArray(params.repos)
+        data.repos = Array.isArray(params.repos)
           ? params.repos
           : (typeof params.repos === 'string' && params.repos.length > 0 ? [params.repos] : [])
-        updates.push('repos = ?'); qParams.push(JSON.stringify(normalizedRepos))
       }
-      if (params.priority) { updates.push('priority = ?'); qParams.push(params.priority) }
-      if (params.output_fields !== undefined) { updates.push('output_fields = ?'); qParams.push(JSON.stringify(params.output_fields)) }
+      if (params.priority) data.priority = params.priority as UpdateTaskData['priority']
+      if (params.output_fields !== undefined) data.output_fields = params.output_fields as UpdateTaskData['output_fields']
 
-      if (updates.length === 0) return { error: 'No updates provided' }
+      if (Object.keys(data).length === 0) return { error: 'No updates provided' }
 
-      updates.push('updated_at = ?')
-      qParams.push(new Date().toISOString())
-      qParams.push(params.task_id)
-
-      const result = rawDb.prepare(`UPDATE tasks SET ${updates.join(', ')} WHERE id = ?`).run(...qParams)
-      if (result.changes === 0) return { error: 'Task not found' }
-
-      const updated = rawDb.prepare('SELECT * FROM tasks WHERE id = ?').get(params.task_id) as Record<string, unknown>
-      const parsedUpdated = parseTask(updated)
-
-      // Notify renderer using properly deserialized task (matches WorkfloTask shape)
-      if (notifyRenderer) {
-        const properTask = db.getTask(params.task_id as string)
-        if (properTask) {
-          notifyRenderer('task:updated', { taskId: params.task_id, updates: properTask })
-        }
+      // One write through DatabaseManager so its status rules (source-confirmed
+      // completion, agent-learning hold, locally closed tasks) always apply.
+      let updated
+      try {
+        updated = db.updateTask(taskId, data)
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : 'Task update refused' }
       }
+      if (!updated) return { error: 'Task not found' }
+
+      notifyRenderer?.('task:updated', { taskId, updates: updated })
 
       // A status move — most importantly into ready_for_review — is exactly
       // when an auto-complete flag has to be honoured.
       if (
-        params.status !== undefined ||
-        params.auto_start_agent !== undefined ||
-        params.auto_complete_without_review !== undefined
+        data.status !== undefined ||
+        data.auto_start_agent !== undefined ||
+        data.auto_complete_without_review !== undefined
       ) {
         triggerTaskAutomation()
       }
@@ -512,19 +521,20 @@ export async function handleRoute(db: DatabaseManager, route: string, params: Re
       // Event-driven coordinator wake-up: when a subtask is moved to a terminal
       // state (by its agent or a sibling), resume the idle parent coordinator
       // instead of relying on it staying resident and polling for child status.
-      const newStatus = params.status as string | undefined
-      const parentTaskId = updated.parent_task_id as string | null
+      const parentTaskId = updated.parent_task_id
       if (
         parentTaskId &&
-        (newStatus === TaskStatus.ReadyForReview || newStatus === TaskStatus.Completed) &&
+        data.status !== undefined &&
+        (updated.status === TaskStatus.ReadyForReview || updated.status === TaskStatus.Completed) &&
         agentController?.notifyParentOfSubtaskCompletion
       ) {
-        agentController.notifyParentOfSubtaskCompletion(parentTaskId, params.task_id as string).catch((err) => {
-          console.error(`[TaskAPI] Failed to wake parent ${parentTaskId} after subtask ${params.task_id} update:`, err)
+        agentController.notifyParentOfSubtaskCompletion(parentTaskId, taskId).catch((err) => {
+          console.error(`[TaskAPI] Failed to wake parent ${parentTaskId} after subtask ${taskId} update:`, err)
         })
       }
 
-      return { success: true, task: parsedUpdated }
+      const row = rawDb.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as Record<string, unknown>
+      return { success: true, task: parseTask(row) }
     }
 
     case '/list_agents': {

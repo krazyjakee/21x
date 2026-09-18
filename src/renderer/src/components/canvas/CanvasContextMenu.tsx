@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { CheckSquare, MessageSquare, Monitor, AppWindow, Globe, TerminalSquare, Plus, X, Square, Circle, Minus, MoveUpRight, Type, Image } from 'lucide-react'
+import { CheckSquare, MessageSquare, Globe, TerminalSquare, Plus, X, Square, Circle, Minus, MoveUpRight, Type, Image } from 'lucide-react'
 import { useTaskStore } from '@/stores/task-store'
 import { useAgentStore } from '@/stores/agent-store'
-import { useDashboardStore } from '@/stores/dashboard-store'
 import { useCanvasStore, DEFAULT_PANEL_WIDTH, DEFAULT_PANEL_HEIGHT } from '@/stores/canvas-store'
 import { useDrawingStore } from '@/stores/drawing-store'
 import { useUIStore } from '@/stores/ui-store'
@@ -50,7 +49,6 @@ export function CanvasContextMenu({ position, onClose }: CanvasContextMenuProps)
     const separator = entry.lastIndexOf(':')
     return { taskId: entry.slice(0, separator), messageCount: Number(entry.slice(separator + 1)) }
   })
-  const applications = useDashboardStore((s) => s.applications)
   const addPanel = useCanvasStore((s) => s.addPanel)
   const panels = useCanvasStore((s) => s.panels)
   const openCreateModal = useUIStore((s) => s.openCreateModal)
@@ -80,8 +78,8 @@ export function CanvasContextMenu({ position, onClose }: CanvasContextMenuProps)
 
   const handleAddPanel = useCallback(
     (type: CanvasPanelType, title: string, refId?: string, url?: string) => {
-      // Don't add duplicate task/transcript/app panels for the same refId
-      if (refId && (type === 'task' || type === 'transcript' || type === 'app')) {
+      // Don't add duplicate task/transcript panels for the same refId
+      if (refId && (type === 'task' || type === 'transcript')) {
         const exists = panels.some((p) => p.type === type && p.refId === refId)
         if (exists) {
           onClose()
@@ -176,32 +174,6 @@ export function CanvasContextMenu({ position, onClose }: CanvasContextMenuProps)
           ))}
         </MenuSection>
 
-        {/* Applications section */}
-        {applications.length > 0 && (
-          <MenuSection title="Applications">
-            {applications.map((app) => (
-              <MenuItem
-                key={app.workflowId}
-                icon={<AppWindow className="h-3.5 w-3.5 text-green-400" />}
-                label={app.name}
-                sublabel={app.description || app.status}
-                onClick={() => handleAddPanel('app', app.name, app.workflowId)}
-              />
-            ))}
-          </MenuSection>
-        )}
-
-        {/* Quick add (generic app panel, only if no apps available) */}
-        {applications.length === 0 && (
-          <MenuSection title="Quick Add">
-            <MenuItem
-              icon={<Monitor className="h-3.5 w-3.5 text-green-400" />}
-              label="Application Panel"
-              onClick={() => handleAddPanel('app', 'Application')}
-            />
-          </MenuSection>
-        )}
-
         {/* Tasks section */}
         {availableTasks.length > 0 && (
           <MenuSection title="Tasks">
@@ -242,11 +214,11 @@ export function CanvasContextMenu({ position, onClose }: CanvasContextMenuProps)
         )}
 
         {/* Empty state */}
-        {availableTasks.length === 0 && activeSessions.length === 0 && applications.length === 0 && (
+        {availableTasks.length === 0 && activeSessions.length === 0 && (
           <div className="px-3 py-4 text-center text-[11px] text-muted-foreground/40">
-            No tasks, sessions, or applications available.
+            No tasks or sessions available.
             <br />
-            Create tasks or applications first, then add them to the canvas.
+            Create tasks first, then add them to the canvas.
           </div>
         )}
       </div>

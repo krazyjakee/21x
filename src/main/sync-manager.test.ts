@@ -52,21 +52,15 @@ describe('SyncManager', () => {
   })
 
   describe('importTasks', () => {
-    it('imports canonical tasks without waiting for unrelated resource uploads', async () => {
-      const plugin = makeMockPlugin({ id: 'peakflo' })
-      const resourceSync = vi.fn().mockRejectedValue(new Error('Duplicate skill ids'))
-      Object.assign(syncManager, {
-        enterpriseSyncManager: { syncAll: resourceSync },
-        enterpriseUserId: 'human-1'
-      })
+    it('imports tasks through the source plugin', async () => {
+      const plugin = makeMockPlugin({ id: 'linear' })
       vi.mocked(db.getTaskSource).mockReturnValue({
-        id: 'src-1', plugin_id: 'peakflo', config: {}
+        id: 'src-1', plugin_id: 'linear', config: {}
       } as ReturnType<DatabaseManager['getTaskSource']>)
       vi.mocked(registry.get).mockReturnValue(plugin)
       const result = await syncManager.importTasks('src-1')
       expect(plugin.importTasks).toHaveBeenCalledOnce()
       expect(result.imported).toBe(5)
-      expect(resourceSync).not.toHaveBeenCalled()
     })
 
     it('returns error when source not found', async () => {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useSnoozeTick } from './use-snooze-tick'
-import type { WorkfloTask } from '@/types'
+import type { Task } from '@/types'
 
 // Mock ipc-client
 let overdueCheckCallback: (() => void) | null = null
@@ -13,7 +13,7 @@ vi.mock('@/lib/ipc-client', () => ({
   onTaskDeleted: vi.fn(() => vi.fn()),
 }))
 
-function makeTask(overrides: Partial<WorkfloTask> = {}): WorkfloTask {
+function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: 'task-1',
     title: 'Test Task',
@@ -47,7 +47,7 @@ function makeTask(overrides: Partial<WorkfloTask> = {}): WorkfloTask {
     created_at: '2026-03-25T10:00:00.000Z',
     updated_at: '2026-03-25T10:00:00.000Z',
     ...overrides
-  } as WorkfloTask
+  } as Task
 }
 
 describe('useSnoozeTick', () => {

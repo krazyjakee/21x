@@ -4,7 +4,7 @@ import { cn, formatDate, isOverdue, isDueSoon, isSnoozed } from '@/lib/utils'
 import { TaskPriorityBadge } from './TaskPriorityBadge'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { TaskStatus } from '@/types'
-import type { WorkfloTask, RecurrencePattern, RecurrencePatternObject } from '@/types'
+import type { Task, RecurrencePattern, RecurrencePatternObject } from '@/types'
 
 function ordinal(n: number): string {
   if (n >= 11 && n <= 13) return `${n}th`
@@ -72,7 +72,7 @@ const statusDotColor: Record<TaskStatus, string> = {
 }
 
 interface TaskListItemProps {
-  task: WorkfloTask
+  task: Task
   isSelected: boolean
   onSelect: () => void
   subtaskCount?: number

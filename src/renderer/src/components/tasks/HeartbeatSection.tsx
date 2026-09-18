@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/Textarea'
 import { Markdown } from '@/components/ui/Markdown'
 import { Dialog, DialogContent, DialogHeader, DialogBody, DialogTitle } from '@/components/ui/Dialog'
 import { subscribe } from '@/lib/shared-ipc-listeners'
-import type { WorkfloTask } from '@/types'
+import type { Task } from '@/types'
 import type { HeartbeatStatusResult } from '@/types/electron'
 import { HeartbeatStatus } from '@/types'
 import { formatRelativeDate, formatRelativeFuture } from '@/lib/utils'
@@ -23,7 +23,7 @@ interface HeartbeatLog {
 }
 
 interface HeartbeatSectionProps {
-  task: WorkfloTask
+  task: Task
   onTaskUpdated?: () => void
 }
 

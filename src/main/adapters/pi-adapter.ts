@@ -11,16 +11,9 @@ import type { ChildProcessWithoutNullStreams } from 'child_process'
 import { randomUUID } from 'crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
-import { dirname, join } from 'path'
+import { join } from 'path'
 import { StringDecoder } from 'string_decoder'
 import { promisify } from 'util'
-import type { DatabaseManager } from '../database'
-import {
-  ENTERPRISE_AI_GATEWAY_PROVIDER_ID,
-  ENTERPRISE_AI_GATEWAY_PROVIDER_NAME,
-  buildPiAiGatewayProviderConfig,
-  readEnterpriseAiGatewayConfig,
-} from '../enterprise-ai-gateway'
 import type {
   CodingAgentAdapter,
   MessagePart,
@@ -36,26 +29,18 @@ const MAX_BUFFERED_PARTS = 1_000
 const MINIMUM_PI_VERSION = [0, 80, 5] as const
 const PI_PERMISSION_MODE_ENV = 'TWENTYX_PI_PERMISSION_MODE'
 const TERMINAL_ERROR_SETTLE_GRACE_MS = 1_000
+/** Identifies the hosted AI gateway entry older releases wrote to Pi's models file. */
+const LEGACY_GATEWAY_PROVIDER_ID = 'peakflo'
+const LEGACY_GATEWAY_API_KEY_REF = '$PEAKFLO_AI_GATEWAY_API_KEY'
 /**
  * Most model providers cap function/tool `name` at 64 characters. Pi forwards
  * MCP tools as `<server>_<tool>`-style names, so a long MCP server name (e.g.
- * "[Workflo] Organisation Workspace") plus a long tool name overflows the
+ * "[Team] Shared Workspace Tools") plus a long tool name overflows the
  * limit and the whole turn fails with "name must be at most 64 characters".
  * Keep server slugs short to leave room for the tool suffix.
  */
 export const MAX_PI_NAME_LENGTH = 64
 export const MAX_PI_MCP_SERVER_SLUG_LENGTH = 24
-
-/**
- * Short Pi-side aliases for MCP servers whose display names are too long to
- * fit the provider 64-char tool-name limit. The alias is only used in the
- * Pi `--mcp-config` file — display names in settings, docs, and other
- * backends are untouched.
- */
-export const PI_MCP_SERVER_ALIASES: Record<string, string> = {
-  '[Workflo] Organisation Workspace': 'workflo',
-  '[Workflo] MCP Dev Server': 'workflo-dev',
-}
 
 function slugifyPiName(value: string, maxLength: number): string {
   return (value
@@ -68,8 +53,8 @@ function slugifyPiName(value: string, maxLength: number): string {
 }
 
 /**
- * Generic rule for bracket-prefixed servers ("[Workflo] My tasks" →
- * "workflo-my-tasks"). Returns null when the name has no bracket prefix so
+ * Generic rule for bracket-prefixed servers ("[Team] My tasks" →
+ * "team-my-tasks"). Returns null when the name has no bracket prefix so
  * the caller falls back to plain slugification.
  */
 function slugifyBracketPrefix(name: string): string | null {
@@ -91,9 +76,7 @@ export function sanitizePiSessionName(taskId: string): string {
 }
 
 export function sanitizePiMcpServerName(name: string, used: Set<string>): string {
-  // Exact aliases first (e.g. "[Workflo] Organisation Workspace" → "workflo").
-  const alias = PI_MCP_SERVER_ALIASES[name]
-  const base = alias ?? slugifyBracketPrefix(name) ?? slugifyPiName(name, MAX_PI_MCP_SERVER_SLUG_LENGTH)
+  const base = slugifyBracketPrefix(name) ?? slugifyPiName(name, MAX_PI_MCP_SERVER_SLUG_LENGTH)
   if (!used.has(base)) {
     used.add(base)
     return base
@@ -262,7 +245,7 @@ export class PiAdapter implements CodingAgentAdapter {
   private piExecutablePath: string | null = null
   onDataAvailable?: (sessionId: string) => void
 
-  constructor(private db: Pick<DatabaseManager, 'getSetting'>) {}
+  private legacyGatewayChecked = false
 
   async initialize(): Promise<void> {
     await this.findPiExecutable()
@@ -302,37 +285,29 @@ export class PiAdapter implements CodingAgentAdapter {
   }
 
   /**
-   * Install or update the Peakflo provider in Pi's normal models file. The key
-   * remains an environment reference; 20x supplies the decrypted value only to
-   * the child process.
+   * Earlier releases wrote a hosted AI gateway provider into Pi's models file.
+   * Its key came from 20x at spawn time, so the entry cannot work any more.
+   * Remove only that exact entry and leave everything else the user has.
    */
-  private installPeakfloGateway(): { apiKey: string; providerModels: Array<{ id: string; name: string }> } | null {
-    const gateway = readEnterpriseAiGatewayConfig(this.db)
-    if (!gateway) return null
-
+  private removeLegacyGatewayProvider(): void {
+    if (this.legacyGatewayChecked) return
+    this.legacyGatewayChecked = true
     const agentDir = process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent')
     const modelsPath = join(agentDir, 'models.json')
-    mkdirSync(dirname(modelsPath), { recursive: true })
-
-    let root: { providers?: Record<string, unknown> } = {}
-    if (existsSync(modelsPath)) {
-      try {
-        root = JSON.parse(readFileSync(modelsPath, 'utf8')) as { providers?: Record<string, unknown> }
-      } catch (error) {
-        throw new Error(`Pi models file is not valid JSON: ${error instanceof Error ? error.message : String(error)}`)
-      }
+    if (!existsSync(modelsPath)) return
+    try {
+      const root = JSON.parse(readFileSync(modelsPath, 'utf8')) as { providers?: Record<string, { apiKey?: unknown }> }
+      if (root.providers?.[LEGACY_GATEWAY_PROVIDER_ID]?.apiKey !== LEGACY_GATEWAY_API_KEY_REF) return
+      const providers = { ...root.providers }
+      delete providers[LEGACY_GATEWAY_PROVIDER_ID]
+      const temporaryPath = `${modelsPath}.20x-${process.pid}.tmp`
+      writeFileSync(temporaryPath, `${JSON.stringify({ ...root, providers }, null, 2)}
+`, { mode: 0o600 })
+      chmodSync(temporaryPath, 0o600)
+      renameSync(temporaryPath, modelsPath)
+    } catch (error) {
+      console.warn('[PiAdapter] Could not remove the legacy gateway provider from Pi models file:', error)
     }
-
-    const providers = { ...(root.providers ?? {}) }
-    providers[ENTERPRISE_AI_GATEWAY_PROVIDER_ID] = buildPiAiGatewayProviderConfig(gateway)
-
-    const temporaryPath = `${modelsPath}.20x-${process.pid}.tmp`
-    writeFileSync(temporaryPath, `${JSON.stringify({ ...root, providers }, null, 2)}\n`, { mode: 0o600 })
-    chmodSync(temporaryPath, 0o600)
-    renameSync(temporaryPath, modelsPath)
-    chmodSync(modelsPath, 0o600)
-
-    return { apiKey: gateway.apiKey, providerModels: gateway.models ?? [] }
   }
 
   private buildMcpConfig(config: SessionConfig): string | undefined {
@@ -342,7 +317,7 @@ export class PiAdapter implements CodingAgentAdapter {
     const path = join(dir, `${sanitizePiSessionName(config.taskId)}-${randomUUID()}.json`)
     // Pi forwards MCP tools to the model as <server>_<tool> names, which most
     // providers cap at 64 characters. Sanitize server keys so a long display
-    // name (e.g. "[Workflo] Organisation Workspace") cannot overflow the limit.
+    // name (e.g. "[Team] Shared Workspace Tools") cannot overflow the limit.
     const document = buildPiMcpConfigDocument(config.mcpServers, (name, slug) => {
       console.warn(`[PiAdapter] Renamed MCP server "${name}" to "${slug}" to fit the provider 64-char tool name limit`)
     })
@@ -366,14 +341,10 @@ export class PiAdapter implements CodingAgentAdapter {
     return path
   }
 
-  private processEnv(
-    config: SessionConfig,
-    gateway: { apiKey: string } | null,
-  ): NodeJS.ProcessEnv {
+  private processEnv(config: SessionConfig): NodeJS.ProcessEnv {
     const env = {
       ...process.env,
       ...(config.secretEnvVars ?? {}),
-      ...(gateway ? { PEAKFLO_AI_GATEWAY_API_KEY: gateway.apiKey } : {}),
       [PI_PERMISSION_MODE_ENV]: config.permissionMode ?? 'ask',
     } as NodeJS.ProcessEnv
     delete env.AI_AGENT
@@ -461,7 +432,7 @@ export class PiAdapter implements CodingAgentAdapter {
 
   private async spawnSession(config: SessionConfig, resumeId?: string): Promise<PiSession> {
     const executable = await this.findPiExecutable()
-    const gateway = this.installPeakfloGateway()
+    this.removeLegacyGatewayProvider()
     const mcpConfigPath = this.buildMcpConfig(config)
     const permissionExtension = this.installPermissionExtension()
 
@@ -472,7 +443,7 @@ export class PiAdapter implements CodingAgentAdapter {
     if (resumeId) args.push('--session', resumeId)
     if (mcpConfigPath) args.push('--mcp-config', mcpConfigPath)
 
-    const invocation = this.piInvocation(executable, args, this.processEnv(config, gateway))
+    const invocation = this.piInvocation(executable, args, this.processEnv(config))
     const child = spawn(invocation.command, invocation.args, {
       cwd: config.workspaceDir,
       env: invocation.env,
@@ -1197,7 +1168,7 @@ export class PiAdapter implements CodingAgentAdapter {
     directory?: string,
   ): Promise<{ providers: Array<{ id: string; name: string; models: Array<{ id: string; name: string }> }>; default: Record<string, string> }> {
     const executable = await this.findPiExecutable()
-    const gateway = this.installPeakfloGateway()
+    this.removeLegacyGatewayProvider()
     const config: SessionConfig = {
       agentId: 'pi-discovery',
       taskId: 'pi-discovery',
@@ -1207,7 +1178,7 @@ export class PiAdapter implements CodingAgentAdapter {
     const invocation = this.piInvocation(
       executable,
       ['--mode', 'rpc', '--no-session', '--approve'],
-      this.processEnv(config, gateway),
+      this.processEnv(config),
     )
     const child = spawn(invocation.command, invocation.args, {
       cwd: config.workspaceDir,
@@ -1233,9 +1204,7 @@ export class PiAdapter implements CodingAgentAdapter {
         if (typeof record.provider !== 'string' || typeof record.id !== 'string') continue
         const provider = providers.get(record.provider) ?? {
           id: record.provider,
-          name: record.provider === ENTERPRISE_AI_GATEWAY_PROVIDER_ID
-            ? ENTERPRISE_AI_GATEWAY_PROVIDER_NAME
-            : record.provider,
+          name: record.provider,
           models: [],
         }
         if (!provider.models.some((item) => item.id === record.id)) {
@@ -1258,16 +1227,6 @@ export class PiAdapter implements CodingAgentAdapter {
         default: typeof defaultProvider === 'string' && typeof defaultModelId === 'string'
           ? { [defaultProvider]: defaultModelId }
           : {},
-      }
-    } catch (error) {
-      if (!gateway) throw error
-      return {
-        providers: [{
-          id: ENTERPRISE_AI_GATEWAY_PROVIDER_ID,
-          name: ENTERPRISE_AI_GATEWAY_PROVIDER_NAME,
-          models: gateway.providerModels,
-        }],
-        default: {},
       }
     } finally {
       await this.terminateProcess(session)

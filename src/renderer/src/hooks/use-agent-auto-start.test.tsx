@@ -4,7 +4,7 @@ import { useAgentAutoStart } from './use-agent-auto-start'
 import { useAgentSchedulerStore } from '@/stores/agent-scheduler-store'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { TaskStatus } from '@/types'
-import type { Agent, WorkfloTask } from '@/types'
+import type { Agent, Task } from '@/types'
 import type { Mock } from 'vitest'
 
 const mockElectronAPI = window.electronAPI
@@ -15,7 +15,7 @@ function getLatestAgentStatusCallback(): ((event: { sessionId: string; agentId: 
   return latest?.[0]
 }
 
-function makeTask(overrides: Partial<WorkfloTask> = {}): WorkfloTask {
+function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: 'task-1',
     title: 'Task',
@@ -841,7 +841,7 @@ describe('useAgentAutoStart', () => {
       // re-added auto-start listener would otherwise hide behind whichever
       // effect happened to subscribe last.
       const createdCallbacks = (mockElectronAPI.onTaskCreated as unknown as Mock).mock.calls
-        .map((call: unknown[]) => call[0] as (event: { task: WorkfloTask }) => void)
+        .map((call: unknown[]) => call[0] as (event: { task: Task }) => void)
       expect(createdCallbacks.length).toBeGreaterThan(0)
 
       await act(async () => {
@@ -870,7 +870,7 @@ describe('useAgentAutoStart', () => {
       )
 
       const updatedCallbacks = (mockElectronAPI.onTaskUpdated as unknown as Mock).mock.calls
-        .map((call: unknown[]) => call[0] as (event: { taskId: string; updates: Partial<WorkfloTask> }) => void)
+        .map((call: unknown[]) => call[0] as (event: { taskId: string; updates: Partial<Task> }) => void)
       expect(updatedCallbacks.length).toBeGreaterThan(0)
 
       await act(async () => {

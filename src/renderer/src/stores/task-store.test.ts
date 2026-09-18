@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { Mock } from 'vitest'
 import { useTaskStore } from './task-store'
-import type { WorkfloTask, CreateTaskDTO, UpdateTaskDTO } from '@/types'
+import type { Task, CreateTaskDTO, UpdateTaskDTO } from '@/types'
 
 const mockElectronAPI = window.electronAPI
 
 // Capture listener callbacks before any test clears mocks.
 // The store registers these once at module init time.
 let deletedCallback: ((event: { taskId: string }) => void) | null = null
-let createdCallback: ((event: { task: WorkfloTask }) => void) | null = null
+let createdCallback: ((event: { task: Task }) => void) | null = null
 {
   const calls = (mockElectronAPI.onTaskDeleted as unknown as Mock).mock.calls
   if (calls.length > 0) deletedCallback = calls[0][0]
@@ -55,7 +55,7 @@ describe('useTaskStore', () => {
 
   describe('createTask', () => {
     it('returns the created task from the backend', async () => {
-      useTaskStore.setState({ tasks: [{ id: 't1', title: 'Existing' }] as unknown as WorkfloTask[] })
+      useTaskStore.setState({ tasks: [{ id: 't1', title: 'Existing' }] as unknown as Task[] })
       const newTask = { id: 't2', title: 'New Task' }
       ;(mockElectronAPI.db.createTask as unknown as Mock).mockResolvedValue(newTask)
 
@@ -68,8 +68,8 @@ describe('useTaskStore', () => {
     })
 
     it('prepends task to list when onTaskCreated event fires', () => {
-      useTaskStore.setState({ tasks: [{ id: 't1', title: 'Existing' }] as unknown as WorkfloTask[] })
-      const newTask = { id: 't2', title: 'New Task' } as unknown as WorkfloTask
+      useTaskStore.setState({ tasks: [{ id: 't1', title: 'Existing' }] as unknown as Task[] })
+      const newTask = { id: 't2', title: 'New Task' } as unknown as Task
 
       if (createdCallback) {
         createdCallback({ task: newTask })
@@ -81,8 +81,8 @@ describe('useTaskStore', () => {
     })
 
     it('deduplicates when onTaskCreated fires for an already-present task', () => {
-      useTaskStore.setState({ tasks: [{ id: 't1', title: 'Existing' }] as unknown as WorkfloTask[] })
-      const eventTask = { id: 't1', title: 'Existing' } as unknown as WorkfloTask
+      useTaskStore.setState({ tasks: [{ id: 't1', title: 'Existing' }] as unknown as Task[] })
+      const eventTask = { id: 't1', title: 'Existing' } as unknown as Task
 
       if (createdCallback) {
         createdCallback({ task: eventTask })
@@ -103,7 +103,7 @@ describe('useTaskStore', () => {
       useTaskStore.setState({
         tasks: [
           { id: 't1', title: 'Old', source_id: null, external_id: null }
-        ] as unknown as WorkfloTask[]
+        ] as unknown as Task[]
       })
       const updated = { id: 't1', title: 'Updated', source_id: null, external_id: null }
       ;(mockElectronAPI.db.updateTask as unknown as Mock).mockResolvedValue(updated)
@@ -116,7 +116,7 @@ describe('useTaskStore', () => {
 
     it('fires background export for sourced tasks', async () => {
       useTaskStore.setState({
-        tasks: [{ id: 't1', source_id: 'src-1', external_id: 'ext-1' }] as unknown as WorkfloTask[]
+        tasks: [{ id: 't1', source_id: 'src-1', external_id: 'ext-1' }] as unknown as Task[]
       })
       const updated = { id: 't1', title: 'X', source_id: 'src-1', external_id: 'ext-1' }
       ;(mockElectronAPI.db.updateTask as unknown as Mock).mockResolvedValue(updated)
@@ -130,7 +130,7 @@ describe('useTaskStore', () => {
   describe('deleteTask', () => {
     it('removes task from list', async () => {
       useTaskStore.setState({
-        tasks: [{ id: 't1' }, { id: 't2' }] as unknown as WorkfloTask[],
+        tasks: [{ id: 't1' }, { id: 't2' }] as unknown as Task[],
         selectedTaskId: null
       })
       ;(mockElectronAPI.db.deleteTask as unknown as Mock).mockResolvedValue(true)
@@ -144,7 +144,7 @@ describe('useTaskStore', () => {
 
     it('clears selection if deleted task was selected', async () => {
       useTaskStore.setState({
-        tasks: [{ id: 't1' }] as unknown as WorkfloTask[],
+        tasks: [{ id: 't1' }] as unknown as Task[],
         selectedTaskId: 't1'
       })
       ;(mockElectronAPI.db.deleteTask as unknown as Mock).mockResolvedValue(true)
@@ -156,7 +156,7 @@ describe('useTaskStore', () => {
 
     it('preserves selection if different task deleted', async () => {
       useTaskStore.setState({
-        tasks: [{ id: 't1' }, { id: 't2' }] as unknown as WorkfloTask[],
+        tasks: [{ id: 't1' }, { id: 't2' }] as unknown as Task[],
         selectedTaskId: 't2'
       })
       ;(mockElectronAPI.db.deleteTask as unknown as Mock).mockResolvedValue(true)
@@ -170,7 +170,7 @@ describe('useTaskStore', () => {
   describe('onTaskDeleted', () => {
     it('removes task from list when event received', () => {
       useTaskStore.setState({
-        tasks: [{ id: 't1' }, { id: 't2' }] as unknown as WorkfloTask[],
+        tasks: [{ id: 't1' }, { id: 't2' }] as unknown as Task[],
         selectedTaskId: 't1'
       })
 

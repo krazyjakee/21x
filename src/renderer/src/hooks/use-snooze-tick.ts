@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { onOverdueCheck } from '@/lib/ipc-client'
-import type { WorkfloTask } from '@/types'
+import type { Task } from '@/types'
 
 const SNOOZE_SOMEDAY = '9999-12-31T00:00:00.000Z'
 
@@ -11,7 +11,7 @@ const SNOOZE_SOMEDAY = '9999-12-31T00:00:00.000Z'
  * Use this as a dependency in useMemo to force snooze re-evaluation
  * without polling — we schedule a single timer for the nearest expiry.
  */
-export function useSnoozeTick(tasks: WorkfloTask[]): number {
+export function useSnoozeTick(tasks: Task[]): number {
   const [tick, setTick] = useState(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 

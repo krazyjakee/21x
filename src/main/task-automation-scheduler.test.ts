@@ -288,7 +288,7 @@ describe('TaskAutomationScheduler — parents and subtasks', () => {
         sort_order: index,
         agent_id: child.agent_id === undefined ? agentId : child.agent_id,
         ...(child.status ? { status: child.status } : {})
-      }, 'workflo-server')
+      }, 'task-source')
       return created.id
     })
     return { parentId: parent.id, childIds }
@@ -335,7 +335,7 @@ describe('TaskAutomationScheduler — parents and subtasks', () => {
     for (let i = 0; i < 5; i++) await scheduler.runNow()
     expect(agentManager.completeTaskWithoutReview).not.toHaveBeenCalled()
 
-    db.updateTask(childIds[0], { status: TaskStatus.Completed }, 'workflo-server')
+    db.updateTask(childIds[0], { status: TaskStatus.Completed }, 'task-source')
     await scheduler.runNow()
 
     expect(agentManager.completeTaskWithoutReview).toHaveBeenCalledTimes(1)
@@ -372,7 +372,7 @@ describe('TaskAutomationScheduler — parents and subtasks', () => {
     await scheduler.runNow()
     expect(agentManager.startTask).not.toHaveBeenCalled()
 
-    db.updateTask(childIds[0], { status: TaskStatus.Completed }, 'workflo-server')
+    db.updateTask(childIds[0], { status: TaskStatus.Completed }, 'task-source')
     await scheduler.runNow()
     expect(agentManager.startTask).toHaveBeenCalledWith(childIds[1])
   })

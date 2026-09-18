@@ -79,19 +79,6 @@ describe('useSettingsStore', () => {
     })
   })
 
-  describe('startGhAuth', () => {
-    it('starts auth and re-checks status', async () => {
-      const status = { installed: true, authenticated: true, username: 'user' }
-      ;(mockElectronAPI.github.checkCli as unknown as Mock).mockResolvedValue(status)
-
-      await useSettingsStore.getState().startGhAuth()
-
-      expect(mockElectronAPI.github.startAuth).toHaveBeenCalled()
-      expect(mockElectronAPI.github.checkCli).toHaveBeenCalled()
-      expect(useSettingsStore.getState().ghCliStatus).toEqual(status)
-    })
-  })
-
   describe('setGitProvider', () => {
     it('saves provider choice and updates state', async () => {
       await useSettingsStore.getState().setGitProvider('gitlab')

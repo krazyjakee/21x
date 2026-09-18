@@ -93,27 +93,6 @@ describe('mobile-api-server: POST /api/tasks (create)', () => {
   })
 })
 
-describe('mobile-api-server: route matching', () => {
-  it('POST /api/tasks path does not match the update regex', () => {
-    // The update route regex requires at least one character after /api/tasks/
-    // Ensure the exact path /api/tasks is NOT matched by the :id route
-    const updateRegex = /^\/api\/tasks\/([^/]+)$/
-    expect(updateRegex.test('/api/tasks')).toBe(false)
-    expect(updateRegex.test('/api/tasks/')).toBe(false)
-    expect(updateRegex.test('/api/tasks/some-id')).toBe(true)
-  })
-
-  it('POST /api/tasks/:id/complete is distinct from the update route', () => {
-    const completeRegex = /^\/api\/tasks\/([^/]+)\/complete$/
-    const updateRegex = /^\/api\/tasks\/([^/]+)$/
-    expect(completeRegex.test('/api/tasks/some-id/complete')).toBe(true)
-    // The update route must NOT swallow the /complete path
-    expect(updateRegex.test('/api/tasks/some-id/complete')).toBe(false)
-    // And the base path must not match the complete route
-    expect(completeRegex.test('/api/tasks/some-id')).toBe(false)
-  })
-})
-
 describe('mobile-api-server: auth', () => {
   afterEach(() => {
     stopMobileApiServer()
@@ -144,6 +123,55 @@ describe('mobile-api-server: auth', () => {
   })
 })
 
+describe('mobile-api-server: session tokens', () => {
+  afterEach(() => {
+    stopMobileApiServer()
+    vi.restoreAllMocks()
+  })
+
+  async function startWithSession() {
+    const { db } = createTestDb()
+    const token = 'valid-session-token'
+    db.createMobileSession('session-1', createHash('sha256').update(token).digest('hex'), 'test-device')
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    const port = await startMobileApiServer(db, {} as never, {} as never, 0)
+    return { db, token, base: `http://127.0.0.1:${port}` }
+  }
+
+  it.each([
+    ['no token', undefined],
+    ['an unknown token', 'Bearer not-a-session'],
+    ['a malformed header', 'valid-session-token']
+  ])('rejects API requests with %s', async (_label, authorization) => {
+    const { base } = await startWithSession()
+
+    const response = await fetch(`${base}/api/tasks`, { headers: authorization ? { Authorization: authorization } : {} })
+
+    expect(response.status).toBe(401)
+  })
+
+  it('rejects a token once its session is revoked', async () => {
+    const { db, token, base } = await startWithSession()
+    db.revokeMobileSession('session-1')
+
+    const response = await fetch(`${base}/api/tasks`, { headers: { Authorization: `Bearer ${token}` } })
+
+    expect(response.status).toBe(401)
+  })
+
+  it('never sends task source credentials to the phone', async () => {
+    const { db, token, base } = await startWithSession()
+    db.createTaskSource({ name: 'HubSpot', plugin_id: 'hubspot', mcp_server_id: null, config: { access_token: 'pat-secret' } })
+
+    const response = await fetch(`${base}/api/task-sources`, { headers: { Authorization: `Bearer ${token}` } })
+    const body = await response.text()
+
+    expect(response.status).toBe(200)
+    expect(body).toContain('HubSpot')
+    expect(body).not.toContain('pat-secret')
+  })
+})
+
 describe('mobile-api-server: POST /api/tasks/:id coordinator wake-up', () => {
   afterEach(() => {
     stopMobileApiServer()
@@ -155,8 +183,7 @@ describe('mobile-api-server: POST /api/tasks/:id coordinator wake-up', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
     // The server resolves the requested port, so pick a free-ish high port
     // instead of 0 (which would make the caller resolve port 0).
-    const port = 21000 + Math.floor(Math.random() * 40000)
-    return { db, logSpy, portPromise: startMobileApiServer(db, agentManager as never, {} as never, port) }
+    return { db, logSpy, portPromise: startMobileApiServer(db, agentManager as never, {} as never, 0) }
   }
 
   function pairToken(db: DatabaseManager): string {
@@ -224,14 +251,13 @@ describe('mobile-api-server: source completion action', () => {
 
   it('completes manually without calling the source and preserves the choice after a refresh', async () => {
     const { db } = createTestDb()
-    const source = db.createTaskSource({ name: 'Session Feedback', plugin_id: 'peakflo', mcp_server_id: null })!
+    const source = db.createTaskSource({ name: 'Session Feedback', plugin_id: 'linear', mcp_server_id: null })!
     const task = db.createTask(makeTask({ source_id: source.id, external_id: 'remote-feedback', source: 'Session Feedback' }))!
     const executeAction = vi.fn()
     const token = 'test-manual-token'
     db.createMobileSession('manual-session', createHash('sha256').update(token).digest('hex'), 'test-device')
     vi.spyOn(console, 'log').mockImplementation(() => {})
-    const port = await startMobileApiServer(db, {} as never, {} as never,
-      21000 + Math.floor(Math.random() * 40000), { executeAction } as never)
+    const port = await startMobileApiServer(db, {} as never, {} as never, 0, { executeAction } as never)
     const response = await fetch(`http://127.0.0.1:${port}/api/tasks/${task.id}/complete`, {
       method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ completeAtSource: false })
@@ -239,22 +265,21 @@ describe('mobile-api-server: source completion action', () => {
     expect(response.status).toBe(200)
     expect(db.getTask(task.id)).toMatchObject({status: 'completed', complete_at_source: false})
     expect(executeAction).not.toHaveBeenCalled()
-    db.updateTask(task.id, {status: 'not_started', title: 'Refreshed title'}, 'workflo-server')
+    db.updateTask(task.id, {status: 'not_started', title: 'Refreshed title'}, 'task-source')
     expect(db.getTask(task.id)).toMatchObject({status: 'completed', title: 'Refreshed title', complete_at_source: false})
     db.close()
   })
 
   it.each(['approve', undefined])('sends the selected action %s to the source', async (action) => {
     const { db } = createTestDb()
-    const source = db.createTaskSource({ name: 'Session Feedback', plugin_id: 'peakflo', mcp_server_id: null })!
+    const source = db.createTaskSource({ name: 'Session Feedback', plugin_id: 'linear', mcp_server_id: null })!
     const task = db.createTask(makeTask({ source_id: source.id, source: 'Session Feedback',
       output_fields: action ? [{ id: 'action', name: 'Action', type: 'text', value: action }] : [] }))!
     const executeAction = vi.fn().mockResolvedValue({ success: true })
     const token = 'test-completion-token'
     db.createMobileSession('completion-session', createHash('sha256').update(token).digest('hex'), 'test-device')
     vi.spyOn(console, 'log').mockImplementation(() => {})
-    const port = await startMobileApiServer(db, {} as never, {} as never,
-      21000 + Math.floor(Math.random() * 40000), { executeAction } as never)
+    const port = await startMobileApiServer(db, {} as never, {} as never, 0, { executeAction } as never)
     const response = await fetch(`http://127.0.0.1:${port}/api/tasks/${task.id}/complete`, {
       method: 'POST', headers: { Authorization: `Bearer ${token}` }
     })
@@ -275,8 +300,7 @@ describe('mobile-api-server: source completion action', () => {
     const token = `learning-skip-${completeAtSource}`
     db.createMobileSession(`learning-skip-session-${completeAtSource}`, createHash('sha256').update(token).digest('hex'), 'test-device')
     vi.spyOn(console, 'log').mockImplementation(() => {})
-    const port = await startMobileApiServer(db, {} as never, {} as never,
-      21000 + Math.floor(Math.random() * 40000), sync)
+    const port = await startMobileApiServer(db, {} as never, {} as never, 0, sync)
     const response = await fetch(`http://127.0.0.1:${port}/api/tasks/${task.id}/complete`, {
       method: 'POST', headers: {Authorization: `Bearer ${token}`, 'Content-Type': 'application/json'},
       body: JSON.stringify({completeAtSource})
@@ -309,8 +333,7 @@ describe('mobile API: all four feedback/source combinations', () => {
     const token = 'four-cases-token'
     db.createMobileSession('four-cases-session', createHash('sha256').update(token).digest('hex'), 'test-device')
     vi.spyOn(console, 'log').mockImplementation(() => {})
-    const port = await startMobileApiServer(db, {} as never, {} as never,
-      21000 + Math.floor(Math.random() * 40000), sync)
+    const port = await startMobileApiServer(db, {} as never, {} as never, 0, sync)
     const response = await fetch(`http://127.0.0.1:${port}/api/tasks/${task.id}${feedback === 'skip' ? '/complete' : ''}`, {
       method: 'POST', headers: {Authorization: `Bearer ${token}`, 'Content-Type': 'application/json'},
       body: JSON.stringify(feedback === 'skip' ? {completeAtSource} : {

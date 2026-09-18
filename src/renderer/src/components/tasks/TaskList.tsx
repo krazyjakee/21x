@@ -5,10 +5,10 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { isSnoozed } from '@/lib/utils'
 import { useSnoozeTick } from '@/hooks/use-snooze-tick'
 import { TaskStatus } from '@/types'
-import type { WorkfloTask } from '@/types'
+import type { Task } from '@/types'
 
 interface TaskListProps {
-  tasks: WorkfloTask[]
+  tasks: Task[]
   selectedTaskId: string | null
   onSelectTask: (id: string) => void
 }
@@ -34,7 +34,7 @@ export function TaskList({ tasks, selectedTaskId, onSelectTask }: TaskListProps)
 
   // Build subtask lookup map — sorted by sort_order to preserve explicit sequence
   const subtasksByParent = useMemo(() => {
-    const map = new Map<string, WorkfloTask[]>()
+    const map = new Map<string, Task[]>()
     for (const task of tasks) {
       if (task.parent_task_id) {
         const existing = map.get(task.parent_task_id) || []
@@ -54,10 +54,10 @@ export function TaskList({ tasks, selectedTaskId, onSelectTask }: TaskListProps)
   }, [tasks])
 
   const { activeTasks, snoozedTasks, recurringTasks, completedTasks } = useMemo(() => {
-    const active: WorkfloTask[] = []
-    const snoozed: WorkfloTask[] = []
-    const recurring: WorkfloTask[] = []
-    const completed: WorkfloTask[] = []
+    const active: Task[] = []
+    const snoozed: Task[] = []
+    const recurring: Task[] = []
+    const completed: Task[] = []
     for (const task of tasks) {
       // Skip subtasks from top-level grouping — they render under their parent
       if (task.parent_task_id) continue
@@ -80,7 +80,7 @@ export function TaskList({ tasks, selectedTaskId, onSelectTask }: TaskListProps)
     return <EmptyState icon={Inbox} title="No tasks" description="Create a task to get started" className="py-10" />
   }
 
-  const renderTaskWithSubtasks = (task: WorkfloTask) => {
+  const renderTaskWithSubtasks = (task: Task) => {
     const subtasks = subtasksByParent.get(task.id)
     const hasSubtasks = subtasks && subtasks.length > 0
 

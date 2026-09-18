@@ -1,7 +1,7 @@
 import type { BrowserRecordingManifest } from '@shared/browser-recording'
 import type { UiCommand } from '@shared/ui-commands'
 import type {
-  WorkfloTask,
+  Task,
   CreateTaskDTO,
   UpdateTaskDTO,
   FileAttachment,
@@ -217,12 +217,12 @@ export interface GlabCliStatus {
 
 interface ElectronAPI {
   db: {
-    getTasks: () => Promise<WorkfloTask[]>
-    getTask: (id: string) => Promise<WorkfloTask | undefined>
-    createTask: (data: CreateTaskDTO) => Promise<WorkfloTask>
-    updateTask: (id: string, data: UpdateTaskDTO) => Promise<WorkfloTask | undefined>
+    getTasks: () => Promise<Task[]>
+    getTask: (id: string) => Promise<Task | undefined>
+    createTask: (data: CreateTaskDTO) => Promise<Task>
+    updateTask: (id: string, data: UpdateTaskDTO) => Promise<Task | undefined>
     deleteTask: (id: string) => Promise<boolean>
-    getSubtasks: (parentId: string) => Promise<WorkfloTask[]>
+    getSubtasks: (parentId: string) => Promise<Task[]>
     reorderSubtasks: (parentId: string, orderedIds: string[]) => Promise<boolean>
   }
   tasks: {
@@ -303,7 +303,6 @@ interface ElectronAPI {
   }
   github: {
     checkCli: () => Promise<GhCliStatus>
-    startAuth: () => Promise<void>
     fetchOrgs: () => Promise<string[]>
     fetchOrgRepos: (org: string) => Promise<GitHubRepo[]>
     fetchUserRepos: () => Promise<GitHubRepo[]>
@@ -332,7 +331,6 @@ interface ElectronAPI {
     update: (id: string, data: UpdateTaskSourceDTO) => Promise<TaskSource | undefined>
     delete: (id: string) => Promise<boolean>
     sync: (sourceId: string) => Promise<SyncResult>
-    upload: (taskId: string, autonomous?: boolean) => Promise<{ queued: boolean }>
     exportUpdate: (taskId: string, fields: Record<string, unknown>) => Promise<void>
     getUsers: (sourceId: string) => Promise<SourceUser[]>
     reassign: (taskId: string, userIds: string[], assigneeDisplay: string) => Promise<ReassignResult>
@@ -377,12 +375,12 @@ interface ElectronAPI {
     getPluginResources: (pluginId: string) => Promise<PluginResources>
   }
   heartbeat: {
-    enable: (taskId: string, intervalMinutes?: number) => Promise<WorkfloTask | undefined>
-    disable: (taskId: string) => Promise<WorkfloTask | undefined>
+    enable: (taskId: string, intervalMinutes?: number) => Promise<Task | undefined>
+    disable: (taskId: string) => Promise<Task | undefined>
     runNow: (taskId: string) => Promise<'sent' | 'no_file' | 'no_agent' | 'in_progress' | 'error'>
     getLogs: (taskId: string, limit?: number) => Promise<HeartbeatLog[]>
     getStatus: (taskId: string) => Promise<HeartbeatStatusResult | null>
-    updateInterval: (taskId: string, intervalMinutes: number) => Promise<WorkfloTask | undefined>
+    updateInterval: (taskId: string, intervalMinutes: number) => Promise<Task | undefined>
     readFile: (taskId: string) => Promise<string | null>
     writeFile: (taskId: string, content: string) => Promise<boolean>
   }
@@ -415,52 +413,6 @@ interface ElectronAPI {
     revokeAllSessions: () => Promise<{ success: boolean }>
     onPairingInitiated: (fn: (data: { pin: string; pairCodeId: string; expiresAt: number }) => void) => void
     onDeviceConnected: (fn: (data: { sessionId: string; deviceName: string }) => void) => void
-  }
-  enterprise: {
-    signupInBrowser: (mode: 'register' | 'login') => Promise<{
-      userId: string
-      email: string
-      companies: { id: string; name: string; isPrimary: boolean }[]
-    }>
-    login: (email: string, password: string) => Promise<{
-      userId: string
-      email: string
-      companies: { id: string; name: string; isPrimary: boolean }[]
-    }>
-    listCompanies: () => Promise<{ id: string; name: string; isPrimary: boolean }[]>
-    selectTenant: (tenantId: string) => Promise<{
-      token: string
-      tenant: { id: string; name: string }
-      warnings?: string[]
-    }>
-    logout: () => Promise<void>
-    getSession: () => Promise<{
-      isAuthenticated: boolean
-      userEmail: string | null
-      userId: string | null
-      currentTenant: { id: string; name: string } | null
-    }>
-    refreshToken: () => Promise<{ token: string }>
-    syncResources: () => Promise<{ agents: { created: number; updated: number }; skills: { created: number; updated: number; pushed: number }; mcpServers: { created: number; updated: number }; taskSources: { created: number; updated: number }; errors: string[] } | null>
-    apiRequest: (method: string, path: string, body?: unknown) => Promise<unknown>
-    getApiUrl: () => Promise<string>
-    getJwt: () => Promise<string>
-    getAuthTokens: () => Promise<{ accessToken: string; refreshToken: string; tenantId: string | null }>
-    enableIframeAuth: () => Promise<{ apiUrl: string }>
-    disableIframeAuth: () => Promise<void>
-    getAiGatewayStatus: () => Promise<{
-      configured: boolean
-      modelCount: number
-      keyName: string | null
-      expiresAt: string | null
-      subscription: {
-        planName: string
-        status: string
-        planId: string
-        currentPeriodEnd: string | null
-      } | null
-    }>
-    onSyncComplete: (callback: (data: { success: boolean; syncMs?: number; error?: string; syncStats?: { agents: { created: number; updated: number }; skills: { created: number; updated: number; pushed: number }; mcpServers: { created: number; updated: number }; taskSources: { created: number; updated: number }; errors: string[] } }) => void) => () => void
   }
   updater: {
     check: () => Promise<{ success: boolean; version?: string; error?: string }>
@@ -498,15 +450,14 @@ interface ElectronAPI {
   onAgentStatus: (callback: (event: AgentStatusEvent) => void) => () => void
   onAgentApproval: (callback: (event: AgentApprovalRequest) => void) => () => void
   onAgentIncompatibleSession: (callback: (event: { taskId: string; agentId: string; error: string }) => void) => () => void
-  onTaskUpdated: (callback: (event: { taskId: string; updates: Partial<WorkfloTask> }) => void) => () => void
+  onTaskUpdated: (callback: (event: { taskId: string; updates: Partial<Task> }) => void) => () => void
   onTaskSourceActionFailed: (callback: (event: { taskId: string; taskTitle: string; error: string }) => void) => () => void
-  onTaskCreated: (callback: (event: { task: WorkfloTask }) => void) => () => void
+  onTaskCreated: (callback: (event: { task: Task }) => void) => () => void
   onTaskDeleted: (callback: (event: { taskId: string }) => void) => () => void
   onHeartbeatAlert: (callback: (event: HeartbeatAlertEvent) => void) => () => void
   onHeartbeatDisabled: (callback: (event: { taskId: string; reason: string }) => void) => () => void
   onWorktreeProgress: (callback: (event: WorktreeProgressEvent) => void) => () => void
   onWorkspaceCleanupProgress: (callback: (event: WorkspaceCleanupProgressEvent) => void) => () => void
-  onGithubDeviceCode: (callback: (code: string) => void) => () => void
   browser: {
     startRecording: (panelId: string, title?: string) => Promise<{ ok: true; recording: BrowserRecordingManifest } | { error: string }>
     stopRecording: (panelId: string) => Promise<{ ok: true; recording: BrowserRecordingManifest } | { error: string }>

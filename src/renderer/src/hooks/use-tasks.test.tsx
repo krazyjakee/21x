@@ -4,9 +4,9 @@ import { useTasks } from './use-tasks'
 import { useTaskStore } from '@/stores/task-store'
 import { useUIStore } from '@/stores/ui-store'
 import { TaskStatus } from '@/types'
-import type { WorkfloTask } from '@/types'
+import type { Task } from '@/types'
 
-function makeWorkfloTask(overrides: Partial<WorkfloTask> = {}): WorkfloTask {
+function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: 't1',
     title: 'Task',
@@ -85,8 +85,8 @@ describe('useTasks', () => {
     it('filters by status', () => {
       useTaskStore.setState({
         tasks: [
-          makeWorkfloTask({ id: 't1', status: TaskStatus.NotStarted }),
-          makeWorkfloTask({ id: 't2', status: TaskStatus.Completed })
+          makeTask({ id: 't1', status: TaskStatus.NotStarted }),
+          makeTask({ id: 't2', status: TaskStatus.Completed })
         ]
       })
       useUIStore.setState({ statusFilter: TaskStatus.Completed })
@@ -99,9 +99,9 @@ describe('useTasks', () => {
     it('filters by Triaging status', () => {
       useTaskStore.setState({
         tasks: [
-          makeWorkfloTask({ id: 't1', status: TaskStatus.NotStarted }),
-          makeWorkfloTask({ id: 't2', status: TaskStatus.Triaging }),
-          makeWorkfloTask({ id: 't3', status: TaskStatus.AgentWorking })
+          makeTask({ id: 't1', status: TaskStatus.NotStarted }),
+          makeTask({ id: 't2', status: TaskStatus.Triaging }),
+          makeTask({ id: 't3', status: TaskStatus.AgentWorking })
         ]
       })
       useUIStore.setState({ statusFilter: TaskStatus.Triaging })
@@ -114,8 +114,8 @@ describe('useTasks', () => {
     it('filters by priority', () => {
       useTaskStore.setState({
         tasks: [
-          makeWorkfloTask({ id: 't1', priority: 'high' }),
-          makeWorkfloTask({ id: 't2', priority: 'low' })
+          makeTask({ id: 't1', priority: 'high' }),
+          makeTask({ id: 't2', priority: 'low' })
         ]
       })
       useUIStore.setState({ priorityFilter: 'high' })
@@ -128,8 +128,8 @@ describe('useTasks', () => {
     it('filters local tasks by sourceFilter=local', () => {
       useTaskStore.setState({
         tasks: [
-          makeWorkfloTask({ id: 't1', source_id: null }),
-          makeWorkfloTask({ id: 't2', source_id: 'src-1' })
+          makeTask({ id: 't1', source_id: null }),
+          makeTask({ id: 't2', source_id: 'src-1' })
         ]
       })
       useUIStore.setState({ sourceFilter: 'local' })
@@ -142,8 +142,8 @@ describe('useTasks', () => {
     it('filters by specific source_id', () => {
       useTaskStore.setState({
         tasks: [
-          makeWorkfloTask({ id: 't1', source_id: 'src-1' }),
-          makeWorkfloTask({ id: 't2', source_id: 'src-2' })
+          makeTask({ id: 't1', source_id: 'src-1' }),
+          makeTask({ id: 't2', source_id: 'src-2' })
         ]
       })
       useUIStore.setState({ sourceFilter: 'src-1' })
@@ -156,8 +156,8 @@ describe('useTasks', () => {
     it('filters by search query (title)', () => {
       useTaskStore.setState({
         tasks: [
-          makeWorkfloTask({ id: 't1', title: 'Fix bug' }),
-          makeWorkfloTask({ id: 't2', title: 'Add feature' })
+          makeTask({ id: 't1', title: 'Fix bug' }),
+          makeTask({ id: 't2', title: 'Add feature' })
         ]
       })
       useUIStore.setState({ searchQuery: 'bug' })
@@ -170,9 +170,9 @@ describe('useTasks', () => {
     it('does not crash when task labels is undefined or not an array', () => {
       useTaskStore.setState({
         tasks: [
-          makeWorkfloTask({ id: 't1', title: 'Valid', labels: ['bug'] }),
-          makeWorkfloTask({ id: 't2', title: 'No labels', labels: undefined as unknown as string[] }),
-          makeWorkfloTask({ id: 't3', title: 'Null labels', labels: null as unknown as string[] })
+          makeTask({ id: 't1', title: 'Valid', labels: ['bug'] }),
+          makeTask({ id: 't2', title: 'No labels', labels: undefined as unknown as string[] }),
+          makeTask({ id: 't3', title: 'Null labels', labels: null as unknown as string[] })
         ]
       })
       useUIStore.setState({ searchQuery: 'bug' })
@@ -185,8 +185,8 @@ describe('useTasks', () => {
     it('filters by search query (labels)', () => {
       useTaskStore.setState({
         tasks: [
-          makeWorkfloTask({ id: 't1', title: 'Task', labels: ['frontend'] }),
-          makeWorkfloTask({ id: 't2', title: 'Task', labels: ['backend'] })
+          makeTask({ id: 't1', title: 'Task', labels: ['frontend'] }),
+          makeTask({ id: 't2', title: 'Task', labels: ['backend'] })
         ]
       })
       useUIStore.setState({ searchQuery: 'front' })
@@ -201,8 +201,8 @@ describe('useTasks', () => {
     it('sorts by created_at desc (default)', () => {
       useTaskStore.setState({
         tasks: [
-          makeWorkfloTask({ id: 't1', created_at: '2024-06-10T00:00:00Z' }),
-          makeWorkfloTask({ id: 't2', created_at: '2024-06-15T00:00:00Z' })
+          makeTask({ id: 't1', created_at: '2024-06-10T00:00:00Z' }),
+          makeTask({ id: 't2', created_at: '2024-06-15T00:00:00Z' })
         ]
       })
 
@@ -213,8 +213,8 @@ describe('useTasks', () => {
     it('sorts by priority asc (low first)', () => {
       useTaskStore.setState({
         tasks: [
-          makeWorkfloTask({ id: 't1', priority: 'critical' }),
-          makeWorkfloTask({ id: 't2', priority: 'low' })
+          makeTask({ id: 't1', priority: 'critical' }),
+          makeTask({ id: 't2', priority: 'low' })
         ]
       })
       useUIStore.setState({ sortField: 'priority', sortDirection: 'asc' })
@@ -227,10 +227,10 @@ describe('useTasks', () => {
     it('sorts by priority desc (critical first)', () => {
       useTaskStore.setState({
         tasks: [
-          makeWorkfloTask({ id: 't1', priority: 'low' }),
-          makeWorkfloTask({ id: 't2', priority: 'high' }),
-          makeWorkfloTask({ id: 't3', priority: 'critical' }),
-          makeWorkfloTask({ id: 't4', priority: 'medium' })
+          makeTask({ id: 't1', priority: 'low' }),
+          makeTask({ id: 't2', priority: 'high' }),
+          makeTask({ id: 't3', priority: 'critical' }),
+          makeTask({ id: 't4', priority: 'medium' })
         ]
       })
       useUIStore.setState({ sortField: 'priority', sortDirection: 'desc' })
@@ -245,8 +245,8 @@ describe('useTasks', () => {
     it('sorts by title', () => {
       useTaskStore.setState({
         tasks: [
-          makeWorkfloTask({ id: 't1', title: 'Zebra' }),
-          makeWorkfloTask({ id: 't2', title: 'Apple' })
+          makeTask({ id: 't1', title: 'Zebra' }),
+          makeTask({ id: 't2', title: 'Apple' })
         ]
       })
       useUIStore.setState({ sortField: 'title', sortDirection: 'asc' })
@@ -258,9 +258,9 @@ describe('useTasks', () => {
     it('sorts by due_date with nulls last', () => {
       useTaskStore.setState({
         tasks: [
-          makeWorkfloTask({ id: 't1', due_date: null }),
-          makeWorkfloTask({ id: 't2', due_date: '2024-06-15' }),
-          makeWorkfloTask({ id: 't3', due_date: '2024-06-10' })
+          makeTask({ id: 't1', due_date: null }),
+          makeTask({ id: 't2', due_date: '2024-06-15' }),
+          makeTask({ id: 't3', due_date: '2024-06-10' })
         ]
       })
       useUIStore.setState({ sortField: 'due_date', sortDirection: 'asc' })
@@ -274,8 +274,8 @@ describe('useTasks', () => {
     it('sorts by status asc (completed first)', () => {
       useTaskStore.setState({
         tasks: [
-          makeWorkfloTask({ id: 't1', status: TaskStatus.AgentWorking }),
-          makeWorkfloTask({ id: 't2', status: TaskStatus.Completed })
+          makeTask({ id: 't1', status: TaskStatus.AgentWorking }),
+          makeTask({ id: 't2', status: TaskStatus.Completed })
         ]
       })
       useUIStore.setState({ sortField: 'status', sortDirection: 'asc' })
@@ -288,8 +288,8 @@ describe('useTasks', () => {
     it('sorts by status desc (active first)', () => {
       useTaskStore.setState({
         tasks: [
-          makeWorkfloTask({ id: 't1', status: TaskStatus.Completed }),
-          makeWorkfloTask({ id: 't2', status: TaskStatus.AgentWorking })
+          makeTask({ id: 't1', status: TaskStatus.Completed }),
+          makeTask({ id: 't2', status: TaskStatus.AgentWorking })
         ]
       })
       useUIStore.setState({ sortField: 'status', sortDirection: 'desc' })
@@ -302,9 +302,9 @@ describe('useTasks', () => {
     it('sorts Triaging status between AgentLearning and ReadyForReview (desc)', () => {
       useTaskStore.setState({
         tasks: [
-          makeWorkfloTask({ id: 't1', status: TaskStatus.NotStarted }),
-          makeWorkfloTask({ id: 't2', status: TaskStatus.Triaging }),
-          makeWorkfloTask({ id: 't3', status: TaskStatus.AgentWorking })
+          makeTask({ id: 't1', status: TaskStatus.NotStarted }),
+          makeTask({ id: 't2', status: TaskStatus.Triaging }),
+          makeTask({ id: 't3', status: TaskStatus.AgentWorking })
         ]
       })
       useUIStore.setState({ sortField: 'status', sortDirection: 'desc' })
@@ -318,8 +318,8 @@ describe('useTasks', () => {
     it('respects desc direction', () => {
       useTaskStore.setState({
         tasks: [
-          makeWorkfloTask({ id: 't1', title: 'Apple' }),
-          makeWorkfloTask({ id: 't2', title: 'Zebra' })
+          makeTask({ id: 't1', title: 'Apple' }),
+          makeTask({ id: 't2', title: 'Zebra' })
         ]
       })
       useUIStore.setState({ sortField: 'title', sortDirection: 'desc' })
@@ -331,14 +331,14 @@ describe('useTasks', () => {
 
   describe('selectedTask', () => {
     it('returns undefined when nothing selected', () => {
-      useTaskStore.setState({ tasks: [makeWorkfloTask()], selectedTaskId: null })
+      useTaskStore.setState({ tasks: [makeTask()], selectedTaskId: null })
       const { result } = renderHook(() => useTasks())
       expect(result.current.selectedTask).toBeUndefined()
     })
 
     it('returns the selected task', () => {
       useTaskStore.setState({
-        tasks: [makeWorkfloTask({ id: 't1', title: 'Selected' })],
+        tasks: [makeTask({ id: 't1', title: 'Selected' })],
         selectedTaskId: 't1'
       })
       const { result } = renderHook(() => useTasks())

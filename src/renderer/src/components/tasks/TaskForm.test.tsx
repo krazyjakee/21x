@@ -2,11 +2,11 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import { TaskForm } from './TaskForm'
 import { TaskStatus } from '@/types'
-import type { WorkfloTask } from '@/types'
+import type { Task } from '@/types'
 
 afterEach(cleanup)
 
-function makeTask(overrides: Partial<WorkfloTask> = {}): WorkfloTask {
+function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: 'task-1',
     title: 'Test Task',

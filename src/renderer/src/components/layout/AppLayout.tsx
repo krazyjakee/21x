@@ -646,12 +646,12 @@ export function AppLayout() {
     <>
       {completionDialog}
       {/* ── Top bar: drag region with logo (left) + nav switcher (center) + actions (right) ── */}
-      <div className="app-chrome drag-region bg-background h-8 flex-shrink-0 flex items-center justify-center px-3 pt-2.5 windows-titlebar-pad">
+      <div className="app-chrome drag-region bg-background h-11 flex-shrink-0 flex items-center justify-center px-3 pt-2 windows-titlebar-pad">
         {/* Logo + wordmark + update indicator — pinned left. The white logo mark
             always sits on a brand-gradient tile, so it stays visible in both themes. */}
         <div className="no-drag absolute left-3 flex items-center gap-1.5 macos-titlebar-pad">
-          <div className="relative grid h-5 w-5 place-items-center rounded-md bg-gradient-to-br from-primary to-primary/75 shadow-sm ring-1 ring-black/5">
-            <img src={logo20x} className="h-3 w-3" alt="20x" />
+          <div className="relative grid h-6 w-6 place-items-center rounded-md bg-gradient-to-br from-primary to-primary/75 shadow-sm ring-1 ring-black/5">
+            <img src={logo20x} className="h-3.5 w-3.5" alt="20x" />
             {updateAvailableVersion && (
               <button
                 onClick={() => {
@@ -666,16 +666,17 @@ export function AppLayout() {
               />
             )}
           </div>
-          <span className="text-[12px] font-semibold tracking-tight text-foreground">20x</span>
+          <span className="text-[13px] font-semibold tracking-tight text-foreground">20x</span>
 
           {/* Sidebar collapse toggle — only for views that have a contextual sidebar */}
           {(sidebarView === 'tasks' || sidebarView === 'skills') && activeModal !== 'settings' && (
             <button
               onClick={toggleSidebarCollapsed}
               title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
-              className="ml-0.5 grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors cursor-pointer"
+              aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+              className="ml-0.5 grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors cursor-pointer"
             >
-              {sidebarCollapsed ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
+              {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
             </button>
           )}
 
@@ -688,9 +689,9 @@ export function AppLayout() {
             const Icon = item.icon
             return (
               <div className="flex items-center gap-1.5">
-                <span className="text-border/80 text-xs">/</span>
-                <Icon className="h-3 w-3 text-muted-foreground" />
-                <span className="text-[12px] font-medium text-foreground/90">{item.label}</span>
+                <span className="text-border/80 text-[13px]">/</span>
+                <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-[13px] font-medium text-foreground/90">{item.label}</span>
               </div>
             )
           })()}
@@ -703,11 +704,11 @@ export function AppLayout() {
             captureAnalyticsEvent('command_palette_toggled', { source: 'top_bar' })
           }}
           title="Search or run a command"
-          className="no-drag flex h-7 w-[230px] max-w-[34vw] items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-2.5 text-[11px] text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
+          className="no-drag flex h-8 w-[260px] max-w-[34vw] items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 text-[12px] text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
         >
-          <Search className="h-3 w-3 shrink-0" />
+          <Search className="h-3.5 w-3.5 shrink-0" />
           <span className="flex-1 truncate text-left">Search or run a command…</span>
-          <kbd className="shrink-0 rounded border border-border bg-background/60 px-1.5 py-0.5 text-[10px]">{modKey}K</kbd>
+          <kbd className="shrink-0 rounded border border-border bg-background/60 px-1.5 py-0.5 text-[11px]">{modKey}K</kbd>
         </button>
 
         {/* Global actions — pinned right; offset on Windows to avoid native window controls. */}
@@ -719,11 +720,12 @@ export function AppLayout() {
           <button
             onClick={openSettings}
             title="Settings"
-            className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
+            aria-label="Settings"
+            className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
           >
-            <Settings className="h-3.5 w-3.5" />
+            <Settings className="h-4 w-4" />
           </button>
-          <div className="mx-1 h-3.5 w-px bg-border/70" />
+          <div className="mx-1 h-4 w-px bg-border/70" />
           {/* Start talking to Mastermind from any view. Hidden until voice is on. */}
           <TopBarVoiceButton />
           {/* Quieter than the microphone beside it: typing to Mastermind is
@@ -732,10 +734,10 @@ export function AppLayout() {
             variant={showOrchestrator ? 'default' : 'ghost'}
             size="sm"
             onClick={toggleOrchestrator}
-            className="h-7 px-2"
+            className="h-8 px-2.5"
           >
-            <MessageSquare className="h-3 w-3" />
-            <span className="text-[11px]">Mastermind</span>
+            <MessageSquare className="h-3.5 w-3.5" />
+            <span className="text-[12px]">Mastermind</span>
           </Button>
         </div>
       </div>
@@ -743,7 +745,7 @@ export function AppLayout() {
       {/* ── Content area: left rail + optional sidebar + workspace + orchestrator ── */}
       <div className="app-chrome-field flex flex-1 min-h-0 overflow-hidden bg-background">
         {/* Primary navigation — slim vertical icon rail */}
-        <nav className="app-chrome no-drag flex w-9 flex-shrink-0 flex-col items-center gap-0.5 bg-background py-1.5">
+        <nav className="app-chrome no-drag flex w-11 flex-shrink-0 flex-col items-center gap-1 bg-background py-1.5">
           {NAV_ITEMS.map(({ key, label, icon: Icon }, i) => {
             const active = sidebarView === key && activeModal !== 'settings'
             return (
@@ -758,18 +760,18 @@ export function AppLayout() {
                   })
                 }}
                 aria-label={label}
-                className={`group relative grid h-8 w-8 place-items-center rounded-lg transition-all duration-150 cursor-pointer ${
+                className={`group relative grid h-9 w-9 place-items-center rounded-lg transition-all duration-150 cursor-pointer ${
                   active
                     ? 'bg-primary/12 text-primary'
                     : 'text-muted-foreground hover:bg-accent hover:text-foreground'
                 }`}
               >
                 {active && (
-                  <span className="absolute left-0 top-1/2 h-3.5 w-[3px] -translate-y-1/2 rounded-r-full bg-primary" />
+                  <span className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-primary" />
                 )}
-                <Icon className="h-4 w-4" />
+                <Icon className="h-5 w-5" aria-hidden="true" />
                 {/* Hover flyout label + shortcut */}
-                <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-2 flex -translate-y-1/2 translate-x-[-4px] items-center gap-2 whitespace-nowrap rounded-lg border border-border bg-popover px-2 py-1 text-xs font-medium text-foreground opacity-0 shadow-pop transition-all duration-150 group-hover:translate-x-0 group-hover:opacity-100">
+                <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-2 flex -translate-y-1/2 translate-x-[-4px] items-center gap-2 whitespace-nowrap rounded-lg border border-border bg-popover px-2 py-1 text-[12px] font-medium text-foreground opacity-0 shadow-pop transition-all duration-150 group-hover:translate-x-0 group-hover:opacity-100">
                   {label}
                   <kbd className="rounded border border-border bg-muted px-1 text-[10px] text-muted-foreground">{modKey}{i + 1}</kbd>
                 </span>

@@ -1,10 +1,10 @@
 # AGENTS.md — Multi-Agent Architecture (Implemented)
 
-This document describes the production multi-agent system powering 20x. The architecture spans three agent backends, a centralized polling coordinator, skill management, auto-triage, secret management, heartbeat monitoring, and enterprise sync.
+This document describes the production multi-agent system powering 20x. The architecture spans five agent backends, a centralized polling coordinator, skill management, auto-triage, secret management, and heartbeat monitoring. Orchestration and storage run in the Electron main process on your machine; the agents call whichever model APIs they are configured to use.
 
 ## Overview
 
-20x supports running multiple AI coding agents in parallel, each working on assigned tasks within specific codebases. Agents are managed through adapter interfaces and interact with users via streaming transcripts with human-in-the-loop (HITL) approval flows. Three backend adapters are supported: **OpenCode SDK**, **Claude Code**, and **Codex (ACP)**.
+20x supports running multiple AI coding agents in parallel, each working on assigned tasks within specific codebases. Agents are managed through adapter interfaces and interact with users via streaming transcripts with human-in-the-loop (HITL) approval flows. Five backends are supported (`CodingAgentType` in `src/main/agent-manager.ts`): **OpenCode**, **Claude Code**, **Codex**, **Cursor**, and **Pi**.
 
 ## Agent Model
 
@@ -22,10 +22,12 @@ interface AgentRecord {
 }
 
 interface AgentConfigRecord {
-  coding_agent?: 'opencode' | 'claude-code' | 'codex'
+  coding_agent?: 'opencode' | 'claude-code' | 'codex' | 'cursor' | 'pi'
   model?: string
+  reasoning_effort?: ReasoningEffort
   auth_method?: 'subscription' | 'api_key'
   permission_mode?: 'ask' | 'allow'
+  sandbox_mode?: 'read-only' | 'workspace-write' | 'danger-full-access'
   system_prompt?: string
   mcp_servers?: Array<string | AgentMcpServerEntry>
   skill_ids?: string[]
@@ -33,6 +35,7 @@ interface AgentConfigRecord {
   api_keys?: {
     openai?: string
     anthropic?: string
+    cursor?: string
   }
 }
 
@@ -72,8 +75,6 @@ CREATE TABLE skills (
   last_used TEXT,
   tags TEXT NOT NULL DEFAULT '[]',
   is_deleted INTEGER NOT NULL DEFAULT 0,
-  enterprise_skill_id TEXT DEFAULT NULL,
-  uses_at_last_sync INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -107,7 +108,7 @@ CREATE TABLE mcp_servers (
 );
 ```
 
-Database schema migrations are run automatically with version tracking (`SCHEMA_VERSION = 8` in `database.ts`). Migration history includes column additions for attachments, repos, output fields, agent_id, session_id, snoozed_until, recurring tasks, heartbeat, subtasks, and more.
+Database schema migrations are run automatically with version tracking (`SCHEMA_VERSION = 10` in `database.ts`; see `docs/database-migrations.md`). Migration history includes column additions for attachments, repos, output fields, agent_id, session_id, snoozed_until, recurring tasks, heartbeat, subtasks, and more.
 
 ## Architecture
 
@@ -135,18 +136,18 @@ Database schema migrations are run automatically with version tracking (`SCHEMA_
 │  │  │  (2s tick)  │  │              │               │     │
 │  │  └─────────────┘  └──────┬───────┘               │     │
 │  │                          │                        │     │
-│  │              ┌───────────┼───────────┐            │     │
-│  │              ▼           ▼           ▼            │     │
-│  │  ┌────────────┐ ┌───────────┐ ┌─────────────┐    │     │
-│  │  │  OpenCode  │ │Claude Code│ │ Codex (ACP) │    │     │
-│  │  │  Adapter   │ │  Adapter  │ │  Adapter    │    │     │
-│  │  └────────────┘ └───────────┘ └─────────────┘    │     │
+│  │     ┌─────────┬──────────┼────────┬─────────┐    │     │
+│  │     ▼         ▼          ▼        ▼         ▼    │     │
+│  │ ┌───────┐ ┌───────┐ ┌───────┐ ┌───────┐ ┌───────┐│     │
+│  │ │  Open │ │ Claude│ │ Codex │ │  ACP  │ │   Pi  ││     │
+│  │ │  Code │ │  Code │ │ AppSrv│ │ Cursor│ │       ││     │
+│  │ │       │ │       │ │       │ │ +Codex│ │       ││     │
+│  │ └───────┘ └───────┘ └───────┘ └───────┘ └───────┘│     │
 │  │                                                   │     │
-│  │  ┌──────────────┐  ┌──────────────────────────┐  │     │
-│  │  │Secret Broker  │  │  MCP Auth Proxy          │  │     │
-│  │  │(env injection)│  │  (JWT injection for      │  │     │
-│  │  └──────────────┘  │   enterprise MCP Dev)     │  │     │
-│  │                    └──────────────────────────┘  │     │
+│  │  ┌──────────────┐                                │     │
+│  │  │Secret Broker  │                                │     │
+│  │  │(env injection)│                                │     │
+│  │  └──────────────┘                                │     │
 │  └──────────────────────────────────────────────────┘     │
 │                                                           │
 │  ┌───────────────────────┐  ┌──────────────────────────┐  │
@@ -154,12 +155,11 @@ Database schema migrations are run automatically with version tracking (`SCHEMA_
 │  │                       │  │                           │  │
 │  │ - Git worktree setup  │  │ - All table CRUD         │  │
 │  │ - Per-task workspace  │  │ - Schema migrations      │  │
-│  │ - Multi-repo support  │  │ - Auto-backup before      │  │
-│  └───────────────────────┘  │   migrations              │  │
-│                             └──────────────────────────┘  │
+│  │ - Multi-repo support  │  │                           │  │
+│  └───────────────────────┘  └──────────────────────────┘  │
 │                                                           │
 │  ┌──────────────┐  ┌──────────────┐  ┌────────────────┐  │
-│  │Enterprise    │  │ Heartbeat    │  │ Task API       │  │
+│  │ Task Source  │  │ Heartbeat    │  │ Task API       │  │
 │  │ Sync Manager │  │ Scheduler    │  │ Server (MCP)   │  │
 │  └──────────────┘  └──────────────┘  └────────────────┘  │
 │                                                           │
@@ -170,8 +170,10 @@ Database schema migrations are run automatically with version tracking (`SCHEMA_
   │  Agent Backend Servers       │
   │                              │
   │  - OpenCode (localhost:4096) │
-  │  - Claude Code (CLI)         │
-  │  - Codex (ACP protocol)      │
+  │  - Claude Code (agent SDK)   │
+  │  - codex app-server (stdio)  │
+  │  - cursor-agent (ACP, stdio) │
+  │  - Pi (JSONL RPC, stdio)     │
   │  - MCP servers (stdio/http)  │
   └──────────────────────────────┘
 ```
@@ -202,11 +204,19 @@ Uses `@opencode-ai/sdk` to communicate with the OpenCode server (typically runni
 
 ### Claude Code Adapter (`src/main/adapters/claude-code-adapter.ts`)
 
-Spawns `claude` CLI process with MCP config injected via the `--mcp-servers` flag. Supports `subscription` (OAuth/Pro/Max) and `api_key` (pay-per-use) auth methods. Permission mode can be `ask` (HITL approval) or `allow` (automatic). Uses JSON-RPC over stdin/stdout.
+Uses `@anthropic-ai/claude-agent-sdk` (`query()`), passing MCP servers through the SDK's `mcpServers` option and secrets through a `SHELL` wrapper plus `PreToolUse` hooks. Supports `subscription` (OAuth/Pro/Max) and `api_key` (pay-per-use) auth methods. Permission mode can be `ask` (HITL approval) or `allow` (automatic).
 
-### Codex Adapter (`src/main/adapters/acp-adapter.ts`)
+### Codex Adapter (`src/main/adapters/codex-app-server-adapter.ts`)
 
-Implements the Agent Communication Protocol (ACP) — the same protocol used by Zed's Codex integration. Communicates via WebSocket with OpenAI's Codex backend.
+Spawns `codex app-server` and speaks its JSON-RPC protocol over stdio, mapping app-server threads/turns/items onto the adapter contract. Setting `CODEX_APP_SERVER=0` makes `AgentManager.getAdapter` fall back to the ACP adapter (`codex-acp`).
+
+### ACP Adapter (`src/main/adapters/acp-adapter.ts`)
+
+Implements the Agent Client Protocol (ACP): JSON-RPC 2.0 over stdio, newline-delimited. Used for Cursor (`cursor-agent`) and as the Codex fallback.
+
+### Pi Adapter (`src/main/adapters/pi-adapter.ts`)
+
+Keeps one Pi process per live session and talks to it over Pi's JSONL RPC protocol on stdin/stdout.
 
 ## Polling Coordinator
 
@@ -273,7 +283,6 @@ Features:
 | `agent:output` | `{ sessionId, data }` — streaming transcript parts |
 | `agent:status` | `{ agentId, status }` — status transitions |
 | `agent:approval` | `{ sessionId, action, description }` — HITL request |
-| `agent:todos` | `{ sessionId, todos }` — todo list updates |
 
 ### Agent Config
 
@@ -337,7 +346,7 @@ writer for voice.
 
 ## Agent Manager
 
-`src/main/agent-manager.ts` — the core orchestration layer (1500+ lines).
+`src/main/agent-manager.ts` — the core orchestration layer.
 
 ```typescript
 class AgentManager extends EventEmitter {
@@ -398,8 +407,14 @@ Secrets (encrypted API keys, database URLs, etc.) are injected into agent sessio
 - **Encryption**: Values encrypted with Electron `safeStorage` at rest
 - **Secret Broker**: An HTTP server on `localhost` that serves secrets to the agent's shell process
 - **Wrapper script**: `secret-shell.sh` intercepts bash commands to inject env vars
-- **Claude Code path**: Direct env var injection into the spawned process
+- **Claude Code path**: `SHELL` points at the wrapper, and `PreToolUse` hooks inject secrets (`buildSecretHooks` in `claude-code-adapter.ts`)
 - **System prompt awareness**: Agents are told which secrets are available (name/description only — never the value)
+
+### Task API Server
+
+`src/main/task-api-server.ts` serves the task-management HTTP API on `127.0.0.1` (random port). Every request must present a per-launch random token (`getTaskApiToken()`), either as `Authorization: Bearer <token>` or as a `?token=` query parameter:
+- HTTP MCP sessions get the token in the MCP URL (`?token=`), built in `agent-manager.ts`
+- The stdio `task-management-mcp.js` server reads `TASK_API_URL` and `TASK_API_TOKEN` from its environment (`getTaskApiEnv()`) and sends the token as a bearer header
 
 ### Memory Management
 
@@ -417,7 +432,7 @@ Secrets (encrypted API keys, database URLs, etc.) are injected into agent sessio
 - List of configured agents with name, coding agent type, model
 - Create/edit/delete agents
 - Per-agent MCP server configuration (add/remove servers, set commands and environment, enable/disable tools)
-- Coding agent selection (OpenCode / Claude Code / Codex)
+- Coding agent selection (OpenCode / Claude Code / Codex / Cursor / Pi)
 - Auth method (subscription vs API key) and permission mode (ask vs allow)
 - Skill assignment picker
 - Secret assignment picker
@@ -443,10 +458,8 @@ Secrets (encrypted API keys, database URLs, etc.) are injected into agent sessio
 
 ### Dashboard Workspace
 
-- Overview dashboard with task completion stats, AI autonomy metrics, agent success rates
+- Command input for Mastermind and task creation, with quick-start chips
 - Kanban task board grouped by status with drag-and-drop support
-- Workflow application launcher
-- Presetup wizard with guided templates
 
 ## Auto-Triage System
 
@@ -481,7 +494,7 @@ Skills are reusable `SKILL.md` instructions that agents discover and load on-dem
 
 ```
 workspaces/<taskId>/
-  .agents/skills/<name>/SKILL.md   (OpenCode / Codex)
+  .agents/skills/<name>/SKILL.md   (all other agents)
   .claude/skills/<name>/SKILL.md    (Claude Code)
 ```
 
@@ -493,14 +506,10 @@ workspaces/<taskId>/
 4. `syncSkillsFromWorkspace()` syncs changes back to SQLite
 5. Skills confidence and usage stats are updated automatically
 
-### 2-Way Sync with Workflo
-
-Skills synchronize bidirectionally between 20x and Workflo (enterprise). Uses `enterprise_skill_id` and `uses_at_last_sync` for conflict resolution.
-
 ## HITL (Human-in-the-Loop) Flow
 
 1. Agent encounters a potentially destructive action (file write, shell command, etc.)
-2. Backend (OpenCode SDK / Claude Code / Codex) emits an approval event
+2. The backend adapter emits an approval event
 3. Main process forwards to renderer via IPC
 4. UI shows a banner with action description and approve/reject buttons
 5. User decision sent back via `agentSession:approve`
@@ -508,65 +517,15 @@ Skills synchronize bidirectionally between 20x and Workflo (enterprise). Uses `e
 
 ## Heartbeat Monitoring
 
-Continuous health checks for active tasks:
+`src/main/heartbeat-scheduler.ts` runs periodic checks for tasks with heartbeat enabled:
 
-- Configurable per-task interval (default: 30 minutes)
-- Heartbeat scheduler checks every 60 seconds
-- CI failure detection (GitHub preflight)
+- Each task's workspace `heartbeat.md` lists what to watch (PR comments, CI status, issue updates)
+- Configurable per-task interval (default: 30 minutes, `HEARTBEAT_DEFAULTS` in `src/shared/constants.ts`)
+- Scheduler checks for due tasks every 60 seconds
+- Cheap `gh api` preflight runs first; the agent session is skipped when nothing changed
 - Status: ok, info, attention_needed, error
 - Logs stored in `heartbeat_logs` table
-- Auto-disabled when task is completed
-
-## Enterprise Features
-
-### Enterprise Auth (20x Cloud)
-
-- Login/register via browser OAuth callback flow
-- Tenant selection with resource sync
-- JWT-based authentication with auto-refresh
-- Session persistence across app restarts
-
-### Enterprise Sync
-
-- Skills, MCP servers, and agents sync bidirectionally
-- Task state sync (status changes, completions, feedback)
-- Enterprise heartbeat with CI failure detection
-- MCP auth proxy injects fresh JWT into enterprise MCP Dev Server requests
-
-### Enterprise AI Gateway
-
-- Bring your own key or use subscription-based model
-- Model selection from gateway catalog
-- Auto-fetch AI gateway key on subscription activation
-
-## Implementation Status
-
-| Feature | Status |
-|---------|--------|
-| Agents table + seed default agent | ✅ Implemented |
-| Agent CRUD IPC handlers | ✅ Implemented |
-| OpenCode adapter | ✅ Implemented |
-| Claude Code adapter | ✅ Implemented |
-| Codex (ACP) adapter | ✅ Implemented |
-| Centralized polling coordinator | ✅ Implemented |
-| Agent Settings UI (CRUD) | ✅ Implemented |
-| Agent assignment to task detail | ✅ Implemented |
-| Streaming transcript panel | ✅ Implemented |
-| HITL approval flow | ✅ Implemented |
-| Auto-triage system | ✅ Implemented |
-| Skills system (write, sync, learn) | ✅ Implemented |
-| Skills 2-way sync with Workflo | ✅ Implemented |
-| Secret management (encrypted env vars) | ✅ Implemented |
-| Git worktree management | ✅ Implemented |
-| Heartbeat monitoring | ✅ Implemented |
-| Enterprise auth + sync | ✅ Implemented |
-| MCP server management | ✅ Implemented |
-| MCP OAuth flow | ✅ Implemented |
-| Subtask support | ✅ Implemented |
-| Recurring tasks | ✅ Implemented |
-| Mobile API server | ✅ Implemented |
-| Claude Plugin marketplace | ✅ Implemented |
-| Workspace cleanup scheduler | ✅ Implemented |
+- Disabled when the task is completed; skipped for subtasks whose parent is completed
 
 ## Key Source Files
 
@@ -575,17 +534,16 @@ Continuous health checks for active tasks:
 | `src/main/agent-manager.ts` | Core orchestration, session lifecycle, polling, skills, secrets |
 | `src/main/adapters/coding-agent-adapter.ts` | Adapter interface definition |
 | `src/main/adapters/opencode-adapter.ts` | OpenCode SDK integration |
-| `src/main/adapters/claude-code-adapter.ts` | Claude Code CLI integration |
-| `src/main/adapters/acp-adapter.ts` | Codex ACP protocol integration |
+| `src/main/adapters/claude-code-adapter.ts` | Claude Code via `@anthropic-ai/claude-agent-sdk` |
+| `src/main/adapters/codex-app-server-adapter.ts` | Codex via `codex app-server` |
+| `src/main/adapters/acp-adapter.ts` | Agent Client Protocol (Cursor, Codex fallback) |
+| `src/main/adapters/pi-adapter.ts` | Pi JSONL RPC integration |
 | `src/main/ipc-handlers.ts` | All IPC channel registration |
 | `src/main/database.ts` | SQLite schema, CRUD, migrations |
 | `src/main/worktree-manager.ts` | Git worktree setup |
 | `src/main/secret-broker.ts` | Secret injection HTTP server |
-| `src/main/mcp-auth-proxy.ts` | Enterprise JWT injection proxy |
 | `src/main/task-api-server.ts` | HTTP API for task-management MCP |
-| `src/main/enterprise-sync.ts` | Workflo resource sync |
-| `src/main/enterprise-heartbeat.ts` | CI failure heartbeat |
-| `src/main/enterprise-state-sync.ts` | Task event streaming |
+| `src/main/sync-manager.ts` | Task source import, export and actions |
 | `src/main/heartbeat-scheduler.ts` | Task-level heartbeat scheduling |
 | `src/main/recurrence-scheduler.ts` | Recurring task scheduling |
 | `src/main/claude-plugin-manager.ts` | Claude Plugin marketplace |

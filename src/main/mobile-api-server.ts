@@ -136,8 +136,10 @@ export function startMobileApiServer(
     })
 
     server.listen(port, '0.0.0.0', () => {
-      console.log(`[MobileAPI] Started on port ${port} — http://0.0.0.0:${port}`)
-      resolve(port)
+      const address = server?.address()
+      const boundPort = typeof address === 'object' && address ? address.port : port
+      console.log(`[MobileAPI] Started on port ${boundPort} — http://0.0.0.0:${boundPort}`)
+      resolve(boundPort)
     })
 
     server.on('error', reject)
@@ -476,7 +478,7 @@ async function routeGet(pathname: string, url: URL): Promise<unknown> {
 
   // GET /api/task-sources — list all configured task sources
   if (pathname === '/api/task-sources') {
-    return db.getTaskSources()
+    return db.getTaskSources().map(withoutSourceConfig)
   }
 
   // GET /api/plugins — list available plugins
@@ -671,7 +673,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     }
     if (!name || !plugin_id) throw Object.assign(new Error('name and plugin_id are required'), { status: 400 })
     const source = db.createTaskSource({ name, plugin_id, config: config || {}, mcp_server_id: mcp_server_id || null })
-    return source
+    return withoutSourceConfig(source)
   }
 
   // POST /api/task-sources/sync-all — sync all enabled task sources (must be before :id routes)
@@ -701,7 +703,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     const source = db.getTaskSource(sourceId)
     if (!source) throw Object.assign(new Error('Task source not found'), { status: 404 })
     const updated = db.updateTaskSource(sourceId, params as Parameters<DatabaseManager['updateTaskSource']>[1])
-    return updated
+    return withoutSourceConfig(updated)
   }
 
   // POST /api/tasks/reorder-subtasks — reorder subtasks under a parent
@@ -718,7 +720,6 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
 
   // POST /api/tasks — create task (must be checked before the :id update route)
   if (pathname === '/api/tasks') {
-    if (params.status === TaskStatus.Completed) throw Object.assign(new Error('Workflo must confirm completion.'), { status: 409 })
     const { title } = params as { title?: string }
     if (!title) throw Object.assign(new Error('title is required'), { status: 400 })
     const task = db.createTask(params as unknown as Parameters<DatabaseManager['createTask']>[0])
@@ -758,7 +759,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
       return { completed: true, status: fresh?.status }
     }
     if (!syncManagerRef) {
-      throw Object.assign(new Error('Sync this task with Workflo before completing it.'), { status: 409 })
+      throw Object.assign(new Error('Task source is unavailable.'), { status: 409 })
     }
     db.updateTask(taskId, { complete_at_source: true })
     const result = await syncManagerRef.executeAction(getTaskCompletionAction(task.output_fields), task, undefined, task.source_id)
@@ -947,6 +948,15 @@ function stripSensitiveAgentFields(agent: ReturnType<DatabaseManager['getAgent']
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { api_keys: _keys, secret_ids: _secrets, ...safeConfig } = (agent.config || {}) as Record<string, unknown>
   return { ...agent, config: safeConfig }
+}
+
+// Source configs hold third-party API tokens. The mobile app never reads them,
+// so they do not leave the desktop.
+function withoutSourceConfig<T extends { config?: unknown }>(source: T | undefined) {
+  if (!source) return source
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { config: _config, ...rest } = source
+  return rest
 }
 
 function artifactFromFileEntry(taskId: string, entry: ArtifactFileEntry): Artifact {

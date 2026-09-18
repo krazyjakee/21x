@@ -213,7 +213,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   github: {
     checkCli: (): Promise<{ installed: boolean; authenticated: boolean; username?: string }> =>
       ipcRenderer.invoke('github:checkCli'),
-    startAuth: (): Promise<void> => ipcRenderer.invoke('github:startAuth'),
     fetchOrgs: (): Promise<string[]> => ipcRenderer.invoke('github:fetchOrgs'),
     fetchOrgRepos: (org: string): Promise<unknown[]> =>
       ipcRenderer.invoke('github:fetchOrgRepos', org),
@@ -257,7 +256,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('taskSource:update', id, data),
     delete: (id: string): Promise<boolean> => ipcRenderer.invoke('taskSource:delete', id),
     sync: (sourceId: string): Promise<unknown> => ipcRenderer.invoke('taskSource:sync', sourceId),
-    upload: (taskId: string, autonomous?: boolean): Promise<{ queued: boolean }> => ipcRenderer.invoke('taskSource:upload', taskId, autonomous),
     exportUpdate: (taskId: string, fields: Record<string, unknown>): Promise<void> =>
       ipcRenderer.invoke('taskSource:exportUpdate', taskId, fields),
     getUsers: (sourceId: string): Promise<unknown[]> =>
@@ -364,11 +362,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('workspace:cleanup-progress', handler)
     return () => ipcRenderer.removeListener('workspace:cleanup-progress', handler)
   },
-  onGithubDeviceCode: (callback: (code: string) => void): (() => void) => {
-    const handler = (_: unknown, code: string): void => callback(code)
-    ipcRenderer.on('github:deviceCode', handler)
-    return () => ipcRenderer.removeListener('github:deviceCode', handler)
-  },
   onGitlabDeviceCode: (callback: (code: string) => void): (() => void) => {
     const handler = (_: unknown, code: string): void => callback(code)
     ipcRenderer.on('gitlab:deviceCode', handler)
@@ -420,66 +413,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('mobile:pairing-initiated', (_, data) => fn(data)),
     onDeviceConnected: (fn: (data: { sessionId: string; deviceName: string }) => void) =>
       ipcRenderer.on('mobile:device-connected', (_, data) => fn(data))
-  },
-  enterprise: {
-    signupInBrowser: (mode: 'register' | 'login'): Promise<{
-      userId: string
-      email: string
-      companies: { id: string; name: string; isPrimary: boolean }[]
-    }> => ipcRenderer.invoke('enterprise:signupInBrowser', mode),
-    login: (email: string, password: string): Promise<{
-      userId: string
-      email: string
-      companies: { id: string; name: string; isPrimary: boolean }[]
-    }> => ipcRenderer.invoke('enterprise:login', email, password),
-    listCompanies: (): Promise<{ id: string; name: string; isPrimary: boolean }[]> =>
-      ipcRenderer.invoke('enterprise:listCompanies'),
-    selectTenant: (tenantId: string): Promise<{
-      token: string
-      tenant: { id: string; name: string }
-      warnings?: string[]
-    }> => ipcRenderer.invoke('enterprise:selectTenant', tenantId),
-    logout: (): Promise<void> =>
-      ipcRenderer.invoke('enterprise:logout'),
-    getSession: (): Promise<{
-      isAuthenticated: boolean
-      userEmail: string | null
-      userId: string | null
-      currentTenant: { id: string; name: string } | null
-    }> => ipcRenderer.invoke('enterprise:getSession'),
-    refreshToken: (): Promise<{ token: string }> =>
-      ipcRenderer.invoke('enterprise:refreshToken'),
-    syncResources: (): Promise<{ agents: { created: number; updated: number }; skills: { created: number; updated: number; pushed: number }; mcpServers: { created: number; updated: number }; taskSources: { created: number; updated: number }; errors: string[] } | null> =>
-      ipcRenderer.invoke('enterprise:syncResources'),
-    apiRequest: (method: string, path: string, body?: unknown): Promise<unknown> =>
-      ipcRenderer.invoke('enterprise:apiRequest', method, path, body),
-    getApiUrl: (): Promise<string> =>
-      ipcRenderer.invoke('enterprise:getApiUrl'),
-    getJwt: (): Promise<string> =>
-      ipcRenderer.invoke('enterprise:getJwt'),
-    getAuthTokens: (): Promise<{ accessToken: string; refreshToken: string; tenantId: string | null }> =>
-      ipcRenderer.invoke('enterprise:getAuthTokens'),
-    enableIframeAuth: (): Promise<{ apiUrl: string }> =>
-      ipcRenderer.invoke('enterprise:enableIframeAuth'),
-    disableIframeAuth: (): Promise<void> =>
-      ipcRenderer.invoke('enterprise:disableIframeAuth'),
-    getAiGatewayStatus: (): Promise<{
-      configured: boolean
-      modelCount: number
-      keyName: string | null
-      expiresAt: string | null
-      subscription: {
-        planName: string
-        status: string
-        planId: string
-        currentPeriodEnd: string | null
-      } | null
-    }> => ipcRenderer.invoke('enterprise:getAiGatewayStatus'),
-    onSyncComplete: (callback: (data: { success: boolean; syncMs?: number; error?: string; syncStats?: { agents: { created: number; updated: number }; skills: { created: number; updated: number; pushed: number }; mcpServers: { created: number; updated: number }; taskSources: { created: number; updated: number }; errors: string[] } }) => void): (() => void) => {
-      const handler = (_: unknown, data: { success: boolean; syncMs?: number; error?: string; syncStats?: { agents: { created: number; updated: number }; skills: { created: number; updated: number; pushed: number }; mcpServers: { created: number; updated: number }; taskSources: { created: number; updated: number }; errors: string[] } }): void => callback(data)
-      ipcRenderer.on('enterprise:syncComplete', handler)
-      return () => ipcRenderer.removeListener('enterprise:syncComplete', handler)
-    }
   },
   updater: {
     check: (): Promise<{ success: boolean; version?: string; error?: string }> =>

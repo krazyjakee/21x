@@ -2,12 +2,14 @@
 
 ## Overview
 
-This guide walks through setting up and testing the Linear.app OAuth2 integration in pf-desktop.
+This guide walks through setting up and testing the Linear.app OAuth2 integration in 20x.
+
+The database lives in the Electron `userData` directory: `~/.config/20x/pf-desktop.db` on Linux, `~/Library/Application Support/20x/pf-desktop.db` on macOS, `%APPDATA%\20x\pf-desktop.db` on Windows. The commands below use the Linux path.
 
 ## Prerequisites
 
 1. A Linear workspace (free or paid)
-2. pf-desktop installed and running
+2. 20x installed and running
 3. Linear OAuth application credentials
 
 ## Setup Steps
@@ -16,9 +18,9 @@ This guide walks through setting up and testing the Linear.app OAuth2 integratio
 
 1. Go to https://linear.app/settings/api/applications/new
 2. Fill in the application details:
-   - **Application name**: `pf-desktop` (or your preferred name)
+   - **Application name**: `20x` (or your preferred name)
    - **Description**: "Desktop task management integration"
-   - **Redirect URI**: `pf-desktop://oauth/callback`
+   - **Redirect URI**: `nuanu://oauth/callback`
    - **Scopes**: Select:
      - `read` - Read issues, teams, users
      - `write` - Update issues
@@ -30,7 +32,7 @@ This guide walks through setting up and testing the Linear.app OAuth2 integratio
 
 ### 2. Add Linear as a Task Source
 
-1. Open pf-desktop
+1. Open 20x
 2. Go to Settings → Task Sources
 3. Click **Add Source**
 4. Select **Linear** from the plugin dropdown
@@ -46,8 +48,8 @@ This guide walks through setting up and testing the Linear.app OAuth2 integratio
 1. Your browser will open with Linear's authorization page
 2. Review the requested permissions
 3. Click **Authorize**
-4. You'll be redirected to `pf-desktop://oauth/callback`
-5. pf-desktop will automatically complete the OAuth flow
+4. You'll be redirected to `nuanu://oauth/callback`
+5. 20x will automatically complete the OAuth flow
 6. You should see a success message
 
 ### 4. Select Teams (Optional)
@@ -61,7 +63,7 @@ After authorization, you can select which Linear teams to import tasks from:
 ### 5. Sync Tasks
 
 1. Click the **Sync Now** button next to your Linear task source
-2. pf-desktop will import all issues from the selected teams
+2. 20x will import all issues from the selected teams
 3. Issues will appear in your task list with the source badge "Linear"
 
 ## Testing
@@ -73,13 +75,13 @@ After authorization, you can select which Linear teams to import tasks from:
 1. Follow setup steps above
 2. Verify browser opens to Linear authorization page
 3. Authorize the application
-4. Verify pf-desktop shows success message
-5. Check database: `sqlite3 ~/.config/pf-desktop/pf-desktop.db "SELECT * FROM oauth_tokens WHERE provider='linear'"`
+4. Verify 20x shows success message
+5. Check database: `sqlite3 ~/.config/20x/pf-desktop.db "SELECT * FROM oauth_tokens WHERE provider='linear'"`
 6. Verify `access_token` and `refresh_token` are encrypted (should be binary blobs)
 
 **Troubleshooting**:
 - If browser doesn't open: Check protocol handler registration
-- If callback fails: Verify redirect URI matches exactly: `pf-desktop://oauth/callback`
+- If callback fails: Verify redirect URI matches exactly: `nuanu://oauth/callback`
 - If authorization fails: Check client credentials are correct
 
 ### Test 2: Task Import
@@ -87,8 +89,8 @@ After authorization, you can select which Linear teams to import tasks from:
 **Expected**: Import Linear issues as local tasks
 
 1. Create a test issue in Linear
-2. In pf-desktop, click **Sync Now** on your Linear source
-3. Verify the test issue appears in pf-desktop
+2. In 20x, click **Sync Now** on your Linear source
+3. Verify the test issue appears in 20x
 4. Check field mapping:
    - Title matches
    - Description matches
@@ -98,24 +100,24 @@ After authorization, you can select which Linear teams to import tasks from:
    - Labels are imported
 
 **Status Mapping** (see `docs/task-lifecycle.md` for all statuses):
-- Linear "Backlog", "Todo" → pf-desktop "not_started"
-- Linear "In Progress" → pf-desktop "agent_working"
-- Linear "Review" → pf-desktop "ready_for_review"
-- Linear "Done", "Canceled" → pf-desktop "completed"
+- Linear "Backlog", "Todo" → 20x "not_started"
+- Linear "In Progress" → 20x "agent_working"
+- Linear "Review" → 20x "ready_for_review"
+- Linear "Done", "Canceled" → 20x "completed"
 - Note: "triaging" and "agent_learning" are internal statuses not mapped from Linear
 
 **Priority Mapping**:
-- Linear Urgent (1) → pf-desktop "critical"
-- Linear High (2) → pf-desktop "high"
-- Linear Medium (3) → pf-desktop "medium"
-- Linear Low (4) → pf-desktop "low"
+- Linear Urgent (1) → 20x "critical"
+- Linear High (2) → 20x "high"
+- Linear Medium (3) → 20x "medium"
+- Linear Low (4) → 20x "low"
 
 ### Test 3: Bidirectional Sync
 
-**Expected**: Updates in pf-desktop sync back to Linear
+**Expected**: Updates in 20x sync back to Linear
 
 1. Import a task from Linear
-2. In pf-desktop, update the task:
+2. In 20x, update the task:
    - Change priority from "medium" to "high"
 3. Verify the change syncs to Linear
 4. Open the issue in Linear and verify priority changed
@@ -130,7 +132,7 @@ After authorization, you can select which Linear teams to import tasks from:
 2. Open the task actions menu
 3. Try **Add Comment**:
    - Click "Add Comment"
-   - Enter "Test comment from pf-desktop"
+   - Enter "Test comment from 20x"
    - Execute the action
    - Verify comment appears in Linear
 
@@ -153,14 +155,14 @@ Linear OAuth tokens expire after 24 hours. To test refresh:
 4. Verify sync succeeds (token should auto-refresh)
 
 **Option B: Manually expire token**
-1. Open database: `sqlite3 ~/.config/pf-desktop/pf-desktop.db`
+1. Open database: `sqlite3 ~/.config/20x/pf-desktop.db`
 2. Update token expiry:
    ```sql
    UPDATE oauth_tokens
    SET expires_at = datetime('now', '-1 hour')
    WHERE provider = 'linear';
    ```
-3. Click **Sync Now** in pf-desktop
+3. Click **Sync Now** in 20x
 4. Verify token is refreshed and sync succeeds
 5. Check logs for "Token refresh" message
 
@@ -174,8 +176,8 @@ Linear OAuth tokens expire after 24 hours. To test refresh:
 **Test 6.2: Revoked Token**
 1. Set up Linear integration successfully
 2. In Linear, go to Settings → Applications → Authorized Applications
-3. Revoke access for pf-desktop
-4. In pf-desktop, click **Sync Now**
+3. Revoke access for 20x
+4. In 20x, click **Sync Now**
 5. **Expected**: Error message: "OAuth token expired. Please re-authenticate."
 6. **Expected**: UI shows "Reconnect" button
 
@@ -196,7 +198,7 @@ Verify tokens are encrypted at rest:
 
 ```bash
 # Open database
-sqlite3 ~/.config/pf-desktop/pf-desktop.db
+sqlite3 ~/.config/20x/pf-desktop.db
 
 # View oauth_tokens table
 SELECT id, provider, length(access_token) as token_size, expires_at FROM oauth_tokens;
@@ -213,9 +215,9 @@ Verify the custom protocol handler is registered correctly:
 
 ```bash
 # macOS
-defaults read com.peakflo.pf-desktop
+defaults read com.20x.app
 
-# Should show protocol registration for pf-desktop://
+# Should show protocol registration for nuanu://
 ```
 
 ### PKCE Implementation
@@ -233,13 +235,13 @@ Check logs for PKCE-related messages during OAuth flow.
 
 ### OAuth Callback Not Working
 
-**Symptoms**: Browser opens, you authorize, but nothing happens in pf-desktop
+**Symptoms**: Browser opens, you authorize, but nothing happens in 20x
 
 **Solutions**:
-1. Check if `pf-desktop://` protocol is registered:
-   - macOS: `ls -la ~/Library/Preferences/com.peakflo.pf-desktop.plist`
-2. Restart pf-desktop to re-register protocol handler
-3. Check Linear app redirect URI matches exactly: `pf-desktop://oauth/callback`
+1. Check if `nuanu://` protocol is registered:
+   - macOS: `ls -la ~/Library/Preferences/com.20x.app.plist`
+2. Restart 20x to re-register protocol handler
+3. Check Linear app redirect URI matches exactly: `nuanu://oauth/callback`
 
 ### Token Refresh Fails
 
@@ -287,5 +289,5 @@ After successful setup:
 ## Support
 
 For issues or questions:
-- GitHub Issues: https://github.com/your-repo/pf-desktop/issues
+- GitHub Issues: https://github.com/krazyjakee/21x/issues
 - Linear API Support: https://linear.app/contact

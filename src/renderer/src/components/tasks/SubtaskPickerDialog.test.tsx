@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { SubtaskPickerDialog } from './SubtaskPickerDialog'
-import { TaskStatus, type WorkfloTask } from '@/types'
+import { TaskStatus, type Task } from '@/types'
 
-function makeTask(id: string, title: string, status = TaskStatus.NotStarted): WorkfloTask {
+function makeTask(id: string, title: string, status = TaskStatus.NotStarted): Task {
   return {
     id,
     title,

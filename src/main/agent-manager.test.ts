@@ -51,7 +51,12 @@ vi.mock('./adapters/claude-code-adapter', () => ({ ClaudeCodeAdapter: vi.fn() })
 vi.mock('./adapters/acp-adapter', () => ({ AcpAdapter: vi.fn() }))
 vi.mock('./adapters/codex-app-server-adapter', () => ({ CodexAppServerAdapter: vi.fn() }))
 vi.mock('./adapters/pi-adapter', () => ({ PiAdapter: vi.fn() }))
-vi.mock('./task-api-server', () => ({ getTaskApiPort: vi.fn(), waitForTaskApiServer: vi.fn() }))
+vi.mock('./task-api-server', () => ({
+  getTaskApiPort: vi.fn(),
+  getTaskApiToken: vi.fn(() => 'test-task-api-token'),
+  getTaskApiEnv: vi.fn(() => ({})),
+  waitForTaskApiServer: vi.fn()
+}))
 vi.mock('./secret-broker', () => ({
   registerSecretSession: vi.fn(),
   unregisterSecretSession: vi.fn(),
@@ -355,7 +360,7 @@ describe('AgentManager skill file paths', () => {
         ...createMockDb({ coding_agent: 'codex' }),
         getSkillsByIds: vi.fn(() => [
           makeSkillRecord({
-            name: '[Workflo] gh-pr-base-branch-check',
+            name: '[Team] gh-pr-base-branch-check',
             description: 'Check base branch {details}: see #docs',
           }),
         ]),
@@ -371,7 +376,7 @@ describe('AgentManager skill file paths', () => {
       const writtenContent = writeFileCall![1] as string
       // Values are wrapped in double quotes so special chars (brackets, colons, hashes)
       // are treated as literal YAML string content instead of breaking the parser.
-      expect(writtenContent).toContain('name: "[Workflo] gh-pr-base-branch-check"')
+      expect(writtenContent).toContain('name: "[Team] gh-pr-base-branch-check"')
       expect(writtenContent).toContain('description: "Check base branch {details}: see #docs"')
     })
   })
@@ -538,11 +543,12 @@ describe('AgentManager skill file paths', () => {
       manager = new AgentManager(makeMcpDb())
 
       const md: string = (manager as any).generateAgentsMd([], [], '/tmp/ws', 'agent-1', {
-        'task-management': { type: 'http', url: 'http://127.0.0.1:5555/mcp?task=t1&parent=p1' }
+        'task-management': { type: 'http', url: 'http://127.0.0.1:5555/mcp?token=session-secret&task=t1&parent=p1' }
       })
 
       expect(md).toContain('**Type:** Local (HTTP, in-process)')
       expect(md).toContain('http://127.0.0.1:5555/mcp?task=t1&parent=p1')
+      expect(md).not.toContain('session-secret')
       expect(md).not.toContain('/bin/Electron')
       expect(md).not.toContain('**Command:**')
     })
@@ -567,47 +573,6 @@ describe('AgentManager skill file paths', () => {
       expect(md).not.toContain('configured-server')
     })
 
-    it('adds Workflo discovery guidance even when the cached tool list is empty', () => {
-      const workflo = {
-        id: 'srv-workflo',
-        name: '[Workflo] Organisation Workspace',
-        type: 'remote',
-        url: 'https://api.peakflo.ai/api/mcp/dev/mcp',
-        headers: {},
-        tools: [],
-        source: 'enterprise'
-      }
-      const mockDb = createMockDb({ mcp_servers: ['srv-workflo'] }) as any
-      mockDb.getMcpServer = vi.fn(() => workflo)
-      mockDb.getMcpServers = vi.fn(() => [workflo])
-      manager = new AgentManager(mockDb)
-      const injected = {
-        '[Workflo] Organisation Workspace': { type: 'http', url: 'http://127.0.0.1:5555/proxy-id' }
-      }
-
-      const agentsMd: string = (manager as any).generateAgentsMd([], [], '/tmp/ws', 'agent-1', injected)
-      const claudeMd: string = (manager as any).generateClaudeMd([], [], '/tmp/ws', 'agent-1', injected)
-
-      for (const md of [agentsMd, claudeMd]) {
-        expect(md).toContain('Organisation Workspace discovery')
-        expect(md).toContain('do a short read-only discovery pass')
-        expect(md).toContain('Permissions, toolset settings, and connected services can hide')
-        expect(md).toContain('not evidence that the data does not exist')
-        expect(md).toContain('`integrations_list`')
-        expect(md).toContain('`workflow_list`')
-        expect(md).toContain('`report_schema`')
-      }
-    })
-
-    it('does not add Workflo discovery guidance for unrelated MCP servers', () => {
-      manager = new AgentManager(makeMcpDb())
-
-      const md: string = (manager as any).generateAgentsMd([], [], '/tmp/ws', 'agent-1', {
-        'configured-server': { type: 'stdio', command: '/bin/configured', args: ['a.js'] }
-      })
-
-      expect(md).not.toContain('Organisation Workspace discovery')
-    })
   })
 
   describe('getMemoryFileName', () => {
@@ -1155,6 +1120,7 @@ describe('AgentManager MCP server routing', () => {
     const url = new URL(mcpServers['task-management'].url)
     expect(url.searchParams.get('task')).toBe('task-child')
     expect(url.searchParams.get('parent')).toBe('task-parent')
+    expect(url.searchParams.get('token')).toBe('test-task-api-token')
     // Redundant when it equals the task, so it is left out.
     expect(url.searchParams.get('artifact')).toBeNull()
   })
@@ -1179,118 +1145,32 @@ describe('AgentManager MCP server routing', () => {
     expect(mcpServers['task-management']).toBeUndefined()
   })
 
-  it('canonicalizes Workflo MCP dev server URLs to the active enterprise API URL for enterprise-sourced servers', async () => {
+  it('passes remote MCP servers through with their own URL and headers', async () => {
     const mockDb = {
       getAgent: vi.fn(() => ({
         id: 'agent-1',
         name: 'OPS L2',
         config: {
-          mcp_servers: ['workflo-stage-server']
-        }
-      })),
-      getMcpServer: vi.fn(() => ({
-        id: 'workflo-stage-server',
-        name: '[Workflo] Organisation Workspace',
-        type: 'remote',
-        url: 'https://stage-api.peakflo.ai/api/mcp/dev/mcp',
-        headers: {},
-        oauth_metadata: {},
-        source: 'enterprise',
-      })),
-    } as unknown as ConstructorParameters<typeof AgentManager>[0]
-
-    const manager = new AgentManager(mockDb)
-    manager.setEnterpriseAuth({
-      getApiUrl: vi.fn(() => 'https://api.peakflo.ai'),
-      getJwt: vi.fn(async () => 'fresh-prod-jwt'),
-    } as any)
-
-    const mcpServers = await (manager as any).buildMcpServersForAdapter('agent-1')
-
-    expect(mcpServers['[Workflo] Organisation Workspace']).toMatchObject({
-      type: 'http',
-      url: 'https://api.peakflo.ai/api/mcp/dev/mcp',
-      headers: { Authorization: 'Bearer fresh-prod-jwt' },
-    })
-  })
-
-  it('does NOT auto-manage a user-sourced MCP, even when name and URL look like the enterprise one (provenance check)', async () => {
-    // Regression — the primary tenant-leak fix.
-    // A user-added MCP whose `source` is 'user' must never be hijacked, no
-    // matter what its name or URL looks like. Before Phase 1 this was a
-    // name/path heuristic and any "*workflo*" name + /api/mcp/dev/mcp path
-    // got auto-managed → tenant leak. Now identification is provenance-only.
-    const mockDb = {
-      getAgent: vi.fn(() => ({
-        id: 'agent-1',
-        name: 'OPS L2',
-        config: {
-          mcp_servers: ['tan-insurance-workflo'],
+          mcp_servers: ['team-server'],
         },
       })),
       getMcpServer: vi.fn(() => ({
-        id: 'tan-insurance-workflo',
-        name: '[Workflo] Organisation Workspace',  // user copied the canonical name
+        id: 'team-server',
+        name: 'Team MCP',
         type: 'remote',
-        url: 'https://stage-api.peakflo.ai/api/mcp/dev/mcp',  // and the canonical URL
-        headers: {},
+        url: 'https://mcp.example.com/mcp',
+        headers: { Authorization: 'Bearer user-key' },
         oauth_metadata: {},
-        source: 'user',  // but it was added by the user, not by enterprise sync
+        source: 'user',
       })),
     } as unknown as ConstructorParameters<typeof AgentManager>[0]
 
-    const manager = new AgentManager(mockDb)
-    manager.setEnterpriseAuth({
-      getApiUrl: vi.fn(() => 'https://api.peakflo.ai'),
-      getJwt: vi.fn(async () => 'fresh-prod-jwt-for-tenant-b'),
-    } as any)
+    const mcpServers = await (new AgentManager(mockDb) as any).buildMcpServersForAdapter('agent-1')
 
-    const mcpServers = await (manager as any).buildMcpServersForAdapter('agent-1')
-
-    expect(mcpServers['[Workflo] Organisation Workspace']).toMatchObject({
+    expect(mcpServers['Team MCP']).toEqual({
       type: 'http',
-      // URL is NOT rewritten — user pointed at stage, request goes to stage
-      url: 'https://stage-api.peakflo.ai/api/mcp/dev/mcp',
-    })
-    // No Authorization injected — user didn't set one and the proxy is not invoked
-    expect(mcpServers['[Workflo] Organisation Workspace'].headers).not.toHaveProperty('Authorization')
-  })
-
-  it('respects a user-supplied Authorization header even when an enterprise-sourced row carries one (defence-in-depth)', async () => {
-    // Defence-in-depth: even if a row is somehow mislabelled as 'enterprise'
-    // but the user/sync wrote an Authorization header, honour their explicit
-    // credential and skip the auto-manage path.
-    const mockDb = {
-      getAgent: vi.fn(() => ({
-        id: 'agent-1',
-        name: 'OPS L2',
-        config: {
-          mcp_servers: ['tan-insurance-workflo'],
-        },
-      })),
-      getMcpServer: vi.fn(() => ({
-        id: 'tan-insurance-workflo',
-        name: 'Tan Insurance MCP workflo',
-        type: 'remote',
-        url: 'https://stage-api.peakflo.ai/api/mcp/dev/mcp',
-        headers: { Authorization: 'Bearer pfwf_tenant_a_key' },
-        oauth_metadata: {},
-        source: 'enterprise',
-      })),
-    } as unknown as ConstructorParameters<typeof AgentManager>[0]
-
-    const manager = new AgentManager(mockDb)
-    manager.setEnterpriseAuth({
-      getApiUrl: vi.fn(() => 'https://api.peakflo.ai'),
-      getJwt: vi.fn(async () => 'fresh-prod-jwt-for-tenant-b'),
-    } as any)
-
-    const mcpServers = await (manager as any).buildMcpServersForAdapter('agent-1')
-
-    expect(mcpServers['Tan Insurance MCP workflo']).toMatchObject({
-      type: 'http',
-      url: 'https://stage-api.peakflo.ai/api/mcp/dev/mcp',
-      headers: { Authorization: 'Bearer pfwf_tenant_a_key' },
+      url: 'https://mcp.example.com/mcp',
+      headers: { Authorization: 'Bearer user-key' },
     })
   })
 })
@@ -1368,11 +1248,11 @@ describe('AgentManager transitionToIdle — completing without review', () => {
   })
 })
 
-describe('AgentManager transitionToIdle — enterprise task completion after feedback', () => {
-  function createEnterpriseTaskDb(taskOverrides: Record<string, unknown> = {}) {
+describe('AgentManager transitionToIdle — source task completion after feedback', () => {
+  function createSourceTaskDb(taskOverrides: Record<string, unknown> = {}) {
     const task = {
       id: 'task-1',
-      title: 'Enterprise Task',
+      title: 'Source Task',
       repos: [],
       skill_ids: [],
       status: TaskStatus.AgentLearning,
@@ -1398,7 +1278,7 @@ describe('AgentManager transitionToIdle — enterprise task completion after fee
     } as unknown as ConstructorParameters<typeof AgentManager>[0]
   }
 
-  function setupManager(mockDb: ReturnType<typeof createEnterpriseTaskDb>) {
+  function setupManager(mockDb: ReturnType<typeof createSourceTaskDb>) {
     const mgr = new AgentManager(mockDb)
     // Mock sendToRenderer
     vi.spyOn(mgr as any, 'sendToRenderer').mockImplementation(() => undefined)
@@ -1420,7 +1300,7 @@ describe('AgentManager transitionToIdle — enterprise task completion after fee
   }
 
   it.each([true, false])('completes only after learning and honors the user source choice %s', async completeAtSource => {
-    const mockDb = createEnterpriseTaskDb({complete_at_source: completeAtSource})
+    const mockDb = createSourceTaskDb({complete_at_source: completeAtSource})
     const {mgr, session} = setupManager(mockDb)
     const task = mockDb.getTask('task-1')!
     vi.mocked(mockDb.getSetting).mockImplementation(key => key === 'session-feedback-completion:task-1' ? JSON.stringify({completeAtSource}) : undefined)
@@ -1443,7 +1323,7 @@ describe('AgentManager transitionToIdle — enterprise task completion after fee
   })
 
   it('learning never completes with the human credential',async()=>{
-    const mockDb=createEnterpriseTaskDb();const {mgr,session}=setupManager(mockDb)
+    const mockDb=createSourceTaskDb();const {mgr,session}=setupManager(mockDb)
     const executeAction=vi.fn();mgr.setSyncManager({executeAction} as never)
     await (mgr as any).transitionToIdle('session-1',session)
     expect(executeAction).not.toHaveBeenCalled()
@@ -1451,7 +1331,7 @@ describe('AgentManager transitionToIdle — enterprise task completion after fee
   })
 
   it('replays missed transcript parts before transitioning idle', async () => {
-    const mockDb = createEnterpriseTaskDb({
+    const mockDb = createSourceTaskDb({
       status: TaskStatus.AgentWorking,
       output_fields: [],
       source_id: null,
@@ -1492,7 +1372,7 @@ describe('AgentManager transitionToIdle — enterprise task completion after fee
   })
 
   it('does NOT re-emit a message already persisted under a different part id (codex id-scheme mismatch)', async () => {
-    const mockDb = createEnterpriseTaskDb({ status: TaskStatus.AgentWorking, output_fields: [], source_id: null })
+    const mockDb = createSourceTaskDb({ status: TaskStatus.AgentWorking, output_fields: [], source_id: null })
     // The projection already has this assistant message — captured live under a
     // codex streaming id (agent-msg_...). getAllMessages returns the SAME text
     // under the finalized item id (agent-item-42), which is NOT in seenPartIds.
@@ -1531,7 +1411,7 @@ describe('AgentManager transitionToIdle — enterprise task completion after fee
   })
 
   it('does not replay the final assistant text after idle when only the persisted part id changed (assistantTextKeys dedup)', async () => {
-    const mockDb = createEnterpriseTaskDb({
+    const mockDb = createSourceTaskDb({
       status: TaskStatus.AgentWorking,
       output_fields: [],
       source_id: null,
@@ -1573,7 +1453,7 @@ describe('AgentManager transitionToIdle — enterprise task completion after fee
   })
 
   it('keeps polling and does not mark ready when adapter is still busy after transcript replay', async () => {
-    const mockDb = createEnterpriseTaskDb({
+    const mockDb = createSourceTaskDb({
       status: TaskStatus.AgentWorking,
       output_fields: [],
       source_id: null,
@@ -1614,7 +1494,7 @@ describe('AgentManager transitionToIdle — enterprise task completion after fee
     // Regression: partContentLengths stored String(text.length) (e.g. "133")
     // instead of actual text. When chunk accumulation read it back, the number
     // was prepended to the next streamed chunk: "133Fixed and pushed..."
-    const mockDb = createEnterpriseTaskDb({
+    const mockDb = createSourceTaskDb({
       status: TaskStatus.AgentWorking,
       output_fields: [],
       source_id: null,
@@ -3912,54 +3792,5 @@ describe('AgentManager background subagent protection', () => {
 
       expect(resumeSpy).toHaveBeenCalledWith('real-id', expect.anything())
     })
-  })
-})
-
-describe('Workflo task execution owner', () => {
-  it('starts and resumes local help for a human-owned server task without claiming task status', async () => {
-    const db = createMockDb()
-    vi.mocked(db.getSetting).mockImplementation(key => key === 'workflo-task:task-1' ? JSON.stringify({ executionMode: 'human', status: 'not_started' }) : undefined)
-    vi.mocked(db.getAgent).mockReturnValue({ id: 'agent-1', config: {} } as any)
-    const manager = new AgentManager(db)
-    vi.spyOn(manager as any, 'getAdapter').mockReturnValue({})
-    const start = vi.spyOn(manager as any, 'startAdapterSession').mockResolvedValue('help-session')
-    const resume = vi.spyOn(manager as any, 'resumeAdapterSession').mockResolvedValue('help-session')
-    await expect(manager.startSession('agent-1', 'task-1', '/tmp/help')).resolves.toBe('help-session')
-    await expect(manager.resumeSession('agent-1', 'task-1', 'help-session')).resolves.toBe('help-session')
-    expect(start).toHaveBeenCalledTimes(1)
-    expect(resume).toHaveBeenCalledTimes(1)
-    ;(manager as any).updateTaskFromLocalAgent('task-1', { status: TaskStatus.AgentWorking, session_id: 'help-session' })
-    ;(manager as any).updateTaskFromLocalAgent('task-1', { status: TaskStatus.ReadyForReview })
-    expect(db.updateTask).toHaveBeenCalledExactlyOnceWith('task-1', { session_id: 'help-session' })
-  })
-
-  it('does not publish local helper status as canonical task status', () => {
-    const db = createMockDb()
-    vi.mocked(db.getSetting).mockImplementation(key => key === 'workflo-task:task-1' ? JSON.stringify({ executionMode: 'human' }) : undefined)
-    const manager = new AgentManager(db)
-    const send = vi.fn()
-    ;(manager as any).mainWindow = { isDestroyed: () => false, webContents: { send } }
-    ;(manager as any).sendToRenderer('task:updated', { taskId: 'task-1', updates: { status: TaskStatus.AgentWorking } })
-    expect(send).not.toHaveBeenCalled()
-    ;(manager as any).sendToRenderer('task:updated', { taskId: 'task-1', updates: { status: TaskStatus.ReadyForReview, session_id: 'help-session' } })
-    expect(send).toHaveBeenCalledExactlyOnceWith('task:updated', { taskId: 'task-1', updates: { session_id: 'help-session' } })
-  })
-
-  it('refuses resuming local help after assignment changes to an agent', async () => {
-    const db = createMockDb()
-    vi.mocked(db.getSetting).mockImplementation(key => key === 'workflo-task:task-1' ? JSON.stringify({ executionMode: 'autonomous' }) : undefined)
-    await expect(new AgentManager(db).resumeSession('agent-1', 'task-1', 'help-session')).rejects.toThrow('Agent-assigned tasks')
-  })
-
-  it('refuses a desktop session for autonomous server work', async () => {
-    const db = createMockDb()
-    vi.mocked(db.getSetting).mockImplementation(key => key === 'workflo-task:task-1' ? JSON.stringify({ executionMode: 'autonomous' }) : undefined)
-    await expect(new AgentManager(db).startSession('agent-1', 'task-1', '/tmp/workflo-guard')).rejects.toThrow('Agent-assigned tasks run through Workflo')
-  })
-
-  it('refuses a desktop session while task upload is pending', async () => {
-    const db = createMockDb()
-    vi.mocked(db.getSetting).mockImplementation(key => key === 'workflo-upload:task-1' ? '{}' : undefined)
-    await expect(new AgentManager(db).startSession('agent-1', 'task-1', '/tmp/workflo-guard')).rejects.toThrow('Wait for the Workflo task upload')
   })
 })

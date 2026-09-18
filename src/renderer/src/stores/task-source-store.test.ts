@@ -38,7 +38,7 @@ describe('useTaskSourceStore', () => {
       const result = await useTaskSourceStore.getState().createSource({
         mcp_server_id: 'm1',
         name: 'New Source',
-        plugin_id: 'peakflo'
+        plugin_id: 'linear'
       } as unknown as CreateTaskSourceDTO)
 
       expect(result).toEqual(newSource)

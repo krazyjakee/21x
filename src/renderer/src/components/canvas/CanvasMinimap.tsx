@@ -18,7 +18,6 @@ const PANEL_COLORS: Record<string, string> = {
   task: 'rgba(59,130,246,0.7)',     // fallback blue when a task status is unavailable
   browser: 'rgba(249,115,22,0.7)',  // orange
   terminal: 'rgba(139,92,246,0.7)',  // violet
-  app: 'rgba(20,184,166,0.7)',      // teal
   transcript: 'rgba(6,182,212,0.62)', // cyan
   webpage: 'rgba(14,165,233,0.62)',  // sky
   placeholder: 'rgba(107,114,128,0.4)', // gray

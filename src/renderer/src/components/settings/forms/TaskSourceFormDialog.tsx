@@ -26,7 +26,7 @@ export function TaskSourceFormDialog({
   onSubmit
 }: TaskSourceFormDialogProps) {
   const [name, setName] = useState(source?.name ?? '')
-  const [pluginId, setPluginId] = useState(source?.plugin_id ?? (plugins[0]?.id ?? 'peakflo'))
+  const [pluginId, setPluginId] = useState(source?.plugin_id ?? (plugins[0]?.id ?? ''))
   const [mcpServerId, setMcpServerId] = useState(source?.mcp_server_id ?? (mcpServers[0]?.id ?? ''))
   const [pluginConfig, setPluginConfig] = useState<Record<string, unknown>>(source?.config ?? {})
   const [documentation, setDocumentation] = useState<string | null>(null)
@@ -34,7 +34,7 @@ export function TaskSourceFormDialog({
   useEffect(() => {
     if (open) {
       setName(source?.name ?? '')
-      setPluginId(source?.plugin_id ?? (plugins[0]?.id ?? 'peakflo'))
+      setPluginId(source?.plugin_id ?? (plugins[0]?.id ?? ''))
       setMcpServerId(source?.mcp_server_id ?? (mcpServers[0]?.id ?? ''))
       setPluginConfig(source?.config ?? {})
     }

@@ -22,10 +22,6 @@ const mockSettings = window.electronAPI.settings as unknown as {
   getAll: Mock
 }
 
-const mockEnterprise = window.electronAPI.enterprise as unknown as {
-  getSession: Mock
-}
-
 describe('shouldShowOnboarding', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -106,12 +102,6 @@ describe('OnboardingWizard', () => {
     mockAgentInstaller.onProgress.mockImplementation(() => vi.fn())
     mockAgents.getAll.mockResolvedValue([])
     mockSettings.getAll.mockResolvedValue({})
-    mockEnterprise.getSession.mockResolvedValue({
-      isAuthenticated: false,
-      userEmail: null,
-      userId: null,
-      currentTenant: null
-    })
   })
 
   it('should not render when open is false', () => {
@@ -125,13 +115,14 @@ describe('OnboardingWizard', () => {
     expect(screen.getAllByText('Welcome to 20x').length).toBeGreaterThan(0)
   })
 
-  it('should display Peakflo option prominently', () => {
+  it('offers only local agents, with no hosted-service option', () => {
     render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
-    expect(screen.getAllByText('Peakflo').length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/Managed agents, workflows/i).length).toBeGreaterThan(0)
+    expect(screen.queryByText('Peakflo')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Managed agents/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Sign up|Log in|Cloud/i)).not.toBeInTheDocument()
   })
 
-  it('should display all BYO coding agent options', () => {
+  it('should display all coding agent options', () => {
     render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
     expect(screen.getAllByText('Claude Code').length).toBeGreaterThan(0)
     expect(screen.getAllByText('OpenCode').length).toBeGreaterThan(0)
@@ -141,18 +132,8 @@ describe('OnboardingWizard', () => {
 
   it('should show button disabled when no agent is selected', () => {
     render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
-    const btns = screen.getAllByRole('button', { name: /get started|sign up/i })
+    const btns = screen.getAllByRole('button', { name: /get started/i })
     expect(btns.some((b) => b.hasAttribute('disabled'))).toBe(true)
-  })
-
-  it('should show "Sign up / Log in" when Peakflo is selected', async () => {
-    render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
-    const peakfloButtons = screen.getAllByText('Peakflo')
-    fireEvent.click(peakfloButtons[0])
-
-    await waitFor(() => {
-      expect(screen.getAllByText(/Sign up \/ Log in/i).length).toBeGreaterThan(0)
-    })
   })
 
   it('should show "Get Started" when a BYO agent is selected', async () => {
@@ -185,26 +166,6 @@ describe('OnboardingWizard', () => {
     })
   })
 
-  it('uses Pi as the default harness after Peakflo authentication', async () => {
-    mockEnterprise.getSession.mockResolvedValue({
-      isAuthenticated: true,
-      userEmail: 'user@peakflo.co',
-      userId: 'user-1',
-      currentTenant: { id: 'tenant-1', name: 'Peakflo' }
-    })
-
-    render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
-
-    await waitFor(() => {
-      expect(mockAgentInstaller.install).toHaveBeenCalledWith('pi')
-      expect(mockAgents.create).toHaveBeenCalledWith(expect.objectContaining({
-        is_default: true,
-        config: expect.objectContaining({ coding_agent: CodingAgentType.PI })
-      }))
-    })
-    expect(mockAgentInstaller.install).not.toHaveBeenCalledWith('opencode')
-  })
-
   it('should call onOpenChange(false) when Skip is clicked', () => {
     const onOpenChange = vi.fn()
     render(<OnboardingWizard open={true} onOpenChange={onOpenChange} />)
@@ -229,17 +190,6 @@ describe('OnboardingWizard', () => {
       expect(screen.getAllByText(/Where are your repos/i).length).toBeGreaterThan(0)
       expect(screen.getAllByText('GitHub').length).toBeGreaterThan(0)
       expect(screen.getAllByText('GitLab').length).toBeGreaterThan(0)
-    })
-  })
-
-  it('should NOT show git provider when Peakflo is selected', async () => {
-    render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
-    const peakflo = screen.getAllByText('Peakflo')
-    fireEvent.click(peakflo[0])
-
-    // Git provider row should not appear for Peakflo
-    await waitFor(() => {
-      expect(screen.queryByText(/Where are your repos/i)).not.toBeInTheDocument()
     })
   })
 

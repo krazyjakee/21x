@@ -1,99 +1,13 @@
-import { useEffect, useCallback, useState } from 'react'
-import { Cloud, ExternalLink } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
-import { useDashboardStore } from '@/stores/dashboard-store'
-import { useEnterpriseStore } from '@/stores/enterprise-store'
-import { useTaskStore } from '@/stores/task-store'
+import { useCallback } from 'react'
 import { useUIStore } from '@/stores/ui-store'
-import { SettingsTab } from '@/types'
 import { HeroSection } from './HeroSection'
 import { CommandInput } from './CommandInput'
 import { QuickChips } from './QuickChips'
-import { PresetupSection } from './PresetupSection'
-import { ApplicationsList } from './ApplicationsList'
 import { TaskBoard } from './TaskBoard'
-import { EnterpriseLoginModal } from '@/components/settings/tabs/EnterpriseLoginModal'
 
 export function DashboardWorkspace() {
-  const {
-    isAuthenticated,
-    isLoading: enterpriseLoading,
-    error: enterpriseError,
-    availableTenants,
-    signupInBrowser,
-    loadSession,
-    clearError,
-    setSyncing,
-    setSyncResult
-  } = useEnterpriseStore()
-  const [signupPending, setSignupPending] = useState(false)
-  const [showLoginModal, setShowLoginModal] = useState(false)
-
-  const handleSignupInBrowser = useCallback(async () => {
-    setSignupPending(true)
-    try {
-      await signupInBrowser('register')
-    } finally {
-      setSignupPending(false)
-    }
-  }, [signupInBrowser])
-
-  // After browser signup returns companies that need tenant selection, open the modal
-  useEffect(() => {
-    if (availableTenants && availableTenants.length > 1 && !isAuthenticated) {
-      setShowLoginModal(true)
-    }
-  }, [availableTenants, isAuthenticated])
-
-  // Listen for sync completion from main process
-  useEffect(() => {
-    const unsubscribe = window.electronAPI?.enterprise?.onSyncComplete?.((data) => {
-      setSyncing(false)
-      if (data.success) {
-        console.log(`[enterprise] Sync completed in ${data.syncMs}ms`)
-        setSyncResult(data.syncStats ?? null, data.syncMs ?? null)
-      } else {
-        console.warn('[enterprise] Sync failed:', data.error)
-      }
-    })
-    return () => unsubscribe?.()
-  }, [setSyncing, setSyncResult])
-
-  const tasks = useTaskStore((s) => s.tasks)
-  const openSettings = useUIStore((s) => s.openSettings)
-  const setSettingsTab = useUIStore((s) => s.setSettingsTab)
   const openCreateWithPrefill = useUIStore((s) => s.openCreateWithPrefill)
   const setShowOrchestrator = useUIStore((s) => s.setShowOrchestrator)
-  const timeWindow = useDashboardStore((s) => s.timeWindow)
-  const fetchAllIfNeeded = useDashboardStore((s) => s.fetchAllIfNeeded)
-  const startPeriodicRefresh = useDashboardStore((s) => s.startPeriodicRefresh)
-  const stopPeriodicRefresh = useDashboardStore((s) => s.stopPeriodicRefresh)
-  const updateLocalStats = useDashboardStore((s) => s.updateLocalStats)
-
-  // Restore saved enterprise session on mount
-  useEffect(() => {
-    loadSession()
-  }, [])
-
-  // Always compute local stats from task store
-  useEffect(() => {
-    updateLocalStats(tasks)
-  }, [tasks, timeWindow])
-
-  // Fetch cloud data when authenticated
-  useEffect(() => {
-    if (isAuthenticated) {
-      fetchAllIfNeeded()
-      startPeriodicRefresh()
-    } else {
-      useDashboardStore.setState({
-        hasFetchedOnce: false,
-        applicationsError: null,
-        statsError: null
-      })
-    }
-    return () => stopPeriodicRefresh()
-  }, [isAuthenticated])
 
   // Handler: send message to Mastermind and open the drawer
   const handleSendToMastermind = useCallback((message: string) => {
@@ -118,9 +32,9 @@ export function DashboardWorkspace() {
   }, [setShowOrchestrator])
 
   return (
-    <div className="h-full overflow-y-auto overflow-x-hidden">
+    <div className="dashboard-scale h-full overflow-y-auto overflow-x-hidden">
       {/* Command center — centered narrow column */}
-      <div className="max-w-2xl mx-auto px-6 pt-8 pb-6 space-y-5">
+      <div className="max-w-3xl mx-auto px-6 pt-8 pb-6 space-y-5">
         {/* 1. Hero — Recent Mastermind Messages */}
         <HeroSection onSeeFullConversation={handleSeeFullConversation} />
 
@@ -139,91 +53,7 @@ export function DashboardWorkspace() {
 
       {/* Full-width sections below — constrained + centered to align with kanban */}
       <div className="max-w-[1600px] mx-auto px-6 space-y-6 pb-8">
-        {/* Cloud connect prompt — when not authenticated */}
-        {!isAuthenticated && (
-          <>
-            <div className="max-w-2xl mx-auto rounded-lg border border-border/50 bg-card p-4 space-y-3">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <Cloud className="h-5 w-5 text-muted-foreground shrink-0" />
-                  <div>
-                    <p className="text-sm font-medium">Connect to 20x Cloud</p>
-                    <p className="text-xs text-muted-foreground">
-                      See application workflows and enhanced stats.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="default"
-                    size="sm"
-                    onClick={handleSignupInBrowser}
-                    disabled={signupPending || enterpriseLoading}
-                  >
-                    {signupPending ? (
-                      <span className="flex items-center gap-1.5">
-                        <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
-                        Waiting...
-                      </span>
-                    ) : (
-                      <>
-                        <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
-                        Connect
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </div>
-              {signupPending && (
-                <p className="text-xs text-muted-foreground">
-                  Complete sign up in your browser, then you'll be connected automatically.
-                </p>
-              )}
-              {enterpriseError && (
-                <div className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2 flex items-center justify-between">
-                  <p className="text-xs text-destructive">{enterpriseError}</p>
-                  <button
-                    onClick={clearError}
-                    className="text-xs text-destructive/70 hover:text-destructive underline ml-2 shrink-0 cursor-pointer"
-                  >
-                    Dismiss
-                  </button>
-                </div>
-              )}
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">Already have an account?</span>
-                <button
-                  className="text-xs text-primary hover:underline cursor-pointer"
-                  onClick={() => {
-                    setSettingsTab(SettingsTab.ENTERPRISE)
-                    openSettings()
-                  }}
-                >
-                  Sign in
-                </button>
-              </div>
-            </div>
-
-            <EnterpriseLoginModal
-              open={showLoginModal}
-              onClose={() => {
-                setShowLoginModal(false)
-                loadSession()
-              }}
-            />
-          </>
-        )}
-
-        {/* 4. Launch an Application — cloud only, full width */}
-        {isAuthenticated && <ApplicationsList />}
-
-        {/* 5. Start with a Template — cloud only, full width */}
-        {isAuthenticated && <PresetupSection />}
-
-        {/* 6. Task Board (Kanban) — full width */}
+        {/* 4. Task Board (Kanban) — full width */}
         <TaskBoard />
       </div>
     </div>

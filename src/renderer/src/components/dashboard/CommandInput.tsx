@@ -124,6 +124,8 @@ export function CommandInput({ onSendToMastermind, onCreateTask }: CommandInputP
         <div className="relative" ref={dropdownRef}>
           <button
             onClick={() => setShowAgentDropdown(!showAgentDropdown)}
+            title="Choose agent"
+            aria-expanded={showAgentDropdown}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs text-foreground/70 hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
           >
             <Settings className="h-3.5 w-3.5" />
@@ -160,6 +162,7 @@ export function CommandInput({ onSendToMastermind, onCreateTask }: CommandInputP
         <button
           className="p-1.5 rounded-md text-foreground/60 hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
           title="Attach file"
+          aria-label="Attach file"
         >
           <Paperclip className="h-4 w-4" />
         </button>
@@ -189,6 +192,7 @@ export function CommandInput({ onSendToMastermind, onCreateTask }: CommandInputP
               : 'bg-accent text-muted-foreground cursor-not-allowed'
           }`}
           title="Send to Mastermind"
+          aria-label="Send to Mastermind"
         >
           <ArrowUp className="h-4 w-4" />
         </button>

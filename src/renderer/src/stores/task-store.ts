@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { WorkfloTask, CreateTaskDTO, UpdateTaskDTO, OutputField, OutputFieldType } from '@/types'
+import type { Task, CreateTaskDTO, UpdateTaskDTO, OutputField, OutputFieldType } from '@/types'
 import { taskApi, taskSourceApi, onTaskUpdated, onTaskCreated, onTaskDeleted, onTasksRefresh } from '@/lib/ipc-client'
 import { captureAnalyticsEvent, getTaskAnalyticsProperties, getTaskMutationProperties } from '@/lib/analytics'
 
@@ -36,7 +36,7 @@ function normalizeOutputField(field: unknown, index: number): OutputField | null
 }
 
 /** Ensure array fields on a task are always proper arrays (guards against undefined/null from external sources) */
-function normalizeTask(task: WorkfloTask): WorkfloTask {
+function normalizeTask(task: Task): Task {
   return {
     ...task,
     labels: Array.isArray(task.labels) ? task.labels : [],
@@ -52,14 +52,14 @@ function normalizeTask(task: WorkfloTask): WorkfloTask {
 }
 
 interface TaskState {
-  tasks: WorkfloTask[]
+  tasks: Task[]
   selectedTaskId: string | null
   isLoading: boolean
   error: string | null
 
   fetchTasks: () => Promise<void>
-  createTask: (data: CreateTaskDTO) => Promise<WorkfloTask | null>
-  updateTask: (id: string, data: UpdateTaskDTO) => Promise<WorkfloTask | null>
+  createTask: (data: CreateTaskDTO) => Promise<Task | null>
+  updateTask: (id: string, data: UpdateTaskDTO) => Promise<Task | null>
   deleteTask: (id: string) => Promise<boolean>
   selectTask: (id: string | null) => void
 }

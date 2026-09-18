@@ -1,4 +1,3 @@
-import { isWorkfloLinkedTask } from './workflo-task-sync'
 import Database from 'better-sqlite3'
 import { app, safeStorage } from 'electron'
 import { join } from 'path'
@@ -88,14 +87,13 @@ export type McpOAuthMetadata = McpOAuthRegistration
 /**
  * Provenance of an MCP server row:
  * - 'user'       — added by the user through the 20x UI / IPC.
- * - 'enterprise' — synced from a Workflo org node by EnterpriseSyncManager.
  * - 'plugin'     — materialised from a Claude plugin (.mcp.json or manifest).
  *
- * This is the authoritative signal for "is this an enterprise-managed MCP?"
+ * This is the authoritative signal for "is this a plugin-managed MCP?"
  * Do NOT rely on name prefixes or URL heuristics — those are display details
  * that the user can edit. `source` is set at create time and never changes.
  */
-export type McpServerSource = 'user' | 'enterprise' | 'plugin'
+export type McpServerSource = 'user' | 'plugin'
 
 export interface McpServerRow {
   id: string
@@ -331,12 +329,6 @@ export interface TranscriptPartRecord {
 }
 
 export interface TaskRecord {
-  server_pending_edits?: Record<string, unknown>
-  server_managed?: boolean
-  server_execution_mode?: 'human' | 'autonomous'
-  server_cron?: string | null
-  server_sync_pending?: boolean
-  server_sync_error?: string
   id: string
   title: string
   description: string
@@ -391,8 +383,6 @@ export interface FileAttachmentRecord {
   size: number
   mime_type: string
   added_at: string
-  /** Storage path in workflo — used to skip re-downloads on sync */
-  workflo_path?: string
 }
 
 export interface CreateTaskData {
@@ -497,6 +487,19 @@ const UPDATABLE_COLUMNS = new Set([
 const JSON_COLUMNS = new Set(['labels', 'attachments', 'repos', 'output_fields', 'skill_ids'])
 
 /** Ensure a parsed JSON value is always an array (guards against double-stringified or scalar values) */
+/** True for URLs served by the hosted service that older releases connected to. */
+function isHostedServiceUrl(url: string | null | undefined): boolean {
+  if (!url) return false
+  try {
+    const parsed = new URL(url)
+    const host = parsed.hostname.toLowerCase()
+    return host === 'peakflo.ai' || host.endsWith('.peakflo.ai') ||
+      parsed.pathname.replace(/\/+$/, '') === '/api/mcp/dev/mcp'
+  } catch {
+    return false
+  }
+}
+
 function ensureArray<T = string>(value: unknown): T[] {
   if (Array.isArray(value)) return value as T[]
   if (value != null && value !== '') return [value] as T[]
@@ -548,7 +551,6 @@ function deserializeTaskSource(row: TaskSourceRow): TaskSourceRecord {
   try {
     return {
       ...row,
-      plugin_id: row.plugin_id || 'peakflo',
       config: JSON.parse(row.config || '{}') as Record<string, unknown>,
       list_tool_args: JSON.parse(row.list_tool_args) as Record<string, unknown>,
       update_tool_args: JSON.parse(row.update_tool_args) as Record<string, unknown>,
@@ -568,9 +570,7 @@ function deserializeTaskSource(row: TaskSourceRow): TaskSourceRecord {
 }
 
 function deserializeMcpServer(row: McpServerRow): McpServerRecord {
-  const source: McpServerSource = row.source === 'enterprise' || row.source === 'plugin'
-    ? row.source
-    : 'user'
+  const source: McpServerSource = row.source === 'plugin' ? 'plugin' : 'user'
   return {
     ...row,
     type: (row.type as 'local' | 'remote') || 'local',
@@ -605,8 +605,6 @@ export interface SkillRow {
   last_used: string | null
   tags: string
   is_deleted: number
-  enterprise_skill_id: string | null
-  uses_at_last_sync: number
   created_at: string
   updated_at: string
 }
@@ -621,8 +619,6 @@ export interface SkillRecord {
   uses: number
   last_used: string | null
   tags: string[]
-  enterprise_skill_id: string | null
-  uses_at_last_sync: number
   created_at: string
   updated_at: string
 }
@@ -635,7 +631,6 @@ export interface CreateSkillData {
   uses?: number
   last_used?: string | null
   tags?: string[]
-  enterprise_skill_id?: string | null
 }
 
 export interface UpdateSkillData {
@@ -646,8 +641,6 @@ export interface UpdateSkillData {
   uses?: number
   last_used?: string | null
   tags?: string[]
-  enterprise_skill_id?: string | null
-  uses_at_last_sync?: number
 }
 
 // ── Secret types ─────────────────────────────────────────────
@@ -860,8 +853,6 @@ function deserializeSkill(row: SkillRow): SkillRecord {
     uses: row.uses,
     last_used: row.last_used,
     tags,
-    enterprise_skill_id: row.enterprise_skill_id ?? null,
-    uses_at_last_sync: row.uses_at_last_sync ?? 0,
     created_at: row.created_at,
     updated_at: row.updated_at
   }
@@ -959,7 +950,7 @@ function deserializeInstalledPlugin(row: InstalledPluginRow): InstalledPluginRec
  *
  * 8 → 9: tasks.complete_at_source
  */
-const SCHEMA_VERSION = 9
+const SCHEMA_VERSION = 10
 
 export class DatabaseManager {
   public db!: Database.Database
@@ -1120,7 +1111,7 @@ export class DatabaseManager {
         update_tool TEXT NOT NULL DEFAULT '',
         update_tool_args TEXT NOT NULL DEFAULT '{}',
         last_synced_at TEXT,
-        plugin_id TEXT NOT NULL DEFAULT 'peakflo',
+        plugin_id TEXT NOT NULL DEFAULT '',
         config TEXT NOT NULL DEFAULT '{}',
         enabled INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
@@ -1138,8 +1129,6 @@ export class DatabaseManager {
         last_used TEXT,
         tags TEXT NOT NULL DEFAULT '[]',
         is_deleted INTEGER NOT NULL DEFAULT 0,
-        enterprise_skill_id TEXT DEFAULT NULL,
-        uses_at_last_sync INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -1423,16 +1412,6 @@ export class DatabaseManager {
     if (!mcpColumnNames.has('source')) {
       // Provenance column. Defaults to 'user'.
       this.db.exec(`ALTER TABLE mcp_servers ADD COLUMN source TEXT NOT NULL DEFAULT 'user'`)
-      // One-time backfill for rows seeded by EnterpriseSyncManager before this
-      // column existed. Those rows have a hardcoded "[Workflo] " name prefix
-      // (see mapMcpServer in enterprise-sync.ts). This is the ONLY place that
-      // prefix is treated as a signal — going forward `source` is the truth.
-      //
-      // Plugin-materialised rows are intentionally NOT backfilled by name
-      // heuristic — "<plugin>:<server>" could collide with a user-chosen
-      // name. They'll be tagged correctly on the next plugin reload (every
-      // app start re-materialises plugin MCPs).
-      this.db.exec(`UPDATE mcp_servers SET source = 'enterprise' WHERE name LIKE '[Workflo] %'`)
     }
 
     // Migrate oauth_tokens: make source_id nullable and add mcp_server_id
@@ -1479,7 +1458,7 @@ export class DatabaseManager {
     const tsColumnNames = new Set(tsColumns.map((c) => c.name))
 
     if (!tsColumnNames.has('plugin_id')) {
-      this.db.exec(`ALTER TABLE task_sources ADD COLUMN plugin_id TEXT NOT NULL DEFAULT 'peakflo'`)
+      this.db.exec(`ALTER TABLE task_sources ADD COLUMN plugin_id TEXT NOT NULL DEFAULT ''`)
     }
     if (!tsColumnNames.has('config')) {
       this.db.exec(`ALTER TABLE task_sources ADD COLUMN config TEXT NOT NULL DEFAULT '{}'`)
@@ -1541,7 +1520,7 @@ export class DatabaseManager {
           update_tool TEXT NOT NULL DEFAULT '',
           update_tool_args TEXT NOT NULL DEFAULT '{}',
           last_synced_at TEXT,
-          plugin_id TEXT NOT NULL DEFAULT 'peakflo',
+          plugin_id TEXT NOT NULL DEFAULT '',
           config TEXT NOT NULL DEFAULT '{}',
           enabled INTEGER NOT NULL DEFAULT 1,
           created_at TEXT NOT NULL,
@@ -1574,20 +1553,17 @@ export class DatabaseManager {
         // Try to parse config as JSON
         JSON.parse(src.config)
       } catch {
-        // Invalid JSON - reset to empty object and set appropriate plugin_id
+        // Invalid JSON - reset to empty object and infer plugin_id from the name
         console.log(`[Database Migration] Fixing corrupted config for task source: ${src.name} (${src.id})`)
 
-        // Determine plugin_id based on name
-        let pluginId = 'peakflo'
-        if (src.name.toLowerCase().includes('linear')) {
-          pluginId = 'linear'
-        } else if (src.name.toLowerCase().includes('hubspot')) {
-          pluginId = 'hubspot'
+        const name = src.name.toLowerCase()
+        const pluginId = name.includes('linear') ? 'linear' : name.includes('hubspot') ? 'hubspot' : null
+        if (pluginId) {
+          this.db.prepare('UPDATE task_sources SET config = ?, plugin_id = ? WHERE id = ?')
+            .run('{}', pluginId, src.id)
+        } else {
+          this.db.prepare('UPDATE task_sources SET config = ? WHERE id = ?').run('{}', src.id)
         }
-
-        // Reset config to empty object and set plugin_id
-        this.db.prepare('UPDATE task_sources SET config = ?, plugin_id = ? WHERE id = ?')
-          .run('{}', pluginId, src.id)
       }
     }
 
@@ -1704,24 +1680,7 @@ export class DatabaseManager {
       `)
     }
 
-    // Migrate skills table: add enterprise_skill_id for 2-way sync
-    const skillColumns = this.db.pragma('table_info(skills)') as { name: string }[]
-    const skillColumnNames = new Set(skillColumns.map((c) => c.name))
-
-    if (!skillColumnNames.has('enterprise_skill_id')) {
-      this.db.exec(`ALTER TABLE skills ADD COLUMN enterprise_skill_id TEXT DEFAULT NULL`)
-    }
-
-    if (!skillColumnNames.has('uses_at_last_sync')) {
-      this.db.exec(`ALTER TABLE skills ADD COLUMN uses_at_last_sync INTEGER NOT NULL DEFAULT 0`)
-    }
-
-    // Enterprise sync looks skills up by name and by server id on every run.
-    // Created after the ALTER TABLE above so the column is guaranteed to exist.
-    this.db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name);
-      CREATE INDEX IF NOT EXISTS idx_skills_enterprise_id ON skills(enterprise_skill_id);
-    `)
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name)`)
 
     // Seed default agent if none exist
     const agentCount = this.db.prepare('SELECT COUNT(*) as count FROM agents').get() as { count: number }
@@ -1735,6 +1694,90 @@ export class DatabaseManager {
 
     // Migration v4: FTS5 full-text search index for similar task search
     this.initializeTasksFts()
+
+    // Migration v10: 20x is local-only. Remove hosted-service data left by
+    // older releases without losing any local work.
+    this.removeHostedServiceData()
+  }
+
+  /**
+   * Older releases could connect to a hosted service that synced tasks,
+   * agents, skills and MCP servers into this database. Keep everything the
+   * user can still use locally, and remove only what cannot work without it:
+   *
+   * - Tasks imported from the hosted task source become ordinary local tasks
+   *   before the source row goes (tasks.source_id cascades on delete).
+   * - MCP servers that point at the hosted API are removed and unlinked from
+   *   agents. Other synced MCP servers are kept as user servers.
+   * - Synced agents and skills are kept; only their remote link ids go.
+   * - Session tokens, tenant data, gateway keys and sync queues are deleted.
+   *
+   * Every step is idempotent, so a partial run is completed on the next start.
+   */
+  private removeHostedServiceData(): void {
+    const hostedSources = this.db.prepare(
+      "SELECT id FROM task_sources WHERE plugin_id = 'peakflo'"
+    ).all() as { id: string }[]
+    for (const { id } of hostedSources) {
+      this.db.prepare(
+        "UPDATE tasks SET source_id = NULL, external_id = NULL, source = 'local' WHERE source_id = ?"
+      ).run(id)
+      this.db.prepare('DELETE FROM task_sources WHERE id = ?').run(id)
+    }
+
+    const hostedMcpIds = new Set<string>()
+    const syncedMcpServers = this.db.prepare(
+      "SELECT id, url FROM mcp_servers WHERE source = 'enterprise'"
+    ).all() as { id: string; url: string | null }[]
+    for (const server of syncedMcpServers) {
+      if (isHostedServiceUrl(server.url)) {
+        hostedMcpIds.add(server.id)
+        this.db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(server.id)
+      } else {
+        this.db.prepare("UPDATE mcp_servers SET source = 'user' WHERE id = ?").run(server.id)
+      }
+    }
+
+    const agents = this.db.prepare('SELECT id, config FROM agents').all() as { id: string; config: string }[]
+    for (const agent of agents) {
+      let config: Record<string, unknown>
+      try {
+        config = JSON.parse(agent.config || '{}') as Record<string, unknown>
+      } catch {
+        continue
+      }
+      let changed = false
+      for (const key of ['enterprise_source', 'enterprise_agent_id']) {
+        if (key in config) {
+          delete config[key]
+          changed = true
+        }
+      }
+      if (Array.isArray(config.mcp_servers) && hostedMcpIds.size > 0) {
+        const kept = (config.mcp_servers as Array<string | AgentMcpServerEntry>).filter((entry) =>
+          !hostedMcpIds.has(typeof entry === 'string' ? entry : entry.serverId)
+        )
+        if (kept.length !== config.mcp_servers.length) {
+          config.mcp_servers = kept
+          changed = true
+        }
+      }
+      if (changed) {
+        this.db.prepare('UPDATE agents SET config = ? WHERE id = ?').run(JSON.stringify(config), agent.id)
+      }
+    }
+
+    this.db.exec('DROP INDEX IF EXISTS idx_skills_enterprise_id')
+    const skillColumns = new Set((this.db.pragma('table_info(skills)') as { name: string }[]).map((c) => c.name))
+    for (const column of ['enterprise_skill_id', 'uses_at_last_sync']) {
+      if (skillColumns.has(column)) this.db.exec(`ALTER TABLE skills DROP COLUMN ${column}`)
+    }
+
+    this.db.exec(`
+      DELETE FROM settings
+      WHERE substr(key, 1, 11) = 'enterprise_'
+         OR substr(key, 1, 8) = 'workflo-'
+    `)
   }
 
   /**
@@ -2099,14 +2142,7 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
       'SELECT * FROM tasks ORDER BY created_at DESC'
     ).all() as TaskRow[]
 
-    return rows.map(row => this.withServerOwnership(deserializeTask(row)))
-  }
-
-  private withServerOwnership(task: TaskRecord): TaskRecord {
-    if (this.getSetting(`workflo-upload:${task.id}`)) return { ...task, server_pending_edits: JSON.parse(this.getSetting(`workflo-update:${task.id}`) || '{}').fields, server_managed: true, server_sync_pending: true, server_sync_error: this.getSetting(`workflo-upload:${task.id}:error`) }
-    if (!isWorkfloLinkedTask(this, task)) return task
-    const snapshot = this.getSetting(`workflo-task:${task.id}`)
-    return { ...task, server_pending_edits: JSON.parse(this.getSetting(`workflo-update:${task.id}`) || '{}').fields, server_managed: true, server_cron: snapshot ? JSON.parse(snapshot).cron : null, server_execution_mode: snapshot ? JSON.parse(snapshot).executionMode : 'human', server_sync_pending: !!this.getSetting(`workflo-update:${task.id}`) || !!this.getSetting(`workflo-completion:${task.id}`), server_sync_error: this.getSetting(`workflo-update:${task.id}:error`) ?? this.getSetting(`workflo-completion:${task.id}:error`) }
+    return rows.map(deserializeTask)
   }
 
   getTask(id: string): TaskRecord | undefined {
@@ -2116,7 +2152,7 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
       'SELECT * FROM tasks WHERE id = ?'
     ).get(id) as TaskRow | undefined
 
-    return row ? this.withServerOwnership(deserializeTask(row)) : undefined
+    return row ? deserializeTask(row) : undefined
   }
 
   getSubtasks(parentId: string): TaskRecord[] {
@@ -2366,8 +2402,8 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
     return this.getTask(id)
   }
 
-  updateTask(id: string, data: UpdateTaskData, origin?: 'workflo-server' | 'session-feedback' | 'task-source'): TaskRecord | undefined {
-    if (origin !== 'workflo-server' && ('external_id' in data || 'source_id' in data || 'source' in data)) {
+  updateTask(id: string, data: UpdateTaskData, origin?: 'session-feedback' | 'task-source'): TaskRecord | undefined {
+    if (origin !== 'task-source' && ('external_id' in data || 'source_id' in data || 'source' in data)) {
       throw new Error('Only the sync service can change a task source link.')
     }
     const currentTask = this.getTask(id)
@@ -2380,18 +2416,7 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
     if (currentTask?.source_id && currentTask.status === TaskStatus.Completed && currentTask.complete_at_source === false && data.complete_at_source !== true) {
       data = { ...data, status: TaskStatus.Completed }
     }
-    if (data.status && origin !== 'workflo-server' && !manualCompletion && !approvedStatusWrite) {
-      const task = this.getTask(id)
-      const snapshot = this.getSetting(`workflo-task:${id}`)
-      const remote = snapshot ? JSON.parse(snapshot) : undefined
-      if (task && data.status !== task.status && isWorkfloLinkedTask(this, task)) {
-        throw new Error('Workflo controls task status. Use a server task action.')
-      }
-      if (task && data.status !== task.status && remote?.status === 'completed') {
-        throw new Error('This task is completed in Workflo.')
-      }
-    }
-    if (data.status === TaskStatus.Completed && origin !== 'workflo-server' && !manualCompletion && !approvedStatusWrite) {
+    if (data.status === TaskStatus.Completed && !manualCompletion && !approvedStatusWrite) {
       const task = this.getTask(id)
       if (task?.source_id && task.status !== TaskStatus.Completed) {
         throw new Error('The task source must confirm completion before this task can close in 20x.')
@@ -2684,7 +2709,7 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
       id,
       data.mcp_server_id,
       data.name,
-      data.plugin_id || 'peakflo',
+      data.plugin_id,
       JSON.stringify(data.config ?? {}),
       data.list_tool ?? '',
       JSON.stringify(data.list_tool_args ?? {}),
@@ -2780,11 +2805,10 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
     const uses = data.uses ?? 0
     const lastUsed = data.last_used ?? null
     const tags = JSON.stringify(data.tags ?? [])
-    const enterpriseSkillId = data.enterprise_skill_id ?? null
     this.db.prepare(`
-      INSERT INTO skills (id, name, description, content, version, confidence, uses, last_used, tags, is_deleted, enterprise_skill_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, 0, ?, ?, ?)
-    `).run(id, data.name, data.description, data.content, confidence, uses, lastUsed, tags, enterpriseSkillId, now, now)
+      INSERT INTO skills (id, name, description, content, version, confidence, uses, last_used, tags, is_deleted, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, 0, ?, ?)
+    `).run(id, data.name, data.description, data.content, confidence, uses, lastUsed, tags, now, now)
     return this.getSkill(id)
   }
 
@@ -2802,21 +2826,17 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
     if (data.uses !== undefined) { setClauses.push('uses = ?'); values.push(data.uses) }
     if (data.last_used !== undefined) { setClauses.push('last_used = ?'); values.push(data.last_used) }
     if (data.tags !== undefined) { setClauses.push('tags = ?'); values.push(JSON.stringify(data.tags)) }
-    if (data.enterprise_skill_id !== undefined) { setClauses.push('enterprise_skill_id = ?'); values.push(data.enterprise_skill_id) }
-    if (data.uses_at_last_sync !== undefined) { setClauses.push('uses_at_last_sync = ?'); values.push(data.uses_at_last_sync) }
 
     if (setClauses.length === 0) return existing
 
-    // Only increment version for content changes, not metadata-only updates (like enterprise_skill_id linking)
+    // Only increment version for content changes, not usage updates (uses / last_used)
     const isContentChange = data.name !== undefined || data.description !== undefined ||
       data.content !== undefined || data.confidence !== undefined || data.tags !== undefined
     if (isContentChange) {
       setClauses.push('version = version + 1')
     }
-    // `updated_at` is the conflict token used by enterprise sync: it must mean
-    // "when the content last changed". Bumping it for a metadata-only write
-    // (enterprise_skill_id / uses_at_last_sync linking) would make every local
-    // copy look newer than the server and defeat conflict resolution.
+    // `updated_at` means "when the content last changed", so usage updates
+    // leave it alone.
     if (isContentChange) {
       setClauses.push('updated_at = ?')
       values.push(new Date().toISOString())
@@ -2835,34 +2855,6 @@ Remember: Be helpful, concise, and proactive. Learn from history, but adapt to c
       'SELECT * FROM skills WHERE name = ? AND is_deleted = 0'
     ).get(name) as SkillRow | undefined
     return row ? deserializeSkill(row) : undefined
-  }
-
-  getSkillByEnterpriseId(enterpriseSkillId: string): SkillRecord | undefined {
-    const row = this.db.prepare(
-      'SELECT * FROM skills WHERE enterprise_skill_id = ? AND is_deleted = 0'
-    ).get(enterpriseSkillId) as SkillRow | undefined
-    return row ? deserializeSkill(row) : undefined
-  }
-
-  /**
-   * Get skills that were deleted locally but had an enterprise link.
-   * Used to propagate deletions to the server during sync.
-   */
-  getDeletedEnterpriseSkills(): SkillRecord[] {
-    const rows = this.db.prepare(
-      'SELECT * FROM skills WHERE is_deleted = 1 AND enterprise_skill_id IS NOT NULL'
-    ).all() as SkillRow[]
-    return rows.map(deserializeSkill)
-  }
-
-  /**
-   * Hard-delete a skill row (permanent removal after server sync).
-   */
-  hardDeleteSkill(id: string): boolean {
-    const result = this.db.prepare(
-      'DELETE FROM skills WHERE id = ?'
-    ).run(id)
-    return result.changes > 0
   }
 
   deleteSkill(id: string): boolean {

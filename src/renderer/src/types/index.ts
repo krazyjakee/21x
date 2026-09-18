@@ -7,8 +7,6 @@ export enum SettingsTab {
   SECRETS = 'secrets',
   VOICE = 'voice',
   INTEGRATIONS = 'integrations',
-  CONNECTORS = 'connectors',
-  ENTERPRISE = 'enterprise',
   PLUGINS = 'plugins',
   ADVANCED = 'advanced'
 }
@@ -20,8 +18,6 @@ export const SETTINGS_TABS: { value: SettingsTab; label: string; icon: string }[
   { value: SettingsTab.SECRETS, label: 'Secrets', icon: 'KeyRound' },
   { value: SettingsTab.VOICE, label: 'Voice', icon: 'Mic' },
   { value: SettingsTab.INTEGRATIONS, label: 'Integrations', icon: 'Workflow' },
-  { value: SettingsTab.CONNECTORS, label: 'Connectors', icon: 'Cable' },
-  { value: SettingsTab.ENTERPRISE, label: 'Enterprise', icon: 'Building2' },
   { value: SettingsTab.PLUGINS, label: 'Plugins', icon: 'Puzzle' },
   { value: SettingsTab.ADVANCED, label: 'Advanced', icon: 'Wrench' }
 ]
@@ -291,13 +287,7 @@ export interface RecurrencePatternObject {
 /** A cron expression string OR a legacy JSON object */
 export type RecurrencePattern = RecurrencePatternObject | string
 
-export interface WorkfloTask {
-  server_pending_edits?: Record<string, unknown>
-  server_managed?: boolean
-  server_execution_mode?: 'human' | 'autonomous'
-  server_cron?: string | null
-  server_sync_pending?: boolean
-  server_sync_error?: string
+export interface Task {
   id: string
   title: string
   description: string

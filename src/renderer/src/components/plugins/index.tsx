@@ -7,7 +7,6 @@
 
 import { LinearConfigForm } from './LinearConfigForm'
 import { HubSpotConfigForm } from './HubSpotConfigForm'
-import { PeakfloConfigForm } from './PeakfloConfigForm'
 import { GitHubIssuesConfigForm } from './GitHubIssuesConfigForm'
 import { NotionConfigForm } from './NotionConfigForm'
 import { YouTrackConfigForm } from './YouTrackConfigForm'
@@ -23,7 +22,6 @@ type PluginFormComponent = React.ComponentType<PluginFormProps>
 export const PLUGIN_FORMS: Record<string, PluginFormComponent> = {
   linear: LinearConfigForm,
   hubspot: HubSpotConfigForm,
-  peakflo: PeakfloConfigForm,
   'github-issues': GitHubIssuesConfigForm,
   notion: NotionConfigForm,
   youtrack: YouTrackConfigForm

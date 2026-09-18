@@ -11,34 +11,9 @@ const POSTHOG_RECORD_SESSIONS = import.meta.env.VITE_POSTHOG_RECORD_SESSIONS !==
 let initialized = false
 let identifiedId: string | null = null
 let appPlatform: AnalyticsPlatform = 'desktop'
-let enterpriseEmail: string | null = null
 
 function isEnabled(): boolean {
   return typeof window !== 'undefined' && Boolean(POSTHOG_KEY)
-}
-
-export function setAnalyticsEnterpriseEmail(email: string | null): void {
-  enterpriseEmail = email && email.trim() ? email.trim() : null
-  if (initialized && isEnabled()) {
-    try {
-      if (enterpriseEmail) {
-        posthog.register({ email: enterpriseEmail, enterprise_email: enterpriseEmail })
-      } else {
-        posthog.unregister('email')
-        posthog.unregister('enterprise_email')
-      }
-    } catch {
-      // ignore
-    }
-  }
-}
-
-export function getAnalyticsEnterpriseEmail(): string | null {
-  return enterpriseEmail
-}
-
-function getEnterpriseEmailProperties(): AnalyticsProperties {
-  return enterpriseEmail ? { email: enterpriseEmail, enterprise_email: enterpriseEmail } : {}
 }
 
 export function initAnalytics(platform: AnalyticsPlatform = 'desktop'): void {
@@ -58,13 +33,6 @@ export function initAnalytics(platform: AnalyticsPlatform = 'desktop'): void {
   })
 
   initialized = true
-  if (enterpriseEmail) {
-    try {
-      posthog.register({ email: enterpriseEmail, enterprise_email: enterpriseEmail })
-    } catch {
-      // ignore
-    }
-  }
 }
 
 export function identifyAnalyticsUser(
@@ -75,7 +43,6 @@ export function identifyAnalyticsUser(
   if (!isEnabled() || !distinctId || identifiedId === distinctId) return
 
   posthog.identify(distinctId, cleanProperties({
-    ...getEnterpriseEmailProperties(),
     ...properties,
     app_platform: appPlatform
   }))
@@ -94,7 +61,6 @@ export function captureAnalyticsEvent(event: string, properties: AnalyticsProper
 
   posthog.capture(event, cleanProperties({
     ...properties,
-    ...getEnterpriseEmailProperties(),
     app_platform: appPlatform
   }))
 }

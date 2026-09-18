@@ -4,12 +4,9 @@
 
 If you discover a security vulnerability in 20x, **please do not open a public issue.**
 
-Instead, report it privately:
+Instead, report it privately through [GitHub's private vulnerability reporting](https://github.com/krazyjakee/21x/security/advisories/new) on krazyjakee/21x.
 
-- **Email:** [support@peakflo.co](mailto:support@peakflo.co)
-- **GitHub:** Use [GitHub's private vulnerability reporting](https://github.com/peakflo/20x/security/advisories/new)
-
-We'll acknowledge your report within 48 hours and provide a timeline for a fix.
+This is a personally maintained fork, so reports are handled on a best-effort basis.
 
 ## Scope
 

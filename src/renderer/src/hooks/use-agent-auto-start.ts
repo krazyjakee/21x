@@ -4,7 +4,7 @@ import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useAgentSession } from './use-agent-session'
 import { onAgentStatus, onTaskUpdated, onTaskCreated, taskApi } from '@/lib/ipc-client'
 import { TaskStatus } from '@/types'
-import type { WorkfloTask, Agent, TaskPriority } from '@/types'
+import type { Task, Agent, TaskPriority } from '@/types'
 import type { AgentStatusEvent } from '@/types/electron.d'
 import type { TaskSession } from '@/stores/agent-store'
 
@@ -18,7 +18,7 @@ const PRIORITY_ORDER: Record<TaskPriority, number> = {
 const MAX_TRIAGE_ATTEMPTS = 2
 
 interface UseAgentAutoStartProps {
-  tasks: WorkfloTask[]
+  tasks: Task[]
   agents: Agent[]
   /** @deprecated sessions are now read via getState() to avoid reactive re-renders in AppLayout */
   sessions?: Map<string, TaskSession>
@@ -74,7 +74,7 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
   }, [])
 
   // Helper: Check if task is a recurring parent template (should never be triaged or auto-started)
-  const isRecurringTemplate = useCallback((task: WorkfloTask): boolean => {
+  const isRecurringTemplate = useCallback((task: Task): boolean => {
     return task.is_recurring && !task.recurrence_parent_id
   }, [])
 
@@ -100,13 +100,13 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
 
         const subtasks = await taskApi.getSubtasks(parentId)
         const sorted = subtasks.sort(
-          (a: WorkfloTask, b: WorkfloTask) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
+          (a: Task, b: Task) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
         )
 
         if (sorted.length === 0) return
 
         // Check if all subtasks are completed → mark parent as ready for review
-        if (sorted.every((s: WorkfloTask) => s.status === TaskStatus.Completed)) {
+        if (sorted.every((s: Task) => s.status === TaskStatus.Completed)) {
           console.log(`[AutoStart] All subtasks completed for parent ${parentId}, marking parent as ready for review`)
           await taskApi.update(parentId, { status: TaskStatus.ReadyForReview })
           return
@@ -114,7 +114,7 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
 
         // If any subtask is currently active (working/review/triaging/learning), wait
         const hasActive = sorted.some(
-          (s: WorkfloTask) =>
+          (s: Task) =>
             s.status === TaskStatus.AgentWorking ||
             s.status === TaskStatus.ReadyForReview ||
             s.status === TaskStatus.Triaging ||
@@ -127,7 +127,7 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
 
         // Find next not_started subtask with an assigned agent
         const nextSubtask = sorted.find(
-          (s: WorkfloTask) => s.status === TaskStatus.NotStarted && !!s.agent_id
+          (s: Task) => s.status === TaskStatus.NotStarted && !!s.agent_id
         )
         if (!nextSubtask || !nextSubtask.agent_id) {
           console.log(`[AutoStart] No eligible next subtask for parent ${parentId}`)
@@ -167,11 +167,11 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
 
   // Helper: Select triage candidates (tasks with no agent_id that need triage)
   const selectTriageCandidates = useCallback(
-    (allTasks: WorkfloTask[], allSessions: Map<string, TaskSession>): string[] => {
+    (allTasks: Task[], allSessions: Map<string, TaskSession>): string[] => {
       return allTasks
         .filter((task) => {
           // Skip recurring parent template tasks — they are templates, not actionable tasks
-          if (task.server_managed || isRecurringTemplate(task)) return false
+          if (isRecurringTemplate(task)) return false
 
           // Skip subtasks — they are managed by sequential subtask orchestration
           if (task.parent_task_id) return false
@@ -237,14 +237,14 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
   // Helper: Select eligible tasks grouped by agent
   const selectEligibleTasks = useCallback(
     (
-      allTasks: WorkfloTask[],
+      allTasks: Task[],
       allSessions: Map<string, TaskSession>
     ): Map<string, string[]> => {
       const tasksByAgent = new Map<string, string[]>()
 
       allTasks.forEach((task) => {
         // Skip recurring parent template tasks — they are templates, not actionable tasks
-        if (task.server_managed || isRecurringTemplate(task)) return
+        if (isRecurringTemplate(task)) return
 
         // Skip parent tasks that have subtasks — subtasks will run sequentially instead
         const hasChildren = allTasks.some((t) => t.parent_task_id === task.id)
@@ -392,7 +392,7 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
 
       // Verify task is still eligible
       if (
-        task.server_managed || isRecurringTemplate(task) ||
+        isRecurringTemplate(task) ||
         task.status !== TaskStatus.NotStarted ||
         task.agent_id !== agentId ||
         isSnoozed(task.snoozed_until) ||
@@ -616,7 +616,7 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
     if (!isEnabled) return
 
     const unsubscribe = onTaskCreated((event) => {
-      const task = event.task as WorkfloTask
+      const task = event.task as Task
       // Skip recurring parent template tasks
       if (task.is_recurring && !task.recurrence_parent_id) return
       // Skip subtasks — they are managed by sequential subtask orchestration
@@ -668,7 +668,7 @@ export function useAgentAutoStart({ tasks, agents, showToast }: UseAgentAutoStar
       if (!staleTask) return
 
       // Merge event updates with stale task to get current state
-      const task = { ...staleTask, ...event.updates } as WorkfloTask
+      const task = { ...staleTask, ...event.updates } as Task
 
       // Skip recurring parent template tasks
       if (task.is_recurring && !task.recurrence_parent_id) return

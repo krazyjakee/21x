@@ -11,8 +11,8 @@ Thanks for your interest in contributing! Here's how to get started.
 ## Dev Setup
 
 ```bash
-git clone https://github.com/peakflo/20x.git
-cd 20x
+git clone https://github.com/krazyjakee/21x.git
+cd 21x
 pnpm install
 pnpm dev
 ```
@@ -51,7 +51,6 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 2. Make your changes
 3. Run `pnpm typecheck && pnpm build && pnpm test:run`
 4. Open a PR with a clear description of what changed and why
-5. Wait for review — at least one approval required
 
 ## Testing
 
@@ -64,4 +63,4 @@ pnpm test:renderer # Renderer tests only
 
 ## Questions?
 
-Open a [GitHub Discussion](https://github.com/peakflo/20x/discussions) or join our [Discord](https://discord.gg/bPgkmycM).
+Open a [GitHub Discussion](https://github.com/krazyjakee/21x/discussions).

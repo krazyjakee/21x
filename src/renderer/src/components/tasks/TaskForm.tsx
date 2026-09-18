@@ -10,7 +10,7 @@ import { OutputFieldsEditor } from './OutputFieldsEditor'
 import { RecurrenceEditor } from './RecurrenceEditor'
 import { TaskStatus, TASK_TYPES, TASK_PRIORITIES, TASK_STATUSES } from '@/types'
 import type {
-  WorkfloTask,
+  Task,
   CreateTaskDTO,
   UpdateTaskDTO,
   FileAttachment,
@@ -25,7 +25,7 @@ export interface TaskFormSubmitData extends CreateTaskDTO {
 }
 
 interface TaskFormProps {
-  task?: WorkfloTask
+  task?: Task
   prefill?: { title: string; description: string } | null
   /** @deprecated Use collapsible section instead — kept for backward compat, ignored */
   compact?: boolean

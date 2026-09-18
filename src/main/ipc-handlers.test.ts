@@ -77,11 +77,7 @@ describe('registerIpcHandlers', () => {
       createTask: vi.fn(() => task),
       getTask: vi.fn(() => task)
     } as unknown as Parameters<typeof registerIpcHandlers>[0]
-    const uploadTask = vi.fn()
-    const syncManager = {
-      canUploadTasks: vi.fn(() => true),
-      uploadTask
-    } as unknown as Parameters<typeof registerIpcHandlers>[4]
+    const syncManager = {} as unknown as Parameters<typeof registerIpcHandlers>[4]
 
     registerIpcHandlers(
       db,
@@ -97,7 +93,6 @@ describe('registerIpcHandlers', () => {
     const sender = { send: vi.fn() }
 
     await expect(createTask!({ sender }, task)).resolves.toBe(task)
-    expect(uploadTask).not.toHaveBeenCalled()
     expect(sender.send).toHaveBeenCalledWith('task:created', { task })
   })
 
@@ -130,12 +125,12 @@ describe('registerIpcHandlers', () => {
     const syncManager = {} as unknown as Parameters<typeof registerIpcHandlers>[4]
     const pluginRegistry = {} as unknown as Parameters<typeof registerIpcHandlers>[5]
     const startTurnSpy = vi.fn(async (_mode: string, _context: unknown) => ({ turnId: 't1' }))
-    const voice = { startTurn: startTurnSpy } as unknown as Parameters<typeof registerIpcHandlers>[16]
+    const voice = { startTurn: startTurnSpy } as unknown as Parameters<typeof registerIpcHandlers>[13]
 
     registerIpcHandlers(
       db, agentManager, githubManager, worktreeManager, syncManager, pluginRegistry,
-      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
-      undefined, undefined, undefined, voice
+      undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, voice
     )
 
     const handleCalls = (ipcMain.handle as ReturnType<typeof vi.fn>).mock.calls as [string, (...args: unknown[]) => unknown][]
@@ -262,7 +257,7 @@ describe('db:updateTask heartbeat cascade on parent completion', () => {
   }) {
     const { existing, updated, subtasks } = options
     const disableHeartbeat = vi.fn()
-    const heartbeatScheduler = { disableHeartbeat } as unknown as Parameters<typeof registerIpcHandlers>[11]
+    const heartbeatScheduler = { disableHeartbeat } as unknown as Parameters<typeof registerIpcHandlers>[10]
     const db = {
       getTask: vi.fn(() => existing),
       getSetting: vi.fn(() => undefined),
@@ -280,7 +275,6 @@ describe('db:updateTask heartbeat cascade on parent completion', () => {
       undefined, // mcpToolCaller
       undefined, // oauthManager
       undefined, // recurrenceScheduler
-      undefined, // enterpriseAuth
       undefined, // claudePluginManager
       heartbeatScheduler
     )

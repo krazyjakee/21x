@@ -10,7 +10,7 @@ describe('session feedback completion', () => {
   beforeEach(() => {
     db = createTestDb().db
     const agent = db.createAgent({name: 'Learning agent', server_url: '', config: {}, is_default: false})!
-    const source = db.createTaskSource({name: 'dmitry ai tasks', plugin_id: 'peakflo', mcp_server_id: null})!
+    const source = db.createTaskSource({name: 'dmitry ai tasks', plugin_id: 'linear', mcp_server_id: null})!
     taskId = db.createTask(makeTask({source_id: source.id, external_id: 'remote-1', source: 'Notion',
       status: 'ready_for_review', output_fields: [{id: 'action', name: 'Action', type: 'text', value: 'approve'}]}))!.id
     db.updateTask(taskId, {agent_id: agent.id})
@@ -22,8 +22,6 @@ describe('session feedback completion', () => {
     updateTaskFromUser(db, taskId, {status: 'agent_learning', feedback_rating: 4, feedback_comment: 'Useful', complete_at_source: completeAtSource})
     expect(db.getTask(taskId)).toMatchObject({status: 'agent_learning', complete_at_source: completeAtSource})
     expect(executeAction).not.toHaveBeenCalled()
-    db.updateTask(taskId, {status: 'ready_for_review'}, 'workflo-server')
-    expect(db.getTask(taskId)?.status).toBe('agent_learning')
     db.updateTask(taskId, {status: 'ready_for_review'})
     expect(db.getTask(taskId)?.status).toBe('agent_learning')
     await finishSessionFeedback(db, {executeAction} as never, taskId)
@@ -36,10 +34,10 @@ describe('session feedback completion', () => {
 
   it('does not authorize completion without a user feedback request', async () => {
     const executeAction = vi.fn()
-    expect(() => db.updateTask(taskId, {status: 'agent_learning', feedback_rating: 4})).toThrow()
-    await finishSessionFeedback(db, {executeAction} as never, taskId)
+    db.updateTask(taskId, {status: 'agent_learning', feedback_rating: 4})
+    await expect(finishSessionFeedback(db, {executeAction} as never, taskId)).resolves.toBeUndefined()
     expect(executeAction).not.toHaveBeenCalled()
-    expect(db.getTask(taskId)?.status).toBe('ready_for_review')
+    expect(db.getTask(taskId)?.status).toBe('agent_learning')
   })
 
   it('leaves the task open if the source action fails after learning', async () => {

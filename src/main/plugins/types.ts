@@ -1,8 +1,6 @@
 import type { DatabaseManager, McpServerRecord, TaskRecord } from '../database'
-import type { EnterpriseStateSync } from '../enterprise-state-sync'
 import type { McpToolCaller } from '../mcp-tool-caller'
 import type { OAuthManager } from '../oauth/oauth-manager'
-import type { WorkfloApiClient } from '../workflo-api-client'
 import type { SourceUser, ReassignResult } from '../../shared/types'
 
 // ── Config Schema (declarative, JSON-serializable) ──────────
@@ -97,10 +95,6 @@ export interface PluginContext {
   mcpServer?: McpServerRecord
   oauthManager?: OAuthManager
   sourceId?: string
-  /** Available when enterprise-connected — allows direct REST API calls */
-  workfloApiClient?: WorkfloApiClient
-  /** Available when enterprise-connected — records sync events */
-  enterpriseStateSync?: EnterpriseStateSync
 }
 
 // ── Plugin Interface ────────────────────────────────────────

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { TaskDetailView } from './TaskDetailView'
 import { CodingAgentType, TaskStatus } from '@/types'
-import type { Agent, WorkfloTask } from '@/types'
+import type { Agent, Task } from '@/types'
 
 // Mock CollapsibleDescription to avoid markdown rendering complexity
 vi.mock('@/components/ui/CollapsibleDescription', () => ({
@@ -23,7 +23,7 @@ if (!api.shell) (api as Record<string, unknown>).shell = { openPath: vi.fn() }
 if (!api.onHeartbeatAlert) api.onHeartbeatAlert = vi.fn(() => vi.fn())
 if (!api.onHeartbeatDisabled) api.onHeartbeatDisabled = vi.fn(() => vi.fn())
 
-function makeTask(overrides: Partial<WorkfloTask> = {}): WorkfloTask {
+function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: 'task-1',
     title: 'Test Task',
@@ -82,9 +82,9 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
 }
 
 function renderDetailView(overrides: {
-  task?: Partial<WorkfloTask>
+  task?: Partial<Task>
   agents?: Agent[]
-  parentTask?: WorkfloTask | null
+  parentTask?: Task | null
   onNavigateToTask?: (taskId: string) => void
   onEditAgent?: (agentId: string) => void
   onTriage?: () => void

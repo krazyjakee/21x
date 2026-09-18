@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 import { vi } from 'vitest'
 import type { AgentOutputEvent, AgentOutputBatchEvent, AgentStatusEvent, AgentApprovalRequest, WorktreeProgressEvent } from '../src/renderer/src/types/electron'
-import type { WorkfloTask } from '../src/renderer/src/types/index'
+import type { Task } from '../src/renderer/src/types/index'
 
 // Suppress React act() warnings in happy-dom
 ;(globalThis as unknown as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true
@@ -14,7 +14,7 @@ export const eventCallbacks = {
   onAgentStatus: null as ((event: AgentStatusEvent) => void) | null,
   onAgentApproval: null as ((event: AgentApprovalRequest) => void) | null,
   onOverdueCheck: null as (() => void) | null,
-  onTaskUpdated: null as ((event: { taskId: string; updates: Partial<WorkfloTask> }) => void) | null,
+  onTaskUpdated: null as ((event: { taskId: string; updates: Partial<Task> }) => void) | null,
   onTaskDeleted: null as ((event: { taskId: string }) => void) | null,
   onWorktreeProgress: null as ((event: WorktreeProgressEvent) => void) | null,
   onVoiceState: null as ((event: unknown) => void) | null,
@@ -81,23 +81,6 @@ const mockElectronAPI = {
     readTextFile: vi.fn().mockResolvedValue(null),
     openExternal: vi.fn().mockResolvedValue(undefined)
   },
-  enterprise: {
-    login: vi.fn().mockResolvedValue({ userId: 'u1', email: 'test@test.com', companies: [] }),
-    signupInBrowser: vi.fn().mockResolvedValue({ userId: 'u1', email: 'test@test.com', companies: [] }),
-    selectTenant: vi.fn().mockResolvedValue({ token: 'jwt', tenant: { id: 't1', name: 'Test' } }),
-    logout: vi.fn().mockResolvedValue(undefined),
-    getSession: vi.fn().mockResolvedValue({ isAuthenticated: false, userEmail: null, userId: null, currentTenant: null }),
-    listCompanies: vi.fn().mockResolvedValue([]),
-    syncResources: vi.fn().mockResolvedValue({}),
-    apiRequest: vi.fn().mockResolvedValue({}),
-    getJwt: vi.fn().mockResolvedValue(null),
-    refreshToken: vi.fn().mockResolvedValue(undefined),
-    getAuthTokens: vi.fn().mockResolvedValue({ accessToken: '', refreshToken: '', tenantId: '' }),
-    getAiGatewayStatus: vi.fn().mockResolvedValue(null),
-    getApiUrl: vi.fn().mockResolvedValue('https://api.peakflo.ai'),
-    enableIframeAuth: vi.fn().mockResolvedValue(undefined),
-    disableIframeAuth: vi.fn().mockResolvedValue(undefined)
-  },
   notifications: {
     show: vi.fn().mockResolvedValue(undefined)
   },
@@ -108,7 +91,6 @@ const mockElectronAPI = {
   },
   github: {
     checkCli: vi.fn().mockResolvedValue({ installed: false, authenticated: false }),
-    startAuth: vi.fn().mockResolvedValue(undefined),
     fetchOrgs: vi.fn().mockResolvedValue([]),
     fetchOrgRepos: vi.fn().mockResolvedValue([])
   },
@@ -181,7 +163,7 @@ const mockElectronAPI = {
   onAgentIncompatibleSession: vi.fn((_cb: (event: { taskId: string; agentId: string; error: string }) => void) => {
     return vi.fn()
   }),
-  onTaskUpdated: vi.fn((cb: (event: { taskId: string; updates: Partial<WorkfloTask> }) => void) => {
+  onTaskUpdated: vi.fn((cb: (event: { taskId: string; updates: Partial<Task> }) => void) => {
     eventCallbacks.onTaskUpdated = cb
     return vi.fn()
   }),
@@ -189,14 +171,11 @@ const mockElectronAPI = {
     eventCallbacks.onWorktreeProgress = cb
     return vi.fn()
   }),
-  onTaskCreated: vi.fn((_cb: (event: { task: WorkfloTask }) => void) => {
+  onTaskCreated: vi.fn((_cb: (event: { task: Task }) => void) => {
     return vi.fn()
   }),
   onTaskDeleted: vi.fn((cb: (event: { taskId: string }) => void) => {
     eventCallbacks.onTaskDeleted = cb
-    return vi.fn()
-  }),
-  onGithubDeviceCode: vi.fn((_cb: (code: string) => void) => {
     return vi.fn()
   }),
   onGitlabDeviceCode: vi.fn((_cb: (code: string) => void) => {

@@ -4,14 +4,14 @@ import { useCallback, useState } from 'react'
 import { useTaskSourceStore } from '@/stores/task-source-store'
 import { useTaskStore } from '@/stores/task-store'
 import { TaskStatus } from '@/types'
-import type { WorkfloTask } from '@/types'
+import type { Task } from '@/types'
 
 export interface UseTaskCompletionOptions {
   onToast?: (message: string, isError?: boolean) => void
 }
 export interface CompleteTaskRequestOptions {
   completeAtSource?: boolean
-  onCompleted?: (task: WorkfloTask) => void
+  onCompleted?: (task: Task) => void
 }
 
 /** Ask before a source write; a manual completion changes only the local task. */

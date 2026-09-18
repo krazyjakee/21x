@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react'
 import { useTaskCompletion } from './use-task-completion'
 import { TaskStatus, PluginActionId } from '@/types'
-import type { WorkfloTask } from '@/types'
+import type { Task } from '@/types'
 
 const { updateTaskMock, executeActionMock, storeState } = vi.hoisted(() => ({
   updateTaskMock: vi.fn(async () => undefined),
@@ -30,7 +30,7 @@ vi.mock('@/stores/task-source-store', () => {
   return { useTaskSourceStore }
 })
 
-function makeTask(overrides: Partial<WorkfloTask> = {}): WorkfloTask {
+function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: 'task-1',
     title: 'Fix the login bug',
@@ -67,7 +67,7 @@ function makeTask(overrides: Partial<WorkfloTask> = {}): WorkfloTask {
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     ...overrides
-  } as WorkfloTask
+  } as Task
 }
 
 const onToast = vi.fn()
@@ -106,13 +106,11 @@ describe('server completion', () => {
     expect(updateTaskMock).toHaveBeenCalledWith('task-1', { complete_at_source: true })
     expect(screen.queryByRole('dialog')).toBeNull()
   })
-  it('completes a source-less 20x task locally without uploading it',async()=>{
-    const upload = vi.fn()
-    window.electronAPI.taskSources.upload = upload
+  it('completes a source-less 20x task locally',async()=>{
     storeState.tasks=[makeTask()];render(<Harness />);fireEvent.click(screen.getByText('Complete'))
     await waitFor(()=>expect(onCompleted).toHaveBeenCalled())
     expect(updateTaskMock).toHaveBeenCalledWith('task-1',{status:TaskStatus.Completed})
-    expect(upload).not.toHaveBeenCalled();expect(executeActionMock).not.toHaveBeenCalled()
+    expect(executeActionMock).not.toHaveBeenCalled()
   })
   it('stops pending learning before completing a source-less task', async () => {
     storeState.tasks = [makeTask({status: TaskStatus.AgentLearning})]

@@ -1,6 +1,6 @@
 # Canvas Drawing (Figures, Text, Images) — Architecture
 
-**Status:** Approved design — ready for implementation
+**Status:** Implemented in `src/renderer/src/components/canvas/drawing/`. This is the original design doc; the code is the reference where they differ.
 **Scope:** Add figures (shapes), typeable text fields, and pasted images to the existing InfiniteCanvas. No freehand drawing.
 **Platform:** Desktop only — `src/mobile` has no canvas (verified: zero canvas references). No mobile parity needed.
 

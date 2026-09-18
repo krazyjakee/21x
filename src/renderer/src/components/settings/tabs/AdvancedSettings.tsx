@@ -1,31 +1,21 @@
 import { useState, useEffect } from 'react'
-import { CheckCircle, Loader2 } from 'lucide-react'
+import { CheckCircle } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { SettingsSection } from '../SettingsSection'
 import { useSettingsStore } from '@/stores/settings-store'
 import { settingsApi } from '@/lib/ipc-client'
-import { subscribe } from '@/lib/shared-ipc-listeners'
+import { GhCliGuidance } from '@/components/github/GhCliGuidance'
 
 export function AdvancedSettings() {
-  const { githubOrg, ghCliStatus, setGithubOrg, checkGhCli, startGhAuth } = useSettingsStore()
+  const { githubOrg, ghCliStatus, setGithubOrg, checkGhCli } = useSettingsStore()
   const [orgInput, setOrgInput] = useState(githubOrg || '')
-  const [isAuthenticating, setIsAuthenticating] = useState(false)
-  const [deviceCode, setDeviceCode] = useState('')
 
   // API Keys
   const [anthropicKey, setAnthropicKey] = useState('')
   const [openaiKey, setOpenaiKey] = useState('')
   const [googleKey, setGoogleKey] = useState('')
-
-  useEffect(() => {
-    return subscribe<string>(
-      'github:deviceCode',
-      (cb) => window.electronAPI.onGithubDeviceCode(cb),
-      (code) => setDeviceCode(code)
-    )
-  }, [])
 
   useEffect(() => {
     checkGhCli()
@@ -54,54 +44,22 @@ export function AdvancedSettings() {
     <div className="space-y-6">
       <SettingsSection
         title="GitHub Integration"
-        description="Configure GitHub CLI for repository operations and worktree management"
+        description="Uses your existing GitHub CLI (gh) sign-in for repository operations and worktree management"
       >
         <div className="space-y-3">
           <div className="flex items-center gap-2 text-xs">
             {ghCliStatus?.authenticated ? (
               <span className="flex items-center gap-1.5 text-foreground">
                 <CheckCircle className="h-3.5 w-3.5 text-primary" />
-                Authenticated{ghCliStatus.username ? ` as ${ghCliStatus.username}` : ''}
+                Using gh CLI{ghCliStatus.username ? ` as ${ghCliStatus.username}` : ''}
               </span>
-            ) : ghCliStatus?.installed ? (
-              <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">gh CLI installed but not authenticated</span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={async () => {
-                    setIsAuthenticating(true)
-                    setDeviceCode('')
-                    try {
-                      await startGhAuth()
-                    } catch (error) {
-                      console.error('GitHub auth failed:', error)
-                    } finally {
-                      setIsAuthenticating(false)
-                      setDeviceCode('')
-                    }
-                  }}
-                  disabled={isAuthenticating}
-                >
-                  {isAuthenticating && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
-                  Authenticate
-                </Button>
-
-                {deviceCode && (
-                  <div className="mt-2 space-y-1">
-                    <p className="text-xs text-muted-foreground">Enter this code in your browser:</p>
-                    <code className="block text-lg font-mono font-bold bg-muted px-3 py-2 rounded text-center">
-                      {deviceCode}
-                    </code>
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                      Waiting for authorization...
-                    </div>
-                  </div>
-                )}
-              </div>
             ) : (
-              <span className="text-muted-foreground">gh CLI not installed</span>
+              <div className="flex-1 space-y-2">
+                <GhCliGuidance status={ghCliStatus} />
+                <Button size="sm" variant="outline" onClick={() => checkGhCli()}>
+                  Re-check
+                </Button>
+              </div>
             )}
           </div>
 

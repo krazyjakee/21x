@@ -13,12 +13,6 @@ import { fileURLToPath } from 'url'
 import { join } from 'path'
 import { homedir } from 'os'
 
-import type { DatabaseManager } from '../database'
-import {
-  buildEnterpriseAiGatewayProviderConfig,
-  readEnterpriseAiGatewayConfig
-} from '../enterprise-ai-gateway'
-
 /** Paths used by the OpenCode CLI to store config & auth. */
 const OPENCODE_CONFIG_PATH = join(homedir(), '.config', 'opencode', 'opencode.json')
 const OPENCODE_AUTH_PATH = join(homedir(), '.local', 'share', 'opencode', 'auth.json')
@@ -103,8 +97,7 @@ function removeMissing20xRuntimePlugins(config: Record<string, unknown>): void {
  * in auth.json — are included by the server in its `/config/providers` response.
  */
 export function buildMergedOpencodeConfig(
-  extraConfig?: Record<string, unknown>,
-  db?: Pick<DatabaseManager, 'getSetting'>
+  extraConfig?: Record<string, unknown>
 ): Record<string, unknown> {
   const config = readOpencodeConfig()
   const auth = readOpencodeAuth()
@@ -127,18 +120,6 @@ export function buildMergedOpencodeConfig(
         providerCfg.options = { ...options, apiKey: authEntry.key }
         console.log(`[opencode-config] Injected API key for provider "${providerId}" from auth.json`)
       }
-    }
-  }
-
-  const enterpriseAiGatewayConfig = db
-    ? readEnterpriseAiGatewayConfig(db)
-    : null
-  if (enterpriseAiGatewayConfig) {
-    const existingProviders =
-      (config.provider as Record<string, unknown> | undefined) ?? {}
-    config.provider = {
-      ...existingProviders,
-      ...buildEnterpriseAiGatewayProviderConfig(enterpriseAiGatewayConfig)
     }
   }
 

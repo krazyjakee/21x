@@ -170,13 +170,13 @@ export function UpdateDialog({ open, onClose }: UpdateDialogProps) {
             {/* Link to full release page */}
             {hasUpdate && state.version && (
               <a
-                href={`https://github.com/peakflo/20x/releases/tag/v${state.version}`}
+                href={`https://github.com/krazyjakee/21x/releases/tag/v${state.version}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
                 onClick={(e) => {
                   e.preventDefault()
-                  window.electronAPI?.shell?.openExternal(`https://github.com/peakflo/20x/releases/tag/v${state.version}`)
+                  window.electronAPI?.shell?.openExternal(`https://github.com/krazyjakee/21x/releases/tag/v${state.version}`)
                 }}
               >
                 <ExternalLink className="h-3 w-3" />

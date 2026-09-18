@@ -11,7 +11,7 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 import { createTestDb } from '../../test/helpers/db-test-helper'
 import { makeTask } from '../../test/helpers/task-fixtures'
 import type { DatabaseManager } from './database'
-import { startTaskApiServer, stopTaskApiServer, setTaskApiNotifier } from './task-api-server'
+import { getTaskApiToken, startTaskApiServer, stopTaskApiServer, setTaskApiNotifier } from './task-api-server'
 import { buildTaskMcpUrl, parseScopeFromUrl } from './task-mcp-endpoint'
 
 let db: DatabaseManager
@@ -36,8 +36,8 @@ const textOf = (result: unknown): string =>
 
 describe('buildTaskMcpUrl and parseScopeFromUrl', () => {
   it('round-trips a full-access session', () => {
-    const url = buildTaskMcpUrl(1234)
-    expect(url).toBe('http://127.0.0.1:1234/mcp')
+    const url = buildTaskMcpUrl(1234, 'tok')
+    expect(url).toBe('http://127.0.0.1:1234/mcp?token=tok')
     expect(parseScopeFromUrl(new URL(url))).toEqual({
       parentTaskId: null,
       taskId: null,
@@ -46,7 +46,7 @@ describe('buildTaskMcpUrl and parseScopeFromUrl', () => {
   })
 
   it('round-trips a scoped subtask session', () => {
-    const url = buildTaskMcpUrl(1234, { taskId: 'task-child', parentTaskId: 'task-parent' })
+    const url = buildTaskMcpUrl(1234, 'tok', { taskId: 'task-child', parentTaskId: 'task-parent' })
     expect(parseScopeFromUrl(new URL(url))).toEqual({
       parentTaskId: 'task-parent',
       taskId: 'task-child',
@@ -56,21 +56,21 @@ describe('buildTaskMcpUrl and parseScopeFromUrl', () => {
   })
 
   it('carries a separate artifact scope only when it differs from the task', () => {
-    expect(buildTaskMcpUrl(1, { taskId: 't', artifactTaskId: 't' })).not.toContain('artifact=')
-    const url = buildTaskMcpUrl(1, { taskId: 't', parentTaskId: 'p', artifactTaskId: 'other' })
+    expect(buildTaskMcpUrl(1, 'tok', { taskId: 't', artifactTaskId: 't' })).not.toContain('artifact=')
+    const url = buildTaskMcpUrl(1, 'tok', { taskId: 't', parentTaskId: 'p', artifactTaskId: 'other' })
     expect(parseScopeFromUrl(new URL(url)).artifactTaskId).toBe('other')
   })
 
   it('builds the same URL every time, so a resume does not change the config', () => {
     const scope = { taskId: 'a', parentTaskId: 'b', artifactTaskId: 'c' }
-    expect(buildTaskMcpUrl(9, scope)).toBe(buildTaskMcpUrl(9, scope))
+    expect(buildTaskMcpUrl(9, 'tok', scope)).toBe(buildTaskMcpUrl(9, 'tok', scope))
   })
 })
 
 describe('MCP endpoint over HTTP', () => {
   it('serves the full tool set to an unscoped session', async () => {
     const port = await startTaskApiServer(db)
-    const client = await connect(buildTaskMcpUrl(port))
+    const client = await connect(buildTaskMcpUrl(port, getTaskApiToken()))
 
     const { tools } = await client.listTools()
     const names = tools.map((t) => t.name)
@@ -89,7 +89,7 @@ describe('MCP endpoint over HTTP', () => {
     const parent = db.createTask(makeTask({ title: 'Parent' }))!
     const child = db.createTask(makeTask({ title: 'Child', parent_task_id: parent.id }))!
     const port = await startTaskApiServer(db)
-    const client = await connect(buildTaskMcpUrl(port, { taskId: child.id, parentTaskId: parent.id }))
+    const client = await connect(buildTaskMcpUrl(port, getTaskApiToken(), { taskId: child.id, parentTaskId: parent.id }))
 
     const names = (await client.listTools()).tools.map((t) => t.name)
 
@@ -106,7 +106,7 @@ describe('MCP endpoint over HTTP', () => {
   it('reads real data from the database through tools/call', async () => {
     const task = db.createTask(makeTask({ title: 'Findable task' }))!
     const port = await startTaskApiServer(db)
-    const client = await connect(buildTaskMcpUrl(port))
+    const client = await connect(buildTaskMcpUrl(port, getTaskApiToken()))
 
     const result = await client.callTool({ name: 'get_task', arguments: { task_id: task.id } })
 
@@ -119,7 +119,7 @@ describe('MCP endpoint over HTTP', () => {
     const own = db.createTask(makeTask({ title: 'Own', parent_task_id: parent.id }))!
     const sibling = db.createTask(makeTask({ title: 'Sibling', parent_task_id: parent.id }))!
     const port = await startTaskApiServer(db)
-    const client = await connect(buildTaskMcpUrl(port, { taskId: own.id, parentTaskId: parent.id }))
+    const client = await connect(buildTaskMcpUrl(port, getTaskApiToken(), { taskId: own.id, parentTaskId: parent.id }))
 
     // The agent names its sibling. The scope rewrites the target to its own task.
     await client.callTool({
@@ -140,7 +140,7 @@ describe('MCP endpoint over HTTP', () => {
     const own = db.createTask(makeTask({ title: 'Own', parent_task_id: parent.id }))!
     const stranger = db.createTask(makeTask({ title: 'Stranger' }))!
     const port = await startTaskApiServer(db)
-    const client = await connect(buildTaskMcpUrl(port, { taskId: own.id, parentTaskId: parent.id }))
+    const client = await connect(buildTaskMcpUrl(port, getTaskApiToken(), { taskId: own.id, parentTaskId: parent.id }))
 
     const result = await client.callTool({
       name: 'update_task',
@@ -158,7 +158,7 @@ describe('MCP endpoint over HTTP', () => {
     const own = db.createTask(makeTask({ title: 'Own', parent_task_id: parent.id }))!
     const stranger = db.createTask(makeTask({ title: 'Stranger' }))!
     const port = await startTaskApiServer(db)
-    const client = await connect(buildTaskMcpUrl(port, { taskId: own.id, parentTaskId: parent.id }))
+    const client = await connect(buildTaskMcpUrl(port, getTaskApiToken(), { taskId: own.id, parentTaskId: parent.id }))
 
     const result = await client.callTool({
       name: 'get_sibling_task',
@@ -172,7 +172,7 @@ describe('MCP endpoint over HTTP', () => {
 
   it('reports a failing tool call as an error instead of throwing', async () => {
     const port = await startTaskApiServer(db)
-    const client = await connect(buildTaskMcpUrl(port))
+    const client = await connect(buildTaskMcpUrl(port, getTaskApiToken()))
 
     const result = await client.callTool({ name: 'get_task', arguments: { task_id: 'no-such-task' } })
 
@@ -186,8 +186,8 @@ describe('MCP endpoint over HTTP', () => {
     const port = await startTaskApiServer(db)
 
     const [full, scoped] = await Promise.all([
-      connect(buildTaskMcpUrl(port)),
-      connect(buildTaskMcpUrl(port, { taskId: child.id, parentTaskId: parent.id }))
+      connect(buildTaskMcpUrl(port, getTaskApiToken())),
+      connect(buildTaskMcpUrl(port, getTaskApiToken(), { taskId: child.id, parentTaskId: parent.id }))
     ])
     const [fullNames, scopedNames] = await Promise.all([
       full.listTools().then((r) => r.tools.map((t) => t.name)),
@@ -208,7 +208,7 @@ describe('MCP endpoint over HTTP', () => {
 
     const before = count()
     const port = await startTaskApiServer(db)
-    const client = await connect(buildTaskMcpUrl(port))
+    const client = await connect(buildTaskMcpUrl(port, getTaskApiToken()))
     await client.listTools()
     await client.callTool({ name: 'list_tasks', arguments: {} })
 

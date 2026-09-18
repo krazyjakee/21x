@@ -11,6 +11,7 @@ import {
   snapGuidesEqual,
 } from './canvas-store'
 import type { CanvasPanelData } from './canvas-store'
+import { settingsApi } from '@/lib/ipc-client'
 
 // Mock settingsApi to prevent actual IPC calls during tests
 vi.mock('@/lib/ipc-client', () => ({
@@ -34,6 +35,29 @@ describe('canvas-store', () => {
       connectingFromId: null,
       proximityEdge: null,
       liveDrag: null,
+    })
+  })
+
+  // ── Persistence ───────────────────────────────────────────
+
+  describe('loadCanvas', () => {
+    it('drops application panels saved by older releases, with their edges', async () => {
+      const panel = (id: string, type: string) => ({ id, type, title: id, x: 0, y: 0, width: 400, height: 300, zIndex: 1 })
+      vi.mocked(settingsApi.get).mockResolvedValueOnce(JSON.stringify({
+        viewport: { x: 0, y: 0, zoom: 1 },
+        panels: [panel('panel-1', 'task'), panel('panel-2', 'app'), panel('panel-3', 'webpage')],
+        edges: [
+          { id: 'edge-1', fromPanelId: 'panel-1', toPanelId: 'panel-2' },
+          { id: 'edge-2', fromPanelId: 'panel-1', toPanelId: 'panel-3' },
+        ],
+        nextZIndex: 4,
+      }))
+
+      await useCanvasStore.getState().loadCanvas()
+
+      const { panels, edges } = useCanvasStore.getState()
+      expect(panels.map((p) => p.id)).toEqual(['panel-1', 'panel-3'])
+      expect(edges.map((e) => e.id)).toEqual(['edge-2'])
     })
   })
 
@@ -170,7 +194,7 @@ describe('canvas-store', () => {
     })
 
     it('should remove a panel', () => {
-      const id = useCanvasStore.getState().addPanel({ type: 'app', title: 'App', x: 0, y: 0, width: 400, height: 300 })
+      const id = useCanvasStore.getState().addPanel({ type: 'webpage', title: 'Page', x: 0, y: 0, width: 400, height: 300 })
       expect(useCanvasStore.getState().panels).toHaveLength(1)
       useCanvasStore.getState().removePanel(id)
       expect(useCanvasStore.getState().panels).toHaveLength(0)

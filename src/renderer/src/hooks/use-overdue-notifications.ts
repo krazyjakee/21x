@@ -2,9 +2,9 @@ import { useEffect, useRef } from 'react'
 import { isOverdue, isDueSoon, isSnoozed } from '@/lib/utils'
 import { notificationApi, onOverdueCheck } from '@/lib/ipc-client'
 import { TaskStatus } from '@/types'
-import type { WorkfloTask } from '@/types'
+import type { Task } from '@/types'
 
-export function useOverdueNotifications(tasks: WorkfloTask[]): void {
+export function useOverdueNotifications(tasks: Task[]): void {
   const notifiedRef = useRef<Set<string>>(new Set())
   const snoozeNotifiedRef = useRef<Set<string>>(new Set())
   const tasksRef = useRef(tasks)

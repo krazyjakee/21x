@@ -1,7 +1,5 @@
-import { execFile, spawn, type ChildProcess } from 'child_process'
+import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { shell } from 'electron'
-import { guardChildStreams, writeToChildStdin } from './child-stream-guards'
 import {
   PullRequestCheckState,
   PullRequestReviewDecision,
@@ -117,9 +115,11 @@ function mapPullRequestCheck(check: RawPullRequestCheck): PullRequestCheck {
   }
 }
 
+/**
+ * All GitHub operations go through the user's authenticated gh CLI. 20x never
+ * logs in, reads, stores, or forwards GitHub credentials itself.
+ */
 export class GitHubManager {
-  private authProcess: ChildProcess | null = null
-
   private mapRepo(raw: Record<string, unknown>): GitHubRepo {
     return {
       name: raw.name as string,
@@ -171,73 +171,6 @@ export class GitHubManager {
       }
       return { installed: true, authenticated: false }
     }
-  }
-
-  async startWebAuth(onDeviceCode?: (code: string) => void): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.authProcess = spawn(
-        'gh',
-        ['auth', 'login', '--web', '--git-protocol', 'https', '--hostname', 'github.com'],
-        { stdio: ['pipe', 'pipe', 'pipe'] }
-      )
-
-      // Every pipe needs an error listener before the first write; a CLI that
-      // exits early must not crash the main process with EPIPE.
-      guardChildStreams(this.authProcess, 'GitHubManager')
-
-      let completed = false
-      let browserOpened = false
-      let codeEmitted = false
-      let output = ''
-      const timeout = setTimeout(() => {
-        if (!completed) {
-          this.authProcess?.kill()
-          reject(new Error('Auth timeout'))
-        }
-      }, 120000)
-
-      const handleOutput = (data: Buffer): void => {
-        output += data.toString()
-
-        if (!codeEmitted && onDeviceCode) {
-          const codeMatch = output.match(/code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})/)
-          if (codeMatch) {
-            codeEmitted = true
-            onDeviceCode(codeMatch[1])
-          }
-        }
-
-        if (!browserOpened) {
-          const urlMatch = output.match(/(https:\/\/github\.com\/login\/device\S*)/)
-          if (urlMatch) {
-            browserOpened = true
-            shell.openExternal(urlMatch[1])
-          }
-        }
-      }
-
-      this.authProcess.stderr?.on('data', handleOutput)
-      this.authProcess.stdout?.on('data', handleOutput)
-
-      this.authProcess.on('close', (code) => {
-        completed = true
-        clearTimeout(timeout)
-        this.authProcess = null
-        if (code === 0) resolve()
-        else reject(new Error(`gh auth login exited with code ${code}`))
-      })
-
-      this.authProcess.on('error', (err) => {
-        completed = true
-        clearTimeout(timeout)
-        this.authProcess = null
-        reject(err)
-      })
-
-      // Write newline for any potential "Press Enter" prompts. `gh` may have
-      // already exited, so the write must never throw.
-      writeToChildStdin(this.authProcess, '\n', 'GitHubManager')
-    })
   }
 
   async fetchUserOrgs(): Promise<string[]> {

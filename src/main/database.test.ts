@@ -89,7 +89,7 @@ describe('Task CRUD', () => {
     const source = db.createTaskSource({
       mcp_server_id: server.id,
       name: 'Test Source',
-      plugin_id: 'peakflo'
+      plugin_id: 'linear'
     })!
 
     db.createTask(makeTask({
@@ -287,19 +287,6 @@ describe('MCP Server CRUD', () => {
     expect(server.source).toBe('user')
   })
 
-  it("persists `source: 'enterprise'` when set explicitly (used by EnterpriseSyncManager)", () => {
-    const server = db.createMcpServer({
-      name: '[Workflo] Organisation Workspace',
-      type: 'remote',
-      url: 'https://api.peakflo.ai/api/mcp/dev/mcp',
-      source: 'enterprise'
-    })!
-    expect(server.source).toBe('enterprise')
-
-    const refetched = db.getMcpServer(server.id)!
-    expect(refetched.source).toBe('enterprise')
-  })
-
   it("persists `source: 'plugin'` when set explicitly (used by ClaudePluginManager)", () => {
     const server = db.createMcpServer({
       name: 'my-plugin:some-server',
@@ -321,13 +308,13 @@ describe('TaskSource CRUD', () => {
     const source = db.createTaskSource({
       mcp_server_id: mcpServerId,
       name: 'Source 1',
-      plugin_id: 'peakflo',
+      plugin_id: 'linear',
       list_tool: 'task_list',
       list_tool_args: { status: 'pending' }
     })
     expect(source).toBeDefined()
     expect(source!.name).toBe('Source 1')
-    expect(source!.plugin_id).toBe('peakflo')
+    expect(source!.plugin_id).toBe('linear')
     expect(source!.list_tool_args).toEqual({ status: 'pending' })
     expect(source!.enabled).toBe(true)
   })
@@ -336,7 +323,7 @@ describe('TaskSource CRUD', () => {
     const source = db.createTaskSource({
       mcp_server_id: mcpServerId,
       name: 'Source',
-      plugin_id: 'peakflo'
+      plugin_id: 'linear'
     })!
     const updated = db.updateTaskSource(source.id, { name: 'Updated', enabled: false })
     expect(updated!.name).toBe('Updated')
@@ -347,7 +334,7 @@ describe('TaskSource CRUD', () => {
     const source = db.createTaskSource({
       mcp_server_id: mcpServerId,
       name: 'Source',
-      plugin_id: 'peakflo'
+      plugin_id: 'linear'
     })!
     expect(source.last_synced_at).toBeNull()
 
@@ -360,7 +347,7 @@ describe('TaskSource CRUD', () => {
     const source = db.createTaskSource({
       mcp_server_id: mcpServerId,
       name: 'Source',
-      plugin_id: 'peakflo'
+      plugin_id: 'linear'
     })!
     expect(db.deleteTaskSource(source.id)).toBe(true)
     expect(db.getTaskSource(source.id)).toBeUndefined()
@@ -371,7 +358,7 @@ describe('TaskSource CRUD', () => {
     const source = db.createTaskSource({
       mcp_server_id: mcpServerId,
       name: 'Test Source',
-      plugin_id: 'peakflo'
+      plugin_id: 'linear'
     })!
 
     // Create tasks linked to this source
@@ -787,5 +774,84 @@ describe('transcript_parts.rev migration on a legacy DB (no rev column)', () => 
     ).not.toThrow()
     const after = (rawDb.prepare('SELECT COALESCE(MAX(rev),0) AS m FROM transcript_parts').get() as { m: number }).m
     expect(after).toBe(before)
+  })
+})
+
+describe('hosted service data removal on upgrade', () => {
+  function seedLegacyData(rawDb: RawDatabase.Database) {
+    const now = new Date().toISOString()
+    rawDb.exec(`
+      ALTER TABLE skills ADD COLUMN enterprise_skill_id TEXT DEFAULT NULL;
+      ALTER TABLE skills ADD COLUMN uses_at_last_sync INTEGER NOT NULL DEFAULT 0;
+      CREATE INDEX idx_skills_enterprise_id ON skills(enterprise_skill_id);
+    `)
+    rawDb.prepare(`INSERT INTO mcp_servers (id, name, type, url, source, created_at, updated_at) VALUES (?, ?, 'remote', ?, ?, ?, ?)`)
+      .run('mcp-hosted', '[Workflo] Organisation Workspace', 'https://api.peakflo.ai/api/mcp/dev/mcp', 'enterprise', now, now)
+    rawDb.prepare(`INSERT INTO mcp_servers (id, name, type, url, source, created_at, updated_at) VALUES (?, ?, 'remote', ?, ?, ?, ?)`)
+      .run('mcp-third-party', '[Workflo] Docs', 'https://mcp.example.com/mcp', 'enterprise', now, now)
+    rawDb.prepare(`INSERT INTO agents (id, name, config, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`)
+      .run('agent-1', '[Workflo] Helper', JSON.stringify({
+        enterprise_source: true,
+        enterprise_agent_id: 'remote-agent',
+        model: 'm',
+        mcp_servers: ['mcp-hosted', { serverId: 'mcp-third-party' }]
+      }), now, now)
+    rawDb.prepare(`INSERT INTO task_sources (id, name, plugin_id, created_at, updated_at) VALUES (?, ?, 'peakflo', ?, ?)`)
+      .run('src-hosted', '[Workflo] My tasks', now, now)
+    rawDb.prepare(`INSERT INTO task_sources (id, name, plugin_id, created_at, updated_at) VALUES (?, ?, 'linear', ?, ?)`)
+      .run('src-linear', 'Linear', now, now)
+    rawDb.prepare(`INSERT INTO skills (id, name, description, content, enterprise_skill_id, created_at, updated_at) VALUES (?, ?, '', 'body', ?, ?, ?)`)
+      .run('skill-1', 'Synced skill', 'remote-skill', now, now)
+    for (const [key, value] of [
+      ['enterprise_jwt', 'secret'],
+      ['enterprise_tenant_id', 'tenant'],
+      ['workflo-task:t1', '{}'],
+      ['theme', 'dark']
+    ]) {
+      rawDb.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(key, value)
+    }
+  }
+
+  function run(manager: DatabaseManager) {
+    ;(manager as unknown as { removeHostedServiceData(): void }).removeHostedServiceData()
+  }
+
+  it('keeps local data and removes only what needs the hosted service', () => {
+    const { db: manager, rawDb } = createTestDb()
+    seedLegacyData(rawDb)
+    const hostedTask = manager.createTask(makeTask({ title: 'Synced task', source_id: 'src-hosted', external_id: 'remote-1', source: '[Workflo] My tasks' }))!
+    const linearTask = manager.createTask(makeTask({ title: 'Linear task', source_id: 'src-linear', external_id: 'LIN-1', source: 'Linear' }))!
+
+    run(manager)
+
+    const detached = manager.getTask(hostedTask.id)!
+    expect(detached.title).toBe('Synced task')
+    expect(detached.source_id).toBeNull()
+    expect(detached.external_id).toBeNull()
+    expect(manager.getTask(linearTask.id)!.source_id).toBe('src-linear')
+    expect(manager.getTaskSources().map((s) => s.id)).toEqual(['src-linear'])
+
+    expect(manager.getMcpServer('mcp-hosted')).toBeUndefined()
+    expect(manager.getMcpServer('mcp-third-party')!.source).toBe('user')
+
+    const agentConfig = manager.getAgent('agent-1')!.config as Record<string, unknown>
+    expect(agentConfig).not.toHaveProperty('enterprise_source')
+    expect(agentConfig).not.toHaveProperty('enterprise_agent_id')
+    expect(agentConfig.model).toBe('m')
+    expect(agentConfig.mcp_servers).toEqual([{ serverId: 'mcp-third-party' }])
+
+    expect(manager.getSkill('skill-1')!.content).toBe('body')
+    const skillColumns = (rawDb.pragma('table_info(skills)') as { name: string }[]).map((c) => c.name)
+    expect(skillColumns).not.toContain('enterprise_skill_id')
+    expect(skillColumns).not.toContain('uses_at_last_sync')
+
+    expect(manager.getAllSettings()).toEqual({ theme: 'dark' })
+  })
+
+  it('is safe to run again', () => {
+    const { db: manager, rawDb } = createTestDb()
+    seedLegacyData(rawDb)
+    run(manager)
+    expect(() => run(manager)).not.toThrow()
   })
 })

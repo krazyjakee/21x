@@ -11,10 +11,10 @@ import { useSkillStore } from '@/stores/skill-store'
 import { useAgentSchedulerStore } from '@/stores/agent-scheduler-store'
 import { isSnoozed } from '@/lib/utils'
 import { TaskStatus, TASK_STATUSES, TASK_PRIORITIES } from '@/types'
-import type { WorkfloTask, TaskPriority } from '@/types'
+import type { Task, TaskPriority } from '@/types'
 
 interface SidebarProps {
-  tasks: WorkfloTask[]
+  tasks: Task[]
   selectedTaskId: string | null
   overdueCount: number
   onSelectTask: (id: string) => void

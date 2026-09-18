@@ -6,7 +6,7 @@ import {
   callToolForScope,
   type TaskApiInvoke
 } from './mcp-servers/task-management-core'
-import { getTaskApiPort } from './task-api-server'
+import { getTaskApiEnv } from './task-api-server'
 
 export interface McpToolCallResult {
   success: boolean
@@ -142,10 +142,7 @@ export class McpToolCaller {
         ...process.env,
         npm_config_yes: 'true',
         ...server.environment,
-        // Inject TASK_API_URL for task-management MCP server
-        ...(server.name === 'task-management' && getTaskApiPort()
-          ? { TASK_API_URL: `http://127.0.0.1:${getTaskApiPort()}` }
-          : {})
+        ...(server.name === 'task-management' ? getTaskApiEnv() : {})
       }
     })
 

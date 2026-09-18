@@ -10,9 +10,7 @@ import { ToolsMcpSettings } from './tabs/ToolsMcpSettings'
 import { SecretsSettings } from './tabs/SecretsSettings'
 import { VoiceSettings } from './tabs/VoiceSettings'
 import { IntegrationsSettings } from './tabs/IntegrationsSettings'
-import { EnterpriseSettings } from './tabs/EnterpriseSettings'
 import { AdvancedSettings } from './tabs/AdvancedSettings'
-import { ConnectorsSettings } from './tabs/ConnectorsSettings'
 import { PluginsSettings } from './tabs/PluginsSettings'
 
 const ICON_MAP = {
@@ -38,8 +36,6 @@ export function SettingsWorkspace() {
     { value: SettingsTab.SECRETS, label: 'Secrets', iconName: 'KeyRound' },
     { value: SettingsTab.VOICE, label: 'Voice', iconName: 'Mic' },
     { value: SettingsTab.INTEGRATIONS, label: 'Task sources', iconName: 'Workflow' },
-    { value: SettingsTab.CONNECTORS, label: 'Connectors', iconName: 'Cable' },
-    { value: SettingsTab.ENTERPRISE, label: 'Enterprise', iconName: 'Building2' },
     { value: SettingsTab.PLUGINS, label: 'Plugins', iconName: 'Puzzle' },
     { value: SettingsTab.ADVANCED, label: 'Advanced', iconName: 'Wrench' }
   ] as const
@@ -114,14 +110,6 @@ export function SettingsWorkspace() {
 
             <Tabs.Content value={SettingsTab.INTEGRATIONS} className="focus-visible:outline-none space-y-6">
               <IntegrationsSettings />
-            </Tabs.Content>
-
-            <Tabs.Content value={SettingsTab.CONNECTORS} className="focus-visible:outline-none space-y-6">
-              <ConnectorsSettings />
-            </Tabs.Content>
-
-            <Tabs.Content value={SettingsTab.ENTERPRISE} className="focus-visible:outline-none space-y-6">
-              <EnterpriseSettings />
             </Tabs.Content>
 
             <Tabs.Content value={SettingsTab.PLUGINS} className="focus-visible:outline-none space-y-6">

@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { DashboardWorkspace } from './DashboardWorkspace'
-import { useDashboardStore } from '@/stores/dashboard-store'
-import { useEnterpriseStore } from '@/stores/enterprise-store'
 import { useTaskStore } from '@/stores/task-store'
 import { useUIStore } from '@/stores/ui-store'
 import { TaskStatus } from '@/types'
-import type { WorkfloTask } from '@/types'
+import type { Task } from '@/types'
 
 // Mock use-snooze-tick to avoid IPC dependency in tests
 vi.mock('@/hooks/use-snooze-tick', () => ({
@@ -15,18 +15,6 @@ vi.mock('@/hooks/use-snooze-tick', () => ({
 
 // Mock ipc-client - prevent real API calls during tests
 vi.mock('@/lib/ipc-client', () => ({
-  enterpriseApi: {
-    apiRequest: vi.fn().mockResolvedValue({}),
-    login: vi.fn(),
-    selectTenant: vi.fn(),
-    logout: vi.fn(),
-    getSession: vi.fn().mockResolvedValue({ isAuthenticated: false }),
-    refreshToken: vi.fn(),
-    getApiUrl: vi.fn().mockResolvedValue('http://localhost:2000'),
-    getJwt: vi.fn().mockResolvedValue('mock-jwt-token'),
-    enableIframeAuth: vi.fn().mockResolvedValue({ apiUrl: 'http://localhost:2000' }),
-    disableIframeAuth: vi.fn().mockResolvedValue(undefined)
-  },
   taskApi: {
     getAll: vi.fn().mockResolvedValue([])
   },
@@ -93,7 +81,7 @@ vi.mock('@/lib/ipc-client', () => ({
 
 afterEach(cleanup)
 
-function makeTask(overrides: Partial<WorkfloTask> = {}): WorkfloTask {
+function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: 'task-1',
     title: 'Test task',
@@ -134,35 +122,6 @@ function makeTask(overrides: Partial<WorkfloTask> = {}): WorkfloTask {
 }
 
 beforeEach(() => {
-  // Reset dashboard store with fetchAll as a no-op
-  useDashboardStore.setState({
-    applications: [],
-    presetupTemplates: [],
-    stats: null,
-    localStats: null,
-    timeWindow: '7d',
-    applicationsLoading: false,
-    presetupLoading: false,
-    presetupProvisioning: null,
-    statsLoading: false,
-    hasFetchedOnce: false,
-    applicationsError: null,
-    statsError: null,
-    fetchAll: vi.fn(),
-    fetchAllIfNeeded: vi.fn(),
-    startPeriodicRefresh: vi.fn(),
-    stopPeriodicRefresh: vi.fn(),
-    updateLocalStats: vi.fn()
-  })
-  useEnterpriseStore.setState({
-    isAuthenticated: false,
-    isLoading: false,
-    error: null,
-    userEmail: null,
-    userId: null,
-    currentTenant: null,
-    availableTenants: null
-  })
   useTaskStore.setState({
     tasks: [],
     selectedTaskId: null,
@@ -176,10 +135,11 @@ beforeEach(() => {
 })
 
 describe('DashboardWorkspace', () => {
-  it('shows connect CTA when not authenticated', () => {
+  it('shows no hosted-service prompts', () => {
     render(<DashboardWorkspace />)
-    expect(screen.getByText('Connect to 20x Cloud')).toBeDefined()
-    expect(screen.getByText('Connect')).toBeDefined() // CTA button
+    expect(screen.queryByText(/20x Cloud/)).toBeNull()
+    expect(screen.queryByText(/Sign in/)).toBeNull()
+    expect(screen.queryByText('Applications')).toBeNull()
   })
 
   it('renders hero section with rotating title', () => {
@@ -211,39 +171,7 @@ describe('DashboardWorkspace', () => {
     expect(screen.getByText('Agent Working')).toBeDefined()
   })
 
-  it('hides applications section when no data', () => {
-    useEnterpriseStore.setState({ isAuthenticated: true })
-
-    render(<DashboardWorkspace />)
-    // Applications block should not render at all when empty
-    expect(screen.queryByText(/No applications found/)).toBeNull()
-    expect(screen.queryByText('Applications')).toBeNull()
-  })
-
-  it('renders application tabs when data is loaded', () => {
-    useEnterpriseStore.setState({ isAuthenticated: true })
-    useDashboardStore.setState({
-      applications: [
-        {
-          workflowId: 'wf-1',
-          tenantId: 'tenant-1',
-          name: 'AI Accountant',
-          description: 'Automated accounting',
-          status: 'Active',
-          lastRun: '2026-03-28T10:00:00Z',
-          runCount: 42,
-          updatedAt: '2026-03-28T10:00:00Z',
-          version: 3
-        }
-      ]
-    })
-
-    render(<DashboardWorkspace />)
-    expect(screen.getByText('AI Accountant')).toBeDefined()
-  })
-
   it('renders task board columns with local 20x tasks', () => {
-    useEnterpriseStore.setState({ isAuthenticated: true })
     useTaskStore.setState({
       tasks: [
         makeTask({ id: 'task-1', title: 'Review invoice', status: TaskStatus.NotStarted, priority: 'high' }),
@@ -262,7 +190,6 @@ describe('DashboardWorkspace', () => {
   })
 
   it('filters out subtasks from the task board', () => {
-    useEnterpriseStore.setState({ isAuthenticated: true })
     useTaskStore.setState({
       tasks: [
         makeTask({ id: 'parent-1', title: 'Parent task', status: TaskStatus.NotStarted }),
@@ -278,57 +205,9 @@ describe('DashboardWorkspace', () => {
   })
 
   it('shows empty task board when no tasks', () => {
-    useEnterpriseStore.setState({ isAuthenticated: true })
 
     render(<DashboardWorkspace />)
     expect(screen.getByText(/No tasks yet/)).toBeDefined()
-  })
-
-  it('calls fetchAllIfNeeded on mount when authenticated (no reload on tab switch)', () => {
-    const mockFetchAllIfNeeded = vi.fn()
-    const mockStartPeriodicRefresh = vi.fn()
-    useDashboardStore.setState({
-      fetchAllIfNeeded: mockFetchAllIfNeeded,
-      startPeriodicRefresh: mockStartPeriodicRefresh
-    })
-    useEnterpriseStore.setState({ isAuthenticated: true })
-
-    render(<DashboardWorkspace />)
-    expect(mockFetchAllIfNeeded).toHaveBeenCalledOnce()
-    expect(mockStartPeriodicRefresh).toHaveBeenCalledOnce()
-  })
-
-  it('does not refetch when component remounts (tab switch) if data already loaded', () => {
-    const mockFetchAll = vi.fn()
-    const mockFetchAllIfNeeded = vi.fn()
-    useDashboardStore.setState({
-      fetchAll: mockFetchAll,
-      fetchAllIfNeeded: mockFetchAllIfNeeded,
-      startPeriodicRefresh: vi.fn(),
-      stopPeriodicRefresh: vi.fn(),
-      hasFetchedOnce: true
-    })
-    useEnterpriseStore.setState({ isAuthenticated: true })
-
-    render(<DashboardWorkspace />)
-    // fetchAllIfNeeded is called but should be a no-op since hasFetchedOnce is true
-    expect(mockFetchAllIfNeeded).toHaveBeenCalledOnce()
-    // fetchAll should NOT be called directly
-    expect(mockFetchAll).not.toHaveBeenCalled()
-  })
-
-  it('computes local stats on mount even when not authenticated', () => {
-    const mockUpdateLocalStats = vi.fn()
-    useDashboardStore.setState({ updateLocalStats: mockUpdateLocalStats })
-    useTaskStore.setState({
-      tasks: [
-        makeTask({ id: 'task-1', title: 'Task 1', status: TaskStatus.NotStarted }),
-        makeTask({ id: 'task-2', title: 'Task 2', status: TaskStatus.Completed })
-      ]
-    })
-
-    render(<DashboardWorkspace />)
-    expect(mockUpdateLocalStats).toHaveBeenCalled()
   })
 
   it('hides snoozed tasks from the task board', () => {
@@ -361,31 +240,6 @@ describe('DashboardWorkspace', () => {
     expect(screen.getByText('Expired snooze task')).toBeDefined()
   })
 
-  it('resets hasFetchedOnce and errors when isAuthenticated goes false (re-login scenario)', () => {
-    // Simulate: previous fetch failed and set hasFetchedOnce + errors
-    useDashboardStore.setState({
-      hasFetchedOnce: true,
-      applicationsError: 'No refresh token available — please sign in again',
-      statsError: 'Session expired — please sign in again',
-      fetchAllIfNeeded: vi.fn(),
-      startPeriodicRefresh: vi.fn(),
-      stopPeriodicRefresh: vi.fn()
-    })
-    useEnterpriseStore.setState({ isAuthenticated: true })
-
-    const { rerender } = render(<DashboardWorkspace />)
-
-    // Simulate logout / session clear: isAuthenticated → false
-    useEnterpriseStore.setState({ isAuthenticated: false })
-    rerender(<DashboardWorkspace />)
-
-    // Dashboard fetch state should be reset
-    const state = useDashboardStore.getState()
-    expect(state.hasFetchedOnce).toBe(false)
-    expect(state.applicationsError).toBeNull()
-    expect(state.statsError).toBeNull()
-  })
-
   it('clicking a task card sets dashboardPreviewTaskId in UI store', () => {
     useTaskStore.setState({
       tasks: [
@@ -408,5 +262,56 @@ describe('DashboardWorkspace', () => {
     expect(state.activeModal).toBe('create')
     expect(state.createTaskPrefill).toBeDefined()
     expect(state.createTaskPrefill?.title).toBe('Draft outreach email')
+  })
+})
+
+describe('DashboardWorkspace — readability', () => {
+  it('opts the dashboard into the larger type and spacing scale', () => {
+    const { container } = render(<DashboardWorkspace />)
+    expect(container.firstElementChild?.classList.contains('dashboard-scale')).toBe(true)
+  })
+
+  it('defines readable dashboard tokens in the shared stylesheet', () => {
+    const css = readFileSync(resolve(__dirname, '../../styles/globals.css'), 'utf8')
+    const block = css.match(/\.dashboard-scale\s*\{([^}]*)\}/)?.[1] ?? ''
+    const px = (token: string): number =>
+      Number(block.match(new RegExp(`--${token}:\\s*([\\d.]+)px`))?.[1] ?? 0)
+
+    // Smallest metadata text stays at 11px or more; body text at 13px.
+    expect(px('text-2xs')).toBeGreaterThanOrEqual(11)
+    expect(px('text-xs')).toBeGreaterThanOrEqual(12)
+    expect(px('text-sm')).toBeGreaterThanOrEqual(13)
+    // h-3 icons render at 12px and p-1.5 + h-4 buttons reach 28px.
+    expect(px('spacing')).toBeGreaterThanOrEqual(4)
+  })
+
+  it('uses shared type tokens instead of fixed pixel sizes on task cards', () => {
+    useTaskStore.setState({
+      tasks: [
+        makeTask({
+          id: 'task-rich',
+          title: 'Rich task',
+          description: 'Has every piece of metadata',
+          priority: 'high',
+          labels: ['one', 'two', 'three', 'four'],
+          assignee: 'Ada Lovelace',
+          due_date: '2026-01-01T00:00:00Z',
+          source: 'github'
+        })
+      ]
+    })
+    const { container } = render(<DashboardWorkspace />)
+    expect(screen.getByText('Rich task')).toBeDefined()
+
+    const fixed = Array.from(container.querySelectorAll('[class*="text-["]')).filter((el) =>
+      /\btext-\[\d+px\]/.test(el.getAttribute('class') ?? '')
+    )
+    expect(fixed).toEqual([])
+  })
+
+  it('gives icon-only command controls accessible names', () => {
+    render(<DashboardWorkspace />)
+    expect(screen.getByRole('button', { name: 'Attach file' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Send to Mastermind' })).toBeDefined()
   })
 })

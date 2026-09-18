@@ -51,17 +51,19 @@ export function parseScopeFromUrl(url: URL): TaskMcpScope {
  */
 export function buildTaskMcpUrl(
   port: number,
+  token: string,
   scope: { taskId?: string | null; parentTaskId?: string | null; artifactTaskId?: string | null } = {}
 ): string {
-  const params = new URLSearchParams()
+  // The token rides in the URL because it is the one part of an MCP server
+  // config that every agent backend passes through unchanged.
+  const params = new URLSearchParams({ token })
   if (scope.taskId) params.set('task', scope.taskId)
   if (scope.parentTaskId) params.set('parent', scope.parentTaskId)
   // Only needed when it differs from `task`, which already implies it.
   if (scope.artifactTaskId && scope.artifactTaskId !== scope.taskId) {
     params.set('artifact', scope.artifactTaskId)
   }
-  const query = params.toString()
-  return `http://127.0.0.1:${port}${TASK_MCP_PATH}${query ? `?${query}` : ''}`
+  return `http://127.0.0.1:${port}${TASK_MCP_PATH}?${params.toString()}`
 }
 
 /** A fresh MCP server bound to one scope. */

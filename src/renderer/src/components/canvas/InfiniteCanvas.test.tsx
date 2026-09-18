@@ -5,7 +5,7 @@ import { useCanvasStore } from '@/stores/canvas-store'
 import { useDrawingStore } from '@/stores/drawing-store'
 import { DEFAULT_TOOL_OPTIONS } from './drawing/types'
 import { TaskStatus } from '@/types'
-import type { WorkfloTask } from '@/types'
+import type { Task } from '@/types'
 
 // Mock only the clipboard paste (no real clipboard in happy-dom) — the
 // DrawingLayer component itself stays real.
@@ -15,13 +15,13 @@ vi.mock('./drawing/DrawingLayer', async (importOriginal) => {
 })
 
 const taskStoreState = vi.hoisted(() => ({
-  tasks: [] as WorkfloTask[],
+  tasks: [] as Task[],
   selectedTaskId: null as string | null,
   isLoading: false,
   error: null as string | null,
 }))
 
-const makeTask = (overrides: Partial<WorkfloTask> = {}): WorkfloTask => ({
+const makeTask = (overrides: Partial<Task> = {}): Task => ({
   id: 'task-123',
   title: 'Task',
   description: '',
@@ -79,7 +79,6 @@ vi.mock('@/stores/ui-store', () => ({
     const state = {
       canvasPendingTaskId: null,
       clearCanvasPendingTask: vi.fn(),
-      canvasPendingApp: null,
       clearCanvasPendingApp: vi.fn(),
       sidebarView: 'canvas',
     }
@@ -434,20 +433,6 @@ describe('InfiniteCanvas', () => {
     render(<InfiniteCanvas />)
     expect(screen.getByText('Agent Chat')).toBeTruthy()
     expect(screen.getByText('Transcript')).toBeTruthy()
-  })
-
-  it('should render app panel type', () => {
-    useCanvasStore.getState().addPanel({
-      type: 'app',
-      title: 'My App',
-      x: 0,
-      y: 0,
-      width: 400,
-      height: 300,
-    })
-    render(<InfiniteCanvas />)
-    expect(screen.getAllByText('My App').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('App').length).toBeGreaterThanOrEqual(1)
   })
 
   it('should show focus/collapse/close actions on panel', () => {

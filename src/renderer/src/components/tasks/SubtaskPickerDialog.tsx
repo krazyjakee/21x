@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { CheckSquare, CornerDownLeft } from 'lucide-react'
-import type { WorkfloTask } from '@/types'
+import type { Task } from '@/types'
 import { TaskStatusBadge } from './TaskStatusBadge'
 
 interface SubtaskPickerDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  subtasks: WorkfloTask[]
+  subtasks: Task[]
   onSelect: (taskId: string) => void
 }
 

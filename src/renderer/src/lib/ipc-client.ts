@@ -1,4 +1,4 @@
-import type { WorkfloTask, CreateTaskDTO, UpdateTaskDTO, FileAttachment, Agent, CreateAgentDTO, UpdateAgentDTO, McpServer, CreateMcpServerDTO, UpdateMcpServerDTO, Skill, CreateSkillDTO, UpdateSkillDTO, Secret, CreateSecretDTO, UpdateSecretDTO, TaskSource, CreateTaskSourceDTO, UpdateTaskSourceDTO, SyncResult, PluginMeta, ConfigFieldSchema, ConfigFieldOption, PluginAction, ActionResult, SourceUser, ReassignResult, MarketplaceSource, InstalledPlugin, DiscoverablePlugin, MarketplaceCatalog, PluginResources } from '@/types'
+import type { Task, CreateTaskDTO, UpdateTaskDTO, FileAttachment, Agent, CreateAgentDTO, UpdateAgentDTO, McpServer, CreateMcpServerDTO, UpdateMcpServerDTO, Skill, CreateSkillDTO, UpdateSkillDTO, Secret, CreateSecretDTO, UpdateSecretDTO, TaskSource, CreateTaskSourceDTO, UpdateTaskSourceDTO, SyncResult, PluginMeta, ConfigFieldSchema, ConfigFieldOption, PluginAction, ActionResult, SourceUser, ReassignResult, MarketplaceSource, InstalledPlugin, DiscoverablePlugin, MarketplaceCatalog, PluginResources } from '@/types'
 import type { AgentOutputEvent, AgentOutputBatchEvent, AgentStatusEvent, AgentApprovalRequest, GhCliStatus, GlabCliStatus, GitHubRepo, GitHubCollaborator, WorktreeProgressEvent, WorkspaceCleanupProgressEvent, McpTestResult, SkillSyncResult, DepsStatus, AgentMessageAttachment, TranscriptPartRecord, TranscriptChangedEvent } from '@/types/electron'
 import type { ArtifactApi } from '@shared/artifacts'
 import type {
@@ -23,19 +23,19 @@ import type {
 } from '@shared/voice-tts'
 
 export const taskApi = {
-  getAll: (): Promise<WorkfloTask[]> => {
+  getAll: (): Promise<Task[]> => {
     return window.electronAPI.db.getTasks()
   },
 
-  getById: (id: string): Promise<WorkfloTask | undefined> => {
+  getById: (id: string): Promise<Task | undefined> => {
     return window.electronAPI.db.getTask(id)
   },
 
-  create: (data: CreateTaskDTO): Promise<WorkfloTask> => {
+  create: (data: CreateTaskDTO): Promise<Task> => {
     return window.electronAPI.db.createTask(data)
   },
 
-  update: (id: string, data: UpdateTaskDTO): Promise<WorkfloTask | undefined> => {
+  update: (id: string, data: UpdateTaskDTO): Promise<Task | undefined> => {
     return window.electronAPI.db.updateTask(id, data)
   },
 
@@ -43,7 +43,7 @@ export const taskApi = {
     return window.electronAPI.db.deleteTask(id)
   },
 
-  getSubtasks: (parentId: string): Promise<WorkfloTask[]> => {
+  getSubtasks: (parentId: string): Promise<Task[]> => {
     return window.electronAPI.db.getSubtasks(parentId)
   },
 
@@ -268,7 +268,7 @@ export const onAgentIncompatibleSession = (callback: (event: { taskId: string; a
   return window.electronAPI.onAgentIncompatibleSession(callback)
 }
 
-export const onTaskUpdated = (callback: (event: { taskId: string; updates: Partial<WorkfloTask> }) => void): (() => void) => {
+export const onTaskUpdated = (callback: (event: { taskId: string; updates: Partial<Task> }) => void): (() => void) => {
   return window.electronAPI.onTaskUpdated(callback)
 }
 
@@ -279,7 +279,7 @@ export const onTaskSourceActionFailed = (
   return window.electronAPI.onTaskSourceActionFailed(callback)
 }
 
-export const onTaskCreated = (callback: (event: { task: WorkfloTask }) => void): (() => void) => {
+export const onTaskCreated = (callback: (event: { task: Task }) => void): (() => void) => {
   return window.electronAPI.onTaskCreated(callback)
 }
 
@@ -370,9 +370,6 @@ export const mobileApi = {
 export const githubApi = {
   checkCli: (): Promise<GhCliStatus> => {
     return window.electronAPI.github.checkCli()
-  },
-  startAuth: (): Promise<void> => {
-    return window.electronAPI.github.startAuth()
   },
   fetchOrgs: (): Promise<string[]> => {
     return window.electronAPI.github.fetchOrgs()
@@ -597,100 +594,6 @@ export const onWorktreeProgress = (callback: (event: WorktreeProgressEvent) => v
 
 export const onWorkspaceCleanupProgress = (callback: (event: WorkspaceCleanupProgressEvent) => void): (() => void) => {
   return window.electronAPI.onWorkspaceCleanupProgress(callback)
-}
-
-export const enterpriseApi = {
-  signupInBrowser: (mode: 'register' | 'login' = 'register'): Promise<{
-    userId: string
-    email: string
-    companies: { id: string; name: string; isPrimary: boolean }[]
-  }> => {
-    return window.electronAPI.enterprise.signupInBrowser(mode)
-  },
-
-  login: (email: string, password: string): Promise<{
-    userId: string
-    email: string
-    companies: { id: string; name: string; isPrimary: boolean }[]
-  }> => {
-    return window.electronAPI.enterprise.login(email, password)
-  },
-
-  listCompanies: (): Promise<{ id: string; name: string; isPrimary: boolean }[]> => {
-    return window.electronAPI.enterprise.listCompanies()
-  },
-
-  selectTenant: (tenantId: string): Promise<{
-    token: string
-    tenant: { id: string; name: string }
-    warnings?: string[]
-  }> => {
-    return window.electronAPI.enterprise.selectTenant(tenantId)
-  },
-
-  logout: (): Promise<void> => {
-    return window.electronAPI.enterprise.logout()
-  },
-
-  getSession: (): Promise<{
-    isAuthenticated: boolean
-    userEmail: string | null
-    userId: string | null
-    currentTenant: { id: string; name: string } | null
-  }> => {
-    return window.electronAPI.enterprise.getSession()
-  },
-
-  refreshToken: (): Promise<{ token: string }> => {
-    return window.electronAPI.enterprise.refreshToken()
-  },
-
-  syncResources: (): Promise<{ agents: { created: number; updated: number }; skills: { created: number; updated: number; pushed: number }; mcpServers: { created: number; updated: number }; taskSources: { created: number; updated: number }; errors: string[] } | null> => {
-    return window.electronAPI.enterprise.syncResources()
-  },
-
-  apiRequest: (method: string, path: string, body?: unknown): Promise<unknown> => {
-    return window.electronAPI.enterprise.apiRequest(method, path, body)
-  },
-
-  getApiUrl: (): Promise<string> => {
-    return window.electronAPI.enterprise.getApiUrl()
-  },
-
-  getJwt: (): Promise<string> => {
-    return window.electronAPI.enterprise.getJwt()
-  },
-
-  getAuthTokens: (): Promise<{ accessToken: string; refreshToken: string; tenantId: string | null }> => {
-    return window.electronAPI.enterprise.getAuthTokens()
-  },
-
-  enableIframeAuth: (): Promise<{ apiUrl: string }> => {
-    return window.electronAPI.enterprise.enableIframeAuth()
-  },
-
-  disableIframeAuth: (): Promise<void> => {
-    return window.electronAPI.enterprise.disableIframeAuth()
-  },
-
-  getAiGatewayStatus: (): Promise<{
-    configured: boolean
-    modelCount: number
-    keyName: string | null
-    expiresAt: string | null
-    subscription: {
-      planName: string
-      status: string
-      planId: string
-      currentPeriodEnd: string | null
-    } | null
-  }> => {
-    return window.electronAPI.enterprise.getAiGatewayStatus()
-  },
-
-  onSyncComplete: (callback: (data: { success: boolean; syncMs?: number; error?: string; syncStats?: { agents: { created: number; updated: number }; skills: { created: number; updated: number; pushed: number }; mcpServers: { created: number; updated: number }; taskSources: { created: number; updated: number }; errors: string[] } }) => void): (() => void) => {
-    return window.electronAPI.enterprise.onSyncComplete(callback)
-  }
 }
 
 // ── Voice control ───────────────────────────────────────────

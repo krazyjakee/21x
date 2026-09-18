@@ -27,7 +27,7 @@ import { taskApi, worktreeApi, taskSourceApi, onAgentIncompatibleSession, onWork
 import { subscribe } from '@/lib/shared-ipc-listeners'
 import { memo, useEffect, useLayoutEffect, useCallback, useRef, useState, useMemo, type PointerEvent as ReactPointerEvent } from 'react'
 import { TaskStatus } from '@/types'
-import type { WorkfloTask, FileAttachment, OutputField, Agent, UpdateAgentDTO, CreateAgentDTO } from '@/types'
+import type { Task, FileAttachment, OutputField, Agent, UpdateAgentDTO, CreateAgentDTO } from '@/types'
 import type { GitHubRepo } from '@/types/electron'
 import { isAgentConfigured } from '@shared/agent-utils'
 import { useUIStore } from '@/stores/ui-store'
@@ -70,7 +70,7 @@ function defaultTranscriptWidth(containerWidth: number): number {
 export type TaskWorkspaceLayout = 'both' | 'task-only' | 'transcript-only'
 
 interface TaskWorkspaceProps {
-  task?: WorkfloTask
+  task?: Task
   agents: Agent[]
   onEdit: () => void
   onDelete: () => void
@@ -131,7 +131,7 @@ function TaskWorkspaceComponent({
   const [showSnooze, setShowSnooze] = useState(false)
   const [showIncompatibleSession, setShowIncompatibleSession] = useState(false)
   const [incompatibleSessionError, setIncompatibleSessionError] = useState<string>()
-  const [parentTask, setParentTask] = useState<WorkfloTask | null>(null)
+  const [parentTask, setParentTask] = useState<Task | null>(null)
   const startingRef = useRef(false)
   const submittedQuestionIdsRef = useRef(new Set<string>())
   const workspaceBodyRef = useRef<HTMLDivElement>(null)
@@ -386,7 +386,7 @@ function TaskWorkspaceComponent({
 
   const handleGhSetupComplete = useCallback(() => {
     setShowGhSetup(false)
-    // After gh auth, check if org is set — if not, show org picker
+    // gh is ready — check if org is set — if not, show org picker
     if (!githubOrg) {
       setShowOrgPicker(true)
     } else {
@@ -660,7 +660,7 @@ function TaskWorkspaceComponent({
 
     // Persist feedback + set task to Learning status - prevents auto-stop useEffect.
     console.log('[TaskWorkspace] Setting task status to AgentLearning:', task.id)
-    let updatedTask: WorkfloTask | null | undefined
+    let updatedTask: Task | null | undefined
     try {
       updatedTask = await taskApi.update(task.id, {
         status: TaskStatus.AgentLearning,

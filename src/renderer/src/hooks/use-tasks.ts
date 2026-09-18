@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { useTaskStore } from '@/stores/task-store'
 import { useUIStore } from '@/stores/ui-store'
 import { TaskStatus } from '@/types'
-import type { WorkfloTask, TaskPriority } from '@/types'
+import type { Task, TaskPriority } from '@/types'
 
 const PRIORITY_ORDER: Record<TaskPriority, number> = {
   critical: 3,
@@ -109,7 +109,7 @@ export function useTasks() {
     return result
   }, [tasks, sourceFilter, statusFilter, priorityFilter, searchQuery, sortField, sortDirection])
 
-  const selectedTask: WorkfloTask | undefined = useMemo(
+  const selectedTask: Task | undefined = useMemo(
     () => (selectedTaskId ? tasks.find((t) => t.id === selectedTaskId) : undefined),
     [tasks, selectedTaskId]
   )

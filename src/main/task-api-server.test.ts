@@ -5,15 +5,9 @@ import { join } from 'path'
 import { createTestDb } from '../../test/helpers/db-test-helper'
 import { makeTask, makeAgent } from '../../test/helpers/task-fixtures'
 import type { DatabaseManager } from './database'
-import { handleRoute, setTaskApiAgentController, setTaskApiNotifier, setTaskAutomationTrigger, startTaskApiServer, stopTaskApiServer } from './task-api-server'
+import { getTaskApiToken, handleRoute, setTaskApiAgentController, setTaskApiNotifier, setTaskAutomationTrigger, startTaskApiServer, stopTaskApiServer } from './task-api-server'
 import { TaskStatus } from '../shared/constants'
 
-/**
- * The handleRoute function is not exported, so we test the triage-related
- * behavior through the DatabaseManager which handleRoute delegates to.
- * We test the API-level logic that handleRoute implements by simulating
- * the same SQL operations.
- */
 let db: DatabaseManager
 let rawDb: import('better-sqlite3').Database
 
@@ -39,7 +33,7 @@ describe('explicit artifact workpiece routes', () => {
     const post = async <T>(route: string, body: Record<string, unknown>): Promise<T> => {
       const response = await fetch(`http://127.0.0.1:${apiPort}${route}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getTaskApiToken()}` },
         body: JSON.stringify(body)
       })
       return response.json() as Promise<T>
@@ -77,46 +71,76 @@ describe('explicit artifact workpiece routes', () => {
   })
 })
 
+describe('authentication', () => {
+  it.each([
+    ['no credentials', {}],
+    ['a wrong bearer token', { Authorization: 'Bearer wrong' }],
+    ['a token of the right length but wrong value', { Authorization: `Bearer ${'0'.repeat(64)}` }]
+  ])('rejects a request with %s before touching any route', async (_label, headers) => {
+    const task = db.createTask(makeTask({ title: 'Untouched' }))!
+    const port = await startTaskApiServer(db)
+
+    const response = await fetch(`http://127.0.0.1:${port}/update_task`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain', ...headers },
+      body: JSON.stringify({ task_id: task.id, title: 'Changed by a web page' })
+    })
+
+    expect(response.status).toBe(401)
+    expect(db.getTask(task.id)!.title).toBe('Untouched')
+  })
+
+  it('rejects the MCP endpoint without the token', async () => {
+    const port = await startTaskApiServer(db)
+
+    const response = await fetch(`http://127.0.0.1:${port}/mcp`, { method: 'POST', body: '{}' })
+
+    expect(response.status).toBe(401)
+  })
+
+  it('accepts the token as a query parameter, which is how MCP sessions send it', async () => {
+    const port = await startTaskApiServer(db)
+
+    const response = await fetch(`http://127.0.0.1:${port}/list_agents?token=${getTaskApiToken()}`, { method: 'POST' })
+
+    expect(response.status).toBe(200)
+  })
+})
+
 describe('/update_task - triage status guard', () => {
-  it('skips status update when task is in triaging status', () => {
-    const agent = db.createAgent(makeAgent({ name: 'Agent 1' }))
+  it('ignores a status change while the task is triaging but applies the other fields', async () => {
+    const agent = db.createAgent(makeAgent({ name: 'Agent 1' }))!
     const task = db.createTask(makeTask({ title: 'Triage me' }))!
+    db.updateTask(task.id, { status: TaskStatus.Triaging })
 
-    // Set task to triaging status
-    db.updateTask(task.id, { status: 'triaging' as unknown as Parameters<typeof db.updateTask>[1]['status'] })
-    const triagingTask = db.getTask(task.id)!
-    expect(triagingTask.status).toBe('triaging')
+    const result = await handleRoute(db, '/update_task', { task_id: task.id, status: 'not_started', agent_id: agent.id })
 
-    // Simulate what handleRoute does: check current status before updating
-    const currentTask = rawDb.prepare('SELECT status FROM tasks WHERE id = ?').get(task.id) as { status: string }
-    expect(currentTask.status).toBe('triaging')
+    expect(result).toMatchObject({ success: true })
+    expect(db.getTask(task.id)).toMatchObject({ status: TaskStatus.Triaging, agent_id: agent.id })
+  })
 
-    // When status is triaging, the API should skip status changes
-    // but still allow other field updates (agent_id, labels, etc.)
-    const updates: string[] = []
-    const qParams: unknown[] = []
+  it('keeps a task in agent_learning while session feedback owns its completion', async () => {
+    const task = db.createTask(makeTask({ title: 'Learning' }))!
+    db.updateTask(task.id, { status: TaskStatus.AgentLearning })
+    db.setSetting(`session-feedback-completion:${task.id}`, '1')
 
-    // Simulate status guard from handleRoute
-    const requestedStatus = 'not_started'
-    if (currentTask.status === 'triaging') {
-      // Don't push status update — this is the guard
-    } else {
-      updates.push('status = ?')
-      qParams.push(requestedStatus)
-    }
+    await handleRoute(db, '/update_task', { task_id: task.id, status: TaskStatus.ReadyForReview })
 
-    // But agent_id should still be updatable
-    updates.push('agent_id = ?')
-    qParams.push(agent!.id)
-    updates.push('updated_at = ?')
-    qParams.push(new Date().toISOString())
-    qParams.push(task.id)
+    expect(db.getTask(task.id)!.status).toBe(TaskStatus.AgentLearning)
+  })
 
-    rawDb.prepare(`UPDATE tasks SET ${updates.join(', ')} WHERE id = ?`).run(...qParams)
+  it('does not reopen a sourced task the user closed only locally', async () => {
+    const source = db.createTaskSource({ name: 'Notion', plugin_id: 'notion', mcp_server_id: null })!
+    const task = db.createTask(makeTask({ title: 'Closed here', source_id: source.id, external_id: 'page-2', source: 'Notion' }))!
+    db.updateTask(task.id, { status: TaskStatus.Completed, complete_at_source: false })
 
-    const updatedTask = db.getTask(task.id)!
-    expect(updatedTask.status).toBe('triaging') // Status preserved
-    expect(updatedTask.agent_id).toBe(agent!.id) // Agent assigned
+    await handleRoute(db, '/update_task', { task_id: task.id, status: TaskStatus.AgentWorking })
+
+    expect(db.getTask(task.id)!.status).toBe(TaskStatus.Completed)
+  })
+
+  it('reports a missing task without writing anything', async () => {
+    expect(await handleRoute(db, '/update_task', { task_id: 'missing', title: 'x' })).toEqual({ error: 'Task not found' })
   })
 
   it('allows an agent to complete a source-less task directly', async () => {
@@ -390,7 +414,7 @@ describe('/start_task', () => {
     const port = await startTaskApiServer(db)
     const response = await fetch(`http://127.0.0.1:${port}/start_task`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getTaskApiToken()}` },
       body: JSON.stringify({ task_id: task.id })
     })
     const result = await response.json() as Record<string, unknown>
@@ -420,7 +444,7 @@ describe('/wait_for_subtasks', () => {
     const port = await startTaskApiServer(db)
     const response = await fetch(`http://127.0.0.1:${port}/wait_for_subtasks`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getTaskApiToken()}` },
       body: JSON.stringify({ parent_task_id: parent.id, subtask_ids: [subtask.id], timeout_ms: 5_000 })
     })
     const result = await response.json() as Record<string, unknown>
@@ -802,7 +826,7 @@ describe('auto_start_agent over the task API', () => {
   const post = async <T>(port: number, route: string, body: Record<string, unknown>): Promise<T> => {
     const response = await fetch(`http://127.0.0.1:${port}${route}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getTaskApiToken()}` },
       body: JSON.stringify(body)
     })
     return (await response.json()) as T
@@ -882,7 +906,7 @@ describe('/create_subtask automation inheritance', () => {
   const post = async <T>(port: number, route: string, body: Record<string, unknown>): Promise<T> => {
     const response = await fetch(`http://127.0.0.1:${port}${route}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getTaskApiToken()}` },
       body: JSON.stringify(body)
     })
     return (await response.json()) as T

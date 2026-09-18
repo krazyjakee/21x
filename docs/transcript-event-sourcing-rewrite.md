@@ -1,5 +1,7 @@
 # Transcript rewrite: event-sourced projection-render (t3 model)
 
+> **Status:** Mostly implemented. `getTranscriptDelta` (`src/main/database.ts`), the `transcript:changed` delta event (`src/main/agent-manager.ts`) and `bindTranscript` (desktop and mobile `agent-store.ts`) are in place, and `replaySessionMessages` is gone. Some legacy paths named below (`hydrateTranscript`, `clearMessageDedup`) still exist in `src/renderer/src/stores/agent-store.ts`. Read this as the design record, not a to-do list.
+
 ## Why
 
 Today the rendered transcript is an **in-memory `AgentMessage[]` the renderer owns and

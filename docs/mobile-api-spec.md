@@ -85,7 +85,7 @@ List all tasks with optional filters.
     "due_date": "2026-03-15T00:00:00.000Z",
     "labels": ["frontend", "auth"],
     "attachments": [],
-    "repos": ["peakflo/20x"],
+    "repos": ["acme/web"],
     "output_fields": [],
     "agent_id": "agent_abc123",
     "session_id": "session_xyz789",
@@ -148,7 +148,7 @@ Update a task. Only provided fields are updated.
   "assignee": "dmitry",
   "due_date": "2026-03-20T00:00:00.000Z",
   "labels": ["urgent", "backend"],
-  "repos": ["peakflo/20x"],
+  "repos": ["acme/web"],
   "output_fields": [
     {
       "id": "field_1",
@@ -285,7 +285,7 @@ Get the configured GitHub organization name.
 
 ```json
 {
-  "org": "peakflo"
+  "org": "acme"
 }
 ```
 
@@ -303,7 +303,7 @@ Fetch repositories for a GitHub organization.
 
 ```json
 {
-  "org": "peakflo"
+  "org": "acme"
 }
 ```
 
@@ -316,11 +316,11 @@ Fetch repositories for a GitHub organization.
 ```json
 [
   {
-    "name": "20x",
-    "fullName": "peakflo/20x",
+    "name": "web",
+    "fullName": "acme/web",
     "defaultBranch": "main",
-    "cloneUrl": "https://github.com/peakflo/20x.git",
-    "description": "AI agent platform",
+    "cloneUrl": "https://github.com/acme/web.git",
+    "description": "Marketing site",
     "isPrivate": true
   }
 ]

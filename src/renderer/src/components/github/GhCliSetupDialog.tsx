@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { CheckCircle, Loader2, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogBody } from '@/components/ui/Dialog'
 import { useSettingsStore } from '@/stores/settings-store'
-import { subscribe } from '@/lib/shared-ipc-listeners'
+import { GhCliGuidance } from './GhCliGuidance'
 
 interface GhCliSetupDialogProps {
   open: boolean
@@ -11,138 +11,62 @@ interface GhCliSetupDialogProps {
   onComplete: () => void
 }
 
+/**
+ * 20x never authenticates with GitHub itself — it relies on the gh CLI's
+ * existing session. This dialog only reports status and tells the user which
+ * command to run in their own terminal.
+ */
 export function GhCliSetupDialog({ open, onOpenChange, onComplete }: GhCliSetupDialogProps) {
-  const { ghCliStatus, checkGhCli, startGhAuth } = useSettingsStore()
+  const { ghCliStatus, checkGhCli } = useSettingsStore()
   const [isChecking, setIsChecking] = useState(false)
-  const [isAuthenticating, setIsAuthenticating] = useState(false)
-  const [deviceCode, setDeviceCode] = useState<string | null>(null)
+
+  const recheck = useCallback(() => {
+    setIsChecking(true)
+    checkGhCli().catch(() => {}).finally(() => setIsChecking(false))
+  }, [checkGhCli])
 
   useEffect(() => {
-    if (open) {
-      setIsChecking(true)
-      setDeviceCode(null)
-      checkGhCli().finally(() => setIsChecking(false))
-    }
+    if (open) recheck()
   }, [open])
 
-  useEffect(() => {
-    return subscribe<string>(
-      'github:deviceCode',
-      (cb) => window.electronAPI.onGithubDeviceCode(cb),
-      (code) => setDeviceCode(code)
-    )
-  }, [])
-
-  const handleAuth = async () => {
-    setIsAuthenticating(true)
-    setDeviceCode(null)
-    try {
-      await startGhAuth()
-    } catch {
-      // Re-check status even on error
-      await checkGhCli()
-    } finally {
-      setIsAuthenticating(false)
-      setDeviceCode(null)
-    }
-  }
-
-  const isInstalled = ghCliStatus?.installed ?? false
   const isAuthenticated = ghCliStatus?.authenticated ?? false
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>GitHub CLI Setup</DialogTitle>
+          <DialogTitle>GitHub CLI</DialogTitle>
         </DialogHeader>
-        <DialogBody className="space-y-5">
-          {isChecking ? (
+        <DialogBody className="space-y-4">
+          {isChecking && !ghCliStatus ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
+          ) : isAuthenticated ? (
+            <>
+              <p className="flex items-center gap-1.5 text-sm">
+                <CheckCircle className="h-4 w-4 text-green-400" />
+                Using gh CLI{ghCliStatus?.username ? ` as ${ghCliStatus.username}` : ''}
+              </p>
+              <Button className="w-full" onClick={onComplete}>Continue</Button>
+            </>
           ) : (
             <>
-              {/* Step 1: Install gh */}
-              <div className="flex items-start gap-3">
-                <div className={`mt-0.5 h-5 w-5 rounded-full flex items-center justify-center shrink-0 ${isInstalled ? 'bg-green-500/20 text-green-400' : 'bg-muted text-muted-foreground'}`}>
-                  {isInstalled ? <CheckCircle className="h-3.5 w-3.5" /> : <span className="text-xs font-medium">1</span>}
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-medium">Install GitHub CLI</p>
-                  {!isInstalled && (
-                    <div className="mt-2 space-y-2">
-                      <div className="space-y-1">
-                        {navigator.platform?.toLowerCase().includes('win') ? (
-                          <code className="block text-xs bg-muted px-3 py-2 rounded">winget install GitHub.cli</code>
-                        ) : navigator.platform?.toLowerCase().includes('linux') ? (
-                          <>
-                            <code className="block text-xs bg-muted px-3 py-2 rounded">sudo apt install gh</code>
-                            <code className="block text-xs bg-muted px-3 py-2 rounded">sudo dnf install gh</code>
-                          </>
-                        ) : (
-                          <>
-                            <code className="block text-xs bg-muted px-3 py-2 rounded">brew install gh</code>
-                            <code className="block text-xs bg-muted px-3 py-2 rounded">conda install gh --channel conda-forge</code>
-                          </>
-                        )}
-                      </div>
-                      <a
-                        href="https://cli.github.com"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                      >
-                        cli.github.com <ExternalLink className="h-3 w-3" />
-                      </a>
-                      <Button size="sm" variant="outline" onClick={() => { setIsChecking(true); checkGhCli().finally(() => setIsChecking(false)) }}>
-                        Re-check
-                      </Button>
-                    </div>
-                  )}
-                </div>
+              <GhCliGuidance status={ghCliStatus} />
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="outline" onClick={recheck} disabled={isChecking}>
+                  {isChecking && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
+                  Re-check
+                </Button>
+                <a
+                  href="https://cli.github.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                >
+                  cli.github.com <ExternalLink className="h-3 w-3" />
+                </a>
               </div>
-
-              {/* Step 2: Authenticate */}
-              <div className="flex items-start gap-3">
-                <div className={`mt-0.5 h-5 w-5 rounded-full flex items-center justify-center shrink-0 ${isAuthenticated ? 'bg-green-500/20 text-green-400' : 'bg-muted text-muted-foreground'}`}>
-                  {isAuthenticated ? <CheckCircle className="h-3.5 w-3.5" /> : <span className="text-xs font-medium">2</span>}
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-medium">Authenticate with GitHub</p>
-                  {isInstalled && !isAuthenticated && (
-                    <div className="mt-2 space-y-2">
-                      {isAuthenticating && deviceCode ? (
-                        <>
-                          <p className="text-xs text-muted-foreground">Enter this code in your browser:</p>
-                          <code className="block text-lg font-mono font-bold bg-muted px-3 py-2 rounded text-center">
-                            {deviceCode}
-                          </code>
-                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                            Waiting for authorization...
-                          </div>
-                        </>
-                      ) : (
-                        <Button size="sm" onClick={handleAuth} disabled={isAuthenticating}>
-                          {isAuthenticating ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : null}
-                          Authenticate with GitHub
-                        </Button>
-                      )}
-                    </div>
-                  )}
-                  {isAuthenticated && ghCliStatus?.username && (
-                    <p className="text-xs text-muted-foreground mt-1">Logged in as {ghCliStatus.username}</p>
-                  )}
-                </div>
-              </div>
-
-              {/* Continue button */}
-              {isAuthenticated && (
-                <div className="pt-2">
-                  <Button className="w-full" onClick={onComplete}>Continue</Button>
-                </div>
-              )}
             </>
           )}
         </DialogBody>

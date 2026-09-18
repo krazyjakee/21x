@@ -7,7 +7,7 @@ import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useArtifactStore } from '@/stores/artifact-store'
 import { TaskStatus } from '@/types'
-import type { WorkfloTask, Agent } from '@/types'
+import type { Task, Agent } from '@/types'
 import { dispatchTaskShortcut, TaskShortcutAction } from '@/lib/keyboard-shortcuts'
 import { PinnedArtifactTabId } from '@/stores/artifact-store'
 
@@ -27,14 +27,13 @@ vi.mock('@/components/github/RepoSelectorDialog', () => ({
 
 // Add missing electronAPI mocks that child components need
 const api = window.electronAPI as unknown as Record<string, unknown>
-if (!api.onGithubDeviceCode) api.onGithubDeviceCode = vi.fn(() => vi.fn())
 if (!api.onHeartbeatAlert) api.onHeartbeatAlert = vi.fn(() => vi.fn())
 if (!api.onHeartbeatDisabled) api.onHeartbeatDisabled = vi.fn(() => vi.fn())
 if (!api.tasks) api.tasks = { getWorkspaceDir: vi.fn().mockResolvedValue('/tmp') }
 if (!api.artifacts) api.artifacts = { scan: vi.fn().mockResolvedValue([]), read: vi.fn().mockResolvedValue(null) }
 
 // Minimal task factory
-function makeRendererTask(overrides: Partial<WorkfloTask> = {}): WorkfloTask {
+function makeRendererTask(overrides: Partial<Task> = {}): Task {
   return {
     id: 'task-1',
     title: 'Test Task',
@@ -90,7 +89,7 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
 const noopFn = vi.fn()
 const noopAsync = vi.fn().mockResolvedValue(undefined)
 
-function renderWorkspace(task: WorkfloTask, agents: Agent[] = [makeAgent()]) {
+function renderWorkspace(task: Task, agents: Agent[] = [makeAgent()]) {
   return render(
     <TaskWorkspace
       task={task}

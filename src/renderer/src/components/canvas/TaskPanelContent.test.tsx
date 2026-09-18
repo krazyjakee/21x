@@ -187,16 +187,13 @@ describe('TaskPanelContent', () => {
     expect(addEdgeMock).not.toHaveBeenCalled()
   })
 
-  it('completes a source-less canvas task locally without uploading it', async () => {
-    const upload = vi.fn()
-    window.electronAPI.taskSources.upload = upload
+  it('completes a source-less canvas task locally', async () => {
     render(<TaskPanelContent panelId="panel-1" taskId="task-1" panelLayout="both" />)
     fireEvent.click(screen.getByText('Complete task'))
 
     await waitFor(() => expect(updateTaskMock).toHaveBeenCalledExactlyOnceWith('task-1', {
       status: TaskStatus.Completed,
     }))
-    expect(upload).not.toHaveBeenCalled()
     expect(executeActionMock).not.toHaveBeenCalled()
     expect(screen.queryByRole('dialog')).toBeNull()
   })

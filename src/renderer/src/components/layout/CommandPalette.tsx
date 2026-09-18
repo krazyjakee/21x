@@ -10,7 +10,6 @@ import { useUIStore } from '@/stores/ui-store'
 import { useThemeStore } from '@/stores/theme-store'
 import { useTaskStore } from '@/stores/task-store'
 import { useSkillStore } from '@/stores/skill-store'
-import { useDashboardStore } from '@/stores/dashboard-store'
 import { cn } from '@/lib/utils'
 
 interface CommandItem {
@@ -70,17 +69,14 @@ export function CommandPalette({ open, onOpenChange, actions }: { open: boolean;
   const selectTask = useTaskStore((s) => s.selectTask)
   const skills = useSkillStore((s) => s.skills)
   const selectSkill = useSkillStore((s) => s.selectSkill)
-  const applications = useDashboardStore((s) => s.applications)
-  const openApplication = useDashboardStore((s) => s.openApplication)
 
-  // Reset query + highlight whenever the palette opens, and make sure skills +
-  // applications are loaded so they're searchable even before those views are visited.
+  // Reset query + highlight whenever the palette opens, and make sure skills
+  // are loaded so they're searchable even before that view is visited.
   useEffect(() => {
     if (open) {
       setQuery('')
       setActive(0)
       useSkillStore.getState().fetchSkills()
-      useDashboardStore.getState().fetchAllIfNeeded()
     }
   }, [open])
 
@@ -131,19 +127,6 @@ export function CommandPalette({ open, onOpenChange, actions }: { open: boolean;
       : base
 
     // Content search — only when the user has typed something.
-    const appItems: CommandItem[] = q
-      ? applications
-          .filter((a) => a.name.toLowerCase().includes(q))
-          .slice(0, 6)
-          .map((a) => ({
-            id: `app-${a.workflowId}`,
-            group: 'Applications',
-            label: a.name,
-            icon: LayoutGrid,
-            run: () => { closeModal(); setSidebarView('dashboard'); void openApplication(a.workflowId); close() },
-          }))
-      : []
-
     const skillItems: CommandItem[] = q
       ? skills
           .filter((s) => s.name.toLowerCase().includes(q) || (s.description ?? '').toLowerCase().includes(q))
@@ -170,8 +153,8 @@ export function CommandPalette({ open, onOpenChange, actions }: { open: boolean;
           }))
       : []
 
-    return [...filteredBase, ...appItems, ...taskItems, ...skillItems]
-  }, [query, tasks, skills, applications, themeResolved, closeModal, setSidebarView, openCreateModal, toggleOrchestrator, openSettings, toggleTheme, selectTask, selectSkill, openApplication, actions])
+    return [...filteredBase, ...taskItems, ...skillItems]
+  }, [query, tasks, skills, themeResolved, closeModal, setSidebarView, openCreateModal, toggleOrchestrator, openSettings, toggleTheme, selectTask, selectSkill, actions])
 
   // Keep highlight within bounds when the list shrinks.
   useEffect(() => { setActive((a) => Math.min(a, Math.max(0, items.length - 1))) }, [items.length])

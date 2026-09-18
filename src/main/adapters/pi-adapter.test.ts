@@ -2,6 +2,9 @@ import { nodeWorkerRuntime } from '../node-worker-runtime'
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { EventEmitter } from 'events'
 import { StringDecoder } from 'string_decoder'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }))
@@ -9,13 +12,6 @@ const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }))
 vi.mock('child_process', () => ({
   spawn: spawnMock,
   execFile: vi.fn(),
-}))
-
-vi.mock('../enterprise-ai-gateway', () => ({
-  ENTERPRISE_AI_GATEWAY_PROVIDER_ID: 'peakflo',
-  ENTERPRISE_AI_GATEWAY_PROVIDER_NAME: 'Peakflo',
-  buildPiAiGatewayProviderConfig: vi.fn(() => ({})),
-  readEnterpriseAiGatewayConfig: vi.fn(() => null),
 }))
 
 import {
@@ -42,6 +38,16 @@ function fakeProcess() {
   process.stderr = new EventEmitter()
   process.kill = vi.fn(() => true)
   return process
+}
+
+// The adapter strips variables set by a parent agent harness (see processEnv),
+// so the expectation must too, or the test fails when run from inside an agent.
+function expectedPiEnv(): NodeJS.ProcessEnv {
+  const env = { ...nodeWorkerRuntime().env }
+  delete env.AI_AGENT
+  delete env.PI_CODING_AGENT
+  delete env.MCP_DIRECT_TOOLS
+  return env
 }
 
 function fakeSession(process = fakeProcess()): any {
@@ -83,9 +89,9 @@ describe('PiAdapter', () => {
   it('uses the native Pi session file and applies model selection through RPC', async () => {
     const child = fakeProcess()
     spawnMock.mockReturnValue(child)
-    const adapter = new PiAdapter({ getSetting: vi.fn(() => null) } as any)
+    const adapter = new PiAdapter()
     vi.spyOn(adapter as any, 'findPiExecutable').mockResolvedValue('/usr/local/bin/pi')
-    vi.spyOn(adapter as any, 'installPeakfloGateway').mockReturnValue(null)
+    vi.spyOn(adapter as any, 'removeLegacyGatewayProvider').mockReturnValue(undefined)
     vi.spyOn(adapter as any, 'buildMcpConfig').mockReturnValue(undefined)
     vi.spyOn(adapter as any, 'installPermissionExtension').mockReturnValue('/tmp/20x-permissions.ts')
     vi.spyOn(adapter as any, 'attachProcess').mockImplementation(() => undefined)
@@ -102,7 +108,7 @@ describe('PiAdapter', () => {
       agentId: 'agent-1',
       taskId: 'task-1',
       workspaceDir: '/workspace',
-      model: 'peakflo/model-one',
+      model: 'anthropic/model-one',
       permissionMode: 'ask',
     })
 
@@ -116,21 +122,21 @@ describe('PiAdapter', () => {
     expect(args).not.toContain('--provider')
     expect(args).not.toContain('--model')
     expect(spawnMock.mock.calls[0][2]).toMatchObject({
-      env: nodeWorkerRuntime().env,
+      env: expectedPiEnv(),
       shell: false,
     })
     expect(command).toHaveBeenLastCalledWith(
       expect.anything(),
-      { type: 'set_model', provider: 'peakflo', modelId: 'model-one' },
+      { type: 'set_model', provider: 'anthropic', modelId: 'model-one' },
     )
   })
 
   it('discovers the effective Pi model catalog through RPC', async () => {
     const child = fakeProcess()
     spawnMock.mockReturnValue(child)
-    const adapter = new PiAdapter({ getSetting: vi.fn(() => null) } as any)
+    const adapter = new PiAdapter()
     vi.spyOn(adapter as any, 'findPiExecutable').mockResolvedValue('/usr/local/bin/pi')
-    vi.spyOn(adapter as any, 'installPeakfloGateway').mockReturnValue(null)
+    vi.spyOn(adapter as any, 'removeLegacyGatewayProvider').mockReturnValue(undefined)
     vi.spyOn(adapter as any, 'attachProcess').mockImplementation(() => undefined)
     vi.spyOn(adapter as any, 'terminateProcess').mockResolvedValue(undefined)
     vi.spyOn(adapter as any, 'command')
@@ -138,7 +144,7 @@ describe('PiAdapter', () => {
         type: 'response',
         command: 'get_state',
         success: true,
-        data: { model: { provider: 'peakflo', id: 'model-one' } },
+        data: { model: { provider: 'anthropic', id: 'model-one' } },
       })
       .mockResolvedValueOnce({
         type: 'response',
@@ -146,7 +152,7 @@ describe('PiAdapter', () => {
         success: true,
         data: {
           models: [
-            { provider: 'peakflo', id: 'model-one', name: 'Model One' },
+            { provider: 'anthropic', id: 'model-one', name: 'Model One' },
             { provider: 'openai', id: 'model-two', name: 'Model Two' },
           ],
         },
@@ -154,10 +160,10 @@ describe('PiAdapter', () => {
 
     await expect(adapter.getProviders(undefined, '/workspace')).resolves.toEqual({
       providers: [
-        { id: 'peakflo', name: 'Peakflo', models: [{ id: 'model-one', name: 'Model One' }] },
+        { id: 'anthropic', name: 'anthropic', models: [{ id: 'model-one', name: 'Model One' }] },
         { id: 'openai', name: 'openai', models: [{ id: 'model-two', name: 'Model Two' }] },
       ],
-      default: { peakflo: 'model-one' },
+      default: { anthropic: 'model-one' },
     })
     expect(spawnMock.mock.calls[0][0]).toBe(nodeWorkerRuntime().execPath)
     expect(spawnMock.mock.calls[0][1]).toEqual([
@@ -168,13 +174,13 @@ describe('PiAdapter', () => {
       '--approve',
     ])
     expect(spawnMock.mock.calls[0][2]).toMatchObject({
-      env: nodeWorkerRuntime().env,
+      env: expectedPiEnv(),
       shell: false,
     })
   })
 
   it('waits for agent_settled instead of agent_end', () => {
-    const adapter = new PiAdapter({ getSetting: vi.fn(() => null) } as any)
+    const adapter = new PiAdapter()
     const session = fakeSession()
 
     ;(adapter as any).handleEvent(session, { type: 'agent_end' })
@@ -185,7 +191,7 @@ describe('PiAdapter', () => {
   })
 
   it('steers an active Pi turn instead of queueing a follow-up', async () => {
-    const adapter = new PiAdapter({ getSetting: vi.fn(() => null) } as any)
+    const adapter = new PiAdapter()
     const process = fakeProcess()
     const session = fakeSession(process)
     ;(adapter as any).sessions.set(session.id, session)
@@ -203,7 +209,7 @@ describe('PiAdapter', () => {
   })
 
   it('sends a normal prompt when Pi is idle', async () => {
-    const adapter = new PiAdapter({ getSetting: vi.fn(() => null) } as any)
+    const adapter = new PiAdapter()
     const process = fakeProcess()
     const session = fakeSession(process)
     session.status = 'idle'
@@ -218,7 +224,7 @@ describe('PiAdapter', () => {
   })
 
   it('routes Pi confirmation requests through the approval API', async () => {
-    const adapter = new PiAdapter({ getSetting: vi.fn(() => null) } as any)
+    const adapter = new PiAdapter()
     const process = fakeProcess()
     const session = fakeSession(process)
     ;(adapter as any).sessions.set(session.id, session)
@@ -256,7 +262,7 @@ describe('PiAdapter', () => {
   })
 
   it('routes Pi select requests through structured questions', async () => {
-    const adapter = new PiAdapter({ getSetting: vi.fn(() => null) } as any)
+    const adapter = new PiAdapter()
     const process = fakeProcess()
     const session = fakeSession(process)
     ;(adapter as any).sessions.set(session.id, session)
@@ -306,7 +312,7 @@ describe('PiAdapter', () => {
   })
 
   it('does not answer a newer confirmation with a stale request ID', async () => {
-    const adapter = new PiAdapter({ getSetting: vi.fn(() => null) } as any)
+    const adapter = new PiAdapter()
     const process = fakeProcess()
     const session = fakeSession(process)
     ;(adapter as any).sessions.set(session.id, session)
@@ -327,7 +333,7 @@ describe('PiAdapter', () => {
   })
 
   it('keeps UTF-8 JSONL frames intact across buffer boundaries', async () => {
-    const adapter = new PiAdapter({ getSetting: vi.fn(() => null) } as any)
+    const adapter = new PiAdapter()
     const process = fakeProcess()
     const session = fakeSession(process)
     ;(adapter as any).sessions.set(session.id, session)
@@ -347,7 +353,7 @@ describe('PiAdapter', () => {
   })
 
   it('uses distinct stream IDs for separate assistant messages in one run', async () => {
-    const adapter = new PiAdapter({ getSetting: vi.fn(() => null) } as any)
+    const adapter = new PiAdapter()
     const session = fakeSession()
     ;(adapter as any).sessions.set(session.id, session)
 
@@ -368,7 +374,7 @@ describe('PiAdapter', () => {
   })
 
   it('uses the completed assistant message as the authoritative text', async () => {
-    const adapter = new PiAdapter({ getSetting: vi.fn(() => null) } as any)
+    const adapter = new PiAdapter()
     const session = fakeSession()
     ;(adapter as any).sessions.set(session.id, session)
 
@@ -390,7 +396,7 @@ describe('PiAdapter', () => {
   })
 
   it('does not surface a transient model error when Pi retry succeeds', async () => {
-    const adapter = new PiAdapter({ getSetting: vi.fn(() => null) } as any)
+    const adapter = new PiAdapter()
     const session = fakeSession()
     ;(adapter as any).sessions.set(session.id, session)
 
@@ -408,7 +414,7 @@ describe('PiAdapter', () => {
   })
 
   it('settles a terminal model error when Pi omits agent_settled', async () => {
-    const adapter = new PiAdapter({ getSetting: vi.fn(() => null) } as any)
+    const adapter = new PiAdapter()
     const session = fakeSession()
     ;(adapter as any).sessions.set(session.id, session)
     vi.spyOn(adapter as any, 'command').mockResolvedValue({
@@ -443,7 +449,7 @@ describe('PiAdapter', () => {
   })
 
   it('closes timed-out dialogs when the Pi run settles', async () => {
-    const adapter = new PiAdapter({ getSetting: vi.fn(() => null) } as any)
+    const adapter = new PiAdapter()
     const process = fakeProcess()
     const session = fakeSession(process)
     ;(adapter as any).sessions.set(session.id, session)
@@ -468,7 +474,7 @@ describe('PiAdapter', () => {
   })
 
   it('includes editor prefill in the structured question', async () => {
-    const adapter = new PiAdapter({ getSetting: vi.fn(() => null) } as any)
+    const adapter = new PiAdapter()
     const session = fakeSession()
     ;(adapter as any).sessions.set(session.id, session)
 
@@ -484,7 +490,7 @@ describe('PiAdapter', () => {
   })
 
   it('clears queued messages and pending dialogs before aborting', async () => {
-    const adapter = new PiAdapter({ getSetting: vi.fn(() => null) } as any)
+    const adapter = new PiAdapter()
     const process = fakeProcess()
     const session = fakeSession(process)
     session.pendingUiRequests.set('request-1', {
@@ -524,22 +530,21 @@ describe('PiAdapter', () => {
   })
 
   it('keeps long generated workflow tools behind a short MCP namespace proxy', () => {
-    // Real Workflo workflow tools can be 50 characters. A 24-character server
+    // Generated workflow tools can be 50 characters. A 24-character server
     // slug plus separator plus this tool is the reported 76-character failure.
-    const workflowTool = 'wf_peakflo_travels_voice_agent_call_summary_peakfl'
+    const workflowTool = 'wf_acme_travels_voice_agent_call_summary_acme_rep1'
     expect(workflowTool).toHaveLength(50)
     expect(`${'s'.repeat(24)}__${workflowTool}`).toHaveLength(76)
 
     const used = new Set<string>()
-    // Canonical alias: "[Workflo] Organisation Workspace" → "workflo"
-    expect(sanitizePiMcpServerName('[Workflo] Organisation Workspace', used)).toBe('workflo')
+    // Bracket rule: "[Team] Workspace" → "team-workspace"
+    expect(sanitizePiMcpServerName('[Team] Workspace', used)).toBe('team-workspace')
     // Second use dedupes instead of colliding
-    expect(sanitizePiMcpServerName('[Workflo] Organisation Workspace', used)).not.toBe('workflo')
-    // Generic bracket rule: "[Workflo] My tasks" → "workflo-my-tasks"
-    expect(sanitizePiMcpServerName('[Workflo] My tasks', new Set())).toBe('workflo-my-tasks')
+    expect(sanitizePiMcpServerName('[Team] Workspace', used)).not.toBe('team-workspace')
+    expect(sanitizePiMcpServerName('[Team] My tasks', new Set())).toBe('team-my-tasks')
 
     const document = buildPiMcpConfigDocument({
-      '[Workflo] Organisation Workspace': {
+      '[Team] Workspace': {
         type: 'http',
         url: 'https://example.com/mcp',
       },
@@ -548,18 +553,46 @@ describe('PiAdapter', () => {
       mcpServers: Record<string, unknown>
     }
     expect(document.settings.directTools).toBe(false)
-    expect(Object.keys(document.mcpServers)).toEqual(['workflo'])
+    expect(Object.keys(document.mcpServers)).toEqual(['team-workspace'])
     // With direct tools disabled, this is the only server-specific tool name
     // registered with the provider; the 50-character suffix stays in MCP.
-    expect('mcp__workflo').toHaveLength(12)
+    expect('mcp__team-workspace').toHaveLength(19)
+  })
+
+  it('removes only the legacy hosted gateway provider from the Pi models file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pi-models-'))
+    const previous = process.env.PI_CODING_AGENT_DIR
+    process.env.PI_CODING_AGENT_DIR = dir
+    try {
+      const modelsPath = join(dir, 'models.json')
+      writeFileSync(modelsPath, JSON.stringify({
+        providers: {
+          peakflo: { baseUrl: 'https://gateway.example.com', apiKey: '$PEAKFLO_AI_GATEWAY_API_KEY' },
+          mine: { baseUrl: 'https://llm.example.com', apiKey: '$MY_KEY' },
+        },
+      }))
+      ;(new PiAdapter() as any).removeLegacyGatewayProvider()
+      expect(JSON.parse(readFileSync(modelsPath, 'utf8'))).toEqual({
+        providers: { mine: { baseUrl: 'https://llm.example.com', apiKey: '$MY_KEY' } },
+      })
+
+      const ownPeakflo = { providers: { peakflo: { baseUrl: 'https://mine.example.com', apiKey: '$OTHER' } } }
+      writeFileSync(modelsPath, JSON.stringify(ownPeakflo))
+      ;(new PiAdapter() as any).removeLegacyGatewayProvider()
+      expect(JSON.parse(readFileSync(modelsPath, 'utf8'))).toEqual(ownPeakflo)
+    } finally {
+      if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR
+      else process.env.PI_CODING_AGENT_DIR = previous
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('prevents the parent environment from forcing direct MCP tools back on', () => {
     const previous = process.env.MCP_DIRECT_TOOLS
     process.env.MCP_DIRECT_TOOLS = '*'
     try {
-      const adapter = new PiAdapter({ getSetting: vi.fn(() => null) } as any)
-      const env = (adapter as any).processEnv({ permissionMode: 'ask' }, null)
+      const adapter = new PiAdapter()
+      const env = (adapter as any).processEnv({ permissionMode: 'ask' })
       expect(env.MCP_DIRECT_TOOLS).toBeUndefined()
     } finally {
       if (previous === undefined) delete process.env.MCP_DIRECT_TOOLS

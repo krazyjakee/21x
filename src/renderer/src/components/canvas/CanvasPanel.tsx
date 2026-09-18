@@ -14,7 +14,6 @@ import { useTaskStore } from '@/stores/task-store'
 import { TaskStatus } from '@/types'
 import { TaskPanelContent } from './TaskPanelContent'
 import { TranscriptPanelContent } from './TranscriptPanelContent'
-import { AppPanelContent } from './AppPanelContent'
 import { WebPagePanelContent } from './WebPagePanelContent'
 import { TerminalPanelContent } from './TerminalPanelContent'
 import { BrowserPanelContent } from './BrowserPanelContent'
@@ -468,7 +467,6 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
     const TYPE_CONFIG: Record<string, { label: string; color: string; border: string; bg: string }> = {
       task: { label: 'Task', color: 'bg-blue-500/20 text-blue-400', border: 'border-blue-500/40', bg: 'bg-[var(--canvas-panel)]' },
       transcript: { label: 'Transcript', color: 'bg-cyan-500/20 text-cyan-300', border: 'border-cyan-500/40', bg: 'bg-[var(--canvas-panel)]' },
-      app: { label: 'App', color: 'bg-teal-500/20 text-teal-300', border: 'border-teal-500/40', bg: 'bg-[var(--canvas-panel)]' },
       webpage: { label: 'Web', color: 'bg-cyan-500/20 text-cyan-400', border: 'border-cyan-500/40', bg: 'bg-[var(--canvas-panel)]' },
       terminal: { label: 'Terminal', color: 'bg-violet-500/20 text-violet-300', border: 'border-violet-500/45', bg: 'bg-[var(--canvas-panel)]' },
       browser: { label: 'Browser', color: 'bg-orange-500/20 text-orange-300', border: 'border-orange-500/40', bg: 'bg-[var(--canvas-panel)]' },
@@ -609,7 +607,7 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
       {!isCollapsed && (
         <div
           data-canvas-content-mounted={suspendHeavyContent ? 'false' : 'true'}
-          className={`flex-1 overflow-hidden min-h-0 ${panel.type === 'task' || panel.type === 'transcript' || panel.type === 'webpage' || panel.type === 'terminal' || panel.type === 'browser' || (panel.type === 'app' && panel.refId) ? '' : 'p-3 overflow-auto'}`}
+          className={`flex-1 overflow-hidden min-h-0 ${panel.type === 'task' || panel.type === 'transcript' || panel.type === 'webpage' || panel.type === 'terminal' || panel.type === 'browser' ? '' : 'p-3 overflow-auto'}`}
           style={frozen ? FROZEN_CONTENT_STYLE : undefined}
         >
           {!suspendHeavyContent && (
@@ -729,9 +727,6 @@ const MemoizedPanelContent = memo(function PanelContent({ type, id, refId, url, 
   }
   if (type === 'transcript' && refId) {
     return <TranscriptPanelContent taskId={refId} />
-  }
-  if (type === 'app') {
-    return <AppPanelContent appId={refId} title={title} />
   }
   if (type === 'webpage') {
     return <WebPagePanelContent panelId={id} url={url} title={title} />

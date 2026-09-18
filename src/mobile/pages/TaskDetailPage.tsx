@@ -184,7 +184,7 @@ export function TaskDetailPage({ taskId, onNavigate }: { taskId: string; onNavig
     try {
       await api.tasks.complete(t.id, completeAtSource)
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Workflo has not confirmed completion.')
+      window.alert(error instanceof Error ? error.message : 'The task source has not confirmed completion.')
     }
   }, [])
 
