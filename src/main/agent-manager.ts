@@ -32,6 +32,7 @@ import { ARTIFACT_WORKSPACE_INSTRUCTIONS, HEARTBEAT_MONITORING_INSTRUCTIONS, bui
 import { setupTaskWorktrees } from './agent-manager/worktree-setup'
 import { listProjectRepos, taskProjectId } from './agent-manager/project-repos'
 import { assistantTextKey, dedupStateFromHistory, hasMatchingErrorMessage, pruneDedup } from './agent-manager/output-dedup'
+import { findCreditExhaustionMessage, normalizeFallbackAgentIds } from './agent-manager/credit-exhaustion'
 import { STUCK_SESSION_TIMEOUT_MS, findStuckTool, hasGarbledOutput, isDelegationTool, isWaitingForUserInput, type RunningTool } from './agent-manager/watchdogs'
 import { MAX_CONCURRENT_AGENT_SESSIONS_SETTING, StartQueue, checkAdmission, isExemptFromAdmission, parseGlobalSessionLimit, type AdmissionReason, type CountedSession, type QueuedStartInfo } from './agent-manager/admission'
 import { collectMissedParts, debugTranscript, emitArtifactUpdatesFromParts, textTranscript, type DebugTranscriptMessage, notifyStatusTransition, transcriptPartsFromEvent, transcriptPartsFromMessages, type OutputMessage } from './agent-manager/transcript-events'
@@ -81,6 +82,16 @@ interface AgentSession {
    *  flag — a released session is always resumable from the persisted
    *  session_id, so nothing is lost. */
   lastActivityAt?: number
+  /** Ordered automatic handoff candidates still available for this task run. */
+  fallbackAgentIds: string[]
+  /** Prevents fallback cycles such as Claude -> Codex -> Claude. */
+  attemptedAgentIds: Set<string>
+  fallbackInProgress?: boolean
+}
+
+interface AgentFallbackState {
+  remainingAgentIds: string[]
+  attemptedAgentIds: Set<string>
 }
 
 /** Entry tracked by the centralized polling coordinator */
@@ -503,6 +514,15 @@ export class AgentManager extends EventEmitter {
     })
   }
 
+  private emitSystemNotice(sessionId: string, taskId: string, id: string, content: string): void {
+    this.sendToRenderer('agent:output', {
+      sessionId,
+      taskId,
+      type: 'message',
+      data: { id, role: 'system', content, partType: 'text' }
+    })
+  }
+
   async stopServer(): Promise<void> {
     const adapter = this.adapters.get(CodingAgentType.OPENCODE)
     if (adapter && 'stopServer' in adapter && typeof (adapter as { stopServer: () => Promise<void> }).stopServer === 'function') {
@@ -527,7 +547,8 @@ export class AgentManager extends EventEmitter {
     taskId: string,
     workspaceDir?: string,
     skipInitialPrompt?: boolean,
-    handoffFromAgentName?: string
+    handoffFromAgentName?: string,
+    inheritedFallbackState?: AgentFallbackState
   ): Promise<string> {
     const agent = this.db.getAgent(agentId)!
     workspaceDir ||= this.db.getWorkspaceDir(taskId)
@@ -581,6 +602,17 @@ export class AgentManager extends EventEmitter {
     }
 
     this.schedulePowerSaveBlockerUpdate()
+    // Keep one shared set across nested startup fallbacks. If a replacement
+    // itself exhausts credits before startAdapterSession returns, the outer
+    // handoff must see every agent the nested handoff already attempted.
+    const attemptedAgentIds = inheritedFallbackState?.attemptedAgentIds ?? new Set<string>()
+    attemptedAgentIds.add(agentId)
+    const configuredFallbacks = normalizeFallbackAgentIds(agent.config?.fallback_agent_ids)
+    const fallbackAgentIds = [
+      ...(inheritedFallbackState?.remainingAgentIds ?? []),
+      ...configuredFallbacks,
+    ].filter((id, index, ids) => id !== agentId && !attemptedAgentIds.has(id) && ids.indexOf(id) === index)
+
     this.sessions.set(adapterSessionId, {
       id: adapterSessionId,
       agentId,
@@ -595,7 +627,9 @@ export class AgentManager extends EventEmitter {
       assistantTextKeys: new Set(),
       adapter,
       isTriageSession,
-      secretSessionToken: secretToken
+      secretSessionToken: secretToken,
+      fallbackAgentIds,
+      attemptedAgentIds
     })
 
     this.updateTaskFromLocalAgent(taskId, { session_id: adapterSessionId })
@@ -658,6 +692,11 @@ export class AgentManager extends EventEmitter {
         await adapter.sendPrompt(adapterSessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
       } catch (sendError) {
         console.error(`[AgentManager] sendPrompt FAILED:`, sendError)
+        const message = sendError instanceof Error ? sendError.message : String(sendError)
+        const session = this.sessions.get(adapterSessionId)
+        if (session && findCreditExhaustionMessage([message]) && await this.tryAutomaticFallback(adapterSessionId, session, message)) {
+          return this.findSessionByTaskId(taskId)?.sessionId || adapterSessionId
+        }
         throw sendError
       }
     }
@@ -973,7 +1012,7 @@ export class AgentManager extends EventEmitter {
       const session = this.sessions.get(sessionId)
 
       if (status.type === SessionStatusType.ERROR) {
-        this.handleErrorStatus(sessionId, session, config, status, batchMessages)
+        await this.handleErrorStatus(sessionId, session, config, status, batchMessages)
       } else if (status.type === SessionStatusType.WAITING_APPROVAL && session) {
         this.handleWaitingApprovalStatus(sessionId, session, config)
       } else if (status.type === SessionStatusType.BUSY && session) {
@@ -1152,13 +1191,13 @@ export class AgentManager extends EventEmitter {
     }
   }
 
-  private handleErrorStatus(
+  private async handleErrorStatus(
     sessionId: string,
     session: AgentSession | undefined,
     config: SessionConfig,
     status: AdapterSessionStatus,
     batchMessages: OutputMessage[]
-  ): void {
+  ): Promise<void> {
     if (status.message?.includes('INCOMPATIBLE_SESSION_ID')) {
       console.warn('[AgentManager] Incompatible session detected during polling:', sessionId)
       this.updateTaskFromLocalAgent(config.taskId, { session_id: null })
@@ -1183,12 +1222,96 @@ export class AgentManager extends EventEmitter {
       this.emitSystemError(sessionId, config.taskId, `error-${Date.now()}`, status.message || 'An unexpected error occurred. Check logs for details.')
     }
 
+    const exhaustionMessage = findCreditExhaustionMessage([
+      status.message,
+      ...batchMessages
+        .filter((message) => message.partType === MessagePartType.ERROR || message.role === 'system')
+        .map((message) => message.content)
+    ])
+    if (session && exhaustionMessage && await this.tryAutomaticFallback(sessionId, session, exhaustionMessage)) {
+      return
+    }
+
     if (session) {
       session.status = 'error'
       session.pollingStarted = false
       this.emitStatus(sessionId, config, 'error')
     }
     this.stopAdapterPolling(sessionId)
+  }
+
+  /**
+   * Moves an exhausted task to the next configured agent. The shared worktree
+   * and durable transcript remain in place; switchAgentWithContext seeds the
+   * new backend with the conversation recap and carries the rest of the chain.
+   */
+  private async tryAutomaticFallback(
+    sessionId: string,
+    session: AgentSession,
+    exhaustionMessage: string
+  ): Promise<boolean> {
+    if (session.fallbackInProgress || session.fallbackAgentIds.length === 0) return false
+    session.fallbackInProgress = true
+
+    while (session.fallbackAgentIds.length > 0) {
+      const fallbackAgentId = session.fallbackAgentIds.shift()!
+      if (session.attemptedAgentIds.has(fallbackAgentId)) continue
+      session.attemptedAgentIds.add(fallbackAgentId)
+
+      const fallbackAgent = this.db.getAgent(fallbackAgentId)
+      if (!fallbackAgent) {
+        console.warn(`[AgentManager] Skipping deleted fallback agent ${fallbackAgentId} for task ${session.taskId}`)
+        continue
+      }
+
+      const currentAgent = this.db.getAgent(session.agentId)
+      const fromName = currentAgent?.name || 'the current agent'
+      const detail = exhaustionMessage.replace(/\s+/g, ' ').trim().slice(0, 300)
+      this.emitSystemNotice(
+        sessionId,
+        session.taskId,
+        `automatic-fallback-${Date.now()}`,
+        `${fromName} cannot continue because its credits or usage quota are exhausted. Automatically handing off to ${fallbackAgent.name}.${detail ? `\n\nProvider message: ${detail}` : ''}`
+      )
+
+      try {
+        await this.switchAgentWithContext(session.taskId, fallbackAgentId, {
+          remainingAgentIds: [...session.fallbackAgentIds],
+          attemptedAgentIds: session.attemptedAgentIds
+        })
+        console.log(`[AgentManager] Automatic fallback succeeded for task ${session.taskId}: ${session.agentId} -> ${fallbackAgentId}`)
+        return true
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.error(`[AgentManager] Automatic fallback to ${fallbackAgent.name} failed:`, error)
+        this.emitSystemError(
+          '',
+          session.taskId,
+          `automatic-fallback-error-${Date.now()}`,
+          `Could not start fallback agent ${fallbackAgent.name}: ${message}`
+        )
+
+        // A failure after createSession may leave a partially-created runtime.
+        // Release it before trying the next candidate in the ordered chain.
+        const partial = this.findSessionByTaskId(session.taskId)
+        if (partial && partial.session.agentId === fallbackAgentId) {
+          await this.stopSession(partial.sessionId, false)
+          this.updateTaskFromLocalAgent(session.taskId, { session_id: null })
+        }
+      }
+    }
+
+    session.fallbackInProgress = false
+    if (!this.findSessionByTaskId(session.taskId)) {
+      this.updateTaskFromLocalAgent(session.taskId, { session_id: null })
+    }
+    this.emitSystemError(
+      '',
+      session.taskId,
+      `automatic-fallback-exhausted-${Date.now()}`,
+      'Every configured fallback agent was unavailable. The task has been stopped so you can review the agent configuration and retry.'
+    )
+    return false
   }
 
   private handleWaitingApprovalStatus(sessionId: string, session: AgentSession, config: SessionConfig): void {
@@ -1534,7 +1657,10 @@ export class AgentManager extends EventEmitter {
       ...dedupState,
       adapter,
       pollingStarted: false,
-      secretSessionToken: secretToken
+      secretSessionToken: secretToken,
+      fallbackAgentIds: normalizeFallbackAgentIds(agent.config?.fallback_agent_ids)
+        .filter((id) => id !== agentId),
+      attemptedAgentIds: new Set([agentId])
     })
 
     // Persist the resumed session binding and tell the renderer BEFORE any
@@ -1692,6 +1818,14 @@ export class AgentManager extends EventEmitter {
    * blank slate.
    */
   async switchAgent(taskId: string, newAgentId: string): Promise<string> {
+    return this.switchAgentWithContext(taskId, newAgentId)
+  }
+
+  private async switchAgentWithContext(
+    taskId: string,
+    newAgentId: string,
+    fallbackState?: AgentFallbackState
+  ): Promise<string> {
     const task = this.db.getTask(taskId)
     if (!task) throw new Error(`Task not found: ${taskId}`)
 
@@ -1715,6 +1849,10 @@ export class AgentManager extends EventEmitter {
     await this.stopByTaskId(taskId)
 
     this.updateTaskFromLocalAgent(taskId, { agent_id: newAgentId })
+    this.sendToRenderer('task:updated', {
+      taskId,
+      updates: { agent_id: newAgentId }
+    })
 
     // Same workspace resolution as startSession() — reuses the existing
     // worktrees, or repairs them if they went missing.
@@ -1726,7 +1864,8 @@ export class AgentManager extends EventEmitter {
       taskId,
       workspaceDir,
       false,
-      previousAgent?.name || 'a previous agent'
+      previousAgent?.name || 'a previous agent',
+      fallbackState
     )
   }
 
@@ -2723,7 +2862,7 @@ export class AgentManager extends EventEmitter {
   private sendInBackground(session: AgentSession, sessionId: string, message: string, attachments?: MessageAttachmentRef[]): void {
     this.doSendAdapterMessage(session, sessionId, message, attachments).catch((err) => {
       console.error(`[AgentManager] doSendAdapterMessage failed for session ${sessionId}:`, err)
-      this.handleSessionError(sessionId, session, err)
+      return this.handleSessionError(sessionId, session, err)
     })
   }
 
@@ -2734,9 +2873,12 @@ export class AgentManager extends EventEmitter {
    * and the user can retry with "continue". The session stays recoverable:
    * the next send clears the error state (see doSendAdapterMessage).
    */
-  private handleSessionError(sessionId: string, session: AgentSession, err: unknown): void {
+  private async handleSessionError(sessionId: string, session: AgentSession, err: unknown): Promise<void> {
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[AgentManager] Session ${sessionId} error:`, message)
+    if (findCreditExhaustionMessage([message]) && await this.tryAutomaticFallback(sessionId, session, message)) {
+      return
+    }
     session.status = 'error'
     this.emitSystemError(
       sessionId,

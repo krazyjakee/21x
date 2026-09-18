@@ -207,6 +207,56 @@ describe('AgentManager skill file paths', () => {
     })
   })
 
+  describe('automatic credit fallback', () => {
+    it('hands off to the first available fallback and carries the remaining chain', async () => {
+      const mockDb = createMockDb({ coding_agent: 'claude-code' }) as any
+      mockDb.getAgent.mockImplementation((id: string) => ({
+        id,
+        name: id === 'agent-1' ? 'Claude Opus' : id === 'agent-2' ? 'Astra' : 'GPT 6',
+        config: { coding_agent: 'claude-code' }
+      }))
+      const mgr = new AgentManager(mockDb)
+      const switchSpy = vi.spyOn(mgr as any, 'switchAgentWithContext').mockResolvedValue('fallback-session')
+      const session = {
+        id: 'session-1',
+        agentId: 'agent-1',
+        taskId: 'task-1',
+        fallbackAgentIds: ['agent-2', 'agent-3'],
+        attemptedAgentIds: new Set(['agent-1']),
+      }
+
+      await expect((mgr as any).tryAutomaticFallback(
+        'session-1',
+        session,
+        'Credit balance is too low'
+      )).resolves.toBe(true)
+
+      expect(switchSpy).toHaveBeenCalledWith('task-1', 'agent-2', {
+        remainingAgentIds: ['agent-3'],
+        attemptedAgentIds: new Set(['agent-1', 'agent-2'])
+      })
+    })
+
+    it('skips fallback agents already attempted in this task run', async () => {
+      const mockDb = createMockDb({ coding_agent: 'claude-code' }) as any
+      mockDb.getAgent.mockImplementation((id: string) => ({ id, name: id, config: { coding_agent: 'claude-code' } }))
+      const mgr = new AgentManager(mockDb)
+      const switchSpy = vi.spyOn(mgr as any, 'switchAgentWithContext').mockResolvedValue('fallback-session')
+      const session = {
+        id: 'session-2',
+        agentId: 'agent-2',
+        taskId: 'task-1',
+        fallbackAgentIds: ['agent-1', 'agent-3'],
+        attemptedAgentIds: new Set(['agent-1', 'agent-2']),
+      }
+
+      await (mgr as any).tryAutomaticFallback('session-2', session, 'Quota exceeded')
+
+      expect(switchSpy).toHaveBeenCalledOnce()
+      expect(switchSpy.mock.calls[0][1]).toBe('agent-3')
+    })
+  })
+
   describe('shouldEnableTillDone', () => {
     it('disables tillDone for Mastermind sessions', () => {
       expect(shouldEnableTillDone('mastermind-task-row', { role: 'mastermind' } as TaskRecord)).toBe(false)

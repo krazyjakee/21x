@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Loader2, ChevronRight, Plus, X } from 'lucide-react'
+import { Loader2, ChevronRight, Plus, X, ArrowUp, ArrowDown } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -10,6 +10,7 @@ import { SearchableSelect } from '@/components/ui/SearchableSelect'
 import { agentConfigApi } from '@/lib/ipc-client'
 import { useMcpStore } from '@/stores/mcp-store'
 import { useSkillStore } from '@/stores/skill-store'
+import { useAgentStore } from '@/stores/agent-store'
 import { SkillSelectorDialog } from '@/components/skills/SkillSelectorDialog'
 import { SecretSelector } from '@/components/secrets/SecretSelector'
 import { CLAUDE_REASONING_EFFORT_VALUES, CODEX_REASONING_EFFORT_VALUES } from '@shared/reasoning-effort'
@@ -53,6 +54,7 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
   const [skillIds, setSkillIds] = useState<string[] | undefined>(agent?.config.skill_ids)
   const [showSkillSelector, setShowSkillSelector] = useState(false)
   const [secretIds, setSecretIds] = useState<string[]>(agent?.config.secret_ids ?? [])
+  const [fallbackAgentIds, setFallbackAgentIds] = useState<string[]>(agent?.config.fallback_agent_ids ?? [])
   const [mcpSelection, setMcpSelection] = useState<Map<string, string[] | undefined>>(
     () => parseMcpSelection(agent?.config.mcp_servers)
   )
@@ -81,6 +83,8 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
 
   const { servers: globalMcpServers, fetchServers: fetchMcpServers } = useMcpStore()
   const { skills, fetchSkills } = useSkillStore()
+  const configuredAgents = useAgentStore((state) => state.agents)
+  const fallbackCandidates = configuredAgents.filter((candidate) => candidate.id !== agent?.id)
   const supportsReasoningEffort = codingAgent === CodingAgentType.CLAUDE_CODE || codingAgent === CodingAgentType.CODEX
   const reasoningEffortValues = codingAgent === CodingAgentType.CLAUDE_CODE
     ? CLAUDE_REASONING_EFFORT_VALUES
@@ -251,6 +255,7 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
         mcp_servers: mcpServersConfig.length > 0 ? mcpServersConfig : undefined,
         skill_ids: skillIds,
         secret_ids: secretIds.length > 0 ? secretIds : undefined,
+        fallback_agent_ids: fallbackAgentIds.length > 0 ? fallbackAgentIds : undefined,
         api_keys: {
           // Only persist the OpenAI key when Codex is in api_key mode
           openai: (codingAgent === CodingAgentType.CODEX && authMethod === 'api_key')
@@ -676,6 +681,80 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
         <p className="text-xs text-muted-foreground">
           How many tasks this agent can work on at the same time (1-10)
         </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="fallback-agent">Automatic Fallbacks</Label>
+        <p className="text-xs text-muted-foreground">
+          If this agent runs out of credits or usage quota, continue the same task with these agents in order.
+        </p>
+        {fallbackAgentIds.length > 0 && (
+          <div className="space-y-1.5">
+            {fallbackAgentIds.map((fallbackId, index) => {
+              const fallback = configuredAgents.find((candidate) => candidate.id === fallbackId)
+              return (
+                <div key={fallbackId} className="flex items-center gap-2 rounded-md border border-border px-3 py-2">
+                  <span className="w-5 text-xs text-muted-foreground">{index + 1}.</span>
+                  <span className="min-w-0 flex-1 truncate text-sm">{fallback?.name || 'Unavailable agent'}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    disabled={index === 0}
+                    aria-label={`Move ${fallback?.name || 'fallback'} up`}
+                    onClick={() => setFallbackAgentIds((ids) => {
+                      const next = [...ids]
+                      ;[next[index - 1], next[index]] = [next[index], next[index - 1]]
+                      return next
+                    })}
+                  >
+                    <ArrowUp className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    disabled={index === fallbackAgentIds.length - 1}
+                    aria-label={`Move ${fallback?.name || 'fallback'} down`}
+                    onClick={() => setFallbackAgentIds((ids) => {
+                      const next = [...ids]
+                      ;[next[index], next[index + 1]] = [next[index + 1], next[index]]
+                      return next
+                    })}
+                  >
+                    <ArrowDown className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Remove ${fallback?.name || 'fallback'}`}
+                    onClick={() => setFallbackAgentIds((ids) => ids.filter((id) => id !== fallbackId))}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+        <select
+          id="fallback-agent"
+          value=""
+          onChange={(event) => {
+            const id = event.target.value
+            if (id) setFallbackAgentIds((ids) => ids.includes(id) ? ids : [...ids, id])
+          }}
+          className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm cursor-pointer"
+          disabled={fallbackCandidates.every((candidate) => fallbackAgentIds.includes(candidate.id))}
+        >
+          <option value="">Add a fallback agent...</option>
+          {fallbackCandidates
+            .filter((candidate) => !fallbackAgentIds.includes(candidate.id))
+            .map((candidate) => (
+              <option key={candidate.id} value={candidate.id}>{candidate.name}</option>
+            ))}
+        </select>
       </div>
 
       <div className="space-y-2">

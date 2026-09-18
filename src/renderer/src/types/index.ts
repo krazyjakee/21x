@@ -186,6 +186,8 @@ export interface AgentConfig {
   mcp_servers?: Array<string | AgentMcpServerEntry>
   skill_ids?: string[]
   secret_ids?: string[]
+  /** Ordered agents to try when this agent exhausts its credits or usage quota. */
+  fallback_agent_ids?: string[]
   max_parallel_sessions?: number  // Default: 1, range: 1-10
   api_keys?: {
     openai?: string  // For Codex

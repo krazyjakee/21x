@@ -58,6 +58,9 @@ export interface AgentConfigRecord {
   mcp_servers?: Array<string | AgentMcpServerEntry>
   skill_ids?: string[]
   secret_ids?: string[]
+  /** Ordered agents to try when this agent exhausts its credits or usage quota. */
+  fallback_agent_ids?: string[]
+  max_parallel_sessions?: number
   api_keys?: {
     openai?: string
     anthropic?: string
