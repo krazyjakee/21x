@@ -105,8 +105,6 @@ export const FONT_FAMILIES = [
   { id: 'mono', label: 'Mono', css: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
 ] as const
 
-export type FontFamilyId = (typeof FONT_FAMILIES)[number]['id']
-
 /** Resolve a font family id to its CSS font-family stack. */
 export function fontCssFor(id: string): string {
   const match = FONT_FAMILIES.find((f) => f.id === id)

@@ -4,7 +4,6 @@ import {
   buildSystemMessage,
   computeDeliveryId,
   evaluateAuthorityGate,
-  isSystemGeneratedMessage,
   FINDINGS_BEGIN,
   FINDINGS_END,
   SYSTEM_MESSAGE_MARKER,
@@ -71,7 +70,6 @@ describe('buildSystemMessage', () => {
   it('marks the message as machine-authored and non-authorizing', () => {
     const message = buildSystemMessage(meta, 'Header', INCIDENT_FINDINGS, 'Trailer')
     expect(message.startsWith(SYSTEM_MESSAGE_MARKER)).toBe(true)
-    expect(isSystemGeneratedMessage(message)).toBe(true)
     expect(message).toContain('human_authored=false')
     expect(message).toContain('authorizes_actions=false')
     expect(message).toContain(`origin=${SystemMessageOrigin.Heartbeat}`)

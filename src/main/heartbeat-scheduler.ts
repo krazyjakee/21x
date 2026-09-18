@@ -2,36 +2,12 @@ import { guardedIpcSend } from './guarded-ipc-send'
 import { BrowserWindow, Notification } from 'electron'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { dirname } from 'path'
-import { execFile } from 'child_process'
-import { promisify } from 'util'
 import { join } from 'path'
 import type { DatabaseManager, TaskRecord } from './database'
 import type { AgentManager } from './agent-manager'
 import { HeartbeatStatus, HEARTBEAT_OK_TOKEN, HEARTBEAT_INFO_TOKEN, HEARTBEAT_DEFAULTS, TaskStatus } from '../shared/constants'
 import { buildSystemMessage, computeDeliveryId, evaluateAuthorityGate, SystemMessageOrigin } from '../shared/system-authority'
-
-const execFileAsync = promisify(execFile)
-
-/**
- * Matches a GitHub PR/issue URL. Non-global so it is safe for repeated `.test()`
- * calls (a global regex would carry `lastIndex` between calls).
- */
-const GITHUB_URL_PATTERN = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/(?:pull|issues)\/\d+/
-
-/**
- * Headings whose body is context the agent wrote for itself (status logs, past
- * findings, notes) rather than instructions to run. Lines under these headings
- * are not treated as checks when deciding whether pre-flight covers the file.
- *
- * Whole words only, so e.g. "Backlog" or "Catalog" are not informational.
- */
-const INFORMATIONAL_HEADING_PATTERN = /\b(status|findings?|notes?|context|history|summary|progress|log|results?)\b/i
-
-/**
- * Headings that describe work to do. These are never informational, even when
- * they also mention an informational word (e.g. "Status checks", "Monitor logs").
- */
-const ACTIONABLE_HEADING_PATTERN = /\b(checks?|checklist|monitor(ing)?|verify|watch|todo|tasks?|instructions?)\b/i
+import { extractGitHubUrls, requiresCurrentStateChecks, runPreflightChecks } from './heartbeat-preflight'
 
 /**
  * HeartbeatScheduler - Periodic monitoring of tasks in ready_for_review status
@@ -83,10 +59,8 @@ export class HeartbeatScheduler {
     this.mainWindow = mainWindow
     console.log('[HeartbeatScheduler] Starting scheduler...')
 
-    // Run immediately on startup
     this.checkHeartbeats()
 
-    // Then run every 60 seconds
     this.intervalId = setInterval(() => {
       this.checkHeartbeats()
     }, this.CHECK_INTERVAL)
@@ -267,14 +241,11 @@ export class HeartbeatScheduler {
 
   private async checkHeartbeats(): Promise<void> {
     try {
-      // Check if heartbeat is globally enabled
       const globalEnabled = this.dbManager.getSetting('heartbeat_enabled_global')
       if (globalEnabled === 'false') return
 
-      // Check active hours
       if (!this.isWithinActiveHours()) return
 
-      // Query due tasks
       const dueTasks = this.dbManager.getHeartbeatDueTasks()
 
       if (dueTasks.length === 0) return
@@ -287,7 +258,6 @@ export class HeartbeatScheduler {
         }
       }
 
-      // Filter out tasks already being processed
       const actionableTasks = dueTasks.filter(t => !this.inProgress.has(t.id))
 
       if (actionableTasks.length === 0) return
@@ -364,7 +334,7 @@ export class HeartbeatScheduler {
       console.log(`[HeartbeatScheduler] Running heartbeat for task "${task.title}" (${task.id})`)
 
       // Phase 1: Pre-flight checks (cheap, no LLM)
-      const preflightResult = await this.runPreflightChecks(heartbeatContent, task)
+      const preflightResult = await runPreflightChecks(heartbeatContent, task.heartbeat_last_check_at)
       if (preflightResult === 'no_changes') {
         console.log(`[HeartbeatScheduler] Pre-flight: no changes for task "${task.title}", skipping LLM`)
         this.logResult(task.id, HeartbeatStatus.Ok, 'Pre-flight: no changes detected (LLM skipped)')
@@ -453,7 +423,7 @@ export class HeartbeatScheduler {
   private buildHeartbeatPrompt(task: TaskRecord, heartbeatContent: string): string {
     const globalInstructions = this.dbManager.getSetting('heartbeat_global_instructions') || ''
     const lastCheck = task.heartbeat_last_check_at
-    const hasGitHubPullLink = this.extractGitHubUrls(heartbeatContent).some(url => url.type === 'pull')
+    const hasGitHubPullLink = extractGitHubUrls(heartbeatContent).some(url => url.type === 'pull')
 
     let prompt = `Heartbeat check for task: "${task.title}"\n\n`
 
@@ -461,7 +431,7 @@ export class HeartbeatScheduler {
       prompt += `IMPORTANT: Only consider events after ${lastCheck}. Ignore anything older — it has already been handled.\n\n`
     }
 
-    if (hasGitHubPullLink || this.requiresCurrentStateChecks(heartbeatContent)) {
+    if (hasGitHubPullLink || requiresCurrentStateChecks(heartbeatContent)) {
       prompt += 'For checks about current state (for example merge conflicts, unresolved requested changes, or the latest CI status), inspect the current state even if the problem started before the last check.\n\n'
     }
 
@@ -678,7 +648,6 @@ export class HeartbeatScheduler {
    * Send notification when heartbeat detects something needs attention.
    */
   private notifyAttentionNeeded(task: TaskRecord, summary: string): void {
-    // Electron notification
     try {
       const notification = new Notification({
         title: `Heartbeat Alert: ${task.title}`,
@@ -689,7 +658,6 @@ export class HeartbeatScheduler {
       console.error('[HeartbeatScheduler] Failed to show notification:', err)
     }
 
-    // Renderer notification
     this.sendToRenderer('heartbeat:alert', {
       taskId: task.id,
       title: task.title,
@@ -724,7 +692,6 @@ export class HeartbeatScheduler {
     let effectiveInterval = baseInterval
 
     if (isOk) {
-      // Count consecutive OKs to determine if we should slow down
       const consecutiveOks = this.countConsecutiveOks(task.id)
       if (consecutiveOks >= 6) {
         effectiveInterval = baseInterval * 4 // 4x after 6+ OKs
@@ -764,10 +731,9 @@ export class HeartbeatScheduler {
    * Check for consecutive errors and auto-disable if threshold is exceeded.
    */
   private checkConsecutiveErrors(taskId: string): void {
-    const maxErrors = this.getMaxConsecutiveErrors()
     const consecutiveErrors = this.dbManager.getHeartbeatConsecutiveErrors(taskId)
 
-    if (consecutiveErrors >= maxErrors) {
+    if (consecutiveErrors >= this.MAX_CONSECUTIVE_ERRORS) {
       console.log(`[HeartbeatScheduler] Auto-disabling heartbeat for task ${taskId} after ${consecutiveErrors} consecutive errors`)
       this.disableHeartbeat(taskId)
 
@@ -791,304 +757,11 @@ export class HeartbeatScheduler {
     }
   }
 
-  // ── Pre-flight Checks (Phase 4.1 — cheap, no LLM) ────────
-
-  /**
-   * Parse heartbeat.md for GitHub PR/issue URLs and check for changes
-   * using `gh api` directly — avoids spinning up an LLM session.
-   *
-   * Returns:
-   * - 'no_changes': all checked items have no updates since last check
-   * - 'changes_detected': something changed, need LLM to analyze
-   * - 'inconclusive': couldn't determine (no URLs found, or gh cli error)
-   */
-  private async runPreflightChecks(heartbeatContent: string, task: TaskRecord): Promise<'no_changes' | 'changes_detected' | 'inconclusive'> {
-    // Extract GitHub PR and issue URLs
-    const githubUrls = this.extractGitHubUrls(heartbeatContent)
-
-    if (githubUrls.length === 0) {
-      return 'inconclusive' // No URLs to check — need LLM
-    }
-
-    // Pre-flight can only clear a heartbeat when EVERY check in the file is a
-    // GitHub check it knows how to verify with `gh api`. A file that mixes PR
-    // links with free-text instructions (e.g. "Monitor if any new transactions
-    // appeared in the profiler") would otherwise be marked 'no_changes' purely
-    // because GitHub was quiet, and the free-text checks would silently never run.
-    if (!this.preflightCoversAllChecks(heartbeatContent)) {
-      return 'inconclusive'
-    }
-
-    const lastCheck = task.heartbeat_last_check_at
-    if (!lastCheck) {
-      return 'inconclusive' // First check — need LLM to establish baseline
-    }
-
-    // Phase 1: Always check CI status for PRs (cheap, catches deployment failures)
-    // This runs even when current-state checks are needed, so CI failures are never missed.
-    const pullUrls = githubUrls.filter(u => u.type === 'pull')
-    for (const url of pullUrls) {
-      try {
-        const { stdout: prJson } = await execFileAsync('gh', [
-          'api',
-          `repos/${url.owner}/${url.repo}/pulls/${url.number}`,
-          '--jq', '.head.sha'
-        ], { timeout: 15_000 })
-
-        const headSha = prJson.trim()
-        if (headSha) {
-          const hasFailed = await this.hasFailedCheckRuns(url.owner, url.repo, headSha)
-          if (hasFailed) {
-            console.log(`[HeartbeatScheduler] Pre-flight: CI failure detected for ${url.owner}/${url.repo}#${url.number}`)
-            return 'changes_detected'
-          }
-        }
-      } catch {
-        // CI check failed — fall through to LLM
-        return 'inconclusive'
-      }
-    }
-
-    // Phase 2: If heartbeat needs current-state checks that pre-flight cannot
-    // reliably interpret (for example unresolved requested changes), delegate to
-    // the LLM. Conflict state, CI status, comments, and reviews are covered by
-    // the hard checks above/below.
-    if (this.requiresLlmCurrentStateChecks(heartbeatContent)) {
-      return 'inconclusive'
-    }
-
-    // Phase 3: Check for new activity since last check (comments, reviews, merge conflicts)
-    let hasChanges = false
-
-    for (const url of githubUrls) {
-      try {
-        const changed = await this.checkGitHubUrlForChanges(url, lastCheck)
-        if (changed) {
-          hasChanges = true
-          break // One change is enough to trigger LLM
-        }
-      } catch {
-        return 'inconclusive' // gh cli error — fall through to LLM
-      }
-    }
-
-    return hasChanges ? 'changes_detected' : 'no_changes'
-  }
-
-  /**
-   * Detect whether the heartbeat instructions require checking the current state,
-   * not just new activity since the last run.
-   */
-  private requiresCurrentStateChecks(heartbeatContent: string): boolean {
-    return /(requested changes|request changes|merge conflict|conflict|ci\b|pipeline|status check|check run)/i.test(heartbeatContent)
-  }
-
-  private requiresLlmCurrentStateChecks(heartbeatContent: string): boolean {
-    return /(requested changes|request changes)/i.test(heartbeatContent)
-  }
-
-  /**
-   * Whether every check in heartbeat.md is a GitHub check that pre-flight can
-   * verify on its own. Only then may pre-flight report 'no_changes' and skip the
-   * LLM entirely.
-   *
-   * A "check line" is any non-empty line that is not a heading, horizontal rule,
-   * blockquote, or fenced code — minus the bodies of purely informational
-   * sections (`## Current Status`, `## Latest Finding`, …), which agents use to
-   * record context rather than instructions.
-   *
-   * Returns false when there are no check lines at all: an instruction-free file
-   * gives pre-flight nothing to reason about, so the LLM should look at it.
-   */
-  private preflightCoversAllChecks(heartbeatContent: string): boolean {
-    let inCodeFence = false
-    let inInformationalSection = false
-    let checkLines = 0
-
-    for (const rawLine of heartbeatContent.split('\n')) {
-      const line = rawLine.trim()
-      if (!line) continue
-
-      if (/^(```|~~~)/.test(line)) {
-        inCodeFence = !inCodeFence
-        continue
-      }
-      if (inCodeFence) continue
-
-      // Horizontal rules — `---`/`***`/`___` only, never a `- [ ]` list item
-      if (/^(-{3,}|\*{3,}|_{3,})$/.test(line)) continue
-      if (line.startsWith('>')) continue
-
-      if (line.startsWith('#')) {
-        inInformationalSection =
-          INFORMATIONAL_HEADING_PATTERN.test(line) && !ACTIONABLE_HEADING_PATTERN.test(line)
-        continue
-      }
-      if (inInformationalSection) continue
-
-      checkLines++
-      if (!GITHUB_URL_PATTERN.test(line)) return false
-    }
-
-    return checkLines > 0
-  }
-
-  private hasMergeConflicts(prState: { mergeable: boolean | null; mergeable_state?: string | null }): boolean {
-    return prState.mergeable_state === 'dirty'
-  }
-
-  /**
-   * Check if a commit has any failed CI check-runs or commit statuses.
-   * Uses the combined status endpoint which aggregates both check-runs and commit statuses.
-   */
-  private async hasFailedCheckRuns(owner: string, repo: string, sha: string): Promise<boolean> {
-    try {
-      // Check check-runs (GitHub Actions, etc.)
-      const { stdout: checkRunsJson } = await execFileAsync('gh', [
-        'api',
-        `repos/${owner}/${repo}/commits/${sha}/check-runs`,
-        '--jq', '[.check_runs[] | select(.status == "completed" and (.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled"))] | length'
-      ], { timeout: 15_000 })
-
-      const failedCheckRuns = parseInt(checkRunsJson.trim(), 10)
-      if (failedCheckRuns > 0) return true
-
-      // Check commit statuses (Vercel, external CI, etc.)
-      const { stdout: statusJson } = await execFileAsync('gh', [
-        'api',
-        `repos/${owner}/${repo}/commits/${sha}/status`,
-        '--jq', '[.statuses[] | select(.state == "failure" or .state == "error")] | length'
-      ], { timeout: 15_000 })
-
-      const failedStatuses = parseInt(statusJson.trim(), 10)
-      return failedStatuses > 0
-    } catch {
-      // If we can't determine CI status, signal inconclusive (caller will throw → LLM fallback)
-      return false
-    }
-  }
-
-  /**
-   * Extract GitHub PR and issue URLs from heartbeat.md content.
-   * Matches patterns like:
-   * - https://github.com/owner/repo/pull/123
-   * - https://github.com/owner/repo/issues/456
-   */
-  private extractGitHubUrls(content: string): Array<{ owner: string; repo: string; type: 'pull' | 'issue'; number: number }> {
-    const urlRegex = /https:\/\/github\.com\/([^/]+)\/([^/]+)\/(pull|issues)\/(\d+)/g
-    const results: Array<{ owner: string; repo: string; type: 'pull' | 'issue'; number: number }> = []
-    let match
-
-    while ((match = urlRegex.exec(content)) !== null) {
-      results.push({
-        owner: match[1],
-        repo: match[2],
-        type: match[3] === 'pull' ? 'pull' : 'issue',
-        number: parseInt(match[4], 10)
-      })
-    }
-
-    return results
-  }
-
-  /**
-   * Check a single GitHub PR/issue for changes since lastCheck.
-   * Uses `gh api` to fetch comments and reviews updated after lastCheck.
-   */
-  private async checkGitHubUrlForChanges(
-    url: { owner: string; repo: string; type: 'pull' | 'issue'; number: number },
-    lastCheck: string
-  ): Promise<boolean> {
-    try {
-      if (url.type === 'pull') {
-        // Check PR comments
-        const { stdout: commentsJson } = await execFileAsync('gh', [
-          'api',
-          `repos/${url.owner}/${url.repo}/pulls/${url.number}/comments`,
-          '--jq', `[.[] | select(.updated_at > "${lastCheck}")] | length`
-        ], { timeout: 15_000 })
-
-        const newComments = parseInt(commentsJson.trim(), 10)
-        if (newComments > 0) return true
-
-        // Check PR reviews
-        const { stdout: reviewsJson } = await execFileAsync('gh', [
-          'api',
-          `repos/${url.owner}/${url.repo}/pulls/${url.number}/reviews`,
-          '--jq', `[.[] | select(.submitted_at > "${lastCheck}")] | length`
-        ], { timeout: 15_000 })
-
-        const newReviews = parseInt(reviewsJson.trim(), 10)
-        if (newReviews > 0) return true
-
-        // Check issue comments on the PR
-        const { stdout: issueCommentsJson } = await execFileAsync('gh', [
-          'api',
-          `repos/${url.owner}/${url.repo}/issues/${url.number}/comments`,
-          '--jq', `[.[] | select(.updated_at > "${lastCheck}")] | length`
-        ], { timeout: 15_000 })
-
-        const newIssueComments = parseInt(issueCommentsJson.trim(), 10)
-        if (newIssueComments > 0) return true
-
-        // Check CI/check-run status — detect failed checks
-        const { stdout: checkRunsJson } = await execFileAsync('gh', [
-          'api',
-          `repos/${url.owner}/${url.repo}/pulls/${url.number}`,
-          '--jq', '{ mergeable: .mergeable, mergeable_state: .mergeable_state, head_sha: .head.sha }'
-        ], { timeout: 15_000 })
-
-        const prState = JSON.parse(checkRunsJson.trim()) as { mergeable: boolean | null; mergeable_state?: string | null; head_sha?: string }
-
-        // Check for merge conflicts
-        if (this.hasMergeConflicts(prState)) return true
-
-        // Check for failed CI check-runs on the HEAD commit
-        if (prState.head_sha) {
-          const hasFailedChecks = await this.hasFailedCheckRuns(url.owner, url.repo, prState.head_sha)
-          if (hasFailedChecks) return true
-        }
-
-        return false
-      } else {
-        // Check issue comments
-        const { stdout: commentsJson } = await execFileAsync('gh', [
-          'api',
-          `repos/${url.owner}/${url.repo}/issues/${url.number}/comments`,
-          '--jq', `[.[] | select(.updated_at > "${lastCheck}")] | length`
-        ], { timeout: 15_000 })
-
-        const newComments = parseInt(commentsJson.trim(), 10)
-        return newComments > 0
-      }
-    } catch (err) {
-      console.warn(`[HeartbeatScheduler] Pre-flight check failed for ${url.owner}/${url.repo}#${url.number}:`, err)
-      throw err // Signal inconclusive
-    }
-  }
-
   // ── Helpers ──────────────────────────────────────────────
 
-  /**
-   * Resolve which agent to use for heartbeat. Priority:
-   * 1. Setting: heartbeat_agent_id (dedicated cheap agent)
-   * 2. Task's own agent_id
-   * 3. Default agent
-   */
+  /** Heartbeats run on the task's own agent, else the default agent. */
   private resolveAgentId(task: TaskRecord): string | null {
-    // Check for dedicated heartbeat agent
-    const heartbeatAgentId = this.dbManager.getSetting('heartbeat_agent_id')
-    if (heartbeatAgentId) {
-      const agent = this.dbManager.getAgent(heartbeatAgentId)
-      if (agent) return heartbeatAgentId
-    }
-
-    // Use task's own agent
-    if (task.agent_id) {
-      return task.agent_id
-    }
-
-    // Fall back to default agent
+    if (task.agent_id) return task.agent_id
     const agents = this.dbManager.getAgents()
     const defaultAgent = agents.find(a => a.is_default)
     return defaultAgent?.id ?? agents[0]?.id ?? null
@@ -1124,11 +797,6 @@ export class HeartbeatScheduler {
   private getDefaultInterval(): number {
     const setting = this.dbManager.getSetting('heartbeat_default_interval')
     return setting ? parseInt(setting, 10) : HEARTBEAT_DEFAULTS.intervalMinutes
-  }
-
-  private getMaxConsecutiveErrors(): number {
-    const setting = this.dbManager.getSetting('heartbeat_max_consecutive_errors')
-    return setting ? parseInt(setting, 10) : this.MAX_CONSECUTIVE_ERRORS
   }
 
   private sendToRenderer(channel: string, data: unknown): void {

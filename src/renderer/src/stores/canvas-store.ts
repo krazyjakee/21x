@@ -212,9 +212,7 @@ interface CanvasState {
 
   // Viewport actions
   setViewport: (viewport: Partial<Viewport>) => void
-  panBy: (dx: number, dy: number) => void
   zoomTo: (zoom: number, centerX?: number, centerY?: number) => void
-  zoomAtPoint: (delta: number, clientX: number, clientY: number, containerRect: DOMRect) => void
   resetViewport: () => void
   /**
    * Fit the viewport to all panels. `contentBounds` (e.g. the union box of
@@ -234,7 +232,6 @@ interface CanvasState {
   removePanelsByRefId: (refId: string) => void
   updatePanel: (id: string, updates: Partial<Omit<CanvasPanelData, 'id'>>) => void
   bringToFront: (id: string) => void
-  clearPanels: () => void
 
   // Drag actions
   setDraggingPanelId: (id: string | null) => void
@@ -246,7 +243,6 @@ interface CanvasState {
   removeEdgesForPanel: (panelId: string) => void
   setConnectingFromId: (id: string | null) => void
   setProximityEdge: (edge: { fromId: string; toId: string } | null) => void
-  clearEdges: () => void
 }
 
 let panelCounter = 0
@@ -317,11 +313,6 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
     scheduleSave()
   },
 
-  panBy: (dx, dy) => {
-    set((s) => ({ viewport: panViewport(s.viewport, dx, dy) }))
-    scheduleSave()
-  },
-
   zoomTo: (zoom, centerX, centerY) => {
     const clamped = clampZoom(zoom)
     set((s) => {
@@ -333,11 +324,6 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
       }
       return { viewport: { ...s.viewport, zoom: clamped } }
     })
-    scheduleSave()
-  },
-
-  zoomAtPoint: (delta, clientX, clientY, containerRect) => {
-    set({ viewport: zoomViewportAtPoint(get().viewport, delta, clientX, clientY, containerRect) })
     scheduleSave()
   },
 
@@ -465,14 +451,6 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
     scheduleSave()
   },
 
-  clearPanels: () => {
-    for (const p of get().panels) {
-      releaseBrokerPanel(p.id)
-    }
-    set({ panels: [], edges: [], nextZIndex: 1 })
-    scheduleSave()
-  },
-
   // Drag
   setDraggingPanelId: (id) => set({ draggingPanelId: id }),
   // Bail out when the guides are structurally unchanged — calculateSnap()
@@ -544,11 +522,6 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
     if (prev === edge) return
     if (prev && edge && prev.fromId === edge.fromId && prev.toId === edge.toId) return
     set({ proximityEdge: edge })
-  },
-
-  clearEdges: () => {
-    set({ edges: [] })
-    scheduleSave()
   }
 })))
 

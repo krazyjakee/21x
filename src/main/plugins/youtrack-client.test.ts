@@ -253,7 +253,7 @@ describe('YouTrackClient', () => {
       } as unknown as Response)
 
       await expect(client.downloadAttachment('/api/files/missing.txt'))
-        .rejects.toThrow('Failed to download attachment')
+        .rejects.toThrow('Failed to download file')
     })
   })
 

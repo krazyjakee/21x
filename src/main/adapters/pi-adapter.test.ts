@@ -1,7 +1,6 @@
 import { nodeWorkerRuntime } from '../node-worker-runtime'
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { EventEmitter } from 'events'
-import { StringDecoder } from 'string_decoder'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -14,13 +13,13 @@ vi.mock('child_process', () => ({
   execFile: vi.fn(),
 }))
 
+import { PiAdapter } from './pi-adapter'
 import {
-  PiAdapter,
   buildPiMcpConfigDocument,
   sanitizePiMcpServerName,
   sanitizePiSessionName,
   withProviderNameLimitHint,
-} from './pi-adapter'
+} from './pi-config'
 import { MessagePartType } from './coding-agent-adapter'
 
 function fakeProcess() {
@@ -65,8 +64,6 @@ function fakeSession(process = fakeProcess()): any {
     pending: new Map(),
     parts: [],
     allMessages: [],
-    stdoutBuffer: '',
-    stdoutDecoder: new StringDecoder('utf8'),
     textByBlock: new Map(),
     reasoningByBlock: new Map(),
     toolParts: new Map(),

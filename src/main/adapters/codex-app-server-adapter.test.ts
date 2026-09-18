@@ -1233,7 +1233,7 @@ describe('CodexAppServerAdapter', () => {
       expect(apiKeyEnv.env.CODEX_API_KEY).toBe('explicit-key')
       expect(apiKeyEnv.env.CUSTOM_SECRET).toBe('secret')
       expect(apiKeyEnv.env.NO_BROWSER).toBe('1')
-      expect(apiKeyEnv.env.CODEX_HOME).toContain('codex-app-server-session-')
+      expect(apiKeyEnv.env.CODEX_HOME).toContain('codex-session-')
     } finally {
       if (originalOpenAI === undefined) delete process.env.OPENAI_API_KEY
       else process.env.OPENAI_API_KEY = originalOpenAI

@@ -96,12 +96,3 @@ export async function fetchAllProviderOrgs(): Promise<OrgEntry[]> {
 
   return [...ghEntries, ...glEntries, ...fjEntries]
 }
-
-/**
- * Returns a human-readable label for the provider.
- */
-export function getProviderLabel(provider: GitProvider | null): string {
-  if (provider === 'gitlab') return 'GitLab'
-  if (provider === 'forgejo') return 'Forgejo'
-  return 'GitHub'
-}

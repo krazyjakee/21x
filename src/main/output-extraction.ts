@@ -1,45 +1,7 @@
 import type { OutputFieldRecord } from './database'
+import type { SessionMessage } from './adapters/coding-agent-adapter'
 
-interface MessagePart {
-  type: string
-  text?: string
-  tool?: string
-  state?: { status?: string; input?: Record<string, string> }
-}
-
-interface AgentMessage {
-  info?: { role?: string }
-  parts?: MessagePart[]
-}
-
-/**
- * Extracts the last JSON code block from text.
- * Searches for ```json first, then any ``` block.
- */
-export function extractJsonBlock(text: string): Record<string, unknown> | null {
-  // Find the LAST json code block (greedy outer match)
-  const jsonBlocks = [...text.matchAll(/```json\s*\n?([\s\S]*?)\n?\s*```/g)]
-  const plainBlocks = [...text.matchAll(/```\s*\n?([\s\S]*?)\n?\s*```/g)]
-
-  const match = jsonBlocks.length > 0
-    ? jsonBlocks[jsonBlocks.length - 1]
-    : plainBlocks.length > 0
-      ? plainBlocks[plainBlocks.length - 1]
-      : null
-
-  if (!match) return null
-
-  const raw = match[1].trim()
-  try {
-    return JSON.parse(raw)
-  } catch {
-    return extractPartialJson(raw)
-  }
-}
-
-/**
- * Extracts complete key-value pairs from truncated JSON.
- */
+/** Extracts complete key-value pairs from JSON that was cut off mid-value. */
 export function extractPartialJson(raw: string): Record<string, unknown> {
   const result: Record<string, unknown> = {}
   const stringPairs = raw.matchAll(/"([^"]+)"\s*:\s*"((?:[^"\\]|\\.)*)"/g)
@@ -53,18 +15,15 @@ export function extractPartialJson(raw: string): Record<string, unknown> {
   return result
 }
 
-/**
- * Collects file paths from completed write/edit tool calls.
- */
-export function collectWrittenFiles(messages: AgentMessage[]): string[] {
+/** File paths from completed write/edit tool calls. */
+export function collectWrittenFiles(messages: SessionMessage[]): string[] {
   const files: string[] = []
   for (const msg of messages) {
-    if (!msg.parts) continue
-    for (const part of msg.parts) {
+    for (const part of msg.parts ?? []) {
       if (part.type !== 'tool' || part.state?.status !== 'completed') continue
-      const toolName = (part.tool || '').toLowerCase()
+      const toolName = (typeof part.tool === 'string' ? part.tool : part.tool?.name || '').toLowerCase()
       if (toolName === 'write' || toolName === 'edit' || toolName === 'create_file') {
-        const input = part.state?.input || {}
+        const input = (part.state?.input || {}) as Record<string, string | undefined>
         const filePath = input.file_path || input.path || input.filename
         if (filePath) files.push(filePath)
       }
@@ -74,39 +33,35 @@ export function collectWrittenFiles(messages: AgentMessage[]): string[] {
 }
 
 /**
- * Extracts output field values from agent messages.
- * Returns updated fields with values filled in, or null if no values found.
+ * Fills output field values from the agent's JSON block: the first ```json
+ * (else plain ```) block of the latest assistant message that has one. Keys
+ * match field names case-insensitively, then field ids. Unfilled file fields
+ * fall back to files the agent wrote.
  */
-export function extractOutputFromMessages(
-  messages: AgentMessage[],
-  fields: OutputFieldRecord[]
-): OutputFieldRecord[] | null {
-  const assistantMessages = messages.filter((m) => m.info?.role === 'assistant')
-  if (assistantMessages.length === 0) return null
-
+export function extractOutputFromMessages(messages: SessionMessage[], fields: OutputFieldRecord[]): OutputFieldRecord[] {
+  const assistantMessages = messages.filter((m) => m.role === 'assistant')
   const writtenFiles = collectWrittenFiles(assistantMessages)
-  let parsedValues: Record<string, unknown> = {}
 
-  // Search last assistant message first, then earlier ones
+  let parsedValues: Record<string, unknown> = {}
   for (let i = assistantMessages.length - 1; i >= 0; i--) {
-    const msg = assistantMessages[i]
-    if (!msg.parts) continue
-    const fullText = msg.parts
+    const fullText = (assistantMessages[i].parts ?? [])
       .filter((p) => p.type === 'text' && p.text)
       .map((p) => p.text)
       .join('\n')
     if (!fullText) continue
 
-    const extracted = extractJsonBlock(fullText)
-    if (extracted && Object.keys(extracted).length > 0) {
-      parsedValues = extracted
+    const match = fullText.match(/```json\s*\n?([\s\S]*?)\n?\s*```/) || fullText.match(/```\s*\n?([\s\S]*?)\n?\s*```/)
+    if (!match) continue
+    const raw = match[1].trim()
+    try {
+      parsedValues = JSON.parse(raw)
       break
+    } catch {
+      parsedValues = extractPartialJson(raw)
+      if (Object.keys(parsedValues).length > 0) break
     }
   }
 
-  if (Object.keys(parsedValues).length === 0 && writtenFiles.length === 0) return null
-
-  // Build lookup maps
   const byName = new Map<string, unknown>()
   const byId = new Map<string, unknown>()
   for (const [key, value] of Object.entries(parsedValues)) {

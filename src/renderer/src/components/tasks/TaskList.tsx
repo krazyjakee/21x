@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { Inbox, ChevronRight } from 'lucide-react'
 import { TaskListItem } from './TaskListItem'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -23,14 +23,15 @@ export function TaskList({ tasks, selectedTaskId, onSelectTask }: TaskListProps)
   // when their snooze time expires (not only when the tasks array changes)
   const snoozeTick = useSnoozeTick(tasks)
 
-  const toggleParentExpanded = (parentId: string) => {
+  // Stable so the memoized TaskListItem rows do not all re-render.
+  const toggleParentExpanded = useCallback((parentId: string) => {
     setExpandedParents(prev => {
       const next = new Set(prev)
       if (next.has(parentId)) next.delete(parentId)
       else next.add(parentId)
       return next
     })
-  }
+  }, [])
 
   // Build subtask lookup map — sorted by sort_order to preserve explicit sequence
   const subtasksByParent = useMemo(() => {
@@ -90,7 +91,7 @@ export function TaskList({ tasks, selectedTaskId, onSelectTask }: TaskListProps)
           key={task.id}
           task={task}
           isSelected={task.id === selectedTaskId}
-          onSelect={() => onSelectTask(task.id)}
+          onSelect={onSelectTask}
         />
       )
     }
@@ -102,10 +103,10 @@ export function TaskList({ tasks, selectedTaskId, onSelectTask }: TaskListProps)
         <TaskListItem
           task={task}
           isSelected={task.id === selectedTaskId}
-          onSelect={() => onSelectTask(task.id)}
+          onSelect={onSelectTask}
           subtaskCount={subtasks.length}
           isExpanded={isExpanded}
-          onToggleExpand={() => toggleParentExpanded(task.id)}
+          onToggleExpand={toggleParentExpanded}
         />
         {isExpanded && (
           <div className="ml-5 pl-2 border-l border-border/30">
@@ -114,7 +115,7 @@ export function TaskList({ tasks, selectedTaskId, onSelectTask }: TaskListProps)
                 key={subtask.id}
                 task={subtask}
                 isSelected={subtask.id === selectedTaskId}
-                onSelect={() => onSelectTask(subtask.id)}
+                onSelect={onSelectTask}
                 isSubtask
               />
             ))}

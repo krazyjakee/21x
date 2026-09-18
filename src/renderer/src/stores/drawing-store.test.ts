@@ -274,21 +274,4 @@ describe('drawing-store', () => {
     await useDrawingStore.getState().loadDrawings()
     expect(useDrawingStore.getState().isLoaded).toBe(true)
   })
-
-  // ── clearAll ──────────────────────────────────────────────
-
-  it('clearAll resets figures and transient state', () => {
-    const a = useDrawingStore.getState().addObject(toNewFigure(makeRect()))
-    useDrawingStore.getState().select([a])
-    useDrawingStore.getState().setEditingTextId(a)
-    useDrawingStore.getState().setLiveObject(makeRect())
-
-    useDrawingStore.getState().clearAll()
-    const s = useDrawingStore.getState()
-    expect(s.objects).toEqual([])
-    expect(s.nextZIndex).toBe(1)
-    expect(s.selectedIds).toEqual([])
-    expect(s.editingTextId).toBeNull()
-    expect(s.liveObject).toBeNull()
-  })
 })

@@ -6,7 +6,7 @@
  * Two cheap, dependency-free layers widen the net:
  *
  *   1. Stemming — the FTS5 index uses the `porter` tokenizer (see
- *      `database.ts`), so inflected forms collapse to a shared root at both
+ *      `database/schema.ts`), so inflected forms collapse to a shared root at both
  *      index and query time: "fixing" / "fixed" / "fix" all match, as do
  *      "issue" / "issues".
  *   2. Synonyms — stemming only relates forms of the *same* word, never words

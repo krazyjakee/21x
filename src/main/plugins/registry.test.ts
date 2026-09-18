@@ -8,11 +8,8 @@ function makePlugin(id: string): TaskSourcePlugin {
     displayName: `Plugin ${id}`,
     description: `Description for ${id}`,
     icon: 'Zap',
-    requiresMcpServer: true,
     getConfigSchema: () => [],
     resolveOptions: async () => [],
-    validateConfig: () => null,
-    getFieldMapping: () => ({ external_id: 'id', title: 'name' }),
     getActions: () => [],
     importTasks: async () => ({ imported: 0, updated: 0, errors: [] }),
     exportUpdate: async () => {},
@@ -43,8 +40,7 @@ describe('PluginRegistry', () => {
       id: 'a',
       displayName: 'Plugin a',
       description: 'Description for a',
-      icon: 'Zap',
-      requiresMcpServer: true
+      icon: 'Zap'
     })
   })
 

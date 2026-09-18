@@ -32,16 +32,3 @@ export function parseShellArgs(input: string): string[] {
   if (current) args.push(current)
   return args
 }
-
-// Note: testMcpConnection is imported from useMcpStore().testConnection
-// This is just a re-export type for convenience
-export type TestMcpConnectionFn = (testData: {
-  id: string
-  name: string
-  type: 'local' | 'remote'
-  command?: string
-  args?: string[]
-  environment?: Record<string, string>
-  url?: string
-  headers?: Record<string, string>
-}) => Promise<{ status: 'connected' | 'failed'; error?: string; toolCount?: number }>

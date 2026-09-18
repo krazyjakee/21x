@@ -1,5 +1,4 @@
-import type { DatabaseManager, McpServerRecord, TaskRecord } from '../database'
-import type { McpToolCaller } from '../mcp-tool-caller'
+import type { DatabaseManager, TaskRecord } from '../database'
 import type { OAuthManager } from '../oauth/oauth-manager'
 import type { SourceUser, ReassignResult } from '../../shared/types'
 
@@ -37,21 +36,6 @@ export interface ConfigFieldSchema {
 }
 
 export type PluginConfigSchema = ConfigFieldSchema[]
-
-// ── Field Mapping ───────────────────────────────────────────
-
-export interface FieldMapping {
-  external_id: string
-  title: string
-  description?: string
-  type?: string
-  priority?: string
-  status?: string
-  assignee?: string
-  due_date?: string
-  labels?: string
-  resolution?: string
-}
 
 // ── Actions ─────────────────────────────────────────────────
 
@@ -91,8 +75,6 @@ export interface PluginSyncResult {
 
 export interface PluginContext {
   db: DatabaseManager
-  toolCaller: McpToolCaller
-  mcpServer?: McpServerRecord
   oauthManager?: OAuthManager
   sourceId?: string
 }
@@ -104,7 +86,6 @@ export interface TaskSourcePlugin {
   displayName: string
   description: string
   icon: string
-  requiresMcpServer: boolean
 
   getConfigSchema(): PluginConfigSchema
 
@@ -113,10 +94,6 @@ export interface TaskSourcePlugin {
     config: Record<string, unknown>,
     ctx: PluginContext
   ): Promise<ConfigFieldOption[]>
-
-  validateConfig(config: Record<string, unknown>): string | null
-
-  getFieldMapping(config: Record<string, unknown>): FieldMapping
 
   getActions(config: Record<string, unknown>): PluginAction[]
 

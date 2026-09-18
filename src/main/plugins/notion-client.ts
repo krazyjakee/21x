@@ -5,6 +5,9 @@
  * Handles pagination, rate limiting, and error handling.
  */
 
+import { setTimeout as sleep } from 'node:timers/promises'
+import { downloadFile, filenameFromUrl, requestJson } from './http'
+
 // ── Response types ───────────────────────────────────────────
 
 export interface NotionDataSource {
@@ -107,49 +110,38 @@ export class NotionClient {
     this.token = token
   }
 
-  // ── Private helpers ──────────────────────────────────────
-
-  private async request<T>(
-    method: string,
-    path: string,
-    body?: unknown,
-    retries = 3
-  ): Promise<T> {
-    const url = `${NOTION_API}${path}`
-    const headers: Record<string, string> = {
-      'Authorization': `Bearer ${this.token}`,
-      'Notion-Version': NOTION_VERSION,
-      'Content-Type': 'application/json'
-    }
-
-    const response = await fetch(url, {
+  private request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    return requestJson<T>(`${NOTION_API}${path}`, {
       method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined
+      body,
+      service: 'Notion',
+      headers: {
+        'Authorization': `Bearer ${this.token}`,
+        'Notion-Version': NOTION_VERSION,
+        'Content-Type': 'application/json'
+      },
+      errors: {
+        401: 'Notion authentication failed. Check your integration token.',
+        403: 'Notion access forbidden. Make sure the database is shared with your integration.'
+      }
     })
-
-    if (response.status === 401) {
-      throw new Error('Notion authentication failed. Check your integration token.')
-    }
-    if (response.status === 403) {
-      throw new Error('Notion access forbidden. Make sure the database is shared with your integration.')
-    }
-    if (response.status === 429 && retries > 0) {
-      const retryAfter = parseInt(response.headers.get('Retry-After') || '1', 10)
-      await this.sleep(retryAfter * 1000)
-      return this.request(method, path, body, retries - 1)
-    }
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(`Notion API error: ${response.status} ${errorText}`)
-    }
-
-    return response.json() as Promise<T>
   }
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms))
+  /** Collects every page of a cursor-paginated GET endpoint. */
+  private async paginateGet<T>(path: string): Promise<T[]> {
+    const results: T[] = []
+    let startCursor: string | undefined
+    do {
+      const cursorParam = startCursor ? `&start_cursor=${startCursor}` : ''
+      const data = await this.request<{ results: T[]; has_more: boolean; next_cursor: string | null }>(
+        'GET',
+        `${path}?page_size=100${cursorParam}`
+      )
+      results.push(...data.results)
+      startCursor = data.has_more && data.next_cursor ? data.next_cursor : undefined
+      if (startCursor) await sleep(RATE_LIMIT_DELAY)
+    } while (startCursor)
+    return results
   }
 
   // ── Public methods ───────────────────────────────────────
@@ -210,7 +202,7 @@ export class NotionClient {
       }
       startCursor = nextCursor
 
-      if (startCursor) await this.sleep(RATE_LIMIT_DELAY)
+      if (startCursor) await sleep(RATE_LIMIT_DELAY)
     } while (startCursor)
 
     return results
@@ -260,8 +252,6 @@ export class NotionClient {
       andClauses.length === 1 ? andClauses[0] :
       { and: andClauses }
 
-    console.log('[Notion] Query filter:', JSON.stringify(combinedFilter, null, 2))
-
     do {
       const body: Record<string, unknown> = { page_size: 100 }
       if (combinedFilter) body.filter = combinedFilter
@@ -276,19 +266,10 @@ export class NotionClient {
       pages.push(...data.results)
       startCursor = data.has_more && data.next_cursor ? data.next_cursor : undefined
 
-      if (startCursor) await this.sleep(RATE_LIMIT_DELAY)
+      if (startCursor) await sleep(RATE_LIMIT_DELAY)
     } while (startCursor)
 
     return pages
-  }
-
-  /**
-   * Get page content (blocks) and convert to markdown.
-   * Recursively fetches children for toggle, callout, and other container blocks.
-   */
-  async getPageContent(pageId: string, maxDepth = 3): Promise<string> {
-    const blocks = await this.fetchBlocksRecursive(pageId, maxDepth)
-    return this.blocksToMarkdown(blocks)
   }
 
   /**
@@ -326,25 +307,8 @@ export class NotionClient {
   /**
    * Fetch all child blocks for a given block/page ID
    */
-  private async fetchBlocks(blockId: string): Promise<NotionBlock[]> {
-    const blocks: NotionBlock[] = []
-    let startCursor: string | undefined
-
-    do {
-      const path = `/v1/blocks/${blockId}/children?page_size=100${startCursor ? `&start_cursor=${startCursor}` : ''}`
-      const data = await this.request<{
-        results: NotionBlock[]
-        has_more: boolean
-        next_cursor: string | null
-      }>('GET', path)
-
-      blocks.push(...data.results)
-      startCursor = data.has_more && data.next_cursor ? data.next_cursor : undefined
-
-      if (startCursor) await this.sleep(RATE_LIMIT_DELAY)
-    } while (startCursor)
-
-    return blocks
+  private fetchBlocks(blockId: string): Promise<NotionBlock[]> {
+    return this.paginateGet<NotionBlock>(`/v1/blocks/${blockId}/children`)
   }
 
   /**
@@ -360,25 +324,8 @@ export class NotionClient {
   /**
    * List workspace users
    */
-  async getUsers(): Promise<NotionUser[]> {
-    const users: NotionUser[] = []
-    let startCursor: string | undefined
-
-    do {
-      const path = `/v1/users?page_size=100${startCursor ? `&start_cursor=${startCursor}` : ''}`
-      const data = await this.request<{
-        results: NotionUser[]
-        has_more: boolean
-        next_cursor: string | null
-      }>('GET', path)
-
-      users.push(...data.results)
-      startCursor = data.has_more && data.next_cursor ? data.next_cursor : undefined
-
-      if (startCursor) await this.sleep(RATE_LIMIT_DELAY)
-    } while (startCursor)
-
-    return users
+  getUsers(): Promise<NotionUser[]> {
+    return this.paginateGet<NotionUser>('/v1/users')
   }
 
   /**
@@ -386,41 +333,12 @@ export class NotionClient {
    * Returns the buffer, detected filename, and content type.
    */
   async downloadFile(url: string): Promise<{ buffer: Buffer; filename: string; contentType: string }> {
-    const response = await fetch(url)
-    if (!response.ok) {
-      throw new Error(`Failed to download file: ${response.status}`)
+    const file = await downloadFile(url)
+    return {
+      buffer: file.buffer,
+      filename: file.filename || filenameFromUrl(url) || `notion-file-${Date.now()}`,
+      contentType: file.contentType || 'application/octet-stream'
     }
-
-    const contentType = response.headers.get('content-type') || 'application/octet-stream'
-
-    // Try to extract filename from Content-Disposition header
-    let filename = ''
-    const disposition = response.headers.get('content-disposition')
-    if (disposition) {
-      const match = disposition.match(/filename[*]?=(?:UTF-8''|"?)([^";]+)/)
-      if (match) filename = decodeURIComponent(match[1].replace(/"/g, ''))
-    }
-
-    // Fallback: extract from URL path
-    if (!filename) {
-      try {
-        const urlObj = new URL(url)
-        const pathParts = urlObj.pathname.split('/').filter(Boolean)
-        const lastPart = pathParts[pathParts.length - 1]
-        if (lastPart && lastPart.includes('.')) {
-          filename = decodeURIComponent(lastPart)
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    if (!filename) {
-      filename = `notion-file-${Date.now()}`
-    }
-
-    const arrayBuffer = await response.arrayBuffer()
-    return { buffer: Buffer.from(arrayBuffer), filename, contentType }
   }
 
   /**
@@ -485,19 +403,7 @@ export class NotionClient {
       filename = blockData.name
     }
     if (!filename) {
-      try {
-        const urlObj = new URL(url)
-        const pathParts = urlObj.pathname.split('/').filter(Boolean)
-        const lastPart = pathParts[pathParts.length - 1]
-        if (lastPart && lastPart.includes('.')) {
-          filename = decodeURIComponent(lastPart)
-        }
-      } catch {
-        // ignore
-      }
-    }
-    if (!filename) {
-      filename = `notion-${block.type}-${block.id.slice(0, 8)}`
+      filename = filenameFromUrl(url) || `notion-${block.type}-${block.id.slice(0, 8)}`
     }
 
     return { url, filename }

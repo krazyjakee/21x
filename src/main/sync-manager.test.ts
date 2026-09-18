@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SyncManager } from './sync-manager'
 import { TaskStatus } from '../shared/constants'
 import type { DatabaseManager, TaskRecord } from './database'
-import type { McpToolCaller } from './mcp-tool-caller'
 import type { PluginRegistry } from './plugins/registry'
 import type { TaskSourcePlugin } from './plugins/types'
 
@@ -15,21 +14,14 @@ function makeMockDb(): DatabaseManager {
   } as unknown as DatabaseManager
 }
 
-function makeMockToolCaller(): McpToolCaller {
-  return { callTool: vi.fn() } as unknown as McpToolCaller
-}
-
 function makeMockPlugin(overrides: Partial<TaskSourcePlugin> = {}): TaskSourcePlugin {
   return {
     id: 'test',
     displayName: 'Test',
     description: 'Test plugin',
     icon: 'Zap',
-    requiresMcpServer: true,
     getConfigSchema: () => [],
     resolveOptions: async () => [],
-    validateConfig: () => null,
-    getFieldMapping: () => ({ external_id: 'id', title: 'name' }),
     getActions: () => [],
     importTasks: vi.fn().mockResolvedValue({ imported: 5, updated: 2, errors: [] }),
     exportUpdate: vi.fn().mockResolvedValue(undefined),
@@ -40,15 +32,13 @@ function makeMockPlugin(overrides: Partial<TaskSourcePlugin> = {}): TaskSourcePl
 
 describe('SyncManager', () => {
   let db: ReturnType<typeof makeMockDb>
-  let toolCaller: ReturnType<typeof makeMockToolCaller>
   let registry: PluginRegistry
   let syncManager: SyncManager
 
   beforeEach(() => {
     db = makeMockDb()
-    toolCaller = makeMockToolCaller()
     registry = { get: vi.fn() } as unknown as PluginRegistry
-    syncManager = new SyncManager(db, toolCaller, registry)
+    syncManager = new SyncManager(db, registry)
   })
 
   describe('importTasks', () => {
@@ -99,7 +89,7 @@ describe('SyncManager', () => {
       expect(plugin.importTasks).toHaveBeenCalledWith(
         'src-1',
         { status_filter: 'pending' },
-        expect.objectContaining({ db, toolCaller })
+        expect.objectContaining({ db })
       )
     })
 

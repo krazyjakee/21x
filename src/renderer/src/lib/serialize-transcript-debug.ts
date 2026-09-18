@@ -138,7 +138,6 @@ export interface TranscriptDebugInfo {
   status: SessionStatus
   systemStatus?: string | null
   messageCount: number
-  pendingApproval?: { action: string; description: string } | null
 }
 
 /**
@@ -183,9 +182,6 @@ export function serializeTranscriptForDebug(
     `Total Messages: ${info.messageCount}`,
     silentDuration != null && silentDuration > 30_000
       ? `Silent For: ${formatElapsed(silentDuration)} (since last message)`
-      : null,
-    info.pendingApproval
-      ? `⚠️ Pending Approval: ${info.pendingApproval.action} — ${info.pendingApproval.description}`
       : null,
   ].filter(Boolean).join('\n')
 

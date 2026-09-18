@@ -10,7 +10,6 @@ import {
   type PluginConfigSchema,
   type ConfigFieldOption,
   type PluginContext,
-  type FieldMapping,
   type PluginAction,
   type PluginSyncResult,
   type ActionResult
@@ -130,19 +129,6 @@ export class ForgejoIssuesPlugin implements TaskSourcePlugin {
     if (!config.owner || typeof config.owner !== 'string') return 'Owner is required'
     if (!config.repo || typeof config.repo !== 'string') return 'Repository is required'
     return null
-  }
-
-  getFieldMapping(_config: Record<string, unknown>): FieldMapping {
-    return {
-      external_id: 'number',
-      title: 'title',
-      description: 'body',
-      status: 'state',
-      priority: 'labels',
-      assignee: 'assignees[0].login',
-      due_date: 'milestone.due_on',
-      labels: 'labels'
-    }
   }
 
   getActions(_config: Record<string, unknown>): PluginAction[] {

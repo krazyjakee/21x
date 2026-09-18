@@ -104,10 +104,3 @@ export function initCrashLogger(): void {
 
   console.log(`[CrashLogger] Initialized. Log path: ${getLogPath()}`)
 }
-
-/**
- * Get the path to the crash log file.
- */
-export function getCrashLogPath(): string {
-  return getLogPath()
-}

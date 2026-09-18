@@ -10,6 +10,7 @@ import {
   type ArtifactFileEntry,
   type RegisteredArtifact
 } from '../shared/artifacts'
+import { mimeTypeForPath } from './mime'
 
 const MAX_SCAN_DEPTH = 10
 const MAX_SCAN_FILES = 500
@@ -35,43 +36,19 @@ const EXCLUDED_DIRECTORIES = new Set([
 const EXCLUDED_ROOT_FILES = new Set(['AGENTS.md', 'CLAUDE.md', 'heartbeat.md'])
 
 const MARKDOWN_EXTENSIONS = new Set(['.md', '.mdx'])
-const IMAGE_MIME_TYPES: Record<string, string> = {
-  '.gif': 'image/gif',
-  '.jpeg': 'image/jpeg',
-  '.jpg': 'image/jpeg',
-  '.png': 'image/png',
-  '.svg': 'image/svg+xml',
-  '.webp': 'image/webp'
-}
+const IMAGE_EXTENSIONS = new Set(['.gif', '.jpeg', '.jpg', '.png', '.svg', '.webp'])
 const HTML_EXTENSIONS = new Set(['.htm', '.html'])
-const TEXT_MIME_TYPES: Record<string, string> = {
-  '.py': 'text/plain',
-  '.sh': 'text/plain',
-  '.sql': 'text/plain',
-  '.ini': 'text/plain',
-  '.css': 'text/css',
-  '.csv': 'text/csv',
-  '.js': 'text/javascript',
-  '.json': 'application/json',
-  '.jsx': 'text/javascript',
-  '.log': 'text/plain',
-  '.md': 'text/markdown',
-  '.mdx': 'text/markdown',
-  '.toml': 'text/plain',
-  '.ts': 'text/typescript',
-  '.tsx': 'text/typescript',
-  '.txt': 'text/plain',
-  '.xml': 'application/xml',
-  '.yaml': 'application/yaml',
-  '.yml': 'application/yaml'
-}
+const TEXT_EXTENSIONS = new Set([
+  '.py', '.sh', '.sql', '.ini', '.css', '.csv', '.js', '.json', '.jsx', '.log',
+  '.md', '.mdx', '.toml', '.ts', '.tsx', '.txt', '.xml', '.yaml', '.yml'
+])
 
 export function artifactTypeForPath(filePath: string): ArtifactType | null {
   const extension = extname(filePath).toLowerCase()
   if (MARKDOWN_EXTENSIONS.has(extension)) return ArtifactType.MARKDOWN
-  if (extension in IMAGE_MIME_TYPES) return ArtifactType.IMAGE
+  if (IMAGE_EXTENSIONS.has(extension)) return ArtifactType.IMAGE
   if (HTML_EXTENSIONS.has(extension)) return ArtifactType.HTML
-  if (extension in TEXT_MIME_TYPES) return ArtifactType.FILE
+  if (TEXT_EXTENSIONS.has(extension)) return ArtifactType.FILE
   return null
 }
 
@@ -338,10 +315,13 @@ export async function readRegisteredTaskArtifactFile(
   const bytes = await readFile(target.absolutePath)
   if (type === ArtifactType.IMAGE) {
     if (bytes.length > MAX_IMAGE_BYTES) throw new Error('Artifact image exceeds the read limit')
-    return { content: bytes.toString('base64'), encoding: 'base64', mimeType: IMAGE_MIME_TYPES[extname(target.relativeName).toLowerCase()] }
+    return { content: bytes.toString('base64'), encoding: 'base64', mimeType: mimeTypeForPath(target.relativeName) }
   }
   if (bytes.length > MAX_TEXT_BYTES) throw new Error('Artifact file exceeds the read limit')
-  return { content: bytes.toString('utf8'), encoding: 'utf8', mimeType: TEXT_MIME_TYPES[extname(target.relativeName).toLowerCase()] || 'text/plain' }
+  // The bytes are always returned as utf8 text, so a binary type would misdescribe them.
+  const mimeType = mimeTypeForPath(target.relativeName)
+  const isText = mimeType.startsWith('text/') || mimeType === 'application/json'
+  return { content: bytes.toString('utf8'), encoding: 'utf8', mimeType: isText ? mimeType : 'text/plain' }
 }
 
 function previewPriorityForPath(path: string, type: ArtifactType): number {
@@ -542,7 +522,6 @@ export async function readTaskArtifact(workspaceDir: string, artifactPath: strin
   }
   if (!fileStat.isFile()) return null
 
-  const extension = extname(filePath).toLowerCase()
   try {
     if (!type) {
       if (fileStat.size > MAX_IMAGE_BYTES) return null
@@ -553,7 +532,7 @@ export async function readTaskArtifact(workspaceDir: string, artifactPath: strin
     if (type === ArtifactType.IMAGE) {
       if (fileStat.size > MAX_IMAGE_BYTES) return null
       const data = await readFile(filePath)
-      const mimeType = IMAGE_MIME_TYPES[extension]
+      const mimeType = mimeTypeForPath(filePath)
       return {
         kind: ArtifactContentKind.DATA_URL,
         content: `data:${mimeType};base64,${data.toString('base64')}`,
@@ -563,7 +542,7 @@ export async function readTaskArtifact(workspaceDir: string, artifactPath: strin
 
     if (fileStat.size > MAX_TEXT_BYTES) return null
     const content = await readFile(filePath, 'utf8')
-    const mimeType = HTML_EXTENSIONS.has(extension) ? 'text/html' : TEXT_MIME_TYPES[extension] || 'text/plain'
+    const mimeType = mimeTypeForPath(filePath)
     return { kind: ArtifactContentKind.TEXT, content, mimeType }
   } catch {
     return null

@@ -60,6 +60,8 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     parent_task_id: null,
     next_subtask_ids: [],
     sort_order: 0,
+    auto_start_agent: false,
+    auto_complete_without_review: false,
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: '2026-01-01T00:00:00.000Z',
     ...overrides

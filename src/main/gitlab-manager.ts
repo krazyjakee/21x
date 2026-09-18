@@ -1,8 +1,6 @@
-import { execFile, spawn, type ChildProcess } from 'child_process'
+import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { shell } from 'electron'
 import type { GitHubRepo } from './github-manager'
-import { guardChildStreams, writeToChildStdin } from './child-stream-guards'
 
 const execFileAsync = promisify(execFile)
 
@@ -15,7 +13,6 @@ export interface GlabCliStatus {
 }
 
 export class GitLabManager {
-  private authProcess: ChildProcess | null = null
 
   /**
    * Maps a raw GitLab API project object to the shared GitHubRepo interface
@@ -91,72 +88,6 @@ export class GitLabManager {
       }
       return { installed: true, authenticated: false }
     }
-  }
-
-  async startWebAuth(onDeviceCode?: (code: string) => void): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.authProcess = spawn(
-        'glab',
-        ['auth', 'login', '--hostname', 'gitlab.com'],
-        { stdio: ['pipe', 'pipe', 'pipe'] }
-      )
-
-      // Every pipe needs an error listener before the first write; a CLI that
-      // exits early must not crash the main process with EPIPE.
-      guardChildStreams(this.authProcess, 'GitLabManager')
-
-      let completed = false
-      let browserOpened = false
-      let output = ''
-      const timeout = setTimeout(() => {
-        if (!completed) {
-          this.authProcess?.kill()
-          reject(new Error('Auth timeout'))
-        }
-      }, 120000)
-
-      const handleOutput = (data: Buffer): void => {
-        output += data.toString()
-
-        // glab uses a web-based flow similar to gh
-        if (onDeviceCode) {
-          const codeMatch = output.match(/code:\s*([A-Z0-9-]+)/)
-          if (codeMatch) {
-            onDeviceCode(codeMatch[1])
-          }
-        }
-
-        if (!browserOpened) {
-          const urlMatch = output.match(/(https:\/\/gitlab\.com\/\S+)/)
-          if (urlMatch) {
-            browserOpened = true
-            shell.openExternal(urlMatch[1])
-          }
-        }
-      }
-
-      this.authProcess.stderr?.on('data', handleOutput)
-      this.authProcess.stdout?.on('data', handleOutput)
-
-      this.authProcess.on('close', (code) => {
-        completed = true
-        clearTimeout(timeout)
-        this.authProcess = null
-        if (code === 0) resolve()
-        else reject(new Error(`glab auth login exited with code ${code}`))
-      })
-
-      this.authProcess.on('error', (err) => {
-        completed = true
-        clearTimeout(timeout)
-        this.authProcess = null
-        reject(err)
-      })
-
-      // Write newline for any potential prompts. `glab` may have already
-      // exited, so the write must never throw.
-      writeToChildStdin(this.authProcess, '\n', 'GitLabManager')
-    })
   }
 
   /**

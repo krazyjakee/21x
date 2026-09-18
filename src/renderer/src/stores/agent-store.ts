@@ -1,64 +1,14 @@
 import { create } from 'zustand'
 import type { Agent, CreateAgentDTO, UpdateAgentDTO } from '@/types'
-import { agentApi, agentSessionApi, onAgentStatus, onAgentApproval, onTranscriptChanged } from '@/lib/ipc-client'
-import type { AgentStatusEvent, AgentApprovalRequest, TranscriptPartRecord, TranscriptChangedEvent } from '@/types/electron'
+import { agentApi, agentSessionApi, onAgentStatus, onTranscriptChanged } from '@/lib/ipc-client'
+import type { AgentStatusEvent, TranscriptChangedEvent } from '@/types/electron'
+import { SessionStatus } from '@shared/constants'
+import type { AgentMessage, TranscriptPartRecord } from '@shared/transcript/types'
+import { applyPartsToProjection, createProjection, projectMessages, type TranscriptProjection } from '@shared/transcript/projection'
 import { useArtifactStore } from './artifact-store'
 
-// ── Message type ──────────────────────────────────────────────
-
-export interface StepMeta {
-  durationMs?: number
-  tokens?: { input: number; output: number; cache: number }
-}
-
-export interface TaskProgressData {
-  taskId: string
-  status: 'started' | 'running' | 'completed' | 'failed' | 'stopped'
-  description: string
-  lastToolName?: string
-  summary?: string
-  usage?: { total_tokens: number; tool_uses: number; duration_ms: number }
-}
-
-export interface AgentMessage {
-  id: string
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  timestamp: Date
-  partType?: string
-  stepMeta?: StepMeta
-  tool?: {
-    name: string
-    status: string
-    title?: string
-    description?: string
-    input?: string
-    output?: string
-    error?: string
-    requestId?: string
-    questions?: Array<{
-      header: string
-      question: string
-      options: Array<{ label: string; description: string }>
-    }>
-    todos?: Array<{
-      id: string
-      content: string
-      status: 'pending' | 'in_progress' | 'completed'
-      priority?: string
-    }>
-  }
-  taskProgress?: TaskProgressData
-}
-
-// ── Per-task session ──────────────────────────────────────────
-
-export enum SessionStatus {
-  IDLE = 'idle',
-  WORKING = 'working',
-  ERROR = 'error',
-  WAITING_APPROVAL = 'waiting_approval',
-}
+export { SessionStatus }
+export type { AgentMessage }
 
 export interface TaskSession {
   sessionId: string | null
@@ -68,7 +18,6 @@ export interface TaskSession {
   /** Derived, read-only render list — a pure projection of the durable transcript
    *  (`projections` cache), never mutated directly by live events. */
   messages: AgentMessage[]
-  pendingApproval: AgentApprovalRequest | null
   /** Transient system status indicator (e.g. 'compacting'). */
   systemStatus?: string | null
   /**
@@ -83,38 +32,28 @@ export interface TaskSession {
 
 // ── Projection cache (SINGLE source of truth for the transcript) ──
 //
-// The main process owns the durable transcript (`transcript_parts`) and is the
-// authoritative source. The renderer keeps a per-task cache keyed by stable
-// part id and renders a *derived* sorted list. There is exactly one write path
-// into a task's messages: applyParts(), fed by (a) a full snapshot on bind and
-// (b) idempotent `transcript:changed` deltas. Because parts are keyed by id and
-// sorted by (createdAt, seq), reordering, duplication, and collapse are
-// structurally impossible — no dedup sets, no accumulation, no clear/replay.
+// The main process owns the durable transcript (`transcript_parts`). The
+// renderer's only write path into a task's messages is applyParts(), fed by a
+// full snapshot on bind and idempotent `transcript:changed` deltas.
 
-interface ProjectionCache {
-  parts: Map<string, TranscriptPartRecord>
-  rev: number
-}
-
-const projections = new Map<string, ProjectionCache>()
+const projections = new Map<string, TranscriptProjection>()
 // Number of mounted transcript views per task. Canvas panels can be kept in the
 // workspace indefinitely, but their full transcript only belongs in renderer
 // memory while at least one view is actually mounted. The durable DB projection
 // is re-hydrated when a view comes back.
 const projectionBindings = new Map<string, number>()
 const bindingTasks = new Set<string>()
+// Tasks whose projection may be missing rows (a live event was blocked, or a
+// snapshot is being reconciled) and so must not advance their cursor from
+// live events until a delta read has caught up.
 const dirtyTranscripts = new Set<string>()
 const recoveringTranscripts = new Set<string>()
 const recoverAgain = new Set<string>()
 
-function getProjection(taskId: string): ProjectionCache {
+function getProjection(taskId: string): TranscriptProjection {
   let p = projections.get(taskId)
-  if (!p) { p = { parts: new Map(), rev: 0 }; projections.set(taskId, p) }
+  if (!p) { p = createProjection(); projections.set(taskId, p) }
   return p
-}
-
-function resetProjection(taskId: string): void {
-  projections.delete(taskId)
 }
 
 /** Test-only: clear all projection caches between tests. */
@@ -125,37 +64,6 @@ export function __clearProjectionsForTest(): void {
   dirtyTranscripts.clear()
   recoveringTranscripts.clear()
   recoverAgain.clear()
-}
-
-// Memoize the part → message projection per part record. Unchanged parts keep
-// their exact record reference across deltas (applyParts only replaces changed
-// entries), so reusing the derived AgentMessage preserves object identity and
-// lets React.memo'd rows skip re-rendering the entire transcript on every
-// streamed delta. Entries are GC'd with their part records (WeakMap).
-const messageProjectionCache = new WeakMap<TranscriptPartRecord, AgentMessage>()
-
-function toAgentMessage(p: TranscriptPartRecord): AgentMessage {
-  const cached = messageProjectionCache.get(p)
-  if (cached) return cached
-  const payload = (p.payload || {}) as { taskProgress?: unknown }
-  const message: AgentMessage = {
-    id: p.partId,
-    role: p.role === 'user' ? 'user' : p.role === 'assistant' ? 'assistant' : 'system',
-    content: p.content,
-    timestamp: new Date(p.createdAt),
-    partType: p.partType,
-    // `tool` already carries nested questions/todos as persisted by write-through.
-    tool: p.tool as AgentMessage['tool'],
-    taskProgress: payload.taskProgress as AgentMessage['taskProgress']
-  }
-  messageProjectionCache.set(p, message)
-  return message
-}
-
-function deriveMessages(cache: ProjectionCache): AgentMessage[] {
-  return [...cache.parts.values()]
-    .sort((a, b) => (a.createdAt - b.createdAt) || (a.seq - b.seq))
-    .map(toAgentMessage)
 }
 
 function findBySessionId(sessions: Map<string, TaskSession>, sid: string): TaskSession | undefined {
@@ -201,13 +109,12 @@ export const useAgentStore = create<AgentState>((set, get) => {
   // into the session (creating a placeholder session if the view isn't bound yet,
   // e.g. a background-wake delta arriving before the user opens the task).
   const commitMessages = (taskId: string): void => {
-    const cache = getProjection(taskId)
-    const messages = deriveMessages(cache)
+    const messages = projectMessages(getProjection(taskId))
     set((state) => {
       const existing = state.sessions.get(taskId)
       const session: TaskSession = existing
         ? { ...existing, messages }
-        : { sessionId: null, agentId: '', taskId, status: SessionStatus.IDLE, messages, pendingApproval: null }
+        : { sessionId: null, agentId: '', taskId, status: SessionStatus.IDLE, messages }
       return { sessions: new Map(state.sessions).set(taskId, session) }
     })
   }
@@ -215,13 +122,9 @@ export const useAgentStore = create<AgentState>((set, get) => {
   // Apply a delta (or snapshot) of parts into the cache, idempotently by id.
   const applyParts = (taskId: string, parts: TranscriptPartRecord[], maxRev?: number): void => {
     if (parts.length === 0 && maxRev == null) return
-    const cache = getProjection(taskId)
-    for (const p of parts) {
-      const existing = cache.parts.get(p.partId)
-      if (!existing || p.rev >= existing.rev) cache.parts.set(p.partId, p)
-    }
-    if (typeof maxRev === 'number') cache.rev = Math.max(cache.rev, maxRev)
-    if (cache.parts.size || get().sessions.has(taskId)) commitMessages(taskId)
+    const projection = getProjection(taskId)
+    applyPartsToProjection(projection, parts, maxRev)
+    if (projection.parts.size || get().sessions.has(taskId)) commitMessages(taskId)
   }
 
   const hydrateTranscript = async (taskId: string, requireBinding = false): Promise<void> => {
@@ -236,15 +139,15 @@ export const useAgentStore = create<AgentState>((set, get) => {
       // flight. Do not repopulate the cache after its final consumer left.
       if (requireBinding && !projectionBindings.has(taskId)) return
       const maxRev = snapshot.reduce((m, p) => Math.max(m, p.rev || 0), 0)
-      const parts = new Map(snapshot.map(p => [p.partId, p]))
-      // Live events can arrive between pages. Keep their newer rows and then
-      // reconcile from the snapshot cursor to cover changes behind the scan.
-      for (const [id, part] of projections.get(taskId)?.parts ?? []) {
-        if (!parts.has(id) || part.rev > parts.get(id)!.rev) parts.set(id, part)
-      }
-      projections.set(taskId, { parts, rev: maxRev })
+      const projection = createProjection(snapshot, maxRev)
+      // Live events can arrive while the snapshot is in flight. Keep their
+      // newer rows, then reconcile from the snapshot cursor to cover changes
+      // behind the scan.
+      const live = projections.get(taskId)
+      if (live) applyPartsToProjection(projection, [...live.parts.values()])
+      projections.set(taskId, projection)
       useArtifactStore.getState().projectTranscriptParts(taskId, snapshot)
-      if (parts.size || get().sessions.has(taskId)) commitMessages(taskId)
+      if (projection.parts.size || get().sessions.has(taskId)) commitMessages(taskId)
     } catch (err) {
       console.error(`[agent-store] hydrateTranscript failed for task ${taskId}:`, err)
     } finally {
@@ -260,14 +163,17 @@ export const useAgentStore = create<AgentState>((set, get) => {
     if (typeof window.electronAPI?.agentSession?.getTranscriptDelta !== 'function') return
     if (!projections.has(taskId)) return
     if (bindingTasks.has(taskId)) return
+    // One delta read per task at a time; a request that arrives meanwhile
+    // runs another pass from the advanced cursor.
     if (recoveringTranscripts.has(taskId)) { recoverAgain.add(taskId); return }
     recoveringTranscripts.add(taskId)
     try {
       do {
         recoverAgain.delete(taskId)
-        const cache = getProjection(taskId)
-        const { parts, maxRev } = await agentSessionApi.getTranscriptDelta(taskId, cache.rev)
-        if (projections.get(taskId) !== cache) return
+        const projection = getProjection(taskId)
+        const { parts, maxRev } = await agentSessionApi.getTranscriptDelta(taskId, projection.rev)
+        // Unbound (or re-hydrated) while the read was in flight.
+        if (projections.get(taskId) !== projection) return
         applyParts(taskId, parts, maxRev)
       } while (recoverAgain.has(taskId))
       dirtyTranscripts.delete(taskId)
@@ -285,6 +191,8 @@ export const useAgentStore = create<AgentState>((set, get) => {
   // Transcript content: the ONLY writer of messages. Idempotent delta apply.
   onTranscriptChanged((event: TranscriptChangedEvent) => {
     if (!event?.taskId) return
+    // The main process could not deliver a live batch (IPC size guard): the
+    // projection is missing rows until a delta read catches up.
     if (event.reloadRequired && projections.has(event.taskId)) dirtyTranscripts.add(event.taskId)
     useArtifactStore.getState().projectTranscriptParts(event.taskId, event.parts || [])
     // Background agents continue writing to the durable projection, but an
@@ -292,13 +200,15 @@ export const useAgentStore = create<AgentState>((set, get) => {
     // rebuilding every off-screen transcript in memory; bindTranscript() loads
     // the authoritative snapshot when the task becomes visible again.
     if (projections.has(event.taskId)) {
+      // While recovering, apply the rows but keep the cursor where it is, so
+      // the delta read does not skip the rows that never arrived.
       const recovering = dirtyTranscripts.has(event.taskId) || recoveringTranscripts.has(event.taskId)
       applyParts(event.taskId, event.parts || [], recovering ? undefined : event.maxRev)
       if (recovering) void reconcileDelta(event.taskId)
     }
   })
 
-  // Session state only (status / pendingApproval / sessionId) — never messages.
+  // Session state only (status / sessionId) — never messages.
   onAgentStatus((event: AgentStatusEvent) => {
     const state = get()
     const session = findBySessionId(state.sessions, event.sessionId) || state.sessions.get(event.taskId)
@@ -311,10 +221,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
             agentId: event.agentId || '',
             taskId: event.taskId,
             status: event.status,
-            messages: projections.has(event.taskId)
-              ? deriveMessages(projections.get(event.taskId)!)
-              : [],
-            pendingApproval: null
+            messages: projectMessages(projections.get(event.taskId))
           })
         })
       }
@@ -324,7 +231,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
     const previousStatus = session.status
     const updated = { ...session, status: event.status }
     if (event.sessionId && session.sessionId !== event.sessionId) updated.sessionId = event.sessionId
-    if (event.status === SessionStatus.IDLE) updated.pendingApproval = null
     // Turn confirmed running (or errored/awaiting input) — stop showing
     // "starting". Interim `idle` events during resume must NOT clear it.
     if (event.status !== SessionStatus.IDLE) updated.pendingSend = false
@@ -346,19 +252,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
       return { sessions: new Map(state.sessions).set(taskId, { ...s, pendingSend: false }) }
     })
   }
-
-  onAgentApproval((event: AgentApprovalRequest) => {
-    const state = get()
-    const session = findBySessionId(state.sessions, event.sessionId)
-    if (!session) return
-    set({
-      sessions: new Map(state.sessions).set(session.taskId, {
-        ...session,
-        pendingApproval: event,
-        status: SessionStatus.WAITING_APPROVAL
-      })
-    })
-  })
 
   // ── Return store ──
 
@@ -434,7 +327,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
         }
 
         projectionBindings.delete(taskId)
-        resetProjection(taskId)
+        projections.delete(taskId)
         set((state) => {
           const session = state.sessions.get(taskId)
           if (!session || session.messages.length === 0) return state
@@ -458,8 +351,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
             taskId,
             status: existing?.status || SessionStatus.WORKING,
             // Messages are always the projection of the durable transcript.
-            messages: existing?.messages || deriveMessages(getProjection(taskId)),
-            pendingApproval: null
+            messages: existing?.messages || projectMessages(getProjection(taskId))
           })
         }
       })
@@ -485,15 +377,14 @@ export const useAgentStore = create<AgentState>((set, get) => {
           sessions: new Map(state.sessions).set(taskId, {
             ...session,
             sessionId: null,
-            status: SessionStatus.IDLE,
-            pendingApproval: null
+            status: SessionStatus.IDLE
           })
         }
       })
     },
 
     removeSession: (taskId) => {
-      resetProjection(taskId)
+      projections.delete(taskId)
       set((state) => {
         const next = new Map(state.sessions)
         next.delete(taskId)

@@ -9,7 +9,7 @@ import { act, cleanup, render, screen } from '@testing-library/react'
 import { VoiceRuntimeRow } from './VoiceRuntimeRow'
 import { VoiceMicButton } from './VoiceMicButton'
 import { useVoiceStore } from '@/stores/voice-store'
-import { getDictationTarget, clearDictationTarget } from '@/lib/voice-dictation-target'
+import { insertDictation, clearDictationTarget } from '@/lib/voice-dictation-target'
 import type { VoiceRuntimeStatus } from '@shared/voice'
 
 const ABSENT: VoiceRuntimeStatus = {
@@ -197,8 +197,11 @@ describe('microphone button — click to start, click to stop', () => {
     await act(async () => {
       screen.getByTestId('voice-mic-button').click()
     })
-    expect(getDictationTarget()).toBe(screen.getByTestId('mine'))
-    expect(getDictationTarget()).not.toBe(screen.getByTestId('other'))
+    act(() => {
+      insertDictation('hello')
+    })
+    expect(screen.getByTestId('mine')).toHaveValue('hello')
+    expect(screen.getByTestId('other')).toHaveValue('')
   })
 })
 

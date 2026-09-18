@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo } from 'react'
 import { agentSessionApi } from '@/lib/ipc-client'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
-import type { AgentApprovalRequest } from '@/types/electron'
 
 export type { AgentMessage } from '@/stores/agent-store'
 
@@ -9,7 +8,6 @@ export interface AgentSessionState {
   sessionId: string | null
   status: SessionStatus
   messages: import('@/stores/agent-store').AgentMessage[]
-  pendingApproval: AgentApprovalRequest | null
   /** Transient system status indicator (e.g. 'compacting') — cleared on next non-status message */
   systemStatus?: string | null
   /** User sent and the backend is still resuming the session. */
@@ -28,12 +26,45 @@ export interface SendMessageOptions {
 const EMPTY_SESSION: AgentSessionState = {
   sessionId: null,
   status: SessionStatus.IDLE,
-  messages: [],
-  pendingApproval: null
+  messages: []
 }
 
+/**
+ * Session state plus actions. Re-renders on every streamed delta because the
+ * state includes `messages`; components that only act on a session should use
+ * useAgentSessionActions instead.
+ */
 export function useAgentSession(taskId: string | undefined) {
+  const actions = useAgentSessionActions(taskId)
   const session = useAgentStore((s) => (taskId ? s.sessions.get(taskId) : undefined))
+
+  // Keyed on individual fields so the object keeps its identity across
+  // unrelated store deltas, letting downstream React.memo boundaries bail out.
+  const sessionState: AgentSessionState = useMemo(
+    () =>
+      session
+        ? {
+            sessionId: session.sessionId,
+            status: session.status,
+            messages: session.messages,
+            systemStatus: session.systemStatus,
+            pendingSend: session.pendingSend
+          }
+        : EMPTY_SESSION,
+    [
+      session?.sessionId,
+      session?.status,
+      session?.messages,
+      session?.systemStatus,
+      session?.pendingSend
+    ]
+  )
+
+  return useMemo(() => ({ session: sessionState, ...actions }), [sessionState, actions])
+}
+
+/** Binds the task's transcript and returns stable session actions, without subscribing to session state. */
+export function useAgentSessionActions(taskId: string | undefined) {
   const initSession = useAgentStore((s) => s.initSession)
   const endSession = useAgentStore((s) => s.endSession)
   const bindTranscript = useAgentStore((s) => s.bindTranscript)
@@ -48,32 +79,6 @@ export function useAgentSession(taskId: string | undefined) {
     if (taskId && typeof bindTranscript === 'function') return bindTranscript(taskId)
     return undefined
   }, [taskId, bindTranscript])
-
-  // Project the store session into a stable value. Keyed on individual fields so
-  // the returned object keeps identity across unrelated store deltas (e.g. a new
-  // session Map identity that leaves these fields referentially equal). This lets
-  // downstream React.memo boundaries actually bail out.
-  const sessionState: AgentSessionState = useMemo(
-    () =>
-      session
-        ? {
-            sessionId: session.sessionId,
-            status: session.status,
-            messages: session.messages,
-            pendingApproval: session.pendingApproval,
-            systemStatus: session.systemStatus,
-            pendingSend: session.pendingSend
-          }
-        : EMPTY_SESSION,
-    [
-      session?.sessionId,
-      session?.status,
-      session?.messages,
-      session?.pendingApproval,
-      session?.systemStatus,
-      session?.pendingSend
-    ]
-  )
 
   const start = useCallback(
     async (agentId: string, tId: string, workspaceDir?: string, skipInitialPrompt?: boolean) => {
@@ -190,11 +195,8 @@ export function useAgentSession(taskId: string | undefined) {
     [taskId]
   )
 
-  // Memoize the returned hook object so consumers that spread/destructure it (and
-  // any effect/memo keyed on the whole object) see a stable identity when nothing
-  // meaningful changed. All callbacks below are already useCallback-stable.
   return useMemo(
-    () => ({ session: sessionState, start, resume, switchAgent, abort, stop, sendMessage, approve }),
-    [sessionState, start, resume, switchAgent, abort, stop, sendMessage, approve]
+    () => ({ start, resume, switchAgent, abort, stop, sendMessage, approve }),
+    [start, resume, switchAgent, abort, stop, sendMessage, approve]
   )
 }

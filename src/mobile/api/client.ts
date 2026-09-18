@@ -1,3 +1,4 @@
+import type { TranscriptPartRecord } from '@shared/transcript/types'
 /**
  * HTTP API client for the mobile API server.
  * In production the SPA is served by the mobile-api-server (same origin).
@@ -54,7 +55,6 @@ export const api = {
       const qs = params ? '?' + new URLSearchParams(params).toString() : ''
       return get<unknown[]>(`/api/tasks${qs}`)
     },
-    get: (id: string) => get<unknown>(`/api/tasks/${encodeURIComponent(id)}`),
     create: (data: unknown) => post<unknown>('/api/tasks', data),
     update: (id: string, data: unknown) => post<unknown>(`/api/tasks/${encodeURIComponent(id)}`, data),
     complete: (id: string, completeAtSource = true) =>
@@ -64,28 +64,19 @@ export const api = {
   },
   taskSources: {
     list: () => get<unknown[]>('/api/task-sources'),
-    create: (data: { name: string; plugin_id: string; config: Record<string, unknown>; mcp_server_id?: string | null }) =>
-      post<unknown>('/api/task-sources', data),
-    update: (id: string, data: unknown) => post<unknown>(`/api/task-sources/${encodeURIComponent(id)}`, data),
     sync: (id: string) => post<unknown>(`/api/task-sources/${encodeURIComponent(id)}/sync`),
     syncAll: () => post<unknown[]>('/api/task-sources/sync-all')
   },
   plugins: {
-    list: () => get<Array<{ id: string; displayName: string; description: string; icon: string; requiresMcpServer: boolean }>>('/api/plugins'),
-    getSchema: (pluginId: string) => get<unknown[]>(`/api/plugins/${encodeURIComponent(pluginId)}/schema`),
-    getDocumentation: (pluginId: string) => get<{ documentation: string | null }>(`/api/plugins/${encodeURIComponent(pluginId)}/documentation`),
-    resolveOptions: (pluginId: string, resolverKey: string, config: Record<string, unknown>) =>
-      post<Array<{ value: string; label: string }>>(`/api/plugins/${encodeURIComponent(pluginId)}/resolve-options`, { resolverKey, config })
+    list: () => get<Array<{ id: string; displayName: string; description: string; icon: string }>>('/api/plugins')
   },
   agents: {
-    list: () => get<unknown[]>('/api/agents'),
-    get: (id: string) => get<unknown>(`/api/agents/${encodeURIComponent(id)}`)
+    list: () => get<unknown[]>('/api/agents')
   },
   skills: {
     list: () => get<unknown[]>('/api/skills')
   },
   git: {
-    getProvider: () => get<{ provider: string }>('/api/git/provider'),
     recordRepoProviders: (repos: string[], provider: string) =>
       post<{ success: boolean }>('/api/git/repo-providers', { repos, provider })
   },
@@ -112,10 +103,6 @@ export const api = {
       post<{ success: boolean; newSessionId?: string }>(`/api/sessions/${encodeURIComponent(sessionId)}/send`, { message, taskId, agentId, attachments }),
     approve: (sessionId: string, approved: boolean, message?: string, responseType?: 'permission' | 'question', requestId?: string) =>
       post<{ success: boolean }>(`/api/sessions/${encodeURIComponent(sessionId)}/approve`, { approved, message, responseType, requestId }),
-    sync: (sessionId: string) =>
-      post<{ success: boolean; status: string }>(`/api/sessions/${encodeURIComponent(sessionId)}/sync`),
-    abort: (sessionId: string) =>
-      post<{ success: boolean }>(`/api/sessions/${encodeURIComponent(sessionId)}/abort`),
     stop: (sessionId: string) =>
       post<{ success: boolean }>(`/api/sessions/${encodeURIComponent(sessionId)}/stop`)
   },
@@ -133,21 +120,4 @@ export const api = {
     content: (taskId: string, path: string) =>
       get<ArtifactContent>(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/content?path=${encodeURIComponent(path)}`)
   }
-}
-
-export type { ArtifactContent }
-
-/** A durable transcript projection part (single source of truth for rendering). */
-export interface TranscriptPartRecord {
-  taskId: string
-  partId: string
-  seq: number
-  role: string
-  content: string
-  partType?: string
-  tool?: unknown
-  payload?: unknown
-  createdAt: number
-  updatedAt: number
-  rev: number
 }

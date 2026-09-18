@@ -16,15 +16,6 @@
 
 // ── Audio format ────────────────────────────────────────────
 
-/**
- * Both local models report 24 kHz. The renderer is told the rate of every
- * stream, so a future model with another rate needs no change here.
- */
-export const VOICE_TTS_DEFAULT_SAMPLE_RATE = 24000
-
-/** Speech leaves the worker as mono signed 16-bit little-endian PCM. */
-export const VOICE_TTS_CHANNELS_COUNT = 1
-
 // ── Engines ─────────────────────────────────────────────────
 
 /**

@@ -73,7 +73,6 @@ export function TaskListPage({ onNavigate }: { onNavigate: (route: Route) => voi
   const { active, completed } = useMemo(() => {
     let filtered = tasks
 
-    // Search
     if (search) {
       const q = search.toLowerCase()
       filtered = filtered.filter(
@@ -81,7 +80,6 @@ export function TaskListPage({ onNavigate }: { onNavigate: (route: Route) => voi
       )
     }
 
-    // Filter by status
     if (filter !== 'all') {
       filtered = filtered.filter((t) => t.status === filter)
     }
@@ -151,7 +149,6 @@ export function TaskListPage({ onNavigate }: { onNavigate: (route: Route) => voi
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
       <div className="shrink-0 px-4 pt-3 pb-2 border-b border-border/30">
         <div className="flex items-center justify-between mb-2">
           <h1 className="text-lg font-semibold">Tasks</h1>
@@ -181,7 +178,6 @@ export function TaskListPage({ onNavigate }: { onNavigate: (route: Route) => voi
           </div>
         </div>
 
-        {/* Search */}
         <input
           type="text"
           value={search}
@@ -190,7 +186,6 @@ export function TaskListPage({ onNavigate }: { onNavigate: (route: Route) => voi
           className="w-full bg-transparent border border-input rounded-md px-3 py-1 h-9 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-ring focus:ring-1 focus:ring-ring/30 mb-2"
         />
 
-        {/* Filter pills */}
         <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
           {FILTER_OPTIONS.map((opt) => (
             <button
@@ -236,7 +231,6 @@ export function TaskListPage({ onNavigate }: { onNavigate: (route: Route) => voi
           </>
         )}
 
-        {/* FAB — Create Task */}
         <button
           onClick={() => onNavigate({ page: 'create' })}
           className="sticky bottom-4 left-full -translate-x-4 ml-auto w-12 h-12 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center active:scale-95 transition-transform"

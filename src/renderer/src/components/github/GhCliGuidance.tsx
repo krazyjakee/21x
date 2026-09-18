@@ -1,9 +1,9 @@
 import type { GhCliStatus } from '@/types/electron'
+import { platform } from '@/lib/platform'
 
 function installCommands(): string[] {
-  const platform = navigator.platform?.toLowerCase() ?? ''
-  if (platform.includes('win')) return ['winget install GitHub.cli']
-  if (platform.includes('linux')) return ['sudo apt install gh', 'sudo dnf install gh']
+  if (platform === 'win32') return ['winget install GitHub.cli']
+  if (platform === 'linux') return ['sudo apt install gh', 'sudo dnf install gh']
   return ['brew install gh']
 }
 

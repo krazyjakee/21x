@@ -1,17 +1,13 @@
 import { create } from 'zustand'
-import { ArtifactType, type Artifact } from '@shared/artifacts'
+import type { Artifact } from '@shared/artifacts'
 import { api } from '../api/client'
 import { onEvent } from '../api/websocket'
-
-export { ArtifactType }
-export type { Artifact }
 
 interface ArtifactState {
   artifactsByTask: Map<string, Artifact[]>
   loadingTaskIds: Set<string>
   hydrate: (taskId: string) => Promise<void>
   upsert: (artifact: Artifact) => void
-  getArtifact: (taskId: string, artifactId: string) => Artifact | undefined
 }
 
 const hydrating = new Map<string, Promise<void>>()
@@ -82,9 +78,6 @@ export const useArtifactStore = create<ArtifactState>((set, get) => {
           )
         }
       })
-    },
-
-    getArtifact: (taskId, artifactId) =>
-      get().artifactsByTask.get(taskId)?.find((artifact) => artifact.id === artifactId)
+    }
   }
 })

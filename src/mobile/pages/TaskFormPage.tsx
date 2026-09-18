@@ -1,24 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { TaskStatus, TASK_STATUSES } from '@shared/constants'
+import { buildCronExpression, parseCronToState, type RecurrenceFrequency as FrequencyType } from '@shared/recurrence-cron'
 import { useTaskStore } from '../stores/task-store'
 import { cn } from '../lib/utils'
+import { TASK_TYPES, TASK_PRIORITIES } from '@/types'
+import { PageHeader } from '../components/PageHeader'
 import type { Route } from '../App'
-
-// ── Constants (mirrors desktop @/types) ─────────────────────
-const TASK_TYPES = [
-  { value: 'general', label: 'General' },
-  { value: 'coding', label: 'Coding' },
-  { value: 'manual', label: 'Manual' },
-  { value: 'review', label: 'Review' },
-  { value: 'approval', label: 'Approval' }
-]
-
-const TASK_PRIORITIES = [
-  { value: 'critical', label: 'Critical' },
-  { value: 'high', label: 'High' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'low', label: 'Low' }
-]
+import { ChevronRightIcon } from '../components/icons'
 
 const OUTPUT_FIELD_TYPES = [
   { value: 'text', label: 'Text' },
@@ -49,7 +37,6 @@ const WEEKDAYS = [
   { value: 6, label: 'S' }
 ]
 
-// ── Types ───────────────────────────────────────────────────
 interface OutputField {
   id: string
   name: string
@@ -59,50 +46,15 @@ interface OutputField {
   options?: string[]
 }
 
-type FrequencyType = 'daily' | 'weekly' | 'monthly'
-
-// ── Cron helpers ────────────────────────────────────────────
-function parseCronToState(cron: string) {
-  const parts = cron.trim().split(/\s+/)
-  if (parts.length < 5) return { type: 'daily' as FrequencyType, interval: 1, time: '09:00', weekdays: [1,2,3,4,5], monthDay: 1 }
-  const [minute, hour, dayOfMonth, , dayOfWeek] = parts
-  const time = `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`
-  if (dayOfMonth !== '*' && !dayOfMonth.startsWith('*/') && dayOfWeek === '*') {
-    return { type: 'monthly' as FrequencyType, interval: 1, time, weekdays: [1,2,3,4,5], monthDay: parseInt(dayOfMonth) || 1 }
-  }
-  if (dayOfWeek !== '*') {
-    const weekdays = dayOfWeek.split(',').flatMap(part => {
-      if (part.includes('-')) { const [s, e] = part.split('-').map(Number); const d: number[] = []; for (let i = s; i <= e; i++) d.push(i); return d }
-      return [parseInt(part)]
-    }).filter(n => !isNaN(n))
-    return { type: 'weekly' as FrequencyType, interval: 1, time, weekdays, monthDay: 1 }
-  }
-  let interval = 1
-  if (dayOfMonth.startsWith('*/')) interval = parseInt(dayOfMonth.slice(2)) || 1
-  return { type: 'daily' as FrequencyType, interval, time, weekdays: [1,2,3,4,5], monthDay: 1 }
-}
-
-function buildCronExpression(type: FrequencyType, interval: number, time: string, weekdays: number[], monthDay: number): string {
-  const [hour, minute] = time.split(':').map(s => parseInt(s) || 0)
-  switch (type) {
-    case 'daily': return interval === 1 ? `${minute} ${hour} * * *` : `${minute} ${hour} */${interval} * *`
-    case 'weekly': return `${minute} ${hour} * * ${weekdays.sort((a, b) => a - b).join(',')}`
-    case 'monthly': return `${minute} ${hour} ${monthDay} * *`
-  }
-}
-
-// ── Component ───────────────────────────────────────────────
 export function TaskFormPage({ taskId, onNavigate }: { taskId?: string; onNavigate: (route: Route) => void }) {
   const existingTask = useTaskStore((s) => taskId ? s.tasks.find((t) => t.id === taskId) : undefined)
   const createTask = useTaskStore((s) => s.createTask)
   const updateTask = useTaskStore((s) => s.updateTask)
   const isEdit = !!taskId
 
-  // ── Core fields (always visible) ────────────────────────
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
 
-  // ── Additional fields (behind toggle) ───────────────────
   const [showMore, setShowMore] = useState(false)
   const [type, setType] = useState('general')
   const [priority, setPriority] = useState('medium')
@@ -110,12 +62,10 @@ export function TaskFormPage({ taskId, onNavigate }: { taskId?: string; onNaviga
   const [dueDate, setDueDate] = useState('')
   const [labels, setLabels] = useState('')
 
-  // ── Output fields ───────────────────────────────────────
   const [outputFields, setOutputFields] = useState<OutputField[]>([])
   const [newFieldName, setNewFieldName] = useState('')
   const [newFieldType, setNewFieldType] = useState('text')
 
-  // ── Recurrence ──────────────────────────────────────────
   const [recurringEnabled, setRecurringEnabled] = useState(false)
   const [freqType, setFreqType] = useState<FrequencyType>('daily')
   const [freqInterval, setFreqInterval] = useState(1)
@@ -125,15 +75,12 @@ export function TaskFormPage({ taskId, onNavigate }: { taskId?: string; onNaviga
   const [cronMode, setCronMode] = useState(false)
   const [rawCron, setRawCron] = useState('')
 
-  // ── Auto-start / auto-complete flags ───────────────────
   const [autoStartAgent, setAutoStartAgent] = useState(false)
   const [autoCompleteWithoutReview, setAutoCompleteWithoutReview] = useState(false)
 
-  // ── Submit state ────────────────────────────────────────
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
-  // ── Populate form when editing (only once on initial load) ──
   // Track whether we've already populated the form to prevent
   // background polling / WebSocket updates from overwriting edits.
   const formPopulatedRef = useRef(false)
@@ -152,11 +99,9 @@ export function TaskFormPage({ taskId, onNavigate }: { taskId?: string; onNaviga
     setLabels(existingTask.labels.join(', '))
     setOutputFields((existingTask.output_fields || []) as OutputField[])
 
-    // Auto flags
     setAutoStartAgent(existingTask.auto_start_agent)
     setAutoCompleteWithoutReview(existingTask.auto_complete_without_review)
 
-    // Recurrence
     if (existingTask.is_recurring && existingTask.recurrence_pattern) {
       setRecurringEnabled(true)
       if (typeof existingTask.recurrence_pattern === 'string') {
@@ -183,7 +128,6 @@ export function TaskFormPage({ taskId, onNavigate }: { taskId?: string; onNaviga
     }
   }, [existingTask])
 
-  // ── Submit handler ──────────────────────────────────────
   const handleSubmit = async () => {
     if (!title.trim()) return
     setIsSubmitting(true)
@@ -191,7 +135,6 @@ export function TaskFormPage({ taskId, onNavigate }: { taskId?: string; onNaviga
 
     const parsedLabels = labels.split(',').map((l) => l.trim()).filter(Boolean)
 
-    // Build recurrence pattern
     let recurrencePattern: string | null = null
     if (recurringEnabled) {
       recurrencePattern = cronMode && rawCron.trim()
@@ -231,7 +174,6 @@ export function TaskFormPage({ taskId, onNavigate }: { taskId?: string; onNaviga
     }
   }
 
-  // ── Output field helpers ────────────────────────────────
   const addOutputField = () => {
     if (!newFieldName.trim()) return
     const field: OutputField = { id: `f_${Date.now()}`, name: newFieldName.trim(), type: newFieldType }
@@ -248,11 +190,10 @@ export function TaskFormPage({ taskId, onNavigate }: { taskId?: string; onNaviga
   const toggleWeekday = (day: number) =>
     setFreqWeekdays((prev) => prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day].sort())
 
-  // ── Not found (edit mode) ───────────────────────────────
   if (isEdit && !existingTask) {
     return (
       <div className="flex flex-col h-full">
-        <Header onBack={() => onNavigate({ page: 'list' })} title="Not found" />
+        <PageHeader onBack={() => onNavigate({ page: 'list' })} title="Not found" />
         <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Task not found</div>
       </div>
     )
@@ -260,14 +201,13 @@ export function TaskFormPage({ taskId, onNavigate }: { taskId?: string; onNaviga
 
   return (
     <div className="flex flex-col h-full">
-      <Header
+      <PageHeader
         onBack={() => isEdit && taskId ? onNavigate({ page: 'detail', taskId }) : onNavigate({ page: 'list' })}
         title={isEdit ? 'Edit Task' : 'New Task'}
       />
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
         <div className="space-y-4">
-          {/* ── Title ──────────────────────────────────────── */}
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Title *</label>
             <input
@@ -280,7 +220,6 @@ export function TaskFormPage({ taskId, onNavigate }: { taskId?: string; onNaviga
             />
           </div>
 
-          {/* ── Description ────────────────────────────────── */}
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Description</label>
             <textarea
@@ -292,18 +231,12 @@ export function TaskFormPage({ taskId, onNavigate }: { taskId?: string; onNaviga
             />
           </div>
 
-          {/* ── Toggle additional fields ───────────────────── */}
           <button
             type="button"
             onClick={() => setShowMore(!showMore)}
             className="flex items-center gap-2 text-xs text-muted-foreground active:opacity-60 py-1"
           >
-            <svg
-              className={cn('h-3 w-3 transition-transform', showMore && 'rotate-90')}
-              viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-            >
-              <path d="m9 18 6-6-6-6"/>
-            </svg>
+            <ChevronRightIcon className={cn('h-3 w-3 transition-transform', showMore && 'rotate-90')} />
             Additional fields
             {!showMore && (type !== 'general' || priority !== 'medium' || dueDate || labels || outputFields.length > 0 || recurringEnabled) && (
               <span className="text-primary text-[10px]">(has values)</span>
@@ -312,7 +245,6 @@ export function TaskFormPage({ taskId, onNavigate }: { taskId?: string; onNaviga
 
           {showMore && (
             <div className="space-y-4 pl-1">
-              {/* ── Type & Priority ───────────────────────── */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground">Type</label>
@@ -336,7 +268,6 @@ export function TaskFormPage({ taskId, onNavigate }: { taskId?: string; onNaviga
                 </div>
               </div>
 
-              {/* ── Status (edit mode only) ───────────────── */}
               {isEdit && (
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground">Status</label>
@@ -350,7 +281,6 @@ export function TaskFormPage({ taskId, onNavigate }: { taskId?: string; onNaviga
                 </div>
               )}
 
-              {/* ── Due Date & Labels ─────────────────────── */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground">Due Date</label>
@@ -373,7 +303,6 @@ export function TaskFormPage({ taskId, onNavigate }: { taskId?: string; onNaviga
                 </div>
               </div>
 
-              {/* ── Output Fields ─────────────────────────── */}
               <div className="space-y-2 rounded-md border border-border/50 p-3">
                 <label className="text-xs font-medium text-muted-foreground">Output Fields</label>
                 <p className="text-[11px] text-muted-foreground">Fields agents should fill when completing.</p>
@@ -439,7 +368,6 @@ export function TaskFormPage({ taskId, onNavigate }: { taskId?: string; onNaviga
                 </div>
               </div>
 
-              {/* ── Recurrence ────────────────────────────── */}
               <div className="space-y-3 rounded-md border border-border/50 p-3">
                 <div className="flex items-center gap-2">
                   <input
@@ -557,7 +485,6 @@ export function TaskFormPage({ taskId, onNavigate }: { taskId?: string; onNaviga
                   </div>
                 )}
 
-                {/* ── Auto-start / Auto-complete (inside recurrence block) ── */}
                 {recurringEnabled && (
                   <div className="space-y-3 pt-3 mt-3 border-t border-border/50" data-testid="auto-flags-section">
                     <label className="text-xs font-medium text-muted-foreground">Automation</label>
@@ -585,14 +512,12 @@ export function TaskFormPage({ taskId, onNavigate }: { taskId?: string; onNaviga
             </div>
           )}
 
-          {/* ── Submit error ────────────────────────────────── */}
           {submitError && (
             <p className="text-xs text-red-400 px-1">{submitError}</p>
           )}
         </div>
       </div>
 
-      {/* ── Bottom action bar ──────────────────────────────── */}
       <div className="shrink-0 border-t border-border px-4 py-3 flex gap-3">
         <button
           onClick={() => isEdit && taskId ? onNavigate({ page: 'detail', taskId }) : onNavigate({ page: 'list' })}
@@ -608,19 +533,6 @@ export function TaskFormPage({ taskId, onNavigate }: { taskId?: string; onNaviga
           {isSubmitting ? 'Saving...' : isEdit ? 'Save Changes' : 'Create Task'}
         </button>
       </div>
-    </div>
-  )
-}
-
-function Header({ onBack, title }: { onBack: () => void; title: string }) {
-  return (
-    <div className="shrink-0 flex items-center gap-2 px-2 py-3 border-b border-border">
-      <button onClick={onBack} className="p-2 active:opacity-60 hover:bg-accent rounded-md transition-colors">
-        <svg className="w-5 h-5 text-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="m15 18-6-6 6-6" />
-        </svg>
-      </button>
-      <h1 className="text-sm font-semibold truncate flex-1">{title}</h1>
     </div>
   )
 }

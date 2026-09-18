@@ -7,7 +7,8 @@
  *
  * This file stays for a direct run outside the app, for example
  * `TASK_API_URL=... TASK_API_TOKEN=... node task-management-mcp.js`. All tool definitions and all
- * scope rules live in task-management-core.ts, so both paths behave the same.
+ * scope rules live in task-management-core.ts and task-management-tools.ts, so
+ * both paths behave the same.
  */
 import { Server } from '@modelcontextprotocol/server'
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
@@ -18,7 +19,6 @@ import {
   type TaskMcpScope
 } from './task-management-core'
 
-// Get API URL from environment (points to Electron main process HTTP server)
 const apiUrl = process.env.TASK_API_URL
 if (!apiUrl) {
   throw new Error('TASK_API_URL environment variable is required')

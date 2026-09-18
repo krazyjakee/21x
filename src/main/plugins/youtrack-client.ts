@@ -6,6 +6,10 @@
  * Supports both YouTrack Cloud and self-hosted instances.
  */
 
+import { setTimeout as sleep } from 'node:timers/promises'
+import { HttpError } from '../http-utils'
+import { downloadFile, filenameFromUrl, requestJson } from './http'
+
 // ── Response types ───────────────────────────────────────────
 
 export interface YouTrackUser {
@@ -178,59 +182,23 @@ export class YouTrackClient {
     return normalized
   }
 
-  private async request<T>(
-    method: string,
-    path: string,
-    body?: unknown,
-    retries = 3
-  ): Promise<T> {
-    const url = `${this.baseUrl}/api${path}`
-    const headers: Record<string, string> = {
-      'Authorization': `Bearer ${this.token}`,
-      'Accept': 'application/json',
-      'Content-Type': 'application/json'
-    }
-
-    const response = await fetch(url, {
+  private request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    return requestJson<T>(`${this.baseUrl}/api${path}`, {
       method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined
+      body,
+      service: 'YouTrack',
+      headers: {
+        'Authorization': `Bearer ${this.token}`,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      errors: {
+        401: 'YouTrack authentication failed. Check your permanent token.',
+        403: 'YouTrack access forbidden. Your token may lack the required permissions.',
+        404: `YouTrack API endpoint not found: ${path}. Check your server URL.`
+      },
+      defaultRetryAfterSeconds: 2
     })
-
-    if (response.status === 401) {
-      throw new Error(
-        'YouTrack authentication failed. Check your permanent token.'
-      )
-    }
-    if (response.status === 403) {
-      throw new Error(
-        'YouTrack access forbidden. Your token may lack the required permissions.'
-      )
-    }
-    if (response.status === 404) {
-      throw new Error(
-        `YouTrack API endpoint not found: ${path}. Check your server URL.`
-      )
-    }
-    if (response.status === 429 && retries > 0) {
-      const retryAfter = parseInt(
-        response.headers.get('Retry-After') || '2',
-        10
-      )
-      await this.sleep(retryAfter * 1000)
-      return this.request(method, path, body, retries - 1)
-    }
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(`YouTrack API error: ${response.status} ${errorText}`)
-    }
-
-    return response.json() as Promise<T>
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms))
   }
 
   // ── Public methods ───────────────────────────────────────
@@ -277,7 +245,7 @@ export class YouTrackClient {
 
       if (page.length < PAGE_SIZE) break
       skip += PAGE_SIZE
-      await this.sleep(RATE_LIMIT_DELAY)
+      await sleep(RATE_LIMIT_DELAY)
     } while (true)
 
     return allIssues
@@ -322,7 +290,7 @@ export class YouTrackClient {
 
   /**
    * List all projects accessible to the current user.
-   * Uses admin API; falls back gracefully on 403.
+   * Uses the admin API; returns no projects when it is forbidden.
    */
   async getProjects(): Promise<YouTrackProject[]> {
     try {
@@ -331,23 +299,9 @@ export class YouTrackClient {
         '/admin/projects?fields=id,name,shortName&$top=500'
       )
     } catch (err) {
-      // If admin API is forbidden, try the regular issues-based approach
-      if (
-        err instanceof Error &&
-        err.message.includes('forbidden')
-      ) {
-        console.warn(
-          '[youtrack] Admin API not accessible, falling back to user projects'
-        )
-        // Fallback: query current user's visible projects
-        try {
-          return await this.request<YouTrackProject[]>(
-            'GET',
-            '/admin/projects?fields=id,name,shortName&$top=500'
-          )
-        } catch {
-          return []
-        }
+      if (err instanceof HttpError && err.status === 403) {
+        console.warn('[youtrack] Admin API not accessible, no projects listed')
+        return []
       }
       throw err
     }
@@ -383,54 +337,15 @@ export class YouTrackClient {
   async downloadAttachment(
     attachmentUrl: string
   ): Promise<{ buffer: Buffer; filename: string; contentType: string }> {
-    // Attachment URLs may be relative or absolute
     const fullUrl = attachmentUrl.startsWith('http')
       ? attachmentUrl
       : `${this.baseUrl}${attachmentUrl}`
-
-    const response = await fetch(fullUrl, {
-      headers: {
-        'Authorization': `Bearer ${this.token}`
-      }
-    })
-
-    if (!response.ok) {
-      throw new Error(`Failed to download attachment: ${response.status}`)
+    const file = await downloadFile(fullUrl, { 'Authorization': `Bearer ${this.token}` })
+    return {
+      buffer: file.buffer,
+      filename: file.filename || filenameFromUrl(fullUrl) || `youtrack-attachment-${Date.now()}`,
+      contentType: file.contentType || 'application/octet-stream'
     }
-
-    const contentType =
-      response.headers.get('content-type') || 'application/octet-stream'
-
-    // Try to extract filename from Content-Disposition header
-    let filename = ''
-    const disposition = response.headers.get('content-disposition')
-    if (disposition) {
-      const match = disposition.match(
-        /filename[*]?=(?:UTF-8''|"?)([^";]+)/i
-      )
-      if (match) filename = decodeURIComponent(match[1].replace(/"/g, ''))
-    }
-
-    // Fallback: extract from URL path
-    if (!filename) {
-      try {
-        const urlObj = new URL(fullUrl)
-        const pathParts = urlObj.pathname.split('/').filter(Boolean)
-        const lastPart = pathParts[pathParts.length - 1]
-        if (lastPart && lastPart.includes('.')) {
-          filename = decodeURIComponent(lastPart)
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    if (!filename) {
-      filename = `youtrack-attachment-${Date.now()}`
-    }
-
-    const arrayBuffer = await response.arrayBuffer()
-    return { buffer: Buffer.from(arrayBuffer), filename, contentType }
   }
 
   /**

@@ -11,6 +11,7 @@ import { useThemeStore } from '@/stores/theme-store'
 import { useTaskStore } from '@/stores/task-store'
 import { useSkillStore } from '@/stores/skill-store'
 import { cn } from '@/lib/utils'
+import { modKey as mod } from '@/lib/platform'
 
 interface CommandItem {
   id: string
@@ -21,9 +22,6 @@ interface CommandItem {
   shortcut?: string
   run: () => void
 }
-
-const isMac = navigator.platform.toLowerCase().includes('mac')
-const mod = isMac ? '⌘' : 'Ctrl'
 
 export interface CommandPaletteActions {
   nextTask: () => void

@@ -30,6 +30,15 @@ vi.mock('child_process', () => {
 })
 
 import { HeartbeatScheduler } from './heartbeat-scheduler'
+import {
+  extractGitHubUrls,
+  hasFailedCheckRuns,
+  hasMergeConflicts,
+  preflightCoversAllChecks,
+  requiresCurrentStateChecks,
+  requiresLlmCurrentStateChecks,
+  runPreflightChecks
+} from './heartbeat-preflight'
 import { HeartbeatStatus, HEARTBEAT_OK_TOKEN, HEARTBEAT_INFO_TOKEN, HEARTBEAT_DEFAULTS, TaskStatus } from '../shared/constants'
 import type { DatabaseManager, TaskRecord } from './database'
 import type { AgentManager } from './agent-manager'
@@ -102,14 +111,10 @@ describe('HeartbeatScheduler', () => {
     vi.restoreAllMocks()
   })
 
-  // ── extractGitHubUrls (private, tested via preflight) ──────
+  // ── extractGitHubUrls ──────
 
   describe('extractGitHubUrls', () => {
-    // Access private method for unit testing
-    const extract = (content: string) => {
-      const s = new HeartbeatScheduler({} as DatabaseManager, {} as AgentManager)
-      return (s as unknown as { extractGitHubUrls: (c: string) => unknown[] }).extractGitHubUrls(content)
-    }
+    const extract = extractGitHubUrls
 
     it('extracts PR URL', () => {
       const result = extract('Check https://github.com/acme/app/pull/42 for reviews')
@@ -214,13 +219,6 @@ describe('HeartbeatScheduler', () => {
   // ── requiresCurrentStateChecks ───────────────────────────
 
   describe('requiresCurrentStateChecks', () => {
-    const requiresCurrentStateChecks = (content: string) => {
-      const scheduler = new HeartbeatScheduler({} as DatabaseManager, {} as AgentManager)
-      return (scheduler as unknown as {
-        requiresCurrentStateChecks: (heartbeatContent: string) => boolean
-      }).requiresCurrentStateChecks(content)
-    }
-
     it('returns true for requested changes and CI checks', () => {
       expect(requiresCurrentStateChecks('Verify CI pipeline passed')).toBe(true)
       expect(requiresCurrentStateChecks('Watch for requested changes on the PR')).toBe(true)
@@ -237,13 +235,6 @@ describe('HeartbeatScheduler', () => {
   })
 
   describe('requiresLlmCurrentStateChecks', () => {
-    const requiresLlmCurrentStateChecks = (content: string) => {
-      const scheduler = new HeartbeatScheduler({} as DatabaseManager, {} as AgentManager)
-      return (scheduler as unknown as {
-        requiresLlmCurrentStateChecks: (heartbeatContent: string) => boolean
-      }).requiresLlmCurrentStateChecks(content)
-    }
-
     it('returns true for requested-changes checks', () => {
       expect(requiresLlmCurrentStateChecks('Watch for requested changes on the PR')).toBe(true)
       expect(requiresLlmCurrentStateChecks('Check whether review requested changes are unresolved')).toBe(true)
@@ -259,12 +250,7 @@ describe('HeartbeatScheduler', () => {
   // ── preflightCoversAllChecks ─────────────────────────────
 
   describe('preflightCoversAllChecks', () => {
-    const coversAllChecks = (content: string) => {
-      const scheduler = new HeartbeatScheduler({} as DatabaseManager, {} as AgentManager)
-      return (scheduler as unknown as {
-        preflightCoversAllChecks: (heartbeatContent: string) => boolean
-      }).preflightCoversAllChecks(content)
-    }
+    const coversAllChecks = (content: string) => preflightCoversAllChecks(content)
 
     it('returns true when every check references a GitHub URL', () => {
       const content = [
@@ -348,10 +334,8 @@ describe('HeartbeatScheduler', () => {
   // ── runPreflightChecks ───────────────────────────────────
 
   describe('runPreflightChecks', () => {
-    const runPreflight = (scheduler: HeartbeatScheduler, content: string, task: TaskRecord) =>
-      (scheduler as unknown as {
-        runPreflightChecks: (heartbeatContent: string, task: TaskRecord) => Promise<string>
-      }).runPreflightChecks(content, task)
+    const runPreflight = (_scheduler: HeartbeatScheduler, content: string, task: TaskRecord) =>
+      runPreflightChecks(content, task.heartbeat_last_check_at)
 
     /** A PR with nothing new: no failed checks, no comments/reviews, no conflicts. */
     const quietPr = (argv: string[]): string => {
@@ -427,13 +411,6 @@ describe('HeartbeatScheduler', () => {
   })
 
   describe('hasMergeConflicts', () => {
-    const hasMergeConflicts = (prState: { mergeable: boolean | null; mergeable_state?: string | null }) => {
-      const scheduler = new HeartbeatScheduler({} as DatabaseManager, {} as AgentManager)
-      return (scheduler as unknown as {
-        hasMergeConflicts: (prState: { mergeable: boolean | null; mergeable_state?: string | null }) => boolean
-      }).hasMergeConflicts(prState)
-    }
-
     it('returns true for dirty merge state', () => {
       expect(hasMergeConflicts({ mergeable: false, mergeable_state: 'dirty' })).toBe(true)
     })
@@ -873,21 +850,6 @@ describe('HeartbeatScheduler', () => {
         heartbeat_next_check_at: null,
       })
     })
-
-    it('respects custom max errors setting', () => {
-      ;(db.getSetting as ReturnType<typeof vi.fn>).mockImplementation((key: string) => {
-        if (key === 'heartbeat_max_consecutive_errors') return '5'
-        return null
-      })
-      ;(db.getHeartbeatConsecutiveErrors as ReturnType<typeof vi.fn>).mockReturnValue(4)
-
-      checkErrors(scheduler).call(scheduler, 'task-1')
-      expect(db.updateTask).not.toHaveBeenCalled() // 4 < 5
-
-      ;(db.getHeartbeatConsecutiveErrors as ReturnType<typeof vi.fn>).mockReturnValue(5)
-      checkErrors(scheduler).call(scheduler, 'task-1')
-      expect(db.updateTask).toHaveBeenCalled() // 5 >= 5
-    })
   })
 
   // ── completed task handling ────────────────────────────
@@ -982,17 +944,6 @@ describe('HeartbeatScheduler', () => {
       (scheduler as unknown as {
         resolveAgentId: (task: TaskRecord) => string | null
       }).resolveAgentId
-
-    it('uses dedicated heartbeat agent if configured', () => {
-      ;(db.getSetting as ReturnType<typeof vi.fn>).mockImplementation((key: string) => {
-        if (key === 'heartbeat_agent_id') return 'heartbeat-agent'
-        return null
-      })
-      ;(db.getAgent as ReturnType<typeof vi.fn>).mockReturnValue({ id: 'heartbeat-agent' })
-
-      const task = makeTask({ agent_id: 'task-agent' })
-      expect(resolve(scheduler).call(scheduler, task)).toBe('heartbeat-agent')
-    })
 
     it('falls back to task agent_id', () => {
       const task = makeTask({ agent_id: 'task-agent' })
@@ -1156,15 +1107,9 @@ describe('HeartbeatScheduler', () => {
   // ── hasFailedCheckRuns ────────────────────────────────
 
   describe('hasFailedCheckRuns', () => {
-    const hasFailedCheckRuns = (scheduler: HeartbeatScheduler) =>
-      (scheduler as unknown as {
-        hasFailedCheckRuns: (owner: string, repo: string, sha: string) => Promise<boolean>
-      }).hasFailedCheckRuns
-
-    it('exposes the method with the correct signature', () => {
-      const s = new HeartbeatScheduler({} as DatabaseManager, {} as AgentManager)
-      // Verify the method exists and has the right signature
-      expect(typeof hasFailedCheckRuns(s)).toBe('function')
+    it('is exported with the (owner, repo, sha) signature', () => {
+      expect(typeof hasFailedCheckRuns).toBe('function')
+      expect(hasFailedCheckRuns.length).toBe(3)
     })
   })
 
@@ -1224,11 +1169,9 @@ describe('HeartbeatScheduler', () => {
 
       const oldSessionId = 'temp-session-abc'
       const newSessionId = 'real-session-xyz'
-      let pollCount = 0
 
       const agentWithRekey = mockAgentManager({
         getSession: vi.fn().mockImplementation((id: string) => {
-          pollCount++
           if (id === oldSessionId) {
             // Old session ID no longer exists after re-keying
             return undefined

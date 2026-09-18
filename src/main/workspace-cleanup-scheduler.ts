@@ -61,12 +61,11 @@ export class WorkspaceCleanupScheduler {
     this.mainWindow = mainWindow
     console.log('[WorkspaceCleanup] Starting scheduler...')
 
-    // Run once on startup (delayed by 2 minutes to not slow down app launch)
+    // Delayed so the first run does not slow down app launch.
     setTimeout(() => {
       this.runCleanup()
     }, 2 * 60 * 1000)
 
-    // Then check every hour
     this.intervalId = setInterval(() => {
       this.runCleanup()
     }, this.CHECK_INTERVAL)
@@ -124,7 +123,6 @@ export class WorkspaceCleanupScheduler {
       // whole-workspace auto-cleanup is enabled.
       await this.runNodeModulesGcAuto()
 
-      // Check if auto-cleanup is enabled
       const enabled = this.dbManager.getSetting('workspace_autocleanup_enabled')
       if (enabled !== 'true') {
         // Auto-cleanup defaults to OFF, and that is exactly the machine where
@@ -135,7 +133,6 @@ export class WorkspaceCleanupScheduler {
         return
       }
 
-      // Check if we already ran today
       const lastRun = this.dbManager.getSetting('workspace_autocleanup_last_run')
       if (lastRun) {
         const lastRunDate = new Date(lastRun)
@@ -147,7 +144,6 @@ export class WorkspaceCleanupScheduler {
       this.isRunning = true
       const result = await this.doCleanup(false)
 
-      // Record last run time
       this.dbManager.setSetting('workspace_autocleanup_last_run', new Date().toISOString())
 
       if (result.cleaned > 0) {
@@ -180,12 +176,10 @@ export class WorkspaceCleanupScheduler {
         new Date(t.updated_at) < cutoffDate
     )
 
-    // Count eligible workspaces (ones that actually exist on disk)
     const eligibleTasks = completedTasks.filter((t) =>
       existsSync(join(WORKSPACES_DIR, t.id))
     )
 
-    // Count orphaned directories
     let orphanDirs: string[] = []
     try {
       if (existsSync(WORKSPACES_DIR)) {
@@ -384,7 +378,7 @@ export class WorkspaceCleanupScheduler {
     const dirs = listWorkspaceDirs() ?? []
     const allTasks = this.dbManager.getTasks()
 
-    let skip = findWorkspacesWithLiveProcesses(WORKSPACES_DIR, dirs)
+    let skip = await findWorkspacesWithLiveProcesses(WORKSPACES_DIR, dirs)
     if (skip === null) skip = activeStatusWorkspaceIds(allTasks)
 
     if (reportProgress) {

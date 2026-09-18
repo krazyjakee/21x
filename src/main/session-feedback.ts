@@ -1,4 +1,4 @@
-import type { DatabaseManager, UpdateTaskData } from './database'
+import type { DatabaseManager, TaskRecord, UpdateTaskData } from './database'
 import type { SyncManager } from './sync-manager'
 import { TaskStatus } from '../shared/constants'
 import { getTaskCompletionAction } from '../shared/task-completion'
@@ -38,14 +38,17 @@ export async function finishSessionFeedback(db: DatabaseManager, sync: SyncManag
     if (db.getSubtasks(taskId).some(child => child.status !== TaskStatus.Completed && child.status !== TaskStatus.ReadyForReview)) {
       throw new Error('Subtasks must finish before this task can complete.')
     }
-    if (task.source_id && completeAtSource) {
-      if (!sync) throw new Error('Task source is unavailable.')
-      const result = await sync.executeAction(getTaskCompletionAction(task.output_fields), task, undefined, task.source_id)
-      if (!result.success) throw new Error(result.error || 'Source completion failed.')
-    }
+    if (task.source_id && completeAtSource) await completeTaskAtSource(sync, task)
     return db.updateTask(taskId, { status: TaskStatus.Completed }, 'session-feedback')
   } catch (error) {
     db.updateTask(taskId, { status: TaskStatus.ReadyForReview }, 'session-feedback')
     throw error
   }
+}
+
+/** Sends the task's completion action to its source; throws unless the source accepts it. */
+export async function completeTaskAtSource(sync: SyncManager | null | undefined, task: TaskRecord): Promise<void> {
+  if (!sync || !task.source_id) throw new Error('Task source is unavailable.')
+  const result = await sync.executeAction(getTaskCompletionAction(task.output_fields), task, undefined, task.source_id)
+  if (!result.success) throw new Error(result.error || 'Source completion failed.')
 }

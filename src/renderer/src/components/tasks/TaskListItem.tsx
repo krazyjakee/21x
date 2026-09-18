@@ -4,63 +4,8 @@ import { cn, formatDate, isOverdue, isDueSoon, isSnoozed } from '@/lib/utils'
 import { TaskPriorityBadge } from './TaskPriorityBadge'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { TaskStatus } from '@/types'
-import type { Task, RecurrencePattern, RecurrencePatternObject } from '@/types'
-
-function ordinal(n: number): string {
-  if (n >= 11 && n <= 13) return `${n}th`
-  const last = n % 10
-  if (last === 1) return `${n}st`
-  if (last === 2) return `${n}nd`
-  if (last === 3) return `${n}rd`
-  return `${n}th`
-}
-
-function formatRecurrenceShort(pattern: RecurrencePattern): string {
-  if (typeof pattern === 'string') {
-    const parts = pattern.trim().split(/\s+/)
-    if (parts.length < 5) return pattern
-
-    const [minute, hour, dayOfMonth, , dayOfWeek] = parts
-    const time = `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`
-    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-
-    if (dayOfWeek !== '*') {
-      const days = dayOfWeek.split(',').flatMap(part => {
-        if (part.includes('-')) {
-          const [start, end] = part.split('-').map(Number)
-          const result: number[] = []
-          for (let i = start; i <= end; i++) result.push(i)
-          return result
-        }
-        return [parseInt(part)]
-      }).filter(n => !isNaN(n)).map(d => dayNames[d]).join(', ')
-      return `${days} at ${time}`
-    }
-
-    if (dayOfMonth !== '*' && !dayOfMonth.startsWith('*/')) {
-      return `${ordinal(parseInt(dayOfMonth))} at ${time}`
-    }
-
-    if (dayOfMonth.startsWith('*/')) {
-      return `Every ${dayOfMonth.slice(2)}d at ${time}`
-    }
-
-    return `Daily at ${time}`
-  }
-
-  const p = pattern as RecurrencePatternObject
-  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-  if (p.type === 'weekly' && p.weekdays) {
-    return `${p.weekdays.map(d => dayNames[d]).join(', ')} at ${p.time}`
-  }
-  if (p.type === 'monthly' && p.monthDay) {
-    return `${ordinal(p.monthDay)} at ${p.time}`
-  }
-  if (p.type === 'daily' && p.interval > 1) {
-    return `Every ${p.interval}d at ${p.time}`
-  }
-  return `Daily at ${p.time}`
-}
+import type { Task } from '@/types'
+import { formatRecurrenceShort } from './recurrence-format'
 
 const statusDotColor: Record<TaskStatus, string> = {
   [TaskStatus.NotStarted]: 'bg-muted-foreground',
@@ -74,30 +19,22 @@ const statusDotColor: Record<TaskStatus, string> = {
 interface TaskListItemProps {
   task: Task
   isSelected: boolean
-  onSelect: () => void
+  onSelect: (taskId: string) => void
   subtaskCount?: number
   isSubtask?: boolean
   isExpanded?: boolean
-  onToggleExpand?: () => void
+  onToggleExpand?: (taskId: string) => void
 }
 
 export const TaskListItem = memo(function TaskListItem({ task, isSelected, onSelect, subtaskCount, isSubtask, isExpanded, onToggleExpand }: TaskListItemProps) {
   const isActive = task.status !== TaskStatus.Completed
   const overdue = isActive && isOverdue(task.due_date)
   const dueSoon = isActive && !overdue && isDueSoon(task.due_date)
-  // Use a stable selector that only triggers re-renders when this task's session status/approval changes
   const sessionStatus = useAgentStore((s) => s.sessions.get(task.id)?.status)
-  const hasPendingApproval = useAgentStore((s) => {
-    const sess = s.sessions.get(task.id)
-    return Boolean(sess?.pendingApproval && sess.status !== SessionStatus.IDLE && sess.pendingApproval.action)
-  })
   const hasActiveAgent = sessionStatus != null && sessionStatus !== SessionStatus.IDLE
 
   // Determine status indicator color — memoized to avoid recalculation on every render
   const statusColor = useMemo(() => {
-    if (hasPendingApproval) {
-      return 'bg-blue-400 animate-pulse' // Waiting for user input
-    }
     // Check task status first - AgentLearning/Triaging takes priority over session status
     if (task.status === TaskStatus.AgentLearning) {
       return 'bg-blue-400 animate-pulse' // Agent learning
@@ -109,12 +46,12 @@ export const TaskListItem = memo(function TaskListItem({ task, isSelected, onSel
       return 'bg-amber-400 animate-pulse' // Agent working
     }
     return statusDotColor[task.status] // Task status
-  }, [hasPendingApproval, task.status, hasActiveAgent])
+  }, [task.status, hasActiveAgent])
 
   return (
     <button
       data-keyboard-task-id={task.id}
-      onClick={onSelect}
+      onClick={() => onSelect(task.id)}
       aria-current={isSelected ? 'true' : undefined}
       className={cn(
         'w-full text-left px-3 py-2.5 rounded-md transition-colors cursor-pointer group',
@@ -134,7 +71,7 @@ export const TaskListItem = memo(function TaskListItem({ task, isSelected, onSel
             {onToggleExpand && subtaskCount != null && subtaskCount > 0 && (
               <span
                 role="button"
-                onClick={(e) => { e.stopPropagation(); onToggleExpand() }}
+                onClick={(e) => { e.stopPropagation(); onToggleExpand(task.id) }}
                 className="shrink-0 flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
               >
                 {subtaskCount}

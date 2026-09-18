@@ -1,5 +1,7 @@
 import { afterEach, describe, it, expect, vi } from 'vitest'
 import { OpencodeAdapter } from './opencode-adapter'
+import { attachAndVerifyMcpServers, waitForMcpServersReady } from './opencode-mcp'
+import { setTillDoneSession } from './opencode-runtime-plugins'
 import { SessionStatusType } from './coding-agent-adapter'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { join } from 'path'
@@ -148,8 +150,8 @@ describe('OpencodeAdapter', () => {
           tillDone: true
         })
 
-        ;(adapter as any).writeTillDoneSessionConfig('regular-session', true)
-        ;(adapter as any).writeTillDoneSessionConfig('triage-session', false)
+        setTillDoneSession((adapter as any).tillDoneConfigPath, 'regular-session', true)
+        setTillDoneSession((adapter as any).tillDoneConfigPath, 'triage-session', false)
 
         const supportPaths = (adapter as any).runtimeSupportFilePaths as string[]
         const tillDoneConfigPath = supportPaths.find(path => path.endsWith('.20x-tilldone-config.json'))!
@@ -183,7 +185,7 @@ describe('OpencodeAdapter', () => {
           workspaceDir,
           tillDone: true
         })
-        ;(adapter as any).writeTillDoneSessionConfig('regular-session', true)
+        setTillDoneSession((adapter as any).tillDoneConfigPath, 'regular-session', true)
 
         const supportPaths = (adapter as any).runtimeSupportFilePaths as string[]
         const tillDoneConfigPath = supportPaths.find(path => path.endsWith('.20x-tilldone-config.json'))!
@@ -436,7 +438,7 @@ describe('OpencodeAdapter', () => {
      * still talking. An unchanged, connected server must be left alone.
      */
     it('does not re-add a server that is already connected with the same config', async () => {
-      const adapter = new OpencodeAdapter()
+      const known = new Map<string, string>()
       const workspaceDir = '/tmp/ws-a'
       const add = vi.fn().mockImplementation(async ({ body }: any) => ({
         data: { [body.name]: { status: 'connected' } }
@@ -445,13 +447,13 @@ describe('OpencodeAdapter', () => {
       const ocClient = { mcp: { add, status } }
       const servers = { 'task-management': TASK_MCP['task-management'] }
 
-      const first = await (adapter as any).registerMcpServers(ocClient, servers, workspaceDir)
+      const first = await attachAndVerifyMcpServers(ocClient as any, servers as any, workspaceDir, 'first', known)
       expect(first.attached).toEqual(['task-management'])
       expect(add).toHaveBeenCalledTimes(1)
 
       // Second session starts in the same directory; OpenCode already has it.
       status.mockResolvedValue({ data: { 'task-management': { status: 'connected' } } })
-      const second = await (adapter as any).registerMcpServers(ocClient, servers, workspaceDir)
+      const second = await attachAndVerifyMcpServers(ocClient as any, servers as any, workspaceDir, 'second', known)
 
       expect(second.attached).toEqual(['task-management'])
       expect(second.failed).toEqual([])
@@ -459,7 +461,7 @@ describe('OpencodeAdapter', () => {
     })
 
     it('re-adds a connected server whose config changed, such as a new task API port', async () => {
-      const adapter = new OpencodeAdapter()
+      const known = new Map<string, string>()
       const workspaceDir = '/tmp/ws-a'
       const add = vi.fn().mockImplementation(async ({ body }: any) => ({
         data: { [body.name]: { status: 'connected' } }
@@ -467,16 +469,20 @@ describe('OpencodeAdapter', () => {
       const status = vi.fn().mockResolvedValue({ data: {} })
       const ocClient = { mcp: { add, status } }
 
-      await (adapter as any).registerMcpServers(
-        ocClient,
+      await attachAndVerifyMcpServers(
+        ocClient as any,
         { 'task-management': { type: 'http', url: 'http://127.0.0.1:1111/mcp' } },
-        workspaceDir
+        workspaceDir,
+        'first',
+        known
       )
       status.mockResolvedValue({ data: { 'task-management': { status: 'connected' } } })
-      await (adapter as any).registerMcpServers(
-        ocClient,
+      await attachAndVerifyMcpServers(
+        ocClient as any,
         { 'task-management': { type: 'http', url: 'http://127.0.0.1:2222/mcp' } },
-        workspaceDir
+        workspaceDir,
+        'second',
+        known
       )
 
       expect(add).toHaveBeenCalledTimes(2)
@@ -501,7 +507,6 @@ describe('OpencodeAdapter', () => {
 
   describe('waitForMcpServersReady', () => {
     it('prefers SDK mcp.list when available', async () => {
-      const adapter = new OpencodeAdapter()
       const list = vi.fn().mockResolvedValue({
         data: [
           { name: 'server-a', status: 'connected' },
@@ -511,8 +516,8 @@ describe('OpencodeAdapter', () => {
       const status = vi.fn()
       const mockClient = { mcp: { list, status } }
 
-      const result = await (adapter as any).waitForMcpServersReady(
-        mockClient,
+      const result = await waitForMcpServersReady(
+        mockClient as any,
         ['server-a', 'server-b'],
         '/tmp/ws',
         1,
@@ -526,7 +531,6 @@ describe('OpencodeAdapter', () => {
     })
 
     it('falls back to SDK mcp.status and batches checks per attempt', async () => {
-      const adapter = new OpencodeAdapter()
       const status = vi
         .fn()
         .mockResolvedValueOnce({
@@ -543,8 +547,8 @@ describe('OpencodeAdapter', () => {
         })
       const mockClient = { mcp: { status } }
 
-      const result = await (adapter as any).waitForMcpServersReady(
-        mockClient,
+      const result = await waitForMcpServersReady(
+        mockClient as any,
         ['server-a', 'server-b'],
         '/tmp/ws',
         2,
@@ -557,7 +561,6 @@ describe('OpencodeAdapter', () => {
     })
 
     it('marks unresolved servers as timeout', async () => {
-      const adapter = new OpencodeAdapter()
       const status = vi.fn().mockResolvedValue({
         data: {
           'server-a': { status: 'connecting' }
@@ -565,8 +568,8 @@ describe('OpencodeAdapter', () => {
       })
       const mockClient = { mcp: { status } }
 
-      const result = await (adapter as any).waitForMcpServersReady(
-        mockClient,
+      const result = await waitForMcpServersReady(
+        mockClient as any,
         ['server-a'],
         '/tmp/ws',
         2,

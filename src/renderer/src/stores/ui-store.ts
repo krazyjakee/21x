@@ -60,7 +60,6 @@ interface UIState {
   setPriorityFilter: (filter: TaskPriority | 'all') => void
   setSourceFilter: (filter: string) => void
   setSortField: (field: SortField) => void
-  setSortDirection: (dir: SortDirection) => void
   setSearchQuery: (query: string) => void
   setSkillSearchQuery: (query: string) => void
   setSettingsTab: (tab: SettingsTab) => void
@@ -127,7 +126,6 @@ export const useUIStore = create<UIState>((set) => ({
     }
     set({ sortField, sortDirection: FIELD_DEFAULT_DIRECTION[sortField] })
   },
-  setSortDirection: (sortDirection) => set({ sortDirection }),
   setSearchQuery: (searchQuery) => set({ searchQuery }),
   setSkillSearchQuery: (skillSearchQuery) => set({ skillSearchQuery }),
   setSettingsTab: (settingsTab) => set({ settingsTab }),

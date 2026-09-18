@@ -1,5 +1,8 @@
 import { TaskStatus } from '@shared/constants'
 
+// Date helpers below intentionally differ from desktop's (exact-timestamp due
+// checks, no year in relative dates); formatDate is shared via '@/lib/utils'.
+
 /** Merge class names, filtering out falsy values */
 export function cn(...classes: (string | false | null | undefined)[]): string {
   return classes.filter(Boolean).join(' ')
@@ -55,14 +58,6 @@ export function formatRelativeFuture(dateStr: string): string {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-export function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric'
-  })
-}
-
 // Matches desktop TaskListItem statusDotColor exactly
 export const STATUS_DOT_COLORS: Record<string, string> = {
   [TaskStatus.NotStarted]: 'bg-muted-foreground',
@@ -71,15 +66,6 @@ export const STATUS_DOT_COLORS: Record<string, string> = {
   [TaskStatus.ReadyForReview]: 'bg-pink-400',
   [TaskStatus.AgentLearning]: 'bg-blue-400',
   [TaskStatus.Completed]: 'bg-emerald-400'
-}
-
-export const STATUS_LABELS: Record<string, string> = {
-  [TaskStatus.NotStarted]: 'Not Started',
-  [TaskStatus.Triaging]: 'Triaging',
-  [TaskStatus.AgentWorking]: 'Agent Working',
-  [TaskStatus.ReadyForReview]: 'Ready for Review',
-  [TaskStatus.AgentLearning]: 'Agent Learning',
-  [TaskStatus.Completed]: 'Completed'
 }
 
 // Badge variant mappings — matches desktop Badge.tsx variants

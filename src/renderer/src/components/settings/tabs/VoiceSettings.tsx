@@ -16,12 +16,7 @@ import {
   VOICE_ENDPOINT_SILENCE_CHOICES,
   VOICE_SETTING_KEYS
 } from '@shared/voice'
-
-function formatSize(bytes: number): string {
-  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`
-  if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`
-  return `${Math.round(bytes / 1e3)} kB`
-}
+import { formatBytes } from '@/lib/utils'
 
 /**
  * One page for voice, in two parts: what 20x hears, and what 20x says
@@ -176,7 +171,7 @@ export function VoiceSettings() {
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">{model.description}</p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {formatSize(model.sizeBytes)} · {model.languages.join(', ')} ·{' '}
+                      {formatBytes(model.sizeBytes)} · {model.languages.join(', ')} ·{' '}
                       <a
                         href={model.licenseUrl}
                         target="_blank"

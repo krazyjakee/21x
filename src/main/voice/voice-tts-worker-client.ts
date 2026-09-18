@@ -15,10 +15,10 @@ import type { VoiceTtsEngineId, VoiceTtsStatus } from '../../shared/voice-tts'
 import type { ResolvedTtsModel } from './voice-tts-model-manager'
 
 /** Release the model after this much quiet to give the memory back. */
-export const VOICE_TTS_IDLE_UNLOAD_MS = 5 * 60 * 1000
+const VOICE_TTS_IDLE_UNLOAD_MS = 5 * 60 * 1000
 
 /** How long a held passage waits for a voice to come back before giving up. */
-export const VOICE_TTS_RELOAD_TIMEOUT_MS = 60 * 1000
+const VOICE_TTS_RELOAD_TIMEOUT_MS = 60 * 1000
 
 export interface VoiceTtsLoadRequest {
   engine: VoiceTtsEngineId
@@ -404,6 +404,6 @@ function sameRequest(a: VoiceTtsLoadRequest | null, b: VoiceTtsLoadRequest): boo
 }
 
 /** The worker is copied next to the main bundle by `electron.vite.config.ts`. */
-export function defaultTtsWorkerScript(): string {
+function defaultTtsWorkerScript(): string {
   return join(__dirname, 'voice', 'voice-tts-worker.js')
 }

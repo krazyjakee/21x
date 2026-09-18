@@ -1,4 +1,4 @@
-import { beforeEach, describe, it, expect, vi } from 'vitest'
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 
 vi.mock('electron', () => ({
   ipcMain: { handle: vi.fn() },
@@ -27,11 +27,27 @@ const { mockChildKill, mockSpawn } = vi.hoisted(() => {
 })
 
 vi.mock('child_process', () => ({
-  spawn: mockSpawn
+  spawn: mockSpawn,
+  execFile: vi.fn()
 }))
 
 import { ipcMain } from 'electron'
 import { registerIpcHandlers } from './ipc-handlers'
+import type { IpcDeps } from './ipc/deps'
+import { setTaskSchedulers } from './task-updates'
+
+/** Registers every handler with empty stand-ins for anything the test does not supply. */
+function register(overrides: Partial<Record<keyof IpcDeps, unknown>> = {}): void {
+  registerIpcHandlers({
+    db: {},
+    agentManager: {},
+    githubManager: {},
+    worktreeManager: {},
+    syncManager: {},
+    pluginRegistry: {},
+    ...overrides
+  } as unknown as IpcDeps)
+}
 
 describe('registerIpcHandlers', () => {
   beforeEach(() => {
@@ -39,14 +55,7 @@ describe('registerIpcHandlers', () => {
   })
 
   it('registers the expected number of IPC handlers', () => {
-    const db = {} as unknown as Parameters<typeof registerIpcHandlers>[0]
-    const agentManager = {} as unknown as Parameters<typeof registerIpcHandlers>[1]
-    const githubManager = {} as unknown as Parameters<typeof registerIpcHandlers>[2]
-    const worktreeManager = {} as unknown as Parameters<typeof registerIpcHandlers>[3]
-    const syncManager = {} as unknown as Parameters<typeof registerIpcHandlers>[4]
-    const pluginRegistry = {} as unknown as Parameters<typeof registerIpcHandlers>[5]
-
-    registerIpcHandlers(db, agentManager, githubManager, worktreeManager, syncManager, pluginRegistry)
+    register()
 
     const handleCalls = (ipcMain.handle as ReturnType<typeof vi.fn>).mock.calls
     expect(handleCalls.length).toBeGreaterThanOrEqual(30)
@@ -73,20 +82,12 @@ describe('registerIpcHandlers', () => {
 
   it('keeps a newly created source-less task local', async () => {
     const task = { id: 'task-1', title: 'Instant task', status: 'not_started', source_id: null }
-    const db = {
-      createTask: vi.fn(() => task),
-      getTask: vi.fn(() => task)
-    } as unknown as Parameters<typeof registerIpcHandlers>[0]
-    const syncManager = {} as unknown as Parameters<typeof registerIpcHandlers>[4]
-
-    registerIpcHandlers(
-      db,
-      {} as Parameters<typeof registerIpcHandlers>[1],
-      {} as Parameters<typeof registerIpcHandlers>[2],
-      {} as Parameters<typeof registerIpcHandlers>[3],
-      syncManager,
-      {} as Parameters<typeof registerIpcHandlers>[5]
-    )
+    register({
+      db: {
+        createTask: vi.fn(() => task),
+        getTask: vi.fn(() => task)
+      }
+    })
 
     const handlers = (ipcMain.handle as ReturnType<typeof vi.fn>).mock.calls as [string, (...args: unknown[]) => unknown][]
     const createTask = handlers.filter(([channel]) => channel === 'db:createTask').pop()?.[1]
@@ -97,14 +98,7 @@ describe('registerIpcHandlers', () => {
   })
 
   it('voice handlers stay safe when the voice manager is absent', async () => {
-    const db = {} as unknown as Parameters<typeof registerIpcHandlers>[0]
-    const agentManager = {} as unknown as Parameters<typeof registerIpcHandlers>[1]
-    const githubManager = {} as unknown as Parameters<typeof registerIpcHandlers>[2]
-    const worktreeManager = {} as unknown as Parameters<typeof registerIpcHandlers>[3]
-    const syncManager = {} as unknown as Parameters<typeof registerIpcHandlers>[4]
-    const pluginRegistry = {} as unknown as Parameters<typeof registerIpcHandlers>[5]
-
-    registerIpcHandlers(db, agentManager, githubManager, worktreeManager, syncManager, pluginRegistry)
+    register()
 
     const handleCalls = (ipcMain.handle as ReturnType<typeof vi.fn>).mock.calls as [string, (...args: unknown[]) => unknown][]
     const snapshot = handleCalls.find((call) => call[0] === 'voice:getSnapshot')?.[1]
@@ -118,20 +112,8 @@ describe('registerIpcHandlers', () => {
   })
 
   it('passes every turn mode through, including conversation', async () => {
-    const db = {} as unknown as Parameters<typeof registerIpcHandlers>[0]
-    const agentManager = {} as unknown as Parameters<typeof registerIpcHandlers>[1]
-    const githubManager = {} as unknown as Parameters<typeof registerIpcHandlers>[2]
-    const worktreeManager = {} as unknown as Parameters<typeof registerIpcHandlers>[3]
-    const syncManager = {} as unknown as Parameters<typeof registerIpcHandlers>[4]
-    const pluginRegistry = {} as unknown as Parameters<typeof registerIpcHandlers>[5]
     const startTurnSpy = vi.fn(async (_mode: string, _context: unknown) => ({ turnId: 't1' }))
-    const voice = { startTurn: startTurnSpy } as unknown as Parameters<typeof registerIpcHandlers>[13]
-
-    registerIpcHandlers(
-      db, agentManager, githubManager, worktreeManager, syncManager, pluginRegistry,
-      undefined, undefined, undefined, undefined, undefined, undefined,
-      undefined, voice
-    )
+    register({ voiceSessionManager: { startTurn: startTurnSpy } })
 
     const handleCalls = (ipcMain.handle as ReturnType<typeof vi.fn>).mock.calls as [string, (...args: unknown[]) => unknown][]
     const startTurn = handleCalls.filter((call) => call[0] === 'voice:startTurn').pop()?.[1]
@@ -152,14 +134,7 @@ describe('registerIpcHandlers', () => {
   })
 
   it('terminal:kill ignores stale expectedPid and only kills matching process', async () => {
-    const db = {} as unknown as Parameters<typeof registerIpcHandlers>[0]
-    const agentManager = {} as unknown as Parameters<typeof registerIpcHandlers>[1]
-    const githubManager = {} as unknown as Parameters<typeof registerIpcHandlers>[2]
-    const worktreeManager = {} as unknown as Parameters<typeof registerIpcHandlers>[3]
-    const syncManager = {} as unknown as Parameters<typeof registerIpcHandlers>[4]
-    const pluginRegistry = {} as unknown as Parameters<typeof registerIpcHandlers>[5]
-
-    registerIpcHandlers(db, agentManager, githubManager, worktreeManager, syncManager, pluginRegistry)
+    register()
 
     const handleCalls = (ipcMain.handle as ReturnType<typeof vi.fn>).mock.calls as [string, (...args: unknown[]) => unknown][]
     const createHandler = handleCalls.find((call) => call[0] === 'terminal:create')?.[1]
@@ -183,14 +158,14 @@ describe('registerIpcHandlers', () => {
 describe('db:updateTask coordinator wake-up', () => {
   function setup(existing: Record<string, unknown>, updated: Record<string, unknown>) {
     const notifyParent = vi.fn().mockResolvedValue(undefined)
-    const agentManager = { notifyParentOfSubtaskCompletion: notifyParent } as unknown as Parameters<typeof registerIpcHandlers>[1]
-    const db = {
-      getTask: vi.fn(() => existing),
-      getSetting: vi.fn(() => undefined),
-      updateTask: vi.fn(() => updated)
-    } as unknown as Parameters<typeof registerIpcHandlers>[0]
-
-    registerIpcHandlers(db, agentManager, {} as never, {} as never, {} as never, {} as never)
+    register({
+      agentManager: { notifyParentOfSubtaskCompletion: notifyParent },
+      db: {
+        getTask: vi.fn(() => existing),
+        getSetting: vi.fn(() => undefined),
+        updateTask: vi.fn(() => updated)
+      }
+    })
 
     const handleCalls = (ipcMain.handle as ReturnType<typeof vi.fn>).mock.calls as [string, (...args: unknown[]) => unknown][]
     const updateHandler = handleCalls.filter((call) => call[0] === 'db:updateTask').pop()?.[1]
@@ -250,6 +225,8 @@ describe('db:updateTask coordinator wake-up', () => {
 })
 
 describe('db:updateTask heartbeat cascade on parent completion', () => {
+  afterEach(() => setTaskSchedulers({ heartbeat: null }))
+
   function setup(options: {
     existing: Record<string, unknown>
     updated: Record<string, unknown>
@@ -257,27 +234,15 @@ describe('db:updateTask heartbeat cascade on parent completion', () => {
   }) {
     const { existing, updated, subtasks } = options
     const disableHeartbeat = vi.fn()
-    const heartbeatScheduler = { disableHeartbeat } as unknown as Parameters<typeof registerIpcHandlers>[10]
-    const db = {
-      getTask: vi.fn(() => existing),
-      getSetting: vi.fn(() => undefined),
-      updateTask: vi.fn(() => updated),
-      getSubtasks: vi.fn(() => subtasks)
-    } as unknown as Parameters<typeof registerIpcHandlers>[0]
-
-    registerIpcHandlers(
-      db,
-      {} as Parameters<typeof registerIpcHandlers>[1],
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      undefined, // mcpToolCaller
-      undefined, // oauthManager
-      undefined, // recurrenceScheduler
-      undefined, // claudePluginManager
-      heartbeatScheduler
-    )
+    setTaskSchedulers({ heartbeat: { disableHeartbeat } })
+    register({
+      db: {
+        getTask: vi.fn(() => existing),
+        getSetting: vi.fn(() => undefined),
+        updateTask: vi.fn(() => updated),
+        getSubtasks: vi.fn(() => subtasks)
+      }
+    })
 
     const handleCalls = (ipcMain.handle as ReturnType<typeof vi.fn>).mock.calls as [string, (...args: unknown[]) => unknown][]
     const updateHandler = handleCalls.filter((call) => call[0] === 'db:updateTask').pop()?.[1]
@@ -321,14 +286,7 @@ describe('db:updateTask heartbeat cascade on parent completion', () => {
 describe('bounded transcript IPC replies', () => {
   function handlers(agentManager: Record<string, unknown>) {
     vi.mocked(ipcMain.handle).mockClear()
-    registerIpcHandlers(
-      {} as Parameters<typeof registerIpcHandlers>[0],
-      agentManager as unknown as Parameters<typeof registerIpcHandlers>[1],
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never
-    )
+    register({ agentManager })
     const calls = vi.mocked(ipcMain.handle).mock.calls
     return (channel: string) => calls.find(([name]) => name === channel)![1]
   }

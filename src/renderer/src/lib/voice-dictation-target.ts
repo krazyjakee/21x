@@ -134,6 +134,7 @@ export function setDictationTarget(element: DictationTarget | null, onSubmit?: (
   looseSubmit = onSubmit ?? null
 }
 
+/** Test seam: forgets every registration and the active target. */
 export function clearDictationTarget(): void {
   activeKey = null
   looseTarget = null
@@ -156,10 +157,6 @@ function current(): { field: DictationTarget | null; submit: (() => void) | null
   }
   const field = looseTarget?.isConnected ? looseTarget : null
   return { field, submit: looseSubmit }
-}
-
-export function getDictationTarget(): DictationTarget | null {
-  return current().field
 }
 
 /**

@@ -69,3 +69,18 @@ export function isSnoozed(snoozedUntil: string | null): boolean {
   if (!snoozedUntil) return false
   return new Date(snoozedUntil) > new Date()
 }
+
+/** Binary size for attachments, e.g. "12.3 KB"; "—" when the size is unknown. */
+export function formatFileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '—'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** Decimal (SI) size for downloads, e.g. "42 MB" or "1.2 GB". */
+export function formatBytes(bytes: number): string {
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`
+  if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`
+  return `${Math.round(bytes / 1e3)} kB`
+}
