@@ -56,6 +56,7 @@ import type {
   VoiceTtsModelState,
   VoiceTtsSnapshot
 } from '@shared/voice-tts'
+import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
 
 export interface AgentSessionStartResult {
   sessionId: string
@@ -213,6 +214,7 @@ interface ElectronAPI {
   }
   tasks: {
     getWorkspaceDir: (taskId: string) => Promise<string>
+    getCoordinatorTaskId: () => Promise<string | null>
   }
   /** The preload bridge always exposes every artifact capability, including
    * the desktop-only file clipboard action. */
@@ -513,6 +515,12 @@ interface ElectronAPI {
       onStatus: (callback: (event: VoiceTtsSnapshot) => void) => () => void
       onModelProgress: (callback: (event: { model: VoiceTtsModelState }) => void) => () => void
     }
+  }
+  /** Lightweight chat runtime (docs/chat-runtime.md). */
+  chat: {
+    start: (payload: ChatStartRequest) => Promise<{ turnId: string; provider: string; model: string }>
+    cancel: (turnId: string) => Promise<{ cancelled: boolean }>
+    onEvent: (callback: (event: ChatIpcEvent) => void) => () => void
   }
   onOAuthCallback: (callback: (event: { code: string; state: string }) => void) => () => void
 }

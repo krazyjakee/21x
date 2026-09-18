@@ -17,7 +17,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   tasks: {
     getWorkspaceDir: (taskId: string): Promise<string> =>
-      ipcRenderer.invoke('tasks:getWorkspaceDir', taskId)
+      ipcRenderer.invoke('tasks:getWorkspaceDir', taskId),
+    getCoordinatorTaskId: (): Promise<string | null> =>
+      ipcRenderer.invoke('tasks:getCoordinatorTaskId')
   },
   artifacts: {
     scan: (taskId: string): Promise<ArtifactFileEntry[]> =>
@@ -617,6 +619,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('voice:tts:modelProgress', handler)
         return () => ipcRenderer.removeListener('voice:tts:modelProgress', handler)
       }
+    }
+  },
+  // Lightweight chat runtime (docs/chat-runtime.md). One `chat:start` per turn;
+  // tokens and tool events stream back on `chat:event` tagged with the turnId.
+  chat: {
+    start: (payload: Record<string, unknown>): Promise<{ turnId: string; provider: string; model: string }> =>
+      ipcRenderer.invoke('chat:start', payload),
+    cancel: (turnId: string): Promise<{ cancelled: boolean }> => ipcRenderer.invoke('chat:cancel', { turnId }),
+    onEvent: (callback: (data: unknown) => void): (() => void) => {
+      const handler = (_: unknown, d: unknown): void => callback(d)
+      ipcRenderer.on('chat:event', handler)
+      return () => ipcRenderer.removeListener('chat:event', handler)
     }
   },
   browser: {

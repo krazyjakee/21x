@@ -21,6 +21,7 @@ import type {
   VoiceTtsModelState,
   VoiceTtsSnapshot
 } from '@shared/voice-tts'
+import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
 
 export const taskApi = {
   getAll: (): Promise<Task[]> => {
@@ -49,6 +50,11 @@ export const taskApi = {
 
   reorderSubtasks: (parentId: string, orderedIds: string[]): Promise<boolean> => {
     return window.electronAPI.db.reorderSubtasks(parentId, orderedIds)
+  },
+
+  /** The Mastermind's task row id. Hidden from getAll, so it is asked for by role. */
+  getCoordinatorTaskId: (): Promise<string | null> => {
+    return window.electronAPI.tasks.getCoordinatorTaskId()
   }
 }
 
@@ -682,4 +688,16 @@ export const browserRecordingApi = {
   status: (panelId: string) => window.electronAPI?.browser?.recordingStatus
     ? window.electronAPI.browser.recordingStatus(panelId)
     : Promise.resolve({ recording: null }),
+}
+
+// ── Chat runtime ────────────────────────────────────────────
+// A pass-through for the lightweight chat loop (docs/chat-runtime.md). The
+// renderer sends history and draws events; every model and tool call happens
+// in the main process.
+
+export const chatApi = {
+  start: (payload: ChatStartRequest): Promise<{ turnId: string; provider: string; model: string }> =>
+    window.electronAPI.chat.start(payload),
+  cancel: (turnId: string): Promise<{ cancelled: boolean }> => window.electronAPI.chat.cancel(turnId),
+  onEvent: (callback: (event: ChatIpcEvent) => void): (() => void) => window.electronAPI.chat.onEvent(callback)
 }

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useAgentStore, type AgentMessage } from '@/stores/agent-store'
 import { Bot, User } from 'lucide-react'
-import { MASTERMIND_SESSION_ID } from '@/lib/voice-dictation-target'
+import { useCoordinatorStore } from '@/stores/coordinator-store'
 
 // Stable empty list — a fresh `[]` per render would invalidate memos keyed on it.
 const EMPTY_MESSAGES: AgentMessage[] = []
@@ -41,7 +41,8 @@ interface HeroSectionProps {
 export function HeroSection({ onSeeFullConversation }: HeroSectionProps) {
   const [titleIndex, setTitleIndex] = useState(0)
 
-  const session = useAgentStore((s) => s.sessions.get(MASTERMIND_SESSION_ID))
+  const mastermindTaskId = useCoordinatorStore((s) => s.mastermindTaskId)
+  const session = useAgentStore((s) => (mastermindTaskId ? s.sessions.get(mastermindTaskId) : undefined))
   const messages = session?.messages || EMPTY_MESSAGES
 
   // Rotate title every 5 seconds

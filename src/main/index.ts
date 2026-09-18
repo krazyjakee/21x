@@ -138,7 +138,7 @@ async function sweepLeakedWorkspaces(graceMs?: number, orphansIgnoreTaskState = 
       console.warn('[Cleanup] Skipping the workspace sweep: the workspaces directory could not be read.')
       return
     }
-    const tasks = db ? db.getTasks().map((task) => ({ id: task.id, status: String(task.status) })) : []
+    const tasks = db ? db.getTasks({ includeCoordinators: true }).map((task) => ({ id: task.id, status: String(task.status) })) : []
     if (tasks.length === 0 && dirs.length > 0) {
       // Not credible: workspaces exist but the task table is empty. Far more
       // likely a closed or damaged database than a genuinely empty one — and

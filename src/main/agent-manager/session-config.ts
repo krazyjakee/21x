@@ -2,6 +2,7 @@ import type { AgentRecord, DatabaseManager, McpServerRecord, SecretRecord, TaskR
 import type { McpServerConfig, SessionConfig } from '../adapters/coding-agent-adapter'
 import type { OAuthManager } from '../oauth/oauth-manager'
 import { TaskStatus } from '../../shared/constants'
+import { isCoordinatorTask } from '../../shared/task-roles'
 import { getTaskApiPort, getTaskApiToken, waitForTaskApiServer } from '../task-api-server'
 import { buildTaskMcpUrl } from '../task-mcp-endpoint'
 import { getSecretBrokerPort, writeSecretShellWrapper } from '../secret-broker'
@@ -15,14 +16,15 @@ export interface McpServerOptions {
 
 export function isTriageSessionTask(taskId: string, task?: TaskRecord | null): boolean {
   if (!task) return false
-  if (taskId === 'mastermind-session') return false
+  // A coordinator row has no agent_id of its own; that is not a triage need.
+  if (isCoordinatorTask(task)) return false
   if (taskId.startsWith('heartbeat-')) return false
   return task.status === TaskStatus.Triaging ||
     (Object.prototype.hasOwnProperty.call(task, 'agent_id') && !task.agent_id)
 }
 
 export function shouldEnableTillDone(taskId: string, task?: TaskRecord | null): boolean {
-  if (taskId === 'mastermind-session') return false
+  if (isCoordinatorTask(task)) return false
   if (taskId.startsWith('heartbeat-')) return false
   if (isTriageSessionTask(taskId, task)) return false
   if (task?.status === TaskStatus.AgentLearning) return false
@@ -30,12 +32,14 @@ export function shouldEnableTillDone(taskId: string, task?: TaskRecord | null): 
 }
 
 /** Real task sessions always get task-management so they can triage, orchestrate
- *  subtasks, and inspect live task state regardless of per-agent MCP config. */
+ *  subtasks, and inspect live task state regardless of per-agent MCP config.
+ *  The Mastermind is a task row too, so it gets the same; its artifact calls
+ *  stay unpinned, because it is not a workpiece of its own. */
 export function mcpOptionsForTask(taskId: string, task?: TaskRecord | null): McpServerOptions {
   return {
-    ensureTaskManagement: taskId === 'mastermind-session' || !!task,
+    ensureTaskManagement: !!task,
     taskScope: task?.parent_task_id ? { taskId, parentTaskId: task.parent_task_id } : undefined,
-    artifactTaskId: task ? taskId : undefined
+    artifactTaskId: task && !isCoordinatorTask(task) ? taskId : undefined
   }
 }
 

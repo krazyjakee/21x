@@ -179,7 +179,7 @@ describe('AgentManager skill file paths', () => {
 
   describe('shouldEnableTillDone', () => {
     it('disables tillDone for Mastermind sessions', () => {
-      expect(shouldEnableTillDone('mastermind-session', null)).toBe(false)
+      expect(shouldEnableTillDone('mastermind-task-row', { role: 'mastermind' } as TaskRecord)).toBe(false)
     })
 
     it('disables tillDone for non-work orchestration sessions', () => {

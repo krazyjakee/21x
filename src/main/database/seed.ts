@@ -2,6 +2,8 @@ import type Database from 'better-sqlite3'
 import { join } from 'path'
 import { createId } from '@paralleldrive/cuid2'
 import { FULL_ACCESS_SCOPE, listToolsForScope } from '../mcp-servers/task-management-core'
+import { TaskStatus } from '../../shared/constants'
+import { TASK_ROLE_MASTERMIND } from '../../shared/task-roles'
 
 /** First-run and every-startup rows the app relies on existing. */
 
@@ -13,6 +15,21 @@ export function seedDefaultAgent(db: Database.Database): void {
     INSERT INTO agents (id, name, server_url, config, is_default, created_at, updated_at)
     VALUES (?, ?, ?, ?, 1, ?, ?)
   `).run(createId(), 'Default Agent', 'http://localhost:4096', '{}', now, now)
+}
+
+/**
+ * The Mastermind's own row. It is a task row so its session_id and transcript
+ * persist and resume like any task's; `role` keeps it out of every task list.
+ * Idempotent: one row per install, found by role rather than by a fixed id.
+ */
+export function seedMastermindTask(db: Database.Database): void {
+  const existing = db.prepare('SELECT id FROM tasks WHERE role = ? LIMIT 1').get(TASK_ROLE_MASTERMIND)
+  if (existing) return
+  const now = new Date().toISOString()
+  db.prepare(`
+    INSERT INTO tasks (id, title, description, type, priority, status, assignee, labels, source, role, created_at, updated_at)
+    VALUES (?, ?, ?, 'general', 'medium', ?, '', '[]', 'local', ?, ?, ?)
+  `).run(createId(), 'Mastermind', 'The Mastermind conversation. Not a task: never listed, never scheduled.', TaskStatus.NotStarted, TASK_ROLE_MASTERMIND, now, now)
 }
 
 /** Append `id` to an array in the default agent's config unless already present. */

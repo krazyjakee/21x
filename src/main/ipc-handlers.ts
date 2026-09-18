@@ -12,6 +12,7 @@ import { registerTerminalHandlers } from './ipc/terminal'
 import { registerBrowserBrokerHandlers } from './ipc/browser-broker'
 import { registerExternalAuthHandlers } from './ipc/external-auth'
 import { registerVoiceHandlers } from './ipc/voice'
+import { registerChatHandlers } from './ipc/chat'
 
 export function registerIpcHandlers(deps: IpcDeps): void {
   registerTaskHandlers(deps)
@@ -27,4 +28,5 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   registerBrowserBrokerHandlers()
   registerExternalAuthHandlers()
   registerVoiceHandlers(deps)
+  registerChatHandlers(deps)
 }

@@ -6,7 +6,9 @@ import { createId } from '@paralleldrive/cuid2'
 import { TaskStatus } from '../shared/constants'
 import { WORKSPACES_DIR, taskAttachmentsDir } from './workspace-paths'
 import { applySchema } from './database/schema'
-import { seedDefaultAgent, seedOrchestratorSkill, seedTaskManagementMcpServer } from './database/seed'
+import { seedDefaultAgent, seedMastermindTask, seedOrchestratorSkill, seedTaskManagementMcpServer } from './database/seed'
+import { userTaskRoleFilter } from './database/task-roles'
+import { TASK_ROLE_MASTERMIND, type TaskRole } from '../shared/task-roles'
 import {
   JSON_COLUMNS,
   UPDATABLE_COLUMNS,
@@ -111,6 +113,7 @@ export class DatabaseManager {
 
     seedTaskManagementMcpServer(this.db)
     seedOrchestratorSkill(this.db)
+    seedMastermindTask(this.db)
   }
 
   getWorkspaceDir(taskId: string): string {
@@ -130,14 +133,32 @@ export class DatabaseManager {
     rmSync(taskAttachmentsDir(taskId), { recursive: true, force: true })
   }
 
-  getTasks(): TaskRecord[] {
+  /**
+   * The user's tasks. Coordinator rows (see `role`) are left out, so the board,
+   * the sidebar, mobile, the MCP tools and every other consumer inherit the
+   * same rule. Pass `includeCoordinators` only for bookkeeping over every row,
+   * such as deciding which workspace directories belong to something.
+   */
+  getTasks(opts?: { includeCoordinators?: boolean }): TaskRecord[] {
     if (!this.ensureDbOpen()) return []
 
+    const where = opts?.includeCoordinators ? '' : ` WHERE ${userTaskRoleFilter()}`
     const rows = this.prepare(
-      'SELECT * FROM tasks ORDER BY created_at DESC'
+      `SELECT * FROM tasks${where} ORDER BY created_at DESC`
     ).all() as TaskRow[]
 
     return rows.map(deserializeTask)
+  }
+
+  /** The row that hosts a coordinator conversation, e.g. the Mastermind. */
+  getCoordinatorTask(role: TaskRole = TASK_ROLE_MASTERMIND): TaskRecord | undefined {
+    if (!this.ensureDbOpen()) return undefined
+
+    const row = this.prepare(
+      'SELECT * FROM tasks WHERE role = ? ORDER BY created_at ASC LIMIT 1'
+    ).get(role) as TaskRow | undefined
+
+    return row ? deserializeTask(row) : undefined
   }
 
   getTask(id: string): TaskRecord | undefined {
@@ -334,10 +355,10 @@ export class DatabaseManager {
         labels, attachments, repos, output_fields, external_id, source_id, source,
         is_recurring, recurrence_pattern, recurrence_parent_id,
         auto_start_agent, auto_complete_without_review,
-        parent_task_id, next_subtask_ids, sort_order,
+        parent_task_id, next_subtask_ids, sort_order, role,
         created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       data.title,
@@ -362,6 +383,7 @@ export class DatabaseManager {
       data.parent_task_id ?? null,
       JSON.stringify(data.next_subtask_ids ?? []),
       sortOrder,
+      data.role ?? 'task',
       now,
       now
     )

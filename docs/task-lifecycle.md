@@ -26,6 +26,24 @@ enum TaskStatus {
 | Agent Learning | blue | blue (pulsing) |
 | Completed | green | green |
 
+### Coordinator rows
+
+The Mastermind is stored as a row in `tasks` with `role = 'mastermind'`
+(seeded once per install by `seedMastermindTask`). It is a row so that its
+`session_id` and transcript parts persist like any task's: restarting the app
+and sending a message continues the same conversation, and a runtime the idle
+reaper released is resumed by the next message.
+
+It is not a task. `role` keeps it out of `DatabaseManager.getTasks()` (so the
+board, sidebar, mobile task list and MCP list tools never see it), and the
+raw-SQL routes in `task-routes.ts` (`list_tasks`, `find_similar_tasks`,
+`get_task_statistics`, `list_repos`) carry the same predicate through
+`userTaskRoleFilter()`. It has no lifecycle: `AgentManager` never writes a
+status to it, going idle only reports idle, and `isCoordinatorTask()` in
+`src/shared/task-roles.ts` is the one check for "this row is a conversation,
+not work". The renderer asks for its id with `tasks:getCoordinatorTaskId`
+instead of carrying a fixed string.
+
 ## State Transitions
 
 ```

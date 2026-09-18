@@ -1,4 +1,5 @@
 import { safeStorage } from 'electron'
+import { TASK_ROLE_TASK, isCoordinatorRole, type TaskRole } from '../../shared/task-roles'
 import type {
   AgentConfigRecord, AgentRecord, AgentRow,
   FileAttachmentRecord,
@@ -135,7 +136,8 @@ export function deserializeTask(row: TaskRow): TaskRecord {
     auto_start_agent: (row.auto_start_agent ?? 0) === 1,
     auto_complete_without_review: (row.auto_complete_without_review ?? 0) === 1,
     complete_at_source: row.complete_at_source == null ? null : row.complete_at_source === 1,
-    next_subtask_ids: parseJsonArray(row.next_subtask_ids)
+    next_subtask_ids: parseJsonArray(row.next_subtask_ids),
+    role: isCoordinatorRole(row.role) ? (row.role as TaskRole) : TASK_ROLE_TASK
   }
 }
 

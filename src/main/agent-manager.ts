@@ -10,6 +10,7 @@ import { powerSaveBlocker } from 'electron'
 import type { BrowserWindow } from 'electron'
 import type { AgentRecord, DatabaseManager, TaskRecord } from './database'
 import { TaskStatus } from '../shared/constants'
+import { isCoordinatorTask } from '../shared/task-roles'
 import { findBlockingSibling, isSuccessorGraphInProgress, successorsFireOnReview } from '../shared/subtask-graph'
 import type { WorktreeManager } from './worktree-manager'
 import type { GitHubManager } from './github-manager'
@@ -276,7 +277,9 @@ export class AgentManager extends EventEmitter {
       if (idleForMs < AgentManager.IDLE_SESSION_REAP_THRESHOLD_MS) continue
 
       const task = this.db.getTask(session.taskId)
-      // Pseudo-tasks (mastermind, heartbeat-*) have no DB row — leave them alone.
+      // Pseudo-tasks (heartbeat-*) have no DB row — leave them alone. The
+      // Mastermind has one, so it is released like any task and resumed by
+      // the next message from its persisted session_id.
       if (!task) continue
       // No persisted resume anchor — releasing the runtime would lose the
       // conversation, so keep it in memory.
@@ -386,8 +389,9 @@ export class AgentManager extends EventEmitter {
     const task = this.db.getTask(taskId)
     const mcpServers = await this.buildMcpServersForAdapter(agentId, mcpOptionsForTask(taskId, task))
     // Task context keeps follow-up messages after idle aware of the task;
-    // without it doSendAdapterMessage sends a bare prompt.
-    const taskContext = task
+    // without it doSendAdapterMessage sends a bare prompt. A coordinator row
+    // is not work to describe.
+    const taskContext = task && !isCoordinatorTask(task)
       ? `\n\n[Task Context]\nTask: "${task.title}"\n${task.description || ''}${ARTIFACT_WORKSPACE_INSTRUCTIONS}`
       : ''
     return assembleSessionConfig(this.db, agent, {
@@ -563,8 +567,8 @@ export class AgentManager extends EventEmitter {
     this.updateTaskFromLocalAgent(taskId, { session_id: adapterSessionId })
     console.log(`[SessionTracker] CREATED session=${adapterSessionId} task=${taskId} agent=${agentId} reason=new_session`)
 
-    // Triage sessions keep the Triaging status.
-    if (!isTriageSession) {
+    // Triage sessions keep the Triaging status; coordinator rows have none.
+    if (!isTriageSession && !isCoordinatorTask(task)) {
       this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.AgentWorking })
       this.sendToRenderer('task:updated', {
         taskId,
@@ -1396,7 +1400,7 @@ export class AgentManager extends EventEmitter {
 
     const mcpServers = await this.buildMcpServersForAdapter(agentId, mcpOptionsForTask(taskId, task))
     // Task context in the system prompt survives context compaction.
-    const taskContext = task
+    const taskContext = task && !isCoordinatorTask(task)
       ? `\n\n[Task Context]\nTask: "${task.title}"\n${task.description || ''}`
       : ''
     const secretToken = this.setupSecretSession(agentId)
@@ -1434,6 +1438,13 @@ export class AgentManager extends EventEmitter {
         // Don't show the alarming "incompatible" dialog — just clear the session_id
         // so the UI shows "Start" instead. This commonly happens with subtask sessions.
         const currentTask = this.db.getTask(taskId)
+        // A coordinator conversation the backend no longer has is simply over;
+        // the caller opens a new one. There is no task to ask the user about.
+        if (isCoordinatorTask(currentTask)) {
+          console.log(`[AgentManager] Coordinator session ${adapterSessionId} is gone — clearing session_id for ${taskId}`)
+          this.updateTaskFromLocalAgent(taskId, { session_id: null })
+          return ''
+        }
         const pendingFeedback = currentTask?.status === TaskStatus.AgentLearning
           && this.db.getSetting(`session-feedback-completion:${taskId}`)
         if (currentTask && (currentTask.status === TaskStatus.ReadyForReview || currentTask.status === TaskStatus.Completed || pendingFeedback)) {
@@ -1505,10 +1516,18 @@ export class AgentManager extends EventEmitter {
     return adapterSessionId
   }
 
-  /** A running agent must not pull a task back out of session learning. */
+  /**
+   * A running agent must not pull a task back out of session learning, and a
+   * coordinator row has no lifecycle at all: it is never working, in review or
+   * done, only resumable. Its session_id still persists like any task's.
+   */
   private updateTaskFromLocalAgent(taskId: string, updates: Parameters<DatabaseManager['updateTask']>[1]): TaskRecord | undefined {
     const fields = { ...updates }
-    if (fields.status === TaskStatus.AgentWorking && this.db.getTask(taskId)?.status === TaskStatus.AgentLearning) delete fields.status
+    if (fields.status !== undefined) {
+      const current = this.db.getTask(taskId)
+      if (isCoordinatorTask(current)) delete fields.status
+      else if (fields.status === TaskStatus.AgentWorking && current?.status === TaskStatus.AgentLearning) delete fields.status
+    }
     if (Object.keys(fields).length === 0) return this.db.getTask(taskId)
     return this.db.updateTask(taskId, fields)
   }
@@ -1523,6 +1542,19 @@ export class AgentManager extends EventEmitter {
       throw new Error(`Agent not found: ${agentId}`)
     }
 
+    // A coordinator conversation outlives its runtime. Rejoin the live session
+    // or resume the persisted one, so a restart (or a reaped runtime) continues
+    // the same Mastermind conversation instead of opening a blank one.
+    const task = this.db.getTask(taskId)
+    if (isCoordinatorTask(task)) {
+      const live = this.findSessionByTaskId(taskId)
+      if (live) return live.sessionId
+      if (task?.session_id) {
+        const resumed = await this.resumeCoordinatorSession(agentId, taskId, task.session_id)
+        if (resumed) return resumed
+      }
+    }
+
     if (!workspaceDir) {
       workspaceDir = await this.setupWorktreeIfNeeded(taskId)
     }
@@ -1532,6 +1564,21 @@ export class AgentManager extends EventEmitter {
       throw new Error(`No adapter available for agent ${agentId}`)
     }
     return this.startAdapterSession(adapter, agentId, taskId, workspaceDir, skipInitialPrompt)
+  }
+
+  /** Resumes a coordinator's persisted session; '' when it cannot be continued. */
+  private async resumeCoordinatorSession(agentId: string, taskId: string, sessionId: string): Promise<string> {
+    const adapter = this.getAdapter(agentId)
+    if (!adapter) return ''
+    try {
+      return await this.resumeAdapterSession(adapter, agentId, taskId, sessionId)
+    } catch (error) {
+      // Backend restarted, files gone, or a different backend than the one
+      // that made it. The next session starts fresh; nothing to ask the user.
+      console.warn(`[AgentManager] Could not resume coordinator session ${sessionId} for ${taskId}; starting a new one:`, error)
+      this.updateTaskFromLocalAgent(taskId, { session_id: null })
+      return ''
+    }
   }
 
   /**
@@ -2156,12 +2203,13 @@ export class AgentManager extends EventEmitter {
     session.lastActivityAt = Date.now()
     console.log(`[AgentManager] Session ${sessionId} → idle`)
 
-    // Pseudo-tasks (e.g. mastermind) have no DB row.
+    // Pseudo-tasks (heartbeat-*) have no DB row, and a coordinator row has no
+    // lifecycle: neither goes to review, grows a heartbeat or wakes a parent.
     const task = this.db.getTask(session.taskId)
     await yieldEventLoop()
 
-    if (!task) {
-      console.log(`[AgentManager] No task found for ${session.taskId}, sending idle status only`)
+    if (!task || isCoordinatorTask(task)) {
+      console.log(`[AgentManager] No lifecycle for ${session.taskId}, sending idle status only`)
       this.emitStatus(sessionId, session, 'idle')
       return
     }
@@ -2401,7 +2449,8 @@ export class AgentManager extends EventEmitter {
 
     // Session gone from memory: RESUME first (keeps the conversation), else start a new one.
     if (!session && taskId) {
-      // Regular tasks carry their agent; mastermind passes it in.
+      // Regular tasks carry their agent; the Mastermind (a coordinator row
+      // with no agent_id) passes it in.
       const task = this.db.getTask(taskId)
       const resolvedAgentId = task?.agent_id || agentId
 

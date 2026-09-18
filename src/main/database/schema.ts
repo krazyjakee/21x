@@ -17,8 +17,9 @@ import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
  * 9 → 10: remove hosted-service data (removeHostedServiceData)
  * 10 → 11: preserve existing Claude Code agents' permission behaviour
  * 11 → 12: tasks.next_subtask_ids
+ * 12 → 13: tasks.role (coordinator rows such as the Mastermind)
  */
-const SCHEMA_VERSION = 12
+const SCHEMA_VERSION = 13
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -116,6 +117,7 @@ export function createTables(db: Database.Database): void {
       parent_task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
       next_subtask_ids TEXT NOT NULL DEFAULT '[]',
       sort_order INTEGER NOT NULL DEFAULT 0,
+      role TEXT NOT NULL DEFAULT 'task',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -348,6 +350,7 @@ function rebuildTasksTable(db: Database.Database, columnNames: Set<string>): voi
       auto_start_agent INTEGER NOT NULL DEFAULT 0,
       auto_complete_without_review INTEGER NOT NULL DEFAULT 0,
       complete_at_source INTEGER DEFAULT NULL,
+      role TEXT NOT NULL DEFAULT 'task',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
@@ -687,6 +690,12 @@ export function runMigrations(db: Database.Database): void {
   }
   if (!columnNames.has('auto_complete_without_review')) {
     db.exec(`ALTER TABLE tasks ADD COLUMN auto_complete_without_review INTEGER NOT NULL DEFAULT 0`)
+  }
+
+  // Coordinator rows (the Mastermind) live in `tasks` so their session and
+  // transcript persist like any task's, and `role` keeps them out of every list.
+  if (!columnNames.has('role')) {
+    db.exec(`ALTER TABLE tasks ADD COLUMN role TEXT NOT NULL DEFAULT 'task'`)
   }
 
   // Create heartbeat_logs table
