@@ -26,7 +26,7 @@ describe('tasks.role migration and the Mastermind row', () => {
   })
 
   function openRaw() {
-    return new RawDatabase(join(dir, 'pf-desktop.db'))
+    return new RawDatabase(join(dir, '21x.db'))
   }
 
   function taskColumns(raw: InstanceType<typeof RawDatabase>): string[] {

@@ -53,7 +53,10 @@ export default defineConfig({
           // Built from the TypeScript entry, which shares every tool definition
           // with the in-process endpoint. A duplicate hand-maintained .js copy
           // used to be the build input, and the two copies could drift apart.
-          'mcp-servers/task-management-mcp': resolve(__dirname, 'src/main/mcp-servers/task-management-mcp.ts')
+          'mcp-servers/task-management-mcp': resolve(__dirname, 'src/main/mcp-servers/task-management-mcp.ts'),
+          // Connector piece host, started with utilityProcess.fork() so a
+          // crashing or hung third-party piece cannot take down the app.
+          'piece-host': resolve(__dirname, 'src/main/connectors/piece-host/host-entry.ts')
         },
         output: {
           entryFileNames: '[name].js'

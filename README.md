@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="resources/icon.png" alt="20x Logo" width="120" />
+  <img src="resources/icon.png" alt="21x Logo" width="120" />
 </p>
 
-# 20x
+# 21x
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Version](https://img.shields.io/github/package-json/v/krazyjakee/21x)](./package.json)
@@ -10,19 +10,21 @@
 
 **One app. All your tasks. Powered by AI agents.**
 
-20x is a desktop app that turns your task list into an AI-powered workforce. Connect your tools — Linear, HubSpot, YouTrack, GitHub Issues, GitLab, Notion — assign tasks to AI agents, and watch them work in real time.
+21x is a desktop app that turns your task list into an AI-powered workforce. Connect your tools — Linear, HubSpot, YouTrack, GitHub Issues, GitLab, Notion — assign tasks to AI agents, and watch them work in real time.
 
-This repository (krazyjakee/21x) is a personal fork of [peakflo/20x](https://github.com/peakflo/20x) with the Peakflo enterprise/Workflo features removed. The app is still called 20x.
+21x is a personal fork of [upstream 20x](https://github.com/peakflo/20x) (peakflo/20x) with the Peakflo enterprise/Workflo features removed.
 
-Tasks, transcripts and settings live in a local SQLite database, and there is no 20x account or server. The agents themselves call whichever cloud model APIs you configure, and the integrations talk to the SaaS products they connect to.
+**Upgrading from 20x:** the app's data folder moves with the name. On its first launch 21x copies the previous `20x` data folder (database, attachments, workspaces, repositories, voice models, plugins, logs) into the new `21x` folder once and leaves the old folder as it was; delete it yourself once you are happy. Linear sources connected before the rename need their Linear OAuth app's callback URL changed from `nuanu://oauth/callback` to `twentyonex://oauth/callback` before they reconnect; see [docs/LINEAR_OAUTH_SETUP.md](./docs/LINEAR_OAUTH_SETUP.md). The old scheme is still accepted for one release.
+
+Tasks, transcripts and settings live in a local SQLite database, and there is no 21x account or server. The agents themselves call whichever cloud model APIs you configure, and the integrations talk to the SaaS products they connect to.
 
 <p align="center">
-  <img src="resources/product-demo.gif" alt="20x product demo" />
+  <img src="resources/product-demo.gif" alt="21x product demo" />
 </p>
 
-## Why 20x?
+## Why 21x?
 
-Most AI tools make you copy-paste context between tabs. 20x flips it: **your tasks come to the agents, not the other way around.**
+Most AI tools make you copy-paste context between tabs. 21x flips it: **your tasks come to the agents, not the other way around.**
 
 - Pull a task from Linear → AI agent picks it up, reads the context, writes the code, opens a PR
 - Got a backlog of tickets? → Queue them up, agents work through them while you review
@@ -30,9 +32,25 @@ Most AI tools make you copy-paste context between tabs. 20x flips it: **your tas
 
 ## How It Works
 
-<p align="center">
-  <img src="resources/process.png" alt="20x process: Hubspot, YouTrack, Linear, Github issues → triage agent → Agent (Claude Code, Opencode, OpenAI Codex, Cursor, Pi) → HITL review → Feedback" />
-</p>
+```mermaid
+flowchart LR
+  subgraph Sources[Task sources]
+    HubSpot
+    YouTrack
+    Linear
+    GH[GitHub issues]
+    Notion
+  end
+  Sources --> Triage[Triage agent<br/>assigns priority and agent,<br/>chooses skills and git repos]
+  Triage --> Agent[Agent<br/>reads skills, git worktrees,<br/>MCP servers]
+  Agent --> Review[HITL review]
+  Review --> Feedback[Feedback<br/>updates skills and<br/>confidence levels]
+  Agent --> CC[Claude Code]
+  Agent --> OC[OpenCode]
+  Agent --> Codex[OpenAI Codex]
+  Agent --> Cursor
+  Agent --> Pi
+```
 
 1. **Tasks flow in** — from Linear, YouTrack, HubSpot, GitHub Issues, Notion, or created manually
 2. **Triage agent** — Assigns priority, coding agent (Claude Code, OpenCode, Codex, Cursor, or Pi), relevant skills, and git repos
@@ -42,9 +60,26 @@ Most AI tools make you copy-paste context between tabs. 20x flips it: **your tas
 
 ## Features
 
-<p align="center">
-  <img src="resources/integrations.png" alt="20x integrations: Hubspot, YouTrack, Linear, Github issues → 20x ↔ GitLab, Github, MCP → Claude Code, Opencode, OpenAI Codex, Cursor, Pi; Skills automatically improved" />
-</p>
+```mermaid
+flowchart LR
+  subgraph Sources[Task sources]
+    HubSpot
+    YouTrack
+    Linear
+    GH[GitHub issues]
+    Notion
+  end
+  Sources --> App((21x))
+  App --> GitLab
+  App --> GitHub
+  App --> MCP[MCP servers]
+  App --> CC[Claude Code]
+  App --> OC[OpenCode]
+  App --> Codex[OpenAI Codex]
+  App --> Cursor
+  App --> Pi
+  App --> Skills[Skills<br/>automatically improved]
+```
 
 ### Dashboard Workspace
 - **Command center** — Ask Mastermind or create a task from one input, with quick-start chips
@@ -98,7 +133,7 @@ Most AI tools make you copy-paste context between tabs. 20x flips it: **your tas
 - **Talk to Mastermind** — Microphone in the top bar, or `Cmd/Ctrl+Shift+Space`, from any view
 - **Dictate anywhere** — A microphone in every agent message box and the dashboard command box
 - **Keep talking** — Each pause sends a sentence and the microphone stays open
-- **Spoken answers** — 20x reads an agent answer aloud, and stops the moment you speak. It uses the voice your system already has, so it needs no download; a more natural downloaded voice is one click away
+- **Spoken answers** — 21x reads an agent answer aloud, and stops the moment you speak. It uses the voice your system already has, so it needs no download; a more natural downloaded voice is one click away
 - Off by default: install the runtime and a model in **Settings → Voice**. See [docs/voice.md](docs/voice.md) and [docs/voice-tts.md](docs/voice-tts.md)
 
 ### Heartbeat Monitoring
@@ -121,7 +156,7 @@ Release builds (see `build` in `package.json`):
 - **Node.js** >= 22
 - **pnpm** >= 9
 - **Git** (for worktree features)
-- **GitHub CLI** (optional, for GitHub repo features) — 20x uses your existing `gh` session and never asks for or stores a GitHub token. Sign in once with `gh auth login` in your terminal; `gh auth status` shows the current state.
+- **GitHub CLI** (optional, for GitHub repo features) — 21x uses your existing `gh` session and never asks for or stores a GitHub token. Sign in once with `gh auth login` in your terminal; `gh auth status` shows the current state.
 - **GitLab CLI** (optional, for GitLab repo features)
 - **tea CLI** (optional, for Forgejo repo features — run `tea login add` first)
 
@@ -152,7 +187,7 @@ For maintainers, setup details are in [docs/macos-signing-notarization.md](./doc
 Anthropic, OpenAI and Google API keys can be set in **Settings → Advanced**. Each agent CLI can also use its own login.
 
 **Database:**
-- `pf-desktop.db` in the Electron `userData` directory: `~/Library/Application Support/20x/` (macOS), `%APPDATA%\20x\` (Windows), `~/.config/20x/` (Linux)
+- `21x.db` in the Electron `userData` directory: `~/Library/Application Support/21x/` (macOS), `%APPDATA%\21x\` (Windows), `~/.config/21x/` (Linux). Before the rename it was `pf-desktop.db` in a `20x` folder; see *Upgrading from 20x* above
 - Schema migrations run automatically on startup (see [docs/database-migrations.md](./docs/database-migrations.md))
 
 **Integrations:**
@@ -211,6 +246,15 @@ See [AGENTS.md](./AGENTS.md) for detailed architecture.
 | Database | SQLite (better-sqlite3, WAL mode) |
 | Agent SDKs / protocols | @anthropic-ai/claude-agent-sdk, @opencode-ai/sdk, `codex app-server`, Agent Client Protocol (Cursor), Pi JSONL RPC |
 | Testing | Vitest + happy-dom |
+
+## Releases and telemetry
+
+**Releases are manual and unsigned.** Nothing is tagged or released automatically when `package.json` changes. To publish a release, push a `v*` tag (for example `git tag v1.2.3 && git push origin v1.2.3`), or run the **Release** workflow by hand with an existing tag. It builds for macOS (x64 and arm64), Windows and Linux without signing certificates:
+
+- **macOS:** the app carries an ad-hoc signature only, so Gatekeeper treats it as from an unidentified developer. Open it the first time with right-click, then **Open**. In-app updates can't install unsigned macOS builds; download new versions from the Releases page. To produce signed and notarized builds yourself, see [docs/macos-signing-notarization.md](docs/macos-signing-notarization.md).
+- **Windows:** SmartScreen may warn that the installer is from an unknown publisher.
+
+**No telemetry.** 21x sends no analytics, crash reports or session recordings anywhere. Crash logs stay in the app's data directory on your machine.
 
 ## Contributing
 

@@ -119,8 +119,8 @@ describe('Settings → Voice', () => {
   it('is one page with a listening part and a speaking part', () => {
     render(<VoiceSettings />)
 
-    expect(screen.getByText('Speech to text — what 20x hears')).toBeInTheDocument()
-    expect(screen.getByText('Text to speech — what 20x says')).toBeInTheDocument()
+    expect(screen.getByText('Speech to text — what 21x hears')).toBeInTheDocument()
+    expect(screen.getByText('Text to speech — what 21x says')).toBeInTheDocument()
   })
 
   it('gives each half its own disclosure, named for that half', async () => {

@@ -2,7 +2,7 @@
 @source "../../shared";
 
 /* ══════════════════════════════════════════════════════════════════════════
-   20x Mobile — shares the "Aperture" design system with the desktop app.
+   21x Mobile — shares the "Aperture" design system with the desktop app.
    Light + dark driven by the `.dark` class on <html>. No CDN fonts here
    (mobile CSP restricts font-src to 'self'), so we lean on the system stack.
    ══════════════════════════════════════════════════════════════════════════ */

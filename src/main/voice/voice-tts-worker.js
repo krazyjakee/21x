@@ -137,7 +137,7 @@ const handlers = {
           send({
             t: 'status',
             state: 'engine_missing',
-            message: 'This system has no voice that 20x can use.',
+            message: 'This system has no voice that 21x can use.',
           })
           return
         }
@@ -363,7 +363,7 @@ function systemCommand() {
  */
 function synthesizeSystem(speech, sentence) {
   const command = systemCommand()
-  if (!command) return Promise.reject(new Error('This system has no voice that 20x can use.'))
+  if (!command) return Promise.reject(new Error('This system has no voice that 21x can use.'))
 
   const dir = mkdtempSync(join(tmpdir(), '20x-speech-'))
   const textPath = join(dir, 'text.txt')
@@ -426,7 +426,7 @@ function escapeForPowerShell(value) {
 
 function describeSystemFailure(kind, err) {
   if (err.code === 'ENOENT') {
-    if (kind === 'espeak-ng') return 'espeak-ng is not installed, so 20x cannot use a system voice.'
+    if (kind === 'espeak-ng') return 'espeak-ng is not installed, so 21x cannot use a system voice.'
     return 'The system voice command was not found.'
   }
   if (err.killed) return 'The system voice took too long and was stopped.'
@@ -478,7 +478,7 @@ function readWavAsPcm16(path) {
 }
 
 function toMonoPcm16(body, channels, bits) {
-  if (bits !== 16) throw new Error(`The system voice produced ${bits}-bit audio, which 20x cannot read.`)
+  if (bits !== 16) throw new Error(`The system voice produced ${bits}-bit audio, which 21x cannot read.`)
   if (channels === 1) return Buffer.from(body)
   const frames = Math.floor(body.length / (2 * channels))
   const out = Buffer.alloc(frames * 2)

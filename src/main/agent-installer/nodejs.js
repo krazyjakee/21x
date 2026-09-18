@@ -68,7 +68,7 @@ async function installNodejsLinux(onProgress) {
     // restart. If PATH lacked binDir, the user's shell rc probably does too.
     const pathWasMissing = ensureOnPath(binDir)
     const output = pathWasMissing
-      ? `Node.js ${version} installed.\nNOTE: ${binDir} is not on your shell PATH. Add this to ~/.bashrc or ~/.zshrc:\n  export PATH="$HOME/.local/bin:$PATH"\nThen reopen your terminal. (20x has injected it for this session so subsequent installs will work.)\n`
+      ? `Node.js ${version} installed.\nNOTE: ${binDir} is not on your shell PATH. Add this to ~/.bashrc or ~/.zshrc:\n  export PATH="$HOME/.local/bin:$PATH"\nThen reopen your terminal. (21x has injected it for this session so subsequent installs will work.)\n`
       : `Node.js ${version} installed successfully!\n`
     return finish(onProgress, { success: true, error: null }, output)
   } catch (err) {

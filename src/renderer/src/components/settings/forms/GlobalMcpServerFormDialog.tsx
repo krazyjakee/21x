@@ -134,7 +134,7 @@ export function GlobalMcpServerFormDialog({ open, server, availableClis, onClose
             )}
 
             <p className="text-[11px] text-muted-foreground">
-              Values that look like secrets are never written as plaintext: 20x stores a reference to an environment
+              Values that look like secrets are never written as plaintext: 21x stores a reference to an environment
               variable instead and tells you which one to export. Masked values are kept as they are on disk.
             </p>
 

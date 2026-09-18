@@ -10,8 +10,10 @@
  *     raw 401 response headers, which the SDK transport does not surface.
  */
 
+import { CLIENT_NAME } from './app-identity'
+
 export const MCP_PROTOCOL_VERSION = '2024-11-05'
-export const MCP_CLIENT_INFO = { name: '20x', version: '1.0.0' } as const
+export const MCP_CLIENT_INFO = { name: CLIENT_NAME, version: '1.0.0' } as const
 
 export const MCP_INITIALIZE_ID = 1
 export const MCP_TOOLS_LIST_ID = 2

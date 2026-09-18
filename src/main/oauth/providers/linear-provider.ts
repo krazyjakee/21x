@@ -2,10 +2,13 @@
  * Linear OAuth Provider
  *
  * Implements OAuth 2.0 flow for Linear API.
- * Uses custom URL scheme (nuanu://oauth/callback) for redirect.
+ * Uses custom URL scheme (twentyonex://oauth/callback) for redirect. A source
+ * whose `redirect_uri` setting is the legacy nuanu://oauth/callback keeps
+ * sending that, so a Linear OAuth app not yet updated still completes.
  */
 
 import type { OAuthProvider, TokenResponse } from '../oauth-provider'
+import { oauthRedirectUri } from '../../app-identity'
 
 export class LinearProvider implements OAuthProvider {
   readonly id = 'linear'
@@ -23,7 +26,7 @@ export class LinearProvider implements OAuthProvider {
 
     const params = new URLSearchParams({
       client_id: config.client_id as string,
-      redirect_uri: 'nuanu://oauth/callback',
+      redirect_uri: oauthRedirectUri(config.redirect_uri),
       response_type: 'code',
       scope: scopeValue,
       state,
@@ -46,7 +49,7 @@ export class LinearProvider implements OAuthProvider {
         code,
         client_id: config.client_id as string,
         client_secret: config.client_secret as string,
-        redirect_uri: 'nuanu://oauth/callback',
+        redirect_uri: oauthRedirectUri(config.redirect_uri),
         grant_type: 'authorization_code',
         code_verifier: verifier
       })

@@ -229,7 +229,7 @@ describe('TaskWorkspace keyboard actions', () => {
     act(() => dispatchTaskShortcut({ action: TaskShortcutAction.COMPLETE, taskId: task.id }))
     expect(screen.getByText(`Action at Session Feedback: ${action || 'complete'}. Completion sends this action and the task outputs to the source.`)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('radio', { name: "I'll do it manually" }))
-    expect(screen.getByText('Complete in 20x only. The source record will not change.')).toBeInTheDocument()
+    expect(screen.getByText('Complete in 21x only. The source record will not change.')).toBeInTheDocument()
     expect(noopFn).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Skip' }))
     await waitFor(() => expect(noopFn).toHaveBeenCalledWith(false))

@@ -75,7 +75,7 @@ export function initCrashLogger(): void {
     // Show a user-friendly dialog
     try {
       dialog.showErrorBox(
-        '20x — Unexpected Error',
+        '21x — Unexpected Error',
         `An unexpected error occurred. The app may need to be restarted.\n\nError: ${error.message}\n\nA crash log has been saved to:\n${getLogPath()}`
       )
     } catch { /* dialog may fail if app isn't ready */ }

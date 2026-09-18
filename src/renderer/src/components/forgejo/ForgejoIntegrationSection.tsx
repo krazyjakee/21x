@@ -54,7 +54,7 @@ export function ForgejoIntegrationSection() {
   return (
     <SettingsSection
       title="Forgejo Integration"
-      description="Uses your existing tea CLI logins for Forgejo repositories, issues, pull requests, and CI status. 20x never stores Forgejo credentials."
+      description="Uses your existing tea CLI logins for Forgejo repositories, issues, pull requests, and CI status. 21x never stores Forgejo credentials."
     >
       <div className="space-y-3">
         {showLoginPicker && (

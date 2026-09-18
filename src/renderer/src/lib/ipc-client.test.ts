@@ -11,7 +11,7 @@ describe('worktreeApi.readFile', () => {
     const { worktreeApi } = await import('./ipc-client')
 
     await expect(worktreeApi.readFile('task-1', null, 'AGENTS.md'))
-      .rejects.toThrow('Restart 20x to enable workspace file previews.')
+      .rejects.toThrow('Restart 21x to enable workspace file previews.')
   })
 })
 

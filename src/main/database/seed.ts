@@ -4,6 +4,7 @@ import { createId } from '@paralleldrive/cuid2'
 import { FULL_ACCESS_SCOPE, listToolsForScope } from '../mcp-servers/task-management-core'
 import { TaskStatus } from '../../shared/constants'
 import { TASK_ROLE_MASTERMIND } from '../../shared/task-roles'
+import { DEFAULT_PROJECT_ID } from '../../shared/projects'
 
 /** First-run and every-startup rows the app relies on existing. */
 
@@ -27,9 +28,9 @@ export function seedMastermindTask(db: Database.Database): void {
   if (existing) return
   const now = new Date().toISOString()
   db.prepare(`
-    INSERT INTO tasks (id, title, description, type, priority, status, assignee, labels, source, role, created_at, updated_at)
-    VALUES (?, ?, ?, 'general', 'medium', ?, '', '[]', 'local', ?, ?, ?)
-  `).run(createId(), 'Mastermind', 'The Mastermind conversation. Not a task: never listed, never scheduled.', TaskStatus.NotStarted, TASK_ROLE_MASTERMIND, now, now)
+    INSERT INTO tasks (id, title, description, type, priority, status, assignee, labels, source, role, project_id, created_at, updated_at)
+    VALUES (?, ?, ?, 'general', 'medium', ?, '', '[]', 'local', ?, ?, ?, ?)
+  `).run(createId(), 'Mastermind', 'The Mastermind conversation. Not a task: never listed, never scheduled.', TaskStatus.NotStarted, TASK_ROLE_MASTERMIND, DEFAULT_PROJECT_ID, now, now)
 }
 
 /** Append `id` to an array in the default agent's config unless already present. */

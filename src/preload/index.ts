@@ -2,6 +2,11 @@ import type { BrowserRecordingManifest } from '../shared/browser-recording'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { ArtifactContent, ArtifactCopyFileResult, ArtifactFileEntry, PullRequestDetails } from '../shared/artifacts'
 import { UI_COMMAND_CHANNEL, type UiCommand } from '../shared/ui-commands'
+import type {
+  ProjectRecord, CreateProjectData, UpdateProjectData,
+  ProjectRepoRecord, CreateProjectRepoData, UpdateProjectRepoData,
+  ProjectResourceRecord, CreateProjectResourceData, UpdateProjectResourceData
+} from '../shared/projects'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   db: {
@@ -277,6 +282,37 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('taskSource:getUsers', sourceId),
     reassign: (taskId: string, userIds: string[], assigneeDisplay: string): Promise<unknown> =>
       ipcRenderer.invoke('taskSource:reassign', taskId, userIds, assigneeDisplay)
+  },
+  projects: {
+    getAll: (opts?: { includeArchived?: boolean }): Promise<ProjectRecord[]> => ipcRenderer.invoke('project:getAll', opts),
+    get: (id: string): Promise<ProjectRecord | undefined> => ipcRenderer.invoke('project:get', id),
+    getDefault: (): Promise<ProjectRecord | undefined> => ipcRenderer.invoke('project:getDefault'),
+    create: (data: CreateProjectData): Promise<ProjectRecord | undefined> => ipcRenderer.invoke('project:create', data),
+    update: (id: string, data: UpdateProjectData): Promise<ProjectRecord | undefined> =>
+      ipcRenderer.invoke('project:update', id, data),
+    archive: (id: string, archived?: boolean): Promise<ProjectRecord | undefined> =>
+      ipcRenderer.invoke('project:archive', id, archived),
+    reorder: (orderedIds: string[]): Promise<void> => ipcRenderer.invoke('project:reorder', orderedIds),
+    repos: {
+      list: (projectId: string): Promise<ProjectRepoRecord[]> => ipcRenderer.invoke('projectRepo:list', projectId),
+      add: (projectId: string, data: CreateProjectRepoData): Promise<ProjectRepoRecord | undefined> =>
+        ipcRenderer.invoke('projectRepo:add', projectId, data),
+      update: (id: string, data: UpdateProjectRepoData): Promise<ProjectRepoRecord | undefined> =>
+        ipcRenderer.invoke('projectRepo:update', id, data),
+      remove: (id: string): Promise<boolean> => ipcRenderer.invoke('projectRepo:remove', id),
+      reorder: (projectId: string, orderedIds: string[]): Promise<void> =>
+        ipcRenderer.invoke('projectRepo:reorder', projectId, orderedIds)
+    },
+    resources: {
+      list: (projectId: string): Promise<ProjectResourceRecord[]> => ipcRenderer.invoke('projectResource:list', projectId),
+      add: (projectId: string, data: CreateProjectResourceData): Promise<ProjectResourceRecord | undefined> =>
+        ipcRenderer.invoke('projectResource:add', projectId, data),
+      update: (id: string, data: UpdateProjectResourceData): Promise<ProjectResourceRecord | undefined> =>
+        ipcRenderer.invoke('projectResource:update', id, data),
+      remove: (id: string): Promise<boolean> => ipcRenderer.invoke('projectResource:remove', id),
+      reorder: (projectId: string, orderedIds: string[]): Promise<void> =>
+        ipcRenderer.invoke('projectResource:reorder', projectId, orderedIds)
+    }
   },
   skills: {
     getAll: (): Promise<unknown[]> => ipcRenderer.invoke('skills:getAll'),
@@ -646,6 +682,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const handler = (_: unknown, d: unknown): void => callback(d)
       ipcRenderer.on('chat:event', handler)
       return () => ipcRenderer.removeListener('chat:event', handler)
+    }
+  },
+  // Commander chat sessions (docs/commander.md). Turn tokens, stored messages
+  // and session changes stream back on `commander:event`.
+  commander: {
+    listSessions: (payload?: Record<string, unknown>): Promise<unknown[]> => ipcRenderer.invoke('commander:listSessions', payload),
+    createSession: (payload?: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('commander:createSession', payload),
+    renameSession: (id: string, title: string): Promise<unknown> => ipcRenderer.invoke('commander:renameSession', { id, title }),
+    archiveSession: (id: string, archived: boolean): Promise<unknown> => ipcRenderer.invoke('commander:archiveSession', { id, archived }),
+    listMessages: (sessionId: string): Promise<unknown> => ipcRenderer.invoke('commander:listMessages', { sessionId }),
+    markRead: (sessionId: string): Promise<unknown> => ipcRenderer.invoke('commander:markRead', { sessionId }),
+    send: (sessionId: string, text: string): Promise<unknown> => ipcRenderer.invoke('commander:send', { sessionId, text }),
+    cancel: (sessionId: string): Promise<{ cancelled: boolean }> => ipcRenderer.invoke('commander:cancel', { sessionId }),
+    onEvent: (callback: (data: unknown) => void): (() => void) => {
+      const handler = (_: unknown, d: unknown): void => callback(d)
+      ipcRenderer.on('commander:event', handler)
+      return () => ipcRenderer.removeListener('commander:event', handler)
     }
   },
   browser: {

@@ -96,7 +96,7 @@ export function reconcileSecretValues(
       const variable = referenceVarNameFor(key)
       values[key] = `\${${variable}}`
       referenced.push({ key, variable })
-      warnings.push(`"${key}" looks like a secret. 20x wrote a reference to the ${variable} environment variable instead of the value; export ${variable} in the shell that starts the CLI.`)
+      warnings.push(`"${key}" looks like a secret. 21x wrote a reference to the ${variable} environment variable instead of the value; export ${variable} in the shell that starts the CLI.`)
       continue
     }
     values[key] = rawValue

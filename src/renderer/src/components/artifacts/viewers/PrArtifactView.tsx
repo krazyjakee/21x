@@ -83,7 +83,7 @@ export function PrArtifactView({ artifact, refreshTrigger = 0 }: { artifact: Art
     const fetchPullRequestDetails = window.electronAPI.github.fetchPullRequestDetails
     if (typeof fetchPullRequestDetails !== 'function') {
       setLoading(false)
-      setError('Restart 20x to load the updated pull request integration.')
+      setError('Restart 21x to load the updated pull request integration.')
       return
     }
     const initialLoad = settledUrlRef.current !== artifact.url

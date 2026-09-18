@@ -53,7 +53,7 @@ export function TopBar({ onOpenCommandPalette }: { onOpenCommandPalette: () => v
         {/* The white logo mark always sits on a brand-gradient tile, so it stays visible in both themes. */}
         <div className="no-drag absolute left-3 flex items-center gap-1.5 macos-titlebar-pad">
           <div className="relative grid h-6 w-6 place-items-center rounded-md bg-gradient-to-br from-primary to-primary/75 shadow-sm ring-1 ring-black/5">
-            <img src={logo20x} className="size-icon-sm" alt="20x" />
+            <img src={logo20x} className="size-icon-sm" alt="21x" />
             {updateAvailableVersion && (
               <button
                 onClick={() => {
@@ -67,7 +67,7 @@ export function TopBar({ onOpenCommandPalette }: { onOpenCommandPalette: () => v
               </button>
             )}
           </div>
-          <span className="text-sm font-semibold tracking-tight text-foreground">20x</span>
+          <span className="text-sm font-semibold tracking-tight text-foreground">21x</span>
 
           {/* Only views with a contextual sidebar get the collapse toggle */}
           {(sidebarView === 'tasks' || sidebarView === 'skills') && activeModal !== 'settings' && (

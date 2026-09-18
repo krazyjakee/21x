@@ -30,7 +30,7 @@ async function resolveGitUrl() {
   const suffix = process.arch === 'arm64' ? 'arm64.exe' : '64-bit.exe'
   const release = await fetchJson(
     'https://api.github.com/repos/git-for-windows/git/releases/latest',
-    { 'User-Agent': '20x-app' }
+    { 'User-Agent': '21x-app' }
   )
   const asset = release?.assets?.find(a => a.name?.endsWith(suffix) && !a.name.includes('busybox'))
   return asset?.browser_download_url || 'https://github.com/git-for-windows/git/releases/latest/download/Git-64-bit.exe'

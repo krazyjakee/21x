@@ -22,7 +22,7 @@ export interface OAuthProvider {
   /**
    * Whether this provider requires localhost redirect (vs custom URL scheme)
    * true = localhost (e.g., http://localhost:3000/callback)
-   * false = custom scheme (e.g., nuanu://oauth/callback)
+   * false = custom scheme (e.g., twentyonex://oauth/callback)
    */
   readonly requiresLocalhost: boolean
 

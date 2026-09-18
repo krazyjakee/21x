@@ -4,6 +4,7 @@ import { registerAgentHandlers } from './ipc/agents'
 import { registerMcpHandlers } from './ipc/mcp'
 import { registerCliMcpHandlers } from './ipc/cli-mcp'
 import { registerTaskSourceHandlers } from './ipc/task-sources'
+import { registerProjectHandlers } from './ipc/projects'
 import { registerGitHandlers } from './ipc/git'
 import { registerSettingsHandlers } from './ipc/settings'
 import { registerAppHandlers } from './ipc/app'
@@ -14,6 +15,7 @@ import { registerBrowserBrokerHandlers } from './ipc/browser-broker'
 import { registerExternalAuthHandlers } from './ipc/external-auth'
 import { registerVoiceHandlers } from './ipc/voice'
 import { registerChatHandlers } from './ipc/chat'
+import { registerCommanderHandlers } from './ipc/commander'
 
 export function registerIpcHandlers(deps: IpcDeps): void {
   registerTaskHandlers(deps)
@@ -21,6 +23,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   registerMcpHandlers(deps)
   registerCliMcpHandlers()
   registerTaskSourceHandlers(deps)
+  registerProjectHandlers(deps)
   registerGitHandlers(deps)
   registerSettingsHandlers(deps)
   registerAppHandlers(deps)
@@ -31,4 +34,5 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   registerExternalAuthHandlers()
   registerVoiceHandlers(deps)
   registerChatHandlers(deps)
+  registerCommanderHandlers(deps)
 }

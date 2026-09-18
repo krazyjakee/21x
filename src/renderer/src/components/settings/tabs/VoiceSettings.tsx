@@ -122,8 +122,8 @@ export function VoiceSettings() {
     <>
       {/* ── What 20x hears ───────────────────────────────── */}
       <SettingsSection
-        title="Speech to text — what 20x hears"
-        description="You speak, 20x writes it down. Speech is recognised on this computer; no audio is stored and none leaves the device."
+        title="Speech to text — what 21x hears"
+        description="You speak, 21x writes it down. Speech is recognised on this computer; no audio is stored and none leaves the device."
       >
         <VoiceRuntimeRow />
 
@@ -135,7 +135,7 @@ export function VoiceSettings() {
             </Label>
             <p className="text-xs text-muted-foreground">
               {setupComplete
-                ? '20x asks for the microphone the first time you switch this on.'
+                ? '21x asks for the microphone the first time you switch this on.'
                 : 'Install voice control above first.'}
             </p>
           </div>
@@ -374,7 +374,7 @@ export function VoiceSettings() {
                 <div className="space-y-0.5">
                   <Label>Keep talking</Label>
                   <p className="text-xs text-muted-foreground">
-                    The microphone stays open. Each time you pause, what you said is sent, and 20x keeps listening for
+                    The microphone stays open. Each time you pause, what you said is sent, and 21x keeps listening for
                     the next sentence. Switch this off to write the words into the box and send them yourself.
                   </p>
                 </div>

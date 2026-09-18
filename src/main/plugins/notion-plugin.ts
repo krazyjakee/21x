@@ -121,7 +121,7 @@ export class NotionPlugin implements TaskSourcePlugin {
         optionsResolver: 'status_options',
         multiSelect: true,
         dependsOn: { field: 'data_source_id', value: '__any__' },
-        description: 'Statuses a task can be moved to from 20x'
+        description: 'Statuses a task can be moved to from 21x'
       },
       {
         key: 'completion_status',
@@ -584,7 +584,7 @@ Import tasks from any Notion data source. Supports incremental sync, server-side
 
 1. Go to [notion.so/profile/integrations/internal](https://www.notion.so/profile/integrations/internal)
 2. Click **New integration**
-3. Enter an **Integration name** (e.g. "20x Tasks")
+3. Enter an **Integration name** (e.g. "21x Tasks")
 4. Select your **Associated workspace**
 5. Click **Create**
 
@@ -612,7 +612,7 @@ Alternatively, open the database in Notion → click **...** → **Connections**
 1. Paste your **Integration Token**
 2. Select the **Database** from the dropdown
 3. Optionally select **Filters** to only import specific items (e.g. Status = In Progress)
-4. Optionally select the **Next statuses** a task can move to from 20x
+4. Optionally select the **Next statuses** a task can move to from 21x
 5. Click **Save** and **Sync**
 
 ## Features
@@ -623,9 +623,9 @@ Select property values to filter by. Values from the same property are combined 
 Example: Status = "In Progress" OR "To Do" AND Priority = "High"
 
 ### Next Statuses
-Select the statuses of your data source that a task can move to from 20x, and
+Select the statuses of your data source that a task can move to from 21x, and
 which one a completed task moves to. Use this when your board has custom status
-names such as "Ready for QA" or "Shipped" — without it, 20x can only recognise
+names such as "Ready for QA" or "Shipped" — without it, 21x can only recognise
 the default Notion names (To Do, In progress, In review, Done).
 
 ### Incremental Sync

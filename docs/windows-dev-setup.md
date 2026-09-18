@@ -1,6 +1,6 @@
 # Windows Development Setup
 
-This guide covers building and running 20x from source on Windows. It complements the general instructions in [CONTRIBUTING.md](../CONTRIBUTING.md).
+This guide covers building and running 21x from source on Windows. It complements the general instructions in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Prerequisites
 
@@ -76,7 +76,7 @@ The rebuild script continues if `node-pty` fails and logs a warning.
 pnpm dev
 ```
 
-This starts `electron-vite dev`, builds main/preload/renderer, and opens the 20x window.
+This starts `electron-vite dev`, builds main/preload/renderer, and opens the 21x window.
 
 On first launch you may see:
 
@@ -119,7 +119,7 @@ pnpm test:run
 pnpm build:win
 ```
 
-Output: `dist/20x Setup {version}.exe` (x64 only; electron-builder's default NSIS name, since `win` sets no `artifactName`).
+Output: `dist/21x Setup {version}.exe` (x64 only; electron-builder's default NSIS name, since `win` sets no `artifactName`).
 
 The NSIS installer runs elevated (`RequestExecutionLevel admin` in `resources/installer.nsh`) and installs Python if none is found. The installed app runs with the user's normal privileges (`requestedExecutionLevel: asInvoker` in `package.json`), so agents, shells and MCP servers are not elevated. Dependency installers that need admin rights (Node.js MSI, Git for Windows) ask for elevation on their own through a UAC prompt.
 
@@ -127,13 +127,13 @@ The NSIS installer runs elevated (`RequestExecutionLevel admin` in `resources/in
 
 | Data | Path |
 |------|------|
-| SQLite database | `%APPDATA%\20x\pf-desktop.db` |
-| Crash logs | `%APPDATA%\20x\logs\crash.log` |
-| Secret shell wrapper | `%APPDATA%\20x\secret-shell.ps1` |
-| Task workspaces | `%APPDATA%\20x\workspaces\{taskId}\` |
-| Task attachments | `%APPDATA%\20x\attachments\{taskId}\` |
+| SQLite database | `%APPDATA%\21x\21x.db` |
+| Crash logs | `%APPDATA%\21x\logs\crash.log` |
+| Secret shell wrapper | `%APPDATA%\21x\secret-shell.ps1` |
+| Task workspaces | `%APPDATA%\21x\workspaces\{taskId}\` |
+| Task attachments | `%APPDATA%\21x\attachments\{taskId}\` |
 
-The database file is named `pf-desktop.db` (legacy name) inside the `20x` app data folder.
+Before the rename to 21x, data lived in `%APPDATA%\20x\` with the database named `pf-desktop.db`. The first 21x launch copies it (and the folders above) into `%APPDATA%\21x\` once, leaves the old folder untouched, and records the copy in `%APPDATA%\21x\.21x-identity-migration.json`.
 
 On uninstall, the NSIS installer **asks** whether to remove app data. Choosing **No** keeps your database and settings. App upgrades preserve data automatically.
 
@@ -157,7 +157,7 @@ The native module was built for system Node.js instead of Electron. Rerun `node 
 
 ### `pnpm dev` builds but the window closes immediately
 
-Check `%APPDATA%\20x\logs\crash.log` for the stack trace. Common causes: missing native rebuild or a stale database from an older install — try renaming `%APPDATA%\20x` temporarily to start fresh.
+Check `%APPDATA%\21x\logs\crash.log` for the stack trace. Common causes: missing native rebuild or a stale database from an older install — try renaming `%APPDATA%\21x` temporarily to start fresh.
 
 ### Agent CLI tools not found
 

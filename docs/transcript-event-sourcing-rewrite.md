@@ -71,7 +71,7 @@ Steps:
    transient), but make sure nothing *renderable* is excluded.
 
 Verify (CDP): `getTranscriptSnapshot(taskId).length` and assistant-text count match the CLI
-session file (`~/.claude/projects/.../<session>.jsonl`) and the on-disk `pf-desktop.db`
+session file (`~/.claude/projects/.../<session>.jsonl`) and the on-disk `21x.db` (named `pf-desktop.db` before the 21x rename)
 `transcript_parts` for the task.
 
 Exit criteria: snapshot == ground truth for a long, restarted session. (This was TRUE in the
@@ -179,7 +179,7 @@ we chased should be gone because there is one writer.
 Connect: `curl http://127.0.0.1:19222/json` → page target for `localhost:5173` → CDP
 `Runtime.evaluate`. Checks:
 
-- **Data**: `getTranscriptSnapshot(taskId)` count + assistant-text count == `pf-desktop.db`
+- **Data**: `getTranscriptSnapshot(taskId)` count + assistant-text count == `21x.db` (named `pf-desktop.db` before the 21x rename)
   `transcript_parts` == CLI `.jsonl`.
 - **Store**: projection Map size == snapshot; `selectMessages` length == Map size.
 - **DOM**: virtual-list inner height large (full history present); scroll to top shows oldest.

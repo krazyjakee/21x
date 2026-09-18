@@ -177,7 +177,7 @@ export function GlobalCliMcpSection() {
           <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
             <FileWarning className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
             <div className="flex-1 space-y-1">
-              <p className="font-medium text-amber-300">{CLI_LABELS[conflict.cli]} config changed outside 20x</p>
+              <p className="font-medium text-amber-300">{CLI_LABELS[conflict.cli]} config changed outside 21x</p>
               <p className="text-muted-foreground">
                 Nothing was written. Reload to pick up the external change and try again.
                 <span className="block truncate" title={conflict.paths.join('\n')}>{conflict.paths.join(', ')}</span>

@@ -22,7 +22,13 @@ import type {
   VoiceTtsSnapshot
 } from '@shared/voice-tts'
 import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
+import type { CommanderEvent, CommanderListSessionsRequest, CommanderMessage, CommanderSession } from '@shared/commander'
 import type { CliMcpMutationResult, CliMcpProbeResult, CliMcpServerRef, CliMcpSnapshot, CliMcpUpsertRequest } from '@shared/cli-mcp-config'
+import type {
+  ProjectRecord, CreateProjectData, UpdateProjectData,
+  ProjectRepoRecord, CreateProjectRepoData, UpdateProjectRepoData,
+  ProjectResourceRecord, CreateProjectResourceData, UpdateProjectResourceData
+} from '@shared/projects'
 
 export const taskApi = {
   getAll: (): Promise<Task[]> => {
@@ -460,6 +466,34 @@ export const taskSourceApi = {
   }
 }
 
+export const projectApi = {
+  getAll: (opts?: { includeArchived?: boolean }): Promise<ProjectRecord[]> => window.electronAPI.projects.getAll(opts),
+  get: (id: string): Promise<ProjectRecord | undefined> => window.electronAPI.projects.get(id),
+  getDefault: (): Promise<ProjectRecord | undefined> => window.electronAPI.projects.getDefault(),
+  create: (data: CreateProjectData): Promise<ProjectRecord | undefined> => window.electronAPI.projects.create(data),
+  update: (id: string, data: UpdateProjectData): Promise<ProjectRecord | undefined> => window.electronAPI.projects.update(id, data),
+  archive: (id: string, archived?: boolean): Promise<ProjectRecord | undefined> => window.electronAPI.projects.archive(id, archived),
+  reorder: (orderedIds: string[]): Promise<void> => window.electronAPI.projects.reorder(orderedIds),
+
+  listRepos: (projectId: string): Promise<ProjectRepoRecord[]> => window.electronAPI.projects.repos.list(projectId),
+  addRepo: (projectId: string, data: CreateProjectRepoData): Promise<ProjectRepoRecord | undefined> =>
+    window.electronAPI.projects.repos.add(projectId, data),
+  updateRepo: (id: string, data: UpdateProjectRepoData): Promise<ProjectRepoRecord | undefined> =>
+    window.electronAPI.projects.repos.update(id, data),
+  removeRepo: (id: string): Promise<boolean> => window.electronAPI.projects.repos.remove(id),
+  reorderRepos: (projectId: string, orderedIds: string[]): Promise<void> =>
+    window.electronAPI.projects.repos.reorder(projectId, orderedIds),
+
+  listResources: (projectId: string): Promise<ProjectResourceRecord[]> => window.electronAPI.projects.resources.list(projectId),
+  addResource: (projectId: string, data: CreateProjectResourceData): Promise<ProjectResourceRecord | undefined> =>
+    window.electronAPI.projects.resources.add(projectId, data),
+  updateResource: (id: string, data: UpdateProjectResourceData): Promise<ProjectResourceRecord | undefined> =>
+    window.electronAPI.projects.resources.update(id, data),
+  removeResource: (id: string): Promise<boolean> => window.electronAPI.projects.resources.remove(id),
+  reorderResources: (projectId: string, orderedIds: string[]): Promise<void> =>
+    window.electronAPI.projects.resources.reorder(projectId, orderedIds)
+}
+
 export const skillApi = {
   getAll: (): Promise<Skill[]> => {
     return window.electronAPI.skills.getAll()
@@ -576,7 +610,7 @@ export const worktreeApi = {
   readFile: (taskId: string, repoFullName: string | null, filePath: string): Promise<{ content: string; size: number; binary: boolean; truncated: boolean } | null> => {
     const readFile = window.electronAPI.worktree.readFile
     if (typeof readFile !== 'function') {
-      return Promise.reject(new Error('Restart 20x to enable workspace file previews.'))
+      return Promise.reject(new Error('Restart 21x to enable workspace file previews.'))
     }
     return readFile(taskId, repoFullName, filePath)
   },
@@ -710,6 +744,23 @@ export const chatApi = {
     window.electronAPI.chat.start(payload),
   cancel: (turnId: string): Promise<{ cancelled: boolean }> => window.electronAPI.chat.cancel(turnId),
   onEvent: (callback: (event: ChatIpcEvent) => void): (() => void) => window.electronAPI.chat.onEvent(callback)
+}
+
+// ── Commander sessions ─────────────────────────────────────
+// Persisted Commander chat sessions (docs/commander.md). Main stores every
+// message and runs the turns; the renderer lists, sends and draws events.
+
+export const commanderApi = {
+  listSessions: (payload?: CommanderListSessionsRequest): Promise<CommanderSession[]> => window.electronAPI.commander.listSessions(payload),
+  createSession: (title?: string): Promise<CommanderSession> => window.electronAPI.commander.createSession(title ? { title } : undefined),
+  renameSession: (id: string, title: string): Promise<CommanderSession | null> => window.electronAPI.commander.renameSession(id, title),
+  archiveSession: (id: string, archived: boolean): Promise<CommanderSession | null> => window.electronAPI.commander.archiveSession(id, archived),
+  listMessages: (sessionId: string): Promise<{ messages: CommanderMessage[]; activeTurnId: string | null }> =>
+    window.electronAPI.commander.listMessages(sessionId),
+  markRead: (sessionId: string): Promise<CommanderSession | null> => window.electronAPI.commander.markRead(sessionId),
+  send: (sessionId: string, text: string): Promise<{ turnId: string; message: CommanderMessage }> => window.electronAPI.commander.send(sessionId, text),
+  cancel: (sessionId: string): Promise<{ cancelled: boolean }> => window.electronAPI.commander.cancel(sessionId),
+  onEvent: (callback: (event: CommanderEvent) => void): (() => void) => window.electronAPI.commander.onEvent(callback)
 }
 
 // ── Global MCP config of the coding-agent CLIs ───────────────

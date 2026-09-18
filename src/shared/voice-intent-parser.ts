@@ -24,7 +24,8 @@ import type {
   VoiceViewName,
 } from './voice'
 
-const WAKE_PREFIX = /^(?:hey\s+)?(?:20x|twenty\s*x|twentyx)\s*[,:]?\s*/i
+// 21x is the app's name; the 20x forms keep working for users used to the old one.
+const WAKE_PREFIX = /^(?:hey\s+)?(?:21x|twenty[\s-]*one\s*x|twentyonex|20x|twenty\s*x|twentyx)\s*[,:]?\s*/i
 const TRAILING_PUNCT = /[.!?,;\s]+$/
 
 function normalize(raw: string): string {
@@ -75,6 +76,7 @@ const VIEW_ALIASES: Record<string, VoiceViewName> = {
   skills: 'skills',
   canvas: 'canvas',
   board: 'canvas',
+  commander: 'commander',
   setting: 'settings',
   settings: 'settings',
   preferences: 'settings',
@@ -263,7 +265,7 @@ export function isVoiceIntent(value: unknown): value is VoiceIntent {
     case 'navigate':
       return (
         typeof v.destination === 'string' &&
-        ['tasks', 'skills', 'dashboard', 'canvas', 'settings'].includes(v.destination) &&
+        ['tasks', 'skills', 'dashboard', 'canvas', 'commander', 'settings'].includes(v.destination) &&
         (v.taskRef === undefined || isRef(v.taskRef))
       )
     case 'cancel':

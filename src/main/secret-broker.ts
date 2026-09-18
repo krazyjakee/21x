@@ -140,7 +140,7 @@ export function writeSecretShellWrapper(): string {
   const debugLog = join(app.getPath('userData'), 'secret-shell-debug.log')
 
   const script = `#!/bin/bash
-# 20x Secret Shell Wrapper
+# 21x Secret Shell Wrapper
 # Fetches secrets from the local broker and injects them into the command environment.
 # The agent process has _20X_SB_PORT and _20X_SB_TOKEN but NOT the actual secret values.
 
@@ -180,7 +180,7 @@ exec "\$_real_shell" "\$@"
 export function buildWindowsSecretShellScript(debugLogPath: string): string {
   const debugLog = debugLogPath.replace(/\\/g, '\\\\')
 
-  return `# 20x Secret Shell Wrapper (Windows PowerShell)
+  return `# 21x Secret Shell Wrapper (Windows PowerShell)
 # Fetches secrets from the local broker and injects them into the command environment.
 
 $ErrorActionPreference = "SilentlyContinue"

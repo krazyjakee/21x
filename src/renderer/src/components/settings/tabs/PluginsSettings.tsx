@@ -80,7 +80,7 @@ export function PluginsSettings() {
     <div className="space-y-6">
       <SettingsSection
         title="Plugins"
-        description="Extend 20x with Claude Code format plugins. Browse marketplaces, install skills, MCP servers, agents, and more."
+        description="Extend 21x with Claude Code format plugins. Browse marketplaces, install skills, MCP servers, agents, and more."
       >
         {/* Tab bar */}
         <div className="flex gap-1 border-b border-border">

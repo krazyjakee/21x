@@ -43,7 +43,7 @@ export function CompleteAtSourceDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Complete in {sourceName}?</AlertDialogTitle>
           <AlertDialogDescription>
-            "{taskTitle}" came from {sourceName}. 20x can close it there for you, or you can
+            "{taskTitle}" came from {sourceName}. 21x can close it there for you, or you can
             mark it complete here only and update {sourceName} yourself.
           </AlertDialogDescription>
         </AlertDialogHeader>

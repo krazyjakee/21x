@@ -6,6 +6,7 @@
  * 20x's CodingAgentAdapter contract.
  */
 
+import { CLIENT_NAME } from '../app-identity'
 import { spawn, type ChildProcess } from 'child_process'
 import { existsSync, readFileSync } from 'fs'
 import { guardChildStreams } from '../child-stream-guards'
@@ -614,8 +615,8 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
   private async initializeAppServer(session: AppServerSession): Promise<void> {
     await this.sendRpcRequest(session, 'initialize', {
       clientInfo: {
-        name: '20x',
-        title: '20x',
+        name: CLIENT_NAME,
+        title: CLIENT_NAME,
         version: '0.0.1'
       },
       capabilities: {

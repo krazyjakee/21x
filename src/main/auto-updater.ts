@@ -17,7 +17,8 @@ let updateDownloaded = false
 let updateDownloading = false
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
-const WINDOWS_SETUP_FILE_RE = /^20x-Setup-(\d+\.\d+\.\d+(?:[-+][^/\\]+)?)\.exe(\.blockmap)?$/i
+// 21x is the current product name; 20x covers releases published before the rename.
+const WINDOWS_SETUP_FILE_RE = /^(2[01]x)-Setup-(\d+\.\d+\.\d+(?:[-+][^/\\]+)?)\.exe(\.blockmap)?$/i
 let lastProgressLogAt = 0
 let lastProgressPercent = -1
 
@@ -309,7 +310,7 @@ function normalizeWindowsSetupFileName(fileName: string): string {
   const match = basename.match(WINDOWS_SETUP_FILE_RE)
 
   if (!match) return fileName
-  return `${prefix}20x.Setup.${match[1]}.exe${match[2] ?? ''}`
+  return `${prefix}${match[1]}.Setup.${match[2]}.exe${match[3] ?? ''}`
 }
 
 function logDownloadProgress(progress: {

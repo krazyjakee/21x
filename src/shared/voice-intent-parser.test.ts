@@ -90,6 +90,12 @@ describe('interpretTranscript — create_task', () => {
       title: 'fix login',
     })
   })
+
+  it('ignores the 21x wake prefix, spoken or written', () => {
+    for (const phrase of ['hey 21x, create a task to fix login', 'twenty one x create a task to fix login']) {
+      expect(intentOf(phrase)).toEqual({ type: 'create_task', title: 'fix login' })
+    }
+  })
 })
 
 describe('interpretTranscript — task control', () => {

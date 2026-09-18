@@ -1,4 +1,4 @@
-# Contributing to 20x
+# Contributing to 21x
 
 Thanks for your interest in contributing! Here's how to get started.
 

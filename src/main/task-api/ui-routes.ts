@@ -46,7 +46,7 @@ function requireCanvasPanel(taskId: string): { error: string } | null {
  * is told "done" would go on to describe a screen the user never saw.
  */
 function sendUiCommand(command: UiCommand): { success: true; command: string } | { error: string } {
-  if (!uiState.available) return { error: 'No 20x window is open' }
+  if (!uiState.available) return { error: 'No 21x window is open' }
   if (!notifyRenderer) return { error: 'The window cannot be reached' }
   notifyRenderer(UI_COMMAND_CHANNEL, command)
   return { success: true, command: command.kind }

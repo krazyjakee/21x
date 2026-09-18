@@ -543,9 +543,9 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
     <Dialog open={open} onOpenChange={(o) => !o && handleSkip()}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Welcome to 20x</DialogTitle>
+          <DialogTitle>Welcome to 21x</DialogTitle>
           <DialogDescription>
-            Get 20x more done with AI agents
+            Get 21x more done with AI agents
           </DialogDescription>
         </DialogHeader>
 

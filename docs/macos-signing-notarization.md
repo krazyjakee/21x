@@ -1,5 +1,7 @@
 # macOS Signing & Notarization
 
+> **Note:** the Release workflow in this repository builds unsigned (ad-hoc signed) macOS apps and no longer uses the secrets below (issue #26). This page describes how to sign and notarize a build yourself, locally or in your own CI.
+
 This project signs and notarizes macOS release artifacts through `electron-builder` + GitHub Actions.
 
 ## Required Apple Assets

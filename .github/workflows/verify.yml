@@ -26,6 +26,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Check connector pieces (allowlist, pins, licenses)
+        run: node scripts/check-connector-pieces.mjs
+
       - name: Lint
         run: pnpm lint
 

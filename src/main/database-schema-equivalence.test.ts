@@ -304,6 +304,10 @@ describe('schema equivalence: legacy database migrated vs fresh database', () =>
     const sourceFk = (legacy.pragma('foreign_key_list(tasks)') as ForeignKeyShape[]).find((fk) => fk.from === 'source_id')
     expect(sourceFk?.on_delete).toBe('CASCADE')
 
+    // Every task and task source lands in the Default project.
+    expect(legacy.prepare('SELECT DISTINCT project_id FROM tasks').all()).toEqual([{ project_id: 'default' }])
+    expect(legacy.prepare('SELECT DISTINCT project_id FROM task_sources').all()).toEqual([{ project_id: 'default' }])
+
     // Inline MCP servers move to the mcp_servers table and agents keep ids only.
     const fsServer = legacy.prepare("SELECT id, command, source FROM mcp_servers WHERE name = 'filesystem'").get() as
       { id: string; command: string; source: string } | undefined

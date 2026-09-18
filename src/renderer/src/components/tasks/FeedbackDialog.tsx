@@ -80,7 +80,7 @@ export function FeedbackDialog({ open, sourceName, onSubmit, onSkip, onCancel, c
           {sourceName && (
             <div className="flex flex-col gap-2 rounded-lg border border-border/50 p-3" data-testid="source-completion-choice">
               <p className="text-xs text-muted-foreground">
-                {completeAtSource ? completionDescription : 'Complete in 20x only. The source record will not change.'}
+                {completeAtSource ? completionDescription : 'Complete in 21x only. The source record will not change.'}
               </p>
               <span className="text-xs font-medium text-foreground">
                 This task came from {sourceName}

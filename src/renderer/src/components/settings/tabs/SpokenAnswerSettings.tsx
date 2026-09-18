@@ -57,8 +57,8 @@ export function SpokenAnswerSettings() {
   if (!tts) {
     return (
       <SettingsSection
-        title="Text to speech — what 20x says"
-        description="20x can read an agent answer aloud."
+        title="Text to speech — what 21x says"
+        description="21x can read an agent answer aloud."
       >
         <p className="text-sm text-muted-foreground">Spoken answers are not available in this build.</p>
       </SettingsSection>
@@ -77,8 +77,8 @@ export function SpokenAnswerSettings() {
 
   return (
     <SettingsSection
-      title="Text to speech — what 20x says"
-      description="20x reads an agent answer aloud. The speech is produced on this computer; no text and no audio leave the device."
+      title="Text to speech — what 21x says"
+      description="21x reads an agent answer aloud. The speech is produced on this computer; no text and no audio leave the device."
     >
       <div className="flex items-center justify-between rounded-lg border border-border p-3">
         <div className="space-y-0.5">
@@ -132,7 +132,7 @@ export function SpokenAnswerSettings() {
         {tts.voices.length === 0 ? (
           <p className="text-xs text-muted-foreground">
             {tts.engine === 'system'
-              ? 'This system has no voice that 20x can use.'
+              ? 'This system has no voice that 21x can use.'
               : 'Download a voice below to choose a speaker.'}
           </p>
         ) : (
@@ -335,7 +335,7 @@ export function SpokenAnswerSettings() {
             <div className="space-y-0.5">
               <Label>Read only what you asked for by voice</Label>
               <p className="text-xs text-muted-foreground">
-                Keep this on and 20x reads the answer to a spoken question only. Switch it off and it
+                Keep this on and 21x reads the answer to a spoken question only. Switch it off and it
                 reads every agent answer, including one from a task running in the background.
               </p>
             </div>

@@ -57,7 +57,13 @@ import type {
   VoiceTtsSnapshot
 } from '@shared/voice-tts'
 import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
+import type { CommanderEvent, CommanderListSessionsRequest, CommanderMessage, CommanderSession } from '@shared/commander'
 import type { CliMcpMutationResult, CliMcpProbeResult, CliMcpServerRef, CliMcpSnapshot, CliMcpUpsertRequest } from '@shared/cli-mcp-config'
+import type {
+  ProjectRecord, CreateProjectData, UpdateProjectData,
+  ProjectRepoRecord, CreateProjectRepoData, UpdateProjectRepoData,
+  ProjectResourceRecord, CreateProjectResourceData, UpdateProjectResourceData
+} from '@shared/projects'
 
 export interface AgentSessionStartResult {
   sessionId: string
@@ -356,6 +362,29 @@ interface ElectronAPI {
     getUsers: (sourceId: string) => Promise<SourceUser[]>
     reassign: (taskId: string, userIds: string[], assigneeDisplay: string) => Promise<ReassignResult>
   }
+  projects: {
+    getAll: (opts?: { includeArchived?: boolean }) => Promise<ProjectRecord[]>
+    get: (id: string) => Promise<ProjectRecord | undefined>
+    getDefault: () => Promise<ProjectRecord | undefined>
+    create: (data: CreateProjectData) => Promise<ProjectRecord | undefined>
+    update: (id: string, data: UpdateProjectData) => Promise<ProjectRecord | undefined>
+    archive: (id: string, archived?: boolean) => Promise<ProjectRecord | undefined>
+    reorder: (orderedIds: string[]) => Promise<void>
+    repos: {
+      list: (projectId: string) => Promise<ProjectRepoRecord[]>
+      add: (projectId: string, data: CreateProjectRepoData) => Promise<ProjectRepoRecord | undefined>
+      update: (id: string, data: UpdateProjectRepoData) => Promise<ProjectRepoRecord | undefined>
+      remove: (id: string) => Promise<boolean>
+      reorder: (projectId: string, orderedIds: string[]) => Promise<void>
+    }
+    resources: {
+      list: (projectId: string) => Promise<ProjectResourceRecord[]>
+      add: (projectId: string, data: CreateProjectResourceData) => Promise<ProjectResourceRecord | undefined>
+      update: (id: string, data: UpdateProjectResourceData) => Promise<ProjectResourceRecord | undefined>
+      remove: (id: string) => Promise<boolean>
+      reorder: (projectId: string, orderedIds: string[]) => Promise<void>
+    }
+  }
   skills: {
     getAll: () => Promise<Skill[]>
     create: (data: CreateSkillDTO) => Promise<Skill>
@@ -552,6 +581,18 @@ interface ElectronAPI {
     start: (payload: ChatStartRequest) => Promise<{ turnId: string; provider: string; model: string }>
     cancel: (turnId: string) => Promise<{ cancelled: boolean }>
     onEvent: (callback: (event: ChatIpcEvent) => void) => () => void
+  }
+  /** Commander chat sessions (docs/commander.md). */
+  commander: {
+    listSessions: (payload?: CommanderListSessionsRequest) => Promise<CommanderSession[]>
+    createSession: (payload?: { title?: string }) => Promise<CommanderSession>
+    renameSession: (id: string, title: string) => Promise<CommanderSession | null>
+    archiveSession: (id: string, archived: boolean) => Promise<CommanderSession | null>
+    listMessages: (sessionId: string) => Promise<{ messages: CommanderMessage[]; activeTurnId: string | null }>
+    markRead: (sessionId: string) => Promise<CommanderSession | null>
+    send: (sessionId: string, text: string) => Promise<{ turnId: string; message: CommanderMessage }>
+    cancel: (sessionId: string) => Promise<{ cancelled: boolean }>
+    onEvent: (callback: (event: CommanderEvent) => void) => () => void
   }
   onOAuthCallback: (callback: (event: { code: string; state: string }) => void) => () => void
 }
