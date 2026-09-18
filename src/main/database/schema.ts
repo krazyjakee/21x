@@ -349,6 +349,32 @@ export function createTables(db: Database.Database): void {
     -- NOT here. On a DB created before rev existed, CREATE TABLE IF NOT EXISTS
     -- is a no-op (no rev column), so building them here would fail with
     -- no-such-column before the ALTER TABLE migration runs.
+
+    -- Commander chat sessions (docs/commander.md). Timestamps are epoch ms.
+    CREATE TABLE IF NOT EXISTS commander_sessions (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      archived INTEGER NOT NULL DEFAULT 0,
+      last_read_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_commander_sessions_updated ON commander_sessions(updated_at);
+
+    CREATE TABLE IF NOT EXISTS commander_messages (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES commander_sessions(id) ON DELETE CASCADE,
+      role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'tool', 'report', 'summary')),
+      content TEXT NOT NULL DEFAULT '',
+      tool_calls TEXT,
+      tool_call_id TEXT,
+      tool_name TEXT,
+      is_error INTEGER NOT NULL DEFAULT 0,
+      project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+      correlation_id TEXT,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_commander_messages_session_created ON commander_messages(session_id, created_at);
   `)
 
   // Embedded connector pieces (docs/connectors.md). Timestamps are epoch ms.

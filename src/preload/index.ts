@@ -684,6 +684,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener('chat:event', handler)
     }
   },
+  // Commander chat sessions (docs/commander.md). Turn tokens, stored messages
+  // and session changes stream back on `commander:event`.
+  commander: {
+    listSessions: (payload?: Record<string, unknown>): Promise<unknown[]> => ipcRenderer.invoke('commander:listSessions', payload),
+    createSession: (payload?: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('commander:createSession', payload),
+    renameSession: (id: string, title: string): Promise<unknown> => ipcRenderer.invoke('commander:renameSession', { id, title }),
+    archiveSession: (id: string, archived: boolean): Promise<unknown> => ipcRenderer.invoke('commander:archiveSession', { id, archived }),
+    listMessages: (sessionId: string): Promise<unknown> => ipcRenderer.invoke('commander:listMessages', { sessionId }),
+    markRead: (sessionId: string): Promise<unknown> => ipcRenderer.invoke('commander:markRead', { sessionId }),
+    send: (sessionId: string, text: string): Promise<unknown> => ipcRenderer.invoke('commander:send', { sessionId, text }),
+    cancel: (sessionId: string): Promise<{ cancelled: boolean }> => ipcRenderer.invoke('commander:cancel', { sessionId }),
+    onEvent: (callback: (data: unknown) => void): (() => void) => {
+      const handler = (_: unknown, d: unknown): void => callback(d)
+      ipcRenderer.on('commander:event', handler)
+      return () => ipcRenderer.removeListener('commander:event', handler)
+    }
+  },
   browser: {
     startRecording: (panelId: string, title?: string): Promise<{ ok: true; recording: BrowserRecordingManifest } | { error: string }> =>
       ipcRenderer.invoke('browser:startRecording', panelId, title),

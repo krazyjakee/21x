@@ -33,6 +33,7 @@ import { useGlobalShortcuts } from './hooks/use-global-shortcuts'
 const SkillWorkspace = lazy(() => import('@/components/skills/SkillWorkspace').then(m => ({ default: m.SkillWorkspace })))
 const SettingsWorkspace = lazy(() => import('@/components/settings/SettingsWorkspace').then(m => ({ default: m.SettingsWorkspace })))
 const DashboardWorkspace = lazy(() => import('@/components/dashboard/DashboardWorkspace').then(m => ({ default: m.DashboardWorkspace })))
+const CommanderWorkspace = lazy(() => import('@/components/commander/CommanderWorkspace').then(m => ({ default: m.CommanderWorkspace })))
 const OrchestratorPanel = lazy(() => import('@/components/orchestrator/OrchestratorPanel').then(m => ({ default: m.OrchestratorPanel })))
 
 const workspaceFallback = <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Loading...</div>
@@ -198,7 +199,7 @@ export function AppLayout() {
       <div className="app-chrome-field flex flex-1 min-h-0 overflow-hidden bg-background">
         <NavRail />
 
-        {sidebarView !== 'dashboard' && sidebarView !== 'canvas' && !sidebarCollapsed && (
+        {sidebarView !== 'dashboard' && sidebarView !== 'canvas' && sidebarView !== 'commander' && !sidebarCollapsed && (
           <Sidebar
             tasks={tasks}
             selectedTaskId={selectedTask?.id || null}
@@ -230,6 +231,10 @@ export function AppLayout() {
             ) : sidebarView === 'skills' ? (
               <Suspense fallback={workspaceFallback}>
                 <SkillWorkspace />
+              </Suspense>
+            ) : sidebarView === 'commander' ? (
+              <Suspense fallback={workspaceFallback}>
+                <CommanderWorkspace />
               </Suspense>
             ) : sidebarView !== 'canvas' ? (
               <TaskWorkspace

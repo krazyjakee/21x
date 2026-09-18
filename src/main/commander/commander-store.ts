@@ -1,0 +1,212 @@
+import type Database from 'better-sqlite3'
+import { createId } from '@paralleldrive/cuid2'
+import type { ChatToolCall } from '../../shared/chat'
+import { COMMANDER_MESSAGE_ROLES } from '../../shared/commander'
+import type {
+  CommanderMessage,
+  CommanderMessageRole,
+  CommanderMessageRow,
+  CommanderSession,
+  CommanderSessionRow
+} from '../database/commander-types'
+
+/**
+ * Persistence for Commander chat sessions (docs/commander.md).
+ *
+ * Backed by the app's SQLite connection (DatabaseManager.db). Timestamps are
+ * epoch ms from a clock that never repeats or goes backwards within a store, so
+ * "newer than last_read_at" and message order are exact even inside one ms.
+ */
+
+export interface AppendCommanderMessageInput {
+  role: CommanderMessageRole
+  content: string
+  toolCalls?: ChatToolCall[] | null
+  toolCallId?: string | null
+  toolName?: string | null
+  isError?: boolean
+  projectId?: string | null
+  correlationId?: string | null
+}
+
+export interface CommanderStoreOptions {
+  now?: () => number
+}
+
+const MAX_TITLE_CHARS = 120
+
+/** Unread = reports newer than the last time the session was open. */
+const SESSION_SELECT = `
+  SELECT s.*, (
+    SELECT COUNT(*) FROM commander_messages m
+    WHERE m.session_id = s.id AND m.role = 'report' AND m.created_at > COALESCE(s.last_read_at, 0)
+  ) AS unread_count
+  FROM commander_sessions s`
+
+function toSession(row: CommanderSessionRow): CommanderSession {
+  return {
+    id: row.id,
+    title: row.title ?? '',
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    archived: row.archived === 1,
+    last_read_at: row.last_read_at ?? null,
+    unread_count: row.unread_count ?? 0
+  }
+}
+
+function parseToolCalls(raw: string | null): ChatToolCall[] | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed) ? (parsed as ChatToolCall[]) : null
+  } catch {
+    return null
+  }
+}
+
+function toMessage(row: CommanderMessageRow): CommanderMessage {
+  return {
+    id: row.id,
+    session_id: row.session_id,
+    role: row.role as CommanderMessageRole,
+    content: row.content,
+    tool_calls: parseToolCalls(row.tool_calls),
+    tool_call_id: row.tool_call_id ?? null,
+    tool_name: row.tool_name ?? null,
+    is_error: row.is_error === 1,
+    project_id: row.project_id ?? null,
+    correlation_id: row.correlation_id ?? null,
+    created_at: row.created_at
+  }
+}
+
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (c) => `\\${c}`)
+}
+
+export function normalizeTitle(title: string): string {
+  return title.replace(/\s+/g, ' ').trim().slice(0, MAX_TITLE_CHARS)
+}
+
+export class CommanderStore {
+  private lastTs = 0
+  private readonly clock: () => number
+
+  constructor(private readonly source: { db: Database.Database }, options: CommanderStoreOptions = {}) {
+    this.clock = options.now ?? Date.now
+  }
+
+  private get db(): Database.Database {
+    return this.source.db
+  }
+
+  /** Strictly increasing epoch ms. */
+  now(): number {
+    const ts = Math.max(this.clock(), this.lastTs + 1)
+    this.lastTs = ts
+    return ts
+  }
+
+  // ── Sessions ──────────────────────────────────────────────
+
+  createSession(title = ''): CommanderSession {
+    const id = createId()
+    const ts = this.now()
+    this.db
+      .prepare('INSERT INTO commander_sessions (id, title, created_at, updated_at, archived, last_read_at) VALUES (?, ?, ?, ?, 0, ?)')
+      .run(id, normalizeTitle(title), ts, ts, ts)
+    return this.getSession(id)!
+  }
+
+  getSession(id: string): CommanderSession | null {
+    const row = this.db.prepare(`${SESSION_SELECT} WHERE s.id = ?`).get(id) as CommanderSessionRow | undefined
+    return row ? toSession(row) : null
+  }
+
+  /** Most recently active first. `search` matches the title or any message text. */
+  listSessions(options: { search?: string; includeArchived?: boolean } = {}): CommanderSession[] {
+    const where: string[] = []
+    const params: unknown[] = []
+    if (!options.includeArchived) where.push('s.archived = 0')
+    const search = options.search?.trim()
+    if (search) {
+      const pattern = `%${escapeLike(search)}%`
+      where.push(`(s.title LIKE ? ESCAPE '\\' OR EXISTS (
+        SELECT 1 FROM commander_messages m
+        WHERE m.session_id = s.id AND m.role IN ('user', 'assistant', 'report') AND m.content LIKE ? ESCAPE '\\'
+      ))`)
+      params.push(pattern, pattern)
+    }
+    const sql = `${SESSION_SELECT}${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY s.updated_at DESC, s.rowid DESC`
+    return (this.db.prepare(sql).all(...params) as CommanderSessionRow[]).map(toSession)
+  }
+
+  renameSession(id: string, title: string): CommanderSession | null {
+    this.db.prepare('UPDATE commander_sessions SET title = ? WHERE id = ?').run(normalizeTitle(title), id)
+    return this.getSession(id)
+  }
+
+  setArchived(id: string, archived: boolean): CommanderSession | null {
+    this.db.prepare('UPDATE commander_sessions SET archived = ? WHERE id = ?').run(archived ? 1 : 0, id)
+    return this.getSession(id)
+  }
+
+  deleteSession(id: string): boolean {
+    return this.db.prepare('DELETE FROM commander_sessions WHERE id = ?').run(id).changes > 0
+  }
+
+  /** The user has seen everything up to now: clears the unread count. */
+  markRead(id: string): CommanderSession | null {
+    this.db.prepare('UPDATE commander_sessions SET last_read_at = ? WHERE id = ?').run(this.now(), id)
+    return this.getSession(id)
+  }
+
+  // ── Messages ──────────────────────────────────────────────
+
+  appendMessage(sessionId: string, input: AppendCommanderMessageInput): CommanderMessage {
+    if (!COMMANDER_MESSAGE_ROLES.includes(input.role)) throw new Error(`Unknown Commander message role: ${String(input.role)}`)
+    const id = createId()
+    const ts = this.now()
+    const insert = this.db.transaction(() => {
+      const changes = this.db.prepare('UPDATE commander_sessions SET updated_at = ? WHERE id = ?').run(ts, sessionId).changes
+      if (changes === 0) throw new Error(`Commander session not found: ${sessionId}`)
+      this.db
+        .prepare(`INSERT INTO commander_messages
+          (id, session_id, role, content, tool_calls, tool_call_id, tool_name, is_error, project_id, correlation_id, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(
+          id,
+          sessionId,
+          input.role,
+          input.content,
+          input.toolCalls && input.toolCalls.length > 0 ? JSON.stringify(input.toolCalls) : null,
+          input.toolCallId ?? null,
+          input.toolName ?? null,
+          input.isError ? 1 : 0,
+          input.projectId ?? null,
+          input.correlationId ?? null,
+          ts
+        )
+    })
+    insert()
+    return this.getMessage(id)!
+  }
+
+  getMessage(id: string): CommanderMessage | null {
+    const row = this.db.prepare('SELECT * FROM commander_messages WHERE id = ?').get(id) as CommanderMessageRow | undefined
+    return row ? toMessage(row) : null
+  }
+
+  /** Oldest first. */
+  listMessages(sessionId: string): CommanderMessage[] {
+    const rows = this.db
+      .prepare('SELECT * FROM commander_messages WHERE session_id = ? ORDER BY created_at ASC, rowid ASC')
+      .all(sessionId) as CommanderMessageRow[]
+    return rows.map(toMessage)
+  }
+
+  unreadCount(sessionId: string): number {
+    return this.getSession(sessionId)?.unread_count ?? 0
+  }
+}

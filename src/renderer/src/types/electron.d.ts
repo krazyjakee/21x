@@ -57,6 +57,7 @@ import type {
   VoiceTtsSnapshot
 } from '@shared/voice-tts'
 import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
+import type { CommanderEvent, CommanderListSessionsRequest, CommanderMessage, CommanderSession } from '@shared/commander'
 import type { CliMcpMutationResult, CliMcpProbeResult, CliMcpServerRef, CliMcpSnapshot, CliMcpUpsertRequest } from '@shared/cli-mcp-config'
 import type {
   ProjectRecord, CreateProjectData, UpdateProjectData,
@@ -580,6 +581,18 @@ interface ElectronAPI {
     start: (payload: ChatStartRequest) => Promise<{ turnId: string; provider: string; model: string }>
     cancel: (turnId: string) => Promise<{ cancelled: boolean }>
     onEvent: (callback: (event: ChatIpcEvent) => void) => () => void
+  }
+  /** Commander chat sessions (docs/commander.md). */
+  commander: {
+    listSessions: (payload?: CommanderListSessionsRequest) => Promise<CommanderSession[]>
+    createSession: (payload?: { title?: string }) => Promise<CommanderSession>
+    renameSession: (id: string, title: string) => Promise<CommanderSession | null>
+    archiveSession: (id: string, archived: boolean) => Promise<CommanderSession | null>
+    listMessages: (sessionId: string) => Promise<{ messages: CommanderMessage[]; activeTurnId: string | null }>
+    markRead: (sessionId: string) => Promise<CommanderSession | null>
+    send: (sessionId: string, text: string) => Promise<{ turnId: string; message: CommanderMessage }>
+    cancel: (sessionId: string) => Promise<{ cancelled: boolean }>
+    onEvent: (callback: (event: CommanderEvent) => void) => () => void
   }
   onOAuthCallback: (callback: (event: { code: string; state: string }) => void) => () => void
 }
