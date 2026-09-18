@@ -12,6 +12,7 @@ import { ArtifactClipboardMode, type ArtifactCopyFileResult } from '../../shared
 import { afterTaskCreated, afterTaskUpdated } from '../task-updates'
 import { mimeTypeForPath } from '../mime'
 import { required, type IpcDeps } from './deps'
+import { DEFAULT_PROJECT_ID } from '../../shared/projects'
 
 /** Attachments are stored as `<attachmentId>-<filename>` in the task's attachment dir. */
 function findAttachmentFile(dir: string, attachmentId: string): string | undefined {
@@ -61,9 +62,12 @@ export function registerTaskHandlers(deps: IpcDeps): void {
 
   ipcMain.handle('tasks:getWorkspaceDir', (_, taskId: string): string => db.getWorkspaceDir(taskId))
 
-  // The Mastermind's row id. Never in db:getTasks (coordinator rows are hidden),
-  // so the renderer asks for it by role instead of carrying a fixed string.
-  ipcMain.handle('tasks:getCoordinatorTaskId', (): string | null => db.getCoordinatorTask()?.id ?? null)
+  // A project's Mastermind row id (#55). Never in db:getTasks (coordinator rows
+  // are hidden), so the renderer asks for it by project instead of carrying a
+  // fixed string. A project that somehow has none gets one; an unknown project
+  // gets null.
+  ipcMain.handle('tasks:getCoordinatorTaskId', (_, projectId?: string): string | null =>
+    db.ensureCoordinatorTask(projectId || DEFAULT_PROJECT_ID)?.id ?? null)
 
   ipcMain.handle('attachments:pick', async () => {
     const result = await dialog.showOpenDialog({ properties: ['openFile', 'multiSelections'] })

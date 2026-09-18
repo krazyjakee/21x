@@ -28,11 +28,28 @@ enum TaskStatus {
 
 ### Coordinator rows
 
-The Mastermind is stored as a row in `tasks` with `role = 'mastermind'`
-(seeded once per install by `seedMastermindTask`). It is a row so that its
-`session_id` and transcript parts persist like any task's: restarting the app
-and sending a message continues the same conversation, and a runtime the idle
-reaper released is resumed by the next message.
+Each project's Mastermind is stored as a row in `tasks` with
+`role = 'mastermind'` and the project's `project_id` (#55). `seedMastermindTasks`
+gives every existing project one on startup (idempotent, keyed by project;
+the Default project's row is the one every install has), `createProject`
+creates one with the project, and archiving leaves it alone so a restored
+project finds its conversation again. It is a row so that its `session_id`
+and transcript parts persist like any task's: restarting the app and sending
+a message continues the same conversation, and a runtime the idle reaper
+released is resumed by the next message.
+
+Its session runs in its own workspace with no worktree, on the project's
+`mastermind_agent_id` (else `default_agent_id`, else the app default agent —
+`mastermindAgentIdFor` in the renderer's coordinator-store). The system prompt
+is the built-in Mastermind prompt (`src/main/prompts/mastermind.ts`) followed
+by a project section built on every start, resume and send from the project
+row, its repos (with default branches) and resources
+(`src/main/agent-manager/mastermind-context.ts`), so an edit to the project
+reaches the next message. The Mastermind has no checkout of the project's
+repos; the prompt tells it to ask a task agent instead (read-only clones are
+a follow-up). It keeps a long-lived `MEMORY.md` in its workspace — decisions,
+conventions, open threads — which the prompt injects (capped) and the project
+editor shows read-only via `project:getMastermindMemory`.
 
 It is not a task. `role` keeps it out of `DatabaseManager.getTasks()` (so the
 board, sidebar, mobile task list and MCP list tools never see it), and the
@@ -41,8 +58,10 @@ raw-SQL routes in `task-routes.ts` (`list_tasks`, `find_similar_tasks`,
 `userTaskRoleFilter()`. It has no lifecycle: `AgentManager` never writes a
 status to it, going idle only reports idle, and `isCoordinatorTask()` in
 `src/shared/task-roles.ts` is the one check for "this row is a conversation,
-not work". The renderer asks for its id with `tasks:getCoordinatorTaskId`
-instead of carrying a fixed string.
+not work". The renderer asks for a project's id with
+`tasks:getCoordinatorTaskId(projectId)` instead of carrying a fixed string;
+the coordinator-store keys the ids by project, so the Orchestrator drawer and
+the dashboard command input follow the current project.
 
 ## State Transitions
 
@@ -245,7 +264,7 @@ A task's repos, git provider and org come from its project: its `project_repos` 
 The task-management MCP tools have three scopes (`src/main/mcp-servers/task-management-core.ts`):
 
 - **Subtask scope** (`?task=&parent=`): subtask agents, parent and siblings only.
-- **Project scope** (`?project=<id>`): every other task agent and the Mastermind (for its row's `project_id`, the Default project today; see `coordinatorProjectScope` in `session-config.ts` for per-project Masterminds). List and search tools (`list_tasks`, `find_similar_tasks`, `get_task_statistics`, `get_recent_activity`, `list_pending_approvals`, `list_repos`) are narrowed to the project, `create_task` lands in it, and any call naming a `task_id`, `parent_task_id`, `subtask_ids` or `next_subtask_ids` outside it is refused.
+- **Project scope** (`?project=<id>`): every other task agent and the Mastermind (for its row's `project_id`: one Mastermind per project, see `coordinatorProjectScope` in `session-config.ts`). List and search tools (`list_tasks`, `find_similar_tasks`, `get_task_statistics`, `get_recent_activity`, `list_pending_approvals`, `list_repos`) are narrowed to the project, `create_task` lands in it, and any call naming a `task_id`, `parent_task_id`, `subtask_ids` or `next_subtask_ids` outside it is refused.
 - **Full access** (no scope): internal and debug use only — a direct run of `task-management-mcp.js` without `TASK_SCOPE_PROJECT_ID`, or a session with no task row behind it.
 
 ### Manual Triage

@@ -65,6 +65,7 @@ import type {
   ProjectResourceRecord, CreateProjectResourceData, UpdateProjectResourceData
 } from '@shared/projects'
 
+import type { MastermindMemory } from '@shared/mastermind-memory'
 export interface AgentSessionStartResult {
   sessionId: string
   /** True when the main process queued the start behind a concurrency limit; sessionId is then ''. */
@@ -241,7 +242,7 @@ interface ElectronAPI {
   }
   tasks: {
     getWorkspaceDir: (taskId: string) => Promise<string>
-    getCoordinatorTaskId: () => Promise<string | null>
+    getCoordinatorTaskId: (projectId?: string) => Promise<string | null>
   }
   /** The preload bridge always exposes every artifact capability, including
    * the desktop-only file clipboard action. */
@@ -371,6 +372,7 @@ interface ElectronAPI {
     archive: (id: string, archived?: boolean) => Promise<ProjectRecord | undefined>
     reorder: (orderedIds: string[]) => Promise<void>
     moveTask: (taskId: string, projectId: string) => Promise<Task[] | null>
+    getMastermindMemory: (projectId: string) => Promise<MastermindMemory | null>
     repos: {
       list: (projectId: string) => Promise<ProjectRepoRecord[]>
       add: (projectId: string, data: CreateProjectRepoData) => Promise<ProjectRepoRecord | undefined>

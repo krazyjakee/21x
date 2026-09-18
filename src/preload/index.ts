@@ -8,6 +8,7 @@ import type {
   ProjectResourceRecord, CreateProjectResourceData, UpdateProjectResourceData
 } from '../shared/projects'
 
+import type { MastermindMemory } from '../shared/mastermind-memory'
 contextBridge.exposeInMainWorld('electronAPI', {
   db: {
     getTasks: (projectId?: string): Promise<unknown[]> => ipcRenderer.invoke('db:getTasks', projectId),
@@ -23,8 +24,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   tasks: {
     getWorkspaceDir: (taskId: string): Promise<string> =>
       ipcRenderer.invoke('tasks:getWorkspaceDir', taskId),
-    getCoordinatorTaskId: (): Promise<string | null> =>
-      ipcRenderer.invoke('tasks:getCoordinatorTaskId')
+    // The project's Mastermind row id (#55); the Default project's when omitted.
+    getCoordinatorTaskId: (projectId?: string): Promise<string | null> =>
+      ipcRenderer.invoke('tasks:getCoordinatorTaskId', projectId)
   },
   artifacts: {
     scan: (taskId: string): Promise<ArtifactFileEntry[]> =>
@@ -294,6 +296,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('project:archive', id, archived),
     reorder: (orderedIds: string[]): Promise<void> => ipcRenderer.invoke('project:reorder', orderedIds),
     moveTask: (taskId: string, projectId: string): Promise<unknown[] | null> =>
+    // The project's Mastermind memory file (#55), read-only.
+    getMastermindMemory: (projectId: string): Promise<MastermindMemory | null> =>
+      ipcRenderer.invoke('project:getMastermindMemory', projectId),
       ipcRenderer.invoke('project:moveTask', taskId, projectId),
     repos: {
       list: (projectId: string): Promise<ProjectRepoRecord[]> => ipcRenderer.invoke('projectRepo:list', projectId),

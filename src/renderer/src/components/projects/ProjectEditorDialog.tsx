@@ -34,6 +34,7 @@ import {
   type ResourceDraft
 } from '@/lib/project-editor'
 import { DEFAULT_PROJECT_ID } from '@shared/projects'
+import type { MastermindMemory } from '@shared/mastermind-memory'
 import type { GitHubRepo } from '@/types/electron'
 
 const PROVIDER_IDS = Object.keys(GIT_PROVIDER_LABELS) as GitProviderId[]
@@ -83,6 +84,21 @@ export function ProjectEditorDialog() {
   const [repoInput, setRepoInput] = useState('')
   const [repoInputProvider, setRepoInputProvider] = useState<GitProviderId>('github')
   const [repoPickerOpen, setRepoPickerOpen] = useState(false)
+  /** The project's Mastermind memory file (#55). Read-only here: the Mastermind writes it. */
+  const [memory, setMemory] = useState<MastermindMemory | null>(null)
+
+  useEffect(() => {
+    if (!target || target === 'new') {
+      setMemory(null)
+      return undefined
+    }
+    let cancelled = false
+    Promise.resolve()
+      .then(() => projectApi.getMastermindMemory(target))
+      .then((loaded) => { if (!cancelled) setMemory(loaded ?? null) })
+      .catch(() => { if (!cancelled) setMemory(null) })
+    return () => { cancelled = true }
+  }, [target])
 
   // Load the draft each time the editor opens.
   useEffect(() => {
@@ -412,6 +428,29 @@ export function ProjectEditorDialog() {
                     </div>
                   )}
                 </section>
+
+                {/* ── Mastermind memory (#55) ── */}
+                {project && (
+                  <section className="space-y-3" aria-label="Mastermind memory">
+                    <div>
+                      <h3 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Mastermind memory</h3>
+                      <p className="text-xs text-muted-foreground">
+                        What this project’s Mastermind keeps between conversations: decisions, conventions, open threads. It maintains the file itself; ask it to change something.
+                      </p>
+                    </div>
+                    {memory?.content ? (
+                      <div className="max-h-72 overflow-y-auto rounded-lg border border-border bg-card px-3 py-2">
+                        <Markdown>{memory.content}</Markdown>
+                        {memory.truncated && (
+                          <p className="mt-2 text-xs text-muted-foreground">Showing the first part of a longer file.</p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Nothing remembered yet.</p>
+                    )}
+                    {memory && <p className="text-[11px] text-muted-foreground/70 font-mono truncate" title={memory.path}>{memory.path}</p>}
+                  </section>
+                )}
               </>
             )}
 

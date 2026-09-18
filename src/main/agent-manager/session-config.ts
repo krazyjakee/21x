@@ -7,7 +7,8 @@ import { getTaskApiPort, getTaskApiToken, waitForTaskApiServer } from '../task-a
 import { buildTaskMcpUrl } from '../task-mcp-endpoint'
 import { getSecretBrokerPort, writeSecretShellWrapper } from '../secret-broker'
 import { opencodeDisallowedToolMap, readServerToolLimits, resolveAllowedToolNames } from '../mcp-tool-limits'
-import { withMastermindSystemPrompt } from '../prompts/mastermind'
+import { withMastermindSystemPrompt, type MastermindPromptOptions } from '../prompts/mastermind'
+import { mastermindPromptOptions } from './mastermind-context'
 import { knownBackendModels, orderedSkillIds, resolveSkillModel } from './skill-model'
 import { taskProjectId } from './project-repos'
 
@@ -37,11 +38,10 @@ export function shouldEnableTillDone(taskId: string, task?: TaskRecord | null): 
 }
 
 /**
- * The project a coordinator row (the Mastermind) orchestrates. Today there is
- * one Mastermind row and it lives in the Default project; per-project
- * Masterminds (#55) are rows with their own project_id, so this already gives
- * each one its own project. Change this, not mcpOptionsForTask, if a
- * coordinator ever needs to span projects.
+ * The project a coordinator row (the Mastermind) orchestrates: each project
+ * has its own row with its own project_id (#55), so the row's project is the
+ * scope. Change this, not mcpOptionsForTask, if a coordinator ever needs to
+ * span projects.
  */
 export function coordinatorProjectScope(task: TaskRecord): string {
   return taskProjectId(task)
@@ -212,11 +212,26 @@ function sessionModel(
 }
 
 /**
+ * The project section and memory file of a coordinator session (#55), read
+ * fresh for every config so a project edit reaches the next message. A
+ * failure here must not stop the session: it runs on the built-in prompt.
+ */
+function coordinatorPromptOptions(db: DatabaseManager, task: TaskRecord, workspaceDir: string): MastermindPromptOptions | undefined {
+  try {
+    return mastermindPromptOptions(db, task, workspaceDir)
+  } catch (error) {
+    console.warn(`[AgentManager] Could not build the project context for coordinator ${task.id}:`, error)
+    return undefined
+  }
+}
+
+/**
  * Builds the adapter session config shared by start, resume and follow-up
  * sends. Secret broker fields are attached only when a broker token exists;
  * decrypted secret values and the secrets prompt come from the agent config.
  * A coordinator task (the Mastermind) gets the built-in Mastermind prompt
- * first, whatever the backend, with `systemPrompt` appended after it.
+ * first, whatever the backend, then its project's context and memory file,
+ * with `systemPrompt` appended after them.
  */
 export function assembleSessionConfig(
   db: DatabaseManager,
@@ -241,8 +256,8 @@ export function assembleSessionConfig(
     workspaceDir: params.workspaceDir,
     model: sessionModel(db, agent, params),
     reasoningEffort: agent.config?.reasoning_effort,
-    systemPrompt: isCoordinatorTask(params.task)
-      ? withMastermindSystemPrompt(params.systemPrompt)
+    systemPrompt: params.task && isCoordinatorTask(params.task)
+      ? withMastermindSystemPrompt(params.systemPrompt, coordinatorPromptOptions(db, params.task, params.workspaceDir))
       : params.systemPrompt,
     mcpServers: params.mcpServers,
     // OpenCode enforces per-agent MCP tool limits through session.prompt's

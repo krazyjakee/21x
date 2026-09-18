@@ -1,50 +1,96 @@
+import { useEffect } from 'react'
 import { create } from 'zustand'
 import { taskApi } from '@/lib/ipc-client'
+import { getCurrentProjectId, useProjectStore } from '@/stores/project-store'
+import type { ProjectRecord } from '@shared/projects'
 
 /**
- * Which task row hosts the Mastermind.
+ * Which task row hosts each project's Mastermind (#55).
  *
- * The Mastermind is a real row in `tasks` (role 'mastermind') so its session
- * and transcript persist and resume like any task's. It is hidden from every
- * task list, so the id is asked for once, by role, rather than written into
- * the renderer as a string. Until it is known there is no Mastermind session
- * to look at, which is the same as before the panel has started anything.
+ * A Mastermind is a real row in `tasks` (role 'mastermind', one per project)
+ * so its session and transcript persist and resume like any task's. The rows
+ * are hidden from every task list, so each id is asked for once, by project,
+ * rather than written into the renderer as a string. The Orchestrator drawer
+ * and the dashboard talk to the current project's Mastermind: switching
+ * projects switches which id they use, and so which conversation they show.
  */
 interface CoordinatorState {
-  /** The Mastermind's task id, or null until loaded (or when the row is missing). */
-  mastermindTaskId: string | null
-  /** Fetches the id once; later calls return the value already loaded. */
-  load: () => Promise<string | null>
+  /**
+   * Mastermind task id by project id. A project is absent until loaded and
+   * null when main has no row for it (an unknown project).
+   */
+  mastermindTaskIds: Record<string, string | null>
+  /** Fetches a project's id once; later calls return the value already loaded. */
+  load: (projectId: string) => Promise<string | null>
 }
 
-let loading: Promise<string | null> | null = null
+const loading = new Map<string, Promise<string | null>>()
 
 export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
-  mastermindTaskId: null,
+  mastermindTaskIds: {},
 
-  load: () => {
-    const known = get().mastermindTaskId
+  load: (projectId) => {
+    const known = get().mastermindTaskIds[projectId]
     if (known) return Promise.resolve(known)
-    if (!loading) {
-      loading = taskApi
-        .getCoordinatorTaskId()
+    let pending = loading.get(projectId)
+    if (!pending) {
+      // Started inside the chain, so a bridge that is missing (a partial test
+      // mock, a page loaded without preload) logs instead of throwing from a
+      // render effect.
+      pending = Promise.resolve()
+        .then(() => taskApi.getCoordinatorTaskId(projectId))
         .then((id) => {
-          set({ mastermindTaskId: id })
+          set((state) => ({ mastermindTaskIds: { ...state.mastermindTaskIds, [projectId]: id } }))
           return id
         })
         .catch((err) => {
-          console.error('[coordinator-store] Failed to load the Mastermind task id:', err)
+          console.error(`[coordinator-store] Failed to load the Mastermind task id of project ${projectId}:`, err)
           return null
         })
         .finally(() => {
-          loading = null
+          loading.delete(projectId)
         })
+      loading.set(projectId, pending)
     }
-    return loading
+    return pending
   }
 }))
 
-/** The Mastermind's task id right now, for callers outside React. */
-export function getMastermindTaskId(): string | null {
-  return useCoordinatorStore.getState().mastermindTaskId
+/**
+ * The current project's Mastermind task id, or null until it is known. Loads
+ * it on first use and again for every project the user switches to.
+ */
+export function useMastermindTaskId(): string | null {
+  const projectId = useProjectStore((s) => s.currentProjectId)
+  const taskId = useCoordinatorStore((s) => s.mastermindTaskIds[projectId] ?? null)
+  const load = useCoordinatorStore((s) => s.load)
+  useEffect(() => {
+    void load(projectId)
+  }, [projectId, load])
+  return taskId
+}
+
+/** A project's Mastermind task id right now (the current project's by default), for callers outside React. */
+export function getMastermindTaskId(projectId: string = getCurrentProjectId()): string | null {
+  return useCoordinatorStore.getState().mastermindTaskIds[projectId] ?? null
+}
+
+/**
+ * The agent a project's Mastermind runs on: the project's Mastermind agent,
+ * else its default agent, else the app's default agent (else the first one).
+ * An id that no longer names an agent is skipped.
+ */
+export function mastermindAgentIdFor(
+  project: Pick<ProjectRecord, 'mastermind_agent_id' | 'default_agent_id'> | undefined,
+  agents: Array<{ id: string; is_default?: boolean }>
+): string | null {
+  const known = (id: string | null | undefined): string | null =>
+    id && agents.some((agent) => agent.id === id) ? id : null
+  return (
+    known(project?.mastermind_agent_id) ??
+    known(project?.default_agent_id) ??
+    agents.find((agent) => agent.is_default)?.id ??
+    agents[0]?.id ??
+    null
+  )
 }

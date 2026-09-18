@@ -14,10 +14,21 @@ function agentFor(backend: typeof BACKENDS[number]): AgentRecord {
   } as unknown as AgentRecord
 }
 
+/**
+ * A store with no projects: a coordinator session then gets the built-in
+ * prompt and its (empty) memory section, and nothing else.
+ */
+const EMPTY_DB = {
+  getProject: () => undefined,
+  getProjectRepos: () => [],
+  getProjectResources: () => [],
+  getSetting: () => null
+} as unknown as DatabaseManager
+
 /** `null` means the agent has no system prompt (`undefined` would pick the default). */
-function configFor(backend: typeof BACKENDS[number], task: Partial<TaskRecord>, systemPrompt: string | null = AGENT_PROMPT) {
+function configFor(backend: typeof BACKENDS[number], task: Partial<TaskRecord>, systemPrompt: string | null = AGENT_PROMPT, db: DatabaseManager = EMPTY_DB) {
   const agent = agentFor(backend)
-  return assembleSessionConfig({} as DatabaseManager, agent, {
+  return assembleSessionConfig(db, agent, {
     agentId: agent.id,
     taskId: task.id as string,
     task: task as TaskRecord,
@@ -45,7 +56,37 @@ describe('assembleSessionConfig system prompt', () => {
   }
 
   it('gives a coordinator session the built-in prompt when the agent has none', () => {
-    expect(configFor('opencode', mastermind, null).systemPrompt).toBe(builtIn)
+    const prompt = configFor('opencode', mastermind, null).systemPrompt ?? ''
+    expect(prompt.startsWith(builtIn)).toBe(true)
+    // With no project row there is no project section; the memory section is always there.
+    expect(prompt).not.toContain('## Project context')
+    expect(prompt).toContain('## Project memory')
+  })
+
+  it("gives a coordinator session its project's context, then the agent prompt (#55)", () => {
+    const db = {
+      getProject: (id: string) => id === 'proj-a'
+        ? { id, name: 'Alpha', description: 'Alpha brief.', git_provider: null, git_org: 'acme', archived: false }
+        : undefined,
+      getProjectRepos: () => [{ id: 'r1', project_id: 'proj-a', provider: 'github', org: '', name: 'alpha-api', default_branch: 'main', sort_order: 0, created_at: '' }],
+      getProjectResources: () => [{ id: 'x1', project_id: 'proj-a', label: 'Runbook', url: 'https://wiki/runbook', notes: '', sort_order: 0, created_at: '' }],
+      getSetting: () => null
+    } as unknown as DatabaseManager
+    const prompt = configFor('claude-code', { ...mastermind, project_id: 'proj-a' }, AGENT_PROMPT, db).systemPrompt ?? ''
+    expect(prompt.startsWith(builtIn)).toBe(true)
+    expect(prompt).toContain('**Alpha**')
+    expect(prompt).toContain('Alpha brief.')
+    expect(prompt).toContain('acme/alpha-api (github, default branch `main`)')
+    expect(prompt).toContain('Runbook — https://wiki/runbook')
+    expect(prompt.indexOf('## Project context')).toBeLessThan(prompt.indexOf('## Project memory'))
+    expect(prompt.indexOf('## Project memory')).toBeLessThan(prompt.indexOf(AGENT_PROMPT))
+  })
+
+  it('still runs a coordinator session on the built-in prompt when the context cannot be built', () => {
+    const broken = { getProject: () => { throw new Error('db closed') } } as unknown as DatabaseManager
+    const prompt = configFor('opencode', { ...mastermind, project_id: 'proj-a' }, AGENT_PROMPT, broken).systemPrompt ?? ''
+    expect(prompt.startsWith(builtIn)).toBe(true)
+    expect(prompt.endsWith(AGENT_PROMPT)).toBe(true)
   })
 
   it('gives every backend the same coordinator prompt', () => {

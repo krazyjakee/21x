@@ -23,7 +23,7 @@ All schema migrations live in `src/main/database/schema.ts` as plain functions o
 ### Rows that must survive every migration
 
 `tasks.role` marks coordinator rows (the Mastermind, `role = 'mastermind'`).
-The column is declared in all three places above and `seedMastermindTask()`
+The column is declared in all three places above and `seedMastermindTasks()`
 runs on every startup, so a returning user gets the row exactly once. Never
 default `role` to anything but `'task'`: an old row with a missing column must
 stay a user task.

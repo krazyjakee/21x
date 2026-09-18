@@ -9,9 +9,13 @@
  * each one exists, so keep other identifiers out of backticks.
  */
 
+import type { MastermindMemory } from '../../shared/mastermind-memory'
+
 export interface MastermindPromptOptions {
-  /** Per-project context (#55): conventions, repos, preferred agents. */
+  /** Per-project context (#55): the brief, repos, resources (agent-manager/mastermind-context.ts). */
   projectContext?: string
+  /** The project's memory file (#55): where it is and what it says right now. */
+  memory?: MastermindMemory
 }
 
 const MASTERMIND_CORE_PROMPT = `# You are the Mastermind
@@ -66,11 +70,36 @@ When it helps, open what you are talking about: \`open_task\`, \`navigate\`, \`s
 - When you recommend rather than act (labels, agent, priority, skills), state the evidence briefly ("4 of 5 similar tasks went to Backend Agent") and ask before applying, unless you are confident.
 `
 
-/** Builds the Mastermind system prompt, with an optional per-project section. */
+/**
+ * The memory section: the file's location, the rule for keeping it, and its
+ * current content. The file is the Mastermind's own long-lived notes, so the
+ * instruction to maintain it travels with the content every time.
+ */
+function memorySection(memory: MastermindMemory): string {
+  const lines = [
+    '## Project memory',
+    '',
+    `Your memory file is ${memory.path}. It outlives every session: keep decisions taken, conventions agreed, and open threads (work in flight, questions waiting on the user) there, in short Markdown lists. ` +
+    'Update it with your file tools when any of those change, and prune what is settled. Do not copy task lists into it; the task tools have those.',
+    ''
+  ]
+  const content = memory.content.trim()
+  if (!content) {
+    lines.push('_The file does not exist yet. Create it the first time there is something worth remembering._')
+  } else {
+    lines.push('Current content:', '', content)
+    if (memory.truncated) lines.push('', '_(cut here: the file is longer than fits. Trim it.)_')
+  }
+  return lines.join('\n')
+}
+
+/** Builds the Mastermind system prompt, with the per-project sections when given. */
 export function buildMastermindSystemPrompt(options: MastermindPromptOptions = {}): string {
+  const sections = [MASTERMIND_CORE_PROMPT]
   const projectContext = options.projectContext?.trim()
-  if (!projectContext) return MASTERMIND_CORE_PROMPT
-  return `${MASTERMIND_CORE_PROMPT}\n## Project context\n\n${projectContext}\n`
+  if (projectContext) sections.push(`## Project context\n\n${projectContext}\n`)
+  if (options.memory) sections.push(`${memorySection(options.memory)}\n`)
+  return sections.join('\n')
 }
 
 /**

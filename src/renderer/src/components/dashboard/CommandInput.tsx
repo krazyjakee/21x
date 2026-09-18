@@ -3,6 +3,7 @@ import { Paperclip, Plus, ArrowUp, ChevronDown, Settings } from 'lucide-react'
 import { agentApi, voiceApi } from '@/lib/ipc-client'
 import { VoiceMicButton } from '@/components/voice/VoiceMicButton'
 import { registerComposer, DASHBOARD_COMPOSER_KEY } from '@/lib/voice-dictation-target'
+import { useCurrentProject } from '@/hooks/use-project-tasks'
 import type { Agent } from '@/types'
 
 /** Names this composer, so a spoken sentence reaches this box and no other. */
@@ -20,6 +21,9 @@ export function CommandInput({ onSendToMastermind, onCreateTask }: CommandInputP
   const [showAgentDropdown, setShowAgentDropdown] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  // The box talks to the current project's Mastermind (#55); say which.
+  const project = useCurrentProject()
+  const mastermindName = project ? `Mastermind (${project.name})` : 'Mastermind'
 
   // Load agents on mount
   useEffect(() => {
@@ -112,7 +116,7 @@ export function CommandInput({ onSendToMastermind, onCreateTask }: CommandInputP
           value={text}
           onChange={handleInput}
           onKeyDown={handleKeyDown}
-          placeholder="Ask Mastermind or describe a task..."
+          placeholder={`Ask ${mastermindName} or describe a task...`}
           rows={1}
           className="w-full bg-transparent text-base text-foreground placeholder:text-muted-foreground resize-none outline-none leading-relaxed max-h-32 min-h-[32px]"
         />
@@ -191,7 +195,7 @@ export function CommandInput({ onSendToMastermind, onCreateTask }: CommandInputP
               ? 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm'
               : 'bg-accent text-muted-foreground cursor-not-allowed'
           }`}
-          title="Send to Mastermind"
+          title={`Send to ${mastermindName}`}
           aria-label="Send to Mastermind"
         >
           <ArrowUp className="size-icon" />

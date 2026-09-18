@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useAgentStore, type AgentMessage } from '@/stores/agent-store'
 import { Bot, User, FolderKanban } from 'lucide-react'
-import { useCoordinatorStore } from '@/stores/coordinator-store'
+import { useMastermindTaskId } from '@/stores/coordinator-store'
 import { useUIStore } from '@/stores/ui-store'
 import { useProjectTasks, useCurrentProject } from '@/hooks/use-project-tasks'
 import { TaskStatus } from '@/types'
@@ -44,7 +44,9 @@ interface HeroSectionProps {
 export function HeroSection({ onSeeFullConversation }: HeroSectionProps) {
   const [titleIndex, setTitleIndex] = useState(0)
 
-  const mastermindTaskId = useCoordinatorStore((s) => s.mastermindTaskId)
+  // The current project's Mastermind (#55): switching projects switches the
+  // conversation the hero previews.
+  const mastermindTaskId = useMastermindTaskId()
   const session = useAgentStore((s) => (mastermindTaskId ? s.sessions.get(mastermindTaskId) : undefined))
   const messages = session?.messages || EMPTY_MESSAGES
   const project = useCurrentProject()
