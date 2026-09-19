@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { isAgentStatusHeartbeat } from '@shared/activity'
 import {
   overviewApi,
   projectApi,
@@ -93,7 +94,8 @@ export const useOverviewStore = create<OverviewState>((set, get) => ({
         onTaskUpdated(refresh),
         onTaskCreated(refresh),
         onTaskDeleted(refresh),
-        onAgentStatus(refresh),
+        // Heartbeats (#95) carry no change; only transitions refresh.
+        onAgentStatus((event) => { if (!isAgentStatusHeartbeat(event)) refresh() }),
         onAgentStartQueueChanged(refresh),
         projectApi.onStatusChanged(refresh),
         projectApi.onChanged(refresh),

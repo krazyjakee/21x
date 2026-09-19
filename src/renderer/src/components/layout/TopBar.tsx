@@ -11,6 +11,10 @@ import { ProjectSwitcher } from './ProjectSwitcher'
 import { NAV_ITEMS } from './nav-items'
 import { modKey } from '@/lib/platform'
 import { useTitleBarOverlayTheme } from '@/hooks/use-title-bar-overlay-theme'
+import { ActivityBadge, activityAccessibleName } from '@/components/activity/ActivityBadge'
+import { useCaptainActivity } from '@/lib/activity/use-activity'
+import { isQuietActivity } from '@/lib/activity/derive-activity'
+import { useCaptainTaskId } from '@/stores/coordinator-store'
 
 /** Drag region with logo + breadcrumb (left), command launcher (center), and global actions (right). */
 export function TopBar({ onOpenCommandPalette }: { onOpenCommandPalette: () => void }) {
@@ -21,6 +25,12 @@ export function TopBar({ onOpenCommandPalette }: { onOpenCommandPalette: () => v
   const toggleOrchestrator = useUIStore((s) => s.toggleOrchestrator)
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)
   const toggleSidebarCollapsed = useUIStore((s) => s.toggleSidebarCollapsed)
+
+  // The project Captain's live state on its entry button (#95). A static
+  // mirror: the Captain's own conversation surface owns any motion.
+  const captainTaskId = useCaptainTaskId()
+  const captainActivity = useCaptainActivity(captainTaskId)
+  const showCaptainState = !isQuietActivity(captainActivity)
 
   const [updateAvailableVersion, setUpdateAvailableVersion] = useState<string | null>(null)
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
@@ -133,9 +143,23 @@ export function TopBar({ onOpenCommandPalette }: { onOpenCommandPalette: () => v
             size="sm"
             onClick={toggleOrchestrator}
             className="h-8 px-2.5"
+            aria-label={showCaptainState ? activityAccessibleName('Captain', captainActivity) : undefined}
+            title={showCaptainState ? activityAccessibleName('Captain', captainActivity) : undefined}
           >
             <MessageSquare className="size-icon-sm" />
             <span className="text-sm">Captain</span>
+            {showCaptainState && (
+              <ActivityBadge
+                result={captainActivity}
+                entityName="Captain"
+                entityKey={`task:${captainTaskId}`}
+                region="top-bar"
+                variant="dot"
+                size="chrome"
+                allowMotion={false}
+                decorative
+              />
+            )}
           </Button>
         </div>
       </div>
