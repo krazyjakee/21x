@@ -13,6 +13,7 @@ import { IntegrationsSettings } from './tabs/IntegrationsSettings'
 import { AdvancedSettings } from './tabs/AdvancedSettings'
 import { PluginsSettings } from './tabs/PluginsSettings'
 import { ProjectsSettings } from './tabs/ProjectsSettings'
+import { CommanderBriefingSettings } from './CommanderBriefingSettings'
 
 const ICON_MAP = {
   Settings,
@@ -97,6 +98,7 @@ export function SettingsWorkspace() {
 
             <Tabs.Content value={SettingsTab.PROJECTS} className="focus-visible:outline-none space-y-6">
               <ProjectsSettings />
+              <CommanderBriefingSettings />
             </Tabs.Content>
 
             <Tabs.Content value={SettingsTab.AGENTS} className="focus-visible:outline-none space-y-6">

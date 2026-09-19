@@ -52,6 +52,8 @@ import {
   type MastermindWakeupSettings
 } from '@shared/mastermind-wakeups'
 import type { GitHubRepo } from '@/types/electron'
+import { ScheduledReviewSection } from './ScheduledReviewSection'
+import { withScheduledReviewSettings } from '@shared/scheduled-coordination'
 
 const PROVIDER_IDS = Object.keys(GIT_PROVIDER_LABELS) as GitProviderId[]
 const NO_INITIAL_REPOS: string[] = []
@@ -622,6 +624,12 @@ export function ProjectEditorDialog() {
                     ))}
                   </div>
                 </section>
+
+                {/* ── Scheduled review (#67) ── */}
+                <ScheduledReviewSection
+                  settings={draft.settings}
+                  onChange={(review) => setDraft((d) => ({ ...d, settings: withScheduledReviewSettings(d.settings, review) }))}
+                />
 
                 {/* ── Mastermind memory (#55) ── */}
                 {project && (

@@ -431,6 +431,39 @@ Per action, one of `autonomous`, `tell_commander` or `ask_user`:
 
 The policy is a section of the Mastermind prompt (`src/main/prompts/mastermind.ts`) and is enforced for coordinator-scope calls by a gate on the project-scoped dispatch (`setCoordinatorCallGate` in `task-management-core.ts`, installed by `src/main/escalation.ts` when the Task API server starts). Task agents in the same project are not gated. `tell_commander` runs the call, then calls `escalateToCommander(event)` and shows a user notification; `ask_user` holds the call in memory, returns `{ status: 'held', id }` to the Mastermind, notifies the user, and the status bar's held-actions notice approves (runs the original call) or rejects it over IPC (`escalation:approve` / `escalation:reject`); either way the Mastermind's live session gets a fenced note with the outcome. `escalateToCommander` is a no-op seam until #62's `report_to_commander` installs a handler with `setCommanderEscalationHandler`. Held calls are not persisted: a restart forgets them.
 
+## Scheduled Mastermind reviews (#67)
+
+A project can wake its Mastermind on a schedule to review the board, re-plan
+and update the project status. The setting is a keyed block of
+`projects.settings`, edited in the project editor's "Scheduled review" section.
+It is off by default:
+
+```json
+{ "scheduled_review": { "enabled": false, "cron": "0 9 * * 1-5" } }
+```
+
+`src/main/scheduled-coordination.ts` checks it every minute in the main
+process, so it runs with the window closed. The cron is 5 fields in local
+time. At each occurrence:
+
+- a paused project (its own `limits.paused`, or the global `all_projects_paused`)
+  is skipped, and the skip is logged;
+- a Mastermind that is mid-turn is tried again on the next tick while the
+  occurrence is under 6 hours old;
+- otherwise the project's coordinator row gets one fenced system message
+  (`buildScheduledReviewMessage`: origin `coordinator-wakeup`, the current
+  counts and last status summary as findings, and instructions to review,
+  re-plan and finish with `update_project_status`). It is sent through
+  `AgentManager.sendMessage`, the same rejoin-or-resume path the event waker
+  uses.
+
+The last occurrence handled is stored per project in the app setting
+`scheduled_review_state:<projectId>` (`{ cron, last }`) before the send. A
+restart therefore does not wake the Mastermind twice. Enabling a review, or
+changing its cron, starts from that moment. An occurrence missed while the
+app was closed runs once at start-up if it is under 6 hours old. The
+Commander's scheduled briefing uses the same scheduler (docs/commander.md).
+
 ## Key Files
 
 | File | Role |
