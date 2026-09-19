@@ -1,6 +1,6 @@
 /**
  * A project's status at a glance (#58): counts the database answers on its
- * own, plus the narrative the project's Mastermind maintains through the
+ * own, plus the narrative the project's Captain maintains through the
  * `update_project_status` tool. The Commander and the project switcher read
  * this instead of raw task data.
  *
@@ -29,15 +29,15 @@ export interface ProjectStatus {
   counts: ProjectStatusCounts
   /** The project's limits, pause and what they block right now (#65). Absent with no agent manager. */
   limits?: ProjectLimitState
-  /** The Mastermind's one-paragraph summary; '' until it has written one. */
+  /** The Captain's one-paragraph summary; '' until it has written one. */
   summary: string
-  /** The Mastermind's short list of what is in the way; empty until written. */
+  /** The Captain's short list of what is in the way; empty until written. */
   top_blockers: string[]
   /** ISO time of the last narrative update; null until the first. */
   updated_at: string | null
 }
 
-/** Caps applied to what the Mastermind writes, so a snapshot stays one small read. */
+/** Caps applied to what the Captain writes, so a snapshot stays one small read. */
 export const PROJECT_STATUS_SUMMARY_MAX_CHARS = 1_000
 export const PROJECT_STATUS_BLOCKER_MAX_CHARS = 200
 export const PROJECT_STATUS_MAX_BLOCKERS = 5
@@ -47,8 +47,8 @@ export const PROJECT_STATUS_MAX_BLOCKERS = 5
 // history survives beside the snapshot. Reads are paginated newest first and
 // capped; nothing here is ever injected into a system prompt.
 
-/** Where an entry came from: the Mastermind's own update, or the monthly roll-up of old entries. */
-export type ProjectStatusJournalSource = 'mastermind' | 'compaction'
+/** Where an entry came from: the Captain's own update, or the monthly roll-up of old entries. */
+export type ProjectStatusJournalSource = 'captain' | 'compaction'
 
 export interface ProjectStatusJournalEntry {
   id: string
@@ -59,13 +59,13 @@ export interface ProjectStatusJournalEntry {
   decisions: string[]
   next_steps: string[]
   source: ProjectStatusJournalSource
-  /** The Commander correlation id the update answered, when the Mastermind quoted one. */
+  /** The Commander correlation id the update answered, when the Captain quoted one. */
   correlation_id: string | null
   /** ISO time. For a compaction entry: the newest entry it replaced. */
   created_at: string
 }
 
-/** What the Mastermind may attach to an update besides the summary. */
+/** What the Captain may attach to an update besides the summary. */
 export interface ProjectStatusJournalInput {
   summary: string
   completed?: string[]

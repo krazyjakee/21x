@@ -266,7 +266,7 @@ export function AppLayout() {
           </div>
         </main>
 
-        {/* Mastermind drawer — sits beside the workspace, shifts main content left */}
+        {/* Captain drawer — sits beside the workspace, shifts main content left */}
         <div
           className={`flex-shrink-0 transition-all duration-200 ease-in-out overflow-hidden ${
             showOrchestrator ? 'w-[340px]' : 'w-0'

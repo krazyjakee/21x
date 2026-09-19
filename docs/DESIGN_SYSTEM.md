@@ -77,7 +77,7 @@ colors stay legible on paper without editing 90+ files.
 
 - **Top bar** (52px): frosted, hairline bottom border. Left = logo chip +
   wordmark; center = **segmented pill nav** (active tab is a raised card);
-  right = **theme toggle**, settings icon, divider, Mastermind button.
+  right = **theme toggle**, settings icon, divider, Captain button.
 - **Sidebar** (264px): distinct `sidebar` surface, micro-cap section headers,
   `rounded-lg` card inputs with a 2px focus ring, refined footer stats.
 - **Controls:** Buttons/Inputs/Selects use `rounded-lg`, `bg-card` surfaces,

@@ -192,7 +192,7 @@ function SkillEditor({ skill, onUpdate, onDelete, onSetProject, onDeselect, stor
             </div>
             <p className="text-[10px] text-muted-foreground">
               {skill.project_id
-                ? 'A project skill: only this project\'s Mastermind and task agents see it. Promoting it makes it visible to every project.'
+                ? 'A project skill: only this project\'s Captain and task agents see it. Promoting it makes it visible to every project.'
                 : 'A global skill: every project can discover and use it. Moving it into a project hides it from the others.'}
             </p>
           </div>
@@ -294,7 +294,7 @@ function SkillEditor({ skill, onUpdate, onDelete, onSetProject, onDeselect, stor
             <AlertDialogTitle>{isPromotion ? 'Promote skill to global' : `Move skill to ${targetProjectName}`}</AlertDialogTitle>
             <AlertDialogDescription>
               {isPromotion
-                ? `"${skill.name}" will become visible to every project's Mastermind and task agents, and any of them may assign it.`
+                ? `"${skill.name}" will become visible to every project's Captain and task agents, and any of them may assign it.`
                 : `Only "${targetProjectName}" will see "${skill.name}". Tasks in other projects and agent defaults that still use it will stop receiving it.`}
             </AlertDialogDescription>
           </AlertDialogHeader>

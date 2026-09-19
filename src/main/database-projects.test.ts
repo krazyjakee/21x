@@ -3,7 +3,7 @@ import Database from 'better-sqlite3'
 import { applySchema, createTables, runMigrations } from './database/schema'
 import { createTestDb } from '../../test/helpers/db-test-helper'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
-import { TASK_ROLE_MASTERMIND } from '../shared/task-roles'
+import { TASK_ROLE_CAPTAIN } from '../shared/task-roles'
 
 type Db = InstanceType<typeof Database>
 const NOW = '2026-01-01T00:00:00.000Z'
@@ -61,7 +61,7 @@ describe('projects migration (14 → 15)', () => {
     insertTask(db, 't2', ['ACME/API', 'other/lib', 'acme/widget'], 'task', '2026-01-02T00:00:00.000Z')
     insertTask(db, 't3', [], 'task', '2026-01-03T00:00:00.000Z')
     insertTask(db, 't4', 'not json', 'task', '2026-01-04T00:00:00.000Z')
-    insertTask(db, 'mm', [], TASK_ROLE_MASTERMIND, '2026-01-05T00:00:00.000Z')
+    insertTask(db, 'mm', [], TASK_ROLE_CAPTAIN, '2026-01-05T00:00:00.000Z')
     db.prepare("INSERT INTO task_sources (id, name, list_tool, plugin_id, created_at, updated_at) VALUES ('src-1', 'Linear', 'list', 'linear', ?, ?)")
       .run(NOW, NOW)
     expect(applySchema(db)).toBe(true)
@@ -73,7 +73,7 @@ describe('projects migration (14 → 15)', () => {
     const project = db.prepare('SELECT * FROM projects').all() as Array<Record<string, unknown>>
     expect(project).toHaveLength(1)
     expect(project[0]).toMatchObject({ id: DEFAULT_PROJECT_ID, name: 'Default', git_org: 'acme', git_provider: 'gitlab', archived: 0, settings: '{}' })
-    expect((db.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('16')
+    expect((db.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('17')
     // The global settings stay where they were.
     expect((db.prepare("SELECT value FROM settings WHERE key = 'github_org'").get() as { value: string }).value).toBe('acme')
   })
@@ -181,7 +181,7 @@ describe('project CRUD', () => {
 
     // Repos and resources go with their project. Projects are archived, not
     // deleted, in the app; a raw delete first has to remove the project's own
-    // Mastermind row (#55), which references it.
+    // Captain row (#55), which references it.
     rawDb.prepare('DELETE FROM tasks WHERE project_id = ?').run(p.id)
     rawDb.prepare('DELETE FROM projects WHERE id = ?').run(p.id)
     expect(db.getProjectRepos(p.id)).toEqual([])
@@ -226,7 +226,7 @@ describe('tasks always belong to a project', () => {
     const p = db.createProject({ name: 'P' })!
     const a = db.createTask({ title: 'a' })!
     const b = db.createTask({ title: 'b', project_id: p.id })!
-    const mm = db.createTask({ title: 'Mastermind', role: TASK_ROLE_MASTERMIND })!
+    const mm = db.createTask({ title: 'Captain', role: TASK_ROLE_CAPTAIN })!
 
     expect(db.getTasks().map((t) => t.id).sort()).toEqual([a.id, b.id].sort())
     expect(db.getTasks({ projectId: p.id }).map((t) => t.id)).toEqual([b.id])

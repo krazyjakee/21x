@@ -43,7 +43,7 @@ import type {
 import type { HeldAction, ProjectLimitState } from '@shared/project-limit-types'
 import type { ProjectStatus, ProjectStatusHistoryPage } from '@shared/project-status'
 import type { ProjectOverviewEntry } from '@shared/project-overview'
-import type { MastermindMemory } from '@shared/mastermind-memory'
+import type { CaptainMemory } from '@shared/captain-memory'
 
 export const taskApi = {
   /** Every project's tasks, or one project's when `projectId` is given. */
@@ -75,7 +75,7 @@ export const taskApi = {
     return window.electronAPI.db.reorderSubtasks(parentId, orderedIds)
   },
 
-  /** A project's Mastermind task row id (#55). Hidden from getAll, so it is asked for by project. */
+  /** A project's Captain task row id (#55). Hidden from getAll, so it is asked for by project. */
   getCoordinatorTaskId: (projectId?: string): Promise<string | null> => {
     return window.electronAPI.tasks.getCoordinatorTaskId(projectId)
   }
@@ -491,19 +491,19 @@ export const projectApi = {
   update: (id: string, data: UpdateProjectData): Promise<ProjectRecord | undefined> => window.electronAPI.projects.update(id, data),
   archive: (id: string, archived?: boolean): Promise<ProjectRecord | undefined> => window.electronAPI.projects.archive(id, archived),
   reorder: (orderedIds: string[]): Promise<void> => window.electronAPI.projects.reorder(orderedIds),
-  /** The memory file the project's Mastermind keeps (#55); null when the project has no Mastermind. */
-  getMastermindMemory: (projectId: string): Promise<MastermindMemory | null> =>
-    window.electronAPI.projects.getMastermindMemory(projectId),
+  /** The memory file the project's Captain keeps (#55); null when the project has no Captain. */
+  getCaptainMemory: (projectId: string): Promise<CaptainMemory | null> =>
+    window.electronAPI.projects.getCaptainMemory(projectId),
   /** Moves a top-level task with its subtasks; resolves to the moved rows, or null when refused. */
   moveTask: (taskId: string, projectId: string): Promise<Task[] | null> => window.electronAPI.projects.moveTask(taskId, projectId),
   onChanged: (callback: (event: ProjectChangedEvent) => void): (() => void) =>
     typeof window.electronAPI.projects.onChanged === 'function' ? window.electronAPI.projects.onChanged(callback) : () => {},
-  /** Project status (#58): counts computed now, plus the Mastermind's latest summary. */
+  /** Project status (#58): counts computed now, plus the Captain's latest summary. */
   getStatus: (projectId: string): Promise<ProjectStatus> => window.electronAPI.projects.getStatus(projectId),
-  /** Status history (#72): one page of the Mastermind's journal, newest first; pass `next_cursor` back for older entries. */
+  /** Status history (#72): one page of the Captain's journal, newest first; pass `next_cursor` back for older entries. */
   getStatusHistory: (projectId: string, query?: { limit?: number; cursor?: string | null }): Promise<ProjectStatusHistoryPage> =>
     window.electronAPI.projects.getStatusHistory(projectId, query),
-  /** Fires when the Mastermind writes a new summary through `update_project_status`. */
+  /** Fires when the Captain writes a new summary through `update_project_status`. */
   onStatusChanged: (callback: (event: { projectId: string }) => void): (() => void) =>
     typeof window.electronAPI.projects.onStatusChanged === 'function' ? window.electronAPI.projects.onStatusChanged(callback) : () => {},
 
@@ -533,7 +533,7 @@ export const projectLimitsApi = {
   pauseAll: (paused: boolean): Promise<boolean> => window.electronAPI.projectLimits.pauseAll(paused)
 }
 
-/** Mastermind tool calls held by the escalation policy (#66). */
+/** Captain tool calls held by the escalation policy (#66). */
 export const escalationApi = {
   listHeld: (projectId?: string): Promise<HeldAction[]> =>
     typeof window.electronAPI.escalation?.listHeld === 'function' ? window.electronAPI.escalation.listHeld(projectId) : Promise.resolve([]),

@@ -9,7 +9,7 @@ import { useCommanderStore } from '@/stores/commander-store'
  *
  * Push-to-talk: one click opens the microphone, a second click closes it and
  * the final transcript is sent as a Commander user turn. While voice mode is
- * on, main speaks the reply as it streams and every Mastermind report that
+ * on, main speaks the reply as it streams and every Captain report that
  * lands in this session. Starting a new voice turn, the Stop button and Escape
  * are barge-in: playback stops in this tick, and main cancels the synthesis
  * request (or ElevenLabs connection) and the running Commander turn.

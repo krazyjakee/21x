@@ -195,7 +195,7 @@ describe('answer correlation', () => {
   it('reads the answer when the sender could not name its task', async () => {
     const { service } = makeService({ [VOICE_TTS_SETTING_KEYS.enabled]: 'true' })
     await service.prepare()
-    // The Mastermind drawer sends on its own behalf, so no task is known.
+    // The Captain drawer sends on its own behalf, so no task is known.
     service.expectAnyAnswer('turn-4', clock)
 
     expect(await service.speakAgentAnswer('whichever-task', 'Done.')).toBe(true)

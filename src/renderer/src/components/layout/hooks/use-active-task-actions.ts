@@ -6,7 +6,7 @@ import { TaskStatus } from '@/types'
 import type { Task } from '@/types'
 import { dispatchTaskShortcut, focusComposerInput, getNextNudgeMessage, TaskShortcutAction } from '@/lib/keyboard-shortcuts'
 import { selectVoiceReady, useVoiceStore } from '@/stores/voice-store'
-import { composerCanSubmit, MASTERMIND_COMPOSER_KEY, sendComposerMessage, setActiveComposer } from '@/lib/voice-dictation-target'
+import { composerCanSubmit, CAPTAIN_COMPOSER_KEY, sendComposerMessage, setActiveComposer } from '@/lib/voice-dictation-target'
 import type { CommandPaletteActions } from '../CommandPalette'
 
 interface UseActiveTaskActionsOptions {
@@ -257,7 +257,7 @@ export function useActiveTaskActions({
     showToast('Nudge sent')
   }, [activeTaskId, showToast])
 
-  const toggleMastermindAudio = useCallback(() => {
+  const toggleCaptainAudio = useCallback(() => {
     const voice = useVoiceStore.getState()
     if (!selectVoiceReady(voice)) {
       showToast('Voice input is not ready', true)
@@ -268,9 +268,9 @@ export function useActiveTaskActions({
       return
     }
     setShowOrchestrator(true)
-    setActiveComposer(MASTERMIND_COMPOSER_KEY)
+    setActiveComposer(CAPTAIN_COMPOSER_KEY)
     window.setTimeout(() => {
-      const loop = useVoiceStore.getState().conversation && composerCanSubmit(MASTERMIND_COMPOSER_KEY)
+      const loop = useVoiceStore.getState().conversation && composerCanSubmit(CAPTAIN_COMPOSER_KEY)
       void useVoiceStore.getState().toggleTurn(loop ? 'conversation' : 'dictation')
     }, 0)
   }, [setShowOrchestrator, showToast])
@@ -300,8 +300,8 @@ export function useActiveTaskActions({
     copyPullRequestUrl: () => runTaskShortcut(TaskShortcutAction.COPY_PR_URL),
     copyPullRequestBranch: () => runTaskShortcut(TaskShortcutAction.COPY_PR_BRANCH),
     toggleTaskAudio,
-    toggleMastermindAudio
-  }), [clearTaskSelection, completeActiveTask, deleteActiveTask, focusComposer, focusSearch, navigateVisibleTask, nudgeActiveTask, openActiveTaskOnCanvas, openParentTask, openSelectedTask, openSubtasks, runActiveHeartbeat, runTaskShortcut, setShortcutsOpen, toggleMastermindAudio, toggleTaskAudio])
+    toggleCaptainAudio
+  }), [clearTaskSelection, completeActiveTask, deleteActiveTask, focusComposer, focusSearch, navigateVisibleTask, nudgeActiveTask, openActiveTaskOnCanvas, openParentTask, openSelectedTask, openSubtasks, runActiveHeartbeat, runTaskShortcut, setShortcutsOpen, toggleCaptainAudio, toggleTaskAudio])
 
   return {
     commandActions,

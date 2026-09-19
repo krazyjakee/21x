@@ -3,7 +3,7 @@
  * scheduler (src/main/scheduled-coordination.ts), the project editor and the
  * Commander briefing settings section.
  *
- * - A scheduled Mastermind review lives in the project's `settings` JSON under
+ * - A scheduled Captain review lives in the project's `settings` JSON under
  *   {@link SCHEDULED_REVIEW_SETTING}: `{ "enabled": false, "cron": "0 9 * * 1-5" }`.
  * - The Commander briefing is one app setting, {@link COMMANDER_BRIEFING_SETTING},
  *   holding JSON: `{ "enabled": false, "cron": "0 8 * * 1-5", "speak": false }`.

@@ -10,15 +10,15 @@ vi.mock('@/lib/ipc-client', async (importOriginal) => ({
   projectApi: { getAll: vi.fn(async () => []) },
 }))
 
-import { getMastermindTaskId, mastermindAgentIdFor, useCoordinatorStore } from './coordinator-store'
+import { getCaptainTaskId, captainAgentIdFor, useCoordinatorStore } from './coordinator-store'
 import { useProjectStore } from './project-store'
 import { DEFAULT_PROJECT_ID } from '@shared/projects'
 
-/** One Mastermind id per project (#55), asked for once each. */
+/** One Captain id per project (#55), asked for once each. */
 describe('coordinator-store', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    useCoordinatorStore.setState({ mastermindTaskIds: {} })
+    useCoordinatorStore.setState({ captainTaskIds: {} })
     useProjectStore.setState({ currentProjectId: DEFAULT_PROJECT_ID })
   })
 
@@ -32,15 +32,15 @@ describe('coordinator-store', () => {
 
     await load('proj-a')
     expect(taskApi.getCoordinatorTaskId).toHaveBeenCalledTimes(2)
-    expect(useCoordinatorStore.getState().mastermindTaskIds).toEqual({ 'proj-a': 'mm-proj-a', 'proj-b': 'mm-proj-b' })
+    expect(useCoordinatorStore.getState().captainTaskIds).toEqual({ 'proj-a': 'mm-proj-a', 'proj-b': 'mm-proj-b' })
   })
 
   it('answers for the current project outside React', async () => {
     await useCoordinatorStore.getState().load('proj-b')
-    expect(getMastermindTaskId()).toBeNull()
+    expect(getCaptainTaskId()).toBeNull()
     useProjectStore.setState({ currentProjectId: 'proj-b' })
-    expect(getMastermindTaskId()).toBe('mm-proj-b')
-    expect(getMastermindTaskId('proj-a')).toBeNull()
+    expect(getCaptainTaskId()).toBe('mm-proj-b')
+    expect(getCaptainTaskId('proj-a')).toBeNull()
   })
 
   it('survives a bridge that cannot answer', async () => {
@@ -49,23 +49,23 @@ describe('coordinator-store', () => {
   })
 })
 
-describe('mastermindAgentIdFor', () => {
+describe('captainAgentIdFor', () => {
   const agents = [
     { id: 'default-agent', is_default: true },
     { id: 'codex', is_default: false },
     { id: 'claude', is_default: false },
   ]
 
-  it("prefers the project's Mastermind agent, then its default agent, then the app default", () => {
-    expect(mastermindAgentIdFor({ mastermind_agent_id: 'codex', default_agent_id: 'claude' }, agents)).toBe('codex')
-    expect(mastermindAgentIdFor({ mastermind_agent_id: null, default_agent_id: 'claude' }, agents)).toBe('claude')
-    expect(mastermindAgentIdFor({ mastermind_agent_id: null, default_agent_id: null }, agents)).toBe('default-agent')
-    expect(mastermindAgentIdFor(undefined, agents)).toBe('default-agent')
+  it("prefers the project's Captain agent, then its default agent, then the app default", () => {
+    expect(captainAgentIdFor({ captain_agent_id: 'codex', default_agent_id: 'claude' }, agents)).toBe('codex')
+    expect(captainAgentIdFor({ captain_agent_id: null, default_agent_id: 'claude' }, agents)).toBe('claude')
+    expect(captainAgentIdFor({ captain_agent_id: null, default_agent_id: null }, agents)).toBe('default-agent')
+    expect(captainAgentIdFor(undefined, agents)).toBe('default-agent')
   })
 
   it('skips an agent that no longer exists and copes with an empty list', () => {
-    expect(mastermindAgentIdFor({ mastermind_agent_id: 'gone', default_agent_id: 'claude' }, agents)).toBe('claude')
-    expect(mastermindAgentIdFor({ mastermind_agent_id: 'gone', default_agent_id: null }, [{ id: 'only' }])).toBe('only')
-    expect(mastermindAgentIdFor(undefined, [])).toBeNull()
+    expect(captainAgentIdFor({ captain_agent_id: 'gone', default_agent_id: 'claude' }, agents)).toBe('claude')
+    expect(captainAgentIdFor({ captain_agent_id: 'gone', default_agent_id: null }, [{ id: 'only' }])).toBe('only')
+    expect(captainAgentIdFor(undefined, [])).toBeNull()
   })
 })

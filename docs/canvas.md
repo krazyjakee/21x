@@ -60,7 +60,7 @@ the pending task and, when the task belongs to another project, switches the
 current project first and waits for that project's canvas to load before
 adding the panel (or focusing it, if it is already there).
 
-The Mastermind UI tools (`src/renderer/src/lib/ui-remote-control.ts`) do the
+The Captain UI tools (`src/renderer/src/lib/ui-remote-control.ts`) do the
 same: `open_task`, `move_task_panel` and `close_task_panel` switch to the
 task's project when needed and act once its canvas has loaded. `navigate` and
 `set_canvas_view` name no task and act on the current project. The published

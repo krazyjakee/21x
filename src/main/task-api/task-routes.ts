@@ -8,7 +8,7 @@ import { buildSimilarTasksQuery } from '../task-search'
 import { afterTaskCreated, afterTaskUpdated, triggerTaskAutomation } from '../task-updates'
 import { DEFAULT_PROJECT_ID } from '../../shared/projects'
 import { listProjectRepos, projectGitDefaults, taskProjectId, validateProjectRepos } from '../agent-manager/project-repos'
-import { deliverMastermindReport } from '../commander/report-inbox'
+import { deliverCaptainReport } from '../commander/report-inbox'
 import { agentController, notifyRenderer } from './state'
 import { validateSkillAssignment } from './skill-routes'
 
@@ -69,7 +69,7 @@ function createTask(db: DatabaseManager, data: CreateTaskData, params: Record<st
 
 function listTasks(db: DatabaseManager, params: Record<string, unknown>): ApiTask[] {
   // Recurring parent templates are not actionable tasks, and coordinator rows
-  // (the Mastermind) are conversations, not tasks.
+  // (the Captain) are conversations, not tasks.
   let query = `SELECT * FROM tasks WHERE NOT (is_recurring = 1 AND recurrence_parent_id IS NULL) AND ${userTaskRoleFilter()}`
   const qParams: unknown[] = []
 
@@ -385,7 +385,7 @@ function listReposForProject(db: DatabaseManager, params: Record<string, unknown
 }
 
 /**
- * The Mastermind's status snapshot for its project (#58). A project-scoped
+ * The Captain's status snapshot for its project (#58). A project-scoped
  * session has `project_id` forced by the scope (task-management-core.ts);
  * an unscoped internal caller must name the project. The counts are never
  * written: the reply carries the ones the database computed just now.
@@ -419,7 +419,7 @@ function updateProjectStatus(db: DatabaseManager, params: Record<string, unknown
 const MAX_REPORT_CHARS = 4_000
 
 /**
- * A Mastermind's report to the Commander (#62). The scope forces `project_id`
+ * A Captain's report to the Commander (#62). The scope forces `project_id`
  * like `update_project_status`; the message is capped and handed to the
  * Commander through the report seam (commander/report-inbox.ts), which
  * routes it to the right session. Nothing is stored here.
@@ -432,7 +432,7 @@ function reportToCommander(db: DatabaseManager, params: Record<string, unknown>)
   if (!message) return { error: 'message is required' }
   if (message.length > MAX_REPORT_CHARS) return { error: `message must be at most ${MAX_REPORT_CHARS} characters` }
   const correlationId = typeof params.correlation_id === 'string' && params.correlation_id.trim() ? params.correlation_id.trim().slice(0, 100) : null
-  const delivery = deliverMastermindReport({ projectId, message, correlationId, source: 'mastermind' })
+  const delivery = deliverCaptainReport({ projectId, message, correlationId, source: 'captain' })
   if (!delivery.delivered) return { error: delivery.detail }
   return {
     success: true,

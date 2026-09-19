@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { VoiceMicButton } from '@/components/voice/VoiceMicButton'
 import { voiceApi } from '@/lib/ipc-client'
 import { dispatchShortcutFeedback } from '@/lib/keyboard-shortcuts'
-import { MASTERMIND_COMPOSER_KEY, registerComposer } from '@/lib/voice-dictation-target'
+import { CAPTAIN_COMPOSER_KEY, registerComposer } from '@/lib/voice-dictation-target'
 import { formatFileSize } from '@/lib/utils'
 
 export interface ComposerAttachment {
@@ -48,7 +48,7 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
    * that rebuild, and the callbacks are read through a ref, so a conversation
    * carries on into the panel that replaced this one.
    */
-  const composerKey = taskId ?? MASTERMIND_COMPOSER_KEY
+  const composerKey = taskId ?? CAPTAIN_COMPOSER_KEY
   const sendRef = useRef<(() => void) | null>(null)
   useEffect(() => {
     return registerComposer(composerKey, {

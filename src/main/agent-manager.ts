@@ -224,7 +224,7 @@ export class AgentManager extends EventEmitter {
    *  They hold their slot so concurrent requests cannot all slip past. */
   private admittedStarts: Map<string, string> = new Map()
   private startQueueDrainScheduled = false
-  /** `projectId:reason` pairs the project's Mastermind has been told about (#65),
+  /** `projectId:reason` pairs the project's Captain has been told about (#65),
    *  cleared when one of the project's queued starts runs. */
   private projectLimitNotices: Set<string> = new Set()
 
@@ -313,7 +313,7 @@ export class AgentManager extends EventEmitter {
 
       const task = this.db.getTask(session.taskId)
       // Pseudo-tasks (heartbeat-*) have no DB row — leave them alone. The
-      // Mastermind has one, so it is released like any task and resumed by
+      // Captain has one, so it is released like any task and resumed by
       // the next message from its persisted session_id.
       if (!task) continue
       // No persisted resume anchor — releasing the runtime would lose the
@@ -510,7 +510,7 @@ export class AgentManager extends EventEmitter {
     // Every idle transition and every stop ends here: a slot may have freed.
     if (status === 'idle' || status === 'error') this.scheduleStartQueueDrain()
     // Project events (#57): an agent waiting on the user, or one that failed,
-    // wakes the project's Mastermind. Pseudo-tasks and coordinator rows are
+    // wakes the project's Captain. Pseudo-tasks and coordinator rows are
     // dropped by emitTaskEvent itself.
     if (status === 'waiting_approval') emitTaskEvent(this.db, 'approval_pending', owner.taskId)
     else if (status === 'error') emitTaskEvent(this.db, 'task_failed', owner.taskId)
@@ -1753,7 +1753,7 @@ export class AgentManager extends EventEmitter {
           `(${decision.running}/${decision.limit} running)`
         )
         this.emitStartQueueChanged()
-        this.tellMastermindAboutLimit(task, decision)
+        this.tellCaptainAboutLimit(task, decision)
         return { status: 'queued', position, reason: decision.reason }
       }
       this.recordCountedStart(task)
@@ -1790,7 +1790,7 @@ export class AgentManager extends EventEmitter {
 
     // A coordinator conversation outlives its runtime. Rejoin the live session
     // or resume the persisted one, so a restart (or a reaped runtime) continues
-    // the same Mastermind conversation instead of opening a blank one.
+    // the same Captain conversation instead of opening a blank one.
     const task = this.db.getTask(taskId)
     if (isCoordinatorTask(task)) {
       const live = this.findSessionByTaskId(taskId)
@@ -2003,7 +2003,7 @@ export class AgentManager extends EventEmitter {
    * Each task gets its own heartbeat session so checks don't mix across tasks.
    * Uses the real task's workspace dir so the agent has repo context for gh commands.
    */
-  async sendHeartbeatViaMastermind(agentId: string, taskId: string, heartbeatPrompt: string): Promise<string> {
+  async sendHeartbeatViaCaptain(agentId: string, taskId: string, heartbeatPrompt: string): Promise<string> {
     const heartbeatTaskId = `heartbeat-${taskId}`
 
     let sessionId = this.findSessionByTaskId(heartbeatTaskId)?.sessionId
@@ -2021,7 +2021,7 @@ export class AgentManager extends EventEmitter {
 
   /**
    * Send action findings to the task agent's own session.
-   * Only called when mastermind detected something that needs the task agent to act on.
+   * Only called when captain detected something that needs the task agent to act on.
    */
   async startHeartbeatSession(agentId: string, taskId: string, heartbeatPrompt: string): Promise<string> {
     const task = this.db.getTask(taskId)
@@ -2166,7 +2166,7 @@ export class AgentManager extends EventEmitter {
       }
       if (!routingIssue) return
       // Project event (#57): a chain that cannot advance on its own needs the
-      // project's Mastermind, not only the parent coordinator.
+      // project's Captain, not only the parent coordinator.
       emitTaskEvent(this.db, 'chain_stuck', parentTaskId, `After subtask ${subtaskId}: ${routingIssue}`)
     }
 
@@ -2782,13 +2782,13 @@ export class AgentManager extends EventEmitter {
   }
 
   /**
-   * Tells the project's Mastermind why a start waits (#65): a short fenced
-   * system message to its live, idle coordinator session. A Mastermind
+   * Tells the project's Captain why a start waits (#65): a short fenced
+   * system message to its live, idle coordinator session. A Captain
    * mid-turn already sees the reason in its start_task result; one with no
    * live session is told nothing (the queue entry and the project's limit
    * state carry it). Once per project and reason until a queued start runs.
    */
-  private tellMastermindAboutLimit(task: TaskRecord | undefined, decision: AdmissionDecision): void {
+  private tellCaptainAboutLimit(task: TaskRecord | undefined, decision: AdmissionDecision): void {
     if (!task || decision.admitted) return
     if (decision.reason === 'agent_limit' || decision.reason === 'global_limit') return
     const projectId = taskProjectId(task)
@@ -2810,7 +2810,7 @@ export class AgentManager extends EventEmitter {
       FINDINGS_END
     ].join('\n')
     this.sendMessage(live.sessionId, message, coordinator.id, live.session.agentId).catch((error) => {
-      console.warn(`[AgentManager] Could not tell the Mastermind of project ${projectId} about the queued start:`, error)
+      console.warn(`[AgentManager] Could not tell the Captain of project ${projectId} about the queued start:`, error)
       this.projectLimitNotices.delete(key)
     })
   }
@@ -2934,7 +2934,7 @@ export class AgentManager extends EventEmitter {
 
     // Session gone from memory: RESUME first (keeps the conversation), else start a new one.
     if (!session && taskId) {
-      // Regular tasks carry their agent; the Mastermind (a coordinator row
+      // Regular tasks carry their agent; the Captain (a coordinator row
       // with no agent_id) passes it in.
       const task = this.db.getTask(taskId)
       const resolvedAgentId = task?.agent_id || agentId

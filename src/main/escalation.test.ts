@@ -1,5 +1,5 @@
 /**
- * Escalation policy (#66): the gate on the Mastermind's project-scoped tool
+ * Escalation policy (#66): the gate on the Captain's project-scoped tool
  * calls. `ask_user` holds the call until the user approves it, then runs it;
  * `tell_commander` runs it and reports; `autonomous` is untouched. Task
  * agents in the same project are not gated.
@@ -19,7 +19,7 @@ import {
   setCommanderEscalationHandler,
   type EscalationEvent
 } from './escalation'
-import { buildMastermindSystemPrompt } from './prompts/mastermind'
+import { buildCaptainSystemPrompt } from './prompts/captain'
 import { DEFAULT_ESCALATION_POLICY, escalationPolicyFromSettings, type EscalationPolicy } from '../shared/project-policies'
 import { FINDINGS_BEGIN, SYSTEM_MESSAGE_MARKER } from '../shared/system-authority'
 import type { DatabaseManager } from './database'
@@ -39,7 +39,7 @@ interface Harness {
   invoke: ReturnType<typeof vi.fn<TaskApiInvoke>>
   notifyUser: ReturnType<typeof vi.fn>
   notifyRenderer: ReturnType<typeof vi.fn>
-  tellMastermind: ReturnType<typeof vi.fn>
+  tellCaptain: ReturnType<typeof vi.fn>
   commander: ReturnType<typeof vi.fn>
 }
 
@@ -59,9 +59,9 @@ function setup(policy: Partial<EscalationPolicy>): Harness {
 
   const notifyUser = vi.fn()
   const notifyRenderer = vi.fn()
-  const tellMastermind = vi.fn(async () => undefined)
+  const tellCaptain = vi.fn(async () => undefined)
   const commander = vi.fn()
-  configureEscalation({ db, notifyUser, notifyRenderer, tellMastermind })
+  configureEscalation({ db, notifyUser, notifyRenderer, tellCaptain })
   setCoordinatorCallGate(createCoordinatorEscalationGate())
   setCommanderEscalationHandler(commander)
 
@@ -74,7 +74,7 @@ function setup(policy: Partial<EscalationPolicy>): Harness {
     invoke,
     notifyUser,
     notifyRenderer,
-    tellMastermind,
+    tellCaptain,
     commander
   }
 }
@@ -95,7 +95,7 @@ afterEach(() => {
 })
 
 describe('escalation policy: ask_user', () => {
-  it("holds the Mastermind's start_task until the user approves, then starts it (#66 acceptance)", async () => {
+  it("holds the Captain's start_task until the user approves, then starts it (#66 acceptance)", async () => {
     const h = setup({ start_task: 'ask_user' })
 
     const result = await callToolForScope('start_task', { task_id: h.taskId }, h.coordinatorScope, h.invoke)
@@ -119,9 +119,9 @@ describe('escalation policy: ask_user', () => {
     expect(routeCalls(h, '/start_task')).toHaveLength(1)
     expect(listHeldActions()).toEqual([])
 
-    // And the Mastermind is told, in a fenced system note it cannot read as a human order.
-    expect(h.tellMastermind).toHaveBeenCalledTimes(1)
-    const [projectId, text] = h.tellMastermind.mock.calls[0] as [string, string]
+    // And the Captain is told, in a fenced system note it cannot read as a human order.
+    expect(h.tellCaptain).toHaveBeenCalledTimes(1)
+    const [projectId, text] = h.tellCaptain.mock.calls[0] as [string, string]
     expect(projectId).toBe(h.projectId)
     expect(text).toContain(SYSTEM_MESSAGE_MARKER)
     expect(text).toContain(FINDINGS_BEGIN)
@@ -130,7 +130,7 @@ describe('escalation policy: ask_user', () => {
     expect(h.commander).toHaveBeenLastCalledWith(expect.objectContaining({ outcome: 'approved', heldId: body.id }))
   })
 
-  it('rejecting drops the call and tells the Mastermind, with the note', async () => {
+  it('rejecting drops the call and tells the Captain, with the note', async () => {
     const h = setup({ start_task: 'ask_user' })
     const body = parse(await callToolForScope('start_task', { task_id: h.taskId }, h.coordinatorScope, h.invoke))
 
@@ -138,7 +138,7 @@ describe('escalation policy: ask_user', () => {
     expect(rejectHeldAction(String(body.id))).toBe(false)
     expect(routeCalls(h, '/start_task')).toHaveLength(0)
     expect(listHeldActions()).toEqual([])
-    const text = h.tellMastermind.mock.calls[0][1] as string
+    const text = h.tellCaptain.mock.calls[0][1] as string
     expect(text).toContain('rejected')
     expect(text).toContain('Not before the release freeze.')
     expect(h.commander).toHaveBeenLastCalledWith(expect.objectContaining({ outcome: 'rejected' }))
@@ -157,7 +157,7 @@ describe('escalation policy: ask_user', () => {
     const outcome = await approveHeldAction(String(body.id))
     expect(outcome.ok).toBe(false)
     expect(outcome.error).toContain('not waiting')
-    expect(h.tellMastermind.mock.calls[0][1]).toContain('failed')
+    expect(h.tellCaptain.mock.calls[0][1]).toContain('failed')
   })
 
   it('does not gate a task agent in the same project', async () => {
@@ -188,7 +188,7 @@ describe('escalation policy: tell_commander', () => {
     expect(h.commander).toHaveBeenCalledTimes(1)
     const event = h.commander.mock.calls[0][0] as EscalationEvent
     expect(event).toMatchObject({ projectId: h.projectId, action: 'stop_task', level: 'tell_commander', tool: 'stop_task', outcome: 'performed', summary: 'stop the agent on "Ship it"' })
-    expect(h.notifyUser).toHaveBeenCalledWith(expect.stringContaining('Mastermind of Policy'), expect.stringContaining('stop the agent on "Ship it"'))
+    expect(h.notifyUser).toHaveBeenCalledWith(expect.stringContaining('Captain of Policy'), expect.stringContaining('stop the agent on "Ship it"'))
     expect(h.notifyRenderer).toHaveBeenCalledWith('escalation:event', expect.objectContaining({ outcome: 'performed' }))
   })
 
@@ -215,7 +215,7 @@ describe('escalation policy: autonomous and the action mapping', () => {
     expect(started).toMatchObject({ success: true, action: 'task_started' })
     expect(h.commander).not.toHaveBeenCalled()
     expect(h.notifyUser).not.toHaveBeenCalled()
-    expect(h.tellMastermind).not.toHaveBeenCalled()
+    expect(h.tellCaptain).not.toHaveBeenCalled()
   })
 
   it('uses the defaults when the project has no policy block', async () => {
@@ -254,8 +254,8 @@ describe('the policy in settings and in the prompt', () => {
       .toEqual({ ...DEFAULT_ESCALATION_POLICY, start_task: 'ask_user' })
   })
 
-  it('adds an escalation section to the Mastermind prompt that names only real tools in backticks', () => {
-    const prompt = buildMastermindSystemPrompt({ escalationPolicy: { ...DEFAULT_ESCALATION_POLICY, start_task: 'ask_user' } })
+  it('adds an escalation section to the Captain prompt that names only real tools in backticks', () => {
+    const prompt = buildCaptainSystemPrompt({ escalationPolicy: { ...DEFAULT_ESCALATION_POLICY, start_task: 'ask_user' } })
     expect(prompt).toContain('## Escalation policy')
     expect(prompt).toContain('starting agents (`start_task`): ask the user first.')
     expect(prompt).toContain('stopping agents (`stop_task`): do it, then it is reported')
@@ -266,8 +266,8 @@ describe('the policy in settings and in the prompt', () => {
       expect(['create_task', 'create_subtask', 'start_task', 'stop_task', 'respond_to_checkpoint', 'update_task']).toContain(name)
     }
     // Nothing waits for the user: the section says so instead of explaining held calls.
-    const free = buildMastermindSystemPrompt({ escalationPolicy: { ...DEFAULT_ESCALATION_POLICY, respond_to_checkpoint: 'autonomous', pr: 'autonomous' } })
+    const free = buildCaptainSystemPrompt({ escalationPolicy: { ...DEFAULT_ESCALATION_POLICY, respond_to_checkpoint: 'autonomous', pr: 'autonomous' } })
     expect(free).not.toContain('returns status held')
-    expect(buildMastermindSystemPrompt()).not.toContain('## Escalation policy')
+    expect(buildCaptainSystemPrompt()).not.toContain('## Escalation policy')
   })
 })

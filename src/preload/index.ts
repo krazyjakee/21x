@@ -8,7 +8,7 @@ import type {
   ProjectResourceRecord, CreateProjectResourceData, UpdateProjectResourceData,
   ProjectChangedEvent
 } from '../shared/projects'
-import type { MastermindMemory } from '../shared/mastermind-memory'
+import type { CaptainMemory } from '../shared/captain-memory'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   db: {
@@ -25,7 +25,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   tasks: {
     getWorkspaceDir: (taskId: string): Promise<string> =>
       ipcRenderer.invoke('tasks:getWorkspaceDir', taskId),
-    // The project's Mastermind row id (#55); the Default project's when omitted.
+    // The project's Captain row id (#55); the Default project's when omitted.
     getCoordinatorTaskId: (projectId?: string): Promise<string | null> =>
       ipcRenderer.invoke('tasks:getCoordinatorTaskId', projectId)
   },
@@ -296,9 +296,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     archive: (id: string, archived?: boolean): Promise<ProjectRecord | undefined> =>
       ipcRenderer.invoke('project:archive', id, archived),
     reorder: (orderedIds: string[]): Promise<void> => ipcRenderer.invoke('project:reorder', orderedIds),
-    // The project's Mastermind memory file (#55), read-only.
-    getMastermindMemory: (projectId: string): Promise<MastermindMemory | null> =>
-      ipcRenderer.invoke('project:getMastermindMemory', projectId),
+    // The project's Captain memory file (#55), read-only.
+    getCaptainMemory: (projectId: string): Promise<CaptainMemory | null> =>
+      ipcRenderer.invoke('project:getCaptainMemory', projectId),
     moveTask: (taskId: string, projectId: string): Promise<unknown[] | null> =>
       ipcRenderer.invoke('project:moveTask', taskId, projectId),
     onChanged: (callback: (event: ProjectChangedEvent) => void): (() => void) => {
@@ -306,8 +306,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('project:changed', handler)
       return () => ipcRenderer.removeListener('project:changed', handler)
     },
-    // Project status (#58): live counts plus the Mastermind's summary, and a
-    // ping when the Mastermind writes a new summary.
+    // Project status (#58): live counts plus the Captain's summary, and a
+    // ping when the Captain writes a new summary.
     getStatus: (projectId: string): Promise<unknown> => ipcRenderer.invoke('project:getStatus', projectId),
     // Status history (#72): one page of the journal, newest first.
     getStatusHistory: (projectId: string, query?: { limit?: number; cursor?: string | null }): Promise<unknown> =>
@@ -344,7 +344,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     isAllPaused: (): Promise<boolean> => ipcRenderer.invoke('projectLimits:isAllPaused'),
     pauseAll: (paused: boolean): Promise<boolean> => ipcRenderer.invoke('projectLimits:pauseAll', paused)
   },
-  // Mastermind tool calls held by the escalation policy (#66).
+  // Captain tool calls held by the escalation policy (#66).
   escalation: {
     listHeld: (projectId?: string): Promise<unknown[]> => ipcRenderer.invoke('escalation:listHeld', projectId),
     approve: (id: string): Promise<unknown> => ipcRenderer.invoke('escalation:approve', id),

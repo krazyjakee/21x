@@ -82,7 +82,7 @@ flowchart LR
 ```
 
 ### Dashboard Workspace
-- **Command center** — Ask Mastermind or create a task from one input, with quick-start chips
+- **Command center** — Ask Captain or create a task from one input, with quick-start chips
 - **Kanban task board** — Tasks grouped by status with drag-and-drop support
 
 ### Multi-Agent Support
@@ -130,7 +130,7 @@ flowchart LR
 
 ### Voice (desktop, optional)
 - **Local speech to text** — Runs on your machine; no audio is stored or sent anywhere
-- **Talk to Mastermind** — Microphone in the top bar, or `Cmd/Ctrl+Shift+Space`, from any view
+- **Talk to Captain** — Microphone in the top bar, or `Cmd/Ctrl+Shift+Space`, from any view
 - **Dictate anywhere** — A microphone in every agent message box and the dashboard command box
 - **Keep talking** — Each pause sends a sentence and the microphone stays open
 - **Spoken answers** — 21x reads an agent answer aloud, and stops the moment you speak. It uses the voice your system already has, so it needs no download; a more natural downloaded voice is one click away

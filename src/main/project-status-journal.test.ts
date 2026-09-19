@@ -51,7 +51,7 @@ describe('update_project_status writes the journal (#72)', () => {
     const entry = db.getProjectStatusJournalEntry(first.journal_entry_id)!
     expect(entry).toMatchObject({
       project_id: project.id, summary: 'Round one.', completed: ['Login page'], blockers: ['Design review'],
-      decisions: ['Use OAuth'], next_steps: ['Wire billing'], source: 'mastermind', correlation_id: 'cmd-1'
+      decisions: ['Use OAuth'], next_steps: ['Wire billing'], source: 'captain', correlation_id: 'cmd-1'
     })
 
     await handleTaskRoute(db, '/update_project_status', { project_id: project.id, summary: 'Round two.', blockers: ['Billing API key'] })
@@ -85,7 +85,7 @@ describe('update_project_status writes the journal (#72)', () => {
   it('drops its rows with the project', () => {
     const { db, rawDb, project } = seed()
     db.appendProjectStatusJournal(project.id, { summary: 'One' })
-    // Projects are born with a Mastermind task, whose project FK deliberately
+    // Projects are born with a Captain task, whose project FK deliberately
     // prevents raw project deletion. Remove that owner first so this assertion
     // isolates the journal's ON DELETE CASCADE contract.
     rawDb.prepare('DELETE FROM tasks WHERE project_id = ?').run(project.id)
@@ -172,7 +172,7 @@ describe('status history pages', () => {
     expect(page.has_more).toBe(true)
     expect(page.next_cursor).toBeTruthy()
     expect(String(page.entries[0].summary).length).toBeLessThanOrEqual(600)
-    expect(page.entries[0]).toMatchObject({ source: 'mastermind', decisions: ['Keep SQLite'] })
+    expect(page.entries[0]).toMatchObject({ source: 'captain', decisions: ['Keep SQLite'] })
     expect(JSON.stringify(page).length).toBeLessThanOrEqual(12_000)
 
     const older = JSON.parse(await history({ project: project.id, cursor: page.next_cursor })) as { entries: Array<{ at: string }> }
@@ -202,7 +202,7 @@ describe('retention', () => {
 
     expect(db.compactProjectStatusJournal(now)).toEqual({ folded: 4, written: 3 })
     const entries = readProjectStatusHistory(db, project.id, { limit: 20 }).entries
-    expect(entries.map((e) => [e.source, e.summary.split('\n').length])).toEqual([['mastermind', 1], ['compaction', 2], ['compaction', 1]])
+    expect(entries.map((e) => [e.source, e.summary.split('\n').length])).toEqual([['captain', 1], ['compaction', 2], ['compaction', 1]])
     const may = entries[1]
     expect(may.summary).toBe('2026-05-10: May one\n2026-05-20: May two')
     expect(may.decisions).toEqual(['Ship weekly', 'Drop IE'])

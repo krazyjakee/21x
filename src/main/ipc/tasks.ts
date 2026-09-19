@@ -62,7 +62,7 @@ export function registerTaskHandlers(deps: IpcDeps): void {
 
   ipcMain.handle('tasks:getWorkspaceDir', (_, taskId: string): string => db.getWorkspaceDir(taskId))
 
-  // A project's Mastermind row id (#55). Never in db:getTasks (coordinator rows
+  // A project's Captain row id (#55). Never in db:getTasks (coordinator rows
   // are hidden), so the renderer asks for it by project instead of carrying a
   // fixed string. A project that somehow has none gets one; an unknown project
   // gets null.

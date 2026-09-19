@@ -44,7 +44,7 @@ export class HeartbeatScheduler {
   /**
    * Findings already forwarded to a task agent, keyed by delivery id → timestamp.
    * Makes forwarding idempotent: the same finding for the same task is delivered once,
-   * even when two heartbeat runs (scheduled + Run Now) read the same mastermind reply.
+   * even when two heartbeat runs (scheduled + Run Now) read the same captain reply.
    */
   private deliveredFindings: Map<string, number> = new Map()
   /** How long a delivery id suppresses an identical repeat delivery. */
@@ -136,7 +136,7 @@ export class HeartbeatScheduler {
     }
 
     // A manual run must never race a scheduled run. Two concurrent runs share one
-    // mastermind session, so both would read the same reply and forward it twice.
+    // captain session, so both would read the same reply and forward it twice.
     if (this.inProgress.has(taskId)) {
       console.log(`[HeartbeatScheduler] runNow: heartbeat already in progress for task ${taskId}`)
       return 'in_progress'
@@ -155,12 +155,12 @@ export class HeartbeatScheduler {
     this.inProgress.add(taskId)
 
     try {
-      // Phase 1: Send check to mastermind (skips preflight since user requested it)
+      // Phase 1: Send check to captain (skips preflight since user requested it)
       const checkPrompt = this.buildHeartbeatPrompt(task, heartbeatContent)
-      const mastermindSessionId = await this.agentManager.sendHeartbeatViaMastermind(agentId, task.id, checkPrompt)
+      const captainSessionId = await this.agentManager.sendHeartbeatViaCaptain(agentId, task.id, checkPrompt)
 
       // Phase 2: Wait for result and forward — run in background so IPC returns immediately
-      this.processRunNowResult(mastermindSessionId, task, agentId).catch((err) => {
+      this.processRunNowResult(captainSessionId, task, agentId).catch((err) => {
         const message = err instanceof Error ? err.message : String(err)
         console.error(`[HeartbeatScheduler] runNow background error for task ${taskId}:`, message)
         this.logResult(taskId, HeartbeatStatus.Error, message)
@@ -318,8 +318,8 @@ export class HeartbeatScheduler {
    *
    * Two-phase approach to avoid polluting task agent context:
    * 1. Pre-flight: cheap `gh api` checks (no LLM)
-   * 2. If changes detected → mastermind session evaluates findings
-   * 3. If mastermind says action needed → spawn task agent with specific instructions
+   * 2. If changes detected → captain session evaluates findings
+   * 3. If captain says action needed → spawn task agent with specific instructions
    * 4. If HEARTBEAT_OK → task agent is never touched
    */
   private async runHeartbeat(task: TaskRecord): Promise<void> {
@@ -351,25 +351,25 @@ export class HeartbeatScheduler {
         return
       }
 
-      // Phase 2: Send check to mastermind session (doesn't pollute task context)
+      // Phase 2: Send check to captain session (doesn't pollute task context)
       const checkPrompt = this.buildHeartbeatPrompt(task, heartbeatContent)
-      const mastermindSessionId = await this.agentManager.sendHeartbeatViaMastermind(agentId, task.id, checkPrompt)
-      const mastermindResult = await this.waitForSessionResult(mastermindSessionId, task.id)
+      const captainSessionId = await this.agentManager.sendHeartbeatViaCaptain(agentId, task.id, checkPrompt)
+      const captainResult = await this.waitForSessionResult(captainSessionId, task.id)
 
-      // Phase 3: Evaluate mastermind result
-      const classification = this.classifyMastermindResult(mastermindResult)
+      // Phase 3: Evaluate captain result
+      const classification = this.classifyCaptainResult(captainResult)
 
       if (classification === 'ok') {
-        console.log(`[HeartbeatScheduler] ${HEARTBEAT_OK_TOKEN} for task "${task.title}" (mastermind check)`)
-        this.logResult(task.id, HeartbeatStatus.Ok, this.extractSummary(mastermindResult, HeartbeatStatus.Ok), mastermindSessionId)
+        console.log(`[HeartbeatScheduler] ${HEARTBEAT_OK_TOKEN} for task "${task.title}" (captain check)`)
+        this.logResult(task.id, HeartbeatStatus.Ok, this.extractSummary(captainResult, HeartbeatStatus.Ok), captainSessionId)
         this.advanceNextCheck(task, true)
       } else if (classification === 'info') {
-        console.log(`[HeartbeatScheduler] Info for task "${task.title}": ${mastermindResult.substring(0, 100)}`)
-        this.logResult(task.id, HeartbeatStatus.Info, this.extractSummary(mastermindResult, HeartbeatStatus.Info), mastermindSessionId)
+        console.log(`[HeartbeatScheduler] Info for task "${task.title}": ${captainResult.substring(0, 100)}`)
+        this.logResult(task.id, HeartbeatStatus.Info, this.extractSummary(captainResult, HeartbeatStatus.Info), captainSessionId)
         this.advanceNextCheck(task, true) // no action needed, treat like OK for interval
       } else {
         console.log(`[HeartbeatScheduler] Action needed for task "${task.title}", forwarding to task agent`)
-        const taskSessionId = await this.forwardFindings(task, mastermindResult, agentId)
+        const taskSessionId = await this.forwardFindings(task, captainResult, agentId)
         if (!taskSessionId) {
           // Gated or duplicate — no agent turn was created, so there is nothing to wait for.
           this.advanceNextCheck(task, false)
@@ -393,21 +393,21 @@ export class HeartbeatScheduler {
   }
 
   /**
-   * Background processing for runNow — waits for mastermind result and forwards to task agent if needed.
+   * Background processing for runNow — waits for captain result and forwards to task agent if needed.
    */
-  private async processRunNowResult(mastermindSessionId: string, task: TaskRecord, agentId: string): Promise<void> {
+  private async processRunNowResult(captainSessionId: string, task: TaskRecord, agentId: string): Promise<void> {
     try {
-      const mastermindResult = await this.waitForSessionResult(mastermindSessionId, task.id)
-      const classification = this.classifyMastermindResult(mastermindResult)
+      const captainResult = await this.waitForSessionResult(captainSessionId, task.id)
+      const classification = this.classifyCaptainResult(captainResult)
 
       if (classification === 'action') {
-        console.log(`[HeartbeatScheduler] runNow: mastermind found action needed, forwarding to task agent`)
-        await this.forwardFindings(task, mastermindResult, agentId)
+        console.log(`[HeartbeatScheduler] runNow: captain found action needed, forwarding to task agent`)
+        await this.forwardFindings(task, captainResult, agentId)
         this.advanceNextCheck(task, false)
       } else {
         const logStatus = classification === 'ok' ? HeartbeatStatus.Ok : HeartbeatStatus.Info
         console.log(`[HeartbeatScheduler] runNow: ${classification} for task "${task.title}"`)
-        this.logResult(task.id, logStatus, this.extractSummary(mastermindResult, logStatus), mastermindSessionId)
+        this.logResult(task.id, logStatus, this.extractSummary(captainResult, logStatus), captainSessionId)
         this.advanceNextCheck(task, classification === 'ok')
       }
     } finally {
@@ -418,8 +418,8 @@ export class HeartbeatScheduler {
   }
 
   /**
-   * Build the prompt for the mastermind heartbeat check.
-   * Mastermind evaluates the status — it doesn't make changes.
+   * Build the prompt for the captain heartbeat check.
+   * Captain evaluates the status — it doesn't make changes.
    */
   private buildHeartbeatPrompt(task: TaskRecord, heartbeatContent: string): string {
     const globalInstructions = this.dbManager.getSetting('heartbeat_global_instructions') || ''
@@ -451,14 +451,14 @@ export class HeartbeatScheduler {
   }
 
   /**
-   * Build the prompt for the task agent when mastermind found something.
+   * Build the prompt for the task agent when captain found something.
    * This goes to the task's own session so the agent can act on findings.
    *
    * The findings are machine-generated and often quote untrusted external text
    * (PR comments, CI output). They are therefore fenced as DATA and carry an explicit
    * authority notice: a heartbeat message never authorizes a privileged operation.
    */
-  private buildActionPrompt(task: TaskRecord, mastermindFindings: string, deliveryId: string): string {
+  private buildActionPrompt(task: TaskRecord, captainFindings: string, deliveryId: string): string {
     return buildSystemMessage(
       {
         origin: SystemMessageOrigin.Heartbeat,
@@ -467,17 +467,17 @@ export class HeartbeatScheduler {
         generatedAt: new Date().toISOString()
       },
       `A periodic heartbeat check of task "${task.title}" produced the findings below.`,
-      mastermindFindings,
+      captainFindings,
       `Address only what you may do without new human authorization, then end your message with "${HEARTBEAT_OK_TOKEN}". If the findings need a privileged operation, report what is needed and ask the human — do not perform it.`
     )
   }
 
   /**
-   * Forward mastermind findings to the task agent. This is the ONLY place heartbeat
+   * Forward captain findings to the task agent. This is the ONLY place heartbeat
    * text enters a task agent's session, so both guards live here:
    *
    * 1. Idempotency — identical findings for a task are delivered once, so two heartbeat
-   *    runs reading the same mastermind reply cannot create two user turns.
+   *    runs reading the same captain reply cannot create two user turns.
    * 2. Authority gate — findings that request a privileged operation (production deploy,
    *    merge/review bypass, replay, destructive data change, external message) are
    *    escalated to the human and never handed to the agent as an action directive.
@@ -497,7 +497,7 @@ export class HeartbeatScheduler {
     this.deliveredFindings.set(deliveryId, now)
 
     // Project event (#57): every new finding, forwarded or escalated, reaches
-    // the project's Mastermind once, after the same dedupe as the delivery.
+    // the project's Captain once, after the same dedupe as the delivery.
     emitTaskEvent(this.dbManager, 'heartbeat_finding', task.id, findings)
 
     const gate = evaluateAuthorityGate(findings)
@@ -523,9 +523,9 @@ export class HeartbeatScheduler {
   }
 
   /**
-   * Classify the mastermind's response into one of three categories.
+   * Classify the captain's response into one of three categories.
    */
-  private classifyMastermindResult(result: string): 'ok' | 'info' | 'action' {
+  private classifyCaptainResult(result: string): 'ok' | 'info' | 'action' {
     if (result.includes(HEARTBEAT_OK_TOKEN)) return 'ok'
     if (result.includes(HEARTBEAT_INFO_TOKEN)) return 'info'
     return 'action'
@@ -550,7 +550,7 @@ export class HeartbeatScheduler {
       let currentSessionId = sessionId
       // Use the provided fallbackTaskId for re-keying lookup, defaulting to
       // the heartbeat session's taskId. This ensures Phase 3 (task agent)
-      // looks up the correct session instead of the mastermind session.
+      // looks up the correct session instead of the captain session.
       const lookupTaskId = fallbackTaskId || `heartbeat-${taskId}`
 
       const timer = setInterval(() => {

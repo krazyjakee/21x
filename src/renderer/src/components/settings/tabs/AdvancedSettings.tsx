@@ -125,7 +125,7 @@ export function AdvancedSettings() {
 /**
  * Starts over this cap (or over an agent's own "max parallel sessions") wait
  * in a queue and start on their own when a running session finishes.
- * Mastermind, heartbeat and triage sessions are not counted.
+ * Captain, heartbeat and triage sessions are not counted.
  */
 function AgentConcurrencySection() {
   const [saved, setSaved] = useState('')
@@ -150,7 +150,7 @@ function AgentConcurrencySection() {
   return (
     <SettingsSection
       title="Agent Concurrency"
-      description="Maximum agent sessions working at once across all agents. Extra starts are queued and run when a slot frees. Leave empty for no global limit; each agent's own limit still applies. The Mastermind, heartbeat checks and triage are not counted."
+      description="Maximum agent sessions working at once across all agents. Extra starts are queued and run when a slot frees. Leave empty for no global limit; each agent's own limit still applies. The Captain, heartbeat checks and triage are not counted."
     >
       <div className="space-y-1.5">
         <Label htmlFor="max-concurrent-agent-sessions">Max concurrent agent sessions</Label>

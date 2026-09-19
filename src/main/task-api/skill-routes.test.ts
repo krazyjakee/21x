@@ -15,7 +15,7 @@ let globalSkill: SkillRecord
 let skillA: SkillRecord
 let skillB: SkillRecord
 
-const asMastermind = (projectId: string): Record<string, unknown> => ({ [SKILL_SCOPE_PARAM]: { project_id: projectId, role: 'coordinator' } })
+const asCaptain = (projectId: string): Record<string, unknown> => ({ [SKILL_SCOPE_PARAM]: { project_id: projectId, role: 'coordinator' } })
 const asTaskAgent = (projectId: string): Record<string, unknown> => ({ [SKILL_SCOPE_PARAM]: { project_id: projectId, role: 'task' } })
 
 async function route(name: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -33,7 +33,7 @@ beforeEach(() => {
 
 describe('visibility per scope', () => {
   it('a project scope lists global skills plus its own, with the scope spelled out', async () => {
-    const listed = await handleRoute(db, '/list_skills', asMastermind(projectA)) as Array<Record<string, unknown>>
+    const listed = await handleRoute(db, '/list_skills', asCaptain(projectA)) as Array<Record<string, unknown>>
     expect(listed.map((s) => s.name).sort()).toEqual(['alpha-release', 'pr-review'])
     expect(listed.find((s) => s.name === 'pr-review')).toMatchObject({ scope: 'global', project_id: null, project_name: null })
     expect(listed.find((s) => s.name === 'alpha-release')).toMatchObject({ scope: 'project', project_id: projectA, project_name: 'Alpha' })
@@ -51,10 +51,10 @@ describe('visibility per scope', () => {
   })
 
   it('get_skill refuses another project\'s skill and a missing id the same way, even by id', async () => {
-    expect(await route('/get_skill', { skill_id: skillA.id, ...asMastermind(projectA) })).toMatchObject({ name: 'alpha-release', content: '# A' })
+    expect(await route('/get_skill', { skill_id: skillA.id, ...asCaptain(projectA) })).toMatchObject({ name: 'alpha-release', content: '# A' })
     expect(await route('/get_skill', { skill_id: globalSkill.id, ...asTaskAgent(projectA) })).toMatchObject({ name: 'pr-review' })
-    const foreign = await route('/get_skill', { skill_id: skillB.id, ...asMastermind(projectA) })
-    const missing = await route('/get_skill', { skill_id: 'no-such-skill', ...asMastermind(projectA) })
+    const foreign = await route('/get_skill', { skill_id: skillB.id, ...asCaptain(projectA) })
+    const missing = await route('/get_skill', { skill_id: 'no-such-skill', ...asCaptain(projectA) })
     expect(foreign.error).toContain('Access denied')
     expect(missing).toEqual(foreign)
     expect(await route('/get_skill', { skill_id: skillB.id })).toMatchObject({ name: 'beta-release' })
@@ -62,8 +62,8 @@ describe('visibility per scope', () => {
 })
 
 describe('default ownership per creator', () => {
-  it('a Mastermind-created skill belongs to its project', async () => {
-    const created = await route('/create_skill', { name: 'alpha-conventions', description: 'd', content: 'c', ...asMastermind(projectA) })
+  it('a Captain-created skill belongs to its project', async () => {
+    const created = await route('/create_skill', { name: 'alpha-conventions', description: 'd', content: 'c', ...asCaptain(projectA) })
     expect(created.success).toBe(true)
     expect(created.skill).toMatchObject({ project_id: projectA, scope: 'project' })
     expect(db.getSkills({ visibleToProject: projectB }).map((s) => s.name)).not.toContain('alpha-conventions')
@@ -81,47 +81,47 @@ describe('default ownership per creator', () => {
   })
 
   it('a project scope asking for a global skill is refused and told to ask the user', async () => {
-    const refused = await route('/create_skill', { name: 'wants-global', description: 'd', content: 'c', global: true, ...asMastermind(projectA) })
+    const refused = await route('/create_skill', { name: 'wants-global', description: 'd', content: 'c', global: true, ...asCaptain(projectA) })
     expect(refused.error).toMatch(/confirmation/i)
     expect(refused.error).toMatch(/Skills view|Commander/)
     expect(db.getSkillByName('wants-global')).toBeUndefined()
   })
 
   it('names are unique across scopes', async () => {
-    const clash = await route('/create_skill', { name: 'beta-release', description: 'd', content: 'c', ...asMastermind(projectA) })
+    const clash = await route('/create_skill', { name: 'beta-release', description: 'd', content: 'c', ...asCaptain(projectA) })
     expect(clash.error).toContain('unique across all projects')
-    const own = await route('/create_skill', { name: 'alpha-release', description: 'd', content: 'c', ...asMastermind(projectA) })
+    const own = await route('/create_skill', { name: 'alpha-release', description: 'd', content: 'c', ...asCaptain(projectA) })
     expect(own.error).toContain(skillA.id)
   })
 })
 
 describe('cross-project and global modification', () => {
   it('a project may update and delete only its own skills', async () => {
-    expect((await route('/update_skill', { skill_id: skillA.id, content: 'edited', ...asMastermind(projectA) })).success).toBe(true)
-    expect((await route('/update_skill', { skill_id: skillB.id, content: 'hijack', ...asMastermind(projectA) })).error).toContain('Access denied')
+    expect((await route('/update_skill', { skill_id: skillA.id, content: 'edited', ...asCaptain(projectA) })).success).toBe(true)
+    expect((await route('/update_skill', { skill_id: skillB.id, content: 'hijack', ...asCaptain(projectA) })).error).toContain('Access denied')
     expect(db.getSkill(skillB.id)!.content).toBe('# B')
 
     const global = await route('/update_skill', { skill_id: globalSkill.id, content: 'silently changed', ...asTaskAgent(projectA) })
     expect(global.error).toMatch(/confirmation/i)
     expect(db.getSkill(globalSkill.id)!.content).toBe('# Review')
 
-    expect((await route('/delete_skill', { skill_id: skillB.id, ...asMastermind(projectA) })).error).toContain('Access denied')
-    expect((await route('/delete_skill', { skill_id: globalSkill.id, ...asMastermind(projectA) })).error).toMatch(/confirmation/i)
-    expect((await route('/delete_skill', { skill_id: skillA.id, ...asMastermind(projectA) })).success).toBe(true)
+    expect((await route('/delete_skill', { skill_id: skillB.id, ...asCaptain(projectA) })).error).toContain('Access denied')
+    expect((await route('/delete_skill', { skill_id: globalSkill.id, ...asCaptain(projectA) })).error).toMatch(/confirmation/i)
+    expect((await route('/delete_skill', { skill_id: skillA.id, ...asCaptain(projectA) })).success).toBe(true)
     expect(db.getSkills().map((s) => s.name).sort()).toEqual(['beta-release', 'pr-review'])
   })
 
   it('a stale expected_version is refused with the current version', async () => {
-    const first = await route('/update_skill', { skill_id: skillA.id, content: 'one', expected_version: skillA.version, ...asMastermind(projectA) })
+    const first = await route('/update_skill', { skill_id: skillA.id, content: 'one', expected_version: skillA.version, ...asCaptain(projectA) })
     expect((first.skill as SkillRecord).version).toBe(skillA.version + 1)
-    const stale = await route('/update_skill', { skill_id: skillA.id, content: 'two', expected_version: skillA.version, ...asMastermind(projectA) })
+    const stale = await route('/update_skill', { skill_id: skillA.id, content: 'two', expected_version: skillA.version, ...asCaptain(projectA) })
     expect(stale).toMatchObject({ conflict: 'stale_version', current_version: skillA.version + 1 })
     expect(db.getSkill(skillA.id)!.content).toBe('one')
     expect((await route('/update_skill', { skill_id: skillA.id, content: 'x', expected_version: 0 })).error).toContain('expected_version')
   })
 
   it('a rename cannot take another skill\'s name', async () => {
-    const taken = await route('/update_skill', { skill_id: skillA.id, name: 'pr-review', ...asMastermind(projectA) })
+    const taken = await route('/update_skill', { skill_id: skillA.id, name: 'pr-review', ...asCaptain(projectA) })
     expect(taken.error).toContain('unique across all projects')
   })
 })

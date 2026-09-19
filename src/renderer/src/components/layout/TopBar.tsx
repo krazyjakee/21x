@@ -124,9 +124,9 @@ export function TopBar({ onOpenCommandPalette }: { onOpenCommandPalette: () => v
             <Settings className="size-icon" />
           </button>
           <div className="mx-1 h-5 w-px bg-border/70" />
-          {/* Start talking to Mastermind from any view. Hidden until voice is on. */}
+          {/* Start talking to Captain from any view. Hidden until voice is on. */}
           <TopBarVoiceButton />
-          {/* Quieter than the microphone beside it: typing to Mastermind is
+          {/* Quieter than the microphone beside it: typing to Captain is
               the fallback, speaking to it is the invitation. */}
           <Button
             variant={showOrchestrator ? 'default' : 'ghost'}
@@ -135,7 +135,7 @@ export function TopBar({ onOpenCommandPalette }: { onOpenCommandPalette: () => v
             className="h-8 px-2.5"
           >
             <MessageSquare className="size-icon-sm" />
-            <span className="text-sm">Mastermind</span>
+            <span className="text-sm">Captain</span>
           </Button>
         </div>
       </div>

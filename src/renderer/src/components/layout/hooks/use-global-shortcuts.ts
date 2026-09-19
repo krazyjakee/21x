@@ -19,7 +19,7 @@ const CHORD_ACTIONS: Record<string, keyof CommandPaletteActions> = {
   gp: 'openParentTask',
   os: 'openSubtasks',
   vt: 'toggleTaskAudio',
-  vm: 'toggleMastermindAudio'
+  vm: 'toggleCaptainAudio'
 }
 
 /** Command palette toggle, view switching, two-key chords, and single-key task shortcuts. */

@@ -22,8 +22,8 @@ All schema migrations live in `src/main/database/schema.ts` as plain functions o
 
 ### Rows that must survive every migration
 
-`tasks.role` marks coordinator rows (the Mastermind, `role = 'mastermind'`).
-The column is declared in all three places above and `seedMastermindTasks()`
+`tasks.role` marks coordinator rows (the Captain, `role = 'captain'`).
+The column is declared in all three places above and `seedCaptainTasks()`
 runs on every startup, so a returning user gets the row exactly once. Never
 default `role` to anything but `'task'`: an old row with a missing column must
 stay a user task.
@@ -62,6 +62,27 @@ every project exactly as it was. The column is declared in `createTables()`
 and added with a guarded `ALTER TABLE` in the migration; it runs after
 `migrateToProjects()` so the referenced table exists. Names stay unique across
 scopes (`idx_skills_name`). See docs/skills.md, *Scope*.
+
+### The coordinator is the Captain
+
+Migration 17 (`migrateCoordinatorToCaptain()` in
+`src/main/database/captain-migration.ts`, #71) renames the coordinator's
+persisted identifiers from its former name, Mastermind, in place:
+
+| Before (≤ 16) | After (17) |
+| --- | --- |
+| `tasks.role = 'mastermind'`, title `Mastermind` | `tasks.role = 'captain'`, title `Captain` (same row, id, session and transcript) |
+| `projects.mastermind_agent_id` | `projects.captain_agent_id` (`RENAME COLUMN`, values kept) |
+| setting `mastermind_prewarm` | setting `captain_prewarm` |
+| `projects.settings.mastermind_wakeups` | `projects.settings.captain_wakeups` |
+| `project_status_journal.source = 'mastermind'` (and column default) | `'captain'` (table rebuilt by named columns when the old default is present) |
+
+No row is inserted, so `seedCaptainTasks()` finds the renamed row and never
+adds a second coordinator. A value already stored under a new key wins over the
+old key. Every step only matches old values, so re-runs are no-ops. The same
+file keeps the retirement of the legacy seeded "Mastermind" skill. It is the
+only place in `src/` (with its test and one commented compatibility alias) that
+may spell the old name; `src/shared/captain-terminology.test.ts` enforces that.
 
 ## Adding a column to other tables
 

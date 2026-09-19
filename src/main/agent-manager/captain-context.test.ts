@@ -3,19 +3,19 @@ import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { createTestDb } from '../../../test/helpers/db-test-helper'
-import { seedMastermindTasks } from '../database/seed'
+import { seedCaptainTasks } from '../database/seed'
 import {
-  MASTERMIND_MEMORY_FILE,
-  MASTERMIND_MEMORY_MAX_CHARS,
+  CAPTAIN_MEMORY_FILE,
+  CAPTAIN_MEMORY_MAX_CHARS,
   buildProjectContext,
-  mastermindPromptOptions,
-  readMastermindMemory
-} from './mastermind-context'
-import { buildMastermindSystemPrompt } from '../prompts/mastermind'
+  captainPromptOptions,
+  readCaptainMemory
+} from './captain-context'
+import { buildCaptainSystemPrompt } from '../prompts/captain'
 import type { DatabaseManager } from '../database'
 
 /**
- * The project section of a Mastermind's prompt (#55). Asking "what is this
+ * The project section of a Captain's prompt (#55). Asking "what is this
  * project / what repos do we have" is answered from here, with no tool call,
  * so everything the project editor holds must show up.
  */
@@ -24,7 +24,7 @@ describe('buildProjectContext', () => {
 
   beforeEach(() => {
     ;({ db } = createTestDb())
-    seedMastermindTasks(db.db)
+    seedCaptainTasks(db.db)
   })
 
   it('names the project, its brief, its repos with default branches and its resources', () => {
@@ -66,11 +66,11 @@ describe('buildProjectContext', () => {
   })
 })
 
-describe('readMastermindMemory', () => {
+describe('readCaptainMemory', () => {
   let workspace: string
 
   beforeEach(() => {
-    workspace = mkdtempSync(join(tmpdir(), 'mastermind-memory-'))
+    workspace = mkdtempSync(join(tmpdir(), 'captain-memory-'))
   })
 
   afterEach(() => {
@@ -78,33 +78,33 @@ describe('readMastermindMemory', () => {
   })
 
   it('is empty, with the path it would use, when the file does not exist', () => {
-    const memory = readMastermindMemory(workspace)
-    expect(memory).toEqual({ path: join(workspace, MASTERMIND_MEMORY_FILE), content: '', truncated: false })
+    const memory = readCaptainMemory(workspace)
+    expect(memory).toEqual({ path: join(workspace, CAPTAIN_MEMORY_FILE), content: '', truncated: false })
   })
 
   it('reads the file', () => {
-    writeFileSync(join(workspace, MASTERMIND_MEMORY_FILE), '# Memory\n\n- Use pnpm.\n')
-    const memory = readMastermindMemory(workspace)
+    writeFileSync(join(workspace, CAPTAIN_MEMORY_FILE), '# Memory\n\n- Use pnpm.\n')
+    const memory = readCaptainMemory(workspace)
     expect(memory.content).toBe('# Memory\n\n- Use pnpm.')
     expect(memory.truncated).toBe(false)
   })
 
   it('caps a long file and says so', () => {
-    writeFileSync(join(workspace, MASTERMIND_MEMORY_FILE), 'x'.repeat(MASTERMIND_MEMORY_MAX_CHARS + 500))
-    const memory = readMastermindMemory(workspace)
-    expect(memory.content).toHaveLength(MASTERMIND_MEMORY_MAX_CHARS)
+    writeFileSync(join(workspace, CAPTAIN_MEMORY_FILE), 'x'.repeat(CAPTAIN_MEMORY_MAX_CHARS + 500))
+    const memory = readCaptainMemory(workspace)
+    expect(memory.content).toHaveLength(CAPTAIN_MEMORY_MAX_CHARS)
     expect(memory.truncated).toBe(true)
   })
 })
 
-describe('mastermindPromptOptions', () => {
+describe('captainPromptOptions', () => {
   let db: DatabaseManager
   let workspace: string
 
   beforeEach(() => {
     ;({ db } = createTestDb())
-    seedMastermindTasks(db.db)
-    workspace = mkdtempSync(join(tmpdir(), 'mastermind-ws-'))
+    seedCaptainTasks(db.db)
+    workspace = mkdtempSync(join(tmpdir(), 'captain-ws-'))
   })
 
   afterEach(() => {
@@ -114,22 +114,22 @@ describe('mastermindPromptOptions', () => {
   it("builds the prompt from the row's project and the workspace memory file", () => {
     const project = db.createProject({ name: 'Alpha', description: 'The alpha brief.' })!
     db.addProjectRepo(project.id, { name: 'alpha-api', org: 'acme', default_branch: 'develop' })
-    writeFileSync(join(workspace, MASTERMIND_MEMORY_FILE), '- Decision: ship weekly.\n- Open: waiting on legal.')
+    writeFileSync(join(workspace, CAPTAIN_MEMORY_FILE), '- Decision: ship weekly.\n- Open: waiting on legal.')
     const row = db.getCoordinatorTask(project.id)!
 
-    const prompt = buildMastermindSystemPrompt(mastermindPromptOptions(db, row, workspace))
+    const prompt = buildCaptainSystemPrompt(captainPromptOptions(db, row, workspace))
     expect(prompt).toContain('## Project context')
     expect(prompt).toContain('**Alpha**')
     expect(prompt).toContain('The alpha brief.')
     expect(prompt).toContain('acme/alpha-api (github, default branch `develop`)')
     expect(prompt).toContain('## Project memory')
-    expect(prompt).toContain(join(workspace, MASTERMIND_MEMORY_FILE))
+    expect(prompt).toContain(join(workspace, CAPTAIN_MEMORY_FILE))
     expect(prompt).toContain('- Decision: ship weekly.\n- Open: waiting on legal.')
   })
 
-  it('tells a Mastermind with no memory file yet to create one', () => {
+  it('tells a Captain with no memory file yet to create one', () => {
     const row = db.getCoordinatorTask()!
-    const prompt = buildMastermindSystemPrompt(mastermindPromptOptions(db, row, workspace))
+    const prompt = buildCaptainSystemPrompt(captainPromptOptions(db, row, workspace))
     expect(prompt).toContain('**Default**')
     expect(prompt).toContain('_The file does not exist yet.')
   })

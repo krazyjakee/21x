@@ -1,5 +1,5 @@
 /**
- * The Mastermind's built-in system prompt.
+ * The Captain's built-in system prompt.
  *
  * Owned by code, not by a skill row, so every agent backend gets the same
  * instructions whenever it runs a coordinator session. The agent's own
@@ -9,19 +9,19 @@
  * each one exists, so keep other identifiers out of backticks.
  */
 
-import type { MastermindMemory } from '../../shared/mastermind-memory'
+import type { CaptainMemory } from '../../shared/captain-memory'
 import { ESCALATION_ACTIONS, type EscalationAction, type EscalationLevel, type EscalationPolicy } from '../../shared/project-policies'
 
-export interface MastermindPromptOptions {
-  /** Per-project context (#55): the brief, repos, resources (agent-manager/mastermind-context.ts). */
+export interface CaptainPromptOptions {
+  /** Per-project context (#55): the brief, repos, resources (agent-manager/captain-context.ts). */
   projectContext?: string
   /** The project's memory file (#55): where it is and what it says right now. */
-  memory?: MastermindMemory
+  memory?: CaptainMemory
   /** The project's escalation policy (#66): what it may do alone, must report, or must ask about. */
   escalationPolicy?: EscalationPolicy
 }
 
-const MASTERMIND_CORE_PROMPT = `# You are the Mastermind
+const CAPTAIN_CORE_PROMPT = `# You are the Captain
 
 You coordinate the user's work in 20x. You do not do the work yourself: you turn requests into tasks, hand them to the right agents, keep them moving, and tell the user what happened. Every action goes through the task-management tools.
 
@@ -84,9 +84,9 @@ Between conversations you are woken by an automated system message listing what 
 
 // ── The Commander (#62) ───────────────────────────────────────
 // Always part of the prompt: the relay message a Commander request arrives
-// in names the tool, but the Mastermind must also know when to report unasked.
+// in names the tool, but the Captain must also know when to report unasked.
 
-const MASTERMIND_COMMANDER_SECTION = `## 11. Reporting to the Commander
+const CAPTAIN_COMMANDER_SECTION = `## 11. Reporting to the Commander
 
 The Commander is the fast chat the user talks to about every project. It relays requests to you in a fenced message that carries a correlation id, and it never speaks for the user on privileged operations.
 
@@ -97,10 +97,10 @@ The Commander is the fast chat the user talks to about every project. It relays 
 
 /**
  * The memory section: the file's location, the rule for keeping it, and its
- * current content. The file is the Mastermind's own long-lived notes, so the
+ * current content. The file is the Captain's own long-lived notes, so the
  * instruction to maintain it travels with the content every time.
  */
-function memorySection(memory: MastermindMemory): string {
+function memorySection(memory: CaptainMemory): string {
   const lines = [
     '## Project memory',
     '',
@@ -168,9 +168,9 @@ function escalationPolicySection(policy: EscalationPolicy): string {
   return lines.join('\n')
 }
 
-/** Builds the Mastermind system prompt, with the per-project sections when given. */
-export function buildMastermindSystemPrompt(options: MastermindPromptOptions = {}): string {
-  const sections = [MASTERMIND_CORE_PROMPT, MASTERMIND_COMMANDER_SECTION]
+/** Builds the Captain system prompt, with the per-project sections when given. */
+export function buildCaptainSystemPrompt(options: CaptainPromptOptions = {}): string {
+  const sections = [CAPTAIN_CORE_PROMPT, CAPTAIN_COMMANDER_SECTION]
   const projectContext = options.projectContext?.trim()
   if (projectContext) sections.push(`## Project context\n\n${projectContext}\n`)
   if (options.escalationPolicy) sections.push(`${escalationPolicySection(options.escalationPolicy)}\n`)
@@ -182,8 +182,8 @@ export function buildMastermindSystemPrompt(options: MastermindPromptOptions = {
  * The system prompt a coordinator session receives: the built-in prompt first,
  * then the agent's own system prompt (and anything the caller appended to it).
  */
-export function withMastermindSystemPrompt(agentPrompt: string | undefined, options?: MastermindPromptOptions): string {
-  const builtIn = buildMastermindSystemPrompt(options)
+export function withCaptainSystemPrompt(agentPrompt: string | undefined, options?: CaptainPromptOptions): string {
+  const builtIn = buildCaptainSystemPrompt(options)
   const own = agentPrompt?.trim()
   return own ? `${builtIn}\n${own}` : builtIn
 }

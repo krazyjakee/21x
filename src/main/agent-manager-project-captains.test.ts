@@ -6,15 +6,15 @@ import { join } from 'path'
 import { AgentManager } from './agent-manager'
 import { FakeAdapter } from '../../test/helpers/fake-adapter'
 import { createTestDb } from '../../test/helpers/db-test-helper'
-import { seedMastermindTasks } from './database/seed'
-import { MASTERMIND_MEMORY_FILE } from './agent-manager/mastermind-context'
+import { seedCaptainTasks } from './database/seed'
+import { CAPTAIN_MEMORY_FILE } from './agent-manager/captain-context'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import type { DatabaseManager } from './database'
 import type { SessionConfig } from './adapters/coding-agent-adapter'
 
 // Mock heavy dependencies to avoid loading electron/native modules. The
 // filesystem is real: sessions get workspaces under a temp dir, so the
-// memory file the Mastermind keeps there is read for real.
+// memory file the Captain keeps there is read for real.
 vi.mock('child_process', () => ({ spawn: vi.fn() }))
 vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => '/tmp') },
@@ -49,22 +49,22 @@ function installFakeAdapter(fake: FakeAdapter): void {
 }
 
 /**
- * One persistent Mastermind per project (#55), driven through the public
+ * One persistent Captain per project (#55), driven through the public
  * session API against a real (in-memory) database and the fake adapter.
  *
- * Two projects have their own Mastermind rows; each conversation gets the
+ * Two projects have their own Captain rows; each conversation gets the
  * project's own context and memory, and after a "restart" (a new AgentManager
  * over the same database with a new adapter) each is resumed by the session
  * id its row remembers, never the other project's.
  */
-describe('per-project Mastermind conversations', () => {
+describe('per-project Captain conversations', () => {
   let db: DatabaseManager
   let root: string
   let agentId: string
   let alphaId: string
   let betaId: string
-  let alphaMastermind: string
-  let betaMastermind: string
+  let alphaCaptain: string
+  let betaCaptain: string
   const managers: AgentManager[] = []
 
   function newManager(fake: FakeAdapter): AgentManager {
@@ -80,13 +80,13 @@ describe('per-project Mastermind conversations', () => {
 
   beforeEach(() => {
     ;({ db } = createTestDb())
-    root = mkdtempSync(join(tmpdir(), 'mastermind-restart-'))
+    root = mkdtempSync(join(tmpdir(), 'captain-restart-'))
     db.getWorkspaceDir = vi.fn((taskId: string) => {
       const dir = join(root, taskId)
       mkdirSync(dir, { recursive: true })
       return dir
     })
-    seedMastermindTasks(db.db)
+    seedCaptainTasks(db.db)
     agentId = db.createAgent({ name: 'Claude', is_default: true, config: { coding_agent: 'claude-code' } as any })!.id
 
     const alpha = db.createProject({ name: 'Alpha', description: 'The alpha brief.', git_org: 'acme' })!
@@ -96,8 +96,8 @@ describe('per-project Mastermind conversations', () => {
     db.addProjectRepo(beta.id, { name: 'beta-web', org: 'other', default_branch: 'trunk' })
     alphaId = alpha.id
     betaId = beta.id
-    alphaMastermind = db.getCoordinatorTask(alphaId)!.id
-    betaMastermind = db.getCoordinatorTask(betaId)!.id
+    alphaCaptain = db.getCoordinatorTask(alphaId)!.id
+    betaCaptain = db.getCoordinatorTask(betaId)!.id
   })
 
   afterEach(async () => {
@@ -106,25 +106,25 @@ describe('per-project Mastermind conversations', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('gives each project its own Mastermind row, distinct from the Default one', () => {
-    expect(new Set([alphaMastermind, betaMastermind, db.getCoordinatorTask(DEFAULT_PROJECT_ID)!.id]).size).toBe(3)
+  it('gives each project its own Captain row, distinct from the Default one', () => {
+    expect(new Set([alphaCaptain, betaCaptain, db.getCoordinatorTask(DEFAULT_PROJECT_ID)!.id]).size).toBe(3)
     expect(db.getCoordinatorTasks().map((row) => row.project_id).sort()).toEqual([alphaId, betaId, DEFAULT_PROJECT_ID].sort())
   })
 
-  it('starts each Mastermind with its own project context and memory, in its own workspace with no worktree', async () => {
-    writeFileSync(join(db.getWorkspaceDir(alphaMastermind), MASTERMIND_MEMORY_FILE), '- Alpha decision: ship on Fridays.')
+  it('starts each Captain with its own project context and memory, in its own workspace with no worktree', async () => {
+    writeFileSync(join(db.getWorkspaceDir(alphaCaptain), CAPTAIN_MEMORY_FILE), '- Alpha decision: ship on Fridays.')
     const fake = new FakeAdapter({ sessionIds: ['alpha-session', 'beta-session'] })
     const manager = newManager(fake)
 
-    const alphaSession = await manager.startSession(agentId, alphaMastermind, undefined, true)
-    const betaSession = await manager.startSession(agentId, betaMastermind, undefined, true)
+    const alphaSession = await manager.startSession(agentId, alphaCaptain, undefined, true)
+    const betaSession = await manager.startSession(agentId, betaCaptain, undefined, true)
     expect(alphaSession).toBe('alpha-session')
     expect(betaSession).toBe('beta-session')
 
     const alphaConfig = configOf(fake.createSession.mock.calls[0], 0)
     const betaConfig = configOf(fake.createSession.mock.calls[1], 0)
-    expect(alphaConfig.workspaceDir).toBe(join(root, alphaMastermind))
-    expect(betaConfig.workspaceDir).toBe(join(root, betaMastermind))
+    expect(alphaConfig.workspaceDir).toBe(join(root, alphaCaptain))
+    expect(betaConfig.workspaceDir).toBe(join(root, betaCaptain))
 
     // Alpha knows Alpha: name, brief, repo with branch, resource, memory — and nothing of Beta.
     expect(alphaConfig.systemPrompt).toContain('**Alpha**')
@@ -140,20 +140,20 @@ describe('per-project Mastermind conversations', () => {
     expect(betaConfig.systemPrompt).not.toContain('Alpha')
 
     // The rows remember their sessions; neither row got a task status.
-    expect(db.getTask(alphaMastermind)?.session_id).toBe('alpha-session')
-    expect(db.getTask(betaMastermind)?.session_id).toBe('beta-session')
-    expect(db.getTask(alphaMastermind)?.status).toBe('not_started')
+    expect(db.getTask(alphaCaptain)?.session_id).toBe('alpha-session')
+    expect(db.getTask(betaCaptain)?.session_id).toBe('beta-session')
+    expect(db.getTask(alphaCaptain)?.status).toBe('not_started')
   })
 
   it('resumes both conversations after a restart, each by its own session id', async () => {
     const before = new FakeAdapter({ sessionIds: ['alpha-session', 'beta-session'] })
     const first = newManager(before)
-    await first.startSession(agentId, alphaMastermind, undefined, true)
-    await first.startSession(agentId, betaMastermind, undefined, true)
+    await first.startSession(agentId, alphaCaptain, undefined, true)
+    await first.startSession(agentId, betaCaptain, undefined, true)
     // Quit: runtimes stop, the rows keep their session ids.
     await first.stopAllSessions()
-    expect(db.getTask(alphaMastermind)?.session_id).toBe('alpha-session')
-    expect(db.getTask(betaMastermind)?.session_id).toBe('beta-session')
+    expect(db.getTask(alphaCaptain)?.session_id).toBe('alpha-session')
+    expect(db.getTask(betaCaptain)?.session_id).toBe('beta-session')
 
     // Restart: a new manager and a new backend over the same database.
     const after = new FakeAdapter({ sessionIds: ['would-be-new-1', 'would-be-new-2'] })
@@ -161,29 +161,29 @@ describe('per-project Mastermind conversations', () => {
     // A project edit made while the app was closed reaches the resumed conversation.
     db.updateProject(alphaId, { description: 'The alpha brief, revised.' })
 
-    expect(await second.startSession(agentId, betaMastermind, undefined, true)).toBe('beta-session')
-    expect(await second.startSession(agentId, alphaMastermind, undefined, true)).toBe('alpha-session')
+    expect(await second.startSession(agentId, betaCaptain, undefined, true)).toBe('beta-session')
+    expect(await second.startSession(agentId, alphaCaptain, undefined, true)).toBe('alpha-session')
 
     expect(after.createSession).not.toHaveBeenCalled()
     expect(after.resumeSession).toHaveBeenCalledTimes(2)
     const [betaResume, alphaResume] = after.resumeSession.mock.calls
     expect(betaResume[0]).toBe('beta-session')
-    expect(configOf(betaResume, 1).workspaceDir).toBe(join(root, betaMastermind))
+    expect(configOf(betaResume, 1).workspaceDir).toBe(join(root, betaCaptain))
     expect(configOf(betaResume, 1).systemPrompt).toContain('**Beta**')
     expect(alphaResume[0]).toBe('alpha-session')
     expect(configOf(alphaResume, 1).systemPrompt).toContain('The alpha brief, revised.')
     expect(configOf(alphaResume, 1).systemPrompt).not.toContain('Beta')
 
     // The same conversation is rejoined, not started twice.
-    expect(await second.startSession(agentId, alphaMastermind, undefined, true)).toBe('alpha-session')
+    expect(await second.startSession(agentId, alphaCaptain, undefined, true)).toBe('alpha-session')
     expect(after.resumeSession).toHaveBeenCalledTimes(2)
   })
 
   it('opens a fresh conversation when the backend no longer has the old one, without touching the other project', async () => {
     const before = new FakeAdapter({ sessionIds: ['alpha-session', 'beta-session'] })
     const first = newManager(before)
-    await first.startSession(agentId, alphaMastermind, undefined, true)
-    await first.startSession(agentId, betaMastermind, undefined, true)
+    await first.startSession(agentId, alphaCaptain, undefined, true)
+    await first.startSession(agentId, betaCaptain, undefined, true)
     await first.stopAllSessions()
 
     const after = new FakeAdapter({ sessionIds: ['alpha-session-2'] })
@@ -193,11 +193,11 @@ describe('per-project Mastermind conversations', () => {
     })
     const second = newManager(after)
 
-    expect(await second.startSession(agentId, alphaMastermind, undefined, true)).toBe('alpha-session-2')
-    expect(db.getTask(alphaMastermind)?.session_id).toBe('alpha-session-2')
+    expect(await second.startSession(agentId, alphaCaptain, undefined, true)).toBe('alpha-session-2')
+    expect(db.getTask(alphaCaptain)?.session_id).toBe('alpha-session-2')
     expect(configOf(after.createSession.mock.calls[0], 0).systemPrompt).toContain('**Alpha**')
 
-    expect(await second.startSession(agentId, betaMastermind, undefined, true)).toBe('beta-session')
-    expect(db.getTask(betaMastermind)?.session_id).toBe('beta-session')
+    expect(await second.startSession(agentId, betaCaptain, undefined, true)).toBe('beta-session')
+    expect(db.getTask(betaCaptain)?.session_id).toBe('beta-session')
   })
 })

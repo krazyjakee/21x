@@ -154,7 +154,7 @@ export function deserializeProject(row: ProjectRow): ProjectRecord {
   return {
     ...row,
     default_agent_id: row.default_agent_id ?? null,
-    mastermind_agent_id: row.mastermind_agent_id ?? null,
+    captain_agent_id: row.captain_agent_id ?? null,
     git_provider: row.git_provider ?? null,
     git_org: row.git_org ?? null,
     settings,

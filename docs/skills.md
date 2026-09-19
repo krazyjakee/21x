@@ -40,7 +40,7 @@ Per-scope names with an explicit shadowing rule can come later.
 |---|---|---|---|---|
 | Skills view (the user) | everything | any scope | anything | promote / move, confirmed in the dialog |
 | Commander (`commander/skill-tools.ts`) | everything (archived projects' skills on request) | global, or a named project's | anything, after the confirmation challenge | `promote_skill`, `move_skill`, after confirmation |
-| Mastermind (project scope) | global + its project's | its project's | its project's own | no |
+| Captain (project scope) | global + its project's | its project's | its project's own | no |
 | Task agent / subtask agent | global + its project's | its project's | its project's own | no |
 | Feedback learning (`syncSkillsFromDirectory`) | — | in the task's project | the task's project's own | no |
 
@@ -62,11 +62,11 @@ Visibility is enforced where a skill is read, not in the prompt:
 ### Defaults
 
 - **Commander**: `create_skill` makes a global skill unless `project` names one.
-- **Mastermind / task agent**: `create_skill` makes a skill owned by the
+- **Captain / task agent**: `create_skill` makes a skill owned by the
   session's project. `global: true` is refused with a message that the user
   must create it in the Skills view or through the Commander: a session cannot
   obtain the user's confirmation, and the #66 escalation policy has no action
-  for skill changes today. The Mastermind may still assign global skills to
+  for skill changes today. The Captain may still assign global skills to
   its tasks.
 - **Feedback learning**: a skill the session wrote into its workspace is
   created in the task's project. A changed **global** skill, or one another
@@ -95,7 +95,7 @@ refusal names them. Both bump the version.
 MCP and Commander `update_skill` tools; the editor sends the version it
 loaded) makes a content write conditional on the row still having that
 version. A stale write throws `SkillVersionConflictError` / returns
-`{ conflict: 'stale_version', current_version }`, so two Masterminds, a
+`{ conflict: 'stale_version', current_version }`, so two Captains, a
 learning session and the Commander cannot silently overwrite each other.
 Usage updates (`uses`, `last_used`) are never version-checked.
 
@@ -229,9 +229,9 @@ For each parsed skill:
 from `AgentManager.syncSkillsFromWorkspace`: new skills are created in it, and
 only skills it owns are updated (see *Scope* above for what `skipped` holds).
 
-## The Mastermind is not a skill
+## The Captain is not a skill
 
-The Mastermind's instructions are a built-in system prompt (`src/main/prompts/mastermind.ts`). `assembleSessionConfig` puts it first for any coordinator task, whatever the backend, and appends the agent's own `system_prompt` after it. Older installs seeded a "Mastermind" skill. On startup, `seedOrchestratorSkill` soft-deletes that skill and detaches it from agents if its content still matches the seeded text. If the user edited it, it stays as an ordinary skill.
+The Captain's instructions are a built-in system prompt (`src/main/prompts/captain.ts`). `assembleSessionConfig` puts it first for any coordinator task, whatever the backend, and appends the agent's own `system_prompt` after it. Older installs seeded a "Captain" skill. On startup, `seedOrchestratorSkill` soft-deletes that skill and detaches it from agents if its content still matches the seeded text. If the user edited it, it stays as an ordinary skill.
 
 ## UI Components
 

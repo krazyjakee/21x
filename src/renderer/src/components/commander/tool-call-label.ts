@@ -5,8 +5,12 @@
  * their action name so a rename or archive is not presented as delegation.
  */
 
-/** Tools that hand a message to a project (`ask_project` is the pre-#61 name kept for stored rows). */
-const DELEGATION_TOOLS = new Set(['ask_mastermind', 'ask_project'])
+/**
+ * Tools that hand a message to a project. Compatibility aliases for stored
+ * Commander transcript rows: `ask_project` is the pre-#61 name and
+ * `ask_mastermind` the pre-#71 name of `ask_captain`.
+ */
+const DELEGATION_TOOLS = new Set(['ask_captain', 'ask_mastermind', 'ask_project'])
 const PROJECT_KEYS = ['project_name', 'projectName', 'project', 'project_id', 'projectId'] as const
 const TEXT_KEYS = ['message', 'question', 'request', 'task', 'prompt', 'text'] as const
 const SNIPPET_CHARS = 60

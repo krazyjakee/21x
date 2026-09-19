@@ -1,5 +1,5 @@
 /**
- * Mastermind reports back into Commander sessions (#62): routing by
+ * Captain reports back into Commander sessions (#62): routing by
  * correlation id, the open-session relay turn, the unread-only path, the
  * report-ask loop cap, escalations as reports, and the `report_to_commander`
  * route with its coordinator-only guard.
@@ -16,7 +16,7 @@ import { CommanderService } from './commander-service'
 import { CommanderStore } from './commander-store'
 import { createCommanderProjectTools, ProjectMutationConfirmations, type CommanderAgents } from './project-tools'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_TITLE_PROMPT } from './prompts'
-import { deliverMastermindReport, setMastermindReportHandler } from './report-inbox'
+import { deliverCaptainReport, setCaptainReportHandler } from './report-inbox'
 import {
   escalationReportText,
   guardReportAsks,
@@ -85,7 +85,7 @@ function install(service: CommanderService): void {
   uninstall = installCommanderReportBridge({ service, store, getProject: (id) => db.getProject(id) })
 }
 
-/** The correlation id inside the relay text a Mastermind received. */
+/** The correlation id inside the relay text a Captain received. */
 function correlationOf(relayText: string): string {
   return /correlation_id=(\S+)/.exec(relayText)![1]
 }
@@ -118,7 +118,7 @@ beforeEach(() => {
 
 afterEach(() => {
   uninstall?.()
-  setMastermindReportHandler(null)
+  setCaptainReportHandler(null)
 })
 
 describe('report routing', () => {
@@ -128,7 +128,7 @@ describe('report routing', () => {
     const provider = fakeProvider((request) => {
       if (request.messages.some((m) => m.role === 'tool')) return 'Asked.'
       const project = request.messages[0].content.includes('Alpha') ? 'Alpha' : 'Beta'
-      return { toolCalls: [{ id: 'c', name: 'ask_mastermind', input: { project, message: `Do the ${project} thing` } }] }
+      return { toolCalls: [{ id: 'c', name: 'ask_captain', input: { project, message: `Do the ${project} thing` } }] }
     })
     const service = makeService(provider)
     install(service)
@@ -142,7 +142,7 @@ describe('report routing', () => {
     const betaId = correlationOf((sendMessage.mock.calls[1] as unknown as [string, string])[1])
     expect(alphaId).not.toBe(betaId)
 
-    // The Masterminds answer in the other order, minutes later, through the route the tool uses.
+    // The Captains answer in the other order, minutes later, through the route the tool uses.
     const betaReply = await handleTaskRoute(db, '/report_to_commander', { project_id: beta.id, message: 'API reviewed: two comments.', correlation_id: betaId })
     const alphaReply = await handleTaskRoute(db, '/report_to_commander', { project_id: alpha.id, message: 'Site shipped.', correlation_id: alphaId })
     expect(betaReply).toMatchObject({ success: true, session_id: second.id, routed_by: 'correlation' })
@@ -168,7 +168,7 @@ describe('report routing', () => {
 
     // A delegation from an older session routes its reply back there.
     const older = inbox.sessionId
-    store.appendMessage(older, { role: 'tool', content: '{"status":"sent"}', toolCallId: 'c1', toolName: 'ask_mastermind', projectId: null, correlationId: 'cmd-1' })
+    store.appendMessage(older, { role: 'tool', content: '{"status":"sent"}', toolCallId: 'c1', toolName: 'ask_captain', projectId: null, correlationId: 'cmd-1' })
     // (appending bumps updated_at, so make the other one the most recent again)
     store.appendMessage(newer.id, { role: 'user', content: 'hi' })
     expect(resolveReportSession(store, 'cmd-1')).toEqual({ sessionId: older, routedBy: 'correlation' })
@@ -190,7 +190,7 @@ describe('report delivery', () => {
     const other = store.createSession('Other')
     service.setActiveSession(open.id)
 
-    const delivery = deliverMastermindReport({ projectId: alpha.id, message: 'Site shipped.', correlationId: null, source: 'mastermind' })
+    const delivery = deliverCaptainReport({ projectId: alpha.id, message: 'Site shipped.', correlationId: null, source: 'captain' })
     // The most recent session is `other` (created last), so route there explicitly through the service for the open one.
     expect(delivery).toMatchObject({ delivered: true, sessionId: other.id, relayed: false })
     expect(store.getSession(other.id)?.unread_count).toBe(1)
@@ -256,12 +256,12 @@ describe('report delivery', () => {
 })
 
 describe('loop protection', () => {
-  it('refuses ask_mastermind once report-triggered turns have used the budget, until the user speaks', async () => {
+  it('refuses ask_captain once report-triggered turns have used the budget, until the user speaks', async () => {
     const alpha = db.createProject({ name: 'Alpha' })!
     const provider = fakeProvider((request) => {
       // After its tool result the model answers in text; a turn that a report started delegates once.
       if (request.messages.at(-1)?.role === 'tool') return 'Asked again.'
-      if (startedByReport(request)) return { toolCalls: [{ id: 'c', name: 'ask_mastermind', input: { project: 'Alpha', message: 'Follow up' } }] }
+      if (startedByReport(request)) return { toolCalls: [{ id: 'c', name: 'ask_captain', input: { project: 'Alpha', message: 'Follow up' } }] }
       return 'ok'
     })
     const service = makeService(provider)
@@ -285,13 +285,13 @@ describe('loop protection', () => {
     expect(sendMessage).toHaveBeenCalledTimes(MAX_REPORT_ASKS_WITHOUT_USER_TURN + 1)
   })
 
-  it('guardReportAsks wraps only ask_mastermind', async () => {
+  it('guardReportAsks wraps only ask_captain', async () => {
     let used = 0
     const budget = { remaining: () => 1 - used, consume: () => { used += 1 } }
     const handler = vi.fn(async () => 'sent')
     const tools = guardReportAsks(
       [
-        { name: 'ask_mastermind', description: '', inputSchema: { type: 'object' }, handler },
+        { name: 'ask_captain', description: '', inputSchema: { type: 'object' }, handler },
         { name: 'list_projects', description: '', inputSchema: { type: 'object' }, handler: async () => 'list' }
       ],
       budget
@@ -340,14 +340,14 @@ describe('report_to_commander route and scope', () => {
     expect(refused.error).toContain('not available')
 
     const invoke = vi.fn(async () => ({ success: true }))
-    const mastermind = { parentTaskId: null, taskId: null, artifactTaskId: null, projectId: 'p1' }
-    const ok = await callToolForScope('report_to_commander', { message: 'Done', project_id: 'other' }, mastermind, invoke)
+    const captain = { parentTaskId: null, taskId: null, artifactTaskId: null, projectId: 'p1' }
+    const ok = await callToolForScope('report_to_commander', { message: 'Done', project_id: 'other' }, captain, invoke)
     expect(ok.isError).toBeUndefined()
     expect(invoke).toHaveBeenCalledWith('/report_to_commander', { message: 'Done', project_id: 'p1' })
 
     const taskAgent = { parentTaskId: null, taskId: null, artifactTaskId: 't1', projectId: 'p1' }
     const denied = await callToolForScope('report_to_commander', { message: 'Done' }, taskAgent, invoke)
     expect(denied.isError).toBe(true)
-    expect(denied.content[0].text).toContain("only the project's Mastermind")
+    expect(denied.content[0].text).toContain("only the project's Captain")
   })
 })

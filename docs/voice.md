@@ -70,7 +70,7 @@ voice worker (separate process)
 | `src/main/voice/voice-worker.js` | The worker itself (plain CommonJS) |
 | `src/renderer/src/lib/voice-capture.ts` | Microphone capture |
 | `src/renderer/src/lib/voice-dictation-target.ts` | The one field that receives words |
-| `src/renderer/src/components/voice/TopBarVoiceButton.tsx` | Talk to Mastermind from any view |
+| `src/renderer/src/components/voice/TopBarVoiceButton.tsx` | Talk to Captain from any view |
 | `src/renderer/src/hooks/use-recording-chrome.ts` | Turns the window frame red while recording |
 | `src/shared/ui-commands.ts` | The UI command contract and the published screen |
 | `src/renderer/src/lib/ui-remote-control.ts` | Applies one command; collects the screen |
@@ -96,7 +96,7 @@ only path that acts without a language model, so every rule in it must be
 unambiguous. The wider path is the next section.
 
 **No control in the app runs these rules any more.** Every microphone dictates,
-and the global shortcut talks to Mastermind like the one in the top bar. The
+and the global shortcut talks to Captain like the one in the top bar. The
 parser and `VoiceActionService` are still in the tree, and `command` mode still
 works if something asks for it, but nothing does. They are the last of the
 original design's hands-free command idea, kept only until it is decided whether
@@ -214,7 +214,7 @@ up — a red frame then would be a lie about an open microphone.
 ### Where dictated words go
 
 The transcript panel is mounted many times at once — the task workspace, each
-canvas panel, and the Mastermind drawer. So there is exactly **one** active
+canvas panel, and the Captain drawer. So there is exactly **one** active
 composer, and the microphone button that started the turn names it.
 
 A composer is addressed by a stable **key**, never by an element reference.
@@ -232,15 +232,15 @@ names no composer, so the words are inserted nowhere.
 
 ### Where the microphone button appears
 
-- the agent message box in a task (task workspace, canvas panel, Mastermind);
-- the **Dashboard** command box, where each sentence goes to Mastermind;
-- the **top bar**, beside the Mastermind button, reachable from every view.
+- the agent message box in a task (task workspace, canvas panel, Captain);
+- the **Dashboard** command box, where each sentence goes to Captain;
+- the **top bar**, beside the Captain button, reachable from every view.
 
 The first two name themselves with `data-voice-composer` and register under that
 key, so a sentence reaches one box only, and a conversation survives the panel
 being rebuilt.
 
-In the top bar the microphone is the **loud** control, and the Mastermind button
+In the top bar the microphone is the **loud** control, and the Captain button
 beside it is quiet. Speaking is the invitation there; typing is the fallback.
 
 The emphasis is **colour, never size**: the accent colour and a faint tint of
@@ -249,7 +249,7 @@ as a different control rather than the same one asking to be used. A microphone
 next to a text box keeps the plain treatment, since there the box is the
 subject.
 
-The top-bar button sits inside no composer, so it **names** one: the Mastermind
+The top-bar button sits inside no composer, so it **names** one: the Captain
 composer, `orchestrator`. A control that names none writes the words nowhere —
 which is what the global shortcut does on purpose, and would be a bug here. It
 opens the drawer before it starts listening, so the user watches the words
@@ -257,15 +257,15 @@ arrive in a box they can edit and send rather than into something hidden.
 
 Both microphones show the same turn. A button lights up when the open turn is
 writing into **its** composer, whoever started it — so starting from the top bar
-also lights the one beside the Mastermind box, and either can stop the turn. A
+also lights the one beside the Captain box, and either can stop the turn. A
 microphone belonging to a different box stays greyed out, because it is not the
 one receiving the words.
 
-### Mastermind is already running when you speak
+### Captain is already running when you speak
 
 Starting an agent takes seconds, and it used to happen on the **first message** —
 so the first thing a user said by voice waited for a process to boot. The
-Mastermind panel is mounted for the whole life of the window, so the agent is
+Captain panel is mounted for the whole life of the window, so the agent is
 now started there in the background at launch, with `skipInitialPrompt` so it
 stays quiet until spoken to.
 
@@ -279,7 +279,7 @@ Two consequences had to be handled:
   unchangeable from the moment the app opens.
 
 It costs one idle agent process, so it can be switched off in
-**Settings → General → Start Mastermind at launch**. Warming failure is silent:
+**Settings → General → Start Captain at launch**. Warming failure is silent:
 the first message starts the session exactly as it did before.
 
 The Dashboard box is a **controlled** React field. Its send reads the DOM value,
@@ -289,12 +289,12 @@ previous value. A test pins this.
 
 ### Controlling 20x through the agent
 
-Speaking into the Dashboard box sends each sentence to Mastermind, which is an
+Speaking into the Dashboard box sends each sentence to Captain, which is an
 unscoped agent with the task-management MCP server. That is the general path:
 anything the agent can do with a tool, a user can now ask for by speech, without
 a new rule in the parser.
 
-Eight tools were added for it. They are in `mastermindTools` only — a scoped
+Eight tools were added for it. They are in `captainTools` only — a scoped
 subtask agent must never answer a checkpoint or stop work on a task that is not
 its own.
 

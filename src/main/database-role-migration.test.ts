@@ -9,11 +9,11 @@ import { DatabaseManager } from './database'
 
 /**
  * Exercises the real startup path — `initialize()` — for the `tasks.role`
- * column and the seeded Mastermind row, in the manner of
+ * column and the seeded Captain row, in the manner of
  * docs/database-migrations.md: a returning user whose stored schema version is
  * one behind must get the column, and the seed must run exactly once.
  */
-describe('tasks.role migration and the Mastermind row', () => {
+describe('tasks.role migration and the Captain row', () => {
   let dir: string
 
   beforeEach(() => {
@@ -33,18 +33,18 @@ describe('tasks.role migration and the Mastermind row', () => {
     return (raw.pragma('table_info(tasks)') as { name: string }[]).map((c) => c.name)
   }
 
-  function mastermindRows(raw: InstanceType<typeof RawDatabase>): { id: string; title: string }[] {
-    return raw.prepare("SELECT id, title FROM tasks WHERE role = 'mastermind'").all() as { id: string; title: string }[]
+  function captainRows(raw: InstanceType<typeof RawDatabase>): { id: string; title: string }[] {
+    return raw.prepare("SELECT id, title FROM tasks WHERE role = 'captain'").all() as { id: string; title: string }[]
   }
 
-  it('creates a fresh database with the role column and one Mastermind row', () => {
+  it('creates a fresh database with the role column and one Captain row', () => {
     const db = new DatabaseManager()
     db.initialize()
     db.close?.()
 
     const raw = openRaw()
     expect(taskColumns(raw)).toContain('role')
-    expect(mastermindRows(raw)).toHaveLength(1)
+    expect(captainRows(raw)).toHaveLength(1)
     // Every ordinary row defaults to 'task'.
     const column = (raw.pragma('table_info(tasks)') as { name: string; dflt_value: string | null }[])
       .find((c) => c.name === 'role')
@@ -52,14 +52,14 @@ describe('tasks.role migration and the Mastermind row', () => {
     raw.close()
   })
 
-  it('adds role for a database from schema version 12 and seeds the Mastermind once', () => {
+  it('adds role for a database from schema version 12 and seeds the Captain once', () => {
     const first = new DatabaseManager()
     first.initialize()
     first.close?.()
 
-    // Roll back to the previous release: no Mastermind row, no role column.
+    // Roll back to the previous release: no Captain row, no role column.
     const raw = openRaw()
-    raw.prepare("DELETE FROM tasks WHERE role = 'mastermind'").run()
+    raw.prepare("DELETE FROM tasks WHERE role = 'captain'").run()
     raw.exec('ALTER TABLE tasks DROP COLUMN role')
     raw.prepare("UPDATE settings SET value = ? WHERE key = '__schema_version'").run('12')
     expect(taskColumns(raw)).not.toContain('role')
@@ -71,7 +71,7 @@ describe('tasks.role migration and the Mastermind row', () => {
 
     const after = openRaw()
     expect(taskColumns(after)).toContain('role')
-    const seeded = mastermindRows(after)
+    const seeded = captainRows(after)
     expect(seeded).toHaveLength(1)
     after.close()
 
@@ -81,14 +81,14 @@ describe('tasks.role migration and the Mastermind row', () => {
     third.close?.()
 
     const final = openRaw()
-    expect(mastermindRows(final)).toEqual(seeded)
+    expect(captainRows(final)).toEqual(seeded)
     final.close()
   })
 
   /**
    * docs/database-migrations.md: a column added only by ALTER is dropped the
    * next time the table is rebuilt (rebuildTasksTable copies the columns the
-   * new table declares). The Mastermind would then become a visible task.
+   * new table declares). The Captain would then become a visible task.
    */
   it('declares role in the rebuild template as well as in createTables', () => {
     const schema = readFileSync(fileURLToPath(new URL('./database/schema.ts', import.meta.url)), 'utf-8')

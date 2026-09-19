@@ -510,7 +510,7 @@ every word the user spoke into the turn it had just opened.
 
 When that reply is recognised it is sent, exactly as any spoken sentence is, and
 the answer that comes back is read aloud in turn. The renderer names the task it
-sent to, so the right answer is spoken. The Mastermind drawer sends on its own
+sent to, so the right answer is spoken. The Captain drawer sends on its own
 behalf and can name no task, so the next answer to arrive within ninety seconds
 is taken as the reply — armed only by the user having just spoken, and consumed
 once.

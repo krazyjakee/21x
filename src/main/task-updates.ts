@@ -76,8 +76,8 @@ export function afterTaskUpdated(
     triggerTaskAutomation()
   }
 
-  // Project event (#57): a task reaching review wakes the project's Mastermind
-  // (the waker skips it when the Mastermind made the change itself).
+  // Project event (#57): a task reaching review wakes the project's Captain
+  // (the waker skips it when the Captain made the change itself).
   if (data.status !== undefined && previous.status !== updated.status && updated.status === TaskStatus.ReadyForReview) {
     emitTaskEvent(db, 'task_ready_for_review', updated.id)
   }

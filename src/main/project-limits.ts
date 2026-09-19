@@ -5,7 +5,7 @@
  * This module turns them into what admission control checks
  * (agent-manager/admission.ts, `AdmissionLimits.project`), keeps the daily
  * counters, and describes a project's limit state for the UI and the
- * Mastermind.
+ * Captain.
  *
  * ## Daily counters
  *
@@ -170,7 +170,7 @@ export function buildProjectLimitState(
   }
 }
 
-/** One sentence on why a start waits, for tool results and the Mastermind. */
+/** One sentence on why a start waits, for tool results and the Captain. */
 export function describeQueueReason(reason: string, limit?: number, running?: number): string {
   switch (reason) {
     case 'global_pause':

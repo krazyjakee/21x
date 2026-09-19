@@ -38,7 +38,7 @@ import { buildWorkspaceStates, sweepLeakedWorkspaceProcesses, readDiskSpace, wor
 import { WORKSPACES_DIR, listWorkspaceDirs, taskAttachmentsDir } from './workspace-paths'
 import { setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTranscriptProvider, startTaskApiServer, stopTaskApiServer } from './task-api-server'
 import { setTaskAutomationTrigger, setTaskSchedulers } from './task-updates'
-import { MastermindWaker } from './mastermind-waker'
+import { CaptainWaker } from './captain-waker'
 import { startScheduledCoordination } from './scheduled-coordination'
 import { startSecretBroker, stopSecretBroker, writeSecretShellWrapper } from './secret-broker'
 import { isMainWindowUrl } from './main-window-url'
@@ -79,7 +79,7 @@ let connectorBridgePlugin: ConnectorBridgePlugin | null = null
 let oauthManager: OAuthManager | null = null
 let recurrenceScheduler: RecurrenceScheduler | null = null
 let heartbeatScheduler: HeartbeatScheduler | null = null
-let mastermindWaker: MastermindWaker | null = null
+let captainWaker: CaptainWaker | null = null
 let taskAutomationScheduler: TaskAutomationScheduler | null = null
 let workspaceCleanupScheduler: WorkspaceCleanupScheduler | null = null
 let claudePluginManager: ClaudePluginManager | null = null
@@ -176,7 +176,7 @@ async function sweepLeakedWorkspaces(graceMs?: number, orphansIgnoreTaskState = 
 async function shutdownAppServices(): Promise<void> {
   voiceSessionManager?.shutdown()
   heartbeatScheduler?.stop()
-  mastermindWaker?.stop()
+  captainWaker?.stop()
   taskAutomationScheduler?.stop()
   workspaceCleanupScheduler?.stop()
 
@@ -766,11 +766,11 @@ app.whenReady().then(async () => {
     void taskAutomationScheduler?.runNow()
   })
   setTaskSchedulers({ recurrence: recurrenceScheduler, heartbeat: heartbeatScheduler })
-  // Project events wake each project's Mastermind (#57): one batched, fenced
+  // Project events wake each project's Captain (#57): one batched, fenced
   // message per burst, per-project setting, hourly cap.
-  mastermindWaker = new MastermindWaker(db, agentManager)
-  mastermindWaker.start()
-  // Scheduled Mastermind reviews and the Commander briefing (#67); both off by default.
+  captainWaker = new CaptainWaker(db, agentManager)
+  captainWaker.start()
+  // Scheduled Captain reviews and the Commander briefing (#67); both off by default.
   startScheduledCoordination({
     db,
     agents: agentManager,

@@ -7,8 +7,8 @@ import { getTaskApiPort, getTaskApiToken, waitForTaskApiServer } from '../task-a
 import { buildTaskMcpUrl } from '../task-mcp-endpoint'
 import { getSecretBrokerPort, writeSecretShellWrapper } from '../secret-broker'
 import { opencodeDisallowedToolMap, readServerToolLimits, resolveAllowedToolNames } from '../mcp-tool-limits'
-import { withMastermindSystemPrompt, type MastermindPromptOptions } from '../prompts/mastermind'
-import { mastermindPromptOptions } from './mastermind-context'
+import { withCaptainSystemPrompt, type CaptainPromptOptions } from '../prompts/captain'
+import { captainPromptOptions } from './captain-context'
 import { knownBackendModels, orderedSkillIds, resolveSkillModel } from './skill-model'
 import { taskProjectId } from './project-repos'
 
@@ -38,7 +38,7 @@ export function shouldEnableTillDone(taskId: string, task?: TaskRecord | null): 
 }
 
 /**
- * The project a coordinator row (the Mastermind) orchestrates: each project
+ * The project a coordinator row (the Captain) orchestrates: each project
  * has its own row with its own project_id (#55), so the row's project is the
  * scope. Change this, not mcpOptionsForTask, if a coordinator ever needs to
  * span projects.
@@ -49,10 +49,10 @@ export function coordinatorProjectScope(task: TaskRecord): string {
 
 /** Real task sessions always get task-management so they can triage, orchestrate
  *  subtasks, and inspect live task state regardless of per-agent MCP config.
- *  A subtask gets the subtask scope; any other task, and the Mastermind, get
+ *  A subtask gets the subtask scope; any other task, and the Captain, get
  *  the project scope of their row's project, so they cannot see or act on
  *  another project's tasks. Only a session with no task row behind it stays
- *  unscoped. The Mastermind's artifact calls stay unpinned, because it is not
+ *  unscoped. The Captain's artifact calls stay unpinned, because it is not
  *  a workpiece of its own. */
 export function mcpOptionsForTask(taskId: string, task?: TaskRecord | null, scopeTask?: TaskRecord | null): McpServerOptions {
   // A pseudo-task session (heartbeat-<id>) has no row of its own, but an agent
@@ -216,9 +216,9 @@ function sessionModel(
  * fresh for every config so a project edit reaches the next message. A
  * failure here must not stop the session: it runs on the built-in prompt.
  */
-function coordinatorPromptOptions(db: DatabaseManager, task: TaskRecord, workspaceDir: string): MastermindPromptOptions | undefined {
+function coordinatorPromptOptions(db: DatabaseManager, task: TaskRecord, workspaceDir: string): CaptainPromptOptions | undefined {
   try {
-    return mastermindPromptOptions(db, task, workspaceDir)
+    return captainPromptOptions(db, task, workspaceDir)
   } catch (error) {
     console.warn(`[AgentManager] Could not build the project context for coordinator ${task.id}:`, error)
     return undefined
@@ -229,7 +229,7 @@ function coordinatorPromptOptions(db: DatabaseManager, task: TaskRecord, workspa
  * Builds the adapter session config shared by start, resume and follow-up
  * sends. Secret broker fields are attached only when a broker token exists;
  * decrypted secret values and the secrets prompt come from the agent config.
- * A coordinator task (the Mastermind) gets the built-in Mastermind prompt
+ * A coordinator task (the Captain) gets the built-in Captain prompt
  * first, whatever the backend, then its project's context and memory file,
  * with `systemPrompt` appended after them.
  */
@@ -257,7 +257,7 @@ export function assembleSessionConfig(
     model: sessionModel(db, agent, params),
     reasoningEffort: agent.config?.reasoning_effort,
     systemPrompt: params.task && isCoordinatorTask(params.task)
-      ? withMastermindSystemPrompt(params.systemPrompt, coordinatorPromptOptions(db, params.task, params.workspaceDir))
+      ? withCaptainSystemPrompt(params.systemPrompt, coordinatorPromptOptions(db, params.task, params.workspaceDir))
       : params.systemPrompt,
     mcpServers: params.mcpServers,
     // OpenCode enforces per-agent MCP tool limits through session.prompt's

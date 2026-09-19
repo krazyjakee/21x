@@ -98,7 +98,7 @@ describe('OverviewWorkspace', () => {
     expect(cards[0]).toHaveAttribute('data-attention', 'true')
     expect(cards[1]).toHaveAttribute('data-attention', 'false')
     expect(within(cards[0]).getByText('Needs you')).toBeInTheDocument()
-    expect(within(cards[0]).getByText('1 awaiting approval · 2 held Mastermind calls · 3 to review')).toBeInTheDocument()
+    expect(within(cards[0]).getByText('1 awaiting approval · 2 held Captain calls · 3 to review')).toBeInTheDocument()
     expect(within(cards[1]).queryByText('Needs you')).not.toBeInTheDocument()
     expect(screen.getByText('1 project needs your input.')).toBeInTheDocument()
   })

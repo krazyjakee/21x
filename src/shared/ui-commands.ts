@@ -72,7 +72,7 @@ export interface UiStateSnapshot {
   selectedTaskId: string | null
   selectedTaskTitle: string | null
   dashboardPreviewTaskId: string | null
-  mastermindOpen: boolean
+  captainOpen: boolean
   settingsTab: string | null
   waitingForYou: boolean
   visibleTaskIds: string[]

@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto'
 import type { AgentManager } from '../agent-manager'
 import type { DatabaseManager } from '../database'
 import type { ChatToolDefinition, ChatToolResult } from '../chat/tools'
-import { resolveMastermindAgentId } from '../mastermind-waker'
+import { resolveCaptainAgentId } from '../captain-waker'
 import { buildProjectStatus, readProjectStatusHistory } from '../project-status'
 import { PROJECT_STATUS_HISTORY_DEFAULT_LIMIT, PROJECT_STATUS_HISTORY_MAX_LIMIT } from '../../shared/project-status'
 import { DEFAULT_PROJECT_ID, type ProjectRecord, type ProjectRepoRecord, type ProjectResourceRecord } from '../../shared/projects'
@@ -15,7 +15,7 @@ import type { UiCommand } from '../../shared/ui-commands'
  * The Commander's tools (#61, #73; docs/commander.md).
  *
  * Delegation only: the Commander can discover projects, read their #58
- * status, hand a request to a project's Mastermind (`ask_mastermind`, which
+ * status, hand a request to a project's Captain (`ask_captain`, which
  * returns at once with a correlation id), list what is waiting for the user,
  * and administer project configuration. There is deliberately no tool that
  * creates, updates, starts, stops or approves a task; the registry test
@@ -55,7 +55,7 @@ export interface ProjectToolContext {
   userMessage: string
 }
 
-export interface AskMastermindDispatch {
+export interface AskCaptainDispatch {
   sessionId: string
   projectId: string
   projectName: string
@@ -67,13 +67,13 @@ export interface ProjectToolOptions {
   context: ProjectToolContext
   confirmations: ProjectMutationConfirmations
   agents?: CommanderAgents | null
-  /** Held Mastermind calls waiting for the user (#66); injected so the tools need no escalation wiring in tests. */
+  /** Held Captain calls waiting for the user (#66); injected so the tools need no escalation wiring in tests. */
   listHeldActions?: () => HeldAction[]
   /** Pushes a command to the desktop window; absent when no window can be reached. */
   sendUiCommand?: (command: UiCommand) => { ok: true } | { ok: false; detail: string }
   onProjectChanged?: (projectId: string, kind: ProjectChangeKind) => void
-  /** A delegation that could not reach its Mastermind after `ask_mastermind` returned. */
-  onDeliveryFailed?: (dispatch: AskMastermindDispatch, error: unknown) => void
+  /** A delegation that could not reach its Captain after `ask_captain` returned. */
+  onDeliveryFailed?: (dispatch: AskCaptainDispatch, error: unknown) => void
 }
 
 interface ConfirmationRequest {
@@ -263,8 +263,8 @@ function compactLimits(limits: ProjectStatus['limits']): Record<string, unknown>
   }
 }
 
-/** What the project's Mastermind session is doing right now, from the agent manager; `unknown` without one. */
-function mastermindState(options: ProjectToolOptions, projectId: string): string {
+/** What the project's Captain session is doing right now, from the agent manager; `unknown` without one. */
+function captainState(options: ProjectToolOptions, projectId: string): string {
   const { db, agents } = options
   if (!agents) return 'unknown'
   const coordinator = db.getCoordinatorTask(projectId)
@@ -296,7 +296,7 @@ function summaryEntry(options: ProjectToolOptions, project: ProjectRecord): Reco
     archived: project.archived,
     counts: projectStatus.counts,
     limits: compactLimits(projectStatus.limits),
-    mastermind: { agent: agentSummary(options.db, project.mastermind_agent_id), session: mastermindState(options, project.id) },
+    captain: { agent: agentSummary(options.db, project.captain_agent_id), session: captainState(options, project.id) },
     summary: projectStatus.summary,
     top_blockers: projectStatus.top_blockers,
     status_updated_at: projectStatus.updated_at
@@ -313,7 +313,7 @@ function compactProject(db: DatabaseManager, project: ProjectRecord, includeColl
     name: clip(project.name, MAX_NAME_CHARS),
     brief: clip(project.description, includeCollections ? 2_000 : 500),
     archived: project.archived,
-    mastermind_agent: agentSummary(db, project.mastermind_agent_id),
+    captain_agent: agentSummary(db, project.captain_agent_id),
     default_agent: agentSummary(db, project.default_agent_id),
     git_provider: project.git_provider,
     git_org: project.git_org ? clip(project.git_org, MAX_NAME_CHARS) : null,
@@ -371,9 +371,9 @@ export const COMMANDER_RELAY_BEGIN = '<<<BEGIN COMMANDER MESSAGE (the user\'s re
 export const COMMANDER_RELAY_END = 'END COMMANDER MESSAGE>>>'
 
 /**
- * The message a Mastermind receives from `ask_mastermind`. It is fenced and
+ * The message a Captain receives from `ask_captain`. It is fenced and
  * carries its provenance (the Commander session and a correlation id the
- * reply must quote) so the Mastermind can tell it from a human turn and #62
+ * reply must quote) so the Captain can tell it from a human turn and #62
  * can route the answer back. Like every machine-relayed message it grants no
  * authority for privileged operations.
  */
@@ -397,27 +397,27 @@ function newCorrelationId(): string {
   return `cmd-${randomUUID().replaceAll('-', '').slice(0, 16)}`
 }
 
-function askMastermind(options: ProjectToolOptions, input: Record<string, unknown>): ChatToolResult {
+function askCaptain(options: ProjectToolOptions, input: Record<string, unknown>): ChatToolResult {
   const { db, agents } = options
   const project = resolveProject(db, input.project)
   const message = requiredString(input, 'message', MAX_ASK_CHARS)
   if (project.archived) throw new Error(`Project "${project.name}" is archived. Restore it before delegating to it.`)
-  if (!agents) throw new Error('Agents are not available right now; the Mastermind cannot be reached.')
+  if (!agents) throw new Error('Agents are not available right now; the Captain cannot be reached.')
   const coordinator = db.ensureCoordinatorTask(project.id)
-  if (!coordinator) throw new Error(`Project "${project.name}" has no Mastermind.`)
+  if (!coordinator) throw new Error(`Project "${project.name}" has no Captain.`)
   const live = agents.findSessionByTaskId(coordinator.id)
-  const agentId = live?.session.agentId ?? resolveMastermindAgentId(db, project)
-  if (!agentId) throw new Error(`No agent is configured to run the Mastermind of "${project.name}". Set one in the project settings.`)
+  const agentId = live?.session.agentId ?? resolveCaptainAgentId(db, project)
+  if (!agentId) throw new Error(`No agent is configured to run the Captain of "${project.name}". Set one in the project settings.`)
 
   const correlationId = newCorrelationId()
-  const dispatch: AskMastermindDispatch = { sessionId: options.context.sessionId, projectId: project.id, projectName: project.name, correlationId }
+  const dispatch: AskCaptainDispatch = { sessionId: options.context.sessionId, projectId: project.id, projectName: project.name, correlationId }
   const text = buildCommanderRelayMessage({ commanderSessionId: options.context.sessionId, correlationId, message })
-  // Never block on the Mastermind: starting or resuming its session can take
+  // Never block on the Captain: starting or resuming its session can take
   // seconds and its answer arrives later as a report (#62).
   Promise.resolve()
     .then(() => agents.sendMessage(live?.sessionId ?? '', text, coordinator.id, agentId))
     .catch((error: unknown) => {
-      console.error(`[Commander] Could not deliver ${correlationId} to the Mastermind of ${project.id}:`, error)
+      console.error(`[Commander] Could not deliver ${correlationId} to the Captain of ${project.id}:`, error)
       try {
         options.onDeliveryFailed?.(dispatch, error)
       } catch (err) {
@@ -429,8 +429,8 @@ function askMastermind(options: ProjectToolOptions, input: Record<string, unknow
     project_id: project.id,
     project_name: clip(project.name, MAX_NAME_CHARS),
     correlation_id: correlationId,
-    mastermind_session: live ? 'running' : 'starting',
-    note: 'The Mastermind answers later in a report tagged with this correlation_id. Tell the user which project you asked and do not wait.'
+    captain_session: live ? 'running' : 'starting',
+    note: 'The Captain answers later in a report tagged with this correlation_id. Tell the user which project you asked and do not wait.'
   })
 }
 
@@ -443,7 +443,7 @@ function pendingApprovals(options: ProjectToolOptions): ChatToolResult {
   if (agents) {
     for (const project of projects) {
       for (const task of db.getTasks({ projectId: project.id })) {
-        // The Mastermind's own checkpoint is a held action (#66), not a task waiting.
+        // The Captain's own checkpoint is a held action (#66), not a task waiting.
         if (isCoordinatorTask(task)) continue
         const found = agents.findSessionByTaskId(task.id)
         if (!found || agents.getSessionStatus(found.sessionId)?.status !== 'waiting_approval') continue
@@ -489,7 +489,7 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
     },
     {
       name: 'get_project_summary',
-      description: 'The project status record: live counts (running, queued, awaiting review/approval, blocked), limits, the Mastermind\'s latest summary and top blockers. No raw tasks or transcripts.',
+      description: 'The project status record: live counts (running, queued, awaiting review/approval, blocked), limits, the Captain\'s latest summary and top blockers. No raw tasks or transcripts.',
       inputSchema: { type: 'object', properties: projectLocatorSchema, required: ['project'], additionalProperties: false },
       handler: async (input) => result(summaryEntry(options, resolveProject(db, input.project)))
     },
@@ -499,7 +499,7 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
     {
       name: 'get_project_status_history',
       description:
-        `The project's status journal, newest first: what the Mastermind reported after each round of work (summary, completed, blockers, decisions, next steps, time). ` +
+        `The project's status journal, newest first: what the Captain reported after each round of work (summary, completed, blockers, decisions, next steps, time). ` +
         `Use it only for questions about what changed or how something evolved; get_project_summary is the current state. ` +
         `Returns ${PROJECT_STATUS_HISTORY_DEFAULT_LIMIT} entries by default (at most ${PROJECT_STATUS_HISTORY_MAX_LIMIT}), clipped; pass next_cursor back to read older entries.`,
       inputSchema: {
@@ -537,19 +537,19 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
       }
     },
     {
-      name: 'ask_mastermind',
-      description: 'Hand a request or question to a project\'s Mastermind. Returns immediately with a correlation_id; the Mastermind\'s answer arrives later as a report. Use this for anything that involves tasks or doing work.',
+      name: 'ask_captain',
+      description: 'Hand a request or question to a project\'s Captain. Returns immediately with a correlation_id; the Captain\'s answer arrives later as a report. Use this for anything that involves tasks or doing work.',
       inputSchema: {
         type: 'object',
-        properties: { ...projectLocatorSchema, message: { type: 'string', maxLength: MAX_ASK_CHARS, description: 'What the user wants, in your own words, with the context the Mastermind needs.' } },
+        properties: { ...projectLocatorSchema, message: { type: 'string', maxLength: MAX_ASK_CHARS, description: 'What the user wants, in your own words, with the context the Captain needs.' } },
         required: ['project', 'message'],
         additionalProperties: false
       },
-      handler: async (input) => askMastermind(options, input)
+      handler: async (input) => askCaptain(options, input)
     },
     {
       name: 'get_pending_approvals',
-      description: 'Everything across projects that is waiting for the user: agent checkpoints and held Mastermind actions. Read-only; the Commander cannot approve anything.',
+      description: 'Everything across projects that is waiting for the user: agent checkpoints and held Captain actions. Read-only; the Commander cannot approve anything.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       handler: async () => pendingApprovals(options)
     },
@@ -583,13 +583,13 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
     },
     {
       name: 'get_project',
-      description: `Compact project configuration: brief, Mastermind and default agent, git defaults, and at most ${MAX_REPOS} repos and ${MAX_RESOURCES} resources with clipped notes.`,
+      description: `Compact project configuration: brief, Captain and default agent, git defaults, and at most ${MAX_REPOS} repos and ${MAX_RESOURCES} resources with clipped notes.`,
       inputSchema: { type: 'object', properties: projectLocatorSchema, required: ['project'], additionalProperties: false },
       handler: async (input) => result(compactProject(db, resolveProject(db, input.project), true))
     },
     {
       name: 'create_project',
-      description: 'Create a project (its Mastermind comes with it). The first call only requests confirmation; retry with the token after the user explicitly confirms.',
+      description: 'Create a project (its Captain comes with it). The first call only requests confirmation; retry with the token after the user explicitly confirms.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -606,7 +606,7 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
               additionalProperties: false
             }
           },
-          mastermind_agent: { type: ['string', 'null'], description: 'Agent ID or exact name that runs the Mastermind; omit for the default.' },
+          captain_agent: { type: ['string', 'null'], description: 'Agent ID or exact name that runs the Captain; omit for the default.' },
           default_agent: { type: ['string', 'null'] },
           git_provider: { type: ['string', 'null'], enum: ['github', 'gitlab', 'forgejo', null] },
           git_org: { type: ['string', 'null'], maxLength: MAX_NAME_CHARS },
@@ -619,7 +619,7 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
         const data = {
           name: requiredString(input, 'name', MAX_NAME_CHARS),
           description: optionalNullableString(input.brief, 'brief', MAX_BRIEF_CHARS) ?? '',
-          mastermind_agent_id: resolveAgentId(db, input.mastermind_agent, 'mastermind_agent') ?? null,
+          captain_agent_id: resolveAgentId(db, input.captain_agent, 'captain_agent') ?? null,
           default_agent_id: resolveAgentId(db, input.default_agent, 'default_agent') ?? null,
           git_provider: optionalNullableString(input.git_provider, 'git_provider', 20),
           git_org: optionalNullableString(input.git_org, 'git_org', MAX_NAME_CHARS)
@@ -637,7 +637,7 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
     },
     {
       name: 'update_project',
-      description: 'Rename a project or update its brief, Mastermind/default agent, or git defaults. Requires a one-time explicit confirmation.',
+      description: 'Rename a project or update its brief, Captain/default agent, or git defaults. Requires a one-time explicit confirmation.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -647,7 +647,7 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
             properties: {
               name: { type: 'string', maxLength: MAX_NAME_CHARS },
               brief: { type: 'string', maxLength: MAX_BRIEF_CHARS },
-              mastermind_agent: { type: ['string', 'null'] },
+              captain_agent: { type: ['string', 'null'] },
               default_agent: { type: ['string', 'null'] },
               git_provider: { type: ['string', 'null'], enum: ['github', 'gitlab', 'forgejo', null] },
               git_org: { type: ['string', 'null'], maxLength: MAX_NAME_CHARS }
@@ -663,12 +663,12 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
         const project = resolveProject(db, input.project)
         if (!input.changes || typeof input.changes !== 'object' || Array.isArray(input.changes)) throw new Error('changes must be an object')
         const raw = input.changes as Record<string, unknown>
-        const allowed = new Set(['name', 'brief', 'mastermind_agent', 'default_agent', 'git_provider', 'git_org'])
+        const allowed = new Set(['name', 'brief', 'captain_agent', 'default_agent', 'git_provider', 'git_org'])
         if (Object.keys(raw).some((key) => !allowed.has(key))) throw new Error(`changes may only contain: ${[...allowed].join(', ')}`)
         const changes = {
           ...(raw.name !== undefined ? { name: requiredString(raw, 'name', MAX_NAME_CHARS) } : {}),
           ...(raw.brief !== undefined ? { description: optionalNullableString(raw.brief, 'brief', MAX_BRIEF_CHARS) ?? '' } : {}),
-          ...(raw.mastermind_agent !== undefined ? { mastermind_agent_id: resolveAgentId(db, raw.mastermind_agent, 'mastermind_agent') ?? null } : {}),
+          ...(raw.captain_agent !== undefined ? { captain_agent_id: resolveAgentId(db, raw.captain_agent, 'captain_agent') ?? null } : {}),
           ...(raw.default_agent !== undefined ? { default_agent_id: resolveAgentId(db, raw.default_agent, 'default_agent') ?? null } : {}),
           ...(raw.git_provider !== undefined ? { git_provider: optionalNullableString(raw.git_provider, 'git_provider', 20) } : {}),
           ...(raw.git_org !== undefined ? { git_org: optionalNullableString(raw.git_org, 'git_org', MAX_NAME_CHARS) } : {})

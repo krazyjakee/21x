@@ -1,4 +1,4 @@
-import { getMastermindTaskId } from '@/stores/coordinator-store'
+import { getCaptainTaskId } from '@/stores/coordinator-store'
 
 /**
  * Where dictated words go.
@@ -6,7 +6,7 @@ import { getMastermindTaskId } from '@/stores/coordinator-store'
  * Two problems shape this file.
  *
  * 1. The transcript panel is mounted many times at once — the task workspace,
- *    each canvas panel, and the Mastermind drawer. If every copy listened, one
+ *    each canvas panel, and the Captain drawer. If every copy listened, one
  *    spoken sentence would appear in all of them. So there is exactly one
  *    active composer, and the microphone button that starts the turn names it.
  *
@@ -22,10 +22,10 @@ import { getMastermindTaskId } from '@/stores/coordinator-store'
  */
 
 /**
- * The Mastermind composer. Named here because two controls outside the drawer
+ * The Captain composer. Named here because two controls outside the drawer
  * address it: the top-bar microphone and the global shortcut.
  */
-export const MASTERMIND_COMPOSER_KEY = 'orchestrator'
+export const CAPTAIN_COMPOSER_KEY = 'orchestrator'
 
 /** The dashboard command box. Named for the same reason. */
 export const DASHBOARD_COMPOSER_KEY = 'dashboard-command'
@@ -38,8 +38,8 @@ export const DASHBOARD_COMPOSER_KEY = 'dashboard-command'
 /**
  * Which session a composer speaks to.
  *
- * Both the drawer and the dashboard command box send to Mastermind, so both
- * name the Mastermind session — the id of its task row, which it can name
+ * Both the drawer and the dashboard command box send to Captain, so both
+ * name the Captain session — the id of its task row, which it can name
  * because it is a session like any other. It used to name nothing, and main
  * then armed an expectation that matched the first answer from ANY task — so
  * speaking to the drawer made 20x read out whatever the open task happened to
@@ -48,7 +48,7 @@ export const DASHBOARD_COMPOSER_KEY = 'dashboard-command'
  */
 export function taskIdOfComposer(key: string | null): string | undefined {
   if (!key) return undefined
-  if (key === MASTERMIND_COMPOSER_KEY || key === DASHBOARD_COMPOSER_KEY) return getMastermindTaskId() ?? undefined
+  if (key === CAPTAIN_COMPOSER_KEY || key === DASHBOARD_COMPOSER_KEY) return getCaptainTaskId() ?? undefined
   return key
 }
 

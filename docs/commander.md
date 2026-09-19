@@ -1,11 +1,17 @@
 # Commander chat sessions
 
 The Commander is a fast conversational model with no canvas. The user talks to
-it in persisted chat sessions; it delegates work to each project's Mastermind
+it in persisted chat sessions; it delegates work to each project's Captain
 and relays their reports. It never does the project work itself, and it has
 no tool that could: its registry (#61, #73) holds delegation, status reads
-and project administration only. Mastermind replies and escalations come
+and project administration only. Captain replies and escalations come
 back as reports routed to the right session (#62, below).
+
+The hierarchy is **Commander → Captain → task agent**: the Commander works
+across projects, each project's Captain coordinates the work inside one project
+(one persistent conversation per project), and task agents do the work. The
+Captain was called the Mastermind before #71; stored data is migrated (see
+docs/database-migrations.md, *The coordinator is the Captain*).
 
 ## Storage
 
@@ -49,7 +55,7 @@ does the following:
    and the user message (the confirmation check reads it). Events stream on
    `commander:event`.
 4. Stores the assistant and tool messages. A tool row whose result is a JSON
-   object carrying `project_id` / `correlation_id` (an `ask_mastermind`
+   object carrying `project_id` / `correlation_id` (an `ask_captain`
    result) is tagged with them, so #62 can match the report to the
    delegation. Then it emits `messages_appended`, then `done`.
 5. After the turn, it does two things:
@@ -83,7 +89,7 @@ Delegation and status (#61):
 - `list_projects(include_archived?)`: id, name, one-line brief, the #58
   counts, paused flag.
 - `get_project_summary(project)`: the #58 status record (counts, compact
-  limits, the Mastermind's summary and top blockers) plus the Mastermind
+  limits, the Captain's summary and top blockers) plus the Captain
   agent and whether its session is running.
 - `get_project_status_history(project, limit?, cursor?)` (#72): one page of
   the project's status journal, newest first: 5 entries by default, 20 at
@@ -93,8 +99,8 @@ Delegation and status (#61):
   entries arrived meanwhile. The prompt reserves it for "what changed?"
   questions; it is never part of `list_projects` or the system prompt. See
   docs/task-lifecycle.md, "Status journal".
-- `ask_mastermind(project, message)`: sends a fenced relay message to the
-  project's Mastermind through `AgentManager.sendMessage` on its coordinator
+- `ask_captain(project, message)`: sends a fenced relay message to the
+  project's Captain through `AgentManager.sendMessage` on its coordinator
   row (the same rejoin-or-resume path the wake-ups use) and returns at once
   with a `correlation_id`. The message carries the Commander session id and
   the correlation id in a provenance line, quotes the request inside
@@ -103,7 +109,7 @@ Delegation and status (#61):
   failure after the tool returned is stored on the session as a report through
   `onDeliveryFailed`.
 - `get_pending_approvals()`: agent checkpoints (sessions in
-  `waiting_approval`) and held Mastermind actions (#66) across active
+  `waiting_approval`) and held Captain actions (#66) across active
   projects. Read-only: there is no approve or reject tool.
 - `navigate_to_project(project)`: pushes a `switch_project` UI command down
   the existing `ui:command` channel; the renderer switches the current project
@@ -111,7 +117,7 @@ Delegation and status (#61):
 - `pause_all_projects(paused)`: the #65 pause, behind confirmation.
 
 Administration (#73): `get_project`, `create_project(name, brief?, repos?,
-…)`, `update_project(project, changes)` (name, brief, Mastermind/default
+…)`, `update_project(project, changes)` (name, brief, Captain/default
 agent, git defaults), `add/update/remove/reorder_project_repo(s)`,
 `add/update/remove/reorder_project_resource(s)`, `archive_project`,
 `restore_project`. There is no delete. The Default project cannot be archived
@@ -184,21 +190,21 @@ The Commander view is in the NavRail (`sidebarView === 'commander'`) and lives i
 
 ## Reports (#62)
 
-A Mastermind is slow and the user moves on; its answer must still land in the
+A Captain is slow and the user moves on; its answer must still land in the
 right place. The pieces:
 
-- **The Mastermind's tool.** `report_to_commander(message, correlation_id?)`
+- **The Captain's tool.** `report_to_commander(message, correlation_id?)`
   is a project-scoped, coordinator-only task-management tool (route
-  `/report_to_commander`, message capped at 4,000 characters). The Mastermind
+  `/report_to_commander`, message capped at 4,000 characters). The Captain
   prompt (section 11) tells it to answer a Commander request with it, quoting
   the `correlation_id` from the relay message, and to report unasked when the
   user must decide something. The route hands the report to the seam in
   `src/main/commander/report-inbox.ts`; `ipc/commander.ts` installs the
   handler (`installCommanderReportBridge` in `report-tools.ts`). Without the
   handler (before the Commander IPC is registered) the tool returns an error
-  the Mastermind can read.
+  the Captain can read.
 - **Routing** (`resolveReportSession`). A report quoting a `correlation_id`
-  goes to the session whose `ask_mastermind` tool row carries that id
+  goes to the session whose `ask_captain` tool row carries that id
   (`CommanderStore.findDelegation`, indexed on `correlation_id`), unless that
   session is archived. Otherwise — no id, an unknown id, or an archived
   origin — it goes to the most recently active session, which is where the
@@ -218,14 +224,14 @@ right place. The pieces:
   other session only gets the unread report and its badge; opening it later
   shows the report as a card without a relay turn. With no provider (no API
   key) the report is still stored.
-- **Loop protection.** A turn started by a report may call `ask_mastermind`
+- **Loop protection.** A turn started by a report may call `ask_captain`
   only while the session's budget lasts: 3 calls
   (`MAX_REPORT_ASKS_WITHOUT_USER_TURN`) across report-triggered turns since
   the user last spoke. `guardReportAsks` wraps the tool for such turns and
   returns a `loop_guard` error result beyond that; a user message resets the
   count. User-triggered turns are not limited.
 - **Escalations.** `installCommanderReportBridge` also installs the
-  `escalation.ts` handler: a `tell_commander` action the Mastermind performed
+  `escalation.ts` handler: a `tell_commander` action the Captain performed
   (#66) becomes an unprompted, project-tagged report ("Escalation notice …")
   routed by the rules above. Held, approved and rejected `ask_user` calls are
   not reported; they are the user's business (`get_pending_approvals`).
@@ -248,7 +254,7 @@ of the chat). The wake word stays out of scope.
   selected in Settings → Voice (system, downloaded, or ElevenLabs). Each
   finished sentence is handed over as it arrives; a text run closed by a tool
   call is released whole; the tail is flushed when the turn ends.
-- **Mastermind reports** that land in the session are spoken, introduced as
+- **Captain reports** that land in the session are spoken, introduced as
   "Report from <project>.", only while voice mode is on for that session. A
   report that arrives during a reply is read after it, not over it.
 - **Barge-in**: starting a new voice turn, the Stop button or Escape stops
@@ -285,7 +291,7 @@ one-minute tick, so it runs with the window closed. At each occurrence it:
 
 1. builds the briefing from every active project's status record
    (`buildProjectStatus`): summary, counts, top blockers, and pending approvals
-   (agent steps waiting for approval, plus Mastermind actions held by the
+   (agent steps waiting for approval, plus Captain actions held by the
    escalation policy). Projects that need the user come first. There is no
    model and no raw task data in this step;
 2. if a chat provider is configured, asks the Commander model for a three to
@@ -316,5 +322,5 @@ once at start-up if it is under 6 hours old. Otherwise it is skipped.
 - **Reports from elsewhere**: `getCommanderService()?.deliverReport({ sessionId,
   content, projectId, projectName, correlationId })` stores, counts unread and
   relays when the session is open; `appendReport` only stores. To route by
-  correlation id first, go through `deliverMastermindReport` in
+  correlation id first, go through `deliverCaptainReport` in
   `report-inbox.ts`.

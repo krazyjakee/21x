@@ -21,11 +21,11 @@ import { guardReportAsks, MAX_REPORT_ASKS_WITHOUT_USER_TURN } from './report-too
  * Extension points:
  * - The Commander's tools (project-tools.ts) are supplied through `getTools`,
  *   built per turn so a confirmation can be checked against the user message.
- * - #62 delivers Mastermind reports through `deliverReport`: the report is
+ * - #62 delivers Captain reports through `deliverReport`: the report is
  *   stored (unread until the session is read) and, when the session is the
  *   one open in the Commander view (`setActiveSession`), a turn is started so
  *   the Commander relays it. A turn started by a report can only call
- *   `ask_mastermind` within the session's report-ask budget until the user
+ *   `ask_captain` within the session's report-ask budget until the user
  *   speaks again (report-tools.ts).
  */
 
@@ -49,7 +49,7 @@ export interface CommanderServiceOptions {
   maxToolCalls?: number
   /** Timeout for the title and summary one-shot calls. */
   oneShotTimeoutMs?: number
-  /** `ask_mastermind` calls report-triggered turns may make per session before a user turn resets the count (#62). */
+  /** `ask_captain` calls report-triggered turns may make per session before a user turn resets the count (#62). */
   maxReportAsks?: number
 }
 
@@ -113,7 +113,7 @@ export function cleanGeneratedTitle(raw: string): string {
 
 /**
  * The `project_id` and `correlation_id` a successful tool result carries
- * (`ask_mastermind` does), so the stored tool row can be matched to the
+ * (`ask_captain` does), so the stored tool row can be matched to the
  * report that answers it (#62). Anything that is not such an object tags nothing.
  */
 export function toolResultTags(content: string, isError: boolean): { projectId?: string; correlationId?: string } {
@@ -152,7 +152,7 @@ export class CommanderService {
   private activeSessionId: string | null = null
   /** Reports that arrived during a turn; relayed together once that turn ends. */
   private readonly pendingRelay = new Map<string, { messageIds: string[]; projectName: string | null }>()
-  /** `ask_mastermind` calls made by report-triggered turns since the user last spoke, per session. */
+  /** `ask_captain` calls made by report-triggered turns since the user last spoke, per session. */
   private readonly reportAsks = new Map<string, number>()
 
   constructor(private readonly options: CommanderServiceOptions) {
@@ -413,7 +413,7 @@ export class CommanderService {
   }
 
   /**
-   * Stores a Mastermind report for a session. It counts as unread until the
+   * Stores a Captain report for a session. It counts as unread until the
    * session is read, and the model sees it on the next turn.
    */
   appendReport(input: AppendReportInput, emit = true): CommanderMessage {

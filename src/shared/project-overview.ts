@@ -4,7 +4,7 @@
  * so the desktop overview and the phone read the same numbers.
  *
  * Every number here is counted (task rows, live sessions, held escalations);
- * only `status.summary` is the Mastermind's narrative.
+ * only `status.summary` is the Captain's narrative.
  */
 import type { ProjectLimitReason } from './project-policies'
 import type { ProjectStatus } from './project-status'
@@ -12,14 +12,14 @@ import type { ProjectStatus } from './project-status'
 export interface ProjectOverviewEntry {
   project_id: string
   name: string
-  /** The project's description (the brief its Mastermind reads); '' when none. */
+  /** The project's description (the brief its Captain reads); '' when none. */
   brief: string
   is_default: boolean
   sort_order: number
   status: ProjectStatus
   /** Live sessions waiting for the user to approve a step (`status.counts.awaiting_approval`). */
   pending_approvals: number
-  /** Mastermind calls the escalation policy holds for the user (#66). */
+  /** Captain calls the escalation policy holds for the user (#66). */
   held_actions: number
   /** Working sessions of the project's tasks right now. */
   running_agents: number

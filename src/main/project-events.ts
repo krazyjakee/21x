@@ -6,17 +6,17 @@
  * transitions, the heartbeat scheduler and the task-source sync. Each of those
  * calls {@link emitTaskEvent} with a kind and a task id, and this module turns
  * it into a {@link ProjectEvent} for the task's project. The only consumer
- * today is the MastermindWaker (mastermind-waker.ts), which batches a
- * project's events into one wake-up for its Mastermind.
+ * today is the CaptainWaker (captain-waker.ts), which batches a
+ * project's events into one wake-up for its Captain.
  *
- * Emitting is best effort: a missing task, a coordinator row (the Mastermind's
+ * Emitting is best effort: a missing task, a coordinator row (the Captain's
  * own session going to `waiting_approval` must never wake itself) or a
  * listener that throws never disturbs the caller.
  */
 import { EventEmitter } from 'events'
 import type { DatabaseManager, TaskRecord } from './database'
 import { isCoordinatorTask } from '../shared/task-roles'
-import type { ProjectEventKind } from '../shared/mastermind-wakeups'
+import type { ProjectEventKind } from '../shared/captain-wakeups'
 
 export type { ProjectEventKind }
 

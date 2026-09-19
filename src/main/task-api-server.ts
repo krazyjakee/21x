@@ -74,7 +74,7 @@ export function startTaskApiServer(db: DatabaseManager): Promise<number> {
   if (server && port) return Promise.resolve(port)
   if (startupPromise) return startupPromise
 
-  // #66: the Mastermind's project-scoped tool calls go through its project's
+  // #66: the Captain's project-scoped tool calls go through its project's
   // escalation policy. Installed with the server because the MCP endpoint
   // lives here; tests that call the routes directly install their own.
   installEscalation(db)

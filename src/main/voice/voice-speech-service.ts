@@ -98,7 +98,7 @@ const VOICE_ANSWER_EXPECTATION_MS = 10 * 60 * 1000
  * How long an answer is expected when the task it will come from is not known
  * yet.
  *
- * A sentence spoken into the Mastermind drawer is sent by the drawer itself, so
+ * A sentence spoken into the Captain drawer is sent by the drawer itself, so
  * the renderer has no task to name. The window is short on purpose: it is armed
  * only by the user speaking, and it is consumed by the first answer to arrive.
  */
@@ -585,14 +585,14 @@ export class VoiceSpeechService {
   /**
    * DEPRECATED — no caller arms this any more, and none should.
    *
-   * It matched the first answer from ANY task, so speaking to the Mastermind
+   * It matched the first answer from ANY task, so speaking to the Captain
    * drawer made 20x read out whatever the open task wrote next. Speech in and
-   * speech out are tied to one session: the drawer names the Mastermind
+   * speech out are tied to one session: the drawer names the Captain
    * session, a task names itself. Kept only so an older renderer cannot crash
    * main by calling it.
    *
    * The user spoke a sentence and it was sent, but the sender did not name a
-   * task — the Mastermind drawer sends on its own behalf.
+   * task — the Captain drawer sends on its own behalf.
    *
    * The next answer to arrive is then the answer to that sentence. It is
    * consumed once and it expires quickly, so a background task finishing later

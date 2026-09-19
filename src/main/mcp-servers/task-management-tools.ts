@@ -151,9 +151,9 @@ export const sharedTools: Tool[] = [
   }
 ]
 
-// Orchestration tools: the Mastermind and top-level task agents. A project
+// Orchestration tools: the Captain and top-level task agents. A project
 // scope limits them to one project (see task-management-core.ts).
-export const mastermindTools: Tool[] = [
+export const captainTools: Tool[] = [
   {
     name: 'list_tasks',
     description:
@@ -409,7 +409,7 @@ export const mastermindTools: Tool[] = [
       'Counts (running, queued, awaiting review, awaiting approval, blocked) are computed from the database and must not be repeated here. ' +
       'Every call also appends one entry to the project\'s status journal (#72), so add the structured highlights of this round when you have them: ' +
       'completed work, blockers, decisions taken, next steps (short lines, at most 8 per list). Do not paste task lists or transcripts. ' +
-      'Call it after a meaningful round of work. Only the project Mastermind may call it.',
+      'Call it after a meaningful round of work. Only the project Captain may call it.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -430,7 +430,7 @@ export const mastermindTools: Tool[] = [
       'Send a report to the Commander, the fast chat that relays between the user and every project (#62). ' +
       'Use it to answer a request that arrived from the Commander (quote its correlation_id so the reply lands in the right conversation) ' +
       'and, without a correlation_id, to escalate: a decision the user must take, a blocker, or something finished that the user asked about elsewhere. ' +
-      'Keep it to a few sentences the Commander can relay as-is; the user reads it as "Project X says …". Only the project Mastermind may call it.',
+      'Keep it to a few sentences the Commander can relay as-is; the user reads it as "Project X says …". Only the project Captain may call it.',
     inputSchema: {
       type: 'object',
       properties: {

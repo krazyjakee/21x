@@ -24,7 +24,7 @@ import { isGlobalSkill } from '../../shared/skill-scope'
  * ({@link ProjectMutationConfirmations}) — updates, soft-deletes, promotes a
  * project skill to global or moves a skill into a project. There is no tool
  * here that assigns a skill to a task; that stays with the project's
- * Mastermind, and the registry test proves it.
+ * Captain, and the registry test proves it.
  *
  * Results are bounded like the project tools: `list_skills` is metadata only
  * with fixed item and character caps; content is returned only by
@@ -199,7 +199,7 @@ function listSkills(options: SkillToolOptions, input: Record<string, unknown>): 
     truncated: skills.length > items.length,
     counts,
     ...(project ? { project_id: project.id, project_name: clip(project.name, MAX_LOCATOR_CHARS) } : {}),
-    note: 'Metadata only; get_skill returns the content. You cannot assign skills to tasks: ask the project\'s Mastermind.'
+    note: 'Metadata only; get_skill returns the content. You cannot assign skills to tasks: ask the project\'s Captain.'
   }
   while (JSON.stringify(payload).length > RESULT_PAYLOAD_BUDGET && items.length > 0) {
     items.pop()

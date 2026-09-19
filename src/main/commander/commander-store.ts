@@ -231,7 +231,7 @@ export class CommanderStore {
   // ── Report routing (#62) ──────────────────────────────────
 
   /**
-   * The delegation that carries a correlation id: the `ask_mastermind` tool
+   * The delegation that carries a correlation id: the `ask_captain` tool
    * row the service tagged when the tool returned. Its session is where the
    * report quoting that id belongs. Null for an unknown id.
    */

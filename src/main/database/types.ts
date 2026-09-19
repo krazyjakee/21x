@@ -12,7 +12,7 @@ export interface ProjectRow {
   name: string
   description: string
   default_agent_id: string | null
-  mastermind_agent_id: string | null
+  captain_agent_id: string | null
   git_provider: string | null
   git_org: string | null
   settings: string

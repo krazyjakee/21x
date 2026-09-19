@@ -49,7 +49,7 @@ interface UIState {
   canvasPendingTaskId: string | null
   /** Pre-fill text for the create task modal (from dashboard command input / quick chips) */
   createTaskPrefill: { title: string; description: string } | null
-  /** Whether the Mastermind drawer is open (global) */
+  /** Whether the Captain drawer is open (global) */
   showOrchestrator: boolean
   /** Whether the contextual (tasks/skills) sidebar is collapsed (persisted) */
   sidebarCollapsed: boolean
@@ -85,7 +85,7 @@ interface UIState {
   openCreateWithPrefill: (text: string) => void
   /** Clear prefill data after the form has consumed it */
   clearCreateTaskPrefill: () => void
-  /** Toggle the Mastermind orchestrator drawer */
+  /** Toggle the Captain orchestrator drawer */
   setShowOrchestrator: (show: boolean) => void
   toggleOrchestrator: () => void
   /** Collapse/expand the contextual sidebar (persisted) */

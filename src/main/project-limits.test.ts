@@ -149,7 +149,7 @@ describe('projectAdmissionLimits and the limit state', () => {
     expect(buildProjectLimitState(db, 'p2', [], []).blockedBy).toBeNull()
   })
 
-  it('has a sentence for every reason that tells the Mastermind not to retry', () => {
+  it('has a sentence for every reason that tells the Captain not to retry', () => {
     for (const reason of ['project_limit', 'project_daily_cap', 'project_paused', 'global_pause', 'global_limit', 'agent_limit']) {
       expect(describeQueueReason(reason, 2, 2)).toContain('do not call start_task again')
     }

@@ -112,7 +112,7 @@ describe('settings', () => {
   })
 })
 
-describe('scheduled Mastermind reviews', () => {
+describe('scheduled Captain reviews', () => {
   it('wakes only enabled, unpaused projects, once per occurrence', async () => {
     const on = project('On', { [SCHEDULED_REVIEW_SETTING]: { enabled: true, cron: REVIEW_CRON } })
     project('Paused', { [SCHEDULED_REVIEW_SETTING]: { enabled: true, cron: REVIEW_CRON }, limits: { paused: true } })
@@ -159,7 +159,7 @@ describe('scheduled Mastermind reviews', () => {
     expect(agents.sendMessage).toHaveBeenCalledTimes(2)
   })
 
-  it('waits for a Mastermind that is mid-turn', async () => {
+  it('waits for a Captain that is mid-turn', async () => {
     project('Busy', { [SCHEDULED_REVIEW_SETTING]: { enabled: true, cron: REVIEW_CRON } })
     const s = scheduler()
     await s.tick()
@@ -260,6 +260,6 @@ describe('Commander briefing', () => {
     )
     expect(text.startsWith('Briefing for 2026-09-21: 2 active projects, 1 needs attention.')).toBe(true)
     expect(text.indexOf('## Loud (paused)')).toBeLessThan(text.indexOf('## Quiet'))
-    expect(text).toContain('Pending approvals: 2 agent steps waiting for approval; 1 Mastermind action held for your approval.')
+    expect(text).toContain('Pending approvals: 2 agent steps waiting for approval; 1 Captain action held for your approval.')
   })
 })

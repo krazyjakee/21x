@@ -158,10 +158,10 @@ describe('speaking the reply as it streams', () => {
     await speech.prepare()
     voice.setActiveSession('s1')
     start(commander, 's1', 't1')
-    delta(commander, 's1', 't1', 'Asking the Mastermind now')
-    commander.emit({ type: 'turn_event', sessionId: 's1', turnId: 't1', event: { type: 'tool_call_start', id: 'c1', name: 'ask_mastermind', input: {} } })
+    delta(commander, 's1', 't1', 'Asking the Captain now')
+    commander.emit({ type: 'turn_event', sessionId: 's1', turnId: 't1', event: { type: 'tool_call_start', id: 'c1', name: 'ask_captain', input: {} } })
     await flush()
-    expect(worker.appended).toEqual(['Asking the Mastermind now'])
+    expect(worker.appended).toEqual(['Asking the Captain now'])
   })
 
   it('says nothing for a session that is not in voice mode', async () => {

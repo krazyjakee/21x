@@ -13,7 +13,7 @@ import {
 
 /**
  * The transcript panel is mounted many times at once — the task workspace, each
- * canvas panel, and the Mastermind drawer. These tests pin the rule that one
+ * canvas panel, and the Captain drawer. These tests pin the rule that one
  * spoken sentence reaches exactly one field.
  */
 
@@ -56,14 +56,14 @@ describe('insertDictation', () => {
   it('writes into one field only, never into every mounted panel', () => {
     const a = composer('a')
     const b = composer('b')
-    const mastermind = composer('mastermind')
+    const captain = composer('captain')
 
     setDictationTarget(a.field)
     expect(insertDictation('fix the login page')).toBe(true)
 
     expect(a.field.value).toBe('fix the login page')
     expect(b.field.value).toBe('')
-    expect(mastermind.field.value).toBe('')
+    expect(captain.field.value).toBe('')
   })
 
   it('writes nowhere when no field was claimed', () => {
