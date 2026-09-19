@@ -225,12 +225,5 @@ describe('useAgentStore (projection model)', () => {
       useAgentStore.getState().removeSession('task-1')
       expect(useAgentStore.getState().sessions.get('task-1')).toBeUndefined()
     })
-
-    it('clearMessageDedup is a no-op (projection is the source of truth)', () => {
-      setSession('task-1', SessionStatus.WORKING)
-      transcriptHandler({ taskId: 'task-1', parts: [part('m1'), part('m2', { seq: 1 })], maxRev: 2 })
-      useAgentStore.getState().clearMessageDedup('task-1')
-      expect(useAgentStore.getState().sessions.get('task-1')!.messages).toHaveLength(2)
-    })
   })
 })

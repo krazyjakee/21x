@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Plus, Loader2, RefreshCw, Edit3, Trash2, CheckCircle, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { SettingsSection } from '../SettingsSection'
@@ -10,12 +11,14 @@ import { pluginApi } from '@/lib/ipc-client'
 import type { CreateTaskSourceDTO, PluginMeta, TaskSource } from '@/types'
 
 export function IntegrationsSettings() {
-  const { syncingIds, createSource, updateSource, deleteSource, syncSource, fetchSources } = useTaskSourceStore()
+  const { syncingIds, createSource, updateSource, deleteSource, syncSource, fetchSources } = useTaskSourceStore(
+    useShallow((s) => ({ syncingIds: s.syncingIds, createSource: s.createSource, updateSource: s.updateSource, deleteSource: s.deleteSource, syncSource: s.syncSource, fetchSources: s.fetchSources }))
+  )
   // Sources belong to a project: this tab shows and creates the current project's.
   const sources = useProjectTaskSources()
   const currentProject = useCurrentProject()
   const projectLabel = currentProject?.name ?? 'this project'
-  const { fetchTasks } = useTaskStore()
+  const fetchTasks = useTaskStore((s) => s.fetchTasks)
   const [plugins, setPlugins] = useState<PluginMeta[]>([])
   const [tsDialog, setTsDialog] = useState<{ open: boolean; source?: TaskSource }>({ open: false })
   const [oauthStatus, setOauthStatus] = useState<Map<string, boolean>>(new Map())

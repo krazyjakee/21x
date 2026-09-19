@@ -16,16 +16,9 @@ function getMessages(db: DatabaseManager, params: Record<string, unknown>): unkn
   const before = params.before_seq !== undefined ? Number(params.before_seq) : null
 
   // Tool output is enormous and rarely what a question is about, so it is left
-  // out unless asked for. This keeps a reply readable.
-  const parts = db.getTranscriptParts(taskId).filter((part) =>
-    (includeTools || ((part.role === 'user' || part.role === 'assistant') && (!part.partType || part.partType === 'text'))) &&
-    (!role || part.role === role)
-  )
-  // Newest first, paging backwards with the cursor of the oldest row returned.
-  // A sequence number stays correct while the agent keeps writing.
-  parts.sort((a, b) => b.seq - a.seq)
-  const start = before === null ? 0 : parts.findIndex((part) => part.seq < before)
-  const page = start < 0 ? [] : parts.slice(start, start + limit)
+  // out unless asked for. Newest first, paging backwards with the cursor of the
+  // oldest row returned: a sequence number stays correct while the agent writes.
+  const { parts: page, total } = db.getTranscriptPage(taskId, { includeTools, role, beforeSeq: before, limit })
 
   return {
     task_id: taskId,
@@ -37,7 +30,7 @@ function getMessages(db: DatabaseManager, params: Record<string, unknown>): unkn
       created_at: new Date(part.createdAt).toISOString()
     })),
     next_before_seq: page.length === limit ? page[page.length - 1].seq : null,
-    total_available: parts.length
+    total_available: total
   }
 }
 

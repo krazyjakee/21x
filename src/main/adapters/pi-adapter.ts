@@ -5,11 +5,10 @@
  * per live session and converts Pi events to the shared adapter message shape.
  */
 
-import { nodeWorkerRuntime } from '../node-worker-runtime'
 import { spawn } from 'child_process'
 import type { ChildProcessWithoutNullStreams } from 'child_process'
 import { randomUUID } from 'crypto'
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs'
+import { existsSync, unlinkSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 import type {
@@ -19,14 +18,16 @@ import type {
   SessionMessage,
   SessionStatus,
 } from './coding-agent-adapter'
-import { MessagePartType, MessageRole, SessionStatusType } from './coding-agent-adapter'
+import { MessagePartType, SessionStatusType } from './coding-agent-adapter'
 import {
-  PI_PERMISSION_EXTENSION_SOURCE,
-  PI_PERMISSION_MODE_ENV,
-  buildPiMcpConfigDocument,
+  piInvocation,
+  piProcessEnv,
   sanitizePiSessionName,
+  splitPiModel,
   withProviderNameLimitHint,
 } from './pi-config'
+import { installPiPermissionExtension, removeLegacyGatewayProvider, writePiMcpConfig } from './pi-files'
+import { convertPiHistory, piProvidersFromModels, piToolResultText, type PiMessage } from './pi-messages'
 import { execFileAsync, findExecutable } from '../find-executable'
 import { onJsonLines } from './shared/jsonl'
 
@@ -34,9 +35,6 @@ const RPC_TIMEOUT_MS = 15_000
 const MAX_BUFFERED_PARTS = 1_000
 const MINIMUM_PI_VERSION = [0, 80, 5] as const
 const TERMINAL_ERROR_SETTLE_GRACE_MS = 1_000
-/** Identifies the hosted AI gateway entry older releases wrote to Pi's models file. */
-const LEGACY_GATEWAY_PROVIDER_ID = 'peakflo'
-const LEGACY_GATEWAY_API_KEY_REF = '$PEAKFLO_AI_GATEWAY_API_KEY'
 
 interface PiRpcResponse {
   id?: string
@@ -86,40 +84,10 @@ interface PiUiRequest {
   options: string[]
 }
 
-type PiMessage = {
-  role?: string
-  content?: string | Array<Record<string, unknown>>
-  timestamp?: number
-  stopReason?: string
-  errorMessage?: string
-}
-
-function textFromContent(content: unknown): string {
-  if (typeof content === 'string') return content
-  if (!Array.isArray(content)) return ''
-  return content
-    .filter((block): block is Record<string, unknown> => !!block && typeof block === 'object')
-    .filter((block) => block.type === 'text')
-    .map((block) => String(block.text ?? ''))
-    .join('')
-}
-
-function resultText(result: unknown): string {
-  if (!result || typeof result !== 'object') return ''
-  const content = (result as { content?: unknown }).content
-  if (!Array.isArray(content)) return ''
-  return content
-    .filter((block): block is Record<string, unknown> => !!block && typeof block === 'object')
-    .map((block) => block.type === 'text' ? String(block.text ?? '') : JSON.stringify(block))
-    .join('\n')
-}
-
 export class PiAdapter implements CodingAgentAdapter {
   private sessions = new Map<string, PiSession>()
   private piExecutablePath: string | null = null
   onDataAvailable?: (sessionId: string) => void
-
-  private legacyGatewayChecked = false
 
   async initialize(): Promise<void> {
     await this.findPiExecutable()
@@ -145,101 +113,8 @@ export class PiAdapter implements CodingAgentAdapter {
       throw new Error('Pi CLI not found. Install it with: npm install -g --ignore-scripts @earendil-works/pi-coding-agent')
     }
     this.piExecutablePath = found
+    removeLegacyGatewayProvider()
     return found
-  }
-
-  /**
-   * Earlier releases wrote a hosted AI gateway provider into Pi's models file.
-   * Its key came from 20x at spawn time, so the entry cannot work any more.
-   * Remove only that exact entry and leave everything else the user has.
-   */
-  private removeLegacyGatewayProvider(): void {
-    if (this.legacyGatewayChecked) return
-    this.legacyGatewayChecked = true
-    const agentDir = process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent')
-    const modelsPath = join(agentDir, 'models.json')
-    if (!existsSync(modelsPath)) return
-    try {
-      const root = JSON.parse(readFileSync(modelsPath, 'utf8')) as { providers?: Record<string, { apiKey?: unknown }> }
-      if (root.providers?.[LEGACY_GATEWAY_PROVIDER_ID]?.apiKey !== LEGACY_GATEWAY_API_KEY_REF) return
-      const providers = { ...root.providers }
-      delete providers[LEGACY_GATEWAY_PROVIDER_ID]
-      const temporaryPath = `${modelsPath}.20x-${process.pid}.tmp`
-      writeFileSync(temporaryPath, `${JSON.stringify({ ...root, providers }, null, 2)}
-`, { mode: 0o600 })
-      chmodSync(temporaryPath, 0o600)
-      renameSync(temporaryPath, modelsPath)
-    } catch (error) {
-      console.warn('[PiAdapter] Could not remove the legacy gateway provider from Pi models file:', error)
-    }
-  }
-
-  private buildMcpConfig(config: SessionConfig): string | undefined {
-    if (!config.mcpServers || Object.keys(config.mcpServers).length === 0) return undefined
-    const dir = join(homedir(), '.20x', 'pi-mcp')
-    mkdirSync(dir, { recursive: true })
-    const path = join(dir, `${sanitizePiSessionName(config.taskId)}-${randomUUID()}.json`)
-    // Pi forwards MCP tools to the model as <server>_<tool> names, which most
-    // providers cap at 64 characters. Sanitize server keys so a long display
-    // name (e.g. "[Team] Shared Workspace Tools") cannot overflow the limit.
-    const document = buildPiMcpConfigDocument(config.mcpServers, (name, slug) => {
-      console.warn(`[PiAdapter] Renamed MCP server "${name}" to "${slug}" to fit the provider 64-char tool name limit`)
-    })
-    writeFileSync(path, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 })
-    chmodSync(path, 0o600)
-    return path
-  }
-
-  private installPermissionExtension(): string {
-    const dir = join(homedir(), '.20x', 'pi')
-    const path = join(dir, 'permissions.ts')
-    mkdirSync(dir, { recursive: true })
-    const current = existsSync(path) ? readFileSync(path, 'utf8') : ''
-    if (current !== PI_PERMISSION_EXTENSION_SOURCE) {
-      const temporaryPath = `${path}.${process.pid}.tmp`
-      writeFileSync(temporaryPath, PI_PERMISSION_EXTENSION_SOURCE, { mode: 0o600 })
-      chmodSync(temporaryPath, 0o600)
-      renameSync(temporaryPath, path)
-    }
-    chmodSync(path, 0o600)
-    return path
-  }
-
-  private processEnv(config: SessionConfig): NodeJS.ProcessEnv {
-    const env = {
-      ...process.env,
-      ...(config.secretEnvVars ?? {}),
-      [PI_PERMISSION_MODE_ENV]: config.permissionMode ?? 'ask',
-    } as NodeJS.ProcessEnv
-    delete env.AI_AGENT
-    delete env.PI_CODING_AGENT
-    // A parent shell may set this globally. pi-mcp-adapter gives the variable
-    // precedence over its config, which would undo `directTools: false` and
-    // recreate overlong provider-facing names.
-    delete env.MCP_DIRECT_TOOLS
-    return env
-  }
-
-  /**
-   * Windows npm launchers need a shell; other platforms run the JS entry point.
-   * On macOS, Pi requires installed Node >=22.19 on PATH.
-   */
-  private piInvocation(
-    executable: string,
-    args: string[],
-    env: NodeJS.ProcessEnv,
-  ): { command: string; args: string[]; env: NodeJS.ProcessEnv; shell: boolean } {
-    if (process.platform === 'win32') {
-      return { command: executable, args, env, shell: true }
-    }
-
-    const runtime = nodeWorkerRuntime(process.platform, process.execPath, env)
-    return {
-      command: runtime.execPath,
-      args: [executable, ...args],
-      env: runtime.env,
-      shell: false,
-    }
   }
 
   private createSessionState(
@@ -273,16 +148,9 @@ export class PiAdapter implements CodingAgentAdapter {
     }
   }
 
-  private splitModel(model?: string): { provider?: string; modelId?: string } {
-    if (!model) return {}
-    const separator = model.indexOf('/')
-    if (separator < 0) return { modelId: model }
-    return { provider: model.slice(0, separator), modelId: model.slice(separator + 1) }
-  }
-
   private async applySelection(session: PiSession, config: SessionConfig): Promise<void> {
     if (config.model && config.model !== 'default') {
-      const { provider, modelId } = this.splitModel(config.model)
+      const { provider, modelId } = splitPiModel(config.model)
       if (!provider || !modelId) {
         throw new Error(`Pi model must use provider/model format: ${config.model}`)
       }
@@ -295,9 +163,8 @@ export class PiAdapter implements CodingAgentAdapter {
 
   private async spawnSession(config: SessionConfig, resumeId?: string): Promise<PiSession> {
     const executable = await this.findPiExecutable()
-    this.removeLegacyGatewayProvider()
-    const mcpConfigPath = this.buildMcpConfig(config)
-    const permissionExtension = this.installPermissionExtension()
+    const mcpConfigPath = writePiMcpConfig(config)
+    const permissionExtension = installPiPermissionExtension()
 
     const args = ['--mode', 'rpc', '--approve', '--name', sanitizePiSessionName(config.taskId), '--extension', permissionExtension]
     if (config.systemPrompt?.trim()) {
@@ -306,16 +173,7 @@ export class PiAdapter implements CodingAgentAdapter {
     if (resumeId) args.push('--session', resumeId)
     if (mcpConfigPath) args.push('--mcp-config', mcpConfigPath)
 
-    const invocation = this.piInvocation(executable, args, this.processEnv(config))
-    const child = spawn(invocation.command, invocation.args, {
-      cwd: config.workspaceDir,
-      env: invocation.env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-      shell: invocation.shell,
-      detached: process.platform !== 'win32',
-    })
-
+    const child = this.spawnPi(executable, args, config)
     const tempId = resumeId || randomUUID()
     const session = this.createSessionState(tempId, child, config, mcpConfigPath)
     this.sessions.set(tempId, session)
@@ -342,16 +200,31 @@ export class PiAdapter implements CodingAgentAdapter {
     }
   }
 
+  private spawnPi(executable: string, args: string[], config: SessionConfig): ChildProcessWithoutNullStreams {
+    const invocation = piInvocation(executable, args, piProcessEnv(config))
+    return spawn(invocation.command, invocation.args, {
+      cwd: config.workspaceDir,
+      env: invocation.env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+      shell: invocation.shell,
+      detached: process.platform !== 'win32',
+    })
+  }
+
   async createSession(config: SessionConfig): Promise<string> {
     const session = await this.spawnSession(config)
     return session.id
   }
 
   async resumeSession(sessionId: string, config: SessionConfig): Promise<SessionMessage[]> {
-    const session = await this.spawnSession(config, sessionId)
+    return this.loadHistory(await this.spawnSession(config, sessionId))
+  }
+
+  private async loadHistory(session: PiSession): Promise<SessionMessage[]> {
     const response = await this.command(session, { type: 'get_messages' })
     const messages = Array.isArray(response.data?.messages) ? response.data.messages as PiMessage[] : []
-    session.allMessages = this.convertMessages(messages)
+    session.allMessages = convertPiHistory(messages)
     return session.allMessages
   }
 
@@ -649,7 +522,7 @@ export class PiAdapter implements CodingAgentAdapter {
   private handleToolEvent(session: PiSession, event: Record<string, unknown>, status: string): void {
     const id = String(event.toolCallId || randomUUID())
     const existing = session.toolParts.get(id)
-    const output = resultText(event.result ?? event.partialResult)
+    const output = piToolResultText(event.result ?? event.partialResult)
     const tool: NonNullable<MessagePart['tool']> = {
       name: String(event.toolName || existing?.tool?.name || 'tool'),
       status,
@@ -898,26 +771,11 @@ export class PiAdapter implements CodingAgentAdapter {
     })
   }
 
-  private convertMessages(messages: PiMessage[]): SessionMessage[] {
-    return messages.flatMap((message, index) => {
-      if (message.role !== 'user' && message.role !== 'assistant') return []
-      const text = textFromContent(message.content)
-      if (!text) return []
-      return [{
-        id: `pi-history-${message.timestamp ?? index}`,
-        role: message.role === 'user' ? MessageRole.USER : MessageRole.ASSISTANT,
-        parts: [{ id: `pi-history-part-${message.timestamp ?? index}`, type: MessagePartType.TEXT, text }],
-      }]
-    })
-  }
-
   async getAllMessages(sessionId: string): Promise<SessionMessage[]> {
     const session = this.sessions.get(sessionId)
     if (!session) return []
     try {
-      const response = await this.command(session, { type: 'get_messages' })
-      const messages = Array.isArray(response.data?.messages) ? response.data.messages as PiMessage[] : []
-      session.allMessages = this.convertMessages(messages)
+      await this.loadHistory(session)
     } catch {
       // Use the last successful snapshot when the process has already ended.
     }
@@ -981,7 +839,7 @@ export class PiAdapter implements CodingAgentAdapter {
   async checkHealth(): Promise<{ available: boolean; reason?: string }> {
     try {
       const executable = await this.findPiExecutable()
-      const invocation = this.piInvocation(executable, ['--version'], { ...process.env })
+      const invocation = piInvocation(executable, ['--version'], { ...process.env })
       const { stdout, stderr } = await execFileAsync(invocation.command, invocation.args, {
         env: invocation.env,
         timeout: 10_000,
@@ -1011,26 +869,13 @@ export class PiAdapter implements CodingAgentAdapter {
     directory?: string,
   ): Promise<{ providers: Array<{ id: string; name: string; models: Array<{ id: string; name: string }> }>; default: Record<string, string> }> {
     const executable = await this.findPiExecutable()
-    this.removeLegacyGatewayProvider()
     const config: SessionConfig = {
       agentId: 'pi-discovery',
       taskId: 'pi-discovery',
       workspaceDir: directory || process.cwd(),
       permissionMode: 'allow',
     }
-    const invocation = this.piInvocation(
-      executable,
-      ['--mode', 'rpc', '--no-session', '--approve'],
-      this.processEnv(config),
-    )
-    const child = spawn(invocation.command, invocation.args, {
-      cwd: config.workspaceDir,
-      env: invocation.env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-      shell: invocation.shell,
-      detached: process.platform !== 'win32',
-    })
+    const child = this.spawnPi(executable, ['--mode', 'rpc', '--no-session', '--approve'], config)
     const session = this.createSessionState(`pi-discovery-${randomUUID()}`, child, config)
     this.attachProcess(session)
 
@@ -1040,37 +885,7 @@ export class PiAdapter implements CodingAgentAdapter {
         this.command(session, { type: 'get_available_models' }),
       ])
       const models = Array.isArray(available.data?.models) ? available.data.models : []
-      const providers = new Map<string, { id: string; name: string; models: Array<{ id: string; name: string }> }>()
-      for (const model of models) {
-        if (!model || typeof model !== 'object') continue
-        const record = model as Record<string, unknown>
-        if (typeof record.provider !== 'string' || typeof record.id !== 'string') continue
-        const provider = providers.get(record.provider) ?? {
-          id: record.provider,
-          name: record.provider,
-          models: [],
-        }
-        if (!provider.models.some((item) => item.id === record.id)) {
-          provider.models.push({
-            id: record.id,
-            name: typeof record.name === 'string' ? record.name : record.id,
-          })
-        }
-        providers.set(record.provider, provider)
-      }
-      const defaultModel = state.data?.model
-      const defaultProvider = defaultModel && typeof defaultModel === 'object'
-        ? (defaultModel as Record<string, unknown>).provider
-        : undefined
-      const defaultModelId = defaultModel && typeof defaultModel === 'object'
-        ? (defaultModel as Record<string, unknown>).id
-        : undefined
-      return {
-        providers: Array.from(providers.values()),
-        default: typeof defaultProvider === 'string' && typeof defaultModelId === 'string'
-          ? { [defaultProvider]: defaultModelId }
-          : {},
-      }
+      return piProvidersFromModels(models, state.data?.model)
     } finally {
       await this.terminateProcess(session)
     }

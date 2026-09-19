@@ -4,6 +4,7 @@ import { AgentManager } from './agent-manager'
 import { FakeAdapter } from '../../test/helpers/fake-adapter'
 import { shouldEnableTillDone } from './agent-manager/session-config'
 import { isDelegationTool } from './agent-manager/watchdogs'
+import { assistantTextKey } from './agent-manager/output-dedup'
 import type { TaskRecord } from './database'
 import { generateAgentsMd, generateClaudeMd, getMemoryFileName, writeAgentsDocumentation, writeSkillFiles } from './agent-manager/workspace-docs'
 import { buildMessageWithAttachmentContext, syncAttachmentsToWorkspace } from './agent-manager/attachments'
@@ -11,7 +12,6 @@ import { SessionStatus, TaskStatus } from '../shared/constants'
 import { MessagePartType, MessageRole, SessionStatusType } from './adapters/coding-agent-adapter'
 import { unregisterSecretSession } from './secret-broker'
 
-// Mock filesystem operations
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>()
   return {
@@ -28,7 +28,6 @@ vi.mock('fs/promises', () => ({
   writeFile: vi.fn(async () => undefined),
 }))
 
-// Mock heavy dependencies to avoid loading electron/native modules
 vi.mock('child_process', () => ({ spawn: vi.fn() }))
 const notificationInstances: Array<{ show: ReturnType<typeof vi.fn>; on: ReturnType<typeof vi.fn>; _listeners: Map<string, () => void>; opts: { title: string; body: string } }> = []
 
@@ -199,7 +198,7 @@ describe('AgentManager skill file paths', () => {
       const adapter = (manager as any).getAdapter('agent-1')
 
       expect(adapter).toBeInstanceOf(AcpAdapter)
-      expect(AcpAdapter).toHaveBeenCalledWith('cursor')
+      expect(AcpAdapter).toHaveBeenCalledWith()
     })
 
     it('uses the Pi RPC adapter for Pi agents', () => {
@@ -360,7 +359,6 @@ describe('AgentManager skill file paths', () => {
       const workspaceDir = '/tmp/test-workspace'
       await writeSkillFiles(mockDb, 'task-1', 'agent-1', workspaceDir)
 
-      // Verify SKILL.md was written under .claude/skills/ (now uses async fs/promises)
       const mkdirCalls = mockedMkdirAsync.mock.calls.map(c => c[0])
       expect(mkdirCalls).toContainEqual('/tmp/test-workspace/.claude/skills/test-skill')
 
@@ -369,7 +367,6 @@ describe('AgentManager skill file paths', () => {
         '/tmp/test-workspace/.claude/skills/test-skill/SKILL.md'
       )
 
-      // Verify it was NOT written to .agents/skills/
       const agentsWrites = writeFilePaths.filter(p => p.includes('.agents/skills/'))
       expect(agentsWrites).toHaveLength(0)
     })
@@ -385,7 +382,6 @@ describe('AgentManager skill file paths', () => {
         '/tmp/test-workspace/.agents/skills/test-skill/SKILL.md'
       )
 
-      // Verify it was NOT written to .claude/skills/
       const claudeWrites = writeFilePaths.filter(p => p.includes('.claude/skills/'))
       expect(claudeWrites).toHaveLength(0)
     })
@@ -401,7 +397,6 @@ describe('AgentManager skill file paths', () => {
         '/tmp/test-workspace/.agents/skills/test-skill/SKILL.md'
       )
 
-      // Verify it was NOT written to .claude/skills/
       const claudeWrites = writeFilePaths.filter(p => p.includes('.claude/skills/'))
       expect(claudeWrites).toHaveLength(0)
     })
@@ -455,11 +450,9 @@ describe('AgentManager skill file paths', () => {
 
       const writeFilePaths = mockedWriteFileAsync.mock.calls.map(c => c[0] as string)
 
-      // Both files should be written to workspace root
       expect(writeFilePaths).toContain('/tmp/test-workspace/AGENTS.md')
       expect(writeFilePaths).toContain('/tmp/test-workspace/CLAUDE.md')
 
-      // Neither should be written inside .agents/
       const agentsDirWrites = writeFilePaths.filter(
         p => p.includes('.agents/AGENTS.md') || p.includes('.agents/CLAUDE.md')
       )
@@ -472,7 +465,6 @@ describe('AgentManager skill file paths', () => {
       const workspaceDir = '/tmp/test-workspace'
       await writeAgentsDocumentation(mockDb, workspaceDir, [], [], 'agent-1')
 
-      // mkdir (async) should NOT be called for .agents/ directory
       const mkdirCalls = mockedMkdirAsync.mock.calls.map(c => c[0] as string)
       const agentsDirCreates = mkdirCalls.filter(p => p.endsWith('.agents'))
       expect(agentsDirCreates).toHaveLength(0)
@@ -486,13 +478,9 @@ describe('AgentManager skill file paths', () => {
       const skills = [makeSkillRecord({ name: 'code-testing' })]
       const result: string = generateClaudeMd(mockDb, skills, ['org/repo'], '/tmp/ws')
 
-      // Should use .claude/skills/ paths in Quick Reference
       expect(result).toContain('(.claude/skills/code-testing/SKILL.md)')
-      // Should use .claude/skills/ paths in Detailed Skills
       expect(result).toContain('[.claude/skills/code-testing/SKILL.md](.claude/skills/code-testing/SKILL.md)')
-      // Should NOT use bare skills/ paths (old behavior)
       expect(result).not.toMatch(/\(skills\/code-testing\/SKILL\.md\)/)
-      // Should NOT reference .agents/skills/
       expect(result).not.toContain('.agents/skills/')
     })
 
@@ -513,11 +501,8 @@ describe('AgentManager skill file paths', () => {
       const skills = [makeSkillRecord({ name: 'code-testing' })]
       const result: string = generateAgentsMd(mockDb, skills, ['org/repo'], '/tmp/ws')
 
-      // Should use .agents/skills/ paths
       expect(result).toContain('(.agents/skills/code-testing/SKILL.md)')
-      // Should NOT use bare skills/ paths (old behavior)
       expect(result).not.toMatch(/\(skills\/code-testing\/SKILL\.md\)/)
-      // Should NOT reference .claude/skills/
       expect(result).not.toContain('.claude/skills/')
     })
 
@@ -1377,8 +1362,6 @@ describe('AgentManager transitionToIdle — completing without review', () => {
   function setup(mockDb: ReturnType<typeof makeDb>) {
     const mgr = new AgentManager(mockDb)
     vi.spyOn(mgr as any, 'sendToRenderer').mockImplementation(() => undefined)
-    vi.spyOn(mgr as any, 'extractOutputValues').mockResolvedValue(undefined)
-    vi.spyOn(mgr as any, 'autoEnableHeartbeat').mockImplementation(() => undefined)
     const session = {
       id: 'session-1',
       agentId: 'agent-1',
@@ -1396,7 +1379,7 @@ describe('AgentManager transitionToIdle — completing without review', () => {
   it.each([true,false])('desktop work requires server review with auto-complete=%s', async auto => {
     const mockDb=makeDb({auto_complete_without_review:auto});const {mgr,session}=setup(mockDb)
     const executeAction=vi.fn();mgr.setSyncManager({executeAction} as never)
-    await (mgr as any).transitionToIdle('session-1',session)
+    await (mgr as any).host.transitionToIdle('session-1',session)
     expect(mockDb.updateTask).not.toHaveBeenCalledWith('task-1',{status:TaskStatus.Completed})
     expect(mockDb.updateTask).toHaveBeenCalledWith('task-1',{status:TaskStatus.ReadyForReview})
     expect(executeAction).not.toHaveBeenCalled()
@@ -1441,11 +1424,8 @@ describe('AgentManager transitionToIdle — source task completion after feedbac
 
   function setupManager(mockDb: ReturnType<typeof createSourceTaskDb>) {
     const mgr = new AgentManager(mockDb)
-    // Mock sendToRenderer
     vi.spyOn(mgr as any, 'sendToRenderer').mockImplementation(() => undefined)
-    // Mock syncSkillsFromWorkspace
     vi.spyOn(mgr as any, 'syncSkillsFromWorkspace').mockResolvedValue(undefined)
-    // Create a session in working state
     const session = {
       id: 'session-1',
       agentId: 'agent-1',
@@ -1473,7 +1453,7 @@ describe('AgentManager transitionToIdle — source task completion after feedbac
     }))
     const executeAction = vi.fn().mockResolvedValue({success: true})
     mgr.setSyncManager({executeAction} as never)
-    const idle = (mgr as any).transitionToIdle('session-1', session)
+    const idle = (mgr as any).host.transitionToIdle('session-1', session)
     await vi.waitFor(() => expect(syncSkills).toHaveBeenCalled())
     expect(task.status).toBe(TaskStatus.AgentLearning)
     expect(executeAction).not.toHaveBeenCalled()
@@ -1486,7 +1466,7 @@ describe('AgentManager transitionToIdle — source task completion after feedbac
   it('learning never completes with the human credential',async()=>{
     const mockDb=createSourceTaskDb();const {mgr,session}=setupManager(mockDb)
     const executeAction=vi.fn();mgr.setSyncManager({executeAction} as never)
-    await (mgr as any).transitionToIdle('session-1',session)
+    await (mgr as any).host.transitionToIdle('session-1',session)
     expect(executeAction).not.toHaveBeenCalled()
     expect(mockDb.updateTask).not.toHaveBeenCalledWith('task-1',{status:TaskStatus.Completed})
   })
@@ -1516,11 +1496,10 @@ describe('AgentManager transitionToIdle — source task completion after feedbac
       adapter: adapter as any
     }
     sessionWithAdapter.seenPartIds.add('seen-part')
-    vi.spyOn(mgr as any, 'extractOutputValues').mockResolvedValue(undefined)
 
     const sendSpy = vi.spyOn(mgr as any, 'sendToRenderer')
 
-    await (mgr as any).transitionToIdle('session-1', sessionWithAdapter)
+    await (mgr as any).host.transitionToIdle('session-1', sessionWithAdapter)
 
     const replayCall = sendSpy.mock.calls.find(
       ([channel, payload]) => channel === 'agent:output-batch'
@@ -1554,10 +1533,9 @@ describe('AgentManager transitionToIdle — source task completion after feedbac
       ]))
     }
     const sessionWithAdapter = { ...session, adapter: adapter as any }
-    vi.spyOn(mgr as any, 'extractOutputValues').mockResolvedValue(undefined)
     const sendSpy = vi.spyOn(mgr as any, 'sendToRenderer')
 
-    await (mgr as any).transitionToIdle('session-1', sessionWithAdapter)
+    await (mgr as any).host.transitionToIdle('session-1', sessionWithAdapter)
 
     const batch = sendSpy.mock.calls.find(([channel]) => channel === 'agent:output-batch')?.[1] as
       | { messages: Array<{ id: string; content: string }> }
@@ -1595,13 +1573,12 @@ describe('AgentManager transitionToIdle — source task completion after feedbac
       ...session,
       adapter: adapter as any,
       seenPartIds: new Set<string>(['live-final-id']),
-      assistantTextKeys: new Set<string>([finalText])
+      assistantTextKeys: new Set<string>([assistantTextKey('assistant', 'text', finalText)!])
     }
-    vi.spyOn(mgr as any, 'extractOutputValues').mockResolvedValue(undefined)
 
     const sendSpy = vi.spyOn(mgr as any, 'sendToRenderer')
 
-    await (mgr as any).transitionToIdle('session-1', sessionWithAdapter)
+    await (mgr as any).host.transitionToIdle('session-1', sessionWithAdapter)
 
     const replayCalls = sendSpy.mock.calls.filter(
       ([channel, payload]) => channel === 'agent:output-batch'
@@ -1639,15 +1616,14 @@ describe('AgentManager transitionToIdle — source task completion after feedbac
       adapter: adapter as any,
       workspaceDir: '/tmp/test-workspace'
     }
-    vi.spyOn(mgr as any, 'extractOutputValues').mockResolvedValue(undefined)
-    vi.spyOn(mgr as any, 'ensurePollingCoordinator').mockImplementation(() => undefined)
+    vi.spyOn((mgr as any).poller, 'ensureCoordinator').mockImplementation(() => undefined)
 
-    await (mgr as any).transitionToIdle('session-1', sessionWithAdapter)
+    await (mgr as any).host.transitionToIdle('session-1', sessionWithAdapter)
 
     expect(adapter.getAllMessages).toHaveBeenCalledOnce()
     expect(adapter.getStatus).toHaveBeenCalledOnce()
     expect(mockDb.updateTask).not.toHaveBeenCalledWith('task-1', { status: TaskStatus.ReadyForReview })
-    expect((mgr as any).pollingEntries.has('session-1')).toBe(true)
+    expect((mgr as any).poller.entries.has('session-1')).toBe(true)
     expect(sessionWithAdapter.status).toBe('working')
   })
 
@@ -1678,23 +1654,17 @@ describe('AgentManager transitionToIdle — source task completion after feedbac
       ...session,
       adapter: adapter as any
     }
-    vi.spyOn(mgr as any, 'extractOutputValues').mockResolvedValue(undefined)
     vi.spyOn(mgr as any, 'sendToRenderer')
 
-    await (mgr as any).transitionToIdle('session-1', sessionWithAdapter)
+    await (mgr as any).host.transitionToIdle('session-1', sessionWithAdapter)
 
-    // partContentLengths should store the ACTUAL text, not its length
     const storedValue = sessionWithAdapter.partContentLengths.get('text-part-1')
     expect(storedValue).toBe(partText)
-    // Must NOT be the string representation of the length
     expect(storedValue).not.toBe(String(partText.length))
   })
 
   it('resumeAdapterSession seeds dedup state from resumed history without replaying to clients', async () => {
-    // Resume builds the in-memory dedup state (seenMessageIds / seenPartIds) so
-    // adapter polling won't re-emit historical parts as new streaming output.
-    // It must NOT push a transcript batch to clients — the projection (snapshot
-    // + `transcript:changed` deltas) is the sole render source.
+    // Resume seeds the dedup state but never pushes a transcript batch.
     const mockDb = createMockDb({})
     const mgr = new AgentManager(mockDb)
     const sendSpy = vi.spyOn(mgr as any, 'sendToRenderer')
@@ -1706,7 +1676,6 @@ describe('AgentManager transitionToIdle — source task completion after feedbac
           id: 'msg-1',
           role: MessageRole.ASSISTANT,
           parts: [
-            // Part WITHOUT an id — triggers random ID generation
             { type: MessagePartType.TEXT, text: 'Hello world', content: 'Hello world' },
           ]
         },
@@ -1714,7 +1683,6 @@ describe('AgentManager transitionToIdle — source task completion after feedbac
           id: 'msg-2',
           role: MessageRole.ASSISTANT,
           parts: [
-            // Part WITH an id — uses stable id
             { id: 'stable-part-id', type: MessagePartType.TEXT, text: 'Stable', content: 'Stable' },
           ]
         }
@@ -1730,13 +1698,11 @@ describe('AgentManager transitionToIdle — source task completion after feedbac
 
     await (mgr as any).resumeAdapterSession(adapter, 'agent-1', 'task-1', 'session-1')
 
-    // No transcript batch is pushed to clients on resume.
     const batchCall = sendSpy.mock.calls.find(
       ([channel]) => channel === 'agent:output-batch'
     )
     expect(batchCall).toBeUndefined()
 
-    // The session's dedup state is seeded from the resumed history.
     const session = (mgr as any).sessions.get('session-1')
     expect(session).toBeDefined()
 
@@ -1745,7 +1711,6 @@ describe('AgentManager transitionToIdle — source task completion after feedbac
     expect(session.seenPartIds.size).toBe(2)
     expect(session.seenPartIds.has('stable-part-id')).toBe(true)
 
-    // Message-level IDs are tracked for codex-style message dedup.
     expect(session.seenMessageIds.has('msg-1')).toBe(true)
     expect(session.seenMessageIds.has('msg-2')).toBe(true)
   })
@@ -1896,7 +1861,6 @@ describe('AgentManager permission and question routing', () => {
     const mgr = new AgentManager(mockDb)
     vi.spyOn(mgr as any, 'sendToRenderer').mockImplementation(() => undefined)
 
-    // Create session with temp ID
     const session = {
       agentId: 'agent-1',
       taskId: 'task-1',
@@ -2052,7 +2016,7 @@ describe('AgentManager permission and question routing', () => {
     ;(mgr as any).sessions.set('real-id', heartbeatSession)
     ;(mgr as any).sessionIdRedirects.set('temp-id', 'real-id')
 
-    vi.spyOn(mgr as any, 'stopAdapterPolling').mockImplementation(() => undefined)
+    vi.spyOn((mgr as any).poller, 'stop').mockImplementation(() => undefined)
     vi.spyOn(mgr as any, 'getAdapter').mockReturnValue({ destroySession })
     vi.spyOn(mgr as any, 'buildSessionConfig').mockResolvedValue({})
 
@@ -2102,11 +2066,9 @@ describe('AgentManager resumeAdapterSession — SESSION_ENDED for completed task
     vi.spyOn(mgr as any, 'buildMcpServersForAdapter').mockResolvedValue({})
     vi.spyOn(mgr as any, 'setupSecretSession').mockReturnValue(null)
 
-    // Should NOT throw — returns empty string to signal session ended
     const result = await mgr.resumeSession('agent-1', 'task-1', 'old-session-id')
     expect(result).toBe('')
 
-    // session_id should be cleared
     expect(mockDb.updateTask).toHaveBeenCalledWith('task-1', { session_id: null })
   })
 
@@ -2145,7 +2107,6 @@ describe('AgentManager resumeAdapterSession — SESSION_ENDED for completed task
     vi.spyOn(mgr as any, 'buildMcpServersForAdapter').mockResolvedValue({})
     vi.spyOn(mgr as any, 'setupSecretSession').mockReturnValue(null)
 
-    // Should still throw for non-completed tasks
     await expect(mgr.resumeSession('agent-1', 'task-1', 'old-session-id')).rejects.toThrow()
   })
 })
@@ -2170,21 +2131,17 @@ describe('syncAttachmentsToWorkspace', () => {
     } as unknown as ConstructorParameters<typeof AgentManager>[0]
 
 
-    // All source files exist
     mockedExistsSync.mockImplementation((p: any) => {
       const path = String(p)
       if (path.includes('att-1-design.png') || path.includes('att-2-spec.pdf')) return true
-      // destDir doesn't exist yet
       if (path.endsWith('/attachments')) return false
       return false
     })
 
     const refs = syncAttachmentsToWorkspace(mockDb, 'task-1', '/tmp/ws')
 
-    // Should create the destination directory
     expect(mockedMkdirSync).toHaveBeenCalledWith('/tmp/ws/attachments', { recursive: true })
 
-    // Should copy both files
     expect(mockedCopyFileSync).toHaveBeenCalledWith(
       '/data/attachments/task-1/att-1-design.png',
       '/tmp/ws/attachments/design.png'
@@ -2194,7 +2151,6 @@ describe('syncAttachmentsToWorkspace', () => {
       '/tmp/ws/attachments/spec.pdf'
     )
 
-    // Should return references
     expect(refs).toEqual([
       '- attachments/design.png',
       '- attachments/spec.pdf',
@@ -2242,7 +2198,6 @@ describe('syncAttachmentsToWorkspace', () => {
 
     const refs = syncAttachmentsToWorkspace(mockDb, 'task-1', '/tmp/ws')
 
-    // Only the existing file should be copied
     expect(mockedCopyFileSync).toHaveBeenCalledTimes(1)
     expect(mockedCopyFileSync).toHaveBeenCalledWith(
       '/data/attachments/task-1/att-1-exists.txt',
@@ -2293,22 +2248,41 @@ describe('buildMessageWithAttachmentContext', () => {
   })
 })
 
+describe('AgentManager polling coordinator cycles', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('a nudged cycle polls only the sessions that reported data; the sweep polls all', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    const mgr = new AgentManager(createMockDb({}))
+    const poll = vi.spyOn((mgr as any).poller, 'pollSingleSession').mockResolvedValue(undefined)
+    const adapter: any = { pollMessages: vi.fn(), getStatus: vi.fn() }
+    for (const id of ['s1', 's2']) {
+      ;(mgr as any).poller.start(id, adapter, { agentId: 'agent-1', taskId: id, workspaceDir: '/tmp/ws' })
+    }
+    const polledIds = async (): Promise<string[]> => {
+      for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve))
+      return poll.mock.calls.map(([entry]) => (entry as { sessionId: string }).sessionId)
+    }
+
+    adapter.onDataAvailable('s1')
+    await vi.advanceTimersByTimeAsync(50)
+    expect(await polledIds()).toEqual(['s1'])
+
+    poll.mockClear()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(await polledIds()).toEqual(['s1', 's2'])
+  })
+})
+
 describe('AgentManager startAdapterPolling — IDLE grace period for follow-up messages', () => {
-  // Regression test for: "opencode transitions to idle without any response".
-  // When a follow-up message is sent, startAdapterPolling is invoked with an
-  // existingSession so that dedup state (seenMessageIds / seenPartIds) is
-  // preserved. Previously `hasSeenWork` was pre-set to true whenever an
-  // existingSession was passed, which caused the IDLE grace period to be
-  // skipped. Because opencode's sendPrompt is fire-and-forget, the first poll
-  // after a follow-up can briefly observe IDLE while the server is still
-  // ingesting the request. Skipping the grace period meant transitionToIdle
-  // ran immediately and the session flipped to idle without any response.
+  // Regression: a follow-up prompt (existingSession passed) must still get the
+  // IDLE grace period; opencode's fire-and-forget send can report IDLE first.
 
   function buildManager() {
     const mockDb = createMockDb({})
     const mgr = new AgentManager(mockDb)
     vi.spyOn(mgr as any, 'sendToRenderer').mockImplementation(() => undefined)
-    vi.spyOn(mgr as any, 'ensurePollingCoordinator').mockImplementation(() => undefined)
+    vi.spyOn((mgr as any).poller, 'ensureCoordinator').mockImplementation(() => undefined)
     return mgr
   }
 
@@ -2329,14 +2303,14 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
       partContentLengths: new Map([['part-1', '10']]),
     } as any
 
-    ;(mgr as any).startAdapterPolling(
+    ;(mgr as any).poller.start(
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
       existingSession
     )
 
-    const entry = (mgr as any).pollingEntries.get('session-1')
+    const entry = (mgr as any).poller.entries.get('session-1')
     expect(entry).toBeDefined()
     // hasSeenWork MUST start false so the IDLE grace period applies to every
     // new prompt — not just brand-new sessions.
@@ -2352,7 +2326,6 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
     const mgr = buildManager()
     const adapter = buildAdapter()
 
-    // Simulate a real session in memory
     const session = {
       agentId: 'agent-1',
       taskId: 'task-1',
@@ -2367,29 +2340,28 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
 
     // Start polling as if a follow-up message was just sent. Pre-fix this
     // would set hasSeenWork=true and skip the grace period.
-    ;(mgr as any).startAdapterPolling(
+    ;(mgr as any).poller.start(
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
       session
     )
 
-    const entry = (mgr as any).pollingEntries.get('session-1')
+    const entry = (mgr as any).poller.entries.get('session-1')
     expect(entry).toBeDefined()
     // Keep it fresh so sessionAge stays under the 15s grace window
     entry.createdAt = Date.now()
 
     // Fail loudly if the regression returns and transitionToIdle fires before
     // any work has been observed.
-    const transitionSpy = vi.spyOn(mgr as any, 'transitionToIdle').mockResolvedValue(undefined)
+    const transitionSpy = vi.spyOn((mgr as any).host, 'transitionToIdle').mockResolvedValue(undefined)
 
-    // Run one poll cycle — adapter reports IDLE (prompt not yet ingested)
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
 
     expect(transitionSpy).not.toHaveBeenCalled()
     // Entry must still be registered so subsequent polls can observe BUSY
     // once the backend actually picks up the prompt.
-    expect((mgr as any).pollingEntries.has('session-1')).toBe(true)
+    expect((mgr as any).poller.entries.has('session-1')).toBe(true)
   })
 
   it('pollSingleSession keeps polling when the adapter buffers data after the poll (regression: last message stranded)', async () => {
@@ -2407,14 +2379,14 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
       adapter,
     }
     ;(mgr as any).sessions.set('session-1', session)
-    ;(mgr as any).startAdapterPolling(
+    ;(mgr as any).poller.start(
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
       session
     )
 
-    const entry = (mgr as any).pollingEntries.get('session-1')
+    const entry = (mgr as any).poller.entries.get('session-1')
     // Past both idle grace windows, so only the new guard can hold IDLE off.
     entry.createdAt = Date.now() - 60_000
     entry.hasSeenWork = true
@@ -2428,13 +2400,13 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
       return { type: SessionStatusType.IDLE }
     })
 
-    const transitionSpy = vi.spyOn(mgr as any, 'transitionToIdle').mockResolvedValue(undefined)
+    const transitionSpy = vi.spyOn((mgr as any).host, 'transitionToIdle').mockResolvedValue(undefined)
 
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
 
     // Unregistering here would strand the buffered message until the next prompt.
     expect(transitionSpy).not.toHaveBeenCalled()
-    expect((mgr as any).pollingEntries.has('session-1')).toBe(true)
+    expect((mgr as any).poller.entries.has('session-1')).toBe(true)
   })
 
   it('pollSingleSession still transitions to idle when nothing was buffered after the poll', async () => {
@@ -2452,34 +2424,29 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
       adapter,
     }
     ;(mgr as any).sessions.set('session-1', session)
-    ;(mgr as any).startAdapterPolling(
+    ;(mgr as any).poller.start(
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
       session
     )
 
-    const entry = (mgr as any).pollingEntries.get('session-1')
+    const entry = (mgr as any).poller.entries.get('session-1')
     entry.createdAt = Date.now() - 60_000
     entry.hasSeenWork = true
     entry.lastPartReceivedAt = Date.now() - 60_000
 
-    const transitionSpy = vi.spyOn(mgr as any, 'transitionToIdle').mockResolvedValue(undefined)
+    const transitionSpy = vi.spyOn((mgr as any).host, 'transitionToIdle').mockResolvedValue(undefined)
 
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
 
     expect(transitionSpy).toHaveBeenCalledOnce()
-    expect((mgr as any).pollingEntries.has('session-1')).toBe(false)
+    expect((mgr as any).poller.entries.has('session-1')).toBe(false)
   })
 
   it('pollSingleSession does NOT set hasSeenWork from message content — only from BUSY status (root cause: stale parts)', async () => {
-    // ROOT CAUSE regression test: pollMessages can return stale assistant tool
-    // parts (fingerprint updates from the previous turn) or user echoes.  The
-    // old code set hasSeenWork=true on any non-user part, which disabled the
-    // grace period.  On the same poll cycle getStatus returned IDLE (backend
-    // still ingesting the prompt), so transitionToIdle fired with no response.
-    //
-    // Fix: hasSeenWork is set ONLY when getStatus returns BUSY/WAITING_APPROVAL.
+    // Regression: stale parts from the previous turn must not set hasSeenWork;
+    // only a BUSY/WAITING_APPROVAL status does.
     const mgr = buildManager()
     const adapter = buildAdapter()
 
@@ -2503,24 +2470,22 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
     }
     ;(mgr as any).sessions.set('session-1', session)
 
-    ;(mgr as any).startAdapterPolling(
+    ;(mgr as any).poller.start(
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' }
     )
 
-    const entry = (mgr as any).pollingEntries.get('session-1')
+    const entry = (mgr as any).poller.entries.get('session-1')
     entry.createdAt = Date.now()
 
-    const transitionSpy = vi.spyOn(mgr as any, 'transitionToIdle').mockResolvedValue(undefined)
+    const transitionSpy = vi.spyOn((mgr as any).host, 'transitionToIdle').mockResolvedValue(undefined)
 
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
 
-    // hasSeenWork must stay false — message content never sets it
     expect(entry.hasSeenWork).toBe(false)
-    // Grace period should prevent transition
     expect(transitionSpy).not.toHaveBeenCalled()
-    expect((mgr as any).pollingEntries.has('session-1')).toBe(true)
+    expect((mgr as any).poller.entries.has('session-1')).toBe(true)
   })
 
   it('pollSingleSession sets hasSeenWork=true when getStatus returns BUSY', async () => {
@@ -2542,18 +2507,17 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
     }
     ;(mgr as any).sessions.set('session-1', session)
 
-    ;(mgr as any).startAdapterPolling(
+    ;(mgr as any).poller.start(
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' }
     )
 
-    const entry = (mgr as any).pollingEntries.get('session-1')
+    const entry = (mgr as any).poller.entries.get('session-1')
     entry.createdAt = Date.now()
 
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
 
-    // BUSY status is the authoritative signal → hasSeenWork must be true
     expect(entry.hasSeenWork).toBe(true)
   })
 
@@ -2586,15 +2550,15 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
     }
     ;(mgr as any).sessions.set('session-1', session)
 
-    ;(mgr as any).startAdapterPolling(
+    ;(mgr as any).poller.start(
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
       session
     )
 
-    const firstEntry = (mgr as any).pollingEntries.get('session-1')
-    await (mgr as any).pollSingleSession(firstEntry)
+    const firstEntry = (mgr as any).poller.entries.get('session-1')
+    await (mgr as any).poller.pollSingleSession(firstEntry)
 
     expect(abortPrompt).toHaveBeenCalledOnce()
 
@@ -2602,15 +2566,15 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
     // App Server running tool is still visible. The new PollingEntry has a
     // fresh watchdogFired=false, so the session-level one-shot guard must
     // suppress another chat error and abort attempt.
-    ;(mgr as any).startAdapterPolling(
+    ;(mgr as any).poller.start(
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
       session
     )
 
-    const secondEntry = (mgr as any).pollingEntries.get('session-1')
-    await (mgr as any).pollSingleSession(secondEntry)
+    const secondEntry = (mgr as any).poller.entries.get('session-1')
+    await (mgr as any).poller.pollSingleSession(secondEntry)
 
     const sendSpy = vi.mocked((mgr as any).sendToRenderer)
     const autoAbortMessages = sendSpy.mock.calls.filter(([channel, payload]) => (
@@ -2658,15 +2622,15 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
     }
     ;(mgr as any).sessions.set('session-1', session)
 
-    ;(mgr as any).startAdapterPolling(
+    ;(mgr as any).poller.start(
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
       session
     )
 
-    const entry = (mgr as any).pollingEntries.get('session-1')
-    await (mgr as any).pollSingleSession(entry)
+    const entry = (mgr as any).poller.entries.get('session-1')
+    await (mgr as any).poller.pollSingleSession(entry)
 
     const sendSpy = vi.mocked((mgr as any).sendToRenderer)
     const autoAbortMessages = sendSpy.mock.calls.filter(([channel, payload]) => (
@@ -2707,15 +2671,15 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
     }
     ;(mgr as any).sessions.set('session-1', session)
 
-    ;(mgr as any).startAdapterPolling(
+    ;(mgr as any).poller.start(
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
       session
     )
 
-    const entry = (mgr as any).pollingEntries.get('session-1')
-    await (mgr as any).pollSingleSession(entry)
+    const entry = (mgr as any).poller.entries.get('session-1')
+    await (mgr as any).poller.pollSingleSession(entry)
 
     const sendSpy = vi.mocked((mgr as any).sendToRenderer)
     const outputBatchCalls = sendSpy.mock.calls.filter(([channel]) => channel === 'agent:output-batch')
@@ -2737,7 +2701,6 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
     const adapter = buildAdapter()
     const finalText = 'Investigation complete. The final assistant answer was emitted from live polling before idle replay.'
 
-    // First poll: BUSY
     adapter.pollMessages.mockResolvedValueOnce([
       { id: 'resp-1', role: 'assistant', content: finalText, type: 'text' }
     ])
@@ -2756,19 +2719,18 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
     }
     ;(mgr as any).sessions.set('session-1', session)
 
-    ;(mgr as any).startAdapterPolling(
+    ;(mgr as any).poller.start(
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' }
     )
 
-    const entry = (mgr as any).pollingEntries.get('session-1')
+    const entry = (mgr as any).poller.entries.get('session-1')
     entry.createdAt = Date.now()
 
-    const transitionSpy = vi.spyOn(mgr as any, 'transitionToIdle').mockResolvedValue(undefined)
+    const transitionSpy = vi.spyOn((mgr as any).host, 'transitionToIdle').mockResolvedValue(undefined)
 
-    // First poll: BUSY → hasSeenWork=true, no transition
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
     expect(entry.hasSeenWork).toBe(true)
     expect(transitionSpy).not.toHaveBeenCalled()
 
@@ -2778,10 +2740,10 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
     entry.lastPartReceivedAt = Date.now() - 10_000
     adapter.pollMessages.mockResolvedValueOnce([])
     adapter.getStatus.mockResolvedValueOnce({ type: SessionStatusType.IDLE })
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
     expect(transitionSpy).toHaveBeenCalledOnce()
     const transitionSession = transitionSpy.mock.calls[0][1] as { assistantTextKeys: Set<string> }
-    expect(transitionSession.assistantTextKeys.has(finalText)).toBe(true)
+    expect(transitionSession.assistantTextKeys.has(assistantTextKey('assistant', 'text', finalText)!)).toBe(true)
   })
 
   it('pollSingleSession transitions to idle after grace period expires without work (new session stuck)', async () => {
@@ -2800,19 +2762,19 @@ describe('AgentManager startAdapterPolling — IDLE grace period for follow-up m
     }
     ;(mgr as any).sessions.set('session-1', session)
 
-    ;(mgr as any).startAdapterPolling(
+    ;(mgr as any).poller.start(
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' }
     )
 
     // Backdate the entry so the 15s grace period has elapsed.
-    const entry = (mgr as any).pollingEntries.get('session-1')
+    const entry = (mgr as any).poller.entries.get('session-1')
     entry.createdAt = Date.now() - 30_000
 
-    const transitionSpy = vi.spyOn(mgr as any, 'transitionToIdle').mockResolvedValue(undefined)
+    const transitionSpy = vi.spyOn((mgr as any).host, 'transitionToIdle').mockResolvedValue(undefined)
 
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
 
     expect(transitionSpy).toHaveBeenCalledOnce()
   })
@@ -2823,7 +2785,7 @@ describe('AgentManager tillDone nudge on idle', () => {
     const mockDb = createMockDb({})
     const mgr = new AgentManager(mockDb)
     vi.spyOn(mgr as any, 'sendToRenderer').mockImplementation(() => undefined)
-    vi.spyOn(mgr as any, 'ensurePollingCoordinator').mockImplementation(() => undefined)
+    vi.spyOn((mgr as any).poller, 'ensureCoordinator').mockImplementation(() => undefined)
     return mgr
   }
 
@@ -2844,7 +2806,6 @@ describe('AgentManager tillDone nudge on idle', () => {
       partContentLengths: new Map<string, string>(),
       adapter,
       pollingStarted: true,
-      // Todos captured from todowrite tool calls during polling
       todos: [
         { content: 'fix bug', status: 'in_progress' },
         { content: 'write tests', status: 'pending' },
@@ -2853,35 +2814,30 @@ describe('AgentManager tillDone nudge on idle', () => {
     }
     ;(mgr as any).sessions.set('session-1', session)
 
-    ;(mgr as any).startAdapterPolling(
+    ;(mgr as any).poller.start(
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
       session
     )
 
-    const entry = (mgr as any).pollingEntries.get('session-1')
-    // Make the session old enough to pass grace periods
+    const entry = (mgr as any).poller.entries.get('session-1')
     entry.createdAt = Date.now() - 30_000
     entry.hasSeenWork = true
 
-    const transitionSpy = vi.spyOn(mgr as any, 'transitionToIdle').mockResolvedValue(undefined)
+    const transitionSpy = vi.spyOn((mgr as any).host, 'transitionToIdle').mockResolvedValue(undefined)
     const sendSpy = vi.spyOn(mgr as any, 'doSendAdapterMessage').mockResolvedValue(undefined)
 
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
 
-    // Should NOT transition to idle
     expect(transitionSpy).not.toHaveBeenCalled()
-    // Should send a nudge message containing the incomplete items
     expect(sendSpy).toHaveBeenCalledOnce()
     const nudgeText = sendSpy.mock.calls[0][2] as string
     expect(nudgeText).toContain('fix bug')
     expect(nudgeText).toContain('write tests')
     expect(nudgeText).toContain('Remaining items')
     expect(nudgeText).toContain('1/3 completed')
-    // Completed items should not appear in remaining
     expect(nudgeText).not.toContain('setup CI')
-    // Nudge count should be incremented
     expect(entry.tillDoneNudgeCount).toBe(1)
   })
 
@@ -2909,22 +2865,22 @@ describe('AgentManager tillDone nudge on idle', () => {
     }
     ;(mgr as any).sessions.set('session-1', session)
 
-    ;(mgr as any).startAdapterPolling(
+    ;(mgr as any).poller.start(
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
       session
     )
 
-    const entry = (mgr as any).pollingEntries.get('session-1')
+    const entry = (mgr as any).poller.entries.get('session-1')
     entry.createdAt = Date.now() - 30_000
     entry.hasSeenWork = true
 
-    const transitionSpy = vi.spyOn(mgr as any, 'transitionToIdle').mockResolvedValue(undefined)
-    vi.spyOn(mgr as any, 'stopAdapterPolling').mockImplementation(() => undefined)
+    const transitionSpy = vi.spyOn((mgr as any).host, 'transitionToIdle').mockResolvedValue(undefined)
+    vi.spyOn((mgr as any).poller, 'stop').mockImplementation(() => undefined)
     const sendSpy = vi.spyOn(mgr as any, 'doSendAdapterMessage').mockResolvedValue(undefined)
 
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
 
     expect(transitionSpy).toHaveBeenCalledOnce()
     expect(sendSpy).not.toHaveBeenCalled()
@@ -2951,26 +2907,24 @@ describe('AgentManager tillDone nudge on idle', () => {
     }
     ;(mgr as any).sessions.set('session-1', session)
 
-    ;(mgr as any).startAdapterPolling(
+    ;(mgr as any).poller.start(
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
       session
     )
 
-    const entry = (mgr as any).pollingEntries.get('session-1')
+    const entry = (mgr as any).poller.entries.get('session-1')
     entry.createdAt = Date.now() - 30_000
     entry.hasSeenWork = true
-    // Simulate having already nudged the max number of times
-    entry.tillDoneNudgeCount = (AgentManager as any).MAX_TILLDONE_NUDGES
+    entry.tillDoneNudgeCount = 5
 
-    const transitionSpy = vi.spyOn(mgr as any, 'transitionToIdle').mockResolvedValue(undefined)
-    vi.spyOn(mgr as any, 'stopAdapterPolling').mockImplementation(() => undefined)
+    const transitionSpy = vi.spyOn((mgr as any).host, 'transitionToIdle').mockResolvedValue(undefined)
+    vi.spyOn((mgr as any).poller, 'stop').mockImplementation(() => undefined)
     const sendSpy = vi.spyOn(mgr as any, 'doSendAdapterMessage').mockResolvedValue(undefined)
 
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
 
-    // Should transition to idle since nudge limit is reached
     expect(transitionSpy).toHaveBeenCalledOnce()
     expect(sendSpy).not.toHaveBeenCalled()
   })
@@ -2996,26 +2950,24 @@ describe('AgentManager tillDone nudge on idle', () => {
     }
     ;(mgr as any).sessions.set('session-1', session)
 
-    ;(mgr as any).startAdapterPolling(
+    ;(mgr as any).poller.start(
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
       session
     )
 
-    const entry = (mgr as any).pollingEntries.get('session-1')
+    const entry = (mgr as any).poller.entries.get('session-1')
     entry.tillDoneNudgeCount = 3
 
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
 
-    // BUSY resets the nudge counter
     expect(entry.tillDoneNudgeCount).toBe(0)
   })
 
   it('end-to-end: captures todos from polled messages, nudges on idle, then transitions when done', async () => {
     const mgr = buildManager()
 
-    // Step 1: Agent is working and creates a todo list via todowrite
     let statusType = SessionStatusType.BUSY
     const adapter = {
       pollMessages: vi.fn(async () => []),
@@ -3035,18 +2987,17 @@ describe('AgentManager tillDone nudge on idle', () => {
     }
     ;(mgr as any).sessions.set('session-1', session)
 
-    ;(mgr as any).startAdapterPolling(
+    ;(mgr as any).poller.start(
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
       session
     )
 
-    const entry = (mgr as any).pollingEntries.get('session-1')
+    const entry = (mgr as any).poller.entries.get('session-1')
     entry.createdAt = Date.now() - 30_000
     entry.hasSeenWork = true
 
-    // Agent polls back a todowrite tool call with 3 items
     adapter.pollMessages.mockResolvedValueOnce([
       {
         id: 'part-todo-1',
@@ -3065,26 +3016,23 @@ describe('AgentManager tillDone nudge on idle', () => {
       }
     ] as any)
 
-    // Poll while BUSY — should capture todos onto session
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
     expect((session as any).todos).toEqual([
       { content: 'write unit tests', status: 'in_progress' },
       { content: 'fix linting errors', status: 'pending' },
       { content: 'update README', status: 'pending' }
     ])
 
-    // Step 2: Agent goes idle WITHOUT finishing todos
     statusType = SessionStatusType.IDLE
     adapter.pollMessages.mockResolvedValueOnce([])
     // Clear the post-data grace timer so idle detection isn't skipped
     entry.lastPartReceivedAt = Date.now() - 10_000
 
-    const transitionSpy = vi.spyOn(mgr as any, 'transitionToIdle').mockResolvedValue(undefined)
+    const transitionSpy = vi.spyOn((mgr as any).host, 'transitionToIdle').mockResolvedValue(undefined)
     const sendSpy = vi.spyOn(mgr as any, 'doSendAdapterMessage').mockResolvedValue(undefined)
 
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
 
-    // Should NOT transition — should nudge instead
     expect(transitionSpy).not.toHaveBeenCalled()
     expect(sendSpy).toHaveBeenCalledOnce()
     const nudgeText = sendSpy.mock.calls[0][2] as string
@@ -3094,7 +3042,6 @@ describe('AgentManager tillDone nudge on idle', () => {
     expect(nudgeText).toContain('[pending] update README')
     expect(entry.tillDoneNudgeCount).toBe(1)
 
-    // Step 3: Agent resumes work (BUSY), completes all todos
     statusType = SessionStatusType.BUSY
     sendSpy.mockClear()
     transitionSpy.mockClear()
@@ -3117,25 +3064,21 @@ describe('AgentManager tillDone nudge on idle', () => {
       }
     ] as any)
 
-    await (mgr as any).pollSingleSession(entry)
-    // Nudge counter should reset on BUSY
+    await (mgr as any).poller.pollSingleSession(entry)
     expect(entry.tillDoneNudgeCount).toBe(0)
-    // Todos should be updated to all completed
     expect((session as any).todos).toEqual([
       { content: 'write unit tests', status: 'completed' },
       { content: 'fix linting errors', status: 'completed' },
       { content: 'update README', status: 'completed' }
     ])
 
-    // Step 4: Agent goes idle again — all todos done, should transition normally
     statusType = SessionStatusType.IDLE
     adapter.pollMessages.mockResolvedValueOnce([])
     entry.lastPartReceivedAt = Date.now() - 10_000
-    vi.spyOn(mgr as any, 'stopAdapterPolling').mockImplementation(() => undefined)
+    vi.spyOn((mgr as any).poller, 'stop').mockImplementation(() => undefined)
 
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
 
-    // Should transition to idle (all done) — no nudge
     expect(transitionSpy).toHaveBeenCalledOnce()
     expect(sendSpy).not.toHaveBeenCalled()
   })
@@ -3147,7 +3090,7 @@ describe('AgentManager delegation-aware watchdogs', () => {
     Object.assign(mockDb as any, dbOverrides)
     const mgr = new AgentManager(mockDb)
     vi.spyOn(mgr as any, 'sendToRenderer').mockImplementation(() => undefined)
-    vi.spyOn(mgr as any, 'ensurePollingCoordinator').mockImplementation(() => undefined)
+    vi.spyOn((mgr as any).poller, 'ensureCoordinator').mockImplementation(() => undefined)
     return { mgr, mockDb }
   }
 
@@ -3164,28 +3107,25 @@ describe('AgentManager delegation-aware watchdogs', () => {
       pollingStarted: true,
     }
     ;(mgr as any).sessions.set('session-1', session)
-    ;(mgr as any).startAdapterPolling(
+    ;(mgr as any).poller.start(
       'session-1',
       adapter,
       { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' },
       session
     )
-    const entry = (mgr as any).pollingEntries.get('session-1')
+    const entry = (mgr as any).poller.entries.get('session-1')
     entry.hasSeenWork = true
     return { session, entry }
   }
 
   it('classifies delegation tools correctly', () => {
-    // Subagent spawn tools
     expect(isDelegationTool('task')).toBe(true)
     expect(isDelegationTool('Task')).toBe(true)
     expect(isDelegationTool('agent')).toBe(true)
-    // Subtask orchestration tools (various MCP name manglings)
     expect(isDelegationTool('wait_for_subtasks')).toBe(true)
     expect(isDelegationTool('mcp__task-management__wait_for_subtasks')).toBe(true)
     expect(isDelegationTool('task-management_wait_for_subtasks')).toBe(true)
     expect(isDelegationTool('start_task')).toBe(true)
-    // Ordinary tools are not delegation
     expect(isDelegationTool('read')).toBe(false)
     expect(isDelegationTool('bash')).toBe(false)
     expect(isDelegationTool('todowrite')).toBe(false)
@@ -3207,7 +3147,7 @@ describe('AgentManager delegation-aware watchdogs', () => {
     entry.createdAt = Date.now() - 60_000
     entry.lastPartReceivedAt = Date.now() - 60_000 // recent enough for session watchdog
 
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
 
     expect(adapter.abortPrompt).not.toHaveBeenCalled()
     expect(entry.watchdogFired).toBeFalsy()
@@ -3226,9 +3166,9 @@ describe('AgentManager delegation-aware watchdogs', () => {
     const { entry } = buildBusySession(mgr, adapter)
     entry.createdAt = Date.now() - 60_000
     entry.lastPartReceivedAt = Date.now() - 60_000
-    vi.spyOn(mgr as any, 'sendAutoAbortMessageOnce').mockReturnValue(true)
+    vi.spyOn((mgr as any).poller, 'sendAutoAbortMessageOnce').mockReturnValue(true)
 
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
 
     expect(adapter.abortPrompt).toHaveBeenCalledOnce()
     expect(entry.watchdogFired).toBe(true)
@@ -3253,7 +3193,7 @@ describe('AgentManager delegation-aware watchdogs', () => {
     entry.createdAt = Date.now() - 60_000
     entry.lastPartReceivedAt = Date.now() - 1_000
 
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
 
     expect(adapter.abortPrompt).not.toHaveBeenCalled()
     expect(entry.watchdogFired).toBeFalsy()
@@ -3277,7 +3217,7 @@ describe('AgentManager delegation-aware watchdogs', () => {
     const { entry } = buildBusySession(mgr, adapter)
     entry.lastPartReceivedAt = Date.now() - 1_000
 
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
 
     expect(adapter.abortPrompt).not.toHaveBeenCalled()
   })
@@ -3299,7 +3239,7 @@ describe('AgentManager delegation-aware watchdogs', () => {
     entry.createdAt = Date.now() - 10 * 60_000
     entry.lastPartReceivedAt = Date.now() - 6 * 60_000
 
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
 
     expect(adapter.abortPrompt).not.toHaveBeenCalled()
     expect(entry.watchdogFired).toBeFalsy()
@@ -3320,7 +3260,7 @@ describe('AgentManager delegation-aware watchdogs', () => {
     entry.createdAt = Date.now() - 10 * 60_000
     entry.lastPartReceivedAt = Date.now() - 6 * 60_000
 
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
 
     expect(adapter.abortPrompt).not.toHaveBeenCalled()
     expect(entry.watchdogFired).toBeFalsy()
@@ -3341,7 +3281,7 @@ describe('AgentManager delegation-aware watchdogs', () => {
     entry.createdAt = Date.now() - 10 * 60_000
     entry.lastPartReceivedAt = Date.now() - 6 * 60_000
 
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
 
     expect(adapter.abortPrompt).not.toHaveBeenCalled()
     expect(entry.watchdogFired).toBeFalsy()
@@ -3357,9 +3297,9 @@ describe('AgentManager delegation-aware watchdogs', () => {
     const { entry } = buildBusySession(mgr, adapter)
     entry.createdAt = Date.now() - 10 * 60_000
     entry.lastPartReceivedAt = Date.now() - 6 * 60_000
-    vi.spyOn(mgr as any, 'sendAutoAbortMessageOnce').mockReturnValue(true)
+    vi.spyOn((mgr as any).poller, 'sendAutoAbortMessageOnce').mockReturnValue(true)
 
-    await (mgr as any).pollSingleSession(entry)
+    await (mgr as any).poller.pollSingleSession(entry)
 
     expect(adapter.abortPrompt).toHaveBeenCalledOnce()
     expect(entry.watchdogFired).toBe(true)
@@ -3402,7 +3342,7 @@ describe('AgentManager idle-session inactivity reaper', () => {
     const { mgr, stopSpy } = buildManager()
     addSession(mgr)
 
-    await (mgr as any).reapInactiveSessions()
+    await (mgr as any).lifetime.reap()
 
     // resetTaskStatus=false: this is a resource release, not a user stop
     expect(stopSpy).toHaveBeenCalledWith('session-1', false)
@@ -3412,7 +3352,7 @@ describe('AgentManager idle-session inactivity reaper', () => {
     const { mgr, stopSpy } = buildManager()
     addSession(mgr, { status: 'working' })
 
-    await (mgr as any).reapInactiveSessions()
+    await (mgr as any).lifetime.reap()
 
     expect(stopSpy).not.toHaveBeenCalled()
   })
@@ -3421,7 +3361,7 @@ describe('AgentManager idle-session inactivity reaper', () => {
     const { mgr, stopSpy } = buildManager()
     addSession(mgr, { lastActivityAt: Date.now() - 60_000 })
 
-    await (mgr as any).reapInactiveSessions()
+    await (mgr as any).lifetime.reap()
 
     expect(stopSpy).not.toHaveBeenCalled()
   })
@@ -3433,22 +3373,20 @@ describe('AgentManager idle-session inactivity reaper', () => {
     ])
     addSession(mgr)
 
-    await (mgr as any).reapInactiveSessions()
+    await (mgr as any).lifetime.reap()
 
     expect(stopSpy).not.toHaveBeenCalled()
   })
 
   it('skips pseudo-task sessions (no DB row) and sessions without a resume anchor', async () => {
     const { mgr, mockDb, stopSpy } = buildManager()
-    // No DB row (captain / heartbeat pseudo-tasks)
     ;(mockDb as any).getTask = vi.fn(() => undefined)
     addSession(mgr)
-    await (mgr as any).reapInactiveSessions()
+    await (mgr as any).lifetime.reap()
     expect(stopSpy).not.toHaveBeenCalled()
 
-    // DB row exists but has no persisted session_id to resume from
     ;(mockDb as any).getTask = vi.fn(() => ({ id: 'task-1', title: 'Test Task', session_id: null }))
-    await (mgr as any).reapInactiveSessions()
+    await (mgr as any).lifetime.reap()
     expect(stopSpy).not.toHaveBeenCalled()
   })
 })
@@ -3695,7 +3633,6 @@ describe('AgentManager durable transcript write-through', () => {
       getTranscriptParts: vi.fn(() => [])
     })
     const mgr = new AgentManager(mockDb)
-    // Avoid electron window access; keep persist path (sendToRenderer) intact
     ;(mgr as any).mainWindow = null
     return { mgr, mockDb, upserted }
   }
@@ -3953,7 +3890,7 @@ describe('AgentManager background subagent protection', () => {
         },
       })
 
-      await (mgr as any).reapInactiveSessions()
+      await (mgr as any).lifetime.reap()
 
       expect(stopSpy).not.toHaveBeenCalled()
     })
@@ -3963,7 +3900,7 @@ describe('AgentManager background subagent protection', () => {
       const stopSpy = vi.spyOn(mgr, 'stopSession').mockResolvedValue(undefined)
       addSession(mgr, { adapter: { getRunningTools: vi.fn(async () => []) } })
 
-      await (mgr as any).reapInactiveSessions()
+      await (mgr as any).lifetime.reap()
 
       expect(stopSpy).toHaveBeenCalledWith('session-1', false)
     })
@@ -3973,7 +3910,7 @@ describe('AgentManager background subagent protection', () => {
       const stopSpy = vi.spyOn(mgr, 'stopSession').mockResolvedValue(undefined)
       addSession(mgr, { adapter: {} })
 
-      await (mgr as any).reapInactiveSessions()
+      await (mgr as any).lifetime.reap()
 
       expect(stopSpy).toHaveBeenCalledWith('session-1', false)
     })
@@ -3985,7 +3922,7 @@ describe('AgentManager background subagent protection', () => {
         adapter: { getRunningTools: vi.fn(async () => { throw new Error('boom') }) },
       })
 
-      await (mgr as any).reapInactiveSessions()
+      await (mgr as any).lifetime.reap()
 
       expect(stopSpy).toHaveBeenCalledWith('session-1', false)
     })
@@ -3997,13 +3934,13 @@ describe('AgentManager background subagent protection', () => {
     it('re-registers polling when an already-idle session reports BUSY again', async () => {
       const { mgr, mockDb } = buildManager()
       const resumeSpy = vi
-        .spyOn(mgr as any, 'resumeAdapterPollingAfterPrematureIdle')
+        .spyOn((mgr as any).poller, 'resumeAfterPrematureIdle')
         .mockImplementation(() => undefined)
       addSession(mgr, {
         adapter: { getStatus: vi.fn(async () => ({ type: SessionStatusType.BUSY })) },
       })
 
-      ;(mgr as any).wakeSessionOnAdapterData('session-1')
+      ;(mgr as any).poller.wakeSessionOnAdapterData('session-1')
       await flush()
 
       expect(resumeSpy).toHaveBeenCalled()
@@ -4016,7 +3953,7 @@ describe('AgentManager background subagent protection', () => {
     it('re-registers polling during the gap before transitionToIdle marks the session idle', async () => {
       const { mgr } = buildManager()
       const resumeSpy = vi
-        .spyOn(mgr as any, 'resumeAdapterPollingAfterPrematureIdle')
+        .spyOn((mgr as any).poller, 'resumeAfterPrematureIdle')
         .mockImplementation(() => undefined)
       const getStatus = vi.fn(async () => ({ type: SessionStatusType.BUSY }))
       addSession(mgr, {
@@ -4026,7 +3963,7 @@ describe('AgentManager background subagent protection', () => {
 
       // pollAdapterSession removes the polling entry before its asynchronous
       // transitionToIdle call changes this status. A push event can land here.
-      ;(mgr as any).wakeSessionOnAdapterData('session-1')
+      ;(mgr as any).poller.wakeSessionOnAdapterData('session-1')
       await flush()
 
       expect(getStatus).toHaveBeenCalledTimes(1)
@@ -4036,13 +3973,13 @@ describe('AgentManager background subagent protection', () => {
     it('ignores trailing data from a session that is genuinely finished', async () => {
       const { mgr, mockDb } = buildManager()
       const resumeSpy = vi
-        .spyOn(mgr as any, 'resumeAdapterPollingAfterPrematureIdle')
+        .spyOn((mgr as any).poller, 'resumeAfterPrematureIdle')
         .mockImplementation(() => undefined)
       addSession(mgr, {
         adapter: { getStatus: vi.fn(async () => ({ type: SessionStatusType.IDLE })) },
       })
 
-      ;(mgr as any).wakeSessionOnAdapterData('session-1')
+      ;(mgr as any).poller.wakeSessionOnAdapterData('session-1')
       await flush()
 
       expect(resumeSpy).not.toHaveBeenCalled()
@@ -4052,13 +3989,13 @@ describe('AgentManager background subagent protection', () => {
     it('does nothing when the session is still registered for polling', async () => {
       const { mgr } = buildManager()
       const resumeSpy = vi
-        .spyOn(mgr as any, 'resumeAdapterPollingAfterPrematureIdle')
+        .spyOn((mgr as any).poller, 'resumeAfterPrematureIdle')
         .mockImplementation(() => undefined)
       const getStatus = vi.fn(async () => ({ type: SessionStatusType.BUSY }))
       addSession(mgr, { adapter: { getStatus } })
-      ;(mgr as any).pollingEntries.set('session-1', { sessionId: 'session-1' })
+      ;(mgr as any).poller.entries.set('session-1', { sessionId: 'session-1' })
 
-      ;(mgr as any).wakeSessionOnAdapterData('session-1')
+      ;(mgr as any).poller.wakeSessionOnAdapterData('session-1')
       await flush()
 
       expect(getStatus).not.toHaveBeenCalled()
@@ -4067,13 +4004,13 @@ describe('AgentManager background subagent protection', () => {
 
     it('dedupes concurrent wake-ups for the same session', async () => {
       const { mgr } = buildManager()
-      vi.spyOn(mgr as any, 'resumeAdapterPollingAfterPrematureIdle').mockImplementation(() => undefined)
+      vi.spyOn((mgr as any).poller, 'resumeAfterPrematureIdle').mockImplementation(() => undefined)
       const getStatus = vi.fn(async () => ({ type: SessionStatusType.BUSY }))
       addSession(mgr, { adapter: { getStatus } })
 
-      ;(mgr as any).wakeSessionOnAdapterData('session-1')
-      ;(mgr as any).wakeSessionOnAdapterData('session-1')
-      ;(mgr as any).wakeSessionOnAdapterData('session-1')
+      ;(mgr as any).poller.wakeSessionOnAdapterData('session-1')
+      ;(mgr as any).poller.wakeSessionOnAdapterData('session-1')
+      ;(mgr as any).poller.wakeSessionOnAdapterData('session-1')
       await flush()
 
       expect(getStatus).toHaveBeenCalledTimes(1)
@@ -4082,7 +4019,7 @@ describe('AgentManager background subagent protection', () => {
     it('resolves a re-keyed session id through sessionIdRedirects', async () => {
       const { mgr } = buildManager()
       const resumeSpy = vi
-        .spyOn(mgr as any, 'resumeAdapterPollingAfterPrematureIdle')
+        .spyOn((mgr as any).poller, 'resumeAfterPrematureIdle')
         .mockImplementation(() => undefined)
       addSession(mgr, {
         id: 'real-id',
@@ -4090,7 +4027,7 @@ describe('AgentManager background subagent protection', () => {
       })
       ;(mgr as any).sessionIdRedirects.set('temp-id', 'real-id')
 
-      ;(mgr as any).wakeSessionOnAdapterData('temp-id')
+      ;(mgr as any).poller.wakeSessionOnAdapterData('temp-id')
       await flush()
 
       expect(resumeSpy).toHaveBeenCalledWith('real-id', expect.anything())

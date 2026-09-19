@@ -610,7 +610,7 @@ Resume an existing agent session (reconnect to a previously started session).
 }
 ```
 
-The resumed session replays its full message history via WebSocket `agent:output` events.
+The resumed session replays its full message history via WebSocket `transcript:changed` events.
 
 **Error:** `404` — Session not found or expired.
 
@@ -658,7 +658,7 @@ Send a new user message to the agent (a new instruction or follow-up).
 | `success`      | `boolean`| Always true on success |
 | `newSessionId` | `string?`| Only present if session was re-keyed during auto-recovery |
 
-The agent's response streams via WebSocket `agent:output` events.
+The agent's response streams via WebSocket `transcript:changed` events.
 
 ---
 
@@ -669,7 +669,7 @@ Respond to an agent's permission request OR answer an agent's question.
 This single endpoint handles **two distinct interaction types**. Set `responseType` for a question so an adapter that supports both interactions uses its question endpoint:
 
 1. **Permission requests** (ACP/Codex adapters) — agent needs approval for a risky action (e.g., running a bash command). These arrive via `agent:status` with `status: "waiting_approval"` and may include a `pendingApproval` object.
-2. **Questions** (Claude Code / all adapters) — agent asks the user a structured question with options. These arrive as `agent:output` events with `partType: "question"` and `data.tool.questions` array rendered inline in the transcript.
+2. **Questions** (Claude Code / all adapters) — agent asks the user a structured question with options. These arrive as transcript parts (`transcript:changed`) with `partType: "question"` and `data.tool.questions` array rendered inline in the transcript.
 
 **Path Parameters:**
 
@@ -766,7 +766,7 @@ Replay messages from a running session. Used to re-sync the client transcript af
 | `success` | `boolean`       | Always true on success |
 | `status`  | `SessionStatus` | Current session status |
 
-The server replays the full message history via WebSocket `agent:output` events.
+The server replays the full message history via WebSocket `transcript:changed` events.
 
 **Error:** `404` — Session not found or not running.
 
@@ -825,7 +825,7 @@ Each WebSocket message is a JSON object with a `type` field indicating the event
 
 ```json
 {
-  "type": "agent:output",
+  "type": "transcript:changed",
   "payload": { ... }
 }
 ```
@@ -834,49 +834,41 @@ Each WebSocket message is a JSON object with a `type` field indicating the event
 
 ### Events: Server → Client
 
-#### `agent:output`
+#### `transcript:changed`
 
-An agent transcript message or streaming update.
+New or updated transcript parts for a task, coalesced over a short window.
+Applying a part is idempotent: replace any part with the same `partId`.
 
 ```json
 {
-  "type": "agent:output",
+  "type": "transcript:changed",
   "payload": {
-    "sessionId": "sess_abc123",
     "taskId": "clxyz123abc",
-    "type": "message",
-    "data": {
-      "id": "msg_unique_id",
-      "role": "assistant",
-      "content": "I'll start by creating the login component...",
-      "partType": "text",
-      "update": false,
-      "tool": null
-    }
+    "parts": [
+      {
+        "taskId": "clxyz123abc",
+        "partId": "msg_unique_id",
+        "seq": 17,
+        "role": "assistant",
+        "content": "I'll start by creating the login component...",
+        "partType": "text",
+        "createdAt": 1758290000000,
+        "updatedAt": 1758290001000,
+        "rev": 42
+      }
+    ],
+    "maxRev": 42
   }
 }
 ```
 
 **`payload` fields:**
 
-| Field       | Type     | Description |
-|-------------|----------|-------------|
-| `sessionId` | `string` | Session that produced this message |
-| `taskId`    | `string` | Associated task |
-| `type`      | `string` | Always `"message"` |
-| `data`      | `object` | Message content (see below) |
-
-**`data` fields:**
-
-| Field      | Type      | Description |
-|------------|-----------|-------------|
-| `id`       | `string`  | Unique message/part ID (for deduplication) |
-| `role`     | `string`  | `user`, `assistant`, or `system` |
-| `content`  | `string`  | Text content (may be markdown) |
-| `partType` | `string?` | Message category (see [PartType enum](#parttype)) |
-| `update`   | `boolean?`| If `true`, this replaces an existing message with the same `id` (streaming) |
-| `tool`     | `object?` | Tool call data (see [ToolData](#tooldata)) |
-| `stepTokens`| `object?`| Token usage for `step-finish` events: `{ input, output, cache }` |
+| Field    | Type       | Description |
+|----------|------------|-------------|
+| `taskId` | `string`   | Task whose transcript changed |
+| `parts`  | `object[]` | Stored transcript parts added or replaced since the last event |
+| `maxRev` | `number`   | Highest revision (`rev`) included |
 
 ---
 

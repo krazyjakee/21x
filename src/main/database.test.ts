@@ -114,7 +114,6 @@ describe('Task CRUD', () => {
   })
 
   it('getByExternalId finds the right task', () => {
-    // First create an MCP server for the foreign key
     const server = db.createMcpServer({ name: 'Test Server' })!
     const source = db.createTaskSource({
       mcp_server_id: server.id,
@@ -167,7 +166,6 @@ describe('JSON deserialization', () => {
     // Simulate corrupted data: repos stored as double-stringified JSON
     const task = db.createTask(makeTask({ repos: ['owner/repo1'] }))!
     const rawDb = (db as unknown as { db: import('better-sqlite3').Database }).db
-    // Write a double-stringified value directly to the database
     rawDb.prepare('UPDATE tasks SET repos = ? WHERE id = ?')
       .run(JSON.stringify(JSON.stringify(['owner/repo1'])), task.id)
     const reloaded = db.getTask(task.id)!
@@ -384,14 +382,12 @@ describe('TaskSource CRUD', () => {
   })
 
   it('CASCADE deletes tasks when source is deleted', () => {
-    // Create task source
     const source = db.createTaskSource({
       mcp_server_id: mcpServerId,
       name: 'Test Source',
       plugin_id: 'linear'
     })!
 
-    // Create tasks linked to this source
     const task1 = db.createTask(makeTask({
       title: 'Task 1',
       external_id: 'ext-1',
@@ -406,25 +402,21 @@ describe('TaskSource CRUD', () => {
       source: 'Test Source'
     }))!
 
-    // Create a task without source_id (should not be deleted)
     const task3 = db.createTask(makeTask({
       title: 'Task 3 (no source)'
     }))!
 
-    // Verify tasks exist
     expect(db.getTask(task1.id)).toBeDefined()
     expect(db.getTask(task2.id)).toBeDefined()
     expect(db.getTask(task3.id)).toBeDefined()
     expect(db.getTasks()).toHaveLength(3)
 
-    // Delete the task source
     expect(db.deleteTaskSource(source.id)).toBe(true)
 
-    // Verify that tasks with source_id are CASCADE deleted
+    // Tasks linked to the source cascade; the unlinked one survives.
     expect(db.getTask(task1.id)).toBeUndefined()
     expect(db.getTask(task2.id)).toBeUndefined()
 
-    // Verify that task without source_id still exists
     expect(db.getTask(task3.id)).toBeDefined()
     expect(db.getTasks()).toHaveLength(1)
   })
@@ -480,9 +472,7 @@ describe('Skill CRUD', () => {
     const result = db.deleteSkill(skill.id)
     expect(result).toBe(true)
 
-    // getSkill should not find soft-deleted
     expect(db.getSkill(skill.id)).toBeUndefined()
-    // getSkills should not include it
     expect(db.getSkills()).toHaveLength(0)
   })
 
@@ -613,6 +603,19 @@ describe('Durable transcript projection', () => {
     expect(db.getTranscriptParts('task-2')[0].seq).toBe(1)
   })
 
+  it('gives a new part the next seq even when the batch re-sends or updates older parts', () => {
+    db.upsertTranscriptParts('task-1', [
+      { id: 'p1', role: 'user', content: 'hello' },
+      { id: 'p2', role: 'assistant', content: 'partial' }
+    ])
+    db.upsertTranscriptParts('task-1', [
+      { id: 'p1', role: 'user', content: 'hello' },
+      { id: 'p2', role: 'assistant', content: 'partial then complete' },
+      { id: 'p3', role: 'assistant', content: 'next' }
+    ])
+    expect(db.getTranscriptParts('task-1').map((p) => [p.partId, p.seq])).toEqual([['p1', 1], ['p2', 2], ['p3', 3]])
+  })
+
   it('streaming update replaces content but keeps position (seq)', () => {
     db.upsertTranscriptParts('task-1', [
       { id: 'p1', role: 'assistant', content: 'partial' },
@@ -666,7 +669,6 @@ describe('Durable transcript — timestamp provenance', () => {
 
     const parts = db.getTranscriptParts('task-1')
     expect(parts.map((p) => p.createdAt)).toEqual([t0, t0 + 30_000, t0 + 90_000])
-    // Not collapsed to one shared timestamp
     expect(new Set(parts.map((p) => p.createdAt)).size).toBe(3)
   })
 
@@ -788,7 +790,6 @@ describe('transcript_parts.rev migration on a legacy DB (no rev column)', () => 
     expect(() => createTables(rawDb)).not.toThrow()
     expect(() => ensureTranscriptRevColumn(rawDb)).not.toThrow()
 
-    // Column now exists.
     const cols = rawDb.prepare('PRAGMA table_info(transcript_parts)').all() as Array<{ name: string }>
     expect(cols.some((c) => c.name === 'rev')).toBe(true)
 

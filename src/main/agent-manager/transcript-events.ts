@@ -22,7 +22,7 @@ interface OutputEventPart {
   receivedAt?: number
 }
 
-/** One transcript part as sent to the renderer in `agent:output-batch`. */
+/** One transcript part of an `agent:output-batch` event (persisted, not broadcast). */
 export interface OutputMessage {
   id: string
   role: string

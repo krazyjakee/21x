@@ -42,9 +42,8 @@ import type { ProcessRow } from './mcp-process-cleanup'
  *
  * Matches both halves of the pair — `node .../bin/codex app-server --stdio` and
  * the vendored `.../bin/codex app-server --stdio` — because both end the
- * executable path with `codex` and both carry the same arguments. `codex acp`
- * (the other Codex backend) and the `codex app-server --help` health check do
- * not match.
+ * executable path with `codex` and both carry the same arguments. The
+ * `codex app-server --help` health check does not match.
  */
 export const CODEX_APP_SERVER_MARKER = 'codex app-server --stdio'
 

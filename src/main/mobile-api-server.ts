@@ -9,55 +9,31 @@ import { createServer, type IncomingMessage, type ServerResponse, type Server as
 import { join, sep } from 'path'
 import { existsSync, readFileSync, statSync } from 'fs'
 import { WebSocketServer, WebSocket } from 'ws'
-import { randomUUID, createHash, randomInt } from 'crypto'
-import type { CreateTaskData, DatabaseManager, UpdateTaskData } from './database'
+import type { DatabaseManager } from './database'
 import type { AgentManager } from './agent-manager'
 import type { GitHubManager } from './github-manager'
 import type { GitLabManager } from './gitlab-manager'
 import type { ForgejoManager } from './forgejo-manager'
-import { isGitProvider, recordRepoProviders } from './repo-providers'
 import type { SyncManager } from './sync-manager'
 import type { PluginRegistry } from './plugins/registry'
-import { listTaskArtifactEntries, readTaskArtifact } from './artifacts'
-import type { Artifact, ArtifactFileEntry } from '../shared/artifacts'
-import { MOBILE_VOICE_CAPABILITIES } from '../shared/voice'
-import { TaskStatus } from '../shared/constants'
-import { DEFAULT_PROJECT_ID } from '../shared/projects'
-import { buildProjectOverview } from './project-overview'
 import { guardStream } from './child-stream-guards'
-import { bearerToken, readJsonBody } from './http-utils'
-import { completeTaskAtSource, updateTaskFromUser } from './session-feedback'
-import { afterTaskCreated, afterTaskUpdated } from './task-updates'
+import { bearerToken, HttpError, readJsonBody } from './http-utils'
 import { mimeTypeForPath } from './mime'
+import { deps, setDeps, wsClients, type MobileApiDeps, type MobileRoute } from './mobile-api/state'
+import { authRoutes, hashToken } from './mobile-api/auth-routes'
+import { projectRoutes } from './mobile-api/project-routes'
+import { taskRoutes } from './mobile-api/task-routes'
+import { agentRoutes } from './mobile-api/agent-routes'
+import { gitRoutes } from './mobile-api/git-routes'
+import { sourceRoutes } from './mobile-api/source-routes'
 
-// ── State ────────────────────────────────────────────────────
+export { broadcastToMobileClients, setMobileApiNotifier } from './mobile-api/state'
+export { getPendingPin } from './mobile-api/auth-routes'
+
 let server: HttpServer | null = null
 let wss: WebSocketServer | null = null
-let dbRef: DatabaseManager | null = null
-let agentRef: AgentManager | null = null
-let githubRef: GitHubManager | null = null
-let gitlabRef: GitLabManager | null = null
-let forgejoRef: ForgejoManager | null = null
-let syncManagerRef: SyncManager | null = null
-let pluginRegistryRef: PluginRegistry | null = null
-let notifyDesktop: ((channel: string, data: unknown) => void) | null = null
-let pendingPin: { pin: string; pairCodeId: string; expiresAt: number } | null = null
 let boundHost: string | null = null
 let boundPort: number | null = null
-
-export function getPendingPin(): { pin: string; pairCodeId: string; expiresAt: number } | null {
-  if (!pendingPin) return null
-  if (Math.floor(Date.now() / 1000) > pendingPin.expiresAt) {
-    pendingPin = null
-    return null
-  }
-  return pendingPin
-}
-
-const wsClients = new Set<WebSocket>()
-
-const PIN_EXPIRY_SECONDS = 60
-const PIN_MAX_ATTEMPTS = 3
 
 export const MOBILE_API_PORT = 20620
 /** Settings keys. Mobile access and LAN exposure are both opt-in. */
@@ -86,10 +62,6 @@ function allowPairRequest(): boolean {
   return pairWindowCount <= PAIR_RATE_LIMIT_MAX
 }
 
-function hashToken(token: string): string {
-  return createHash('sha256').update(token).digest('hex')
-}
-
 export function isMobileAccessEnabled(db: DatabaseManager): boolean {
   return db.getSetting(MOBILE_ACCESS_ENABLED_SETTING) === 'true'
 }
@@ -104,21 +76,20 @@ export function getMobileSessionIdleDays(db: DatabaseManager): number {
 }
 
 function validateSession(provided: string | null | undefined): boolean {
-  if (!provided || !dbRef) return false
+  const db = deps?.db
+  if (!provided || !db) return false
   const hash = hashToken(provided)
-  const session = dbRef.getMobileSessionByTokenHash(hash)
+  const session = db.getMobileSessionByTokenHash(hash)
   if (!session) return false
   const idleSeconds = Math.floor(Date.now() / 1000) - session.last_seen
-  if (idleSeconds > getMobileSessionIdleDays(dbRef) * 86_400) {
+  if (idleSeconds > getMobileSessionIdleDays(db) * 86_400) {
     // Idle too long: revoke so the device also drops off the connected list.
-    dbRef.revokeMobileSession(session.id)
+    db.revokeMobileSession(session.id)
     return false
   }
-  dbRef.touchMobileSession(hash)
+  db.touchMobileSession(hash)
   return true
 }
-
-// ── Public API ───────────────────────────────────────────────
 
 export function startMobileApiServer(
   db: DatabaseManager,
@@ -133,20 +104,13 @@ export function startMobileApiServer(
 ): Promise<number> {
   if (server) return Promise.resolve(boundPort ?? port)
 
-  dbRef = db
-  agentRef = agentManager
-  githubRef = githubManager
-  gitlabRef = gitlabManager ?? null
-  forgejoRef = forgejoManager ?? null
-  syncManagerRef = syncManager ?? null
-  pluginRegistryRef = pluginRegistry ?? null
+  setDeps({ db, agentManager, githubManager, syncManager, pluginRegistry, gitlabManager, forgejoManager })
   pairWindowStart = 0
   pairWindowCount = 0
 
   return new Promise((resolve, reject) => {
     server = createServer(handleHttpRequest)
 
-    // WebSocket upgrade
     wss = new WebSocketServer({ noServer: true })
 
     server.on('upgrade', (req, socket, head) => {
@@ -215,21 +179,11 @@ export function startMobileApiServer(
   })
 }
 
-export interface MobileApiDeps {
-  db: DatabaseManager
-  agentManager: AgentManager
-  githubManager: GitHubManager
-  syncManager?: SyncManager | null
-  pluginRegistry?: PluginRegistry | null
-  gitlabManager?: GitLabManager | null
-  forgejoManager?: ForgejoManager | null
-}
-
 let mobileDeps: MobileApiDeps | null = null
 let applyQueue: Promise<unknown> = Promise.resolve()
 
-export function setMobileApiDeps(deps: MobileApiDeps): void {
-  mobileDeps = deps
+export function setMobileApiDeps(next: MobileApiDeps): void {
+  mobileDeps = next
 }
 
 /**
@@ -240,31 +194,22 @@ export function setMobileApiDeps(deps: MobileApiDeps): void {
  */
 export function applyMobileAccessSettings(port = MOBILE_API_PORT): Promise<number | null> {
   const run = async (): Promise<number | null> => {
-    const deps = mobileDeps
-    if (!deps || !isMobileAccessEnabled(deps.db)) {
+    const config = mobileDeps
+    if (!config || !isMobileAccessEnabled(config.db)) {
       await stopMobileApiServer()
       return null
     }
-    const host = isMobileLanAccessEnabled(deps.db) ? '0.0.0.0' : '127.0.0.1'
+    const host = isMobileLanAccessEnabled(config.db) ? '0.0.0.0' : '127.0.0.1'
     if (server && boundHost === host) return boundPort
     await stopMobileApiServer()
     return startMobileApiServer(
-      deps.db, deps.agentManager, deps.githubManager, port, deps.syncManager,
-      deps.pluginRegistry, deps.gitlabManager, deps.forgejoManager, host
+      config.db, config.agentManager, config.githubManager, port, config.syncManager,
+      config.pluginRegistry, config.gitlabManager, config.forgejoManager, host
     )
   }
   const result = applyQueue.then(run, run)
   applyQueue = result.catch(() => {})
   return result
-}
-
-export function getMobileApiBinding(): { host: string; port: number } | null {
-  return server && boundHost && boundPort != null ? { host: boundHost, port: boundPort } : null
-}
-
-/** Notifies the desktop renderer of events that originate from a phone. */
-export function setMobileApiNotifier(fn: (channel: string, data: unknown) => void): void {
-  notifyDesktop = fn
 }
 
 export function stopMobileApiServer(): Promise<void> {
@@ -285,23 +230,6 @@ export function stopMobileApiServer(): Promise<void> {
     closing.closeAllConnections()
   })
 }
-
-/**
- * Called by AgentManager (via external listener) whenever it sends an event.
- * Broadcasts to all connected WebSocket clients.
- */
-export function broadcastToMobileClients(channel: string, data: unknown): void {
-  if (wsClients.size === 0) return
-
-  const message = JSON.stringify({ type: channel, payload: data })
-  for (const ws of wsClients) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(message)
-    }
-  }
-}
-
-// ── HTTP request handler ─────────────────────────────────────
 
 function handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
   // CORS — only allow localhost origins (for Vite dev server).
@@ -329,18 +257,18 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
   const url = new URL(req.url || '/', `http://localhost`)
   const pathname = url.pathname
 
-  // Pairing endpoints — no session required
   if (pathname.startsWith('/api/auth/pair/') && !allowPairRequest()) {
     res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': String(Math.ceil(PAIR_RATE_LIMIT_WINDOW_MS / 1000)) })
     res.end(JSON.stringify({ error: 'Too many pairing attempts. Try again in a minute.' }))
     return
   }
+  // Pairing is how a phone gets a session, so it cannot require one.
   if (pathname === '/api/auth/pair/initiate' || pathname === '/api/auth/pair/verify') {
     void handleApiRoute(req, res, pathname, url)
     return
   }
 
-  // All other API routes — require valid session
+  // Every other API route needs a paired session.
   if (pathname.startsWith('/api/')) {
     if (!validateSession(bearerToken(req))) {
       res.writeHead(401, { 'Content-Type': 'application/json' })
@@ -356,9 +284,22 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
   serveMobileSPA(res, pathname)
 }
 
-// ── API router ───────────────────────────────────────────────
-
 const MAX_BODY_BYTES = 1_048_576
+
+const ROUTES = [...authRoutes, ...projectRoutes, ...taskRoutes, ...agentRoutes, ...gitRoutes, ...sourceRoutes]
+
+function findRoute(method: string, pathname: string): { route: MobileRoute; id: string } | null {
+  for (const route of ROUTES) {
+    if (route.method !== method) continue
+    if (typeof route.path === 'string') {
+      if (route.path === pathname) return { route, id: '' }
+    } else {
+      const match = pathname.match(route.path)
+      if (match) return { route, id: match[1] }
+    }
+  }
+  return null
+}
 
 async function handleApiRoute(req: IncomingMessage, res: ServerResponse, pathname: string, url: URL): Promise<void> {
   res.setHeader('Content-Type', 'application/json')
@@ -370,9 +311,10 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, pathnam
   }
 
   try {
-    const result = req.method === 'POST'
-      ? await routePost(pathname, await readJsonBody(req, MAX_BODY_BYTES), req)
-      : await routeGet(pathname, url)
+    const params = req.method === 'POST' ? await readJsonBody(req, MAX_BODY_BYTES) : {}
+    const found = findRoute(req.method, pathname)
+    if (!found) throw new HttpError(404, 'Not found')
+    const result = await found.route.handle({ id: found.id, params, url, req })
     res.writeHead(200)
     res.end(JSON.stringify(result))
   } catch (err: unknown) {
@@ -383,766 +325,8 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, pathnam
   }
 }
 
-// ── GET routes ───────────────────────────────────────────────
-
-async function routeGet(pathname: string, url: URL): Promise<unknown> {
-  const db = dbRef!
-
-  // GET /api/projects — active projects with cheap task counts. `current`
-  // marks the project a task created without a project_id lands in.
-  if (pathname === '/api/projects') {
-    const counts = new Map<string, { total: number; open: number }>()
-    for (const task of db.getTasks()) {
-      const entry = counts.get(task.project_id) ?? { total: 0, open: 0 }
-      entry.total++
-      if (task.status !== TaskStatus.Completed) entry.open++
-      counts.set(task.project_id, entry)
-    }
-    const currentId = resolveDefaultProjectId(db)
-    return db.getProjects().map(project => ({
-      id: project.id,
-      name: project.name,
-      brief: project.description,
-      is_default: project.id === DEFAULT_PROJECT_ID,
-      current: project.id === currentId,
-      task_count: counts.get(project.id)?.total ?? 0,
-      open_task_count: counts.get(project.id)?.open ?? 0,
-      sort_order: project.sort_order
-    }))
-  }
-
-  // GET /api/projects/status — the all-projects overview (#63): every active
-  // project's status counts, approvals, agents, limit state and last activity,
-  // the same rows the desktop overview shows. Read-only.
-  if (pathname === '/api/projects/status') {
-    return buildProjectOverview(db, agentRef)
-  }
-
-  // GET /api/tasks
-  if (pathname === '/api/tasks') {
-    const projectId = url.searchParams.get('project_id')
-    if (projectId && !db.getProject(projectId)) {
-      throw Object.assign(new Error('Project not found'), { status: 404 })
-    }
-    let tasks = db.getTasks(projectId ? { projectId } : undefined)
-
-    const status = url.searchParams.get('status')
-    if (status) tasks = tasks.filter(t => t.status === status)
-
-    const priority = url.searchParams.get('priority')
-    if (priority) tasks = tasks.filter(t => t.priority === priority)
-
-    const source = url.searchParams.get('source')
-    if (source) tasks = tasks.filter(t => t.source === source)
-
-    const search = url.searchParams.get('search')
-    if (search) {
-      const q = search.toLowerCase()
-      tasks = tasks.filter(t =>
-        t.title.toLowerCase().includes(q) || t.description.toLowerCase().includes(q)
-      )
-    }
-
-    const sort = url.searchParams.get('sort') || 'created_at'
-    const order = url.searchParams.get('order') || 'desc'
-    const dir = order === 'asc' ? 1 : -1
-
-    const PRIORITY_ORDER: Record<string, number> = { critical: 3, high: 2, medium: 1, low: 0 }
-    const STATUS_ORDER: Record<string, number> = { agent_working: 5, agent_learning: 4, triaging: 3, ready_for_review: 2, not_started: 1, completed: 0 }
-
-    tasks.sort((a, b) => {
-      const va = (a as unknown as Record<string, unknown>)[sort]
-      const vb = (b as unknown as Record<string, unknown>)[sort]
-      if (va == null && vb == null) return 0
-      if (va == null) return dir
-      if (vb == null) return -dir
-      // Use semantic ordering for priority and status instead of alphabetical
-      if (sort === 'priority') {
-        const pa = PRIORITY_ORDER[va as string] ?? 0
-        const pb = PRIORITY_ORDER[vb as string] ?? 0
-        return (pa - pb) * dir
-      }
-      if (sort === 'status') {
-        const sa = STATUS_ORDER[va as string] ?? 0
-        const sb = STATUS_ORDER[vb as string] ?? 0
-        return (sa - sb) * dir
-      }
-      if (va < vb) return -dir
-      if (va > vb) return dir
-      return 0
-    })
-
-    return tasks
-  }
-
-  // GET /api/tasks/:taskId/transcript — full durable transcript snapshot.
-  // Mobile is a PURE READER of the projection: read straight from the DB, never
-  // via AgentManager.getTranscriptSnapshot (which can trigger the one-time
-  // backfill/ingest). A mobile client connecting must not mutate the projection
-  // or broadcast deltas to other clients. The desktop (session owner) owns the
-  // one-time seed of pre-store sessions.
-  const transcriptMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/transcript$/)
-  if (transcriptMatch) {
-    return db.getTranscriptParts(decodeURIComponent(transcriptMatch[1]))
-  }
-
-  // GET /api/tasks/:taskId/transcript/delta?sinceRev=N — parts changed since rev.
-  // Pure DB read (see above): no backfill, no writes, no broadcast.
-  const deltaMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/transcript\/delta$/)
-  if (deltaMatch) {
-    const sinceRev = Number(url.searchParams.get('sinceRev') || '0') || 0
-    return db.getTranscriptDelta(decodeURIComponent(deltaMatch[1]), sinceRev)
-  }
-
-  // GET /api/tasks/:taskId/artifacts/content?path=... — authenticated artifact
-  // content read constrained to this task's workspace by readTaskArtifact.
-  const artifactContentMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/artifacts\/content$/)
-  if (artifactContentMatch) {
-    const taskId = decodeURIComponent(artifactContentMatch[1])
-    if (!db.getTask(taskId)) throw Object.assign(new Error('Task not found'), { status: 404 })
-    const artifactPath = url.searchParams.get('path')
-    if (!artifactPath) throw Object.assign(new Error('path is required'), { status: 400 })
-    const content = await readTaskArtifact(db.getWorkspaceDir(taskId), artifactPath)
-    if (!content) throw Object.assign(new Error('Artifact not found or cannot be previewed'), { status: 404 })
-    return content
-  }
-
-  // GET /api/tasks/:taskId/artifacts — explicit workpiece registry plus the
-  // bounded legacy import/recovery scan.
-  const artifactsMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/artifacts$/)
-  if (artifactsMatch) {
-    const taskId = decodeURIComponent(artifactsMatch[1])
-    if (!db.getTask(taskId)) throw Object.assign(new Error('Task not found'), { status: 404 })
-    const entries = await listTaskArtifactEntries(db.getWorkspaceDir(taskId), taskId)
-    return entries.map((entry) => artifactFromFileEntry(taskId, entry))
-  }
-
-  // GET /api/github/pull-request?url=... — authenticated, read-only PR details.
-  if (pathname === '/api/github/pull-request') {
-    const pullRequestUrl = url.searchParams.get('url')
-    if (!pullRequestUrl) throw Object.assign(new Error('url is required'), { status: 400 })
-    if (forgejoRef && !/^https:\/\/github\.com\//i.test(pullRequestUrl) && await forgejoRef.isForgejoUrl(pullRequestUrl)) {
-      return forgejoRef.fetchPullRequestDetails(pullRequestUrl)
-    }
-    if (!githubRef) throw Object.assign(new Error('GitHub not configured'), { status: 500 })
-    return githubRef.fetchPullRequestDetails(pullRequestUrl)
-  }
-
-  // GET /api/tasks/:id
-  const taskMatch = pathname.match(/^\/api\/tasks\/([^/]+)$/)
-  if (taskMatch) {
-    const task = db.getTask(taskMatch[1])
-    if (!task) throw Object.assign(new Error('Task not found'), { status: 404 })
-    return task
-  }
-
-  // GET /api/agents
-  if (pathname === '/api/agents') {
-    return db.getAgents().map(stripSensitiveAgentFields)
-  }
-
-  // GET /api/agents/:id
-  const agentMatch = pathname.match(/^\/api\/agents\/([^/]+)$/)
-  if (agentMatch) {
-    const agent = db.getAgent(agentMatch[1])
-    if (!agent) throw Object.assign(new Error('Agent not found'), { status: 404 })
-    return stripSensitiveAgentFields(agent)
-  }
-
-  // GET /api/capabilities — what this client can and cannot do.
-  // Voice capture is desktop-only in phase 1, so mobile shows a clear note
-  // instead of a button that cannot work (design §5.11).
-  if (pathname === '/api/capabilities') {
-    return { voice: MOBILE_VOICE_CAPABILITIES }
-  }
-
-  // GET /api/skills
-  if (pathname === '/api/skills') {
-    return db.getSkills()
-  }
-
-  // GET /api/sessions
-  if (pathname === '/api/sessions') {
-    return getActiveSessions()
-  }
-
-  // GET /api/auth/sessions — connected devices list
-  if (pathname === '/api/auth/sessions') {
-    return db.getMobileSessions()
-  }
-
-  // GET /api/task-sources — list all configured task sources
-  if (pathname === '/api/task-sources') {
-    return db.getTaskSources().map(withoutSourceConfig)
-  }
-
-  // GET /api/plugins — list available plugins
-  if (pathname === '/api/plugins') {
-    if (!pluginRegistryRef) return []
-    return pluginRegistryRef.list()
-  }
-
-  // GET /api/plugins/:id/schema — get config schema for a plugin
-  const pluginSchemaMatch = pathname.match(/^\/api\/plugins\/([^/]+)\/schema$/)
-  if (pluginSchemaMatch) {
-    if (!pluginRegistryRef) throw Object.assign(new Error('Plugin registry not available'), { status: 503 })
-    const plugin = pluginRegistryRef.get(pluginSchemaMatch[1])
-    if (!plugin) throw Object.assign(new Error('Plugin not found'), { status: 404 })
-    return plugin.getConfigSchema()
-  }
-
-  // GET /api/plugins/:id/documentation — get setup documentation for a plugin
-  const pluginDocMatch = pathname.match(/^\/api\/plugins\/([^/]+)\/documentation$/)
-  if (pluginDocMatch) {
-    if (!pluginRegistryRef) throw Object.assign(new Error('Plugin registry not available'), { status: 503 })
-    const plugin = pluginRegistryRef.get(pluginDocMatch[1])
-    if (!plugin) throw Object.assign(new Error('Plugin not found'), { status: 404 })
-    return { documentation: plugin.getSetupDocumentation?.() ?? null }
-  }
-
-  // GET /api/github/org — returns the configured github org
-  if (pathname === '/api/github/org') {
-    const org = db.getSetting('github_org') || ''
-    return { org }
-  }
-
-  // GET /api/git/provider — returns the configured git provider
-  if (pathname === '/api/git/provider') {
-    const provider = db.getSetting('git_provider') || 'github'
-    return { provider }
-  }
-
-  // GET /api/github/orgs — returns available orgs + personal accounts
-  // Fetches from ALL authenticated providers (GitHub and/or GitLab)
-  if (pathname === '/api/github/orgs') {
-    const owners: Array<{ value: string; label: string; provider: string }> = []
-
-    // Try GitHub
-    if (githubRef) {
-      try {
-        const [status, orgs] = await Promise.all([
-          githubRef.checkGhCli(),
-          githubRef.fetchUserOrgs()
-        ])
-        if (status.authenticated) {
-          if (status.username) {
-            owners.push({ value: status.username, label: `${status.username} (GitHub personal)`, provider: 'github' })
-          }
-          for (const orgName of orgs) {
-            owners.push({ value: orgName, label: `${orgName} (GitHub)`, provider: 'github' })
-          }
-        }
-      } catch { /* GitHub not available — skip */ }
-    }
-
-    // Try GitLab
-    if (gitlabRef) {
-      try {
-        const [status, orgs] = await Promise.all([
-          gitlabRef.checkGlabCli(),
-          gitlabRef.fetchUserOrgs()
-        ])
-        if (status.authenticated) {
-          if (status.username) {
-            owners.push({ value: status.username, label: `${status.username} (GitLab personal)`, provider: 'gitlab' })
-          }
-          for (const orgName of orgs) {
-            owners.push({ value: orgName, label: `${orgName} (GitLab)`, provider: 'gitlab' })
-          }
-        }
-      } catch { /* GitLab not available — skip */ }
-    }
-
-    // Try Forgejo (via the tea login selected in 20x)
-    if (forgejoRef) {
-      try {
-        const status = await forgejoRef.checkTeaCli()
-        if (status.authenticated) {
-          const orgs = await forgejoRef.fetchUserOrgs()
-          if (status.username) {
-            owners.push({ value: status.username, label: `${status.username} (Forgejo personal)`, provider: 'forgejo' })
-          }
-          for (const orgName of orgs) {
-            owners.push({ value: orgName, label: `${orgName} (Forgejo)`, provider: 'forgejo' })
-          }
-        }
-      } catch { /* Forgejo not available — skip */ }
-    }
-
-    if (owners.length === 0) {
-      throw Object.assign(new Error('No git provider authenticated'), { status: 500 })
-    }
-
-    return owners
-  }
-
-  throw Object.assign(new Error('Not found'), { status: 404 })
-}
-
-// ── POST routes ──────────────────────────────────────────────
-
-async function routePost(pathname: string, params: Record<string, unknown>, req?: IncomingMessage): Promise<unknown> {
-  const agent = agentRef!
-  const db = dbRef!
-
-  // POST /api/auth/pair/initiate — phone sends init code, server generates PIN
-  if (pathname === '/api/auth/pair/initiate') {
-    const { code } = params as { code?: string }
-    if (!code) throw Object.assign(new Error('code is required'), { status: 400 })
-
-    const now = Math.floor(Date.now() / 1000)
-    // Validate init code exists and not expired
-    const validCode = db.getSetting(`mobile_init_code_${code}`)
-    const validUntil = db.getSetting(`mobile_init_code_${code}_exp`)
-    if (!validCode || !validUntil || now > parseInt(validUntil)) {
-      throw Object.assign(new Error('Invalid or expired QR code. Please scan a new QR code.'), { status: 401 })
-    }
-    // Delete init code — single use
-    db.deleteSetting(`mobile_init_code_${code}`)
-    db.deleteSetting(`mobile_init_code_${code}_exp`)
-
-    // Generate PIN and pair code ID
-    const pin = String(randomInt(100000, 1000000))
-    const pairCodeId = randomUUID()
-    db.createMobilePairCode(pairCodeId, pin, now + PIN_EXPIRY_SECONDS)
-
-    // Store pending PIN so renderer can fetch it if Settings isn't open when event fires
-    pendingPin = { pin, pairCodeId, expiresAt: now + PIN_EXPIRY_SECONDS }
-
-    // Push PIN to desktop
-    if (notifyDesktop) {
-      notifyDesktop('mobile:pairing-initiated', { pin, pairCodeId, expiresAt: now + PIN_EXPIRY_SECONDS })
-    }
-
-    return { pairCodeId, expiresIn: PIN_EXPIRY_SECONDS }
-  }
-
-  // POST /api/auth/pair/verify — phone submits PIN
-  if (pathname === '/api/auth/pair/verify') {
-    const { pairCodeId, pin } = params as { pairCodeId?: string; pin?: string }
-    if (!pairCodeId || !pin) throw Object.assign(new Error('pairCodeId and pin are required'), { status: 400 })
-
-    const now = Math.floor(Date.now() / 1000)
-    const record = db.getMobilePairCode(pairCodeId)
-
-    if (!record) throw Object.assign(new Error('Invalid pairing session'), { status: 401 })
-    if (now > record.expires_at) {
-      db.deleteMobilePairCode(pairCodeId)
-      throw Object.assign(new Error('PIN expired. Please scan the QR code again.'), { status: 401 })
-    }
-
-    const attempts = db.incrementPairCodeAttempts(pairCodeId)
-    if (attempts > PIN_MAX_ATTEMPTS) {
-      db.deleteMobilePairCode(pairCodeId)
-      throw Object.assign(new Error('Too many incorrect attempts. Please scan the QR code again.'), { status: 401 })
-    }
-
-    if (record.pin !== pin.trim()) {
-      const remaining = PIN_MAX_ATTEMPTS - attempts
-      throw Object.assign(new Error(`Incorrect PIN. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`), { status: 401 })
-    }
-
-    // PIN correct — issue session token
-    pendingPin = null
-    db.deleteMobilePairCode(pairCodeId)
-    const sessionToken = randomUUID()
-    const tokenHash = hashToken(sessionToken)
-    const sessionId = randomUUID()
-    const userAgent = req?.headers['user-agent'] || 'Unknown device'
-    const deviceName = parseDeviceName(userAgent)
-    db.createMobileSession(sessionId, tokenHash, deviceName)
-
-    // Notify desktop of new connection
-    if (notifyDesktop) {
-      notifyDesktop('mobile:device-connected', { sessionId, deviceName })
-    }
-
-    return { sessionToken, sessionId, deviceName }
-  }
-
-  // POST /api/plugins/:id/resolve-options — resolve dynamic options for a plugin config field
-  const pluginResolveMatch = pathname.match(/^\/api\/plugins\/([^/]+)\/resolve-options$/)
-  if (pluginResolveMatch) {
-    if (!pluginRegistryRef) throw Object.assign(new Error('Plugin registry not available'), { status: 503 })
-    const pluginId = pluginResolveMatch[1]
-    const plugin = pluginRegistryRef.get(pluginId)
-    if (!plugin) throw Object.assign(new Error('Plugin not found'), { status: 404 })
-
-    const { resolverKey, config } = params as { resolverKey?: string; config?: Record<string, unknown> }
-    if (!resolverKey) throw Object.assign(new Error('resolverKey is required'), { status: 400 })
-
-    return plugin.resolveOptions(resolverKey, config || {}, { db })
-  }
-
-  // POST /api/task-sources — create a new task source
-  if (pathname === '/api/task-sources') {
-    const { name, plugin_id, config, mcp_server_id } = params as {
-      name?: string; plugin_id?: string; config?: Record<string, unknown>; mcp_server_id?: string | null
-    }
-    if (!name || !plugin_id) throw Object.assign(new Error('name and plugin_id are required'), { status: 400 })
-    const source = db.createTaskSource({ name, plugin_id, config: config || {}, mcp_server_id: mcp_server_id || null })
-    return withoutSourceConfig(source)
-  }
-
-  // POST /api/task-sources/sync-all — sync all enabled task sources (must be before :id routes)
-  if (pathname === '/api/task-sources/sync-all') {
-    if (!syncManagerRef) throw Object.assign(new Error('Sync manager not available'), { status: 503 })
-    const sources = db.getTaskSources().filter((s: { enabled: boolean }) => s.enabled)
-    const results = await Promise.allSettled(
-      sources.map((s: { id: string }) => syncManagerRef!.importTasks(s.id))
-    )
-    return results.map((r) =>
-      r.status === 'fulfilled' ? r.value : { error: String((r as PromiseRejectedResult).reason) }
-    )
-  }
-
-  // POST /api/task-sources/:id/sync — sync a single task source
-  const sourceSyncMatch = pathname.match(/^\/api\/task-sources\/([^/]+)\/sync$/)
-  if (sourceSyncMatch) {
-    if (!syncManagerRef) throw Object.assign(new Error('Sync manager not available'), { status: 503 })
-    const result = await syncManagerRef.importTasks(sourceSyncMatch[1])
-    return result
-  }
-
-  // POST /api/task-sources/:id — update a task source
-  const sourceUpdateMatch = pathname.match(/^\/api\/task-sources\/([^/]+)$/)
-  if (sourceUpdateMatch) {
-    const sourceId = sourceUpdateMatch[1]
-    const source = db.getTaskSource(sourceId)
-    if (!source) throw Object.assign(new Error('Task source not found'), { status: 404 })
-    const updated = db.updateTaskSource(sourceId, params as Parameters<DatabaseManager['updateTaskSource']>[1])
-    return withoutSourceConfig(updated)
-  }
-
-  // POST /api/tasks/reorder-subtasks — reorder subtasks under a parent
-  if (pathname === '/api/tasks/reorder-subtasks') {
-    const { parentId, orderedIds } = params as { parentId?: string; orderedIds?: string[] }
-    if (!parentId || !Array.isArray(orderedIds)) {
-      throw Object.assign(new Error('parentId and orderedIds are required'), { status: 400 })
-    }
-    db.reorderSubtasks(parentId, orderedIds)
-    broadcastToMobileClients('task:subtasks-reordered', { parentId, orderedIds })
-    if (notifyDesktop) notifyDesktop('task:subtasks-reordered', { parentId, orderedIds })
-    return { success: true }
-  }
-
-  // POST /api/tasks — create task (must be checked before the :id update route)
-  if (pathname === '/api/tasks') {
-    if (!params.title) throw Object.assign(new Error('title is required'), { status: 400 })
-    const data = pickCreateTaskFields(params)
-    if (data.project_id !== undefined && data.project_id !== null) {
-      const project = typeof data.project_id === 'string' ? db.getProject(data.project_id) : undefined
-      if (!project || project.archived) {
-        throw Object.assign(new Error('project_id must name an active project'), { status: 400 })
-      }
-    } else if (!data.parent_task_id) {
-      // A subtask always joins its parent's project (DatabaseManager decides);
-      // anything else lands in the desktop's current project.
-      data.project_id = resolveDefaultProjectId(db)
-    }
-    const created = db.createTask(data)
-    if (!created) throw Object.assign(new Error('Failed to create task'), { status: 500 })
-    afterTaskCreated(created)
-    const task = db.getTask(created.id) ?? created
-    broadcastToMobileClients('task:created', { task })
-    if (notifyDesktop) notifyDesktop('task:created', { task })
-    return task
-  }
-
-  // Source-less tasks are local 20x records. Only sourced tasks delegate
-  // completion to their external authority.
-  const taskCompleteMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/complete$/)
-  if (taskCompleteMatch) {
-    const taskId = taskCompleteMatch[1]
-    const task = db.getTask(taskId)
-    if (!task) throw Object.assign(new Error('Task not found'), { status: 404 })
-    const completeAtSource = (params as { completeAtSource?: boolean }).completeAtSource !== false
-    // A second explicit completion while feedback learning is pending cancels
-    // that learning cycle first. Without clearing its durable marker, the
-    // database protects AgentLearning and silently preserves the old status.
-    if (task.status === TaskStatus.AgentLearning) {
-      updateTaskFromUser(db, taskId, { status: TaskStatus.ReadyForReview })
-    }
-    if (!task.source_id || !completeAtSource) {
-      const data: UpdateTaskData = { status: TaskStatus.Completed, ...(task.source_id ? { complete_at_source: false } : {}) }
-      const fresh = db.updateTask(taskId, data)
-      if (fresh) {
-        broadcastToMobileClients('task:updated', { taskId, updates: fresh })
-        if (notifyDesktop) notifyDesktop('task:updated', { taskId, updates: fresh })
-        afterTaskUpdated(db, agent, task, data, fresh)
-      }
-      return { completed: true, status: fresh?.status }
-    }
-    if (!syncManagerRef) {
-      throw Object.assign(new Error('Task source is unavailable.'), { status: 409 })
-    }
-    db.updateTask(taskId, { complete_at_source: true })
-    try {
-      await completeTaskAtSource(syncManagerRef, task)
-    } catch (err) {
-      throw Object.assign(err as Error, { status: 409 })
-    }
-    const fresh = db.getTask(taskId)
-    if (fresh) {
-      broadcastToMobileClients('task:updated', { taskId, updates: fresh })
-    }
-    return { completed: true, status: fresh?.status }
-  }
-
-  // POST /api/tasks/:id — update task
-  const taskUpdateMatch = pathname.match(/^\/api\/tasks\/([^/]+)$/)
-  if (taskUpdateMatch) {
-    const taskId = taskUpdateMatch[1]
-    const existing = db.getTask(taskId)
-    if (!existing) throw Object.assign(new Error('Task not found'), { status: 404 })
-    const data = params as UpdateTaskData
-    const updated = updateTaskFromUser(db, taskId, data)
-    if (updated) {
-      broadcastToMobileClients('task:updated', { taskId, updates: updated })
-      if (notifyDesktop) notifyDesktop('task:updated', { taskId, updates: updated })
-      afterTaskUpdated(db, agent, existing, data, updated)
-    }
-    return updated
-  }
-
-  // POST /api/sessions/start
-  if (pathname === '/api/sessions/start') {
-    const { agentId, taskId, skipInitialPrompt } = params as { agentId?: string; taskId: string; skipInitialPrompt?: boolean }
-    if (!taskId) throw Object.assign(new Error('taskId is required'), { status: 400 })
-    if (!agentId) {
-      // No explicit agent: the same routing as the desktop's Start button and
-      // the scheduler (next subtask, triage, the task's own agent), which is
-      // admission-controlled too.
-      if (!db.getTask(taskId)) throw Object.assign(new Error('Task not found'), { status: 404 })
-      const result = await agent.startTask(taskId)
-      return {
-        sessionId: result.sessionId ?? '',
-        action: result.action,
-        startedTaskId: result.startedTaskId,
-        agentId: result.agentId,
-        ...(result.action === 'queued'
-          ? { queued: true, queuePosition: result.queuePosition, queueReason: result.queueReason }
-          : {})
-      }
-    }
-    // Admission-controlled: over a concurrency limit the start waits in the
-    // main-process queue and starts on its own when a slot frees. This is the
-    // path the desktop's agent:start IPC takes.
-    const outcome = await agent.requestSession(agentId, taskId, undefined, skipInitialPrompt as boolean | undefined)
-    if (outcome.status === 'queued') return { sessionId: '', queued: true, queuePosition: outcome.position, queueReason: outcome.reason }
-    return { sessionId: outcome.sessionId }
-  }
-
-  // POST /api/sessions/:sessionId/resume
-  const resumeMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/resume$/)
-  if (resumeMatch) {
-    const sessionId = resumeMatch[1]
-    const { agentId, taskId } = params as { agentId: string; taskId: string }
-    if (!agentId || !taskId) throw Object.assign(new Error('agentId and taskId are required'), { status: 400 })
-    const newSessionId = await agent.resumeSession(agentId, taskId, sessionId)
-    return { sessionId: newSessionId }
-  }
-
-  // POST /api/sessions/:sessionId/send
-  const sendMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/send$/)
-  if (sendMatch) {
-    const sessionId = sendMatch[1]
-    const { message, taskId, agentId: aid, attachments } = params as {
-      message: string
-      taskId?: string
-      agentId?: string
-      attachments?: Array<{ id: string; filename: string; size: number; mime_type: string }>
-    }
-    if (!message) throw Object.assign(new Error('message is required'), { status: 400 })
-    const result = await agent.sendMessage(sessionId, message, taskId, aid, attachments)
-    return { success: true, ...result }
-  }
-
-  // POST /api/sessions/:sessionId/approve
-  const approveMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/approve$/)
-  if (approveMatch) {
-    const sessionId = approveMatch[1]
-    const { approved, message, responseType, requestId } = params as {
-      approved: boolean
-      message?: string
-      responseType?: 'permission' | 'question'
-      requestId?: string
-    }
-    if (typeof approved !== 'boolean') throw Object.assign(new Error('approved (boolean) is required'), { status: 400 })
-    await agent.respondToPermission(sessionId, approved, message, undefined, responseType, requestId)
-    return { success: true }
-  }
-
-  // POST /api/sessions/:sessionId/sync — status ping. Transcript is no longer
-  // replayed here; the mobile client renders the durable projection (GET
-  // /api/tasks/:taskId/transcript + `transcript:changed` deltas).
-  const syncMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/sync$/)
-  if (syncMatch) {
-    const status = agent.getSessionStatus(syncMatch[1])
-    if (!status) throw Object.assign(new Error('Session not found or not running'), { status: 404 })
-    return { success: true, status: status.status }
-  }
-
-  // POST /api/sessions/:sessionId/abort
-  const abortMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/abort$/)
-  if (abortMatch) {
-    await agent.abortSession(abortMatch[1])
-    return { success: true }
-  }
-
-  // POST /api/sessions/:sessionId/stop
-  const stopMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/stop$/)
-  if (stopMatch) {
-    await agent.stopSession(stopMatch[1])
-    return { success: true }
-  }
-
-  // POST /api/github/repos — fetch org repos
-  // Accepts optional `provider` param ('github' | 'gitlab') to route to the right backend.
-  // Falls back to the configured git_provider setting for backward compat.
-  if (pathname === '/api/github/repos') {
-    const { org, provider: reqProvider } = params as { org?: string; provider?: string }
-    if (!org) throw Object.assign(new Error('org is required'), { status: 400 })
-
-    const provider = reqProvider || db.getSetting('git_provider') || 'github'
-
-    if (provider === 'gitlab') {
-      if (!gitlabRef) throw Object.assign(new Error('GitLab not configured'), { status: 500 })
-      const repos = await gitlabRef.fetchOrgRepos(org)
-      return repos
-    }
-
-    if (provider === 'forgejo') {
-      if (!forgejoRef) throw Object.assign(new Error('Forgejo not configured'), { status: 500 })
-      return await forgejoRef.fetchOrgRepos(org)
-    }
-
-    if (!githubRef) throw Object.assign(new Error('GitHub not configured'), { status: 500 })
-    const repos = await githubRef.fetchOrgRepos(org)
-    return repos
-  }
-
-  // POST /api/git/repo-providers — remember which provider attached repos came from
-  if (pathname === '/api/git/repo-providers') {
-    const { repos, provider } = params as { repos?: unknown; provider?: unknown }
-    if (!Array.isArray(repos) || !isGitProvider(provider)) {
-      throw Object.assign(new Error('repos and a valid provider are required'), { status: 400 })
-    }
-    recordRepoProviders(db, repos.filter((repo): repo is string => typeof repo === 'string'), provider)
-    return { success: true }
-  }
-
-  // POST /api/github/org — set configured github org
-  if (pathname === '/api/github/org') {
-    const { org } = params as { org?: string }
-    if (!org) throw Object.assign(new Error('org is required'), { status: 400 })
-    db.setSetting('github_org', org)
-    return { org }
-  }
-
-  throw Object.assign(new Error('Not found'), { status: 404 })
-}
-
-// ── Helpers ──────────────────────────────────────────────────
-
-// A phone creates local tasks only: the source link (source_id, external_id,
-// source) and recurrence-instance fields are owned by sync and the scheduler.
-const CREATE_TASK_FIELDS = [
-  'title', 'description', 'type', 'priority', 'status', 'assignee', 'due_date', 'labels', 'attachments',
-  'repos', 'output_fields', 'is_recurring', 'recurrence_pattern', 'cron', 'auto_start_agent',
-  'auto_complete_without_review', 'parent_task_id', 'project_id'
-] as const satisfies ReadonlyArray<keyof CreateTaskData>
-
-function pickCreateTaskFields(params: Record<string, unknown>): CreateTaskData {
-  const data: Record<string, unknown> = {}
-  for (const key of CREATE_TASK_FIELDS) {
-    if (params[key] !== undefined) data[key] = params[key]
-  }
-  return data as unknown as CreateTaskData
-}
-
-/**
- * The desktop's current-project setting, written by the desktop project
- * switcher. Tasks a phone creates without a project_id land there.
- */
-export const CURRENT_PROJECT_SETTING = 'current_project_id'
-
-/** The desktop's current project when it is set and active, else Default. */
-function resolveDefaultProjectId(db: DatabaseManager): string {
-  const current = db.getSetting(CURRENT_PROJECT_SETTING)
-  if (current) {
-    const project = db.getProject(current)
-    if (project && !project.archived) return project.id
-  }
-  return DEFAULT_PROJECT_ID
-}
-
-function parseDeviceName(userAgent: string): string {
-  if (/iPhone/i.test(userAgent)) return 'iPhone'
-  if (/iPad/i.test(userAgent)) return 'iPad'
-  if (/Android/i.test(userAgent)) return 'Android'
-  if (/Windows/i.test(userAgent)) return 'Windows Browser'
-  if (/Mac/i.test(userAgent)) return 'Mac Browser'
-  return 'Unknown device'
-}
-
-function getActiveSessions(): Array<{ sessionId: string; agentId: string; taskId: string; status: string }> {
-  if (!dbRef) return []
-
-  // Walk all tasks that have a session_id and check against AgentManager
-  const tasks = dbRef.getTasks()
-  const results: Array<{ sessionId: string; agentId: string; taskId: string; status: string }> = []
-
-  for (const task of tasks) {
-    if (!task.session_id || !task.agent_id) continue
-    const sessionStatus = agentRef?.getSessionStatus(task.session_id)
-    if (sessionStatus) {
-      results.push({
-        sessionId: task.session_id,
-        agentId: sessionStatus.agentId,
-        taskId: sessionStatus.taskId,
-        status: sessionStatus.status
-      })
-    }
-  }
-  return results
-}
-
-/** Strip sensitive fields (api_keys, secret_ids) from agent config before sending over the network. */
-function stripSensitiveAgentFields(agent: ReturnType<DatabaseManager['getAgent']>) {
-  if (!agent) return agent
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { api_keys: _keys, secret_ids: _secrets, ...safeConfig } = (agent.config || {}) as Record<string, unknown>
-  return { ...agent, config: safeConfig }
-}
-
-// Source configs hold third-party API tokens. The mobile app never reads them,
-// so they do not leave the desktop.
-function withoutSourceConfig<T extends { config?: unknown }>(source: T | undefined) {
-  if (!source) return source
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { config: _config, ...rest } = source
-  return rest
-}
-
-function artifactFromFileEntry(taskId: string, entry: ArtifactFileEntry): Artifact {
-  return {
-    id: entry.workpieceKey
-      ? `${taskId}:workpiece:${encodeURIComponent(entry.workpieceKey)}`
-      : `${taskId}:${entry.type}:${encodeURIComponent(entry.path)}`,
-    taskId,
-    type: entry.type,
-    title: entry.title,
-    path: entry.path,
-    workpieceKey: entry.workpieceKey,
-    files: entry.files,
-    updatedAt: entry.updatedAt,
-    reloadTrigger: Math.floor(entry.updatedAt)
-  }
-}
-
 function serveMobileSPA(res: ServerResponse, pathname: string): void {
-  // Resolve static file from out/mobile/
+  // The built SPA lives in out/mobile/.
   const mobileDir = join(__dirname, '../mobile')
   const resolved = join(mobileDir, pathname === '/' ? 'index.html' : pathname)
 
@@ -1154,7 +338,7 @@ function serveMobileSPA(res: ServerResponse, pathname: string): void {
     filePath = resolved
   }
 
-  // If not found, serve index.html (SPA fallback)
+  // SPA fallback.
   if (!existsSync(filePath) || !statSync(filePath).isFile()) {
     filePath = join(mobileDir, 'index.html')
   }

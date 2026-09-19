@@ -44,8 +44,6 @@ import type { DatabaseManager, TaskRecord } from './database'
 import type { AgentManager } from './agent-manager'
 import { SYSTEM_MESSAGE_MARKER, FINDINGS_BEGIN, computeDeliveryId } from '../shared/system-authority'
 
-// ── Helpers ──────────────────────────────────────────────
-
 function makeTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
     id: 'task-1',
@@ -91,8 +89,6 @@ function mockAgentManager(overrides: Record<string, unknown> = {}): AgentManager
   } as unknown as AgentManager
 }
 
-// ── Tests ──────────────────────────────────────────────
-
 describe('HeartbeatScheduler', () => {
   let scheduler: HeartbeatScheduler
   let db: ReturnType<typeof mockDbManager>
@@ -110,8 +106,6 @@ describe('HeartbeatScheduler', () => {
     vi.useRealTimers()
     vi.restoreAllMocks()
   })
-
-  // ── extractGitHubUrls ──────
 
   describe('extractGitHubUrls', () => {
     const extract = extractGitHubUrls
@@ -148,8 +142,6 @@ describe('HeartbeatScheduler', () => {
       expect(extract('https://gitlab.com/acme/app/pull/1')).toEqual([])
     })
   })
-
-  // ── isWithinActiveHours ──────────────────────────────────
 
   describe('isWithinActiveHours', () => {
     const getPrivateMethod = (s: HeartbeatScheduler) =>
@@ -216,8 +208,6 @@ describe('HeartbeatScheduler', () => {
     })
   })
 
-  // ── requiresCurrentStateChecks ───────────────────────────
-
   describe('requiresCurrentStateChecks', () => {
     it('returns true for requested changes and CI checks', () => {
       expect(requiresCurrentStateChecks('Verify CI pipeline passed')).toBe(true)
@@ -246,8 +236,6 @@ describe('HeartbeatScheduler', () => {
       expect(requiresLlmCurrentStateChecks('Verify CI pipeline passed')).toBe(false)
     })
   })
-
-  // ── preflightCoversAllChecks ─────────────────────────────
 
   describe('preflightCoversAllChecks', () => {
     const coversAllChecks = (content: string) => preflightCoversAllChecks(content)
@@ -330,8 +318,6 @@ describe('HeartbeatScheduler', () => {
       expect(coversAllChecks('# Heartbeat Checks\n\n## Current Status')).toBe(false)
     })
   })
-
-  // ── runPreflightChecks ───────────────────────────────────
 
   describe('runPreflightChecks', () => {
     const runPreflight = (_scheduler: HeartbeatScheduler, content: string, task: TaskRecord) =>
@@ -421,8 +407,6 @@ describe('HeartbeatScheduler', () => {
     })
   })
 
-  // ── buildHeartbeatPrompt ──────────────────────────────────
-
   describe('buildHeartbeatPrompt', () => {
     it('includes task title and heartbeat content', () => {
       const buildPrompt = (scheduler as unknown as {
@@ -462,8 +446,6 @@ describe('HeartbeatScheduler', () => {
       expect(prompt).toContain('inspect the current state even if the problem started before the last check')
     })
   })
-
-  // ── advanceNextCheck (adaptive intervals) ─────────────
 
   describe('advanceNextCheck', () => {
     const advance = (scheduler: HeartbeatScheduler) =>
@@ -577,8 +559,6 @@ describe('HeartbeatScheduler', () => {
     })
   })
 
-  // ── enableHeartbeat / disableHeartbeat ─────────────────
-
   describe('enableHeartbeat', () => {
     it('sets heartbeat_enabled and next check time', () => {
       vi.setSystemTime(new Date('2024-01-15T12:00:00.000Z'))
@@ -654,8 +634,6 @@ describe('HeartbeatScheduler', () => {
     })
   })
 
-  // ── task:updated events for sidebar sync ──────────────
-
   describe('task:updated renderer events', () => {
     let mockWindow: { webContents: { send: ReturnType<typeof vi.fn> }; isDestroyed: ReturnType<typeof vi.fn> }
 
@@ -705,60 +683,6 @@ describe('HeartbeatScheduler', () => {
       expect(() => freshScheduler.enableHeartbeat('task-1')).not.toThrow()
     })
   })
-
-  // ── task:updated events for sidebar sync ──────────────
-
-  describe('task:updated renderer events', () => {
-    let mockWindow: { webContents: { send: ReturnType<typeof vi.fn> }; isDestroyed: ReturnType<typeof vi.fn> }
-
-    beforeEach(() => {
-      mockWindow = { webContents: { send: vi.fn() }, isDestroyed: vi.fn().mockReturnValue(false) }
-      scheduler.start(mockWindow as unknown as import('electron').BrowserWindow)
-    })
-
-    it('sends task:updated to renderer when heartbeat is enabled', () => {
-      vi.setSystemTime(new Date('2024-01-15T12:00:00.000Z'))
-      scheduler.enableHeartbeat('task-1', 60)
-
-      const updateCall = mockWindow.webContents.send.mock.calls.find(
-        (call) => call[0] === 'task:updated'
-      )
-      expect(updateCall).toBeDefined()
-      expect(updateCall![1]).toEqual({
-        taskId: 'task-1',
-        updates: expect.objectContaining({
-          heartbeat_enabled: true,
-          heartbeat_interval_minutes: 60,
-          heartbeat_next_check_at: expect.any(String),
-        }),
-      })
-    })
-
-    it('sends task:updated to renderer when heartbeat is disabled', () => {
-      scheduler.disableHeartbeat('task-1')
-
-      const updateCall = mockWindow.webContents.send.mock.calls.find(
-        (call) => call[0] === 'task:updated'
-      )
-      expect(updateCall).toBeDefined()
-      expect(updateCall![1]).toEqual({
-        taskId: 'task-1',
-        updates: {
-          heartbeat_enabled: false,
-          heartbeat_next_check_at: null,
-        },
-      })
-    })
-
-    it('does not crash when mainWindow is not set (scheduler not started)', () => {
-      const freshScheduler = new HeartbeatScheduler(db as unknown as DatabaseManager, agent as unknown as AgentManager)
-      // Should not throw - just silently skip the send
-      expect(() => freshScheduler.disableHeartbeat('task-1')).not.toThrow()
-      expect(() => freshScheduler.enableHeartbeat('task-1')).not.toThrow()
-    })
-  })
-
-  // ── handleResult ────────────────────────────────────────
 
   describe('handleResult', () => {
     const handle = (scheduler: HeartbeatScheduler) =>
@@ -825,8 +749,6 @@ describe('HeartbeatScheduler', () => {
     })
   })
 
-  // ── checkConsecutiveErrors ─────────────────────────────
-
   describe('checkConsecutiveErrors', () => {
     const checkErrors = (scheduler: HeartbeatScheduler) =>
       (scheduler as unknown as {
@@ -851,8 +773,6 @@ describe('HeartbeatScheduler', () => {
       })
     })
   })
-
-  // ── completed task handling ────────────────────────────
 
   describe('checkHeartbeats skips completed tasks', () => {
     it('disables heartbeat for completed tasks returned by getHeartbeatDueTasks', async () => {
@@ -884,8 +804,6 @@ describe('HeartbeatScheduler', () => {
       expect(agent.startHeartbeatSession).not.toHaveBeenCalled()
     })
   })
-
-  // ── subtask heartbeat vs. completed parent ─────────────
 
   describe('checkHeartbeats skips subtasks whose parent is completed', () => {
     it('disables heartbeat for a ready_for_review subtask whose parent is completed', async () => {
@@ -937,8 +855,6 @@ describe('HeartbeatScheduler', () => {
     })
   })
 
-  // ── resolveAgentId ─────────────────────────────────────
-
   describe('resolveAgentId', () => {
     const resolve = (scheduler: HeartbeatScheduler) =>
       (scheduler as unknown as {
@@ -961,8 +877,6 @@ describe('HeartbeatScheduler', () => {
       expect(resolve(scheduler).call(scheduler, task)).toBeNull()
     })
   })
-
-  // ── start / stop ────────────────────────────────────────
 
   describe('start / stop', () => {
     it('starts periodic checking', () => {
@@ -1002,8 +916,6 @@ describe('HeartbeatScheduler', () => {
       expect(db.getHeartbeatDueTasks).toHaveBeenCalledTimes(3) // 2 + 1, not 2 + 2
     })
   })
-
-  // ── checkHeartbeats (private integration-style) ────────
 
   describe('checkHeartbeats', () => {
     const check = (scheduler: HeartbeatScheduler) =>
@@ -1094,8 +1006,6 @@ describe('HeartbeatScheduler', () => {
     })
   })
 
-  // ── hasHeartbeatFile / readHeartbeatFile ────────────────
-
   describe('getHeartbeatFilePath', () => {
     it('returns path with heartbeat.md in workspace dir', () => {
       const path = scheduler.getHeartbeatFilePath('task-1')
@@ -1104,16 +1014,12 @@ describe('HeartbeatScheduler', () => {
     })
   })
 
-  // ── hasFailedCheckRuns ────────────────────────────────
-
   describe('hasFailedCheckRuns', () => {
     it('is exported with the (owner, repo, sha) signature', () => {
       expect(typeof hasFailedCheckRuns).toBe('function')
       expect(hasFailedCheckRuns.length).toBe(3)
     })
   })
-
-  // ── waitForSessionResult (dangerous default fix) ────
 
   describe('waitForSessionResult', () => {
     it('rejects when session is idle with no message after inactivity timeout', { timeout: 25_000 }, async () => {
@@ -1300,8 +1206,6 @@ describe('HeartbeatScheduler', () => {
       expect(pollCount).toBeGreaterThan(8)
     })
   })
-
-  // ── countConsecutiveOks ────────────────────────────────
 
   describe('countConsecutiveOks', () => {
     const count = (scheduler: HeartbeatScheduler) =>

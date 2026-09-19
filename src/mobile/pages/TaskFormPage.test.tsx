@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, fireEvent, waitFor } from '@testing-library/react'
 import { TaskFormPage } from './TaskFormPage'
-import { useTaskStore, type Task } from '../stores/task-store'
+import { useTaskStore } from '../stores/task-store'
+import { TaskStatus, type Task } from '@/types'
 
 const mockNavigate = vi.fn()
 
@@ -132,7 +133,7 @@ describe('TaskFormPage — Edit mode', () => {
     description: 'Some description',
     type: 'coding',
     priority: 'high',
-    status: 'not_started',
+    status: TaskStatus.NotStarted,
     assignee: '',
     due_date: '2026-06-15T00:00:00.000Z',
     labels: ['bug', 'frontend'],

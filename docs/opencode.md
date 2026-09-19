@@ -99,7 +99,7 @@ Extended tasks table with `agent_id` column (foreign key to agents table).
 ### IPC Communication
 
 #### Channels (Main → Renderer)
-- `agent:output` - Agent message output
+- `transcript:changed` - New or updated transcript parts
 - `agent:status` - Session status changes
 
 #### Channels (Renderer → Main)

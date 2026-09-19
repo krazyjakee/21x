@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { CollapsibleDescription } from './CollapsibleDescription'
-import { Badge } from './Badge'
+import { CollapsibleDescription } from '@/components/ui/CollapsibleDescription'
+import { Badge } from '@/components/ui/Badge'
 import { TaskBadges } from './TaskBadges'
 import { cn } from '../lib/utils'
-import type { Task } from '../stores/task-store'
+import type { Task } from '@/types'
 import type { Route } from '../App'
 import { ChevronLeftIcon, ChevronRightIcon } from './icons'
 
@@ -39,6 +39,7 @@ export function ParentTaskContext({ parentTask, onNavigate }: { parentTask: Task
               taskId={parentTask.id}
               description={parentTask.description}
               size="sm"
+              variant="touch"
             />
           )}
           {parentTask.labels && parentTask.labels.length > 0 && (

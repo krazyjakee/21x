@@ -2,13 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { safeStorage } from 'electron'
 import { get as httpGet } from 'http'
 import { readdirSync, readFileSync, statSync } from 'fs'
+import { createHash } from 'crypto'
 import { join, relative } from 'path'
 import { createTestDb } from '../../../../test/helpers/db-test-helper'
 import type { DatabaseManager } from '../../database'
 import { PluginActionId, TaskStatus } from '../../../shared/constants'
 import { ConnectorBridgePlugin } from '../../plugins/connector-bridge-plugin'
 import type { PluginContext } from '../../plugins/types'
-import { pkceChallenge } from '../../oauth/pkce'
 import { CONNECTOR_PIECE_ALLOWLIST, type ConnectorPieceAllowlist } from '../allowlist'
 import { ConnectorStore } from '../connector-store'
 import { ConnectorCredentialStore } from '../credentials'
@@ -22,6 +22,8 @@ import { ConnectorBridgeEngine, type BridgeRuntime } from './engine'
 import { CONNECTOR_TASK_MAPPINGS } from './mappings'
 import type { RetryPolicy } from './retry'
 import { readCursor } from './state'
+
+const pkceChallenge = (verifier: string): string => createHash('sha256').update(verifier).digest('base64url')
 
 /**
  * Todoist OAuth2 proof (issue #15, docs/taskSources.md "Connector OAuth2").
@@ -52,8 +54,6 @@ const API = 'https://api.todoist.com/api/v1'
 const FILTER = '#Work | overdue'
 const RETRY: RetryPolicy = { maxAttempts: 3, baseDelayMs: 1000, maxDelayMs: 60_000 }
 const PAGE_SIZE = 3
-
-// ── Fake Todoist ────────────────────────────────────────────────
 
 interface TodoistTask {
   id: string
@@ -260,8 +260,6 @@ class FakeTodoist {
   }
 }
 
-// ── In-process piece host ───────────────────────────────────────
-
 class FakeHostProcess implements PieceHostTransport {
   alive = true
   private readonly toHost: ((m: HostInboundMessage) => void)[] = []
@@ -308,8 +306,6 @@ class FakeHostProcess implements PieceHostTransport {
   }
 }
 
-// ── Fake keychain ───────────────────────────────────────────────
-
 const MARKER = Buffer.from('fake-keychain:')
 const KEY = 0x5a
 
@@ -327,8 +323,6 @@ function fakeDecrypt(value: Buffer): string {
   for (let i = 0; i < out.length; i++) out[i] = value[MARKER.length + i] ^ KEY
   return out.toString('utf8')
 }
-
-// ── Harness ─────────────────────────────────────────────────────
 
 interface Harness {
   store: ConnectorStore
@@ -460,8 +454,6 @@ afterEach(() => {
   consoleWarn.mockRestore()
 })
 
-// ── Wiring ──────────────────────────────────────────────────────
-
 describe('Todoist is only an allowlist entry, a declarative mapping and a registry line', () => {
   it('mentions Todoist in no connector source file except the allowlist, the mapping and the static registry', () => {
     const root = join(__dirname, '..')
@@ -509,8 +501,6 @@ describe('Todoist is only an allowlist entry, a declarative mapping and a regist
     expect(h.processes).toHaveLength(0)
   })
 })
-
-// ── Connect ─────────────────────────────────────────────────────
 
 describe('connect through the loopback flow', () => {
   it('builds the authorization URL the provider expects, exchanges the code with the client secret, and stores the token encrypted', async () => {
@@ -595,8 +585,6 @@ describe('connect through the loopback flow', () => {
   })
 })
 
-// ── Import ──────────────────────────────────────────────────────
-
 describe('import through the real todoist_filter_tasks action with the resolved token', () => {
   it('follows every page, sends the access token as a bearer, and maps tasks to canonical fields', async () => {
     api.add(task('a', { content: 'Fix the login bug', description: 'Users see a blank page.', due: { date: '2026-10-01', string: 'Oct 1', lang: 'en', is_recurring: false }, labels: ['bug', 'urgent'] }))
@@ -646,8 +634,6 @@ describe('import through the real todoist_filter_tasks action with the resolved 
     expect(api.requests).toHaveLength(0)
   })
 })
-
-// ── Refresh ─────────────────────────────────────────────────────
 
 describe('refresh of an expired token', () => {
   it('refreshes once before the piece runs, persists the new token set, and uses it for every call', async () => {
@@ -699,8 +685,6 @@ describe('refresh of an expired token', () => {
     expect(second.oauth.status(instanceId).state).toBe('connected')
   })
 })
-
-// ── Revoked ─────────────────────────────────────────────────────
 
 describe('revoked tokens', () => {
   it('refresh refused with invalid_grant: a clear per-instance error, no retries, no task changes, no leaked secrets, and reconnect recovers', async () => {
@@ -794,8 +778,6 @@ describe('revoked tokens', () => {
   })
 })
 
-// ── Round trip ──────────────────────────────────────────────────
-
 describe('round trip through the real update / complete / reopen actions', () => {
   it('closes the task at the source before completing it locally, pushes title and due date, and reopens', async () => {
     const a = api.add(task('a'))
@@ -845,8 +827,6 @@ describe('round trip through the real update / complete / reopen actions', () =>
     expect(h.store.listDeadLetters(instanceId)).toEqual([])
   })
 })
-
-// ── Disconnect ──────────────────────────────────────────────────
 
 describe('disconnect', () => {
   it('forgets the token set and the client registration; the next sync asks to connect again', async () => {

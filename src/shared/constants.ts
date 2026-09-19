@@ -23,6 +23,24 @@ export const TASK_STATUSES: { value: TaskStatus; label: string }[] = [
   { value: TaskStatus.Completed, label: 'Completed' }
 ]
 
+/** Sort rank, higher = more urgent. */
+export const PRIORITY_ORDER: Record<'critical' | 'high' | 'medium' | 'low', number> = {
+  critical: 3,
+  high: 2,
+  medium: 1,
+  low: 0
+}
+
+/** Sort rank, higher = more active. */
+export const STATUS_ORDER: Record<TaskStatus, number> = {
+  [TaskStatus.AgentWorking]: 5,
+  [TaskStatus.AgentLearning]: 4,
+  [TaskStatus.Triaging]: 3,
+  [TaskStatus.ReadyForReview]: 2,
+  [TaskStatus.NotStarted]: 1,
+  [TaskStatus.Completed]: 0
+}
+
 // ── Plugin Action IDs ───────────────────────────────────────
 
 /** Action IDs used across task source plugins */
@@ -39,10 +57,7 @@ export enum PluginActionId {
   OpenInYouTrack = 'open_in_youtrack',
   ChangeState = 'change_state',
   // HubSpot
-  AddNote = 'add_note',
-  // Generic approval flow (sources that complete tasks by approve/reject)
-  Approve = 'approve',
-  Reject = 'reject'
+  AddNote = 'add_note'
 }
 
 // ── Heartbeat types ─────────────────────────────────────────

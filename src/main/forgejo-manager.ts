@@ -8,7 +8,7 @@ import {
   type PullRequestCheck,
   type PullRequestDetails
 } from '../shared/artifacts'
-import { FORGEJO_LOGIN_SETTING } from './repo-providers'
+import { FORGEJO_LOGIN_SETTING, mapGitHubStyleRepo, otherOwners, repoOwner, uniqueRepos } from './repo-providers'
 
 export { FORGEJO_LOGIN_SETTING }
 
@@ -225,17 +225,6 @@ function mapPullRequestState(raw: RawPullRequest): PullRequestState {
 export class ForgejoManager {
   constructor(private getSetting: (key: string) => string | null | undefined = () => null) {}
 
-  private mapRepo(raw: Record<string, unknown>): GitHubRepo {
-    return {
-      name: raw.name as string,
-      fullName: raw.full_name as string,
-      defaultBranch: (raw.default_branch as string) || 'main',
-      cloneUrl: raw.clone_url as string,
-      description: (raw.description as string) || '',
-      isPrivate: raw.private === true
-    }
-  }
-
   async isInstalled(): Promise<boolean> {
     try {
       await execFileAsync('tea', ['--version'])
@@ -394,13 +383,7 @@ export class ForgejoManager {
   }
 
   private async fetchAccessibleRepos(login: TeaLogin): Promise<GitHubRepo[]> {
-    const raw = await this.paginate<Record<string, unknown>>(login, '/user/repos')
-    const deduped = new Map<string, GitHubRepo>()
-    for (const repo of raw) {
-      const mapped = this.mapRepo(repo)
-      deduped.set(mapped.fullName, mapped)
-    }
-    return Array.from(deduped.values())
+    return uniqueRepos(await this.paginate<Record<string, unknown>>(login, '/user/repos'), mapGitHubStyleRepo)
   }
 
   private async currentUsername(login: TeaLogin): Promise<string> {
@@ -419,25 +402,14 @@ export class ForgejoManager {
       this.paginate<{ username?: string; name?: string }>(login, '/user/orgs'),
       this.fetchAccessibleRepos(login)
     ])
-
-    const owners = new Set<string>()
-    for (const org of orgs) {
-      const name = org.username || org.name
-      if (name) owners.add(name)
-    }
-    for (const repo of repos) {
-      const [owner] = repo.fullName.split('/')
-      if (owner) owners.add(owner)
-    }
-    owners.delete(username)
-    return Array.from(owners).sort((left, right) => left.localeCompare(right))
+    return otherOwners([...orgs.map((org) => org.username || org.name), ...repos.map(repoOwner)], username)
   }
 
   async fetchOrgRepos(org: string, loginName?: string): Promise<GitHubRepo[]> {
     const login = await this.getLogin(loginName)
     try {
       const raw = await this.paginate<Record<string, unknown>>(login, `/orgs/${encodeURIComponent(org)}/repos`)
-      return raw.map((repo) => this.mapRepo(repo))
+      return raw.map(mapGitHubStyleRepo)
     } catch (error) {
       // Personal namespaces and collaborator-only owners are not orgs.
       if (!(error instanceof ForgejoError) || error.httpStatus !== 404) throw error

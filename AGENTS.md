@@ -396,7 +396,7 @@ Secrets (encrypted API keys, database URLs, etc.) are injected into agent sessio
 - **Encryption**: Values encrypted with Electron `safeStorage` at rest
 - **Secret Broker**: An HTTP server on `localhost` that serves secrets to the agent's shell process
 - **Wrapper script**: `secret-shell.sh` intercepts bash commands to inject env vars
-- **Claude Code path**: `SHELL` points at the wrapper, and `PreToolUse` hooks inject secrets (`buildSecretHooks` in `claude-code-adapter.ts`)
+- **Claude Code path**: `SHELL` points at the wrapper, and `PreToolUse` hooks inject secrets (`buildSecretHooks` in `claude-code-options.ts`)
 - **System prompt awareness**: Agents are told which secrets are available (name/description only — never the value)
 
 ### Task API Server

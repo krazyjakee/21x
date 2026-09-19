@@ -18,20 +18,15 @@ export function SkillSelectorPage({
   const [selected, setSelected] = useState<Set<string>>(() => new Set(task?.skill_ids ?? []))
   const [search, setSearch] = useState('')
 
-  const agentSkills = useMemo(() => {
-    if (!task?.agent_id) return skills
-    return skills.filter((s) => !s.agent_id || s.agent_id === task.agent_id)
-  }, [skills, task?.agent_id])
-
   const filtered = useMemo(() => {
-    if (!search) return agentSkills
+    if (!search) return skills
     const q = search.toLowerCase()
-    return agentSkills.filter(
+    return skills.filter(
       (s) =>
         s.name.toLowerCase().includes(q) ||
         (s.description || '').toLowerCase().includes(q)
     )
-  }, [agentSkills, search])
+  }, [skills, search])
 
   const toggleSkill = useCallback((id: string) => {
     setSelected((prev) => {

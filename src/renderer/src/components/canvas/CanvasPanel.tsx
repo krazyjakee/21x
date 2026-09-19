@@ -78,7 +78,6 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
   const resizeCommit = useRef({ w: 0, h: 0 })
   const previousTaskStatusRef = useRef<TaskStatus | undefined>(undefined)
 
-  // ── Drag handling ─────────────────────────────────────────
   const handleDragStart = useCallback(
     (e: React.MouseEvent) => {
       if (e.button !== 0) return
@@ -149,7 +148,6 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
       if (guides.length > 0 || hadGuides) setSnapGuides(guides)
       hadGuides = guides.length > 0
 
-      // Auto-connect proximity detection (browser ↔ task)
       const draggedWithPos = { ...panel, x: snappedX, y: snappedY }
       const prox = detectProximityEdge(draggedWithPos, otherPanels, edges)
       useCanvasStore.getState().setProximityEdge(prox)
@@ -184,7 +182,6 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
       }
       setLiveDrag(null)
 
-      // If there's a proximity edge, auto-connect on drop
       const prox = useCanvasStore.getState().proximityEdge
       if (prox) {
         const { edges } = useCanvasStore.getState()
@@ -194,7 +191,6 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
             (e.fromPanelId === prox.toId && e.toPanelId === prox.fromId)
         )
         if (!alreadyExists) {
-          // Determine edge type from the panel types
           const allPanels = useCanvasStore.getState().panels
           const fromP = allPanels.find((p) => p.id === prox.fromId)
           const toP = allPanels.find((p) => p.id === prox.toId)
@@ -220,7 +216,6 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
     }
   }, [isDragging, panel.id, panel.width, panel.height, zoom, updatePanel, setDraggingPanelId, setSnapGuides, setLiveDrag])
 
-  // ── Resize handling ───────────────────────────────────────
   const handleResizeStart = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault()
@@ -293,7 +288,6 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
     }
   }, [isResizing, panel.id, panel.minWidth, panel.minHeight, zoom, updatePanel])
 
-  // ── Connect (edge drawing) ─────────────────────────────────
   // Local state tracks whether THIS panel initiated connecting — avoids global subscription
   const [isConnectingLocal, setIsConnectingLocal] = useState(false)
 
@@ -311,13 +305,11 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
     return unsub
   }, [isConnectingLocal, panel.id])
 
-  // ── Click handling ────────────────────────────────────────
   const handleMouseDown = useCallback(
     () => {
       // Read connecting state imperatively — no subscription cost
       const connectingFrom = useCanvasStore.getState().connectingFromId
       if (connectingFrom && connectingFrom !== panel.id) {
-        // Complete the edge
         const fromPanel = useCanvasStore.getState().panels.find((p) => p.id === connectingFrom)
         const isBrowserEdge = panel.type === 'browser' || fromPanel?.type === 'browser'
         const isTerminalEdge = panel.type === 'terminal' || fromPanel?.type === 'terminal'
@@ -331,7 +323,6 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
     [bringToFront, panel.id, panel.type, addEdge, setConnectingFromId]
   )
 
-  // ── Focus (zoom-to-fit this panel) ────────────────────────
   const handleFocus = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
@@ -344,7 +335,6 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
     [focusPanel, panel.id]
   )
 
-  // ── Close ─────────────────────────────────────────────────
   const handleClose = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
@@ -353,7 +343,6 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
     [removePanel, panel.id]
   )
 
-  // ── Toggle collapse ───────────────────────────────────────
   const handleToggleCollapse = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
@@ -362,7 +351,7 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
     []
   )
 
-  // ── Side handle auto-hide after 20s of panel inactivity ──────
+  // Side handle auto-hide after 20s of panel inactivity
   const [sideHandleVisible, setSideHandleVisible] = useState(false)
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -377,12 +366,11 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
     setSideHandleVisible(false)
   }, [])
 
-  // Clean up timer on unmount
   useEffect(() => {
     return () => { if (hideTimerRef.current) clearTimeout(hideTimerRef.current) }
   }, [])
 
-  // ── Proximity glow — this panel is a target of auto-connect proximity ──
+  // Proximity glow — this panel is a target of auto-connect proximity
   const [isProximityTarget, setIsProximityTarget] = useState(false)
   useEffect(() => {
     const unsub = useCanvasStore.subscribe(
@@ -398,7 +386,6 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
     return unsub
   }, [panel.id])
 
-  // ── Task status for dynamic color coding ─────────────────
   const taskStatus = useTaskStore(useCallback((s) =>
     panel.type === 'task' ? s.tasks.find(t => t.id === panel.refId)?.status : undefined,
     [panel.type, panel.refId])
@@ -424,12 +411,10 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
     return undefined
   }, [panel.type, taskStatus])
 
-  // ── Create connected browser panel (from side handle click) ──
   const handleCreateBrowser = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
       e.preventDefault()
-      // Place new browser panel to the right of this panel with a gap
       const gap = 40
       const newX = panel.x + panel.width + gap
       const newY = panel.y
@@ -442,7 +427,6 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
         width: DEFAULT_PANEL_WIDTH,
         height: DEFAULT_PANEL_HEIGHT,
       })
-      // Auto-connect with browser edge
       if (newId) {
         addEdge(panel.id, newId, 'browser')
       }
@@ -450,7 +434,6 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
     [panel.id, panel.x, panel.y, panel.width, addEdge]
   )
 
-  // ── Start connecting from side handle (drag) ──
   const handleSideHandleDrag = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
@@ -462,7 +445,6 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
     [setConnectingFromId, panel.id]
   )
 
-  // ── Panel type styling ────────────────────────────────────
   const cfg = useMemo(() => {
     const TYPE_CONFIG: Record<string, { label: string; color: string; border: string; bg: string }> = {
       task: { label: 'Task', color: 'bg-blue-500/20 text-blue-400', border: 'border-blue-500/40', bg: 'bg-[var(--canvas-panel)]' },
@@ -567,7 +549,6 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
 
         {/* Panel actions — visible on hover */}
         <div className={`flex items-center gap-0.5 transition-opacity duration-150 opacity-0 group-hover:opacity-100`}>
-          {/* Focus / zoom-to-fit button */}
           <button
             onMouseDown={(e) => e.stopPropagation()}
             onClick={handleFocus}
@@ -577,7 +558,6 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
             <Focus className="h-3 w-3" />
           </button>
 
-          {/* Collapse/expand */}
           <button
             onMouseDown={(e) => e.stopPropagation()}
             onClick={handleToggleCollapse}
@@ -591,7 +571,6 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
             )}
           </button>
 
-          {/* Close button */}
           <button
             onMouseDown={(e) => e.stopPropagation()}
             onClick={handleClose}
@@ -603,7 +582,6 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
         </div>
       </div>
 
-      {/* Content area */}
       {!isCollapsed && (
         <div
           data-canvas-content-mounted={suspendHeavyContent ? 'false' : 'true'}
@@ -706,7 +684,6 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
   )
 })
 
-// ── Memoized panel content router ──────────────────────────
 // Only re-renders when the content-relevant props change (type, refId, url, id).
 // Position/size/zIndex changes do NOT cause content to remount.
 

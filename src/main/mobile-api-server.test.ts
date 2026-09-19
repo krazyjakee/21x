@@ -8,7 +8,6 @@ import { makeTask } from '../../test/helpers/task-fixtures'
 import type { DatabaseManager } from './database'
 import {
   applyMobileAccessSettings,
-  getMobileApiBinding,
   MOBILE_ACCESS_ENABLED_SETTING,
   MOBILE_LAN_ACCESS_SETTING,
   MOBILE_SESSION_IDLE_DAYS_SETTING,
@@ -548,7 +547,6 @@ describe('mobile-api-server: mobile access settings', () => {
     setup()
 
     expect(await applyMobileAccessSettings(0)).toBeNull()
-    expect(getMobileApiBinding()).toBeNull()
   })
 
   it('binds to 127.0.0.1 unless LAN access is opted into, and rebinds on change', async () => {
@@ -557,16 +555,15 @@ describe('mobile-api-server: mobile access settings', () => {
 
     const port = await applyMobileAccessSettings(0)
     expect(port).toBeGreaterThan(0)
-    expect(getMobileApiBinding()).toEqual({ host: '127.0.0.1', port })
     expect((await fetch(`http://127.0.0.1:${port}/api/tasks`)).status).toBe(401)
 
     db.setSetting(MOBILE_LAN_ACCESS_SETTING, 'true')
     const lanPort = await applyMobileAccessSettings(0)
-    expect(getMobileApiBinding()).toEqual({ host: '0.0.0.0', port: lanPort })
+    expect(lanPort).toBeGreaterThan(0)
+    expect((await fetch(`http://127.0.0.1:${lanPort}/api/tasks`)).status).toBe(401)
 
     db.setSetting(MOBILE_ACCESS_ENABLED_SETTING, 'false')
     expect(await applyMobileAccessSettings(0)).toBeNull()
-    expect(getMobileApiBinding()).toBeNull()
     await expect(fetch(`http://127.0.0.1:${lanPort}/api/tasks`)).rejects.toThrow()
   })
 })

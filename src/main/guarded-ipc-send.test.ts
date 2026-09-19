@@ -23,10 +23,10 @@ describe('guarded desktop sends', () => {
     vi.mocked(app.getPath).mockReturnValue(directory)
     const send = vi.fn()
     const data = { content: 'SECRET-MESSAGE'.repeat(MAX_IPC_MESSAGE_BYTES) }
-    expect(guardedIpcSend({ send }, 'agent:output', data)).toBe(false)
+    expect(guardedIpcSend({ send }, 'agent:status', data)).toBe(false)
     expect(send).not.toHaveBeenCalled()
     const log = readFileSync(join(directory, 'logs/ipc-guard.log'), 'utf8')
-    expect(log).toContain('agent:output')
+    expect(log).toContain('agent:status')
     expect(log).toContain('blocked:size')
     expect(log).not.toContain('SECRET-MESSAGE')
     expect(dialog.showMessageBox).toHaveBeenCalled()
@@ -49,16 +49,6 @@ describe('guarded desktop sends', () => {
     expect(payload.maxRev).toBe(12)
   })
 
-  it('splits legacy output batches and retains routing fields', () => {
-    const send = vi.fn()
-    const messages = Array.from({ length: 12 }, (_, id) => ({ id, content: 'x'.repeat(400_000) }))
-    expect(guardedIpcSend({ send }, 'agent:output-batch', {
-      taskId: 'task-1', sessionId: 'session-1', messages
-    })).toBe(true)
-    expect(send.mock.calls.flatMap(([, data]) => data.messages)).toEqual(messages)
-    expect(send.mock.calls.every(([, data]) => data.taskId === 'task-1' && data.sessionId === 'session-1')).toBe(true)
-  })
-
   it('preflights all parts before sending a batch with one excessive item', () => {
     const send = vi.fn()
     const parts = [{ content: 'ok' }, { content: 'x'.repeat(MAX_IPC_MESSAGE_BYTES) }]
@@ -69,15 +59,15 @@ describe('guarded desktop sends', () => {
   it('bounds amplification from repeated references when splitting', () => {
     const send = vi.fn()
     const shared = { content: 'x'.repeat(1_000_000) }
-    const messages = [...Array(100).fill(shared), { content: 'x'.repeat(3_500_000) }]
-    expect(guardedIpcSend({ send }, 'agent:output-batch', { messages })).toBe(false)
+    const parts = [...Array(100).fill(shared), { content: 'x'.repeat(3_500_000) }]
+    expect(guardedIpcSend({ send }, 'transcript:changed', { taskId: 't', parts, maxRev: 101 })).toBe(false)
     expect(send).not.toHaveBeenCalled()
   })
 
   it('rejects an aggregate batch over the total budget', () => {
     const send = vi.fn()
-    const messages = Array.from({ length: 100 }, () => ({ content: 'x'.repeat(400_000) }))
-    expect(guardedIpcSend({ send }, 'agent:output-batch', { messages })).toBe(false)
+    const parts = Array.from({ length: 100 }, () => ({ content: 'x'.repeat(400_000) }))
+    expect(guardedIpcSend({ send }, 'transcript:changed', { taskId: 't', parts, maxRev: 100 })).toBe(false)
     expect(send).not.toHaveBeenCalled()
   })
 
@@ -97,7 +87,7 @@ describe('guarded desktop sends', () => {
   })
 })
 
- describe('complex transcript batches', () => {
+describe('complex transcript batches', () => {
   it('splits at the traversal limit without losing small records', () => {
     const send = vi.fn()
     const parts = Array.from({ length: 11000 }, (_, i) => ({

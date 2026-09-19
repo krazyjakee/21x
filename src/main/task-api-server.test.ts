@@ -458,7 +458,7 @@ describe('/start_task', () => {
         agentId: agent.id
       }))
     }
-    setTaskApiAgentController(controller as any)
+    setTaskApiAgentController(controller as never)
 
     const port = await startTaskApiServer(db)
     const response = await fetch(`http://127.0.0.1:${port}/start_task`, {
@@ -529,16 +529,13 @@ describe('Triage task status lifecycle', () => {
     const agent = db.createAgent(makeAgent({ name: 'Default Agent', is_default: true }))!
     const task = db.createTask(makeTask({ title: 'New task needing triage' }))!
 
-    // Step 1: Task starts as not_started with no agent
     expect(task.status).toBe('not_started')
     expect(task.agent_id).toBeNull()
 
-    // Step 2: Auto-start hook sets status to triaging
     db.updateTask(task.id, { status: 'triaging' as unknown as Parameters<typeof db.updateTask>[1]['status'] })
     const triagingTask = db.getTask(task.id)!
     expect(triagingTask.status).toBe('triaging')
 
-    // Step 3: Triage agent assigns agent_id, skills, labels, priority
     db.updateTask(task.id, {
       agent_id: agent.id,
       skill_ids: ['skill-1', 'skill-2'],
@@ -552,21 +549,18 @@ describe('Triage task status lifecycle', () => {
     expect(assignedTask.priority).toBe('high')
     expect(assignedTask.status).toBe('triaging') // Still triaging
 
-    // Step 4: transitionToIdle resets status to not_started
     db.updateTask(task.id, { status: 'not_started' as unknown as Parameters<typeof db.updateTask>[1]['status'] })
     const readyTask = db.getTask(task.id)!
     expect(readyTask.status).toBe('not_started')
     expect(readyTask.agent_id).toBe(agent.id) // Agent still assigned
 
-    // Step 5: Auto-run picks up the task (status=not_started + agent_id set)
-    // This would be handled by the auto-start hook
+    // Auto-run picks this up: not_started with an agent assigned.
   })
 
   it('task created with agent_id already set skips triage', () => {
     const agent = db.createAgent(makeAgent({ name: 'Specific Agent' }))!
     const task = db.createTask(makeTask({ title: 'Pre-assigned task' }))!
 
-    // Assign agent immediately after creation
     db.updateTask(task.id, { agent_id: agent.id })
     const assignedTask = db.getTask(task.id)!
 
@@ -626,10 +620,8 @@ describe('Triage lifecycle with output_fields', () => {
     const agent = db.createAgent(makeAgent({ name: 'Default Agent', is_default: true }))!
     const task = db.createTask(makeTask({ title: 'Task needing triage and outputs' }))!
 
-    // Task starts with no output_fields
     expect(task.output_fields).toEqual([])
 
-    // Set to triaging
     db.updateTask(task.id, { status: 'triaging' as unknown as Parameters<typeof db.updateTask>[1]['status'] })
 
     // Triage agent assigns agent_id and output_fields
@@ -639,7 +631,6 @@ describe('Triage lifecycle with output_fields', () => {
       { id: 'files_changed', name: 'Files Changed', type: 'number', required: false }
     ]
 
-    // Simulate handleRoute update_task with output_fields
     const updates = ['agent_id = ?', 'output_fields = ?', 'updated_at = ?']
     const params = [agent.id, JSON.stringify(outputFields), new Date().toISOString(), task.id]
     rawDb.prepare(`UPDATE tasks SET ${updates.join(', ')} WHERE id = ?`).run(...params)
@@ -708,12 +699,10 @@ describe('agent_workload statistics - uses agent_working status', () => {
     const t2 = db.createTask(makeTask({ title: 'Not started task' }))!
     const t3 = db.createTask(makeTask({ title: 'Another active task' }))!
 
-    // Assign all to the same agent
     db.updateTask(t1.id, { agent_id: agent.id })
     db.updateTask(t2.id, { agent_id: agent.id })
     db.updateTask(t3.id, { agent_id: agent.id })
 
-    // Set statuses
     rawDb.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('agent_working', t1.id)
     rawDb.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('not_started', t2.id)
     rawDb.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('agent_working', t3.id)

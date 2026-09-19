@@ -5,8 +5,6 @@ import { TaskStatus } from '../../shared/constants'
 import type { PluginContext } from './types'
 import type { DatabaseManager, TaskRecord } from '../database'
 
-// ── Shared mock instance (reset per test) ────────────────────
-
 const mockClientInstance = {
   getDataSource: vi.fn(),
   queryAllPages: vi.fn(),
@@ -25,8 +23,6 @@ vi.mock('./notion-client', () => ({
     return mockClientInstance
   }
 }))
-
-// ── Helpers ──────────────────────────────────────────────────
 
 const DB_SCHEMA = {
   id: 'db-1',
@@ -73,8 +69,6 @@ function makePage(overrides: Record<string, unknown> = {}) {
 const TEST_ATTACHMENTS_DIR = '/tmp/test-notion-attachments'
 const defaultConfig = { api_token: 'ntn_test', data_source_id: 'db-1' }
 
-// ── Tests ────────────────────────────────────────────────────
-
 describe('NotionPlugin', () => {
   let plugin: NotionPlugin
 
@@ -82,10 +76,8 @@ describe('NotionPlugin', () => {
     vi.clearAllMocks()
     plugin = new NotionPlugin()
 
-    // Ensure test attachments dir exists
     if (!existsSync(TEST_ATTACHMENTS_DIR)) mkdirSync(TEST_ATTACHMENTS_DIR, { recursive: true })
 
-    // Default mock returns
     mockClientInstance.getDataSource.mockResolvedValue(DB_SCHEMA)
     mockClientInstance.queryAllPages.mockResolvedValue([])
     mockClientInstance.getPageBlocks.mockResolvedValue([])
@@ -100,8 +92,6 @@ describe('NotionPlugin', () => {
     mockClientInstance.updatePage.mockResolvedValue({})
     mockClientInstance.getUsers.mockResolvedValue([])
   })
-
-  // ── Metadata ────────────────────────────────────────────
 
   it('has correct metadata', () => {
     expect(plugin.id).toBe('notion')
@@ -151,8 +141,6 @@ describe('NotionPlugin', () => {
       ).rejects.toThrow('Notion search returned incomplete results')
     })
   })
-
-  // ── importTasks ─────────────────────────────────────────
 
   describe('importTasks', () => {
     it('imports new tasks from pages', async () => {
@@ -275,9 +263,6 @@ describe('NotionPlugin', () => {
       const ctx = makeContext()
       await plugin.importTasks('src-1', defaultConfig, ctx)
 
-      // updateTask should be called with attachments including the new one
-      // The first updateTask call is from importTasks creating the task description,
-      // but since we create (not update), the attachment updateTask is a separate call
       const updateCalls = (ctx.db.updateTask as ReturnType<typeof vi.fn>).mock.calls
       const attachmentCall = updateCalls.find(
         (call: unknown[]) => call[0] === 'task-new' &&
@@ -440,8 +425,6 @@ describe('NotionPlugin', () => {
     })
   })
 
-  // ── formatPropertyValue (files type) ────────────────────
-
   describe('formatPropertyValue (via formatProperties)', () => {
     it('formats files property as markdown links in description', async () => {
       const page = makePage({
@@ -486,8 +469,6 @@ describe('NotionPlugin', () => {
     })
   })
 
-  // ── executeAction ───────────────────────────────────────
-
   describe('executeAction', () => {
     it('returns error when no external_id', async () => {
       const ctx = makeContext()
@@ -526,8 +507,6 @@ describe('NotionPlugin', () => {
       }
     })
   })
-
-  // ── Next statuses ───────────────────────────────────────
 
   describe('next statuses', () => {
     const CUSTOM_SCHEMA = {

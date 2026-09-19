@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, fireEvent, waitFor } from '@testing-library/react'
 import type { Mock } from 'vitest'
 import { RepoSelectorPage } from './RepoSelectorPage'
-import { useTaskStore, type Task } from '../stores/task-store'
+import { useTaskStore } from '../stores/task-store'
+import { TaskStatus, type Task } from '@/types'
 import { api } from '../api/client'
 
 const mockNavigate = vi.fn()
@@ -14,7 +15,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     description: '',
     type: 'general',
     priority: 'medium',
-    status: 'not_started',
+    status: TaskStatus.NotStarted,
     assignee: '',
     due_date: null,
     labels: [],

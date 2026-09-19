@@ -45,8 +45,6 @@ const LIST_DONE = 'list-done-0000000000000002'
 const RETRY: RetryPolicy = { maxAttempts: 3, baseDelayMs: 1000, maxDelayMs: 60_000 }
 const LONG = 30_000
 
-// ── Fake Trello API ─────────────────────────────────────────────
-
 interface TrelloLabel {
   id: string
   name: string
@@ -174,8 +172,6 @@ class FakeTrelloApi {
   }
 }
 
-// ── In-process piece host ───────────────────────────────────────
-
 /** The real host runtime and the real bundled-piece registry behind a fake utilityProcess. */
 class FakeHostProcess implements PieceHostTransport {
   alive = true
@@ -237,8 +233,6 @@ interface Harness {
   processes: FakeHostProcess[]
   runtime: BridgeRuntime
 }
-
-// ── Test state ──────────────────────────────────────────────────
 
 let db: DatabaseManager
 let instanceId: string
@@ -345,8 +339,6 @@ afterEach(() => {
   consoleWarn.mockRestore()
 })
 
-// ── Success criterion: allowlist entry + declarative mapping only ──
-
 describe('Trello is only an allowlist entry and a declarative mapping', () => {
   it('mentions Trello in no connector source file except the allowlist, the mapping and the static registry', () => {
     const root = join(__dirname, '..')
@@ -390,8 +382,6 @@ describe('Trello is only an allowlist entry and a declarative mapping', () => {
     expect(h.processes).toHaveLength(0)
   })
 })
-
-// ── Import ──────────────────────────────────────────────────────
 
 describe('import through the real list_cards_in_board action', () => {
   it('maps board cards to canonical task fields and never creates tasks for archived cards', async () => {
@@ -500,8 +490,6 @@ describe('import through the real list_cards_in_board action', () => {
   })
 })
 
-// ── Round trip ──────────────────────────────────────────────────
-
 describe('round trip through the real update_card action', () => {
   it('archives the card at the source before the task completes locally', async () => {
     const a = api.add(card('a'))
@@ -574,8 +562,6 @@ describe('round trip through the real update_card action', () => {
     expect(h.store.listDeadLetters(instanceId)).toEqual([])
   })
 })
-
-// ── Failure matrix ──────────────────────────────────────────────
 
 describe('failure matrix', () => {
   it('401 (revoked token): a clear permanent error, no retries, no task changes, no leaked secrets', async () => {
@@ -792,8 +778,6 @@ describe('failure matrix', () => {
   })
 })
 
-// ── Polling trigger cursor ──────────────────────────────────────
-
 describe('real deadline polling trigger', () => {
   it('keeps its poll cursor in connector_kv across an app restart', async () => {
     const base = { instanceId, pieceName: PIECE, pieceVersion: VERSION, triggerName: 'deadline' as const }
@@ -819,8 +803,6 @@ describe('real deadline polling trigger', () => {
     expect(second.store.kvGet(instanceId, 'flow', 'lastPoll')).toBe(Date.parse(later.due!))
   })
 })
-
-// ── 100 items ───────────────────────────────────────────────────
 
 describe('100-item import and update', () => {
   it(

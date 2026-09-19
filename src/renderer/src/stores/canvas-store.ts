@@ -9,8 +9,8 @@ import { DEFAULT_PROJECT_ID } from '@shared/projects'
  * The canvas is kept once per project under `canvas_state:<projectId>`. The
  * bare key is the pre-project blob, copied into Default on first load.
  */
-export const CANVAS_STORAGE_KEY = 'canvas_state'
-export function canvasStorageKey(projectId: string): string {
+const CANVAS_STORAGE_KEY = 'canvas_state'
+function canvasStorageKey(projectId: string): string {
   return projectScopedKey(CANVAS_STORAGE_KEY, projectId)
 }
 
@@ -44,8 +44,6 @@ function releaseBrokerPanel(panelId: string): void {
   }
 }
 
-// ── Panel types ────────────────────────────────────────────
-
 export type CanvasPanelType = 'task' | 'transcript' | 'webpage' | 'terminal' | 'browser' | 'placeholder'
 
 export interface CanvasPanelData {
@@ -71,9 +69,7 @@ export interface CanvasPanelData {
   minHeight?: number
 }
 
-// ── Connections / Edges ───────────────────────────────────
-
-export type CanvasEdgeType = 'default' | 'browser' | 'terminal'
+type CanvasEdgeType = 'default' | 'browser' | 'terminal'
 
 export interface CanvasEdge {
   id: string
@@ -83,9 +79,7 @@ export interface CanvasEdge {
   edgeType?: CanvasEdgeType
 }
 
-// ── Snapping helpers ──────────────────────────────────────
-
-export const SNAP_THRESHOLD = 12 // px distance to trigger snap
+const SNAP_THRESHOLD = 12 // px distance to trigger snap
 export const SNAP_GAP = 8 // px gap between snapped panels
 
 /**
@@ -93,18 +87,16 @@ export const SNAP_GAP = 8 // px gap between snapped panels
  * task, not the panel: a panel is rebuilt when a session starts, so a panel ID
  * read a moment ago may already be gone.
  */
-export type CanvasViewCommand =
+type CanvasViewCommand =
   | { kind: 'fit_all' }
   | { kind: 'reset' }
   | { kind: 'zoom'; zoom: number }
   | { kind: 'focus_task'; taskId: string }
 
-export interface SnapGuide {
+interface SnapGuide {
   axis: 'x' | 'y'
   position: number
 }
-
-// ── Viewport state ─────────────────────────────────────────
 
 export interface Viewport {
   x: number
@@ -117,18 +109,14 @@ export const MAX_ZOOM = 3
 export const DEFAULT_PANEL_WIDTH = 1020
 export const DEFAULT_PANEL_HEIGHT = 780
 
-// ── Pure viewport math ─────────────────────────────────────
 // Shared by the store actions *and* by the imperative gesture path in
 // InfiniteCanvas (which transforms the DOM directly during a pan/zoom and
 // only commits to the store once, on gesture end). Keeping the math in one
 // place guarantees the imperative path and the store can never diverge.
-
-/** Translate a viewport by a screen-space delta. */
 export function panViewport(viewport: Viewport, dx: number, dy: number): Viewport {
   return { ...viewport, x: viewport.x + dx, y: viewport.y + dy }
 }
 
-/** Clamp a zoom level to the supported range. */
 export function clampZoom(zoom: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom))
 }
@@ -169,10 +157,6 @@ export function snapGuidesEqual(a: SnapGuide[], b: SnapGuide[]): boolean {
   }
   return true
 }
-
-// ── Store ──────────────────────────────────────────────────
-
-// ── Persistence shape ─────────────────────────────────────
 
 interface CanvasPersistedState {
   viewport: Viewport
@@ -221,7 +205,6 @@ interface CanvasState {
   requestViewCommand: (command: CanvasViewCommand) => void
   clearViewCommand: () => void
 
-  // Persistence
   /** The project this canvas belongs to — set as a load starts, before it lands. */
   projectId: string
   /** True once `projectId`'s canvas has been read from settings. */
@@ -233,7 +216,6 @@ interface CanvasState {
    */
   loadCanvas: (projectId?: string) => Promise<void>
 
-  // Viewport actions
   setViewport: (viewport: Partial<Viewport>) => void
   zoomTo: (zoom: number, centerX?: number, centerY?: number) => void
   resetViewport: () => void
@@ -249,18 +231,15 @@ interface CanvasState {
   ) => void
   focusPanel: (id: string, containerWidth: number, containerHeight: number) => void
 
-  // Panel actions
   addPanel: (panel: Omit<CanvasPanelData, 'id' | 'zIndex'>) => string
   removePanel: (id: string) => void
   removePanelsByRefId: (refId: string) => void
   updatePanel: (id: string, updates: Partial<Omit<CanvasPanelData, 'id'>>) => void
   bringToFront: (id: string) => void
 
-  // Drag actions
   setDraggingPanelId: (id: string | null) => void
   setSnapGuides: (guides: SnapGuide[]) => void
 
-  // Edge / connection actions
   addEdge: (fromPanelId: string, toPanelId: string, edgeType?: CanvasEdgeType) => string
   removeEdge: (id: string) => void
   removeEdgesForPanel: (panelId: string) => void
@@ -375,7 +354,6 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
           return
         }
         const data = JSON.parse(raw) as CanvasPersistedState
-        // Restore counters from persisted panel/edge IDs
         for (const p of data.panels) {
           const match = p.id.match(/^panel-(\d+)/)
           if (match) panelCounter = Math.max(panelCounter, parseInt(match[1], 10))
@@ -438,7 +416,6 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
     // Guard against zero-size container (window minimized, being dragged, not laid out yet)
     if (!containerWidth || !containerHeight || containerWidth < 10 || containerHeight < 10) return
 
-    // Calculate bounding box of all panels (plus any extra content, e.g. figures)
     const PAD = 60
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
     for (const p of panels) {
@@ -462,7 +439,6 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
     // Fit zoom to show all panels (capped at 1x so we never zoom in past 100%)
     const zoom = Math.max(MIN_ZOOM, Math.min(1, containerWidth / contentW, containerHeight / contentH))
 
-    // Center the bounding box in the viewport
     const centerX = (minX + maxX) / 2
     const centerY = (minY + maxY) / 2
     const x = containerWidth / 2 - centerX * zoom
@@ -493,7 +469,6 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
 
     if (!isFinite(x) || !isFinite(y) || !isFinite(zoom)) return
 
-    // Bring panel to front too
     set((s) => ({
       viewport: { x, y, zoom },
       panels: s.panels.map((p) => (p.id === id ? { ...p, zIndex: nextZIndex } : p)),
@@ -551,7 +526,6 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
     scheduleSave()
   },
 
-  // Drag
   setDraggingPanelId: (id) => set({ draggingPanelId: id }),
   // Bail out when the guides are structurally unchanged — calculateSnap()
   // allocates a fresh array every frame, and an unconditional write would
@@ -567,14 +541,12 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
     set({ liveDrag: drag })
   },
 
-  // Viewport commands from outside the canvas
   requestViewCommand: (command) => set({ pendingViewCommand: command }),
   clearViewCommand: () => {
     if (!get().pendingViewCommand) return
     set({ pendingViewCommand: null })
   },
 
-  // Edges
   addEdge: (fromPanelId, toPanelId, edgeType) => {
     const { edges, panels } = get()
     const exists = edges.some(
@@ -589,7 +561,6 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
     }))
     scheduleSave()
 
-    // ── Notify agent when a browser/terminal edge connects to a task ──
     if (edgeType === 'browser') {
       notifyAgentOfBrowserConnection(panels, fromPanelId, toPanelId)
     }
@@ -632,8 +603,6 @@ useProjectStore.subscribe((state, previous) => {
   if (state.currentProjectId === previous.currentProjectId) return
   void useCanvasStore.getState().loadCanvas(state.currentProjectId)
 })
-
-// ── Snapping utility ──────────────────────────────────────
 
 /**
  * Calculate snap position and guides for a panel being dragged.
@@ -711,10 +680,8 @@ export function calculateSnap(
   return { x: bestDx < threshold ? snapX : x, y: bestDy < threshold ? snapY : y, guides }
 }
 
-// ── Auto-connect proximity detection ─────────────────────────
-
 /** Distance threshold (canvas px) for auto-connect proximity */
-export const PROXIMITY_THRESHOLD = 80
+const PROXIMITY_THRESHOLD = 80
 
 /**
  * Check if a dragged panel is close enough to a compatible panel for auto-connect.
@@ -726,7 +693,6 @@ export function detectProximityEdge(
   otherPanels: CanvasPanelData[],
   existingEdges: CanvasEdge[]
 ): { fromId: string; toId: string } | null {
-  // Only browser, terminal, or task panels participate in auto-connect
   if (draggedPanel.type !== 'browser' && draggedPanel.type !== 'terminal' && draggedPanel.type !== 'task') return null
 
   // Task connects to browser or terminal; browser/terminal connect to task
@@ -740,7 +706,6 @@ export function detectProximityEdge(
 
   for (const p of otherPanels) {
     if (!compatibleTypes.includes(p.type)) continue
-    // Skip if already connected
     const alreadyConnected = existingEdges.some(
       (e) =>
         (e.fromPanelId === draggedPanel.id && e.toPanelId === p.id) ||
@@ -754,7 +719,6 @@ export function detectProximityEdge(
     const dRight = draggedPanel.x + draggedPanel.width
     const dBottom = draggedPanel.y + draggedPanel.height
 
-    // Gap between nearest edges
     const gapX = Math.max(0, Math.max(p.x - dRight, draggedPanel.x - pRight))
     const gapY = Math.max(0, Math.max(p.y - dBottom, draggedPanel.y - pBottom))
     const dist = Math.sqrt(gapX * gapX + gapY * gapY)
@@ -778,7 +742,6 @@ export function detectProximityEdge(
     : { fromId: bestPanel.id, toId: draggedPanel.id }
 }
 
-// ── Browser↔Task edge notification ──────────────────────────
 // Lazy-imports agent-store and ipc-client to avoid circular deps in tests.
 
 function notifyAgentOfBrowserConnection(
@@ -809,8 +772,6 @@ function notifyAgentOfBrowserConnection(
   ).catch((err) => console.error('[Canvas] Failed to notify agent of browser connection:', err))
 }
 
-// ── Terminal↔Task edge notification ──────────────────────────
-
 function notifyAgentOfTerminalConnection(
   panels: CanvasPanelData[],
   fromPanelId: string,
@@ -833,7 +794,6 @@ function notifyAgentOfTerminalConnection(
     const taskId = taskPanel.refId!
     let session = useAgentStore.getState().getSession(taskId)
 
-    // If no active session, auto-start or resume the task
     if (!session?.sessionId) {
       const task = useTaskStore.getState().tasks.find((t) => t.id === taskId)
       if (!task?.agent_id) return
@@ -841,8 +801,6 @@ function notifyAgentOfTerminalConnection(
       const initSession = useAgentStore.getState().initSession
       try {
         if (task.session_id) {
-          // Do NOT clearMessageDedup here — it would wipe the hydrated durable
-          // transcript. The resume replay dedups against the hydrated history.
           initSession(taskId, '', task.agent_id)
           const result = await agentSessionApi.resume(task.agent_id, taskId, task.session_id)
           if (result.ended) {
@@ -866,7 +824,6 @@ function notifyAgentOfTerminalConnection(
 
     if (!session?.sessionId) return
 
-    // Get the current terminal buffer to include as initial context
     const terminalId = terminalPanel.id
     let bufferPreview = ''
     try {

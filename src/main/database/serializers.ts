@@ -12,10 +12,10 @@ import type {
   SecretRecord, SecretRecordWithValue, SecretRow,
   SkillRecord, SkillRow,
   TaskRecord, TaskRow,
-  TaskSourceRecord, TaskSourceRow
+  TaskSourceRecord, TaskSourceRow,
+  TranscriptPartRecord
 } from './types'
 
-/** Columns that can be dynamically updated via updateTask. */
 /** Encrypt at rest with the OS keychain when available (plaintext fallback). */
 export function encryptSecret(value: string): Buffer {
   return safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(value) : Buffer.from(value, 'utf8')
@@ -54,6 +54,7 @@ export function decryptSettingValue(value: string): string {
   }
 }
 
+/** Columns that can be dynamically updated via updateTask. */
 export const UPDATABLE_COLUMNS = new Set([
   'external_id', 'source_id', 'source',
   'title',
@@ -303,5 +304,27 @@ export function deserializeInstalledPlugin(row: InstalledPluginRow): InstalledPl
     version: row.version,
     installed_at: row.installed_at,
     updated_at: row.updated_at
+  }
+}
+
+export interface TranscriptPartRow {
+  task_id: string; part_id: string; seq: number; role: string; content: string
+  part_type: string | null; tool: string | null; payload: string | null
+  created_at: number; updated_at: number; rev: number
+}
+
+export function toTranscriptPartRecord(r: TranscriptPartRow): TranscriptPartRecord {
+  return {
+    taskId: r.task_id,
+    partId: r.part_id,
+    seq: r.seq,
+    role: r.role,
+    content: r.content,
+    rev: r.rev ?? 0,
+    partType: r.part_type ?? undefined,
+    tool: r.tool ? (JSON.parse(r.tool) as unknown) : undefined,
+    payload: r.payload ? (JSON.parse(r.payload) as unknown) : undefined,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at
   }
 }

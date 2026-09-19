@@ -240,8 +240,3 @@ export function manifestSizeBytes(entry: VoiceModelManifestEntry): number {
 export function manifestKind(entry: Pick<VoiceModelManifestEntry, 'kind'>): VoiceModelKind {
   return entry.kind ?? 'streaming'
 }
-
-/** The entries a fresh install is offered: everything that is not legacy. */
-export function offeredManifestEntries(): VoiceModelManifestEntry[] {
-  return VOICE_MODEL_MANIFEST.filter((entry) => !entry.legacy)
-}

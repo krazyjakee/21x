@@ -47,9 +47,6 @@ export function resultErrorText(raw: Record<string, unknown>): string | null {
   return null
 }
 
-/**
- * Converts SDKMessage to MessagePart[] format
- */
 export function convertSDKMessageToParts(
   msg: SDKMessage,
   seenPartIds: Set<string>,
@@ -184,15 +181,13 @@ export function convertSDKMessageToParts(
         const input = rawInput ? JSON.stringify(rawInput, null, 2) : undefined
         const toolUseId = blockWithProps.id || ''
 
-        // Use tool_use_id as partId so we can update it when result arrives
+        // Keyed by tool_use_id so the tool result can update this part.
         const toolPartId = `tool-${toolUseId}`
         if (seenPartIds.has(toolPartId)) continue
         seenPartIds.add(toolPartId)
 
-        // Build a human-readable title from tool input (OpenCode supplies its own state.title; see transformToolPart)
         const title = buildToolTitle(toolName, rawInput)
 
-        // Detect AskUserQuestion → render as interactive question
         const questions = parseMaybeJson(rawInput?.questions)
         if (Array.isArray(questions) && questions.length > 0) {
           partContentLengths.set(toolPartId, `pending:${toolName}`)
@@ -205,7 +200,6 @@ export function convertSDKMessageToParts(
           continue
         }
 
-        // Detect TodoWrite → render as todo list
         const normalizedTodos = normalizeTodos(rawInput?.todos)
         if (normalizedTodos) {
           partContentLengths.set(toolPartId, `pending:${toolName}`)
@@ -218,8 +212,7 @@ export function convertSDKMessageToParts(
           continue
         }
 
-        // Detect EnterPlanMode / ExitPlanMode → render as plan mode indicator
-        // For ExitPlanMode, the plan content is in input.plan (not in tool_result)
+        // ExitPlanMode carries the plan in input.plan, not in the tool result.
         if (toolName === 'EnterPlanMode' || toolName === 'ExitPlanMode') {
           const planTitle = toolName === 'EnterPlanMode' ? 'Enter plan mode' : 'Exit plan mode'
           const planContent = toolName === 'ExitPlanMode' && rawInput?.plan
@@ -234,7 +227,6 @@ export function convertSDKMessageToParts(
           continue
         }
 
-        // Regular tool call
         partContentLengths.set(toolPartId, `pending:${toolName}`)
         parts.push({
           id: toolPartId,
@@ -245,7 +237,6 @@ export function convertSDKMessageToParts(
       }
     }
   } else if (msgWithProps.type === 'user' || msgWithProps.type === 'user_message') {
-    // User messages contain tool results or text
     const content = msgWithProps.message?.content || (Array.isArray(msgWithProps.content) ? msgWithProps.content : [])
 
     for (const block of content) {
@@ -353,8 +344,7 @@ export function convertSDKMessageToParts(
       })
     }
   } else if (msgWithProps.type === 'tool_progress') {
-    // SDKToolProgressMessage — periodic progress updates for running tools.
-    // Update the existing tool part with elapsed time so the UI shows a timer.
+    // Periodic progress for a running tool: shows elapsed time on its part.
     const toolUseId = msgWithProps.tool_use_id
     if (toolUseId) {
       const partId = `tool-${toolUseId}`
@@ -365,7 +355,6 @@ export function convertSDKMessageToParts(
         : `${Math.round(elapsed)}s`
 
       if (seenPartIds.has(partId)) {
-        // Tool was already emitted — send an update with elapsed time
         parts.push({
           id: partId,
           type: MessagePartType.TOOL,
@@ -377,10 +366,8 @@ export function convertSDKMessageToParts(
           update: true,
         })
       }
-      // If tool hasn't been seen yet, skip — progress before tool_use is meaningless
     }
   } else if (msgWithProps.type === 'result') {
-    // Surface error result messages (e.g., rate limit errors) to the UI
     const resultMsg = msg as Record<string, unknown>
     if (resultMsg.is_error) {
       const errorText = resultErrorText(resultMsg) ?? 'An error occurred (no details available)'
@@ -397,14 +384,11 @@ export function convertSDKMessageToParts(
         })
       }
     } else {
-      // Non-error result: extract the final assistant text as a safety net.
-      // Normally the text was already sent in a preceding assistant message event,
-      // but if the first streaming chunk had empty text and no subsequent chunk
-      // updated it, the result message is the only source of the final response.
+      // Safety net: when the first streaming chunk had empty text and no later
+      // chunk updated it, the result message is the only source of the final
+      // response. Emitted only if no non-empty assistant text was shown.
       const resultText = typeof resultMsg.result === 'string' ? resultMsg.result : ''
       if (resultText) {
-        // Check if any assistant text part was already emitted with non-empty content.
-        // If so, skip — the text is already shown.  If not, emit it now.
         let hasNonEmptyText = false
         for (const [pid, len] of partContentLengths) {
           if (pid.includes('-text-') && parseInt(len, 10) > 0) {
@@ -427,12 +411,10 @@ export function convertSDKMessageToParts(
       }
     }
   } else if (msgWithProps.type === 'system') {
-    // Skip system init messages - they're internal session setup
     if (msgWithProps.subtype === ClaudeSystemSubtype.INIT) {
       return parts
     }
 
-    // SDKTaskStartedMessage — subagent task started
     if (msgWithProps.subtype === ClaudeSystemSubtype.TASK_STARTED) {
       const taskId = msgWithProps.task_id || msgWithProps.uuid || `task-${Date.now()}`
       const partId = `task-${taskId}`
@@ -461,7 +443,6 @@ export function convertSDKMessageToParts(
       const alreadySeen = seenPartIds.has(partId)
 
       if (!alreadySeen) {
-        // Missed task_started — create the entry
         seenPartIds.add(partId)
       }
       partContentLengths.set(partId, `running:${taskId}`)

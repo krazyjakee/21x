@@ -60,7 +60,6 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
   )
   const [expandedServers, setExpandedServers] = useState<Set<string>>(new Set())
 
-  // Auth method state (Claude Code and Codex)
   const [authMethod, setAuthMethod] = useState<ClaudeAuthMethod>(
     agent?.config.auth_method ?? 'subscription'
   )
@@ -71,12 +70,10 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
     agent?.config.sandbox_mode ?? 'danger-full-access'
   )
 
-  // API keys state
   const [openaiApiKey, setOpenaiApiKey] = useState(agent?.config.api_keys?.openai ?? '')
   const [anthropicApiKey, setAnthropicApiKey] = useState(agent?.config.api_keys?.anthropic ?? '')
   const [cursorApiKey, setCursorApiKey] = useState(agent?.config.api_keys?.cursor ?? '')
 
-  // Environment variable detection state
   const [hasOpenaiEnv, setHasOpenaiEnv] = useState(false)
   const [hasAnthropicEnv, setHasAnthropicEnv] = useState(false)
   const [hasCursorEnv, setHasCursorEnv] = useState(false)
@@ -95,7 +92,6 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
     fetchMcpServers()
     fetchSkills()
 
-    // Check for environment variables
     window.electronAPI.env.get('OPENAI_API_KEY').then(value => {
       setHasOpenaiEnv(!!value)
     })
@@ -107,26 +103,20 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
     })
   }, [])
 
-  // Model fetching state
   const [availableModels, setAvailableModels] = useState<Model[]>([])
   const [isLoadingModels, setIsLoadingModels] = useState(false)
   const [modelError, setModelError] = useState<string | null>(null)
 
-  // Fetch models when coding agent is selected
   useEffect(() => {
-    if (codingAgent === CodingAgentType.OPENCODE) {
+    if (codingAgent === CodingAgentType.OPENCODE || codingAgent === CodingAgentType.PI) {
       fetchModels()
     } else if (codingAgent === CodingAgentType.CLAUDE_CODE) {
-      // For Claude Code, show predefined Claude models
       setAvailableModels(CLAUDE_MODELS)
     } else if (codingAgent === CodingAgentType.CODEX) {
-      // For Codex, fetch models dynamically from Codex CLI
-      fetchCodexModels()
+      setAvailableModels(CODEX_MODELS)
     } else if (codingAgent === CodingAgentType.CURSOR) {
       setAvailableModels(CURSOR_MODELS)
       setModel(CURSOR_MODELS[0].id)
-    } else if (codingAgent === CodingAgentType.PI) {
-      fetchModels()
     } else {
       setAvailableModels([])
       setModel('')
@@ -159,14 +149,12 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
       // Check if agentConfigApi is available (requires app restart after preload changes)
       if (!agentConfigApi || typeof agentConfigApi.getProviders !== 'function') {
         setModelError('API not available. Please restart the application.')
-        setIsLoadingModels(false)
         return
       }
 
       const result = await agentConfigApi.getProviders(serverUrl, codingAgent)
 
       if (result && result.providers) {
-        // Flatten all models from all providers
         const models: Model[] = []
 
         if (Array.isArray(result.providers) && result.providers.length > 0) {
@@ -174,7 +162,6 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
             // Models can be either an array or an object with model IDs as keys
             if (provider.models) {
               if (Array.isArray(provider.models)) {
-                // Handle array format
                 provider.models.forEach((m: { id: string; name?: string }) => {
                   models.push({
                     id: `${provider.id}/${m.id}`,
@@ -182,8 +169,7 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
                   })
                 })
               } else if (typeof provider.models === 'object') {
-                // Handle object format (model IDs as keys)
-                // Use Object.entries so the map key serves as fallback model ID
+                // Object format keyed by model ID. Use Object.entries so the map key serves as fallback model ID
                 // (custom providers like routerAI may not have id on the value)
                 Object.entries(provider.models as Record<string, unknown>).forEach(([key, m]) => {
                   const model = m as { id?: string; name?: string }
@@ -217,16 +203,10 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
     }
   }
 
-  const fetchCodexModels = () => {
-    // Use hardcoded models for Codex
-    setAvailableModels(CODEX_MODELS)
-  }
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!name.trim()) return
 
-    // Serialize mcp_servers selection
     const mcpServersConfig: Array<string | AgentMcpServerEntry> = []
     for (const [serverId, enabledTools] of mcpSelection) {
       if (enabledTools === undefined) {
@@ -339,7 +319,6 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
         />
       </div>
 
-      {/* Only show Server URL for OpenCode */}
       {codingAgent !== CodingAgentType.CLAUDE_CODE && codingAgent !== CodingAgentType.CODEX && codingAgent !== CodingAgentType.CURSOR && (
         <div className="space-y-1.5">
           <Label htmlFor="agent-url">Server URL</Label>
@@ -352,7 +331,6 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
         </div>
       )}
 
-      {/* Show info for CLI-based agents */}
       {codingAgent === CodingAgentType.CLAUDE_CODE && (
         <p className="text-sm text-muted-foreground">
           Claude Code runs locally via CLI and doesn't require a server URL

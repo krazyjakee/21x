@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { handleRoute, setTaskApiAgentController, setTaskApiUiState } from './task-api-server'
+import { createTestDb } from '../../test/helpers/db-test-helper'
 
 /** The routes take the database first; the tests read better the other way. */
 const handleTaskApiRoute = (
@@ -62,32 +63,22 @@ function task(id: string, title: string, extra: Partial<TaskRecord> = {}): TaskR
 
 const TASKS = [task('t1', 'Fix login'), task('t2', 'Write the release notes')]
 
-function part(seq: number, role: string, content: string, partType = 'text') {
-  return {
-    taskId: 't1',
-    partId: `p${seq}`,
-    seq,
-    role,
-    content,
-    partType,
-    createdAt: 1_700_000_000_000 + seq * 1000,
-    updatedAt: 1_700_000_000_000 + seq * 1000,
-    rev: seq,
-  }
+/** A real transcript: get_messages filters, orders and pages in SQL. */
+function transcriptDb() {
+  const { db } = createTestDb()
+  db.upsertTranscriptParts('t1', [
+    { id: 'p1', role: 'user', content: 'why did the test fail', partType: 'text' },
+    { id: 'p2', role: 'assistant', content: 'I am looking at it', partType: 'text' },
+    { id: 'p3', role: 'assistant', content: '{"tool":"bash","output":"…10 kB of log…"}', partType: 'tool' },
+    { id: 'p4', role: 'assistant', content: 'The mock was missing', partType: 'text' }
+  ])
+  return db as never
 }
-
-const PARTS = [
-  part(1, 'user', 'why did the test fail'),
-  part(2, 'assistant', 'I am looking at it'),
-  part(3, 'assistant', '{"tool":"bash","output":"…10 kB of log…"}', 'tool'),
-  part(4, 'assistant', 'The mock was missing'),
-]
 
 function makeDb() {
   return {
     getTasks: vi.fn(() => TASKS),
     getTask: vi.fn((id: string) => TASKS.find((t) => t.id === id)),
-    getTranscriptParts: vi.fn(() => PARTS),
   } as never
 }
 
@@ -118,10 +109,12 @@ beforeEach(() => {
 
 describe('get_messages', () => {
   it('returns the conversation newest first and leaves tool output out', async () => {
-    const result = (await handleTaskApiRoute('/get_messages', { task_id: 't1' }, makeDb())) as {
+    const result = (await handleTaskApiRoute('/get_messages', { task_id: 't1' }, transcriptDb())) as {
       messages: Array<{ seq: number; content: string }>
+      total_available: number
     }
     expect(result.messages.map((m) => m.seq)).toEqual([4, 2, 1])
+    expect(result.total_available).toBe(3)
     // A transcript full of tool JSON would drown the reply.
     expect(JSON.stringify(result.messages)).not.toContain('10 kB of log')
   })
@@ -130,13 +123,13 @@ describe('get_messages', () => {
     const result = (await handleTaskApiRoute(
       '/get_messages',
       { task_id: 't1', include_tools: true },
-      makeDb()
+      transcriptDb()
     )) as { messages: Array<{ seq: number }> }
     expect(result.messages.map((m) => m.seq)).toEqual([4, 3, 2, 1])
   })
 
   it('pages backwards with the cursor it returns', async () => {
-    const db = makeDb()
+    const db = transcriptDb()
     const first = (await handleTaskApiRoute('/get_messages', { task_id: 't1', limit: 2 }, db)) as {
       messages: Array<{ seq: number }>
       next_before_seq: number | null
@@ -157,7 +150,7 @@ describe('get_messages', () => {
     const result = (await handleTaskApiRoute(
       '/get_messages',
       { task_id: 't1', role: 'user' },
-      makeDb()
+      transcriptDb()
     )) as { messages: Array<{ role: string }> }
     expect(result.messages.every((m) => m.role === 'user')).toBe(true)
   })

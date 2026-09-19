@@ -1,25 +1,18 @@
 /**
- * Codex App Server adapter.
- *
- * Experimental replacement path for Codex ACP. This talks to `codex app-server`
- * over JSON-RPC stdio and maps the app-server thread/turn/item protocol onto
- * 20x's CodingAgentAdapter contract.
+ * Codex adapter. Talks to `codex app-server` over JSON-RPC stdio and maps the
+ * app-server thread/turn/item protocol onto 20x's CodingAgentAdapter contract.
  */
 
 import { CLIENT_NAME } from '../app-identity'
-import { spawn, type ChildProcess } from 'child_process'
-import { existsSync, readFileSync } from 'fs'
-import { guardChildStreams } from '../child-stream-guards'
-import { parseProcessTable } from '../mcp-process-cleanup'
+import type { ChildProcess } from 'child_process'
+import { readProcessTable, terminatePids } from '../mcp-process-cleanup'
 import { selectUntrackedAppServerPids } from '../codex-app-server-sweep'
-import { isAbsolute, join, relative, resolve } from 'path'
 import type {
   CodingAgentAdapter,
   SessionConfig,
   SessionStatus,
   SessionMessage,
-  MessagePart,
-  McpServerConfig
+  MessagePart
 } from './coding-agent-adapter'
 import { MessagePartType, SessionStatusType } from './coding-agent-adapter'
 import {
@@ -33,10 +26,20 @@ import {
   type CodexItemState,
   type RunningTool
 } from './codex-app-server-items'
+import { buildSandboxPolicy, buildThreadParams } from './codex-app-server-config'
+import {
+  approvalDecisionResponse,
+  autoApprovalResponse,
+  buildPendingApproval,
+  type PendingApproval
+} from './codex-app-server-approvals'
 import { applyCodexAuthEnv } from './shared/codex-auth'
 import { execFileAsync, findExecutable } from '../find-executable'
 import {
   sendJsonRpcRequest,
+  settleJsonRpcResponse,
+  spawnJsonRpcChild,
+  terminateJsonRpcPeer,
   writeJsonRpc,
   type JsonRpcMessage,
   type JsonRpcNotification,
@@ -44,10 +47,8 @@ import {
   type JsonRpcRequest,
   type JsonRpcResponse
 } from './shared/json-rpc'
-import { onJsonLines } from './shared/jsonl'
 import { groupPartsIntoMessages } from './shared/session-messages'
 
-const DEFAULT_CODEX_APP_SERVER_MODEL = 'gpt-6-astra'
 const LABEL = 'CodexAppServerAdapter'
 
 /**
@@ -72,23 +73,6 @@ const APP_SERVER_KILL_GRACE_MS = 1000
  */
 const ORPHAN_SWEEP_INTERVAL_MS = 5 * 60_000
 
-type CodexSandboxPolicy =
-  | { type: 'readOnly'; networkAccess: boolean }
-  | { type: 'workspaceWrite'; networkAccess: boolean; writableRoots: string[] }
-  | { type: 'dangerFullAccess' }
-
-interface PendingApproval {
-  requestId: string | number
-  toolCallId: string
-  question: string
-  options: Array<{
-    optionId: string
-    name: string
-    kind: string
-  }>
-  responseKind: 'execCommand' | 'commandExecution' | 'fileChange' | 'permissions' | 'elicitation' | 'userInput' | 'generic'
-}
-
 interface AppServerSession extends CodexItemState, JsonRpcPeer {
   sessionId: string
   threadId: string | null
@@ -104,8 +88,6 @@ interface AppServerSession extends CodexItemState, JsonRpcPeer {
   pendingApproval: PendingApproval | null
   lastError: string | null
   config: SessionConfig
-  codexUseApiKey: boolean
-  codexAuthSummary: string
   /**
    * Set once the child has been signalled, so a session that is destroyed twice
    * — a user stop racing the idle reaper, say — signals once and reports once.
@@ -113,57 +95,8 @@ interface AppServerSession extends CodexItemState, JsonRpcPeer {
   terminated: boolean
 }
 
-/** The message of a thrown value, for a teardown log line. */
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-function normalizeCodexMcpServerName(name: string): string {
-  const normalized = name.replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '')
-  return normalized || 'mcp_server'
-}
-
-function uniquePaths(paths: string[]): string[] {
-  return Array.from(new Set(paths.filter(Boolean).map((path) => resolve(path))))
-}
-
-function isSubpath(parent: string, child: string): boolean {
-  const rel = relative(resolve(parent), resolve(child))
-  return rel === '' || (!!rel && !rel.startsWith('..') && !isAbsolute(rel))
-}
-
-function summarizeApproval(params: Record<string, unknown>, fallback: string): string {
-  const command = asString(params.command)
-  const reason = asString(params.reason)
-  const itemId = asString(params.itemId) || asString(params.callId)
-  return [command || fallback, reason, itemId ? `id: ${itemId}` : ''].filter(Boolean).join('\n')
-}
-
-function normalizeDecisionName(decision: unknown): string {
-  if (typeof decision === 'string') return decision
-  if (isObject(decision)) {
-    return Object.keys(decision)[0] || 'accept'
-  }
-  return 'accept'
-}
-
-function decisionLabel(decision: string): string {
-  switch (decision) {
-    case 'accept':
-    case 'approved':
-      return 'Allow'
-    case 'acceptForSession':
-    case 'approved_for_session':
-      return 'Allow for Session'
-    case 'decline':
-    case 'denied':
-      return 'Deny'
-    case 'cancel':
-    case 'abort':
-      return 'Deny and Stop'
-    default:
-      return decision
-  }
 }
 
 export class CodexAppServerAdapter implements CodingAgentAdapter {
@@ -214,7 +147,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     await this.initializeAppServer(session)
 
     const result = await this.sendRpcRequest(session, 'thread/start', {
-      ...this.buildThreadParams(config),
+      ...buildThreadParams(config),
       developerInstructions: config.systemPrompt || null
     })
 
@@ -267,7 +200,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     await this.initializeAppServer(session)
 
     await this.sendRpcRequest(session, 'thread/resume', {
-      ...this.buildThreadParams(config),
+      ...buildThreadParams(config),
       threadId: sessionId,
       initialTurnsPage: { limit: 50 }
     })
@@ -320,11 +253,11 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     session.lastError = null
 
     const result = await this.sendRpcRequest(session, 'turn/start', {
-      ...this.buildThreadParams(config),
+      ...buildThreadParams(config),
       threadId: session.threadId,
       input: [{ type: 'text', text: promptText }],
       effort: config.reasoningEffort && config.reasoningEffort !== 'max' ? config.reasoningEffort : null,
-      sandboxPolicy: this.buildSandboxPolicy(config)
+      sandboxPolicy: buildSandboxPolicy(config)
     })
 
     if (isObject(result)) {
@@ -345,7 +278,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
 
   async pollMessages(
     sessionId: string,
-    seenMessageIds: Set<string>,
+    _seenMessageIds: Set<string>,
     seenPartIds: Set<string>,
     partContentLengths: Map<string, string>,
     _config: SessionConfig
@@ -354,7 +287,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     if (!session) return []
 
     const parts = session.messageBuffer.flatMap((event) =>
-      this.convertEventToMessageParts(event, seenMessageIds, seenPartIds, partContentLengths, session)
+      convertEventToMessageParts(event, seenPartIds, partContentLengths, session)
     )
     session.messageBuffer = []
     return parts
@@ -362,7 +295,6 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
 
   async getAllMessages(sessionId: string, _config: SessionConfig): Promise<SessionMessage[]> {
     const session = this.requireSession(sessionId)
-    const seenMessageIds = new Set<string>()
     const seenPartIds = new Set<string>()
     const partContentLengths = new Map<string, string>()
 
@@ -370,7 +302,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     session.assistantTextKeysByTurn = new Map()
     try {
       return groupPartsIntoMessages(session.permanentMessages.flatMap((event) =>
-        this.convertEventToMessageParts(event, seenMessageIds, seenPartIds, partContentLengths, session)
+        convertEventToMessageParts(event, seenPartIds, partContentLengths, session)
       ))
     } finally {
       session.assistantTextKeysByTurn = assistantTextKeysByTurn
@@ -421,38 +353,15 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
    * live process group that the vendored `codex` binary and the
    * `npm exec @google-cloud/observability-mcp` grandchild beneath it both went
    * with it. SIGKILL follows only if the wrapper is still there after the grace
-   * period — and it is scheduled against the child's own `exit`, not against
-   * `ChildProcess.killed`, which reports that a SIGNAL WAS SENT rather than
-   * that the process died and so was true immediately every time.
+   * period.
    */
   private terminateSession(session: AppServerSession, reason: string): void {
     if (session.terminated) return
     session.terminated = true
     this.liveSessions.delete(session)
 
-    const child = session.process
-    console.log(`[CodexAppServerAdapter] Stopping app-server pid ${child.pid ?? '?'} — ${reason}`)
-    try {
-      child.kill('SIGTERM')
-    } catch {
-      // Already gone. Nothing left to stop.
-    }
-    const escalation = setTimeout(() => {
-      try {
-        child.kill('SIGKILL')
-      } catch {
-        // Exited during the grace period, which is the outcome we wanted.
-      }
-    }, APP_SERVER_KILL_GRACE_MS)
-    escalation.unref()
-    child.once('exit', () => clearTimeout(escalation))
-
-    // An in-flight RPC would otherwise sit on its 30 s timeout against a pipe
-    // that is already closed, holding its caller open for no reason.
-    for (const pending of session.pendingRequests.values()) {
-      pending.reject(new Error(`Codex app-server stopped: ${reason}`))
-    }
-    session.pendingRequests.clear()
+    console.log(`[CodexAppServerAdapter] Stopping app-server pid ${session.process.pid ?? '?'} — ${reason}`)
+    terminateJsonRpcPeer(session, `Codex app-server stopped: ${reason}`, APP_SERVER_KILL_GRACE_MS)
     session.messageBuffer.length = 0
     session.permanentMessages.length = 0
     session.streamedTextByItemId.clear()
@@ -472,25 +381,16 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
   private async sweepOrphanedAppServers(): Promise<void> {
     if (process.platform === 'win32') return // No cheap ancestry query on Windows.
     try {
-      const { stdout } = await execFileAsync('ps', ['-eo', 'pid=,ppid=,command='], {
-        timeout: 10_000,
-        maxBuffer: 16 * 1024 * 1024
-      })
+      const rows = await readProcessTable()
       const tracked = new Set<number>()
       for (const session of this.liveSessions) {
         if (typeof session.process.pid === 'number') tracked.add(session.process.pid)
       }
-      const leaked = selectUntrackedAppServerPids(parseProcessTable(String(stdout)), process.pid, tracked)
-      for (const pid of leaked) {
-        try {
-          process.kill(pid, 'SIGTERM')
-        } catch {
-          // Exited between the listing and the signal.
-        }
-      }
+      const leaked = selectUntrackedAppServerPids(rows, process.pid, tracked)
       if (leaked.length > 0) {
-        console.warn(`[CodexAppServerAdapter] Swept ${leaked.length} orphaned app-server process(es): ${leaked.join(', ')}`)
+        console.warn(`[CodexAppServerAdapter] Sweeping ${leaked.length} orphaned app-server process(es): ${leaked.join(', ')}`)
       }
+      await terminatePids(leaked, APP_SERVER_KILL_GRACE_MS)
     } catch (error) {
       console.warn('[CodexAppServerAdapter] Could not sweep orphaned app-servers:', error)
     }
@@ -509,10 +409,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
       await execFileAsync(executable, ['app-server', '--help'], { timeout: 5000 })
       return { available: true }
     } catch (error) {
-      return {
-        available: false,
-        reason: error instanceof Error ? error.message : String(error)
-      }
+      return { available: false, reason: errorText(error) }
     }
   }
 
@@ -525,14 +422,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     const approval = session.pendingApproval
     if (!approval) return
 
-    const selected = optionId || approval.options.find((option) =>
-      approved
-        ? ['acceptForSession', 'accept', 'approved_for_session', 'approved'].includes(option.optionId)
-        : ['cancel', 'abort', 'decline', 'denied'].includes(option.optionId)
-    )?.optionId || (approved ? 'accept' : 'cancel')
-    const response = this.buildApprovalResponse(approval.responseKind, selected, approved)
-
-    this.sendRpcResponse(session, approval.requestId, response)
+    this.sendRpcResponse(session, approval.requestId, approvalDecisionResponse(approval, approved, optionId))
     session.pendingApproval = null
     if (!approved) {
       session.status = SessionStatusType.IDLE
@@ -546,18 +436,9 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
   private async startAppServerProcess(config: SessionConfig, sessionId: string): Promise<AppServerSession> {
     const executable = await this.findCodexExecutable()
     const authEnv = this.buildEnvironment(config)
-    const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(executable)
-    const child = spawn(executable, ['app-server', '--stdio'], {
-      cwd: config.workspaceDir,
-      env: authEnv.env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      ...(needsShell ? { shell: true } : {})
-    })
-
-    // Every pipe needs an error listener before the first write. The app server
-    // can exit at any moment, and an unhandled EPIPE on its stdin crashes the
-    // main process.
-    guardChildStreams(child, LABEL)
+    console.log(`[${LABEL}] Auth: ${authEnv.summary}`)
+    const child = spawnJsonRpcChild(executable, ['app-server', '--stdio'], { cwd: config.workspaceDir, env: authEnv.env }, LABEL,
+      (message) => this.handleRpcMessage(session, message))
 
     const session: AppServerSession = {
       sessionId,
@@ -579,8 +460,6 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
       streamedTextByItemId: new Map(),
       assistantTextKeysByTurn: new Map(),
       runningTools: new Map(),
-      codexUseApiKey: authEnv.usesApiKey,
-      codexAuthSummary: authEnv.summary,
       terminated: false
     }
 
@@ -590,18 +469,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     this.liveSessions.add(session)
     this.startOrphanSweep()
 
-    onJsonLines(child.stdout, (line) => {
-      try {
-        this.handleRpcMessage(session, JSON.parse(line) as JsonRpcMessage)
-      } catch (error) {
-        console.error('[CodexAppServerAdapter] Failed to parse JSON-RPC:', line, error)
-      }
-    })
-    child.stderr?.on('data', (chunk: Buffer) => {
-      console.log('[CodexAppServerAdapter] stderr:', chunk.toString())
-    })
-    child.on('exit', (code, signal) => {
-      console.log(`[CodexAppServerAdapter] process exited: code=${code}, signal=${signal}`)
+    child.on('exit', (code) => {
       this.liveSessions.delete(session)
       if (code !== 0 && code !== null) {
         session.status = SessionStatusType.ERROR
@@ -624,7 +492,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
         mcpServerOpenaiFormElicitation: true
       }
     })
-    this.sendRpcNotification(session, 'initialized', {})
+    writeJsonRpc(session, { jsonrpc: '2.0', method: 'initialized', params: {} }, LABEL)
   }
 
   private async findCodexExecutable(): Promise<string> {
@@ -642,91 +510,6 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
   } {
     const env: NodeJS.ProcessEnv = { ...process.env, ...config.secretEnvVars }
     return { env, ...applyCodexAuthEnv(env, config) }
-  }
-
-  /** Parameters shared by thread/start, thread/resume and turn/start. */
-  private buildThreadParams(config: SessionConfig): Record<string, unknown> {
-    return {
-      cwd: config.workspaceDir,
-      model: config.model || DEFAULT_CODEX_APP_SERVER_MODEL,
-      approvalPolicy: config.permissionMode === 'allow' ? 'never' : 'on-request',
-      approvalsReviewer: 'user',
-      sandbox: this.resolveSandboxMode(config),
-      runtimeWorkspaceRoots: this.buildRuntimeWorkspaceRoots(config.workspaceDir),
-      config: this.buildConfigOverrides(config)
-    }
-  }
-
-  private buildConfigOverrides(config: SessionConfig): Record<string, unknown> {
-    const overrides: Record<string, unknown> = {}
-    if (config.reasoningEffort && config.reasoningEffort !== 'max') {
-      overrides.model_reasoning_effort = config.reasoningEffort
-    }
-    if (this.resolveSandboxMode(config) === 'workspace-write') {
-      overrides.sandbox_workspace_write = {
-        network_access: true,
-        writable_roots: this.buildRuntimeWorkspaceRoots(config.workspaceDir)
-      }
-    }
-    if (config.mcpServers && Object.keys(config.mcpServers).length > 0) {
-      overrides.mcp_servers = this.convertMcpServers(config.mcpServers)
-    }
-    return overrides
-  }
-
-  private buildRuntimeWorkspaceRoots(workspaceDir: string): string[] {
-    return uniquePaths([workspaceDir, ...this.resolveExternalGitRoots(workspaceDir)])
-  }
-
-  private resolveExternalGitRoots(workspaceDir: string): string[] {
-    const workspaceRoot = resolve(workspaceDir)
-    const dotGitPath = join(workspaceRoot, '.git')
-    if (!existsSync(dotGitPath)) return []
-
-    try {
-      const dotGitContent = readFileSync(dotGitPath, 'utf8').trim()
-      if (!dotGitContent.startsWith('gitdir:')) return []
-
-      const rawGitDir = dotGitContent.slice('gitdir:'.length).trim()
-      if (!rawGitDir) return []
-
-      const gitDir = isAbsolute(rawGitDir)
-        ? resolve(rawGitDir)
-        : resolve(workspaceRoot, rawGitDir)
-      const commonDirPath = join(gitDir, 'commondir')
-      const rawCommonDir = existsSync(commonDirPath)
-        ? readFileSync(commonDirPath, 'utf8').trim()
-        : ''
-      const commonDir = rawCommonDir
-        ? (isAbsolute(rawCommonDir) ? resolve(rawCommonDir) : resolve(gitDir, rawCommonDir))
-        : gitDir
-
-      return [commonDir, gitDir].filter((path) => !isSubpath(workspaceRoot, path))
-    } catch (error) {
-      console.warn('[CodexAppServerAdapter] Failed to resolve external git metadata roots:', error)
-      return []
-    }
-  }
-
-  private convertMcpServers(servers: Record<string, McpServerConfig>): Record<string, unknown> {
-    const result: Record<string, unknown> = {}
-    for (const [name, server] of Object.entries(servers)) {
-      const codexName = normalizeCodexMcpServerName(name)
-      if (server.type === 'stdio') {
-        result[codexName] = {
-          command: server.command,
-          args: server.args || [],
-          env: server.env || {}
-        }
-      } else {
-        const remoteConfig: Record<string, unknown> = { url: server.url }
-        if (server.headers && Object.keys(server.headers).length > 0) {
-          remoteConfig.http_headers = server.headers
-        }
-        result[codexName] = remoteConfig
-      }
-    }
-    return result
   }
 
   private async logMcpServerInventory(session: AppServerSession, threadId: string, context: string): Promise<void> {
@@ -769,15 +552,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     }
 
     if ('id' in message) {
-      const pending = session.pendingRequests.get(message.id)
-      if (!pending) return
-      session.pendingRequests.delete(message.id)
-      const response = message as JsonRpcResponse
-      if (response.error) {
-        pending.reject(new Error(response.error.message))
-      } else {
-        pending.resolve(response.result)
-      }
+      settleJsonRpcResponse(session, message as JsonRpcResponse)
       return
     }
 
@@ -787,18 +562,18 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
   }
 
   private handleServerRequest(session: AppServerSession, request: JsonRpcRequest): void {
-    const params = isObject(request.params) ? request.params : {}
-    if (request.method.includes('Approval') || request.method.includes('requestApproval')) {
-      this.handleApprovalRequest(session, request, params)
-      return
+    const isApproval = request.method.includes('Approval')
+      || request.method === 'mcpServer/elicitation/request'
+      || request.method === 'item/tool/requestUserInput'
+    if (!isApproval) {
+      this.sendRpcResponse(session, request.id, {})
+    } else if (session.config.permissionMode === 'allow') {
+      this.sendRpcResponse(session, request.id, autoApprovalResponse(request.method))
+    } else {
+      session.pendingApproval = buildPendingApproval(request, isObject(request.params) ? request.params : {})
+      session.status = SessionStatusType.WAITING_APPROVAL
+      this.onDataAvailable?.(session.threadId || session.sessionId)
     }
-
-    if (request.method === 'mcpServer/elicitation/request' || request.method === 'item/tool/requestUserInput') {
-      this.handleApprovalRequest(session, request, params)
-      return
-    }
-
-    this.sendRpcResponse(session, request.id, {})
   }
 
   private handleNotification(session: AppServerSession, notification: JsonRpcNotification): void {
@@ -876,110 +651,6 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     this.addEvent(session, notification)
   }
 
-  private handleApprovalRequest(
-    session: AppServerSession,
-    request: JsonRpcRequest,
-    params: Record<string, unknown>
-  ): void {
-    if (session.config.permissionMode === 'allow') {
-      const responseKind = this.getApprovalResponseKind(request.method)
-      const selected = responseKind === 'execCommand' ? 'approved' : 'accept'
-      this.sendRpcResponse(session, request.id, this.buildApprovalResponse(responseKind, selected, true))
-      return
-    }
-
-    const toolCallId = asString(params.approvalId) || asString(params.itemId) || asString(params.callId) || String(request.id)
-    const responseKind = this.getApprovalResponseKind(request.method)
-
-    const rawDecisions = Array.isArray(params.availableDecisions) ? params.availableDecisions : []
-    const approvalOptions = rawDecisions.length > 0
-      ? rawDecisions.map((decision) => {
-          const optionId = normalizeDecisionName(decision)
-          return {
-            optionId,
-            name: decisionLabel(optionId),
-            kind: optionId.includes('accept') || optionId === 'approved' ? 'allow' : 'reject'
-          }
-        })
-      : [
-          { optionId: 'accept', name: 'Allow', kind: 'allow' },
-          { optionId: 'cancel', name: 'Deny', kind: 'reject' }
-        ]
-
-    session.pendingApproval = {
-      requestId: request.id,
-      toolCallId,
-      question: summarizeApproval(params, request.method),
-      options: approvalOptions,
-      responseKind
-    }
-    session.status = SessionStatusType.WAITING_APPROVAL
-    this.onDataAvailable?.(session.threadId || session.sessionId)
-  }
-
-  private buildApprovalResponse(
-    responseKind: PendingApproval['responseKind'],
-    selected: string,
-    approved: boolean
-  ): unknown {
-    switch (responseKind) {
-      case 'execCommand':
-        return { decision: approved ? (selected === 'approved_for_session' ? 'approved_for_session' : 'approved') : (selected === 'denied' ? 'denied' : 'abort') }
-      case 'commandExecution':
-        return { decision: selected }
-      case 'fileChange':
-      case 'permissions':
-        return { decision: selected }
-      case 'elicitation':
-        return approved
-          ? { action: 'accept', content: {} }
-          : { action: 'decline' }
-      case 'userInput':
-        return approved
-          ? { response: selected }
-          : { response: null }
-      default:
-        return { decision: approved ? selected : 'cancel' }
-    }
-  }
-
-  private getApprovalResponseKind(method: string): PendingApproval['responseKind'] {
-    if (method === 'execCommandApproval') return 'execCommand'
-    if (method.includes('commandExecution')) return 'commandExecution'
-    if (method.includes('fileChange')) return 'fileChange'
-    if (method.includes('permissions')) return 'permissions'
-    if (method === 'mcpServer/elicitation/request') return 'elicitation'
-    if (method === 'item/tool/requestUserInput') return 'userInput'
-    return 'generic'
-  }
-
-  private resolveSandboxMode(config: SessionConfig): 'read-only' | 'workspace-write' | 'danger-full-access' {
-    switch (config.sandboxMode) {
-      case 'read-only':
-      case 'workspace-write':
-      case 'danger-full-access':
-        return config.sandboxMode
-      default:
-        return 'danger-full-access'
-    }
-  }
-
-  private buildSandboxPolicy(config: SessionConfig): CodexSandboxPolicy {
-    switch (this.resolveSandboxMode(config)) {
-      case 'read-only':
-        return { type: 'readOnly', networkAccess: true }
-      case 'danger-full-access':
-        return { type: 'dangerFullAccess' }
-      case 'workspace-write':
-      default:
-        return {
-          type: 'workspaceWrite',
-          networkAccess: true,
-          writableRoots: this.buildRuntimeWorkspaceRoots(config.workspaceDir)
-        }
-    }
-  }
-
   private addEvent(session: AppServerSession, event: unknown): void {
     session.messageBuffer.push(event)
     session.permanentMessages.push(event)
@@ -987,13 +658,6 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
       session.permanentMessages.splice(0, 250)
     }
     this.onDataAvailable?.(session.threadId || session.sessionId)
-  }
-
-  private bufferThreadItems(session: AppServerSession, result: unknown): void {
-    const items = isObject(result) && Array.isArray(result.data) ? result.data : []
-    for (const item of items) {
-      this.bufferReconciledThreadItem(session, item, isObject(item) ? asString(item.turnId) : undefined)
-    }
   }
 
   /**
@@ -1039,14 +703,16 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
           limit: 200,
           sortDirection: 'asc'
         })
-        this.bufferThreadItems(session, result)
+        const items = isObject(result) && Array.isArray(result.data) ? result.data : []
+        for (const item of items) {
+          this.bufferReconciledThreadItem(session, item, isObject(item) ? asString(item.turnId) : undefined)
+        }
         cursor = isObject(result) ? (asString(result.nextCursor) || null) : null
         if (!cursor) return
       }
       console.warn('[CodexAppServerAdapter] Stopped thread/items pagination after 20 pages')
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      if (!message.includes('not supported')) throw error
+      if (!errorText(error).includes('not supported')) throw error
       await this.bufferAllThreadTurns(session, threadId)
     }
   }
@@ -1064,7 +730,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
           itemsView: 'full'
         })
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
+        const message = errorText(error)
         if (message.includes('not materialized yet') || message.includes('before first user message')) {
           return
         }
@@ -1106,7 +772,6 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     this.onDataAvailable?.(session.threadId || session.sessionId)
   }
 
-
   private sendRpcRequest(session: AppServerSession, method: string, params?: unknown): Promise<unknown> {
     // Writing to a stopped child's stdin is silent — the guard swallows the
     // EPIPE — so the request would sit on its 30 s timeout instead of
@@ -1119,20 +784,6 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
 
   private sendRpcResponse(session: AppServerSession, id: string | number, result: unknown): void {
     writeJsonRpc(session, { jsonrpc: '2.0', id, result }, LABEL)
-  }
-
-  private sendRpcNotification(session: AppServerSession, method: string, params?: unknown): void {
-    writeJsonRpc(session, { jsonrpc: '2.0', method, params }, LABEL)
-  }
-
-  private convertEventToMessageParts(
-    event: unknown,
-    _seenMessageIds: Set<string>,
-    seenPartIds: Set<string>,
-    partContentLengths: Map<string, string>,
-    session: AppServerSession
-  ): MessagePart[] {
-    return convertEventToMessageParts(event, seenPartIds, partContentLengths, session)
   }
 
   private requireSession(sessionId: string): AppServerSession {

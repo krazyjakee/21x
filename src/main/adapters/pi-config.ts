@@ -1,9 +1,11 @@
 /**
- * Pure configuration helpers for the Pi adapter: provider-safe names, the
- * pi-mcp-adapter config document, and the generated permission extension.
+ * Configuration helpers for the Pi adapter: provider-safe names, the
+ * pi-mcp-adapter config document, the generated permission extension, and
+ * the Pi process command line and environment.
  */
 
 import type { SessionConfig } from './coding-agent-adapter'
+import { nodeWorkerRuntime } from '../node-worker-runtime'
 
 export const PI_PERMISSION_MODE_ENV = 'TWENTYX_PI_PERMISSION_MODE'
 
@@ -150,3 +152,42 @@ export default function permissions(pi: ExtensionAPI) {
   });
 }
 `
+
+/** `provider/model` → Pi's set_model fields; a bare name is a model id. */
+export function splitPiModel(model?: string): { provider?: string; modelId?: string } {
+  if (!model) return {}
+  const separator = model.indexOf('/')
+  if (separator < 0) return { modelId: model }
+  return { provider: model.slice(0, separator), modelId: model.slice(separator + 1) }
+}
+
+export function piProcessEnv(config: SessionConfig): NodeJS.ProcessEnv {
+  const env = {
+    ...process.env,
+    ...(config.secretEnvVars ?? {}),
+    [PI_PERMISSION_MODE_ENV]: config.permissionMode ?? 'ask',
+  } as NodeJS.ProcessEnv
+  delete env.AI_AGENT
+  delete env.PI_CODING_AGENT
+  // A parent shell may set this globally. pi-mcp-adapter gives the variable
+  // precedence over its config, which would undo `directTools: false` and
+  // recreate overlong provider-facing names.
+  delete env.MCP_DIRECT_TOOLS
+  return env
+}
+
+/**
+ * Windows npm launchers need a shell; other platforms run the JS entry point.
+ * On macOS, Pi requires installed Node >=22.19 on PATH.
+ */
+export function piInvocation(
+  executable: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+): { command: string; args: string[]; env: NodeJS.ProcessEnv; shell: boolean } {
+  if (process.platform === 'win32') {
+    return { command: executable, args, env, shell: true }
+  }
+  const runtime = nodeWorkerRuntime(process.platform, process.execPath, env)
+  return { command: runtime.execPath, args: [executable, ...args], env: runtime.env, shell: false }
+}

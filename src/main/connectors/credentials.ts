@@ -41,7 +41,6 @@ export type ConnectorCredentials =
   | { type: 'custom_auth'; props: Record<string, unknown> }
   | ConnectorOAuth2Credentials
 
-export type ConnectorAuthType = ConnectorCredentials['type']
 export type ConnectorCredentialStorage = 'persistent' | 'session'
 
 export const CONNECTOR_CREDENTIALS_REMEDIATION =

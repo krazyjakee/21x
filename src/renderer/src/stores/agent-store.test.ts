@@ -335,15 +335,6 @@ describe('useAgentStore', () => {
       expect(msgs[msgs.length - 2].id).toBe('u-new')
     })
   })
-
-  describe('clearMessageDedup (no-op in projection model)', () => {
-    it('does not throw and does not wipe the projection', () => {
-      useAgentStore.getState().initSession('task-1', 'sess-1', 'agent-1')
-      fireDelta('task-1', [part({ partId: 'p1', content: 'x' })])
-      useAgentStore.getState().clearMessageDedup('task-1')
-      expect(useAgentStore.getState().sessions.get('task-1')!.messages).toHaveLength(1)
-    })
-  })
 })
 
  describe('transcript recovery after a blocked event', () => {

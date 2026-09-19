@@ -3,7 +3,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, cleanup, fireEvent, waitFor, within, act } from '@testing-library/react'
 import { ArtifactType } from '@shared/artifacts'
 import { TaskDetailPage } from './TaskDetailPage'
-import { useTaskStore, type Task } from '../stores/task-store'
+import { useTaskStore } from '../stores/task-store'
+import { TaskStatus, type Task } from '@/types'
 import { useAgentStore } from '../stores/agent-store'
 import { useArtifactStore } from '../stores/artifact-store'
 
@@ -34,7 +35,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     description: 'Migrate all actions',
     type: 'coding',
     priority: 'medium',
-    status: 'not_started',
+    status: TaskStatus.NotStarted,
     assignee: '',
     due_date: null,
     labels: [],
@@ -89,12 +90,12 @@ afterEach(() => {
 
 describe('TaskDetailPage', () => {
   it('stops a learning session when the task completes', async () => {
-    const task = makeTask({agent_id: 'agent-1', session_id: 'learning-session', status: 'agent_learning'})
+    const task = makeTask({agent_id: 'agent-1', session_id: 'learning-session', status: TaskStatus.AgentLearning})
     const stop = vi.spyOn(api.sessions, 'stop').mockResolvedValue({success: true})
     useAgentStore.getState().initSession(task.id, 'learning-session', 'agent-1')
     useTaskStore.setState({tasks: [task], isLoading: false})
     const view = render(<TaskDetailPage taskId="task-1" onNavigate={mockNavigate} />)
-    act(() => useTaskStore.setState({tasks: [{...task, status: 'completed'}]}))
+    act(() => useTaskStore.setState({tasks: [{...task, status: TaskStatus.Completed}]}))
     await waitFor(() => expect(stop).toHaveBeenCalledWith('learning-session'))
     view.unmount()
     stop.mockRestore()
@@ -117,7 +118,7 @@ describe('TaskDetailPage', () => {
       fireEvent.click(view.getByRole('button', {name: button}))
       if (button === 'Submit Feedback') {
         await waitFor(() => expect(send).toHaveBeenCalledWith('persisted', expect.stringContaining('Review the session and update skills'), task.id, task.agent_id))
-        expect(updateTask).toHaveBeenCalledWith(task.id, {status: 'agent_learning', feedback_rating: 4, feedback_comment: null, complete_at_source: completeAtSource})
+        expect(updateTask).toHaveBeenCalledWith(task.id, {status: TaskStatus.AgentLearning, feedback_rating: 4, feedback_comment: null, complete_at_source: completeAtSource})
         expect(completeMock).not.toHaveBeenCalled()
       } else {
         await waitFor(() => expect(completeMock).toHaveBeenCalledWith(task.id, completeAtSource))
@@ -147,7 +148,7 @@ describe('TaskDetailPage', () => {
       fireEvent.click(view.getByRole('button', {name: 'Submit Feedback'}))
       await waitFor(() => expect(send).toHaveBeenCalledWith('learning', expect.stringContaining('User rated this session 5/5'), task.id, task.agent_id))
       expect(start).toHaveBeenCalledWith('agent-1', task.id, true)
-      expect(updateTask).toHaveBeenCalledWith(task.id, expect.objectContaining({status: 'agent_learning', feedback_rating: 5, complete_at_source: completeAtSource}))
+      expect(updateTask).toHaveBeenCalledWith(task.id, expect.objectContaining({status: TaskStatus.AgentLearning, feedback_rating: 5, complete_at_source: completeAtSource}))
       expect(completeMock).not.toHaveBeenCalled()
     } finally {
       cleanup()
@@ -160,7 +161,7 @@ describe('TaskDetailPage', () => {
 
   it.each(['approve', undefined])('shows the Session Feedback action %s before Skip completes', async (action) => {
     const task = makeTask({ agent_id: 'agent-1', source_id: 'session-feedback', source: 'Session Feedback',
-      output_fields: action ? [{ id: 'action', value: action }] : [] })
+      output_fields: action ? [{ id: 'action', name: 'action', type: 'text', value: action }] : [] })
     useTaskStore.setState({ tasks: [task], isLoading: false })
     const view = render(<TaskDetailPage taskId="task-1" onNavigate={mockNavigate} />)
     fireEvent.click(view.getByTestId('main-cta-complete'))

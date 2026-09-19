@@ -1,34 +1,23 @@
-import type { TaskRecord } from '../database'
 import type { ForgejoManager } from '../forgejo-manager'
-import type { SourceUser, ReassignResult } from '../../shared/types'
-import { TaskStatus } from '../../shared/constants'
 import { recordRepoProviders } from '../repo-providers'
-import { mapIssueToTask, mapLocalStatusToIssueState } from './github-issues-plugin'
-import {
-  PluginActionId,
-  type TaskSourcePlugin,
-  type PluginConfigSchema,
-  type ConfigFieldOption,
-  type PluginContext,
-  type PluginAction,
-  type PluginSyncResult,
-  type ActionResult
-} from './types'
-import { upsertSourcedTask } from './sourced-tasks'
+import type { ConfigFieldOption, PluginConfigSchema, PluginContext } from './types'
+import { IssuesPlugin, issueFilterFields } from './issues-plugin'
 
 /**
  * Imports and syncs Forgejo (or Gitea) issues through the tea CLI. Each source
  * pins the tea login it was configured with, so several Forgejo servers can be
  * used side by side without re-authenticating in 20x.
  */
-export class ForgejoIssuesPlugin implements TaskSourcePlugin {
+export class ForgejoIssuesPlugin extends IssuesPlugin {
   id = 'forgejo-issues'
   displayName = 'Forgejo Issues'
   description = 'Import and sync issues from a Forgejo repository using the tea CLI'
   icon = 'GitBranch'
-  requiresMcpServer = false
+  protected sourceName = 'Forgejo'
 
-  constructor(private forgejoManager: ForgejoManager) {}
+  constructor(private forgejoManager: ForgejoManager) {
+    super(forgejoManager)
+  }
 
   getConfigSchema(): PluginConfigSchema {
     return [
@@ -58,31 +47,7 @@ export class ForgejoIssuesPlugin implements TaskSourcePlugin {
         description: 'Repository to import issues from',
         dependsOn: { field: 'owner', value: '__any__' }
       },
-      {
-        key: 'state',
-        label: 'Issue State',
-        type: 'select',
-        default: 'open',
-        options: [
-          { value: 'open', label: 'Open' },
-          { value: 'closed', label: 'Closed' },
-          { value: 'all', label: 'All' }
-        ]
-      },
-      {
-        key: 'assignee',
-        label: 'Assignee Filter',
-        type: 'text',
-        placeholder: 'Forgejo username (optional)',
-        description: 'Only import issues assigned to this user'
-      },
-      {
-        key: 'labels',
-        label: 'Labels Filter',
-        type: 'text',
-        placeholder: 'bug, feature (optional)',
-        description: 'Comma-separated labels to filter by'
-      }
+      ...issueFilterFields('Forgejo')
     ]
   }
 
@@ -125,191 +90,10 @@ export class ForgejoIssuesPlugin implements TaskSourcePlugin {
     return []
   }
 
-  validateConfig(config: Record<string, unknown>): string | null {
-    if (!config.login || typeof config.login !== 'string') return 'tea login is required'
-    if (!config.owner || typeof config.owner !== 'string') return 'Owner is required'
-    if (!config.repo || typeof config.repo !== 'string') return 'Repository is required'
-    return null
-  }
-
-  getActions(_config: Record<string, unknown>): PluginAction[] {
-    return [
-      {
-        id: PluginActionId.AddComment,
-        label: 'Add Comment',
-        icon: 'MessageSquare',
-        requiresInput: true,
-        inputLabel: 'Comment',
-        inputPlaceholder: 'Enter your comment...'
-      },
-      {
-        id: PluginActionId.CloseIssue,
-        label: 'Close Issue',
-        icon: 'XCircle',
-        variant: 'destructive'
-      },
-      {
-        id: PluginActionId.ReopenIssue,
-        label: 'Reopen Issue',
-        icon: 'RotateCcw'
-      }
-    ]
-  }
-
-  async importTasks(
-    sourceId: string,
-    config: Record<string, unknown>,
-    ctx: PluginContext
-  ): Promise<PluginSyncResult> {
-    const result: PluginSyncResult = { imported: 0, updated: 0, errors: [] }
-    const owner = config.owner as string
-    const repo = config.repo as string
-
-    try {
-      const issues = await this.forgejoManager.fetchIssues(owner, repo, {
-        state: (config.state as string) || 'open',
-        assignee: config.assignee as string | undefined,
-        labels: config.labels as string | undefined,
-        login: config.login as string | undefined
-      })
-
-      const fullRepoName = `${owner}/${repo}`
-      // Imported tasks reference this repo; make sure their workspaces are
-      // cloned through tea rather than the default provider's CLI.
-      recordRepoProviders(ctx.db, [fullRepoName], 'forgejo')
-
-      for (const issue of issues) {
-        try {
-          const mapped = mapIssueToTask(issue)
-          const externalId = String(issue.number)
-          const upserted = upsertSourcedTask(ctx, sourceId, externalId, mapped, {
-            title: issue.title,
-            source: 'Forgejo',
-            repos: [fullRepoName]
-          })
-          if (upserted?.created) result.imported++
-          else if (upserted) result.updated++
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Unknown error'
-          result.errors.push(`Failed to import #${issue.number} "${issue.title}": ${msg}`)
-        }
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error'
-      result.errors.push(`Import failed: ${msg}`)
-    }
-
-    return result
-  }
-
-  async exportUpdate(
-    task: TaskRecord,
-    changedFields: Record<string, unknown>,
-    config: Record<string, unknown>,
-    _ctx: PluginContext
-  ): Promise<void> {
-    if (!task.external_id) return
-    const owner = config.owner as string
-    const repo = config.repo as string
-    const number = parseInt(task.external_id, 10)
-
-    const updates: { title?: string; body?: string; state?: string; assignees?: string[]; labels?: string[] } = {}
-
-    if (changedFields.title) updates.title = changedFields.title as string
-    if (changedFields.description) updates.body = changedFields.description as string
-    if (changedFields.status) updates.state = mapLocalStatusToIssueState(changedFields.status as string)
-    if (changedFields.assignee) updates.assignees = [(changedFields.assignee as string)]
-    if (changedFields.labels) updates.labels = changedFields.labels as string[]
-
-    if (Object.keys(updates).length > 0) {
-      try {
-        await this.forgejoManager.updateIssue(owner, repo, number, updates, config.login as string | undefined)
-      } catch (err) {
-        console.error('[forgejo-issues] Export update failed:', err)
-      }
-    }
-  }
-
-  async executeAction(
-    actionId: string,
-    task: TaskRecord,
-    input: string | undefined,
-    config: Record<string, unknown>,
-    _ctx: PluginContext
-  ): Promise<ActionResult> {
-    if (!task.external_id) {
-      return { success: false, error: 'Task has no external ID' }
-    }
-
-    const owner = config.owner as string
-    const repo = config.repo as string
-    const login = config.login as string | undefined
-    const number = parseInt(task.external_id, 10)
-
-    try {
-      switch (actionId) {
-        case PluginActionId.AddComment:
-          if (!input) return { success: false, error: 'Comment text is required' }
-          await this.forgejoManager.addIssueComment(owner, repo, number, input, login)
-          return { success: true }
-
-        case PluginActionId.Complete:
-        case PluginActionId.CloseIssue:
-          await this.forgejoManager.updateIssue(owner, repo, number, { state: 'closed' }, login)
-          return { success: true, taskUpdate: { status: TaskStatus.Completed } }
-
-        case PluginActionId.ReopenIssue:
-          await this.forgejoManager.updateIssue(owner, repo, number, { state: 'open' }, login)
-          return { success: true, taskUpdate: { status: TaskStatus.NotStarted } }
-
-        default:
-          return { success: false, error: `Unknown action: ${actionId}` }
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error'
-      return { success: false, error: `Action failed: ${msg}` }
-    }
-  }
-
-  async getUsers(
-    config: Record<string, unknown>,
-    _ctx: PluginContext
-  ): Promise<SourceUser[]> {
-    try {
-      const collaborators = await this.forgejoManager.fetchRepoCollaborators(
-        config.owner as string,
-        config.repo as string,
-        config.login as string | undefined
-      )
-      return collaborators.map((c) => ({ id: c.login, email: '', name: c.login }))
-    } catch {
-      return []
-    }
-  }
-
-  async reassignTask(
-    task: TaskRecord,
-    userIds: string[],
-    config: Record<string, unknown>,
-    _ctx: PluginContext
-  ): Promise<ReassignResult> {
-    if (!task.external_id) {
-      return { success: false, error: 'Task has no external ID' }
-    }
-
-    try {
-      await this.forgejoManager.updateIssue(
-        config.owner as string,
-        config.repo as string,
-        parseInt(task.external_id, 10),
-        { assignees: userIds },
-        config.login as string | undefined
-      )
-      return { success: true }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error'
-      return { success: false, error: msg }
-    }
+  // Imported tasks reference this repo; make sure their workspaces are
+  // cloned through tea rather than the default provider's CLI.
+  protected onImportRepo(ctx: PluginContext, fullRepoName: string): void {
+    recordRepoProviders(ctx.db, [fullRepoName], 'forgejo')
   }
 
   getSetupDocumentation(): string {

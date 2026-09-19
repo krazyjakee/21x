@@ -1,5 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { afterEach, describe, it, expect, vi } from 'vitest'
 import { OpencodeAdapter } from './opencode-adapter'
+import { buildPromptBody } from './opencode-prompt'
 import { attachAndVerifyMcpServers, waitForMcpServersReady } from './opencode-mcp'
 import { setTillDoneSession } from './opencode-runtime-plugins'
 import { SessionStatusType } from './coding-agent-adapter'
@@ -240,10 +242,9 @@ describe('OpencodeAdapter', () => {
     const parts = [{ type: 'text', text: 'do the thing' }] as any
 
     it('sends the agent settings system prompt as the body system field', () => {
-      const body = (OpencodeAdapter as any).buildPromptBody(
+      const body: any = buildPromptBody(
         parts,
-        { providerID: 'anthropic', modelID: 'claude-x' },
-        { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws', systemPrompt: 'You are a backend specialist.' }
+        { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws', model: 'anthropic/claude-x', systemPrompt: 'You are a backend specialist.' }
       )
 
       expect(body.system).toBe('You are a backend specialist.')
@@ -252,9 +253,8 @@ describe('OpencodeAdapter', () => {
     })
 
     it('omits the system field when no system prompt is configured', () => {
-      const body = (OpencodeAdapter as any).buildPromptBody(
+      const body: any = buildPromptBody(
         parts,
-        undefined,
         { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' }
       )
 
@@ -263,9 +263,8 @@ describe('OpencodeAdapter', () => {
     })
 
     it('omits the system field when the system prompt is only whitespace', () => {
-      const body = (OpencodeAdapter as any).buildPromptBody(
+      const body: any = buildPromptBody(
         parts,
-        undefined,
         { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws', systemPrompt: '   \n  ' }
       )
 
@@ -273,9 +272,8 @@ describe('OpencodeAdapter', () => {
     })
 
     it('keeps the tools passthrough alongside the system prompt', () => {
-      const body = (OpencodeAdapter as any).buildPromptBody(
+      const body: any = buildPromptBody(
         parts,
-        undefined,
         { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws', systemPrompt: 'p', tools: { bash: true } }
       )
 
@@ -458,6 +456,18 @@ describe('OpencodeAdapter', () => {
       expect(second.attached).toEqual(['task-management'])
       expect(second.failed).toEqual([])
       expect(add).toHaveBeenCalledTimes(1)
+    })
+
+    it('registers sse servers as remote, like the workspace opencode.json does', async () => {
+      const add = vi.fn().mockImplementation(async ({ body }: any) => ({
+        data: { [body.name]: { status: 'connected' } }
+      }))
+      const ocClient = { mcp: { add, status: vi.fn().mockResolvedValue({ data: {} }) } }
+      const servers = { events: { type: 'sse', url: 'https://mcp.example/sse', headers: { A: 'b' } } }
+
+      await attachAndVerifyMcpServers(ocClient as any, servers as any, '/tmp/ws-a', 'sse', new Map())
+
+      expect(add.mock.calls[0][0].body.config).toEqual({ type: 'remote', url: 'https://mcp.example/sse', headers: { A: 'b' } })
     })
 
     it('re-adds a connected server whose config changed, such as a new task API port', async () => {
@@ -702,7 +712,7 @@ describe('OpencodeAdapter', () => {
           list: async () => ({ data: [] })
         }
       }
-      vi.spyOn(adapter as any, 'getV2Client').mockReturnValue(mockV2Client)
+      vi.spyOn((adapter as any).server, 'v2').mockReturnValue(mockV2Client)
 
       const status = await adapter.getStatus('session-3', { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' })
       expect(status.type).toBe(SessionStatusType.BUSY)
@@ -736,7 +746,7 @@ describe('OpencodeAdapter', () => {
           list: async () => ({ data: [] })
         }
       }
-      vi.spyOn(adapter as any, 'getV2Client').mockReturnValue(mockV2Client)
+      vi.spyOn((adapter as any).server, 'v2').mockReturnValue(mockV2Client)
 
       const status = await adapter.getStatus('session-4', { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' })
       expect(status.type).toBe(SessionStatusType.BUSY)
@@ -770,7 +780,7 @@ describe('OpencodeAdapter', () => {
           list: async () => ({ data: [] })
         }
       }
-      vi.spyOn(adapter as any, 'getV2Client').mockReturnValue(mockV2Client)
+      vi.spyOn((adapter as any).server, 'v2').mockReturnValue(mockV2Client)
 
       const status = await adapter.getStatus('session-5', { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' })
       expect(status.type).toBe(SessionStatusType.IDLE)
@@ -799,7 +809,7 @@ describe('OpencodeAdapter', () => {
           })
         }
       }
-      vi.spyOn(adapter as any, 'getV2Client').mockReturnValue(mockV2Client)
+      vi.spyOn((adapter as any).server, 'v2').mockReturnValue(mockV2Client)
 
       const status = await adapter.getStatus('session-2', { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' })
       expect(status.type).toBe(SessionStatusType.WAITING_APPROVAL)
@@ -827,7 +837,7 @@ describe('OpencodeAdapter', () => {
           })
         }
       }
-      vi.spyOn(adapter as any, 'getV2Client').mockReturnValue(mockV2Client)
+      vi.spyOn((adapter as any).server, 'v2').mockReturnValue(mockV2Client)
 
       const status = await adapter.getStatus('session-2', { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' })
       expect(status.type).toBe(SessionStatusType.WAITING_APPROVAL)
@@ -863,7 +873,7 @@ describe('OpencodeAdapter', () => {
           })
         }
       }
-      vi.spyOn(adapter as any, 'getV2Client').mockReturnValue(mockV2Client)
+      vi.spyOn((adapter as any).server, 'v2').mockReturnValue(mockV2Client)
 
       const status = await adapter.getStatus('session-2', { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' })
       expect(status.type).toBe(SessionStatusType.IDLE)
@@ -887,7 +897,7 @@ describe('OpencodeAdapter', () => {
           list: async () => ({ data: [] })
         }
       }
-      vi.spyOn(adapter as any, 'getV2Client').mockReturnValue(mockV2Client)
+      vi.spyOn((adapter as any).server, 'v2').mockReturnValue(mockV2Client)
 
       const status = await adapter.getStatus('session-2', { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' })
       expect(status.type).toBe(SessionStatusType.WAITING_APPROVAL)
@@ -982,48 +992,36 @@ describe('OpencodeAdapter', () => {
 
     it('autoApprovePermission calls V2 SDK permission.reply with correct args including directory', async () => {
       const adapter = new OpencodeAdapter()
-      // The SDK is imported asynchronously in the constructor (fire-and-forget).
-      // autoApprovePermission only uses the mocked v2Client once the module-level
-      // OpenCodeV2Client has finished loading; otherwise it falls through to a real
-      // fetch() to DEFAULT_SERVER_URL (localhost:4096), which hangs the test if an
-      // OpenCode server happens to be running locally. Await the load so the V2
-      // path is taken deterministically (fixes the local 5s timeout / CI flake).
-      await (adapter as any).sdkLoading
       const mockReply = vi.fn().mockResolvedValue({ data: {}, error: null })
-      const mockV2Client = {
-        permission: { reply: mockReply, list: vi.fn() }
-      }
-      ;(adapter as any).v2Client = mockV2Client
-      // Set the workspace directory for the session
+      vi.spyOn((adapter as any).server, 'v2').mockReturnValue({ permission: { reply: mockReply, list: vi.fn() } })
       ;(adapter as any).sessionWorkspaceDirs.set('ses_abc', '/workspace/task_1')
 
-      // Safety net: if the SDK failed to load, keep the raw-fetch fallback path
-      // from making a real network call that would hang the test.
-      const mockFetch = vi.fn().mockResolvedValue({ ok: true, text: async () => '{}' })
-      vi.stubGlobal('fetch', mockFetch)
-      try {
-        await (adapter as any).autoApprovePermission('ses_abc', 'per_123')
-      } finally {
-        vi.unstubAllGlobals()
-      }
+      await (adapter as any).autoApprovePermission('ses_abc', 'per_123')
 
-      // If OpenCodeV2Client is loaded (it is in test env since we import the module),
-      // it should try to use v2Client. If OpenCodeV2Client is null (dynamic import
-      // failed), it falls through to raw fetch.
-      if (mockReply.mock.calls.length > 0) {
-        expect(mockReply).toHaveBeenCalledWith({
-          requestID: 'per_123',
-          reply: 'always',
-          directory: '/workspace/task_1'
-        })
-      }
+      expect(mockReply).toHaveBeenCalledWith({
+        requestID: 'per_123',
+        reply: 'always',
+        directory: '/workspace/task_1'
+      })
+    })
+
+    it('answers a queued permission through the V2 reply endpoint', async () => {
+      const adapter = new OpencodeAdapter()
+      const mockReply = vi.fn().mockResolvedValue({ data: {}, error: null })
+      vi.spyOn((adapter as any).server, 'v2').mockReturnValue({ permission: { reply: mockReply, list: vi.fn() } })
+      ;(adapter as any).sessionWorkspaceDirs.set('ses_abc', '/workspace/task_1')
+      ;(adapter as any).pendingPermissions.set('ses_abc', [{ permissionId: 'per_9', permission: 'bash', patterns: [] }])
+
+      await expect(adapter.respondToApproval('ses_abc', true)).resolves.toBe(true)
+
+      expect(mockReply).toHaveBeenCalledWith({ requestID: 'per_9', reply: 'once', directory: '/workspace/task_1' })
+      expect((adapter as any).pendingPermissions.has('ses_abc')).toBe(false)
     })
 
     it('sends selected question labels as ordered answer arrays to OpenCode', async () => {
       const adapter = new OpencodeAdapter()
-      await (adapter as any).sdkLoading
       const mockReply = vi.fn().mockResolvedValue({ data: true, error: null })
-      ;(adapter as any).v2Client = {
+      vi.spyOn((adapter as any).server, 'v2').mockReturnValue({
         question: {
           list: vi.fn().mockResolvedValue({
             data: [{
@@ -1042,7 +1040,7 @@ describe('OpencodeAdapter', () => {
           }),
           reply: mockReply
         }
-      }
+      })
 
       await adapter.respondToQuestion(
         'ses_abc',
@@ -1057,52 +1055,9 @@ describe('OpencodeAdapter', () => {
       })
     })
 
-    it('autoApprovePermission falls back to raw fetch when V2 SDK is not loaded', async () => {
-      const adapter = new OpencodeAdapter()
-      ;(adapter as any).v2Client = null
-      ;(adapter as any).serverUrl = 'http://localhost:4096'
-      ;(adapter as any).sessionWorkspaceDirs.set('ses_abc', '/workspace/task_1')
-
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        text: async () => '{}'
-      })
-      vi.stubGlobal('fetch', mockFetch)
-
-      try {
-        await (adapter as any).autoApprovePermission('ses_abc', 'per_123')
-
-        // Should have called fetch with V2 endpoint (not V1) and include directory query param
-        // Check if fetch was called at all — if OpenCodeV2Client IS loaded
-        // (dynamic import succeeded at module init), it would use the SDK path
-        // and never reach fetch. Either path is valid depending on the env.
-        if (mockFetch.mock.calls.length > 0) {
-          // Node's built-in fetch may wrap (url, init) into a Request object,
-          // so check the first arg for either a plain URL string or a Request.
-          const firstArg = mockFetch.mock.calls[0][0]
-          const url = typeof firstArg === 'string' ? firstArg : firstArg.url
-          expect(url).toBe(
-            'http://localhost:4096/permission/per_123/reply?directory=%2Fworkspace%2Ftask_1'
-          )
-          if (typeof firstArg === 'string') {
-            // Classic two-arg form
-            expect(mockFetch.mock.calls[0][1]).toEqual(
-              expect.objectContaining({ method: 'POST', body: JSON.stringify({ reply: 'always' }) })
-            )
-          } else {
-            // Request object form — method is on the Request, body is a stream
-            expect(firstArg.method).toBe('POST')
-          }
-        }
-      } finally {
-        vi.unstubAllGlobals()
-      }
-    })
-
     it('full SSE → auto-approve flow works end-to-end', async () => {
       const adapter = new OpencodeAdapter()
       ;(adapter as any).sessionPermissionModes.set('ses_live', 'allow')
-      ;(adapter as any).serverUrl = 'http://localhost:4096'
 
       // Track what autoApprovePermission does
       const calls: Array<{ sessionId: string; permissionId: string }> = []
@@ -1209,6 +1164,24 @@ describe('OpencodeAdapter', () => {
         startTime: 1100000,
         input: { filePath: '/workspace/task_1/file.ts', content: '...' }
       })
+    })
+
+    it('reuses the history fetched by pollMessages in the same poll cycle', async () => {
+      const adapter = new OpencodeAdapter()
+      const messages = vi.fn().mockResolvedValue({
+        data: [{
+          info: { id: 'msg_1', role: 'assistant' },
+          parts: [{ id: 'prt_1', type: 'tool', tool: 'bash', state: { status: 'running', input: {} } }]
+        }]
+      })
+      ;(adapter as any).clients.set('ses_cycle', { session: { messages } })
+      const config = { agentId: 'a', taskId: 't' } as any
+
+      await adapter.pollMessages('ses_cycle', new Set(), new Set(), new Map(), config)
+      const running = await adapter.getRunningTools('ses_cycle', config)
+
+      expect(running.map((tool) => tool.partId)).toEqual(['prt_1'])
+      expect(messages).toHaveBeenCalledTimes(1)
     })
 
     it('returns empty array when no client exists', async () => {
