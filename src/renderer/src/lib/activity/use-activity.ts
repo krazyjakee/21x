@@ -138,7 +138,7 @@ export function summarizeProjectActivity(
     else if (r.state === 'waiting-for-user') summary.needsInput++
     else if (r.state === 'queued') summary.queued++
     else if (r.state === 'failed') summary.failed++
-    else if (r.state === 'unknown' && r.lastKnown && r.lastKnown !== 'idle') summary.unavailable++
+    else if (r.state === 'unknown' && r.lastKnown && r.lastKnown !== 'idle' && r.lastKnown !== 'failed') summary.unavailable++
   }
   return { summary, expiresAt }
 }
