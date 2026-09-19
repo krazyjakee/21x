@@ -377,14 +377,21 @@ function TaskWorkspaceComponent({
         return
       }
 
-      const readySessionId = await ensureChatSession(true)
       // Thrown, not swallowed: the composer has already cleared the text, so a
       // silent return leaves the user staring at an idle transcript with no
       // idea that the message went nowhere.
-      if (!readySessionId) throw new Error('Could not start an agent session for this task')
+      if (!task?.agent_id && !useAgentStore.getState().sessions.get(task?.id ?? '')?.sessionId) {
+        throw new Error('Assign an agent to this task before sending a message')
+      }
+      // An empty id here is not a failure: `start` goes through admission
+      // control and returns '' when the task is queued behind the concurrency
+      // limit. sendMessage then falls back to sendByTaskId, and the main
+      // process resumes or starts the session immediately — a direct message
+      // is exempt from the limits.
+      await ensureChatSession(true)
       await sendMessage(message, options)
     },
-    [approve, ensureChatSession, sendMessage, task?.id]
+    [approve, ensureChatSession, sendMessage, task?.agent_id, task?.id]
   )
 
   const handleAddAttachmentPaths = useCallback(async (filePaths: string[]) => {
