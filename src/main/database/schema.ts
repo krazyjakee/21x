@@ -7,6 +7,7 @@ import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
 import { migrateCoordinatorToCaptain } from './captain-migration'
 import { splitLegacyPullRequestEscalation } from '../../shared/project-policies'
 import { createConcurrencyTables, migrateConcurrencyControl } from './concurrency-migration'
+import { createDurableStartQueueTables, migrateDurableStartQueue } from './start-queue-migration'
 
 /**
  * Bump this whenever new migrations are added so returning users skip
@@ -44,8 +45,10 @@ import { createConcurrencyTables, migrateConcurrencyControl } from './concurrenc
  * 20 → 21: Captain-managed concurrency (#150): concurrency_audit, task_touches,
  *          and agents.config.concurrency_cap = min(max_parallel_sessions, 5)
  *          where unset (migrateConcurrencyControl in concurrency-migration.ts).
+ * 21 → 22: durable agent start queue, leases, generations, retry state and
+ *          cross-project fairness (#148, migrateDurableStartQueue).
  */
-const SCHEMA_VERSION = 21
+const SCHEMA_VERSION = 22
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -536,6 +539,9 @@ export function createTables(db: Database.Database): void {
   createMergeGrantTables(db)
   // Concurrency control (#150): audit feed and declared touches.
   createConcurrencyTables(db)
+
+  // Captain self-healing (#148): the one durable admission/start queue.
+  createDurableStartQueueTables(db)
 
   // Report routing (#62): a Captain report quotes the correlation id of
   // the `ask_captain` tool row it answers; this serves that lookup.
@@ -1029,6 +1035,10 @@ export function runMigrations(db: Database.Database): void {
   // Migration v21: concurrency control (#150). After migrateToProjects so the
   // projects table the audit references exists.
   migrateConcurrencyControl(db)
+
+  // Migration v22: durable start claims and recovery (#148). This extends the
+  // v20 runtime and v21 admission model rather than introducing a second one.
+  migrateDurableStartQueue(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)

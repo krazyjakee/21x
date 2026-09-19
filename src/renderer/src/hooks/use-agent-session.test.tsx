@@ -51,6 +51,19 @@ describe('useAgentSession', () => {
       expect(session).toBeDefined()
       expect(session!.sessionId).toBe('real-session-id')
     })
+
+    it('leaves a durably queued start idle instead of presenting it as running', async () => {
+      ;(mockElectronAPI.agentSession.start as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+        sessionId: '', queued: true, queuePosition: 1, queueReason: 'global_limit'
+      })
+      const { result } = renderHook(() => useAgentSession('task-1'))
+
+      await act(async () => {
+        expect(await result.current.start('agent-1', 'task-1')).toBe('')
+      })
+
+      expect(useAgentStore.getState().sessions.get('task-1')).toMatchObject({ sessionId: null, status: 'idle' })
+    })
   })
 
   describe('abort', () => {

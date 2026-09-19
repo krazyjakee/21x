@@ -73,12 +73,14 @@ import type { ProjectStatus, ProjectStatusHistoryPage } from '@shared/project-st
 import type { ProjectOverviewEntry } from '@shared/project-overview'
 import type { CaptainMemory } from '@shared/captain-memory'
 
+export type AgentQueueReason = 'agent_limit' | 'global_limit' | 'global_pause' | 'project_paused' | 'project_daily_cap' | 'project_limit' | 'concurrency_level' | 'file_overlap' | 'recovery' | 'dependency' | 'agent_unavailable'
+
 export interface AgentSessionStartResult {
   sessionId: string
   /** True when the main process queued the start behind a concurrency limit; sessionId is then ''. */
   queued?: boolean
   queuePosition?: number
-  queueReason?: 'agent_limit' | 'global_limit'
+  queueReason?: AgentQueueReason
 }
 
 export interface AgentTaskStartResult {
@@ -87,17 +89,29 @@ export interface AgentTaskStartResult {
   startedTaskId?: string
   agentId?: string
   queuePosition?: number
-  queueReason?: 'agent_limit' | 'global_limit'
+  queueReason?: AgentQueueReason
 }
 
-/** A session start waiting in the main-process queue for a free slot. */
+/** A session start or recovery outcome in the durable shared queue. */
 export interface QueuedAgentStart {
+  id: string
   taskId: string
+  projectId: string
   agentId: string
-  reason: 'agent_limit' | 'global_limit'
+  reason: AgentQueueReason
   queuedAt: string
   /** 1-based. */
   position: number
+  priority: string | null
+  state: 'queued' | 'retrying' | 'claimed' | 'starting' | 'started' | 'recovered' | 'failed' | 'cancelled'
+  retryCount: number
+  nextRetryAt: string | null
+  generation: number
+  dependencyReason: string | null
+  recoveryCause: string | null
+  recoveryAction: string | null
+  recoveryResult: string | null
+  lastError: string | null
 }
 
 export interface AgentStartQueueChangedEvent {
@@ -276,6 +290,7 @@ interface ElectronAPI {
     update: (id: string, data: UpdateAgentDTO) => Promise<Agent | undefined>
     delete: (id: string) => Promise<boolean>
     getStartQueue: () => Promise<QueuedAgentStart[]>
+    getStartRecoveryState?: (taskId: string) => Promise<QueuedAgentStart | null>
   }
   agentSession: {
     start: (agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean) => Promise<AgentSessionStartResult>

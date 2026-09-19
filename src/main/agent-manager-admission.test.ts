@@ -197,6 +197,45 @@ describe('admission control — AgentManager.startSession', () => {
     expect(outcomes.map((o) => o.status)).toEqual(['started', 'queued', 'queued'])
     expect(outcomes.slice(1).map((o) => (o as { position: number }).position)).toEqual([1, 2])
   })
+
+  it('persists and retries a recoverable failure from an immediately admitted start', async () => {
+    const { manager, agentId, createTasks } = setup(1)
+    const [task] = createTasks(1)
+    ;(manager as any).startSessionNow.mockRejectedValueOnce(new Error('agent temporarily unavailable'))
+
+    await expect(manager.requestSession(agentId, task.id)).rejects.toThrow('agent temporarily unavailable')
+
+    expect(manager.getStartRecoveryState(task.id)).toMatchObject({
+      state: 'retrying',
+      retryCount: 1,
+      recoveryCause: 'recoverable_start_failure',
+      recoveryAction: 'retry'
+    })
+    expect(manager.getStartQueue()).toEqual([expect.objectContaining({ taskId: task.id, state: 'retrying' })])
+    await manager.stopAllSessions()
+  })
+
+  it('holds a successor on its durable dependency and drains it after the predecessor finishes', async () => {
+    const { db, manager, agentId, started, createTasks } = setup(2)
+    const parent = db.createTask(makeTask({ title: 'Parent' }))!
+    const [first, second] = createTasks(2, { parent_task_id: parent.id })
+    db.updateTask(first.id, { next_subtask_ids: [second.id] })
+
+    await manager.requestSession(agentId, first.id)
+    expect(await manager.requestSession(agentId, second.id)).toMatchObject({ status: 'queued', reason: 'dependency' })
+    expect(manager.getStartRecoveryState(second.id)).toMatchObject({
+      state: 'queued',
+      reason: 'dependency',
+      dependencyReason: 'predecessor_active'
+    })
+
+    db.updateTask(first.id, { status: TaskStatus.ReadyForReview })
+    goIdle(manager, first.id)
+    await settle()
+
+    expect(started).toEqual([first.id, second.id])
+    expect(manager.getStartQueue()).toEqual([])
+  })
 })
 
 describe('admission control — MCP start_task', () => {
@@ -349,5 +388,112 @@ describe('admission control — exempt sessions', () => {
     expect(await manager.requestSession(agentId, untriaged.id)).toMatchObject({ status: 'started' })
     expect(started).toHaveLength(3)
     expect(manager.getStartQueue()).toEqual([])
+  })
+})
+
+describe('startup self-healing (#148)', () => {
+  it('makes an orphan with no assigned agent a visible terminal recovery', async () => {
+    const { db, manager } = setup(1)
+    const task = db.createTask(makeTask({ title: 'Unassigned orphan', status: TaskStatus.AgentWorking }))!
+
+    await manager.reconcileStartup()
+
+    expect(db.getTask(task.id)).toMatchObject({ status: TaskStatus.NotStarted, session_id: null })
+    expect(manager.getStartRecoveryState(task.id)).toMatchObject({
+      agentId: 'unassigned',
+      state: 'failed',
+      recoveryCause: 'agent_missing',
+      recoveryAction: 'terminal_failure'
+    })
+  })
+
+  it('requeues orphaned agent_working state and starts it without user intervention', async () => {
+    const { db, manager, started, createTasks } = setup(1)
+    const [task] = createTasks(1)
+    db.updateTask(task.id, { status: TaskStatus.AgentWorking, session_id: null })
+
+    await manager.reconcileStartup()
+    await settle()
+
+    expect(started).toEqual([task.id])
+    expect(db.getTask(task.id)).toMatchObject({ status: TaskStatus.AgentWorking, session_id: 'session-1' })
+    expect(manager.getStartQueue()).toEqual([])
+    expect(manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'started', recoveryResult: 'session_acknowledged' })
+    const journal = db.listProjectStatusJournal(DEFAULT_PROJECT_ID, { limit: 20 }).entries
+    expect(journal.some((entry) => entry.source === 'system_recovery' && entry.summary.includes('session_acknowledged'))).toBe(true)
+    setTaskApiAgentController(manager)
+    expect(await handleSessionRoute(db, '/get_session_status', { task_id: task.id })).toMatchObject({
+      recovery: { state: 'started', recoveryResult: 'session_acknowledged' }
+    })
+    expect(await handleSessionRoute(db, '/get_recent_activity', {})).toMatchObject({
+      activity: expect.arrayContaining([
+        expect.objectContaining({ task_id: task.id, recovery_state: 'started', recovery_result: 'session_acknowledged' })
+      ])
+    })
+  })
+
+  it('reclaims a live persisted session and never double-starts it', async () => {
+    const { db, manager, agentId, started, createTasks } = setup(1)
+    const [task] = createTasks(1)
+    db.updateTask(task.id, { status: TaskStatus.AgentWorking, session_id: 'persisted-session' })
+    ;(manager as any).startQueue.enqueue({
+      taskId: task.id,
+      projectId: task.project_id,
+      agentId,
+      priority: task.priority,
+      reason: 'recovery',
+      queuedAt: new Date().toISOString()
+    })
+    vi.spyOn(manager, 'resumeSession').mockImplementation(async () => {
+      ;(manager as any).sessions.set('persisted-session', {
+        id: 'persisted-session', agentId, taskId: task.id, status: 'working', createdAt: new Date(),
+        seenMessageIds: new Set(), seenPartIds: new Set(), partContentLengths: new Map(),
+        fallbackAgentIds: [], attemptedAgentIds: new Set()
+      })
+      return 'persisted-session'
+    })
+
+    await manager.reconcileStartup()
+    await manager.reconcileStartup()
+    await settle()
+
+    expect(started).toEqual([])
+    expect(manager.resumeSession).toHaveBeenCalledTimes(1)
+    expect(manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'recovered', recoveryResult: 'live_session_reclaimed' })
+    const recoveryEntries = db.listProjectStatusJournal(DEFAULT_PROJECT_ID, { limit: 20 }).entries
+      .filter((entry) => entry.source === 'system_recovery' && entry.summary.includes('live_session_reclaimed'))
+    expect(recoveryEntries).toHaveLength(1)
+  })
+
+  it.each(['manual-stop', 'awaiting-approval', 'unsafe', 'destructive', 'irreversible'])(
+    'does not retry excluded orphaned work labelled %s',
+    async (label) => {
+      const { db, manager, started, createTasks } = setup(1)
+      const [task] = createTasks(1, { labels: [label] })
+      db.updateTask(task.id, { status: TaskStatus.AgentWorking, session_id: null })
+
+      await manager.reconcileStartup()
+      await settle()
+
+      expect(started).toEqual([])
+      expect(db.getTask(task.id)?.status).toBe(TaskStatus.NotStarted)
+      expect(manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'cancelled', recoveryAction: 'exclude_from_retry' })
+    }
+  )
+
+  it.each([
+    { partType: 'question', tool: { name: 'permission', status: 'running' }, cause: 'awaiting_approval' },
+    { partType: 'tool', tool: { name: 'external_write', status: 'running' }, cause: 'unsafe_side_effect_unknown' }
+  ])('does not replay unresolved $cause work from the durable transcript', async ({ partType, tool, cause }) => {
+    const { db, manager, started, createTasks } = setup(1)
+    const [task] = createTasks(1)
+    db.updateTask(task.id, { status: TaskStatus.AgentWorking, session_id: null })
+    db.upsertTranscriptParts(task.id, [{ id: 'unresolved', role: 'assistant', content: 'pending', partType, tool }])
+
+    await manager.reconcileStartup()
+    await settle()
+
+    expect(started).toEqual([])
+    expect(manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'cancelled', recoveryCause: cause })
   })
 })

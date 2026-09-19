@@ -6,9 +6,9 @@
  * `start_task` / `start_sibling_subtask` tools, the mobile API, the IPC start
  * and the TaskAutomationScheduler all reach it). That one place asks
  * {@link checkAdmission} whether the start fits under the limits; if it does
- * not, the start waits in a FIFO {@link StartQueue} in the main process and is
- * started when a counted session goes idle or stops. The window does not have
- * to be open for any of this.
+ * not, the start waits in the durable shared start queue and is started when a
+ * counted session goes idle or stops. The queue survives process loss; the
+ * window does not have to be open for any of this.
  *
  * ## What counts
  *
@@ -56,7 +56,7 @@ import type { AgentRecord, TaskRecord } from '../database'
 import { isCoordinatorTask } from '../../shared/task-roles'
 import type { ProjectLimitReason } from '../../shared/project-policies'
 import { isTriageSessionTask } from './session-config'
-import { agentHardCap, orderStartQueue } from '../../shared/concurrency'
+import { agentHardCap } from '../../shared/concurrency'
 
 /** Settings key for the global cap on concurrently working agent sessions. */
 export const MAX_CONCURRENT_AGENT_SESSIONS_SETTING = 'max_concurrent_agent_sessions'
@@ -111,7 +111,9 @@ export interface AdmissionLimits {
 /** Why a start waits because of the project's working level or file overlap (#150). */
 export type ConcurrencyReason = 'concurrency_level' | 'file_overlap'
 
-export type AdmissionReason = 'agent_limit' | 'global_limit' | ProjectLimitReason | ConcurrencyReason
+/** `recovery` and `dependency` are durable restoration reasons rather than
+ * capacity decisions, but share the one queue and visibility vocabulary. */
+export type AdmissionReason = 'agent_limit' | 'global_limit' | 'recovery' | 'dependency' | 'agent_unavailable' | ProjectLimitReason | ConcurrencyReason
 
 /** Reasons that block every start, so a drain can stop at the first one. */
 export function isGlobalAdmissionReason(reason: AdmissionReason): boolean {
@@ -214,84 +216,4 @@ export interface QueuedStartInfo {
   queuedAt: string
   position: number
   priority?: string | null
-}
-
-/**
- * Starts waiting for a slot, at most one entry per task, in the order
- * {@link orderStartQueue} gives them: priority within a project, round
- * robin across projects (#150).
- */
-export class StartQueue {
-  private entries: Array<QueuedStart & { seq: number }> = []
-  private seq = 0
-  /** projectId → when it last had a start admitted, as a counter (#150 fairness). */
-  private served = new Map<string, number>()
-  private servedSeq = 0
-
-  get size(): number {
-    return this.entries.length
-  }
-
-  private ordered(): Array<QueuedStart & { seq: number }> {
-    return orderStartQueue(this.entries, (projectId) => this.served.get(projectId) ?? 0)
-  }
-
-  /** Records an admitted start of the project, queued or not: it goes to the back of the round. */
-  markServed(projectId: string | undefined): void {
-    this.served.set(projectId ?? '', ++this.servedSeq)
-  }
-
-  /** Adds the start unless the task is already waiting; returns its position. */
-  enqueue(entry: QueuedStart): { position: number; added: boolean } {
-    const existing = this.positionOf(entry.taskId)
-    if (existing) return { position: existing, added: false }
-    this.entries.push({ ...entry, seq: ++this.seq })
-    return { position: this.positionOf(entry.taskId), added: true }
-  }
-
-  remove(taskId: string): boolean {
-    const index = this.entries.findIndex((e) => e.taskId === taskId)
-    if (index === -1) return false
-    this.entries.splice(index, 1)
-    return true
-  }
-
-  /** 1-based position in drain order, or 0 when the task is not queued. */
-  positionOf(taskId: string): number {
-    return this.ordered().findIndex((e) => e.taskId === taskId) + 1
-  }
-
-  /**
-   * Updates the project and priority of every entry (a task's priority may
-   * change while it waits; a critical bump moves it up at the next drain).
-   */
-  refresh(lookup: (taskId: string) => { projectId?: string; priority?: string | null } | undefined): void {
-    for (const entry of this.entries) {
-      const found = lookup(entry.taskId)
-      if (!found) continue
-      entry.projectId = found.projectId
-      entry.priority = found.priority
-    }
-  }
-
-  /** The live entries in drain order. Iterating it while removing is safe. */
-  snapshot(): QueuedStart[] {
-    return this.ordered()
-  }
-
-  list(): QueuedStartInfo[] {
-    return this.ordered().map((e, i) => ({
-      taskId: e.taskId,
-      agentId: e.agentId,
-      reason: e.reason,
-      queuedAt: e.queuedAt,
-      position: i + 1,
-      priority: e.priority ?? null
-    }))
-  }
-
-  clear(): void {
-    this.entries = []
-    this.served.clear()
-  }
 }

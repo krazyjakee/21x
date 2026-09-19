@@ -149,9 +149,16 @@ export const agentApi = {
     return window.electronAPI.agents.delete(id)
   },
 
-  /** Starts the main process is holding back behind concurrency limits. */
+  /** Durable starts waiting on capacity, dependencies or retry deadlines. */
   getStartQueue: (): Promise<QueuedAgentStart[]> => {
     return window.electronAPI.agents.getStartQueue()
+  },
+
+  /** Latest durable queue/recovery outcome for one task, including terminal states. */
+  getStartRecoveryState: (taskId: string): Promise<QueuedAgentStart | null> => {
+    return typeof window.electronAPI.agents.getStartRecoveryState === 'function'
+      ? window.electronAPI.agents.getStartRecoveryState(taskId)
+      : Promise.resolve(null)
   }
 }
 

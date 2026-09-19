@@ -87,7 +87,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     update: (id: string, data: Record<string, unknown>): Promise<unknown> =>
       ipcRenderer.invoke('agent:update', id, data),
     delete: (id: string): Promise<boolean> => ipcRenderer.invoke('agent:delete', id),
-    getStartQueue: (): Promise<unknown[]> => ipcRenderer.invoke('agent:getStartQueue')
+    getStartQueue: (): Promise<unknown[]> => ipcRenderer.invoke('agent:getStartQueue'),
+    getStartRecoveryState: (taskId: string): Promise<unknown> => ipcRenderer.invoke('agent:getStartRecoveryState', taskId)
   },
   mcpServers: {
     getAll: (): Promise<unknown[]> => ipcRenderer.invoke('mcp:getAll'),

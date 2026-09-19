@@ -20,8 +20,8 @@ export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
   })
   ipcMain.handle('agent:delete', (_, id: string) => db.deleteAgent(id))
 
-  // Over a concurrency limit the start is queued in the main process: the
-  // reply carries an empty sessionId plus the queue position.
+  // A deferred start is committed to the durable queue before this reply;
+  // empty sessionId means there is no live session yet.
   ipcMain.handle('agentSession:start', async (_, agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean) => {
     const outcome = await agentManager.requestSession(agentId, taskId, workspaceDir, skipInitialPrompt)
     if (outcome.status === 'queued') return { sessionId: '', queued: true, queuePosition: outcome.position, queueReason: outcome.reason }
@@ -36,6 +36,7 @@ export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
   })
 
   ipcMain.handle('agent:getStartQueue', () => agentManager.getStartQueue())
+  ipcMain.handle('agent:getStartRecoveryState', (_, taskId: string) => agentManager.getStartRecoveryState(taskId))
 
   ipcMain.handle('agentSession:resume', async (_, agentId: string, taskId: string, ocSessionId: string) => {
     const sessionId = await agentManager.resumeSession(agentId, taskId, ocSessionId)

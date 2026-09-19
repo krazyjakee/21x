@@ -37,6 +37,21 @@ describe('DatabaseManager migrations on an existing install', () => {
     return (raw.pragma('table_info(tasks)') as { name: string }[]).map((c) => c.name)
   }
 
+  const integratedTables = [
+    'managed_agent_runtimes', 'delivery_outbox',
+    'concurrency_audit', 'task_touches',
+    'agent_start_queue', 'agent_start_queue_fairness'
+  ]
+
+  function integratedSchema(raw: InstanceType<typeof RawDatabase>): Array<{ type: string; name: string; tbl_name: string; sql: string }> {
+    const placeholders = integratedTables.map(() => '?').join(', ')
+    return raw.prepare(`
+      SELECT type, name, tbl_name, sql FROM sqlite_master
+      WHERE tbl_name IN (${placeholders}) AND sql IS NOT NULL
+      ORDER BY type, name
+    `).all(...integratedTables) as Array<{ type: string; name: string; tbl_name: string; sql: string }>
+  }
+
   it('creates a fresh database that already has every task column', () => {
     const db = new DatabaseManager()
     db.initialize()
@@ -102,11 +117,11 @@ describe('DatabaseManager migrations on an existing install', () => {
   })
 
   /**
-   * Migration 20 (#150): every agent gets a hard cap of
+   * Migration 21 (#150): every agent gets a hard cap of
    * min(existing max_parallel_sessions, 5); an explicit cap is kept, the old
    * field is left as it was, and the concurrency tables appear.
    */
-  it('gives existing agents a hard cap of min(max_parallel_sessions, 5) on the upgrade to 20', () => {
+  it('gives existing agents a hard cap and the unified recovery schema on upgrade to 22', () => {
     const first = new DatabaseManager()
     first.initialize()
     first.close?.()
@@ -134,8 +149,48 @@ describe('DatabaseManager migrations on an existing install', () => {
     expect(config('a-unset').concurrency_cap).toBe(1)
     expect(config('a-explicit').concurrency_cap).toBe(7)
     const tables = (after.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((t) => t.name)
-    expect(tables).toEqual(expect.arrayContaining(['concurrency_audit', 'task_touches']))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('20')
+    expect(tables).toEqual(expect.arrayContaining([
+      'managed_agent_runtimes', 'delivery_outbox',
+      'concurrency_audit', 'task_touches',
+      'agent_start_queue', 'agent_start_queue_fairness'
+    ]))
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('22')
+    after.close()
+  })
+
+  it.each([
+    { name: 'main v19', version: '19', drop: ['managed_agent_runtimes', 'delivery_outbox', 'concurrency_audit', 'task_touches', 'agent_start_queue', 'agent_start_queue_fairness'] },
+    { name: '#151-only v20', version: '20', drop: ['concurrency_audit', 'task_touches', 'agent_start_queue', 'agent_start_queue_fairness'] },
+    { name: '#152-only v20', version: '20', drop: ['managed_agent_runtimes', 'delivery_outbox', 'agent_start_queue', 'agent_start_queue_fairness'] },
+    { name: 'integrated v21', version: '21', drop: ['agent_start_queue', 'agent_start_queue_fairness'] }
+  ])('produces schema-equivalent v22 from $name', ({ version, drop }) => {
+    const fresh = new DatabaseManager()
+    fresh.initialize()
+    fresh.close?.()
+
+    const raw = openRaw()
+    const canonicalSchema = integratedSchema(raw)
+    for (const table of drop) raw.exec(`DROP TABLE IF EXISTS ${table}`)
+    raw.prepare("UPDATE settings SET value = ? WHERE key = '__schema_version'").run(version)
+    raw.close()
+
+    const upgraded = new DatabaseManager()
+    upgraded.initialize()
+    upgraded.close?.()
+
+    const after = openRaw()
+    expect(integratedSchema(after)).toEqual(canonicalSchema)
+    const columns = (table: string) => (after.pragma(`table_info(${table})`) as Array<{ name: string }>).map((column) => column.name)
+    expect(columns('managed_agent_runtimes')).toEqual(expect.arrayContaining(['owner_id', 'generation', 'session_id', 'phase']))
+    expect(columns('delivery_outbox')).toEqual(expect.arrayContaining(['idempotency_key', 'state', 'claim_owner', 'acknowledged_at']))
+    expect(columns('concurrency_audit')).toEqual(expect.arrayContaining(['project_id', 'kind', 'actor', 'reason']))
+    expect(columns('agent_start_queue')).toEqual(expect.arrayContaining([
+      'id', 'task_id', 'project_id', 'agent_id', 'priority', 'fifo_seq',
+      'dependency_reason', 'admission_reason', 'retry_count', 'next_retry_at',
+      'generation', 'lease_owner', 'lease_expires_at', 'recovery_cause',
+      'recovery_action', 'recovery_result', 'queued_at', 'acknowledged_at'
+    ]))
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('22')
     after.close()
   })
 

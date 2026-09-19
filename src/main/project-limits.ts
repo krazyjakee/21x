@@ -187,6 +187,12 @@ export function describeQueueReason(reason: string, limit?: number, running?: nu
       return 'it touches the same files as a running job in this project, so it waits for that job to finish; do not call start_task again for it.'
     case 'global_limit':
       return 'the global concurrent session limit is reached. It starts automatically when a running session finishes; do not call start_task again for it.'
+    case 'recovery':
+      return 'the previous process ended before durable session ownership was confirmed. Recovery retries it automatically when safe; do not call start_task again for it.'
+    case 'dependency':
+      return 'a predecessor is still active. It starts automatically when its dependency completes; do not call start_task again for it.'
+    case 'agent_unavailable':
+      return 'the assigned agent is temporarily unavailable. Recovery retries with bounded backoff when it returns; do not call start_task again for it.'
     default:
       return "the agent's hard cap on concurrent jobs is reached. It starts automatically when a running session finishes; do not call start_task again for it."
   }

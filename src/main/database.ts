@@ -165,7 +165,7 @@ function toJournalEntry(row: ProjectStatusJournalRow): ProjectStatusJournalEntry
     blockers: journalStringList(row.blockers),
     decisions: journalStringList(row.decisions),
     next_steps: journalStringList(row.next_steps),
-    source: row.source === 'compaction' ? 'compaction' : 'captain',
+    source: row.source === 'compaction' ? 'compaction' : row.source === 'system_recovery' ? 'system_recovery' : 'captain',
     correlation_id: row.correlation_id ?? null,
     created_at: row.created_at
   }

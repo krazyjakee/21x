@@ -131,6 +131,23 @@ Both tables are also created in `createTables()`. Nothing is added to `tasks`,
 so `rebuildTasksTable()` is unchanged. This migration follows the managed
 runtime and delivery-outbox migration at v20.
 
+### Durable Captain recovery queue (#148, v22)
+
+Migration 22 (`migrateDurableStartQueue()` in
+`src/main/database/start-queue-migration.ts`) adds the single durable agent
+start queue and its cross-project fairness cursor. Each task keeps one stable
+queue ID. Priority/FIFO position, admission or dependency reason, retry and
+backoff state, claim generation, lease, session acknowledgement, recovery
+cause/action/result, and timestamps are committed before a queued result is
+returned. Claims and acknowledgements are generation-fenced, so replaying
+startup reconciliation or crashing around claim/start/ack cannot double-start
+the logical item.
+
+Landing order is v20 (#151 runtime and delivery outbox), v21 (#152 priority,
+admission and fairness), then v22 (#148 reconciliation and durable starts).
+All three migrations are idempotent and fresh databases create the same final
+tables directly.
+
 ## Adding a column to other tables
 
 Same pattern: update `createTables()`, add a guarded `ALTER TABLE` in `runMigrations()`, and bump `SCHEMA_VERSION`.
