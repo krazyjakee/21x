@@ -10,7 +10,7 @@ import { useAgentSessionActions } from '@/hooks/use-agent-session'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useTaskStore } from '@/stores/task-store'
-import { taskApi, worktreeApi, taskSourceApi, attachmentApi, artifactApi } from '@/lib/ipc-client'
+import { taskApi, worktreeApi, taskSourceApi, attachmentApi, artifactApi, agentApi, onAgentStartQueueChanged } from '@/lib/ipc-client'
 import { memo, useEffect, useCallback, useRef, useState, useMemo } from 'react'
 import { TaskStatus } from '@/types'
 import type { Task, FileAttachment, OutputField, Agent } from '@/types'
@@ -27,6 +27,7 @@ import { useTaskFeedbackFlow } from './workspace/useTaskFeedbackFlow'
 import { useTaskShortcutRouter } from './workspace/useTaskShortcutRouter'
 import { TaskWorkspaceDialogs } from './workspace/TaskWorkspaceDialogs'
 import { TaskTranscriptPane } from './workspace/TaskTranscriptPane'
+import type { QueuedAgentStart } from '@/types/electron'
 
 const EMPTY_ARTIFACTS: Artifact[] = []
 const DEFAULT_ARTIFACT_UI: ArtifactUIState = { open: false, activeTabId: null, railExpanded: false }
@@ -84,6 +85,7 @@ function TaskWorkspaceComponent({
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
   const [showSnooze, setShowSnooze] = useState(false)
   const [parentTask, setParentTask] = useState<Task | null>(null)
+  const [recoveryState, setRecoveryState] = useState<QueuedAgentStart | null>(null)
   const startingRef = useRef(false)
   const submittedQuestionIdsRef = useRef(new Set<string>())
   const openTaskOnCanvas = useUIStore((s) => s.openTaskOnCanvas)
@@ -128,6 +130,27 @@ function TaskWorkspaceComponent({
   }, [hydrateArtifacts, task?.id])
 
   useEffect(() => { fetchSettings() }, [])
+
+  useEffect(() => {
+    if (!task?.id) {
+      setRecoveryState(null)
+      return
+    }
+    let live = true
+    const refresh = () => {
+      void agentApi.getStartRecoveryState(task.id).then((state) => {
+        if (live) setRecoveryState(state)
+      }).catch(() => {
+        if (live) setRecoveryState(null)
+      })
+    }
+    refresh()
+    const unsubscribe = onAgentStartQueueChanged(refresh)
+    return () => {
+      live = false
+      unsubscribe()
+    }
+  }, [task?.id])
 
   useEffect(() => {
     if (!task) {
@@ -599,8 +622,10 @@ function TaskWorkspaceComponent({
   const triageAgentConfigured = isAgentConfigured(triageAgent)
   const canResume = task.agent_id && task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE && !hasMessages
   const canRestart = task.agent_id && task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE && hasMessages
+  const hasPendingRecovery = recoveryState !== null && ['queued', 'retrying', 'claimed', 'starting'].includes(recoveryState.state)
   const canStart = task.agent_id && assignedAgentConfigured && !task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE
     && task.status !== TaskStatus.Completed
+    && !hasPendingRecovery
   const canTriage = !task.agent_id && agents.length > 0 && triageAgentConfigured && sessionStatus === SessionStatus.IDLE
     && task.status !== TaskStatus.Completed && task.status !== TaskStatus.Triaging
 
@@ -624,6 +649,18 @@ function TaskWorkspaceComponent({
     primaryAction = TaskPrimaryAction.TRIAGE
     handlePrimaryAction = () => void handleTriage()
   }
+
+  const recoveryLabel = recoveryState?.state === 'queued'
+    ? `Queued #${recoveryState.position}`
+    : recoveryState?.state === 'retrying'
+      ? `Retrying ${recoveryState.retryCount}/5`
+      : recoveryState?.state === 'claimed' || recoveryState?.state === 'starting'
+        ? 'Starting'
+        : recoveryState?.state === 'recovered'
+          ? 'Recovered'
+          : recoveryState?.state === 'failed'
+            ? 'Recovery failed'
+            : null
 
   const detailsView = (
     <TaskDetailView
@@ -707,6 +744,7 @@ function TaskWorkspaceComponent({
           onOpenFolder={() => void handleOpenFolder()}
           onOpenFullView={onOpenFullView}
           onDelete={onDelete}
+          recoveryState={recoveryLabel}
         />
         <div ref={workspaceBodyRef} className="relative flex min-h-0 flex-1 overflow-hidden">
           {panelLayout === 'task-only' || (!hasSession && panelLayout === 'both') ? (

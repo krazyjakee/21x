@@ -51,6 +51,19 @@ describe('useAgentSession', () => {
       expect(session).toBeDefined()
       expect(session!.sessionId).toBe('real-session-id')
     })
+
+    it('leaves a durably queued start idle instead of presenting it as running', async () => {
+      ;(mockElectronAPI.agentSession.start as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+        sessionId: '', queued: true, queuePosition: 1, queueReason: 'global_limit'
+      })
+      const { result } = renderHook(() => useAgentSession('task-1'))
+
+      await act(async () => {
+        expect(await result.current.start('agent-1', 'task-1')).toBe('')
+      })
+
+      expect(useAgentStore.getState().sessions.get('task-1')).toMatchObject({ sessionId: null, status: 'idle' })
+    })
   })
 
   describe('abort', () => {
@@ -136,7 +149,7 @@ describe('useAgentSession', () => {
         await result.current.sendMessage('Hello agent')
       })
 
-      expect(mockElectronAPI.agentSession.send).toHaveBeenCalledWith('sess-1', 'Hello agent', 'task-1', 'agent-1', undefined)
+      expect(mockElectronAPI.agentSession.send).toHaveBeenCalledWith('sess-1', 'Hello agent', 'task-1', 'agent-1', undefined, expect.stringMatching(/^renderer:/))
     })
 
     it('sends message attachments when provided', async () => {
@@ -149,7 +162,7 @@ describe('useAgentSession', () => {
         await result.current.sendMessage('Use this file', { attachments })
       })
 
-      expect(mockElectronAPI.agentSession.send).toHaveBeenCalledWith('sess-1', 'Use this file', 'task-1', 'agent-1', attachments)
+      expect(mockElectronAPI.agentSession.send).toHaveBeenCalledWith('sess-1', 'Use this file', 'task-1', 'agent-1', attachments, expect.stringMatching(/^renderer:/))
     })
 
     it('falls back to sendByTaskId when no active session', async () => {
@@ -160,7 +173,7 @@ describe('useAgentSession', () => {
       })
 
       expect(mockElectronAPI.agentSession.send).not.toHaveBeenCalled()
-      expect(mockElectronAPI.agentSession.sendByTaskId).toHaveBeenCalledWith('task-1', 'Hello', undefined)
+      expect(mockElectronAPI.agentSession.sendByTaskId).toHaveBeenCalledWith('task-1', 'Hello', undefined, expect.stringMatching(/^renderer:/))
     })
 
     it('uses latest sessionId from store, not stale closure', async () => {
@@ -184,7 +197,7 @@ describe('useAgentSession', () => {
       })
 
       // Should use the NEW sessionId from store, not the old one from closure
-      expect(mockElectronAPI.agentSession.send).toHaveBeenCalledWith('sess-2-new', 'After resume', 'task-1', 'agent-1', undefined)
+      expect(mockElectronAPI.agentSession.send).toHaveBeenCalledWith('sess-2-new', 'After resume', 'task-1', 'agent-1', undefined, expect.stringMatching(/^renderer:/))
     })
   })
 

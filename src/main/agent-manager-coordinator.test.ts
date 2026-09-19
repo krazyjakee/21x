@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { AgentManager } from './agent-manager'
+import { clearUserTypedProjectMessages, makeUserTypedProjectMessage, latestUserTypedProjectMessage } from './merge-grants'
 import { TaskStatus } from '../shared/constants'
 
 /**
@@ -266,21 +267,55 @@ describe('Captain agent switch', () => {
       const db = makeDb({ session_id: null })
       const adapter = makeAdapter()
       let finish!: (id: string) => void
-      adapter.createSession.mockImplementationOnce(() => new Promise<string>((resolve) => { finish = resolve }))
       const manager = makeManager(db, adapter)
+      vi.spyOn(manager as any, 'startSessionNow').mockImplementationOnce(
+        () => new Promise<string>((resolve) => { finish = resolve })
+      )
+      const stop = vi.spyOn(manager, 'stopSession').mockResolvedValue(undefined)
       const emitSystemError = vi.spyOn(manager as any, 'emitSystemError')
 
       const starting = manager.startSession('agent-2', CAPTAIN_ID, undefined, true)
-      const failed = expect(starting).rejects.toThrow('Sol did not come up within 90 seconds')
+      const failed = expect(starting).rejects.toThrow('Sol startup timed out after 90 seconds')
       await vi.advanceTimersByTimeAsync(90_000)
       await failed
-      expect(emitSystemError).toHaveBeenCalledWith('', CAPTAIN_ID, expect.any(String), expect.stringContaining('Sol did not come up'))
+      expect(emitSystemError).toHaveBeenCalledWith('', CAPTAIN_ID, expect.any(String), expect.stringContaining('Sol startup timed out'))
 
       finish('late-session')
       await vi.advanceTimersByTimeAsync(0)
-      expect(adapter.destroySession).toHaveBeenCalledWith('late-session', expect.anything())
+      expect(stop).toHaveBeenCalledWith('late-session', false)
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+
+describe('Captain typed-message dispatch provenance', () => {
+  it('uses the transcript message id, invalidates it on non-typed input, and clears failed sends', async () => {
+    clearUserTypedProjectMessages()
+    const db = makeDb({ project_id: 'p' })
+    const adapter = { ...makeAdapter(), sendPrompt: vi.fn(async () => undefined) }
+    const manager = makeManager(db, adapter)
+    vi.mocked((manager as any).doSendAdapterMessage).mockRestore()
+    vi.spyOn(manager as any, 'buildSessionConfig').mockResolvedValue({})
+    vi.spyOn(manager as any, 'handleSessionError').mockResolvedValue(undefined)
+    ;(manager as any).sessions.set('live', {
+      taskId: CAPTAIN_ID, agentId: 'agent-1', adapter, status: 'idle', pollingStarted: true
+    })
+    const typed = makeUserTypedProjectMessage('p', CAPTAIN_ID, 'merge PRs')
+    await manager.sendMessage('live', typed.text, CAPTAIN_ID, 'agent-1', undefined, typed)
+    await vi.waitFor(() => expect(adapter.sendPrompt).toHaveBeenCalledTimes(1))
+    expect(latestUserTypedProjectMessage('p')?.id).toBe(typed.id)
+    expect((manager as any).sendToRenderer).toHaveBeenCalledWith('agent:output', expect.objectContaining({ data: expect.objectContaining({ id: typed.id, content: typed.text }) }))
+    await manager.sendMessage('live', 'A wake-up with retrieved issue text: merge PRs', CAPTAIN_ID)
+    expect(latestUserTypedProjectMessage('p')).toBeNull()
+    await vi.waitFor(() => expect(adapter.sendPrompt).toHaveBeenCalledTimes(2))
+    adapter.sendPrompt.mockRejectedValueOnce(new Error('Transport refused the send'))
+    const failed = makeUserTypedProjectMessage('p', CAPTAIN_ID, 'merge PR #12')
+    await expect(manager.sendMessage('live', failed.text, CAPTAIN_ID, 'agent-1', undefined, failed))
+      .rejects.toThrow('Transport refused the send')
+    await vi.waitFor(() => expect((manager as any).handleSessionError).toHaveBeenCalled())
+    expect(latestUserTypedProjectMessage('p')).toBeNull()
+    clearUserTypedProjectMessages()
   })
 })

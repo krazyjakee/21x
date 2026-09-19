@@ -9,6 +9,7 @@ import type {
   ProjectChangedEvent
 } from '../shared/projects'
 import type { CaptainMemory } from '../shared/captain-memory'
+import type { CaptainRuntimeState } from '../shared/captain-runtime'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   db: {
@@ -86,7 +87,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     update: (id: string, data: Record<string, unknown>): Promise<unknown> =>
       ipcRenderer.invoke('agent:update', id, data),
     delete: (id: string): Promise<boolean> => ipcRenderer.invoke('agent:delete', id),
-    getStartQueue: (): Promise<unknown[]> => ipcRenderer.invoke('agent:getStartQueue')
+    getStartQueue: (): Promise<unknown[]> => ipcRenderer.invoke('agent:getStartQueue'),
+    getStartRecoveryState: (taskId: string): Promise<unknown> => ipcRenderer.invoke('agent:getStartRecoveryState', taskId)
   },
   mcpServers: {
     getAll: (): Promise<unknown[]> => ipcRenderer.invoke('mcp:getAll'),
@@ -132,10 +134,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('agentSession:stopByTaskId', taskId),
     switchAgent: (taskId: string, newAgentId: string): Promise<{ sessionId: string }> =>
       ipcRenderer.invoke('agentSession:switchAgent', taskId, newAgentId),
-    send: (sessionId: string, message: string, taskId?: string, agentId?: string, attachments?: Array<{ id: string; filename: string; size: number; mime_type: string }>): Promise<{ success: boolean; newSessionId?: string }> =>
-      ipcRenderer.invoke('agentSession:send', sessionId, message, taskId, agentId, attachments),
-    sendByTaskId: (taskId: string, message: string, attachments?: Array<{ id: string; filename: string; size: number; mime_type: string }>): Promise<{ success: boolean; sessionId: string | null; newSessionId?: string }> =>
-      ipcRenderer.invoke('agentSession:sendByTaskId', taskId, message, attachments),
+    send: (sessionId: string, message: string, taskId?: string, agentId?: string, attachments?: Array<{ id: string; filename: string; size: number; mime_type: string }>, deliveryId?: string): Promise<{ success: boolean; newSessionId?: string }> =>
+      ipcRenderer.invoke('agentSession:send', sessionId, message, taskId, agentId, attachments, deliveryId),
+    sendByTaskId: (taskId: string, message: string, attachments?: Array<{ id: string; filename: string; size: number; mime_type: string }>, deliveryId?: string): Promise<{ success: boolean; sessionId: string | null; newSessionId?: string }> =>
+      ipcRenderer.invoke('agentSession:sendByTaskId', taskId, message, attachments, deliveryId),
     approve: (sessionId: string, approved: boolean, message?: string, responseType?: 'permission' | 'question', requestId?: string): Promise<{ success: boolean }> =>
       requestId
         ? ipcRenderer.invoke('agentSession:approve', sessionId, approved, message, responseType, requestId)
@@ -148,6 +150,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('agentSession:getTranscriptSnapshot', taskId, sinceSeq),
     getTranscriptDelta: (taskId: string, sinceRev: number): Promise<{ parts: Array<{ taskId: string; partId: string; seq: number; role: string; content: string; partType?: string; tool?: unknown; payload?: unknown; createdAt: number; updatedAt: number; rev: number }>; maxRev: number }> =>
       ipcRenderer.invoke('agentSession:getTranscriptDelta', taskId, sinceRev)
+  },
+  captainRuntime: {
+    get: (projectId: string): Promise<CaptainRuntimeState | null> => ipcRenderer.invoke('captainRuntime:get', projectId),
+    switch: (projectId: string, agentId: string): Promise<CaptainRuntimeState> => ipcRenderer.invoke('captainRuntime:switch', projectId, agentId),
+    retry: (projectId: string): Promise<CaptainRuntimeState> => ipcRenderer.invoke('captainRuntime:retry', projectId),
+    rollback: (projectId: string): Promise<CaptainRuntimeState> => ipcRenderer.invoke('captainRuntime:rollback', projectId)
   },
   agentConfig: {
     getProviders: (serverUrl?: string, backendType?: string): Promise<{ providers: { id: string; name: string; models: unknown }[]; default: Record<string, string> } | null> =>
@@ -336,6 +344,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     isAllPaused: (): Promise<boolean> => ipcRenderer.invoke('projectLimits:isAllPaused'),
     pauseAll: (paused: boolean): Promise<boolean> => ipcRenderer.invoke('projectLimits:pauseAll', paused)
   },
+  // Captain-managed concurrency under the user-set hard cap (#150).
+  concurrency: {
+    getState: (projectId: string): Promise<unknown> => ipcRenderer.invoke('concurrency:getState', projectId),
+    setCaptainControl: (projectId: string, enabled: boolean): Promise<unknown> =>
+      ipcRenderer.invoke('concurrency:setCaptainControl', projectId, enabled),
+    pin: (projectId: string, agentId: string, level: number | null): Promise<unknown> =>
+      ipcRenderer.invoke('concurrency:pin', projectId, agentId, level),
+    onChanged: (callback: (event: { projectId: string }) => void): (() => void) => {
+      const handler = (_: unknown, event: { projectId: string }): void => callback(event)
+      ipcRenderer.on('concurrency:changed', handler)
+      return () => ipcRenderer.removeListener('concurrency:changed', handler)
+    }
+  },
   // Captain tool calls held by the escalation policy (#66).
   escalation: {
     listHeld: (projectId?: string): Promise<unknown[]> => ipcRenderer.invoke('escalation:listHeld', projectId),
@@ -345,6 +366,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const handler = (_: unknown, event: unknown): void => callback(event)
       ipcRenderer.on('escalation:heldChanged', handler)
       return () => ipcRenderer.removeListener('escalation:heldChanged', handler)
+    }
+  },
+  // Merge grants the user gave Captains (#137).
+  mergeGrants: {
+    noteTyped: (taskId: string, text: string): Promise<void> => ipcRenderer.invoke('mergeGrants:noteTyped', taskId, text),
+    listActive: (projectId?: string): Promise<unknown[]> => ipcRenderer.invoke('mergeGrants:listActive', projectId),
+    audit: (projectId: string): Promise<unknown[]> => ipcRenderer.invoke('mergeGrants:audit', projectId),
+    revoke: (id: string): Promise<unknown> => ipcRenderer.invoke('mergeGrants:revoke', id),
+    onChanged: (callback: (event: unknown) => void): (() => void) => {
+      const handler = (_: unknown, event: unknown): void => callback(event)
+      ipcRenderer.on('mergeGrants:changed', handler)
+      return () => ipcRenderer.removeListener('mergeGrants:changed', handler)
     }
   },
   // The all-projects overview (#63): every active project's status in one call.

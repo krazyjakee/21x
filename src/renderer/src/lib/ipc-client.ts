@@ -23,6 +23,7 @@ import type {
 } from '@shared/voice-tts'
 import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
 import type { CommanderEvent, CommanderListSessionsRequest, CommanderMessage, CommanderSession } from '@shared/commander'
+import type { CaptainRuntimeState } from '@shared/captain-runtime'
 import type {
   ConnectorBridgeCredentialInput,
   ConnectorBridgeCredentialStatus,
@@ -41,6 +42,8 @@ import type {
   ProjectChangedEvent
 } from '@shared/projects'
 import type { HeldAction, ProjectLimitState } from '@shared/project-limit-types'
+import type { MergeGrant, MergeGrantAuditEntry } from '@shared/merge-grants'
+import type { ProjectConcurrencyState } from '@shared/concurrency'
 import type { ProjectStatus, ProjectStatusHistoryPage } from '@shared/project-status'
 import type { ProjectOverviewEntry } from '@shared/project-overview'
 import type { CaptainMemory } from '@shared/captain-memory'
@@ -146,9 +149,16 @@ export const agentApi = {
     return window.electronAPI.agents.delete(id)
   },
 
-  /** Starts the main process is holding back behind concurrency limits. */
+  /** Durable starts waiting on capacity, dependencies or retry deadlines. */
   getStartQueue: (): Promise<QueuedAgentStart[]> => {
     return window.electronAPI.agents.getStartQueue()
+  },
+
+  /** Latest durable queue/recovery outcome for one task, including terminal states. */
+  getStartRecoveryState: (taskId: string): Promise<QueuedAgentStart | null> => {
+    return typeof window.electronAPI.agents.getStartRecoveryState === 'function'
+      ? window.electronAPI.agents.getStartRecoveryState(taskId)
+      : Promise.resolve(null)
   }
 }
 
@@ -181,12 +191,12 @@ export const agentSessionApi = {
     return window.electronAPI.agentSession.switchAgent(taskId, newAgentId)
   },
 
-  send: (sessionId: string, message: string, taskId?: string, agentId?: string, attachments?: AgentMessageAttachment[]): Promise<{ success: boolean; newSessionId?: string }> => {
-    return window.electronAPI.agentSession.send(sessionId, message, taskId, agentId, attachments)
+  send: (sessionId: string, message: string, taskId?: string, agentId?: string, attachments?: AgentMessageAttachment[], deliveryId?: string): Promise<{ success: boolean; newSessionId?: string }> => {
+    return window.electronAPI.agentSession.send(sessionId, message, taskId, agentId, attachments, deliveryId)
   },
 
-  sendByTaskId: (taskId: string, message: string, attachments?: AgentMessageAttachment[]): Promise<{ success: boolean; sessionId: string | null; newSessionId?: string }> => {
-    return window.electronAPI.agentSession.sendByTaskId(taskId, message, attachments)
+  sendByTaskId: (taskId: string, message: string, attachments?: AgentMessageAttachment[], deliveryId?: string): Promise<{ success: boolean; sessionId: string | null; newSessionId?: string }> => {
+    return window.electronAPI.agentSession.sendByTaskId(taskId, message, attachments, deliveryId)
   },
 
   approve: (sessionId: string, approved: boolean, message?: string, responseType?: 'permission' | 'question', requestId?: string): Promise<{ success: boolean }> => {
@@ -206,6 +216,13 @@ export const agentSessionApi = {
   getTranscriptDelta: (taskId: string, sinceRev: number): Promise<{ parts: TranscriptPartRecord[]; maxRev: number }> => {
     return window.electronAPI.agentSession.getTranscriptDelta(taskId, sinceRev)
   }
+}
+
+export const captainRuntimeApi = {
+  get: (projectId: string): Promise<CaptainRuntimeState | null> => window.electronAPI.captainRuntime.get(projectId),
+  switch: (projectId: string, agentId: string): Promise<CaptainRuntimeState> => window.electronAPI.captainRuntime.switch(projectId, agentId),
+  retry: (projectId: string): Promise<CaptainRuntimeState> => window.electronAPI.captainRuntime.retry(projectId),
+  rollback: (projectId: string): Promise<CaptainRuntimeState> => window.electronAPI.captainRuntime.rollback(projectId)
 }
 
 export const agentConfigApi = {
@@ -527,6 +544,33 @@ export const projectLimitsApi = {
   getState: (projectId: string): Promise<ProjectLimitState> => window.electronAPI.projectLimits.getState(projectId),
   isAllPaused: (): Promise<boolean> => window.electronAPI.projectLimits.isAllPaused(),
   pauseAll: (paused: boolean): Promise<boolean> => window.electronAPI.projectLimits.pauseAll(paused)
+}
+
+/** Merge grants the user gave Captains (#137). Absent bridges (tests) read as empty. */
+export const mergeGrantsApi = {
+  /** Text the user typed (not dictated) to a task's agent; main keeps it only for a Captain. */
+  noteTyped: (taskId: string, text: string): void => {
+    if (typeof window.electronAPI.mergeGrants?.noteTyped !== 'function') return
+    window.electronAPI.mergeGrants.noteTyped(taskId, text).catch(() => { /* best effort */ })
+  },
+  listActive: (projectId?: string): Promise<MergeGrant[]> =>
+    typeof window.electronAPI.mergeGrants?.listActive === 'function' ? window.electronAPI.mergeGrants.listActive(projectId) : Promise.resolve([]),
+  audit: (projectId: string): Promise<MergeGrantAuditEntry[]> =>
+    typeof window.electronAPI.mergeGrants?.audit === 'function' ? window.electronAPI.mergeGrants.audit(projectId) : Promise.resolve([]),
+  revoke: (id: string): Promise<{ ok: boolean; error?: string }> => window.electronAPI.mergeGrants.revoke(id),
+  onChanged: (callback: (event: { projectId: string }) => void): (() => void) =>
+    typeof window.electronAPI.mergeGrants?.onChanged === 'function' ? window.electronAPI.mergeGrants.onChanged(callback) : () => {}
+}
+
+/** Captain-managed concurrency under the user-set hard cap (#150). */
+export const concurrencyApi = {
+  getState: (projectId: string): Promise<ProjectConcurrencyState> => window.electronAPI.concurrency.getState(projectId),
+  setCaptainControl: (projectId: string, enabled: boolean): Promise<{ success: true } | { error: string }> =>
+    window.electronAPI.concurrency.setCaptainControl(projectId, enabled),
+  pin: (projectId: string, agentId: string, level: number | null): Promise<{ success: true } | { error: string }> =>
+    window.electronAPI.concurrency.pin(projectId, agentId, level),
+  onChanged: (callback: (event: { projectId: string }) => void): (() => void) =>
+    typeof window.electronAPI.concurrency?.onChanged === 'function' ? window.electronAPI.concurrency.onChanged(callback) : () => undefined
 }
 
 /** Captain tool calls held by the escalation policy (#66). */

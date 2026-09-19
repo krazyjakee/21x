@@ -46,7 +46,8 @@ const mockElectronAPI = {
     create: vi.fn().mockResolvedValue({}),
     update: vi.fn().mockResolvedValue({}),
     delete: vi.fn().mockResolvedValue(true),
-    getStartQueue: vi.fn().mockResolvedValue([])
+    getStartQueue: vi.fn().mockResolvedValue([]),
+    getStartRecoveryState: vi.fn().mockResolvedValue(null)
   },
   agentSession: {
     start: vi.fn().mockResolvedValue({ sessionId: 'test-session-id' }),

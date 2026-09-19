@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest'
-import { AgentManager } from './agent-manager'
+import { AgentManager, withStartupDeadline } from './agent-manager'
 import { FakeAdapter } from '../../test/helpers/fake-adapter'
 import { shouldEnableTillDone } from './agent-manager/session-config'
 import { isDelegationTool } from './agent-manager/watchdogs'
@@ -124,6 +124,9 @@ function createMockDb(agentConfig: Record<string, unknown> = {}) {
     })),
     getTasks: vi.fn(() => []),
     getSubtasks: vi.fn(() => []),
+    // Concurrency control (#150): declared touches and the audit feed.
+    getTaskTouches: vi.fn(() => []),
+    listConcurrencyAudit: vi.fn(() => []),
     getAgent: vi.fn(() => ({
       id: 'agent-1',
       name: 'Test Agent',
@@ -173,6 +176,26 @@ async function flushEventLoop(turns = 3): Promise<void> {
 afterEach(() => {
   // A fake installed by one test must not leak into the next one's factory.
   ;(ClaudeCodeAdapter as unknown as Mock).mockReset()
+})
+
+describe('bounded agent startup', () => {
+  it('rejects a never-ready agent at its deadline', async () => {
+    const neverReady = new Promise<string>(() => {})
+    await expect(withStartupDeadline(neverReady, 5, 'Never-ready agent')).rejects.toThrow(
+      'Never-ready agent timed out after 5ms'
+    )
+  })
+
+  it('fences and cleans up a session that resolves after its caller timed out', async () => {
+    let resolve!: (sessionId: string) => void
+    const starting = new Promise<string>((done) => { resolve = done })
+    const late = vi.fn()
+    const bounded = withStartupDeadline(starting, 5, 'Slow session', late)
+    await expect(bounded).rejects.toThrow('Slow session timed out after 5ms')
+
+    resolve('late-session')
+    await vi.waitFor(() => expect(late).toHaveBeenCalledWith('late-session'))
+  })
 })
 
 describe('AgentManager skill file paths', () => {
@@ -658,12 +681,13 @@ describe('AgentManager skill file paths', () => {
       const db = makeMcpDb()
 
       const md: string = generateAgentsMd(db, [], [], '/tmp/ws', 'agent-1', {
-        'task-management': { type: 'http', url: 'http://127.0.0.1:5555/mcp?token=session-secret&task=t1&parent=p1' }
+        'task-management': { type: 'http', url: 'http://127.0.0.1:5555/mcp?token=session-secret&scope_signature=captain-secret&task=t1&parent=p1' }
       })
 
       expect(md).toContain('**Type:** Local (HTTP, in-process)')
       expect(md).toContain('http://127.0.0.1:5555/mcp?task=t1&parent=p1')
       expect(md).not.toContain('session-secret')
+      expect(md).not.toContain('captain-secret')
       expect(md).not.toContain('/bin/Electron')
       expect(md).not.toContain('**Command:**')
     })

@@ -117,7 +117,6 @@ describe('mcpOptionsForTask scopes (#56)', () => {
 
   it("confines a heartbeat session to the checked task's project without forcing the tool on", () => {
     const checked = { id: 'x', project_id: 'proj-b', parent_task_id: null } as unknown as TaskRecord
-    expect(mcpOptionsForTask('heartbeat-x', null, checked)).toEqual({ ensureTaskManagement: false, projectId: 'proj-b' })
+    expect(mcpOptionsForTask('heartbeat-x', null, checked)).toEqual({ ensureTaskManagement: false, projectId: 'proj-b', artifactTaskId: 'x' })
   })
 })
-
