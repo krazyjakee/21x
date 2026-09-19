@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Task } from '../stores/task-store'
-import type { Agent } from '../stores/agent-store'
+import type { Agent, Task } from '@/types'
 import { MENU_ITEM_CLASS, MENU_PANEL_CLASS } from '@shared/menu-styles'
 import { taskStatusDotClass } from '@shared/task-status-styles'
 

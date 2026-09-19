@@ -4,6 +4,7 @@ import type { AgentMessage, TranscriptPartRecord } from '@shared/transcript/type
 import { applyPartsToProjection, createProjection, projectMessages, type TranscriptProjection } from '@shared/transcript/projection'
 import { api } from '../api/client'
 import { onEvent } from '../api/websocket'
+import type { Agent, Skill } from '@/types'
 
 export { SessionStatus }
 export type { AgentMessage }
@@ -24,23 +25,6 @@ export interface TaskSession {
    * first working/waiting/error status or a safety timeout.
    */
   pendingSend?: boolean
-}
-
-export interface Agent {
-  id: string
-  name: string
-  server_url: string
-  config: Record<string, unknown>
-  is_default: boolean
-  created_at: string
-  updated_at: string
-}
-
-export interface Skill {
-  id: string
-  name: string
-  description: string
-  agent_id: string | null
 }
 
 // ── Projection cache (SINGLE source of truth for the transcript) ──
@@ -87,7 +71,6 @@ interface AgentState {
   endSend: (taskId: string) => void
   endSession: (taskId: string) => void
   removeSession: (taskId: string) => void
-  clearMessageDedup: (taskId: string) => void
   getSession: (taskId: string) => TaskSession | undefined
 }
 
@@ -295,10 +278,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
         return { sessions: next }
       })
     },
-
-    // No-op in the projection model (no client dedup state; the durable
-    // projection is the source of truth).
-    clearMessageDedup: () => {},
 
     getSession: (taskId) => get().sessions.get(taskId)
   }

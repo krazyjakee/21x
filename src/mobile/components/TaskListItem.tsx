@@ -1,10 +1,9 @@
 import { TaskStatus } from '@shared/constants'
 import { taskListDotClass } from '@shared/task-status-styles'
 import { TaskPriorityBadge } from '@/components/tasks/TaskPriorityBadge'
-import type { TaskPriority } from '@/types'
 import { formatDate } from '@/lib/utils'
 import { cn, isOverdue, isDueSoon, isSnoozed } from '../lib/utils'
-import type { Task } from '../stores/task-store'
+import type { Task } from '@/types'
 import { SessionStatus } from '../stores/agent-store'
 import { ChevronRightIcon } from './icons'
 
@@ -53,7 +52,7 @@ export function TaskListItem({ task, onSelect, sessionStatus, isSubtask, subtask
             )}
           </div>
           <div className="flex items-center gap-2 mt-1">
-            <TaskPriorityBadge priority={task.priority as TaskPriority} />
+            <TaskPriorityBadge priority={task.priority} />
             {task.due_date && (
               <span className={cn(
                 'flex items-center gap-1 text-xs',

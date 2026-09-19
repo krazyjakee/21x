@@ -1,9 +1,9 @@
-import { useMemo } from 'react'
 import { TaskStatus } from '@shared/constants'
 import { getAgentConfigIssue } from '@shared/agent-utils'
-import { Badge } from './Badge'
-import { useTaskStore, type Task } from '../stores/task-store'
-import { useAgentStore, SessionStatus, type Agent, type TaskSession } from '../stores/agent-store'
+import { Badge } from '@/components/ui/Badge'
+import { useTaskStore } from '../stores/task-store'
+import type { Agent, Task } from '@/types'
+import { useAgentStore, SessionStatus, type TaskSession } from '../stores/agent-store'
 import { formatDate } from '@/lib/utils'
 import { cn, isOverdue, formatRelativeDate, formatRelativeFuture } from '../lib/utils'
 import type { Route } from '../App'
@@ -32,10 +32,7 @@ export function TaskPropertiesGrid({ task, siblingSubtasks, agents, session, isA
 }) {
   const updateTask = useTaskStore((s) => s.updateTask)
   const skills = useAgentStore((s) => s.skills)
-  const agentSkills = useMemo(
-    () => (task.agent_id ? skills.filter((s) => !s.agent_id || s.agent_id === task.agent_id) : []),
-    [skills, task.agent_id]
-  )
+  const agentSkills = task.agent_id ? skills : []
   const { canTriage, canStart, canResume, canStop, onTriage, onStart, onResume, onStop } = actions
 
   return (

@@ -2,7 +2,7 @@ import { getSourceCompletionDescription, getTaskSourceName } from '@shared/task-
 import { useMemo, useCallback, useEffect, useState, useRef } from 'react'
 import { TaskStatus } from '@shared/constants'
 import { isAgentConfigured } from '@shared/agent-utils'
-import { CollapsibleDescription } from '../components/CollapsibleDescription'
+import { CollapsibleDescription } from '@/components/ui/CollapsibleDescription'
 import { useTaskStore } from '../stores/task-store'
 import { useAgentStore, SessionStatus } from '../stores/agent-store'
 import { api } from '../api/client'
@@ -223,6 +223,7 @@ export function TaskDetailPage({ taskId, onNavigate }: { taskId: string; onNavig
             description={task.description || ''}
             size="sm"
             collapsedLines={3}
+            variant="touch"
             onSave={async (description) => {
               await updateTask(task.id, { description })
             }}

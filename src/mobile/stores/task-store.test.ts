@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { Mock } from 'vitest'
-import { useTaskStore, CURRENT_PROJECT_STORAGE_KEY, type Task } from './task-store'
+import { useTaskStore, CURRENT_PROJECT_STORAGE_KEY } from './task-store'
+import type { Task } from '@/types'
 import { api } from '../api/client'
 
 beforeEach(() => {

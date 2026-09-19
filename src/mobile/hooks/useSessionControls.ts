@@ -10,7 +10,6 @@ import { useStartQueueStore } from '../stores/start-queue-store'
 export function useSessionControls(taskId: string) {
   const initSession = useAgentStore((s) => s.initSession)
   const endSession = useAgentStore((s) => s.endSession)
-  const clearMessageDedup = useAgentStore((s) => s.clearMessageDedup)
   const markQueued = useStartQueueStore((s) => s.markQueued)
   const clearQueued = useStartQueueStore((s) => s.clear)
   const busyRef = useRef(false)
@@ -44,7 +43,6 @@ export function useSessionControls(taskId: string) {
   const handleResume = useCallback(async (agentId: string, existingSessionId: string) => {
     if (busyRef.current) return
     busyRef.current = true
-    clearMessageDedup(taskId)
     initSession(taskId, '', agentId)
     try {
       const { sessionId } = await api.sessions.resume(existingSessionId, agentId, taskId)
@@ -55,7 +53,7 @@ export function useSessionControls(taskId: string) {
     } finally {
       busyRef.current = false
     }
-  }, [taskId, initSession, endSession, clearMessageDedup])
+  }, [taskId, initSession, endSession])
 
   const handleStop = useCallback(async (sessionId: string) => {
     if (busyRef.current) return
@@ -76,7 +74,6 @@ export function useSessionControls(taskId: string) {
     try {
       await api.sessions.stop(currentSessionId)
       endSession(taskId)
-      clearMessageDedup(taskId)
       initSession(taskId, '', agentId)
       applyStartResult(await api.sessions.start(agentId, taskId), agentId)
     } catch (e) {
@@ -85,7 +82,7 @@ export function useSessionControls(taskId: string) {
     } finally {
       busyRef.current = false
     }
-  }, [taskId, initSession, endSession, clearMessageDedup, applyStartResult])
+  }, [taskId, initSession, endSession, applyStartResult])
 
   return { handleStart, handleResume, handleStop, handleRestart, busyRef }
 }

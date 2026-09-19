@@ -1,57 +1,7 @@
 import { create } from 'zustand'
 import { api, type MobileProject } from '../api/client'
 import { onEvent } from '../api/websocket'
-
-export interface TaskAttachment {
-  id: string
-  filename: string
-  size: number
-  mime_type: string
-  added_at: string
-}
-
-export interface Task {
-  id: string
-  title: string
-  description: string
-  type: string
-  priority: string
-  status: string
-  assignee: string
-  due_date: string | null
-  labels: string[]
-  attachments: TaskAttachment[]
-  repos: string[]
-  output_fields: unknown[]
-  agent_id: string | null
-  session_id: string | null
-  external_id: string | null
-  source_id: string | null
-  source: string
-  skill_ids: string[] | null
-  snoozed_until: string | null
-  resolution: string | null
-  feedback_rating: number | null
-  feedback_comment: string | null
-  is_recurring: boolean
-  recurrence_pattern: unknown
-  recurrence_parent_id: string | null
-  last_occurrence_at: string | null
-  next_occurrence_at: string | null
-  heartbeat_enabled?: boolean
-  heartbeat_interval_minutes?: number | null
-  heartbeat_last_check_at?: string | null
-  heartbeat_next_check_at?: string | null
-  auto_start_agent: boolean
-  auto_complete_without_review: boolean
-  complete_at_source: boolean | null
-  parent_task_id: string | null
-  project_id?: string
-  next_subtask_ids: string[]
-  sort_order: number
-  created_at: string
-  updated_at: string
-}
+import type { Task } from '@/types'
 
 /** Where the phone remembers its chosen project (per device, not shared with the desktop). */
 export const CURRENT_PROJECT_STORAGE_KEY = 'mobile:current_project_id'
