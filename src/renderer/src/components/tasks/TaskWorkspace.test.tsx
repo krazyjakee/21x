@@ -430,6 +430,21 @@ describe('TaskWorkspace – messaging a task whose session has ended', () => {
     )
     expect(sessionApi().start).not.toHaveBeenCalled()
   })
+
+  it('still delivers the message when the fresh start is queued behind the concurrency limit', async () => {
+    sessionApi().resume.mockResolvedValue({ sessionId: '', ended: true })
+    // What agentSession:start answers when admission control queues the task.
+    sessionApi().start.mockResolvedValue({ sessionId: '', queued: true, queuePosition: 1, queueReason: 'global_limit' })
+    sessionApi().sendByTaskId.mockResolvedValue({ success: true, sessionId: null, newSessionId: 'direct-session-1' })
+
+    renderCompletedTask()
+    fireEvent.click(screen.getByTestId('mock-send'))
+
+    // The main process starts the session for a direct message, bypassing the queue.
+    await waitFor(() =>
+      expect(sessionApi().sendByTaskId).toHaveBeenCalledWith('task-1', 'approved', undefined)
+    )
+  })
 })
 
 describe('TaskWorkspace – stale triage session cleanup', () => {
