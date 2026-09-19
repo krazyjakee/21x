@@ -25,9 +25,15 @@
  *
  * Which tool call is which action: create_task and create_subtask are
  * `create_task`; start_task, stop_task and respond_to_checkpoint are their
- * own; update_task with a `priority` is `change_priority`. The `pr` action
- * has no tool behind it today (no task-management tool opens or merges pull
- * requests), so it is prompt guidance only.
+ * own; update_task with a `priority` is `change_priority`;
+ * merge_pull_request is `merge_pr` (#137). `open_pr` has no tool behind it
+ * (the agent doing the work opens its PR), so it is prompt guidance only.
+ *
+ * The merge tools (merge_pull_request, grant_merge_authority,
+ * list_merge_grants) are answered here, by merge-grant-gate.ts: a merge
+ * under `ask_user` runs without a held call only when an active merge grant
+ * the user gave covers it (merge-grants.ts), and every merge is checked
+ * against the PR's checks and branch protection first.
  */
 import { randomUUID } from 'crypto'
 import type { DatabaseManager } from './database'
@@ -36,6 +42,9 @@ import { setCoordinatorCallGate, type CoordinatorCallGate } from './mcp-servers/
 import { FINDINGS_BEGIN, FINDINGS_END, SYSTEM_MESSAGE_MARKER } from '../shared/system-authority'
 import { escalationPolicyFromSettings, type EscalationAction, type EscalationLevel } from '../shared/project-policies'
 import type { HeldAction } from '../shared/project-limit-types'
+import { handleMergeGrantTool } from './merge-grant-gate'
+import { MERGE_GRANT_TOOL_NAMES, MERGE_PULL_REQUEST_TOOL } from './mcp-servers/merge-grant-tools'
+import type { MergeGrantDb, MergeHooks } from './merge-grants'
 
 export type { HeldAction }
 
@@ -49,10 +58,17 @@ export interface EscalationEvent {
   args: Record<string, unknown>
   /** One line a person can read: what the Captain did or wants to do. */
   summary: string
-  /** `performed`: tell_commander ran it. `held` / `approved` / `rejected`: the life of an ask_user call. */
-  outcome: 'performed' | 'held' | 'approved' | 'rejected'
+  /**
+   * `performed`: tell_commander ran it. `held` / `approved` / `rejected`: the
+   * life of an ask_user call. `merged_under_grant`: a merge ran without a
+   * held call because a user's merge grant covered it (#137). `needs_user`:
+   * a merge is blocked on a person outside 21x (a required review).
+   */
+  outcome: 'performed' | 'held' | 'approved' | 'rejected' | 'merged_under_grant' | 'needs_user'
   /** The held call's id for ask_user outcomes. */
   heldId?: string
+  /** The merge grant used, for `merged_under_grant`. */
+  grantId?: string
   /** ISO time. */
   at: string
 }
@@ -83,6 +99,8 @@ export function escalateToCommander(event: EscalationEvent): void {
 
 export interface EscalationDeps {
   db: Pick<DatabaseManager, 'getProject' | 'getTask' | 'getCoordinatorTask'>
+  /** Merge grants and merges (#137); without it the merge tools answer "not available". */
+  mergeDb?: MergeGrantDb
   /** Shows the person a notice. Default: an OS notification when supported. */
   notifyUser?: (title: string, body: string) => void
   /** Pushes to the window. Default: the Task API notifier (index.ts sets it). */
@@ -164,6 +182,8 @@ export function actionForToolCall(tool: string, args: Record<string, unknown>): 
       return 'respond_to_checkpoint'
     case 'update_task':
       return args.priority !== undefined && args.priority !== null ? 'change_priority' : null
+    case MERGE_PULL_REQUEST_TOOL:
+      return 'merge_pr'
     default:
       return null
   }
@@ -186,6 +206,8 @@ function summarizeCall(action: EscalationAction, tool: string, args: Record<stri
       return `${args.approved === true ? 'approve' : 'reject'} the checkpoint on ${target}`
     case 'change_priority':
       return `set the priority of ${target} to ${String(args.priority)}`
+    case 'merge_pr':
+      return `merge ${String(args.pr_url ?? '')}`
     default:
       return `${tool} ${target}`.trim()
   }
@@ -294,9 +316,90 @@ export function policyLevelFor(db: Pick<DatabaseManager, 'getProject'>, projectI
   return escalationPolicyFromSettings(db.getProject(projectId)?.settings)[action]
 }
 
+/**
+ * Holds a call for the user (ask_user). `run` gets the held id, so what it
+ * does on approval can say whose approval it ran under.
+ */
+function holdCall(
+  projectId: string,
+  action: EscalationAction,
+  tool: string,
+  args: Record<string, unknown>,
+  summary: string,
+  run: (heldId: string) => Promise<unknown>
+): Record<string, unknown> {
+  const projectName = deps?.db.getProject(projectId)?.name ?? projectId
+  const id = randomUUID()
+  const held: HeldAction & { run: () => Promise<unknown> } = {
+    id, projectId, action, tool, args, summary, createdAt: new Date().toISOString(), run: () => run(id)
+  }
+  heldActions.set(id, held)
+  const event: EscalationEvent = {
+    projectId, action, level: 'ask_user', tool, args, summary, outcome: 'held', heldId: id, at: held.createdAt
+  }
+  escalateToCommander(event)
+  notifyUser(`Captain of ${projectName} needs approval`, `Wants to ${summary}`)
+  emitHeldChanged()
+  return {
+    status: 'held',
+    id,
+    action,
+    message:
+      `This project's escalation policy sets "${action}" to ask the user first. The call is held (id ${id}) until the user approves or rejects it in 20x; ` +
+      'you will get a message either way. Do not repeat the call. Carry on with anything that does not depend on it, or end your turn.'
+  }
+}
+
+/** What a merge tells the person and the Commander (#137). */
+function mergeHooks(projectId: string): MergeHooks {
+  return {
+    notifyUser,
+    pushToRenderer,
+    report: (id, kind, summary, grantId) => {
+      const event: EscalationEvent = {
+        projectId: id,
+        action: 'merge_pr',
+        level: 'ask_user',
+        tool: MERGE_PULL_REQUEST_TOOL,
+        args: {},
+        summary,
+        outcome: kind === 'merged_under_grant' ? 'merged_under_grant' : 'needs_user',
+        ...(grantId ? { grantId } : {}),
+        at: new Date().toISOString()
+      }
+      escalateToCommander(event)
+      pushToRenderer('escalation:event', event)
+      if (kind === 'needs_user') notifyUser(`A PR in ${deps?.db.getProject(projectId)?.name ?? projectId} needs a reviewer`, summary)
+    }
+  }
+}
+
 export function createCoordinatorEscalationGate(): CoordinatorCallGate {
   return async ({ projectId, tool, args, run }) => {
     if (!deps) return run()
+
+    // #137: the merge tools have no route; they are answered here.
+    if (MERGE_GRANT_TOOL_NAMES.has(tool)) {
+      if (!deps.mergeDb) return { error: 'Merging through 21x is not available right now.' }
+      const projectName = deps.db.getProject(projectId)?.name ?? projectId
+      return handleMergeGrantTool(tool, {
+        db: deps.mergeDb,
+        projectId,
+        args,
+        level: policyLevelFor(deps.db, projectId, 'merge_pr'),
+        hooks: mergeHooks(projectId),
+        hold: (summary, runHeld) => holdCall(projectId, 'merge_pr', tool, args, summary, runHeld),
+        reportPerformed: (summary) => {
+          const event: EscalationEvent = {
+            projectId, action: 'merge_pr', level: 'tell_commander', tool, args, summary, outcome: 'performed', at: new Date().toISOString()
+          }
+          escalateToCommander(event)
+          notifyUser(`Captain of ${projectName}`, `Did: ${summary}`)
+          pushToRenderer('escalation:event', event)
+        }
+      })
+    }
+
     const action = actionForToolCall(tool, args)
     if (!action) return run()
     const level = policyLevelFor(deps.db, projectId, action)
@@ -323,30 +426,12 @@ export function createCoordinatorEscalationGate(): CoordinatorCallGate {
     }
 
     // ask_user: hold the call until the user answers.
-    const id = randomUUID()
-    const held: HeldAction & { run: () => Promise<unknown> } = {
-      id, projectId, action, tool, args, summary, createdAt: new Date().toISOString(), run
-    }
-    heldActions.set(id, held)
-    const event: EscalationEvent = {
-      projectId, action, level, tool, args, summary, outcome: 'held', heldId: id, at: held.createdAt
-    }
-    escalateToCommander(event)
-    notifyUser(`Captain of ${projectName} needs approval`, `Wants to ${summary}`)
-    emitHeldChanged()
-    return {
-      status: 'held',
-      id,
-      action,
-      message:
-        `This project's escalation policy sets "${action}" to ask the user first. The call is held (id ${id}) until the user approves or rejects it in 20x; ` +
-        'you will get a message either way. Do not repeat the call. Carry on with anything that does not depend on it, or end your turn.'
-    }
+    return holdCall(projectId, action, tool, args, summary, () => run())
   }
 }
 
 /** Main-process wiring: reads the policy from `db` and gates the Captain's tool calls. */
 export function installEscalation(db: DatabaseManager): void {
-  configureEscalation({ db })
+  configureEscalation({ db, mergeDb: db })
   setCoordinatorCallGate(createCoordinatorEscalationGate())
 }

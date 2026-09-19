@@ -22,6 +22,12 @@ interface TranscriptComposerProps {
   onAddAttachmentPaths?: (filePaths: string[]) => Promise<ComposerAttachment[]>
   taskId?: string
   isStarting: boolean
+  /**
+   * Called with text the user typed and sent with Enter or the Send button,
+   * never with dictated or programmatic text (#137: only typed words can back
+   * a merge grant).
+   */
+  onTypedMessage?: (text: string) => void
 }
 
 function mergeAttachments(current: ComposerAttachment[], added: ComposerAttachment[]): ComposerAttachment[] {
@@ -35,7 +41,7 @@ function mergeAttachments(current: ComposerAttachment[], added: ComposerAttachme
   return merged
 }
 
-export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentPaths, taskId, isStarting }: TranscriptComposerProps) {
+export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentPaths, taskId, isStarting, onTypedMessage }: TranscriptComposerProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [pendingAttachments, setPendingAttachments] = useState<ComposerAttachment[]>([])
   const [isDragOver, setIsDragOver] = useState(false)
@@ -49,11 +55,12 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
    * carries on into the panel that replaced this one.
    */
   const composerKey = taskId ?? CAPTAIN_COMPOSER_KEY
-  const sendRef = useRef<(() => void) | null>(null)
+  const sendRef = useRef<((typed: boolean) => void) | null>(null)
   useEffect(() => {
     return registerComposer(composerKey, {
       getField: () => inputRef.current,
-      submit: () => sendRef.current?.(),
+      // Voice conversations submit through here: not typed.
+      submit: () => sendRef.current?.(false),
       sendMessage: (message) => onSend(message),
     })
   }, [composerKey, onSend])
@@ -65,9 +72,10 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
     el.style.height = `${Math.min(el.scrollHeight, 128)}px` // max ~6 lines
   }, [])
 
-  const handleSend = () => {
+  const handleSend = (typed: boolean) => {
     const value = inputRef.current?.value.trim()
     if (!value) return
+    if (typed) onTypedMessage?.(value)
     // Whatever answer was expected by voice is not the answer that is now
     // coming, so it is dropped and this reply is not read aloud. A spoken
     // sentence goes through here too and arms a fresh expectation of its own
@@ -183,12 +191,12 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
-              handleSend()
+              handleSend(true)
             }
           }}
           onInput={autoResize}
         />
-        <VoiceMicButton mode="dictation" onSubmit={handleSend} />
+        <VoiceMicButton mode="dictation" onSubmit={() => handleSend(false)} />
         {onPickAttachments && (
           <Button
             type="button"
@@ -202,7 +210,7 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
             <Paperclip className="h-4 w-4" />
           </Button>
         )}
-        <Button variant="default" size="icon" onClick={handleSend} className="h-[32px] w-[32px] shrink-0 rounded-lg" aria-label="Send message">
+        <Button variant="default" size="icon" onClick={() => handleSend(true)} className="h-[32px] w-[32px] shrink-0 rounded-lg" aria-label="Send message">
           <Send className="h-4 w-4" />
         </Button>
       </div>

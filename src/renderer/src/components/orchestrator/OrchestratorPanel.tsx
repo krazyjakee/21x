@@ -5,7 +5,7 @@ import { AgentTranscriptPanel } from '@/components/agents/AgentTranscriptPanel'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useAgentSession } from '@/hooks/use-agent-session'
 import { useCurrentProject } from '@/hooks/use-project-tasks'
-import { agentApi, settingsApi } from '@/lib/ipc-client'
+import { agentApi, mergeGrantsApi, settingsApi } from '@/lib/ipc-client'
 import { captainAgentIdFor, useCaptainTaskId } from '@/stores/coordinator-store'
 import type { Agent } from '@/types'
 
@@ -215,6 +215,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
           systemStatus={currentSession?.systemStatus}
           onStop={stop}
           onSend={handleSendMessage}
+          onTypedMessage={(text) => { if (captainTaskId) mergeGrantsApi.noteTyped(captainTaskId, text) }}
           className="flex-1 min-h-0"
           sessionId={currentSession?.sessionId}
           pendingSend={currentSession?.pendingSend}

@@ -427,9 +427,25 @@ Per action, one of `autonomous`, `tell_commander` or `ask_user`:
 | `stop_task` | tell_commander | `stop_task` |
 | `respond_to_checkpoint` | ask_user | `respond_to_checkpoint` |
 | `change_priority` | autonomous | `update_task` with a `priority` |
-| `pr` | ask_user | none: prompt guidance only, no task-management tool opens or merges pull requests |
+| `open_pr` | tell_commander | none: prompt guidance only; the agent doing the work opens its pull request |
+| `merge_pr` | ask_user | `merge_pull_request` (#137): under `ask_user` a merge runs without a held call only when an active merge grant covers it |
+
+Until #137 one `pr` item covered both. Migration v19 (`splitPullRequestEscalation` in `src/main/database/schema.ts`) moves a project's stored `pr` level to `merge_pr` and gives `open_pr` its default; `escalationPolicyFromSettings` also reads a leftover `pr` as `merge_pr`.
 
 The policy is a section of the Captain prompt (`src/main/prompts/captain.ts`) and is enforced for coordinator-scope calls by a gate on the project-scoped dispatch (`setCoordinatorCallGate` in `task-management-core.ts`, installed by `src/main/escalation.ts` when the Task API server starts). Task agents in the same project are not gated. `tell_commander` runs the call, then calls `escalateToCommander(event)` and shows a user notification; `ask_user` holds the call in memory, returns `{ status: 'held', id }` to the Captain, notifies the user, and the status bar's held-actions notice approves (runs the original call) or rejects it over IPC (`escalation:approve` / `escalation:reject`); either way the Captain's live session gets a fenced note with the outcome. `escalateToCommander` is a no-op seam until #62's `report_to_commander` installs a handler with `setCommanderEscalationHandler`. Held calls are not persisted: a restart forgets them.
+
+### Merge grants (`settings.merge_grants`, #137)
+
+`{ "merge_grants": { "enabled": false } }`, off by default and set in the project editor. A merge grant is standing authority for the project's Captain to merge pull requests the user told it to merge. The rules are in `src/shared/merge-grants.ts` and `src/main/merge-grants.ts`:
+
+- **Source.** Only a message the user typed. In the Commander chat, `ask_captain` takes `merge_grant` (scope only), and the app binds it to the stored id and verbatim text of the current user turn. A report-triggered turn, or a voice transcript, has no id, so it cannot create one. In a project chat, the chat composer reports text the user typed and sent with Enter or the Send button (not dictation, not app-generated sends such as the canvas terminal notice) over `mergeGrants:noteTyped`. `noteUserTypedMessage` in `src/main/ipc/merge-grants.ts` keeps it only when it went to a Captain from the main window, for 30 minutes, and the Captain's `grant_merge_authority` binds to it. Wake-ups, relays, `send_message`, reports, issue and web text never pass through either path.
+- **Words.** The text must say merge/merging/merged and must not negate it: "ship it" and "land it" do not count. When the text names PRs, the grant is limited to them.
+- **Scope.** One project (one message can back one grant only, so no grant ever spans projects), the action `merge_pr`, the fixed condition "checks green and branch protection satisfied", optional repo, base branch and PR filters, and optional `max_merges`. Expiry: 7 days by default and at most, or until revoked, whichever comes first.
+- **Enforcement.** `merge_pull_request` has no Task API route; the escalation gate answers it (`src/main/merge-grant-gate.ts`). The PR must be in one of the project's GitHub repos. `gh pr view` must report: open, not a draft, every check passed or skipped, `mergeStateStatus` CLEAN or HAS_HOOKS, and no `REVIEW_REQUIRED`/`CHANGES_REQUESTED`. Then the only command 21x runs is `gh pr merge <url> --squash|--merge|--rebase --match-head-commit <sha>`: never `--admin` or `--auto`. A grant's use is reserved before the merge and refunded if GitHub refuses.
+- **External approvals.** A missing required review, CODEOWNERS approval, requested changes or unmet protection returns `blocked` with `needs_external_approval`, and is reported to the Commander once per PR head. It is never bypassed.
+- **Audit.** Each grant keeps who granted it (source, session, message id), the verbatim text, its scope, status and `revoked_by`. Each merge made under it gets a `merge_grant_uses` row (PR, title, base, head SHA, method, merge state, review decision, checks as reported) and a project status journal entry, a notification, and a report to the Commander. The project editor's "Merge grants" section shows the audit log. The status-bar approvals popover lists active grants, and either place revokes one in one click (IPC `mergeGrants:*`).
+
+Residual risk: agents still have a shell with the user's `gh` credentials. The Captain prompt forbids merging any other way, but a shell-level `gh pr merge --admin` is outside what 21x can intercept.
 
 ## Scheduled Captain reviews (#67)
 

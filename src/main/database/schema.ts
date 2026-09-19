@@ -5,6 +5,7 @@ import { DEFAULT_PROJECT_ID, DEFAULT_PROJECT_NAME } from '../../shared/projects'
 import { getRepoProviders, isGitProvider } from '../repo-providers'
 import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
 import { migrateCoordinatorToCaptain } from './captain-migration'
+import { splitLegacyPullRequestEscalation } from '../../shared/project-policies'
 
 /**
  * Bump this whenever new migrations are added so returning users skip
@@ -31,8 +32,15 @@ import { migrateCoordinatorToCaptain } from './captain-migration'
  *          tasks.role, projects.captain_agent_id, the captain_prewarm setting,
  *          projects.settings.captain_wakeups and project_status_journal.source
  *          (migrateCoordinatorToCaptain in captain-migration.ts)
+ * 17 → 19: merge grants (#137): merge_grants, merge_grant_uses
+ *          (migrateMergeGrants), and the escalation policy's combined `pr`
+ *          item split into `open_pr` / `merge_pr` in projects.settings
+ *          (splitPullRequestEscalation: the old level goes to merge_pr,
+ *          open_pr gets its default "tell_commander"). 18 is skipped on purpose: it is claimed by
+ *          an open branch (feat/commander-on-agent-sessions); whichever lands
+ *          second renumbers.
  */
-const SCHEMA_VERSION = 17
+const SCHEMA_VERSION = 19
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -469,6 +477,8 @@ export function createTables(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_project_status_journal_project_created
       ON project_status_journal(project_id, created_at DESC, id DESC);
   `)
+
+  createMergeGrantTables(db)
 
   // Report routing (#62): a Captain report quotes the correlation id of
   // the `ask_captain` tool row it answers; this serves that lookup.
@@ -956,6 +966,10 @@ export function runMigrations(db: Database.Database): void {
   // the projects table (and its renamed column) exists.
   migrateCoordinatorToCaptain(db)
 
+  // Migration v19: merge grants (#137). New tables only; runs after
+  // migrateToProjects so the projects table they reference exists.
+  migrateMergeGrants(db)
+
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)
 
@@ -965,6 +979,91 @@ export function runMigrations(db: Database.Database): void {
 
   // Migration v11: the Claude Code adapter now honours permission_mode.
   preserveClaudeCodePermissionBehaviour(db)
+}
+
+/**
+ * Merge grants (#137): standing merge authority the user gave a project's
+ * Captain in words they typed (src/main/merge-grants.ts). A grant is bound
+ * to that message (`source_message_id`, `user_text` verbatim; one grant per
+ * message, so one message can never reach several projects), has one fixed
+ * action and condition, optional filters, and always an expiry.
+ * `merge_grant_uses` is the audit trail: one row per merge made under a
+ * grant, with the PR, the head SHA merged and the checks and protection
+ * state GitHub reported at that moment. `revoked_by` says who revoked it. Both go with their project. New tables, so CREATE IF NOT EXISTS
+ * covers fresh and existing DBs alike.
+ */
+function createMergeGrantTables(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS merge_grants (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      action TEXT NOT NULL DEFAULT 'merge_pr',
+      condition TEXT NOT NULL DEFAULT 'checks_green_and_protection_satisfied',
+      repo TEXT,
+      base_branch TEXT,
+      pr_numbers TEXT NOT NULL DEFAULT '[]',
+      source TEXT NOT NULL,
+      source_session_id TEXT,
+      source_message_id TEXT NOT NULL,
+      user_text TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      max_uses INTEGER,
+      uses INTEGER NOT NULL DEFAULT 0,
+      last_used_at TEXT,
+      revoked_at TEXT,
+      revoked_by TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_merge_grants_project ON merge_grants(project_id, created_at DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_merge_grants_source_message ON merge_grants(source, source_message_id);
+    CREATE TABLE IF NOT EXISTS merge_grant_uses (
+      id TEXT PRIMARY KEY,
+      grant_id TEXT NOT NULL REFERENCES merge_grants(id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      pr_url TEXT NOT NULL,
+      pr_title TEXT NOT NULL DEFAULT '',
+      base_branch TEXT NOT NULL DEFAULT '',
+      head_sha TEXT NOT NULL,
+      method TEXT NOT NULL,
+      merge_state TEXT NOT NULL DEFAULT '',
+      review_decision TEXT NOT NULL DEFAULT '',
+      checks TEXT NOT NULL DEFAULT '[]',
+      merged_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_merge_grant_uses_grant ON merge_grant_uses(grant_id, merged_at DESC);
+  `)
+}
+
+/** Migration v19 (#137). Idempotent: `createTables()` already ran the same statements. */
+function migrateMergeGrants(db: Database.Database): void {
+  createMergeGrantTables(db)
+  splitPullRequestEscalation(db)
+}
+
+/**
+ * Migration v19 (#137): the escalation policy's combined "opening or merging
+ * pull requests" item (`pr`) becomes two. Whatever level a project had for
+ * `pr` now applies to `merge_pr`; `open_pr` gets its new default. Rows
+ * without a `pr` key are untouched, so re-runs are no-ops. Unreadable
+ * settings are left alone (the reader falls back to defaults).
+ */
+export function splitPullRequestEscalation(db: Database.Database): void {
+  const cols = new Set((db.pragma('table_info(projects)') as { name: string }[]).map((c) => c.name))
+  if (!cols.has('settings')) return
+  const rows = db.prepare('SELECT id, settings FROM projects').all() as Array<{ id: string; settings: string | null }>
+  const update = db.prepare('UPDATE projects SET settings = ? WHERE id = ?')
+  for (const row of rows) {
+    if (!row.settings) continue
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(row.settings)
+    } catch {
+      continue
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue
+    const next = splitLegacyPullRequestEscalation(parsed as Record<string, unknown>)
+    if (next) update.run(JSON.stringify(next), row.id)
+  }
 }
 
 function readSetting(db: Database.Database, key: string): string | null {
