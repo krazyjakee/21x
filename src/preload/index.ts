@@ -120,6 +120,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   agentSession: {
     start: (agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<{ sessionId: string; queued?: boolean; queuePosition?: number; queueReason?: string }> =>
       ipcRenderer.invoke('agentSession:start', agentId, taskId, workspaceDir, skipInitialPrompt),
+    startTask: (taskId: string): Promise<{ action: 'task_started' | 'subtask_started' | 'triage_started' | 'already_running' | 'queued' | 'no_action'; sessionId?: string; startedTaskId?: string; agentId?: string; queuePosition?: number; queueReason?: string }> =>
+      ipcRenderer.invoke('agentSession:startTask', taskId),
     resume: (agentId: string, taskId: string, ocSessionId: string): Promise<{ sessionId: string; ended?: boolean }> =>
       ipcRenderer.invoke('agentSession:resume', agentId, taskId, ocSessionId),
     abort: (sessionId: string): Promise<{ success: boolean }> =>
@@ -160,16 +162,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (): void => callback()
     ipcRenderer.on('tasks:refresh', handler)
     return () => ipcRenderer.removeListener('tasks:refresh', handler)
-  },
-  onAgentOutput: (callback: (event: unknown) => void): (() => void) => {
-    const handler = (_: unknown, data: unknown): void => callback(data)
-    ipcRenderer.on('agent:output', handler)
-    return () => ipcRenderer.removeListener('agent:output', handler)
-  },
-  onAgentOutputBatch: (callback: (event: unknown) => void): (() => void) => {
-    const handler = (_: unknown, data: unknown): void => callback(data)
-    ipcRenderer.on('agent:output-batch', handler)
-    return () => ipcRenderer.removeListener('agent:output-batch', handler)
   },
   onArtifactUpdated: (callback: (event: unknown) => void): (() => void) => {
     const handler = (_: unknown, data: unknown): void => callback(data)

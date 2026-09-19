@@ -3538,12 +3538,18 @@ export class AgentManager extends EventEmitter {
     // mobile hydrate from snapshots (transcript:get) instead of depending on
     // catching live events, so output produced while no view is bound
     // (background wake-ups, silently resumed sessions) is never lost.
+    //
+    // Clients only read the `transcript:changed` delta that persisting emits,
+    // which carries display previews of oversized records. The raw event is
+    // never broadcast: nothing listens to it, and a single poll of large tool
+    // output can run to tens of megabytes.
     if (channel === 'agent:output' || channel === 'agent:output-batch') {
       try {
         this.persistTranscriptEvent(channel, data)
       } catch (err) {
         console.error('[AgentManager] Failed to persist transcript parts:', err)
       }
+      return
     }
 
     this.broadcast(channel, data)

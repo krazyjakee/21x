@@ -61,6 +61,7 @@ export interface ChatIpcEvent {
 
 /** Settings keys read by the provider factory. Keys themselves never hold secrets. */
 export const CHAT_SETTING_KEYS = {
+  agentId: 'chat_agent_id',
   provider: 'chat_provider',
   model: 'chat_model',
   baseUrl: 'chat_base_url',
