@@ -54,3 +54,23 @@ vocabulary in the durable queue, renderer event, task/session status response,
 recent activity, and a `system_recovery` project-status journal entry. A queued
 or retrying task remains `not_started`; it is never presented as running before
 a live session owns it.
+
+## Independent review hardening
+
+Immediate admissions use the same durable claim/start/ack path as deferred
+starts. In-flight starts and explicit reconnects share one per-task promise;
+startup reconciliation itself is joined, and dispatch waits until it finishes.
+The provider's busy or waiting-for-approval state survives reconnect and keeps
+its admission slot. A stale reconnect cannot overwrite a newer session binding.
+
+Dispatch rechecks exclusions, all unresolved transcript tools/questions, and
+actual predecessor edges (including the existing review opt-in policy). A late
+backend creation is checked against its original queue generation before it
+registers a session or delivers a prompt. Shutdown also blocks already-scheduled
+drains. Explicit manual stops and retry exhaustion remain terminal across
+scheduler sweeps and restarts; an explicit continuation message is needed to
+resume. Deferred outbox messages cannot bypass those recovery exclusions.
+
+A failed initial prompt transport can have accepted the prompt before reporting
+an error. Such an attempt stops with `prompt_delivery_unconfirmed`, preserving
+an auditable user decision instead of automatically replaying unknown effects.

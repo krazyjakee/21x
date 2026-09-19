@@ -288,6 +288,7 @@ export class AgentManager extends EventEmitter {
   /** In-flight admitted starts, so a durable message accepted during warm-up
    * joins that start instead of opening a competing Captain session. */
   private sessionStarts: Map<string, Promise<string>> = new Map()
+  private startupReconciliation: Promise<void> | null = null
   private startQueueDrainScheduled = false
   private startQueueRetryTimer: ReturnType<typeof setTimeout> | null = null
   private shuttingDown = false
@@ -311,6 +312,19 @@ export class AgentManager extends EventEmitter {
 
   /** Repairs process-owned state after a crash before schedulers accept work. */
   async reconcileStartup(): Promise<void> {
+    if (this.startupReconciliation) return this.startupReconciliation
+    // Install the barrier before any adapter work can yield or emit idle.
+    const reconciliation = Promise.resolve().then(() => this.reconcileStartupNow())
+    this.startupReconciliation = reconciliation
+    try {
+      await reconciliation
+    } finally {
+      this.startupReconciliation = null
+      this.scheduleStartQueueDrain()
+    }
+  }
+
+  private async reconcileStartupNow(): Promise<void> {
     const inventory = {
       projects: this.db.getProjects().length,
       tasks: this.db.getTasks().length,
@@ -325,6 +339,7 @@ export class AgentManager extends EventEmitter {
     // task/session ownership. A reconnect below may then acknowledge it as
     // recovered instead of dispatching a second start.
     for (const claim of this.startQueue.interruptedClaims(this.startQueueLeaseOwner)) {
+      if (this.sessionStarts.has(claim.taskId)) continue
       const requeued = this.startQueue.requeueInterrupted(claim, claim.state === 'claimed' ? 'crash_after_claim' : 'crash_after_start')
       const task = this.db.getTask(claim.taskId)
       if (requeued && task) {
@@ -402,11 +417,24 @@ export class AgentManager extends EventEmitter {
 
     const staleTasks = this.db.db.prepare(`
       SELECT id, agent_id, session_id FROM tasks
-      WHERE role = 'task' AND status = ?
+      WHERE role = 'task' AND (status = ? OR (status != 'completed' AND session_id IS NOT NULL
+        AND id IN (SELECT task_id FROM agent_start_queue WHERE state IN ('queued', 'retrying', 'claimed', 'starting'))))
     `).all(TaskStatus.AgentWorking) as Array<{ id: string; agent_id: string | null; session_id: string | null }>
     for (const stale of staleTasks) {
       const task = this.db.getTask(stale.id)
       if (!task) continue
+      if (this.sessionStarts.has(stale.id)) continue
+      const liveOwner = this.findSessionByTaskId(stale.id)
+      if (liveOwner && liveOwner.session.status !== 'error') {
+        this.updateTaskFromLocalAgent(stale.id, { session_id: liveOwner.sessionId })
+        this.startQueue.markRecovered(stale.id, liveOwner.sessionId, 'live_session_present')
+        continue
+      }
+      const previousRecovery = this.startQueue.get(stale.id)
+      if (previousRecovery?.state === 'failed' || previousRecovery?.state === 'cancelled') {
+        this.updateTaskFromLocalAgent(stale.id, { status: TaskStatus.NotStarted, session_id: null })
+        continue
+      }
       if (!stale.agent_id) {
         this.updateTaskFromLocalAgent(stale.id, { status: TaskStatus.NotStarted, session_id: null })
         this.startQueue.enqueue({
@@ -445,19 +473,19 @@ export class AgentManager extends EventEmitter {
           : 'The app restarted before session ownership was confirmed. The task was safely requeued and will restart automatically.')
         continue
       }
-      const alreadyLive = this.findSessionByTaskId(stale.id)
-      if (alreadyLive && alreadyLive.sessionId === stale.session_id && alreadyLive.session.status !== 'error') {
-        // Reconciliation is safe to repeat in the same process: the first pass
-        // already established ownership, so a later pass neither resumes nor
-        // appends another audit row.
-        continue
-      }
       try {
         const sessionId = await withStartupDeadline(
           this.resumeSession(stale.agent_id, stale.id, stale.session_id),
           AGENT_START_TIMEOUT_MS,
           'Stale session recovery'
         )
+        const currentTask = this.db.getTask(stale.id)
+        const currentRecovery = this.startQueue.get(stale.id)
+        if (!currentTask || currentTask.status === TaskStatus.Completed
+          || currentRecovery?.state === 'cancelled' || currentRecovery?.state === 'failed') {
+          if (sessionId) await this.stopSession(sessionId, false)
+          continue
+        }
         const status = sessionId ? this.getSessionStatus(sessionId)?.status : undefined
         if (!sessionId || status === 'error') throw new Error('The saved backend session is not ready.')
         const queueBefore = this.startQueue.info(stale.id)
@@ -471,8 +499,13 @@ export class AgentManager extends EventEmitter {
         }
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error)
+        const currentTask = this.db.getTask(stale.id)
+        const currentRecovery = this.startQueue.get(stale.id)
+        if (!currentTask || currentTask.status === TaskStatus.Completed
+          || currentRecovery?.state === 'cancelled' || currentRecovery?.state === 'failed'
+          || (currentTask.session_id && currentTask.session_id !== stale.session_id)) continue
         this.updateTaskFromLocalAgent(stale.id, { status: TaskStatus.NotStarted, session_id: null })
-        const exclusion = this.retryExclusion(task)
+        const exclusion = this.retryExclusion(currentTask)
         const queued = this.startQueue.enqueue({
           taskId: stale.id,
           projectId: taskProjectId(task),
@@ -495,6 +528,17 @@ export class AgentManager extends EventEmitter {
     }
 
     for (const record of this.deliveries.listRecoverable('agent_message')) {
+      const task = record.taskId ? this.db.getTask(record.taskId) : undefined
+      const recovery = record.taskId ? this.startQueue.get(record.taskId) : null
+      const exclusion = record.state === 'accepted' ? null
+        : recovery?.state === 'cancelled' || recovery?.state === 'failed'
+          ? recovery.recoveryCause ?? 'terminal_recovery'
+          : record.taskId ? this.retryExclusion(task) : null
+      if (exclusion) {
+        this.deliveries.terminal(record.id, 'cancelled', `Recovery excluded delivery: ${exclusion}`)
+        if (task) this.recordRecoveryAudit(task, exclusion, 'exclude_from_retry', 'outbox_delivery_not_replayed')
+        continue
+      }
       try {
         await this.dispatchAgentMessage(record)
       } catch (error) {
@@ -883,7 +927,7 @@ export class AgentManager extends EventEmitter {
     sessionConfig: SessionConfig,
     taskId: string,
     markHealthy = true
-  ): Promise<void> {
+  ): Promise<SessionStatusType> {
     this.transitionCaptainRuntime(taskId, 'verifying', { sessionId, lastProbeAt: Date.now() })
     const readiness = adapter as CodingAgentAdapter & {
       getSessionStatus?: (id: string, config: SessionConfig) => Promise<{ type: SessionStatusType; message?: string }>
@@ -918,7 +962,7 @@ export class AgentManager extends EventEmitter {
         errorCode: null,
         errorDetail: null
       })
-      return
+      return status.type
     }
     const runtime = this.captainRuntimes.get(taskId)
     this.transitionCaptainRuntime(taskId, 'healthy', {
@@ -931,6 +975,7 @@ export class AgentManager extends EventEmitter {
       errorCode: null,
       errorDetail: null
     })
+    return status.type
   }
 
   /**
@@ -951,7 +996,8 @@ export class AgentManager extends EventEmitter {
     skipInitialPrompt?: boolean,
     handoffFromAgentName?: string,
     inheritedFallbackState?: AgentFallbackState,
-    deferCoordinatorBinding = false
+    deferCoordinatorBinding = false,
+    mayStart: () => boolean = () => !this.shuttingDown
   ): Promise<string> {
     const agent = this.db.getAgent(agentId)!
     workspaceDir ||= this.db.getWorkspaceDir(taskId)
@@ -984,6 +1030,7 @@ export class AgentManager extends EventEmitter {
     console.log(`[AgentManager] startAdapterSession: agent=${agent.name}, coding_agent=${agent.config?.coding_agent || 'opencode'}, model=${agent.config?.model}, adapter=${adapter.constructor.name}`)
     await this.initializeAndProbeAdapter(adapter, taskId)
 
+    if (!mayStart()) throw new Error('Start ownership was withdrawn before session creation.')
     const creating = adapter.createSession(sessionConfig)
     const adapterSessionId = await withStartupDeadline(
       creating,
@@ -1014,6 +1061,11 @@ export class AgentManager extends EventEmitter {
         Object.entries(mcpServers).filter(([name]) => !attachFailures.includes(name))
       )
       await writeSkillFiles(this.db, taskId, agentId, workspaceDir, attached)
+    }
+
+    if (!mayStart()) {
+      await adapter.destroySession(adapterSessionId, sessionConfig).catch(() => {})
+      throw new Error('Start ownership was withdrawn before session registration.')
     }
 
     this.schedulePowerSaveBlockerUpdate()
@@ -1062,6 +1114,11 @@ export class AgentManager extends EventEmitter {
       })
     }
     await yieldEventLoop()
+
+    if (!mayStart()) {
+      await this.stopSession(adapterSessionId, false)
+      throw new Error('Start ownership was withdrawn before prompt delivery.')
+    }
 
     this.emitStatus(adapterSessionId, { agentId, taskId }, 'working')
 
@@ -1115,6 +1172,14 @@ export class AgentManager extends EventEmitter {
         const session = this.sessions.get(adapterSessionId)
         if (session && findCreditExhaustionMessage([message]) && await this.tryAutomaticFallback(adapterSessionId, session, message)) {
           return this.findSessionByTaskId(taskId)?.sessionId || adapterSessionId
+        }
+        if (task && this.startQueue.fail(taskId, 'unsafe_side_effect_unknown', 'prompt_delivery_unconfirmed', message)) {
+          this.recordRecoveryAudit(task, 'unsafe_side_effect_unknown', 'terminal_failure', 'prompt_delivery_unconfirmed', message)
+        }
+        await this.stopSession(adapterSessionId, false)
+        const currentTask = this.db.getTask(taskId)
+        if (currentTask?.session_id === adapterSessionId && currentTask.status !== TaskStatus.Completed) {
+          this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.NotStarted, session_id: null })
         }
         throw sendError
       }
@@ -1960,6 +2025,8 @@ export class AgentManager extends EventEmitter {
     adapterSessionId: string
   ): Promise<string> {
     const agent = this.db.getAgent(agentId)!
+    const originalTask = this.db.getTask(taskId)
+    const originalBinding = originalTask?.session_id
 
     // Use the same workspace resolution as startSession: try git worktree first,
     // then fall back to the default workspace dir. This is critical because Claude
@@ -2062,7 +2129,14 @@ export class AgentManager extends EventEmitter {
       throw error
     }
 
-    await this.verifyAdapterSession(adapter, adapterSessionId, sessionConfig, taskId)
+    const readiness = await this.verifyAdapterSession(adapter, adapterSessionId, sessionConfig, taskId)
+    const currentTask = this.db.getTask(taskId)
+    if (this.shuttingDown || (originalTask && (!currentTask || currentTask.session_id !== originalBinding))) {
+      await adapter.destroySession(adapterSessionId, sessionConfig).catch(() => {})
+      throw new Error('Resume ownership changed before the backend reconnected.')
+    }
+    const resumedStatus = readiness === SessionStatusType.WAITING_APPROVAL ? 'waiting_approval'
+      : readiness === SessionStatusType.BUSY || readiness === SessionStatusType.RETRY ? 'working' : 'idle'
 
     // Seed the dedup state from the resumed history so polling won't re-emit
     // historical parts as new output. Resume does NOT push the transcript to
@@ -2070,14 +2144,14 @@ export class AgentManager extends EventEmitter {
     // `transcript:changed` deltas), which the one-time backfill seeds.
     const dedupState = dedupStateFromHistory(messages)
 
-    // Idle until the user sends a message.
+    // Reconnected busy/approval sessions still own capacity.
     this.schedulePowerSaveBlockerUpdate()
     this.sessions.set(adapterSessionId, {
       id: adapterSessionId,
       agentId,
       taskId,
       workspaceDir,
-      status: 'idle',
+      status: resumedStatus,
       createdAt: new Date(),
       lastActivityAt: Date.now(),
       ...dedupState,
@@ -2098,7 +2172,11 @@ export class AgentManager extends EventEmitter {
     this.recordCoordinatorSessionAgent(taskId, agentId)
     this.sendToRenderer('task:updated', { taskId, updates: { session_id: adapterSessionId } })
 
-    this.emitStatus(adapterSessionId, { agentId, taskId }, 'idle')
+    if (resumedStatus !== 'idle') {
+      this.startAdapterPolling(adapterSessionId, adapter, sessionConfig, this.sessions.get(adapterSessionId))
+      if (currentTask?.status !== TaskStatus.Completed) this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.AgentWorking })
+    }
+    this.emitStatus(adapterSessionId, { agentId, taskId }, resumedStatus)
 
     return adapterSessionId
   }
@@ -2143,12 +2221,25 @@ export class AgentManager extends EventEmitter {
    * heartbeat and triage sessions bypass the limits (see admission.ts).
    */
   async requestSession(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<SessionStartOutcome> {
+    if (this.shuttingDown) throw new Error('The app is shutting down; retry after restart.')
+    const pending = this.sessionStarts.get(taskId)
+    if (pending) return { status: 'started', sessionId: await pending }
+    const live = this.findSessionByTaskId(taskId)
+    if (live && live.session.agentId === agentId && live.session.status !== 'idle' && live.session.status !== 'error') {
+      return { status: 'started', sessionId: live.sessionId }
+    }
     const agent = this.db.getAgent(agentId)
     if (!agent) {
       throw new Error(`Agent not found: ${agentId}`)
     }
 
     const task = this.db.getTask(taskId)
+    let startClaim: ReturnType<DurableStartQueueStore['claim']> = null
+    const recovery = this.startQueue.get(taskId)
+    if (recovery?.state === 'failed' || recovery?.state === 'cancelled') {
+      throw new Error(`Automatic start stopped: ${recovery.recoveryResult}. Send a message to explicitly continue this task.`)
+    }
+    if (task?.status === TaskStatus.Completed) throw new Error('Completed tasks cannot be started.')
     if (!isExemptFromAdmission(taskId, task)) {
       const alreadyQueued = this.startQueue.list().find((entry) => entry.taskId === taskId)
       if (alreadyQueued) {
@@ -2195,6 +2286,14 @@ export class AgentManager extends EventEmitter {
         this.tellCaptainAboutLimit(task, decision)
         return { status: 'queued', position, reason: decision.reason }
       }
+      if (task) {
+        this.startQueue.enqueue({ taskId, agentId, projectId: taskProjectId(task), workspaceDir,
+          skipInitialPrompt, priority: task.priority, reason: 'recovery', queuedAt: new Date().toISOString() })
+        startClaim = this.startQueue.claim(taskId, this.startQueueLeaseOwner)
+        if (!startClaim || !this.startQueue.markStarting(startClaim.id, startClaim.generation)) {
+          throw new Error('Start ownership could not be acquired.')
+        }
+      }
       this.recordCountedStart(task)
       this.startQueue.markServed(task ? taskProjectId(task) : undefined)
     }
@@ -2209,6 +2308,10 @@ export class AgentManager extends EventEmitter {
       trackedStart = boundedStart
       this.sessionStarts.set(taskId, boundedStart)
       const sessionId = await boundedStart
+      if (startClaim && !this.startQueue.acknowledgeStarted(startClaim.id, startClaim.generation, sessionId)) {
+        await this.stopSession(sessionId, false)
+        throw new Error('Start ownership was withdrawn.')
+      }
       return { status: 'started', sessionId }
     } catch (error) {
       // The reserved slot is free again (released in finally, before the
@@ -2240,32 +2343,22 @@ export class AgentManager extends EventEmitter {
         }
       }
       console.error(`[AgentManager] Failed to start ${agent.name} for task ${taskId}:`, error)
-      if (task && !isExemptFromAdmission(taskId, task)) {
-        const queued = this.startQueue.enqueue({
-          taskId,
-          projectId: taskProjectId(task),
-          agentId,
-          workspaceDir,
-          skipInitialPrompt,
-          reason: 'recovery',
-          queuedAt: new Date().toISOString(),
-          priority: task.priority,
-          dependencyReason: this.isSerialChainStart(taskId) ? 'predecessor_active' : null
-        })
-        const exclusion = this.retryExclusion(this.db.getTask(taskId))
-        if (exclusion) {
-          this.startQueue.cancel(taskId, exclusion, 'excluded_failure_not_retried', message)
-          this.recordRecoveryAudit(task, exclusion, 'exclude_from_retry', 'excluded_failure_not_retried', message)
-        } else {
-          this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.NotStarted, session_id: null })
-          const claim = this.startQueue.claim(taskId, this.startQueueLeaseOwner)
-          const retried = claim ? this.startQueue.failOrRetry(claim.id, claim.generation, message) : null
-          if (retried) {
-            this.recordRecoveryAudit(task, 'recoverable_start_failure', 'retry', retried.record.recoveryResult ?? 'retry_scheduled', message)
+      if (task && startClaim) {
+        const current = this.startQueue.get(taskId)
+        // A stopped or superseded attempt must not reset state or retry budgets.
+        if (current?.generation === startClaim.generation && current.state === 'starting') {
+          const exclusion = this.retryExclusion(this.db.getTask(taskId))
+          if (exclusion) {
+            this.startQueue.cancel(taskId, exclusion, 'excluded_failure_not_retried', message)
+            this.recordRecoveryAudit(task, exclusion, 'exclude_from_retry', 'excluded_failure_not_retried', message)
+          } else {
+            this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.NotStarted, session_id: null })
+            const retried = this.startQueue.failOrRetry(startClaim.id, startClaim.generation, message)
+            if (retried) this.recordRecoveryAudit(task, 'recoverable_start_failure', 'retry', retried.record.recoveryResult ?? 'retry_scheduled', message)
           }
+          this.emitStartQueueChanged()
+          this.scheduleStartQueueDrain()
         }
-        if (queued.added) this.emitStartQueueChanged()
-        this.scheduleStartQueueDrain()
       }
       this.emitSystemError('', taskId, `session-start-failed-${Date.now()}`, `Could not start ${agent.name}: ${message}`)
       this.emitStatus('', { agentId, taskId }, 'error')
@@ -2295,6 +2388,18 @@ export class AgentManager extends EventEmitter {
     const agent = this.db.getAgent(agentId)
     if (!agent) {
       throw new Error(`Agent not found: ${agentId}`)
+    }
+
+    const claim = this.startQueue.get(taskId)
+    const mayStart = (): boolean => {
+      if (this.shuttingDown) return false
+      if (!claim || claim.state !== 'starting') return true
+      const latest = this.startQueue.get(taskId)
+      const task = this.db.getTask(taskId)
+      return latest?.generation === claim.generation && latest.state === 'starting'
+        && !!task && task.status !== TaskStatus.Completed
+        && (!task.agent_id || task.agent_id === agentId)
+        && !this.retryExclusion(task)
     }
 
     // A coordinator conversation outlives its runtime. Rejoin the live session
@@ -2330,7 +2435,7 @@ export class AgentManager extends EventEmitter {
     if (!adapter) {
       throw new Error(`No adapter available for agent ${agentId}`)
     }
-    return this.startAdapterSession(adapter, agentId, taskId, workspaceDir, skipInitialPrompt)
+    return this.startAdapterSession(adapter, agentId, taskId, workspaceDir, skipInitialPrompt, undefined, undefined, false, mayStart)
   }
 
   /** The real task a heartbeat pseudo-session checks, used only to scope its MCP tools. */
@@ -2799,6 +2904,7 @@ export class AgentManager extends EventEmitter {
    *   chain advances, but accepting the result is still a human's call.
    */
   async notifyParentOfSubtaskCompletion(parentTaskId: string, subtaskId: string): Promise<void> {
+    this.scheduleStartQueueDrain()
     const parentTask = this.db.getTask(parentTaskId)
     if (!parentTask) return
     if (parentTask.status === TaskStatus.Completed) return
@@ -3016,7 +3122,7 @@ export class AgentManager extends EventEmitter {
 
   /**
    * Reconnects to an existing session by its persisted session ID and resumes
-   * it idle (history is not replayed; clients render the durable projection).
+   * its provider status (history is not replayed; clients render the durable projection).
    */
   async resumeSession(agentId: string, taskId: string, sessionId: string): Promise<string> {
     console.log('[AgentManager] resumeSession called:', { agentId, taskId, sessionId })
@@ -3030,7 +3136,18 @@ export class AgentManager extends EventEmitter {
       throw new Error(`No adapter available for agent ${agentId}`)
     }
 
-    return this.resumeAdapterSession(adapter, agentId, taskId, sessionId)
+    const pending = this.sessionStarts.get(taskId)
+    if (pending) return pending
+    const live = this.findSessionByTaskId(taskId)
+    if (live && live.session.status !== 'error') return live.sessionId
+    const resumed = this.resumeAdapterSession(adapter, agentId, taskId, sessionId)
+    this.sessionStarts.set(taskId, resumed)
+    try {
+      return await resumed
+    } finally {
+      if (this.sessionStarts.get(taskId) === resumed) this.sessionStarts.delete(taskId)
+      this.scheduleStartQueueDrain()
+    }
   }
 
   /**
@@ -3314,6 +3431,8 @@ export class AgentManager extends EventEmitter {
       return
     }
 
+    if (resetTaskStatus) this.cancelQueuedStart(session.taskId)
+
     console.log(`[AgentManager] Destroying session ${sessionId} (resetTaskStatus=${resetTaskStatus})`)
 
     this.stopAdapterPolling(sessionId)
@@ -3369,6 +3488,10 @@ export class AgentManager extends EventEmitter {
     this.cancelQueuedStart(taskId)
     const found = this.findSessionByTaskId(taskId)
     if (!found) {
+      const task = this.db.getTask(taskId)
+      if (task?.status === TaskStatus.AgentWorking) {
+        this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.NotStarted, session_id: null })
+      }
       console.log(`[AgentManager] stopByTaskId: no active session found for task ${taskId}`)
       return { sessionId: null }
     }
@@ -3392,6 +3515,10 @@ export class AgentManager extends EventEmitter {
   /** Withdraws a queued start; true when one was waiting. */
   cancelQueuedStart(taskId: string): boolean {
     const task = this.db.getTask(taskId)
+    if (!this.startQueue.get(taskId) && task?.agent_id) {
+      this.startQueue.enqueue({ taskId, agentId: task.agent_id, projectId: taskProjectId(task),
+        priority: task.priority, reason: 'recovery', queuedAt: new Date().toISOString() })
+    }
     if (!this.startQueue.cancel(taskId, 'manual_stop', 'manual_stop_not_retried')) return false
     console.log(`[AgentManager] Queued start of task ${taskId} cancelled`)
     if (task) this.recordRecoveryAudit(task, 'manual_stop', 'exclude_from_retry', 'manual_stop_not_retried')
@@ -3584,7 +3711,10 @@ export class AgentManager extends EventEmitter {
     const task = this.db.getTask(taskId)
     if (!task?.parent_task_id) return false
     const siblings = this.db.getSubtasks(task.parent_task_id)
-    return isSuccessorGraphInProgress(siblings) && siblings.some((s) => s.id !== taskId && s.status === TaskStatus.AgentWorking)
+    const parent = this.db.getTask(task.parent_task_id)
+    return siblings.some((predecessor) => predecessor.next_subtask_ids?.includes(taskId)
+      && predecessor.status !== TaskStatus.Completed
+      && !(predecessor.status === TaskStatus.ReadyForReview && successorsFireOnReview(parent, predecessor)))
   }
 
   /** Counts an admitted start of a real task against its project's day (#65). */
@@ -3702,20 +3832,16 @@ export class AgentManager extends EventEmitter {
       'irreversible', 'external-side-effect'
     ].includes(label))
     if (excluded) return excluded.replace(/-/g, '_')
-    const latestUnresolvedTool = this.db.getTranscriptParts(task.id)
-      .filter((part) => part.partType === 'question' || part.partType === 'tool')
-      .at(-1)
-    if (latestUnresolvedTool?.tool && typeof latestUnresolvedTool.tool === 'object') {
-      const tool = latestUnresolvedTool.tool as { name?: unknown; status?: unknown }
-      const status = typeof tool.status === 'string' ? tool.status.toLowerCase() : ''
-      if (status === 'running' || status === 'pending' || status === 'waiting') {
-        if (latestUnresolvedTool.partType === 'question' || tool.name === 'permission') return 'awaiting_approval'
-        // A process loss while a tool was still running leaves its external
-        // side effect unknowable. Replaying the whole turn is unsafe even when
-        // the tool name sounds harmless; the user must choose how to proceed.
-        return 'unsafe_side_effect_unknown'
-      }
+    const unresolved = this.db.getTranscriptParts(task.id).filter((part) => {
+      if (part.partType !== 'question' && part.partType !== 'tool') return false
+      const tool = part.tool as { status?: unknown } | undefined
+      return typeof tool?.status === 'string' && ['running', 'pending', 'waiting'].includes(tool.status.toLowerCase())
+    })
+    if (unresolved.some((part) => part.partType === 'question' || (part.tool as { name?: unknown })?.name === 'permission')) {
+      return 'awaiting_approval'
     }
+    if (unresolved.length > 0) return 'unsafe_side_effect_unknown'
+
     return null
   }
 
@@ -3740,6 +3866,7 @@ export class AgentManager extends EventEmitter {
    * dropped.
    */
   drainStartQueue(): void {
+    if (this.shuttingDown || this.startupReconciliation) return
     let changed = false
     let nextRetryAt: number | null = null
     // #150: a priority changed while waiting reorders the queue now.
@@ -3750,10 +3877,12 @@ export class AgentManager extends EventEmitter {
     for (const entry of this.startQueue.snapshot()) {
       const agent = this.db.getAgent(entry.agentId)
       const task = this.db.getTask(entry.taskId)
+      const exclusion = this.retryExclusion(task)
       const stale =
         !agent ? 'agent deleted'
         : !task ? 'task deleted'
-        : task.status === TaskStatus.Completed ? 'task completed'
+        : exclusion
+          ? exclusion.replace(/_/g, ' ')
         : task.agent_id && task.agent_id !== entry.agentId ? 'task reassigned'
         : null
       if (stale) {
@@ -3763,6 +3892,7 @@ export class AgentManager extends EventEmitter {
         changed = true
         continue
       }
+      if (this.sessionStarts.has(entry.taskId)) continue
       if (this.hasActiveSessionForTask(entry.taskId)) {
         const live = this.findSessionByTaskId(entry.taskId)
         if (live) {
@@ -3814,7 +3944,9 @@ export class AgentManager extends EventEmitter {
         continue
       }
       const starting = this.startSessionNow(entry.agentId, entry.taskId, entry.workspaceDir, entry.skipInitialPrompt)
-      void this.boundedSessionStart(starting, agent!.name, entry.taskId, AGENT_START_TIMEOUT_MS)
+      const trackedStart = this.boundedSessionStart(starting, agent!.name, entry.taskId, AGENT_START_TIMEOUT_MS)
+      this.sessionStarts.set(entry.taskId, trackedStart)
+      void trackedStart
         .then(async (sessionId) => {
           if (!this.startQueue.acknowledgeStarted(claim.id, claim.generation, sessionId)) {
             console.warn(`[AgentManager] Fenced late/duplicate start ${sessionId} for queue ${claim.id} generation ${claim.generation}`)
@@ -3827,6 +3959,8 @@ export class AgentManager extends EventEmitter {
         .catch((error) => {
           console.error(`[AgentManager] Queued start of task ${entry.taskId} failed:`, error)
           const detail = error instanceof Error ? error.message : String(error)
+          const current = this.startQueue.get(entry.taskId)
+          if (current?.generation !== claim.generation || current.state !== 'starting') return
           const latestTask = this.db.getTask(entry.taskId)
           const exclusion = this.retryExclusion(latestTask)
           if (exclusion) {
@@ -3848,6 +3982,7 @@ export class AgentManager extends EventEmitter {
         })
         .finally(() => {
           this.admittedStarts.delete(entry.taskId)
+          if (this.sessionStarts.get(entry.taskId) === trackedStart) this.sessionStarts.delete(entry.taskId)
           this.scheduleStartQueueDrain()
         })
     }
