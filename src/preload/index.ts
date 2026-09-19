@@ -161,16 +161,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('tasks:refresh', handler)
     return () => ipcRenderer.removeListener('tasks:refresh', handler)
   },
-  onAgentOutput: (callback: (event: unknown) => void): (() => void) => {
-    const handler = (_: unknown, data: unknown): void => callback(data)
-    ipcRenderer.on('agent:output', handler)
-    return () => ipcRenderer.removeListener('agent:output', handler)
-  },
-  onAgentOutputBatch: (callback: (event: unknown) => void): (() => void) => {
-    const handler = (_: unknown, data: unknown): void => callback(data)
-    ipcRenderer.on('agent:output-batch', handler)
-    return () => ipcRenderer.removeListener('agent:output-batch', handler)
-  },
   onArtifactUpdated: (callback: (event: unknown) => void): (() => void) => {
     const handler = (_: unknown, data: unknown): void => callback(data)
     ipcRenderer.on('artifact:updated', handler)

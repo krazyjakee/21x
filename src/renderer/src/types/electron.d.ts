@@ -105,19 +105,6 @@ export interface AgentMessageAttachment {
   mime_type: string
 }
 
-export interface AgentOutputEvent {
-  sessionId: string
-  taskId?: string
-  type: 'message' | 'error' | 'status'
-  data: unknown
-}
-
-export interface AgentOutputBatchEvent {
-  sessionId: string
-  taskId: string
-  messages: Array<{ id: string; role: string; content: string; partType?: string; tool?: unknown; update?: boolean; taskProgress?: unknown }>
-}
-
 export interface AgentStatusEvent {
   sessionId: string
   agentId: string
@@ -539,8 +526,6 @@ interface ElectronAPI {
   }
   onOverdueCheck: (callback: () => void) => () => void
   onTasksRefresh: (callback: () => void) => () => void
-  onAgentOutput: (callback: (event: AgentOutputEvent) => void) => () => void
-  onAgentOutputBatch: (callback: (event: AgentOutputBatchEvent) => void) => () => void
   onArtifactUpdated: (callback: (event: { taskId: string; artifact: import('@shared/artifacts').Artifact }) => void) => () => void
   onTranscriptChanged: (callback: (event: TranscriptChangedEvent) => void) => () => void
   onAgentStatus: (callback: (event: AgentStatusEvent) => void) => () => void
