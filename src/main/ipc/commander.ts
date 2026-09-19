@@ -11,7 +11,7 @@ import { createCommanderSkillTools } from '../commander/skill-tools'
 import { createCommanderMergeGrantTools } from '../commander/merge-grant-tools'
 import { installCommanderReportBridge } from '../commander/report-tools'
 import { broadcastSkillsChanged } from './settings'
-import { listHeldActions } from '../escalation'
+import { listHeldActions, recoverMergeGrantOutcomes } from '../escalation'
 import { guardedIpcSend } from '../guarded-ipc-send'
 import { assertTrustedSender } from '../ipc-sender'
 import { notifyRenderer, uiState } from '../task-api/state'
@@ -117,6 +117,7 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
   // #62: `report_to_commander` (Task API route) and `tell_commander`
   // escalations reach the sessions through this bridge.
   installCommanderReportBridge({ service: commander, store, getProject: (projectId) => deps.db.getProject(projectId) })
+  void recoverMergeGrantOutcomes(deps.db).catch((error) => console.error('[MergeGrants] Recovery failed:', error))
 
   /** Every Commander call is from the main window; the caller then receives events. */
   const trusted = (event: IpcMainInvokeEvent, channel: string): void => {

@@ -253,7 +253,7 @@ export function createMergeGrantFromUserMessage(
 
   let prNumbers: number[] = []
   if (scope.pr_numbers !== undefined && scope.pr_numbers !== null) {
-    if (!Array.isArray(scope.pr_numbers) || scope.pr_numbers.some((n) => !Number.isInteger(n) || n <= 0)) {
+    if (!Array.isArray(scope.pr_numbers) || scope.pr_numbers.some((n) => !Number.isSafeInteger(n) || n <= 0)) {
       return { ok: false, error: 'pr_numbers must be positive integers' }
     }
     prNumbers = [...new Set(scope.pr_numbers)].sort((a, b) => a - b)
@@ -665,11 +665,18 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
     return { error: `GitHub refused the merge of ${pr.url}: ${detail.slice(0, 1_000)}`, pr_url: pr.url }
   }
 
-  if (reservationId) db.recordMergeGrantUse(reservationId)
+  // Finalization writes the use and journal atomically. Recovery may have
+  // already finalized it while GitHub's response was in flight.
+  let recorded = true
+  try {
+    if (reservationId) recorded = !!db.recordMergeGrantUse(reservationId)
+  } catch {
+    return { status: 'unknown', pr_url: pr.url, reservation_id: reservationId, message: 'GitHub confirmed the merge, but its local audit could not be saved. The durable reservation remains for recovery.' }
+  }
   const { line } = authorityText(db, authority)
   const title = state.title ? ` "${state.title.slice(0, 120)}"` : ''
   const summary = `Merged ${pr.url}${title} (${method}, ${state.headRefOid.slice(0, 7)}) ${line}`
-  db.appendProjectStatusJournal(projectId, {
+  if (!reservationId) db.appendProjectStatusJournal(projectId, {
     summary,
     completed: [`Merged ${pr.owner}/${pr.repo}#${pr.number}${title}`],
     decisions: [authority.kind === 'grant' ? `Merge authorised by merge grant ${authority.grantId}` : `Merge authorised ${line}`]
@@ -679,7 +686,7 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
   hooks.pushToRenderer?.('mergeGrants:merged', { projectId, prUrl: pr.url, authority, at: new Date().toISOString() })
   if (grant) {
     grantsChanged(projectId)
-    hooks.report?.(projectId, 'merged_under_grant', summary, grant.id)
+    if (recorded) hooks.report?.(projectId, 'merged_under_grant', summary, grant.id)
   }
   return {
     status: 'merged',
@@ -715,7 +722,7 @@ export function mergeGrantAudit(db: MergeGrantDb, projectId: string): MergeGrant
  * the observed base. OPEN, changed heads/bases, and transport failures remain
  * reserved for inspection: a delayed remote operation must never free a use.
  */
-export async function reconcileMergeGrantReservations(db: MergeGrantDb, projectId?: string): Promise<void> {
+export async function reconcileMergeGrantReservations(db: MergeGrantDb, projectId?: string, hooks: MergeHooks = {}): Promise<void> {
   for (const reservation of db.listPendingMergeGrantReservations(projectId)) {
     try {
       const pr = parseGitHubPullRequestUrl(reservation.snapshot.pr_url)
@@ -724,11 +731,10 @@ export async function reconcileMergeGrantReservations(db: MergeGrantDb, projectI
       if (state.state !== 'MERGED' || state.headRefOid !== reservation.snapshot.head_sha || state.baseRefName !== reservation.snapshot.base_branch) continue
       const use = db.recordMergeGrantUse(reservation.id)
       if (!use) continue
-      db.appendProjectStatusJournal(reservation.project_id, {
-        summary: `Recovered merge outcome for ${pr.url} after an interrupted request under merge grant ${reservation.grant_id}; GitHub confirms head ${state.headRefOid} merged.`,
-        completed: [`Confirmed merged: ${pr.url}`]
-      })
       grantsChanged(reservation.project_id)
+      const summary = `Recovered merge outcome for ${pr.url} after an interrupted request under merge grant ${reservation.grant_id}; GitHub confirms head ${state.headRefOid} merged.`
+      hooks.pushToRenderer?.('project:statusChanged', { projectId: reservation.project_id })
+      hooks.report?.(reservation.project_id, 'merged_under_grant', summary, reservation.grant_id)
     } catch {
       // Keep the durable reservation and original snapshot until GitHub can confirm it.
     }

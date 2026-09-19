@@ -14,6 +14,7 @@ import type { DatabaseManager } from './database'
 import { getTaskApiToken, startTaskApiServer, stopTaskApiServer, setTaskApiNotifier, setTaskApiAgentController } from './task-api-server'
 import { createMergeGrantFromUserMessage, setGhRunner } from './merge-grants'
 import { buildTaskMcpUrl, parseScopeFromUrl } from './task-mcp-endpoint'
+import { mcpOptionsForTask } from './agent-manager/session-config'
 
 let db: DatabaseManager
 
@@ -363,6 +364,17 @@ describe('project-scoped MCP session (#56)', () => {
 
 
 describe('merge-grant scope credential over real HTTP', () => {
+  it('never grants Captain authority to a heartbeat checking a task', async () => {
+    const project = db.createProject({ name: 'Heartbeat target' })!
+    const worker = db.createTask(makeTask({ title: 'Worker', project_id: project.id }))!
+    const port = await startTaskApiServer(db)
+    const options = mcpOptionsForTask(`heartbeat-${worker.id}`, null, worker)
+    const client = await connect(buildTaskMcpUrl(port, getTaskApiToken(), options))
+    const result = await client.callTool({ name: 'merge_pull_request', arguments: { pr_url: 'https://github.com/acme/app/pull/12' } })
+    expect(textOf(result)).toContain('only the project')
+    await client.close()
+  })
+
   it('rejects a worker removing its pins, changing projects, or forging/removing the signature', async () => {
     const project = db.createProject({ name: 'App', settings: { merge_grants: { enabled: true } } })!
     db.addProjectRepo(project.id, { provider: 'github', org: 'acme', name: 'app' })

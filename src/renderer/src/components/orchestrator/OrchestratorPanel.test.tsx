@@ -29,6 +29,7 @@ const projectApi = vi.hoisted(() => ({
   getAll: vi.fn(async () => []),
   update: vi.fn(async (id: string, data: Record<string, unknown>) => ({ id, ...data })),
 }))
+const mergeGrantsApi = vi.hoisted(() => ({ noteTyped: vi.fn() }))
 
 vi.mock('@/lib/ipc-client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/ipc-client')>()),
@@ -37,16 +38,18 @@ vi.mock('@/lib/ipc-client', async (importOriginal) => ({
   agentSessionApi,
   taskApi,
   projectApi,
+  mergeGrantsApi,
 }))
 
 /**
  * The transcript is a large tree with its own IPC; this file is about the
  * session. Its send handler is captured so a test can send like a user.
  */
-const composer = vi.hoisted(() => ({ send: null as ((text: string) => void) | null }))
+const composer = vi.hoisted(() => ({ send: null as ((text: string) => void) | null, typed: null as ((text: string) => void) | null }))
 vi.mock('@/components/agents/AgentTranscriptPanel', () => ({
-  AgentTranscriptPanel: ({ onSend }: { onSend?: (text: string) => void }) => {
+  AgentTranscriptPanel: ({ onSend, onTypedMessage }: { onSend?: (text: string) => void; onTypedMessage?: (text: string) => void }) => {
     composer.send = onSend ?? null
+    composer.typed = onTypedMessage ?? null
     return null
   },
 }))
@@ -116,6 +119,29 @@ beforeEach(() => {
 })
 
 describe('OrchestratorPanel — warming the session', () => {
+  it('preserves typed evidence through warm-up and stages it only immediately before sending', async () => {
+    const pending = deferredStart()
+    await act(async () => { render(<OrchestratorPanel onClose={vi.fn()} />) })
+    await waitFor(() => expect(agentSessionApi.start).toHaveBeenCalled())
+    await act(async () => {
+      composer.typed?.('Merge PR #12')
+      void composer.send?.('Merge PR #12')
+    })
+    expect(mergeGrantsApi.noteTyped).not.toHaveBeenCalled()
+    await act(async () => { pending.resolve() })
+    await waitFor(() => expect(agentSessionApi.send).toHaveBeenCalled())
+    expect(mergeGrantsApi.noteTyped).toHaveBeenCalledWith(CAPTAIN, 'Merge PR #12')
+    expect(mergeGrantsApi.noteTyped.mock.invocationCallOrder[0]).toBeLessThan(agentSessionApi.send.mock.invocationCallOrder[0])
+  })
+
+  it.each([true, false])('only a typed dashboard prefill stages grant evidence (typed=%s)', async (typed) => {
+    await act(async () => { render(<OrchestratorPanel onClose={vi.fn()} />) })
+    await waitFor(() => expect(agentSessionApi.start).toHaveBeenCalled())
+    act(() => { window.dispatchEvent(new CustomEvent('captain-prefill', { detail: { message: 'Merge PR #12', typed } })) })
+    await waitFor(() => expect(agentSessionApi.send).toHaveBeenCalled())
+    expect(mergeGrantsApi.noteTyped).toHaveBeenCalledTimes(typed ? 1 : 0)
+  })
+
   it('starts the default agent at launch, before any message', async () => {
     await act(async () => {
       render(<OrchestratorPanel onClose={vi.fn()} />)

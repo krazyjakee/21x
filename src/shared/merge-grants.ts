@@ -179,6 +179,8 @@ export function checkMergeIntent(text: string): MergeIntentResult {
   }
   let repo: string | undefined
   for (const target of targets) {
+    const number = target.match(/(\d+)$/)?.[1]
+    if (number && (!Number.isSafeInteger(Number(number)) || Number(number) <= 0)) return refused
     const url = target.match(/github\.com\/([\w.-]+\/[\w.-]+)\/pull\//i)
     if (url) {
       if (repo && repo.toLowerCase() !== url[1].toLowerCase()) return refused
@@ -208,11 +210,11 @@ export function checkMergeIntent(text: string): MergeIntentResult {
 /** PR numbers the text names: `#12`, `PR 12`, `pull request 12`, `/pull/12`. */
 export function prNumbersMentioned(text: string): number[] {
   const found = new Set<number>()
-  const patterns = [/(?:^|[^\w&])#(\d{1,7})\b/g, /\bPRs?\s*#?(\d{1,7})\b/gi, /\bpull\s+requests?\s*#?(\d{1,7})\b/gi, /\/pull\/(\d{1,7})\b/g]
+  const patterns = [/(?:^|[^\w&])#(\d+)\b/g, /\bPRs?\s*#?(\d+)\b/gi, /\bpull\s+requests?\s*#?(\d+)\b/gi, /\/pull\/(\d+)\b/g]
   for (const pattern of patterns) {
     for (const match of (text ?? '').matchAll(pattern)) found.add(Number(match[1]))
   }
-  return [...found].filter((n) => Number.isInteger(n) && n > 0).sort((a, b) => a - b)
+  return [...found].filter((n) => Number.isSafeInteger(n) && n > 0).sort((a, b) => a - b)
 }
 
 // ── GitHub pull request URLs ──────────────────────────────────
@@ -234,7 +236,7 @@ export function parseGitHubPullRequestUrl(value: unknown): PullRequestRef | null
   if (!match) return null
   const [, owner, repo, number] = match
   const n = Number(number)
-  if (!Number.isInteger(n) || n <= 0) return null
+  if (!Number.isSafeInteger(n) || n <= 0) return null
   return { owner, repo, number: n, url: `https://github.com/${owner}/${repo}/pull/${n}` }
 }
 

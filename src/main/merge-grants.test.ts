@@ -790,11 +790,54 @@ describe('independent review: fail-closed authority boundaries', () => {
     if (!created.ok) throw new Error(created.error)
     const snapshot = { pr_url: PR_URL, pr_title: '', base_branch: 'main', head_sha: SHA, method: 'squash', merge_state: 'CLEAN', review_decision: '', checks: [] }
     const first = h.db.reserveMergeGrantUse(created.grant.id, snapshot)!
-    const second = h.db.reserveMergeGrantUse(created.grant.id, snapshot)!
+    expect(h.db.reserveMergeGrantUse(created.grant.id, snapshot)).toBeUndefined()
+    const second = h.db.reserveMergeGrantUse(created.grant.id, { ...snapshot, pr_url: 'https://github.com/acme/app/pull/13' })!
     h.db.refundMergeGrantUse(first.reservationId)
     h.db.refundMergeGrantUse(first.reservationId)
     expect(h.db.getMergeGrant(created.grant.id)?.uses).toBe(1)
     expect(h.db.listPendingMergeGrantReservations().map((r) => r.id)).toEqual([second.reservationId])
+  })
+
+  it('never widens an eight-digit PR instruction into every PR', () => {
+    const h = setup()
+    const result = createMergeGrantFromUserMessage(h.db, h.projectId, {
+      source: 'commander', sessionId: 's', messageId: 'large-pr', text: 'Merge PR #12345678'
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.grant.pr_numbers).toEqual([12345678])
+    expect(checkMergeIntent('Merge PR #0').ok).toBe(false)
+    expect(checkMergeIntent('Merge PR #9007199254740993').ok).toBe(false)
+    expect(parseGitHubPullRequestUrl('https://github.com/acme/app/pull/9007199254740993')).toBeNull()
+  })
+
+  it('reports a recovered merge to the Commander exactly once', async () => {
+    const h = setup()
+    createMergeGrantFromUserMessage(h.db, h.projectId, { source: 'commander', sessionId: 's', messageId: 'recover-report', text: 'Merge PRs' })
+    h.gh.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'pr') return JSON.stringify(prState())
+      throw new Error('Lost response')
+    })
+    await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })
+    h.setPr({ state: 'MERGED' })
+    h.gh.mockImplementation(async () => JSON.stringify(prState({ state: 'MERGED' })))
+    await captainCall(h, 'list_merge_grants', {})
+    await captainCall(h, 'list_merge_grants', {})
+    expect(h.events.filter((event) => event.outcome === 'merged_under_grant')).toHaveLength(1)
+    expect(journal(h)).toHaveLength(1)
+  })
+
+  it('rolls back merge finalization when the journal cannot be written', () => {
+    const h = setup()
+    const result = createMergeGrantFromUserMessage(h.db, h.projectId, { source: 'commander', sessionId: 's', messageId: 'journal', text: 'Merge PRs' })
+    if (!result.ok) throw new Error(result.error)
+    const pending = h.db.reserveMergeGrantUse(result.grant.id, { pr_url: PR_URL, pr_title: '', base_branch: 'main', head_sha: SHA, method: 'squash', merge_state: 'CLEAN', review_decision: '', checks: [] })!
+    const write = vi.spyOn(h.db, 'appendProjectStatusJournal').mockImplementation(() => { throw new Error('disk full') })
+    expect(() => h.db.recordMergeGrantUse(pending.reservationId)).toThrow('disk full')
+    expect(h.db.listMergeGrantUses(result.grant.id)).toHaveLength(0)
+    expect(h.db.listPendingMergeGrantReservations()).toHaveLength(1)
+    write.mockRestore()
+    h.db.recordMergeGrantUse(pending.reservationId)
+    expect(journal(h)).toHaveLength(1)
   })
 
 })

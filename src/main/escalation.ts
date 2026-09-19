@@ -351,7 +351,7 @@ function holdCall(
 }
 
 /** What a merge tells the person and the Commander (#137). */
-function mergeHooks(projectId: string): MergeHooks {
+function mergeHooks(): MergeHooks {
   return {
     notifyUser,
     pushToRenderer,
@@ -369,7 +369,7 @@ function mergeHooks(projectId: string): MergeHooks {
       }
       escalateToCommander(event)
       pushToRenderer('escalation:event', event)
-      if (kind === 'needs_user') notifyUser(`A PR in ${deps?.db.getProject(projectId)?.name ?? projectId} needs a reviewer`, summary)
+      if (kind === 'needs_user') notifyUser(`A PR in ${deps?.db.getProject(id)?.name ?? id} needs a reviewer`, summary)
     }
   }
 }
@@ -387,7 +387,7 @@ export function createCoordinatorEscalationGate(): CoordinatorCallGate {
         projectId,
         args,
         level: policyLevelFor(deps.db, projectId, 'merge_pr'),
-        hooks: mergeHooks(projectId),
+        hooks: mergeHooks(),
         hold: (summary, runHeld) => holdCall(projectId, 'merge_pr', tool, args, summary, runHeld),
         reportPerformed: (summary) => {
           const event: EscalationEvent = {
@@ -433,6 +433,10 @@ export function createCoordinatorEscalationGate(): CoordinatorCallGate {
 /** Main-process wiring: reads the policy from `db` and gates the Captain's tool calls. */
 export function installEscalation(db: DatabaseManager): void {
   configureEscalation({ db, mergeDb: db })
-  void reconcileMergeGrantReservations(db).catch((error) => console.error('[MergeGrants] Recovery failed:', error))
   setCoordinatorCallGate(createCoordinatorEscalationGate())
+}
+
+/** Run after the Commander report bridge is ready so recovered outcomes reach it. */
+export function recoverMergeGrantOutcomes(db: DatabaseManager): Promise<void> {
+  return reconcileMergeGrantReservations(db, undefined, mergeHooks())
 }

@@ -1243,6 +1243,10 @@ export class DatabaseManager {
     return this.db.transaction(() => {
       const grant = this.getMergeGrant(grantId)
       if (!grant || mergeGrantStatus(grant) !== 'active') return undefined
+      // An uncertain/in-flight operation for this PR must be reconciled before
+      // another grant can spend authority on it or claim the same merge.
+      if (this.listPendingMergeGrantReservations(grant.project_id).some((pending) =>
+        pending.snapshot.pr_url.toLowerCase() === snapshot.pr_url.toLowerCase())) return undefined
       const reservationId = createId()
       this.prepare('UPDATE merge_grants SET uses = uses + 1 WHERE id = ?').run(grantId)
       this.prepare('INSERT INTO merge_grant_reservations (id, grant_id, project_id, snapshot, created_at) VALUES (?, ?, ?, ?, ?)')
@@ -1285,6 +1289,12 @@ export class DatabaseManager {
           (id, grant_id, project_id, pr_url, pr_title, base_branch, head_sha, method, merge_state, review_decision, checks, merged_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(reservationId, row.grant_id, row.project_id, use.pr_url, use.pr_title, use.base_branch, use.head_sha, use.method, use.merge_state, use.review_decision, JSON.stringify(use.checks), now)
+      const entry = this.appendProjectStatusJournal(row.project_id, {
+        summary: `Merged ${use.pr_url} (${use.method}, ${use.head_sha.slice(0, 7)}) under the user's merge grant ${row.grant_id}.`,
+        completed: [`Merged ${use.pr_url}${use.pr_title ? ` "${use.pr_title.slice(0, 120)}"` : ''}`],
+        decisions: [`Merge authorised by merge grant ${row.grant_id}`]
+      })
+      if (!entry) throw new Error('Could not write the merge grant journal entry')
       return { ...use, id: reservationId, grant_id: row.grant_id, project_id: row.project_id, merged_at: now }
     }).immediate()
   }
