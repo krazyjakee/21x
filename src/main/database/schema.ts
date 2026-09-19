@@ -5,6 +5,7 @@ import { DEFAULT_PROJECT_ID, DEFAULT_PROJECT_NAME } from '../../shared/projects'
 import { getRepoProviders, isGitProvider } from '../repo-providers'
 import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
 import { migrateCoordinatorToCaptain } from './captain-migration'
+import { migrateTaskActivity } from './task-activity-migration'
 import { splitLegacyPullRequestEscalation } from '../../shared/project-policies'
 
 /**
@@ -39,8 +40,9 @@ import { splitLegacyPullRequestEscalation } from '../../shared/project-policies'
  *          open_pr gets its default "tell_commander"). 18 is skipped on purpose: it is claimed by
  *          an open branch (feat/commander-on-agent-sessions); whichever lands
  *          second renumbers.
+ * 19 → 20: meaningful task activity timestamps (#142).
  */
-const SCHEMA_VERSION = 19
+const SCHEMA_VERSION = 20
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -141,6 +143,7 @@ export function createTables(db: Database.Database): void {
       sort_order INTEGER NOT NULL DEFAULT 0,
       role TEXT NOT NULL DEFAULT 'task',
       project_id TEXT REFERENCES projects(id),
+      last_activity_at TEXT DEFAULT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -542,6 +545,7 @@ function rebuildTasksTable(db: Database.Database, columnNames: Set<string>): voi
       sort_order INTEGER NOT NULL DEFAULT 0,
       role TEXT NOT NULL DEFAULT 'task',
       project_id TEXT REFERENCES projects(id),
+      last_activity_at TEXT DEFAULT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
@@ -969,6 +973,9 @@ export function runMigrations(db: Database.Database): void {
   // Migration v19: merge grants (#137). New tables only; runs after
   // migrateToProjects so the projects table they reference exists.
   migrateMergeGrants(db)
+
+  // Migration v20: meaningful activity, including ancestor backfill.
+  migrateTaskActivity(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)

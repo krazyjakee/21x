@@ -206,6 +206,24 @@ function toTranscriptPartRecord(r: TranscriptPartRow): TranscriptPartRecord {
 export class DatabaseManager {
   public db!: Database.Database
 
+  /** Push activity for both the changed task and its ancestors to connected clients. */
+  onTaskActivity?: (taskId: string, lastActivityAt: string) => void
+
+  recordTaskActivity(taskId: string, at = new Date().toISOString()): void {
+    const changed = this.prepare(`
+      WITH RECURSIVE ancestors(id) AS (
+        SELECT id FROM tasks WHERE id = ?
+        UNION
+        SELECT tasks.parent_task_id FROM tasks JOIN ancestors ON tasks.id = ancestors.id
+        WHERE tasks.parent_task_id IS NOT NULL
+      )
+      UPDATE tasks SET last_activity_at = ? WHERE id IN (SELECT id FROM ancestors)
+        AND (last_activity_at IS NULL OR last_activity_at < ?)
+      RETURNING id
+    `).all(taskId, at, at) as { id: string }[]
+    for (const { id } of changed) this.onTaskActivity?.(id, at)
+  }
+
   private statements = new Map<string, Database.Statement>()
   private statementsDb?: Database.Database
 
@@ -370,7 +388,7 @@ export class DatabaseManager {
    * returned revs stay contiguous (maxRev - changedPartIds.length is the
    * cursor before this batch).
    */
-  upsertTranscriptParts(taskId: string, parts: TranscriptPartInput[]): { maxRev: number; changedPartIds: string[] } {
+  upsertTranscriptParts(taskId: string, parts: TranscriptPartInput[], origin: 'history' | 'live' = 'history'): { maxRev: number; changedPartIds: string[] } {
     if (!this.ensureDbOpen() || parts.length === 0) return { maxRev: this.getTranscriptMaxRev(taskId), changedPartIds: [] }
 
     const nextSeqStmt = this.prepare(
@@ -434,6 +452,10 @@ export class DatabaseManager {
     // that stale snapshot. BEGIN IMMEDIATE lets busy_timeout wait for the
     // writer and only calculates the counters after the lock is acquired.
     txn.immediate()
+    if (origin === 'live' && parts.some((part) => changedPartIds.includes(part.id) &&
+      (part.role === 'user' || part.role === 'assistant' || part.partType === 'task_progress'))) {
+      this.recordTaskActivity(taskId)
+    }
     return { maxRev, changedPartIds }
   }
 
@@ -632,18 +654,19 @@ export class DatabaseManager {
       }
     }
 
+    if (data.parent_task_id) this.recordTaskActivity(data.parent_task_id, now)
     return this.getTask(id)
   }
 
-  updateTask(id: string, data: UpdateTaskData, origin?: 'session-feedback' | 'task-source'): TaskRecord | undefined {
-    if (origin !== 'task-source' && ('external_id' in data || 'source_id' in data || 'source' in data)) {
+  updateTask(id: string, data: UpdateTaskData, origin?: 'session-feedback' | 'task-source' | 'system' | 'task-source-action'): TaskRecord | undefined {
+    if (origin !== 'task-source' && origin !== 'task-source-action' && ('external_id' in data || 'source_id' in data || 'source' in data)) {
       throw new Error('Only the sync service can change a task source link.')
     }
     if (data.next_subtask_ids !== undefined) {
       this.validateNextSubtaskIds(id, data.next_subtask_ids)
     }
     const currentTask = this.getTask(id)
-    const approvedStatusWrite = origin === 'session-feedback' || origin === 'task-source'
+    const approvedStatusWrite = origin === 'session-feedback' || origin === 'task-source' || origin === 'task-source-action'
     if (!approvedStatusWrite && currentTask?.status === TaskStatus.AgentLearning && this.getSetting(`session-feedback-completion:${id}`) && !(data.status === TaskStatus.Completed && data.complete_at_source === false)) {
       data = { ...data, status: TaskStatus.AgentLearning }
     }
@@ -701,6 +724,19 @@ export class DatabaseManager {
       `UPDATE tasks SET ${setClauses.join(', ')} WHERE id = ?`
     ).run(...values)
 
+    if (currentTask && origin !== 'task-source' && origin !== 'system') {
+      const meaningfulFields = ['status', 'title', 'description', 'priority', 'resolution', 'feedback_comment'] as const
+      const fieldChanged = meaningfulFields.some((key) => data[key] !== undefined && data[key] !== currentTask[key])
+      const attachmentAdded = data.attachments?.some((attachment) =>
+        !currentTask.attachments.some((existing) => existing.id === attachment.id))
+      if (fieldChanged || attachmentAdded) this.recordTaskActivity(id)
+    }
+    // Re-parenting must carry the child's existing activity into its new
+    // ancestors, without inventing a fresh event for metadata housekeeping.
+    if (data.parent_task_id && data.parent_task_id !== currentTask?.parent_task_id) {
+      const activity = this.getTask(id)?.last_activity_at
+      if (activity) this.recordTaskActivity(data.parent_task_id, activity)
+    }
     return this.getTask(id)
   }
 

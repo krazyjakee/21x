@@ -1707,7 +1707,7 @@ export class AgentManager extends EventEmitter {
    * coordinator row has no lifecycle at all: it is never working, in review or
    * done, only resumable. Its session_id still persists like any task's.
    */
-  private updateTaskFromLocalAgent(taskId: string, updates: Parameters<DatabaseManager['updateTask']>[1]): TaskRecord | undefined {
+  private updateTaskFromLocalAgent(taskId: string, updates: Parameters<DatabaseManager['updateTask']>[1], origin?: 'system'): TaskRecord | undefined {
     const fields = { ...updates }
     if (fields.status !== undefined) {
       const current = this.db.getTask(taskId)
@@ -1716,7 +1716,7 @@ export class AgentManager extends EventEmitter {
     }
     if (Object.keys(fields).length === 0) return this.db.getTask(taskId)
     const before = fields.status !== undefined ? this.db.getTask(taskId)?.status : undefined
-    const updated = this.db.updateTask(taskId, fields)
+    const updated = origin ? this.db.updateTask(taskId, fields, origin) : this.db.updateTask(taskId, fields)
     // Project event (#57): an agent's own work reaching review bypasses
     // afterTaskUpdated (task-updates.ts), so the event is raised here.
     if (fields.status === TaskStatus.ReadyForReview && updated?.status === TaskStatus.ReadyForReview && before !== TaskStatus.ReadyForReview) {
@@ -2531,7 +2531,7 @@ export class AgentManager extends EventEmitter {
     if (session.isTriageSession) {
       session.status = 'idle'
       console.log(`[AgentManager] Triage session completed for task ${session.taskId}, reverting to NotStarted`)
-      this.updateTaskFromLocalAgent(session.taskId, { status: TaskStatus.NotStarted, session_id: null })
+      this.updateTaskFromLocalAgent(session.taskId, { status: TaskStatus.NotStarted, session_id: null }, 'system')
       await yieldEventLoop()
 
       this.sendToRenderer('task:updated', {
@@ -3526,7 +3526,7 @@ export class AgentManager extends EventEmitter {
   private persistTranscriptEvent(channel: string, data: unknown): void {
     const event = transcriptPartsFromEvent(channel, data)
     if (!event || event.parts.length === 0) return
-    const result = this.db.upsertTranscriptParts(event.taskId, event.parts)
+    const result = this.db.upsertTranscriptParts(event.taskId, event.parts, 'live')
     if (!result) return
     const { maxRev, changedPartIds } = result
     // Event-sourced push: notify clients of the delta (the parts just written),
