@@ -679,7 +679,7 @@ function TaskWorkspaceComponent({
 
   return (
     <>
-      <div className="relative flex h-full min-h-0 flex-col bg-background">
+      <div className="ui-scale relative flex h-full min-h-0 flex-col bg-background">
         <TaskHeaderBar
           task={task}
           agent={assignedAgent}
