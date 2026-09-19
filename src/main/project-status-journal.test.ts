@@ -3,7 +3,7 @@
  * entry beside the unchanged snapshot; history reads are newest first,
  * cursor-stable and capped; old entries roll up by month, idempotently.
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { createTestDb } from '../../test/helpers/db-test-helper'
 import type { DatabaseManager } from './database'
 import { decodeHistoryCursor, encodeHistoryCursor, readProjectStatusHistory } from './project-status'
@@ -54,7 +54,11 @@ describe('update_project_status writes the journal (#72)', () => {
     expect(rawDb.prepare('SELECT summary FROM project_status WHERE project_id = ?').get(project.id)).toEqual({ summary })
   })
 
-  it('appends one entry per update and leaves the snapshot one small read', async () => {
+  it('appends one entry per update and leaves the snapshot one small read', async ({ onTestFinished }) => {
+    // These two updates must have distinct timestamps: IDs break ties randomly.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    onTestFinished(() => { vi.useRealTimers() })
+    vi.setSystemTime(new Date('2026-09-19T12:00:00.000Z'))
     const { db, project } = seed()
     const first = await handleTaskRoute(db, '/update_project_status', {
       project_id: project.id, summary: 'Round one.', top_blockers: ['Design review'],
@@ -72,6 +76,7 @@ describe('update_project_status writes the journal (#72)', () => {
       decisions: ['Use OAuth'], next_steps: ['Wire billing'], source: 'captain', correlation_id: 'cmd-1'
     })
 
+    vi.setSystemTime(new Date('2026-09-19T12:00:01.000Z'))
     await handleTaskRoute(db, '/update_project_status', { project_id: project.id, summary: 'Round two.', blockers: ['Billing API key'] })
     expect(db.countProjectStatusJournal(project.id)).toBe(2)
     expect(db.getProjectStatus(project.id).summary).toBe('Round two.')
