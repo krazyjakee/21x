@@ -68,6 +68,7 @@ import type {
 } from '@shared/projects'
 import type { HeldAction, ProjectLimitState } from '@shared/project-limit-types'
 import type { MergeGrant, MergeGrantAuditEntry } from '@shared/merge-grants'
+import type { ProjectConcurrencyState } from '@shared/concurrency'
 import type { ProjectStatus, ProjectStatusHistoryPage } from '@shared/project-status'
 import type { ProjectOverviewEntry } from '@shared/project-overview'
 import type { CaptainMemory } from '@shared/captain-memory'
@@ -408,6 +409,13 @@ interface ElectronAPI {
     getState: (projectId: string) => Promise<ProjectLimitState>
     isAllPaused: () => Promise<boolean>
     pauseAll: (paused: boolean) => Promise<boolean>
+  }
+  /** Captain-managed concurrency under the user-set hard cap (#150). */
+  concurrency: {
+    getState: (projectId: string) => Promise<ProjectConcurrencyState>
+    setCaptainControl: (projectId: string, enabled: boolean) => Promise<{ success: true } | { error: string }>
+    pin: (projectId: string, agentId: string, level: number | null) => Promise<{ success: true } | { error: string }>
+    onChanged: (callback: (event: { projectId: string }) => void) => () => void
   }
   /** Captain tool calls held by the escalation policy (#66). */
   escalation: {

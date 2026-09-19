@@ -343,6 +343,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     isAllPaused: (): Promise<boolean> => ipcRenderer.invoke('projectLimits:isAllPaused'),
     pauseAll: (paused: boolean): Promise<boolean> => ipcRenderer.invoke('projectLimits:pauseAll', paused)
   },
+  // Captain-managed concurrency under the user-set hard cap (#150).
+  concurrency: {
+    getState: (projectId: string): Promise<unknown> => ipcRenderer.invoke('concurrency:getState', projectId),
+    setCaptainControl: (projectId: string, enabled: boolean): Promise<unknown> =>
+      ipcRenderer.invoke('concurrency:setCaptainControl', projectId, enabled),
+    pin: (projectId: string, agentId: string, level: number | null): Promise<unknown> =>
+      ipcRenderer.invoke('concurrency:pin', projectId, agentId, level),
+    onChanged: (callback: (event: { projectId: string }) => void): (() => void) => {
+      const handler = (_: unknown, event: { projectId: string }): void => callback(event)
+      ipcRenderer.on('concurrency:changed', handler)
+      return () => ipcRenderer.removeListener('concurrency:changed', handler)
+    }
+  },
   // Captain tool calls held by the escalation policy (#66).
   escalation: {
     listHeld: (projectId?: string): Promise<unknown[]> => ipcRenderer.invoke('escalation:listHeld', projectId),

@@ -40,6 +40,8 @@ import { STUCK_SESSION_TIMEOUT_MS, findStuckTool, hasGarbledOutput, isDelegation
 import { MAX_CONCURRENT_AGENT_SESSIONS_SETTING, StartQueue, checkAdmission, isExemptFromAdmission, isGlobalAdmissionReason, parseGlobalSessionLimit, type AdmissionDecision, type AdmissionLimits, type AdmissionReason, type CountedSession, type QueuedStartInfo } from './agent-manager/admission'
 import { buildProjectLimitState, describeQueueReason, isAllProjectsPaused, projectAdmissionLimits, recordProjectSessionStart, setAllProjectsPaused, type ProjectLimitState } from './project-limits'
 import { FINDINGS_BEGIN, FINDINGS_END, SYSTEM_MESSAGE_MARKER } from '../shared/system-authority'
+import { BranchDiffCache, ResourceMonitor, agentCap, autoLowerForPressure, findFileOverlap, projectAgentLevel, readProjectConcurrency, setConcurrencyLevel, setUserConcurrency, type LevelChangeResult, type OverlapCandidate } from './concurrency-control'
+import { effectiveLevel, recommendLevel, type ProjectConcurrencyState, type ResourcePressure } from '../shared/concurrency'
 import { collectMissedParts, debugTranscript, emitArtifactUpdatesFromParts, textTranscript, type DebugTranscriptMessage, notifyStatusTransition, transcriptPartsFromEvent, transcriptPartsFromMessages, type OutputMessage } from './agent-manager/transcript-events'
 import { CaptainRuntimeStore } from './sessions/runtime-store'
 import { DeliveryStore, type DeliveryRecord } from './sessions/delivery-store'
@@ -268,8 +270,14 @@ export class AgentManager extends EventEmitter {
   private lastSentStatus: Map<string, string> = new Map()
 
   // ── Admission control (see agent-manager/admission.ts) ──
-  /** Starts waiting for a free slot, FIFO, one per task. */
+  /** Starts waiting for a free slot, one per task, priority-ordered per project (#150). */
   private startQueue = new StartQueue()
+  /** #150: the branch diff of running tasks, for file-overlap serialisation. */
+  private branchDiffs = new BranchDiffCache()
+  /** #150: free memory and CPU; confirmed pressure lowers Captain-controlled levels. */
+  private resourceMonitor = new ResourceMonitor({
+    onPressure: (pressure) => this.lowerLevelsForPressure(pressure)
+  })
   /** taskId → agentId of admitted starts whose session is not registered yet.
    *  They hold their slot so concurrent requests cannot all slip past. */
   private admittedStarts: Map<string, string> = new Map()
@@ -287,6 +295,7 @@ export class AgentManager extends EventEmitter {
     this.captainRuntimes = new CaptainRuntimeStore(db)
     this.deliveries = new DeliveryStore(db)
     this.startIdleSessionReaper()
+    this.resourceMonitor.start(30_000, () => this.refreshBranchDiffs())
   }
 
   getCaptainRuntime(projectId: string): CaptainRuntimeState | null {
@@ -2050,7 +2059,8 @@ export class AgentManager extends EventEmitter {
       if (alreadyQueued) {
         return { status: 'queued', position: alreadyQueued.position, reason: alreadyQueued.reason }
       }
-      const decision = checkAdmission({ agentId, taskId, task, agent }, this.countedSessions(), this.admissionLimits(task))
+      const counted = this.countedSessions()
+      const decision = checkAdmission({ agentId, taskId, task, agent }, counted, this.admissionLimits(task, agentId, counted))
       if (!decision.admitted) {
         const { position } = this.startQueue.enqueue({
           taskId,
@@ -2058,7 +2068,9 @@ export class AgentManager extends EventEmitter {
           workspaceDir,
           skipInitialPrompt,
           reason: decision.reason,
-          queuedAt: new Date().toISOString()
+          queuedAt: new Date().toISOString(),
+          projectId: task ? taskProjectId(task) : undefined,
+          priority: task?.priority ?? null
         })
         console.log(
           `[AgentManager] Start of task ${taskId} queued at position ${position}: ${decision.reason} ` +
@@ -2069,6 +2081,7 @@ export class AgentManager extends EventEmitter {
         return { status: 'queued', position, reason: decision.reason }
       }
       this.recordCountedStart(task)
+      this.startQueue.markServed(task ? taskProjectId(task) : undefined)
     }
 
     this.admittedStarts.set(taskId, agentId)
@@ -3253,13 +3266,176 @@ export class AgentManager extends EventEmitter {
     return [...counted.values()]
   }
 
-  /** The global cap and pause, plus the requested task's project limits (#65). */
-  private admissionLimits(task: TaskRecord | undefined): AdmissionLimits {
-    return {
+  /**
+   * The global cap and pause, the requested task's project limits (#65), and
+   * for the requested agent the project's working level and any file overlap
+   * with the project's running jobs (#150).
+   */
+  private admissionLimits(task: TaskRecord | undefined, agentId?: string, counted?: CountedSession[]): AdmissionLimits {
+    const limits: AdmissionLimits = {
       globalLimit: parseGlobalSessionLimit(this.db.getSetting(MAX_CONCURRENT_AGENT_SESSIONS_SETTING)),
       globalPaused: isAllProjectsPaused(this.db),
       project: task ? projectAdmissionLimits(this.db, taskProjectId(task)) : undefined
     }
+    if (task && agentId) {
+      // A task whose project row is gone is bounded by the hard cap alone.
+      const agent = this.db.getAgent(agentId)
+      const projectId = taskProjectId(task)
+      if (agent && this.db.getProject(projectId)) limits.concurrencyLevel = projectAgentLevel(this.db, projectId, agent).level
+      limits.fileOverlap = this.fileOverlapFor(task, counted ?? this.countedSessions())
+    }
+    return limits
+  }
+
+  // ── Concurrency control (#150) ─────────────────────────────────
+
+  /** A task's touched files: what it declared plus what its branch has changed. */
+  private touchesOf(task: TaskRecord): OverlapCandidate {
+    const declared = this.db.getTaskTouches(task.id)
+    const diff = this.branchDiffs.get(task.id)
+    return { taskId: task.id, repos: task.repos ?? [], touches: [...new Set([...declared, ...diff])] }
+  }
+
+  private fileOverlapFor(task: TaskRecord, counted: CountedSession[]): { taskId: string; path: string } | null {
+    const projectId = taskProjectId(task)
+    const mine = this.touchesOf(task)
+    if (mine.touches.length === 0) return null
+    const running: OverlapCandidate[] = []
+    for (const session of counted) {
+      if (session.taskId === task.id || session.projectId !== projectId) continue
+      const other = this.db.getTask(session.taskId)
+      if (other) running.push(this.touchesOf(other))
+    }
+    return findFileOverlap(mine, running)
+  }
+
+  /** Re-reads the branch diff of every working task session (resource monitor tick). */
+  private refreshBranchDiffs(): void {
+    for (const session of this.sessions.values()) {
+      if (session.status !== 'working' && session.status !== 'waiting_approval') continue
+      if (session.isTriageSession || isExemptFromAdmission(session.taskId, this.db.getTask(session.taskId))) continue
+      const dir = session.workspaceDir || this.db.getWorkspaceDir(session.taskId)
+      void this.branchDiffs.refresh(session.taskId, dir).catch(() => undefined)
+    }
+    // Finished or deleted tasks never run again; their diffs are dropped.
+    for (const taskId of this.branchDiffs.taskIds()) {
+      const task = this.db.getTask(taskId)
+      if (!task || task.status === TaskStatus.Completed) this.branchDiffs.forget(taskId)
+    }
+    // A diff can clear an overlap as well as create one.
+    this.scheduleStartQueueDrain()
+  }
+
+  private lowerLevelsForPressure(pressure: ResourcePressure): void {
+    const rows = autoLowerForPressure(this.db, pressure)
+    for (const projectId of new Set(rows.map((row) => row.project_id))) this.emitConcurrencyChanged(projectId)
+  }
+
+  private emitConcurrencyChanged(projectId: string): void {
+    this.sendToRenderer('concurrency:changed', { projectId })
+    this.sendToRenderer('project:statusChanged', { projectId })
+  }
+
+  /** The latest resource reading, sampling once if there is none yet. */
+  getResourcePressure(): ResourcePressure {
+    return this.resourceMonitor.current() ?? this.resourceMonitor.tick()
+  }
+
+  /**
+   * The Captain's `set_concurrency`: moves the project's working level for
+   * one agent within its hard cap. A raise drains the queue; a lower never
+   * stops running work.
+   */
+  setConcurrencyLevel(input: { projectId: string; agentId: string; level: unknown; reason: unknown; actor?: 'captain' | 'user' | 'system' }): LevelChangeResult | { error: string } {
+    const runningInProject = this.countedSessions().filter((s) => s.agentId === input.agentId && s.projectId === input.projectId).length
+    const result = setConcurrencyLevel(this.db, { ...input, pressure: this.getResourcePressure(), runningInProject })
+    if ('success' in result) {
+      this.emitConcurrencyChanged(input.projectId)
+      if (result.level > result.previous_level) this.scheduleStartQueueDrain()
+    }
+    return result
+  }
+
+  /** The user's pin / Captain-control switch from the project editor. */
+  setUserConcurrency(projectId: string, change: { captainControl: boolean } | { agentId: string; pinnedLevel: number | null }, reason?: string): { success: true } | { error: string } {
+    const result = setUserConcurrency(this.db, projectId, change, reason)
+    if ('success' in result) {
+      this.emitConcurrencyChanged(projectId)
+      this.scheduleStartQueueDrain()
+    }
+    return result
+  }
+
+  /** Declares the files a task will change; overlapping starts in its project wait. */
+  setTaskTouches(taskId: string, paths: string[]): string[] {
+    const stored = this.db.setTaskTouches(taskId, paths)
+    // Fewer touches can free a waiting start.
+    this.scheduleStartQueueDrain()
+    return stored
+  }
+
+  /**
+   * Caps, levels, load and a suggested level per agent, for the Captain's
+   * `get_concurrency` and the project editor. Lists every agent that has
+   * running or queued work in the project, or a level/pin set there, plus the
+   * project's default and Captain agents.
+   */
+  getConcurrencyState(projectId: string, auditLimit = 10): ProjectConcurrencyState {
+    const settings = readProjectConcurrency(this.db, projectId)
+    const counted = this.countedSessions()
+    const queue = this.startQueue.snapshot()
+    const project = this.db.getProject(projectId)
+    // Agents with open tasks in the project stay listed, so a level can be
+    // pinned before anything runs and does not vanish when a pin is removed.
+    const openTaskAgents = this.db.getTasks({ projectId })
+      .filter((t) => t.agent_id && t.status !== TaskStatus.Completed && !isCoordinatorTask(t))
+      .map((t) => t.agent_id as string)
+    const agentIds = new Set<string>([
+      ...openTaskAgents,
+      ...Object.keys(settings.levels),
+      ...Object.keys(settings.pinned),
+      ...counted.filter((s) => s.projectId === projectId).map((s) => s.agentId),
+      ...queue.filter((e) => taskProjectId(this.db.getTask(e.taskId)) === projectId).map((e) => e.agentId)
+    ])
+    if (project?.default_agent_id) agentIds.add(project.default_agent_id)
+    const pressure = this.getResourcePressure()
+    const agents = [...agentIds].flatMap((agentId) => {
+      const agent = this.db.getAgent(agentId)
+      if (!agent) return []
+      const cap = agentCap(agent)
+      const { level, source } = effectiveLevel(settings, agentId, cap)
+      const runningInProject = counted.filter((s) => s.agentId === agentId && s.projectId === projectId).length
+      const runningTotal = counted.filter((s) => s.agentId === agentId).length
+      const queued = queue.filter((e) => e.agentId === agentId && taskProjectId(this.db.getTask(e.taskId)) === projectId)
+      const serialChainQueued = queued.filter((e) => this.isSerialChainStart(e.taskId)).length
+      const overlapQueued = queued.filter((e) => e.reason === 'file_overlap').length
+      return [{
+        agentId,
+        agentName: agent.name,
+        cap,
+        level,
+        source,
+        runningInProject,
+        runningTotal,
+        queuedInProject: queued.length,
+        recommendation: recommendLevel({ cap, level, queued: queued.length, running: runningInProject, serialChainQueued, overlapQueued, underPressure: pressure.underPressure })
+      }]
+    })
+    return {
+      projectId,
+      captainControl: settings.captain_control,
+      agents,
+      pressure,
+      recentChanges: this.db.listConcurrencyAudit(projectId, auditLimit)
+    }
+  }
+
+  /** A queued subtask whose parent sequences its children and has one still running. */
+  private isSerialChainStart(taskId: string): boolean {
+    const task = this.db.getTask(taskId)
+    if (!task?.parent_task_id) return false
+    const siblings = this.db.getSubtasks(task.parent_task_id)
+    return isSuccessorGraphInProgress(siblings) && siblings.some((s) => s.id !== taskId && s.status === TaskStatus.AgentWorking)
   }
 
   /** Counts an admitted start of a real task against its project's day (#65). */
@@ -3330,7 +3506,11 @@ export class AgentManager extends EventEmitter {
       SYSTEM_MESSAGE_MARKER,
       `provenance: origin=admission-control project=${projectId} human_authored=false authorizes_actions=false`,
       '',
-      'A start in your project was queued by admission control. No action is required; the queue drains by itself.',
+      decision.reason === 'concurrency_level'
+        ? 'A start in your project waits for your working concurrency level. If it can run in parallel with what is running (no shared files, not the next step of a serial chain) and the machine is not under pressure, raise the level with `set_concurrency` (never above the hard cap). Otherwise nothing is needed; it starts when a job finishes.'
+        : decision.reason === 'file_overlap'
+          ? 'A start in your project waits because it touches the same files as a running job. It starts when that job finishes; no action is required.'
+          : 'A start in your project was queued by admission control. No action is required; the queue drains by itself.',
       '',
       FINDINGS_BEGIN,
       `Task "${task.title}" (${task.id}) is waiting to start: ${describeQueueReason(decision.reason, decision.limit, decision.running)}`,
@@ -3364,6 +3544,11 @@ export class AgentManager extends EventEmitter {
    */
   drainStartQueue(): void {
     let changed = false
+    // #150: a priority changed while waiting reorders the queue now.
+    this.startQueue.refresh((taskId) => {
+      const task = this.db.getTask(taskId)
+      return task ? { projectId: taskProjectId(task), priority: task.priority } : undefined
+    })
     for (const entry of this.startQueue.snapshot()) {
       const agent = this.db.getAgent(entry.agentId)
       const task = this.db.getTask(entry.taskId)
@@ -3381,10 +3566,11 @@ export class AgentManager extends EventEmitter {
         continue
       }
 
+      const counted = this.countedSessions()
       const decision = checkAdmission(
         { agentId: entry.agentId, taskId: entry.taskId, task, agent: agent! },
-        this.countedSessions(),
-        this.admissionLimits(task)
+        counted,
+        this.admissionLimits(task, entry.agentId, counted)
       )
       if (!decision.admitted) {
         // The queued reason follows the current limits: a project may have
@@ -3400,6 +3586,7 @@ export class AgentManager extends EventEmitter {
       this.startQueue.remove(entry.taskId)
       changed = true
       this.recordCountedStart(task)
+      this.startQueue.markServed(entry.projectId)
       for (const key of this.projectLimitNotices) {
         if (key.startsWith(`${taskProjectId(task)}:`)) this.projectLimitNotices.delete(key)
       }

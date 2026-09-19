@@ -6,6 +6,7 @@ import { getRepoProviders, isGitProvider } from '../repo-providers'
 import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
 import { migrateCoordinatorToCaptain } from './captain-migration'
 import { splitLegacyPullRequestEscalation } from '../../shared/project-policies'
+import { createConcurrencyTables, migrateConcurrencyControl } from './concurrency-migration'
 
 /**
  * Bump this whenever new migrations are added so returning users skip
@@ -40,8 +41,11 @@ import { splitLegacyPullRequestEscalation } from '../../shared/project-policies'
  *          contemporaneous feature branch.
  * 19 → 20: managed Captain runtime generations and the durable delivery
  *          outbox used by task messages, Commander requests and reports.
+ * 20 → 21: Captain-managed concurrency (#150): concurrency_audit, task_touches,
+ *          and agents.config.concurrency_cap = min(max_parallel_sessions, 5)
+ *          where unset (migrateConcurrencyControl in concurrency-migration.ts).
  */
-const SCHEMA_VERSION = 20
+const SCHEMA_VERSION = 21
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -530,6 +534,8 @@ export function createTables(db: Database.Database): void {
   `)
 
   createMergeGrantTables(db)
+  // Concurrency control (#150): audit feed and declared touches.
+  createConcurrencyTables(db)
 
   // Report routing (#62): a Captain report quotes the correlation id of
   // the `ask_captain` tool row it answers; this serves that lookup.
@@ -1020,6 +1026,9 @@ export function runMigrations(db: Database.Database): void {
   // Migration v19: merge grants (#137). New tables only; runs after
   // migrateToProjects so the projects table they reference exists.
   migrateMergeGrants(db)
+  // Migration v21: concurrency control (#150). After migrateToProjects so the
+  // projects table the audit references exists.
+  migrateConcurrencyControl(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)
