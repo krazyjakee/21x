@@ -6,7 +6,7 @@ import type { DatabaseManager } from '../database'
 import { COMMANDER_ADMIN_TOOLS, CommanderService, cleanGeneratedTitle, fallbackTitle, toolResultTags } from './commander-service'
 import { CommanderStore } from './commander-store'
 import { buildContext, planFold, splitTurns } from './context'
-import { createCommanderProjectTools, MUTATING_COMMANDER_TOOLS, ProjectMutationConfirmations, type CommanderAgents } from './project-tools'
+import { createCommanderProjectTools, MUTATING_COMMANDER_TOOLS, type CommanderAgents } from './project-tools'
 import { createCommanderSkillTools, MUTATING_COMMANDER_SKILL_TOOLS } from './skill-tools'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_TITLE_PROMPT } from './prompts'
 
@@ -151,13 +151,13 @@ describe('CommanderService turns', () => {
         return []
       }
     })
-    const session = store.createSession('Confirmation context')
+    const session = store.createSession('Turn context')
     await service.sendUserMessage(session.id, 'propose a rename').done
-    await service.sendUserMessage(session.id, 'Confirm abc123').done
+    await service.sendUserMessage(session.id, 'yes, rename it').done
 
     expect(seen).toEqual([
       { sessionId: session.id, userMessage: 'propose a rename', trigger: 'user' },
-      { sessionId: session.id, userMessage: 'Confirm abc123', trigger: 'user' }
+      { sessionId: session.id, userMessage: 'yes, rename it', trigger: 'user' }
     ])
   })
 
@@ -165,14 +165,13 @@ describe('CommanderService turns', () => {
     const adminTools = [...MUTATING_COMMANDER_TOOLS, ...MUTATING_COMMANDER_SKILL_TOOLS] as string[]
 
     function serviceWithFullRegistry(provider: ChatProvider): CommanderService {
-      const confirmations = new ProjectMutationConfirmations()
       return new CommanderService({
         store,
         emit: (e) => events.push(e),
         createProvider: () => provider,
         getTools: (context) => [
-          ...createCommanderProjectTools({ db, context, confirmations }),
-          ...createCommanderSkillTools({ db, context, confirmations })
+          ...createCommanderProjectTools({ db, context }),
+          ...createCommanderSkillTools({ db, context })
         ]
       })
     }
@@ -261,12 +260,11 @@ describe('CommanderService turns', () => {
             },
       title: () => 'Two projects'
     })
-    const confirmations = new ProjectMutationConfirmations()
     const service = new CommanderService({
       store,
       emit: (e) => events.push(e),
       createProvider: () => provider,
-      getTools: (context) => createCommanderProjectTools({ db, context, confirmations, agents })
+      getTools: (context) => createCommanderProjectTools({ db, context, agents })
     })
     const session = store.createSession()
 
