@@ -140,8 +140,8 @@ describe('CommanderService turns', () => {
     expect(store.listMessages(session.id)).toEqual([])
   })
 
-  it('binds each turn tool registry to the immediately preceding user message', async () => {
-    const seen: Array<{ sessionId: string; userMessage: string }> = []
+  it('builds a fresh tool registry for each turn with its session and trigger', async () => {
+    const seen: Array<{ sessionId: string; trigger: string }> = []
     const service = new CommanderService({
       store,
       emit: (event) => events.push(event),
@@ -156,8 +156,8 @@ describe('CommanderService turns', () => {
     await service.sendUserMessage(session.id, 'yes, rename it').done
 
     expect(seen).toEqual([
-      { sessionId: session.id, userMessage: 'propose a rename', trigger: 'user' },
-      { sessionId: session.id, userMessage: 'yes, rename it', trigger: 'user' }
+      { sessionId: session.id, trigger: 'user' },
+      { sessionId: session.id, trigger: 'user' }
     ])
   })
 

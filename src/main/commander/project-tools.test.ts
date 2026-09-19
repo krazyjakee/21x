@@ -39,23 +39,23 @@ function fakeAgents(over: Partial<CommanderAgents> = {}): CommanderAgents {
   } as unknown as CommanderAgents
 }
 
-function tools(userMessage = 'do it'): ChatToolDefinition[] {
+function tools(): ChatToolDefinition[] {
   return createCommanderProjectTools({
     db,
-    context: { sessionId: 'session-1', userMessage },
+    context: { sessionId: 'session-1' },
     onProjectChanged: (projectId, kind) => changes.push({ projectId, kind }),
     ...extra
   })
 }
 
-function tool(name: string, userMessage = 'do it'): ChatToolDefinition {
-  const found = tools(userMessage).find((candidate) => candidate.name === name)
+function tool(name: string): ChatToolDefinition {
+  const found = tools().find((candidate) => candidate.name === name)
   if (!found) throw new Error(`Missing tool: ${name}`)
   return found
 }
 
-async function call(name: string, input: Record<string, unknown>, userMessage = 'do it'): Promise<ChatToolResult> {
-  const output = await tool(name, userMessage).handler(input, { signal: new AbortController().signal, toolCallId: 'call-1' })
+async function call(name: string, input: Record<string, unknown>): Promise<ChatToolResult> {
+  const output = await tool(name).handler(input, { signal: new AbortController().signal, toolCallId: 'call-1' })
   return typeof output === 'string' ? { content: output } : output
 }
 
@@ -207,7 +207,7 @@ describe('Commander tool registry', () => {
 describe('Commander tool registry with skill administration (#74)', () => {
   /** The registry ipc/commander.ts builds: project tools, then skill tools. */
   function fullRegistry(): ChatToolDefinition[] {
-    const context = { sessionId: 'session-1', userMessage: 'do it' }
+    const context = { sessionId: 'session-1' }
     return [...tools(), ...createCommanderSkillTools({ db, context })]
   }
 

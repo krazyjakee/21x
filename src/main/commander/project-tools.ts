@@ -53,7 +53,6 @@ export type CommanderAgents = Pick<
 
 export interface ProjectToolContext {
   sessionId: string
-  userMessage: string
 }
 
 export interface AskCaptainDispatch {
