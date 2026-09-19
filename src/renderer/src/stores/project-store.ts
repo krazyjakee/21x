@@ -13,7 +13,7 @@ export const CURRENT_PROJECT_SETTING = 'current_project_id'
 /**
  * The current project and the list of projects. Every task-facing view reads
  * `currentProjectId` from here; later features (the per-project canvas, the
- * per-project Mastermind) subscribe to the same field. The Commander view is
+ * per-project Captain) subscribe to the same field. The Commander view is
  * deliberately cross-project and ignores it.
  */
 interface ProjectState {

@@ -4,6 +4,7 @@ import { TaskStatus } from '../../shared/constants'
 import { DEFAULT_PROJECT_ID, DEFAULT_PROJECT_NAME } from '../../shared/projects'
 import { getRepoProviders, isGitProvider } from '../repo-providers'
 import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
+import { migrateCoordinatorToCaptain } from './captain-migration'
 
 /**
  * Bump this whenever new migrations are added so returning users skip
@@ -19,15 +20,19 @@ import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
  * 9 → 10: remove hosted-service data (removeHostedServiceData)
  * 10 → 11: preserve existing Claude Code agents' permission behaviour
  * 11 → 12: tasks.next_subtask_ids
- * 12 → 13: tasks.role (coordinator rows such as the Mastermind)
+ * 12 → 13: tasks.role (coordinator rows such as the Captain)
  * 13 → 14: skills.preferred_model
  * 14 → 15: projects, project_repos, project_resources; tasks.project_id and
  *          task_sources.project_id, everything moved into the Default project
  *          (migrateToProjects)
  * 15 → 16: skills.project_id (null = global; every existing skill stays global)
  *          (migrateSkillScope, #74)
+ * 16 → 17: the project coordinator is renamed to Captain (#71):
+ *          tasks.role, projects.captain_agent_id, the captain_prewarm setting,
+ *          projects.settings.captain_wakeups and project_status_journal.source
+ *          (migrateCoordinatorToCaptain in captain-migration.ts)
  */
-const SCHEMA_VERSION = 16
+const SCHEMA_VERSION = 17
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -145,7 +150,7 @@ export function createTables(db: Database.Database): void {
       name TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
       default_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
-      mastermind_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+      captain_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
       git_provider TEXT DEFAULT NULL,
       git_org TEXT DEFAULT NULL,
       settings TEXT NOT NULL DEFAULT '{}',
@@ -428,7 +433,7 @@ export function createTables(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_connector_dead_letters_instance ON connector_dead_letters(instance_id, created_at);
   `)
 
-  // Project status snapshot (#58): the Mastermind's narrative for a project.
+  // Project status snapshot (#58): the Captain's narrative for a project.
   // Counts are never stored; they are computed from tasks and live sessions.
   // One row per project, replaced on every write. A durable journal of past
   // snapshots (#72) is a separate table beside this one, keyed the same way.
@@ -442,9 +447,9 @@ export function createTables(db: Database.Database): void {
     );
   `)
 
-  // Project status journal (#72): one row per Mastermind status update, kept
+  // Project status journal (#72): one row per Captain status update, kept
   // beside the snapshot above. The lists are JSON arrays of short strings.
-  // `source` is 'mastermind' for a written update and 'compaction' for the
+  // `source` is 'captain' for a written update and 'compaction' for the
   // monthly roll-up of entries older than the retention window. Rows go with
   // their project. The index serves the newest-first (created_at, id) page
   // reads. New table, so CREATE IF NOT EXISTS covers fresh and existing DBs alike.
@@ -457,7 +462,7 @@ export function createTables(db: Database.Database): void {
       blockers TEXT NOT NULL DEFAULT '[]',
       decisions TEXT NOT NULL DEFAULT '[]',
       next_steps TEXT NOT NULL DEFAULT '[]',
-      source TEXT NOT NULL DEFAULT 'mastermind',
+      source TEXT NOT NULL DEFAULT 'captain',
       correlation_id TEXT,
       created_at TEXT NOT NULL
     );
@@ -465,8 +470,8 @@ export function createTables(db: Database.Database): void {
       ON project_status_journal(project_id, created_at DESC, id DESC);
   `)
 
-  // Report routing (#62): a Mastermind report quotes the correlation id of
-  // the `ask_mastermind` tool row it answers; this serves that lookup.
+  // Report routing (#62): a Captain report quotes the correlation id of
+  // the `ask_captain` tool row it answers; this serves that lookup.
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_commander_messages_correlation
       ON commander_messages(correlation_id) WHERE correlation_id IS NOT NULL;
@@ -888,7 +893,7 @@ export function runMigrations(db: Database.Database): void {
     db.exec(`ALTER TABLE tasks ADD COLUMN auto_complete_without_review INTEGER NOT NULL DEFAULT 0`)
   }
 
-  // Coordinator rows (the Mastermind) live in `tasks` so their session and
+  // Coordinator rows (the Captain) live in `tasks` so their session and
   // transcript persist like any task's, and `role` keeps them out of every list.
   if (!columnNames.has('role')) {
     db.exec(`ALTER TABLE tasks ADD COLUMN role TEXT NOT NULL DEFAULT 'task'`)
@@ -946,6 +951,10 @@ export function runMigrations(db: Database.Database): void {
   // Migration v16: skill scope (#74). Runs after migrateToProjects so the
   // projects table the column references exists.
   migrateSkillScope(db)
+
+  // Migration v17: the coordinator is renamed to Captain (#71). Runs after migrateToProjects so
+  // the projects table (and its renamed column) exists.
+  migrateCoordinatorToCaptain(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)

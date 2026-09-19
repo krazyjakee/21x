@@ -38,7 +38,7 @@ export interface ProjectDraft {
   name: string
   description: string
   default_agent_id: string | null
-  mastermind_agent_id: string | null
+  captain_agent_id: string | null
   /** null = the global git provider setting. */
   git_provider: string | null
   /** null = the global org setting. */
@@ -65,7 +65,7 @@ export function emptyProjectDraft(): ProjectDraft {
     name: '',
     description: '',
     default_agent_id: null,
-    mastermind_agent_id: null,
+    captain_agent_id: null,
     git_provider: null,
     git_org: null,
     settings: {},
@@ -83,7 +83,7 @@ export function draftFromProject(
     name: project.name,
     description: project.description,
     default_agent_id: project.default_agent_id,
-    mastermind_agent_id: project.mastermind_agent_id,
+    captain_agent_id: project.captain_agent_id,
     git_provider: project.git_provider,
     git_org: project.git_org,
     settings: project.settings ?? {},
@@ -209,7 +209,7 @@ export async function saveProjectDraft(
     name: draft.name.trim(),
     description: draft.description,
     default_agent_id: draft.default_agent_id || null,
-    mastermind_agent_id: draft.mastermind_agent_id || null,
+    captain_agent_id: draft.captain_agent_id || null,
     git_provider: draft.git_provider || null,
     git_org: draft.git_org?.trim() || null,
     settings: draft.settings

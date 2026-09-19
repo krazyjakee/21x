@@ -4,7 +4,7 @@ import { AgentManager } from './agent-manager'
 import { TaskStatus } from '../shared/constants'
 
 /**
- * The Mastermind is a task row with role 'mastermind'. Its conversation must
+ * The Captain is a task row with role 'captain'. Its conversation must
  * outlive the runtime: a restart, or a runtime the idle reaper released, is
  * continued from the persisted session_id rather than begun again.
  */
@@ -38,18 +38,18 @@ vi.mock('./secret-broker', () => ({
   writeSecretShellWrapper: vi.fn()
 }))
 
-const MASTERMIND_ID = 'mm-row'
+const CAPTAIN_ID = 'mm-row'
 
-/** An in-memory task table: the Mastermind row plus whatever updateTask writes. */
+/** An in-memory task table: the Captain row plus whatever updateTask writes. */
 function makeDb(initial: Record<string, unknown>) {
-  const task: Record<string, unknown> = { id: MASTERMIND_ID, title: 'Mastermind', role: 'mastermind', agent_id: null, status: TaskStatus.NotStarted, ...initial }
+  const task: Record<string, unknown> = { id: CAPTAIN_ID, title: 'Captain', role: 'captain', agent_id: null, status: TaskStatus.NotStarted, ...initial }
   return {
     task,
-    getTask: vi.fn((id: string) => (id === MASTERMIND_ID ? task : undefined)),
+    getTask: vi.fn((id: string) => (id === CAPTAIN_ID ? task : undefined)),
     getTasks: vi.fn(() => []),
     getSubtasks: vi.fn(() => []),
     updateTask: vi.fn((id: string, updates: Record<string, unknown>) => {
-      if (id === MASTERMIND_ID) Object.assign(task, updates)
+      if (id === CAPTAIN_ID) Object.assign(task, updates)
       return task
     }),
     getAgent: vi.fn(() => ({ id: 'agent-1', name: 'Agent', config: { coding_agent: 'codex' } })),
@@ -90,13 +90,13 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-describe('Mastermind session persistence', () => {
+describe('Captain session persistence', () => {
   it('stores the session id on the row and never gives it a task status', async () => {
     const db = makeDb({ session_id: null })
     const adapter = makeAdapter()
     const manager = makeManager(db, adapter)
 
-    const sessionId = await manager.startSession('agent-1', MASTERMIND_ID, undefined, true)
+    const sessionId = await manager.startSession('agent-1', CAPTAIN_ID, undefined, true)
 
     expect(sessionId).toBe('fresh-session')
     expect(adapter.createSession).toHaveBeenCalledOnce()
@@ -110,10 +110,10 @@ describe('Mastermind session persistence', () => {
     const adapter = makeAdapter()
     const manager = makeManager(db, adapter)
 
-    const sessionId = await manager.startSession('agent-1', MASTERMIND_ID, undefined, true)
+    const sessionId = await manager.startSession('agent-1', CAPTAIN_ID, undefined, true)
 
     expect(sessionId).toBe('persisted-session')
-    expect(adapter.resumeSession).toHaveBeenCalledWith('persisted-session', expect.objectContaining({ taskId: MASTERMIND_ID }))
+    expect(adapter.resumeSession).toHaveBeenCalledWith('persisted-session', expect.objectContaining({ taskId: CAPTAIN_ID }))
     expect(adapter.createSession).not.toHaveBeenCalled()
     expect(db.task.session_id).toBe('persisted-session')
   })
@@ -123,8 +123,8 @@ describe('Mastermind session persistence', () => {
     const adapter = makeAdapter()
     const manager = makeManager(db, adapter)
 
-    const first = await manager.startSession('agent-1', MASTERMIND_ID, undefined, true)
-    const second = await manager.startSession('agent-1', MASTERMIND_ID, undefined, true)
+    const first = await manager.startSession('agent-1', CAPTAIN_ID, undefined, true)
+    const second = await manager.startSession('agent-1', CAPTAIN_ID, undefined, true)
 
     expect(second).toBe(first)
     expect(adapter.createSession).toHaveBeenCalledOnce()
@@ -137,7 +137,7 @@ describe('Mastermind session persistence', () => {
     const manager = makeManager(db, adapter)
     const sendToRenderer = (manager as any).sendToRenderer as ReturnType<typeof vi.fn>
 
-    const sessionId = await manager.startSession('agent-1', MASTERMIND_ID, undefined, true)
+    const sessionId = await manager.startSession('agent-1', CAPTAIN_ID, undefined, true)
 
     expect(sessionId).toBe('fresh-session')
     expect(adapter.createSession).toHaveBeenCalledOnce()
@@ -152,7 +152,7 @@ describe('Mastermind session persistence', () => {
     const manager = makeManager(db, adapter)
 
     // The renderer still holds the old id; main no longer has it in memory.
-    const result = await manager.sendMessage('persisted-session', 'what next?', MASTERMIND_ID, 'agent-1')
+    const result = await manager.sendMessage('persisted-session', 'what next?', CAPTAIN_ID, 'agent-1')
 
     expect(result.newSessionId).toBe('persisted-session')
     expect(adapter.resumeSession).toHaveBeenCalledOnce()
@@ -166,7 +166,7 @@ describe('Mastermind session persistence', () => {
     const manager = makeManager(db, adapter)
     vi.spyOn(manager as any, 'hasActiveDelegationTools').mockResolvedValue(false)
 
-    const sessionId = await manager.startSession('agent-1', MASTERMIND_ID, undefined, true)
+    const sessionId = await manager.startSession('agent-1', CAPTAIN_ID, undefined, true)
     const session = (manager as any).sessions.get(sessionId)
     session.status = 'idle'
     session.lastActivityAt = Date.now() - 60 * 60 * 1000
@@ -185,7 +185,7 @@ describe('Mastermind session persistence', () => {
     const manager = makeManager(db, adapter)
     const extract = vi.spyOn(manager as any, 'extractOutputValues').mockResolvedValue(undefined)
 
-    const sessionId = await manager.startSession('agent-1', MASTERMIND_ID, undefined, true)
+    const sessionId = await manager.startSession('agent-1', CAPTAIN_ID, undefined, true)
     const session = (manager as any).sessions.get(sessionId)
     await (manager as any).transitionToIdle(sessionId, session)
 

@@ -1,6 +1,6 @@
 /**
  * Projects group tasks, task sources and (later) the canvas, drawings and a
- * Mastermind. A project may have zero, one or many git repos; everything else
+ * Captain. A project may have zero, one or many git repos; everything else
  * it points at (a Google Drive, docs, a dashboard) is a resource — a link and
  * notes given to agents as context, with no integration.
  */
@@ -21,10 +21,10 @@ export interface ProjectChangedEvent {
 export interface ProjectRecord {
   id: string
   name: string
-  /** The brief the project's Mastermind reads as context. */
+  /** The brief the project's Captain reads as context. */
   description: string
   default_agent_id: string | null
-  mastermind_agent_id: string | null
+  captain_agent_id: string | null
   /** null = use the global `git_provider` setting. */
   git_provider: string | null
   /** null = use the global `github_org` setting. */
@@ -40,7 +40,7 @@ export interface CreateProjectData {
   name: string
   description?: string
   default_agent_id?: string | null
-  mastermind_agent_id?: string | null
+  captain_agent_id?: string | null
   git_provider?: string | null
   git_org?: string | null
   settings?: Record<string, unknown>
@@ -50,7 +50,7 @@ export interface UpdateProjectData {
   name?: string
   description?: string
   default_agent_id?: string | null
-  mastermind_agent_id?: string | null
+  captain_agent_id?: string | null
   git_provider?: string | null
   git_org?: string | null
   settings?: Record<string, unknown>

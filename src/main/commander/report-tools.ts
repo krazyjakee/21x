@@ -2,14 +2,14 @@ import type { ChatToolDefinition, ChatToolResult } from '../chat/tools'
 import { setCommanderEscalationHandler, type EscalationEvent } from '../escalation'
 import type { CommanderService } from './commander-service'
 import type { CommanderStore } from './commander-store'
-import { setMastermindReportHandler, type MastermindReportHandler, type ReportRoutedBy } from './report-inbox'
+import { setCaptainReportHandler, type CaptainReportHandler, type ReportRoutedBy } from './report-inbox'
 
 /**
- * Mastermind reports into Commander sessions (#62; docs/commander.md).
+ * Captain reports into Commander sessions (#62; docs/commander.md).
  *
  * Routing rules, in order:
  * 1. A report quoting a `correlation_id` goes to the session whose
- *    `ask_mastermind` tool row carries that id ({@link CommanderStore.findDelegation}),
+ *    `ask_captain` tool row carries that id ({@link CommanderStore.findDelegation}),
  *    unless that session is archived.
  * 2. Otherwise (no id, an unknown id, or an archived origin) it goes to the
  *    most recently active session, which is where the user is working.
@@ -20,7 +20,7 @@ import { setMastermindReportHandler, type MastermindReportHandler, type ReportRo
  * so it can always be traced back. Delivery itself (store, unread, relay when
  * the session is open) is {@link CommanderService.deliverReport}.
  *
- * Loop protection: a turn started by a report may call `ask_mastermind` only
+ * Loop protection: a turn started by a report may call `ask_captain` only
  * while the session's budget lasts ({@link MAX_REPORT_ASKS_WITHOUT_USER_TURN}
  * calls since the user last spoke); {@link guardReportAsks} enforces it in
  * the tool, not the prompt.
@@ -51,7 +51,7 @@ export function resolveReportSession(store: ReportRoutingStore, correlationId?: 
 // ── Loop protection ───────────────────────────────────────────
 
 export interface ReportAskBudget {
-  /** How many `ask_mastermind` calls report-triggered turns may still make before a user turn resets it. */
+  /** How many `ask_captain` calls report-triggered turns may still make before a user turn resets it. */
   remaining: () => number
   consume: () => void
 }
@@ -68,10 +68,10 @@ function loopGuardResult(): ChatToolResult {
   }
 }
 
-/** The same tools, with `ask_mastermind` refused once the session's report-ask budget is spent. */
+/** The same tools, with `ask_captain` refused once the session's report-ask budget is spent. */
 export function guardReportAsks(tools: ChatToolDefinition[], budget: ReportAskBudget): ChatToolDefinition[] {
   return tools.map((tool) => {
-    if (tool.name !== 'ask_mastermind') return tool
+    if (tool.name !== 'ask_captain') return tool
     return {
       ...tool,
       handler: async (input, context) => {
@@ -88,7 +88,7 @@ export function guardReportAsks(tools: ChatToolDefinition[], budget: ReportAskBu
 /** The report text for an escalation event, or null when the event is not one the Commander relays (only `tell_commander` outcomes are). */
 export function escalationReportText(event: EscalationEvent): string | null {
   if (event.level !== 'tell_commander' || event.outcome !== 'performed') return null
-  return `Escalation notice (policy: act, then tell the Commander): the Mastermind did this on its own — ${event.summary}.`
+  return `Escalation notice (policy: act, then tell the Commander): the Captain did this on its own — ${event.summary}.`
 }
 
 // ── Wiring ────────────────────────────────────────────────────
@@ -101,7 +101,7 @@ export interface CommanderReportBridgeOptions {
 }
 
 /** The handler behind `report_to_commander`: routes, stores and relays one report. */
-export function createMastermindReportHandler(options: CommanderReportBridgeOptions): MastermindReportHandler {
+export function createCaptainReportHandler(options: CommanderReportBridgeOptions): CaptainReportHandler {
   return (report) => {
     const project = options.getProject(report.projectId)
     if (!project) return { delivered: false, detail: `Project not found: ${report.projectId}` }
@@ -123,8 +123,8 @@ export function createMastermindReportHandler(options: CommanderReportBridgeOpti
  * reports. Returns the uninstaller.
  */
 export function installCommanderReportBridge(options: CommanderReportBridgeOptions): () => void {
-  const handler = createMastermindReportHandler(options)
-  setMastermindReportHandler(handler)
+  const handler = createCaptainReportHandler(options)
+  setCaptainReportHandler(handler)
   setCommanderEscalationHandler((event) => {
     const text = escalationReportText(event)
     if (!text) return
@@ -132,7 +132,7 @@ export function installCommanderReportBridge(options: CommanderReportBridgeOptio
     if (!delivery.delivered) console.warn(`[Commander] Escalation for project ${event.projectId} not delivered: ${delivery.detail}`)
   })
   return () => {
-    setMastermindReportHandler(null)
+    setCaptainReportHandler(null)
     setCommanderEscalationHandler(null)
   }
 }

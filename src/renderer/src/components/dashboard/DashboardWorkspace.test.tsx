@@ -150,7 +150,7 @@ describe('DashboardWorkspace', () => {
 
   it('renders command input', () => {
     render(<DashboardWorkspace />)
-    expect(screen.getByPlaceholderText('Ask Mastermind or describe a task...')).toBeDefined()
+    expect(screen.getByPlaceholderText('Ask Captain or describe a task...')).toBeDefined()
   })
 
   it('renders quick chips', () => {
@@ -325,7 +325,7 @@ describe('DashboardWorkspace — readability', () => {
 
   it('gives icon-only command controls accessible names and a full hit area', () => {
     render(<DashboardWorkspace />)
-    for (const name of ['Attach file', 'Send to Mastermind']) {
+    for (const name of ['Attach file', 'Send to Captain']) {
       const button = screen.getByRole('button', { name })
       expect(button.classList.contains('size-hit')).toBe(true)
     }

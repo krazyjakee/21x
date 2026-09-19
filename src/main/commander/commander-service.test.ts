@@ -160,11 +160,11 @@ describe('CommanderService turns', () => {
     ])
   })
 
-  it('delegates to each project the user names and replies at once, without waiting for the Masterminds', async () => {
+  it('delegates to each project the user names and replies at once, without waiting for the Captains', async () => {
     db.createAgent({ name: 'Claude' })
     const alpha = db.createProject({ name: 'Alpha' })!
     const beta = db.createProject({ name: 'Beta' })!
-    // Masterminds that never answer: the Commander's turn must still finish.
+    // Captains that never answer: the Commander's turn must still finish.
     const sendMessage = vi.fn(() => new Promise<{ newSessionId?: string }>(() => {}))
     const agents = {
       getStartQueue: () => [],
@@ -181,8 +181,8 @@ describe('CommanderService turns', () => {
           ? 'Asked Alpha to ship the site and Beta to review the API. They will report back here.'
           : {
               toolCalls: [
-                { id: 'c1', name: 'ask_mastermind', input: { project: 'Alpha', message: 'Ship the site' } },
-                { id: 'c2', name: 'ask_mastermind', input: { project: beta.id, message: 'Review the API' } }
+                { id: 'c1', name: 'ask_captain', input: { project: 'Alpha', message: 'Ship the site' } },
+                { id: 'c2', name: 'ask_captain', input: { project: beta.id, message: 'Review the API' } }
               ]
             },
       title: () => 'Two projects'
@@ -198,7 +198,7 @@ describe('CommanderService turns', () => {
 
     await service.sendUserMessage(session.id, 'Get Alpha to ship the site and Beta to review the API').done
 
-    // Both Masterminds were asked, each with its own correlation id, and the turn ended in text.
+    // Both Captains were asked, each with its own correlation id, and the turn ended in text.
     expect(sendMessage).toHaveBeenCalledTimes(2)
     const targets = sendMessage.mock.calls.map((args) => (args as unknown as [string, string, string])[2]).sort()
     expect(targets).toEqual([db.getCoordinatorTask(alpha.id)!.id, db.getCoordinatorTask(beta.id)!.id].sort())
@@ -206,10 +206,10 @@ describe('CommanderService turns', () => {
 
     const messages = store.listMessages(session.id)
     expect(messages.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'tool', 'assistant'])
-    expect(messages[1].tool_calls?.map((c) => c.name)).toEqual(['ask_mastermind', 'ask_mastermind'])
+    expect(messages[1].tool_calls?.map((c) => c.name)).toEqual(['ask_captain', 'ask_captain'])
     // Tool rows are tagged with the project and the correlation id the report will quote (#62).
-    expect(messages[2]).toMatchObject({ tool_name: 'ask_mastermind', is_error: false, project_id: alpha.id })
-    expect(messages[3]).toMatchObject({ tool_name: 'ask_mastermind', is_error: false, project_id: beta.id })
+    expect(messages[2]).toMatchObject({ tool_name: 'ask_captain', is_error: false, project_id: alpha.id })
+    expect(messages[3]).toMatchObject({ tool_name: 'ask_captain', is_error: false, project_id: beta.id })
     expect(messages[2].correlation_id).toMatch(/^cmd-/)
     expect(messages[3].correlation_id).toMatch(/^cmd-/)
     expect(messages[2].correlation_id).not.toBe(messages[3].correlation_id)

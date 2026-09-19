@@ -129,7 +129,7 @@ List active (non-archived) projects in sidebar order.
 
 | Field             | Type      | Description |
 |-------------------|-----------|-------------|
-| `brief`           | `string`  | The project's description (the brief its Mastermind reads) |
+| `brief`           | `string`  | The project's description (the brief its Captain reads) |
 | `is_default`      | `boolean` | The built-in `default` project |
 | `current`         | `boolean` | The desktop's current project (setting `current_project_id`, else `default`): where a task created without `project_id` lands. Exactly one project is `current`. |
 | `task_count`      | `number`  | User tasks in the project (coordinator rows excluded) |
@@ -173,9 +173,9 @@ it on `task:*` and `agent:status` events (debounced) and every 15 s while visibl
 
 | Field                 | Type             | Description |
 |-----------------------|------------------|-------------|
-| `status`              | `ProjectStatus`  | Counts from the task rows and live sessions, plus the Mastermind's narrative (`summary`, `top_blockers`, `updated_at`). `limits` is present when the agent manager is running. |
+| `status`              | `ProjectStatus`  | Counts from the task rows and live sessions, plus the Captain's narrative (`summary`, `top_blockers`, `updated_at`). `limits` is present when the agent manager is running. |
 | `pending_approvals`   | `number`         | Live sessions waiting for the user to approve a step (`status.counts.awaiting_approval`) |
-| `held_actions`        | `number`         | Mastermind calls held by the project's escalation policy, waiting for the user |
+| `held_actions`        | `number`         | Captain calls held by the project's escalation policy, waiting for the user |
 | `running_agents`      | `number`         | Working sessions of the project's tasks right now |
 | `paused`              | `boolean`        | The project's own pause |
 | `all_projects_paused` | `boolean`        | The global pause: nothing starts anywhere while true |
@@ -185,7 +185,7 @@ it on `task:*` and `agent:status` events (debounced) and every 15 s while visibl
 
 Archived projects are not listed. Every number is counted (task rows, live
 sessions, held calls); only `status.summary` and `status.top_blockers` come from
-the Mastermind.
+the Captain.
 
 ---
 

@@ -1,10 +1,10 @@
 /**
- * Which project events wake a project's Mastermind (#57).
+ * Which project events wake a project's Captain (#57).
  *
- * The choice lives in `projects.settings` under {@link MASTERMIND_WAKEUPS_SETTING}
+ * The choice lives in `projects.settings` under {@link CAPTAIN_WAKEUPS_SETTING}
  * so it needs no schema change. An absent or unreadable value means the
  * default: wake-ups on, for every kind. The renderer's project editor and the
- * main-process waker both read it through {@link readMastermindWakeupSettings}.
+ * main-process waker both read it through {@link readCaptainWakeupSettings}.
  */
 
 /** Every kind of event the main process raises for a project, in display order. */
@@ -29,16 +29,16 @@ export const PROJECT_EVENT_KIND_LABELS: Record<ProjectEventKind, string> = {
 }
 
 /** Key inside `projects.settings`. */
-export const MASTERMIND_WAKEUPS_SETTING = 'mastermind_wakeups'
+export const CAPTAIN_WAKEUPS_SETTING = 'captain_wakeups'
 
-export interface MastermindWakeupSettings {
+export interface CaptainWakeupSettings {
   /** Off entirely when false, whatever `kinds` says. */
   enabled: boolean
-  /** The kinds that wake the Mastermind. */
+  /** The kinds that wake the Captain. */
   kinds: ProjectEventKind[]
 }
 
-export function defaultMastermindWakeupSettings(): MastermindWakeupSettings {
+export function defaultCaptainWakeupSettings(): CaptainWakeupSettings {
   return { enabled: true, kinds: [...PROJECT_EVENT_KINDS] }
 }
 
@@ -47,24 +47,24 @@ function isKind(value: unknown): value is ProjectEventKind {
 }
 
 /** The project's wake-up settings; anything missing or malformed falls back to the default (on, all kinds). */
-export function readMastermindWakeupSettings(settings: Record<string, unknown> | null | undefined): MastermindWakeupSettings {
-  const raw = settings?.[MASTERMIND_WAKEUPS_SETTING]
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return defaultMastermindWakeupSettings()
+export function readCaptainWakeupSettings(settings: Record<string, unknown> | null | undefined): CaptainWakeupSettings {
+  const raw = settings?.[CAPTAIN_WAKEUPS_SETTING]
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return defaultCaptainWakeupSettings()
   const value = raw as { enabled?: unknown; kinds?: unknown }
   const enabled = typeof value.enabled === 'boolean' ? value.enabled : true
   const kinds = Array.isArray(value.kinds) ? value.kinds.filter(isKind) : [...PROJECT_EVENT_KINDS]
   return { enabled, kinds }
 }
 
-/** True when an event of this kind should wake the project's Mastermind. */
-export function wakeupKindEnabled(settings: MastermindWakeupSettings, kind: ProjectEventKind): boolean {
+/** True when an event of this kind should wake the project's Captain. */
+export function wakeupKindEnabled(settings: CaptainWakeupSettings, kind: ProjectEventKind): boolean {
   return settings.enabled && settings.kinds.includes(kind)
 }
 
 /** `projects.settings` with the wake-up choice written into it; other keys are kept. */
-export function withMastermindWakeupSettings(
+export function withCaptainWakeupSettings(
   settings: Record<string, unknown> | null | undefined,
-  wakeups: MastermindWakeupSettings
+  wakeups: CaptainWakeupSettings
 ): Record<string, unknown> {
-  return { ...(settings ?? {}), [MASTERMIND_WAKEUPS_SETTING]: { enabled: wakeups.enabled, kinds: [...wakeups.kinds] } }
+  return { ...(settings ?? {}), [CAPTAIN_WAKEUPS_SETTING]: { enabled: wakeups.enabled, kinds: [...wakeups.kinds] } }
 }

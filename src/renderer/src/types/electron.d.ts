@@ -68,7 +68,7 @@ import type {
 import type { HeldAction, ProjectLimitState } from '@shared/project-limit-types'
 import type { ProjectStatus, ProjectStatusHistoryPage } from '@shared/project-status'
 import type { ProjectOverviewEntry } from '@shared/project-overview'
-import type { MastermindMemory } from '@shared/mastermind-memory'
+import type { CaptainMemory } from '@shared/captain-memory'
 
 export interface AgentSessionStartResult {
   sessionId: string
@@ -375,7 +375,7 @@ interface ElectronAPI {
     update: (id: string, data: UpdateProjectData) => Promise<ProjectRecord | undefined>
     archive: (id: string, archived?: boolean) => Promise<ProjectRecord | undefined>
     reorder: (orderedIds: string[]) => Promise<void>
-    getMastermindMemory: (projectId: string) => Promise<MastermindMemory | null>
+    getCaptainMemory: (projectId: string) => Promise<CaptainMemory | null>
     moveTask: (taskId: string, projectId: string) => Promise<Task[] | null>
     onChanged: (callback: (event: ProjectChangedEvent) => void) => () => void
     /** Project status (#58). */
@@ -404,7 +404,7 @@ interface ElectronAPI {
     isAllPaused: () => Promise<boolean>
     pauseAll: (paused: boolean) => Promise<boolean>
   }
-  /** Mastermind tool calls held by the escalation policy (#66). */
+  /** Captain tool calls held by the escalation policy (#66). */
   escalation: {
     listHeld: (projectId?: string) => Promise<HeldAction[]>
     approve: (id: string) => Promise<{ ok: boolean; result?: unknown; error?: string }>

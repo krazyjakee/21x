@@ -42,7 +42,7 @@ describe('DatabaseManager.getProjectStatus (#58)', () => {
     expect(db.getProjectStatus(project.id).counts).toEqual({ running: 2, queued: 0, awaiting_review: 1, awaiting_approval: 0, blocked: 1 })
   })
 
-  it('never counts the Mastermind row', () => {
+  it('never counts the Captain row', () => {
     const { db, project } = seed()
     expect(db.getCoordinatorTask(project.id)).toBeDefined()
     expect(db.getProjectStatus(project.id).counts).toEqual({ running: 0, queued: 0, awaiting_review: 0, awaiting_approval: 0, blocked: 0 })
@@ -101,8 +101,8 @@ describe('update_project_status tool (#58)', () => {
 
   it('forces the scope\'s project and refuses task agents in the same project', async () => {
     const invoke = vi.fn(async () => ({ success: true }))
-    const mastermind = { parentTaskId: null, taskId: null, artifactTaskId: null, projectId: 'p1' }
-    const ok = await callToolForScope('update_project_status', { summary: 'S', project_id: 'other' }, mastermind, invoke)
+    const captain = { parentTaskId: null, taskId: null, artifactTaskId: null, projectId: 'p1' }
+    const ok = await callToolForScope('update_project_status', { summary: 'S', project_id: 'other' }, captain, invoke)
     expect(ok.isError).toBeUndefined()
     expect(invoke).toHaveBeenCalledWith('/update_project_status', { summary: 'S', project_id: 'p1' })
 
@@ -110,7 +110,7 @@ describe('update_project_status tool (#58)', () => {
     const taskAgent = { parentTaskId: null, taskId: null, artifactTaskId: 't1', projectId: 'p1' }
     const denied = await callToolForScope('update_project_status', { summary: 'S' }, taskAgent, invoke)
     expect(denied.isError).toBe(true)
-    expect(denied.content[0].text).toContain('only the project\'s Mastermind')
+    expect(denied.content[0].text).toContain('only the project\'s Captain')
     expect(invoke).not.toHaveBeenCalled()
 
     // Subtask scope does not list the tool at all.

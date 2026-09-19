@@ -5,7 +5,7 @@ import { useProjectStore } from '@/stores/project-store'
 import type { HeldAction } from '@shared/project-limit-types'
 
 /**
- * Mastermind tool calls held by a project's escalation policy (#66), as a
+ * Captain tool calls held by a project's escalation policy (#66), as a
  * status-bar pill that opens a small list with Approve / Reject. Renders
  * nothing while nothing is held. The list comes from the main process and is
  * pushed on every change, so this never has to poll.
@@ -51,8 +51,8 @@ export function HeldActionsNotice() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-amber-700 hover:bg-amber-500/10 dark:text-amber-400 cursor-pointer"
-        title="Mastermind actions waiting for your approval"
-        aria-label={`${held.length} Mastermind action${held.length !== 1 ? 's' : ''} waiting for approval`}
+        title="Captain actions waiting for your approval"
+        aria-label={`${held.length} Captain action${held.length !== 1 ? 's' : ''} waiting for approval`}
         aria-expanded={open}
       >
         <ShieldAlert className="h-3 w-3" />
@@ -61,11 +61,11 @@ export function HeldActionsNotice() {
       {open && (
         <div
           role="dialog"
-          aria-label="Held Mastermind actions"
+          aria-label="Held Captain actions"
           className="absolute bottom-full right-0 z-50 mb-2 w-96 rounded-lg border border-border bg-card p-2 text-xs text-foreground shadow-lg"
         >
           <p className="mb-2 px-1 text-[11px] text-muted-foreground">
-            The project’s escalation policy asks you before these run. Approve runs the call; Reject drops it and tells the Mastermind.
+            The project’s escalation policy asks you before these run. Approve runs the call; Reject drops it and tells the Captain.
           </p>
           <ul className="space-y-1.5">
             {held.map((action) => (

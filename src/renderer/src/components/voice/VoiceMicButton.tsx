@@ -89,7 +89,7 @@ export function VoiceMicButton({
    * The open turn is writing into this button's composer, whoever started it.
    *
    * Without this, starting from the top bar left the microphone beside the
-   * Mastermind box looking idle — and disabled — while it was the box receiving
+   * Captain box looking idle — and disabled — while it was the box receiving
    * every word. The recording state belongs where the words land, not only
    * where the click happened.
    */

@@ -5,7 +5,7 @@ import type { ProjectStatus, ProjectStatusCounts } from '@shared/project-status'
 
 /**
  * Project status for a list of projects (#58): fetched when the list is
- * shown, refetched when the Mastermind writes a new summary. Counts are
+ * shown, refetched when the Captain writes a new summary. Counts are
  * computed by the main process from the database and live sessions; nothing
  * here is an LLM's opinion.
  */
@@ -57,7 +57,7 @@ export function describeProjectCounts(counts: ProjectStatusCounts): string {
 }
 
 /**
- * One compact line per project: the counts, the Mastermind's summary and
+ * One compact line per project: the counts, the Captain's summary and
  * how old that summary is. `compact` keeps it to two short lines for the
  * project switcher; the settings list shows the summary in full.
  */

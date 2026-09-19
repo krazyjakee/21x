@@ -1,7 +1,7 @@
 /**
  * Skill scope (#74). A skill is either global (`project_id` null: visible to
  * every project) or owned by one project (visible to the Commander, that
- * project's Mastermind and the sessions of that project's tasks). Names stay
+ * project's Captain and the sessions of that project's tasks). Names stay
  * unique across both scopes so global and project skills can be written to
  * one workspace without a filename collision.
  */

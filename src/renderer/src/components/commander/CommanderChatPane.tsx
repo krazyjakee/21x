@@ -55,7 +55,7 @@ function thinkingOptions(provider: ChatProviderId): ChatReasoningEffort[] {
 }
 
 export const COMMANDER_EMPTY_DESCRIPTION =
-  'The Commander is a fast chat that coordinates your projects. It hands work to each project’s Mastermind and relays their reports back here — it never does the work itself.'
+  'The Commander is a fast chat that coordinates your projects. It hands work to each project’s Captain and relays their reports back here — it never does the work itself.'
 
 /** The open session: history, the streaming turn, and the composer. */
 export function CommanderChatPane() {

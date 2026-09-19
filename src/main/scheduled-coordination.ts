@@ -1,5 +1,5 @@
 /**
- * Scheduled coordination (#67): per-project Mastermind reviews and the
+ * Scheduled coordination (#67): per-project Captain reviews and the
  * Commander briefing, both on cron schedules, both off by default
  * (shared/scheduled-coordination.ts holds the settings shapes).
  *
@@ -8,10 +8,10 @@
  *
  *  - Scheduled review: a project whose `settings.scheduled_review` is enabled
  *    gets one fenced "scheduled review" system message at each cron
- *    occurrence, delivered to its Mastermind row through
+ *    occurrence, delivered to its Captain row through
  *    AgentManager.sendMessage — the same rejoin-or-resume path the event
- *    waker uses (mastermind-waker.ts). A paused project (#65: its own pause
- *    or the global one) is skipped and logged. A Mastermind that is mid-turn
+ *    waker uses (captain-waker.ts). A paused project (#65: its own pause
+ *    or the global one) is skipped and logged. A Captain that is mid-turn
  *    is retried on the next tick while the occurrence is still recent.
  *  - Commander briefing: the `commander_briefing` app setting. At each
  *    occurrence a NEW Commander session "Briefing <date>" is created holding a
@@ -39,7 +39,7 @@ import { CommanderStore } from './commander/commander-store'
 import { createChatProviderFromSettings } from './chat/provider-factory'
 import { listHeldActions } from './escalation'
 import { getCommanderService } from './ipc/commander'
-import { resolveMastermindAgentId, type MastermindWakerAgents } from './mastermind-waker'
+import { resolveCaptainAgentId, type CaptainWakerAgents } from './captain-waker'
 import { buildProjectStatus, type ProjectStatusAgents } from './project-status'
 import { isAllProjectsPaused, localDayKey } from './project-limits'
 import { projectLimitsFromSettings } from '../shared/project-policies'
@@ -57,7 +57,7 @@ export type ScheduledCoordinationStore = Pick<
   'getProjects' | 'getProject' | 'getCoordinatorTask' | 'getAgents' | 'getSetting' | 'setSetting' | 'getProjectStatus' | 'getTasks'
 > & { db: DatabaseManager['db'] }
 
-export type ScheduledCoordinationAgents = MastermindWakerAgents & Partial<ProjectStatusAgents>
+export type ScheduledCoordinationAgents = CaptainWakerAgents & Partial<ProjectStatusAgents>
 
 /** The part of the speech service the briefing uses. */
 export interface BriefingSpeech {
@@ -77,7 +77,7 @@ export interface ScheduledCoordinationOptions {
   getSpeech?: () => BriefingSpeech | null
   /** True when a window exists to play speech in. */
   canPlayAudio?: () => boolean
-  /** Mastermind calls held for the user's approval (#66). */
+  /** Captain calls held for the user's approval (#66). */
   listHeldActions?: (projectId: string) => HeldAction[]
   tickMs?: number
   /** A missed occurrence older than this is skipped rather than caught up. */
@@ -143,7 +143,7 @@ type DueDecision =
 
 // ── Message builders ──────────────────────────────────────────
 
-/** The fenced wake-up a Mastermind gets for a scheduled review. */
+/** The fenced wake-up a Captain gets for a scheduled review. */
 export function buildScheduledReviewMessage(coordinatorTaskId: string, project: Pick<ProjectRecord, 'name'>, status: ProjectStatus | null, occurrence: number): string {
   const header = `Scheduled review of "${project.name}".`
   const lines: string[] = []
@@ -213,7 +213,7 @@ export function buildBriefingText(entries: BriefingProjectEntry[], day: string):
     }
     const approvals: string[] = []
     if (status && status.counts.awaiting_approval > 0) approvals.push(`${plural(status.counts.awaiting_approval, 'agent step')} waiting for approval`)
-    if (entry.heldActions > 0) approvals.push(`${plural(entry.heldActions, 'Mastermind action')} held for your approval`)
+    if (entry.heldActions > 0) approvals.push(`${plural(entry.heldActions, 'Captain action')} held for your approval`)
     if (approvals.length > 0) lines.push(`Pending approvals: ${approvals.join('; ')}.`)
     if (status && status.top_blockers.length > 0) {
       lines.push('Blockers:')
@@ -270,7 +270,7 @@ export class ScheduledCoordination {
   private ticking = false
   /** Invalid crons already logged, so the log does not repeat every minute. */
   private readonly invalidLogged = new Set<string>()
-  /** Projects whose Mastermind is being woken right now. */
+  /** Projects whose Captain is being woken right now. */
   private readonly waking = new Set<string>()
 
   constructor(private readonly options: ScheduledCoordinationOptions) {
@@ -377,7 +377,7 @@ export class ScheduledCoordination {
     const agents = this.options.agents
     const coordinator = db.getCoordinatorTask(project.id)
     if (!agents || !coordinator) {
-      console.warn(`[ScheduledCoordination] Project ${project.id} has no Mastermind to review with; skipping`)
+      console.warn(`[ScheduledCoordination] Project ${project.id} has no Captain to review with; skipping`)
       this.markHandled(key, cron, occurrence)
       return
     }
@@ -386,9 +386,9 @@ export class ScheduledCoordination {
       // Mid-turn: try again next tick, while the occurrence is still recent (decide() drops it after catchUpMs).
       return
     }
-    const agentId = live?.session.agentId ?? resolveMastermindAgentId(db, project)
+    const agentId = live?.session.agentId ?? resolveCaptainAgentId(db, project)
     if (!agentId) {
-      console.warn(`[ScheduledCoordination] No agent to run the Mastermind of ${project.id}; skipping its scheduled review`)
+      console.warn(`[ScheduledCoordination] No agent to run the Captain of ${project.id}; skipping its scheduled review`)
       this.markHandled(key, cron, occurrence)
       return
     }
@@ -398,10 +398,10 @@ export class ScheduledCoordination {
     this.markHandled(key, cron, occurrence)
     this.waking.add(project.id)
     try {
-      console.log(`[ScheduledCoordination] Waking the Mastermind of ${project.id} for its scheduled review`)
+      console.log(`[ScheduledCoordination] Waking the Captain of ${project.id} for its scheduled review`)
       await agents.sendMessage(live?.sessionId ?? '', message, coordinator.id, agentId)
     } catch (err) {
-      console.error(`[ScheduledCoordination] Could not wake the Mastermind of ${project.id}:`, err)
+      console.error(`[ScheduledCoordination] Could not wake the Captain of ${project.id}:`, err)
     } finally {
       this.waking.delete(project.id)
     }

@@ -9,12 +9,12 @@ export function DashboardWorkspace() {
   const openCreateWithPrefill = useUIStore((s) => s.openCreateWithPrefill)
   const setShowOrchestrator = useUIStore((s) => s.setShowOrchestrator)
 
-  // Handler: send message to Mastermind and open the drawer
-  const handleSendToMastermind = useCallback((message: string) => {
+  // Handler: send message to Captain and open the drawer
+  const handleSendToCaptain = useCallback((message: string) => {
     // Open the orchestrator panel — the panel itself handles sending messages
     setShowOrchestrator(true)
     // We dispatch a custom event so the OrchestratorPanel can pick up the message
-    window.dispatchEvent(new CustomEvent('mastermind-prefill', { detail: { message } }))
+    window.dispatchEvent(new CustomEvent('captain-prefill', { detail: { message } }))
   }, [setShowOrchestrator])
 
   // Handler: create task from command input text
@@ -26,7 +26,7 @@ export function DashboardWorkspace() {
     }
   }, [openCreateWithPrefill])
 
-  // Handler: open Mastermind drawer from hero "See full conversation"
+  // Handler: open Captain drawer from hero "See full conversation"
   const handleSeeFullConversation = useCallback(() => {
     setShowOrchestrator(true)
   }, [setShowOrchestrator])
@@ -35,18 +35,18 @@ export function DashboardWorkspace() {
     <div className="ui-scale h-full overflow-y-auto overflow-x-hidden">
       {/* Command center — centered narrow column */}
       <div className="max-w-3xl mx-auto px-6 pt-8 pb-6 space-y-5">
-        {/* 1. Hero — Recent Mastermind Messages */}
+        {/* 1. Hero — Recent Captain Messages */}
         <HeroSection onSeeFullConversation={handleSeeFullConversation} />
 
         {/* 2. Command Input */}
         <CommandInput
-          onSendToMastermind={handleSendToMastermind}
+          onSendToCaptain={handleSendToCaptain}
           onCreateTask={handleCreateTask}
         />
 
         {/* 3. Quick Task Chips */}
         <QuickChips
-          onAskMastermind={handleSendToMastermind}
+          onAskCaptain={handleSendToCaptain}
           onCreateTask={(text) => openCreateWithPrefill(text)}
         />
       </div>

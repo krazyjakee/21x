@@ -1,6 +1,6 @@
 /**
  * Renderer-safe shapes for the per-project limit state (#65) and the
- * Mastermind calls held by the escalation policy (#66). The main process
+ * Captain calls held by the escalation policy (#66). The main process
  * builds them in project-limits.ts and escalation.ts; the bridge and the
  * project editor read them.
  */
@@ -16,7 +16,7 @@ export interface QueuedStartSummary {
   position: number
 }
 
-/** What the UI and the Mastermind see of a project's limits (#65). */
+/** What the UI and the Captain see of a project's limits (#65). */
 export interface ProjectLimitState {
   projectId: string
   paused: boolean
@@ -35,14 +35,14 @@ export interface ProjectLimitState {
   blockedBy: ProjectLimitReason | null
 }
 
-/** A Mastermind tool call waiting for the user's approval (#66). */
+/** A Captain tool call waiting for the user's approval (#66). */
 export interface HeldAction {
   id: string
   projectId: string
   action: EscalationAction
   tool: string
   args: Record<string, unknown>
-  /** One line a person can read: what the Mastermind wants to do. */
+  /** One line a person can read: what the Captain wants to do. */
   summary: string
   /** ISO time. */
   createdAt: string

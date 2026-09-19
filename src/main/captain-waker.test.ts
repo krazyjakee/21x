@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createTestDb } from '../../test/helpers/db-test-helper'
-import { MastermindWaker, buildMastermindWakeMessage, resolveMastermindAgentId, taskIdsTouchedByCall } from './mastermind-waker'
+import { CaptainWaker, buildCaptainWakeMessage, resolveCaptainAgentId, taskIdsTouchedByCall } from './captain-waker'
 import { emitTaskEvent, projectEvents, type ProjectEvent } from './project-events'
-import { MASTERMIND_WAKEUPS_SETTING } from '../shared/mastermind-wakeups'
+import { CAPTAIN_WAKEUPS_SETTING } from '../shared/captain-wakeups'
 import { FINDINGS_BEGIN, SYSTEM_MESSAGE_MARKER } from '../shared/system-authority'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import type { DatabaseManager } from './database'
@@ -64,15 +64,15 @@ function event(overrides: Partial<ProjectEvent> & { taskId: string }): ProjectEv
   return { kind: 'task_ready_for_review', projectId: DEFAULT_PROJECT_ID, title: `Task ${overrides.taskId}`, at: new Date().toISOString(), ...overrides }
 }
 
-/** A DB stub: one project (settings as given), one Mastermind row, one default agent. */
+/** A DB stub: one project (settings as given), one Captain row, one default agent. */
 function fakeStore(settings: Record<string, unknown> = {}, opts: { archived?: boolean; noCoordinator?: boolean } = {}) {
   const project = {
-    id: DEFAULT_PROJECT_ID, name: 'Default', description: '', default_agent_id: null, mastermind_agent_id: null,
+    id: DEFAULT_PROJECT_ID, name: 'Default', description: '', default_agent_id: null, captain_agent_id: null,
     git_provider: null, git_org: null, settings, sort_order: 0, archived: opts.archived ?? false, created_at: '', updated_at: ''
   }
   return {
     getProject: vi.fn((id: string) => (id === project.id ? project : undefined)),
-    getCoordinatorTask: vi.fn((id: string) => (id === project.id && !opts.noCoordinator ? { id: 'mm-1', role: 'mastermind', project_id: id } : undefined)),
+    getCoordinatorTask: vi.fn((id: string) => (id === project.id && !opts.noCoordinator ? { id: 'mm-1', role: 'captain', project_id: id } : undefined)),
     getAgents: vi.fn(() => [{ id: 'agent-1', is_default: true }])
   } as unknown as Pick<DatabaseManager, 'getProject' | 'getCoordinatorTask' | 'getAgents'>
 }
@@ -80,7 +80,7 @@ function fakeStore(settings: Record<string, unknown> = {}, opts: { archived?: bo
 const COORDINATOR_SCOPE = { parentTaskId: null, taskId: null, artifactTaskId: null, projectId: DEFAULT_PROJECT_ID }
 const TASK_AGENT_SCOPE = { parentTaskId: null, taskId: null, artifactTaskId: 'agent-task', projectId: DEFAULT_PROJECT_ID }
 
-describe('MastermindWaker', () => {
+describe('CaptainWaker', () => {
   let clock: ReturnType<typeof fakeClock>
   let warn: ReturnType<typeof vi.spyOn>
 
@@ -94,8 +94,8 @@ describe('MastermindWaker', () => {
     vi.restoreAllMocks()
   })
 
-  function makeWaker(store = fakeStore(), agents = fakeAgents(), options: ConstructorParameters<typeof MastermindWaker>[2] = {}) {
-    return new MastermindWaker(store, agents, { debounceMs: 3_000, hourlyCap: 12, ...clock, ...options })
+  function makeWaker(store = fakeStore(), agents = fakeAgents(), options: ConstructorParameters<typeof CaptainWaker>[2] = {}) {
+    return new CaptainWaker(store, agents, { debounceMs: 3_000, hourlyCap: 12, ...clock, ...options })
   }
 
   it('delivers one batched wake-up for a new unassigned task, a finished task and a pending approval', async () => {
@@ -160,7 +160,7 @@ describe('MastermindWaker', () => {
     expect([sessionId, taskId, agentId]).toEqual(['live-1', 'mm-1', 'agent-live'])
   })
 
-  it('waits for a working Mastermind instead of interrupting it', async () => {
+  it('waits for a working Captain instead of interrupting it', async () => {
     const agents = fakeAgents({ sessionId: 'live-1', status: 'working' })
     const waker = makeWaker(fakeStore(), agents)
     waker.handleEvent(event({ taskId: 'a' }))
@@ -176,7 +176,7 @@ describe('MastermindWaker', () => {
     expect((agents.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0][1]).toContain('2 project events')
   })
 
-  it('drops a batch the Mastermind never became free for', async () => {
+  it('drops a batch the Captain never became free for', async () => {
     const agents = fakeAgents({ sessionId: 'live-1', status: 'working' })
     const waker = makeWaker(fakeStore(), agents, { maxDeferMs: 10_000 })
     waker.handleEvent(event({ taskId: 'a' }))
@@ -186,13 +186,13 @@ describe('MastermindWaker', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('stale event'))
   })
 
-  it('skips events the Mastermind caused itself, inside the window only', async () => {
+  it('skips events the Captain caused itself, inside the window only', async () => {
     const agents = fakeAgents()
     const waker = makeWaker(fakeStore(), agents, { selfCausedWindowMs: 20_000 })
 
-    // The Mastermind's own update_task call: coordinator-shaped scope, no artifact pin.
+    // The Captain's own update_task call: coordinator-shaped scope, no artifact pin.
     waker.observeToolCall(COORDINATOR_SCOPE, { task_id: 'mine' }, { success: true, task: { id: 'mine' } })
-    // A task agent's call in the same project is not the Mastermind.
+    // A task agent's call in the same project is not the Captain.
     waker.observeToolCall(TASK_AGENT_SCOPE, { task_id: 'theirs' }, { success: true })
 
     waker.handleEvent(event({ taskId: 'mine' }))
@@ -223,7 +223,7 @@ describe('MastermindWaker', () => {
 
   it('does nothing when the project turned wake-ups off', async () => {
     const agents = fakeAgents()
-    const waker = makeWaker(fakeStore({ [MASTERMIND_WAKEUPS_SETTING]: { enabled: false } }), agents)
+    const waker = makeWaker(fakeStore({ [CAPTAIN_WAKEUPS_SETTING]: { enabled: false } }), agents)
     waker.handleEvent(event({ taskId: 'a' }))
     waker.handleEvent(event({ taskId: 'b', kind: 'approval_pending' }))
     await clock.advance(5_000)
@@ -233,7 +233,7 @@ describe('MastermindWaker', () => {
 
   it('honours the per-kind choice', async () => {
     const agents = fakeAgents()
-    const waker = makeWaker(fakeStore({ [MASTERMIND_WAKEUPS_SETTING]: { enabled: true, kinds: ['approval_pending'] } }), agents)
+    const waker = makeWaker(fakeStore({ [CAPTAIN_WAKEUPS_SETTING]: { enabled: true, kinds: ['approval_pending'] } }), agents)
     waker.handleEvent(event({ taskId: 'a', kind: 'task_ready_for_review' }))
     waker.handleEvent(event({ taskId: 'b', kind: 'task_synced' }))
     waker.handleEvent(event({ taskId: 'c', kind: 'approval_pending' }))
@@ -244,7 +244,7 @@ describe('MastermindWaker', () => {
     expect(message).toContain('(id: c)')
   })
 
-  it('ignores archived projects and projects without a Mastermind row', async () => {
+  it('ignores archived projects and projects without a Captain row', async () => {
     const archived = fakeAgents()
     makeWaker(fakeStore({}, { archived: true }), archived).handleEvent(event({ taskId: 'a' }))
     await clock.advance(3_000)
@@ -311,12 +311,12 @@ describe('emitTaskEvent', () => {
 })
 
 describe('helpers', () => {
-  it('resolveMastermindAgentId prefers the project agent, then the default agent, skipping unknown ids', () => {
+  it('resolveCaptainAgentId prefers the project agent, then the default agent, skipping unknown ids', () => {
     const db = { getAgents: () => [{ id: 'a' }, { id: 'b', is_default: true }] } as never
-    expect(resolveMastermindAgentId(db, { mastermind_agent_id: 'a', default_agent_id: null })).toBe('a')
-    expect(resolveMastermindAgentId(db, { mastermind_agent_id: 'gone', default_agent_id: 'a' })).toBe('a')
-    expect(resolveMastermindAgentId(db, { mastermind_agent_id: null, default_agent_id: null })).toBe('b')
-    expect(resolveMastermindAgentId({ getAgents: () => [] } as never, { mastermind_agent_id: null, default_agent_id: null })).toBeNull()
+    expect(resolveCaptainAgentId(db, { captain_agent_id: 'a', default_agent_id: null })).toBe('a')
+    expect(resolveCaptainAgentId(db, { captain_agent_id: 'gone', default_agent_id: 'a' })).toBe('a')
+    expect(resolveCaptainAgentId(db, { captain_agent_id: null, default_agent_id: null })).toBe('b')
+    expect(resolveCaptainAgentId({ getAgents: () => [] } as never, { captain_agent_id: null, default_agent_id: null })).toBeNull()
   })
 
   it('taskIdsTouchedByCall reads the argument ids and the created row', () => {
@@ -325,8 +325,8 @@ describe('helpers', () => {
     expect(taskIdsTouchedByCall({}, null)).toEqual([])
   })
 
-  it('buildMastermindWakeMessage fences the events and states the boundary', () => {
-    const message = buildMastermindWakeMessage('mm', 'P', [event({ taskId: 'x', kind: 'chain_stuck', detail: 'no agent' })])
+  it('buildCaptainWakeMessage fences the events and states the boundary', () => {
+    const message = buildCaptainWakeMessage('mm', 'P', [event({ taskId: 'x', kind: 'chain_stuck', detail: 'no agent' })])
     expect(message).toContain('[chain stuck] "Task x" (id: x) — no agent')
     expect(message).toContain('AUTHORITY BOUNDARY')
     expect(message).toContain('task=mm')

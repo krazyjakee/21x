@@ -10,20 +10,20 @@ import type { Agent } from '@/types'
 const VOICE_COMPOSER_KEY = DASHBOARD_COMPOSER_KEY
 
 interface CommandInputProps {
-  onSendToMastermind: (message: string) => void
+  onSendToCaptain: (message: string) => void
   onCreateTask: (text: string) => void
 }
 
-export function CommandInput({ onSendToMastermind, onCreateTask }: CommandInputProps) {
+export function CommandInput({ onSendToCaptain, onCreateTask }: CommandInputProps) {
   const [text, setText] = useState('')
   const [agents, setAgents] = useState<Agent[]>([])
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [showAgentDropdown, setShowAgentDropdown] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
-  // The box talks to the current project's Mastermind (#55); say which.
+  // The box talks to the current project's Captain (#55); say which.
   const project = useCurrentProject()
-  const mastermindName = project ? `Mastermind (${project.name})` : 'Mastermind'
+  const captainName = project ? `Captain (${project.name})` : 'Captain'
 
   // Load agents on mount
   useEffect(() => {
@@ -68,13 +68,13 @@ export function CommandInput({ onSendToMastermind, onCreateTask }: CommandInputP
     // expectation straight after this, so the conversation loop is unaffected;
     // a typed one does not, and its reply stays silent.
     void voiceApi.answerNotExpected()
-    onSendToMastermind(trimmed)
+    onSendToCaptain(trimmed)
     setText('')
     if (textareaRef.current) {
       textareaRef.current.value = ''
       textareaRef.current.style.height = 'auto'
     }
-  }, [onSendToMastermind])
+  }, [onSendToCaptain])
 
   const handleSend = submitField
 
@@ -116,7 +116,7 @@ export function CommandInput({ onSendToMastermind, onCreateTask }: CommandInputP
           value={text}
           onChange={handleInput}
           onKeyDown={handleKeyDown}
-          placeholder={`Ask ${mastermindName} or describe a task...`}
+          placeholder={`Ask ${captainName} or describe a task...`}
           rows={1}
           className="w-full bg-transparent text-base text-foreground placeholder:text-muted-foreground resize-none outline-none leading-relaxed max-h-32 min-h-[32px]"
         />
@@ -171,7 +171,7 @@ export function CommandInput({ onSendToMastermind, onCreateTask }: CommandInputP
           <Paperclip className="size-icon" />
         </button>
 
-        {/* Dictate. With "Keep talking" on, each pause sends to Mastermind. */}
+        {/* Dictate. With "Keep talking" on, each pause sends to Captain. */}
         <VoiceMicButton mode="dictation" onSubmit={submitField} />
 
         {/* Spacer */}
@@ -195,8 +195,8 @@ export function CommandInput({ onSendToMastermind, onCreateTask }: CommandInputP
               ? 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm'
               : 'bg-accent text-muted-foreground cursor-not-allowed'
           }`}
-          title={`Send to ${mastermindName}`}
-          aria-label="Send to Mastermind"
+          title={`Send to ${captainName}`}
+          aria-label="Send to Captain"
         >
           <ArrowUp className="size-icon" />
         </button>

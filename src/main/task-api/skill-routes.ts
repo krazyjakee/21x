@@ -5,13 +5,13 @@ import { isSkillOwnedByProject, isSkillVisibleToProject } from '../../shared/ski
 /**
  * Skill routes, scope-aware (#74).
  *
- * A session limited to one project (the Mastermind or a task agent; see
+ * A session limited to one project (the Captain or a task agent; see
  * task-management-core.ts, which attaches {@link SKILL_SCOPE_PARAM} to every
  * skill call and overwrites anything the caller sent under that key) sees
  * global skills plus its project's own, and may create or change only its
  * project's. A global skill is read-only to it: creating or changing one
  * needs the user's confirmation, which a session cannot obtain, so the call
- * is refused with a message telling the Mastermind to ask the user (who can
+ * is refused with a message telling the Captain to ask the user (who can
  * do it in the Skills view or through the Commander).
  *
  * Callers with no scope (the IPC handlers behind the Skills view, the mobile
@@ -26,7 +26,7 @@ export const SKILL_TOOL_NAMES: ReadonlySet<string> = new Set(['list_skills', 'ge
 
 export interface SkillRouteScope {
   project_id: string
-  /** The project's Mastermind, or one of its task agents. */
+  /** The project's Captain, or one of its task agents. */
   role: 'coordinator' | 'task'
 }
 

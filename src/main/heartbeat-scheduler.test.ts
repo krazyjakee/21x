@@ -82,7 +82,7 @@ function mockDbManager(overrides: Record<string, unknown> = {}): DatabaseManager
 function mockAgentManager(overrides: Record<string, unknown> = {}): AgentManager {
   return {
     startHeartbeatSession: vi.fn().mockResolvedValue('session-1'),
-    sendHeartbeatViaMastermind: vi.fn().mockResolvedValue('heartbeat-session-1'),
+    sendHeartbeatViaCaptain: vi.fn().mockResolvedValue('heartbeat-session-1'),
     cleanupHeartbeatSession: vi.fn().mockResolvedValue(undefined),
     getSession: vi.fn().mockReturnValue({ status: 'idle' }),
     getLastAssistantMessage: vi.fn().mockReturnValue(HEARTBEAT_OK_TOKEN),
@@ -1423,7 +1423,7 @@ describe('HeartbeatScheduler', () => {
       const task = makeTask()
 
       const first = await forward(scheduler).call(scheduler, task, BENIGN_FINDINGS, 'agent-1')
-      // Second heartbeat run reads the SAME mastermind reply (seq 501 / 502 in the incident).
+      // Second heartbeat run reads the SAME captain reply (seq 501 / 502 in the incident).
       const second = await forward(scheduler).call(scheduler, task, BENIGN_FINDINGS, 'agent-1')
 
       expect(first).toBe('session-1')
@@ -1461,14 +1461,14 @@ describe('HeartbeatScheduler', () => {
       expect(agent.startHeartbeatSession).toHaveBeenCalledTimes(2)
     })
 
-    it('refuses a manual run while a scheduled run is in flight (no second mastermind prompt)', async () => {
+    it('refuses a manual run while a scheduled run is in flight (no second captain prompt)', async () => {
       const inProgress = (scheduler as unknown as { inProgress: Set<string> }).inProgress
       inProgress.add('task-1')
 
       const result = await scheduler.runNow('task-1')
 
       expect(result).toBe('in_progress')
-      expect(agent.sendHeartbeatViaMastermind).not.toHaveBeenCalled()
+      expect(agent.sendHeartbeatViaCaptain).not.toHaveBeenCalled()
       expect(agent.startHeartbeatSession).not.toHaveBeenCalled()
       inProgress.delete('task-1')
     })

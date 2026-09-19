@@ -15,7 +15,7 @@
  * Only sessions of real tasks that are working (`working` or
  * `waiting_approval`). Idle sessions have finished their turn and do not hold
  * a slot. These never count and are never queued:
- *  - coordinator sessions (the Mastermind, `isCoordinatorTask`) — they only
+ *  - coordinator sessions (the Captain, `isCoordinatorTask`) — they only
  *    delegate, and queueing the thing that drains the queue would deadlock;
  *  - heartbeat sessions (`heartbeat-*` pseudo tasks) — short checks on
  *    existing work;

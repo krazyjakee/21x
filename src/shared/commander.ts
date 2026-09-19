@@ -9,7 +9,7 @@ import type { ChatRuntimeEvent, ChatStopReason, ChatToolCall } from './chat'
 
 /**
  * - `user` / `assistant` / `tool`: the conversation the model sees.
- * - `report`: an incoming Mastermind report for a project (#62). Counts as
+ * - `report`: an incoming Captain report for a project (#62). Counts as
  *   unread until the session is read; fed to the model as a user-side note.
  * - `summary`: a rolling summary of older turns, written by the chat model.
  *   Its `correlation_id` is the id of the last message it folds in.

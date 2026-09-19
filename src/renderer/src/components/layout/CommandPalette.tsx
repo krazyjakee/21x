@@ -50,7 +50,7 @@ export interface CommandPaletteActions {
   copyPullRequestUrl: () => void
   copyPullRequestBranch: () => void
   toggleTaskAudio: () => void
-  toggleMastermindAudio: () => void
+  toggleCaptainAudio: () => void
 }
 
 export function CommandPalette({ open, onOpenChange, actions }: { open: boolean; onOpenChange: (v: boolean) => void; actions: CommandPaletteActions }) {
@@ -121,11 +121,11 @@ export function CommandPalette({ open, onOpenChange, actions }: { open: boolean;
       { id: 'copy-pr-url', group: 'Pull request', label: 'Copy pull-request URL', icon: Copy, shortcut: 'Y P', run: () => { actions.copyPullRequestUrl(); close() } },
       { id: 'copy-pr-branch', group: 'Pull request', label: 'Copy pull-request branch', icon: GitBranch, shortcut: 'Y B', run: () => { actions.copyPullRequestBranch(); close() } },
       { id: 'audio-task', group: 'Audio', label: 'Toggle task audio', icon: Mic, shortcut: 'V T', run: () => { actions.toggleTaskAudio(); close() } },
-      { id: 'audio-mastermind', group: 'Audio', label: 'Toggle Mastermind audio', icon: Mic, shortcut: 'V M', run: () => { actions.toggleMastermindAudio(); close() } },
+      { id: 'audio-captain', group: 'Audio', label: 'Toggle Captain audio', icon: Mic, shortcut: 'V M', run: () => { actions.toggleCaptainAudio(); close() } },
       { id: 'act-switch-project', group: 'Projects', label: 'Switch project…', icon: FolderKanban, keywords: 'project change workspace', shortcut: `${mod}P`, run: () => { close(); if (useUIStore.getState().sidebarView === 'commander') setSidebarView('dashboard'); window.setTimeout(() => setProjectSwitcherOpen(true), 0) } },
       { id: 'act-new-project', group: 'Projects', label: 'New project…', icon: FolderPlus, keywords: 'project create add', run: () => { close(); openProjectEditor('new') } },
       { id: 'act-edit-project', group: 'Projects', label: 'Edit current project…', icon: FolderKanban, keywords: 'project settings repos resources brief', run: () => { close(); openProjectEditor(currentProjectId) } },
-      { id: 'act-mastermind', group: 'Actions', label: 'Toggle Mastermind', icon: MessageSquare, keywords: 'orchestrator chat', run: () => { toggleOrchestrator(); close() } },
+      { id: 'act-captain', group: 'Actions', label: 'Toggle Captain', icon: MessageSquare, keywords: 'orchestrator chat', run: () => { toggleOrchestrator(); close() } },
       { id: 'act-settings', group: 'Actions', label: 'Open Settings', icon: Settings, keywords: 'preferences config', run: () => { openSettings(); close() } },
       { id: 'act-theme', group: 'Actions', label: themeResolved === 'dark' ? 'Switch to Light mode' : 'Switch to Dark mode', icon: themeResolved === 'dark' ? Sun : Moon, keywords: 'theme dark light appearance', run: () => { toggleTheme(); close() } },
     ]

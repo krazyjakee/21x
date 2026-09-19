@@ -2001,7 +2001,7 @@ describe('AcpAdapter - system prompt delivery', () => {
     const priv = adapterPrivate(adapter)
     const session = createMockSession('sess-sys')
     session.permanentMessages = []
-    session.pendingSystemPrompt = 'You are the Mastermind.'
+    session.pendingSystemPrompt = 'You are the Captain.'
     const write = vi.fn((_data: string, cb?: (err?: Error | null) => void) => { if (cb) cb(null) })
     session.process = { stdin: { write } } as unknown as ChildProcess
     priv.sessions.set('sess-sys', session)
@@ -2014,11 +2014,11 @@ describe('AcpAdapter - system prompt delivery', () => {
       .map(([data]) => JSON.parse(String(data).trim()))
       .filter((msg) => msg.method === 'session/prompt')
       .map((msg) => msg.params.prompt[0].text as string)
-    expect(prompts[0]).toBe('<system_instructions>\nYou are the Mastermind.\n</system_instructions>\n\nPlan the release')
+    expect(prompts[0]).toBe('<system_instructions>\nYou are the Captain.\n</system_instructions>\n\nPlan the release')
     expect(prompts[1]).toBe('Next step')
 
     const transcript = JSON.stringify(session.permanentMessages)
-    expect(transcript).not.toContain('You are the Mastermind.')
+    expect(transcript).not.toContain('You are the Captain.')
   })
 })
 

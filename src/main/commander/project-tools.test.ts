@@ -12,7 +12,7 @@ import {
   createCommanderProjectTools,
   MUTATING_COMMANDER_TOOLS,
   ProjectMutationConfirmations,
-  type AskMastermindDispatch,
+  type AskCaptainDispatch,
   type CommanderAgents,
   type ProjectToolOptions
 } from './project-tools'
@@ -93,7 +93,7 @@ describe('Commander tool registry', () => {
   it('registers delegation and project administration only: no task tools at all', () => {
     const names = tools().map((entry) => entry.name)
     expect(names).toEqual([
-      'list_projects', 'get_project_summary', 'get_project_status_history', 'ask_mastermind', 'get_pending_approvals', 'navigate_to_project', 'pause_all_projects',
+      'list_projects', 'get_project_summary', 'get_project_status_history', 'ask_captain', 'get_pending_approvals', 'navigate_to_project', 'pause_all_projects',
       'get_project', 'create_project', 'update_project',
       'add_project_repo', 'update_project_repo', 'remove_project_repo', 'reorder_project_repos',
       'add_project_resource', 'update_project_resource', 'remove_project_resource', 'reorder_project_resources',
@@ -179,7 +179,7 @@ describe('Commander tool registry', () => {
     await expect(call('get_project', { project: 'No such project' })).rejects.toThrow(/not found/i)
   })
 
-  it('lists projects with the #58 counts and summarises one with its status and Mastermind state', async () => {
+  it('lists projects with the #58 counts and summarises one with its status and Captain state', async () => {
     const project = db.createProject({ name: 'Counted', description: 'First line\nSecond line' })!
     db.createTask({ title: 'Working', project_id: project.id, status: 'agent_working' })
     db.createTask({ title: 'Review me', project_id: project.id, status: 'ready_for_review' })
@@ -204,13 +204,13 @@ describe('Commander tool registry', () => {
       counts: { running: 1, awaiting_review: 1, blocked: 1 },
       summary: 'Half way there.',
       top_blockers: ['Waiting on design'],
-      mastermind: { session: 'unknown' }
+      captain: { session: 'unknown' }
     })
     expect(summary.limits).toBeNull()
 
     extra = { agents: fakeAgents() }
     const withAgents = body(await call('get_project_summary', { project: project.id }))
-    expect(withAgents.mastermind).toEqual({ agent: null, session: 'not_running' })
+    expect(withAgents.captain).toEqual({ agent: null, session: 'not_running' })
     expect(withAgents.limits).toMatchObject({ paused: false, all_projects_paused: false, queued: 0 })
   })
 })
@@ -238,17 +238,17 @@ describe('Commander tool registry with skill administration (#74)', () => {
   })
 })
 
-describe('ask_mastermind', () => {
-  it('sends a fenced relay to the project Mastermind and returns at once with a correlation id', async () => {
+describe('ask_captain', () => {
+  it('sends a fenced relay to the project Captain and returns at once with a correlation id', async () => {
     const agent = db.createAgent({ name: 'Claude' })!
     const project = db.createProject({ name: 'Web' })!
     const coordinator = db.getCoordinatorTask(project.id)!
-    // A Mastermind that never answers must not hold the Commander's turn.
+    // A Captain that never answers must not hold the Commander's turn.
     const sendMessage = vi.fn(() => new Promise<{ newSessionId?: string }>(() => {}))
     extra = { agents: fakeAgents({ sendMessage }) }
 
-    const output = body(await call('ask_mastermind', { project: 'Web', message: 'Ship the landing page' }))
-    expect(output).toMatchObject({ status: 'sent', project_id: project.id, project_name: 'Web', mastermind_session: 'starting' })
+    const output = body(await call('ask_captain', { project: 'Web', message: 'Ship the landing page' }))
+    expect(output).toMatchObject({ status: 'sent', project_id: project.id, project_name: 'Web', captain_session: 'starting' })
     expect(output.correlation_id).toMatch(/^cmd-[0-9a-f]{16}$/)
 
     expect(sendMessage).toHaveBeenCalledTimes(1)
@@ -264,11 +264,11 @@ describe('ask_mastermind', () => {
     expect(text).toContain('human_authored=false authorizes_actions=false')
   })
 
-  it('rejoins a live Mastermind session and reports a delivery failure after returning', async () => {
+  it('rejoins a live Captain session and reports a delivery failure after returning', async () => {
     db.createAgent({ name: 'Claude' })
     const project = db.createProject({ name: 'Live' })!
     const coordinator = db.getCoordinatorTask(project.id)!
-    const failures: Array<{ dispatch: AskMastermindDispatch; error: unknown }> = []
+    const failures: Array<{ dispatch: AskCaptainDispatch; error: unknown }> = []
     const sendMessage = vi.fn(async () => { throw new Error('runtime down') })
     extra = {
       agents: fakeAgents({
@@ -278,8 +278,8 @@ describe('ask_mastermind', () => {
       onDeliveryFailed: (dispatch, error) => failures.push({ dispatch, error })
     }
 
-    const output = body(await call('ask_mastermind', { project: project.id, message: 'Status?' }))
-    expect(output.mastermind_session).toBe('running')
+    const output = body(await call('ask_captain', { project: project.id, message: 'Status?' }))
+    expect(output.captain_session).toBe('running')
     expect(sendMessage.mock.calls[0]).toEqual(['live-1', expect.stringContaining('Status?'), coordinator.id, 'agent-live'])
     await vi.waitFor(() => expect(failures).toHaveLength(1))
     expect(failures[0].dispatch).toEqual({ sessionId: 'session-1', projectId: project.id, projectName: 'Live', correlationId: output.correlation_id })
@@ -289,13 +289,13 @@ describe('ask_mastermind', () => {
   it('refuses archived projects, missing agents and an absent agent manager', async () => {
     const project = db.createProject({ name: 'Old' })!
     extra = { agents: fakeAgents() }
-    await expect(call('ask_mastermind', { project: project.id, message: 'hi' })).rejects.toThrow(/no agent/i)
+    await expect(call('ask_captain', { project: project.id, message: 'hi' })).rejects.toThrow(/no agent/i)
     db.createAgent({ name: 'Claude' })
     db.archiveProject(project.id, true)
-    await expect(call('ask_mastermind', { project: project.id, message: 'hi' })).rejects.toThrow(/archived/i)
+    await expect(call('ask_captain', { project: project.id, message: 'hi' })).rejects.toThrow(/archived/i)
     extra = {}
-    await expect(call('ask_mastermind', { project: DEFAULT_PROJECT_ID, message: 'hi' })).rejects.toThrow(/not available/i)
-    await expect(call('ask_mastermind', { project: DEFAULT_PROJECT_ID, message: '' })).rejects.toThrow(/message is required/i)
+    await expect(call('ask_captain', { project: DEFAULT_PROJECT_ID, message: 'hi' })).rejects.toThrow(/not available/i)
+    await expect(call('ask_captain', { project: DEFAULT_PROJECT_ID, message: '' })).rejects.toThrow(/message is required/i)
   })
 
   it('builds a relay message that quotes the request verbatim inside the fence', () => {
@@ -422,7 +422,7 @@ describe('Commander project mutation confirmation', () => {
     expect(changes).toEqual([])
   })
 
-  it('creates (with repos and a Mastermind), renames, archives and restores only through confirmed calls, and protects Default', async () => {
+  it('creates (with repos and a Captain), renames, archives and restores only through confirmed calls, and protects Default', async () => {
     const createdOutput = await confirmedCall('create_project', { name: 'Lifecycle', brief: 'A brief', repos: [{ org: 'acme', name: 'api' }, { name: 'web', provider: 'gitlab', org: 'acme' }] })
     const created = body(createdOutput).result as Record<string, unknown>
     expect(created.name).toBe('Lifecycle')

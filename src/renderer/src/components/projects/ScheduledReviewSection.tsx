@@ -16,7 +16,7 @@ export function ScheduledReviewSection({ settings, onChange }: ScheduledReviewSe
       <div>
         <h3 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Scheduled review</h3>
         <p className="text-xs text-muted-foreground">
-          Wakes this project’s Mastermind on a schedule to review the board, re-plan and update the project status. Runs with the window closed; skipped while the project is paused.
+          Wakes this project’s Captain on a schedule to review the board, re-plan and update the project status. Runs with the window closed; skipped while the project is paused.
         </p>
       </div>
       <label className="flex items-center gap-2 text-sm">
@@ -24,9 +24,9 @@ export function ScheduledReviewSection({ settings, onChange }: ScheduledReviewSe
           type="checkbox"
           checked={review.enabled}
           onChange={(e) => onChange({ ...review, enabled: e.target.checked })}
-          aria-label="Run a scheduled Mastermind review"
+          aria-label="Run a scheduled Captain review"
         />
-        Run a scheduled Mastermind review
+        Run a scheduled Captain review
       </label>
       <div className={`pl-5 ${review.enabled ? '' : 'opacity-50'}`}>
         <CronScheduleInput

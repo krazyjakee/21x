@@ -28,8 +28,8 @@ enum TaskStatus {
 
 ### Coordinator rows
 
-Each project's Mastermind is stored as a row in `tasks` with
-`role = 'mastermind'` and the project's `project_id` (#55). `seedMastermindTasks`
+Each project's Captain is stored as a row in `tasks` with
+`role = 'captain'` and the project's `project_id` (#55). `seedCaptainTasks`
 gives every existing project one on startup (idempotent, keyed by project;
 the Default project's row is the one every install has), `createProject`
 creates one with the project, and archiving leaves it alone so a restored
@@ -39,17 +39,17 @@ a message continues the same conversation, and a runtime the idle reaper
 released is resumed by the next message.
 
 Its session runs in its own workspace with no worktree, on the project's
-`mastermind_agent_id` (else `default_agent_id`, else the app default agent —
-`mastermindAgentIdFor` in the renderer's coordinator-store). The system prompt
-is the built-in Mastermind prompt (`src/main/prompts/mastermind.ts`) followed
+`captain_agent_id` (else `default_agent_id`, else the app default agent —
+`captainAgentIdFor` in the renderer's coordinator-store). The system prompt
+is the built-in Captain prompt (`src/main/prompts/captain.ts`) followed
 by a project section built on every start, resume and send from the project
 row, its repos (with default branches) and resources
-(`src/main/agent-manager/mastermind-context.ts`), so an edit to the project
-reaches the next message. The Mastermind has no checkout of the project's
+(`src/main/agent-manager/captain-context.ts`), so an edit to the project
+reaches the next message. The Captain has no checkout of the project's
 repos; the prompt tells it to ask a task agent instead (read-only clones are
 a follow-up). It keeps a long-lived `MEMORY.md` in its workspace — decisions,
 conventions, open threads — which the prompt injects (capped) and the project
-editor shows read-only via `project:getMastermindMemory`.
+editor shows read-only via `project:getCaptainMemory`.
 
 It is not a task. `role` keeps it out of `DatabaseManager.getTasks()` (so the
 board, sidebar, mobile task list and MCP list tools never see it), and the
@@ -264,7 +264,7 @@ A task's repos, git provider and org come from its project: its `project_repos` 
 The task-management MCP tools have three scopes (`src/main/mcp-servers/task-management-core.ts`):
 
 - **Subtask scope** (`?task=&parent=`): subtask agents, parent and siblings only.
-- **Project scope** (`?project=<id>`): every other task agent and the Mastermind (for its row's `project_id`: one Mastermind per project, see `coordinatorProjectScope` in `session-config.ts`). List and search tools (`list_tasks`, `find_similar_tasks`, `get_task_statistics`, `get_recent_activity`, `list_pending_approvals`, `list_repos`) are narrowed to the project, `create_task` lands in it, and any call naming a `task_id`, `parent_task_id`, `subtask_ids` or `next_subtask_ids` outside it is refused.
+- **Project scope** (`?project=<id>`): every other task agent and the Captain (for its row's `project_id`: one Captain per project, see `coordinatorProjectScope` in `session-config.ts`). List and search tools (`list_tasks`, `find_similar_tasks`, `get_task_statistics`, `get_recent_activity`, `list_pending_approvals`, `list_repos`) are narrowed to the project, `create_task` lands in it, and any call naming a `task_id`, `parent_task_id`, `subtask_ids` or `next_subtask_ids` outside it is refused.
 - **Full access** (no scope): internal and debug use only — a direct run of `task-management-mcp.js` without `TASK_SCOPE_PROJECT_ID`, or a session with no task row behind it.
 
 ### Manual Triage
@@ -293,13 +293,13 @@ Uses SQL `LIKE` substring matching — not semantic search:
 - `labels` → JSON substring match
 - `completed_only` → filters to completed tasks only (default: true)
 
-## Project events and Mastermind wake-ups (#57)
+## Project events and Captain wake-ups (#57)
 
-The Mastermind used to act only when the user talked to it. Now the main
+The Captain used to act only when the user talked to it. Now the main
 process raises a `ProjectEvent` (`src/main/project-events.ts`) at the places
-where something happens to a task, and the `MastermindWaker`
-(`src/main/mastermind-waker.ts`) turns a project's events into one wake-up
-for that project's Mastermind.
+where something happens to a task, and the `CaptainWaker`
+(`src/main/captain-waker.ts`) turns a project's events into one wake-up
+for that project's Captain.
 
 Event kinds and where they are raised:
 
@@ -313,33 +313,33 @@ Event kinds and where they are raised:
 | `task_synced` | `SyncManager.importTasks`, for every row a run created (flagged `unassigned` when it has no agent) |
 
 `emitTaskEvent(db, kind, taskId, detail?)` looks the task up, drops
-coordinator rows (the Mastermind's own session must never wake itself) and
+coordinator rows (the Captain's own session must never wake itself) and
 clips the detail to 400 characters, so each hook is one line.
 
 The waker holds a project's events for a debounce window (3 s), then sends
 ONE fenced system message (`buildSystemMessage`, origin `coordinator-wakeup`,
 the same authority boundary as the subtask wake-up) to the project's
 coordinator row through `AgentManager.sendMessage`, which rejoins the live
-session or resumes the persisted one. A Mastermind that is mid-turn is not
+session or resumes the persisted one. A Captain that is mid-turn is not
 interrupted: the batch waits for idle (dropped after 15 min). Rules:
 
-- **Per-project setting.** `projects.settings.mastermind_wakeups`
-  (`src/shared/mastermind-wakeups.ts`): `{ enabled, kinds[] }`; absent means
-  on for every kind. The project editor's "Mastermind wake-ups" section edits
+- **Per-project setting.** `projects.settings.captain_wakeups`
+  (`src/shared/captain-wakeups.ts`): `{ enabled, kinds[] }`; absent means
+  on for every kind. The project editor's "Captain wake-ups" section edits
   it.
 - **Self-caused events are skipped.** The task-management MCP dispatch reports
   every successful call (`setToolCallObserver`); a coordinator-shaped scope
   (project scope, no artifact pin) touching a task marks it for 20 s, and
-  events on marked tasks do not wake the Mastermind.
+  events on marked tasks do not wake the Captain.
 - **Cap.** At most 12 wake-ups per project per rolling hour; the first dropped
-  batch is logged (`[MastermindWaker] Wake-up cap reached`).
+  batch is logged (`[CaptainWaker] Wake-up cap reached`).
 - Duplicate (kind, task) pairs inside one window are one line; a batch lists
   at most 40 events and counts the rest.
 
 ## Project status (#58)
 
 `project_status` (`project_id` PK, `summary`, `top_blockers` JSON,
-`updated_at`) holds the Mastermind's narrative snapshot for a project, one
+`updated_at`) holds the Captain's narrative snapshot for a project, one
 row per project. Counts are never stored: `DatabaseManager.getProjectStatus`
 computes `running` (`agent_working` / `triaging`), `awaiting_review`
 (`ready_for_review`) and `blocked` (`not_started` with no agent and no
@@ -348,7 +348,7 @@ queued start) from the task rows, and takes `queued` (admission queue) and
 `src/main/project-status.ts` reads those from the `AgentManager`. No LLM is
 involved in any count.
 
-The Mastermind writes the narrative with the project-scoped tool
+The Captain writes the narrative with the project-scoped tool
 `update_project_status(summary, top_blockers?)` (route
 `/update_project_status`; the scope forces `project_id`, and a task agent in
 the same project is refused). Its prompt tells it to call the tool after a
@@ -360,7 +360,7 @@ switcher and Settings → Projects show the counts, the summary and its age.
 
 `project_status_journal` (`id`, `project_id` FK cascade, `summary`,
 `completed` / `blockers` / `decisions` / `next_steps` JSON lists, `source`
-(`mastermind` | `compaction`), `correlation_id`, `created_at`; indexed on
+(`captain` | `compaction`), `correlation_id`, `created_at`; indexed on
 `(project_id, created_at DESC, id DESC)`) keeps one row per status update
 beside the snapshot. `update_project_status` accepts the optional lists
 (`completed`, `blockers` — default `top_blockers` —, `decisions`,
@@ -381,7 +381,7 @@ project editor's read-only **Status history** section (IPC
 `project:getStatusHistory`) both read through it.
 
 Retention: `DatabaseManager.compactProjectStatusJournal` runs at every start
-(`initialize()`) and rolls Mastermind entries older than 90 days into one
+(`initialize()`) and rolls Captain entries older than 90 days into one
 `compaction` entry per project and calendar month: a dated line per folded
 summary (capped at 2,000 characters, newest lines kept) and the deduplicated
 union of each list (capped at 16 items), dated at the newest folded entry. An
@@ -394,10 +394,10 @@ Rows go with their project (`ON DELETE CASCADE`); archiving leaves them.
 coordinator-only and project-forced like `update_project_status`, message
 capped at 4,000 characters) hands a report to the Commander through the seam
 in `src/main/commander/report-inbox.ts`; docs/commander.md describes where it
-lands. Section 11 of the Mastermind prompt tells it to answer Commander
+lands. Section 11 of the Captain prompt tells it to answer Commander
 requests with it (quoting the relay's correlation id) and to report unasked
 when the user must decide something. `tell_commander` escalations (#66)
-reach the Commander the same way, without the Mastermind doing anything.
+reach the Commander the same way, without the Captain doing anything.
 
 ## Project limits, pause and escalation policy (#65, #66)
 
@@ -414,7 +414,7 @@ Both live in the project's `settings` JSON column under their own keys (`src/sha
 
 The global pause is the `all_projects_paused` setting: `AgentManager.pauseAllProjects(paused)` sets it and drains the queue when lifted (IPC `projectLimits:pauseAll`; the Commander's "pause all projects" tool of #61 calls the same method).
 
-A start over a limit goes into the existing FIFO start queue with a reason of `project_limit`, `project_daily_cap`, `project_paused` or `global_pause` (beside `agent_limit` and `global_limit`). The `start_task` tool's result says which. The project's Mastermind is also told in a short fenced system message when its session is live and idle (once per project and reason until a queued start runs). Coordinator (Mastermind), heartbeat and triage sessions bypass all of it, as before. The queue is re-checked when a project's settings are saved (`project:update`), when the global pause is lifted, on every session idle/stop, and on every idle-session sweep, which is also what reopens a project after midnight. `AgentManager.getProjectLimitState(projectId)` (IPC `projectLimits:getState`) reports the limits, the live counts, the queued starts and what the next start would wait for; the project status (#58) carries it as `limits`.
+A start over a limit goes into the existing FIFO start queue with a reason of `project_limit`, `project_daily_cap`, `project_paused` or `global_pause` (beside `agent_limit` and `global_limit`). The `start_task` tool's result says which. The project's Captain is also told in a short fenced system message when its session is live and idle (once per project and reason until a queued start runs). Coordinator (Captain), heartbeat and triage sessions bypass all of it, as before. The queue is re-checked when a project's settings are saved (`project:update`), when the global pause is lifted, on every session idle/stop, and on every idle-session sweep, which is also what reopens a project after midnight. `AgentManager.getProjectLimitState(projectId)` (IPC `projectLimits:getState`) reports the limits, the live counts, the queued starts and what the next start would wait for; the project status (#58) carries it as `limits`.
 
 ### Escalation policy (`settings.escalation`)
 
@@ -429,11 +429,11 @@ Per action, one of `autonomous`, `tell_commander` or `ask_user`:
 | `change_priority` | autonomous | `update_task` with a `priority` |
 | `pr` | ask_user | none: prompt guidance only, no task-management tool opens or merges pull requests |
 
-The policy is a section of the Mastermind prompt (`src/main/prompts/mastermind.ts`) and is enforced for coordinator-scope calls by a gate on the project-scoped dispatch (`setCoordinatorCallGate` in `task-management-core.ts`, installed by `src/main/escalation.ts` when the Task API server starts). Task agents in the same project are not gated. `tell_commander` runs the call, then calls `escalateToCommander(event)` and shows a user notification; `ask_user` holds the call in memory, returns `{ status: 'held', id }` to the Mastermind, notifies the user, and the status bar's held-actions notice approves (runs the original call) or rejects it over IPC (`escalation:approve` / `escalation:reject`); either way the Mastermind's live session gets a fenced note with the outcome. `escalateToCommander` is a no-op seam until #62's `report_to_commander` installs a handler with `setCommanderEscalationHandler`. Held calls are not persisted: a restart forgets them.
+The policy is a section of the Captain prompt (`src/main/prompts/captain.ts`) and is enforced for coordinator-scope calls by a gate on the project-scoped dispatch (`setCoordinatorCallGate` in `task-management-core.ts`, installed by `src/main/escalation.ts` when the Task API server starts). Task agents in the same project are not gated. `tell_commander` runs the call, then calls `escalateToCommander(event)` and shows a user notification; `ask_user` holds the call in memory, returns `{ status: 'held', id }` to the Captain, notifies the user, and the status bar's held-actions notice approves (runs the original call) or rejects it over IPC (`escalation:approve` / `escalation:reject`); either way the Captain's live session gets a fenced note with the outcome. `escalateToCommander` is a no-op seam until #62's `report_to_commander` installs a handler with `setCommanderEscalationHandler`. Held calls are not persisted: a restart forgets them.
 
-## Scheduled Mastermind reviews (#67)
+## Scheduled Captain reviews (#67)
 
-A project can wake its Mastermind on a schedule to review the board, re-plan
+A project can wake its Captain on a schedule to review the board, re-plan
 and update the project status. The setting is a keyed block of
 `projects.settings`, edited in the project editor's "Scheduled review" section.
 It is off by default:
@@ -448,7 +448,7 @@ time. At each occurrence:
 
 - a paused project (its own `limits.paused`, or the global `all_projects_paused`)
   is skipped, and the skip is logged;
-- a Mastermind that is mid-turn is tried again on the next tick while the
+- a Captain that is mid-turn is tried again on the next tick while the
   occurrence is under 6 hours old;
 - otherwise the project's coordinator row gets one fenced system message
   (`buildScheduledReviewMessage`: origin `coordinator-wakeup`, the current
@@ -459,7 +459,7 @@ time. At each occurrence:
 
 The last occurrence handled is stored per project in the app setting
 `scheduled_review_state:<projectId>` (`{ cron, last }`) before the send. A
-restart therefore does not wake the Mastermind twice. Enabling a review, or
+restart therefore does not wake the Captain twice. Enabling a review, or
 changing its cron, starts from that moment. An occurrence missed while the
 app was closed runs once at start-up if it is under 6 hours old. The
 Commander's scheduled briefing uses the same scheduler (docs/commander.md).
@@ -469,8 +469,8 @@ Commander's scheduled briefing uses the same scheduler (docs/commander.md).
 | File | Role |
 |------|------|
 | `src/main/project-events.ts` | Project event bus, `emitTaskEvent` |
-| `src/main/mastermind-waker.ts` | Batched, debounced, capped Mastermind wake-ups |
-| `src/shared/mastermind-wakeups.ts` | Event kinds and the per-project wake-up setting |
+| `src/main/captain-waker.ts` | Batched, debounced, capped Captain wake-ups |
+| `src/shared/captain-wakeups.ts` | Event kinds and the per-project wake-up setting |
 | `src/main/project-status.ts` / `src/shared/project-status.ts` | Project status counts + narrative |
 | `src/shared/constants.ts` | `TaskStatus` enum |
 | `src/main/agent-manager.ts` | Session lifecycle, `transitionToIdle` |

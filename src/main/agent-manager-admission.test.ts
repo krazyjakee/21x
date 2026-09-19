@@ -312,8 +312,8 @@ describe('admission control — global cap', () => {
 
 describe('admission control — exempt sessions', () => {
   function makeCoordinator(db: DatabaseManager): string {
-    const row = db.createTask(makeTask({ title: 'Mastermind' }))!
-    db.db.prepare("UPDATE tasks SET role = 'mastermind' WHERE id = ?").run(row.id)
+    const row = db.createTask(makeTask({ title: 'Captain' }))!
+    db.db.prepare("UPDATE tasks SET role = 'captain' WHERE id = ?").run(row.id)
     return row.id
   }
 
@@ -323,12 +323,12 @@ describe('admission control — exempt sessions', () => {
     const [task1, task2] = createTasks(2)
 
     expect((await manager.startTask(task1.id)).action).toBe('task_started')
-    // Agent full, but the Mastermind is not counted or queued.
+    // Agent full, but the Captain is not counted or queued.
     expect(await manager.requestSession(agentId, coordinatorId)).toMatchObject({ status: 'started' })
     expect(started).toEqual([task1.id, coordinatorId])
 
     await manager.stopSession(sessionIdFor(manager, task1.id))
-    // The working Mastermind does not hold the freed slot.
+    // The working Captain does not hold the freed slot.
     expect((await manager.startTask(task2.id)).action).toBe('task_started')
   })
 

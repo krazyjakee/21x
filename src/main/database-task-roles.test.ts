@@ -1,43 +1,43 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createTestDb } from '../../test/helpers/db-test-helper'
-import { ensureProjectMastermind, seedMastermindTasks } from './database/seed'
+import { ensureProjectCaptain, seedCaptainTasks } from './database/seed'
 import { handleTaskRoute } from './task-api/task-routes'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import type { DatabaseManager } from './database'
 
 /**
- * A coordinator row (the Mastermind) is a conversation, not work. It must be
+ * A coordinator row (the Captain) is a conversation, not work. It must be
  * reachable by id — that is what makes its session and transcript persist —
  * and absent from everything that lists, counts or searches tasks.
  */
 describe('coordinator task rows', () => {
   let db: DatabaseManager
-  let mastermindId: string
+  let captainId: string
 
   beforeEach(() => {
     ;({ db } = createTestDb())
-    seedMastermindTasks(db.db)
-    mastermindId = db.getCoordinatorTask()!.id
+    seedCaptainTasks(db.db)
+    captainId = db.getCoordinatorTask()!.id
     db.createTask({ title: 'Fix the login bug', labels: ['bug'], priority: 'high' })
-    db.createTask({ title: 'Mastermind planning notes', description: 'mastermind', status: 'completed' })
+    db.createTask({ title: 'Captain planning notes', description: 'captain', status: 'completed' })
   })
 
   it('seeds one row for the Default project and finds it by project', () => {
-    seedMastermindTasks(db.db)
-    seedMastermindTasks(db.db)
-    const rows = db.db.prepare("SELECT id FROM tasks WHERE role = 'mastermind'").all()
+    seedCaptainTasks(db.db)
+    seedCaptainTasks(db.db)
+    const rows = db.db.prepare("SELECT id FROM tasks WHERE role = 'captain'").all()
     expect(rows).toHaveLength(1)
-    expect(db.getCoordinatorTask()?.id).toBe(mastermindId)
-    expect(db.getCoordinatorTask(DEFAULT_PROJECT_ID)?.id).toBe(mastermindId)
-    expect(db.getCoordinatorTask()?.role).toBe('mastermind')
+    expect(db.getCoordinatorTask()?.id).toBe(captainId)
+    expect(db.getCoordinatorTask(DEFAULT_PROJECT_ID)?.id).toBe(captainId)
+    expect(db.getCoordinatorTask()?.role).toBe('captain')
     expect(db.getCoordinatorTask()?.project_id).toBe(DEFAULT_PROJECT_ID)
   })
 
   it('is fetched by id like any task, so a session id can be stored on it', () => {
-    db.updateTask(mastermindId, { session_id: 'backend-session-1' })
-    const row = db.getTask(mastermindId)
+    db.updateTask(captainId, { session_id: 'backend-session-1' })
+    const row = db.getTask(captainId)
     expect(row?.session_id).toBe('backend-session-1')
-    expect(row?.role).toBe('mastermind')
+    expect(row?.role).toBe('captain')
   })
 
   it('creates ordinary tasks with role task', () => {
@@ -47,26 +47,26 @@ describe('coordinator task rows', () => {
 
   it('is left out of getTasks unless asked for', () => {
     const ids = db.getTasks().map((t) => t.id)
-    expect(ids).not.toContain(mastermindId)
+    expect(ids).not.toContain(captainId)
     expect(ids).toHaveLength(2)
 
     const all = db.getTasks({ includeCoordinators: true }).map((t) => t.id)
-    expect(all).toContain(mastermindId)
+    expect(all).toContain(captainId)
     expect(all).toHaveLength(3)
   })
 
   it('is left out of list_tasks, find_similar_tasks and statistics', async () => {
     const listed = await handleTaskRoute(db, '/list_tasks', {}) as Array<{ id: string }>
-    expect(listed.map((t) => t.id)).not.toContain(mastermindId)
+    expect(listed.map((t) => t.id)).not.toContain(captainId)
     expect(listed).toHaveLength(2)
 
-    // Its title says "Mastermind", so a keyword search would otherwise find it.
-    const similar = await handleTaskRoute(db, '/find_similar_tasks', { title_keywords: 'mastermind', completed_only: false }) as Array<{ id: string; title: string }>
-    expect(similar.map((t) => t.id)).not.toContain(mastermindId)
-    expect(similar.map((t) => t.title)).toEqual(['Mastermind planning notes'])
+    // Its title says "Captain", so a keyword search would otherwise find it.
+    const similar = await handleTaskRoute(db, '/find_similar_tasks', { title_keywords: 'captain', completed_only: false }) as Array<{ id: string; title: string }>
+    expect(similar.map((t) => t.id)).not.toContain(captainId)
+    expect(similar.map((t) => t.title)).toEqual(['Captain planning notes'])
 
     const recent = await handleTaskRoute(db, '/find_similar_tasks', {}) as Array<{ id: string }>
-    expect(recent.map((t) => t.id)).not.toContain(mastermindId)
+    expect(recent.map((t) => t.id)).not.toContain(captainId)
     expect(recent).toHaveLength(2)
 
     const completion = await handleTaskRoute(db, '/get_task_statistics', { metric: 'completion_rate' }) as { total: number; completed: number }
@@ -81,31 +81,31 @@ describe('coordinator task rows', () => {
   })
 })
 
-/** One Mastermind per project (#55): born with the project, kept through archive and restore. */
-describe('per-project Mastermind rows', () => {
+/** One Captain per project (#55): born with the project, kept through archive and restore. */
+describe('per-project Captain rows', () => {
   let db: DatabaseManager
 
   beforeEach(() => {
     ;({ db } = createTestDb())
-    seedMastermindTasks(db.db)
+    seedCaptainTasks(db.db)
   })
 
-  const mastermindRows = (): Array<{ id: string; project_id: string }> =>
-    db.db.prepare("SELECT id, project_id FROM tasks WHERE role = 'mastermind' ORDER BY created_at").all() as Array<{ id: string; project_id: string }>
+  const captainRows = (): Array<{ id: string; project_id: string }> =>
+    db.db.prepare("SELECT id, project_id FROM tasks WHERE role = 'captain' ORDER BY created_at").all() as Array<{ id: string; project_id: string }>
 
-  it('creates a Mastermind with the project, in that project', () => {
+  it('creates a Captain with the project, in that project', () => {
     const project = db.createProject({ name: 'Alpha' })!
-    const mastermind = db.getCoordinatorTask(project.id)
-    expect(mastermind).toBeDefined()
-    expect(mastermind?.project_id).toBe(project.id)
-    expect(mastermind?.role).toBe('mastermind')
-    expect(mastermind?.id).not.toBe(db.getCoordinatorTask(DEFAULT_PROJECT_ID)?.id)
+    const captain = db.getCoordinatorTask(project.id)
+    expect(captain).toBeDefined()
+    expect(captain?.project_id).toBe(project.id)
+    expect(captain?.role).toBe('captain')
+    expect(captain?.id).not.toBe(db.getCoordinatorTask(DEFAULT_PROJECT_ID)?.id)
     // Still hidden from the project's task list.
     expect(db.getTasks({ projectId: project.id })).toEqual([])
   })
 
   it('seeds one row per existing project and stays idempotent across startups', () => {
-    // Projects that predate per-project Masterminds: rows made without the create hook.
+    // Projects that predate per-project Captains: rows made without the create hook.
     const now = new Date().toISOString()
     for (const id of ['legacy-a', 'legacy-b']) {
       db.db.prepare(`
@@ -113,37 +113,37 @@ describe('per-project Mastermind rows', () => {
         VALUES (?, ?, '', '{}', 0, 0, ?, ?)
       `).run(id, id, now, now)
     }
-    expect(mastermindRows().map((row) => row.project_id)).toEqual([DEFAULT_PROJECT_ID])
+    expect(captainRows().map((row) => row.project_id)).toEqual([DEFAULT_PROJECT_ID])
 
-    seedMastermindTasks(db.db)
-    const afterFirst = mastermindRows()
+    seedCaptainTasks(db.db)
+    const afterFirst = captainRows()
     expect(afterFirst.map((row) => row.project_id).sort()).toEqual([DEFAULT_PROJECT_ID, 'legacy-a', 'legacy-b'])
 
-    seedMastermindTasks(db.db)
-    seedMastermindTasks(db.db)
-    expect(mastermindRows()).toEqual(afterFirst)
+    seedCaptainTasks(db.db)
+    seedCaptainTasks(db.db)
+    expect(captainRows()).toEqual(afterFirst)
     expect(db.getCoordinatorTasks()).toHaveLength(3)
   })
 
-  it('adopts a Mastermind row written before projects existed into the Default project', () => {
+  it('adopts a Captain row written before projects existed into the Default project', () => {
     const existing = db.getCoordinatorTask(DEFAULT_PROJECT_ID)!.id
     db.db.prepare('UPDATE tasks SET project_id = NULL WHERE id = ?').run(existing)
-    seedMastermindTasks(db.db)
-    expect(mastermindRows()).toEqual([{ id: existing, project_id: DEFAULT_PROJECT_ID }])
+    seedCaptainTasks(db.db)
+    expect(captainRows()).toEqual([{ id: existing, project_id: DEFAULT_PROJECT_ID }])
   })
 
   it('keeps the conversation through archive and restore', () => {
     const project = db.createProject({ name: 'Beta' })!
-    const mastermind = db.getCoordinatorTask(project.id)!
-    db.updateTask(mastermind.id, { session_id: 'backend-session-beta' })
+    const captain = db.getCoordinatorTask(project.id)!
+    db.updateTask(captain.id, { session_id: 'backend-session-beta' })
 
     db.archiveProject(project.id, true)
-    expect(db.getCoordinatorTask(project.id)?.id).toBe(mastermind.id)
+    expect(db.getCoordinatorTask(project.id)?.id).toBe(captain.id)
 
     db.archiveProject(project.id, false)
-    expect(db.getCoordinatorTask(project.id)?.id).toBe(mastermind.id)
-    expect(db.getTask(mastermind.id)?.session_id).toBe('backend-session-beta')
-    expect(mastermindRows()).toHaveLength(2)
+    expect(db.getCoordinatorTask(project.id)?.id).toBe(captain.id)
+    expect(db.getTask(captain.id)?.session_id).toBe('backend-session-beta')
+    expect(captainRows()).toHaveLength(2)
   })
 
   it('ensureCoordinatorTask heals a project without one and refuses an unknown project', () => {
@@ -155,7 +155,7 @@ describe('per-project Mastermind rows', () => {
     const healed = db.ensureCoordinatorTask(project.id)
     expect(healed?.project_id).toBe(project.id)
     expect(healed?.id).not.toBe(original)
-    expect(ensureProjectMastermind(db.db, project.id)).toBe(healed?.id)
+    expect(ensureProjectCaptain(db.db, project.id)).toBe(healed?.id)
 
     expect(db.ensureCoordinatorTask('no-such-project')).toBeUndefined()
     expect(db.getCoordinatorTask('no-such-project')).toBeUndefined()

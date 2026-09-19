@@ -16,7 +16,7 @@ const api = window.electronAPI as unknown as Record<string, Record<string, Mock>
 
 function project(id: string, name: string, extra: Partial<ProjectRecord> = {}): ProjectRecord {
   return {
-    id, name, description: '', default_agent_id: null, mastermind_agent_id: null,
+    id, name, description: '', default_agent_id: null, captain_agent_id: null,
     git_provider: null, git_org: null, settings: {}, sort_order: 0, archived: false,
     created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z', ...extra
   }

@@ -2,15 +2,15 @@ import { useCallback } from 'react'
 import { VoiceMicButton } from './VoiceMicButton'
 import { useUIStore } from '@/stores/ui-store'
 import { useVoiceStore } from '@/stores/voice-store'
-import { MASTERMIND_COMPOSER_KEY } from '@/lib/voice-dictation-target'
+import { CAPTAIN_COMPOSER_KEY } from '@/lib/voice-dictation-target'
 
-export { MASTERMIND_COMPOSER_KEY } from '@/lib/voice-dictation-target'
+export { CAPTAIN_COMPOSER_KEY } from '@/lib/voice-dictation-target'
 
 /**
- * Start talking to Mastermind from anywhere.
+ * Start talking to Captain from anywhere.
  *
- * The button sits beside the Mastermind control in the top bar, so it is
- * reachable from every view. It names the Mastermind composer explicitly: a
+ * The button sits beside the Captain control in the top bar, so it is
+ * reachable from every view. It names the Captain composer explicitly: a
  * turn started away from a text box would otherwise write the words nowhere,
  * which is what the global shortcut does on purpose.
  *
@@ -30,7 +30,7 @@ export function TopBarVoiceButton(): React.JSX.Element | null {
 
   return (
     <VoiceMicButton
-      composerKey={MASTERMIND_COMPOSER_KEY}
+      composerKey={CAPTAIN_COMPOSER_KEY}
       onBeforeStart={revealComposer}
       // The loudest control in the bar — by colour, not by size. Speaking is
       // the point here and the written word beside it is the fallback.
@@ -38,8 +38,8 @@ export function TopBarVoiceButton(): React.JSX.Element | null {
       className="h-8 w-8"
       title={
         conversational
-          ? 'Talk to Mastermind. Each pause sends what you said.'
-          : 'Dictate to Mastermind'
+          ? 'Talk to Captain. Each pause sends what you said.'
+          : 'Dictate to Captain'
       }
     />
   )

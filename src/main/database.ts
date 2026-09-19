@@ -6,9 +6,10 @@ import { createId } from '@paralleldrive/cuid2'
 import { TaskStatus } from '../shared/constants'
 import { WORKSPACES_DIR, taskAttachmentsDir } from './workspace-paths'
 import { applySchema } from './database/schema'
-import { ensureProjectMastermind, seedDefaultAgent, seedMastermindTasks, seedOrchestratorSkill, seedTaskManagementMcpServer } from './database/seed'
+import { ensureProjectCaptain, seedDefaultAgent, seedCaptainTasks, seedTaskManagementMcpServer } from './database/seed'
+import { seedOrchestratorSkill } from './database/captain-migration'
 import { userTaskRoleFilter } from './database/task-roles'
-import { TASK_ROLE_MASTERMIND, type TaskRole } from '../shared/task-roles'
+import { TASK_ROLE_CAPTAIN, type TaskRole } from '../shared/task-roles'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import {
   PROJECT_STATUS_BLOCKER_MAX_CHARS,
@@ -109,13 +110,13 @@ function toJournalEntry(row: ProjectStatusJournalRow): ProjectStatusJournalEntry
     blockers: journalStringList(row.blockers),
     decisions: journalStringList(row.decisions),
     next_steps: journalStringList(row.next_steps),
-    source: row.source === 'compaction' ? 'compaction' : 'mastermind',
+    source: row.source === 'compaction' ? 'compaction' : 'captain',
     correlation_id: row.correlation_id ?? null,
     created_at: row.created_at
   }
 }
 
-/** Trims, clips and caps one highlight list from the Mastermind. */
+/** Trims, clips and caps one highlight list from the Captain. */
 function cleanJournalList(value: unknown, maxItems = PROJECT_STATUS_JOURNAL_MAX_ITEMS): string[] {
   if (!Array.isArray(value)) return []
   const out: string[] = []
@@ -209,7 +210,7 @@ export class DatabaseManager {
 
     seedTaskManagementMcpServer(this.db)
     seedOrchestratorSkill(this.db)
-    seedMastermindTasks(this.db)
+    seedCaptainTasks(this.db)
 
     // Status journal retention (#72): idempotent, so every start may run it.
     try {
@@ -264,10 +265,10 @@ export class DatabaseManager {
   }
 
   /**
-   * The row that hosts a project's coordinator conversation: its Mastermind.
+   * The row that hosts a project's coordinator conversation: its Captain.
    * One per project (#55); the Default project's is the one every install has.
    */
-  getCoordinatorTask(projectId: string = DEFAULT_PROJECT_ID, role: TaskRole = TASK_ROLE_MASTERMIND): TaskRecord | undefined {
+  getCoordinatorTask(projectId: string = DEFAULT_PROJECT_ID, role: TaskRole = TASK_ROLE_CAPTAIN): TaskRecord | undefined {
     if (!this.ensureDbOpen()) return undefined
 
     const row = this.prepare(
@@ -278,7 +279,7 @@ export class DatabaseManager {
   }
 
   /** Every coordinator row of a role, one per project, in project creation order. */
-  getCoordinatorTasks(role: TaskRole = TASK_ROLE_MASTERMIND): TaskRecord[] {
+  getCoordinatorTasks(role: TaskRole = TASK_ROLE_CAPTAIN): TaskRecord[] {
     if (!this.ensureDbOpen()) return []
     const rows = this.prepare(
       'SELECT * FROM tasks WHERE role = ? ORDER BY created_at ASC'
@@ -287,13 +288,13 @@ export class DatabaseManager {
   }
 
   /**
-   * The project's Mastermind row, created if the project exists and has none
-   * (a project made before per-project Masterminds, or one restored from an
+   * The project's Captain row, created if the project exists and has none
+   * (a project made before per-project Captains, or one restored from an
    * archive). Undefined for an unknown project: no row is invented for it.
    */
   ensureCoordinatorTask(projectId: string): TaskRecord | undefined {
     if (!this.ensureDbOpen() || !this.getProject(projectId)) return undefined
-    return this.getTask(ensureProjectMastermind(this.db, projectId))
+    return this.getTask(ensureProjectCaptain(this.db, projectId))
   }
 
   getTask(id: string): TaskRecord | undefined {
@@ -949,14 +950,14 @@ export class DatabaseManager {
     const now = new Date().toISOString()
     const { next } = this.prepare('SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM projects').get() as { next: number }
     this.prepare(`
-      INSERT INTO projects (id, name, description, default_agent_id, mastermind_agent_id, git_provider, git_org, settings, sort_order, archived, created_at, updated_at)
+      INSERT INTO projects (id, name, description, default_agent_id, captain_agent_id, git_provider, git_org, settings, sort_order, archived, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
     `).run(
       id,
       name,
       data.description ?? '',
       data.default_agent_id ?? null,
-      data.mastermind_agent_id ?? null,
+      data.captain_agent_id ?? null,
       data.git_provider || null,
       data.git_org || null,
       JSON.stringify(data.settings ?? {}),
@@ -964,9 +965,9 @@ export class DatabaseManager {
       now,
       now
     )
-    // A project is born with its Mastermind (#55); the conversation is ready
+    // A project is born with its Captain (#55); the conversation is ready
     // before the user opens the drawer.
-    ensureProjectMastermind(this.db, id)
+    ensureProjectCaptain(this.db, id)
     return this.getProject(id)
   }
 
@@ -980,7 +981,7 @@ export class DatabaseManager {
     }
     if (data.description !== undefined) { setClauses.push('description = ?'); values.push(data.description) }
     if (data.default_agent_id !== undefined) { setClauses.push('default_agent_id = ?'); values.push(data.default_agent_id || null) }
-    if (data.mastermind_agent_id !== undefined) { setClauses.push('mastermind_agent_id = ?'); values.push(data.mastermind_agent_id || null) }
+    if (data.captain_agent_id !== undefined) { setClauses.push('captain_agent_id = ?'); values.push(data.captain_agent_id || null) }
     if (data.git_provider !== undefined) { setClauses.push('git_provider = ?'); values.push(data.git_provider || null) }
     if (data.git_org !== undefined) { setClauses.push('git_org = ?'); values.push(data.git_org || null) }
     if (data.settings !== undefined) { setClauses.push('settings = ?'); values.push(JSON.stringify(data.settings ?? {})) }
@@ -994,14 +995,14 @@ export class DatabaseManager {
 
   /**
    * Archive (or restore) a project. The Default project always stays active.
-   * The project's Mastermind row is left alone either way: archiving keeps
+   * The project's Captain row is left alone either way: archiving keeps
    * the conversation (its row is hidden anyway), restoring finds it again.
    */
   archiveProject(id: string, archived = true): ProjectRecord | undefined {
     if (archived && id === DEFAULT_PROJECT_ID) throw new Error('The Default project cannot be archived.')
     this.prepare('UPDATE projects SET archived = ?, updated_at = ? WHERE id = ?')
       .run(archived ? 1 : 0, new Date().toISOString(), id)
-    if (!archived && this.getProject(id)) ensureProjectMastermind(this.db, id)
+    if (!archived && this.getProject(id)) ensureProjectCaptain(this.db, id)
     return this.getProject(id)
   }
 
@@ -1012,7 +1013,7 @@ export class DatabaseManager {
 
   // ── Project status (#58) ─────────────────────────────────────
   // Counts come from the task rows every time (plus the caller's live session
-  // facts, which no row records); only the Mastermind's narrative is stored,
+  // facts, which no row records); only the Captain's narrative is stored,
   // one snapshot per project in `project_status`. A journal of earlier
   // snapshots (#72) goes in its own table beside it.
 
@@ -1123,7 +1124,7 @@ export class DatabaseManager {
       JSON.stringify(cleanJournalList(input.blockers)),
       JSON.stringify(cleanJournalList(input.decisions)),
       JSON.stringify(cleanJournalList(input.next_steps)),
-      options.source ?? 'mastermind',
+      options.source ?? 'captain',
       correlationId,
       options.createdAt ?? new Date().toISOString()
     )
@@ -1137,7 +1138,7 @@ export class DatabaseManager {
   }
 
   /**
-   * One status update from the Mastermind: replaces the snapshot and appends
+   * One status update from the Captain: replaces the snapshot and appends
    * the journal entry in one transaction. The entry's `blockers` default to
    * the snapshot's `top_blockers`. Undefined for an unknown project.
    */
@@ -1185,7 +1186,7 @@ export class DatabaseManager {
   }
 
   /**
-   * Retention (#72): Mastermind entries older than the window (90 days) are
+   * Retention (#72): Captain entries older than the window (90 days) are
    * rolled into one `compaction` entry per project and calendar month, then
    * deleted. The roll-up keeps a dated line per folded summary (newest lines
    * win when the cap is hit) and the union of each highlight list, so
@@ -1198,7 +1199,7 @@ export class DatabaseManager {
     const cutoff = new Date(now.getTime() - PROJECT_STATUS_JOURNAL_COMPACT_AFTER_DAYS * 24 * 60 * 60 * 1000).toISOString()
     const stale = this.prepare(`
       SELECT * FROM project_status_journal
-      WHERE source = 'mastermind' AND created_at < ?
+      WHERE source = 'captain' AND created_at < ?
       ORDER BY project_id ASC, created_at ASC, id ASC
     `).all(cutoff) as ProjectStatusJournalRow[]
     if (stale.length === 0) return { folded: 0, written: 0 }

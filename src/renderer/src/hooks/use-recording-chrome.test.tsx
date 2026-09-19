@@ -191,8 +191,8 @@ describe('the surfaces that carry the mark', () => {
     const panels = {
       workspace: appLayout.slice(appLayout.indexOf('<main'), appLayout.indexOf('</main>')),
       sidebar: sidebar.slice(sidebar.indexOf('<aside'), sidebar.indexOf('>', sidebar.indexOf('<aside'))),
-      // The Mastermind drawer was the last one still flush and square.
-      mastermind: drawer.slice(drawer.indexOf('return ('), drawer.indexOf('{/* Header')),
+      // The Captain drawer was the last one still flush and square.
+      captain: drawer.slice(drawer.indexOf('return ('), drawer.indexOf('{/* Header')),
     }
 
     // One shape language. A panel that opts out reads as unfinished beside

@@ -1,48 +1,48 @@
 /**
- * Wakes a project's Mastermind on project events (#57).
+ * Wakes a project's Captain on project events (#57).
  *
  * Parent tasks already get an event-driven wake-up when a subtask finishes
  * (AgentManager.notifyParentOfSubtaskCompletion). This does the same for the
- * project's Mastermind, from the project event bus (project-events.ts):
+ * project's Captain, from the project event bus (project-events.ts):
  *
  *  - events for a project are held for a short debounce window and delivered
  *    as ONE fenced system message, in the coordinator wake-up style, so a
  *    burst (a synced batch of tasks, three agents finishing together) causes
- *    a single Mastermind turn;
+ *    a single Captain turn;
  *  - the message goes to the project's coordinator row through
  *    AgentManager.sendMessage, which rejoins the live session or resumes the
  *    persisted one (the coordinator path of startSessionNow), so the window
  *    does not have to be open and the runtime does not have to be resident;
- *  - a Mastermind that is mid-turn is not interrupted: its batch waits and is
+ *  - a Captain that is mid-turn is not interrupted: its batch waits and is
  *    retried after the next window, until it goes idle (or the batch is too
  *    old to be worth delivering);
- *  - per project, `projects.settings.mastermind_wakeups` chooses the kinds
- *    that wake it, or turns wake-ups off (shared/mastermind-wakeups.ts;
+ *  - per project, `projects.settings.captain_wakeups` chooses the kinds
+ *    that wake it, or turns wake-ups off (shared/captain-wakeups.ts;
  *    default on, all kinds);
- *  - events the Mastermind caused itself are skipped: the task-management
+ *  - events the Captain caused itself are skipped: the task-management
  *    MCP dispatch reports each of its calls (setToolCallObserver), and a task
  *    it touched in the last few seconds does not wake it;
  *  - at most `hourlyCap` wake-ups per project per hour, logged when hit, so
- *    an agent that keeps failing cannot spin the Mastermind.
+ *    an agent that keeps failing cannot spin the Captain.
  */
 import type { AgentManager } from './agent-manager'
 import type { DatabaseManager, ProjectRecord } from './database'
 import { projectEvents, type ProjectEvent } from './project-events'
 import { isCoordinatorScope, setToolCallObserver, type TaskMcpScope } from './mcp-servers/task-management-core'
-import { readMastermindWakeupSettings, wakeupKindEnabled, type ProjectEventKind } from '../shared/mastermind-wakeups'
+import { readCaptainWakeupSettings, wakeupKindEnabled, type ProjectEventKind } from '../shared/captain-wakeups'
 import { buildSystemMessage, computeDeliveryId, SystemMessageOrigin } from '../shared/system-authority'
 
-export type MastermindWakerStore = Pick<DatabaseManager, 'getProject' | 'getCoordinatorTask' | 'getAgents'>
-export type MastermindWakerAgents = Pick<AgentManager, 'findSessionByTaskId' | 'sendMessage'>
+export type CaptainWakerStore = Pick<DatabaseManager, 'getProject' | 'getCoordinatorTask' | 'getAgents'>
+export type CaptainWakerAgents = Pick<AgentManager, 'findSessionByTaskId' | 'sendMessage'>
 
-export interface MastermindWakerOptions {
+export interface CaptainWakerOptions {
   /** How long a project's first event waits for company before the wake-up. */
   debounceMs?: number
   /** Wake-ups per project per rolling hour. */
   hourlyCap?: number
-  /** How long after the Mastermind touched a task its events count as self-caused. */
+  /** How long after the Captain touched a task its events count as self-caused. */
   selfCausedWindowMs?: number
-  /** A batch older than this is dropped rather than delivered to a Mastermind that never went idle. */
+  /** A batch older than this is dropped rather than delivered to a Captain that never went idle. */
   maxDeferMs?: number
   /** Events kept per batch; the rest are counted in the message, not listed. */
   maxEventsPerWake?: number
@@ -52,7 +52,7 @@ export interface MastermindWakerOptions {
   clearTimer?: (handle: unknown) => void
 }
 
-export const MASTERMIND_WAKE_DEFAULTS = {
+export const CAPTAIN_WAKE_DEFAULTS = {
   debounceMs: 3_000,
   hourlyCap: 12,
   selfCausedWindowMs: 20_000,
@@ -70,16 +70,16 @@ interface PendingBatch {
 }
 
 /**
- * The agent a project's Mastermind runs on, resolved the way the renderer's
- * coordinator-store does it: the project's Mastermind agent, else its default
+ * The agent a project's Captain runs on, resolved the way the renderer's
+ * coordinator-store does it: the project's Captain agent, else its default
  * agent, else the app default, else the first agent. Ids that no longer name
  * an agent are skipped.
  */
-export function resolveMastermindAgentId(db: Pick<DatabaseManager, 'getAgents'>, project: Pick<ProjectRecord, 'mastermind_agent_id' | 'default_agent_id'>): string | null {
+export function resolveCaptainAgentId(db: Pick<DatabaseManager, 'getAgents'>, project: Pick<ProjectRecord, 'captain_agent_id' | 'default_agent_id'>): string | null {
   const agents = db.getAgents()
   const known = (id: string | null | undefined): string | null =>
     id && agents.some((agent) => agent.id === id) ? id : null
-  return known(project.mastermind_agent_id) ?? known(project.default_agent_id) ?? agents.find((agent) => agent.is_default)?.id ?? agents[0]?.id ?? null
+  return known(project.captain_agent_id) ?? known(project.default_agent_id) ?? agents.find((agent) => agent.is_default)?.id ?? agents[0]?.id ?? null
 }
 
 const KIND_LINE: Record<ProjectEventKind, string> = {
@@ -103,7 +103,7 @@ function describeEvent(event: ProjectEvent): string {
  * or source-authored text, so they are fenced as findings and the authority
  * boundary is stated, exactly like the subtask wake-up.
  */
-export function buildMastermindWakeMessage(
+export function buildCaptainWakeMessage(
   coordinatorTaskId: string,
   projectName: string,
   events: ProjectEvent[],
@@ -151,7 +151,7 @@ export function taskIdsTouchedByCall(args: Record<string, unknown>, result: unkn
   return ids
 }
 
-export class MastermindWaker {
+export class CaptainWaker {
   private readonly debounceMs: number
   private readonly hourlyCap: number
   private readonly selfCausedWindowMs: number
@@ -164,7 +164,7 @@ export class MastermindWaker {
   private readonly pending = new Map<string, PendingBatch>()
   /** Wake-up times per project inside the rolling hour. */
   private readonly wakes = new Map<string, number[]>()
-  /** Task id → when the Mastermind last touched it through its tools. */
+  /** Task id → when the Captain last touched it through its tools. */
   private readonly touched = new Map<string, number>()
   /** Projects whose cap was already logged for the current hour, so the log does not repeat per event. */
   private readonly capLogged = new Set<string>()
@@ -172,15 +172,15 @@ export class MastermindWaker {
   private flushing = new Set<string>()
 
   constructor(
-    private readonly db: MastermindWakerStore,
-    private readonly agents: MastermindWakerAgents,
-    options: MastermindWakerOptions = {}
+    private readonly db: CaptainWakerStore,
+    private readonly agents: CaptainWakerAgents,
+    options: CaptainWakerOptions = {}
   ) {
-    this.debounceMs = options.debounceMs ?? MASTERMIND_WAKE_DEFAULTS.debounceMs
-    this.hourlyCap = options.hourlyCap ?? MASTERMIND_WAKE_DEFAULTS.hourlyCap
-    this.selfCausedWindowMs = options.selfCausedWindowMs ?? MASTERMIND_WAKE_DEFAULTS.selfCausedWindowMs
-    this.maxDeferMs = options.maxDeferMs ?? MASTERMIND_WAKE_DEFAULTS.maxDeferMs
-    this.maxEventsPerWake = options.maxEventsPerWake ?? MASTERMIND_WAKE_DEFAULTS.maxEventsPerWake
+    this.debounceMs = options.debounceMs ?? CAPTAIN_WAKE_DEFAULTS.debounceMs
+    this.hourlyCap = options.hourlyCap ?? CAPTAIN_WAKE_DEFAULTS.hourlyCap
+    this.selfCausedWindowMs = options.selfCausedWindowMs ?? CAPTAIN_WAKE_DEFAULTS.selfCausedWindowMs
+    this.maxDeferMs = options.maxDeferMs ?? CAPTAIN_WAKE_DEFAULTS.maxDeferMs
+    this.maxEventsPerWake = options.maxEventsPerWake ?? CAPTAIN_WAKE_DEFAULTS.maxEventsPerWake
     this.now = options.now ?? (() => Date.now())
     this.setTimer = options.setTimer ?? ((fn, ms) => setTimeout(fn, ms))
     this.clearTimer = options.clearTimer ?? ((handle) => clearTimeout(handle as NodeJS.Timeout))
@@ -203,7 +203,7 @@ export class MastermindWaker {
     this.pending.clear()
   }
 
-  /** Records that the Mastermind itself just changed a task, so its own change does not wake it. */
+  /** Records that the Captain itself just changed a task, so its own change does not wake it. */
   noteCoordinatorTouched(taskId: string): void {
     this.touched.set(taskId, this.now())
     // Keep the map small: entries outside the window are of no use.
@@ -227,11 +227,11 @@ export class MastermindWaker {
   handleEvent(event: ProjectEvent): void {
     const project = this.db.getProject(event.projectId)
     if (!project || project.archived) return
-    if (!wakeupKindEnabled(readMastermindWakeupSettings(project.settings), event.kind)) return
+    if (!wakeupKindEnabled(readCaptainWakeupSettings(project.settings), event.kind)) return
 
     const touchedAt = this.touched.get(event.taskId)
     if (touchedAt !== undefined && this.now() - touchedAt <= this.selfCausedWindowMs) {
-      console.log(`[MastermindWaker] ${event.kind} on ${event.taskId} was caused by the Mastermind of ${event.projectId}; not waking it`)
+      console.log(`[CaptainWaker] ${event.kind} on ${event.taskId} was caused by the Captain of ${event.projectId}; not waking it`)
       return
     }
 
@@ -273,7 +273,7 @@ export class MastermindWaker {
     const project = this.db.getProject(projectId)
     const coordinator = this.db.getCoordinatorTask(projectId)
     if (!project || !coordinator) {
-      console.warn(`[MastermindWaker] Project ${projectId} has no Mastermind row; dropping ${batch.events.length} event(s)`)
+      console.warn(`[CaptainWaker] Project ${projectId} has no Captain row; dropping ${batch.events.length} event(s)`)
       this.pending.delete(projectId)
       return
     }
@@ -283,7 +283,7 @@ export class MastermindWaker {
     const live = this.agents.findSessionByTaskId(coordinator.id)
     if (live && live.session.status !== 'idle') {
       if (this.now() - batch.since > this.maxDeferMs) {
-        console.warn(`[MastermindWaker] Mastermind of ${projectId} stayed ${live.session.status} for over ${Math.round(this.maxDeferMs / 60_000)} min; dropping ${batch.events.length} stale event(s)`)
+        console.warn(`[CaptainWaker] Captain of ${projectId} stayed ${live.session.status} for over ${Math.round(this.maxDeferMs / 60_000)} min; dropping ${batch.events.length} stale event(s)`)
         this.pending.delete(projectId)
         return
       }
@@ -295,26 +295,26 @@ export class MastermindWaker {
     if (!this.underCap(projectId)) {
       if (!this.capLogged.has(projectId)) {
         this.capLogged.add(projectId)
-        console.warn(`[MastermindWaker] Wake-up cap reached for project ${projectId} (${this.hourlyCap}/hour); dropping ${batch.events.length} event(s) until the hour rolls over`)
+        console.warn(`[CaptainWaker] Wake-up cap reached for project ${projectId} (${this.hourlyCap}/hour); dropping ${batch.events.length} event(s) until the hour rolls over`)
       }
       return
     }
 
-    const agentId = live?.session.agentId ?? resolveMastermindAgentId(this.db, project)
+    const agentId = live?.session.agentId ?? resolveCaptainAgentId(this.db, project)
     if (!agentId) {
-      console.warn(`[MastermindWaker] No agent to run the Mastermind of ${projectId}; dropping ${batch.events.length} event(s)`)
+      console.warn(`[CaptainWaker] No agent to run the Captain of ${projectId}; dropping ${batch.events.length} event(s)`)
       return
     }
 
     const listed = batch.events.slice(0, this.maxEventsPerWake)
-    const message = buildMastermindWakeMessage(coordinator.id, project.name, listed, batch.events.length - listed.length)
+    const message = buildCaptainWakeMessage(coordinator.id, project.name, listed, batch.events.length - listed.length)
     this.recordWake(projectId)
     this.flushing.add(projectId)
     try {
-      console.log(`[MastermindWaker] Waking Mastermind of ${projectId} with ${batch.events.length} event(s)`)
+      console.log(`[CaptainWaker] Waking Captain of ${projectId} with ${batch.events.length} event(s)`)
       await this.agents.sendMessage(live?.sessionId ?? '', message, coordinator.id, agentId)
     } catch (err) {
-      console.error(`[MastermindWaker] Could not wake the Mastermind of ${projectId}:`, err)
+      console.error(`[CaptainWaker] Could not wake the Captain of ${projectId}:`, err)
     } finally {
       this.flushing.delete(projectId)
     }

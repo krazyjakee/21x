@@ -7,7 +7,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { callToolForScope, FULL_ACCESS_SCOPE, type TaskMcpScope } from './task-management-core'
 import { SKILL_SCOPE_PARAM } from '../task-api/skill-routes'
 
-const MASTERMIND: TaskMcpScope = { parentTaskId: null, taskId: null, artifactTaskId: null, projectId: 'proj-a' }
+const CAPTAIN: TaskMcpScope = { parentTaskId: null, taskId: null, artifactTaskId: null, projectId: 'proj-a' }
 const TASK_AGENT: TaskMcpScope = { parentTaskId: null, taskId: 'task-1', artifactTaskId: 'task-1', projectId: 'proj-a' }
 const SUBTASK: TaskMcpScope = { parentTaskId: 'task-1', taskId: 'sub-1', artifactTaskId: 'sub-1' }
 
@@ -26,9 +26,9 @@ function scopeSeenBy(invoke: ReturnType<typeof fakeInvoke>, route: string): unkn
 }
 
 describe('skill scope attached by the dispatcher', () => {
-  it('marks the Mastermind as the coordinator of its project', async () => {
+  it('marks the Captain as the coordinator of its project', async () => {
     const invoke = fakeInvoke()
-    await callToolForScope('list_skills', {}, MASTERMIND, invoke)
+    await callToolForScope('list_skills', {}, CAPTAIN, invoke)
     expect(scopeSeenBy(invoke, '/list_skills')).toEqual({ project_id: 'proj-a', role: 'coordinator' })
   })
 
@@ -57,7 +57,7 @@ describe('skill scope attached by the dispatcher', () => {
 
   it('leaves non-skill tools alone', async () => {
     const invoke = fakeInvoke()
-    await callToolForScope('list_agents', {}, MASTERMIND, invoke)
+    await callToolForScope('list_agents', {}, CAPTAIN, invoke)
     expect(scopeSeenBy(invoke, '/list_agents')).toBeUndefined()
   })
 })

@@ -11,7 +11,7 @@ export const OVERVIEW_COUNT_TILES: Array<{ key: keyof ProjectStatusCounts; label
   { key: 'blocked', label: 'Blocked' }
 ]
 
-/** The card's one-line summary: the Mastermind's, else the counts, else a quiet note. */
+/** The card's one-line summary: the Captain's, else the counts, else a quiet note. */
 export function overviewSummary(entry: ProjectOverviewEntry): string {
   const summary = entry.status.summary.trim()
   if (summary) return summary
@@ -35,7 +35,7 @@ export function describeLimitState(entry: Pick<ProjectOverviewEntry, 'paused' | 
 export function describeAttention(entry: ProjectOverviewEntry): string[] {
   const parts: string[] = []
   if (entry.pending_approvals > 0) parts.push(`${entry.pending_approvals} awaiting approval`)
-  if (entry.held_actions > 0) parts.push(`${entry.held_actions} held Mastermind ${entry.held_actions === 1 ? 'call' : 'calls'}`)
+  if (entry.held_actions > 0) parts.push(`${entry.held_actions} held Captain ${entry.held_actions === 1 ? 'call' : 'calls'}`)
   if (entry.status.counts.awaiting_review > 0) parts.push(`${entry.status.counts.awaiting_review} to review`)
   return parts
 }

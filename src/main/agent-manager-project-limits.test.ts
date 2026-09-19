@@ -207,7 +207,7 @@ describe('per-project limits (#65)', () => {
     expect(h.manager.getStartQueue()[0]).toMatchObject({ taskId: b.id, reason: 'project_paused' })
   })
 
-  it('the Mastermind (coordinator row) bypasses a paused project and the global pause', async () => {
+  it('the Captain (coordinator row) bypasses a paused project and the global pause', async () => {
     const h = setup()
     const p1 = h.createProject('Paused', { paused: true })
     h.manager.pauseAllProjects(true)
@@ -218,7 +218,7 @@ describe('per-project limits (#65)', () => {
     expect(h.manager.getProjectLimitState(p1).runningAgents).toBe(0)
   })
 
-  it('tells a live, idle Mastermind why a start waits, once per project and reason', async () => {
+  it('tells a live, idle Captain why a start waits, once per project and reason', async () => {
     const h = setup()
     const p1 = h.createProject('Told', { paused: true })
     const coordinator = h.db.getCoordinatorTask(p1)!

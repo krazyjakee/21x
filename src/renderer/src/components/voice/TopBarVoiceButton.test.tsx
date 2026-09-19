@@ -11,7 +11,7 @@ vi.mock('@/lib/voice-capture', () => ({
 }))
 
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
-import { MASTERMIND_COMPOSER_KEY, TopBarVoiceButton } from './TopBarVoiceButton'
+import { CAPTAIN_COMPOSER_KEY, TopBarVoiceButton } from './TopBarVoiceButton'
 import { VoiceMicButton } from './VoiceMicButton'
 import { useVoiceStore } from '@/stores/voice-store'
 import { useUIStore } from '@/stores/ui-store'
@@ -45,12 +45,12 @@ function voiceReady(conversation = true): void {
   })
 }
 
-/** Stands in for the Mastermind drawer, which registers the same key. */
-function mountMastermindComposer(): { field: HTMLTextAreaElement; submit: ReturnType<typeof vi.fn> } {
+/** Stands in for the Captain drawer, which registers the same key. */
+function mountCaptainComposer(): { field: HTMLTextAreaElement; submit: ReturnType<typeof vi.fn> } {
   const field = document.createElement('textarea')
   document.body.appendChild(field)
   const submit = vi.fn()
-  registerComposer(MASTERMIND_COMPOSER_KEY, { getField: () => field, submit })
+  registerComposer(CAPTAIN_COMPOSER_KEY, { getField: () => field, submit })
   return { field, submit }
 }
 
@@ -88,7 +88,7 @@ describe('TopBarVoiceButton', () => {
   })
 
   it('opens the drawer, so the words arrive somewhere the user can see', async () => {
-    mountMastermindComposer()
+    mountCaptainComposer()
     await act(async () => {
       render(<TopBarVoiceButton />)
     })
@@ -100,8 +100,8 @@ describe('TopBarVoiceButton', () => {
     expect(useUIStore.getState().showOrchestrator).toBe(true)
   })
 
-  it('sends the words to Mastermind, not to nowhere', async () => {
-    const { field, submit } = mountMastermindComposer()
+  it('sends the words to Captain, not to nowhere', async () => {
+    const { field, submit } = mountCaptainComposer()
     await act(async () => {
       render(<TopBarVoiceButton />)
     })
@@ -120,7 +120,7 @@ describe('TopBarVoiceButton', () => {
     const startTurn = vi.fn(async () => undefined)
     useVoiceStore.setState({ startTurn: startTurn as never })
 
-    mountMastermindComposer()
+    mountCaptainComposer()
     await act(async () => {
       render(<TopBarVoiceButton />)
     })
@@ -134,7 +134,7 @@ describe('TopBarVoiceButton', () => {
     clearDictationTarget()
     voiceReady(false)
     useVoiceStore.setState({ startTurn: startTurn as never })
-    mountMastermindComposer()
+    mountCaptainComposer()
     await act(async () => {
       render(<TopBarVoiceButton />)
     })
@@ -144,8 +144,8 @@ describe('TopBarVoiceButton', () => {
     expect(startTurn).toHaveBeenLastCalledWith('dictation')
   })
 
-  it('writes into the Mastermind box even when the drawer was rebuilt mid-turn', async () => {
-    mountMastermindComposer()
+  it('writes into the Captain box even when the drawer was rebuilt mid-turn', async () => {
+    mountCaptainComposer()
     await act(async () => {
       render(<TopBarVoiceButton />)
     })
@@ -154,7 +154,7 @@ describe('TopBarVoiceButton', () => {
     })
 
     // The drawer remounts — a new field under the same key.
-    const replacement = mountMastermindComposer()
+    const replacement = mountCaptainComposer()
     expect(insertDictation('still listening')).toBe(true)
     expect(replacement.field.value).toBe('still listening')
   })
@@ -162,18 +162,18 @@ describe('TopBarVoiceButton', () => {
   /**
    * The recording state belongs where the words land, not only where the click
    * happened. Starting from the top bar used to leave the microphone beside the
-   * Mastermind box looking idle — and disabled — while that box was receiving
+   * Captain box looking idle — and disabled — while that box was receiving
    * every word.
    */
-  it('lights the microphone inside the Mastermind box as well', async () => {
-    mountMastermindComposer()
+  it('lights the microphone inside the Captain box as well', async () => {
+    mountCaptainComposer()
     await act(async () => {
       render(
         <>
           <div data-testid="top-bar">
             <TopBarVoiceButton />
           </div>
-          <div data-voice-composer={MASTERMIND_COMPOSER_KEY} data-testid="chat">
+          <div data-voice-composer={CAPTAIN_COMPOSER_KEY} data-testid="chat">
             <VoiceMicButton mode="dictation" onSubmit={vi.fn()} />
           </div>
         </>
@@ -197,14 +197,14 @@ describe('TopBarVoiceButton', () => {
 
   it('lets the microphone in the box stop a turn the top bar started', async () => {
     const endTurn = vi.fn(async () => undefined)
-    mountMastermindComposer()
+    mountCaptainComposer()
     await act(async () => {
       render(
         <>
           <div data-testid="top-bar">
             <TopBarVoiceButton />
           </div>
-          <div data-voice-composer={MASTERMIND_COMPOSER_KEY} data-testid="chat">
+          <div data-voice-composer={CAPTAIN_COMPOSER_KEY} data-testid="chat">
             <VoiceMicButton mode="dictation" onSubmit={vi.fn()} />
           </div>
         </>
@@ -223,7 +223,7 @@ describe('TopBarVoiceButton', () => {
   })
 
   it('still greys out a microphone that belongs to another box', async () => {
-    mountMastermindComposer()
+    mountCaptainComposer()
     await act(async () => {
       render(
         <>
@@ -248,7 +248,7 @@ describe('TopBarVoiceButton', () => {
   })
 
   it('stands out by colour, and never by size', async () => {
-    mountMastermindComposer()
+    mountCaptainComposer()
     await act(async () => {
       render(
         <>

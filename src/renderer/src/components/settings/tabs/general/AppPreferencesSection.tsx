@@ -3,7 +3,7 @@ import { SettingsSection } from '../../SettingsSection'
 import { Label } from '@/components/ui/Label'
 import { Switch } from '@/components/ui/Switch'
 import { settingsApi } from '@/lib/ipc-client'
-import { MASTERMIND_PREWARM_SETTING } from '@/components/orchestrator/OrchestratorPanel'
+import { CAPTAIN_PREWARM_SETTING } from '@/components/orchestrator/OrchestratorPanel'
 
 function PreferenceRow({ id, label, description, checked, onCheckedChange, disabled }: {
   id: string
@@ -28,7 +28,7 @@ export function AppPreferencesSection() {
   const [loading, setLoading] = useState(true)
   const [launchAtStartup, setLaunchAtStartup] = useState(false)
   const [notificationsEnabled, setNotificationsEnabled] = useState(false)
-  const [mastermindPrewarm, setMastermindPrewarm] = useState(true)
+  const [captainPrewarm, setCaptainPrewarm] = useState(true)
   const [minimizeToTray, setMinimizeToTray] = useState(false)
 
   useEffect(() => {
@@ -47,10 +47,10 @@ export function AppPreferencesSection() {
       }
 
       try {
-        const warm = await settingsApi.get(MASTERMIND_PREWARM_SETTING)
-        setMastermindPrewarm(warm !== 'false')
+        const warm = await settingsApi.get(CAPTAIN_PREWARM_SETTING)
+        setCaptainPrewarm(warm !== 'false')
       } catch (error) {
-        console.error('Failed to load the Mastermind warm-up setting:', error)
+        console.error('Failed to load the Captain warm-up setting:', error)
       }
     }
     load()
@@ -65,11 +65,11 @@ export function AppPreferencesSection() {
     }
   }
 
-  const handleMastermindPrewarmChange = async (checked: boolean): Promise<void> => {
-    setMastermindPrewarm(checked)
+  const handleCaptainPrewarmChange = async (checked: boolean): Promise<void> => {
+    setCaptainPrewarm(checked)
     // Takes effect at the next launch: the session it governs is started once,
     // when the window opens.
-    await settingsApi.set(MASTERMIND_PREWARM_SETTING, checked ? 'true' : 'false')
+    await settingsApi.set(CAPTAIN_PREWARM_SETTING, checked ? 'true' : 'false')
   }
 
   const handleNotificationsChange = async (checked: boolean) => {
@@ -109,11 +109,11 @@ export function AppPreferencesSection() {
           disabled={loading}
         />
         <PreferenceRow
-          id="mastermind-prewarm"
-          label="Start Mastermind at launch"
+          id="captain-prewarm"
+          label="Start Captain at launch"
           description="Bring the agent up in the background so your first message does not wait for it. Costs one idle agent process. Applies at the next launch."
-          checked={mastermindPrewarm}
-          onCheckedChange={handleMastermindPrewarmChange}
+          checked={captainPrewarm}
+          onCheckedChange={handleCaptainPrewarmChange}
           disabled={loading}
         />
         <PreferenceRow

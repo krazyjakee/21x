@@ -12,7 +12,7 @@
  *   - subtask scope: the subtask set, reaching only its parent and siblings;
  *   - project scope: the full orchestration set, but every list is narrowed to
  *     one project and every call naming a task outside it is refused. Task
- *     agents and the Mastermind get this (see mcpOptionsForTask);
+ *     agents and the Captain get this (see mcpOptionsForTask);
  *   - full access (no scope at all): every task in every project. Only
  *     internal and debug callers get it: a direct run of the stdio entry point
  *     without TASK_SCOPE_PROJECT_ID, or a session with no task row behind it.
@@ -23,7 +23,7 @@ import {
   artifactToolNames,
   browserRecordingToolNames,
   browserTools,
-  mastermindTools,
+  captainTools,
   sharedTools,
   subtaskTools
 } from './task-management-tools'
@@ -52,8 +52,8 @@ export type ToolCallResult = {
 export const FULL_ACCESS_SCOPE: TaskMcpScope = { parentTaskId: null, taskId: null, artifactTaskId: null, projectId: null }
 
 /**
- * Sees every tool call that returned without an error. The Mastermind waker
- * (#57) uses it to notice which tasks the Mastermind touched itself, so those
+ * Sees every tool call that returned without an error. The Captain waker
+ * (#57) uses it to notice which tasks the Captain touched itself, so those
  * changes do not wake it again. Never throws into the caller.
  */
 export type ToolCallObserver = (call: { scope: TaskMcpScope; name: string; args: Record<string, unknown>; result: unknown }) => void
@@ -66,7 +66,7 @@ export function setToolCallObserver(observer: ToolCallObserver | null): void {
 
 /**
  * A coordinator session's scope: project-limited and with no artifact pin,
- * because the Mastermind is not a workpiece of its own (session-config.ts,
+ * because the Captain is not a workpiece of its own (session-config.ts,
  * mcpOptionsForTask). Task agents in the same project carry their own task
  * as the artifact pin, so this tells the two apart without a database read.
  */
@@ -74,12 +74,12 @@ export function isCoordinatorScope(scope: TaskMcpScope): boolean {
   return isProjectScopedSession(scope) && !scope.taskId && !scope.artifactTaskId
 }
 
-/** Tools only the project's Mastermind may call. */
+/** Tools only the project's Captain may call. */
 const COORDINATOR_ONLY_TOOLS = new Set(['update_project_status', 'report_to_commander'])
 
 /**
  * The escalation policy hook (#66). The main process installs one from
- * src/main/escalation.ts; it sees every project-scoped call the Mastermind
+ * src/main/escalation.ts; it sees every project-scoped call the Captain
  * makes after the membership checks passed, and decides whether to run it
  * (`run`), run it and report, or hold it for the user. This module cannot
  * read the policy itself: it has no database, and the stdio entry point must
@@ -164,7 +164,7 @@ async function handleProjectCall(
       if (!(await isTaskInProject(id, projectId, invoke))) return PROJECT_ACCESS_DENIED
     }
   }
-  // #66: the Mastermind's calls pass through the escalation policy. Task
+  // #66: the Captain's calls pass through the escalation policy. Task
   // agents in the same project are not covered by it.
   if (isCoordinator && coordinatorCallGate) {
     return coordinatorCallGate({ projectId, tool: name, args, run: () => invoke(`/${name}`, args) })
@@ -270,7 +270,7 @@ async function handleScopedCall(
 
 /**
  * The project a skill call is made from, and whether the caller is the
- * project's Mastermind (#74). A subtask scope carries no project of its own,
+ * project's Captain (#74). A subtask scope carries no project of its own,
  * so it is read off the subtask's row; a session whose task cannot be found
  * is treated as a task agent of no project, which the skill routes refuse.
  */
@@ -290,7 +290,7 @@ async function skillScopeFor(scope: TaskMcpScope, invoke: TaskApiInvoke): Promis
 export function listToolsForScope(scope: TaskMcpScope) {
   return isScopedSession(scope)
     ? [...subtaskTools, ...browserTools, ...sharedTools]
-    : [...mastermindTools, ...browserTools, ...sharedTools]
+    : [...captainTools, ...browserTools, ...sharedTools]
 }
 
 /**
@@ -318,12 +318,12 @@ export async function callToolForScope(
       }
     }
 
-    // A task agent shares the project scope with the Mastermind but must not
+    // A task agent shares the project scope with the Captain but must not
     // write the project's status on its behalf (#58). Full access (no
     // project) stays allowed: it is internal, and names the project itself.
     if (COORDINATOR_ONLY_TOOLS.has(name) && isProjectScopedSession(scope) && !isCoordinatorScope(scope)) {
       return {
-        content: [{ type: 'text', text: JSON.stringify({ error: `Access denied: only the project's Mastermind may call ${name}` }) }],
+        content: [{ type: 'text', text: JSON.stringify({ error: `Access denied: only the project's Captain may call ${name}` }) }],
         isError: true
       }
     }

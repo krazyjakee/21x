@@ -90,7 +90,7 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
           try {
             commander.appendReport({
               sessionId: dispatch.sessionId,
-              content: `Your request could not be delivered to the Mastermind of "${dispatch.projectName}": ${reason}`,
+              content: `Your request could not be delivered to the Captain of "${dispatch.projectName}": ${reason}`,
               projectId: dispatch.projectId,
               correlationId: dispatch.correlationId
             })

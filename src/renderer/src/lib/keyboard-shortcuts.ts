@@ -70,7 +70,7 @@ export const KEYBOARD_SHORTCUT_GROUPS = [
     label: 'Audio',
     shortcuts: [
       { keys: ['V', 'T'], label: 'Toggle task audio' },
-      { keys: ['V', 'M'], label: 'Toggle Mastermind audio' }
+      { keys: ['V', 'M'], label: 'Toggle Captain audio' }
     ]
   }
 ] as const

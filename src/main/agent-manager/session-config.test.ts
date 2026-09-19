@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { assembleSessionConfig, mcpOptionsForTask } from './session-config'
-import { buildMastermindSystemPrompt } from '../prompts/mastermind'
+import { buildCaptainSystemPrompt } from '../prompts/captain'
 import type { AgentRecord, DatabaseManager, TaskRecord } from '../database'
 
 const BACKENDS = ['opencode', 'claude-code', 'codex', 'cursor', 'pi'] as const
@@ -39,13 +39,13 @@ function configFor(backend: typeof BACKENDS[number], task: Partial<TaskRecord>, 
 }
 
 describe('assembleSessionConfig system prompt', () => {
-  const mastermind: Partial<TaskRecord> = { id: 'mm-1', title: 'Mastermind', role: 'mastermind', agent_id: null }
+  const captain: Partial<TaskRecord> = { id: 'mm-1', title: 'Captain', role: 'captain', agent_id: null }
   const ordinary: Partial<TaskRecord> = { id: 'task-1', title: 'Fix login', role: 'task', agent_id: 'agent-x' }
-  const builtIn = buildMastermindSystemPrompt()
+  const builtIn = buildCaptainSystemPrompt()
 
   for (const backend of BACKENDS) {
     it(`gives a ${backend} coordinator session the built-in prompt, then the agent prompt`, () => {
-      const prompt = configFor(backend, mastermind).systemPrompt ?? ''
+      const prompt = configFor(backend, captain).systemPrompt ?? ''
       expect(prompt.startsWith(builtIn)).toBe(true)
       expect(prompt.indexOf(AGENT_PROMPT)).toBeGreaterThan(builtIn.length - 1)
     })
@@ -56,7 +56,7 @@ describe('assembleSessionConfig system prompt', () => {
   }
 
   it('gives a coordinator session the built-in prompt when the agent has none', () => {
-    const prompt = configFor('opencode', mastermind, null).systemPrompt ?? ''
+    const prompt = configFor('opencode', captain, null).systemPrompt ?? ''
     expect(prompt.startsWith(builtIn)).toBe(true)
     // With no project row there is no project section; the memory section is always there.
     expect(prompt).not.toContain('## Project context')
@@ -72,7 +72,7 @@ describe('assembleSessionConfig system prompt', () => {
       getProjectResources: () => [{ id: 'x1', project_id: 'proj-a', label: 'Runbook', url: 'https://wiki/runbook', notes: '', sort_order: 0, created_at: '' }],
       getSetting: () => null
     } as unknown as DatabaseManager
-    const prompt = configFor('claude-code', { ...mastermind, project_id: 'proj-a' }, AGENT_PROMPT, db).systemPrompt ?? ''
+    const prompt = configFor('claude-code', { ...captain, project_id: 'proj-a' }, AGENT_PROMPT, db).systemPrompt ?? ''
     expect(prompt.startsWith(builtIn)).toBe(true)
     expect(prompt).toContain('**Alpha**')
     expect(prompt).toContain('Alpha brief.')
@@ -84,13 +84,13 @@ describe('assembleSessionConfig system prompt', () => {
 
   it('still runs a coordinator session on the built-in prompt when the context cannot be built', () => {
     const broken = { getProject: () => { throw new Error('db closed') } } as unknown as DatabaseManager
-    const prompt = configFor('opencode', { ...mastermind, project_id: 'proj-a' }, AGENT_PROMPT, broken).systemPrompt ?? ''
+    const prompt = configFor('opencode', { ...captain, project_id: 'proj-a' }, AGENT_PROMPT, broken).systemPrompt ?? ''
     expect(prompt.startsWith(builtIn)).toBe(true)
     expect(prompt.endsWith(AGENT_PROMPT)).toBe(true)
   })
 
   it('gives every backend the same coordinator prompt', () => {
-    const prompts = new Set(BACKENDS.map((backend) => configFor(backend, mastermind).systemPrompt))
+    const prompts = new Set(BACKENDS.map((backend) => configFor(backend, captain).systemPrompt))
     expect(prompts.size).toBe(1)
   })
 })
@@ -106,8 +106,8 @@ describe('mcpOptionsForTask scopes (#56)', () => {
     expect(opts).toMatchObject({ taskScope: { taskId: 'c1', parentTaskId: 'p1' }, projectId: undefined })
   })
 
-  it("gives the Mastermind the project scope of its row's project", () => {
-    const opts = mcpOptionsForTask('mm', { id: 'mm', role: 'mastermind', project_id: 'default', parent_task_id: null } as unknown as TaskRecord)
+  it("gives the Captain the project scope of its row's project", () => {
+    const opts = mcpOptionsForTask('mm', { id: 'mm', role: 'captain', project_id: 'default', parent_task_id: null } as unknown as TaskRecord)
     expect(opts).toMatchObject({ projectId: 'default', artifactTaskId: undefined })
   })
 

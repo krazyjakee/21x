@@ -216,7 +216,7 @@ export function collectUiState(): UiStateSnapshot {
     selectedTaskId: selected,
     selectedTaskTitle: tasks.tasks.find((task) => task.id === selected)?.title ?? null,
     dashboardPreviewTaskId: ui.dashboardPreviewTaskId,
-    mastermindOpen: ui.showOrchestrator,
+    captainOpen: ui.showOrchestrator,
     settingsTab: ui.activeModal === 'settings' ? ui.settingsTab : null,
     // Agent approval requests are not surfaced in the renderer.
     waitingForYou: false,

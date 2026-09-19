@@ -90,7 +90,7 @@ describe('OpencodeAdapter', () => {
       try {
         ;(adapter as any).writeRuntimePluginFiles({
           agentId: 'agent-1',
-          taskId: 'mastermind-session',
+          taskId: 'captain-session',
           workspaceDir,
           tillDone: false
         })

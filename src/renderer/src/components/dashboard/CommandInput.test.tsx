@@ -43,7 +43,7 @@ describe('CommandInput — dictation', () => {
 
   it('offers a microphone once voice is ready', async () => {
     await act(async () => {
-      render(<CommandInput onSendToMastermind={vi.fn()} onCreateTask={vi.fn()} />)
+      render(<CommandInput onSendToCaptain={vi.fn()} onCreateTask={vi.fn()} />)
     })
     expect(screen.getByTestId('voice-mic-button')).toBeInTheDocument()
   })
@@ -51,7 +51,7 @@ describe('CommandInput — dictation', () => {
   it('hides the microphone while voice is switched off', async () => {
     useVoiceStore.setState({ enabled: false })
     await act(async () => {
-      render(<CommandInput onSendToMastermind={vi.fn()} onCreateTask={vi.fn()} />)
+      render(<CommandInput onSendToCaptain={vi.fn()} onCreateTask={vi.fn()} />)
     })
     expect(screen.queryByTestId('voice-mic-button')).not.toBeInTheDocument()
   })
@@ -59,9 +59,9 @@ describe('CommandInput — dictation', () => {
   it('sends the words it just heard, not the value React held before', async () => {
     // This box is controlled. A send that read React state would send the
     // previous value, because dictation writes and sends in the same tick.
-    const onSendToMastermind = vi.fn()
+    const onSendToCaptain = vi.fn()
     await act(async () => {
-      render(<CommandInput onSendToMastermind={onSendToMastermind} onCreateTask={vi.fn()} />)
+      render(<CommandInput onSendToCaptain={onSendToCaptain} onCreateTask={vi.fn()} />)
     })
     setActiveComposer('dashboard-command')
 
@@ -69,13 +69,13 @@ describe('CommandInput — dictation', () => {
       expect(insertAndSubmit('what is blocking the release')).toBe(true)
     })
 
-    expect(onSendToMastermind).toHaveBeenCalledWith('what is blocking the release')
+    expect(onSendToCaptain).toHaveBeenCalledWith('what is blocking the release')
   })
 
   it('clears the box after each sentence, so a conversation does not repeat itself', async () => {
-    const onSendToMastermind = vi.fn()
+    const onSendToCaptain = vi.fn()
     await act(async () => {
-      render(<CommandInput onSendToMastermind={onSendToMastermind} onCreateTask={vi.fn()} />)
+      render(<CommandInput onSendToCaptain={onSendToCaptain} onCreateTask={vi.fn()} />)
     })
     setActiveComposer('dashboard-command')
 
@@ -86,7 +86,7 @@ describe('CommandInput — dictation', () => {
       insertAndSubmit('second sentence')
     })
 
-    expect(onSendToMastermind.mock.calls.map((call) => call[0])).toEqual([
+    expect(onSendToCaptain.mock.calls.map((call) => call[0])).toEqual([
       'first sentence',
       'second sentence',
     ])

@@ -6,11 +6,11 @@ import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useAgentSession } from '@/hooks/use-agent-session'
 import { useCurrentProject } from '@/hooks/use-project-tasks'
 import { agentApi, settingsApi } from '@/lib/ipc-client'
-import { mastermindAgentIdFor, useMastermindTaskId } from '@/stores/coordinator-store'
+import { captainAgentIdFor, useCaptainTaskId } from '@/stores/coordinator-store'
 import type { Agent } from '@/types'
 
 /** Start the agent at app start, so the first sentence does not wait for it. */
-export const MASTERMIND_PREWARM_SETTING = 'mastermind_prewarm'
+export const CAPTAIN_PREWARM_SETTING = 'captain_prewarm'
 
 interface OrchestratorPanelProps {
   onClose: () => void
@@ -19,14 +19,14 @@ interface OrchestratorPanelProps {
 export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   const [agents, setAgents] = useState<Agent[]>([])
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
-  // The drawer talks to the current project's Mastermind (#55): a task row
+  // The drawer talks to the current project's Captain (#55): a task row
   // per project, hidden from every list, whose id is asked for by project.
   // Switching projects switches the id, and with it the conversation shown.
   // Nothing starts until the id is known.
   const project = useCurrentProject()
-  const mastermindTaskId = useMastermindTaskId()
-  const { start, stop, sendMessage, approve } = useAgentSession(mastermindTaskId ?? undefined)
-  const currentSession = useAgentStore((state) => (mastermindTaskId ? state.sessions.get(mastermindTaskId) : undefined))
+  const captainTaskId = useCaptainTaskId()
+  const { start, stop, sendMessage, approve } = useAgentSession(captainTaskId ?? undefined)
+  const currentSession = useAgentStore((state) => (captainTaskId ? state.sessions.get(captainTaskId) : undefined))
   const removeSession = useAgentStore((state) => state.removeSession)
   /** The start in flight and whose it is, shared so a message can wait for it instead of racing. */
   const startingRef = useRef<{ taskId: string; promise: Promise<void> } | null>(null)
@@ -39,7 +39,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   useEffect(() => {
     let cancelled = false
     settingsApi
-      .get(MASTERMIND_PREWARM_SETTING)
+      .get(CAPTAIN_PREWARM_SETTING)
       .then((value) => {
         if (!cancelled) setPrewarm(value !== 'false')
       })
@@ -56,25 +56,25 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
     agentApi.getAll().then(setAgents)
   }, [])
 
-  // The project's Mastermind agent, else its default agent, else the app
+  // The project's Captain agent, else its default agent, else the app
   // default. Re-picked when the project changes; a choice made by hand in the
   // selector below holds until then.
   const projectId = project?.id
-  const projectMastermindAgentId = project?.mastermind_agent_id ?? null
+  const projectCaptainAgentId = project?.captain_agent_id ?? null
   const projectDefaultAgentId = project?.default_agent_id ?? null
   useEffect(() => {
     if (agents.length === 0) return
-    setSelectedAgentId(mastermindAgentIdFor({ mastermind_agent_id: projectMastermindAgentId, default_agent_id: projectDefaultAgentId }, agents))
-  }, [agents, projectId, projectMastermindAgentId, projectDefaultAgentId])
+    setSelectedAgentId(captainAgentIdFor({ captain_agent_id: projectCaptainAgentId, default_agent_id: projectDefaultAgentId }, agents))
+  }, [agents, projectId, projectCaptainAgentId, projectDefaultAgentId])
 
   // Switch agent. The new choice is recorded before the old session is
   // stopped, or the warm-up would race in and start the old agent again.
   const handleAgentChange = async (newAgentId: string) => {
     selectedAgentIdRef.current = newAgentId
     setSelectedAgentId(newAgentId)
-    if (currentSession?.sessionId && mastermindTaskId) {
+    if (currentSession?.sessionId && captainTaskId) {
       await stop()
-      removeSession(mastermindTaskId)
+      removeSession(captainTaskId)
     }
   }
 
@@ -87,7 +87,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
    * dropped, because there is no session yet and one is already being made.
    */
   const ensureSession = useCallback(async (): Promise<boolean> => {
-    const taskId = mastermindTaskId
+    const taskId = captainTaskId
     if (!taskId) return false
     const live = useAgentStore.getState().sessions.get(taskId)
     if (live?.sessionId) return true
@@ -95,7 +95,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
     const agentId = selectedAgentIdRef.current
     if (!agentId) return false
 
-    // A start still in flight for another project's Mastermind is not ours.
+    // A start still in flight for another project's Captain is not ours.
     if (!startingRef.current || startingRef.current.taskId !== taskId) {
       const promise = (async () => {
         // Clean up any old session data first
@@ -116,10 +116,10 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
       await startingRef.current.promise
       return Boolean(useAgentStore.getState().sessions.get(taskId)?.sessionId)
     } catch (err) {
-      console.error('Failed to start mastermind session:', err)
+      console.error('Failed to start captain session:', err)
       return false
     }
-  }, [mastermindTaskId, start, removeSession])
+  }, [captainTaskId, start, removeSession])
 
   // Send message - the session is usually warm already, so this just sends.
   const handleSendMessage = useCallback(
@@ -127,7 +127,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
       if (!(await ensureSession())) return
 
       // Question answers should use approve() instead of sendMessage()
-      const live = mastermindTaskId ? useAgentStore.getState().sessions.get(mastermindTaskId) : undefined
+      const live = captainTaskId ? useAgentStore.getState().sessions.get(captainTaskId) : undefined
       const messages = live?.messages || []
       const lastMessage = messages[messages.length - 1]
       if (lastMessage?.partType === 'question' && lastMessage?.tool?.questions) {
@@ -136,7 +136,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
         await sendMessage(message)
       }
     },
-    [mastermindTaskId, ensureSession, sendMessage, approve]
+    [captainTaskId, ensureSession, sendMessage, approve]
   )
 
   /**
@@ -146,15 +146,15 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
    * app start, and again for each project the user switches to. It costs one
    * idle agent process and saves the seconds a user would otherwise wait
    * after their first sentence — which is most of the delay when talking to
-   * Mastermind by voice.
+   * Captain by voice.
    *
    * Switched off in Settings → General for anyone who does not want the
    * process. Failure is silent: the first message starts the session as before.
    */
   useEffect(() => {
-    if (!prewarm || !selectedAgentId || !mastermindTaskId || currentSession?.sessionId) return
+    if (!prewarm || !selectedAgentId || !captainTaskId || currentSession?.sessionId) return
     void ensureSession()
-  }, [prewarm, selectedAgentId, mastermindTaskId, currentSession?.sessionId, ensureSession])
+  }, [prewarm, selectedAgentId, captainTaskId, currentSession?.sessionId, ensureSession])
 
   // Listen for pre-fill messages from the dashboard command input
   useEffect(() => {
@@ -167,8 +167,8 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
         }, 200)
       }
     }
-    window.addEventListener('mastermind-prefill', handlePrefill)
-    return () => window.removeEventListener('mastermind-prefill', handlePrefill)
+    window.addEventListener('captain-prefill', handlePrefill)
+    return () => window.removeEventListener('captain-prefill', handlePrefill)
   }, [handleSendMessage])
 
   const projectName = project?.name ?? 'Default'
@@ -178,20 +178,20 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
     // hairline, fill and shadow. It was the one panel still sitting flush and
     // square against the work.
     <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-card">
-      {/* Header: which project's Mastermind this is, and the agent it runs on */}
+      {/* Header: which project's Captain this is, and the agent it runs on */}
       <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-border shrink-0">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={`The Mastermind of ${projectName}`}>
+          <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={`The Captain of ${projectName}`}>
             <FolderKanban className="size-icon-xs shrink-0" />
-            <span className="truncate font-medium text-foreground/80" data-testid="mastermind-project">{projectName}</span>
+            <span className="truncate font-medium text-foreground/80" data-testid="captain-project">{projectName}</span>
           </span>
-          {/* The Mastermind's coding agent. It stays usable the whole time:
+          {/* The Captain's coding agent. It stays usable the whole time:
               changing it re-warms the session on the freshly picked agent. */}
           <select
             value={selectedAgentId || ''}
             onChange={(e) => handleAgentChange(e.target.value)}
             className="text-xs bg-background border border-border rounded px-2 py-1 cursor-pointer hover:border-primary/50 transition-colors"
-            aria-label="Mastermind agent"
+            aria-label="Captain agent"
           >
             {agents.map((agent) => (
               <option key={agent.id} value={agent.id}>
@@ -209,7 +209,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
       {/* Chat interface */}
       {selectedAgentId && (
         <AgentTranscriptPanel
-          title={`Mastermind den · ${projectName}`}
+          title={`Captain den · ${projectName}`}
           messages={currentSession?.messages || []}
           status={currentSession?.status || SessionStatus.IDLE}
           systemStatus={currentSession?.systemStatus}

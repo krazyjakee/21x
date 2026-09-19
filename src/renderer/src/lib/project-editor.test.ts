@@ -19,7 +19,7 @@ const NOW = '2026-01-01T00:00:00.000Z'
 
 function projectRecord(id: string, name: string): ProjectRecord {
   return {
-    id, name, description: '', default_agent_id: null, mastermind_agent_id: null, git_provider: null,
+    id, name, description: '', default_agent_id: null, captain_agent_id: null, git_provider: null,
     git_org: null, settings: {}, sort_order: 0, archived: false, created_at: NOW, updated_at: NOW
   }
 }

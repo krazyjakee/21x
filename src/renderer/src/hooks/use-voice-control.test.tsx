@@ -29,7 +29,7 @@ import { useVoiceControl } from './use-voice-control'
 import { useVoiceStore } from '@/stores/voice-store'
 import { useUIStore } from '@/stores/ui-store'
 import {
-  MASTERMIND_COMPOSER_KEY,
+  CAPTAIN_COMPOSER_KEY,
   clearDictationTarget,
   getActiveComposer,
   registerComposer,
@@ -67,8 +67,8 @@ beforeEach(() => {
 })
 
 describe('the global shortcut', () => {
-  it('talks to Mastermind rather than running a command', async () => {
-    registerComposer(MASTERMIND_COMPOSER_KEY, { getField: () => null, submit: vi.fn() })
+  it('talks to Captain rather than running a command', async () => {
+    registerComposer(CAPTAIN_COMPOSER_KEY, { getField: () => null, submit: vi.fn() })
     await act(async () => {
       render(<Harness />)
     })
@@ -79,14 +79,14 @@ describe('the global shortcut', () => {
 
     // Never 'command': that mode is what rejected anything outside eight phrases.
     expect(toggleTurn).toHaveBeenCalledWith('conversation')
-    expect(getActiveComposer()).toBe(MASTERMIND_COMPOSER_KEY)
+    expect(getActiveComposer()).toBe(CAPTAIN_COMPOSER_KEY)
     // Opened, so the words arrive somewhere the user can see.
     expect(useUIStore.getState().showOrchestrator).toBe(true)
   })
 
   it('dictates one turn when the loop is switched off', async () => {
     useVoiceStore.setState({ conversation: false })
-    registerComposer(MASTERMIND_COMPOSER_KEY, { getField: () => null, submit: vi.fn() })
+    registerComposer(CAPTAIN_COMPOSER_KEY, { getField: () => null, submit: vi.fn() })
     await act(async () => {
       render(<Harness />)
     })
@@ -99,7 +99,7 @@ describe('the global shortcut', () => {
 
   it('dictates one turn when the drawer cannot send', async () => {
     // No submit registered: a loop would have nowhere to send each sentence.
-    registerComposer(MASTERMIND_COMPOSER_KEY, { getField: () => null })
+    registerComposer(CAPTAIN_COMPOSER_KEY, { getField: () => null })
     await act(async () => {
       render(<Harness />)
     })

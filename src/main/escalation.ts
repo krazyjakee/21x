@@ -1,10 +1,10 @@
 /**
- * Escalation policy enforcement for the Mastermind (#66).
+ * Escalation policy enforcement for the Captain (#66).
  *
  * The policy (shared/project-policies.ts, `projects.settings.escalation`)
- * says, per action, whether the Mastermind acts alone (`autonomous`), acts
+ * says, per action, whether the Captain acts alone (`autonomous`), acts
  * and reports (`tell_commander`), or waits for the user (`ask_user`). The
- * prompt tells the Mastermind the policy; this module enforces it where it
+ * prompt tells the Captain the policy; this module enforces it where it
  * can be checked mechanically: the project-scoped task-management tools
  * (task-management-core.ts installs {@link createCoordinatorEscalationGate}
  * through `setCoordinatorCallGate`, see {@link installEscalation}).
@@ -17,11 +17,11 @@
  * - `ask_user`: the call is held. The tool returns `{ status: 'held', id }`,
  *   the user is notified, and the renderer's held-actions notice offers
  *   approve / reject over IPC (ipc/projects.ts). Approval runs the original
- *   call and tells the Mastermind what happened; rejection tells it too.
+ *   call and tells the Captain what happened; rejection tells it too.
  *
  * Held calls are kept in memory: the closure that runs them belongs to the
  * session that made them, and a held call from before a restart could no
- * longer be answered by its Mastermind anyway. They are listed, not persisted.
+ * longer be answered by its Captain anyway. They are listed, not persisted.
  *
  * Which tool call is which action: create_task and create_subtask are
  * `create_task`; start_task, stop_task and respond_to_checkpoint are their
@@ -47,7 +47,7 @@ export interface EscalationEvent {
   level: Exclude<EscalationLevel, 'autonomous'>
   tool: string
   args: Record<string, unknown>
-  /** One line a person can read: what the Mastermind did or wants to do. */
+  /** One line a person can read: what the Captain did or wants to do. */
   summary: string
   /** `performed`: tell_commander ran it. `held` / `approved` / `rejected`: the life of an ask_user call. */
   outcome: 'performed' | 'held' | 'approved' | 'rejected'
@@ -88,11 +88,11 @@ export interface EscalationDeps {
   /** Pushes to the window. Default: the Task API notifier (index.ts sets it). */
   notifyRenderer?: (channel: string, data: unknown) => void
   /**
-   * Tells the project's Mastermind something. Default: a message to its live
+   * Tells the project's Captain something. Default: a message to its live
    * session through the agent controller; nothing when it has no live session
-   * (the Mastermind waker, #57, is the place to wake it from).
+   * (the Captain waker, #57, is the place to wake it from).
    */
-  tellMastermind?: (projectId: string, text: string) => Promise<void>
+  tellCaptain?: (projectId: string, text: string) => Promise<void>
 }
 
 let deps: EscalationDeps | null = null
@@ -112,7 +112,7 @@ function defaultNotifyUser(title: string, body: string): void {
     .catch((error) => console.error('[Escalation] OS notification failed:', error))
 }
 
-async function defaultTellMastermind(projectId: string, text: string): Promise<void> {
+async function defaultTellCaptain(projectId: string, text: string): Promise<void> {
   if (!deps || !agentController) return
   const coordinator = deps.db.getCoordinatorTask(projectId)
   if (!coordinator) return
@@ -129,13 +129,13 @@ function pushToRenderer(channel: string, data: unknown): void {
   push?.(channel, data)
 }
 
-function tellMastermind(projectId: string, text: string): void {
-  ;(deps?.tellMastermind ?? defaultTellMastermind)(projectId, text).catch((error) => {
-    console.warn(`[Escalation] Could not tell the Mastermind of project ${projectId}:`, error)
+function tellCaptain(projectId: string, text: string): void {
+  ;(deps?.tellCaptain ?? defaultTellCaptain)(projectId, text).catch((error) => {
+    console.warn(`[Escalation] Could not tell the Captain of project ${projectId}:`, error)
   })
 }
 
-/** A short fenced system message, so the Mastermind cannot read it as a human instruction. */
+/** A short fenced system message, so the Captain cannot read it as a human instruction. */
 function systemNote(projectId: string, header: string, finding: string): string {
   return [
     SYSTEM_MESSAGE_MARKER,
@@ -212,7 +212,7 @@ function emitHeldChanged(): void {
   pushToRenderer('escalation:heldChanged', { held: listHeldActions() })
 }
 
-/** Truncated JSON of a tool result, for the Mastermind's note. */
+/** Truncated JSON of a tool result, for the Captain's note. */
 function briefResult(result: unknown): string {
   let text: string
   try {
@@ -224,7 +224,7 @@ function briefResult(result: unknown): string {
 }
 
 /**
- * Runs a held call. The Mastermind is told the outcome (result or error) in
+ * Runs a held call. The Captain is told the outcome (result or error) in
  * a fenced note; the Commander seam sees `approved`.
  */
 export async function approveHeldAction(id: string): Promise<{ ok: boolean; result?: unknown; error?: string }> {
@@ -240,7 +240,7 @@ export async function approveHeldAction(id: string): Promise<{ ok: boolean; resu
   }
   const failed = !!(result && typeof result === 'object' && 'error' in (result as Record<string, unknown>))
   escalateToCommander({ ...eventOf(entry, 'approved'), heldId: id })
-  tellMastermind(
+  tellCaptain(
     entry.projectId,
     systemNote(
       entry.projectId,
@@ -251,14 +251,14 @@ export async function approveHeldAction(id: string): Promise<{ ok: boolean; resu
   return failed ? { ok: false, result, error: String((result as Record<string, unknown>).error) } : { ok: true, result }
 }
 
-/** Drops a held call and tells the Mastermind, with the user's note if any. */
+/** Drops a held call and tells the Captain, with the user's note if any. */
 export function rejectHeldAction(id: string, note?: string): boolean {
   const entry = heldActions.get(id)
   if (!entry) return false
   heldActions.delete(id)
   emitHeldChanged()
   escalateToCommander({ ...eventOf(entry, 'rejected'), heldId: id })
-  tellMastermind(
+  tellCaptain(
     entry.projectId,
     systemNote(
       entry.projectId,
@@ -313,7 +313,7 @@ export function createCoordinatorEscalationGate(): CoordinatorCallGate {
           projectId, action, level, tool, args, summary, outcome: 'performed', at: new Date().toISOString()
         }
         escalateToCommander(event)
-        notifyUser(`Mastermind of ${projectName}`, `Did: ${summary}`)
+        notifyUser(`Captain of ${projectName}`, `Did: ${summary}`)
         pushToRenderer('escalation:event', event)
         if (result && typeof result === 'object' && !Array.isArray(result)) {
           return { ...(result as Record<string, unknown>), escalation: { level, reported: true } }
@@ -332,7 +332,7 @@ export function createCoordinatorEscalationGate(): CoordinatorCallGate {
       projectId, action, level, tool, args, summary, outcome: 'held', heldId: id, at: held.createdAt
     }
     escalateToCommander(event)
-    notifyUser(`Mastermind of ${projectName} needs approval`, `Wants to ${summary}`)
+    notifyUser(`Captain of ${projectName} needs approval`, `Wants to ${summary}`)
     emitHeldChanged()
     return {
       status: 'held',
@@ -345,7 +345,7 @@ export function createCoordinatorEscalationGate(): CoordinatorCallGate {
   }
 }
 
-/** Main-process wiring: reads the policy from `db` and gates the Mastermind's tool calls. */
+/** Main-process wiring: reads the policy from `db` and gates the Captain's tool calls. */
 export function installEscalation(db: DatabaseManager): void {
   configureEscalation({ db })
   setCoordinatorCallGate(createCoordinatorEscalationGate())

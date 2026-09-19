@@ -1,7 +1,7 @@
 /**
- * What a project's Mastermind knows about its project (#55).
+ * What a project's Captain knows about its project (#55).
  *
- * The Mastermind's system prompt is the built-in persona (prompts/mastermind.ts)
+ * The Captain's system prompt is the built-in persona (prompts/captain.ts)
  * followed by a project section built here from the project row, its repos and
  * its resources, and by the memory file it keeps in its workspace. The section
  * is rebuilt from the database on every session start, resume and send, so an
@@ -11,50 +11,50 @@
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import type { DatabaseManager, TaskRecord } from '../database'
-import type { MastermindPromptOptions } from '../prompts/mastermind'
-import type { MastermindMemory } from '../../shared/mastermind-memory'
+import type { CaptainPromptOptions } from '../prompts/captain'
+import type { CaptainMemory } from '../../shared/captain-memory'
 import { listProjectRepos, taskProjectId } from './project-repos'
 import { escalationPolicyFromSettings } from '../../shared/project-policies'
 
-/** The file the Mastermind keeps its long-lived notes in, inside its workspace. */
-export const MASTERMIND_MEMORY_FILE = 'MEMORY.md'
+/** The file the Captain keeps its long-lived notes in, inside its workspace. */
+export const CAPTAIN_MEMORY_FILE = 'MEMORY.md'
 
 /** Characters of the memory file injected into the prompt; the rest is cut with a notice. */
-export const MASTERMIND_MEMORY_MAX_CHARS = 12_000
+export const CAPTAIN_MEMORY_MAX_CHARS = 12_000
 
-export type { MastermindMemory }
+export type { CaptainMemory }
 
 /** What the DB lookups need; a Pick so tests can pass a small stub. */
-export type MastermindContextStore = Pick<DatabaseManager, 'getProject' | 'getProjectRepos' | 'getProjectResources' | 'getSetting'>
+export type CaptainContextStore = Pick<DatabaseManager, 'getProject' | 'getProjectRepos' | 'getProjectResources' | 'getSetting'>
 
-export function mastermindMemoryPath(workspaceDir: string): string {
-  return join(workspaceDir, MASTERMIND_MEMORY_FILE)
+export function captainMemoryPath(workspaceDir: string): string {
+  return join(workspaceDir, CAPTAIN_MEMORY_FILE)
 }
 
 /** Reads the memory file; a missing or unreadable file is empty memory, never an error. */
-export function readMastermindMemory(workspaceDir: string): MastermindMemory {
-  const path = mastermindMemoryPath(workspaceDir)
+export function readCaptainMemory(workspaceDir: string): CaptainMemory {
+  const path = captainMemoryPath(workspaceDir)
   let raw = ''
   try {
     if (existsSync(path)) raw = readFileSync(path, 'utf-8')
   } catch (error) {
-    console.warn(`[AgentManager] Could not read Mastermind memory at ${path}:`, error)
+    console.warn(`[AgentManager] Could not read Captain memory at ${path}:`, error)
   }
   const trimmed = raw.trim()
-  const truncated = trimmed.length > MASTERMIND_MEMORY_MAX_CHARS
-  return { path, content: truncated ? trimmed.slice(0, MASTERMIND_MEMORY_MAX_CHARS) : trimmed, truncated }
+  const truncated = trimmed.length > CAPTAIN_MEMORY_MAX_CHARS
+  return { path, content: truncated ? trimmed.slice(0, CAPTAIN_MEMORY_MAX_CHARS) : trimmed, truncated }
 }
 
 /**
  * The project section of the prompt: name, brief, repos with default branches,
- * resources. The Mastermind answers "what is this project / what repos do we
+ * resources. The Captain answers "what is this project / what repos do we
  * have" from this, without a tool call.
  */
-export function buildProjectContext(db: MastermindContextStore, projectId: string): string {
+export function buildProjectContext(db: CaptainContextStore, projectId: string): string {
   const project = db.getProject(projectId)
   if (!project) return ''
   const lines: string[] = []
-  lines.push(`You are the Mastermind of the project **${project.name}**. Everything you plan, create and start belongs to it.`)
+  lines.push(`You are the Captain of the project **${project.name}**. Everything you plan, create and start belongs to it.`)
   const brief = project.description?.trim()
   lines.push('', '### Brief', '', brief || '_No brief yet. Ask the user what the project is for when it matters._')
 
@@ -96,16 +96,16 @@ export function buildProjectContext(db: MastermindContextStore, projectId: strin
  * Prompt options for a coordinator row: the project section from its
  * project_id and the memory file from its workspace.
  */
-export function mastermindPromptOptions(
-  db: MastermindContextStore,
+export function captainPromptOptions(
+  db: CaptainContextStore,
   task: TaskRecord,
   workspaceDir: string
-): MastermindPromptOptions {
+): CaptainPromptOptions {
   const projectId = taskProjectId(task)
   return {
     projectContext: buildProjectContext(db, projectId),
     // #66: the policy travels with every session start, resume and send, like the context.
     escalationPolicy: escalationPolicyFromSettings(db.getProject(projectId)?.settings),
-    memory: readMastermindMemory(workspaceDir)
+    memory: readCaptainMemory(workspaceDir)
   }
 }

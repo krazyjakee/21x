@@ -112,7 +112,7 @@ function makeSkillRecord(overrides: Partial<{
 
 function createMockDb(agentConfig: Record<string, unknown> = {}) {
   return {
-    // Project limits (#65) and the Mastermind context (#55) read the task's project on every start.
+    // Project limits (#65) and the Captain context (#55) read the task's project on every start.
     getProject: vi.fn(() => undefined),
     getProjectRepos: vi.fn(() => []),
     getProjectResources: vi.fn(() => []),
@@ -264,8 +264,8 @@ describe('AgentManager skill file paths', () => {
   })
 
   describe('shouldEnableTillDone', () => {
-    it('disables tillDone for Mastermind sessions', () => {
-      expect(shouldEnableTillDone('mastermind-task-row', { role: 'mastermind' } as TaskRecord)).toBe(false)
+    it('disables tillDone for Captain sessions', () => {
+      expect(shouldEnableTillDone('captain-task-row', { role: 'captain' } as TaskRecord)).toBe(false)
     })
 
     it('disables tillDone for non-work orchestration sessions', () => {
@@ -3440,7 +3440,7 @@ describe('AgentManager idle-session inactivity reaper', () => {
 
   it('skips pseudo-task sessions (no DB row) and sessions without a resume anchor', async () => {
     const { mgr, mockDb, stopSpy } = buildManager()
-    // No DB row (mastermind / heartbeat pseudo-tasks)
+    // No DB row (captain / heartbeat pseudo-tasks)
     ;(mockDb as any).getTask = vi.fn(() => undefined)
     addSession(mgr)
     await (mgr as any).reapInactiveSessions()

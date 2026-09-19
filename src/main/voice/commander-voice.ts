@@ -8,7 +8,7 @@
  * - speaks each reply as it streams — every finished sentence is handed to
  *   the selected engine the moment it exists, and the tail is flushed when the
  *   turn ends, so a short reply is never left in a buffer;
- * - speaks every Mastermind report that lands in that session, after the reply
+ * - speaks every Captain report that lands in that session, after the reply
  *   that is being read rather than over it;
  * - on barge-in stops playback, cancels the synthesis request or connection,
  *   and cancels the Commander turn, so the cancelled reply is neither heard
@@ -257,7 +257,7 @@ export class CommanderVoice {
     })
   }
 
-  /** A Mastermind report in the active session is read — after the reply, not over it. */
+  /** A Captain report in the active session is read — after the reply, not over it. */
   private onReport(sessionId: string, message: CommanderMessage): void {
     if (sessionId !== this.activeSessionId) return
     const text = spokenReport(message.content, message.project_id ? this.options.resolveProjectName?.(message.project_id) : null)

@@ -531,7 +531,7 @@ export class VoiceSessionManager {
    *
    * This is what closes the loop in a conversation: the answer that comes back
    * is read aloud, exactly as it is for a spoken command. `taskId` is absent
-   * when the sender does not know it — the Mastermind drawer sends on its own
+   * when the sender does not know it — the Captain drawer sends on its own
    * behalf — and then the next answer to arrive is taken as the reply.
    */
   expectSpokenAnswer(turnId: string, taskId?: string): void {

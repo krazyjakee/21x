@@ -6,7 +6,7 @@ import type {
 } from '../database'
 import type { IpcDeps } from './deps'
 import { guardedIpcSend } from '../guarded-ipc-send'
-import { readMastermindMemory, type MastermindMemory } from '../agent-manager/mastermind-context'
+import { readCaptainMemory, type CaptainMemory } from '../agent-manager/captain-context'
 import { buildProjectStatus, readProjectStatusHistory } from '../project-status'
 import type { ProjectStatus, ProjectStatusHistoryPage } from '../../shared/project-status'
 import type { ProjectChangedEvent } from '../../shared/projects'
@@ -32,7 +32,7 @@ export function registerProjectHandlers({ db, agentManager }: IpcDeps): void {
     return value
   }
   // Project status (#58): counts from the database and live sessions, plus
-  // the Mastermind's narrative snapshot.
+  // the Captain's narrative snapshot.
   ipcMain.handle('project:getStatus', (_, projectId: string): ProjectStatus => buildProjectStatus(db, agentManager, projectId))
   // Status history (#72): one bounded page of the journal, newest first, for
   // the project editor's read-only view. Full summaries; the page cap still holds.
@@ -56,11 +56,11 @@ export function registerProjectHandlers({ db, agentManager }: IpcDeps): void {
     return changed(updated, updated?.id, archived ?? true ? 'archived' : 'restored')
   })
   ipcMain.handle('project:reorder', (_, orderedIds: string[]) => db.reorderProjects(orderedIds))
-  // The memory file the project's Mastermind keeps in its workspace (#55),
-  // read-only for the project editor. Null when the project has no Mastermind.
-  ipcMain.handle('project:getMastermindMemory', (_, projectId: string): MastermindMemory | null => {
+  // The memory file the project's Captain keeps in its workspace (#55),
+  // read-only for the project editor. Null when the project has no Captain.
+  ipcMain.handle('project:getCaptainMemory', (_, projectId: string): CaptainMemory | null => {
     const coordinator = db.getCoordinatorTask(projectId)
-    return coordinator ? readMastermindMemory(db.getWorkspaceDir(coordinator.id)) : null
+    return coordinator ? readCaptainMemory(db.getWorkspaceDir(coordinator.id)) : null
   })
   // Moves a top-level task, its subtasks and recurrence instances into another project.
   ipcMain.handle('project:moveTask', (event, taskId: string, projectId: string) => {
@@ -108,7 +108,7 @@ export function registerProjectHandlers({ db, agentManager }: IpcDeps): void {
     return agentManager.isAllProjectsPaused()
   })
 
-  // ── Escalation policy: held Mastermind calls (#66) ──
+  // ── Escalation policy: held Captain calls (#66) ──
   ipcMain.handle('escalation:listHeld', (_, projectId?: string) => listHeldActions(projectId))
   ipcMain.handle('escalation:approve', (_, id: string) => approveHeldAction(id))
   ipcMain.handle('escalation:reject', (_, id: string, note?: string) => rejectHeldAction(id, note))

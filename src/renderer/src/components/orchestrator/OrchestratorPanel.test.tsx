@@ -18,12 +18,12 @@ const agentApi = vi.hoisted(() => ({
     { id: 'other-agent', name: 'Codex', is_default: false },
   ]),
 }))
-/** Each project's Mastermind is a hidden task row; the panel asks main for the current project's id. */
-const MASTERMIND = 'mastermind-row-1'
-const MASTERMIND_B = 'mastermind-row-b'
+/** Each project's Captain is a hidden task row; the panel asks main for the current project's id. */
+const CAPTAIN = 'captain-row-1'
+const CAPTAIN_B = 'captain-row-b'
 const taskApi = vi.hoisted(() => ({
   getCoordinatorTaskId: vi.fn(async (projectId?: string) =>
-    (projectId === 'proj-b' ? 'mastermind-row-b' : 'mastermind-row-1') as string | null),
+    (projectId === 'proj-b' ? 'captain-row-b' : 'captain-row-1') as string | null),
 }))
 const projectApi = vi.hoisted(() => ({
   getAll: vi.fn(async () => []),
@@ -61,7 +61,7 @@ function projectRecord(overrides: Partial<ProjectRecord> & { id: string; name: s
   return {
     description: '',
     default_agent_id: null,
-    mastermind_agent_id: null,
+    captain_agent_id: null,
     git_provider: null,
     git_org: null,
     settings: {},
@@ -74,7 +74,7 @@ function projectRecord(overrides: Partial<ProjectRecord> & { id: string; name: s
 }
 
 /**
- * Mastermind starts before there is anything to say.
+ * Captain starts before there is anything to say.
  *
  * The rule this file protects: warming creates a window in which a message can
  * arrive while the session is still coming up. A message sent in that window
@@ -98,10 +98,10 @@ beforeEach(() => {
   cleanup()
   vi.clearAllMocks()
   useAgentStore.setState({ sessions: new Map() })
-  useCoordinatorStore.setState({ mastermindTaskIds: {} })
+  useCoordinatorStore.setState({ captainTaskIds: {} })
   useProjectStore.setState({ projects: [], currentProjectId: DEFAULT_PROJECT_ID })
   taskApi.getCoordinatorTaskId.mockImplementation(async (projectId?: string) =>
-    projectId === 'proj-b' ? MASTERMIND_B : MASTERMIND)
+    projectId === 'proj-b' ? CAPTAIN_B : CAPTAIN)
   settingsApi.get.mockResolvedValue(null)
   agentSessionApi.start.mockResolvedValue({ sessionId: 'session-1' })
   composer.send = null
@@ -115,7 +115,7 @@ describe('OrchestratorPanel — warming the session', () => {
 
     await waitFor(() => expect(agentSessionApi.start).toHaveBeenCalledTimes(1))
     // skipInitialPrompt: the agent must stay quiet until the user speaks.
-    expect(agentSessionApi.start).toHaveBeenCalledWith('default-agent', MASTERMIND, undefined, true)
+    expect(agentSessionApi.start).toHaveBeenCalledWith('default-agent', CAPTAIN, undefined, true)
     expect(agentSessionApi.send).not.toHaveBeenCalled()
   })
 
@@ -147,7 +147,7 @@ describe('OrchestratorPanel — warming the session', () => {
     })
     // Wait for the session to actually be live before we switch agents.
     await waitFor(() => {
-      expect(useAgentStore.getState().sessions.get(MASTERMIND)?.sessionId).toBe('session-1')
+      expect(useAgentStore.getState().sessions.get(CAPTAIN)?.sessionId).toBe('session-1')
     })
     // ensureSession holds its start promise for a ~100 ms settle window; let
     // it clear so the switch is not de-duped against the initial warm-up.
@@ -160,8 +160,8 @@ describe('OrchestratorPanel — warming the session', () => {
     await act(async () => {
       useAgentStore.setState((state) => {
         const sessions = new Map(state.sessions)
-        const current = sessions.get(MASTERMIND) as Record<string, unknown> | undefined
-        sessions.set(MASTERMIND, {
+        const current = sessions.get(CAPTAIN) as Record<string, unknown> | undefined
+        sessions.set(CAPTAIN, {
           ...current,
           messages: [{ id: 'm1', role: 'user', content: 'hello' }],
         } as never)
@@ -182,7 +182,7 @@ describe('OrchestratorPanel — warming the session', () => {
     // on the deferred start.
     expect(agentSessionApi.stop).toHaveBeenCalledWith('session-1')
     await waitFor(() =>
-      expect(agentSessionApi.start).toHaveBeenLastCalledWith('other-agent', MASTERMIND, undefined, true)
+      expect(agentSessionApi.start).toHaveBeenLastCalledWith('other-agent', CAPTAIN, undefined, true)
     )
     await act(async () => {
       started.resolve()
@@ -228,7 +228,7 @@ describe('OrchestratorPanel — warming the session', () => {
     expect(agentSessionApi.send).toHaveBeenCalledWith(
       'session-1',
       'what is blocking the release',
-      MASTERMIND,
+      CAPTAIN,
       'default-agent',
       undefined
     )
@@ -251,14 +251,14 @@ describe('OrchestratorPanel — warming the session', () => {
 })
 
 /**
- * One Mastermind per project (#55). The drawer shows the current project's
+ * One Captain per project (#55). The drawer shows the current project's
  * conversation, runs it on the project's agent, and follows a project switch.
  */
-describe('OrchestratorPanel — the current project\'s Mastermind', () => {
-  const alpha = projectRecord({ id: 'proj-a', name: 'Alpha', mastermind_agent_id: 'other-agent' })
+describe('OrchestratorPanel — the current project\'s Captain', () => {
+  const alpha = projectRecord({ id: 'proj-a', name: 'Alpha', captain_agent_id: 'other-agent' })
   const beta = projectRecord({ id: 'proj-b', name: 'Beta', default_agent_id: 'other-agent' })
 
-  it("names the project and warms its Mastermind on the project's agent", async () => {
+  it("names the project and warms its Captain on the project's agent", async () => {
     useProjectStore.setState({ projects: [alpha, beta], currentProjectId: 'proj-a' })
     await act(async () => {
       render(<OrchestratorPanel onClose={vi.fn()} />)
@@ -266,9 +266,9 @@ describe('OrchestratorPanel — the current project\'s Mastermind', () => {
 
     await waitFor(() => expect(agentSessionApi.start).toHaveBeenCalledTimes(1))
     expect(taskApi.getCoordinatorTaskId).toHaveBeenCalledWith('proj-a')
-    // Alpha's Mastermind agent, not the app default.
-    expect(agentSessionApi.start).toHaveBeenCalledWith('other-agent', MASTERMIND, undefined, true)
-    expect(screen.getByTestId('mastermind-project')).toHaveTextContent('Alpha')
+    // Alpha's Captain agent, not the app default.
+    expect(agentSessionApi.start).toHaveBeenCalledWith('other-agent', CAPTAIN, undefined, true)
+    expect(screen.getByTestId('captain-project')).toHaveTextContent('Alpha')
   })
 
   it("falls back to the project's default agent, then the app default", async () => {
@@ -277,7 +277,7 @@ describe('OrchestratorPanel — the current project\'s Mastermind', () => {
       render(<OrchestratorPanel onClose={vi.fn()} />)
     })
     await waitFor(() => expect(agentSessionApi.start).toHaveBeenCalledTimes(1))
-    expect(agentSessionApi.start).toHaveBeenCalledWith('other-agent', MASTERMIND_B, undefined, true)
+    expect(agentSessionApi.start).toHaveBeenCalledWith('other-agent', CAPTAIN_B, undefined, true)
     expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('other-agent')
   })
 
@@ -292,16 +292,16 @@ describe('OrchestratorPanel — the current project\'s Mastermind', () => {
       useProjectStore.getState().setCurrentProject('proj-b')
     })
 
-    // Beta's Mastermind is asked for, warmed, and shown; Alpha's session is left alone.
+    // Beta's Captain is asked for, warmed, and shown; Alpha's session is left alone.
     await waitFor(() => expect(agentSessionApi.start).toHaveBeenCalledTimes(2))
     expect(taskApi.getCoordinatorTaskId).toHaveBeenCalledWith('proj-b')
-    expect(agentSessionApi.start).toHaveBeenLastCalledWith('other-agent', MASTERMIND_B, undefined, true)
+    expect(agentSessionApi.start).toHaveBeenLastCalledWith('other-agent', CAPTAIN_B, undefined, true)
     expect(agentSessionApi.stop).not.toHaveBeenCalled()
-    expect(screen.getByTestId('mastermind-project')).toHaveTextContent('Beta')
+    expect(screen.getByTestId('captain-project')).toHaveTextContent('Beta')
 
     await act(async () => {
       await (composer.send as (t: string) => Promise<unknown>)('status?')
     })
-    expect(agentSessionApi.send).toHaveBeenCalledWith('session-1', 'status?', MASTERMIND_B, 'other-agent', undefined)
+    expect(agentSessionApi.send).toHaveBeenCalledWith('session-1', 'status?', CAPTAIN_B, 'other-agent', undefined)
   })
 })

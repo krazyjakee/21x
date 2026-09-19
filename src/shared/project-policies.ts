@@ -75,7 +75,7 @@ export function projectLimitsFromSettings(settings: Record<string, unknown> | nu
 
 // ── Escalation policy (#66) ───────────────────────────────────
 
-/** The actions a Mastermind takes through the project-scoped tools that the policy covers. */
+/** The actions a Captain takes through the project-scoped tools that the policy covers. */
 export type EscalationAction =
   | 'create_task'
   | 'start_task'

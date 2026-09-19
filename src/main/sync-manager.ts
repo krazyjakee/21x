@@ -57,7 +57,7 @@ export class SyncManager {
       console.log('[sync] Updated last_synced_at for source:', sourceId)
 
       // Project events (#57): each task this run created wakes the project's
-      // Mastermind. Plugins do not report ids, so the rows are found by source
+      // Captain. Plugins do not report ids, so the rows are found by source
       // and creation time (both set by createTask, in the same clock).
       if (result.imported > 0) {
         for (const task of this.db.getTasks({ projectId: source.project_id })) {

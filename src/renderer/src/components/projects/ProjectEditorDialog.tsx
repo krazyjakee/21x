@@ -35,7 +35,7 @@ import {
   type ResourceDraft
 } from '@/lib/project-editor'
 import { DEFAULT_PROJECT_ID } from '@shared/projects'
-import type { MastermindMemory } from '@shared/mastermind-memory'
+import type { CaptainMemory } from '@shared/captain-memory'
 import type { ProjectStatusJournalEntry } from '@shared/project-status'
 import { formatRelativeDate } from '@shared/date-format'
 import {
@@ -47,10 +47,10 @@ import type { ProjectLimitState } from '@shared/project-limit-types'
 import {
   PROJECT_EVENT_KINDS,
   PROJECT_EVENT_KIND_LABELS,
-  readMastermindWakeupSettings,
-  withMastermindWakeupSettings,
-  type MastermindWakeupSettings
-} from '@shared/mastermind-wakeups'
+  readCaptainWakeupSettings,
+  withCaptainWakeupSettings,
+  type CaptainWakeupSettings
+} from '@shared/captain-wakeups'
 import type { GitHubRepo } from '@/types/electron'
 import { ScheduledReviewSection } from './ScheduledReviewSection'
 import { withScheduledReviewSettings } from '@shared/scheduled-coordination'
@@ -117,12 +117,12 @@ export function ProjectEditorDialog() {
   const [repoInputProvider, setRepoInputProvider] = useState<GitProviderId>('github')
   const [repoPickerOpen, setRepoPickerOpen] = useState(false)
   const [externalRevision, setExternalRevision] = useState(0)
-  /** The project's Mastermind memory file (#55). Read-only here: the Mastermind writes it. */
-  const [memory, setMemory] = useState<MastermindMemory | null>(null)
-  /** Which project events wake the Mastermind (#57): a keyed block of the draft's settings JSON, saved with it. */
-  const wakeups = useMemo(() => readMastermindWakeupSettings(draft.settings), [draft.settings])
-  const patchWakeups = (fields: Partial<MastermindWakeupSettings>) =>
-    setDraft((d) => ({ ...d, settings: withMastermindWakeupSettings(d.settings, { ...readMastermindWakeupSettings(d.settings), ...fields }) }))
+  /** The project's Captain memory file (#55). Read-only here: the Captain writes it. */
+  const [memory, setMemory] = useState<CaptainMemory | null>(null)
+  /** Which project events wake the Captain (#57): a keyed block of the draft's settings JSON, saved with it. */
+  const wakeups = useMemo(() => readCaptainWakeupSettings(draft.settings), [draft.settings])
+  const patchWakeups = (fields: Partial<CaptainWakeupSettings>) =>
+    setDraft((d) => ({ ...d, settings: withCaptainWakeupSettings(d.settings, { ...readCaptainWakeupSettings(d.settings), ...fields }) }))
   /** Live limit state (#65): what the caps count right now. Null for a new project. */
   const [limitState, setLimitState] = useState<ProjectLimitState | null>(null)
 
@@ -146,7 +146,7 @@ export function ProjectEditorDialog() {
     }
     let cancelled = false
     Promise.resolve()
-      .then(() => projectApi.getMastermindMemory(target))
+      .then(() => projectApi.getCaptainMemory(target))
       .then((loaded) => { if (!cancelled) setMemory(loaded ?? null) })
       .catch(() => { if (!cancelled) setMemory(null) })
     return () => { cancelled = true }
@@ -321,7 +321,7 @@ export function ProjectEditorDialog() {
                         id="project-brief"
                         value={draft.description}
                         onChange={(e) => patch({ description: e.target.value })}
-                        placeholder="What this project is for, who it serves, conventions to follow. Markdown is supported. The project's Mastermind reads this."
+                        placeholder="What this project is for, who it serves, conventions to follow. Markdown is supported. The project's Captain reads this."
                         className="min-h-[120px] font-mono text-[13px]"
                       />
                     )}
@@ -337,11 +337,11 @@ export function ProjectEditorDialog() {
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="project-mastermind-agent">Mastermind agent</Label>
+                      <Label htmlFor="project-captain-agent">Captain agent</Label>
                       <Select
-                        id="project-mastermind-agent"
-                        value={draft.mastermind_agent_id ?? ''}
-                        onChange={(e) => patch({ mastermind_agent_id: e.target.value || null })}
+                        id="project-captain-agent"
+                        value={draft.captain_agent_id ?? ''}
+                        onChange={(e) => patch({ captain_agent_id: e.target.value || null })}
                         options={agentOptions}
                       />
                     </div>
@@ -567,7 +567,7 @@ export function ProjectEditorDialog() {
                   <div>
                     <h3 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Escalation</h3>
                     <p className="text-xs text-muted-foreground">
-                      What the Mastermind does on its own, does and reports, or asks you about first. “Ask the user first” holds the call until you approve it in the status bar.
+                      What the Captain does on its own, does and reports, or asks you about first. “Ask the user first” holds the call until you approve it in the status bar.
                     </p>
                   </div>
                   <div className="space-y-2">
@@ -584,16 +584,16 @@ export function ProjectEditorDialog() {
                     ))}
                   </div>
                   <p className="text-[11px] text-muted-foreground">
-                    Pull requests are guidance to the Mastermind only: none of its tools opens or merges one.
+                    Pull requests are guidance to the Captain only: none of its tools opens or merges one.
                   </p>
                 </section>
 
-                {/* ── Mastermind wake-ups (#57) ── */}
-                <section className="space-y-3" aria-label="Mastermind wake-ups">
+                {/* ── Captain wake-ups (#57) ── */}
+                <section className="space-y-3" aria-label="Captain wake-ups">
                   <div>
-                    <h3 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Mastermind wake-ups</h3>
+                    <h3 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Captain wake-ups</h3>
                     <p className="text-xs text-muted-foreground">
-                      What wakes this project’s Mastermind between conversations. Events are batched into one message, changes it made itself are skipped, and wake-ups are capped per hour.
+                      What wakes this project’s Captain between conversations. Events are batched into one message, changes it made itself are skipped, and wake-ups are capped per hour.
                     </p>
                   </div>
                   <label className="flex items-center gap-2 text-sm">
@@ -601,9 +601,9 @@ export function ProjectEditorDialog() {
                       type="checkbox"
                       checked={wakeups.enabled}
                       onChange={(e) => patchWakeups({ enabled: e.target.checked })}
-                      aria-label="Wake the Mastermind on project events"
+                      aria-label="Wake the Captain on project events"
                     />
-                    Wake the Mastermind on project events
+                    Wake the Captain on project events
                   </label>
                   <div className={`grid grid-cols-2 gap-1.5 pl-5 ${wakeups.enabled ? '' : 'opacity-50'}`}>
                     {PROJECT_EVENT_KINDS.map((kind) => (
@@ -631,13 +631,13 @@ export function ProjectEditorDialog() {
                   onChange={(review) => setDraft((d) => ({ ...d, settings: withScheduledReviewSettings(d.settings, review) }))}
                 />
 
-                {/* ── Mastermind memory (#55) ── */}
+                {/* ── Captain memory (#55) ── */}
                 {project && (
-                  <section className="space-y-3" aria-label="Mastermind memory">
+                  <section className="space-y-3" aria-label="Captain memory">
                     <div>
-                      <h3 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Mastermind memory</h3>
+                      <h3 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Captain memory</h3>
                       <p className="text-xs text-muted-foreground">
-                        What this project’s Mastermind keeps between conversations: decisions, conventions, open threads. It maintains the file itself; ask it to change something.
+                        What this project’s Captain keeps between conversations: decisions, conventions, open threads. It maintains the file itself; ask it to change something.
                       </p>
                     </div>
                     {memory?.content ? (
@@ -700,10 +700,10 @@ const HISTORY_LISTS: Array<[keyof Pick<ProjectStatusJournalEntry, 'completed' | 
 ]
 
 /**
- * The Mastermind's status journal for a project, newest first, one page at a
+ * The Captain's status journal for a project, newest first, one page at a
  * time. Read-only: entries are written by `update_project_status` and rolled
  * up by the retention job; nothing here edits them. Reloads its first page
- * when the Mastermind writes a new status.
+ * when the Captain writes a new status.
  */
 function ProjectStatusHistory({ projectId }: { projectId: string }) {
   const [entries, setEntries] = useState<ProjectStatusJournalEntry[]>([])
@@ -752,7 +752,7 @@ function ProjectStatusHistory({ projectId }: { projectId: string }) {
       <div>
         <h3 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Status history</h3>
         <p className="text-xs text-muted-foreground">
-          What the Mastermind reported after each round of work, newest first. Entries older than three months are rolled up by month.
+          What the Captain reported after each round of work, newest first. Entries older than three months are rolled up by month.
         </p>
       </div>
       {failed && <p className="text-xs text-destructive">The history could not be loaded.</p>}
