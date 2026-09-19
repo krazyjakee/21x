@@ -14,20 +14,16 @@ the original rename in `b3c504c` (#71). Active prompt templates and report
 formatting already used Captain. The stale phrase came from agent-authored
 persisted context, then an agent-authored report:
 
-- Daccord Captain task `hb4m7ujsf0bytqa76dgn6ga0`, native Claude session
-  `08d4131f-5190-4e93-aaf5-f3bd617b8492`, called `report_to_commander` at
-  **19:00:54.646 UTC** with “Daccord <retired coordinator name> chat”.
-  Its correlation ID was `cmd-bdb3cd74026a4b33`.
-- Commander stored that report as `myyuz9p2w2t0tnij9fbfxud3` and repeated the
-  phrase in reply `w4sctf2u8377tmkjskactoj7` at **19:01:02.030 UTC**.
-  Summary `v2ej5lgth5om2845c18dmgxu` subsequently preserved it.
-- Daccord's workspace `MEMORY.md:1` still titled its notes with the retired
-  coordinator name. `AGENTS.md:33-34` and `CLAUDE.md:74,78`, generated on
-  September 18 at 22:34 UTC, still used it in the descriptions of
-  `update_project_status` and `report_to_commander`.
-- The same Captain had already used the old name in a `send_message` call at
-  **15:22:59.580 UTC**, persisted in task `m8uydpk1ui5hd2tt2fgjy33r`, part
-  `user-message-1789831379586`. The task agent repeated it.
+- Daccord's Captain called `report_to_commander` at **19:00:54.646 UTC** with
+  “Daccord <retired coordinator name> chat”.
+- Commander stored that report and repeated the phrase in its reply at
+  **19:01:02.030 UTC**. The next Commander summary preserved it.
+- Daccord's workspace `MEMORY.md` still titled its notes with the retired
+  coordinator name. Its generated `AGENTS.md` and `CLAUDE.md` (written on
+  September 18) still used it in the descriptions of `update_project_status`
+  and `report_to_commander`.
+- The same Captain had already used the old name in a `send_message` call to a
+  task agent at **15:22:59.580 UTC**, and the task agent repeated it.
 - The database was at schema 17: all three coordinator rows had Captain titles
   and roles, Daccord's settings were empty, and no old app setting key or agent
   configuration remained. The single old seeded skill was soft-deleted; no
@@ -36,6 +32,10 @@ persisted context, then an agent-authored report:
   also retained old wording (10 summaries and one next-steps field); its
   structured source values were already migrated. Other task/transcript matches
   were historical output or this rename task itself.
+
+Local task, session, message and correlation IDs from the investigation are
+deliberately not recorded here: they identify one user's private database rows
+and native session files, not anything in this repository.
 
 These records establish the report-to-relay chain exactly. The stale workspace
 instructions and memory are confirmed inputs; which particular occurrence the
@@ -53,11 +53,12 @@ not rewrite the Captain's own `MEMORY.md` or native transcript.
 `readCaptainMemory()` translates the retired role name in the text it injects.
 `CommanderStore` translates report, assistant reply and summary prose on read,
 so the UI, relay model and subsequent summary folding see Captain. Project status
-snapshots and journal prose use the same projection for history tools and UI. Original stored bytes, user
-messages, structured tool calls/results, correlation IDs and session bindings
-remain intact. The prose alias also preserves identifiers, paths and URLs.
-Prompts instruct new replies and summaries to use Captain. Old delegation tool calls
-still display correctly, including calls without a project argument.
+snapshots and journal prose use the same projection for history tools and UI.
+Original stored bytes, user messages, structured tool calls/results,
+correlation IDs and session bindings remain intact. The prose alias also
+preserves identifiers, paths and URLs. Prompts instruct new replies and
+summaries to use Captain. Old delegation tool calls still display correctly,
+including calls without a project argument.
 
 The built-in Captain system prompt is assembled on start, resume and follow-up.
 Claude Code passes it on each query, OpenCode on each prompt and Pi when its

@@ -71,8 +71,8 @@ function toMessage(row: CommanderMessageRow): CommanderMessage {
     id: row.id,
     session_id: row.session_id,
     role: row.role as CommanderMessageRole,
-    // Compatibility is a read projection: preserve the original report and
-    // summary bytes, routing IDs and all user/tool messages in storage.
+    // Compatibility is a read projection over report, summary and assistant
+    // prose: stored bytes, routing IDs and user/tool messages stay untouched.
     content: row.role === 'report' || row.role === 'summary' || row.role === 'assistant'
       ? captainTerminology(row.content)
       : row.content,
