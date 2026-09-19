@@ -12,6 +12,7 @@ import { createTestDb } from '../../test/helpers/db-test-helper'
 import { makeTask } from '../../test/helpers/task-fixtures'
 import type { DatabaseManager } from './database'
 import { getTaskApiToken, startTaskApiServer, stopTaskApiServer, setTaskApiNotifier, setTaskApiAgentController } from './task-api-server'
+import { createMergeGrantFromUserMessage, setGhRunner } from './merge-grants'
 import { buildTaskMcpUrl, parseScopeFromUrl } from './task-mcp-endpoint'
 
 let db: DatabaseManager
@@ -21,6 +22,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  setGhRunner(null)
   setTaskApiNotifier(() => undefined)
   setTaskApiAgentController(null)
   stopTaskApiServer()
@@ -38,7 +40,7 @@ const textOf = (result: unknown): string =>
 describe('buildTaskMcpUrl and parseScopeFromUrl', () => {
   it('round-trips a full-access session', () => {
     const url = buildTaskMcpUrl(1234, 'tok')
-    expect(url).toBe('http://127.0.0.1:1234/mcp?token=tok')
+    expect(url).toMatch(/^http:\/\/127\.0\.0\.1:1234\/mcp\?token=tok&scope_signature=[0-9a-f]{64}$/)
     expect(parseScopeFromUrl(new URL(url))).toEqual({
       parentTaskId: null,
       taskId: null,
@@ -356,5 +358,43 @@ describe('project-scoped MCP session (#56)', () => {
     expect(db.getTasks({ projectId: a.id }).map((t) => t.title)).toContain('Fresh')
     expect(db.getTasks({ projectId: b.id }).map((t) => t.title)).not.toContain('Fresh')
     await client.close()
+  })
+})
+
+
+describe('merge-grant scope credential over real HTTP', () => {
+  it('rejects a worker removing its pins, changing projects, or forging/removing the signature', async () => {
+    const project = db.createProject({ name: 'App', settings: { merge_grants: { enabled: true } } })!
+    db.addProjectRepo(project.id, { provider: 'github', org: 'acme', name: 'app' })
+    const worker = db.createTask(makeTask({ title: 'Worker', project_id: project.id }))!
+    createMergeGrantFromUserMessage(db, project.id, { source: 'commander', sessionId: 's', messageId: 'typed', text: 'merge PRs' })
+    const port = await startTaskApiServer(db)
+    const gh = vi.fn(async () => { throw new Error('No GitHub call is permitted for the worker') })
+    setGhRunner(gh)
+    const issued = buildTaskMcpUrl(port, getTaskApiToken(), { projectId: project.id, artifactTaskId: worker.id })
+    const client = await connect(issued)
+    const denied = await client.callTool({ name: 'merge_pull_request', arguments: { pr_url: 'https://github.com/acme/app/pull/12' } })
+    expect(textOf(denied)).toContain('only the project')
+    await client.close()
+    for (const change of ['artifact', 'project', 'signature', 'unsigned', 'all-pins']) {
+      const forged = new URL(issued)
+      if (change === 'artifact') forged.searchParams.delete('artifact')
+      if (change === 'project') forged.searchParams.set('project', 'other')
+      if (change === 'signature') forged.searchParams.set('scope_signature', '0'.repeat(64))
+      if (change === 'unsigned') forged.searchParams.delete('scope_signature')
+      if (change === 'all-pins') for (const key of ['artifact', 'task', 'parent', 'project']) forged.searchParams.delete(key)
+      const response = await fetch(forged, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'merge_pull_request', arguments: { pr_url: 'https://github.com/acme/app/pull/12' } } })
+      })
+      expect(response.status, change).toBe(403)
+      await response.text()
+    }
+    expect(gh).not.toHaveBeenCalled()
+    expect(db.listMergeGrants()[0].uses).toBe(0)
+    // App-issued Captain credentials still reach the real gate.
+    const captain = await connect(buildTaskMcpUrl(port, getTaskApiToken(), { projectId: project.id }))
+    expect(textOf(await captain.callTool({ name: 'list_merge_grants', arguments: {} }))).toContain('merge PRs')
+    await captain.close()
   })
 })
