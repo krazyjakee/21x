@@ -395,6 +395,10 @@ export interface PullRequestGateState {
   headRefOid: string
   baseRefName: string
   baseRefOid?: string
+  /** The PR author's login, so their own approval never counts as independent. */
+  authorLogin?: string
+  /** Logins that approved the current PR and are not its author (#155). */
+  independentApprovals?: string[]
   checks: Array<{ name: string; state: 'passed' | 'skipped' | 'failed' | 'pending' }>
 }
 
@@ -416,9 +420,31 @@ function checkState(check: RawCheck): 'passed' | 'skipped' | 'failed' | 'pending
   return 'pending'
 }
 
-const PR_VIEW_FIELDS = 'url,number,title,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefOid,baseRefName,statusCheckRollup'
+const PR_VIEW_FIELDS = 'url,number,title,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefOid,baseRefName,statusCheckRollup,author,latestReviews'
 // gh pr view does not expose baseRefOid on supported CLI versions.
 const PR_REFS_QUERY = 'query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { headRefOid baseRefName baseRefOid } } }'
+
+function loginOf(value: unknown): string {
+  if (!value || typeof value !== 'object') return ''
+  const login = (value as { login?: unknown }).login
+  return typeof login === 'string' ? login : ''
+}
+
+/**
+ * Approving reviewers other than the PR author. `reviewDecision` is empty on a
+ * repository without required reviews even when people have approved, so it
+ * cannot stand in for "someone independent looked at this" (#155).
+ */
+function independentApprovalsFrom(raw: Record<string, unknown>): string[] {
+  const author = loginOf(raw.author).toLowerCase()
+  const reviews = Array.isArray(raw.latestReviews) ? raw.latestReviews : []
+  const logins = reviews
+    .filter((review): review is Record<string, unknown> => !!review && typeof review === 'object')
+    .filter((review) => String(review.state ?? '').toUpperCase() === 'APPROVED')
+    .map((review) => loginOf(review.author))
+    .filter((login) => login && login.toLowerCase() !== author)
+  return [...new Set(logins)]
+}
 
 /** Reads what the gate needs from GitHub, through the user's gh CLI. */
 export async function readPullRequestGate(pr: PullRequestRef): Promise<PullRequestGateState> {
@@ -449,6 +475,8 @@ export async function readPullRequestGate(pr: PullRequestRef): Promise<PullReque
     headRefOid: typeof raw.headRefOid === 'string' ? raw.headRefOid : '',
     baseRefName: typeof raw.baseRefName === 'string' ? raw.baseRefName : '',
     baseRefOid: refs.baseRefOid,
+    authorLogin: loginOf(raw.author),
+    independentApprovals: independentApprovalsFrom(raw),
     checks: rollup.map((check) => ({ name: check.name || check.context || 'check', state: checkState(check) }))
   }
 }
@@ -642,6 +670,20 @@ export function refuseUnmergeable(projectId: string, pr: PullRequestRef, state: 
 }
 
 /**
+ * Why this PR has no independent review, or null when it has one. GitHub's
+ * `reviewDecision` is only authoritative when the base branch requires
+ * reviews; on an unprotected branch it is empty however many people approved,
+ * so an explicit approval by someone other than the author is what counts.
+ */
+export function missingIndependentReview(state: PullRequestGateState): string | null {
+  if (state.reviewDecision === 'APPROVED') return null
+  if ((state.independentApprovals ?? []).length > 0) return null
+  return state.authorLogin
+    ? `no one other than ${state.authorLogin} has approved it (the base branch does not require reviews, so GitHub reports no review decision)`
+    : 'it has no independent approving review (the base branch does not require reviews, so GitHub reports no review decision)'
+}
+
+/**
  * Checks and merges one pull request under an authority the caller already
  * established. The PR must be in one of the project's GitHub repos and pass
  * {@link evaluatePullRequestGate}. A grant's use is reserved before the
@@ -673,6 +715,28 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
       request.state.baseRefName !== state.baseRefName || request.state.baseRefOid !== state.baseRefOid)) {
     return { status: 'blocked', reason_code: 'PR_CHANGED', pr_url: pr.url,
       message: 'The PR head or base changed. Reevaluate reviews, checks and stack predecessors before retrying; no grant use was spent.' }
+  }
+
+  // A grant is standing authority over many PRs, so nobody looks at each one
+  // before it lands. GitHub reports reviewDecision "" on a repository without
+  // required reviews, so the mechanical gate alone would merge an unreviewed,
+  // obsolete or duplicate PR under a project-wide grant. Require a real
+  // independent approval instead, and spend no grant use without one (#155).
+  const review = missingIndependentReview(state)
+  if (authority.kind === 'grant' && review) {
+    const key = `independent-review:${pr.url}@${state.headRefOid}`
+    if (!reportedBlocks.has(key)) {
+      reportedBlocks.add(key)
+      hooks.report?.(projectId, 'needs_user', `${pr.url} was not merged under the merge grant: ${review}`)
+    }
+    return {
+      status: 'blocked',
+      reason_code: 'INDEPENDENT_REVIEW_REQUIRED',
+      pr_url: pr.url,
+      needs_external_approval: true,
+      reasons: [review],
+      message: `Not merged and no grant use was spent. ${review} A merge grant authorises merging; it is not evidence that this PR is safe, current or not superseded. Get an independent approving review on GitHub, or ask the user to merge it themselves.`
+    }
   }
 
   let grant: MergeGrant | undefined

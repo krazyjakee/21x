@@ -201,6 +201,9 @@ export function mergeGrantFailure(blockers: MergeGrantProblem[], project = '<pro
  * Quoted material, reports, questions about merging, negations and unrecognized
  * conditions fail closed. The model cannot decide that ambiguous text consents.
  */
+/** Words that mean the "project" slot is carrying extra meaning, not a name. */
+const SCOPE_STOPWORDS = /\b(?:in|into|without|skip|skipping|skipped|ignore|ignoring|bypass|bypassing|except|excluding|unless|even|regardless|review|reviews|reviewed|check|checks|approval|approvals|approve|approved|required|protection|merge|merging|pr|prs|pull|request|requests)\b/i
+
 export function checkMergeIntent(text: string): MergeIntentResult {
   const refused: MergeIntentResult = { ok: false, reasonCode: 'AMBIGUOUS_COMMAND', offendingScope: text, reason: 'No explicit merge instruction was recognized. Quoted text, reports, questions and ambiguous instructions cannot grant authority.' }
   let value = (text ?? '').trim().replace(/[.!]$/, '')
@@ -218,6 +221,12 @@ export function checkMergeIntent(text: string): MergeIntentResult {
       return { ...refused, reasonCode: 'MULTIPLE_PROJECTS_UNSUPPORTED', offendingScope: name, reason: 'One grant covers one project; cross-project grants are unsupported.' }
     }
     if (!/^[\w.-]+(?:[ /][\w.-]+)*$/.test(name)) return { ...refused, reasonCode: 'PR_SCOPE_UNSUPPORTED', offendingScope: name }
+    // The scope slot is a project or owner/repo, never a place to tack on
+    // extra conditions. "21x skipping required reviews" must not parse as a
+    // command naming a project; authority never comes from a substring (#155).
+    if (SCOPE_STOPWORDS.test(name)) {
+      return { ...refused, reasonCode: 'PR_SCOPE_UNSUPPORTED', offendingScope: name, reason: 'Name only the project or owner/repository in the scope; extra words and conditions are not part of the accepted command.' }
+    }
     if (name.includes('/')) {
       if (!/^[\w.-]+\/[\w.-]+$/.test(name)) return { ...refused, reasonCode: 'PR_SCOPE_UNSUPPORTED', offendingScope: name }
       return { ok: true, scopeKind: 'project_wide', repo: name }

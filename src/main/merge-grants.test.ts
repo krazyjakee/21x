@@ -74,6 +74,8 @@ function prState(over: Partial<Record<string, unknown>> = {}): Record<string, un
     headRefOid: SHA,
     baseRefName: 'main',
     baseRefOid: 'd'.repeat(40),
+    author: { login: 'author-dev' },
+    latestReviews: [{ author: { login: 'reviewer-dev' }, state: 'APPROVED' }],
     statusCheckRollup: [{ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }],
     ...over
   }
@@ -1079,6 +1081,57 @@ describe('explicit project-wide grants (#155)', () => {
     h.setPr({ url: successor, number: 13, baseRefOid: 'b'.repeat(40) })
     expect((await captainCall(h, 'merge_pull_request', { pr_url: successor })).status).toBe('merged')
     expect(h.merges).toHaveLength(2)
+  })
+
+  // #156 review: on a repository whose base branch requires no reviews GitHub
+  // reports reviewDecision "", so the mechanical gate alone called an entirely
+  // unreviewed PR ready. A standing grant would then land obsolete or
+  // duplicate work without anyone looking at it.
+  it('refuses a mechanically green but unreviewed PR and spends no grant use', async () => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.setPr({ reviewDecision: '', latestReviews: [] })
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({
+      status: 'blocked',
+      reason_code: 'INDEPENDENT_REVIEW_REQUIRED',
+      needs_external_approval: true
+    })
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+  })
+
+  it('does not count the PR author approving their own PR as independent review', async () => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.setPr({ reviewDecision: '', author: { login: 'astra' }, latestReviews: [{ author: { login: 'astra' }, state: 'APPROVED' }] })
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({ status: 'blocked', reason_code: 'INDEPENDENT_REVIEW_REQUIRED' })
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+  })
+
+  it('accepts an independent approval on a branch that requires no reviews', async () => {
+    const h = setupWide()
+    wideGrant(h)
+    h.setPr({ reviewDecision: '', author: { login: 'astra' }, latestReviews: [{ author: { login: 'someone-else' }, state: 'APPROVED' }] })
+    expect((await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).status).toBe('merged')
+  })
+
+  it.each([
+    'Merge all open PRs in 21x in 22x when required reviews and checks pass',
+    'Merge all open PRs in 21x without review when required reviews and checks pass',
+    'Merge all safe PRs in 21x skipping required reviews when required reviews and checks pass'
+  ])('refuses a scope slot carrying extra conditions: %s', (text) => {
+    expect(checkMergeIntent(text)).toMatchObject({ ok: false, reasonCode: 'PR_SCOPE_UNSUPPORTED' })
+  })
+
+  // Reported live against this branch: the command names one project and both
+  // gates, but the extra "after resolving its conflicts and" clause is outside
+  // the grammar, so it must fail closed and say so specifically.
+  it('refuses a numbered command with an extra trailing condition', () => {
+    const text = 'Merge PR #156 in 21x after resolving its conflicts and after all required reviews and checks pass.'
+    expect(checkMergeIntent(text)).toMatchObject({ ok: false, reasonCode: 'AMBIGUOUS_COMMAND' })
   })
 
   it('requires the Captain to verify independent review, disposition and stack predecessors', () => {
