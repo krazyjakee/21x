@@ -41,3 +41,17 @@ export function toolCallLabel(name: string, input: Record<string, unknown> | und
   const snippet = text.length > SNIPPET_CHARS ? `${text.slice(0, SNIPPET_CHARS).trimEnd()}…` : text
   return `Asked ${project}: ${snippet}`
 }
+
+/**
+ * A tool result as shown when its chip is expanded: JSON is pretty-printed,
+ * anything else is trimmed. Empty results return an empty string (nothing to expand).
+ */
+export function formatToolResult(result: string | undefined): string {
+  const text = result?.trim() ?? ''
+  if (!text || (text[0] !== '{' && text[0] !== '[')) return text
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2)
+  } catch {
+    return text
+  }
+}
