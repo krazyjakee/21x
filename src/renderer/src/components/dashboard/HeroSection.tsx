@@ -5,6 +5,9 @@ import { useCaptainTaskId } from '@/stores/coordinator-store'
 import { useUIStore } from '@/stores/ui-store'
 import { useProjectTasks, useCurrentProject } from '@/hooks/use-project-tasks'
 import { TaskStatus } from '@/types'
+import { ActivityBadge } from '@/components/activity/ActivityBadge'
+import { useCaptainActivity } from '@/lib/activity/use-activity'
+import { isQuietActivity } from '@/lib/activity/derive-activity'
 
 // Stable empty list — a fresh `[]` per render would invalidate memos keyed on it.
 const EMPTY_MESSAGES: AgentMessage[] = []
@@ -50,6 +53,8 @@ export function HeroSection({ onSeeFullConversation }: HeroSectionProps) {
   const session = useAgentStore((s) => (captainTaskId ? s.sessions.get(captainTaskId) : undefined))
   const messages = session?.messages || EMPTY_MESSAGES
   const project = useCurrentProject()
+  // Same Captain identity as the top bar; a static mirror (#95).
+  const captainActivity = useCaptainActivity(captainTaskId)
   const projectTasks = useProjectTasks()
   // Pending approvals: this project's tasks waiting on the user's review.
   const awaitingReview = useMemo(
@@ -87,6 +92,21 @@ export function HeroSection({ onSeeFullConversation }: HeroSectionProps) {
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <FolderKanban className="size-icon-xs" />
         <span className="font-medium text-foreground/80">{project?.name ?? 'Default'}</span>
+        {captainTaskId && !isQuietActivity(captainActivity) && (
+          <>
+            <span aria-hidden>·</span>
+            <span className="flex items-center gap-1.5" data-testid="hero-captain-activity">
+              <span aria-hidden="true">Captain</span>
+              <ActivityBadge
+                result={captainActivity}
+                entityName="Captain"
+                entityKey={`task:${captainTaskId}`}
+                region="dashboard-hero"
+                allowMotion={false}
+              />
+            </span>
+          </>
+        )}
         {awaitingReview > 0 && (
           <>
             <span aria-hidden>·</span>
