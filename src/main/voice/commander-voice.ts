@@ -229,9 +229,11 @@ export class CommanderVoice {
       case 'tool_call_result':
         // Whatever the model says after a tool call is a new message, and the
         // one before it is finished — so its closing sentence is released.
+        // `final` releases the tail of every part so far; it does not end the
+        // passage (`endStreamingAnswer` does), and the next run is a new part.
         if (turn.textPart) {
           turn.textPart = null
-          this.push(turn, false)
+          this.push(turn, true)
         }
         return
       case 'done':
@@ -267,7 +269,8 @@ export class CommanderVoice {
       // of the passage, read once the reply is done.
       open.parts.push({ partId: `report:${message.id}`, content: text })
       open.textPart = null
-      this.push(open, false)
+      // The report is whole, so all of it is released at once.
+      this.push(open, true)
       return
     }
     void this.options.speech

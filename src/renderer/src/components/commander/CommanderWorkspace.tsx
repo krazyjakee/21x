@@ -3,6 +3,7 @@ import { commanderApi } from '@/lib/ipc-client'
 import { useCommanderStore } from '@/stores/commander-store'
 import { CommanderChatPane } from './CommanderChatPane'
 import { CommanderSessionList } from './CommanderSessionList'
+import { CommanderVoiceControls } from './CommanderVoiceControls'
 
 /** Top-level Commander view: persisted sessions on the left, the open chat on the right. No canvas. */
 export function CommanderWorkspace() {
@@ -27,6 +28,7 @@ export function CommanderWorkspace() {
     <div className="flex h-full min-h-0">
       <CommanderSessionList />
       <CommanderChatPane />
+      <CommanderVoiceControls />
     </div>
   )
 }

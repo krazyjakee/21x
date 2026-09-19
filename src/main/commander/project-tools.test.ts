@@ -16,6 +16,7 @@ import {
   type CommanderAgents,
   type ProjectToolOptions
 } from './project-tools'
+import { createCommanderSkillTools, MUTATING_COMMANDER_SKILL_TOOLS } from './skill-tools'
 
 let db: DatabaseManager
 let confirmations: ProjectMutationConfirmations
@@ -211,6 +212,29 @@ describe('Commander tool registry', () => {
     const withAgents = body(await call('get_project_summary', { project: project.id }))
     expect(withAgents.mastermind).toEqual({ agent: null, session: 'not_running' })
     expect(withAgents.limits).toMatchObject({ paused: false, all_projects_paused: false, queued: 0 })
+  })
+})
+
+describe('Commander tool registry with skill administration (#74)', () => {
+  /** The registry ipc/commander.ts builds: project tools, then skill tools, one confirmation table. */
+  function fullRegistry(): ChatToolDefinition[] {
+    const context = { sessionId: 'session-1', userMessage: 'do it' }
+    return [...tools(), ...createCommanderSkillTools({ db, context, confirmations })]
+  }
+
+  it('adds skill administration and still no task-mutating or skill-assigning tool', () => {
+    const names = fullRegistry().map((entry) => entry.name)
+    expect(names.slice(-7)).toEqual(['list_skills', 'get_skill', 'create_skill', 'update_skill', 'remove_skill', 'promote_skill', 'move_skill'])
+    expect(new Set(names).size).toBe(names.length)
+    expect(names.filter((name) => /task|session|checkpoint|approve|reject|start|stop|delete|assign/.test(name))).toEqual([])
+    const mutating = new Set<string>([...MUTATING_COMMANDER_TOOLS, ...MUTATING_COMMANDER_SKILL_TOOLS])
+    for (const entry of fullRegistry()) {
+      const declaresToken = 'confirmation_token' in (entry.inputSchema.properties ?? {})
+      expect(declaresToken, entry.name).toBe(mutating.has(entry.name))
+      // No tool takes a task or skill_ids argument: the Commander cannot assign skills to tasks.
+      const properties = Object.keys(entry.inputSchema.properties ?? {})
+      expect(properties.filter((key) => /task|skill_ids/.test(key)), entry.name).toEqual([])
+    }
   })
 })
 

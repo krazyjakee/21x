@@ -10,6 +10,7 @@ import { useVoiceStore } from '@/stores/voice-store'
 import { VOICE_SETTING_KEYS } from '@shared/voice'
 import { VOICE_TTS_MAX_CHARS_CHOICES, VOICE_TTS_SPEED_CHOICES, type VoiceTtsEngineId } from '@shared/voice-tts'
 import { formatBytes } from '@/lib/utils'
+import { ElevenLabsSettings } from './ElevenLabsSettings'
 
 /**
  * Spoken answers — the speaking half of the voice page (design §5.7 and §5.10).
@@ -70,7 +71,9 @@ export function SpokenAnswerSettings() {
     tts.status.state === 'ready'
       ? tts.status.engine === 'system'
         ? 'Ready — the voice installed in this system.'
-        : `Ready — ${tts.status.modelId}.`
+        : tts.status.engine === 'elevenlabs'
+          ? `Ready — ElevenLabs, ${tts.status.modelId}. Reply text is sent to ElevenLabs.`
+          : `Ready — ${tts.status.modelId}.`
       : tts.status.state === 'loading'
         ? 'The voice is loading.'
         : tts.status.message
@@ -78,7 +81,7 @@ export function SpokenAnswerSettings() {
   return (
     <SettingsSection
       title="Text to speech — what 21x says"
-      description="21x reads an agent answer aloud. The speech is produced on this computer; no text and no audio leave the device."
+      description="21x reads an agent answer aloud. With the voices on this computer no text and no audio leave the device; only the optional ElevenLabs voice sends text online."
     >
       <div className="flex items-center justify-between rounded-lg border border-border p-3">
         <div className="space-y-0.5">
@@ -102,6 +105,15 @@ export function SpokenAnswerSettings() {
         <div className="rounded-lg border border-yellow-500/40 p-3 text-sm">
           <p className="text-muted-foreground" data-testid="tts-status">
             {statusLine}
+          </p>
+        </div>
+      )}
+      {/* A streaming failure (credits, rate limit, dropped connection) leaves
+          the engine ready but is still stated here, where the user looks. */}
+      {ready && tts.engine === 'elevenlabs' && tts.elevenlabs.error && (
+        <div className="rounded-lg border border-destructive/40 p-3 text-sm" role="alert">
+          <p className="text-destructive" data-testid="tts-elevenlabs-status">
+            {tts.elevenlabs.error.message}
           </p>
         </div>
       )}
@@ -133,7 +145,9 @@ export function SpokenAnswerSettings() {
           <p className="text-xs text-muted-foreground">
             {tts.engine === 'system'
               ? 'This system has no voice that 21x can use.'
-              : 'Download a voice below to choose a speaker.'}
+              : tts.engine === 'elevenlabs'
+                ? 'Add your ElevenLabs key below to load the voices of your account.'
+                : 'Download a voice below to choose a speaker.'}
           </p>
         ) : (
           <select
@@ -243,6 +257,9 @@ export function SpokenAnswerSettings() {
           </div>
         ))}
       </div>
+
+      {/* The hosted voice is an explicit, opt-in choice: disclosure first, then the key. */}
+      <ElevenLabsSettings tts={tts} />
 
       {advancedReady && (
         <AdvancedDisclosure
