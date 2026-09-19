@@ -1,8 +1,3 @@
-/**
- * Adapter interface for coding agent backends.
- * Defines common operations that all coding agent implementations must support.
- */
-
 import type { ReasoningEffort } from '../../shared/reasoning-effort'
 
 export enum SessionStatusType {
@@ -107,7 +102,7 @@ export interface MessagePart {
   type: MessagePartType
   text?: string
   content?: string
-  role?: 'user' | 'assistant' | 'system' // Message role
+  role?: 'user' | 'assistant' | 'system'
   tool?: {
     name: string
     status?: string
@@ -140,46 +135,34 @@ export interface MessagePart {
   }
 }
 
-/**
- * Common interface for all coding agent backends (OpenCode, Claude Code, etc.)
- */
+export interface PendingApproval {
+  requestId?: string | number
+  toolCallId: string
+  question: string
+  options: Array<{ optionId: string; name: string; kind: string }>
+}
+
+/** The interface every coding agent backend implements. */
 export interface CodingAgentAdapter {
-  /**
-   * Initialize the adapter (e.g., load SDK, validate config)
-   */
   initialize(): Promise<void>
 
-  /**
-   * Create a new coding session
-   * @returns OpenCode/Claude session ID
-   */
+  /** @returns the backend's session id */
   createSession(config: SessionConfig): Promise<string>
 
-  /**
-   * Resume an existing session from a persisted session ID
-   * @returns Session messages for replay
-   */
+  /** Reattaches to a persisted session; returns its history. */
   resumeSession(sessionId: string, config: SessionConfig): Promise<SessionMessage[]>
 
-  /**
-   * Send a prompt/message to the session
-   */
   sendPrompt(
     sessionId: string,
     parts: MessagePart[],
     config: SessionConfig
   ): Promise<void>
 
-  /**
-   * Get current session status
-   */
   getStatus(sessionId: string, config: SessionConfig): Promise<SessionStatus>
 
   /**
-   * Get new messages since last poll
-   * @param seenMessageIds Set of message IDs already processed
-   * @param seenPartIds Set of part IDs already processed
-   * @returns New message parts
+   * Parts that are new or changed since the last poll. The adapter records
+   * what it returned in the dedup structures it is given.
    */
   pollMessages(
     sessionId: string,
@@ -189,11 +172,7 @@ export interface CodingAgentAdapter {
     config: SessionConfig
   ): Promise<MessagePart[]>
 
-  /**
-   * Get all session messages in a standardized format
-   * Used for extracting output fields and other post-processing
-   * @returns All messages from the session
-   */
+  /** The live session's full message list (output fields, idle replay, debug copy). */
   getAllMessages?(sessionId: string, config: SessionConfig): Promise<SessionMessage[]>
 
   /**
@@ -206,16 +185,12 @@ export interface CodingAgentAdapter {
    */
   getPersistedMessages?(sessionId: string, config: SessionConfig): Promise<SessionMessage[]>
 
-  /**
-   * Abort ongoing prompt
-   */
   abortPrompt(sessionId: string, config: SessionConfig): Promise<void>
 
   /**
-   * Get tools currently in "running" state.
-   * Used by the stuck-tool detector to abort tools that hang without producing
-   * data (e.g. cross-workspace file reads that the server silently blocks).
-   * Optional — returns empty array if the adapter doesn't support it.
+   * Tools currently running. Used by the stuck-tool detector to abort tools
+   * that hang without producing data (e.g. cross-workspace file reads that the
+   * server silently blocks).
    */
   getRunningTools?(sessionId: string, config: SessionConfig): Promise<Array<{
     partId: string
@@ -226,9 +201,6 @@ export interface CodingAgentAdapter {
     input?: Record<string, unknown> // Tool input (e.g. { filePath: "..." })
   }>>
 
-  /**
-   * Destroy/cleanup session
-   */
   destroySession(sessionId: string, config: SessionConfig): Promise<void>
 
   /**
@@ -244,6 +216,20 @@ export interface CodingAgentAdapter {
     config: SessionConfig,
     requestId?: string
   ): Promise<boolean | void | { handled: boolean; resolutionPart?: MessagePart }>
+
+  /** The oldest tool-permission request waiting for the user, rendered as a permission card. */
+  getPendingApproval?(sessionId: string): PendingApproval | null
+
+  /**
+   * Answers a permission request. `false` means no matching request exists
+   * (the turn ended or the app restarted), so the card can be marked expired.
+   */
+  respondToApproval?(
+    sessionId: string,
+    approved: boolean,
+    optionId?: string,
+    requestId?: string
+  ): Promise<boolean | void>
 
   /**
    * List available providers and their models from the backend.
@@ -267,9 +253,6 @@ export interface CodingAgentAdapter {
    */
   notifyConfigChanged?(): Promise<void>
 
-  /**
-   * Check if this adapter's backend is available and healthy
-   */
   checkHealth(): Promise<{ available: boolean; reason?: string }>
 
   /**

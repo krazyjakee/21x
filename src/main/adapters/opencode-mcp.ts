@@ -148,7 +148,7 @@ async function registerMcpServers(
 
   for (const [name, mcpConfig] of Object.entries(mcpServers)) {
     try {
-      const mcpAddConfig = mcpConfig.type === 'http'
+      const mcpAddConfig = mcpConfig.type === 'http' || mcpConfig.type === 'sse'
         ? { type: 'remote' as const, url: mcpConfig.url ?? '', headers: mcpConfig.headers }
         : { type: 'local' as const, command: [mcpConfig.command ?? '', ...(mcpConfig.args ?? [])], environment: mcpConfig.env }
       const serialized = JSON.stringify(mcpAddConfig)

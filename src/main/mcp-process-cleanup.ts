@@ -18,6 +18,12 @@
  * process table through CIM and goes through the same scoped selection.
  */
 
+import { execFile } from 'child_process'
+import { setTimeout as sleep } from 'timers/promises'
+import { promisify } from 'util'
+
+const execFileAsync = promisify(execFile)
+
 /** One row of the process table. */
 export type ProcessRow = { pid: number; ppid: number; command: string }
 
@@ -58,6 +64,48 @@ export function parseProcessTable(psOutput: string): ProcessRow[] {
     rows.push({ pid: Number(match[1]), ppid: Number(match[2]), command: match[3] })
   }
   return rows
+}
+
+/**
+ * Reads the Unix process table with `ps -eo pid=,ppid=,command=`. Bounded,
+ * because callers run it at boot and inside a held-open quit.
+ */
+export async function readProcessTable(timeoutMs = 20_000): Promise<ProcessRow[]> {
+  const { stdout } = await execFileAsync('ps', ['-eo', 'pid=,ppid=,command='], {
+    encoding: 'utf-8',
+    maxBuffer: 16 * 1024 * 1024,
+    timeout: timeoutMs
+  })
+  return parseProcessTable(stdout)
+}
+
+/**
+ * SIGTERM, a grace period, then SIGKILL for whatever ignored it.
+ *
+ * There is a pid-reuse window between reading the table and signalling: a
+ * selected process could exit and its number be handed to something else.
+ * `kill(pid, 0)` proves a process exists, never that it is the same one. It is
+ * not closable without a pidfd (Linux) or a kqueue handle per process, and a
+ * second of window against days of leaked resources is the right trade.
+ */
+export async function terminatePids(pids: readonly number[], graceMs = 1500): Promise<void> {
+  if (pids.length === 0) return
+  for (const pid of pids) {
+    try {
+      process.kill(pid, 'SIGTERM')
+    } catch {
+      // Already gone between the listing and the signal.
+    }
+  }
+  await sleep(graceMs)
+  for (const pid of pids) {
+    try {
+      process.kill(pid, 0) // throws when the process is gone
+      process.kill(pid, 'SIGKILL')
+    } catch {
+      // Gone, which is the outcome we wanted.
+    }
+  }
 }
 
 /** All transitive children of `rootPid`, excluding `rootPid` itself. */

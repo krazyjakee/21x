@@ -1,14 +1,12 @@
 /**
- * Unified ACP (Agent Client Protocol) adapter for all ACP-compatible coding agents.
- * Supports: codex-acp and cursor-agent.
+ * ACP (Agent Client Protocol) adapter for Cursor (`cursor-agent acp`).
  *
  * Protocol: JSON-RPC 2.0 over stdio (newline-delimited JSON)
  * Spec: https://github.com/agentclientprotocol/typescript-sdk
  */
 
 import { CLIENT_NAME } from '../app-identity'
-import { spawn, ChildProcess } from 'child_process'
-import { guardChildStreams } from '../child-stream-guards'
+import type { ChildProcess } from 'child_process'
 import type {
   CodingAgentAdapter,
   SessionConfig,
@@ -18,13 +16,10 @@ import type {
 } from './coding-agent-adapter'
 import { SessionStatusType } from './coding-agent-adapter'
 import {
-  acpModelValue,
   applyCursorAuthEnv,
   convertAcpMcpServers,
-  getAcpAgentConfig,
-  pickAcpAuthMethod,
-  type AcpAgentConfig,
-  type AcpAgentType
+  cursorModelValue,
+  CURSOR_AGENT_COMMAND
 } from './acp-agent-config'
 import {
   convertAcpEventToMessageParts,
@@ -34,10 +29,12 @@ import {
   type AcpTurnState,
   type SessionUpdate
 } from './acp-event-converter'
-import { applyCodexAuthEnv } from './shared/codex-auth'
 import { execFileAsync } from '../find-executable'
 import {
   sendJsonRpcRequest,
+  settleJsonRpcResponse,
+  spawnJsonRpcChild,
+  terminateJsonRpcPeer,
   writeJsonRpc,
   type JsonRpcError,
   type JsonRpcMessage,
@@ -46,7 +43,6 @@ import {
   type JsonRpcRequest,
   type JsonRpcResponse
 } from './shared/json-rpc'
-import { onJsonLines } from './shared/jsonl'
 import { groupPartsIntoMessages } from './shared/session-messages'
 
 interface AcpPermissionRequest {
@@ -76,12 +72,8 @@ interface AcpSession extends AcpTurnState, JsonRpcPeer {
   config: SessionConfig
   /** ID of the current session/prompt request */
   promptRequestId: number | null
-  /** Last error (e.g. quota exceeded) for status reporting */
+  /** Last error, for status reporting */
   lastError: string | null
-  /** True when Codex auth uses an API key (vs. ChatGPT subscription / CLI login) */
-  codexUseApiKey: boolean
-  /** Auth identity used, surfaced in provider errors for diagnostics */
-  codexAuthSummary: string
   /**
    * System prompt still to deliver. ACP's session/new has no system-prompt
    * field, so it rides along with the first prompt of a new session.
@@ -95,6 +87,7 @@ interface AcpSession extends AcpTurnState, JsonRpcPeer {
  */
 const MAX_PERMANENT_MESSAGES = 1000
 const MAX_HISTORY_OUTPUT_CHARS = 100_000
+const LABEL = 'AcpAdapter/cursor'
 
 /** Prefixes the first prompt of a session with its system prompt, fenced so the agent can tell them apart. */
 export function withSystemPrompt(systemPrompt: string | undefined, promptText: string): string {
@@ -103,35 +96,14 @@ export function withSystemPrompt(systemPrompt: string | undefined, promptText: s
 }
 
 export class AcpAdapter implements CodingAgentAdapter {
-  private agentType: AcpAgentType
-  private agentConfig: AcpAgentConfig
   private sessions = new Map<string, AcpSession>()
   private debugRpcLogs: boolean
 
-  /** Callback set by agent-manager to trigger an immediate poll cycle */
   onDataAvailable?: (sessionId: string) => void
 
-  constructor(agentType: AcpAgentType) {
-    this.agentType = agentType
-    this.agentConfig = getAcpAgentConfig(agentType)
+  constructor() {
     const logLevel = process.env.LOG_LEVEL?.trim().toLowerCase()
     this.debugRpcLogs = logLevel === 'debug' || logLevel === 'trace'
-  }
-
-  private get label(): string {
-    return `AcpAdapter/${this.agentType}`
-  }
-
-  /** Returns true when Codex uses API-key auth; see applyCodexAuthEnv. */
-  private configureCodexAuthEnv(env: Record<string, string | undefined>, config: SessionConfig): boolean {
-    if (this.agentType !== 'codex') return false
-    const { usesApiKey, summary } = applyCodexAuthEnv(env, config)
-    console.log(`[${this.label}] Auth: ${summary}`)
-    return usesApiKey
-  }
-
-  private configureCursorAuthEnv(env: Record<string, string | undefined>, config: SessionConfig): void {
-    if (this.agentType === 'cursor') applyCursorAuthEnv(env, config)
   }
 
   async initialize(): Promise<void> {
@@ -139,34 +111,23 @@ export class AcpAdapter implements CodingAgentAdapter {
     if (!health.available) {
       throw new Error(health.reason || 'ACP agent not available')
     }
-    console.log(`[${this.label}] Initialized successfully`)
+    console.log(`[${LABEL}] Initialized successfully`)
   }
 
+  /**
+   * Authenticates with the first advertised method. Which credential it uses
+   * (CLI login or CURSOR_API_KEY) was already decided in the child's env by
+   * applyCursorAuthEnv.
+   */
   private async authenticateSession(session: AcpSession, initResult: unknown): Promise<void> {
     const initObj = initResult as Record<string, unknown> | undefined
-    const authMethods = (Array.isArray(initObj?.authMethods) ? initObj.authMethods : []) as Array<{ id: string; [key: string]: unknown }>
-
-    if (authMethods.length === 0) {
-      console.log(`[${this.label}] No auth methods advertised by agent (already authenticated); codexUseApiKey=${session.codexUseApiKey}`)
-      return
-    }
-
-    // Use the auth mode decided in configureCodexAuthEnv() rather than sniffing
-    // env vars: an ambient OPENAI_API_KEY must not flip a subscription user into
-    // API-key auth.
-    const authMethod = pickAcpAuthMethod(this.agentType, authMethods, session.codexUseApiKey)
-    console.log(`[${this.label}] Available auth methods: [${authMethods.map((m) => m.id).join(', ')}]; codexUseApiKey=${session.codexUseApiKey}`)
-
+    const authMethods = (Array.isArray(initObj?.authMethods) ? initObj.authMethods : []) as Array<{ id: string }>
+    const authMethod = authMethods[0]
     if (!authMethod) {
-      console.log(`[${this.label}] No usable auth method found; skipping authenticate`)
+      console.log(`[${LABEL}] No auth methods advertised by agent (already authenticated)`)
       return
     }
-
-    // No `logout` first: with an API key, CODEX_HOME is a per-session temp
-    // directory, so there are no stale disk credentials and keys can differ
-    // per session.
-    console.log(`[${this.label}] Authenticating with method: ${authMethod.id}`)
-    session.codexAuthSummary = `${session.codexUseApiKey ? 'API key' : 'subscription'} via authenticate(${authMethod.id})`
+    console.log(`[${LABEL}] Authenticating with method: ${authMethod.id}`)
     await this.sendRpcRequest(session, 'authenticate', { methodId: authMethod.id })
   }
 
@@ -177,31 +138,17 @@ export class AcpAdapter implements CodingAgentAdapter {
   private async startSession(sessionId: string, acpSessionId: string | null, config: SessionConfig): Promise<AcpSession> {
     const env: Record<string, string | undefined> = {
       ...process.env,
-      ...this.agentConfig.env,
       ...(config.apiKeys?.anthropic ? { ANTHROPIC_API_KEY: config.apiKeys.anthropic } : {}),
       ...config.secretEnvVars
     }
-
     // Auth is decided LAST so it is authoritative over injected secrets.
-    const codexUseApiKey = this.configureCodexAuthEnv(env, config)
-    this.configureCursorAuthEnv(env, config)
-    const codexAuthSummary = this.agentType === 'codex'
-      ? `${codexUseApiKey ? 'API key' : 'subscription'} (authMethod=${config.authMethod ?? 'legacy'}, CODEX_HOME=${env.CODEX_HOME ?? 'default'})`
-      : ''
+    applyCursorAuthEnv(env, config)
 
-    // On Windows, .cmd/.bat wrappers need shell:true to resolve
-    const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(this.agentConfig.command)
-    const acpProcess = spawn(this.agentConfig.command, this.agentConfig.args, {
-      cwd: config.workspaceDir,
-      env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      ...(needsShell ? { shell: true } : {})
+    const acpProcess = spawnJsonRpcChild(CURSOR_AGENT_COMMAND, ['acp'], { cwd: config.workspaceDir, env }, LABEL,
+      (message) => this.handleRpcMessage(session, message))
+    acpProcess.on('exit', (code) => {
+      session.status = code === 0 ? SessionStatusType.IDLE : SessionStatusType.ERROR
     })
-
-    // Every pipe needs an error listener before the first write. The agent can
-    // exit at any moment, and an unhandled EPIPE on its stdin takes the whole
-    // main process down with a crash dialog.
-    guardChildStreams(acpProcess, this.label)
 
     const session: AcpSession = {
       sessionId,
@@ -222,26 +169,9 @@ export class AcpAdapter implements CodingAgentAdapter {
       activeTurnId: null,
       pendingAssistantTurnSplit: false,
       toolCallMetadata: new Map(),
-      lastError: null,
-      codexUseApiKey,
-      codexAuthSummary
+      lastError: null
     }
     this.sessions.set(sessionId, session)
-
-    onJsonLines(acpProcess.stdout, (line) => {
-      try {
-        this.handleRpcMessage(session, JSON.parse(line) as JsonRpcMessage)
-      } catch (error) {
-        console.error(`[${this.label}] Failed to parse JSON-RPC message:`, line, error)
-      }
-    })
-    acpProcess.stderr?.on('data', (chunk: Buffer) => {
-      console.log(`[${this.label}] stderr:`, chunk.toString())
-    })
-    acpProcess.on('exit', (code, signal) => {
-      console.log(`[${this.label}] Process exited: code=${code}, signal=${signal}`)
-      session.status = code === 0 ? SessionStatusType.IDLE : SessionStatusType.ERROR
-    })
 
     const initResult = await this.sendRpcRequest(session, 'initialize', {
       protocolVersion: 1,
@@ -266,22 +196,22 @@ export class AcpAdapter implements CodingAgentAdapter {
         configId,
         value
       })
-      console.log(`[${this.label}] ${configId} set to: ${value}`)
+      console.log(`[${LABEL}] ${configId} set to: ${value}`)
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : String(error)
-      console.warn(`[${this.label}] Failed to set ${configId}: ${errMsg}`)
+      console.warn(`[${LABEL}] Failed to set ${configId}: ${errMsg}`)
     }
   }
 
   async createSession(config: SessionConfig): Promise<string> {
     const sessionId = config.taskId
-    console.log(`[${this.label}] Creating session ${sessionId}`)
+    console.log(`[${LABEL}] Creating session ${sessionId}`)
 
     const session = await this.startSession(sessionId, null, config)
 
     // session/new only accepts cwd and mcpServers per the ACP spec.
     const mcpServers = convertAcpMcpServers(config.mcpServers)
-    console.log(`[${this.label}] session/new mcpServers:`, JSON.stringify(mcpServers))
+    console.log(`[${LABEL}] session/new mcpServers:`, JSON.stringify(mcpServers))
     const result = await this.sendRpcRequest(session, 'session/new', {
       cwd: config.workspaceDir,
       mcpServers
@@ -295,20 +225,20 @@ export class AcpAdapter implements CodingAgentAdapter {
       this.sessions.set(acpSessionId, session)
 
       if (config.model) {
-        await this.setConfigOption(session, 'model', acpModelValue(this.agentType, config.model))
+        await this.setConfigOption(session, 'model', cursorModelValue(config.model))
       }
       if (config.reasoningEffort && config.reasoningEffort !== 'max') {
         await this.setConfigOption(session, 'model_reasoning_effort', config.reasoningEffort)
       }
     }
 
-    console.log(`[${this.label}] Session created: ${sessionId} (ACP: ${acpSessionId})`)
+    console.log(`[${LABEL}] Session created: ${sessionId} (ACP: ${acpSessionId})`)
     // The ACP session ID is persisted and used for resuming.
     return acpSessionId || sessionId
   }
 
   async resumeSession(sessionId: string, config: SessionConfig): Promise<SessionMessage[]> {
-    console.log(`[${this.label}] Resuming session ${sessionId}`)
+    console.log(`[${LABEL}] Resuming session ${sessionId}`)
 
     // sessionId is the ACP session ID returned by createSession.
     const session = await this.startSession(sessionId, sessionId, config)
@@ -319,7 +249,7 @@ export class AcpAdapter implements CodingAgentAdapter {
         cwd: config.workspaceDir,
         mcpServers: convertAcpMcpServers(config.mcpServers)
       })
-      console.log(`[${this.label}] Session loaded successfully: ${sessionId}`)
+      console.log(`[${LABEL}] Session loaded successfully: ${sessionId}`)
 
       // Notifications replayed during session/load become the returned history.
       // Without this, the renderer sees status:'idle' + messages:[] and hides the panel.
@@ -332,10 +262,10 @@ export class AcpAdapter implements CodingAgentAdapter {
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : String(error)
       if (errMsg.includes('not found') || errMsg.includes('does not exist')) {
-        session.process.kill('SIGTERM')
+        terminateJsonRpcPeer(session, `${LABEL}: session ${sessionId} not found`)
         this.sessions.delete(sessionId)
         throw new Error(
-          `INCOMPATIBLE_SESSION_ID: This ${this.agentType} session does not exist or has expired. Please start a new session.`
+          'INCOMPATIBLE_SESSION_ID: This cursor session does not exist or has expired. Please start a new session.'
         )
       }
       throw error
@@ -361,7 +291,7 @@ export class AcpAdapter implements CodingAgentAdapter {
       throw new Error('No text content in message parts')
     }
 
-    console.log(`[${this.label}] Sending prompt to session ${sessionId} (${promptText.length} chars)`)
+    console.log(`[${LABEL}] Sending prompt to session ${sessionId} (${promptText.length} chars)`)
 
     // Clear stale buffered events from the previous turn. Notifications can
     // arrive between the last poll and idle detection; a fresh PollingEntry
@@ -413,7 +343,7 @@ export class AcpAdapter implements CodingAgentAdapter {
         sessionId: session.acpSessionId,
         prompt: [{ type: 'text', text: wireText }]
       }
-    }, this.label, failPrompt)
+    }, LABEL, failPrompt)
     if (!sent) failPrompt(new Error('agent process is not running'))
   }
 
@@ -454,7 +384,7 @@ export class AcpAdapter implements CodingAgentAdapter {
       throw new Error(`Session not found: ${sessionId}`)
     }
 
-    console.log(`[${this.label}] Sending session/cancel for ${sessionId}`)
+    console.log(`[${LABEL}] Sending session/cancel for ${sessionId}`)
 
     // session/cancel is a notification. The agent answers the original
     // session/prompt with stopReason: cancelled, which settles the status.
@@ -462,7 +392,7 @@ export class AcpAdapter implements CodingAgentAdapter {
       jsonrpc: '2.0',
       method: 'session/cancel',
       params: { sessionId: session.acpSessionId }
-    }, this.label)
+    }, LABEL)
   }
 
   async destroySession(sessionId: string, _config: SessionConfig): Promise<void> {
@@ -471,20 +401,12 @@ export class AcpAdapter implements CodingAgentAdapter {
       return
     }
 
-    console.log(`[${this.label}] Destroying session ${sessionId}`)
+    console.log(`[${LABEL}] Destroying session ${sessionId}`)
 
-    session.process.kill('SIGTERM')
-    setTimeout(() => {
-      if (!session.process.killed) {
-        session.process.kill('SIGKILL')
-      }
-    }, 1000)
-
-    // Eagerly clear large data structures to free memory immediately
+    terminateJsonRpcPeer(session, `${LABEL}: session ${sessionId} destroyed`)
     session.permanentMessages.length = 0
     session.messageBuffer.length = 0
     session.toolCallMetadata.clear()
-    session.pendingRequests.clear()
 
     this.sessions.delete(sessionId)
   }
@@ -541,30 +463,16 @@ export class AcpAdapter implements CodingAgentAdapter {
   }
 
   async checkHealth(): Promise<{ available: boolean; reason?: string }> {
-    if (this.agentType === 'cursor') {
-      try {
-        await execFileAsync(this.agentConfig.command, ['--version'], {
-          timeout: 10000,
-          windowsHide: true,
-          shell: process.platform === 'win32'
-        })
-        return { available: true }
-      } catch (error: unknown) {
-        const errMsg = error instanceof Error ? error.message : String(error)
-        return { available: false, reason: `Cursor Agent CLI is unavailable. Install it and run cursor-agent login. (${errMsg})` }
-      }
-    }
-
-    // API keys are not checked here: they can come from the agent's UI
-    // configuration at session creation time.
     try {
-      require.resolve('@agentclientprotocol/codex-acp/dist/index.js')
+      await execFileAsync(CURSOR_AGENT_COMMAND, ['--version'], {
+        timeout: 10000,
+        windowsHide: true,
+        shell: process.platform === 'win32'
+      })
       return { available: true }
-    } catch {
-      return {
-        available: false,
-        reason: '@agentclientprotocol/codex-acp not found. Install with: pnpm add @agentclientprotocol/codex-acp'
-      }
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : String(error)
+      return { available: false, reason: `Cursor Agent CLI is unavailable. Install it and run cursor-agent login. (${errMsg})` }
     }
   }
 
@@ -580,7 +488,7 @@ export class AcpAdapter implements CodingAgentAdapter {
   ): Promise<void> {
     const session = this.sessions.get(sessionId)
     if (!session || !session.pendingApproval) {
-      console.warn(`[${this.label}] No pending approval for session ${sessionId}`)
+      console.warn(`[${LABEL}] No pending approval for session ${sessionId}`)
       return
     }
 
@@ -594,7 +502,7 @@ export class AcpAdapter implements CodingAgentAdapter {
         : approval.options.find((option) => option.optionId === 'reject-once')?.optionId || 'abort'
     }
 
-    console.log(`[${this.label}] Responding to approval with: ${selectedOptionId}`)
+    console.log(`[${LABEL}] Responding to approval with: ${selectedOptionId}`)
 
     // The ACP TypeScript SDK nests the outcome: { outcome: { outcome, optionId } }
     this.sendRpcResponse(session, approval.requestId, {
@@ -621,36 +529,16 @@ export class AcpAdapter implements CodingAgentAdapter {
 
   private handleRpcMessage(session: AcpSession, message: JsonRpcMessage): void {
     if (this.debugRpcLogs) {
-      console.log(`[${this.label}] Received RPC message:`, JSON.stringify(message))
+      console.log(`[${LABEL}] Received RPC message:`, JSON.stringify(message))
     }
 
-    // Responses to our requests
     if ('id' in message && message.id !== undefined && !('method' in message)) {
       const response = message as JsonRpcResponse
-      const pending = session.pendingRequests.get(message.id)
-      if (pending) {
-        session.pendingRequests.delete(message.id)
-        if (response.error) {
-          const errorInfo = this.extractCodexErrorInfo(response.error)
-          if (errorInfo) {
-            this.handleQuotaError(session, errorInfo)
-          }
-          pending.reject(new Error(response.error.message))
-        } else if ('result' in response) {
-          pending.resolve(response.result)
-        }
-        return
-      }
+      if (settleJsonRpcResponse(session, response)) return
 
       // No pending request: e.g. an error for a permission response.
       if (response.error) {
-        const errorInfo = this.extractCodexErrorInfo(response.error)
-        if (errorInfo) {
-          this.handleQuotaError(session, errorInfo)
-          return
-        }
-
-        console.error(`[${this.label}] Unexpected error response:`, response.error)
+        console.error(`[${LABEL}] Unexpected error response:`, response.error)
         const errorEvent = {
           _isError: true,
           message: response.error.message,
@@ -665,7 +553,7 @@ export class AcpAdapter implements CodingAgentAdapter {
       if (session.promptRequestId === message.id && 'result' in response) {
         const result = response.result as Record<string, unknown> | undefined
         if (result?.stopReason) {
-          console.log(`[${this.label}] Prompt completed with stopReason: ${result.stopReason}`)
+          console.log(`[${LABEL}] Prompt completed with stopReason: ${result.stopReason}`)
           session.status = SessionStatusType.IDLE
           session.activeTurnId = null
           // promptRequestId is kept for late-arriving events; the next prompt replaces it.
@@ -674,11 +562,10 @@ export class AcpAdapter implements CodingAgentAdapter {
       }
     }
 
-    // Requests from the agent (e.g. session/request_permission)
     if ('method' in message && 'id' in message && message.id !== undefined) {
       const request = message as JsonRpcRequest
       if (this.debugRpcLogs) {
-        console.log(`[${this.label}] << Request: ${request.method}`)
+        console.log(`[${LABEL}] << Request: ${request.method}`)
       }
 
       if (request.method === 'session/request_permission') {
@@ -686,14 +573,14 @@ export class AcpAdapter implements CodingAgentAdapter {
         return
       }
 
-      if (this.agentType === 'cursor' && request.method === 'cursor/ask_question') {
+      if (request.method === 'cursor/ask_question') {
         this.sendRpcResponse(session, request.id, {
           result: { outcome: { outcome: 'skipped', reason: 'Cursor questions are not supported by 20x yet' } }
         })
         return
       }
 
-      if (this.agentType === 'cursor' && request.method === 'cursor/create_plan') {
+      if (request.method === 'cursor/create_plan') {
         this.sendRpcResponse(session, request.id, {
           result: { outcome: { outcome: 'cancelled' } }
         })
@@ -712,10 +599,10 @@ export class AcpAdapter implements CodingAgentAdapter {
       const notification = message as JsonRpcNotification
 
       if (this.debugRpcLogs) {
-        console.log(`[${this.label}] << Notification: ${notification.method}`)
+        console.log(`[${LABEL}] << Notification: ${notification.method}`)
         if (notification.method === 'session/update') {
           const params = notification.params as { update?: SessionUpdate } | undefined
-          console.log(`[${this.label}]    sessionUpdate: ${params?.update?.sessionUpdate}`)
+          console.log(`[${LABEL}]    sessionUpdate: ${params?.update?.sessionUpdate}`)
         }
       }
 
@@ -724,63 +611,6 @@ export class AcpAdapter implements CodingAgentAdapter {
       this.onDataAvailable?.(session.sessionId)
       this.updateSessionStatus(session, notification)
     }
-  }
-
-  /**
-   * Maps a Codex-specific RPC error to a user-facing message, or returns null
-   * for generic errors that should be handled normally.
-   */
-  private extractCodexErrorInfo(error: JsonRpcError): {
-    errorType: string
-    userMessage: string
-  } | null {
-    const data = error.data as Record<string, unknown> | undefined
-    if (!data?.codex_error_info) return null
-
-    const errorType = String(data.codex_error_info)
-    const providerMessage = typeof data.message === 'string' ? data.message : error.message
-
-    switch (errorType) {
-      case 'usage_limit_exceeded':
-        return {
-          errorType,
-          userMessage: `Quota exceeded: ${providerMessage}. Please check your Codex plan and billing details to continue.`
-        }
-      case 'rate_limit_exceeded':
-        return {
-          errorType,
-          userMessage: `Rate limit reached: ${providerMessage}. Please wait a moment before trying again.`
-        }
-      default:
-        return {
-          errorType,
-          userMessage: `Codex error (${errorType}): ${providerMessage}`
-        }
-    }
-  }
-
-  private handleQuotaError(session: AcpSession, errorInfo: { errorType: string; userMessage: string }): void {
-    // Include the auth identity 20x used, so it is visible whether the limit
-    // came from the subscription or an API key.
-    const authNote = session.codexAuthSummary ? ` [20x auth: ${session.codexAuthSummary}]` : ''
-    const userMessage = `${errorInfo.userMessage}${authNote}`
-
-    console.warn(`[${this.label}] Provider error (${errorInfo.errorType}):`, userMessage)
-
-    session.status = SessionStatusType.ERROR
-    session.lastError = userMessage
-    session.activeTurnId = null
-
-    // LIVE buffer only. Quota/rate-limit errors are transient; permanentMessages
-    // is replayed on every resume, so persisting them would show a stale
-    // "Quota exceeded" at the end of the transcript forever, even after the
-    // limit resets. lastError is cleared by the next sendPrompt().
-    session.messageBuffer.push({
-      _isError: true,
-      message: userMessage,
-      data: null  // Don't expose raw error data for known error types
-    })
-    this.onDataAvailable?.(session.sessionId)
   }
 
   private updateSessionStatus(session: AcpSession, notification: JsonRpcNotification): void {
@@ -868,7 +698,7 @@ export class AcpAdapter implements CodingAgentAdapter {
   }
 
   private sendRpcRequest(session: AcpSession, method: string, params?: unknown): Promise<unknown> {
-    return sendJsonRpcRequest(session, method, params, this.label)
+    return sendJsonRpcRequest(session, method, params, LABEL)
   }
 
   private sendRpcResponse(
@@ -879,8 +709,8 @@ export class AcpAdapter implements CodingAgentAdapter {
     const payload = response.error
       ? { jsonrpc: '2.0', id, error: response.error }
       : { jsonrpc: '2.0', id, result: response.result }
-    console.log(`[${this.label}] Sending RPC response:`, JSON.stringify(payload))
-    writeJsonRpc(session, payload, this.label)
+    console.log(`[${LABEL}] Sending RPC response:`, JSON.stringify(payload))
+    writeJsonRpc(session, payload, LABEL)
   }
 
   private handlePermissionRequest(session: AcpSession, request: JsonRpcRequest): void {
@@ -902,7 +732,7 @@ export class AcpAdapter implements CodingAgentAdapter {
       kind: o.kind
     }))
 
-    console.log(`[${this.label}] Permission request for ${toolCall?.kind} ${toolCall?.toolCallId} (options: ${approvalOptions.map((o) => o.optionId).join(', ')})`)
+    console.log(`[${LABEL}] Permission request for ${toolCall?.kind} ${toolCall?.toolCallId} (options: ${approvalOptions.map((o) => o.optionId).join(', ')})`)
 
     if (session.config.permissionMode === 'allow') {
       const offered = (optionId: string): string | undefined =>
@@ -911,9 +741,9 @@ export class AcpAdapter implements CodingAgentAdapter {
         || offered('allow-always')
         || offered('approved')
         || offered('allow-once')
-        || (this.agentType === 'cursor' ? 'allow-once' : 'approved')
+        || 'allow-once'
 
-      console.log(`[${this.label}] Auto-approving permission with: ${autoApprovedOptionId}`)
+      console.log(`[${LABEL}] Auto-approving permission with: ${autoApprovedOptionId}`)
       this.sendRpcResponse(session, request.id, {
         result: {
           outcome: {
@@ -934,7 +764,7 @@ export class AcpAdapter implements CodingAgentAdapter {
       options: approvalOptions
     }
     session.status = SessionStatusType.WAITING_APPROVAL
-    console.log(`[${this.label}] Awaiting user approval...`)
+    console.log(`[${LABEL}] Awaiting user approval...`)
   }
 
   private extractAcpSessionId(result: unknown): string | null {

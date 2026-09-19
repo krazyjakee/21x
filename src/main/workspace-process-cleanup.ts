@@ -38,10 +38,9 @@
 import { execFile } from 'child_process'
 import { existsSync, realpathSync, statfsSync } from 'fs'
 import { readlink } from 'fs/promises'
-import { setTimeout as sleep } from 'timers/promises'
 import { promisify } from 'util'
 import { isAbsolute, normalize, resolve, sep } from 'path'
-import { collectDescendantPids, parseProcessTable, type ProcessRow } from './mcp-process-cleanup'
+import { collectDescendantPids, readProcessTable, terminatePids, type ProcessRow } from './mcp-process-cleanup'
 
 export type { ProcessRow }
 
@@ -329,7 +328,6 @@ const LSOF_CANDIDATES = ['/usr/sbin/lsof', '/usr/bin/lsof', 'lsof'] as const
 const SUBPROCESS_TIMEOUT_MS = 20_000
 
 const EXEC_OPTIONS = { encoding: 'utf-8' as const, maxBuffer: 16 * 1024 * 1024, timeout: SUBPROCESS_TIMEOUT_MS }
-const PS_ARGS = ['-eo', 'pid=,ppid=,command=']
 // `-w` suppresses the warnings lsof prints for directories it cannot read;
 // without it an ordinary permission notice looks like a failure. `-n` and
 // `-P` skip DNS and service lookups.
@@ -394,55 +392,19 @@ function warnNoCwd(err: unknown): CwdRow[] {
  * so it runs async to keep the main thread free during live sessions.
  */
 export async function readProcessSnapshot(): Promise<{ rows: ProcessRow[]; cwdRows: CwdRow[] }> {
-  const rows = parseProcessTable((await execFileAsync('ps', PS_ARGS, EXEC_OPTIONS)).stdout)
+  const rows = await readProcessTable(SUBPROCESS_TIMEOUT_MS)
   let cwdRows = hasProcCwd() ? await readCwdsFromProc(rows.map((row) => row.pid)) : []
   if (cwdRows.length === 0) cwdRows = await readCwdsWithLsof().catch(warnNoCwd)
   return warnIfBlind(rows, cwdRows)
 }
 
-/** How long a process gets to honour SIGTERM before SIGKILL. */
-const DEFAULT_GRACE_MS = 1500
-
 /**
- * The grace used while quitting. Shorter, because quit latency is visible to
- * the user and the BOOT sweep is the backstop: anything that ignores SIGTERM
- * here is collected on the next start, which is the path that has to work
- * anyway for a force-quit.
+ * The grace used while quitting. Shorter than the default, because quit
+ * latency is visible to the user and the BOOT sweep is the backstop: anything
+ * that ignores SIGTERM here is collected on the next start, which is the path
+ * that has to work anyway for a force-quit.
  */
 export const SHUTDOWN_GRACE_MS = 300
-
-/**
- * SIGTERM, a short grace period, then SIGKILL for whatever ignored it.
- * A watcher that traps SIGTERM and keeps its file descriptors is exactly the
- * process this whole module exists to remove.
- *
- * There is a pid-reuse window of roughly a second between reading the table and
- * signalling: a selected process could exit and its number be handed to
- * something else. `kill(pid, 0)` proves a process exists, never that it is the
- * same one. The exposure is identical to the MCP sweep this copies, it is not
- * closable without a pidfd (Linux) or a kqueue handle per process, and a second
- * of window against days of leaked descriptors is the right trade. Written down
- * rather than engineered around.
- */
-async function terminateProcessTree(pids: readonly number[], graceMs = DEFAULT_GRACE_MS): Promise<void> {
-  if (pids.length === 0) return
-  for (const pid of pids) {
-    try {
-      process.kill(pid, 'SIGTERM')
-    } catch {
-      // Already gone between the listing and the signal.
-    }
-  }
-  await sleep(graceMs)
-  for (const pid of pids) {
-    try {
-      process.kill(pid, 0) // throws when the process is gone
-      process.kill(pid, 'SIGKILL')
-    } catch {
-      // Gone, which is the outcome we wanted.
-    }
-  }
-}
 
 /**
  * The workspaces root as the KERNEL spells it.
@@ -515,7 +477,7 @@ export async function sweepLeakedWorkspaceProcesses(input: {
   for (const leak of leaked) {
     console.log(`[WorkspaceProcessCleanup] Killing pid ${leak.pid} in workspace ${leak.workspaceId} — ${leak.reason}: ${leak.command.slice(0, 160)}`)
   }
-  await terminateProcessTree(pids, input.graceMs)
+  await terminatePids(pids, input.graceMs)
   console.log(`[WorkspaceProcessCleanup] Terminated ${pids.length} process(es) across ${leaked.length} leaked workspace root(s)`)
   return leaked
 }
@@ -535,7 +497,7 @@ export async function terminateProcessesInWorkspaces(input: {
   const pids = selectPidsRootedInWorkspaces({ rows, cwdRows, workspacesRoot: resolveWorkspacesRoot(input.workspacesRoot), ownPid, workspaceIds: input.workspaceIds })
   if (pids.length === 0) return []
   console.log(`[WorkspaceProcessCleanup] ${pids.length} process(es) still rooted in ${input.workspaceIds.length} workspace(s) being removed: ${pids.join(', ')}`)
-  await terminateProcessTree(pids)
+  await terminatePids(pids)
   return pids
 }
 

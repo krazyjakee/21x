@@ -1,13 +1,10 @@
-/**
- * Tests for ACP Adapter turn-based message ID detection
- */
-
-import { ChildProcess } from 'child_process'
+import { ChildProcess, spawn } from 'child_process'
+import { EventEmitter } from 'events'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { AcpAdapter } from './acp-adapter'
+import { applyCursorAuthEnv } from './acp-agent-config'
 import { SessionStatusType, MessagePartType, MessagePart } from './coding-agent-adapter'
 
-// Mock child_process
 vi.mock('child_process', () => ({
   execFile: vi.fn(),
   spawn: vi.fn(() => ({
@@ -25,17 +22,6 @@ vi.mock('child_process', () => ({
   }))
 }))
 
-// Mock fs so configureCodexAuthEnv()'s mkdtempSync returns a stable path instead
-// of touching disk (used to assert the isolated CODEX_HOME in API-key mode).
-vi.mock('fs', async (importActual) => {
-  const actual = await importActual<typeof import('fs')>()
-  return {
-    ...actual,
-    mkdtempSync: vi.fn(() => '/tmp/codex-session-test')
-  }
-})
-
-// Type for accessing private members of AcpAdapter in tests
 interface AcpAdapterPrivate {
   sessions: Map<string, AcpSessionForTest>
   convertAcpEventToMessageParts(
@@ -48,24 +34,9 @@ interface AcpAdapterPrivate {
   handlePermissionRequest(session: AcpSessionForTest, request: JsonRpcRequestForTest): void
   sendRpcResponse(session: AcpSessionForTest, id: string | number, result: unknown): void
   updateSessionStatus(session: AcpSessionForTest, notification: unknown): void
-  extractCodexErrorInfo(error: { code: number; message: string; data?: unknown }): {
-    errorType: string
-    userMessage: string
-  } | null
-  handleQuotaError(session: AcpSessionForTest, errorInfo: { errorType: string; userMessage: string }): void
   handleRpcMessage(session: AcpSessionForTest, message: unknown): void
   authenticateSession(session: AcpSessionForTest, initResult: unknown): Promise<void>
   sendRpcRequest(session: AcpSessionForTest, method: string, params?: unknown): Promise<unknown>
-  configureCodexAuthEnv(
-    env: Record<string, string | undefined>,
-    config: { apiKeys?: { openai?: string; cursor?: string }; authMethod?: 'subscription' | 'api_key' }
-  ): boolean
-  configureCursorAuthEnv(
-    env: Record<string, string | undefined>,
-    config: { apiKeys?: { cursor?: string }; authMethod?: 'subscription' | 'api_key' }
-  ): void
-  agentType: string
-  agentConfig: { command: string; args: string[]; env?: Record<string, string> }
 }
 
 interface JsonRpcRequestForTest {
@@ -75,7 +46,6 @@ interface JsonRpcRequestForTest {
   params?: unknown
 }
 
-// Minimal session type for tests (mirrors private AcpSession)
 interface AcpSessionForTest {
   pendingSystemPrompt?: string
   sessionId: string
@@ -102,16 +72,12 @@ interface AcpSessionForTest {
   pendingAssistantTurnSplit: boolean
   toolCallMetadata: Map<string, { name: string; input: string; title?: string }>
   lastError: string | null
-  codexUseApiKey?: boolean
-  codexAuthSummary?: string
 }
 
-/** Cast adapter to access private members for testing */
 function adapterPrivate(adapter: AcpAdapter): AcpAdapterPrivate {
   return adapter as unknown as AcpAdapterPrivate
 }
 
-/** Create a mock session for testing */
 function createMockSession(sessionId: string): AcpSessionForTest {
   return {
     sessionId,
@@ -134,8 +100,7 @@ function createMockSession(sessionId: string): AcpSessionForTest {
     activeTurnId: null,
     pendingAssistantTurnSplit: false,
     toolCallMetadata: new Map(),
-    lastError: null,
-    codexUseApiKey: false
+    lastError: null
   }
 }
 
@@ -143,9 +108,8 @@ describe('AcpAdapter - Turn Detection', () => {
   let adapter: AcpAdapter
 
   beforeEach(() => {
-    adapter = new AcpAdapter('codex')
+    adapter = new AcpAdapter()
 
-    // Fast-forward time for time-based tests
     vi.useFakeTimers()
   })
 
@@ -226,7 +190,7 @@ describe('AcpAdapter - Turn Detection', () => {
     })
 
     it('auto-approves Cursor permissions with allow-always', () => {
-      const cursor = adapterPrivate(new AcpAdapter('cursor'))
+      const cursor = adapterPrivate(new AcpAdapter())
       const session = createMockSession('cursor-session')
       session.config.permissionMode = 'allow'
       const sendRpcResponseSpy = vi.spyOn(cursor, 'sendRpcResponse')
@@ -251,60 +215,18 @@ describe('AcpAdapter - Turn Detection', () => {
     })
   })
 
-  describe('Authentication selection', () => {
-    it('uses chatgpt (Codex CLI login) on the subscription path', async () => {
+  describe('Authentication', () => {
+    it('authenticates with the first advertised method using the Cursor CLI login', async () => {
       const priv = adapterPrivate(adapter)
-      const session = createMockSession('auth-session')
-      session.codexUseApiKey = false // subscription / CLI login decided upstream
-      const sendRpcRequestSpy = vi.spyOn(priv, 'sendRpcRequest').mockResolvedValue({})
-
-      // An ambient API key in the shell must NOT change auth-method selection.
-      process.env.CODEX_API_KEY = 'ambient-key-should-be-ignored'
-
-      await priv.authenticateSession(session, {
-        authMethods: [
-          { id: 'codex-api-key' },
-          { id: 'chatgpt' }
-        ]
-      })
-
-      // On the subscription path, fall back to chatgpt (Codex CLI login)
-      expect(sendRpcRequestSpy).toHaveBeenCalledWith(session, 'authenticate', {
-        methodId: 'chatgpt'
-      })
-
-      delete process.env.CODEX_API_KEY
-    })
-
-    it('prefers key-based Codex auth when the session uses API-key auth', async () => {
-      const priv = adapterPrivate(adapter)
-      const session = createMockSession('auth-session')
-      session.codexUseApiKey = true // API-key auth decided upstream
-      const sendRpcRequestSpy = vi.spyOn(priv, 'sendRpcRequest').mockResolvedValue({})
-
-      await priv.authenticateSession(session, {
-        authMethods: [
-          { id: 'chatgpt' },
-          { id: 'codex-api-key' }
-        ]
-      })
-
-      expect(sendRpcRequestSpy).toHaveBeenCalledWith(session, 'authenticate', {
-        methodId: 'codex-api-key'
-      })
-    })
-
-    it('uses Cursor CLI login without ambient credentials', async () => {
-      const cursor = adapterPrivate(new AcpAdapter('cursor'))
       const env: Record<string, string | undefined> = {
         CURSOR_API_KEY: 'ambient-key',
         CURSOR_AUTH_TOKEN: 'ambient-token'
       }
       const session = createMockSession('cursor-auth')
-      const sendRpcRequestSpy = vi.spyOn(cursor, 'sendRpcRequest').mockResolvedValue({})
+      const sendRpcRequestSpy = vi.spyOn(priv, 'sendRpcRequest').mockResolvedValue({})
 
-      cursor.configureCursorAuthEnv(env, { authMethod: 'subscription' })
-      await cursor.authenticateSession(session, { authMethods: [{ id: 'cursor_login' }] })
+      applyCursorAuthEnv(env, { authMethod: 'subscription' })
+      await priv.authenticateSession(session, { authMethods: [{ id: 'cursor_login' }] })
 
       expect(env.CURSOR_API_KEY).toBeUndefined()
       expect(env.CURSOR_AUTH_TOKEN).toBeUndefined()
@@ -313,24 +235,32 @@ describe('AcpAdapter - Turn Detection', () => {
       })
     })
 
+    it('skips authenticate when no method is advertised', async () => {
+      const priv = adapterPrivate(adapter)
+      const sendRpcRequestSpy = vi.spyOn(priv, 'sendRpcRequest').mockResolvedValue({})
+
+      await priv.authenticateSession(createMockSession('cursor-auth'), { authMethods: [] })
+
+      expect(sendRpcRequestSpy).not.toHaveBeenCalled()
+    })
+
     it('uses the configured Cursor API key and rejects missing key auth', () => {
-      const cursor = adapterPrivate(new AcpAdapter('cursor'))
       const env: Record<string, string | undefined> = { CURSOR_API_KEY: 'ambient-key' }
 
-      cursor.configureCursorAuthEnv(env, {
+      applyCursorAuthEnv(env, {
         authMethod: 'api_key',
         apiKeys: { cursor: 'configured-key' }
       })
       expect(env.CURSOR_API_KEY).toBe('configured-key')
 
-      expect(() => cursor.configureCursorAuthEnv({}, { authMethod: 'api_key' }))
+      expect(() => applyCursorAuthEnv({}, { authMethod: 'api_key' }))
         .toThrow('Cursor API-key authentication requires a configured key or CURSOR_API_KEY')
     })
   })
 
   describe('Cursor extension requests', () => {
     it('returns non-blocking outcomes for unsupported questions and plans', () => {
-      const cursor = adapterPrivate(new AcpAdapter('cursor'))
+      const cursor = adapterPrivate(new AcpAdapter())
       const session = createMockSession('cursor-extensions')
       const sendRpcResponseSpy = vi.spyOn(cursor, 'sendRpcResponse')
 
@@ -361,12 +291,10 @@ describe('AcpAdapter - Turn Detection', () => {
       const sessionId = 'test-session'
       const priv = adapterPrivate(adapter)
 
-      // Get access to the private session
       const session = priv.sessions.get(sessionId) || createMockSession(sessionId)
 
       priv.sessions.set(sessionId, session)
 
-      // Simulate first chunk
       const chunk1 = {
         method: 'session/update',
         params: {
@@ -378,7 +306,6 @@ describe('AcpAdapter - Turn Detection', () => {
         }
       }
 
-      // Process first chunk
       const parts1 = priv.convertAcpEventToMessageParts(
         chunk1,
         new Set(),
@@ -390,10 +317,8 @@ describe('AcpAdapter - Turn Detection', () => {
       expect(session.currentTurnId).toBe(1) // First turn
       expect(parts1[0].id).toBe('agent-response-1')
 
-      // Advance time by 1 second (within threshold)
       vi.advanceTimersByTime(1000)
 
-      // Simulate second chunk
       const chunk2 = {
         method: 'session/update',
         params: {
@@ -425,7 +350,6 @@ describe('AcpAdapter - Turn Detection', () => {
 
       priv.sessions.set(sessionId, session)
 
-      // First chunk
       const chunk1 = {
         method: 'session/update',
         params: {
@@ -448,10 +372,8 @@ describe('AcpAdapter - Turn Detection', () => {
       expect(session.currentTurnId).toBe(1)
       expect(parts1[0].id).toBe('agent-response-1')
 
-      // Advance time by 3 seconds (beyond threshold)
       vi.advanceTimersByTime(3000)
 
-      // Second chunk (new turn)
       const chunk2 = {
         method: 'session/update',
         params: {
@@ -597,7 +519,6 @@ describe('AcpAdapter - Turn Detection', () => {
 
       priv.sessions.set(sessionId, session)
 
-      // First message chunk
       const chunk1 = {
         method: 'session/update',
         params: {
@@ -619,7 +540,6 @@ describe('AcpAdapter - Turn Detection', () => {
 
       expect(session.currentTurnId).toBe(1)
 
-      // Tool call inside the same prompt turn
       vi.advanceTimersByTime(500)
 
       const toolCall = {
@@ -679,7 +599,6 @@ describe('AcpAdapter - Turn Detection', () => {
 
       priv.sessions.set(sessionId, session)
 
-      // Initial tool_call with kind and rawInput (in_progress)
       const toolCallStart = {
         method: 'session/update',
         params: {
@@ -703,7 +622,6 @@ describe('AcpAdapter - Turn Detection', () => {
         session
       )
 
-      // Metadata should be cached
       expect(session.toolCallMetadata.has('tool-1')).toBe(true)
       expect(session.toolCallMetadata.get('tool-1')?.name).toBe('shell')
       expect(session.toolCallMetadata.get('tool-1')?.input).toBe('ls -la')
@@ -731,7 +649,6 @@ describe('AcpAdapter - Turn Detection', () => {
         session
       )
 
-      // Should use cached metadata for name and input
       expect(parts.length).toBe(1)
       expect(parts[0].type).toBe(MessagePartType.TOOL)
       expect(parts[0].tool?.name).toBe('shell')
@@ -739,7 +656,6 @@ describe('AcpAdapter - Turn Detection', () => {
       expect(parts[0].tool?.input).toBe('ls -la')
       expect(parts[0].tool?.output).toBe('file.txt\ndir/')
 
-      // Cached metadata should be cleaned up
       expect(session.toolCallMetadata.has('tool-1')).toBe(false)
     })
 
@@ -937,7 +853,6 @@ describe('AcpAdapter - Turn Detection', () => {
       const seenPartIds = new Set<string>()
       const partContentLengths = new Map<string, string>()
 
-      // First chunk
       const chunk1 = {
         method: 'session/update',
         params: {
@@ -960,7 +875,6 @@ describe('AcpAdapter - Turn Detection', () => {
       expect(parts1[0].text).toBe('Hello')
       expect(parts1[0].id).toBe('agent-response-1')
 
-      // Second chunk (within 2s)
       vi.advanceTimersByTime(500)
 
       const chunk2 = {
@@ -998,7 +912,6 @@ describe('AcpAdapter - Turn Detection', () => {
       const seenPartIds = new Set<string>()
       const partContentLengths = new Map<string, string>()
 
-      // First message
       const chunk1 = {
         method: 'session/update',
         params: {
@@ -1021,10 +934,8 @@ describe('AcpAdapter - Turn Detection', () => {
       expect(parts1[0].text).toBe('First')
       expect(parts1[0].id).toBe('agent-response-1')
 
-      // Time gap to trigger new turn
       vi.advanceTimersByTime(3000)
 
-      // Second message (new turn)
       const chunk2 = {
         method: 'session/update',
         params: {
@@ -1059,7 +970,6 @@ describe('AcpAdapter - Turn Detection', () => {
 
       priv.sessions.set(sessionId, session)
 
-      // Message chunk (establishes turn 1)
       const messageChunk = {
         method: 'session/update',
         params: {
@@ -1081,7 +991,6 @@ describe('AcpAdapter - Turn Detection', () => {
 
       expect(session.currentTurnId).toBe(1)
 
-      // Thinking chunk (within 2s)
       vi.advanceTimersByTime(500)
 
       const thinkingChunk = {
@@ -1123,7 +1032,6 @@ describe('AcpAdapter - Turn Detection', () => {
       // Simulate replayed messages arriving in quick succession
       // (as they would during session resume)
 
-      // First historical message chunks
       const replay1a = {
         method: 'session/update',
         params: {
@@ -1146,7 +1054,6 @@ describe('AcpAdapter - Turn Detection', () => {
         }
       }
 
-      // Process first message chunks (immediate succession)
       priv.convertAcpEventToMessageParts(replay1a, new Set(), seenPartIds, partContentLengths, session)
       vi.advanceTimersByTime(100) // Small delay
       const parts1 = priv.convertAcpEventToMessageParts(replay1b, new Set(), seenPartIds, partContentLengths, session)
@@ -1158,7 +1065,6 @@ describe('AcpAdapter - Turn Detection', () => {
       // Simulate gap before next historical message (tool call or time)
       vi.advanceTimersByTime(3000)
 
-      // Second historical message
       const replay2 = {
         method: 'session/update',
         params: {
@@ -1334,9 +1240,7 @@ describe('AcpAdapter - Turn Detection', () => {
       priv.updateSessionStatus(session, toolCall as never)
       expect(session.activeTurnId).toBe(1) // Preserved — turn state managed only during polling
 
-      // Process the tool call through the polling path
       priv.convertAcpEventToMessageParts(toolCall, new Set(), seenPartIds, partContentLengths, session)
-      // Now pendingAssistantTurnSplit is set by convertAcpEventToMessageParts
 
       const assistantAfterTool = {
         method: 'session/update',
@@ -1515,7 +1419,7 @@ describe('AcpAdapter - Turn Detection', () => {
       priv.sessions.set(sessionId, session)
 
       const messages = await adapter.getAllMessages(sessionId, {
-        agentId: 'codex',
+        agentId: 'cursor',
         taskId: 'task-1',
         workspaceDir: '/tmp'
       })
@@ -1667,7 +1571,6 @@ describe('AcpAdapter - Turn Detection', () => {
     it('should not increment turn ID when session is undefined', async () => {
       const priv = adapterPrivate(adapter)
 
-      // Process message without session context
       const chunk = {
         method: 'session/update',
         params: {
@@ -1687,19 +1590,16 @@ describe('AcpAdapter - Turn Detection', () => {
         undefined // No session
       )
 
-      // Should still work but use fallback ID
       expect(parts[0].id).toBe('agent-response') // Default when turnId is 0
     })
   })
 })
 
-// ── Fix Tests: Message Duplication, User Messages, Function Calls ────
-
 describe('AcpAdapter - sendPrompt buffer clearing', () => {
   let adapter: AcpAdapter
 
   beforeEach(() => {
-    adapter = new AcpAdapter('codex')
+    adapter = new AcpAdapter()
   })
 
   it('should clear messageBuffer on sendPrompt to prevent stale event duplication', async () => {
@@ -1710,7 +1610,6 @@ describe('AcpAdapter - sendPrompt buffer clearing', () => {
     } as unknown as ChildProcess
     priv.sessions.set('sess-buffer', session)
 
-    // Simulate stale events from the previous turn
     session.messageBuffer.push({
       jsonrpc: '2.0',
       method: 'session/update',
@@ -1722,10 +1621,8 @@ describe('AcpAdapter - sendPrompt buffer clearing', () => {
       }
     })
 
-    // Send a new prompt — should clear stale buffer
     await adapter.sendPrompt('sess-buffer', [{ type: MessagePartType.TEXT, text: 'New prompt' }], {} as never)
 
-    // The buffer should be empty (stale events cleared)
     expect(session.messageBuffer).toEqual([])
   })
 
@@ -1739,14 +1636,12 @@ describe('AcpAdapter - sendPrompt buffer clearing', () => {
 
     await adapter.sendPrompt('sess-usermsg', [{ type: MessagePartType.TEXT, text: 'Hello agent' }], {} as never)
 
-    // permanentMessages should contain the synthetic user_message event
     const userEvent = session.permanentMessages.find((e: unknown) => {
       const params = (e as { params?: { update?: { sessionUpdate?: string } } }).params
       return params?.update?.sessionUpdate === 'user_message'
     })
     expect(userEvent).toBeDefined()
 
-    // The event should contain the prompt text
     const params = (userEvent as { params: { update: { content: { text: string } } } }).params
     expect(params.update.content.text).toBe('Hello agent')
   })
@@ -1759,10 +1654,8 @@ describe('AcpAdapter - sendPrompt buffer clearing', () => {
     } as unknown as ChildProcess
     priv.sessions.set('sess-replay', session)
 
-    // Send a prompt (stores synthetic user_message in permanentMessages)
     await adapter.sendPrompt('sess-replay', [{ type: MessagePartType.TEXT, text: 'Work on task' }], {} as never)
 
-    // Add an agent response to permanentMessages
     session.permanentMessages.push({
       jsonrpc: '2.0',
       method: 'session/update',
@@ -1774,7 +1667,6 @@ describe('AcpAdapter - sendPrompt buffer clearing', () => {
       }
     })
 
-    // getAllMessages should include both user and agent messages
     const messages = await adapter.getAllMessages('sess-replay', {} as never)
     const userParts = messages.flatMap(m => m.parts).filter(p => p.text?.includes('Work on task'))
     const agentParts = messages.flatMap(m => m.parts).filter(p => p.text?.includes('I will work on it'))
@@ -1788,7 +1680,7 @@ describe('AcpAdapter - In-progress tool call visibility', () => {
   let adapter: AcpAdapter
 
   beforeEach(() => {
-    adapter = new AcpAdapter('codex')
+    adapter = new AcpAdapter()
     vi.useFakeTimers()
   })
 
@@ -1823,7 +1715,6 @@ describe('AcpAdapter - In-progress tool call visibility', () => {
       session
     )
 
-    // Should emit a tool part with running status
     expect(parts.length).toBe(1)
     expect(parts[0].type).toBe(MessagePartType.TOOL)
     expect(parts[0].tool?.status).toBe('running')
@@ -1837,7 +1728,6 @@ describe('AcpAdapter - In-progress tool call visibility', () => {
     const session = createMockSession('sess-tool2')
     const seenPartIds = new Set<string>()
 
-    // First: in_progress event
     const inProgressEvent = {
       method: 'session/update',
       params: {
@@ -1852,10 +1742,8 @@ describe('AcpAdapter - In-progress tool call visibility', () => {
     }
     priv.convertAcpEventToMessageParts(inProgressEvent, new Set(), seenPartIds, new Map(), session)
 
-    // seenPartIds should have the tool
     expect(seenPartIds.has('tool-xyz')).toBe(true)
 
-    // Then: completed event
     const completedEvent = {
       method: 'session/update',
       params: {
@@ -1876,7 +1764,6 @@ describe('AcpAdapter - In-progress tool call visibility', () => {
       session
     )
 
-    // Should emit completed tool part with update flag
     expect(completedParts.length).toBe(1)
     expect(completedParts[0].type).toBe(MessagePartType.TOOL)
     expect(completedParts[0].tool?.status).toBe('completed')
@@ -1889,7 +1776,6 @@ describe('AcpAdapter - In-progress tool call visibility', () => {
     const session = createMockSession('sess-tool3')
     const seenPartIds = new Set<string>()
 
-    // Only completed event (no prior in_progress)
     const completedEvent = {
       method: 'session/update',
       params: {
@@ -1919,13 +1805,11 @@ describe('AcpAdapter - In-progress tool call visibility', () => {
   })
 })
 
-// ─── Bug fix tests: codex messages garbage (duplication, user messages, tool calls) ───
-
 describe('AcpAdapter - sendPrompt clears stale messageBuffer', () => {
   let adapter: AcpAdapter
 
   beforeEach(() => {
-    adapter = new AcpAdapter('codex')
+    adapter = new AcpAdapter()
   })
 
   it('should clear messageBuffer on sendPrompt to prevent duplication on next poll', async () => {
@@ -1942,7 +1826,6 @@ describe('AcpAdapter - sendPrompt clears stale messageBuffer', () => {
 
     priv.sessions.set('sess-dedup', session)
 
-    // sendPrompt should clear the stale messageBuffer
     await adapter.sendPrompt('sess-dedup', [{ type: MessagePartType.TEXT, text: 'new prompt' }], {} as never)
 
     expect(session.messageBuffer).toEqual([])
@@ -1960,7 +1843,6 @@ describe('AcpAdapter - sendPrompt clears stale messageBuffer', () => {
 
     await adapter.sendPrompt('sess-user', [{ type: MessagePartType.TEXT, text: 'Hello agent' }], {} as never)
 
-    // permanentMessages should contain a synthetic user_message
     const userEvents = session.permanentMessages.filter((e) => {
       const params = (e as { params?: { update?: { sessionUpdate?: string } } }).params
       return params?.update?.sessionUpdate === 'user_message'
@@ -1976,7 +1858,6 @@ describe('AcpAdapter - sendPrompt clears stale messageBuffer', () => {
     const priv = adapterPrivate(adapter)
     const session = createMockSession('sess-idle')
 
-    // Simulate stale events left in messageBuffer after idle
     session.messageBuffer = [
       { method: 'session/update', params: { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'old text' } } } }
     ]
@@ -1986,10 +1867,8 @@ describe('AcpAdapter - sendPrompt clears stale messageBuffer', () => {
 
     priv.sessions.set('sess-idle', session)
 
-    // sendPrompt clears the buffer before the new prompt starts
     await adapter.sendPrompt('sess-idle', [{ type: MessagePartType.TEXT, text: 'fresh prompt' }], {} as never)
 
-    // Now poll — should get NO messages (buffer was cleared)
     const parts = await adapter.pollMessages('sess-idle', new Set(), new Set(), new Map(), {} as never)
     expect(parts).toEqual([])
   })
@@ -1997,7 +1876,7 @@ describe('AcpAdapter - sendPrompt clears stale messageBuffer', () => {
 
 describe('AcpAdapter - system prompt delivery', () => {
   it('sends the system prompt with the first prompt only and keeps it out of the transcript', async () => {
-    const adapter = new AcpAdapter('cursor')
+    const adapter = new AcpAdapter()
     const priv = adapterPrivate(adapter)
     const session = createMockSession('sess-sys')
     session.permanentMessages = []
@@ -2026,7 +1905,7 @@ describe('AcpAdapter - In-progress tool parts', () => {
   let adapter: AcpAdapter
 
   beforeEach(() => {
-    adapter = new AcpAdapter('codex')
+    adapter = new AcpAdapter()
     vi.useFakeTimers()
   })
 
@@ -2061,7 +1940,6 @@ describe('AcpAdapter - In-progress tool parts', () => {
       session
     )
 
-    // Should emit a running tool part
     expect(parts.length).toBe(1)
     expect(parts[0].id).toBe('tool-ip-1')
     expect(parts[0].type).toBe(MessagePartType.TOOL)
@@ -2074,7 +1952,6 @@ describe('AcpAdapter - In-progress tool parts', () => {
     const session = createMockSession('sess-tool-update')
     const seenPartIds = new Set<string>()
 
-    // First: in-progress event
     const inProgressEvent = {
       method: 'session/update',
       params: {
@@ -2098,7 +1975,6 @@ describe('AcpAdapter - In-progress tool parts', () => {
 
     expect(seenPartIds.has('tool-up-1')).toBe(true)
 
-    // Second: completed event
     const completedEvent = {
       method: 'session/update',
       params: {
@@ -2146,7 +2022,6 @@ describe('AcpAdapter - In-progress tool parts', () => {
       }
     }
 
-    // First call
     const parts1 = priv.convertAcpEventToMessageParts(
       toolCallEvent,
       new Set(),
@@ -2156,7 +2031,6 @@ describe('AcpAdapter - In-progress tool parts', () => {
     )
     expect(parts1.length).toBe(1)
 
-    // Second call with same toolCallId
     const parts2 = priv.convertAcpEventToMessageParts(
       toolCallEvent,
       new Set(),
@@ -2164,7 +2038,6 @@ describe('AcpAdapter - In-progress tool parts', () => {
       new Map(),
       session
     )
-    // Should NOT emit another in-progress part
     expect(parts2.length).toBe(0)
   })
 })
@@ -2173,7 +2046,7 @@ describe('AcpAdapter - User message handling', () => {
   let adapter: AcpAdapter
 
   beforeEach(() => {
-    adapter = new AcpAdapter('codex')
+    adapter = new AcpAdapter()
     vi.useFakeTimers()
   })
 
@@ -2259,7 +2132,6 @@ describe('AcpAdapter - User message handling', () => {
     const priv = adapterPrivate(adapter)
     const session = createMockSession('sess-resume-user')
 
-    // Simulate what sendPrompt does: add synthetic user_message
     session.permanentMessages.push({
       jsonrpc: '2.0',
       method: 'session/update',
@@ -2272,7 +2144,6 @@ describe('AcpAdapter - User message handling', () => {
       }
     })
 
-    // Also add an agent response
     session.permanentMessages.push({
       jsonrpc: '2.0',
       method: 'session/update',
@@ -2288,7 +2159,6 @@ describe('AcpAdapter - User message handling', () => {
 
     const messages = await adapter.getAllMessages('sess-resume-user', {} as never)
 
-    // Should have both user and assistant messages
     const userMessages = messages.filter(m => m.role === 'user')
     const assistantMessages = messages.filter(m => m.role === 'assistant')
 
@@ -2299,13 +2169,11 @@ describe('AcpAdapter - User message handling', () => {
   })
 })
 
-// ─── Regression tests: available_commands_update / plan must NOT cause turn splits ───
-
 describe('AcpAdapter - Non-content events must not fragment assistant messages', () => {
   let adapter: AcpAdapter
 
   beforeEach(() => {
-    adapter = new AcpAdapter('codex')
+    adapter = new AcpAdapter()
     vi.useFakeTimers()
   })
 
@@ -2325,7 +2193,6 @@ describe('AcpAdapter - Non-content events must not fragment assistant messages',
     const seenPartIds = new Set<string>()
     const partContentLengths = new Map<string, string>()
 
-    // First assistant chunk
     const chunk1 = {
       method: 'session/update',
       params: { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Hello ' } } }
@@ -2333,14 +2200,12 @@ describe('AcpAdapter - Non-content events must not fragment assistant messages',
     priv.convertAcpEventToMessageParts(chunk1, new Set(), seenPartIds, partContentLengths, session)
     expect(session.currentTurnId).toBe(1)
 
-    // available_commands_update arrives (non-content event)
     const cmdUpdate = {
       method: 'session/update',
       params: { update: { sessionUpdate: 'available_commands_update' } }
     }
     priv.convertAcpEventToMessageParts(cmdUpdate, new Set(), seenPartIds, partContentLengths, session)
 
-    // Second assistant chunk — should continue same turn
     const chunk2 = {
       method: 'session/update',
       params: { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'world' } } }
@@ -2363,21 +2228,18 @@ describe('AcpAdapter - Non-content events must not fragment assistant messages',
     const seenPartIds = new Set<string>()
     const partContentLengths = new Map<string, string>()
 
-    // First chunk
     const chunk1 = {
       method: 'session/update',
       params: { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Step 1: ' } } }
     }
     priv.convertAcpEventToMessageParts(chunk1, new Set(), seenPartIds, partContentLengths, session)
 
-    // plan event
     const planEvent = {
       method: 'session/update',
       params: { update: { sessionUpdate: 'plan', entries: [{ content: 'step 1', priority: 'high', status: 'pending' }] } }
     }
     priv.convertAcpEventToMessageParts(planEvent, new Set(), seenPartIds, partContentLengths, session)
 
-    // Second chunk — should continue same turn
     const chunk2 = {
       method: 'session/update',
       params: { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'read file' } } }
@@ -2404,27 +2266,18 @@ describe('AcpAdapter - Non-content events must not fragment assistant messages',
 
     priv.updateSessionStatus(session, toolNotification as never)
 
-    // Status should be updated
     expect(session.status).toBe('busy')
-    // Turn state should NOT be modified by updateSessionStatus
     expect(session.activeTurnId).toBe(1)
     expect(session.pendingAssistantTurnSplit).toBe(false)
   })
 })
 
-describe('AcpAdapter process spawning for packaged Electron apps', () => {
-  it('cursor should run the installed CLI in ACP mode', () => {
-    const config = adapterPrivate(new AcpAdapter('cursor')).agentConfig
-
-    expect(config.command).toBe('cursor-agent')
-    expect(config.args).toEqual(['acp'])
-  })
-
+describe('AcpAdapter - session creation', () => {
   it.each([
     ['composer-2.5', 'composer-2.5[fast=true]'],
     ['grok-4.5', 'grok-4.5[effort=high,fast=true]']
   ])('maps %s to Cursor ACP model configuration', async (model, value) => {
-    const adapter = new AcpAdapter('cursor')
+    const adapter = new AcpAdapter()
     const priv = adapterPrivate(adapter)
     const sendRpcRequestSpy = vi.spyOn(priv, 'sendRpcRequest')
       .mockResolvedValueOnce({ authMethods: [] })
@@ -2439,6 +2292,7 @@ describe('AcpAdapter process spawning for packaged Electron apps', () => {
       authMethod: 'subscription'
     })
 
+    expect(spawn).toHaveBeenCalledWith('cursor-agent', ['acp'], expect.objectContaining({ cwd: '/tmp/workspace' }))
     expect(sendRpcRequestSpy).toHaveBeenNthCalledWith(3, expect.anything(), 'session/set_config_option', {
       sessionId: 'cursor-session',
       configId: 'model',
@@ -2446,241 +2300,19 @@ describe('AcpAdapter process spawning for packaged Electron apps', () => {
     })
   })
 
-  it('codex should spawn via node with the JS entrypoint (new package)', () => {
-    const adapter = new AcpAdapter('codex')
-    const config = (adapter as any).agentConfig
-
-    // New @agentclientprotocol/codex-acp is a Node script, spawned via process.execPath
-    expect(config.command).toBe(process.execPath)
-    expect(config.args[0]).toContain('codex-acp')
-    expect(config.args[0]).toContain('dist/index.js')
-    expect(config.env).not.toHaveProperty('ELECTRON_RUN_AS_NODE')
-  })
 })
 
-describe('AcpAdapter - Codex Quota/Error Handling', () => {
+describe('AcpAdapter - Error handling', () => {
   let adapter: AcpAdapter
 
   beforeEach(() => {
-    adapter = new AcpAdapter('codex')
+    adapter = new AcpAdapter()
   })
 
-  describe('extractCodexErrorInfo', () => {
-    it('should return null for generic errors without codex_error_info', () => {
-      const result = adapterPrivate(adapter).extractCodexErrorInfo({
-        code: -32603,
-        message: 'Internal error'
-      })
-      expect(result).toBeNull()
-    })
-
-    it('should return null for errors with no data', () => {
-      const result = adapterPrivate(adapter).extractCodexErrorInfo({
-        code: -32603,
-        message: 'Internal error',
-        data: undefined
-      })
-      expect(result).toBeNull()
-    })
-
-    it('should extract usage_limit_exceeded error', () => {
-      const result = adapterPrivate(adapter).extractCodexErrorInfo({
-        code: -32603,
-        message: 'Internal error',
-        data: {
-          message: 'Quota exceeded. Check your plan and billing details.',
-          codex_error_info: 'usage_limit_exceeded'
-        }
-      })
-      expect(result).not.toBeNull()
-      expect(result!.errorType).toBe('usage_limit_exceeded')
-      expect(result!.userMessage).toContain('Quota exceeded')
-      expect(result!.userMessage).toContain('plan and billing')
-    })
-
-    it('should extract rate_limit_exceeded error', () => {
-      const result = adapterPrivate(adapter).extractCodexErrorInfo({
-        code: -32603,
-        message: 'Internal error',
-        data: {
-          message: 'Too many requests',
-          codex_error_info: 'rate_limit_exceeded'
-        }
-      })
-      expect(result).not.toBeNull()
-      expect(result!.errorType).toBe('rate_limit_exceeded')
-      expect(result!.userMessage).toContain('Rate limit')
-      expect(result!.userMessage).toContain('wait')
-    })
-
-    it('should handle unknown codex error types gracefully', () => {
-      const result = adapterPrivate(adapter).extractCodexErrorInfo({
-        code: -32603,
-        message: 'Internal error',
-        data: {
-          message: 'Something went wrong',
-          codex_error_info: 'some_new_error_type'
-        }
-      })
-      expect(result).not.toBeNull()
-      expect(result!.errorType).toBe('some_new_error_type')
-      expect(result!.userMessage).toContain('some_new_error_type')
-    })
-
-    it('should fall back to error.message when data.message is not a string', () => {
-      const result = adapterPrivate(adapter).extractCodexErrorInfo({
-        code: -32603,
-        message: 'Internal error',
-        data: {
-          codex_error_info: 'usage_limit_exceeded'
-        }
-      })
-      expect(result).not.toBeNull()
-      expect(result!.userMessage).toContain('Internal error')
-    })
-  })
-
-  describe('handleQuotaError', () => {
-    it('should set session to ERROR status with lastError', () => {
-      const session = createMockSession('test-session')
-      session.activeTurnId = 1
-
-      adapterPrivate(adapter).handleQuotaError(session, {
-        errorType: 'usage_limit_exceeded',
-        userMessage: 'Quota exceeded: Check your plan.'
-      })
-
-      expect(session.status).toBe(SessionStatusType.ERROR)
-      expect(session.lastError).toBe('Quota exceeded: Check your plan.')
-      expect(session.activeTurnId).toBeNull()
-    })
-
-    it('should push error event to the live buffer but NOT persist it', () => {
+  describe('handleRpcMessage error responses', () => {
+    it('buffers an error response that answers no pending request', () => {
       const session = createMockSession('test-session')
 
-      adapterPrivate(adapter).handleQuotaError(session, {
-        errorType: 'usage_limit_exceeded',
-        userMessage: 'Quota exceeded: Check your plan.'
-      })
-
-      // Live buffer gets the error so the user sees it during the session...
-      expect(session.messageBuffer).toHaveLength(1)
-      // ...but it must NOT enter permanentMessages, otherwise it would be
-      // replayed on every resume and keep "showing limits" after the user
-      // upgrades / re-logs in / waits for the window to reset.
-      expect(session.permanentMessages).toHaveLength(0)
-
-      const errorEvent = session.messageBuffer[0] as Record<string, unknown>
-      expect(errorEvent._isError).toBe(true)
-      expect(errorEvent.message).toBe('Quota exceeded: Check your plan.')
-      expect(errorEvent.data).toBeNull()
-    })
-
-    it('stale quota error does not survive a resume replay (getAllMessages)', async () => {
-      const session = createMockSession('test-session')
-      adapterPrivate(adapter).sessions.set('test-session', session)
-
-      // Simulate the session hitting a usage limit.
-      adapterPrivate(adapter).handleQuotaError(session, {
-        errorType: 'usage_limit_exceeded',
-        userMessage: 'Quota exceeded: Check your plan.'
-      })
-
-      // On resume, only permanentMessages are replayed. The transient quota
-      // error must be gone so the upgraded/re-logged-in user starts clean.
-      const messages = await adapter.getAllMessages('test-session', {} as never)
-      const replayedText = messages
-        .flatMap((m) => m.parts)
-        .map((p) => p.text || p.content || '')
-        .join('\n')
-      expect(replayedText).not.toContain('Quota exceeded')
-    })
-
-    it('should trigger onDataAvailable callback', () => {
-      const session = createMockSession('test-session')
-      const onDataAvailable = vi.fn()
-      ;(adapter as any).onDataAvailable = onDataAvailable
-
-      adapterPrivate(adapter).handleQuotaError(session, {
-        errorType: 'usage_limit_exceeded',
-        userMessage: 'Quota exceeded'
-      })
-
-      expect(onDataAvailable).toHaveBeenCalledWith('test-session')
-    })
-  })
-
-  describe('handleRpcMessage with quota error', () => {
-    it('should handle quota error for pending request', () => {
-      const session = createMockSession('test-session')
-      const rejectFn = vi.fn()
-      session.pendingRequests.set(5, {
-        resolve: vi.fn(),
-        reject: rejectFn
-      })
-
-      // Register session in adapter
-      adapterPrivate(adapter).sessions.set('test-session', session)
-
-      const quotaErrorMessage = {
-        jsonrpc: '2.0',
-        id: 5,
-        error: {
-          code: -32603,
-          message: 'Internal error',
-          data: {
-            message: 'Quota exceeded. Check your plan and billing details.',
-            codex_error_info: 'usage_limit_exceeded'
-          }
-        }
-      }
-
-      adapterPrivate(adapter).handleRpcMessage(session, quotaErrorMessage)
-
-      // Should set session to error state
-      expect(session.status).toBe(SessionStatusType.ERROR)
-      expect(session.lastError).toContain('Quota exceeded')
-
-      // Should still reject the pending promise
-      expect(rejectFn).toHaveBeenCalled()
-
-      // Should have error event in buffers
-      expect(session.messageBuffer).toHaveLength(1)
-      const errorEvent = session.messageBuffer[0] as Record<string, unknown>
-      expect(errorEvent._isError).toBe(true)
-    })
-
-    it('should handle quota error for non-pending request', () => {
-      const session = createMockSession('test-session')
-
-      // Register session in adapter
-      adapterPrivate(adapter).sessions.set('test-session', session)
-
-      const quotaErrorMessage = {
-        jsonrpc: '2.0',
-        id: 99,
-        error: {
-          code: -32603,
-          message: 'Internal error',
-          data: {
-            message: 'Quota exceeded. Check your plan and billing details.',
-            codex_error_info: 'usage_limit_exceeded'
-          }
-        }
-      }
-
-      adapterPrivate(adapter).handleRpcMessage(session, quotaErrorMessage)
-
-      // Should set session to error state
-      expect(session.status).toBe(SessionStatusType.ERROR)
-      expect(session.lastError).toContain('Quota exceeded')
-      expect(session.messageBuffer).toHaveLength(1)
-    })
-
-    it('should handle generic errors normally (no codex_error_info)', () => {
-      const session = createMockSession('test-session')
-
-      // Register session in adapter
       adapterPrivate(adapter).sessions.set('test-session', session)
 
       const genericErrorMessage = {
@@ -2694,9 +2326,7 @@ describe('AcpAdapter - Codex Quota/Error Handling', () => {
 
       adapterPrivate(adapter).handleRpcMessage(session, genericErrorMessage)
 
-      // Should NOT set lastError (generic errors don't)
       expect(session.lastError).toBeNull()
-      // Should still push error event to buffer
       expect(session.messageBuffer).toHaveLength(1)
       const errorEvent = session.messageBuffer[0] as Record<string, unknown>
       expect(errorEvent._isError).toBe(true)
@@ -2741,15 +2371,14 @@ describe('AcpAdapter - Codex Quota/Error Handling', () => {
   })
 
   describe('error rendering in convertAcpEventToMessageParts', () => {
-    it('should render quota error event with clean message (no raw data)', () => {
+    it('renders an error event with a clean message (no raw data)', () => {
       const session = createMockSession('test-session')
       const seenPartIds = new Set<string>()
       const partContentLengths = new Map<string, string>()
 
-      // This is how handleQuotaError creates the error event
       const errorEvent = {
         _isError: true,
-        message: 'Quota exceeded: Quota exceeded. Check your plan and billing details. Please check your Codex plan and billing details to continue.',
+        message: 'Quota exceeded: Check your plan.',
         data: null
       }
 
@@ -2763,10 +2392,7 @@ describe('AcpAdapter - Codex Quota/Error Handling', () => {
 
       expect(parts).toHaveLength(1)
       expect(parts[0].type).toBe(MessagePartType.TEXT)
-      expect(parts[0].text).toContain('Quota exceeded')
-      // Should NOT contain raw data stringified
-      expect(parts[0].text).not.toContain('[object Object]')
-      expect(parts[0].text).not.toContain('codex_error_info')
+      expect(parts[0].text).toBe('Error: Quota exceeded: Check your plan.')
     })
   })
 
@@ -2790,7 +2416,7 @@ describe('AcpAdapter - Codex Quota/Error Handling', () => {
       process.env.LOG_LEVEL = 'debug'
 
       try {
-        const verboseAdapter = new AcpAdapter('codex')
+        const verboseAdapter = new AcpAdapter()
         const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
         const session = createMockSession('test-session')
 
@@ -2836,23 +2462,17 @@ describe('AcpAdapter - Codex Quota/Error Handling', () => {
 
   describe('getAllMessages turn state isolation', () => {
     /**
-     * Regression test for codex message duplication.
-     *
      * When getAllMessages() is called from replayMissedTranscriptPartsBeforeIdle
      * after a follow-up response, the session's turn counters have already
      * advanced. If getAllMessages() processes permanent messages with that
      * advanced state, historical events get different turn-based IDs
      * (e.g. agent-response-5 instead of agent-response-1), bypassing
      * seenPartIds dedup and causing every old message to reappear.
-     *
-     * The fix: getAllMessages() snapshots and resets turn state before
-     * processing, then restores it afterward.
      */
     it('getAllMessages produces stable IDs regardless of current session turn state', async () => {
       const session = createMockSession('test-session')
       adapterPrivate(adapter).sessions.set('test-session', session)
 
-      // Simulate permanent messages from a session with one assistant response
       const historyEvents = [
         {
           method: 'session/update',
@@ -2917,7 +2537,6 @@ describe('AcpAdapter - Codex Quota/Error Handling', () => {
       const secondResult = await adapter.getAllMessages('test-session', {} as any)
       const secondPartIds = secondResult.flatMap(m => m.parts.map(p => p.id))
 
-      // Part IDs should be identical regardless of session turn state
       expect(secondPartIds).toEqual(firstPartIds)
     })
 
@@ -2935,7 +2554,6 @@ describe('AcpAdapter - Codex Quota/Error Handling', () => {
         }
       })
 
-      // Set specific turn state
       session.currentTurnId = 7
       session.activeTurnId = 7
       session.currentUserTurnId = 3
@@ -2944,7 +2562,6 @@ describe('AcpAdapter - Codex Quota/Error Handling', () => {
 
       await adapter.getAllMessages('test-session', {} as any)
 
-      // Turn state should be restored to pre-call values
       expect(session.currentTurnId).toBe(7)
       expect(session.activeTurnId).toBe(7)
       expect(session.currentUserTurnId).toBe(3)
@@ -2968,7 +2585,6 @@ describe('AcpAdapter - Codex Quota/Error Handling', () => {
       const seenPartIds = new Set<string>()
       const partContentLengths = new Map<string, string>()
 
-      // 1) Streaming chunks arrive first
       const chunk1 = {
         method: 'session/update',
         params: {
@@ -3000,7 +2616,6 @@ describe('AcpAdapter - Codex Quota/Error Handling', () => {
       expect(parts2[0].text).toBe('Hello world!')
       expect(parts2[0].id).toBe('agent-response-1')
 
-      // 2) Final agent_message arrives WITHOUT a messageId
       session.lastSessionUpdateType = 'agent_message_chunk'
       const finalMessage = {
         method: 'session/update',
@@ -3016,7 +2631,6 @@ describe('AcpAdapter - Codex Quota/Error Handling', () => {
 
       const finalParts = priv.convertAcpEventToMessageParts(finalMessage, new Set(), seenPartIds, partContentLengths, session)
 
-      // Should NOT create a new part — the streaming chunks already covered it
       expect(finalParts).toHaveLength(0)
     })
 
@@ -3193,7 +2807,6 @@ describe('AcpAdapter - Codex Quota/Error Handling', () => {
       const seenPartIds = new Set<string>()
       const partContentLengths = new Map<string, string>()
 
-      // 1) Only partial chunk arrived
       const chunk = {
         method: 'session/update',
         params: {
@@ -3208,7 +2821,6 @@ describe('AcpAdapter - Codex Quota/Error Handling', () => {
       priv.convertAcpEventToMessageParts(chunk, new Set(), seenPartIds, partContentLengths, session)
       session.lastSessionUpdateType = 'agent_message_chunk'
 
-      // 2) Final agent_message has more complete text
       const finalMessage = {
         method: 'session/update',
         params: {
@@ -3223,7 +2835,6 @@ describe('AcpAdapter - Codex Quota/Error Handling', () => {
 
       const finalParts = priv.convertAcpEventToMessageParts(finalMessage, new Set(), seenPartIds, partContentLengths, session)
 
-      // Should emit an update with the more complete text
       expect(finalParts).toHaveLength(1)
       expect(finalParts[0].text).toBe('Partial response with full details here.')
       expect(finalParts[0].update).toBe(true)
@@ -3263,144 +2874,6 @@ describe('AcpAdapter - Codex Quota/Error Handling', () => {
   })
 })
 
-describe('AcpAdapter - configureCodexAuthEnv (Codex auth precedence)', () => {
-  let adapter: AcpAdapter
-
-  beforeEach(() => {
-    adapter = new AcpAdapter('codex')
-  })
-
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  it('authMethod=subscription strips ambient API keys and uses ~/.codex', () => {
-    // Explicit subscription choice + an ambient OPENAI_API_KEY exported in the
-    // shell — the classic "terminal works, 20x shows out of rate limits" case.
-    const env: Record<string, string | undefined> = {
-      OPENAI_API_KEY: 'sk-ambient-from-shell',
-      CODEX_API_KEY: 'sk-ambient-from-shell'
-    }
-
-    const usesApiKey = adapterPrivate(adapter).configureCodexAuthEnv(env, {
-      authMethod: 'subscription'
-    })
-
-    expect(usesApiKey).toBe(false)
-    // Ambient keys must be stripped so codex-acp uses ~/.codex (subscription).
-    expect(env.OPENAI_API_KEY).toBeUndefined()
-    expect(env.CODEX_API_KEY).toBeUndefined()
-    // CODEX_HOME pinned to the codex CLI default so codex-acp reads the same login.
-    expect(env.CODEX_HOME).toMatch(/[\\/]\.codex$/)
-    expect(env.NO_BROWSER).toBeUndefined()
-  })
-
-  it('authMethod=subscription ignores even an explicitly-configured API key', () => {
-    const env: Record<string, string | undefined> = {}
-
-    const usesApiKey = adapterPrivate(adapter).configureCodexAuthEnv(env, {
-      authMethod: 'subscription',
-      apiKeys: { openai: 'sk-explicit-agent-key' }
-    })
-
-    expect(usesApiKey).toBe(false)
-    expect(env.OPENAI_API_KEY).toBeUndefined()
-    expect(env.CODEX_HOME).toMatch(/[\\/]\.codex$/)
-  })
-
-  it('authMethod=subscription preserves an inherited custom CODEX_HOME', () => {
-    // The user's terminal `codex` may use a custom CODEX_HOME (a different ChatGPT
-    // account); 20x inherits it and must NOT override it with the default ~/.codex.
-    const env: Record<string, string | undefined> = { CODEX_HOME: '/custom/codex/home' }
-
-    const usesApiKey = adapterPrivate(adapter).configureCodexAuthEnv(env, {
-      authMethod: 'subscription'
-    })
-
-    expect(usesApiKey).toBe(false)
-    expect(env.CODEX_HOME).toBe('/custom/codex/home')
-  })
-
-  it('authMethod=api_key uses the explicit per-agent key in an isolated CODEX_HOME', () => {
-    const env: Record<string, string | undefined> = {}
-
-    const usesApiKey = adapterPrivate(adapter).configureCodexAuthEnv(env, {
-      authMethod: 'api_key',
-      apiKeys: { openai: 'sk-explicit-agent-key' }
-    })
-
-    expect(usesApiKey).toBe(true)
-    expect(env.OPENAI_API_KEY).toBe('sk-explicit-agent-key')
-    expect(env.CODEX_API_KEY).toBe('sk-explicit-agent-key')
-    expect(env.NO_BROWSER).toBe('1')
-    expect(env.CODEX_HOME).toBe('/tmp/codex-session-test')
-  })
-
-  it('authMethod=api_key falls back to an ambient key when no per-agent key is set', () => {
-    const env: Record<string, string | undefined> = { OPENAI_API_KEY: 'sk-ambient' }
-
-    const usesApiKey = adapterPrivate(adapter).configureCodexAuthEnv(env, {
-      authMethod: 'api_key'
-    })
-
-    expect(usesApiKey).toBe(true)
-    expect(env.OPENAI_API_KEY).toBe('sk-ambient')
-    expect(env.CODEX_HOME).toBe('/tmp/codex-session-test')
-  })
-
-  it('legacy (no authMethod): an ambient key alone does NOT force API-key mode', () => {
-    // The original bug: an ambient shell OPENAI_API_KEY hijacked subscription users.
-    const env: Record<string, string | undefined> = { OPENAI_API_KEY: 'sk-ambient' }
-
-    const usesApiKey = adapterPrivate(adapter).configureCodexAuthEnv(env, {})
-
-    expect(usesApiKey).toBe(false)
-    expect(env.OPENAI_API_KEY).toBeUndefined()
-    expect(env.CODEX_HOME).toMatch(/[\\/]\.codex$/)
-  })
-
-  it('legacy (no authMethod): an explicit per-agent key opts into API-key mode', () => {
-    const env: Record<string, string | undefined> = {}
-
-    const usesApiKey = adapterPrivate(adapter).configureCodexAuthEnv(env, {
-      apiKeys: { openai: 'sk-explicit-agent-key' }
-    })
-
-    expect(usesApiKey).toBe(true)
-    expect(env.OPENAI_API_KEY).toBe('sk-explicit-agent-key')
-    expect(env.CODEX_HOME).toBe('/tmp/codex-session-test')
-  })
-
-  it('authenticateSession allows chatgpt method on the subscription path', async () => {
-    const session = createMockSession('sub-session')
-    session.codexUseApiKey = false
-    const sendRpc = vi
-      .spyOn(adapterPrivate(adapter), 'sendRpcRequest')
-      .mockResolvedValue(undefined)
-
-    await adapterPrivate(adapter).authenticateSession(session, {
-      authMethods: [{ id: 'chatgpt' }, { id: 'openai-api-key' }]
-    })
-
-    // On the subscription path we must NOT pick the API-key method.
-    expect(sendRpc).toHaveBeenCalledWith(session, 'authenticate', { methodId: 'chatgpt' })
-  })
-
-  it('authenticateSession filters out chatgpt when using API-key auth', async () => {
-    const session = createMockSession('key-session')
-    session.codexUseApiKey = true
-    const sendRpc = vi
-      .spyOn(adapterPrivate(adapter), 'sendRpcRequest')
-      .mockResolvedValue(undefined)
-
-    await adapterPrivate(adapter).authenticateSession(session, {
-      authMethods: [{ id: 'chatgpt' }, { id: 'openai-api-key' }]
-    })
-
-    expect(sendRpc).toHaveBeenCalledWith(session, 'authenticate', { methodId: 'openai-api-key' })
-  })
-})
-
 // ─── Regression: live buffer / permanent history aliasing (scrambled message start) ───
 //
 // handleRpcMessage() pushes each notification object into BOTH session.messageBuffer
@@ -3417,7 +2890,7 @@ describe('AcpAdapter - live buffer vs permanent history aliasing', () => {
   let adapter: AcpAdapter
 
   beforeEach(() => {
-    adapter = new AcpAdapter('codex')
+    adapter = new AcpAdapter()
   })
 
   afterEach(() => {
@@ -3527,5 +3000,51 @@ describe('AcpAdapter - live buffer vs permanent history aliasing', () => {
     const liveStdout = (session.messageBuffer[0] as { params: { update: { rawOutput: { stdout: string } } } })
       .params.update.rawOutput.stdout
     expect(liveStdout).toBe(bigOutput)
+  })
+})
+
+describe('AcpAdapter - destroySession', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function fakeProcess(): ChildProcess & { kill: ReturnType<typeof vi.fn> } {
+    const child = new EventEmitter() as ChildProcess & { kill: ReturnType<typeof vi.fn> }
+    child.kill = vi.fn(() => true)
+    return child
+  }
+
+  it('rejects in-flight requests at once instead of leaving them on the RPC timeout', async () => {
+    const adapter = new AcpAdapter()
+    const session = createMockSession('destroy-session')
+    session.process = fakeProcess()
+    const inFlight = new Promise((resolve, reject) => session.pendingRequests.set(1, { resolve, reject }))
+    adapterPrivate(adapter).sessions.set('destroy-session', session)
+
+    await adapter.destroySession('destroy-session', {} as never)
+
+    await expect(inFlight).rejects.toThrow('destroyed')
+    expect(session.pendingRequests.size).toBe(0)
+  })
+
+  it('escalates to SIGKILL only when the process has not exited after the grace period', async () => {
+    vi.useFakeTimers()
+    const adapter = new AcpAdapter()
+    const exiting = createMockSession('exits')
+    const wedged = createMockSession('wedged')
+    const exitingProcess = fakeProcess()
+    const wedgedProcess = fakeProcess()
+    exiting.process = exitingProcess
+    wedged.process = wedgedProcess
+    adapterPrivate(adapter).sessions.set('exits', exiting)
+    adapterPrivate(adapter).sessions.set('wedged', wedged)
+
+    await adapter.destroySession('exits', {} as never)
+    await adapter.destroySession('wedged', {} as never)
+    exitingProcess.emit('exit', null, 'SIGTERM')
+    vi.advanceTimersByTime(1000)
+
+    expect(exitingProcess.kill.mock.calls).toEqual([['SIGTERM']])
+    expect(wedgedProcess.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']])
   })
 })

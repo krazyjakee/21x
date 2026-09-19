@@ -1,41 +1,19 @@
 /**
- * Per-agent configuration for the ACP adapter: how each ACP agent is spawned,
- * authenticated and configured.
+ * Cursor-specific configuration for the ACP adapter: how `cursor-agent` is
+ * spawned, authenticated and configured.
  */
 
 import type { McpServerConfig, SessionConfig } from './coding-agent-adapter'
 
-export type AcpAgentType = 'codex' | 'cursor'
-
-export interface AcpAgentConfig {
-  command: string
-  args: string[]
-  env?: Record<string, string>
-}
+export const CURSOR_AGENT_COMMAND = 'cursor-agent'
 
 const CURSOR_ACP_MODEL_VALUES: Record<string, string> = {
   'composer-2.5': 'composer-2.5[fast=true]',
   'grok-4.5': 'grok-4.5[effort=high,fast=true]'
 }
 
-export function getAcpAgentConfig(agentType: AcpAgentType): AcpAgentConfig {
-  switch (agentType) {
-    case 'codex': {
-      // @agentclientprotocol/codex-acp ships a Node entrypoint that spawns the
-      // bundled @openai/codex; it is not a native binary, so run it via Node.
-      const entry = require.resolve('@agentclientprotocol/codex-acp/dist/index.js')
-      console.log(`[AcpAdapter/codex] Resolved codex-acp entry: ${entry}`)
-      return { command: process.execPath, args: [entry], env: {} }
-    }
-    case 'cursor':
-      return { command: 'cursor-agent', args: ['acp'], env: {} }
-    default:
-      throw new Error(`Unsupported ACP agent type: ${agentType}`)
-  }
-}
-
-export function acpModelValue(agentType: AcpAgentType, model: string): string {
-  return agentType === 'cursor' ? CURSOR_ACP_MODEL_VALUES[model] ?? model : model
+export function cursorModelValue(model: string): string {
+  return CURSOR_ACP_MODEL_VALUES[model] ?? model
 }
 
 export function applyCursorAuthEnv(env: Record<string, string | undefined>, config: Pick<SessionConfig, 'authMethod' | 'apiKeys'>): void {
@@ -59,25 +37,6 @@ export function applyCursorAuthEnv(env: Record<string, string | undefined>, conf
   delete env.CURSOR_API_KEY
   delete env.CURSOR_AUTH_TOKEN
   console.log('[AcpAdapter/cursor] Auth: Cursor CLI login')
-}
-
-type AuthMethod = { id: string; [key: string]: unknown }
-
-/**
- * Picks the ACP `authenticate` method. With an API key, Codex's browser-based
- * "chatgpt" method is excluded so codex-acp uses the key instead of opening an
- * OAuth popup; on the subscription path a non-key method (e.g. an existing
- * Codex CLI login) is preferred.
- */
-export function pickAcpAuthMethod(agentType: AcpAgentType, authMethods: AuthMethod[], useApiKey: boolean): AuthMethod | null {
-  const usableMethods = agentType === 'codex' && useApiKey
-    ? authMethods.filter((m) => m.id !== 'chatgpt')
-    : authMethods
-  const isKeyMethod = (m: AuthMethod): boolean => m.id === 'openai-api-key' || m.id === 'codex-api-key'
-  const apiKeyMethod = usableMethods.find(isKeyMethod)
-  return useApiKey
-    ? (apiKeyMethod || usableMethods[0] || null)
-    : (usableMethods.find((m) => !isKeyMethod(m)) || apiKeyMethod || null)
 }
 
 /**

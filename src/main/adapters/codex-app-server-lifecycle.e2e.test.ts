@@ -20,7 +20,7 @@ import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { CodexAppServerAdapter } from './codex-app-server-adapter'
-import { collectDescendantPids, parseProcessTable } from '../mcp-process-cleanup'
+import { collectDescendantPids, readProcessTable } from '../mcp-process-cleanup'
 import { CODEX_APP_SERVER_MARKER } from '../codex-app-server-sweep'
 import type { SessionConfig } from './coding-agent-adapter'
 
@@ -40,9 +40,8 @@ function codexAvailable(): boolean {
  * Deliberately wider than what the sweep is willing to KILL: a wrapper whose
  * vendored binary outlived it would be a leak this test must still see.
  */
-function appServerDescendants(): number[] {
-  const ps = execFileSync('ps', ['-eo', 'pid=,ppid=,command='], { encoding: 'utf-8', maxBuffer: 16 * 1024 * 1024 })
-  const rows = parseProcessTable(ps)
+async function appServerDescendants(): Promise<number[]> {
+  const rows = await readProcessTable()
   const ours = collectDescendantPids(rows, process.pid)
   return rows
     .filter((row) => ours.has(row.pid) && row.command.includes(CODEX_APP_SERVER_MARKER))
@@ -53,19 +52,19 @@ function appServerDescendants(): number[] {
 /** Waits for the app-server descendants to reach `expected`, or gives up. */
 async function waitForAppServers(expected: number, timeoutMs = 10_000): Promise<number[]> {
   const deadline = Date.now() + timeoutMs
-  let found = appServerDescendants()
+  let found = await appServerDescendants()
   while (found.length !== expected && Date.now() < deadline) {
     await new Promise((done) => setTimeout(done, 200))
-    found = appServerDescendants()
+    found = await appServerDescendants()
   }
   return found
 }
 
 const workspaces: string[] = []
 
-afterAll(() => {
+afterAll(async () => {
   // Nothing should be left, but a failing assertion must not leak a gigabyte.
-  for (const pid of appServerDescendants()) {
+  for (const pid of await appServerDescendants()) {
     try {
       process.kill(pid, 'SIGKILL')
     } catch {

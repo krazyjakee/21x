@@ -1,12 +1,7 @@
 /**
- * Claude Code Adapter
- *
- * Implements CodingAgentAdapter for Claude Code using @anthropic-ai/claude-agent-sdk.
- *
- * Key differences from OpenCode:
- * - Uses AsyncGenerator streaming API instead of HTTP client
- * - File-based session persistence (~/.claude/projects/)
- * - Different message format (SDKMessage vs OpenCode messages)
+ * CodingAgentAdapter for Claude Code via @anthropic-ai/claude-agent-sdk. The
+ * SDK streams messages from a child `claude` process through an async
+ * generator; sessions persist as files under ~/.claude/projects/.
  */
 
 import { randomUUID } from 'crypto'
@@ -20,51 +15,31 @@ import type {
 import { SessionStatusType, MessagePartType, MessageRole } from './coding-agent-adapter'
 import { findClaudeExecutable } from './claude-code-executable'
 import { cleanSessionFile, isValidClaudeSessionId, loadSessionHistory } from './claude-code-history'
-import { buildToolTitle, ClaudeSystemSubtype, convertSDKMessageToParts, resultErrorText } from './claude-code-message-converter'
+import { buildToolTitle, convertSDKMessageToParts, resultErrorText } from './claude-code-message-converter'
 import { claudeCodePermissionMode } from './permission-mode'
-import { claudeServerPrefix, claudeToolIds, resolveDisallowedToolNames } from '../mcp-tool-limits'
-import { buildShellExports } from './shared/shell-exports'
+import {
+  buildClaudeEnvironment,
+  buildClaudeMcpServers,
+  buildIsolationOptions,
+  buildMcpToolLimitHooks,
+  buildSecretHooks,
+  mergeHooks
+} from './claude-code-options'
+import { pruneStaleBackgroundTasks, trackBackgroundTask, type BackgroundTask } from './claude-code-background-tasks'
+import { ALWAYS_APPROVAL_OPTIONS } from './shared/approval-options'
+import { lazySdk } from './shared/lazy-sdk'
 
-type ClaudeSDK = typeof import('@anthropic-ai/claude-agent-sdk')
 type Query = import('@anthropic-ai/claude-agent-sdk').Query
 type SDKMessage = import('@anthropic-ai/claude-agent-sdk').SDKMessage
 type Options = import('@anthropic-ai/claude-agent-sdk').Options
-type McpServerConfig = import('@anthropic-ai/claude-agent-sdk').McpServerConfig
-type HookCallback = import('@anthropic-ai/claude-agent-sdk').HookCallback
-type HookCallbackMatcher = import('@anthropic-ai/claude-agent-sdk').HookCallbackMatcher
 type CanUseTool = import('@anthropic-ai/claude-agent-sdk').CanUseTool
 type PermissionResult = import('@anthropic-ai/claude-agent-sdk').PermissionResult
 type PermissionUpdate = import('@anthropic-ai/claude-agent-sdk').PermissionUpdate
 
-let ClaudeAgentSDK: ClaudeSDK | null = null
+const claudeSdk = lazySdk('Claude Agent SDK', () => import('@anthropic-ai/claude-agent-sdk'))
 
-/** Maximum number of messages to keep in the buffer per session */
+/** Older, already-polled messages are dropped past this size. */
 const MAX_MESSAGE_BUFFER_SIZE = 500
-
-/**
- * Terminal states for a Claude Code background task. Once a task reports one of
- * these (via `task_updated.patch.status` or `task_notification.status`) it is no
- * longer in flight and stops counting towards the session being BUSY.
- */
-const TERMINAL_TASK_STATUSES = new Set(['completed', 'failed', 'killed', 'stopped'])
-
-/**
- * Safety cap on how long a background task may be considered "in flight".
- * Because in-flight background work suppresses IDLE *and* exempts the session
- * from agent-manager's stuck-session watchdog, a task whose terminal
- * notification is lost would otherwise pin the session BUSY forever. Generous
- * enough that no legitimate subagent hits it.
- */
-const MAX_BACKGROUND_TASK_AGE_MS = 60 * 60 * 1000 // 60 minutes
-
-/** A subagent/bash task that Claude Code is running in the background. */
-interface BackgroundTask {
-  taskId: string
-  /** SDK `task_type`, e.g. 'local_agent' (subagent) or 'local_bash'. */
-  taskType?: string
-  description?: string
-  startedAt: number
-}
 
 /**
  * A Claude Code tool-permission request waiting for the user. Created by the
@@ -83,7 +58,6 @@ interface PendingClaudeApproval {
 
 /** Option ids (and renderer answer labels mapped by agent-manager) that deny a request. */
 const DENY_APPROVAL_OPTIONS = new Set(['abort', 'deny', 'reject', 'cancel', 'denied'])
-const ALWAYS_APPROVAL_OPTIONS = new Set(['approved-for-session', 'allow-always'])
 
 interface ClaudeSession {
   /** Claude's internal session ID, known once the first stream message arrives */
@@ -99,13 +73,7 @@ interface ClaudeSession {
   config: SessionConfig
   /** True when the next query must `resume` the persisted session */
   isResumed?: boolean
-  /**
-   * Subagent / bash tasks Claude Code is currently running in the background.
-   * Claude Code backgrounds Task-tool subagents by default: the tool call returns
-   * immediately, the assistant's turn ends (emitting `result`) and the subagent
-   * keeps working, waking the session again via `task_notification`.  While this
-   * map is non-empty the session is NOT done — it is paused waiting on children.
-   */
+  /** In-flight background tasks; while non-empty the session is paused, not done (see claude-code-background-tasks.ts). */
   backgroundTasks: Map<string, BackgroundTask>
   /** True once the current turn emitted a non-error `result` message. */
   sawResult: boolean
@@ -122,21 +90,6 @@ interface ClaudeSession {
   releasePrompt: (() => void) | null
   /** Tool-permission requests awaiting the user, oldest first ('ask' mode only). */
   pendingApprovals: PendingClaudeApproval[]
-}
-
-type HookMap = Partial<Record<string, HookCallbackMatcher[]>>
-
-/** Combine hook maps, keeping every matcher from each event. */
-function mergeHooks(...maps: Array<HookMap | undefined>): HookMap | undefined {
-  const merged: HookMap = {}
-  for (const map of maps) {
-    if (!map) continue
-    for (const [event, matchers] of Object.entries(map)) {
-      if (!matchers) continue
-      merged[event] = [...(merged[event] || []), ...matchers]
-    }
-  }
-  return Object.keys(merged).length > 0 ? merged : undefined
 }
 
 function newClaudeSession(sessionId: string, config: SessionConfig, isResumed: boolean): ClaudeSession {
@@ -161,7 +114,6 @@ function newClaudeSession(sessionId: string, config: SessionConfig, isResumed: b
 
 export class ClaudeCodeAdapter implements CodingAgentAdapter {
   private sessions = new Map<string, ClaudeSession>()
-  private sdkLoading: Promise<void> | null = null
 
   /**
    * Callback set by agent-manager to trigger an immediate poll cycle
@@ -169,145 +121,6 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
    * latency of the fixed-interval polling heartbeat.
    */
   onDataAvailable?: (sessionId: string) => void
-
-  constructor() {
-    this.sdkLoading = this.loadSDK()
-  }
-
-  /**
-   * The MCP servers handed to the SDK, without the 21x-only `enabledTools` /
-   * `knownTools` fields. The limit is enforced through `disallowedTools` and a
-   * PreToolUse hook instead.
-   */
-  private buildClaudeMcpServers(config: SessionConfig): Record<string, McpServerConfig> | undefined {
-    if (!config.mcpServers) return undefined
-    const cleaned: Record<string, unknown> = {}
-    for (const [name, server] of Object.entries(config.mcpServers)) {
-      const rest: Record<string, unknown> = { ...server }
-      delete rest.enabledTools
-      delete rest.knownTools
-      cleaned[name] = rest
-    }
-    return cleaned as Record<string, McpServerConfig>
-  }
-
-  /**
-   * MCP isolation and per-agent tool limits.
-   *
-   * `strictMcpConfig` makes the SDK use only the servers 21x passes in, instead
-   * of also loading project `.mcp.json`, user MCP settings, plugins and agent
-   * frontmatter. Without it the agent's MCP server selection, and the tool
-   * limits below, could be widened by a file in the repository being worked on.
-   *
-   * `disallowedTools` removes each tool the agent may not use from the model's
-   * context. It can only name tools the server advertised when its tool list
-   * was last refreshed, so the PreToolUse hook from buildMcpToolLimitHooks
-   * also rejects any other tool on a restricted server. The key is omitted
-   * when nothing is restricted.
-   */
-  private buildIsolationOptions(config: SessionConfig): Partial<Options> {
-    const disallowedTools: string[] = []
-    for (const [name, server] of Object.entries(config.mcpServers || {})) {
-      for (const tool of resolveDisallowedToolNames({
-        serverTools: (server.knownTools || []).map(toolName => ({ name: toolName })),
-        limit: server.enabledTools
-      })) {
-        disallowedTools.push(...claudeToolIds(name, tool))
-      }
-    }
-    return {
-      strictMcpConfig: true,
-      ...(disallowedTools.length > 0 ? { disallowedTools } : {})
-    }
-  }
-
-  /**
-   * PreToolUse hook that denies any tool on a restricted MCP server that is not
-   * in the agent's allowlist. Hooks run in every permission mode, including
-   * bypassPermissions, so this holds even for tools added to the server after
-   * the limit was saved.
-   */
-  private buildMcpToolLimitHooks(config: SessionConfig): Partial<Record<string, HookCallbackMatcher[]>> | undefined {
-    const allowedByPrefix = new Map<string, Set<string>>()
-    for (const [name, server] of Object.entries(config.mcpServers || {})) {
-      if (server.enabledTools === undefined) continue
-      const prefix = claudeServerPrefix(name)
-      const allowed = allowedByPrefix.get(prefix) ?? new Set<string>()
-      for (const tool of server.enabledTools) {
-        for (const id of claudeToolIds(name, tool)) allowed.add(id)
-      }
-      allowedByPrefix.set(prefix, allowed)
-    }
-    if (allowedByPrefix.size === 0) return undefined
-
-    const hook: HookCallback = async (input) => {
-      const toolName = 'tool_name' in input ? String(input.tool_name) : ''
-      for (const [prefix, allowed] of allowedByPrefix) {
-        if (toolName.startsWith(prefix) && !allowed.has(toolName)) {
-          console.warn(`[ClaudeCodeAdapter] Blocked MCP tool outside this agent's tool limit: ${toolName}`)
-          return {
-            hookSpecificOutput: {
-              hookEventName: 'PreToolUse' as const,
-              permissionDecision: 'deny' as const,
-              permissionDecisionReason: `${toolName} is not enabled for this agent.`
-            }
-          }
-        }
-      }
-      return {}
-    }
-
-    return {
-      PreToolUse: [{
-        matcher: 'mcp__.*',
-        hooks: [hook]
-      }]
-    }
-  }
-
-  /**
-   * Build PreToolUse hooks for secret injection.
-   * Registers a hook that prepends `export KEY='value'` lines to each Bash command.
-   * The LLM never sees the modified command — only the original tool call and
-   * the output appear in conversation context.
-   */
-  private buildSecretHooks(config: SessionConfig): Partial<Record<string, HookCallbackMatcher[]>> | undefined {
-    const secretEnvVars = config.secretEnvVars
-    if (!secretEnvVars || Object.keys(secretEnvVars).length === 0) {
-      return undefined
-    }
-
-    const exportLines = buildShellExports(secretEnvVars)
-
-    console.log(`[ClaudeCodeAdapter] Registering PreToolUse hook for secrets: [${Object.keys(secretEnvVars).join(', ')}]`)
-
-    const hook: HookCallback = async (input) => {
-      const toolInput = ('tool_input' in input ? input.tool_input : undefined) as Record<string, unknown> | undefined
-      if (!toolInput?.command) {
-        return {}
-      }
-
-      const originalCommand = toolInput.command as string
-      const modifiedCommand = exportLines + '\n' + originalCommand
-
-      return {
-        hookSpecificOutput: {
-          hookEventName: 'PreToolUse' as const,
-          updatedInput: {
-            ...toolInput,
-            command: modifiedCommand
-          }
-        }
-      }
-    }
-
-    return {
-      PreToolUse: [{
-        matcher: 'Bash',
-        hooks: [hook]
-      }]
-    }
-  }
 
   /**
    * Routes Claude Code's tool-permission requests to the 21x approval UI.
@@ -370,37 +183,12 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     }
   }
 
-  private async loadSDK(): Promise<void> {
-    try {
-      ClaudeAgentSDK = await import('@anthropic-ai/claude-agent-sdk')
-      console.log('[ClaudeCodeAdapter] SDK loaded successfully')
-    } catch (error) {
-      console.error('[ClaudeCodeAdapter] Failed to load SDK:', error)
-      ClaudeAgentSDK = null
-    } finally {
-      this.sdkLoading = null
-    }
-  }
-
-  private async ensureSDKLoaded(): Promise<void> {
-    if (ClaudeAgentSDK) return
-    if (this.sdkLoading) {
-      await this.sdkLoading
-    }
-    if (!ClaudeAgentSDK) {
-      throw new Error('Claude Agent SDK failed to load')
-    }
-  }
-
   async initialize(): Promise<void> {
-    await this.ensureSDKLoaded()
+    await claudeSdk.ready()
   }
 
   async createSession(config: SessionConfig): Promise<string> {
-    await this.ensureSDKLoaded()
-    if (!ClaudeAgentSDK) {
-      throw new Error('Claude Agent SDK not loaded')
-    }
+    await claudeSdk.ready()
 
     // Claude Code requires UUID-format session IDs. The real ID arrives with the
     // first stream message; the first sendPrompt starts the query.
@@ -430,10 +218,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     sessionId: string,
     config: SessionConfig
   ): Promise<SessionMessage[]> {
-    await this.ensureSDKLoaded()
-    if (!ClaudeAgentSDK) {
-      throw new Error('Claude Agent SDK not loaded')
-    }
+    await claudeSdk.ready()
 
     if (!isValidClaudeSessionId(sessionId)) {
       console.warn(`[ClaudeCodeAdapter] Invalid session ID format: ${sessionId}`)
@@ -465,9 +250,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       throw new Error(`Session not found: ${sessionId}`)
     }
 
-    if (!ClaudeAgentSDK) {
-      throw new Error('Claude Agent SDK not loaded')
-    }
+    const sdk = await claudeSdk.ready()
 
     const promptText = parts
       .filter((p) => p.type === 'text' && p.text)
@@ -478,8 +261,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       throw new Error('No text content in prompt parts')
     }
 
-    // Note: Don't add user message to buffer - agent-manager already shows it
-    // to avoid duplicate messages in UI
+    // The user message is not buffered: agent-manager already shows it.
 
     const isFirstPrompt = !session.queryIterator
 
@@ -515,16 +297,15 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     const abortController = new AbortController()
     session.abortController = abortController
 
-    // Build options
-    const hooks = mergeHooks(this.buildSecretHooks(config), this.buildMcpToolLimitHooks(config))
+    const hooks = mergeHooks(buildSecretHooks(config), buildMcpToolLimitHooks(config))
     const effort = config.reasoningEffort === 'minimal' ? undefined : config.reasoningEffort
     const claudePermissionMode = claudeCodePermissionMode(config)
 
     const options: Options = {
       cwd: config.workspaceDir,
       pathToClaudeCodeExecutable: claudePath,
-      env: this.buildClaudeEnvironment(),
-      mcpServers: this.buildClaudeMcpServers(config),
+      env: buildClaudeEnvironment(),
+      mcpServers: buildClaudeMcpServers(config),
       model: config.model,
       effort,
       systemPrompt: config.systemPrompt,
@@ -539,25 +320,21 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       ...(claudePermissionMode === 'bypassPermissions'
         ? { allowDangerouslySkipPermissions: true }
         : { canUseTool: this.buildCanUseTool(sessionId, session) }),
-      ...this.buildIsolationOptions(config),
+      ...buildIsolationOptions(config),
       ...(hooks ? { hooks } : {}),
     }
 
-    // Determine session continuation mode
+    // resume and continue are mutually exclusive.
     if (isFirstPrompt && session.isResumed) {
-      // First prompt after resume: use resume to load persisted session
       options.resume = sessionId
-      // Don't use continue with resume - they're mutually exclusive
     } else if (isFirstPrompt && session.sessionId) {
       // Process exited (error recovery or idle timeout) but session has a
       // valid Claude Code UUID. Resume from persistence so the agent keeps
       // its full conversation history instead of starting from scratch.
       options.resume = session.sessionId
     } else if (!isFirstPrompt) {
-      // Subsequent prompts: continue existing session in same process
       options.continue = true
     }
-    // Otherwise: brand-new session, no continue/resume needed
 
     console.log('[ClaudeCodeAdapter] Starting query with options:', {
       cwd: options.cwd,
@@ -623,7 +400,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       }
     })()
 
-    const query = ClaudeAgentSDK.query({
+    const query = sdk.query({
       prompt: promptStream,
       options,
     })
@@ -638,7 +415,6 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       session.messageCursor = 0
     }
 
-    // After first prompt in a resumed session, clear the flag so subsequent prompts use continue
     if (isFirstPrompt && session.isResumed) {
       session.isResumed = false
     }
@@ -717,20 +493,18 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
 
     const newParts: MessagePart[] = []
 
-    // Process only NEW buffered messages using cursor (avoids re-scanning entire buffer)
     const bufferLen = session.messageBuffer.length
     for (let i = session.messageCursor; i < bufferLen; i++) {
       const sdkMsg = session.messageBuffer[i]
       const msgId = this.getMessageId(sdkMsg)
       if (!msgId) continue
 
-      const parts = this.convertSDKMessageToParts(sdkMsg, seenPartIds, partContentLengths)
+      const parts = convertSDKMessageToParts(sdkMsg, seenPartIds, partContentLengths)
       newParts.push(...parts)
     }
     session.messageCursor = bufferLen
 
-    // If we have the real Claude session ID and it's different from the map key,
-    // include it in the first part so agent-manager can update the database
+    // Lets agent-manager re-key the session under Claude's real id.
     if (session.sessionId && session.sessionId !== sessionId && newParts.length > 0) {
       newParts[0].realSessionId = session.sessionId
     }
@@ -789,8 +563,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       }
     }
 
-    // Remove all references to this session (both temp ID and real ID)
-    // Since re-keying keeps both keys, we need to clean up both
+    // Re-keying keeps both the temporary and the real id.
     const keysToDelete: string[] = []
     for (const [key, sess] of this.sessions.entries()) {
       if (sess === session) {
@@ -810,12 +583,8 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       return []
     }
 
-    // Reuse the same convertSDKMessageToParts() that the live streaming path uses.
-    // This ensures replay produces the same message structure (IDs, content, tool
-    // fields) as the original live stream, which is critical for:
-    //   - Correct content extraction from nested message.content[] arrays
-    //   - Proper tool names (tool_name vs name), statuses, and titles
-    //   - Consistent part IDs so mobile dedup works on reconnect
+    // Same conversion as the live stream, so replayed part ids match and
+    // mobile dedup works on reconnect.
     const seenPartIds = new Set<string>()
     const partContentLengths = new Map<string, string>()
 
@@ -830,7 +599,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
                    roleStr === 'system' ? MessageRole.SYSTEM :
                    MessageRole.ASSISTANT
 
-      const parts = this.convertSDKMessageToParts(msg, seenPartIds, partContentLengths)
+      const parts = convertSDKMessageToParts(msg, seenPartIds, partContentLengths)
       if (parts.length === 0) continue
 
       if (!currentMessage || currentMessage.role !== role) {
@@ -936,10 +705,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
 
   async checkHealth(): Promise<{ available: boolean; reason?: string }> {
     try {
-      await this.ensureSDKLoaded()
-      if (!ClaudeAgentSDK) {
-        return { available: false, reason: 'Claude Agent SDK not loaded' }
-      }
+      await claudeSdk.ready()
       return { available: true }
     } catch (error: unknown) {
       return { available: false, reason: error instanceof Error ? error.message : String(error) }
@@ -976,14 +742,8 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
   private isAbortError(error: unknown, session: ClaudeSession): boolean {
     if (session.abortController?.signal.aborted) return true
 
-    let AbortErrorCtor: (new (msg?: string) => Error) | undefined
-    try {
-      AbortErrorCtor = (ClaudeAgentSDK as { AbortError?: new (msg?: string) => Error } | null)
-        ?.AbortError
-    } catch {
-      // Older SDK builds do not export the class; fall through to the string checks.
-      AbortErrorCtor = undefined
-    }
+    // Older SDK builds do not export the class; the string checks below cover them.
+    const AbortErrorCtor = (claudeSdk.current() as { AbortError?: new (msg?: string) => Error } | null)?.AbortError
     if (AbortErrorCtor && error instanceof AbortErrorCtor) return true
 
     if (!(error instanceof Error)) return false
@@ -991,9 +751,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     return error.message.includes('aborted by user') || error.message.includes('Operation aborted')
   }
 
-  /**
-   * Consumes the query stream in the background and buffers messages
-   */
+  /** Consumes the query stream in the background and buffers its messages. */
   private async consumeStream(sessionId: string, session: ClaudeSession): Promise<void> {
     if (!session.queryIterator) return
 
@@ -1002,8 +760,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     try {
       let messagesSinceYield = 0
       for await (const message of session.queryIterator) {
-        // Guard against undefined/null messages from the SDK (can happen during
-        // process crashes, lock acquisition failures, or SDK bugs)
+        // Happens on process crashes, lock acquisition failures and SDK bugs.
         if (!message || typeof message !== 'object') {
           console.warn('[ClaudeCodeAdapter] Received invalid message from SDK, skipping:', typeof message)
           continue
@@ -1011,12 +768,9 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
 
         const msg = message as unknown as Record<string, unknown>
 
-        // ── Prevent microtask starvation ──
-        // When the subprocess sends a burst of messages, the async iterator
-        // resolves each next() as a microtask without ever yielding to the
-        // macrotask queue.  This starves IPC, timers, and rendering callbacks,
-        // making the UI completely unresponsive (loading cursor).
-        // Yield every 5 messages so the event loop can process I/O.
+        // A burst of messages resolves each next() as a microtask without ever
+        // yielding to the macrotask queue, starving IPC, timers and rendering
+        // (the UI freezes). Yield every 5 messages.
         messagesSinceYield++
         if (messagesSinceYield >= 5) {
           messagesSinceYield = 0
@@ -1030,18 +784,14 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
           session.sessionId = realSessionId
           console.log(`[ClaudeCodeAdapter] Claude Code session ID: ${realSessionId}`)
 
-          // Add the session under the real ID (keep old ID too until agent-manager updates)
-          // This allows pollMessages to work with both IDs during transition
           if (realSessionId !== sessionId) {
             console.log(`[ClaudeCodeAdapter] Adding session under real ID: ${realSessionId} (keeping temp ID ${sessionId} until agent-manager updates)`)
             this.sessions.set(realSessionId as string, session)
-            // Don't delete the old sessionId yet - agent-manager needs to poll with it
-            // to receive the realSessionId. The old key will be deleted by destroySession
-            // or when agent-manager explicitly removes it.
+            // The temporary key stays: agent-manager polls with it to learn the
+            // real id. destroySession removes both.
           }
         }
 
-        // Check for session not found error BEFORE buffering
         if (msg.type === 'result' && msg.subtype === 'error_during_execution' && msg.is_error) {
           const errors = Array.isArray(msg.errors) ? msg.errors : []
           const sessionNotFound = errors.some((err: string) =>
@@ -1050,14 +800,12 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
 
           if (sessionNotFound) {
             console.warn('[ClaudeCodeAdapter] Session not found on Claude Code server:', errors)
-            // Don't buffer this error message - throw immediately
             throw new Error(
               'INCOMPATIBLE_SESSION_ID: This session does not exist on Claude Code servers. It may have been created with a different coding agent or has expired.'
             )
           }
         }
 
-        // Handle error result messages (e.g., rate limits) before treating as normal
         if (msg.type === 'result' && msg.is_error) {
           const raw = msg as Record<string, unknown>
           const errorText = resultErrorText(raw)
@@ -1088,24 +836,15 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
 
         session.messageBuffer.push(message)
 
-        // Cap buffer size to prevent unbounded memory growth.
-        // Drop already-processed messages from the front when limit is exceeded.
         if (session.messageBuffer.length > MAX_MESSAGE_BUFFER_SIZE) {
           const drop = session.messageBuffer.length - MAX_MESSAGE_BUFFER_SIZE
           session.messageBuffer.splice(0, drop)
           session.messageCursor = Math.max(0, session.messageCursor - drop)
         }
 
-        // Notify the polling coordinator that new data is available so it can
-        // deliver this message to the UI immediately instead of waiting for
-        // the next 2-second heartbeat tick.
-        if (this.onDataAvailable) {
-          this.onDataAvailable(sessionId)
-        }
+        this.onDataAvailable?.(sessionId)
 
-        // Track background subagent/bash tasks so we never report the session as
-        // finished while children are still running.
-        this.trackBackgroundTask(sessionId, session, message)
+        trackBackgroundTask(sessionId, session.backgroundTasks, message)
 
         if (msg.type === 'status') {
           console.log(`[ClaudeCodeAdapter] Status update: ${msg.subtype}`)
@@ -1140,18 +879,13 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       const errStack = error instanceof Error ? error.stack : undefined
       if (this.isAbortError(error, session)) {
         console.log('[ClaudeCodeAdapter] Stream aborted by user')
-        // Don't set error status - this is normal when sending a new message
       } else if (errMsg.includes('INCOMPATIBLE_SESSION_ID')) {
-        // Store temporarily so resumeSession can detect and re-throw it
         console.warn('[ClaudeCodeAdapter] Incompatible session error detected')
         session.status = 'error'
         session.lastError = errMsg
       } else if (errMsg.includes('exited with code 1')) {
-        // Claude Code process failed - could be rate limit, resume failure, or other error
         console.error('[ClaudeCodeAdapter] Claude Code process failed:', errMsg)
-        // Only treat as incompatible session if this was a resumed session AND we
-        // don't already have a specific error from the result message (e.g., rate limits).
-        // Note: session.config is always set, so only check session.isResumed here.
+        // A specific error from the result message (e.g. a rate limit) wins.
         if (!session.lastError && session.isResumed) {
           console.warn('[ClaudeCodeAdapter] Resume failed - session may not exist on Claude servers')
           session.status = 'error'
@@ -1169,15 +903,11 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       }
     } finally {
       console.log('[ClaudeCodeAdapter] Stream consumption ended')
-      // Always reset queryIterator when the stream ends (process exited).
-      // Previously only error paths did this, leaving a truthy-but-exhausted
-      // iterator after normal completion.  That caused the next sendPrompt to
-      // use `--continue` (most-recent conversation in directory) instead of
-      // `--resume <sessionId>` (exact session).  If any other session
-      // (heartbeat, subtask) ran in the same directory during idle, --continue
-      // would pick up the wrong conversation — the intermittent context-loss bug.
+      // The process exited. With a stale iterator the next sendPrompt would use
+      // `--continue` (most recent conversation in the directory) instead of
+      // `--resume <sessionId>`, and pick up another session's (heartbeat,
+      // subtask) conversation — the intermittent context-loss bug.
       session.queryIterator = null
-      // The process is gone, so nothing can still be running in the background.
       session.backgroundTasks.clear()
       this.rejectPendingApprovals(session, 'The session ended.')
       session.releasePrompt?.()
@@ -1185,107 +915,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       session.enqueuePrompt = null
       if (session.status !== 'error') {
         session.status = 'idle'
-        // Mark as resumed so the next sendPrompt uses --resume with the exact
-        // session ID rather than --continue (which targets most-recent in dir).
         session.isResumed = true
-      }
-    }
-  }
-
-  /**
-   * Maintains `session.backgroundTasks` from the SDK's task lifecycle messages.
-   *
-   * Note: the raw CLI also emits `background_tasks_changed` (which carries the
-   * authoritative in-flight list), but the SDK filters it out — it is not part of
-   * the `SDKMessage` union — so the set has to be rebuilt from task_started plus
-   * task_updated / task_notification.
-   */
-  private trackBackgroundTask(sessionId: string, session: ClaudeSession, message: SDKMessage): void {
-    const msg = message as unknown as {
-      type?: string
-      subtype?: string
-      task_id?: string
-      task_type?: string
-      subagent_type?: string
-      description?: string
-      status?: string
-      patch?: { status?: string }
-      tasks?: Array<{ task_id?: string; task_type?: string; description?: string }>
-    }
-    if (msg.type !== 'system') return
-
-    // `background_tasks_changed` carries the CLI's authoritative in-flight list.
-    // SDK >= 0.3.x filters it out (verified against 0.3.169 and 0.3.195), but the
-    // app has historically bundled older SDKs that do pass it through — prefer it
-    // when available, since it cannot drift the way reconstruction can.
-    if (msg.subtype === ClaudeSystemSubtype.BACKGROUND_TASKS_CHANGED && Array.isArray(msg.tasks)) {
-      const next = new Map<string, BackgroundTask>()
-      for (const t of msg.tasks) {
-        if (!t?.task_id) continue
-        const existing = session.backgroundTasks.get(t.task_id)
-        next.set(t.task_id, {
-          taskId: t.task_id,
-          taskType: t.task_type ?? existing?.taskType,
-          description: t.description ?? existing?.description,
-          // Preserve the original start time so the staleness cap stays meaningful.
-          startedAt: existing?.startedAt ?? Date.now(),
-        })
-      }
-      session.backgroundTasks = next
-      console.log(
-        `[ClaudeCodeAdapter] Background task list for ${sessionId} refreshed from ` +
-        `background_tasks_changed — ${next.size} in flight`
-      )
-      return
-    }
-
-    if (!msg.task_id) return
-
-    if (msg.subtype === ClaudeSystemSubtype.TASK_STARTED) {
-      session.backgroundTasks.set(msg.task_id, {
-        taskId: msg.task_id,
-        taskType: msg.task_type || (msg.subagent_type ? 'local_agent' : undefined),
-        description: msg.description,
-        startedAt: Date.now(),
-      })
-      console.log(
-        `[ClaudeCodeAdapter] Background task started for ${sessionId}: ${msg.task_id} ` +
-        `(${msg.task_type || 'unknown'}) — ${session.backgroundTasks.size} in flight`
-      )
-      return
-    }
-
-    const terminalStatus =
-      msg.subtype === ClaudeSystemSubtype.TASK_NOTIFICATION ? msg.status :
-      msg.subtype === ClaudeSystemSubtype.TASK_UPDATED ? msg.patch?.status :
-      undefined
-
-    if (terminalStatus && TERMINAL_TASK_STATUSES.has(terminalStatus)) {
-      if (session.backgroundTasks.delete(msg.task_id)) {
-        console.log(
-          `[ClaudeCodeAdapter] Background task ${msg.task_id} ${terminalStatus} for ${sessionId} — ` +
-          `${session.backgroundTasks.size} still in flight`
-        )
-      }
-    }
-  }
-
-  /**
-   * Drops background tasks that have outlived MAX_BACKGROUND_TASK_AGE_MS so a
-   * lost terminal notification can't keep the session BUSY (and un-reapable)
-   * indefinitely.
-   */
-  private pruneStaleBackgroundTasks(sessionId: string, session: ClaudeSession): void {
-    if (session.backgroundTasks.size === 0) return
-    const now = Date.now()
-    for (const [taskId, task] of session.backgroundTasks) {
-      if (now - task.startedAt > MAX_BACKGROUND_TASK_AGE_MS) {
-        session.backgroundTasks.delete(taskId)
-        console.warn(
-          `[ClaudeCodeAdapter] Background task ${taskId} for ${sessionId} exceeded ` +
-          `${MAX_BACKGROUND_TASK_AGE_MS / 60000}min without a terminal notification — ` +
-          `no longer counting it as in flight`
-        )
       }
     }
   }
@@ -1300,7 +930,7 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
    */
   private settleTurnIfComplete(sessionId: string, session: ClaudeSession): void {
     if (session.status === 'error') return
-    this.pruneStaleBackgroundTasks(sessionId, session)
+    pruneStaleBackgroundTasks(sessionId, session.backgroundTasks)
     if (!session.sawResult) return
     if (session.backgroundTasks.size > 0) {
       // Paused waiting on background work — explicitly NOT idle.
@@ -1313,9 +943,6 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     session.status = 'idle'
   }
 
-  /**
-   * Extracts a unique message ID from SDKMessage
-   */
   private getMessageId(msg: SDKMessage): string | null {
     if ('uuid' in msg && msg.uuid) {
       return msg.uuid
@@ -1324,23 +951,5 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
       return msg.message_id as string
     }
     return null
-  }
-
-  private convertSDKMessageToParts(
-    msg: SDKMessage,
-    seenPartIds: Set<string>,
-    partContentLengths: Map<string, string>
-  ): MessagePart[] {
-    return convertSDKMessageToParts(msg, seenPartIds, partContentLengths)
-  }
-
-  /**
-   * Environment for the Claude process. CLAUDECODE is removed so the CLI does
-   * not refuse to start as a nested session.
-   */
-  private buildClaudeEnvironment(): Record<string, string> {
-    const env = { ...process.env } as Record<string, string>
-    delete env.CLAUDECODE
-    return env
   }
 }

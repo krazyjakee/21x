@@ -20,7 +20,7 @@ const PATH_END = '__20X_PATH_END__'
 
 // CODEX_HOME: if the user's terminal `codex` uses a custom CODEX_HOME (e.g. a
 // work profile / a different ChatGPT account than ~/.codex), 20x must read the
-// SAME one — otherwise codex-acp authenticates as whatever account lives in the
+// SAME one — otherwise Codex authenticates as whatever account lives in the
 // default ~/.codex, which may be a free/over-limit account ("Upgrade to Plus")
 // while the terminal subscription works fine.
 const INHERITED_VARS = ['OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_API_KEY', 'CODEX_HOME'] as const
