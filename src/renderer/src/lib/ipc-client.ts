@@ -42,6 +42,7 @@ import type {
   ProjectChangedEvent
 } from '@shared/projects'
 import type { HeldAction, ProjectLimitState } from '@shared/project-limit-types'
+import type { MergeGrant, MergeGrantAuditEntry } from '@shared/merge-grants'
 import type { ProjectStatus, ProjectStatusHistoryPage } from '@shared/project-status'
 import type { ProjectOverviewEntry } from '@shared/project-overview'
 import type { CaptainMemory } from '@shared/captain-memory'
@@ -538,6 +539,22 @@ export const projectLimitsApi = {
   getState: (projectId: string): Promise<ProjectLimitState> => window.electronAPI.projectLimits.getState(projectId),
   isAllPaused: (): Promise<boolean> => window.electronAPI.projectLimits.isAllPaused(),
   pauseAll: (paused: boolean): Promise<boolean> => window.electronAPI.projectLimits.pauseAll(paused)
+}
+
+/** Merge grants the user gave Captains (#137). Absent bridges (tests) read as empty. */
+export const mergeGrantsApi = {
+  /** Text the user typed (not dictated) to a task's agent; main keeps it only for a Captain. */
+  noteTyped: (taskId: string, text: string): void => {
+    if (typeof window.electronAPI.mergeGrants?.noteTyped !== 'function') return
+    window.electronAPI.mergeGrants.noteTyped(taskId, text).catch(() => { /* best effort */ })
+  },
+  listActive: (projectId?: string): Promise<MergeGrant[]> =>
+    typeof window.electronAPI.mergeGrants?.listActive === 'function' ? window.electronAPI.mergeGrants.listActive(projectId) : Promise.resolve([]),
+  audit: (projectId: string): Promise<MergeGrantAuditEntry[]> =>
+    typeof window.electronAPI.mergeGrants?.audit === 'function' ? window.electronAPI.mergeGrants.audit(projectId) : Promise.resolve([]),
+  revoke: (id: string): Promise<{ ok: boolean; error?: string }> => window.electronAPI.mergeGrants.revoke(id),
+  onChanged: (callback: (event: { projectId: string }) => void): (() => void) =>
+    typeof window.electronAPI.mergeGrants?.onChanged === 'function' ? window.electronAPI.mergeGrants.onChanged(callback) : () => {}
 }
 
 /** Captain tool calls held by the escalation policy (#66). */

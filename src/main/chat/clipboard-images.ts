@@ -1,9 +1,11 @@
-import { readFile, stat } from 'fs/promises'
+import { open, stat } from 'fs/promises'
+import { constants } from 'fs'
 import { fileURLToPath } from 'url'
 import {
   CHAT_IMAGE_MIME_TYPES,
   MAX_CHAT_IMAGE_BYTES,
   MAX_CHAT_IMAGES_PER_MESSAGE,
+  MAX_CHAT_IMAGE_TOTAL_BYTES,
   chatImageErrors,
   chatImageExtension,
   chatImageMimeTypeForName,
@@ -70,12 +72,35 @@ function toBase64(bytes: Uint8Array): string {
   return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64')
 }
 
+// Bound the actual read too: a copied file may grow after the preliminary stat.
+async function readBoundedFile(path: string): Promise<Uint8Array> {
+  const file = await open(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0))
+  try {
+    if (!(await file.stat()).isFile()) throw new Error('Not a regular file')
+    const bytes = Buffer.alloc(MAX_CHAT_IMAGE_BYTES + 1)
+    let offset = 0
+    while (offset < bytes.length) {
+      const result = await file.read(bytes, offset, bytes.length - offset, null)
+      if (result.bytesRead === 0) break
+      offset += result.bytesRead
+    }
+    return bytes.subarray(0, offset)
+  } finally {
+    await file.close()
+  }
+}
+
 export async function readClipboardImages(deps: ClipboardImageDeps): Promise<ClipboardImagesResult> {
-  const readBytes = deps.readFile ?? (async (path: string) => new Uint8Array(await readFile(path)))
-  const fileSize = deps.fileSize ?? (async (path: string) => (await stat(path)).size)
+  const readBytes = deps.readFile ?? readBoundedFile
+  const fileSize = deps.fileSize ?? (async (path: string) => {
+    const info = await stat(path)
+    if (!info.isFile()) throw new Error('Not a regular file')
+    return info.size
+  })
   const images: ChatImageInput[] = []
   const errors: string[] = []
   const items = await deps.read()
+  let totalBytes = 0
 
   // Copied files first: a copied file also puts its icon or a preview on the
   // clipboard, and the user meant the file.
@@ -99,7 +124,10 @@ export async function readClipboardImages(deps: ClipboardImageDeps): Promise<Cli
     }
     let path: string
     try {
-      path = fileURLToPath(url)
+      // Never turn a copied remote file URL into an SMB/network read on Windows.
+      const parsed = new URL(url)
+      if (parsed.hostname && parsed.hostname !== 'localhost') continue
+      path = fileURLToPath(parsed)
     } catch {
       continue
     }
@@ -114,11 +142,20 @@ export async function readClipboardImages(deps: ClipboardImageDeps): Promise<Cli
         continue
       }
       const bytes = await readBytes(path)
+      if (bytes.byteLength > MAX_CHAT_IMAGE_BYTES) {
+        errors.push(chatImageErrors.tooLarge(name, bytes.byteLength))
+        continue
+      }
+      if (totalBytes + bytes.byteLength > MAX_CHAT_IMAGE_TOTAL_BYTES) {
+        errors.push(chatImageErrors.totalTooLarge())
+        break
+      }
       const mimeType = sniffChatImageMimeType(bytes)
       if (!mimeType) {
         errors.push(chatImageErrors.unsupportedType(name))
         continue
       }
+      totalBytes += bytes.byteLength
       images.push({ name: sanitizeChatImageName(path, mimeType), mimeType, data: toBase64(bytes) })
     } catch {
       errors.push(chatImageErrors.readFailed(name))
@@ -131,9 +168,14 @@ export async function readClipboardImages(deps: ClipboardImageDeps): Promise<Cli
     const type = CHAT_IMAGE_MIME_TYPES.find((mime) => item.types.includes(mime))
     if (!type) continue
     try {
-      const bytes = await blobBytes(await item.getType(type))
-      if (!bytes || bytes.byteLength === 0) continue
+      const value = await item.getType(type)
       const name = `image.${chatImageExtension(type)}`
+      if (value && typeof (value as Blob).size === 'number' && (value as Blob).size > MAX_CHAT_IMAGE_BYTES) {
+        errors.push(chatImageErrors.tooLarge(name, (value as Blob).size))
+        break
+      }
+      const bytes = await blobBytes(value)
+      if (!bytes || bytes.byteLength === 0) continue
       if (bytes.byteLength > MAX_CHAT_IMAGE_BYTES) {
         errors.push(chatImageErrors.tooLarge(name, bytes.byteLength))
         break

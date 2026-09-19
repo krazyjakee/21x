@@ -34,6 +34,8 @@ export interface CommanderToolContext {
   sessionId: string
   /** The user message that immediately precedes this turn's tool calls; empty for a report-triggered turn. */
   userMessage: string
+  /** The stored id of that message (#137: merge grants bind to it); absent for a report-triggered turn. */
+  userMessageId?: string
   /** What started the turn: the user, or a report being relayed (#62). */
   trigger: 'user' | 'report'
 }
@@ -82,8 +84,15 @@ export interface DeliverReportResult {
 interface TurnStart {
   trigger: 'user' | 'report'
   userMessage: string
+  userMessageId?: string
   /** Extra system text for the turn (the relay note of a report-triggered turn). */
   systemNote?: string
+}
+
+interface PreparedTurn {
+  context: ReturnType<typeof buildContext>
+  system: string
+  tools: ChatToolDefinition[]
 }
 
 const MAX_USER_MESSAGE_CHARS = 100_000
@@ -214,11 +223,10 @@ export class CommanderService {
   }
 
   /**
-   * `images` (#144) are validated here, whatever the caller checked, and
-   * refused before anything is stored when the model cannot read them, so the
-   * user keeps the whole message and can choose another model.
+   * Images are validated before storage. Only typed text can back a merge
+   * grant; voice-origin messages never provide a userMessageId to tools.
    */
-  sendUserMessage(sessionId: string, text: string, images?: unknown): SendResult {
+  sendUserMessage(sessionId: string, text: string, origin: 'typed' | 'voice' = 'typed', images?: unknown): SendResult {
     const content = typeof text === 'string' ? text.trim() : ''
     const attached = validateChatImageInputs(images)
     if (!content && attached.length === 0) throw new Error('Message is empty')
@@ -230,28 +238,33 @@ export class CommanderService {
     const provider = this.options.createProvider()
     if (attached.length > 0 && provider.supportsImages !== true) throw new Error(imagesUnsupportedMessage(provider))
 
+    let prepared!: PreparedTurn
+    let session: CommanderSession | null = null
     const message = this.store.appendMessage(sessionId, {
       role: 'user',
       content,
       ...(attached.length > 0 ? { images: attached.map(({ name, mimeType, data }) => ({ name, mimeType, data })) } : {})
+    }, (pendingMessage) => {
+      prepared = this.prepareTurn(sessionId, provider, { trigger: 'user', userMessage: content, userMessageId: origin === 'typed' ? pendingMessage.id : undefined })
+      session = this.store.markRead(sessionId)
     })
     this.emit({ type: 'messages_appended', sessionId, messages: [message] })
     // Sending is reading: the user is looking at this session.
-    this.store.markRead(sessionId)
-    this.emitSession(sessionId)
+    if (session) this.emit({ type: 'session_updated', session })
     // A user turn resets the report-ask budget (#62).
     this.reportAsks.delete(sessionId)
 
-    const { turnId, done } = this.startTurn(sessionId, provider, { trigger: 'user', userMessage: content })
+    const { turnId, done } = this.startTurn(sessionId, provider, { trigger: 'user', userMessage: content, userMessageId: origin === 'typed' ? message.id : undefined }, prepared)
     return { turnId, message, done }
   }
 
-  /** One model turn over the session as stored right now. The caller has checked that no turn is running. */
-  private startTurn(sessionId: string, provider: ChatProvider, start: TurnStart): { turnId: string; done: Promise<void> } {
-    const context = buildContext(this.store.listMessages(sessionId), this.budget, (id) => this.store.getMessageImages(id))
+  /** Prepare synchronously inside the user-message transaction, before accepting the draft. */
+  private prepareTurn(sessionId: string, provider: ChatProvider, start: TurnStart): PreparedTurn {
+    const context = buildContext(this.store.listMessages(sessionId), this.budget,
+      provider.supportsImages === true ? (id) => this.store.getMessageImages(id) : undefined)
     let system = withSummary(this.options.systemPrompt ?? COMMANDER_SYSTEM_PROMPT, context.summary)
     if (start.systemNote) system = `${system}\n\n${start.systemNote}`
-    let tools = this.options.getTools?.({ sessionId, userMessage: start.userMessage, trigger: start.trigger }) ?? []
+    let tools = this.options.getTools?.({ sessionId, userMessage: start.userMessage, userMessageId: start.userMessageId, trigger: start.trigger }) ?? []
     if (start.trigger === 'report') {
       const max = this.options.maxReportAsks ?? MAX_REPORT_ASKS_WITHOUT_USER_TURN
       tools = guardReportAsks(tools, {
@@ -260,6 +273,12 @@ export class CommanderService {
       })
     }
 
+    return { context, system, tools }
+  }
+
+  /** One model turn over the session as stored right now. The caller has checked that no turn is running. */
+  private startTurn(sessionId: string, provider: ChatProvider, start: TurnStart, prepared?: PreparedTurn): { turnId: string; done: Promise<void> } {
+    const { context, system, tools } = prepared ?? this.prepareTurn(sessionId, provider, start)
     let turnId = ''
     const handle = this.runtime.startTurn(
       { provider, messages: context.messages, system, tools, maxToolCalls: this.options.maxToolCalls },

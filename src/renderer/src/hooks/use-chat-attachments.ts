@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type ClipboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react'
 import {
   MAX_CHAT_IMAGE_BYTES,
   MAX_CHAT_IMAGE_TOTAL_BYTES,
@@ -9,6 +9,7 @@ import {
   isChatImageMimeType,
   sanitizeChatImageName,
   sniffChatImageMimeType,
+  validateChatImageInputs,
   type ChatImageInput,
   type ChatImageMimeType
 } from '@shared/chat-images'
@@ -48,6 +49,8 @@ export interface ChatAttachmentAnnouncement {
 }
 
 export interface UseChatAttachmentsOptions {
+  /** Changing chat identity clears the draft and cancels pending paste reads. */
+  draftKey?: string | null
   /**
    * When set, this chat cannot take images: a pasted image is refused with
    * this message and any text on the clipboard pastes normally.
@@ -104,13 +107,6 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
-function base64ToBytesHead(data: string, count: number): Uint8Array {
-  const binary = atob(data.slice(0, Math.ceil(count / 3) * 4))
-  const out = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i)
-  return out
-}
-
 async function readFileBytes(file: File): Promise<Uint8Array> {
   if (typeof file.arrayBuffer === 'function') return new Uint8Array(await file.arrayBuffer())
   return new Promise((resolve, reject) => {
@@ -123,24 +119,33 @@ async function readFileBytes(file: File): Promise<Uint8Array> {
 
 /** Every file on a clipboard, once each (`files` and `items` overlap). */
 export function clipboardFiles(data: DataTransfer): File[] {
-  const out: File[] = []
-  const seen = new Set<File>()
-  const add = (file: File | null): void => {
-    if (!file || seen.has(file)) return
-    // Chromium can hand the same image out as two File objects.
-    if (out.some((f) => f.name === file.name && f.size === file.size && f.type === file.type)) return
-    seen.add(file)
-    out.push(file)
-  }
-  for (const file of Array.from(data.files ?? [])) add(file)
+  const out = Array.from(data.files ?? [])
+  // Match each item against one entry in files. Equal metadata does not mean
+  // two separate files in the same collection have equal image contents.
+  const unmatched = [...out]
   for (const item of Array.from(data.items ?? [])) {
-    if (item.kind === 'file') add(item.getAsFile())
+    if (item.kind !== 'file') continue
+    const file = item.getAsFile()
+    if (!file) continue
+    const index = unmatched.findIndex((f) => f === file || (f.name === file.name && f.size === file.size && f.type === file.type))
+    if (index >= 0) unmatched.splice(index, 1)
+    else out.push(file)
   }
   return out
 }
 
 function isImageCandidate(file: File): boolean {
-  return file.type.startsWith('image/') || (!file.type && chatImageMimeTypeForName(file.name) !== null)
+  return file.type.startsWith('image/') || ((!file.type || file.type === 'application/octet-stream') && chatImageMimeTypeForName(file.name) !== null)
+}
+
+/** File managers may publish a copied file's absolute path as plain text. */
+function isFilePathText(text: string, files: File[], hasUriList: boolean): boolean {
+  const lines = text.trim().split(/\r?\n/).filter(Boolean)
+  return lines.length > 0 && lines.every((line) => {
+    if (!/^(?:file:\/\/|\/|[a-z]:[\\/]|\\\\)/i.test(line)) return false
+    const basename = line.split(/[\\/]/).pop()
+    return hasUriList || files.some((file) => file.name === basename)
+  })
 }
 
 /** Inserts text at the caret the way a native paste would, undo included where supported. */
@@ -156,7 +161,12 @@ export function insertPlainText(field: HTMLTextAreaElement | HTMLInputElement, t
   }
   const start = field.selectionStart ?? field.value.length
   const end = field.selectionEnd ?? start
-  field.setRangeText(text, start, end, 'end')
+  const value = `${field.value.slice(0, start)}${text}${field.value.slice(end)}`
+  // React tracks assignments through the element's own value setter. Use the
+  // native setter so the input event updates controlled composer state too.
+  const prototype = field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+  Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(field, value)
+  field.setSelectionRange(start + text.length, start + text.length)
   field.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
@@ -184,6 +194,8 @@ export function useChatAttachments(options: UseChatAttachmentsOptions = {}): Cha
   const current = useRef<ChatImageAttachment[]>([])
   const reserved = useRef({ count: 0, bytes: 0 })
   const announceKey = useRef(0)
+  const generation = useRef(0)
+  useEffect(() => () => { generation.current += 1 }, [])
 
   const commit = useCallback((next: ChatImageAttachment[]) => {
     current.current = next
@@ -225,13 +237,15 @@ export function useChatAttachments(options: UseChatAttachmentsOptions = {}): Cha
       reportError(unsupportedReason)
       return
     }
+    const started = generation.current
     setErrors([])
     const added: ChatImageAttachment[] = []
     setReadingCount((n) => n + 1)
     try {
       for (const [index, file] of files.entries()) {
-        const declared = isChatImageMimeType(file.type) ? file.type : file.type ? null : chatImageMimeTypeForName(file.name)
-        const label = file.name?.trim() || 'The pasted image'
+        const declared = isChatImageMimeType(file.type) ? file.type : (!file.type || file.type === 'application/octet-stream') ? chatImageMimeTypeForName(file.name) : null
+        if (generation.current !== started) break
+        const label = sanitizeChatImageName(file.name, declared ?? 'image/png')
         if (!declared) {
           reportError(chatImageErrors.unsupportedType(label))
           continue
@@ -245,6 +259,7 @@ export function useChatAttachments(options: UseChatAttachmentsOptions = {}): Cha
         }
         try {
           const bytes = await readFileBytes(file)
+          if (generation.current !== started) break
           const mimeType = sniffChatImageMimeType(bytes)
           if (!mimeType) {
             reportError(chatImageErrors.unsupportedType(name))
@@ -262,15 +277,15 @@ export function useChatAttachments(options: UseChatAttachmentsOptions = {}): Cha
           added.push(attachment)
           commit([...current.current, attachment])
         } catch {
-          reportError(chatImageErrors.readFailed(name))
+          if (generation.current === started) reportError(chatImageErrors.readFailed(name))
         } finally {
-          release(file.size)
+          if (generation.current === started) release(file.size)
         }
       }
     } finally {
-      setReadingCount((n) => n - 1)
+      if (generation.current === started) setReadingCount((n) => n - 1)
     }
-    if (added.length > 0) announce(announceAdded(added))
+    if (generation.current === started && added.length > 0) announce(announceAdded(added))
   }, [announce, commit, displayName, release, reportError, reserve, unsupportedReason])
 
   /** Images read by main (the clipboard fallback), already base64. */
@@ -282,13 +297,15 @@ export function useChatAttachments(options: UseChatAttachmentsOptions = {}): Cha
     }
     const added: ChatImageAttachment[] = []
     for (const [index, input] of inputs.entries()) {
-      const size = Math.floor((input.data.length * 3) / 4) - (input.data.endsWith('==') ? 2 : input.data.endsWith('=') ? 1 : 0)
-      const mimeType = sniffChatImageMimeType(base64ToBytesHead(input.data, 12))
-      const name = displayName(input.name, mimeType ?? 'image/png', index)
-      if (!mimeType) {
-        reportError(chatImageErrors.unsupportedType(name))
+      let validated
+      try {
+        validated = validateChatImageInputs([input])[0]
+      } catch (error) {
+        reportError(error instanceof Error ? error.message : chatImageErrors.readFailed('the clipboard image'))
         continue
       }
+      const { size, mimeType } = validated
+      const name = displayName(validated.name, mimeType, index)
       const refusal = reserve(name, size)
       if (refusal) {
         reportError(refusal)
@@ -312,10 +329,11 @@ export function useChatAttachments(options: UseChatAttachmentsOptions = {}): Cha
     const images = files.filter(isImageCandidate)
     const types = Array.from(data.types ?? [])
     const text = data.getData('text/plain')
+    const pathText = isFilePathText(text, files, types.includes('text/uri-list'))
 
     if (images.length > 0) {
       // Mixed paste: the text still goes in through the browser's own paste.
-      if (!text) event.preventDefault()
+      if (!text || pathText) event.preventDefault()
       void addFiles(images)
       return
     }
@@ -323,7 +341,7 @@ export function useChatAttachments(options: UseChatAttachmentsOptions = {}): Cha
       // Only non-image files (a PDF, say): unsupported for chat images.
       if (!text) {
         event.preventDefault()
-        if (!unsupportedReason) for (const file of files) reportError(chatImageErrors.unsupportedType(file.name || 'The pasted file'))
+        if (!unsupportedReason) for (const file of files) reportError(chatImageErrors.unsupportedType(sanitizeChatImageName(file.name, 'image/png')))
       }
       return
     }
@@ -333,21 +351,24 @@ export function useChatAttachments(options: UseChatAttachmentsOptions = {}): Cha
     const carriesNothing = !text && !types.includes('text/html')
     if (!referencesFiles && !carriesNothing) return // plain text: untouched
 
+    const started = generation.current
     const field = event.currentTarget
     // A file reference would otherwise paste as a path; hold it until main has looked.
-    if (referencesFiles) event.preventDefault()
+    const heldText = referencesFiles && (!text || pathText)
+    if (heldText) event.preventDefault()
     setReadingCount((n) => n + 1)
     void readClipboard()
       .then((result) => {
+        if (generation.current !== started) return
         for (const error of result.errors) reportError(error)
         if (result.images.length > 0) addInputs(result.images)
-        else if (referencesFiles && text) insertPlainText(field, text)
+        else if (heldText && text && result.errors.length === 0) insertPlainText(field, text)
       })
       .catch(() => {
-        if (referencesFiles && text) insertPlainText(field, text)
-        else reportError(chatImageErrors.readFailed('the clipboard image'))
+        if (generation.current !== started) return
+        reportError(chatImageErrors.readFailed('the clipboard image'))
       })
-      .finally(() => setReadingCount((n) => n - 1))
+      .finally(() => { if (generation.current === started) setReadingCount((n) => n - 1) })
   }, [addFiles, addInputs, readClipboard, reportError, unsupportedReason])
 
   const remove = useCallback((id: string) => {
@@ -358,9 +379,15 @@ export function useChatAttachments(options: UseChatAttachmentsOptions = {}): Cha
   }, [announce, commit])
 
   const clear = useCallback(() => {
+    generation.current += 1
+    reserved.current = { count: 0, bytes: 0 }
+    setReadingCount(0)
+    setAnnouncement(null)
     commit([])
     setErrors([])
   }, [commit])
+
+  useEffect(() => { clear() }, [options.draftKey, clear])
 
   const restore = useCallback((list: ChatImageAttachment[]) => {
     const ids = new Set(current.current.map((a) => a.id))

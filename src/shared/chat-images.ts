@@ -70,9 +70,10 @@ export function chatImageExtension(mimeType: ChatImageMimeType): string {
 /** The image type the first bytes prove, or null. Never trusts a declared type. */
 export function sniffChatImageMimeType(bytes: Uint8Array): ChatImageMimeType | null {
   const at = (i: number): number => bytes[i] ?? -1
-  if (at(0) === 0x89 && at(1) === 0x50 && at(2) === 0x4e && at(3) === 0x47) return 'image/png'
+  if ([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((byte, i) => at(i) === byte)) return 'image/png'
   if (at(0) === 0xff && at(1) === 0xd8 && at(2) === 0xff) return 'image/jpeg'
-  if (at(0) === 0x47 && at(1) === 0x49 && at(2) === 0x46 && at(3) === 0x38) return 'image/gif'
+  if (at(0) === 0x47 && at(1) === 0x49 && at(2) === 0x46 && at(3) === 0x38 &&
+      (at(4) === 0x37 || at(4) === 0x39) && at(5) === 0x61) return 'image/gif'
   if (at(0) === 0x52 && at(1) === 0x49 && at(2) === 0x46 && at(3) === 0x46 &&
       at(8) === 0x57 && at(9) === 0x45 && at(10) === 0x42 && at(11) === 0x50) return 'image/webp'
   return null
@@ -87,10 +88,16 @@ export function formatImageBytes(bytes: number): string {
 /** Printable, bounded, path-free. */
 export function sanitizeChatImageName(name: unknown, mimeType: ChatImageMimeType): string {
   const base = typeof name === 'string' ? name.split(/[\\/]/).pop() ?? '' : ''
-  const cleaned = base.replace(/[\u0000-\u001f\u007f<>:"|?*]/g, '').replace(/\s+/g, ' ').trim()
+  const cleaned = base.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069<>:"|?*]/g, '').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '')
   const fallback = `image.${chatImageExtension(mimeType)}`
-  const value = cleaned && cleaned !== '.' && cleaned !== '..' ? cleaned : fallback
-  return value.length > MAX_CHAT_IMAGE_NAME_CHARS ? value.slice(value.length - MAX_CHAT_IMAGE_NAME_CHARS) : value
+  let value = cleaned && cleaned !== '.' && cleaned !== '..' ? cleaned : fallback
+  // These basenames are devices even when an extension is present on Windows.
+  if (/^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(value)) value = `image-${value}`
+  // Leave room for the UUID prefix on filesystems with a 255-byte component limit.
+  let bounded = Array.from(value).slice(-MAX_CHAT_IMAGE_NAME_CHARS).join('')
+  while (new TextEncoder().encode(bounded).length > 200) bounded = Array.from(bounded).slice(1).join('')
+  if (/^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(bounded)) bounded = fallback
+  return bounded
 }
 
 /** User-facing validation messages, identical on every surface. */
@@ -141,9 +148,10 @@ export function validateChatImageInputs(raw: unknown): ValidatedChatImage[] {
     const data = typeof record.data === 'string' ? record.data : ''
     const declared = isChatImageMimeType(record.mimeType) ? record.mimeType : 'image/png'
     const label = sanitizeChatImageName(record.name, declared)
-    if (!data || data.length % 4 !== 0 || !BASE64_RE.test(data)) throw new Error(chatImageErrors.readFailed(label))
     const size = base64ByteLength(data)
+    // Reject oversized IPC strings before scanning them or decoding any bytes.
     if (size > MAX_CHAT_IMAGE_BYTES) throw new Error(chatImageErrors.tooLarge(label, size))
+    if (!data || data.length % 4 !== 0 || !BASE64_RE.test(data)) throw new Error(chatImageErrors.readFailed(label))
     const sniffed = sniffChatImageMimeType(decodeBase64Head(data, 12))
     if (!sniffed || !isChatImageMimeType(record.mimeType)) throw new Error(chatImageErrors.unsupportedType(label))
     total += size

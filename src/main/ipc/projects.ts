@@ -49,6 +49,13 @@ export function registerProjectHandlers({ db, agentManager }: IpcDeps): void {
     const updated = db.updateProject(id, data)
     // #65: a pause lifted or a cap raised in the editor must start queued work now.
     if (data.settings !== undefined) agentManager.recheckStartQueue()
+    // A Captain still running on the agent it was switched away from stops,
+    // so nothing more is delivered to it; the next message starts the new one.
+    if (updated && (data.captain_agent_id !== undefined || data.default_agent_id !== undefined)) {
+      agentManager.releaseCaptainIfAgentChanged(id).catch((error: unknown) => {
+        console.error(`[IPC] Could not stop the previous Captain of ${id}:`, error)
+      })
+    }
     return changed(updated, updated?.id, 'updated')
   })
   ipcMain.handle('project:archive', (_, id: string, archived?: boolean) => {

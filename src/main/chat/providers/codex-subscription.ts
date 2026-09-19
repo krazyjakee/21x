@@ -168,25 +168,26 @@ export function codexExecArgs(input: Pick<CodexExecInput, 'model' | 'reasoningEf
 
 /** Runs one isolated, non-persistent Codex turn using the existing CLI login. */
 async function executeWithCodex(input: CodexExecInput): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), '21x-commander-codex-'))
-  const schemaPath = join(dir, 'output-schema.json')
-  const outputPath = join(dir, 'last-message.json')
-  writeFileSync(schemaPath, JSON.stringify(OUTPUT_SCHEMA), { mode: 0o600 })
-  // Relative to the child's cwd (this dir), so no user path, which could hold
-  // a comma, ever reaches the comma-separated flag value.
-  const imagePaths = (input.images ?? []).map((image, index) => {
-    const name = `image-${index + 1}.${chatImageExtension(image.mimeType)}`
-    writeFileSync(join(dir, name), Buffer.from(image.data, 'base64'), { mode: 0o600 })
-    return name
-  })
-
-  const env: NodeJS.ProcessEnv = { ...process.env }
-  // The selected agent says subscription. Strip ambient API keys so they
-  // cannot silently switch billing/auth away from the cached ChatGPT login.
-  applyCodexAuthEnv(env, { authMethod: 'subscription' })
-  const args = codexExecArgs(input, { schema: schemaPath, output: outputPath, images: imagePaths })
-
+  let dir: string | undefined
   try {
+    dir = mkdtempSync(join(tmpdir(), '21x-commander-codex-'))
+    const schemaPath = join(dir, 'output-schema.json')
+    const outputPath = join(dir, 'last-message.json')
+    writeFileSync(schemaPath, JSON.stringify(OUTPUT_SCHEMA), { mode: 0o600 })
+    // Relative to the child's cwd (this dir), so no user path, which could hold
+    // a comma, ever reaches the comma-separated flag value.
+    const imagePaths = (input.images ?? []).map((image, index) => {
+      const name = `image-${index + 1}.${chatImageExtension(image.mimeType)}`
+      writeFileSync(join(dir!, name), Buffer.from(image.data, 'base64'), { mode: 0o600 })
+      return name
+    })
+
+    const env: NodeJS.ProcessEnv = { ...process.env }
+    // The selected agent says subscription. Strip ambient API keys so they
+    // cannot silently switch billing/auth away from the cached ChatGPT login.
+    applyCodexAuthEnv(env, { authMethod: 'subscription' })
+    const args = codexExecArgs(input, { schema: schemaPath, output: outputPath, images: imagePaths })
+
     return await new Promise<string>((resolve, reject) => {
       if (input.signal.aborted) {
         reject(new ChatAbortError())
@@ -238,8 +239,19 @@ async function executeWithCodex(input: CodexExecInput): Promise<string> {
       })
       child.stdin?.end(input.prompt)
     })
+  } catch (error) {
+    if (input.signal.aborted || error instanceof ChatAbortError) throw new ChatAbortError()
+    // CLI stderr and filesystem exceptions may echo image paths or inherited secrets.
+    if (input.images?.length) throw new Error('Codex could not process the attached images. Check the selected model and try again.')
+    throw error
   } finally {
-    rmSync(dir, { recursive: true, force: true })
+    if (dir) {
+      try {
+        rmSync(dir, { recursive: true, force: true })
+      } catch {
+        throw new Error('Could not remove temporary Commander files.')
+      }
+    }
   }
 }
 

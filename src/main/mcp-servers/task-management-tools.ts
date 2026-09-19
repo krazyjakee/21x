@@ -3,6 +3,7 @@
  * and how calls are dispatched, is decided in task-management-core.ts.
  */
 import type { Tool } from '@modelcontextprotocol/server'
+import { mergeGrantTools } from './merge-grant-tools'
 
 // Tools available in both modes
 const artifactTools: Tool[] = [
@@ -559,7 +560,9 @@ export const captainTools: Tool[] = [
       },
       required: ['task_id', 'artifact_id']
     }
-  }
+  },
+  // #137: the Captain's merge tools, answered by the escalation gate.
+  ...mergeGrantTools
 ]
 
 // Browser-panel tools. They drive canvas "Agent Browser" panels through the

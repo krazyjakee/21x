@@ -70,7 +70,9 @@ export function CommanderChatPane() {
   const cancel = useCommanderStore((s) => s.cancel)
   const createSession = useCommanderStore((s) => s.createSession)
   const [draft, setDraft] = useState('')
-  const images = useChatAttachments()
+  const images = useChatAttachments({ draftKey: sessionId })
+  const submitting = useRef(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   // Read agents from the shared store so the dropdown tracks agent edits made
   // elsewhere in the app (e.g. Agents settings) — never a stale one-time fetch.
@@ -194,21 +196,26 @@ export function CommanderChatPane() {
     )
   }
 
-  const busy = !!streaming
+  const busy = !!streaming || isSubmitting
   const canSend = (!!draft.trim() || images.attachments.length > 0) && !images.isReading
   const submit = async () => {
+    if (!canSend || busy || !selectedModel || submitting.current) return
+    submitting.current = true
+    setIsSubmitting(true)
     const text = draft.trim()
-    if (!canSend || busy || !selectedModel) return
-    await configWrite.current.catch(() => undefined)
-    const attached = images.attachments
-    const payload = images.toInputs()
-    setDraft('')
-    images.clear()
-    const ok = await send(text, payload)
-    // Nothing is lost on a refusal (e.g. a model that can't read images).
-    if (!ok) {
-      setDraft(text)
-      images.restore(attached)
+    try {
+      await configWrite.current.catch(() => undefined)
+      // A session change during a settings write must not send this draft to
+      // whichever session happens to be selected when the promise resolves.
+      if (useCommanderStore.getState().selectedSessionId !== sessionId) return
+      const ok = await send(text, images.toInputs())
+      if (ok) {
+        setDraft('')
+        images.clear()
+      }
+    } finally {
+      submitting.current = false
+      setIsSubmitting(false)
     }
   }
 
@@ -261,6 +268,7 @@ export function CommanderChatPane() {
           <div className="flex items-end gap-2 px-3 py-2">
             <textarea
               ref={inputRef}
+              disabled={isSubmitting}
               aria-label="Message the Commander"
               rows={1}
               value={draft}

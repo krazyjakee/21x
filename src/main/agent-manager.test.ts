@@ -658,12 +658,13 @@ describe('AgentManager skill file paths', () => {
       const db = makeMcpDb()
 
       const md: string = generateAgentsMd(db, [], [], '/tmp/ws', 'agent-1', {
-        'task-management': { type: 'http', url: 'http://127.0.0.1:5555/mcp?token=session-secret&task=t1&parent=p1' }
+        'task-management': { type: 'http', url: 'http://127.0.0.1:5555/mcp?token=session-secret&scope_signature=captain-secret&task=t1&parent=p1' }
       })
 
       expect(md).toContain('**Type:** Local (HTTP, in-process)')
       expect(md).toContain('http://127.0.0.1:5555/mcp?task=t1&parent=p1')
       expect(md).not.toContain('session-secret')
+      expect(md).not.toContain('captain-secret')
       expect(md).not.toContain('/bin/Electron')
       expect(md).not.toContain('**Command:**')
     })
@@ -1886,6 +1887,7 @@ describe('AgentManager permission and question routing', () => {
       getTask: vi.fn(() => ({ id: 'task-1', title: 'Test', agent_id: 'agent-1' })),
       getAgent: vi.fn(() => ({ id: 'agent-1', name: 'Agent', config: {} })),
       getWorkspaceDir: vi.fn(() => '/tmp/ws'),
+      getAttachmentsDir: vi.fn(() => '/tmp/task-attachments/task-1'),
       updateTask: vi.fn(),
       getMcpServer: vi.fn(() => null),
       getSecretsByIds: vi.fn(() => []),
@@ -1900,6 +1902,7 @@ describe('AgentManager permission and question routing', () => {
     const session = {
       agentId: 'agent-1',
       taskId: 'task-1',
+      workspaceDir: '/tmp/ws',
       status: 'working',
       adapter: {
         respondToQuestion: vi.fn(async () => undefined),
@@ -1915,7 +1918,7 @@ describe('AgentManager permission and question routing', () => {
     }
     ;(mgr as any).sessions.set('temp-id', session)
 
-    return { mgr, session }
+    return { mgr, session, mockDb }
   }
 
   it('routes an explicit question response to the question method when the adapter also handles permissions', async () => {
@@ -1937,6 +1940,39 @@ describe('AgentManager permission and question routing', () => {
       { workspaceDir: '/tmp/ws' }
     )
     expect(dualAdapter.respondToApproval).not.toHaveBeenCalled()
+  })
+
+  it('preserves a multiline image answer and copies its task attachment before resuming the question', async () => {
+    const { mgr, session, mockDb } = createManagerWithSession()
+    const image = { id: 'pasted', filename: 'shot.png', mime_type: 'image/png', size: 64, added_at: 'now' }
+    vi.mocked(mockDb.getTask).mockReturnValue({ id: 'task-1', attachments: [image] } as TaskRecord)
+    mockedExistsSync.mockReturnValue(true)
+    mockedCopyFileSync.mockClear()
+    vi.spyOn(mgr as any, 'getAdapter').mockReturnValue(session.adapter)
+    vi.spyOn(mgr as any, 'buildSessionConfig').mockResolvedValue({ workspaceDir: '/tmp/ws' })
+    session.adapter.respondToQuestion.mockImplementation(async () => {
+      expect(mockedCopyFileSync).toHaveBeenCalledWith('/tmp/task-attachments/task-1/pasted-shot.png', '/tmp/ws/attachments/shot.png')
+    })
+    const answer = 'Use this layout.\nKeep both columns.\n\nMessage attachments (already available in your workspace):\n- attachments/shot.png'
+    try {
+      await mgr.respondToPermission('temp-id', true, answer, undefined, 'question')
+      expect(session.adapter.respondToQuestion).toHaveBeenCalledWith('temp-id', { answer }, { workspaceDir: '/tmp/ws' })
+    } finally {
+      mockedExistsSync.mockReturnValue(false)
+    }
+  })
+
+  it('preserves labelled multi-question replies and does not copy attachments for a rejected question', async () => {
+    const { mgr, session } = createManagerWithSession()
+    vi.spyOn(mgr as any, 'getAdapter').mockReturnValue(session.adapter)
+    vi.spyOn(mgr as any, 'buildSessionConfig').mockResolvedValue({ workspaceDir: '/tmp/ws' })
+    await mgr.respondToPermission('temp-id', true, 'Deployment: Staging\nRegion: EU', undefined, 'question')
+    expect(session.adapter.respondToQuestion).toHaveBeenCalledWith('temp-id', { Deployment: 'Staging', Region: 'EU' }, { workspaceDir: '/tmp/ws' })
+    mockedCopyFileSync.mockClear()
+    session.adapter.respondToQuestion.mockClear()
+    await mgr.respondToPermission('temp-id', false, 'Do not send\nattachments/shot.png', undefined, 'question')
+    expect(mockedCopyFileSync).not.toHaveBeenCalled()
+    expect(session.adapter.respondToQuestion).not.toHaveBeenCalled()
   })
 
   it('keeps an untyped response on the permission method for a dual-purpose adapter', async () => {

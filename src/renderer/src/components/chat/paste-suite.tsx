@@ -69,8 +69,11 @@ export function describeChatImagePaste(surface: string, mount: () => Promise<HTM
       expect(screen.getByRole('alert')).toBeTruthy()
       expect(chips()).toHaveLength(0)
 
-      fireEvent.click(screen.getByRole('button', { name: 'Dismiss message' }))
+      const dismiss = screen.getByRole('button', { name: 'Dismiss message' })
+      dismiss.focus()
+      fireEvent.click(dismiss)
       expect(screen.queryByRole('alert')).toBeNull()
+      expect(document.activeElement).toBe(field)
     })
   })
 }

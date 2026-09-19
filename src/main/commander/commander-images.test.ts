@@ -70,7 +70,7 @@ describe('Commander messages with images', () => {
     const service = new CommanderService({ store, createProvider: () => provider, emit: (e) => events.push(e) })
     const session = store.createSession()
 
-    const { message, done } = service.sendUserMessage(session.id, 'What does this show?', [png('chart.png'), png('table.png')])
+    const { message, done } = service.sendUserMessage(session.id, 'What does this show?', 'typed', [png('chart.png'), png('table.png')])
     await done
 
     expect(message.images).toEqual([
@@ -94,7 +94,7 @@ describe('Commander messages with images', () => {
     const provider = recordingProvider({ supportsImages: true })
     const service = new CommanderService({ store, createProvider: () => provider, emit: () => {} })
     const session = store.createSession()
-    await service.sendUserMessage(session.id, '   ', [png()]).done
+    await service.sendUserMessage(session.id, '   ', 'typed', [png()]).done
     expect(store.listMessages(session.id)[0]).toMatchObject({ role: 'user', content: '' })
     expect(store.getSession(session.id)?.title).toBeTruthy()
   })
@@ -103,7 +103,7 @@ describe('Commander messages with images', () => {
     const provider = recordingProvider()
     const service = new CommanderService({ store, createProvider: () => provider, emit: (e) => events.push(e) })
     const session = store.createSession()
-    expect(() => service.sendUserMessage(session.id, 'Look at this', [png()])).toThrow(imagesUnsupportedMessage(provider))
+    expect(() => service.sendUserMessage(session.id, 'Look at this', 'typed', [png()])).toThrow(imagesUnsupportedMessage(provider))
     expect(store.listMessages(session.id)).toEqual([])
     expect(events).toEqual([])
     expect(provider.requests).toEqual([])
@@ -114,8 +114,8 @@ describe('Commander messages with images', () => {
   it('refuses invalid images with the shared messages', () => {
     const service = new CommanderService({ store, createProvider: () => recordingProvider({ supportsImages: true }), emit: () => {} })
     const session = store.createSession()
-    expect(() => service.sendUserMessage(session.id, 'x', [png('big.png', MAX_CHAT_IMAGE_BYTES + 3)])).toThrow(/Images must be 5.0 MB or smaller/)
-    expect(() => service.sendUserMessage(session.id, 'x', Array.from({ length: 6 }, () => png()))).toThrow(chatImageErrors.tooMany())
+    expect(() => service.sendUserMessage(session.id, 'x', 'typed', [png('big.png', MAX_CHAT_IMAGE_BYTES + 3)])).toThrow(/Images must be 5.0 MB or smaller/)
+    expect(() => service.sendUserMessage(session.id, 'x', 'typed', Array.from({ length: 6 }, () => png()))).toThrow(chatImageErrors.tooMany())
     expect(store.listMessages(session.id)).toEqual([])
   })
 
@@ -124,13 +124,46 @@ describe('Commander messages with images', () => {
     const service = new CommanderService({ store, createProvider: () => provider, emit: () => {} })
     const session = store.createSession()
     const nearFull = (name: string) => png(name, MAX_CHAT_IMAGE_BYTES - 3)
-    await service.sendUserMessage(session.id, 'first', [nearFull('old-1.png'), nearFull('old-2.png'), nearFull('old-3.png')]).done
-    await service.sendUserMessage(session.id, 'second', [nearFull('new-1.png'), nearFull('new-2.png')]).done
+    await service.sendUserMessage(session.id, 'first', 'typed', [nearFull('old-1.png'), nearFull('old-2.png'), nearFull('old-3.png')]).done
+    await service.sendUserMessage(session.id, 'second', 'typed', [nearFull('new-1.png'), nearFull('new-2.png')]).done
 
     const last = chatRequests(provider).at(-1)!
     const [first, , second] = last.messages
     expect(first).toEqual({ role: 'user', content: 'first\n[Earlier images no longer attached: old-1.png, old-2.png, old-3.png]' })
     expect(second.role === 'user' && second.images?.map((i) => i.name)).toEqual(['new-1.png', 'new-2.png'])
+  })
+
+  it.each(['images', 'tools'])('rolls back a new message and its images when preparing %s fails, allowing one clean retry', async (failure) => {
+    const provider = recordingProvider({ supportsImages: true })
+    const getTools = vi.fn(() => [])
+    const service = new CommanderService({ store, createProvider: () => provider, getTools, emit: (event) => events.push(event) })
+    const session = store.createSession()
+    if (failure === 'images') vi.spyOn(store, 'getMessageImages').mockImplementationOnce(() => { throw new Error('cannot load images') })
+    else getTools.mockImplementationOnce(() => { throw new Error('cannot prepare tools') })
+
+    expect(() => service.sendUserMessage(session.id, 'look', 'typed', [png()])).toThrow(/cannot/)
+    expect(store.listMessages(session.id)).toEqual([])
+    expect(db.db.prepare('SELECT COUNT(*) AS count FROM commander_images').get()).toEqual({ count: 0 })
+    expect(events).toEqual([])
+    expect(service.activeTurnId(session.id)).toBeNull()
+
+    await service.sendUserMessage(session.id, 'look', 'typed', [png()]).done
+    expect(store.listMessages(session.id).filter((message) => message.role === 'user')).toHaveLength(1)
+    expect(chatRequests(provider)).toHaveLength(1)
+  })
+
+  it('replaces earlier image history with notes after switching to a text-only provider', async () => {
+    const provider = recordingProvider()
+    const service = new CommanderService({ store, createProvider: () => provider, emit: () => {} })
+    const session = store.createSession()
+    store.appendMessage(session.id, { role: 'user', content: 'previous', images: [png()] })
+    store.appendMessage(session.id, { role: 'assistant', content: 'seen' })
+    const loader = vi.spyOn(store, 'getMessageImages')
+    await service.sendUserMessage(session.id, 'continue').done
+    expect(loader).not.toHaveBeenCalled()
+    const history = chatRequests(provider)[0].messages
+    expect(history[0]).toEqual({ role: 'user', content: 'previous\n[Earlier image no longer attached: shot.png]' })
+    expect(history.some((message) => message.role === 'user' && message.images?.length)).toBe(false)
   })
 
   it('deletes images with their session', () => {

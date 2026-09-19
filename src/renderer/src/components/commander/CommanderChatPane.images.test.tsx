@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { CommanderMessage, CommanderSession } from '@shared/commander'
 import { describeChatImagePaste } from '@/components/chat/paste-suite'
 import { clipboard, imageBytes, imageFile, toBase64 } from '@/components/chat/paste-fixtures'
@@ -55,6 +55,14 @@ async function mountCommander(): Promise<HTMLTextAreaElement> {
 }
 
 beforeEach(() => {
+  // This mounted transcript is visible; happy-dom does not calculate layout.
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(private callback: IntersectionObserverCallback) {}
+    observe(target: Element) {
+      this.callback([{ target, isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver)
+    }
+    disconnect() {}
+  })
   clearCommanderImageCache()
   useAgentStore.setState({ agents: [], isLoading: false, error: null, sessions: new Map() })
   useCommanderStore.setState({
@@ -74,6 +82,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  vi.unstubAllGlobals()
   vi.clearAllMocks()
 })
 
@@ -127,6 +136,35 @@ describe('Commander composer: sending images', () => {
     expect(await screen.findByText(reason)).toBeTruthy()
     expect(field.value).toBe('Explain')
     expect(screen.getByRole('img', { name: 'a.png' })).toBeTruthy()
+  })
+
+  it('keeps one in-flight send even before IPC responds', async () => {
+    const field = await mountCommander()
+    let rejectSend!: (error: Error) => void
+    api.send.mockImplementationOnce(() => new Promise((_, reject) => { rejectSend = reject }))
+    fireEvent.change(field, { target: { value: 'Send once' } })
+    fireEvent.click(screen.getByLabelText('Send'))
+    fireEvent.keyDown(field, { key: 'Enter' })
+    await waitFor(() => expect(api.send).toHaveBeenCalledTimes(1))
+    await act(async () => { rejectSend(new Error('offline')) })
+    expect(field.value).toBe('Send once')
+    expect(api.send).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not send a draft to another session after waiting for model settings', async () => {
+    const field = await mountCommander()
+    let finishSettings!: () => void
+    mocks.settingsApi.set.mockImplementation(() => new Promise<void>((resolve) => { finishSettings = resolve }))
+    fireEvent.change(screen.getByLabelText('Thinking level'), { target: { value: 'high' } })
+    await waitFor(() => expect(finishSettings).toBeDefined())
+    fireEvent.change(field, { target: { value: 'Private session A' } })
+    fireEvent.click(screen.getByLabelText('Send'))
+    await act(async () => {
+      useCommanderStore.setState({ selectedSessionId: 's2', sessions: [session(), { ...session(), id: 's2' }] })
+      finishSettings()
+    })
+    expect(api.send).not.toHaveBeenCalled()
+    expect((screen.getByLabelText('Message the Commander') as HTMLTextAreaElement).value).toBe('')
   })
 
   it('loads the thumbnails of stored messages from main', async () => {

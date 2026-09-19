@@ -84,6 +84,18 @@ file keeps the retirement of the legacy seeded "Mastermind" skill. It is the
 only place in `src/` (with its test and one commented compatibility alias) that
 may spell the old name; `src/shared/captain-terminology.test.ts` enforces that.
 
+### Merge grants and the pull-request policy split (v19)
+
+Migration 19 (`migrateMergeGrants()`, #137) adds `merge_grants`,
+`merge_grant_uses` and durable `merge_grant_reservations` (new tables, also in `createTables()`) and splits the
+escalation policy's combined `pr` item in `projects.settings.escalation`:
+the stored level moves to `merge_pr`, `open_pr` gets its default
+(`tell_commander`), and `pr` is removed (`splitPullRequestEscalation()`).
+Rows without `pr`, or with unreadable settings, are untouched, so re-runs are
+no-ops. **18 is skipped on purpose**: it is claimed by an open branch
+(`feat/commander-on-agent-sessions`). Every step of both is guarded, so
+whichever lands second only needs to renumber `SCHEMA_VERSION` and this note.
+
 ## Adding a column to other tables
 
 Same pattern: update `createTables()`, add a guarded `ALTER TABLE` in `runMigrations()`, and bump `SCHEMA_VERSION`.

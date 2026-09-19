@@ -181,7 +181,8 @@ export class CommanderStore {
 
   // ── Messages ──────────────────────────────────────────────
 
-  appendMessage(sessionId: string, input: AppendCommanderMessageInput): CommanderMessage {
+  /** beforeCommit prepares a turn against the inserted message; a failure rolls back its images too. */
+  appendMessage(sessionId: string, input: AppendCommanderMessageInput, beforeCommit?: (message: CommanderMessage) => void): CommanderMessage {
     if (!COMMANDER_MESSAGE_ROLES.includes(input.role)) throw new Error(`Unknown Commander message role: ${String(input.role)}`)
     const id = createId()
     const ts = this.now()
@@ -212,9 +213,11 @@ export class CommanderStore {
         const bytes = Buffer.from(image.data, 'base64')
         insertImage.run(createId(), id, position, image.name, image.mimeType, bytes.length, bytes)
       })
+      const message = this.getMessage(id)!
+      beforeCommit?.(message)
+      return message
     })
-    insert()
-    return this.getMessage(id)!
+    return insert()
   }
 
   getMessage(id: string): CommanderMessage | null {

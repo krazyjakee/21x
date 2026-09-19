@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
-import type { ClipboardEvent } from 'react'
+import { act, cleanup, render, renderHook, screen, waitFor } from '@testing-library/react'
+import { createElement, useState, type ClipboardEvent } from 'react'
 import { MAX_CHAT_IMAGE_BYTES, MAX_CHAT_IMAGES_PER_MESSAGE, chatImageErrors, type ChatImageInput } from '@shared/chat-images'
-import { clipboardFiles, pastedImageName, useChatAttachments, type UseChatAttachmentsOptions } from './use-chat-attachments'
+import { clipboardFiles, insertPlainText, pastedImageName, useChatAttachments, type UseChatAttachmentsOptions } from './use-chat-attachments'
 import { BMP_MAGIC, clipboard, imageBytes, imageFile, toBase64, type FakeClipboard } from '@/components/chat/paste-fixtures'
 
 vi.mock('@/lib/ipc-client', () => ({ chatImageApi: { readClipboard: vi.fn(async () => ({ images: [], errors: [] })) } }))
@@ -161,4 +161,106 @@ describe('useChatAttachments', () => {
     const data = clipboard({ files: [file] })
     expect(clipboardFiles(data as unknown as DataTransfer)).toEqual([file])
   })
+})
+
+describe('paste isolation and adversarial inputs', () => {
+  it('preserves distinct same-name, same-size files while deduplicating files/items', () => {
+    const first = imageFile('image.png')
+    const second = imageFile('image.png')
+    expect(clipboardFiles(clipboard({ files: [first, second] }) as unknown as DataTransfer)).toEqual([first, second])
+  })
+
+  it('rejects malformed native base64 without throwing or leaking file paths', () => {
+    const { current } = setup()
+    act(() => current().addInputs([{ name: '/home/private/secret.png', mimeType: 'image/png', data: '%%%%' }]))
+    expect(current().attachments).toEqual([])
+    expect(current().errors).toEqual([chatImageErrors.readFailed('secret.png')])
+  })
+
+  it('clear cancels an old file read without decrementing a newer reservation', async () => {
+    let complete!: (bytes: ArrayBuffer) => void
+    const file = imageFile('old.png')
+    Object.defineProperty(file, 'arrayBuffer', { value: () => new Promise<ArrayBuffer>((resolve) => { complete = resolve }) })
+    const { current } = setup()
+    let old!: Promise<void>
+    act(() => { old = current().addFiles([file]) })
+    expect(current().isReading).toBe(true)
+    act(() => current().clear())
+    expect(current().isReading).toBe(false)
+    await act(async () => { await current().addFiles([imageFile('new.png')]) })
+    await act(async () => { complete(imageBytes().buffer); await old })
+    expect(current().attachments.map((a) => a.name)).toEqual(['new.png'])
+    expect(current().isReading).toBe(false)
+    expect(current().announcement?.text).toBe('Image attached: new.png')
+  })
+
+  it('switching chats ignores pending native images and fallback text', async () => {
+    let complete!: (value: { images: ChatImageInput[]; errors: string[] }) => void
+    const readClipboard = () => new Promise<{ images: ChatImageInput[]; errors: string[] }>((resolve) => { complete = resolve })
+    const hook = renderHook(({ key }) => useChatAttachments({ draftKey: key, readClipboard }), { initialProps: { key: 'task-a' } })
+    const field = document.createElement('textarea')
+    const event = pasteEvent(clipboard({ uriList: 'file:///private/image.png', text: '/private/image.png' }), field)
+    act(() => hook.result.current.handlePaste(event))
+    hook.rerender({ key: 'task-b' })
+    await act(async () => { complete({ images: [], errors: [] }); await Promise.resolve() })
+    expect(field.value).toBe('')
+    expect(hook.result.current.attachments).toEqual([])
+    expect(hook.result.current.isReading).toBe(false)
+  })
+
+  it('unmount cancels fallback text insertion into a detached composer', async () => {
+    let complete!: (value: { images: ChatImageInput[]; errors: string[] }) => void
+    const { hook, current } = setup({ readClipboard: () => new Promise((resolve) => { complete = resolve }) })
+    const field = document.createElement('textarea')
+    act(() => current().handlePaste(pasteEvent(clipboard({ uriList: 'file:///private/path', text: '/private/path' }), field)))
+    hook.unmount()
+    await act(async () => { complete({ images: [], errors: [] }); await Promise.resolve() })
+    expect(field.value).toBe('')
+  })
+})
+
+it('preserves native mixed text + image paste without inserting a file-manager path', async () => {
+  const input: ChatImageInput = { name: 'photo.png', mimeType: 'image/png', data: toBase64(imageBytes()) }
+  const { paste, current, readClipboard } = setup()
+  readClipboard.mockResolvedValue({ images: [input], errors: [] })
+  const event = await paste(clipboard({ uriList: 'file:///private/photo.png', text: 'please inspect this' }))
+  expect(event.preventDefault).not.toHaveBeenCalled()
+  expect(current().attachments).toHaveLength(1)
+  const filesEvent = await paste(clipboard({ files: [imageFile('photo.png')], text: '/private/photo.png' }))
+  expect(filesEvent.preventDefault).toHaveBeenCalled()
+})
+
+it('does not turn a refused native image into a pasted private path', async () => {
+  const { paste, readClipboard } = setup()
+  const field = document.createElement('textarea')
+  readClipboard.mockResolvedValue({ images: [], errors: ['Image too large'] })
+  await paste(clipboard({ uriList: 'file:///private/photo.png', text: '/private/photo.png' }), field)
+  expect(field.value).toBe('')
+})
+
+
+it('fallback text insertion updates a controlled composer at its selection', () => {
+  function Controlled() {
+    const [value, setValue] = useState('before after')
+    return createElement('div', null,
+      createElement('textarea', { value, onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => setValue(event.target.value) }),
+      createElement('output', null, value))
+  }
+  render(createElement(Controlled))
+  const field = screen.getByRole('textbox') as HTMLTextAreaElement
+  field.setSelectionRange(7, 7)
+  act(() => insertPlainText(field, 'middle '))
+  expect(screen.getByRole('status').textContent).toBe('before middle after')
+  expect(field.selectionStart).toBe(14)
+})
+
+
+it('sniffs copied image files with generic binary MIME types', async () => {
+  const { paste, current } = setup()
+  await paste(clipboard({ files: [imageFile('copied.png', 'application/octet-stream')] }))
+  expect(current().attachments).toHaveLength(1)
+  expect(current().attachments[0].mimeType).toBe('image/png')
+  await paste(clipboard({ files: [imageFile('fake.png', 'application/octet-stream', 64, BMP_MAGIC)] }))
+  expect(current().attachments).toHaveLength(1)
+  expect(current().errors).toEqual([chatImageErrors.unsupportedType('fake.png')])
 })

@@ -20,6 +20,7 @@ interface AttachmentTrayProps {
 export function AttachmentTray({ controller, composerRef, className }: AttachmentTrayProps) {
   const { attachments, errors, announcement, isReading, remove, dismissError } = controller
   const removeButtons = useRef(new Map<string, HTMLButtonElement>())
+  const dismissButtons = useRef(new Map<string, HTMLButtonElement>())
 
   const handleRemove = (id: string) => {
     const index = attachments.findIndex((a) => a.id === id)
@@ -85,7 +86,16 @@ export function AttachmentTray({ controller, composerRef, className }: Attachmen
                   <span className="flex-1">{error}</span>
                   <button
                     type="button"
-                    onClick={() => dismissError(index)}
+                    ref={(el) => {
+                      if (el) dismissButtons.current.set(error, el)
+                      else dismissButtons.current.delete(error)
+                    }}
+                    onClick={() => {
+                      const neighbour = errors[index + 1] ?? errors[index - 1]
+                      dismissError(index)
+                      if (neighbour) dismissButtons.current.get(neighbour)?.focus()
+                      else composerRef?.current?.focus()
+                    }}
                     className="rounded text-destructive/70 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     aria-label="Dismiss message"
                   >

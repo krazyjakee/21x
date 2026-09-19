@@ -5,14 +5,34 @@ import { AgentTranscriptPanel } from '@/components/agents/AgentTranscriptPanel'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useAgentSession } from '@/hooks/use-agent-session'
 import { useCurrentProject } from '@/hooks/use-project-tasks'
-import { agentApi, settingsApi } from '@/lib/ipc-client'
+import { agentApi, mergeGrantsApi, settingsApi } from '@/lib/ipc-client'
 import { captainAgentIdFor, useCaptainTaskId } from '@/stores/coordinator-store'
+import { useProjectStore } from '@/stores/project-store'
 import type { Agent } from '@/types'
 import type { ComposerAttachment } from '@/components/agents/transcript/TranscriptComposer'
 import { taskImageSaver, withAttachmentNote } from '@/lib/chat-image-attachments'
 
 /** Start the agent at app start, so the first sentence does not wait for it. */
 export const CAPTAIN_PREWARM_SETTING = 'captain_prewarm'
+
+/**
+ * How long the drawer waits for a Captain to come up before it offers Retry.
+ * Main gives up at 90 s and says why; this is the backstop for a start whose
+ * answer never arrives.
+ */
+export const CAPTAIN_START_TIMEOUT_MS = 100_000
+
+/** A Captain that could not be brought up, and the agent it was started on. */
+interface StartFailure {
+  agentId: string
+  message: string
+}
+
+/** The reason without Electron's "Error invoking remote method '…': Error: " wrapper. */
+function startFailureMessage(err: unknown): string {
+  const text = err instanceof Error ? err.message : String(err)
+  return text.replace(/^Error invoking remote method '[^']*': (?:Error: )?/, '')
+}
 
 interface OrchestratorPanelProps {
   onClose: () => void
@@ -29,12 +49,24 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   const captainTaskId = useCaptainTaskId()
   const { start, stop, sendMessage, approve } = useAgentSession(captainTaskId ?? undefined)
   const currentSession = useAgentStore((state) => (captainTaskId ? state.sessions.get(captainTaskId) : undefined))
-  const removeSession = useAgentStore((state) => state.removeSession)
+  const resetSession = useAgentStore((state) => state.resetSession)
+  const updateProject = useProjectStore((state) => state.updateProject)
   /** The start in flight and whose it is, shared so a message can wait for it instead of racing. */
   const startingRef = useRef<{ taskId: string; promise: Promise<void> } | null>(null)
   const selectedAgentIdRef = useRef<string | null>(null)
   selectedAgentIdRef.current = selectedAgentId
   const [prewarm, setPrewarm] = useState(false)
+  /** The agent in use before the last switch, offered as the way back when the new one will not start. */
+  const [previousAgentId, setPreviousAgentId] = useState<string | null>(null)
+  const [startFailure, setStartFailure] = useState<StartFailure | null>(null)
+  /**
+   * Messages sent while the Captain could not be started, per Captain row.
+   * Each is delivered once, in order, when a start succeeds.
+   */
+  const queuedRef = useRef(new Map<string, Array<{ text: string; typed: boolean; options?: { attachments?: ComposerAttachment[] } }>>())
+  const typedMessageRef = useRef<string | null>(null)
+  const drainingRef = useRef(false)
+  const [queuedCount, setQueuedCount] = useState(0)
 
   // Read the preference before warming anything: a user who switched this off
   // must not get an agent process on every launch.
@@ -69,14 +101,30 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
     setSelectedAgentId(captainAgentIdFor({ captain_agent_id: projectCaptainAgentId, default_agent_id: projectDefaultAgentId }, agents))
   }, [agents, projectId, projectCaptainAgentId, projectDefaultAgentId])
 
+  // A failure belongs to the Captain it happened to.
+  useEffect(() => {
+    setStartFailure(null)
+    setQueuedCount(captainTaskId ? queuedRef.current.get(captainTaskId)?.length ?? 0 : 0)
+  }, [captainTaskId])
+
   // Switch agent. The new choice is recorded before the old session is
-  // stopped, or the warm-up would race in and start the old agent again.
+  // stopped, or the warm-up would race in and start the old agent again. It
+  // is saved on the project too: the Commander, wake-ups and the next launch
+  // start the Captain on the project's agent, and a choice that lived only
+  // here was silently undone by all three. Main stops a session still
+  // running on the old agent when the project changes.
   const handleAgentChange = async (newAgentId: string) => {
+    const previous = selectedAgentIdRef.current
+    if (!newAgentId || newAgentId === previous) return
+    setPreviousAgentId(previous)
     selectedAgentIdRef.current = newAgentId
     setSelectedAgentId(newAgentId)
+    setStartFailure(null)
+    if (projectId) void updateProject(projectId, { captain_agent_id: newAgentId })
     if (currentSession?.sessionId && captainTaskId) {
       await stop()
-      removeSession(captainTaskId)
+      // Keeps the transcript: the conversation is the same Captain's.
+      resetSession(captainTaskId)
     }
   }
 
@@ -100,12 +148,31 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
     // A start still in flight for another project's Captain is not ours.
     if (!startingRef.current || startingRef.current.taskId !== taskId) {
       const promise = (async () => {
-        // Clean up any old session data first
-        removeSession(taskId)
+        // Drop the old session state (not the transcript) first.
+        resetSession(taskId)
+        setStartFailure(null)
         // skipInitialPrompt keeps the agent quiet until the user speaks. Main
         // resumes the persisted conversation when there is one, so a restart
-        // continues where the last one left off.
-        await start(agentId, taskId, undefined, true)
+        // continues where the last one left off. Bounded, so a start that
+        // never answers ends in Retry rather than "Agent is starting..." forever.
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const timeout = new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`No answer after ${Math.round(CAPTAIN_START_TIMEOUT_MS / 1000)} seconds`)),
+            CAPTAIN_START_TIMEOUT_MS
+          )
+        })
+        try {
+          await Promise.race([start(agentId, taskId, undefined, true), timeout])
+        } catch (err) {
+          // start() already cleared its "starting" state when it failed; a
+          // timeout left it behind.
+          useAgentStore.getState().endSession(taskId)
+          if (selectedAgentIdRef.current === agentId) setStartFailure({ agentId, message: startFailureMessage(err) })
+          throw err
+        } finally {
+          clearTimeout(timer)
+        }
         // Small delay to ensure session is fully initialized
         await new Promise((resolve) => setTimeout(resolve, 100))
       })().finally(() => {
@@ -121,27 +188,81 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
       console.error('Failed to start captain session:', err)
       return false
     }
-  }, [captainTaskId, start, removeSession])
+  }, [captainTaskId, start, resetSession])
 
-  // Send message - the session is usually warm already, so this just sends.
   const handleSaveImages = useMemo(() => (captainTaskId ? taskImageSaver(captainTaskId) : undefined), [captainTaskId])
 
-  const handleSendMessage = useCallback(
-    async (message: string, options?: { attachments?: ComposerAttachment[] }) => {
-      if (!(await ensureSession())) return
-
+  const deliver = useCallback(
+    async (message: { text: string; typed: boolean; options?: { attachments?: ComposerAttachment[] } }) => {
       // Question answers should use approve() instead of sendMessage()
       const live = captainTaskId ? useAgentStore.getState().sessions.get(captainTaskId) : undefined
       const messages = live?.messages || []
       const lastMessage = messages[messages.length - 1]
       if (lastMessage?.partType === 'question' && lastMessage?.tool?.questions) {
-        await approve(true, withAttachmentNote(message, options?.attachments))
+        await approve(true, withAttachmentNote(message.text, message.options?.attachments))
       } else {
-        await sendMessage(message, options)
+        if (message.typed && captainTaskId) mergeGrantsApi.noteTyped(captainTaskId, message.text)
+        await sendMessage(message.text, message.options)
       }
     },
-    [captainTaskId, ensureSession, sendMessage, approve]
+    [captainTaskId, sendMessage, approve]
   )
+
+  /** Sends what was held while the Captain was down, oldest first, each once. */
+  const drainQueue = useCallback(async () => {
+    const taskId = captainTaskId
+    if (!taskId || drainingRef.current) return
+    const queue = queuedRef.current.get(taskId)
+    if (!queue?.length) return
+    drainingRef.current = true
+    try {
+      while (queue.length > 0) {
+        // Taken off before sending, so a second drain cannot send it again.
+        const next = queue.shift()!
+        setQueuedCount(queue.length)
+        try {
+          await deliver(next)
+        } catch (err) {
+          queue.unshift(next)
+          setQueuedCount(queue.length)
+          throw err
+        }
+      }
+    } finally {
+      drainingRef.current = false
+    }
+  }, [captainTaskId, deliver])
+
+  // Send message - the session is usually warm already, so this just sends.
+  // When the Captain cannot be started the message is held, not dropped, and
+  // goes out after a successful retry or switch.
+  const handleSendMessage = useCallback(
+    async (message: string, options?: { attachments?: ComposerAttachment[] }) => {
+      const outgoing = { text: message, typed: typedMessageRef.current === message, options }
+      typedMessageRef.current = null
+      const taskId = captainTaskId
+      if (!(await ensureSession())) {
+        if (!taskId) return
+        const queue = queuedRef.current.get(taskId) ?? []
+        queue.push(outgoing)
+        queuedRef.current.set(taskId, queue)
+        setQueuedCount(queue.length)
+        return
+      }
+      await drainQueue()
+      await deliver(outgoing)
+    },
+    [captainTaskId, ensureSession, drainQueue, deliver]
+  )
+
+  const retryStart = useCallback(async () => {
+    setStartFailure(null)
+    try {
+      if (await ensureSession()) await drainQueue()
+    } catch (err) {
+      console.error('Failed to deliver held Captain messages:', err)
+    }
+  }, [ensureSession, drainQueue])
 
   /**
    * Start the agent in the background, before there is anything to say.
@@ -156,9 +277,11 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
    * process. Failure is silent: the first message starts the session as before.
    */
   useEffect(() => {
-    if (!prewarm || !selectedAgentId || !captainTaskId || currentSession?.sessionId) return
-    void ensureSession()
-  }, [prewarm, selectedAgentId, captainTaskId, currentSession?.sessionId, ensureSession])
+    if (!prewarm || !selectedAgentId || !captainTaskId || currentSession?.sessionId || startFailure) return
+    void ensureSession().then((ok) => (ok ? drainQueue() : undefined)).catch((err: unknown) => {
+      console.error('Failed to deliver held Captain messages:', err)
+    })
+  }, [prewarm, selectedAgentId, captainTaskId, currentSession?.sessionId, startFailure, ensureSession, drainQueue])
 
   // Listen for pre-fill messages from the dashboard command input
   useEffect(() => {
@@ -167,6 +290,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
       if (detail?.message && typeof detail.message === 'string') {
         // Small delay to ensure the panel is mounted and agent is selected
         setTimeout(() => {
+          if (detail.typed === true) typedMessageRef.current = detail.message
           handleSendMessage(detail.message)
         }, 200)
       }
@@ -176,6 +300,11 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   }, [handleSendMessage])
 
   const projectName = project?.name ?? 'Default'
+  const agentName = (id: string | null): string => agents.find((agent) => agent.id === id)?.name ?? 'the agent'
+  const rollbackAgentId =
+    startFailure && previousAgentId && previousAgentId !== startFailure.agentId && agents.some((agent) => agent.id === previousAgentId)
+      ? previousAgentId
+      : null
 
   return (
     // Floats as a card, like the workspace and the sidebar: same radius,
@@ -210,6 +339,31 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
         </Button>
       </div>
 
+      {/* A start that failed or timed out: why, and the ways out. */}
+      {startFailure && (
+        <div role="alert" className="flex flex-col gap-2 border-b border-destructive/30 bg-destructive/10 px-4 py-2.5 text-xs shrink-0">
+          <p>
+            <span className="font-medium text-foreground">The Captain could not start on {agentName(startFailure.agentId)}.</span>{' '}
+            <span className="text-muted-foreground">{startFailure.message}</span>
+          </p>
+          {queuedCount > 0 && (
+            <p className="text-muted-foreground">
+              {queuedCount === 1 ? '1 message is' : `${queuedCount} messages are`} waiting and will be sent once the Captain is up.
+            </p>
+          )}
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => void retryStart()}>
+              Retry
+            </Button>
+            {rollbackAgentId && (
+              <Button size="sm" variant="ghost" onClick={() => void handleAgentChange(rollbackAgentId)}>
+                Switch back to {agentName(rollbackAgentId)}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Chat interface */}
       {selectedAgentId && (
         <AgentTranscriptPanel
@@ -220,6 +374,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
           onStop={stop}
           onSend={handleSendMessage}
           onSaveImages={handleSaveImages}
+          onTypedMessage={(text) => { typedMessageRef.current = text }}
           className="flex-1 min-h-0"
           sessionId={currentSession?.sessionId}
           pendingSend={currentSession?.pendingSend}

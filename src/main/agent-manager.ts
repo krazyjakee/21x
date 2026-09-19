@@ -1,3 +1,4 @@
+import { prepareProjectMessageDispatch, activateProjectMessageDispatch, failProjectMessageDispatch, type ProjectMessageDispatch, type TypedMessage } from './merge-grants'
 import { DEFAULT_SERVER_URL } from './adapters/opencode-server'
 import { guardedIpcSend } from './guarded-ipc-send'
 import { transcriptDisplayPart } from './transcript-display'
@@ -11,6 +12,7 @@ import type { BrowserWindow } from 'electron'
 import type { AgentRecord, DatabaseManager, TaskRecord } from './database'
 import { TaskStatus } from '../shared/constants'
 import { isCoordinatorTask } from '../shared/task-roles'
+import { resolveCaptainAgentId } from './captain-waker'
 import { emitTaskEvent } from './project-events'
 import { findBlockingSibling, isSuccessorGraphInProgress, successorsFireOnReview } from '../shared/subtask-graph'
 import type { WorktreeManager } from './worktree-manager'
@@ -47,6 +49,16 @@ const DONE_TODO_STATUSES = ['completed', 'cancelled', 'done', 'removed']
 /** Yields to the event loop between bursts of synchronous DB / FS calls so IPC
  *  and rendering are not starved (better-sqlite3 calls block the main thread). */
 const yieldEventLoop = (): Promise<void> => new Promise((r) => setImmediate(r))
+
+/** Settings key: the agent whose runtime made a coordinator row's persisted session. */
+const coordinatorSessionAgentKey = (taskId: string): string => `captain_session_agent:${taskId}`
+
+/**
+ * How long a Captain may take to come up (create or resume its session)
+ * before the start is reported as failed. Task sessions are not bounded: their
+ * worktree setup can legitimately clone a large repository first.
+ */
+export const CAPTAIN_START_TIMEOUT_MS = 90_000
 
 /** Outcome of a session start that went through admission control. */
 export type SessionStartOutcome =
@@ -644,6 +656,7 @@ export class AgentManager extends EventEmitter {
     })
 
     this.updateTaskFromLocalAgent(taskId, { session_id: adapterSessionId })
+    this.recordCoordinatorSessionAgent(taskId, agentId)
     console.log(`[SessionTracker] CREATED session=${adapterSessionId} task=${taskId} agent=${agentId} reason=new_session`)
 
     // Triage sessions keep the Triaging status; coordinator rows have none.
@@ -661,6 +674,7 @@ export class AgentManager extends EventEmitter {
     this.startAdapterPolling(adapterSessionId, adapter, sessionConfig)
 
     if (!skipInitialPrompt) {
+      if (task && isCoordinatorTask(task) && task.project_id) prepareProjectMessageDispatch(task.project_id)
       let promptText: string
       if (isTriageSession && task) {
         promptText = buildTriagePrompt(task, this.projectRepoNames(task))
@@ -1680,6 +1694,7 @@ export class AgentManager extends EventEmitter {
     // renderer bound to a stale session id and the wake turn's output renders
     // late or not at all.
     this.updateTaskFromLocalAgent(taskId, { session_id: adapterSessionId })
+    this.recordCoordinatorSessionAgent(taskId, agentId)
     this.sendToRenderer('task:updated', { taskId, updates: { session_id: adapterSessionId } })
 
     this.emitStatus(adapterSessionId, { agentId, taskId }, 'idle')
@@ -1761,7 +1776,11 @@ export class AgentManager extends EventEmitter {
 
     this.admittedStarts.set(taskId, agentId)
     try {
-      return { status: 'started', sessionId: await this.startSessionNow(agentId, taskId, workspaceDir, skipInitialPrompt) }
+      const starting = this.startSessionNow(agentId, taskId, workspaceDir, skipInitialPrompt)
+      const sessionId = isCoordinatorTask(task)
+        ? await this.boundedCaptainStart(starting, agent.name, taskId)
+        : await starting
+      return { status: 'started', sessionId }
     } catch (error) {
       // The reserved slot is free again (released in finally, before the
       // deferred drain runs).
@@ -1781,6 +1800,35 @@ export class AgentManager extends EventEmitter {
     }
   }
 
+  /**
+   * A Captain start that has not finished within CAPTAIN_START_TIMEOUT_MS is
+   * reported as failed, so the drawer leaves "Agent is starting..." with the
+   * reason and a retry instead of waiting forever. If the start does finish
+   * later, that session is stopped: the caller has already been told it
+   * failed and may be starting another.
+   */
+  private boundedCaptainStart(starting: Promise<string>, agentName: string, taskId: string): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      let timedOut = false
+      const timer = setTimeout(() => {
+        timedOut = true
+        reject(new Error(`${agentName} did not come up within ${Math.round(CAPTAIN_START_TIMEOUT_MS / 1000)} seconds`))
+      }, CAPTAIN_START_TIMEOUT_MS)
+      starting.then(
+        (sessionId) => {
+          clearTimeout(timer)
+          if (!timedOut) return resolve(sessionId)
+          console.warn(`[AgentManager] Captain ${taskId} came up after its start timed out; stopping ${sessionId}`)
+          if (sessionId) void this.stopSession(sessionId, false)
+        },
+        (error: unknown) => {
+          clearTimeout(timer)
+          if (!timedOut) reject(error)
+        }
+      )
+    })
+  }
+
   /** Starts without admission control — callers are exempt or already admitted. */
   private async startSessionNow(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<string> {
     const agent = this.db.getAgent(agentId)
@@ -1791,10 +1839,17 @@ export class AgentManager extends EventEmitter {
     // A coordinator conversation outlives its runtime. Rejoin the live session
     // or resume the persisted one, so a restart (or a reaped runtime) continues
     // the same Captain conversation instead of opening a blank one.
-    const task = this.db.getTask(taskId)
+    let task = this.db.getTask(taskId)
     if (isCoordinatorTask(task)) {
       const live = this.findSessionByTaskId(taskId)
-      if (live) return live.sessionId
+      if (live && live.session.agentId === agentId) return live.sessionId
+      // The Captain was switched to another agent: the old runtime must not
+      // keep answering for it.
+      if (live) {
+        console.log(`[AgentManager] Captain ${taskId} switched from agent ${live.session.agentId} to ${agentId}; stopping ${live.sessionId}`)
+        await this.stopSession(live.sessionId, false)
+      }
+      task = this.dropForeignCoordinatorSession(taskId, agentId)
       if (task?.session_id) {
         const resumed = await this.resumeCoordinatorSession(agentId, taskId, task.session_id)
         if (resumed) return resumed
@@ -1816,6 +1871,46 @@ export class AgentManager extends EventEmitter {
   private heartbeatScopeTask(taskId: string, task: TaskRecord | null | undefined): TaskRecord | undefined {
     if (task || !taskId.startsWith('heartbeat-')) return undefined
     return this.db.getTask(taskId.slice('heartbeat-'.length)) ?? undefined
+  }
+
+  /**
+   * A Captain's persisted session belongs to the agent that made it. Another
+   * agent cannot continue it: a different backend fails (Claude Code even
+   * accepts a Codex thread id and only fails at the first message, losing it),
+   * and the user switched agents on purpose. Clears it so a fresh session
+   * starts; a session recorded before this binding existed is left to the
+   * resume attempt. Returns the task as it is now.
+   */
+  private dropForeignCoordinatorSession(taskId: string, agentId: string): TaskRecord | undefined {
+    const task = this.db.getTask(taskId) ?? undefined
+    if (!isCoordinatorTask(task) || !task?.session_id) return task
+    const owner = this.db.getSetting(coordinatorSessionAgentKey(taskId))
+    if (!owner || owner === agentId) return task
+    console.log(`[AgentManager] Captain ${taskId}: session ${task.session_id} was made by agent ${owner}, not ${agentId}; starting a new one`)
+    return this.updateTaskFromLocalAgent(taskId, { session_id: null })
+  }
+
+  /** Records which agent a coordinator row's session runs on (see dropForeignCoordinatorSession). */
+  private recordCoordinatorSessionAgent(taskId: string, agentId: string): void {
+    if (isCoordinatorTask(this.db.getTask(taskId))) this.db.setSetting(coordinatorSessionAgentKey(taskId), agentId)
+  }
+
+  /**
+   * The project's Captain agent changed (project editor, Captain drawer or the
+   * Commander). Stops a live Captain session that runs on another agent, so
+   * nothing keeps delivering to it; the next message or warm-up starts the new
+   * agent. Returns whether a session was stopped.
+   */
+  async releaseCaptainIfAgentChanged(projectId: string): Promise<boolean> {
+    const project = this.db.getProject(projectId)
+    const coordinator = this.db.getCoordinatorTask(projectId)
+    if (!project || !coordinator) return false
+    const live = this.findSessionByTaskId(coordinator.id)
+    const agentId = resolveCaptainAgentId(this.db, project)
+    if (!live || !agentId || live.session.agentId === agentId) return false
+    console.log(`[AgentManager] Captain agent of ${projectId} is now ${agentId}; stopping ${live.sessionId} on ${live.session.agentId}`)
+    await this.stopSession(live.sessionId, false)
+    return true
   }
 
   /** Resumes a coordinator's persisted session; '' when it cannot be continued. */
@@ -2907,17 +3002,18 @@ export class AgentManager extends EventEmitter {
   async sendByTaskId(
     taskId: string,
     message: string,
-    attachments?: MessageAttachmentRef[]
+    attachments?: MessageAttachmentRef[],
+    typedMessage?: TypedMessage
   ): Promise<{ sessionId: string | null; newSessionId?: string }> {
     const found = this.findSessionByTaskId(taskId)
     if (found) {
       console.log(`[AgentManager] sendByTaskId: found live session ${found.sessionId} for task ${taskId}`)
-      const result = await this.sendMessage(found.sessionId, message, taskId, found.session.agentId, attachments)
+      const result = await this.sendMessage(found.sessionId, message, taskId, found.session.agentId, attachments, typedMessage)
       return { sessionId: found.sessionId, ...result }
     }
     // sendMessage resumes from the persisted session_id or creates a new session.
     console.log(`[AgentManager] sendByTaskId: no live session for task ${taskId}, delegating to sendMessage for recovery`)
-    const result = await this.sendMessage('', message, taskId, undefined, attachments)
+    const result = await this.sendMessage('', message, taskId, undefined, attachments, typedMessage)
     return { sessionId: null, ...result }
   }
 
@@ -2926,20 +3022,26 @@ export class AgentManager extends EventEmitter {
     message: string,
     taskId?: string,
     agentId?: string,
-    attachments?: MessageAttachmentRef[]
+    attachments?: MessageAttachmentRef[],
+    typedMessage?: TypedMessage
   ): Promise<{ newSessionId?: string }> {
     const resolved = this.resolveSession(sessionId, 'sendMessage')
     let session = resolved?.session
     if (resolved) sessionId = resolved.sessionId
+    const target = this.db.getTask(session?.taskId ?? taskId ?? '')
+    const dispatch = target && isCoordinatorTask(target) && target.project_id
+      ? prepareProjectMessageDispatch(target.project_id, typedMessage?.taskId === target.id && typedMessage.text === message ? typedMessage : undefined)
+      : undefined
 
     // Session gone from memory: RESUME first (keeps the conversation), else start a new one.
     if (!session && taskId) {
       // Regular tasks carry their agent; the Captain (a coordinator row
       // with no agent_id) passes it in.
-      const task = this.db.getTask(taskId)
+      let task = this.db.getTask(taskId)
       const resolvedAgentId = task?.agent_id || agentId
 
       if (resolvedAgentId) {
+        if (isCoordinatorTask(task)) task = this.dropForeignCoordinatorSession(taskId, resolvedAgentId)
         const persistedSessionId = task?.session_id
         if (persistedSessionId) {
           try {
@@ -2976,19 +3078,20 @@ export class AgentManager extends EventEmitter {
           console.log(`[SessionTracker] CREATED_FALLBACK session=${newSessionId} task=${taskId} reason=resume_failed_or_no_persisted_session`)
         }
 
-        this.sendInBackground(session, sessionId, message, attachments)
+        this.sendInBackground(session, sessionId, message, attachments, dispatch)
         return { newSessionId: sessionId }
       }
     }
 
     if (!session) throw new Error(`Session not found: ${sessionId}`)
-    this.sendInBackground(session, sessionId, message, attachments)
+    this.sendInBackground(session, sessionId, message, attachments, dispatch)
     return {}
   }
 
   /** Fire-and-forget, so the IPC response is not blocked and the renderer does not freeze. */
-  private sendInBackground(session: AgentSession, sessionId: string, message: string, attachments?: MessageAttachmentRef[]): void {
-    this.doSendAdapterMessage(session, sessionId, message, attachments).catch((err) => {
+  private sendInBackground(session: AgentSession, sessionId: string, message: string, attachments?: MessageAttachmentRef[], dispatch?: ProjectMessageDispatch): void {
+    this.doSendAdapterMessage(session, sessionId, message, attachments, dispatch).catch((err) => {
+      if (dispatch) failProjectMessageDispatch(dispatch)
       console.error(`[AgentManager] doSendAdapterMessage failed for session ${sessionId}:`, err)
       return this.handleSessionError(sessionId, session, err)
     })
@@ -3021,8 +3124,12 @@ export class AgentManager extends EventEmitter {
     session: AgentSession,
     sessionId: string,
     message: string,
-    attachments?: MessageAttachmentRef[]
+    attachments?: MessageAttachmentRef[],
+    dispatch?: ProjectMessageDispatch
   ): Promise<void> {
+    const task = this.db.getTask(session.taskId)
+    // Nudges use this method directly, and must invalidate earlier typed authority too.
+    dispatch ??= task && isCoordinatorTask(task) && task.project_id ? prepareProjectMessageDispatch(task.project_id) : undefined
     session.autoAbortNotified = false
 
     if (session.status === 'error') {
@@ -3057,7 +3164,7 @@ export class AgentManager extends EventEmitter {
       taskId: session.taskId,
       type: 'message',
       data: {
-        id: `user-message-${Date.now()}`,
+        id: dispatch?.typed?.id ?? `user-message-${Date.now()}`,
         role: 'user',
         content: buildDisplayMessage(message, attachments),
         partType: 'text'
@@ -3071,7 +3178,13 @@ export class AgentManager extends EventEmitter {
     )
 
     const promptText = buildMessageWithAttachmentContext(session.workspaceDir, message, attachments)
-    await session.adapter.sendPrompt(sessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
+    if (dispatch) activateProjectMessageDispatch(dispatch)
+    try {
+      await session.adapter.sendPrompt(sessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
+    } catch (error) {
+      if (dispatch) failProjectMessageDispatch(dispatch)
+      throw error
+    }
 
     if (!session.pollingStarted) {
       console.log(`[AgentManager] Starting polling for session ${sessionId} (preserving dedup state)`)
@@ -3112,16 +3225,23 @@ export class AgentManager extends EventEmitter {
       }
 
       // The renderer sends "Header1: Answer1\nHeader2: Answer2" or a single answer.
+      // A free-form answer may include paragraphs and image attachment notes;
+      // splitting those into fields loses all but the last unlabelled line.
       const answers: Record<string, string> = {}
       if (message) {
-        const lines = message.split('\n')
-        for (const line of lines) {
-          const colonIdx = line.indexOf(':')
-          if (colonIdx > 0) {
+        const lines = message.split('\n').filter((line) => line.trim())
+        if (lines.length > 0 && lines.every((line) => line.indexOf(':') > 0)) {
+          for (const line of lines) {
+            const colonIdx = line.indexOf(':')
             answers[line.slice(0, colonIdx).trim()] = line.slice(colonIdx + 1).trim()
-          } else {
-            answers['answer'] = line.trim()
           }
+        } else {
+          answers['answer'] = message.trim()
+        }
+        // Question replies bypass doSendAdapterMessage. Make newly pasted
+        // task images available before the adapter resumes the waiting turn.
+        if (session.workspaceDir) {
+          syncAttachmentsToWorkspace(this.db, session.taskId, session.workspaceDir)
         }
       }
 

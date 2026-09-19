@@ -107,7 +107,20 @@ Delegation and status (#61):
   `<<<BEGIN COMMANDER MESSAGE … END COMMANDER MESSAGE>>>`, and states that it
   grants no authority for privileged operations. Delivery is not awaited; a
   failure after the tool returned is stored on the session as a report through
-  `onDeliveryFailed`.
+  `onDeliveryFailed`. It always uses the project's configured Captain agent;
+  a live session on another agent is not reused. `captain_session` reports
+  the live session's real state (`running`, `idle`, `waiting_approval`,
+  `error`), or `starting` when a session is being started for the message.
+  With `merge_grant` (#137), the app first creates a merge
+  grant bound to the user's message of this turn (stored id and verbatim text
+  from the turn context, never the model's input). The provenance line then
+  says `authorizes_actions=merge_pr:<grant id>` and the relay quotes the
+  user's words. If the grant is refused (no typed user message, no "merge",
+  merge grants off, the message already used), nothing is sent. See
+  docs/task-lifecycle.md, "Merge grants".
+- `list_merge_grants(project?, include_inactive?)` and
+  `revoke_merge_grant(grant_id)` (#137): read and revoke grants. Revoking
+  only narrows authority, so it needs no confirmation.
 - `get_pending_approvals()`: agent checkpoints (sessions in
   `waiting_approval`) and held Captain actions (#66) across active
   projects. Read-only: there is no approve or reject tool.
