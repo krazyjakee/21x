@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Check, ShieldAlert, X } from 'lucide-react'
+import { Check, ShieldAlert, ShieldQuestion, X } from 'lucide-react'
+import { ACTIVITY_REVALIDATE_MS, ACTIVITY_STALE_MS } from '@shared/activity'
+import { activityNow } from '@/lib/activity/activity-clock'
 import { escalationApi } from '@/lib/ipc-client'
 import { useProjectStore } from '@/stores/project-store'
 import type { HeldAction } from '@shared/project-limit-types'
@@ -8,28 +10,70 @@ import type { HeldAction } from '@shared/project-limit-types'
  * Captain tool calls held by a project's escalation policy (#66), as a
  * status-bar pill that opens a small list with Approve / Reject. Renders
  * nothing while nothing is held. The list comes from the main process and is
- * pushed on every change, so this never has to poll.
+ * pushed on every change; while the window is visible it is also re-read every
+ * 5 s (#95), and when reads keep failing for 15 s a static "unavailable" pill
+ * replaces silence, because a failed read must not look like "nothing held".
+ * This is a policy-held action (orthogonal to session approval requests).
  */
 export function HeldActionsNotice() {
   const [held, setHeld] = useState<HeldAction[]>([])
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
+  const [unavailable, setUnavailable] = useState(false)
   const projects = useProjectStore((s) => s.projects)
 
   useEffect(() => {
     let cancelled = false
-    try {
-      escalationApi.listHeld()
-        .then((list) => { if (!cancelled) setHeld(list ?? []) })
-        .catch(() => { /* the bridge may be absent in a test shell */ })
-    } catch {
-      // Same: no bridge, nothing to show.
+    let lastOkAt: number | null = null
+    const startedAt = activityNow()
+    let generation = 0
+    const ok = (list: HeldAction[] | undefined): void => {
+      lastOkAt = activityNow()
+      setHeld(list ?? [])
+      setUnavailable(false)
     }
-    const off = escalationApi.onHeldChanged((event) => setHeld(event?.held ?? []))
-    return () => { cancelled = true; off() }
+    const read = (): void => {
+      const mine = ++generation
+      try {
+        escalationApi.listHeld()
+          .then((list) => { if (!cancelled && mine === generation) ok(list) })
+          .catch(() => {
+            if (cancelled) return
+            const since = lastOkAt ?? startedAt
+            if (activityNow() - since >= ACTIVITY_STALE_MS || lastOkAt === null) setUnavailable(true)
+          })
+      } catch {
+        // No bridge (a test shell): nothing to show.
+      }
+    }
+    read()
+    const timer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      read()
+    }, ACTIVITY_REVALIDATE_MS)
+    const off = escalationApi.onHeldChanged((event) => {
+      generation += 1
+      ok(event?.held)
+    })
+    return () => { cancelled = true; clearInterval(timer); off() }
   }, [])
 
   useEffect(() => { if (held.length === 0) setOpen(false) }, [held.length])
+
+  if (unavailable) {
+    return (
+      <span
+        className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+        title="Held Captain actions could not be read"
+        role="img"
+        aria-label="Held Captain actions unavailable"
+        data-testid="held-actions-unavailable"
+      >
+        <ShieldQuestion aria-hidden="true" className="h-3 w-3" />
+        held actions unavailable
+      </span>
+    )
+  }
 
   if (held.length === 0) return null
 
