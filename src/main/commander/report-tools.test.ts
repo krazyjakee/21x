@@ -206,6 +206,10 @@ describe('report delivery', () => {
     expect(messages[1].content).toBe('Alpha says the site shipped.')
     const [request] = chatRequests(provider)
     expect(request.system).toContain('A report from project "Alpha" has just arrived')
+    // The turn is told to summarise in plain language, not to relay (#107).
+    expect(request.system).toContain('Summarise it for the user now in plain language')
+    expect(request.system).toContain('Leave out issue and PR numbers, branch names')
+    expect(request.system).not.toContain('Relay it to the user now')
     expect(request.messages.at(-1)?.content).toContain(`[Report from project ${alpha.id}]\nSite shipped.`)
   })
 

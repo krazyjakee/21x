@@ -9,7 +9,7 @@ import type { VoiceTtsModelManager } from './voice-tts-model-manager'
 
 /**
  * Commander voice mode (#64): the reply is spoken as it streams, reports are
- * spoken only while voice mode is on, and barge-in cancels the speech and the
+ * announced only while voice mode is on and never read out raw (#107), and barge-in cancels the speech and the
  * Commander turn together. The real speech service runs over a fake worker.
  */
 
@@ -176,7 +176,7 @@ describe('speaking the reply as it streams', () => {
 })
 
 describe('reports', () => {
-  it('are spoken only while voice mode is on for that session', async () => {
+  it('are announced only while voice mode is on for that session', async () => {
     const { worker, speech, commander, voice } = setup()
     await speech.prepare()
 
@@ -192,7 +192,8 @@ describe('reports', () => {
     commander.emit({ type: 'messages_appended', sessionId: 's1', messages: [report('s1', 'Deployed to production.')] })
     await flush()
     expect(worker.spoken).toHaveLength(1)
-    expect(worker.spoken[0].sentences.join(' ')).toBe('Report from Web. Deployed to production.')
+    // No summary turn followed, so only the one-line cue is said, not the report.
+    expect(worker.spoken[0].sentences.join(' ')).toBe('Report from Web; details in the chat.')
 
     voice.setActiveSession(null)
     commander.emit({ type: 'messages_appended', sessionId: 's1', messages: [report('s1', 'Another.')] })
@@ -209,11 +210,34 @@ describe('reports', () => {
     commander.emit({ type: 'messages_appended', sessionId: 's1', messages: [report('s1', 'Build passed.')] })
     await flush()
     expect(worker.spoken).toHaveLength(1)
-    expect(worker.appended).toEqual(['Checking now.', 'Report from Web.', 'Build passed.'])
+    expect(worker.appended).toEqual(['Checking now.', 'Report from Web; details in the chat.'])
+    expect(worker.appended.join(' ')).not.toContain('Build passed')
+  })
+
+  it('speaks the summary of the relay turn, not the raw report', async () => {
+    const { worker, speech, commander, voice } = setup()
+    await speech.prepare()
+    voice.setActiveSession('s1')
+    const raw = 'Batch B2 merged in PR #104 on branch sessions-b2-no-silent-drop (commit 630894c); B3 next.'
+    // CommanderService.deliverReport appends the report and starts the relay
+    // turn in the same tick.
+    commander.emit({ type: 'messages_appended', sessionId: 's1', messages: [report('s1', raw)] })
+    start(commander, 's1', 't1')
+    delta(commander, 's1', 't1', 'Web finished the history fix and is moving on. Nothing needs you. ')
+    commander.running.delete('s1')
+    commander.emit({ type: 'turn_event', sessionId: 's1', turnId: 't1', event: { type: 'done', stopReason: 'end_turn' } })
+    await flush()
+    await flush()
+
+    const said = [...worker.spoken.flatMap((s) => s.sentences), ...worker.appended].join(' ')
+    expect(said).toContain('Web finished the history fix and is moving on.')
+    expect(said).not.toContain('PR #104')
+    expect(said).not.toContain('details in the chat')
   })
 
   it('names a report whose project is unknown plainly', () => {
-    expect(spokenReport(' Done. ', null)).toBe('A report arrived. Done.')
+    expect(spokenReport(null)).toBe('A report arrived; details in the chat.')
+    expect(spokenReport(' Web ')).toBe('Report from Web; details in the chat.')
   })
 })
 
