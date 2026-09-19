@@ -714,15 +714,12 @@ export class VoiceSpeechService {
    * not push anything.
    *
    * `source` is `agent_answer` for a task's reply, which is spoken only when
-   * the user asked for it by voice. It is `conversation` for a reply in a voice
-   * conversation the user opened on purpose — Commander voice mode (#64) —
-   * which needs neither the automatic switch nor a voice turn: opening the
-   * conversation was the request.
+   * the user asked for it by voice.
    */
   async beginStreamingAnswer(
     taskId: string,
     parts?: VoiceAnswerPart[],
-    source: Extract<VoiceSpeechSource, 'agent_answer' | 'conversation'> = 'agent_answer'
+    source: Extract<VoiceSpeechSource, 'agent_answer'> = 'agent_answer'
   ): Promise<boolean> {
     if (this.active?.streaming && this.active.taskId === taskId) return true
 
@@ -939,8 +936,6 @@ export class VoiceSpeechService {
       case 'preview':
       case 'manual':
       case 'read_last_answer':
-      // The user opened a voice conversation (#64). Same reasoning.
-      case 'conversation':
         return true
       case 'agent_answer':
         if (!this.isEnabled()) return false

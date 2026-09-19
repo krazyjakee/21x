@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTestDb } from '../../test/helpers/db-test-helper'
 import type { DatabaseManager } from './database'
-import type { ChatProvider, ChatProviderEvent } from './chat/providers/types'
 import { CommanderStore } from './commander/commander-store'
 import {
   BRIEFING_STATE_KEY,
@@ -36,19 +35,6 @@ let now: number
 let agents: {
   findSessionByTaskId: ReturnType<typeof vi.fn>
   sendMessage: ReturnType<typeof vi.fn>
-}
-
-function fakeProvider(text: string): ChatProvider {
-  return {
-    id: 'fake',
-    model: 'fake-1',
-    stream() {
-      return (async function* (): AsyncGenerator<ChatProviderEvent> {
-        yield { type: 'text_delta', text }
-        yield { type: 'message_end', stopReason: 'end_turn' }
-      })()
-    }
-  } as unknown as ChatProvider
 }
 
 function scheduler(extra: Partial<ScheduledCoordinationOptions> = {}): ScheduledCoordination {
@@ -186,7 +172,7 @@ describe('Commander briefing', () => {
     project('Api')
     enableBriefing()
     const notify = vi.fn()
-    // No Commander service (no window has registered anything), no provider.
+    // No Commander service: no window has registered anything.
     const s = scheduler({ notify, getCommander: () => null })
 
     await s.tick() // seeds
@@ -217,19 +203,14 @@ describe('Commander briefing', () => {
     expect(db.getSetting(BRIEFING_STATE_KEY)).toContain(BRIEFING_CRON)
   })
 
-  it('adds the model summary when a provider is configured, and skips it when not', async () => {
+  it('leaves the summing up to the Commander agent: the session holds only the report', async () => {
     project('Web')
-    const withModel = await scheduler({ createProvider: () => fakeProvider('Two things need you this morning.') }).runBriefingNow()
-    expect(withModel?.summary).toBe('Two things need you this morning.')
+    const result = await scheduler().runBriefingNow()
     const store = new CommanderStore(db)
-    expect(store.listMessages(withModel!.sessionId).map((m) => m.role)).toEqual(['report', 'assistant'])
-    expect(store.getSession(withModel!.sessionId)!.unread_count).toBe(1)
-
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
-    const without = await scheduler({ createProvider: () => { throw new Error('No API key') } }).runBriefingNow()
-    log.mockRestore()
-    expect(without?.summary).toBeNull()
-    expect(store.listMessages(without!.sessionId).map((m) => m.role)).toEqual(['report'])
+    expect(store.listMessages(result!.sessionId).map((m) => m.role)).toEqual(['report'])
+    // Its row is ready for the agent the report is handed to when the session opens.
+    expect(db.getTask(result!.sessionId)?.role).toBe('commander')
+    expect(store.getSession(result!.sessionId)!.unread_count).toBe(1)
   })
 
   it('speaks only when asked and a window can play it', async () => {
@@ -243,6 +224,7 @@ describe('Commander briefing', () => {
     const spoken = await scheduler({ getSpeech: () => ({ speak }), canPlayAudio: () => true }).runBriefingNow({ speak: true })
     expect(spoken?.spoken).toBe(true)
     expect(speak).toHaveBeenCalledTimes(1)
+    expect(speak.mock.calls[0]).toEqual([expect.objectContaining({ text: expect.stringMatching(/^Your briefing\. /) })])
   })
 
   it('builds the briefing from status records only, attention first', () => {

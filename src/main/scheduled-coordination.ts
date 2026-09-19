@@ -17,10 +17,10 @@
  *    occurrence a NEW Commander session "Briefing <date>" is created holding a
  *    briefing built deterministically from every active project's status
  *    record (summary, counts, blockers, pending approvals; never raw tasks).
- *    When a chat provider is configured, the Commander model also adds a
- *    short spoken-style summary; without one that step is skipped. The
- *    session is left unread, a desktop notification is raised, and with
- *    `speak` on and speech able to play, the summary is read aloud.
+ *    The session is left unread and a desktop notification is raised; opening
+ *    the session hands the briefing to the Commander's agent, which sums it
+ *    up like any report. With `speak` on and speech able to play, the
+ *    notification's one-line verdict is read aloud.
  *
  * No double fire: the last occurrence handled for each schedule is stored in
  * app settings (with the cron it belongs to) BEFORE the work starts, so a
@@ -32,11 +32,8 @@
 import { CronExpressionParser } from 'cron-parser'
 import type { AgentManager } from './agent-manager'
 import type { DatabaseManager, ProjectRecord } from './database'
-import type { ChatProvider } from './chat/providers/types'
 import type { CommanderService } from './commander/commander-service'
-import { completeText } from './commander/commander-service'
 import { CommanderStore } from './commander/commander-store'
-import { createChatProviderFromSettings } from './chat/provider-factory'
 import { listHeldActions } from './escalation'
 import { getCommanderService } from './ipc/commander'
 import { resolveCaptainAgentId, type CaptainWakerAgents } from './captain-waker'
@@ -69,8 +66,6 @@ export interface ScheduledCoordinationOptions {
   agents: ScheduledCoordinationAgents | null
   /** The running Commander service, when its handlers are registered; emits to the renderer. */
   getCommander?: () => Pick<CommanderService, 'appendReport'> | null
-  /** Builds the Commander's chat provider; throws when none is configured. */
-  createProvider?: () => ChatProvider
   /** Desktop notification. Default: Electron's Notification, when supported. */
   notify?: (title: string, body: string) => void
   /** Speech for a spoken briefing; null when voice is not available. */
@@ -82,16 +77,13 @@ export interface ScheduledCoordinationOptions {
   tickMs?: number
   /** A missed occurrence older than this is skipped rather than caught up. */
   catchUpMs?: number
-  /** Timeout for the model's spoken-style summary. */
-  summaryTimeoutMs?: number
   timezone?: string
   now?: () => number
 }
 
 export const SCHEDULED_COORDINATION_DEFAULTS = {
   tickMs: 60_000,
-  catchUpMs: 6 * 60 * 60_000,
-  summaryTimeoutMs: 30_000
+  catchUpMs: 6 * 60 * 60_000
 } as const
 
 /** App-settings key of a project's last handled review occurrence. */
@@ -224,14 +216,6 @@ export function buildBriefingText(entries: BriefingProjectEntry[], day: string):
   return lines.join('\n')
 }
 
-export const BRIEFING_SUMMARY_PROMPT = [
-  'You are the Commander, briefing the user on their projects.',
-  'Below is a briefing built from each project\'s status record.',
-  'Write a short spoken-style summary: three to five plain sentences, no markdown, no lists, no headings.',
-  'Lead with what needs the user (approvals, reviews, blockers), then one line on overall progress.',
-  'Use only facts from the briefing. Do not invent tasks or numbers.'
-].join('\n')
-
 /** The notification body: one line that says whether to look now. */
 export function briefingNotificationBody(entries: BriefingProjectEntry[]): string {
   const attention = entries.filter(needsAttention)
@@ -255,14 +239,12 @@ function defaultNotify(title: string, body: string): void {
 export interface BriefingResult {
   sessionId: string
   reportId: string
-  summary: string | null
   spoken: boolean
 }
 
 export class ScheduledCoordination {
   private readonly tickMs: number
   private readonly catchUpMs: number
-  private readonly summaryTimeoutMs: number
   private readonly timezone: string
   private readonly now: () => number
   private readonly store: CommanderStore
@@ -276,7 +258,6 @@ export class ScheduledCoordination {
   constructor(private readonly options: ScheduledCoordinationOptions) {
     this.tickMs = options.tickMs ?? SCHEDULED_COORDINATION_DEFAULTS.tickMs
     this.catchUpMs = options.catchUpMs ?? SCHEDULED_COORDINATION_DEFAULTS.catchUpMs
-    this.summaryTimeoutMs = options.summaryTimeoutMs ?? SCHEDULED_COORDINATION_DEFAULTS.summaryTimeoutMs
     this.timezone = options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
     this.now = options.now ?? (() => Date.now())
     const db = options.db
@@ -451,10 +432,6 @@ export class ScheduledCoordination {
     const day = localDayKey(new Date(this.now()))
     const briefing = buildBriefingText(entries, day)
 
-    // The model's summary first, before anything is stored, so the session
-    // is written in one go. No provider, no summary: the briefing stands alone.
-    const summary = await this.modelSummary(briefing)
-
     let sessionId: string
     let reportId: string
     try {
@@ -467,7 +444,6 @@ export class ScheduledCoordination {
         ? commander.appendReport({ sessionId, content: briefing })
         : this.store.appendMessage(sessionId, { role: 'report', content: briefing })
       reportId = report.id
-      if (summary) this.store.appendMessage(sessionId, { role: 'assistant', content: summary })
     } catch (err) {
       console.error('[ScheduledCoordination] Could not store the briefing:', err)
       return null
@@ -475,37 +451,16 @@ export class ScheduledCoordination {
     console.log(`[ScheduledCoordination] Briefing stored in Commander session ${sessionId}`)
 
     const notify = this.options.notify ?? defaultNotify
+    const verdict = briefingNotificationBody(entries)
     try {
-      notify(`Briefing ${day}`, briefingNotificationBody(entries))
+      notify(`Briefing ${day}`, verdict)
     } catch (err) {
       console.error('[ScheduledCoordination] Briefing notification failed:', err)
     }
 
     let spoken = false
-    if (options.speak) spoken = await this.speak(summary ?? briefing, sessionId)
-    return { sessionId, reportId, summary, spoken }
-  }
-
-  private async modelSummary(briefing: string): Promise<string | null> {
-    if (!this.options.createProvider) return null
-    let provider: ChatProvider
-    try {
-      provider = this.options.createProvider()
-    } catch (err) {
-      console.log('[ScheduledCoordination] No Commander model configured; the briefing goes without a summary:', err instanceof Error ? err.message : err)
-      return null
-    }
-    try {
-      const text = await completeText(
-        provider,
-        { system: BRIEFING_SUMMARY_PROMPT, messages: [{ role: 'user', content: briefing }], maxTokens: 400 },
-        AbortSignal.timeout(this.summaryTimeoutMs)
-      )
-      return text.trim() || null
-    } catch (err) {
-      console.warn('[ScheduledCoordination] Briefing summary failed; storing the briefing without it:', err instanceof Error ? err.message : err)
-      return null
-    }
+    if (options.speak) spoken = await this.speak(`Your briefing. ${verdict}`, sessionId)
+    return { sessionId, reportId, spoken }
   }
 
   private async speak(text: string, sessionId: string): Promise<boolean> {
@@ -535,8 +490,8 @@ let running: ScheduledCoordination | null = null
 
 /**
  * Starts the scheduler with the app's services (src/main/index.ts). The
- * Commander service and chat provider are looked up on use: the Commander
- * handlers register after this runs.
+ * Commander service is looked up on use: the Commander handlers register
+ * after this runs.
  */
 export function startScheduledCoordination(deps: StartScheduledCoordinationDeps): ScheduledCoordination {
   running?.stop()
@@ -544,7 +499,6 @@ export function startScheduledCoordination(deps: StartScheduledCoordinationDeps)
     db: deps.db,
     agents: deps.agents,
     getCommander: () => getCommanderService(),
-    createProvider: () => createChatProviderFromSettings(deps.db),
     listHeldActions: (projectId) => listHeldActions(projectId),
     getSpeech: () => deps.getVoice?.()?.speech ?? null,
     canPlayAudio: deps.canPlayAudio

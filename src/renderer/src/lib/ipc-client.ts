@@ -21,8 +21,7 @@ import type {
   VoiceTtsModelState,
   VoiceTtsSnapshot
 } from '@shared/voice-tts'
-import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
-import type { CommanderEvent, CommanderListSessionsRequest, CommanderMessage, CommanderSession } from '@shared/commander'
+import type { CommanderEvent, CommanderListSessionsRequest, CommanderSession } from '@shared/commander'
 import type {
   ConnectorBridgeCredentialInput,
   ConnectorBridgeCredentialStatus,
@@ -821,35 +820,25 @@ export const browserRecordingApi = {
     : Promise.resolve({ recording: null }),
 }
 
-// ── Chat runtime ────────────────────────────────────────────
-// A pass-through for the lightweight chat loop (docs/chat-runtime.md). The
-// renderer sends history and draws events; every model and tool call happens
-// in the main process.
-
-export const chatApi = {
-  start: (payload: ChatStartRequest): Promise<{ turnId: string; provider: string; model: string }> =>
-    window.electronAPI.chat.start(payload),
-  cancel: (turnId: string): Promise<{ cancelled: boolean }> => window.electronAPI.chat.cancel(turnId),
-  onEvent: (callback: (event: ChatIpcEvent) => void): (() => void) => window.electronAPI.chat.onEvent(callback)
-}
-
 // ── Commander sessions ─────────────────────────────────────
-// Persisted Commander chat sessions (docs/commander.md). Main stores every
-// message and runs the turns; the renderer lists, sends and draws events.
+// Persisted Commander chat sessions (docs/commander.md). Each session's
+// conversation is an agent session on a hidden task row, driven through the
+// normal agent-session calls; this is the session list and its reports.
 
 export const commanderApi = {
   listSessions: (payload?: CommanderListSessionsRequest): Promise<CommanderSession[]> => window.electronAPI.commander.listSessions(payload),
   createSession: (title?: string): Promise<CommanderSession> => window.electronAPI.commander.createSession(title ? { title } : undefined),
   renameSession: (id: string, title: string): Promise<CommanderSession | null> => window.electronAPI.commander.renameSession(id, title),
   archiveSession: (id: string, archived: boolean): Promise<CommanderSession | null> => window.electronAPI.commander.archiveSession(id, archived),
-  listMessages: (sessionId: string): Promise<{ messages: CommanderMessage[]; activeTurnId: string | null }> =>
-    window.electronAPI.commander.listMessages(sessionId),
+  /** The task row and agent the session's conversation runs on. */
+  prepareSession: (sessionId: string): Promise<{ taskId: string; agentId: string | null }> =>
+    window.electronAPI.commander.prepareSession(sessionId),
+  /** The agent every Commander session runs on (the `commander_agent_id` setting, else the default agent). */
+  getAgentId: (): Promise<string | null> => window.electronAPI.commander.getAgentId(),
   markRead: (sessionId: string): Promise<CommanderSession | null> => window.electronAPI.commander.markRead(sessionId),
   /** Tells main which session the view shows (#62): a report for it is relayed at once, others only queue as unread. */
   setActiveSession: (sessionId: string | null): Promise<void> =>
     typeof window.electronAPI.commander.setActiveSession === 'function' ? window.electronAPI.commander.setActiveSession(sessionId) : Promise.resolve(),
-  send: (sessionId: string, text: string): Promise<{ turnId: string; message: CommanderMessage }> => window.electronAPI.commander.send(sessionId, text),
-  cancel: (sessionId: string): Promise<{ cancelled: boolean }> => window.electronAPI.commander.cancel(sessionId),
   onEvent: (callback: (event: CommanderEvent) => void): (() => void) => window.electronAPI.commander.onEvent(callback)
 }
 
@@ -866,7 +855,7 @@ export const cliMcpApi = {
   probe: (ref: CliMcpServerRef): Promise<CliMcpProbeResult> => window.electronAPI.cliMcp.probe(ref)
 }
 
-// ── Voice: ElevenLabs engine and Commander voice mode (#64) ──
+// ── Voice: ElevenLabs engine (#64) ──
 // The key is sent to main and never read back; every call returns the speech
 // snapshot, which only says whether a key is set.
 
@@ -876,11 +865,4 @@ export const voiceElevenLabsApi = {
   acceptDisclosure: (): Promise<VoiceTtsSnapshot> => window.electronAPI.voiceElevenLabs.acceptDisclosure(),
   refresh: (): Promise<VoiceTtsSnapshot> => window.electronAPI.voiceElevenLabs.refresh(),
   setModel: (modelId: string): Promise<VoiceTtsSnapshot> => window.electronAPI.voiceElevenLabs.setModel(modelId)
-}
-
-export const commanderVoiceApi = {
-  setActive: (sessionId: string | null): Promise<{ active: string | null }> => window.electronAPI.commanderVoice.setActive(sessionId),
-  bargeIn: (sessionId: string): Promise<{ cancelled: boolean }> => window.electronAPI.commanderVoice.bargeIn(sessionId),
-  send: (sessionId: string, text: string): Promise<{ turnId: string; message: CommanderMessage }> =>
-    window.electronAPI.commanderVoice.send(sessionId, text)
 }

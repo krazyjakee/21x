@@ -1,63 +1,63 @@
-import type { ChatMessage } from '../../shared/chat'
 import type { CommanderEvent, CommanderMessage, CommanderSession } from '../../shared/commander'
-import { ChatRuntime, type ChatTurnHandle, type ChatTurnResult } from '../chat/chat-runtime'
-import type { ChatProvider, ChatProviderRequest } from '../chat/providers/types'
-import type { ChatToolDefinition } from '../chat/tools'
+import { COMMANDER_AGENT_SETTING } from '../../shared/commander'
+import { buildSystemMessage, computeDeliveryId, SYSTEM_MESSAGE_MARKER, SystemMessageOrigin } from '../../shared/system-authority'
+import type { AgentRecord, TranscriptPartInput, TranscriptPartRecord } from '../database/types'
 import { normalizeTitle, type CommanderStore } from './commander-store'
-import { buildContext, DEFAULT_CONTEXT_BUDGET, planFold, transcriptForSummary, type ContextBudget } from './context'
-import { COMMANDER_SUMMARY_PROMPT, COMMANDER_SYSTEM_PROMPT, COMMANDER_TITLE_PROMPT, reportRelayNote, withSummary } from './prompts'
+import { reportRelayNote } from './prompts'
 import { guardReportAsks, MAX_REPORT_ASKS_WITHOUT_USER_TURN } from './report-tools'
+import { runTool, validateTools, type ChatToolDefinition, type ChatToolResult } from './tools'
 
 /**
- * Runs Commander chat turns over persisted sessions (docs/commander.md).
+ * Runs Commander chat sessions (docs/commander.md).
  *
- * `sendUserMessage` stores the user's message, builds the model context from
- * the session (rolling summary + newest turns within a budget), runs one
- * ChatRuntime turn and streams its events, then stores what the model and its
- * tools added. After the turn it names an untitled session and folds turns
- * that no longer fit the budget into the summary, so the next turn starts
- * without waiting on either.
+ * A Commander session is an ordinary agent session. Its conversation lives on
+ * a hidden `role = 'commander'` task row whose id is the session id, and it
+ * goes through AgentManager like every task and every Captain: the same
+ * adapters, auth, streaming, transcript store, approvals, stop and voice. The
+ * renderer talks to it through the normal agent-session calls. This service
+ * only owns what is particular to the Commander:
  *
- * Extension points:
- * - The Commander's tools (project-tools.ts) are supplied through `getTools`,
- *   built per turn so a confirmation can be checked against the user message.
- * - #62 delivers Captain reports through `deliverReport`: the report is
- *   stored (unread until the session is read) and, when the session is the
- *   one open in the Commander view (`setActiveSession`), a turn is started so
- *   the Commander relays it. A turn started by a report can only call
- *   `ask_captain` within the session's report-ask budget until the user
- *   speaks again (report-tools.ts).
+ * - the session list around those rows (titles, archive, unread reports);
+ * - the Commander's tools, served to its agent over MCP (commander-mcp.ts),
+ *   with the context the confirmation check needs read from the transcript;
+ * - Captain reports (#62): stored as unread, and handed to the agent as an
+ *   automated message when the session is open in the Commander view (at
+ *   once, or when the agent next goes idle);
+ * - the agent every session runs on (the `commander_agent_id` setting).
  */
 
 export interface CommanderToolContext {
   sessionId: string
-  /** The user message that immediately precedes this turn's tool calls; empty for a report-triggered turn. */
+  /** The user's newest message in the session; empty when the newest input was a relayed report. */
   userMessage: string
-  /** What started the turn: the user, or a report being relayed (#62). */
+  /** What the agent is answering: the user, or a report being relayed (#62). */
   trigger: 'user' | 'report'
+}
+
+/** The slice of AgentManager the service drives; tests stub it. */
+export interface CommanderAgentsPort {
+  findSessionByTaskId(taskId: string): { sessionId: string; session: { agentId: string; status: string } } | undefined
+  sendMessage(sessionId: string, message: string, taskId?: string, agentId?: string): Promise<unknown>
+  stopByTaskId(taskId: string): Promise<unknown>
+  addExternalListener(fn: (channel: string, data: unknown) => void): void
+}
+
+/** The slice of DatabaseManager the service reads; tests stub it. */
+export interface CommanderDbPort {
+  getSetting(key: string): string | undefined
+  getAgents(): AgentRecord[]
+  getTranscriptParts(taskId: string): TranscriptPartRecord[]
+  upsertTranscriptParts(taskId: string, parts: TranscriptPartInput[]): unknown
 }
 
 export interface CommanderServiceOptions {
   store: CommanderStore
-  /** Throws when no provider can be built (for example, no API key). */
-  createProvider: () => ChatProvider
+  db: CommanderDbPort
+  agents: CommanderAgentsPort
   emit: (event: CommanderEvent) => void
-  runtime?: ChatRuntime
   getTools?: (context: CommanderToolContext) => ChatToolDefinition[]
-  systemPrompt?: string
-  budget?: Partial<ContextBudget>
-  maxToolCalls?: number
-  /** Timeout for the title and summary one-shot calls. */
-  oneShotTimeoutMs?: number
-  /** `ask_captain` calls report-triggered turns may make per session before a user turn resets the count (#62). */
+  /** `ask_captain` calls a report-triggered answer may make per session before the user speaks again (#62). */
   maxReportAsks?: number
-}
-
-export interface SendResult {
-  turnId: string
-  message: CommanderMessage
-  /** Resolves after the turn's messages are stored and the title and summary work is done. Never rejects. */
-  done: Promise<void>
 }
 
 export interface AppendReportInput {
@@ -74,23 +74,14 @@ export interface DeliverReportInput extends AppendReportInput {
 
 export interface DeliverReportResult {
   message: CommanderMessage
-  /** True when the session is open in the view and a relay turn started (or will, after the running one). */
+  /** True when the session is open in the view, so the report is handed to its agent (now, or once it is idle). */
   relayed: boolean
 }
 
-interface TurnStart {
-  trigger: 'user' | 'report'
-  userMessage: string
-  /** Extra system text for the turn (the relay note of a report-triggered turn). */
-  systemNote?: string
-}
-
-const MAX_USER_MESSAGE_CHARS = 100_000
 const FALLBACK_TITLE_WORDS = 6
 const MAX_TITLE_CHARS = 60
-const DEFAULT_ONE_SHOT_TIMEOUT_MS = 20_000
 
-/** First words of the user's message, used when the model cannot name the session. */
+/** First words of the user's message: the session's title until the user renames it. */
 export function fallbackTitle(text: string): string {
   const words = text.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)
   if (words.length === 0) return 'New session'
@@ -100,21 +91,10 @@ export function fallbackTitle(text: string): string {
   return truncated ? `${title}…` : title
 }
 
-/** Cleans a model-written title; empty when unusable. */
-export function cleanGeneratedTitle(raw: string): string {
-  const firstLine = raw.split('\n').map((l) => l.trim()).find(Boolean) ?? ''
-  const title = firstLine
-    .replace(/^(title\s*:\s*)/i, '')
-    .replace(/^["'`*#\s]+|["'`*\s]+$/g, '')
-    .replace(/[.!?:;,]+$/, '')
-    .trim()
-  return title.length > MAX_TITLE_CHARS ? `${title.slice(0, MAX_TITLE_CHARS).trimEnd()}…` : title
-}
-
 /**
  * The `project_id` and `correlation_id` a successful tool result carries
- * (`ask_captain` does), so the stored tool row can be matched to the
- * report that answers it (#62). Anything that is not such an object tags nothing.
+ * (`ask_captain` does), so the delegation can be stored and the report that
+ * answers it routed back (#62). Anything that is not such an object tags nothing.
  */
 export function toolResultTags(content: string, isError: boolean): { projectId?: string; correlationId?: string } {
   if (isError || !content.startsWith('{')) return {}
@@ -132,37 +112,60 @@ export function toolResultTags(content: string, isError: boolean): { projectId?:
   }
 }
 
-/** One non-streaming-to-anyone model call; returns the text. */
-export async function completeText(provider: ChatProvider, request: Omit<ChatProviderRequest, 'tools' | 'toolChoice'>, signal: AbortSignal): Promise<string> {
-  let text = ''
-  for await (const event of provider.stream({ ...request, tools: [], toolChoice: 'none' }, signal)) {
-    if (event.type === 'text_delta') text += event.text
+/** A user-role transcript part the Commander's agent was sent. */
+interface UserInput {
+  partId: string
+  content: string
+  automated: boolean
+}
+
+function userInputs(parts: Array<Pick<TranscriptPartRecord, 'partId' | 'role' | 'content' | 'partType'>>): UserInput[] {
+  return parts
+    .filter((part) => part.role === 'user' && (!part.partType || part.partType === 'text'))
+    .map((part) => ({
+      partId: part.partId,
+      content: part.content ?? '',
+      automated: (part.content ?? '').trimStart().startsWith(SYSTEM_MESSAGE_MARKER)
+    }))
+}
+
+/**
+ * What the agent is answering right now, read from the stored transcript. The
+ * user's message is persisted before the prompt reaches the agent, so a tool
+ * call always sees the message that caused it.
+ */
+export function turnContextFromTranscript(sessionId: string, parts: TranscriptPartRecord[]): CommanderToolContext & { userAnchor: string } {
+  const inputs = userInputs(parts)
+  const latest = inputs[inputs.length - 1]
+  const lastHuman = [...inputs].reverse().find((input) => !input.automated)
+  return {
+    sessionId,
+    userMessage: latest && !latest.automated ? latest.content.trim() : '',
+    trigger: latest?.automated ? 'report' : 'user',
+    userAnchor: lastHuman?.partId ?? ''
   }
-  return text
 }
 
 export class CommanderService {
   private readonly store: CommanderStore
-  private readonly runtime: ChatRuntime
-  private readonly budget: ContextBudget
-  private readonly active = new Map<string, ChatTurnHandle>()
-  private readonly folding = new Set<string>()
-  private readonly naming = new Set<string>()
   /** The session open in the Commander view, as the renderer reports it (#62). */
   private activeSessionId: string | null = null
-  /** Reports that arrived during a turn; relayed together once that turn ends. */
-  private readonly pendingRelay = new Map<string, { messageIds: string[]; projectName: string | null }>()
-  /** `ask_captain` calls made by report-triggered turns since the user last spoke, per session. */
-  private readonly reportAsks = new Map<string, number>()
+  /** Sessions with reports waiting for their busy agent to go idle. */
+  private readonly pendingRelay = new Set<string>()
+  /** `ask_captain` calls made in answer to reports since the user last spoke, per session. */
+  private readonly reportAsks = new Map<string, { anchor: string; count: number }>()
+  private readonly listeners = new Set<(event: CommanderEvent) => void>()
 
   constructor(private readonly options: CommanderServiceOptions) {
     this.store = options.store
-    this.runtime = options.runtime ?? new ChatRuntime()
-    this.budget = { ...DEFAULT_CONTEXT_BUDGET, ...options.budget }
+    options.agents.addExternalListener((channel, data) => {
+      try {
+        this.onAgentEvent(channel, data)
+      } catch (err) {
+        console.error('[Commander] agent event handling failed:', err)
+      }
+    })
   }
-
-  /** Main-process observers of the event stream (#64 voice mode). Additive; the renderer path is `options.emit`. */
-  private readonly listeners = new Set<(event: CommanderEvent) => void>()
 
   /** Subscribes a main-process observer to every event the renderer receives. Returns the unsubscribe. */
   onEvent(listener: (event: CommanderEvent) => void): () => void {
@@ -187,236 +190,126 @@ export class CommanderService {
     }
   }
 
-  private emitSession(sessionId: string): CommanderSession | null {
-    const session = this.store.getSession(sessionId)
+  private emitSession(session: CommanderSession | null): CommanderSession | null {
     if (session) this.emit({ type: 'session_updated', session })
     return session
   }
 
-  activeTurnId(sessionId: string): string | null {
-    return this.active.get(sessionId)?.turnId ?? null
+  // ── Sessions ────────────────────────────────────────────────
+
+  /**
+   * The agent Commander sessions run on: the one chosen in the Commander
+   * view, else the default agent, else the first. Null with no agents at all.
+   */
+  agentId(): string | null {
+    const agents = this.options.db.getAgents()
+    const chosen = this.options.db.getSetting(COMMANDER_AGENT_SETTING)
+    if (chosen && agents.some((agent) => agent.id === chosen)) return chosen
+    return (agents.find((agent) => agent.is_default) ?? agents[0])?.id ?? null
   }
 
-  activeSessions(): Array<{ sessionId: string; turnId: string }> {
-    return [...this.active.entries()].map(([sessionId, handle]) => ({ sessionId, turnId: handle.turnId }))
+  /**
+   * Makes sure the session has its task row, so the renderer can start or
+   * resume its agent. A session from the old chat runtime gets its history
+   * copied into the transcript, so the conversation still reads as one.
+   */
+  prepareSession(sessionId: string): { taskId: string; agentId: string | null } {
+    const { created } = this.store.ensureTask(sessionId)
+    if (created) this.copyEarlierHistory(sessionId)
+    return { taskId: sessionId, agentId: this.agentId() }
   }
 
-  // ── The open session (#62) ──────────────────────────────────
+  private copyEarlierHistory(sessionId: string): void {
+    const parts: TranscriptPartInput[] = this.store
+      .listMessages(sessionId)
+      .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content.trim())
+      .map((m) => ({ id: `commander-history-${m.id}`, role: m.role, content: m.content, partType: 'text', receivedAt: m.created_at }))
+    if (parts.length > 0) this.options.db.upsertTranscriptParts(sessionId, parts)
+  }
+
+  /** Archiving a session stops its agent; the conversation stays resumable. */
+  setArchived(sessionId: string, archived: boolean): CommanderSession | null {
+    if (archived) {
+      void this.options.agents.stopByTaskId(sessionId).catch((err) => {
+        console.warn(`[Commander] Could not stop the agent of archived session ${sessionId}:`, err)
+      })
+    }
+    return this.emitSession(this.store.setArchived(sessionId, archived))
+  }
 
   /** The renderer says which session the Commander view shows; null when the view is closed. */
   setActiveSession(sessionId: string | null): void {
     this.activeSessionId = sessionId
+    // Reports that arrived while the session was not open are handed over now.
+    if (sessionId && this.store.getSession(sessionId)) this.relayReports(sessionId)
   }
 
   isSessionActive(sessionId: string): boolean {
     return this.activeSessionId === sessionId
   }
 
-  sendUserMessage(sessionId: string, text: string): SendResult {
-    const content = typeof text === 'string' ? text.trim() : ''
-    if (!content) throw new Error('Message is empty')
-    if (content.length > MAX_USER_MESSAGE_CHARS) throw new Error('Message is too long')
-    if (!this.store.getSession(sessionId)) throw new Error(`Commander session not found: ${sessionId}`)
-    if (this.active.has(sessionId)) throw new Error('The Commander is still answering in this session')
+  // ── Tools (served over MCP) ─────────────────────────────────
 
-    // Built before anything is stored, so a missing key rejects cleanly.
-    const provider = this.options.createProvider()
-
-    const message = this.store.appendMessage(sessionId, { role: 'user', content })
-    this.emit({ type: 'messages_appended', sessionId, messages: [message] })
-    // Sending is reading: the user is looking at this session.
-    this.store.markRead(sessionId)
-    this.emitSession(sessionId)
-    // A user turn resets the report-ask budget (#62).
-    this.reportAsks.delete(sessionId)
-
-    const { turnId, done } = this.startTurn(sessionId, provider, { trigger: 'user', userMessage: content })
-    return { turnId, message, done }
-  }
-
-  /** One model turn over the session as stored right now. The caller has checked that no turn is running. */
-  private startTurn(sessionId: string, provider: ChatProvider, start: TurnStart): { turnId: string; done: Promise<void> } {
-    const context = buildContext(this.store.listMessages(sessionId), this.budget)
-    let system = withSummary(this.options.systemPrompt ?? COMMANDER_SYSTEM_PROMPT, context.summary)
-    if (start.systemNote) system = `${system}\n\n${start.systemNote}`
-    let tools = this.options.getTools?.({ sessionId, userMessage: start.userMessage, trigger: start.trigger }) ?? []
-    if (start.trigger === 'report') {
+  private toolsFor(sessionId: string): { tools: ChatToolDefinition[]; context: CommanderToolContext } {
+    const { userAnchor, ...context } = turnContextFromTranscript(sessionId, this.options.db.getTranscriptParts(sessionId))
+    let tools = this.options.getTools?.(context) ?? []
+    if (context.trigger === 'report') {
       const max = this.options.maxReportAsks ?? MAX_REPORT_ASKS_WITHOUT_USER_TURN
+      // The budget resets when the user speaks: a new human message is a new anchor.
+      const current = this.reportAsks.get(sessionId)
+      const budget = current && current.anchor === userAnchor ? current : { anchor: userAnchor, count: 0 }
+      this.reportAsks.set(sessionId, budget)
       tools = guardReportAsks(tools, {
-        remaining: () => max - (this.reportAsks.get(sessionId) ?? 0),
-        consume: () => this.reportAsks.set(sessionId, (this.reportAsks.get(sessionId) ?? 0) + 1)
-      })
-    }
-
-    let turnId = ''
-    const handle = this.runtime.startTurn(
-      { provider, messages: context.messages, system, tools, maxToolCalls: this.options.maxToolCalls },
-      (event) => {
-        // `done` is re-emitted after the turn's messages are stored.
-        if (event.type === 'done') return
-        this.emit({ type: 'turn_event', sessionId, turnId, event })
-      }
-    )
-    turnId = handle.turnId
-    this.active.set(sessionId, handle)
-    this.emit({ type: 'turn_started', sessionId, turnId })
-
-    const done = handle.done
-      .then((result) => this.finishTurn(sessionId, context.messages.length, result))
-      .catch((err) => {
-        console.error('[Commander] turn bookkeeping failed:', err)
-        // The renderer must still leave its streaming state.
-        const message = err instanceof Error ? err.message : String(err)
-        this.emit({ type: 'turn_event', sessionId, turnId, event: { type: 'error', message: `Could not save the reply: ${message}` } })
-        this.emit({ type: 'turn_event', sessionId, turnId, event: { type: 'done', stopReason: 'error' } })
-      })
-      .finally(() => {
-        if (this.active.get(sessionId) === handle) this.active.delete(sessionId)
-      })
-      .then(() => this.afterTurn(sessionId, provider))
-      .catch((err) => console.error('[Commander] post-turn work failed:', err))
-      .then(() => this.relayPending(sessionId))
-      .catch((err) => console.error('[Commander] report relay failed:', err))
-
-    return { turnId, done }
-  }
-
-  private finishTurn(sessionId: string, inputCount: number, result: ChatTurnResult): void {
-    const added = result.messages.slice(inputCount)
-    const stored: CommanderMessage[] = []
-    for (const m of added) {
-      const persisted = this.persistChatMessage(sessionId, m)
-      if (persisted) stored.push(persisted)
-    }
-    if (stored.length > 0) this.emit({ type: 'messages_appended', sessionId, messages: stored })
-    this.emitSession(sessionId)
-    if (this.active.get(sessionId)?.turnId === result.turnId) this.active.delete(sessionId)
-    this.emit({ type: 'turn_event', sessionId, turnId: result.turnId, event: { type: 'done', stopReason: result.stopReason } })
-  }
-
-  private persistChatMessage(sessionId: string, message: ChatMessage): CommanderMessage | null {
-    if (message.role === 'assistant') {
-      if (!message.content && !message.toolCalls?.length) return null
-      return this.store.appendMessage(sessionId, { role: 'assistant', content: message.content, toolCalls: message.toolCalls ?? null })
-    }
-    if (message.role === 'tool') {
-      const isError = message.isError === true
-      return this.store.appendMessage(sessionId, {
-        role: 'tool',
-        content: message.content,
-        toolCallId: message.toolCallId,
-        toolName: message.name,
-        isError,
-        ...toolResultTags(message.content, isError)
-      })
-    }
-    // The runtime never adds user messages; ignore defensively.
-    return null
-  }
-
-  private async afterTurn(sessionId: string, provider: ChatProvider): Promise<void> {
-    const session = this.store.getSession(sessionId)
-    if (!session) return
-    if (!session.title) await this.generateTitle(sessionId, provider)
-    await this.foldHistory(sessionId, provider)
-  }
-
-  cancel(sessionId: string): boolean {
-    const handle = this.active.get(sessionId)
-    if (!handle) return false
-    handle.cancel()
-    return true
-  }
-
-  cancelAll(): void {
-    for (const handle of this.active.values()) handle.cancel()
-  }
-
-  /**
-   * Names an untitled session from its first exchange with a cheap one-shot
-   * call; falls back to the first words of the first user message. Never
-   * overwrites a title set meanwhile (for example, a rename).
-   */
-  async generateTitle(sessionId: string, provider?: ChatProvider): Promise<string | null> {
-    if (this.naming.has(sessionId)) return null
-    this.naming.add(sessionId)
-    try {
-      const messages = this.store.listMessages(sessionId)
-      const firstUser = messages.find((m) => m.role === 'user')
-      if (!firstUser) return null
-      const firstReply = messages.find((m) => m.role === 'assistant' && m.content.trim() && m.created_at > firstUser.created_at)
-
-      let title = ''
-      if (firstReply) {
-        try {
-          const model = provider ?? this.options.createProvider()
-          const raw = await completeText(
-            model,
-            {
-              system: COMMANDER_TITLE_PROMPT,
-              messages: [{ role: 'user', content: `User: ${firstUser.content.slice(0, 2000)}\n\nCommander: ${firstReply.content.slice(0, 2000)}` }],
-              maxTokens: 32
-            },
-            AbortSignal.timeout(this.options.oneShotTimeoutMs ?? DEFAULT_ONE_SHOT_TIMEOUT_MS)
-          )
-          title = cleanGeneratedTitle(raw)
-        } catch (err) {
-          console.warn('[Commander] title generation failed, using fallback:', err instanceof Error ? err.message : err)
+        remaining: () => max - budget.count,
+        consume: () => {
+          budget.count += 1
         }
-      }
-      if (!title) title = fallbackTitle(firstUser.content)
-
-      // A rename while the model was thinking wins.
-      if (this.store.getSession(sessionId)?.title) return null
-      this.store.renameSession(sessionId, normalizeTitle(title))
-      this.emitSession(sessionId)
-      return title
-    } finally {
-      this.naming.delete(sessionId)
+      })
     }
+    return { tools, context }
+  }
+
+  /** The tools the session's agent may call. Unknown sessions get none. */
+  listTools(sessionId: string): ChatToolDefinition[] {
+    if (!this.store.getSession(sessionId)) return []
+    return [...validateTools(this.toolsFor(sessionId).tools).values()]
   }
 
   /**
-   * Folds turns that no longer fit the context budget into a new rolling
-   * summary. On failure nothing is stored; the next turn simply trims.
+   * Runs one tool call from the session's agent. A successful `ask_captain`
+   * is stored as a delegation, so the Captain's report comes back here (#62).
    */
-  async foldHistory(sessionId: string, provider?: ChatProvider): Promise<CommanderMessage | null> {
-    if (this.folding.has(sessionId)) return null
-    this.folding.add(sessionId)
-    try {
-      const plan = planFold(this.store.listMessages(sessionId), this.budget)
-      if (!plan) return null
-      const excerpt = transcriptForSummary(plan.toFold)
-      const prompt = plan.previousSummary
-        ? `Previous summary:\n${plan.previousSummary}\n\nNew conversation to fold in:\n${excerpt}`
-        : `Conversation to summarise:\n${excerpt}`
-      let summary: string
+  async callTool(sessionId: string, name: string, input: Record<string, unknown>, toolCallId: string, signal: AbortSignal): Promise<ChatToolResult> {
+    if (!this.store.getSession(sessionId)) return { content: `Commander session not found: ${sessionId}`, isError: true }
+    const byName = validateTools(this.toolsFor(sessionId).tools)
+    const result = await runTool(byName.get(name), name, input, { signal, toolCallId })
+    const isError = result.isError === true
+    const tags = toolResultTags(result.content, isError)
+    if (tags.correlationId) {
       try {
-        const model = provider ?? this.options.createProvider()
-        summary = (await completeText(
-          model,
-          { system: COMMANDER_SUMMARY_PROMPT, messages: [{ role: 'user', content: prompt }], maxTokens: 800 },
-          AbortSignal.timeout(this.options.oneShotTimeoutMs ?? DEFAULT_ONE_SHOT_TIMEOUT_MS)
-        )).trim()
+        const message = this.store.appendMessage(sessionId, {
+          role: 'tool',
+          content: result.content,
+          toolCallId,
+          toolName: name,
+          isError,
+          ...tags
+        })
+        this.emit({ type: 'messages_appended', sessionId, messages: [message] })
       } catch (err) {
-        console.warn('[Commander] summary generation failed:', err instanceof Error ? err.message : err)
-        return null
+        console.error('[Commander] Could not record the delegation:', err)
       }
-      if (!summary) return null
-      if (!this.store.getSession(sessionId)) return null
-      const stored = this.store.appendMessage(sessionId, { role: 'summary', content: summary, correlationId: plan.lastFoldedId })
-      this.emit({ type: 'messages_appended', sessionId, messages: [stored] })
-      return stored
-    } finally {
-      this.folding.delete(sessionId)
     }
+    return result
   }
+
+  // ── Reports (#62) ───────────────────────────────────────────
 
   /**
    * Stores a Captain report for a session. It counts as unread until the
-   * session is read, and the model sees it on the next turn.
+   * session is read, and is handed to the agent when the session is open.
    */
-  appendReport(input: AppendReportInput, emit = true): CommanderMessage {
+  appendReport(input: AppendReportInput): CommanderMessage {
     const content = input.content?.trim()
     if (!content) throw new Error('Report is empty')
     const message = this.store.appendMessage(input.sessionId, {
@@ -425,69 +318,93 @@ export class CommanderService {
       projectId: input.projectId ?? null,
       correlationId: input.correlationId ?? null
     })
-    if (emit) {
-      this.emit({ type: 'messages_appended', sessionId: input.sessionId, messages: [message] })
-    }
-    this.emitSession(input.sessionId)
+    this.emit({ type: 'messages_appended', sessionId: input.sessionId, messages: [message] })
+    this.emitSession(this.store.getSession(input.sessionId))
     return message
   }
 
-  // ── Report delivery (#62) ───────────────────────────────────
-
   /**
-   * Stores a report and, when its session is the one open in the view, gives
-   * the Commander a turn to relay it. A session that is not open only gets
-   * the unread report (the list badge). If the open session is mid-turn, the
-   * relay waits for that turn to end. Storing never depends on the relay:
-   * with no provider (no API key) the report is still there, unread.
+   * Stores a report and, when its session is the one open in the view, hands
+   * it to the session's agent so the Commander relays it. A session that is
+   * not open only gets the unread report (the list badge); it is handed over
+   * when the user opens it. Storing never depends on the agent.
    */
   deliverReport(input: DeliverReportInput): DeliverReportResult {
-    const waitsForCurrentTurn = this.isSessionActive(input.sessionId) && this.active.has(input.sessionId)
-    const message = this.appendReport(input, !waitsForCurrentTurn)
+    const message = this.appendReport(input)
     if (!this.isSessionActive(input.sessionId)) return { message, relayed: false }
-    if (waitsForCurrentTurn) {
-      const pending = this.pendingRelay.get(input.sessionId)
-      if (pending) {
-        pending.messageIds.push(message.id)
-        pending.projectName = input.projectName ?? pending.projectName
-      } else {
-        this.pendingRelay.set(input.sessionId, { messageIds: [message.id], projectName: input.projectName ?? null })
-      }
-      return { message, relayed: true }
-    }
-    return { message, relayed: this.relayReport(input.sessionId, input.projectName ?? null) }
+    return { message, relayed: this.relayReports(input.sessionId, input.projectName ?? null) }
   }
 
-  private relayReport(sessionId: string, projectName: string | null): boolean {
-    let provider: ChatProvider
-    try {
-      provider = this.options.createProvider()
-    } catch (err) {
-      console.warn('[Commander] Report stored but not relayed:', err instanceof Error ? err.message : err)
+  /**
+   * Hands every report the agent has not seen to it, as one automated
+   * message. A busy agent gets them when it next goes idle, so a report never
+   * interrupts an answer. Returns false when nothing could be scheduled.
+   */
+  relayReports(sessionId: string, projectName: string | null = null): boolean {
+    const reports = this.store.reportsToRelay(sessionId)
+    if (reports.length === 0) return false
+    const agentId = this.agentId()
+    if (!agentId) {
+      console.warn('[Commander] Report stored but not relayed: no agent is configured')
       return false
     }
-    if (!this.store.getSession(sessionId)) return false
-    this.startTurn(sessionId, provider, {
-      trigger: 'report',
-      userMessage: '',
-      systemNote: reportRelayNote(projectName ? `"${projectName}"` : 'a project')
-    })
+    const live = this.options.agents.findSessionByTaskId(sessionId)
+    if (live && live.session.status !== 'idle' && live.session.status !== 'error') {
+      this.pendingRelay.add(sessionId)
+      return true
+    }
+    this.pendingRelay.delete(sessionId)
+    this.prepareSession(sessionId)
+    this.store.markRelayed(sessionId, reports[reports.length - 1].created_at)
+    const text = buildReportRelayMessage(sessionId, reports, projectName)
+    this.options.agents
+      .sendMessage(live?.sessionId ?? '', text, sessionId, live?.session.agentId ?? agentId)
+      .catch((err) => console.error(`[Commander] Could not relay reports to session ${sessionId}:`, err))
     return true
   }
 
-  /** After a turn: relays a report that arrived during it, if the session is still open and idle. */
-  private relayPending(sessionId: string): void {
-    const pending = this.pendingRelay.get(sessionId)
-    if (!pending) return
-    this.pendingRelay.delete(sessionId)
-    const messages = pending.messageIds
-      .map((id) => this.store.moveMessageToEnd(id))
-      .filter((message): message is CommanderMessage => message !== null)
-    if (messages.length > 0) {
-      this.emit({ type: 'messages_appended', sessionId, messages })
-      this.emitSession(sessionId)
+  private onAgentEvent(channel: string, data: unknown): void {
+    if (channel === 'agent:status') {
+      const event = data as { taskId?: string; status?: string }
+      if (!event?.taskId || event.status !== 'idle') return
+      const session = this.store.getSession(event.taskId)
+      if (!session) return
+      this.emitSession(this.store.touch(session.id))
+      if (this.pendingRelay.has(session.id) && this.isSessionActive(session.id)) this.relayReports(session.id)
+      return
     }
-    if (!this.isSessionActive(sessionId) || this.active.has(sessionId)) return
-    this.relayReport(sessionId, pending.projectName)
+    if (channel === 'transcript:changed') {
+      const event = data as { taskId?: string; parts?: TranscriptPartRecord[] }
+      if (!event?.taskId || !event.parts?.some((part) => part.role === 'user')) return
+      const session = this.store.getSession(event.taskId)
+      if (!session) return
+      const said = userInputs(event.parts).find((input) => !input.automated && input.content.trim())
+      if (!said) return
+      // The user spoke: the session moves up, and an untitled one is named.
+      if (!session.title) this.store.renameSession(session.id, normalizeTitle(fallbackTitle(said.content)))
+      this.emitSession(this.store.touch(session.id))
+    }
   }
+}
+
+/** The automated message that hands reports to the Commander's agent. */
+export function buildReportRelayMessage(sessionId: string, reports: CommanderMessage[], projectName: string | null): string {
+  const findings = reports
+    .map((report) => {
+      const tag = report.correlation_id ? ` (correlation_id ${report.correlation_id})` : ''
+      return `Report from project ${report.project_id ?? 'unknown'}${tag}:\n${report.content}`
+    })
+    .join('\n\n')
+  const label = projectName ? `project "${projectName}"` : reports.length > 1 ? 'your projects' : 'a project'
+  return buildSystemMessage(
+    {
+      origin: SystemMessageOrigin.CaptainReport,
+      taskId: sessionId,
+      deliveryId: computeDeliveryId(sessionId, reports.map((report) => report.id).join(',')),
+      generatedAt: new Date().toISOString()
+    },
+    reports.length > 1 ? `${reports.length} Captain reports arrived.` : 'A Captain report arrived.',
+    findings,
+    reportRelayNote(label)
+  )
 }

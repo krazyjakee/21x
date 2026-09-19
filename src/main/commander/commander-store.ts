@@ -1,7 +1,9 @@
 import type Database from 'better-sqlite3'
 import { createId } from '@paralleldrive/cuid2'
-import type { ChatToolCall } from '../../shared/chat'
-import { COMMANDER_MESSAGE_ROLES } from '../../shared/commander'
+import { COMMANDER_MESSAGE_ROLES, type ChatToolCall } from '../../shared/commander'
+import { DEFAULT_PROJECT_ID } from '../../shared/projects'
+import { TaskStatus } from '../../shared/constants'
+import { TASK_ROLE_COMMANDER } from '../../shared/task-roles'
 import type {
   CommanderMessage,
   CommanderMessageRole,
@@ -12,6 +14,14 @@ import type {
 
 /**
  * Persistence for Commander chat sessions (docs/commander.md).
+ *
+ * A session is a `commander_sessions` row (title, archive, unread) plus a
+ * hidden `tasks` row with the same id and `role = 'commander'`, which hosts
+ * the agent conversation exactly as a Captain row does: its transcript is
+ * the task's transcript. `commander_messages` keeps what is not part of that
+ * conversation: Captain reports (unread until read, relayed to the agent),
+ * the `ask_captain` delegations reports are routed by, and the history of
+ * sessions written before the Commander ran on agent sessions.
  *
  * Backed by the app's SQLite connection (DatabaseManager.db). Timestamps are
  * epoch ms from a clock that never repeats or goes backwards within a store, so
@@ -51,6 +61,7 @@ function toSession(row: CommanderSessionRow): CommanderSession {
     updated_at: row.updated_at,
     archived: row.archived === 1,
     last_read_at: row.last_read_at ?? null,
+    relayed_at: row.relayed_at ?? null,
     unread_count: row.unread_count ?? 0
   }
 }
@@ -114,9 +125,36 @@ export class CommanderStore {
     const id = createId()
     const ts = this.now()
     this.db
-      .prepare('INSERT INTO commander_sessions (id, title, created_at, updated_at, archived, last_read_at) VALUES (?, ?, ?, ?, 0, ?)')
-      .run(id, normalizeTitle(title), ts, ts, ts)
+      .prepare('INSERT INTO commander_sessions (id, title, created_at, updated_at, archived, last_read_at, relayed_at) VALUES (?, ?, ?, ?, 0, ?, ?)')
+      .run(id, normalizeTitle(title), ts, ts, ts, ts)
+    this.ensureTask(id)
     return this.getSession(id)!
+  }
+
+  /**
+   * The hidden task row that hosts the session's agent conversation, created
+   * on first use (sessions written by the old chat runtime have none).
+   * Returns whether it was created just now. Throws for an unknown session.
+   */
+  ensureTask(sessionId: string): { created: boolean } {
+    const existing = this.db.prepare('SELECT role FROM tasks WHERE id = ?').get(sessionId) as { role: string } | undefined
+    if (existing) {
+      if (existing.role !== TASK_ROLE_COMMANDER) throw new Error(`Task ${sessionId} is not a Commander session`)
+      return { created: false }
+    }
+    if (!this.getSession(sessionId)) throw new Error(`Commander session not found: ${sessionId}`)
+    const now = new Date().toISOString()
+    this.db.prepare(`
+      INSERT INTO tasks (id, title, description, type, priority, status, assignee, labels, source, role, project_id, created_at, updated_at)
+      VALUES (?, 'Commander', 'A Commander chat session. Not a task: never listed, never scheduled.', 'general', 'medium', ?, '', '[]', 'local', ?, ?, ?, ?)
+    `).run(sessionId, TaskStatus.NotStarted, TASK_ROLE_COMMANDER, DEFAULT_PROJECT_ID, now, now)
+    return { created: true }
+  }
+
+  /** Bumps the session to the top of the list. */
+  touch(id: string): CommanderSession | null {
+    this.db.prepare('UPDATE commander_sessions SET updated_at = ? WHERE id = ?').run(this.now(), id)
+    return this.getSession(id)
   }
 
   getSession(id: string): CommanderSession | null {
@@ -124,7 +162,7 @@ export class CommanderStore {
     return row ? toSession(row) : null
   }
 
-  /** Most recently active first. `search` matches the title or any message text. */
+  /** Most recently active first. `search` matches the title, a report, or the conversation text. */
   listSessions(options: { search?: string; includeArchived?: boolean } = {}): CommanderSession[] {
     const where: string[] = []
     const params: unknown[] = []
@@ -135,8 +173,11 @@ export class CommanderStore {
       where.push(`(s.title LIKE ? ESCAPE '\\' OR EXISTS (
         SELECT 1 FROM commander_messages m
         WHERE m.session_id = s.id AND m.role IN ('user', 'assistant', 'report') AND m.content LIKE ? ESCAPE '\\'
+      ) OR EXISTS (
+        SELECT 1 FROM transcript_parts t
+        WHERE t.task_id = s.id AND t.role IN ('user', 'assistant') AND t.content LIKE ? ESCAPE '\\'
       ))`)
-      params.push(pattern, pattern)
+      params.push(pattern, pattern, pattern)
     }
     const sql = `${SESSION_SELECT}${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY s.updated_at DESC, s.rowid DESC`
     return (this.db.prepare(sql).all(...params) as CommanderSessionRow[]).map(toSession)
@@ -153,7 +194,11 @@ export class CommanderStore {
   }
 
   deleteSession(id: string): boolean {
-    return this.db.prepare('DELETE FROM commander_sessions WHERE id = ?').run(id).changes > 0
+    const remove = this.db.transaction(() => {
+      this.db.prepare('DELETE FROM tasks WHERE id = ? AND role = ?').run(id, TASK_ROLE_COMMANDER)
+      return this.db.prepare('DELETE FROM commander_sessions WHERE id = ?').run(id).changes > 0
+    })
+    return remove()
   }
 
   /** The user has seen everything up to now: clears the unread count. */
@@ -198,22 +243,19 @@ export class CommanderStore {
     return row ? toMessage(row) : null
   }
 
-  /**
-   * Moves an already-durable message to the end of its session. Reports that
-   * arrive during a model turn are stored immediately, then moved behind that
-   * turn's assistant reply so the relay turn sees the report as the newest
-   * input rather than splicing it into the turn that was already in flight.
-   */
-  moveMessageToEnd(id: string): CommanderMessage | null {
-    const message = this.getMessage(id)
-    if (!message) return null
-    const ts = this.now()
-    const move = this.db.transaction(() => {
-      this.db.prepare('UPDATE commander_messages SET created_at = ? WHERE id = ?').run(ts, id)
-      this.db.prepare('UPDATE commander_sessions SET updated_at = ? WHERE id = ?').run(ts, message.session_id)
-    })
-    move()
-    return this.getMessage(id)
+  /** Reports stored after the session's agent was last handed its reports, oldest first. */
+  reportsToRelay(sessionId: string): CommanderMessage[] {
+    const rows = this.db
+      .prepare(`SELECT m.* FROM commander_messages m JOIN commander_sessions s ON s.id = m.session_id
+        WHERE m.session_id = ? AND m.role = 'report' AND m.created_at > COALESCE(s.relayed_at, 0)
+        ORDER BY m.created_at ASC, m.rowid ASC`)
+      .all(sessionId) as CommanderMessageRow[]
+    return rows.map(toMessage)
+  }
+
+  /** Every report up to `upTo` has been handed to the agent. */
+  markRelayed(sessionId: string, upTo: number): void {
+    this.db.prepare('UPDATE commander_sessions SET relayed_at = MAX(COALESCE(relayed_at, 0), ?) WHERE id = ?').run(upTo, sessionId)
   }
 
   /** Oldest first. */

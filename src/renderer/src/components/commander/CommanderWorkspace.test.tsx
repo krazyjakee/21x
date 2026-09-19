@@ -8,32 +8,52 @@ const mocks = vi.hoisted(() => ({
     createSession: vi.fn(),
     renameSession: vi.fn(),
     archiveSession: vi.fn(),
-    listMessages: vi.fn(),
     markRead: vi.fn(),
     setActiveSession: vi.fn(async () => undefined),
-    send: vi.fn(),
-    cancel: vi.fn(),
+    prepareSession: vi.fn(),
+    getAgentId: vi.fn(),
     onEvent: vi.fn()
   },
   settingsApi: {
-    getAll: vi.fn(),
+    get: vi.fn(async () => null),
     set: vi.fn()
   },
   agentApi: {
     getAll: vi.fn()
   },
-  agentSessionApi: {},
+  agentSessionApi: {
+    start: vi.fn(),
+    stop: vi.fn(async () => undefined),
+    send: vi.fn(async () => ({ newSessionId: null })),
+    getTranscriptSnapshot: vi.fn(async () => []),
+    getTranscriptDelta: vi.fn(async () => [])
+  },
   onAgentStatus: vi.fn(),
   onTranscriptChanged: vi.fn()
 }))
-vi.mock('@/lib/ipc-client', () => mocks)
+vi.mock('@/lib/ipc-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/ipc-client')>()),
+  ...mocks
+}))
+
+/**
+ * The transcript is the shared agent panel with its own IPC; this file is
+ * about the Commander around it. Its props are captured so a test can send
+ * like a user and see which row it shows.
+ */
+const panel = vi.hoisted(() => ({ props: null as null | { onSend?: (text: string) => Promise<void> | void; taskId?: string; title?: string } }))
+vi.mock('@/components/agents/AgentTranscriptPanel', () => ({
+  AgentTranscriptPanel: (props: { onSend?: (text: string) => void; taskId?: string; title?: string }) => {
+    panel.props = props
+    return null
+  }
+}))
 
 const api = mocks.commanderApi
 
 import { useAgentStore } from '@/stores/agent-store'
 import { useCommanderStore } from '@/stores/commander-store'
 import { CommanderWorkspace } from './CommanderWorkspace'
-import { toolCallLabel } from './tool-call-label'
 
 function session(over: Partial<CommanderSession> = {}): CommanderSession {
   return { id: 's1', title: 'Launch', created_at: 1, updated_at: 1, archived: false, last_read_at: 1, unread_count: 0, ...over }
@@ -65,9 +85,6 @@ beforeEach(() => {
     selectedSessionId: null,
     search: '',
     showArchived: false,
-    messages: {},
-    streaming: {},
-    turnErrors: {},
     isLoading: false,
     error: null
   })
@@ -75,9 +92,10 @@ beforeEach(() => {
     emit = cb
     return () => {}
   })
-  api.listMessages.mockResolvedValue({ messages: [], activeTurnId: null })
+  panel.props = null
+  api.prepareSession.mockImplementation(async (id: string) => ({ taskId: id, agentId: 'claude-agent' }))
+  api.getAgentId.mockResolvedValue('claude-agent')
   api.markRead.mockImplementation(async (id: string) => session({ id, unread_count: 0 }))
-  mocks.settingsApi.getAll.mockResolvedValue({})
   mocks.settingsApi.set.mockResolvedValue(undefined)
   mocks.agentApi.getAll.mockResolvedValue([{
     id: 'claude-agent',
@@ -87,7 +105,16 @@ beforeEach(() => {
     is_default: true,
     created_at: '',
     updated_at: ''
+  }, {
+    id: 'codex-agent',
+    name: 'Codex Agent',
+    server_url: '',
+    config: { coding_agent: 'codex', model: 'gpt-saved' },
+    is_default: false,
+    created_at: '',
+    updated_at: ''
   }])
+  mocks.agentSessionApi.start.mockImplementation(async (_agentId: string, taskId: string) => ({ sessionId: `agent-session-${taskId}` }))
 })
 
 afterEach(() => {
@@ -132,143 +159,46 @@ describe('CommanderWorkspace', () => {
     expect(api.markRead).not.toHaveBeenCalled()
   })
 
-  it('streams a turn, renders tool chips and reports distinctly, then shows the stored reply', async () => {
-    api.listSessions.mockResolvedValue([session()])
-    api.listMessages.mockResolvedValue({
-      messages: [
-        message({ id: 'u1', content: 'Ask web to deploy', created_at: 1 }),
-        message({ id: 'a1', role: 'assistant', content: '', created_at: 2, tool_calls: [{ id: 'c1', name: 'ask_project', input: { project: 'web', message: 'deploy' } }] }),
-        message({ id: 't1', role: 'tool', content: 'queued', tool_call_id: 'c1', tool_name: 'ask_project', created_at: 3 }),
-        message({ id: 'r1', role: 'report', content: 'Deployed to prod', project_id: 'web', created_at: 4 })
-      ],
-      activeTurnId: null
-    })
+  it('runs the open session as an agent session on its task row', async () => {
+    api.listSessions.mockResolvedValue([session({ id: 'a', title: 'Alpha' })])
     render(<CommanderWorkspace />)
-    fireEvent.click(await screen.findByText('Launch'))
+    fireEvent.click(await screen.findByText('Alpha'))
 
-    expect(await screen.findByText('Asked web: deploy')).toBeTruthy()
-    const report = screen.getByTestId('commander-report')
-    expect(report.textContent).toContain('Deployed to prod')
-    expect(report.textContent).toContain('web')
+    await waitFor(() => expect(panel.props?.taskId).toBe('a'))
+    expect(api.prepareSession).toHaveBeenCalledWith('a')
+    expect(api.setActiveSession).toHaveBeenCalledWith('a')
 
-    api.send.mockResolvedValue({ turnId: 't-1', message: message({ id: 'u2', content: 'Status?', created_at: 5 }) })
-    fireEvent.change(screen.getByLabelText('Message the Commander'), { target: { value: 'Status?' } })
-    fireEvent.click(screen.getByLabelText('Send'))
-    await waitFor(() => expect(api.send).toHaveBeenCalledWith('s1', 'Status?'))
-    expect(await screen.findByLabelText('Stop')).toBeTruthy()
-
-    act(() => {
-      emit({ type: 'turn_event', sessionId: 's1', turnId: 't-1', event: { type: 'text_delta', text: 'All ' } })
-      emit({ type: 'turn_event', sessionId: 's1', turnId: 't-1', event: { type: 'text_delta', text: 'good.' } })
+    // Sending starts the agent on the row (quietly), then sends like any task.
+    await act(async () => {
+      await panel.props!.onSend!('Ask Alpha for a status update')
     })
-    expect(screen.getByTestId('commander-streaming').textContent).toContain('All good.')
-
-    fireEvent.click(screen.getByLabelText('Stop'))
-    expect(api.cancel).toHaveBeenCalledWith('s1')
-
-    act(() => {
-      emit({ type: 'messages_appended', sessionId: 's1', messages: [message({ id: 'a2', role: 'assistant', content: 'All good.', created_at: 6 })] })
-      emit({ type: 'turn_event', sessionId: 's1', turnId: 't-1', event: { type: 'done', stopReason: 'end_turn' } })
-    })
-    expect(screen.queryByTestId('commander-streaming')).toBeNull()
-    expect(screen.getByText('All good.')).toBeTruthy()
-    expect(screen.getByLabelText('Send')).toBeTruthy()
+    expect(mocks.agentSessionApi.start).toHaveBeenCalledWith('claude-agent', 'a', undefined, true)
+    expect(mocks.agentSessionApi.send).toHaveBeenCalledWith('agent-session-a', 'Ask Alpha for a status update', 'a', 'claude-agent', undefined)
   })
 
-  it('does not duplicate messages when the open session is selected again', async () => {
-    api.listSessions.mockResolvedValue([session()])
-    api.listMessages.mockResolvedValue({
-      messages: [message({ id: 'u1', content: 'Hi there', created_at: 1 })],
-      activeTurnId: null
-    })
+  it('saves the agent choice for every session and moves the open conversation to it', async () => {
+    api.listSessions.mockResolvedValue([session({ id: 'a', title: 'Alpha' })])
     render(<CommanderWorkspace />)
-    fireEvent.click(await screen.findByText('Launch'))
-    expect(await screen.findByText('Hi there')).toBeTruthy()
+    fireEvent.click(await screen.findByText('Alpha'))
+    const select = await screen.findByLabelText('Commander agent')
+    await waitFor(() => expect((select as HTMLSelectElement).value).toBe('claude-agent'))
+    expect(screen.getByText('Claude Agent · claude-saved')).toBeTruthy()
 
-    // A stored reply arrives while the session is open...
-    act(() => {
-      emit({ type: 'messages_appended', sessionId: 's1', messages: [message({ id: 'a1', role: 'assistant', content: 'Hello!', created_at: 2 })] })
+    await act(async () => {
+      fireEvent.change(select, { target: { value: 'codex-agent' } })
     })
-    expect(screen.getByText('Hello!')).toBeTruthy()
-
-    // ...and the next selection click refetches the same history.
-    api.listMessages.mockResolvedValue({
-      messages: [
-        message({ id: 'u1', content: 'Hi there', created_at: 1 }),
-        message({ id: 'a1', role: 'assistant', content: 'Hello!', created_at: 2 })
-      ],
-      activeTurnId: null
+    expect(mocks.settingsApi.set).toHaveBeenCalledWith('commander_agent_id', 'codex-agent')
+    await act(async () => {
+      await panel.props!.onSend!('hello')
     })
-    fireEvent.click(within(screen.getByLabelText('Commander sessions')).getByText('Launch'))
-    await waitFor(async () => expect(api.listMessages).toHaveBeenCalledTimes(2))
-    expect(screen.getAllByText('Hi there')).toHaveLength(1)
-    expect(screen.getAllByText('Hello!')).toHaveLength(1)
+    expect(mocks.agentSessionApi.start).toHaveBeenCalledWith('codex-agent', 'a', undefined, true)
   })
 
-  it('persists model and thinking choices before sending', async () => {
-    api.listSessions.mockResolvedValue([session()])
-    api.send.mockResolvedValue({ turnId: 't-config', message: message({ content: 'Hello' }) })
-    mocks.agentApi.getAll.mockResolvedValue([
-      {
-        id: 'claude-agent', name: 'Claude Agent', server_url: '',
-        config: { coding_agent: 'claude-code', model: 'claude-saved', reasoning_effort: 'medium' },
-        is_default: true, created_at: '', updated_at: ''
-      },
-      {
-        id: 'codex-agent', name: 'Codex Agent', server_url: '',
-        config: { coding_agent: 'codex', model: 'gpt-saved', reasoning_effort: 'low' },
-        is_default: false, created_at: '', updated_at: ''
-      }
-    ])
-    render(<CommanderWorkspace />)
-    fireEvent.click(await screen.findByText('Launch'))
-
-    await waitFor(() => expect(screen.getByLabelText('Commander model')).not.toBeDisabled())
-    fireEvent.change(screen.getByLabelText('Commander model'), {
-      target: { value: 'codex-agent' }
-    })
-    fireEvent.change(screen.getByLabelText('Thinking level'), { target: { value: 'high' } })
-    fireEvent.change(screen.getByLabelText('Message the Commander'), { target: { value: 'Hello' } })
-    fireEvent.click(screen.getByLabelText('Send'))
-
-    await waitFor(() => expect(api.send).toHaveBeenCalledWith('s1', 'Hello'))
-    expect(mocks.settingsApi.set).toHaveBeenCalledWith('chat_provider', 'openai-compatible')
-    expect(mocks.settingsApi.set).toHaveBeenCalledWith('chat_model', 'gpt-saved')
-    expect(mocks.settingsApi.set).toHaveBeenCalledWith('chat_reasoning_effort', 'high')
-    const lastSettingWrite = Math.max(...mocks.settingsApi.set.mock.invocationCallOrder)
-    expect(lastSettingWrite).toBeLessThan(api.send.mock.invocationCallOrder[0])
-  })
-
-  it('does not offer or send with an unconfigured model', async () => {
-    api.listSessions.mockResolvedValue([session()])
-    mocks.agentApi.getAll.mockResolvedValue([])
-    render(<CommanderWorkspace />)
-    fireEvent.click(await screen.findByText('Launch'))
-
-    expect(await screen.findByText('No configured Commander model')).toBeTruthy()
-    fireEvent.change(screen.getByLabelText('Message the Commander'), { target: { value: 'Hello' } })
-    expect(screen.getByLabelText('Send')).toBeDisabled()
-    expect(api.send).not.toHaveBeenCalled()
-  })
-
-  it('does not restart streaming when the send reply arrives after the turn is over', async () => {
-    useCommanderStore.setState({ selectedSessionId: 's1', sessions: [session()], messages: { s1: [] } })
-    let resolveSend: (v: unknown) => void = () => {}
-    api.send.mockReturnValue(new Promise((r) => { resolveSend = r }))
-    const sending = useCommanderStore.getState().send('hi')
-    useCommanderStore.getState().handleEvent({ type: 'turn_event', sessionId: 's1', turnId: 't-fast', event: { type: 'done', stopReason: 'end_turn' } })
-    resolveSend({ turnId: 't-fast', message: message({ id: 'u9', content: 'hi' }) })
-    await sending
-    expect(useCommanderStore.getState().streaming.s1).toBeUndefined()
-  })
-})
-
-describe('toolCallLabel', () => {
-  it('reads as a delegation when the call names a project', () => {
-    expect(toolCallLabel('ask_project', { project: 'Web' })).toBe('Asked Web…')
-    expect(toolCallLabel('ask_captain', { project: 'Web', message: 'Deploy the site' })).toBe('Asked Web: Deploy the site')
-    expect(toolCallLabel('list_projects', {})).toBe('List projects')
-    expect(toolCallLabel('archive_project', { project: 'Web' })).toBe('Archive project · Web')
-    expect(toolCallLabel('navigate_to_project', { project: 'Web' })).toBe('Navigate to project · Web')
+  it('tells main when the view closes, so reports only queue', async () => {
+    api.listSessions.mockResolvedValue([])
+    const view = render(<CommanderWorkspace />)
+    await screen.findByText('Talk to the Commander')
+    view.unmount()
+    expect(api.setActiveSession).toHaveBeenLastCalledWith(null)
   })
 })

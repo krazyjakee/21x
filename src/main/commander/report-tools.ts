@@ -1,4 +1,4 @@
-import type { ChatToolDefinition, ChatToolResult } from '../chat/tools'
+import type { ChatToolDefinition, ChatToolResult } from './tools'
 import { setCommanderEscalationHandler, type EscalationEvent } from '../escalation'
 import type { CommanderService } from './commander-service'
 import type { CommanderStore } from './commander-store'

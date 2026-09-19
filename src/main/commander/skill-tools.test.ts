@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createTestDb } from '../../../test/helpers/db-test-helper'
 import type { DatabaseManager } from '../database'
-import type { ChatToolResult } from '../chat/tools'
+import type { ChatToolResult } from './tools'
 import { ProjectMutationConfirmations } from './project-tools'
 import { createCommanderSkillTools, MUTATING_COMMANDER_SKILL_TOOLS, type SkillChangeKind } from './skill-tools'
 

@@ -14,7 +14,6 @@ import { registerTerminalHandlers } from './ipc/terminal'
 import { registerBrowserBrokerHandlers } from './ipc/browser-broker'
 import { registerExternalAuthHandlers } from './ipc/external-auth'
 import { registerVoiceHandlers } from './ipc/voice'
-import { registerChatHandlers } from './ipc/chat'
 import { registerCommanderHandlers } from './ipc/commander'
 import { registerConnectorHandlers } from './ipc/connectors'
 import { registerOverviewHandlers } from './ipc/overview'
@@ -35,7 +34,6 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   registerBrowserBrokerHandlers()
   registerExternalAuthHandlers()
   registerVoiceHandlers(deps)
-  registerChatHandlers(deps)
   registerCommanderHandlers(deps)
   registerConnectorHandlers(deps)
   registerOverviewHandlers(deps)

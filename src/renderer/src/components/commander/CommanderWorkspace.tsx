@@ -3,7 +3,6 @@ import { commanderApi } from '@/lib/ipc-client'
 import { useCommanderStore } from '@/stores/commander-store'
 import { CommanderChatPane } from './CommanderChatPane'
 import { CommanderSessionList } from './CommanderSessionList'
-import { CommanderVoiceControls } from './CommanderVoiceControls'
 
 /** Top-level Commander view: persisted sessions on the left, the open chat on the right. No canvas. */
 export function CommanderWorkspace() {
@@ -13,8 +12,8 @@ export function CommanderWorkspace() {
   useEffect(() => {
     const unsubscribe = subscribe()
     void fetchSessions()
-    // Events were missed while the view was closed: reload the open session
-    // (which also tells main it is the active one, #62).
+    // Tell main the open session again (#62): reports that arrived while the
+    // view was closed are handed to its agent now.
     const open = useCommanderStore.getState().selectedSessionId
     if (open) void useCommanderStore.getState().selectSession(open)
     return () => {
@@ -28,7 +27,6 @@ export function CommanderWorkspace() {
     <div className="flex h-full min-h-0">
       <CommanderSessionList />
       <CommanderChatPane />
-      <CommanderVoiceControls />
     </div>
   )
 }

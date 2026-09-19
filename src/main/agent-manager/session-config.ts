@@ -2,9 +2,12 @@ import type { AgentRecord, DatabaseManager, McpServerRecord, SecretRecord, TaskR
 import type { McpServerConfig, SessionConfig } from '../adapters/coding-agent-adapter'
 import type { OAuthManager } from '../oauth/oauth-manager'
 import { TaskStatus } from '../../shared/constants'
-import { isCoordinatorTask } from '../../shared/task-roles'
+import { isCommanderTask, isCoordinatorTask } from '../../shared/task-roles'
 import { getTaskApiPort, getTaskApiToken, waitForTaskApiServer } from '../task-api-server'
-import { buildTaskMcpUrl } from '../task-mcp-endpoint'
+import { buildCommanderMcpUrl, buildTaskMcpUrl } from '../task-mcp-endpoint'
+import { COMMANDER_MCP_SERVER_NAME } from '../commander/commander-mcp'
+import { CommanderStore } from '../commander/commander-store'
+import { buildCommanderSystemPrompt, earlierHistoryNote } from '../commander/prompts'
 import { getSecretBrokerPort, writeSecretShellWrapper } from '../secret-broker'
 import { opencodeDisallowedToolMap, readServerToolLimits, resolveAllowedToolNames } from '../mcp-tool-limits'
 import { withCaptainSystemPrompt, type CaptainPromptOptions } from '../prompts/captain'
@@ -18,6 +21,8 @@ export interface McpServerOptions {
   /** Project scope for a non-subtask session (task-management-core.ts). */
   projectId?: string
   artifactTaskId?: string
+  /** A Commander session: it gets the Commander's MCP server and nothing else (commander-mcp.ts). */
+  commanderSessionId?: string
 }
 
 export function isTriageSessionTask(taskId: string, task?: TaskRecord | null): boolean {
@@ -55,6 +60,8 @@ export function coordinatorProjectScope(task: TaskRecord): string {
  *  unscoped. The Captain's artifact calls stay unpinned, because it is not
  *  a workpiece of its own. */
 export function mcpOptionsForTask(taskId: string, task?: TaskRecord | null, scopeTask?: TaskRecord | null): McpServerOptions {
+  // The Commander works across projects through its own tools only.
+  if (isCommanderTask(task)) return { ensureTaskManagement: false, commanderSessionId: taskId }
   // A pseudo-task session (heartbeat-<id>) has no row of its own, but an agent
   // that lists task-management explicitly must still be confined to the
   // checked task's project, never given full access.
@@ -117,6 +124,8 @@ export async function buildMcpServers(
   agentId: string,
   opts?: McpServerOptions
 ): Promise<Record<string, McpServerConfig>> {
+  if (opts?.commanderSessionId) return buildCommanderMcpServers(opts.commanderSessionId)
+
   const agent = db.getAgent(agentId)
   const mcpEntries = agent?.config?.mcp_servers || []
   const result: Record<string, McpServerConfig> = {}
@@ -165,6 +174,32 @@ export async function buildMcpServers(
   }
 
   return result
+}
+
+/**
+ * A Commander session's only MCP server: its own registry. The agent's other
+ * servers are left out on purpose, because the Commander delegates and never
+ * does project work itself (docs/commander.md).
+ */
+async function buildCommanderMcpServers(sessionId: string): Promise<Record<string, McpServerConfig>> {
+  await waitForTaskApiServer()
+  const apiPort = getTaskApiPort()
+  if (!apiPort) {
+    console.warn('[AgentManager] buildCommanderMcpServers - task API port is null; Commander tools unavailable')
+    return {}
+  }
+  return { [COMMANDER_MCP_SERVER_NAME]: { type: 'http', url: buildCommanderMcpUrl(apiPort, getTaskApiToken(), sessionId) } }
+}
+
+/** The Commander prompt, with what an older session said before it ran on an agent. */
+function commanderSystemPrompt(db: DatabaseManager, task: TaskRecord, agentPrompt?: string): string {
+  let earlier = ''
+  try {
+    earlier = earlierHistoryNote(new CommanderStore(db).listMessages(task.id))
+  } catch (error) {
+    console.warn(`[AgentManager] Could not read the earlier history of Commander session ${task.id}:`, error)
+  }
+  return buildCommanderSystemPrompt(agentPrompt, earlier)
 }
 
 /** Tells the agent which secret env vars exist and how to use them in bash. */
@@ -231,7 +266,8 @@ function coordinatorPromptOptions(db: DatabaseManager, task: TaskRecord, workspa
  * decrypted secret values and the secrets prompt come from the agent config.
  * A coordinator task (the Captain) gets the built-in Captain prompt
  * first, whatever the backend, then its project's context and memory file,
- * with `systemPrompt` appended after them.
+ * with `systemPrompt` appended after them. A Commander session gets the
+ * Commander prompt the same way.
  */
 export function assembleSessionConfig(
   db: DatabaseManager,
@@ -256,9 +292,11 @@ export function assembleSessionConfig(
     workspaceDir: params.workspaceDir,
     model: sessionModel(db, agent, params),
     reasoningEffort: agent.config?.reasoning_effort,
-    systemPrompt: params.task && isCoordinatorTask(params.task)
-      ? withCaptainSystemPrompt(params.systemPrompt, coordinatorPromptOptions(db, params.task, params.workspaceDir))
-      : params.systemPrompt,
+    systemPrompt: params.task && isCommanderTask(params.task)
+      ? commanderSystemPrompt(db, params.task, params.systemPrompt)
+      : params.task && isCoordinatorTask(params.task)
+        ? withCaptainSystemPrompt(params.systemPrompt, coordinatorPromptOptions(db, params.task, params.workspaceDir))
+        : params.systemPrompt,
     mcpServers: params.mcpServers,
     // OpenCode enforces per-agent MCP tool limits through session.prompt's
     // tool map (Claude Code reads enabledTools from mcpServers directly).

@@ -11,6 +11,7 @@ export interface CommanderSessionRow {
   updated_at: number
   archived: number
   last_read_at: number | null
+  relayed_at?: number | null
   unread_count?: number
 }
 

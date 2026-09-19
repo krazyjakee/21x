@@ -1,11 +1,10 @@
 import { ipcMain, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import { COMMANDER_EVENT_CHANNEL, type CommanderEvent, type CommanderListSessionsRequest } from '../../shared/commander'
 import { UI_COMMAND_CHANNEL, type UiCommand } from '../../shared/ui-commands'
-import { createChatProviderFromSettings } from '../chat/provider-factory'
-import type { ChatProvider } from '../chat/providers/types'
-import type { ChatToolDefinition } from '../chat/tools'
+import type { ChatToolDefinition } from '../commander/tools'
 import { CommanderService, type CommanderToolContext } from '../commander/commander-service'
 import { CommanderStore } from '../commander/commander-store'
+import { setCommanderToolHost } from '../commander/commander-mcp'
 import { createCommanderProjectTools, ProjectMutationConfirmations } from '../commander/project-tools'
 import { createCommanderSkillTools } from '../commander/skill-tools'
 import { installCommanderReportBridge } from '../commander/report-tools'
@@ -18,14 +17,15 @@ import type { IpcDeps } from './deps'
 import { broadcastProjectChanged } from './projects'
 
 /**
- * Commander chat sessions (docs/commander.md): session CRUD, message history,
- * and `commander:send` / `commander:cancel` for turns. Events stream on
+ * Commander chat sessions (docs/commander.md): the session list, reports, and
+ * `commander:prepareSession`, which gives the renderer the task row and agent
+ * a session's conversation runs on. The conversation itself goes through the
+ * normal agent-session calls, like any task. Events stream on
  * `commander:event` to every window that has used the Commander, so a report
- * that arrives while no turn is running still reaches the open view.
+ * reaches the open view whenever it arrives.
  */
 
 export interface CommanderIpcOptions {
-  createProvider?: (deps: IpcDeps) => ChatProvider
   /** Replaces the default project tool registry (tests, integrations). */
   getTools?: (context: CommanderToolContext) => ChatToolDefinition[]
 }
@@ -64,7 +64,6 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
       guardedIpcSend(wc, COMMANDER_EVENT_CHANNEL, event)
     }
   }
-  const createProvider = options.createProvider ?? ((d: IpcDeps) => createChatProviderFromSettings(d.db))
   // One challenge table for the app: a token issued in a session is only
   // valid for that session's next confirmed call.
   const confirmations = new ProjectMutationConfirmations()
@@ -72,8 +71,9 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
   const store = new CommanderStore({ get db() { return deps.db.db } })
   const commander: CommanderService = new CommanderService({
     store,
+    db: deps.db,
+    agents: deps.agentManager,
     emit,
-    createProvider: () => createProvider(deps),
     getTools: options.getTools ?? ((context) => [
       ...createCommanderProjectTools({
         db: deps.db,
@@ -110,6 +110,7 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
     ])
   })
   service = commander
+  setCommanderToolHost(commander)
 
   // #62: `report_to_commander` (Task API route) and `tell_commander`
   // escalations reach the sessions through this bridge.
@@ -152,17 +153,19 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
 
   ipcMain.handle('commander:archiveSession', (event, payload: { id?: string; archived?: boolean }) => {
     trusted(event, 'commander:archiveSession')
-    const id = requireString(payload?.id, 'id')
-    if (payload?.archived !== false) commander.cancel(id)
-    const session = store.setArchived(id, payload?.archived !== false)
-    if (session) emit({ type: 'session_updated', session })
-    return session
+    return commander.setArchived(requireString(payload?.id, 'id'), payload?.archived !== false)
   })
 
-  ipcMain.handle('commander:listMessages', (event, payload: { sessionId?: string }) => {
-    trusted(event, 'commander:listMessages')
-    const sessionId = requireString(payload?.sessionId, 'sessionId')
-    return { messages: store.listMessages(sessionId), activeTurnId: commander.activeTurnId(sessionId) }
+  // The task row and agent the session's conversation runs on. The renderer
+  // then starts or resumes it through the normal agent-session calls.
+  ipcMain.handle('commander:prepareSession', (event, payload: { sessionId?: string }) => {
+    trusted(event, 'commander:prepareSession')
+    return commander.prepareSession(requireString(payload?.sessionId, 'sessionId'))
+  })
+
+  ipcMain.handle('commander:getAgentId', (event) => {
+    trusted(event, 'commander:getAgentId')
+    return commander.agentId()
   })
 
   ipcMain.handle('commander:markRead', (event, payload: { sessionId?: string }) => {
@@ -178,19 +181,6 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
     trusted(event, 'commander:setActiveSession')
     const sessionId = typeof payload?.sessionId === 'string' && payload.sessionId ? payload.sessionId : null
     commander.setActiveSession(sessionId)
-  })
-
-  ipcMain.handle('commander:send', (event, payload: { sessionId?: string; text?: string }) => {
-    trusted(event, 'commander:send')
-    const sessionId = requireString(payload?.sessionId, 'sessionId')
-    const { turnId, message } = commander.sendUserMessage(sessionId, typeof payload?.text === 'string' ? payload.text : '')
-    return { turnId, message }
-  })
-
-  ipcMain.handle('commander:cancel', (event, payload: { sessionId?: string }) => {
-    trusted(event, 'commander:cancel')
-    if (typeof payload?.sessionId !== 'string') return { cancelled: false }
-    return { cancelled: commander.cancel(payload.sessionId) }
   })
 
   return commander
