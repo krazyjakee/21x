@@ -4,7 +4,6 @@ import { tmpdir } from 'os'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ArtifactContentKind, ArtifactType } from '../shared/artifacts'
 import {
-  ARTIFACT_FILE_LIMITS,
   createRegisteredTaskArtifact,
   editRegisteredTaskArtifactFile,
   inspectTaskArtifact,
@@ -277,7 +276,7 @@ describe('task artifact files', () => {
   it('rejects directories, unsupported files, missing files, and oversized text previews', async () => {
     await mkdir(join(workspaceDir, 'folder'))
     await writeFile(join(workspaceDir, 'archive.zip'), 'zip')
-    await writeFile(join(workspaceDir, 'large.md'), Buffer.alloc(ARTIFACT_FILE_LIMITS.maxTextBytes + 1, 65))
+    await writeFile(join(workspaceDir, 'large.md'), Buffer.alloc(1024 * 1024 + 1, 65))
 
     await expect(readTaskArtifact(workspaceDir, 'folder')).resolves.toBeNull()
     await expect(readTaskArtifact(workspaceDir, 'archive.zip')).resolves.toBeNull()

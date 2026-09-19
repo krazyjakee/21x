@@ -22,13 +22,6 @@ export function isReference(value: string): boolean {
   return REFERENCE_PATTERN.test(value) || /^\{file:[^}]+\}$/.test(value)
 }
 
-/** The variable names referenced by a value (`Bearer ${A} ${B}` → [A, B]). */
-export function referenceNames(value: string): string[] {
-  const names: string[] = []
-  for (const match of value.matchAll(REFERENCE_PATTERN)) names.push(match[1])
-  return names
-}
-
 /** Whether the value is exactly one reference and nothing else. */
 export function isPureReference(value: string): string | null {
   const match = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(value)

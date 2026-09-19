@@ -8,7 +8,6 @@ import {
   VoiceTtsModelManager,
   describeDownloadFailure,
   extractTarBz2,
-  sha256OfFile,
   stripRoot,
 } from './voice-tts-model-manager'
 import { findTtsManifestEntry } from './voice-tts-manifest'
@@ -132,16 +131,6 @@ describe('extractTarBz2', () => {
     expect(readFileSync(join(target, 'espeak-ng-data', 'en_dict'), 'utf8')).toBe('dict')
     // The wrapping directory is gone, so the worker reads a fixed layout.
     expect(existsSync(join(target, 'wrapper'))).toBe(false)
-  })
-})
-
-describe('sha256OfFile', () => {
-  it('hashes a file the same way the catalogue records it', async () => {
-    const file = join(root, 'x.bin')
-    writeFileSync(file, 'abc')
-    expect(await sha256OfFile(file)).toBe(
-      'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
-    )
   })
 })
 

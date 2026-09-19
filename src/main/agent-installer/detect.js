@@ -7,31 +7,10 @@ import { existsSync } from 'fs'
 const execFileAsync = promisify(execFile)
 export const MINIMUM_PI_VERSION = '0.80.5'
 
-/** Detection keys for every supported coding-agent backend. */
-export const AGENT_BACKEND_KEYS = ['claudeCode', 'opencode', 'codex', 'cursor', 'pi']
-
 /**
  * @typedef {{ installed: boolean, version?: string | null, supported?: boolean, reason?: string }} BackendStatus
  * @typedef {(cmd: string, args?: string[], options?: object) => Promise<{ stdout: string, stderr: string }>} ExecRunner
  */
-
-/**
- * A backend is usable when it is installed and not flagged as unsupported.
- * @param {BackendStatus | undefined} status
- */
-export function isBackendReady(status) {
-  return Boolean(status && status.installed && status.supported !== false)
-}
-
-/**
- * Backend keys that are installed and usable, in `AGENT_BACKEND_KEYS` order.
- * Every detected backend is available — there is no single-selection gate.
- * @param {Record<string, BackendStatus> | undefined} status
- * @returns {string[]}
- */
-export function getInstalledBackends(status) {
-  return AGENT_BACKEND_KEYS.filter((key) => isBackendReady(status?.[key]))
-}
 
 function unique(items) {
   return [...new Set(items.filter(Boolean))]
@@ -120,7 +99,7 @@ function ensureAgentPaths() {
 /**
  * Detect which agents and tools are installed on this system.
  *
- * Every supported backend (`AGENT_BACKEND_KEYS`) is probed on each call, so
+ * Every supported backend is probed on each call, so
  * re-running detection reflects backends installed or removed since the last
  * run. The result is a snapshot — nothing is cached between calls.
  *

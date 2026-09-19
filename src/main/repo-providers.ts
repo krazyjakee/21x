@@ -2,8 +2,11 @@
  * Remembers which git provider each attached repository came from. Task repos
  * are stored as bare `owner/repo` names, so without this map a Forgejo or
  * GitLab repo attached while another provider is the global default would be
- * cloned with the wrong CLI when the agent session starts.
+ * cloned with the wrong CLI when the agent session starts. Also holds the
+ * repo-listing helpers the provider managers share.
  */
+
+import type { GitHubRepo } from './github-manager'
 
 export type GitProvider = 'github' | 'gitlab' | 'forgejo'
 
@@ -46,10 +49,35 @@ export function recordRepoProviders(db: SettingsStore, fullNames: string[], prov
   if (changed) db.setSetting(REPO_PROVIDERS_SETTING, JSON.stringify(map))
 }
 
-/** Provider recorded for the repo, else the global default, else GitHub. */
-export function resolveRepoProvider(db: SettingsStore, fullName: string): GitProvider {
-  const recorded = getRepoProviders(db)[fullName]
-  if (recorded) return recorded
-  const configured = db.getSetting('git_provider')
-  return isGitProvider(configured) ? configured : 'github'
+/** GitHub's repo JSON; Forgejo's API returns the same shape. */
+export function mapGitHubStyleRepo(raw: Record<string, unknown>): GitHubRepo {
+  return {
+    name: raw.name as string,
+    fullName: raw.full_name as string,
+    defaultBranch: (raw.default_branch as string) || 'main',
+    cloneUrl: raw.clone_url as string,
+    description: (raw.description as string) || '',
+    isPrivate: raw.private === true
+  }
+}
+
+/** Maps raw repos, keeping one per fullName (paginated listings can repeat a repo). */
+export function uniqueRepos(raw: Record<string, unknown>[], map: (raw: Record<string, unknown>) => GitHubRepo): GitHubRepo[] {
+  const byFullName = new Map<string, GitHubRepo>()
+  for (const item of raw) {
+    const repo = map(item)
+    byFullName.set(repo.fullName, repo)
+  }
+  return Array.from(byFullName.values())
+}
+
+/** Top-level namespace of a repo (`group/sub/project` → `group`). */
+export function repoOwner(repo: GitHubRepo): string {
+  return repo.fullName.split('/')[0]
+}
+
+/** Distinct owner names other than the signed-in user, sorted. */
+export function otherOwners(names: Array<string | undefined>, username: string | undefined): string[] {
+  const owners = new Set(names.filter((name): name is string => !!name && name !== username))
+  return Array.from(owners).sort((left, right) => left.localeCompare(right))
 }

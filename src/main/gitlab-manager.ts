@@ -1,6 +1,7 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import type { GitHubRepo } from './github-manager'
+import { otherOwners, repoOwner, uniqueRepos } from './repo-providers'
 
 const execFileAsync = promisify(execFile)
 
@@ -12,24 +13,19 @@ export interface GlabCliStatus {
   username?: string
 }
 
-export class GitLabManager {
-
-  /**
-   * Maps a raw GitLab API project object to the shared GitHubRepo interface
-   * so the UI can handle both providers uniformly.
-   */
-  private mapRepo(raw: Record<string, unknown>): GitHubRepo {
-    const pathWithNamespace = raw.path_with_namespace as string
-    const httpUrl = raw.http_url_to_repo as string
-    return {
-      name: raw.path as string,
-      fullName: pathWithNamespace,
-      defaultBranch: (raw.default_branch as string) || 'main',
-      cloneUrl: httpUrl,
-      description: (raw.description as string) || '',
-      isPrivate: (raw.visibility as string) === 'private'
-    }
+/** Maps a GitLab project onto the shared GitHubRepo shape so the UI handles every provider alike. */
+function mapGitLabProject(raw: Record<string, unknown>): GitHubRepo {
+  return {
+    name: raw.path as string,
+    fullName: raw.path_with_namespace as string,
+    defaultBranch: (raw.default_branch as string) || 'main',
+    cloneUrl: raw.http_url_to_repo as string,
+    description: (raw.description as string) || '',
+    isPrivate: (raw.visibility as string) === 'private'
   }
+}
+
+export class GitLabManager {
 
   /**
    * Fetches paginated results from a GitLab API endpoint.
@@ -46,16 +42,9 @@ export class GitLabManager {
       'api', url, '--paginate'
     ], { maxBuffer: GLAB_API_MAX_BUFFER, timeout: 60000 })
 
-    const raw = JSON.parse(stdout) as Record<string, unknown>[]
-
-    // Deduplicate by fullName
-    const deduped = new Map<string, GitHubRepo>()
-    for (const project of raw) {
-      const mapped = this.mapRepo(project)
-      deduped.set(mapped.fullName, mapped)
-    }
-    console.log(`[GitLabManager] Fetched ${deduped.size} projects from ${basePath}`)
-    return Array.from(deduped.values())
+    const repos = uniqueRepos(JSON.parse(stdout) as Record<string, unknown>[], mapGitLabProject)
+    console.log(`[GitLabManager] Fetched ${repos.length} projects from ${basePath}`)
+    return repos
   }
 
   /**
@@ -99,21 +88,8 @@ export class GitLabManager {
       this.checkGlabCli(),
       this.fetchAccessibleRepos()
     ])
-
-    const owners = new Set<string>()
-    for (const repo of repos) {
-      // GitLab uses nested namespaces (e.g. "group/subgroup/project")
-      // We extract the top-level namespace (first segment)
-      const parts = repo.fullName.split('/')
-      if (parts.length >= 2) {
-        const owner = parts[0]
-        if (owner && owner !== status.username) {
-          owners.add(owner)
-        }
-      }
-    }
-
-    return Array.from(owners).sort((left, right) => left.localeCompare(right))
+    // Nested namespaces ("group/subgroup/project") are listed by their top-level group.
+    return otherOwners(repos.map(repoOwner), status.username)
   }
 
   /**

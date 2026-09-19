@@ -1,8 +1,7 @@
 import { guardedIpcSend } from './guarded-ipc-send'
 import { BrowserWindow, Notification } from 'electron'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
-import { dirname } from 'path'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import type { DatabaseManager, TaskRecord } from './database'
 import type { AgentManager } from './agent-manager'
 import { HeartbeatStatus, HEARTBEAT_OK_TOKEN, HEARTBEAT_INFO_TOKEN, HEARTBEAT_DEFAULTS, TaskStatus } from '../shared/constants'
@@ -11,14 +10,10 @@ import { extractGitHubUrls, requiresCurrentStateChecks, runPreflightChecks } fro
 import { emitTaskEvent } from './project-events'
 
 /**
- * HeartbeatScheduler - Periodic monitoring of tasks in ready_for_review status
- *
- * Inspired by OpenClaw's heartbeat pattern, this scheduler:
- * 1. Ticks every 60 seconds
- * 2. Queries tasks with heartbeat_enabled=1 and heartbeat_next_check_at <= NOW()
- * 3. Spawns lightweight agent sessions that read heartbeat.md from the task workspace
- * 4. Parses results: HEARTBEAT_OK (no notification) vs attention needed (notify user)
- * 5. Logs results to heartbeat_logs table
+ * Periodic monitoring of tasks in ready_for_review status (OpenClaw's heartbeat
+ * pattern). Every tick it picks tasks whose heartbeat is due, runs the checks
+ * listed in the task's heartbeat.md, notifies the user only when attention is
+ * needed, and logs each result to heartbeat_logs.
  *
  * ## heartbeat.md
  * A markdown file written by the agent when it finishes a task. Contains a checklist
@@ -37,9 +32,8 @@ export class HeartbeatScheduler {
   private readonly CHECK_INTERVAL = HEARTBEAT_DEFAULTS.checkIntervalMs
   private readonly MAX_CONSECUTIVE_ERRORS = HEARTBEAT_DEFAULTS.maxConsecutiveErrors
 
-  /** Track in-progress heartbeat sessions to avoid duplicates */
   private inProgress: Set<string> = new Set()
-  /** Track which in-progress skips have already been logged (log once, not every tick) */
+  /** In-progress skips already logged, so each is logged once rather than every tick. */
   private loggedInProgress: Set<string> = new Set()
   /**
    * Findings already forwarded to a task agent, keyed by delivery id → timestamp.
@@ -75,58 +69,29 @@ export class HeartbeatScheduler {
     }
   }
 
-  // ── Public API ──────────────────────────────────────────────
-
-  /**
-   * Enable heartbeat for a task. Sets next check time based on interval.
-   */
   enableHeartbeat(taskId: string, intervalMinutes?: number): void {
     const interval = intervalMinutes ?? this.getDefaultInterval()
-    const now = new Date()
-    const nextCheck = new Date(now.getTime() + interval * 60_000)
-
-    this.dbManager.updateTask(taskId, {
+    const nextCheck = new Date(Date.now() + interval * 60_000).toISOString()
+    const updates = {
       heartbeat_enabled: true,
       heartbeat_interval_minutes: interval,
-      heartbeat_next_check_at: nextCheck.toISOString()
-    })
-
-    this.sendToRenderer('task:updated', {
-      taskId,
-      updates: {
-        heartbeat_enabled: true,
-        heartbeat_interval_minutes: interval,
-        heartbeat_next_check_at: nextCheck.toISOString()
-      }
-    })
-
-    console.log(`[HeartbeatScheduler] Enabled heartbeat for task ${taskId}, interval: ${interval}min, next: ${nextCheck.toISOString()}`)
+      heartbeat_next_check_at: nextCheck
+    }
+    this.dbManager.updateTask(taskId, updates)
+    this.sendToRenderer('task:updated', { taskId, updates })
+    console.log(`[HeartbeatScheduler] Enabled heartbeat for task ${taskId}, interval: ${interval}min, next: ${nextCheck}`)
   }
 
-  /**
-   * Disable heartbeat for a task.
-   */
   disableHeartbeat(taskId: string): void {
-    this.dbManager.updateTask(taskId, {
-      heartbeat_enabled: false,
-      heartbeat_next_check_at: null
-    })
-
-    this.sendToRenderer('task:updated', {
-      taskId,
-      updates: {
-        heartbeat_enabled: false,
-        heartbeat_next_check_at: null
-      }
-    })
-
+    const updates = { heartbeat_enabled: false, heartbeat_next_check_at: null }
+    this.dbManager.updateTask(taskId, updates)
+    this.sendToRenderer('task:updated', { taskId, updates })
     console.log(`[HeartbeatScheduler] Disabled heartbeat for task ${taskId}`)
   }
 
   /**
-   * Manually trigger a heartbeat check for a specific task.
-   * Skips pre-flight checks — always sends to the agent since the user explicitly requested it.
-   * Returns a status string so the UI can show feedback.
+   * Manual heartbeat check. Skips the pre-flight checks because the user asked
+   * for it; the returned status is shown in the UI.
    */
   async runNow(taskId: string): Promise<'sent' | 'no_file' | 'no_agent' | 'in_progress' | 'error'> {
     const task = this.dbManager.getTask(taskId)
@@ -155,11 +120,10 @@ export class HeartbeatScheduler {
     this.inProgress.add(taskId)
 
     try {
-      // Phase 1: Send check to captain (skips preflight since user requested it)
       const checkPrompt = this.buildHeartbeatPrompt(task, heartbeatContent)
       const captainSessionId = await this.agentManager.sendHeartbeatViaCaptain(agentId, task.id, checkPrompt)
 
-      // Phase 2: Wait for result and forward — run in background so IPC returns immediately
+      // Wait for the result in the background so the IPC call returns immediately.
       this.processRunNowResult(captainSessionId, task, agentId).catch((err) => {
         const message = err instanceof Error ? err.message : String(err)
         console.error(`[HeartbeatScheduler] runNow background error for task ${taskId}:`, message)
@@ -168,8 +132,7 @@ export class HeartbeatScheduler {
 
       return 'sent'
     } catch (err) {
-      this.inProgress.delete(taskId)
-      this.loggedInProgress.delete(taskId)
+      this.clearInProgress(taskId)
       const message = err instanceof Error ? err.message : String(err)
       console.error(`[HeartbeatScheduler] runNow error for task ${taskId}:`, message)
       this.logResult(taskId, HeartbeatStatus.Error, message)
@@ -177,24 +140,15 @@ export class HeartbeatScheduler {
     }
   }
 
-  /**
-   * Get the heartbeat.md file path for a task.
-   */
   getHeartbeatFilePath(taskId: string): string {
     const workspaceDir = this.dbManager.getWorkspaceDir(taskId)
     return join(workspaceDir, 'heartbeat.md')
   }
 
-  /**
-   * Check if a heartbeat.md file exists for a task.
-   */
   hasHeartbeatFile(taskId: string): boolean {
     return existsSync(this.getHeartbeatFilePath(taskId))
   }
 
-  /**
-   * Read the heartbeat.md content for a task.
-   */
   readHeartbeatFile(taskId: string): string | null {
     const filePath = this.getHeartbeatFilePath(taskId)
     if (!existsSync(filePath)) return null
@@ -208,10 +162,7 @@ export class HeartbeatScheduler {
     }
   }
 
-  /**
-   * Write or update the heartbeat.md file for a task.
-   * Creates the file if it doesn't exist. Ensures the workspace directory exists.
-   */
+  /** Changed instructions reset the check baseline so the next check sees everything. */
   writeHeartbeatFile(taskId: string, content: string): void {
     const filePath = this.getHeartbeatFilePath(taskId)
     const dir = dirname(filePath)
@@ -238,8 +189,6 @@ export class HeartbeatScheduler {
     }
   }
 
-  // ── Core Logic ──────────────────────────────────────────────
-
   private async checkHeartbeats(): Promise<void> {
     try {
       const globalEnabled = this.dbManager.getSetting('heartbeat_enabled_global')
@@ -251,7 +200,6 @@ export class HeartbeatScheduler {
 
       if (dueTasks.length === 0) return
 
-      // Log in-progress skips once per heartbeat run (not every tick)
       for (const task of dueTasks) {
         if (this.inProgress.has(task.id) && !this.loggedInProgress.has(task.id)) {
           console.log(`[HeartbeatScheduler] Skipping task ${task.id} — heartbeat already in progress`)
@@ -267,13 +215,12 @@ export class HeartbeatScheduler {
 
       // Process sequentially to avoid overloading agent quotas
       for (const task of actionableTasks) {
-        // Skip if task has a live agent session (user is actively working)
+        // A live session means the user is working on the task.
         if (this.agentManager.hasActiveSessionForTask(task.id)) {
           console.log(`[HeartbeatScheduler] Skipping task ${task.id} — active agent session in progress`)
           continue
         }
 
-        // Skip completed tasks and disable their heartbeat
         if (task.status === TaskStatus.Completed) {
           console.log(`[HeartbeatScheduler] Task ${task.id} is completed, disabling heartbeat`)
           this.disableHeartbeat(task.id)
@@ -295,7 +242,6 @@ export class HeartbeatScheduler {
           }
         }
 
-        // Verify heartbeat.md still exists
         if (!this.hasHeartbeatFile(task.id)) {
           console.log(`[HeartbeatScheduler] No heartbeat.md for task ${task.id}, disabling heartbeat`)
           this.disableHeartbeat(task.id)
@@ -314,9 +260,7 @@ export class HeartbeatScheduler {
   }
 
   /**
-   * Run a single heartbeat check for a task.
-   *
-   * Two-phase approach to avoid polluting task agent context:
+   * Phased so the task agent's context is only touched when action is needed:
    * 1. Pre-flight: cheap `gh api` checks (no LLM)
    * 2. If changes detected → captain session evaluates findings
    * 3. If captain says action needed → spawn task agent with specific instructions
@@ -334,7 +278,6 @@ export class HeartbeatScheduler {
     try {
       console.log(`[HeartbeatScheduler] Running heartbeat for task "${task.title}" (${task.id})`)
 
-      // Phase 1: Pre-flight checks (cheap, no LLM)
       const preflightResult = await runPreflightChecks(heartbeatContent, task.heartbeat_last_check_at)
       if (preflightResult === 'no_changes') {
         console.log(`[HeartbeatScheduler] Pre-flight: no changes for task "${task.title}", skipping LLM`)
@@ -351,12 +294,10 @@ export class HeartbeatScheduler {
         return
       }
 
-      // Phase 2: Send check to captain session (doesn't pollute task context)
       const checkPrompt = this.buildHeartbeatPrompt(task, heartbeatContent)
       const captainSessionId = await this.agentManager.sendHeartbeatViaCaptain(agentId, task.id, checkPrompt)
       const captainResult = await this.waitForSessionResult(captainSessionId, task.id)
 
-      // Phase 3: Evaluate captain result
       const classification = this.classifyCaptainResult(captainResult)
 
       if (classification === 'ok') {
@@ -386,15 +327,11 @@ export class HeartbeatScheduler {
       this.checkConsecutiveErrors(task.id)
       this.advanceNextCheck(task)
     } finally {
-      this.inProgress.delete(task.id)
-      this.loggedInProgress.delete(task.id)
+      this.clearInProgress(task.id)
       await this.agentManager.cleanupHeartbeatSession(task.id)
     }
   }
 
-  /**
-   * Background processing for runNow — waits for captain result and forwards to task agent if needed.
-   */
   private async processRunNowResult(captainSessionId: string, task: TaskRecord, agentId: string): Promise<void> {
     try {
       const captainResult = await this.waitForSessionResult(captainSessionId, task.id)
@@ -411,16 +348,17 @@ export class HeartbeatScheduler {
         this.advanceNextCheck(task, classification === 'ok')
       }
     } finally {
-      this.inProgress.delete(task.id)
-      this.loggedInProgress.delete(task.id)
+      this.clearInProgress(task.id)
       await this.agentManager.cleanupHeartbeatSession(task.id)
     }
   }
 
-  /**
-   * Build the prompt for the captain heartbeat check.
-   * Captain evaluates the status — it doesn't make changes.
-   */
+  private clearInProgress(taskId: string): void {
+    this.inProgress.delete(taskId)
+    this.loggedInProgress.delete(taskId)
+  }
+
+  /** The Captain only evaluates the checks; it makes no changes. */
   private buildHeartbeatPrompt(task: TaskRecord, heartbeatContent: string): string {
     const globalInstructions = this.dbManager.getSetting('heartbeat_global_instructions') || ''
     const lastCheck = task.heartbeat_last_check_at
@@ -451,9 +389,6 @@ export class HeartbeatScheduler {
   }
 
   /**
-   * Build the prompt for the task agent when captain found something.
-   * This goes to the task's own session so the agent can act on findings.
-   *
    * The findings are machine-generated and often quote untrusted external text
    * (PR comments, CI output). They are therefore fenced as DATA and carry an explicit
    * authority notice: a heartbeat message never authorizes a privileged operation.
@@ -522,44 +457,31 @@ export class HeartbeatScheduler {
     }
   }
 
-  /**
-   * Classify the captain's response into one of three categories.
-   */
   private classifyCaptainResult(result: string): 'ok' | 'info' | 'action' {
     if (result.includes(HEARTBEAT_OK_TOKEN)) return 'ok'
     if (result.includes(HEARTBEAT_INFO_TOKEN)) return 'info'
     return 'action'
   }
 
-  /**
-   * Wait for a heartbeat session to complete and extract the result text.
-   * Polls the agent session status until it transitions to idle.
-   */
+  /** Polls the session until it goes idle with a reply, and returns that reply. */
   private waitForSessionResult(sessionId: string, taskId: string, fallbackTaskId?: string): Promise<string> {
     return new Promise<string>((resolve, reject) => {
-      const INACTIVITY_TIMEOUT_MS = 5 * 60_000 // 5 min since last sign of life
-      const POLL_MS = 3_000 // check every 3s
+      const INACTIVITY_TIMEOUT_MS = 5 * 60_000
+      const POLL_MS = 3_000
 
-      // Track the last time the session showed any activity (working status,
-      // new message, etc.). The timeout only fires if there has been NO
-      // activity for the full INACTIVITY_TIMEOUT_MS window. This handles
-      // long multi-step coding sessions where the agent flickers between
-      // 'working' and 'idle' across tool calls.
+      // The timeout only fires after a full window with no activity: long
+      // multi-step sessions flicker between 'working' and 'idle' across tool calls.
       let lastActivityAt = Date.now()
-      // Track the current session ID — may change if the adapter re-keys it
+      // The adapter may re-key the session, so it is also looked up by task id.
+      // fallbackTaskId makes the task-agent phase find the task's session
+      // rather than the Captain's heartbeat session.
       let currentSessionId = sessionId
-      // Use the provided fallbackTaskId for re-keying lookup, defaulting to
-      // the heartbeat session's taskId. This ensures Phase 3 (task agent)
-      // looks up the correct session instead of the captain session.
       const lookupTaskId = fallbackTaskId || `heartbeat-${taskId}`
 
       const timer = setInterval(() => {
-        // Try to find the session by ID first
         let session = this.agentManager.getSession(currentSessionId)
 
-        // If not found, the session ID may have been re-keyed by pollSingleSession
-        // (adapter provides real ID, old temp ID is deleted from sessions map).
-        // Fall back to finding the session by its stable taskId.
+        // pollSingleSession replaces a temporary id with the adapter's real one.
         if (!session) {
           const found = this.agentManager.findSessionByTaskId(lookupTaskId)
           if (found) {
@@ -569,7 +491,6 @@ export class HeartbeatScheduler {
           }
         }
 
-        // Session is actively working — mark activity and keep waiting
         if (session?.status === 'working') {
           lastActivityAt = Date.now()
           return
@@ -598,15 +519,11 @@ export class HeartbeatScheduler {
             clearInterval(timer)
             reject(new Error(`Heartbeat session ${currentSessionId} timed out after ${Math.round(inactiveMs / 60_000)} minutes of inactivity`))
           }
-          // Otherwise keep waiting — agent may not have processed the prompt yet
         }
       }, POLL_MS)
     })
   }
 
-  /**
-   * Handle the heartbeat result.
-   */
   private handleResult(task: TaskRecord, sessionId: string, result: string): void {
     const isOk = result.includes(HEARTBEAT_OK_TOKEN)
 
@@ -622,10 +539,7 @@ export class HeartbeatScheduler {
     }
   }
 
-  /**
-   * Build a compact check summary for heartbeat logs.
-   * Strips control tokens so UI can show meaningful check context.
-   */
+  /** Compact log summary with the control tokens stripped. */
   private extractSummary(result: string, status: HeartbeatStatus): string {
     const infoTokenPattern = new RegExp(`^${HEARTBEAT_INFO_TOKEN}\\s*:\\s*`, 'i')
     const normalized = result
@@ -649,9 +563,6 @@ export class HeartbeatScheduler {
     return 'Checked: action needed'
   }
 
-  /**
-   * Send notification when heartbeat detects something needs attention.
-   */
   private notifyAttentionNeeded(task: TaskRecord, summary: string): void {
     try {
       const notification = new Notification({
@@ -669,13 +580,9 @@ export class HeartbeatScheduler {
       summary: summary.substring(0, 500)
     })
 
-    // Also trigger a task refresh so UI shows the alert
     this.sendToRenderer('tasks:refresh', {})
   }
 
-  /**
-   * Log heartbeat result to the database.
-   */
   private logResult(taskId: string, status: HeartbeatStatus, summary?: string, sessionId?: string): void {
     this.dbManager.createHeartbeatLog({
       task_id: taskId,
@@ -686,11 +593,8 @@ export class HeartbeatScheduler {
   }
 
   /**
-   * Advance the next check time for a task.
-   *
-   * Phase 4.2: Adaptive intervals
-   * - After 3+ consecutive HEARTBEAT_OK results, double the interval (up to 4x base)
-   * - On attention_needed or error, reset to the configured base interval
+   * Adaptive interval: 2x the base after 3 consecutive OK results, 4x after 6.
+   * Anything but OK resets to the configured base interval.
    */
   private advanceNextCheck(task: TaskRecord, isOk?: boolean): void {
     const baseInterval = task.heartbeat_interval_minutes ?? this.getDefaultInterval()
@@ -699,12 +603,11 @@ export class HeartbeatScheduler {
     if (isOk) {
       const consecutiveOks = this.countConsecutiveOks(task.id)
       if (consecutiveOks >= 6) {
-        effectiveInterval = baseInterval * 4 // 4x after 6+ OKs
+        effectiveInterval = baseInterval * 4
       } else if (consecutiveOks >= 3) {
-        effectiveInterval = baseInterval * 2 // 2x after 3+ OKs
+        effectiveInterval = baseInterval * 2
       }
     }
-    // If isOk is false or undefined, use base interval (reset adaptive)
 
     const now = new Date()
     const nextCheck = new Date(now.getTime() + effectiveInterval * 60_000)
@@ -719,9 +622,6 @@ export class HeartbeatScheduler {
     }
   }
 
-  /**
-   * Count consecutive OK results from most recent logs.
-   */
   private countConsecutiveOks(taskId: string): number {
     const logs = this.dbManager.getHeartbeatLogs(taskId, 10)
     let count = 0
@@ -732,9 +632,6 @@ export class HeartbeatScheduler {
     return count
   }
 
-  /**
-   * Check for consecutive errors and auto-disable if threshold is exceeded.
-   */
   private checkConsecutiveErrors(taskId: string): void {
     const consecutiveErrors = this.dbManager.getHeartbeatConsecutiveErrors(taskId)
 
@@ -751,7 +648,7 @@ export class HeartbeatScheduler {
           })
           notification.show()
         } catch {
-          // Notification may fail in some environments
+          // Notifications are unavailable in some environments.
         }
 
         this.sendToRenderer('heartbeat:disabled', {
@@ -762,8 +659,6 @@ export class HeartbeatScheduler {
     }
   }
 
-  // ── Helpers ──────────────────────────────────────────────
-
   /** Heartbeats run on the task's own agent, else the default agent. */
   private resolveAgentId(task: TaskRecord): string | null {
     if (task.agent_id) return task.agent_id
@@ -772,14 +667,10 @@ export class HeartbeatScheduler {
     return defaultAgent?.id ?? agents[0]?.id ?? null
   }
 
-  /**
-   * Check if current time is within configured active hours.
-   */
   private isWithinActiveHours(): boolean {
     const start = this.dbManager.getSetting('heartbeat_active_hours_start')
     const end = this.dbManager.getSetting('heartbeat_active_hours_end')
 
-    // No active hours configured → always active
     if (!start || !end) return true
 
     const now = new Date()
@@ -791,10 +682,9 @@ export class HeartbeatScheduler {
     const endMinutes = endH * 60 + endM
 
     if (startMinutes <= endMinutes) {
-      // Normal range (e.g., 09:00 - 18:00)
       return currentMinutes >= startMinutes && currentMinutes <= endMinutes
     } else {
-      // Overnight range (e.g., 22:00 - 06:00)
+      // Overnight range, e.g. 22:00 - 06:00
       return currentMinutes >= startMinutes || currentMinutes <= endMinutes
     }
   }

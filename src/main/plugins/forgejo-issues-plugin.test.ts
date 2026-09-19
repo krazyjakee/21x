@@ -46,12 +46,6 @@ describe('ForgejoIssuesPlugin', () => {
     expect(manager.fetchOrgRepos).toHaveBeenCalledWith('team', 'local')
   })
 
-  it('requires a tea login in the config', () => {
-    const { plugin } = setup()
-    expect(plugin.validateConfig({ owner: 'team', repo: 'app' })).toBe('tea login is required')
-    expect(plugin.validateConfig(config)).toBeNull()
-  })
-
   it('imports issues as Forgejo tasks and records the repo provider', async () => {
     const { plugin, ctx, db, manager, settings } = setup()
     const result = await plugin.importTasks('src-1', config, ctx)

@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-// Track Notification calls
 const mockNotificationShow = vi.fn()
 const mockNotificationConstructor = vi.fn()
 
@@ -14,7 +13,6 @@ vi.mock('electron', () => ({
   }
 }))
 
-// Mock all OAuth providers to avoid real HTTP calls
 vi.mock('./providers', () => ({
   LinearProvider: class { id = 'linear' },
   HubSpotProvider: class { id = 'hubspot' },
@@ -24,7 +22,6 @@ vi.mock('./providers', () => ({
   }
 }))
 
-// Mock local OAuth server
 vi.mock('./local-oauth-server', () => ({
   LocalOAuthServer: class {
     start = vi.fn()
@@ -32,14 +29,11 @@ vi.mock('./local-oauth-server', () => ({
   }
 }))
 
-// Mock MCP discovery
 vi.mock('./mcp-discovery', () => ({
   McpDiscovery: { probeForAuth: vi.fn() }
 }))
 
 import { OAuthManager } from './oauth-manager'
-
-// ── Helpers ──────────────────────────────────────────────────────
 
 function makeTokenRecord(overrides: Record<string, unknown> = {}) {
   return {
@@ -90,8 +84,6 @@ function makeMockDb(tokenRecord = makeTokenRecord()) {
   }
 }
 
-// ── Tests ────────────────────────────────────────────────────────
-
 describe('OAuthManager — refresh failure cleanup', () => {
   let manager: OAuthManager
   let mockDb: ReturnType<typeof makeMockDb>
@@ -139,7 +131,6 @@ describe('OAuthManager — refresh failure cleanup', () => {
       new Error('invalid_grant')
     )
 
-    // Call 3 times
     await manager.getValidMcpServerToken('srv-notion')
     await manager.getValidMcpServerToken('srv-notion')
     await manager.getValidMcpServerToken('srv-notion')
@@ -171,14 +162,11 @@ describe('OAuthManager — refresh failure cleanup', () => {
       new Error('invalid_grant: Invalid refresh token')
     )
 
-    // Before: status shows connected
     const beforeStatus = manager.getMcpServerOAuthStatus('srv-notion')
     expect(beforeStatus.connected).toBe(true)
 
-    // Trigger refresh failure
     await manager.getValidMcpServerToken('srv-notion')
 
-    // After: token deleted, status shows disconnected
     const afterStatus = manager.getMcpServerOAuthStatus('srv-notion')
     expect(afterStatus.connected).toBe(false)
   })
