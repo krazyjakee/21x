@@ -61,6 +61,7 @@ interface TaskHeaderBarProps {
   onOpenFolder?: () => void
   onOpenFullView?: () => void
   onDelete: () => void
+  recoveryState?: string | null
 }
 
 export function TaskHeaderBar({
@@ -82,7 +83,8 @@ export function TaskHeaderBar({
   onOpenCanvas,
   onOpenFolder,
   onOpenFullView,
-  onDelete
+  onDelete,
+  recoveryState
 }: TaskHeaderBarProps) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(task.title)
@@ -198,6 +200,14 @@ export function TaskHeaderBar({
           </div>
         )}
       </div>
+      {recoveryState && (
+        <span
+          data-testid="task-recovery-state"
+          className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-700 dark:text-amber-300"
+        >
+          {recoveryState}
+        </span>
+      )}
       <div className="flex items-center gap-1.5">
         <TaskPriorityBadge priority={task.priority} />
         {onAssignAgent && agents ? (
