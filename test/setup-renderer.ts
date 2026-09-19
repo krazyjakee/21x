@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest'
 import { vi } from 'vitest'
-import type { AgentOutputEvent, AgentOutputBatchEvent, AgentStatusEvent, WorktreeProgressEvent } from '../src/renderer/src/types/electron'
+import type { AgentStatusEvent, WorktreeProgressEvent } from '../src/renderer/src/types/electron'
 import type { Task } from '../src/renderer/src/types/index'
 
 // Suppress React act() warnings in happy-dom
@@ -8,8 +8,6 @@ import type { Task } from '../src/renderer/src/types/index'
 
 // Capture event listener callbacks for store tests
 export const eventCallbacks = {
-  onAgentOutput: null as ((event: AgentOutputEvent) => void) | null,
-  onAgentOutputBatch: null as ((event: AgentOutputBatchEvent) => void) | null,
   onTranscriptChanged: null as ((event: unknown) => void) | null,
   onAgentStatus: null as ((event: AgentStatusEvent) => void) | null,
   onOverdueCheck: null as (() => void) | null,
@@ -52,6 +50,7 @@ const mockElectronAPI = {
   },
   agentSession: {
     start: vi.fn().mockResolvedValue({ sessionId: 'test-session-id' }),
+    startTask: vi.fn().mockResolvedValue({ action: 'task_started', sessionId: 'test-session-id' }),
     resume: vi.fn().mockResolvedValue({ sessionId: 'test-session-id' }),
     abort: vi.fn().mockResolvedValue({ success: true }),
     stop: vi.fn().mockResolvedValue({ success: true }),
@@ -148,14 +147,6 @@ const mockElectronAPI = {
   },
   onOverdueCheck: vi.fn((cb: () => void) => {
     eventCallbacks.onOverdueCheck = cb
-    return vi.fn()
-  }),
-  onAgentOutput: vi.fn((cb: (event: AgentOutputEvent) => void) => {
-    eventCallbacks.onAgentOutput = cb
-    return vi.fn()
-  }),
-  onAgentOutputBatch: vi.fn((cb: (event: AgentOutputBatchEvent) => void) => {
-    eventCallbacks.onAgentOutputBatch = cb
     return vi.fn()
   }),
   onTranscriptChanged: vi.fn((cb: (event: unknown) => void) => {

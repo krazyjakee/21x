@@ -116,7 +116,8 @@ export function CommanderChatPane() {
       option.provider === settings[CHAT_SETTING_KEYS.provider] &&
       option.model === settings[CHAT_SETTING_KEYS.model]
     )
-    const selected = matchingModels.find((option) => option.reasoningEffort === savedEffort)
+    const selected = matchingModels.find((option) => option.agentId === settings[CHAT_SETTING_KEYS.agentId])
+      ?? matchingModels.find((option) => option.reasoningEffort === savedEffort)
       ?? matchingModels[0]
       ?? configuredModels[0]
     const effort = selected
@@ -127,11 +128,13 @@ export function CommanderChatPane() {
     setSelectedAgentId(selected?.agentId ?? '')
     setReasoningEffort(effort)
     if (selected && (
+      settings[CHAT_SETTING_KEYS.agentId] !== selected.agentId ||
       settings[CHAT_SETTING_KEYS.provider] !== selected.provider ||
       settings[CHAT_SETTING_KEYS.model] !== selected.model ||
       settings[CHAT_SETTING_KEYS.reasoningEffort] !== effort
     )) {
       queueConfigWrite([
+        [CHAT_SETTING_KEYS.agentId, selected.agentId],
         [CHAT_SETTING_KEYS.provider, selected.provider],
         [CHAT_SETTING_KEYS.model, selected.model],
         [CHAT_SETTING_KEYS.reasoningEffort, effort]
@@ -153,6 +156,7 @@ export function CommanderChatPane() {
     setReasoningEffort(nextEffort)
     if (next) {
       queueConfigWrite([
+        [CHAT_SETTING_KEYS.agentId, next.agentId],
         [CHAT_SETTING_KEYS.provider, next.provider],
         [CHAT_SETTING_KEYS.model, next.model],
         [CHAT_SETTING_KEYS.reasoningEffort, nextEffort]
@@ -279,6 +283,7 @@ export function CommanderChatPane() {
                 setSelectedAgentId(next.agentId)
                 setReasoningEffort(nextEffort)
                 queueConfigWrite([
+                  [CHAT_SETTING_KEYS.agentId, next.agentId],
                   [CHAT_SETTING_KEYS.provider, next.provider],
                   [CHAT_SETTING_KEYS.model, next.model],
                   [CHAT_SETTING_KEYS.reasoningEffort, nextEffort]

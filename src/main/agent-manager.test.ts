@@ -3746,6 +3746,30 @@ describe('AgentManager durable transcript write-through', () => {
     expect(upserted[0].parts[0].id).toBe('p1')
   })
 
+  it('persists raw output events without broadcasting them to the window or external listeners', () => {
+    const { mgr, upserted } = buildManager()
+    const send = vi.fn()
+    ;(mgr as any).mainWindow = { isDestroyed: () => false, webContents: { send } }
+    const external = vi.fn()
+    mgr.addExternalListener(external)
+
+    ;(mgr as any).sendToRenderer('agent:output-batch', {
+      sessionId: 's1',
+      taskId: 'task-1',
+      messages: [{ id: 'p1', role: 'tool', content: 'x'.repeat(1_000_000), partType: 'text' }]
+    })
+    ;(mgr as any).sendToRenderer('agent:output', {
+      sessionId: 's1',
+      taskId: 'task-1',
+      type: 'message',
+      data: { id: 'p2', role: 'assistant', content: 'done', partType: 'text' }
+    })
+
+    expect(upserted).toHaveLength(2)
+    expect(send).not.toHaveBeenCalled()
+    expect(external).not.toHaveBeenCalled()
+  })
+
   it('exposes snapshots via getTranscriptSnapshot', async () => {
     const { mgr, mockDb } = buildManager()
     const rows = [{ taskId: 'task-1', partId: 'p1', seq: 1, role: 'assistant', content: 'hi', createdAt: 1, updatedAt: 1 }]
