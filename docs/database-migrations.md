@@ -84,6 +84,17 @@ file keeps the retirement of the legacy seeded "Mastermind" skill. It is the
 only place in `src/` (with its test and one commented compatibility alias) that
 may spell the old name; `src/shared/captain-terminology.test.ts` enforces that.
 
+### Commander sessions run on agent sessions
+
+Migration 18 (`migrateCommanderSessions()`) adds
+`commander_sessions.relayed_at` and sets it to each session's `updated_at`:
+every report stored before the upgrade was already shown to the old chat
+runtime's model, so only later reports are handed to the session's agent.
+Nothing else moves. A session's hidden `tasks` row (`role = 'commander'`, the
+same id as the session) is created on first use by
+`CommanderStore.ensureTask`, and the session's old `user` / `assistant`
+messages are copied into that row's transcript once (docs/commander.md).
+
 ## Adding a column to other tables
 
 Same pattern: update `createTables()`, add a guarded `ALTER TABLE` in `runMigrations()`, and bump `SCHEMA_VERSION`.

@@ -42,12 +42,13 @@ import { setTaskSchedulers } from './task-updates'
 function register(overrides: Partial<Record<keyof IpcDeps, unknown>> = {}): void {
   registerIpcHandlers({
     db: {},
-    agentManager: {},
     githubManager: {},
     worktreeManager: {},
     syncManager: {},
     pluginRegistry: {},
-    ...overrides
+    ...overrides,
+    // The Commander listens to agent events from registration on.
+    agentManager: { addExternalListener: vi.fn(), ...(overrides.agentManager as object | undefined) }
   } as unknown as IpcDeps)
 }
 

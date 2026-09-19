@@ -56,8 +56,7 @@ import type {
   VoiceTtsModelState,
   VoiceTtsSnapshot
 } from '@shared/voice-tts'
-import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
-import type { CommanderEvent, CommanderListSessionsRequest, CommanderMessage, CommanderSession } from '@shared/commander'
+import type { CommanderEvent, CommanderListSessionsRequest, CommanderSession } from '@shared/commander'
 import type { CliMcpMutationResult, CliMcpProbeResult, CliMcpServerRef, CliMcpSnapshot, CliMcpUpsertRequest } from '@shared/cli-mcp-config'
 import type {
   ProjectRecord, CreateProjectData, UpdateProjectData,
@@ -627,24 +626,17 @@ interface ElectronAPI {
       onModelProgress: (callback: (event: { model: VoiceTtsModelState }) => void) => () => void
     }
   }
-  /** Lightweight chat runtime (docs/chat-runtime.md). */
-  chat: {
-    start: (payload: ChatStartRequest) => Promise<{ turnId: string; provider: string; model: string }>
-    cancel: (turnId: string) => Promise<{ cancelled: boolean }>
-    onEvent: (callback: (event: ChatIpcEvent) => void) => () => void
-  }
   /** Commander chat sessions (docs/commander.md). */
   commander: {
     listSessions: (payload?: CommanderListSessionsRequest) => Promise<CommanderSession[]>
     createSession: (payload?: { title?: string }) => Promise<CommanderSession>
     renameSession: (id: string, title: string) => Promise<CommanderSession | null>
     archiveSession: (id: string, archived: boolean) => Promise<CommanderSession | null>
-    listMessages: (sessionId: string) => Promise<{ messages: CommanderMessage[]; activeTurnId: string | null }>
+    prepareSession: (sessionId: string) => Promise<{ taskId: string; agentId: string | null }>
+    getAgentId: () => Promise<string | null>
     markRead: (sessionId: string) => Promise<CommanderSession | null>
     /** The session the view shows, or null when the view is closed (#62 report relay). */
     setActiveSession: (sessionId: string | null) => Promise<void>
-    send: (sessionId: string, text: string) => Promise<{ turnId: string; message: CommanderMessage }>
-    cancel: (sessionId: string) => Promise<{ cancelled: boolean }>
     onEvent: (callback: (event: CommanderEvent) => void) => () => void
   }
   /** ElevenLabs speech engine (#64). Answers with the speech snapshot; the key never comes back. */
@@ -654,12 +646,6 @@ interface ElectronAPI {
     acceptDisclosure: () => Promise<VoiceTtsSnapshot>
     refresh: () => Promise<VoiceTtsSnapshot>
     setModel: (modelId: string) => Promise<VoiceTtsSnapshot>
-  }
-  /** Commander voice mode (#64): main speaks the active session's replies and reports. */
-  commanderVoice: {
-    setActive: (sessionId: string | null) => Promise<{ active: string | null }>
-    bargeIn: (sessionId: string) => Promise<{ cancelled: boolean }>
-    send: (sessionId: string, text: string) => Promise<{ turnId: string; message: CommanderMessage }>
   }
   onOAuthCallback: (callback: (event: { code: string; state: string }) => void) => () => void
 }

@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { X, FolderKanban } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { AgentTranscriptPanel } from '@/components/agents/AgentTranscriptPanel'
-import { useAgentStore, SessionStatus } from '@/stores/agent-store'
-import { useAgentSession } from '@/hooks/use-agent-session'
+import { SessionStatus } from '@/stores/agent-store'
+import { useCoordinatorChat } from '@/hooks/use-coordinator-chat'
 import { useCurrentProject } from '@/hooks/use-project-tasks'
 import { agentApi, settingsApi } from '@/lib/ipc-client'
 import { captainAgentIdFor, useCaptainTaskId } from '@/stores/coordinator-store'
@@ -25,13 +25,10 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   // Nothing starts until the id is known.
   const project = useCurrentProject()
   const captainTaskId = useCaptainTaskId()
-  const { start, stop, sendMessage, approve } = useAgentSession(captainTaskId ?? undefined)
-  const currentSession = useAgentStore((state) => (captainTaskId ? state.sessions.get(captainTaskId) : undefined))
-  const removeSession = useAgentStore((state) => state.removeSession)
-  /** The start in flight and whose it is, shared so a message can wait for it instead of racing. */
-  const startingRef = useRef<{ taskId: string; promise: Promise<void> } | null>(null)
-  const selectedAgentIdRef = useRef<string | null>(null)
-  selectedAgentIdRef.current = selectedAgentId
+  const { session: currentSession, ensureSession, send: handleSendMessage, stop, switchAgent } = useCoordinatorChat(
+    captainTaskId,
+    selectedAgentId
+  )
   const [prewarm, setPrewarm] = useState(false)
 
   // Read the preference before warming anything: a user who switched this off
@@ -67,77 +64,11 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
     setSelectedAgentId(captainAgentIdFor({ captain_agent_id: projectCaptainAgentId, default_agent_id: projectDefaultAgentId }, agents))
   }, [agents, projectId, projectCaptainAgentId, projectDefaultAgentId])
 
-  // Switch agent. The new choice is recorded before the old session is
-  // stopped, or the warm-up would race in and start the old agent again.
+  // Switch agent: the conversation moves to the freshly picked one.
   const handleAgentChange = async (newAgentId: string) => {
-    selectedAgentIdRef.current = newAgentId
     setSelectedAgentId(newAgentId)
-    if (currentSession?.sessionId && captainTaskId) {
-      await stop()
-      removeSession(captainTaskId)
-    }
+    await switchAgent(newAgentId)
   }
-
-  /**
-   * Brings up the session, or joins the one already starting.
-   *
-   * Starting an agent takes seconds, so it is done ahead of time (see the
-   * warm-up below). That creates a window where a message can arrive while the
-   * session is still coming up: without the shared promise the message would be
-   * dropped, because there is no session yet and one is already being made.
-   */
-  const ensureSession = useCallback(async (): Promise<boolean> => {
-    const taskId = captainTaskId
-    if (!taskId) return false
-    const live = useAgentStore.getState().sessions.get(taskId)
-    if (live?.sessionId) return true
-
-    const agentId = selectedAgentIdRef.current
-    if (!agentId) return false
-
-    // A start still in flight for another project's Captain is not ours.
-    if (!startingRef.current || startingRef.current.taskId !== taskId) {
-      const promise = (async () => {
-        // Clean up any old session data first
-        removeSession(taskId)
-        // skipInitialPrompt keeps the agent quiet until the user speaks. Main
-        // resumes the persisted conversation when there is one, so a restart
-        // continues where the last one left off.
-        await start(agentId, taskId, undefined, true)
-        // Small delay to ensure session is fully initialized
-        await new Promise((resolve) => setTimeout(resolve, 100))
-      })().finally(() => {
-        if (startingRef.current?.taskId === taskId) startingRef.current = null
-      })
-      startingRef.current = { taskId, promise }
-    }
-
-    try {
-      await startingRef.current.promise
-      return Boolean(useAgentStore.getState().sessions.get(taskId)?.sessionId)
-    } catch (err) {
-      console.error('Failed to start captain session:', err)
-      return false
-    }
-  }, [captainTaskId, start, removeSession])
-
-  // Send message - the session is usually warm already, so this just sends.
-  const handleSendMessage = useCallback(
-    async (message: string) => {
-      if (!(await ensureSession())) return
-
-      // Question answers should use approve() instead of sendMessage()
-      const live = captainTaskId ? useAgentStore.getState().sessions.get(captainTaskId) : undefined
-      const messages = live?.messages || []
-      const lastMessage = messages[messages.length - 1]
-      if (lastMessage?.partType === 'question' && lastMessage?.tool?.questions) {
-        await approve(true, message)
-      } else {
-        await sendMessage(message)
-      }
-    },
-    [captainTaskId, ensureSession, sendMessage, approve]
-  )
 
   /**
    * Start the agent in the background, before there is anything to say.

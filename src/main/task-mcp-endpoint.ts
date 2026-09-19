@@ -16,6 +16,7 @@
  *   /mcp?project=<id>                           orchestration set, limited to one project
  *   /mcp?task=<id>&parent=<id>                  subtask set, parent + siblings only
  *   /mcp?...&artifact=<id>                      pins artifact writes to one task
+ *   /mcp?commander=<sessionId>                  the Commander's own registry, nothing else
  *
  * The parameters are an address, not a credential. The Task API server they
  * reach has no authentication either, and it listens only on 127.0.0.1.
@@ -30,6 +31,8 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Server, WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/server'
+import { createId } from '@paralleldrive/cuid2'
+import { callCommanderMcpTool, listCommanderMcpTools } from './commander/commander-mcp'
 import {
   callToolForScope,
   listToolsForScope,
@@ -49,6 +52,17 @@ export function parseScopeFromUrl(url: URL): TaskMcpScope {
     artifactTaskId: url.searchParams.get('artifact') || taskId || null,
     projectId: url.searchParams.get('project') || null
   }
+}
+
+/** The Commander session a URL is scoped to, or null (commander/commander-mcp.ts). */
+export function parseCommanderSessionFromUrl(url: URL): string | null {
+  return url.searchParams.get('commander') || null
+}
+
+/** The MCP URL of one Commander session's tools. */
+export function buildCommanderMcpUrl(port: number, token: string, sessionId: string): string {
+  const params = new URLSearchParams({ token, commander: sessionId })
+  return `http://127.0.0.1:${port}${TASK_MCP_PATH}?${params.toString()}`
 }
 
 /**
@@ -83,6 +97,24 @@ function createScopedServer(scope: TaskMcpScope, invoke: TaskApiInvoke): Server 
   server.setRequestHandler('tools/call', async (request) => {
     const { name, arguments: args } = request.params as { name: string; arguments?: Record<string, unknown> }
     return callToolForScope(name, args, scope, invoke)
+  })
+  return server
+}
+
+/**
+ * A fresh MCP server for one Commander session. It never falls through to
+ * the task-management scopes: a Commander URL serves the Commander's tools or
+ * none at all.
+ */
+function createCommanderServer(sessionId: string): Server {
+  const server = new Server(
+    { name: 'commander', version: '1.0.0' },
+    { capabilities: { tools: {} } }
+  )
+  server.setRequestHandler('tools/list', async () => ({ tools: listCommanderMcpTools(sessionId) }))
+  server.setRequestHandler('tools/call', async (request) => {
+    const { name, arguments: args } = request.params as { name: string; arguments?: Record<string, unknown> }
+    return callCommanderMcpTool(sessionId, name, args, createId())
   })
   return server
 }
@@ -170,7 +202,7 @@ export async function handleTaskMcpRequest(
     return
   }
 
-  const scope = parseScopeFromUrl(url)
+  const commanderSessionId = parseCommanderSessionFromUrl(url)
   const transport = new WebStandardStreamableHTTPServerTransport({
     // Stateless: no session table, so a resumed agent keeps the same URL.
     sessionIdGenerator: undefined,
@@ -178,7 +210,9 @@ export async function handleTaskMcpRequest(
     // request/response only, and no tool sends server-initiated notifications.
     enableJsonResponse: true
   })
-  const server = createScopedServer(scope, invoke)
+  const server = commanderSessionId
+    ? createCommanderServer(commanderSessionId)
+    : createScopedServer(parseScopeFromUrl(url), invoke)
 
   try {
     await server.connect(transport)

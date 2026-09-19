@@ -1,18 +1,26 @@
 /**
  * Wire types for Commander chat sessions (docs/commander.md).
  *
- * The Commander is a fast conversational model with no canvas: its UI is a
- * list of persisted chat sessions. These shapes cross IPC between the
- * main-process CommanderService and the renderer.
+ * The Commander's UI is a list of persisted chat sessions. Each session's
+ * conversation is an ordinary agent session on a hidden task row whose id is
+ * the session id, so its transcript travels on the normal agent channels.
+ * These shapes cover the rest: the session list and Captain reports.
  */
-import type { ChatRuntimeEvent, ChatStopReason, ChatToolCall } from './chat'
+
+/** A tool call recorded on a message written by the old chat runtime. */
+export interface ChatToolCall {
+  id: string
+  name: string
+  input: Record<string, unknown>
+}
 
 /**
- * - `user` / `assistant` / `tool`: the conversation the model sees.
  * - `report`: an incoming Captain report for a project (#62). Counts as
- *   unread until the session is read; fed to the model as a user-side note.
- * - `summary`: a rolling summary of older turns, written by the chat model.
- *   Its `correlation_id` is the id of the last message it folds in.
+ *   unread until the session is read; handed to the session's agent.
+ * - `tool`: an `ask_captain` delegation, kept so the report answering it is
+ *   routed back to this session.
+ * - `user` / `assistant` / `summary`: history written by the old chat
+ *   runtime, before sessions ran on agents. Never written any more.
  */
 export type CommanderMessageRole = 'user' | 'assistant' | 'tool' | 'report' | 'summary'
 
@@ -28,6 +36,8 @@ export interface CommanderSession {
   archived: boolean
   /** Epoch ms of the last time the user had the session open; null when never. */
   last_read_at: number | null
+  /** Epoch ms: reports stored up to then have been handed to the session's agent. */
+  relayed_at?: number | null
   /** Reports newer than `last_read_at`. */
   unread_count: number
 }
@@ -37,7 +47,7 @@ export interface CommanderMessage {
   session_id: string
   role: CommanderMessageRole
   content: string
-  /** Assistant messages: the tool calls the model made (rendered as chips). */
+  /** Old assistant messages: the tool calls the model made. */
   tool_calls: ChatToolCall[] | null
   /** Tool messages: which call this answers. */
   tool_call_id: string | null
@@ -58,20 +68,14 @@ export interface CommanderListSessionsRequest {
   includeArchived?: boolean
 }
 
-/** Events on `commander:event`. */
+/** Events on `commander:event`. The conversation itself streams on the agent channels. */
 export type CommanderEvent =
-  /** A turn started for a session. */
-  | { type: 'turn_started'; sessionId: string; turnId: string }
-  /** A streaming runtime event, minus the `done` payload's full history. */
-  | {
-      type: 'turn_event'
-      sessionId: string
-      turnId: string
-      event: Exclude<ChatRuntimeEvent, { type: 'done' }> | { type: 'done'; stopReason: ChatStopReason }
-    }
-  /** Messages were stored (user, assistant, tool, report, summary). */
+  /** Reports or delegations were stored. */
   | { type: 'messages_appended'; sessionId: string; messages: CommanderMessage[] }
   /** Title, archive state, unread count or timestamps changed. */
   | { type: 'session_updated'; session: CommanderSession }
 
 export const COMMANDER_EVENT_CHANNEL = 'commander:event'
+
+/** App setting: the agent every Commander session runs on. Unset means the default agent. */
+export const COMMANDER_AGENT_SETTING = 'commander_agent_id'

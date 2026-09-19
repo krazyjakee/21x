@@ -740,38 +740,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
       }
     }
   },
-  // Lightweight chat runtime (docs/chat-runtime.md). One `chat:start` per turn;
-  // tokens and tool events stream back on `chat:event` tagged with the turnId.
-  chat: {
-    start: (payload: Record<string, unknown>): Promise<{ turnId: string; provider: string; model: string }> =>
-      ipcRenderer.invoke('chat:start', payload),
-    cancel: (turnId: string): Promise<{ cancelled: boolean }> => ipcRenderer.invoke('chat:cancel', { turnId }),
-    onEvent: (callback: (data: unknown) => void): (() => void) => {
-      const handler = (_: unknown, d: unknown): void => callback(d)
-      ipcRenderer.on('chat:event', handler)
-      return () => ipcRenderer.removeListener('chat:event', handler)
-    }
-  },
-  // Commander chat sessions (docs/commander.md). Turn tokens, stored messages
-  // and session changes stream back on `commander:event`.
+  // Commander chat sessions (docs/commander.md). Each session's conversation
+  // is an agent session on the task row `prepareSession` returns; reports and
+  // session changes stream back on `commander:event`.
   commander: {
     listSessions: (payload?: Record<string, unknown>): Promise<unknown[]> => ipcRenderer.invoke('commander:listSessions', payload),
     createSession: (payload?: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('commander:createSession', payload),
     renameSession: (id: string, title: string): Promise<unknown> => ipcRenderer.invoke('commander:renameSession', { id, title }),
     archiveSession: (id: string, archived: boolean): Promise<unknown> => ipcRenderer.invoke('commander:archiveSession', { id, archived }),
-    listMessages: (sessionId: string): Promise<unknown> => ipcRenderer.invoke('commander:listMessages', { sessionId }),
+    prepareSession: (sessionId: string): Promise<unknown> => ipcRenderer.invoke('commander:prepareSession', { sessionId }),
+    getAgentId: (): Promise<string | null> => ipcRenderer.invoke('commander:getAgentId'),
     markRead: (sessionId: string): Promise<unknown> => ipcRenderer.invoke('commander:markRead', { sessionId }),
     // Which session the Commander view shows (#62): a report for it is relayed at once; others only queue.
     setActiveSession: (sessionId: string | null): Promise<void> => ipcRenderer.invoke('commander:setActiveSession', { sessionId }),
-    send: (sessionId: string, text: string): Promise<unknown> => ipcRenderer.invoke('commander:send', { sessionId, text }),
-    cancel: (sessionId: string): Promise<{ cancelled: boolean }> => ipcRenderer.invoke('commander:cancel', { sessionId }),
     onEvent: (callback: (data: unknown) => void): (() => void) => {
       const handler = (_: unknown, d: unknown): void => callback(d)
       ipcRenderer.on('commander:event', handler)
       return () => ipcRenderer.removeListener('commander:event', handler)
     }
   },
-  // ── Voice: ElevenLabs engine and Commander voice mode (#64) ──
+  // ── Voice: ElevenLabs engine (#64) ──
   // The key goes to main and never comes back: every call answers with the
   // speech snapshot, which only says whether a key is set.
   voiceElevenLabs: {
@@ -780,12 +768,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     acceptDisclosure: (): Promise<unknown> => ipcRenderer.invoke('voice:tts:elevenlabs:acceptDisclosure'),
     refresh: (): Promise<unknown> => ipcRenderer.invoke('voice:tts:elevenlabs:refresh'),
     setModel: (modelId: string): Promise<unknown> => ipcRenderer.invoke('voice:tts:elevenlabs:setModel', { modelId })
-  },
-  commanderVoice: {
-    setActive: (sessionId: string | null): Promise<{ active: string | null }> =>
-      ipcRenderer.invoke('voice:commander:setActive', { sessionId }),
-    bargeIn: (sessionId: string): Promise<{ cancelled: boolean }> => ipcRenderer.invoke('voice:commander:bargeIn', { sessionId }),
-    send: (sessionId: string, text: string): Promise<unknown> => ipcRenderer.invoke('voice:commander:send', { sessionId, text })
   },
   browser: {
     startRecording: (panelId: string, title?: string): Promise<{ ok: true; recording: BrowserRecordingManifest } | { error: string }> =>

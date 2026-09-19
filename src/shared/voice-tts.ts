@@ -291,12 +291,6 @@ export type VoiceSpeechSource =
   | 'preview'
   /** The user pressed the speak button on one message. */
   | 'manual'
-  /**
-   * A reply or a report in a voice conversation the user opened on purpose —
-   * Commander voice mode (#64). Opening the conversation is the request to be
-   * spoken to, so it needs neither the automatic switch nor a voice turn.
-   */
-  | 'conversation'
 
 export interface VoiceSpeechRequest {
   text: string

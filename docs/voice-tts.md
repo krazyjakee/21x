@@ -177,7 +177,7 @@ makes the server generate whatever it still holds, so a short reply is never
 left in its buffer. A lone space keeps an open passage alive between slow
 sentences.
 
-Stopping, barge-in, closing Commander voice mode, changing engine and shutting
+Stopping, barge-in, changing engine and shutting
 down all close the connection. A message that arrives on a closed passage is
 dropped, so audio from a cancelled reply is never heard later. Nothing is
 resent and no other provider is tried.
@@ -303,7 +303,6 @@ Only these six reasons produce speech, and each has its own condition:
 | “read the last answer” | always: the user asked for it |
 | the voice sample in settings | always |
 | the speak button on a message | always |
-| a reply or report in Commander voice mode | always: opening voice mode was the request |
 
 A code block, a table, a file path, a link, a heading mark and every other piece
 of Markdown punctuation are removed before anything is spoken. A code block is
@@ -631,7 +630,6 @@ previous one is still being heard, so its length costs nothing.
 | `src/main/voice/voice-system-voices.ts` | The voices the system already has |
 | `src/main/voice/voice-speech-service.ts` | Policy, correlation, queue, barge-in, engine routing |
 | `src/main/voice/voice-elevenlabs.ts` | ElevenLabs REST listing, error mapping, WebSocket streaming |
-| `src/main/voice/commander-voice.ts` | Commander voice mode: speaks replies and reports, barge-in |
 | `src/renderer/src/components/settings/tabs/ElevenLabsSettings.tsx` | Disclosure, key, model |
 | `src/renderer/src/lib/voice-playback.ts` | Web Audio playback queue |
 | `src/renderer/src/components/voice/SpeakMessageButton.tsx` | Read one message |

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTestDb } from '../../../test/helpers/db-test-helper'
 import type { DatabaseManager } from '../database'
-import type { ChatToolDefinition, ChatToolResult } from '../chat/tools'
+import type { ChatToolDefinition, ChatToolResult } from './tools'
 import { DEFAULT_PROJECT_ID } from '../../shared/projects'
 import type { HeldAction } from '../../shared/project-limit-types'
 import type { UiCommand } from '../../shared/ui-commands'

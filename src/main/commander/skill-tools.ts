@@ -1,6 +1,6 @@
 import type { DatabaseManager } from '../database'
 import { SkillVersionConflictError, type SkillRecord, type UpdateSkillData } from '../database/types'
-import type { ChatToolDefinition, ChatToolResult } from '../chat/tools'
+import type { ChatToolDefinition, ChatToolResult } from './tools'
 import {
   clip,
   confirmationSchema,

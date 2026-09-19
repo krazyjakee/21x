@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import type { AgentManager } from '../agent-manager'
 import type { DatabaseManager } from '../database'
-import type { ChatToolDefinition, ChatToolResult } from '../chat/tools'
+import type { ChatToolDefinition, ChatToolResult } from './tools'
 import { resolveCaptainAgentId } from '../captain-waker'
 import { buildProjectStatus, readProjectStatusHistory } from '../project-status'
 import { PROJECT_STATUS_HISTORY_DEFAULT_LIMIT, PROJECT_STATUS_HISTORY_MAX_LIMIT } from '../../shared/project-status'

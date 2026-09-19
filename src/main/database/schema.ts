@@ -31,8 +31,11 @@ import { migrateCoordinatorToCaptain } from './captain-migration'
  *          tasks.role, projects.captain_agent_id, the captain_prewarm setting,
  *          projects.settings.captain_wakeups and project_status_journal.source
  *          (migrateCoordinatorToCaptain in captain-migration.ts)
+ * 17 → 18: commander_sessions.relayed_at: Commander sessions run as agent
+ *          sessions on a `role = 'commander'` task row, and reports newer
+ *          than this are still to be handed to that agent (migrateCommanderSessions)
  */
-const SCHEMA_VERSION = 17
+const SCHEMA_VERSION = 18
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -365,7 +368,8 @@ export function createTables(db: Database.Database): void {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       archived INTEGER NOT NULL DEFAULT 0,
-      last_read_at INTEGER
+      last_read_at INTEGER,
+      relayed_at INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_commander_sessions_updated ON commander_sessions(updated_at);
 
@@ -956,6 +960,9 @@ export function runMigrations(db: Database.Database): void {
   // the projects table (and its renamed column) exists.
   migrateCoordinatorToCaptain(db)
 
+  // Migration v18: Commander sessions run on agent sessions.
+  migrateCommanderSessions(db)
+
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)
 
@@ -965,6 +972,24 @@ export function runMigrations(db: Database.Database): void {
 
   // Migration v11: the Claude Code adapter now honours permission_mode.
   preserveClaudeCodePermissionBehaviour(db)
+}
+
+/**
+ * Migration v18: Commander sessions run as agent sessions (docs/commander.md).
+ *
+ * Adds `commander_sessions.relayed_at`: the Captain reports stored up to that
+ * time have been handed to the session's agent. Every existing report counts
+ * as handed over, because the old chat runtime already showed each one to its
+ * model; only reports that arrive after the upgrade are relayed.
+ *
+ * Idempotent: the column is only added (and backfilled) when missing.
+ */
+function migrateCommanderSessions(db: Database.Database): void {
+  const cols = new Set((db.pragma('table_info(commander_sessions)') as { name: string }[]).map((c) => c.name))
+  if (!cols.has('relayed_at')) {
+    db.exec('ALTER TABLE commander_sessions ADD COLUMN relayed_at INTEGER')
+    db.exec('UPDATE commander_sessions SET relayed_at = updated_at')
+  }
 }
 
 function readSetting(db: Database.Database, key: string): string | null {

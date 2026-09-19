@@ -1,10 +1,9 @@
 /**
- * Tool definitions for the chat runtime.
+ * Tool definitions for the Commander.
  *
- * A tool is a plain async function with a JSON schema. The caller supplies the
- * list (the Commander's delegation tools arrive in a later issue); the runtime
- * never invents tools of its own. Which tools a model can call is therefore
- * enforced by what is passed here, not by prompting.
+ * A tool is a plain async function with a JSON schema. The Commander's agent
+ * reaches them through its MCP server (commander-mcp.ts); which tools it can
+ * call is enforced by the list served there, not by prompting.
  */
 
 /** JSON Schema (draft 2020-12) for a tool's input. Always an object at the root. */
@@ -22,7 +21,7 @@ export interface ChatToolResult {
 }
 
 export interface ChatToolContext {
-  /** Aborted when the turn is cancelled. Long-running handlers should honour it. */
+  /** Aborted when the call is abandoned. Long-running handlers should honour it. */
   signal: AbortSignal
   toolCallId: string
 }

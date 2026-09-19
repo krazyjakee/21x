@@ -108,7 +108,7 @@ describe('migration 16 → 17: Mastermind → Captain', () => {
     start()
 
     const after = openRaw()
-    expect(after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get()).toEqual({ value: '17' })
+    expect(after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get()).toEqual({ value: '18' })
     // Same row: id, session, project and transcript intact; renamed, not re-seeded.
     expect(after.prepare("SELECT COUNT(*) AS n FROM tasks WHERE role = 'captain'").get()).toEqual({ n: coordinatorCount })
     expect(after.prepare("SELECT COUNT(*) AS n FROM tasks WHERE role = 'mastermind'").get()).toEqual({ n: 0 })

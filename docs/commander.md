@@ -1,7 +1,7 @@
 # Commander chat sessions
 
-The Commander is a fast conversational model with no canvas. The user talks to
-it in persisted chat sessions; it delegates work to each project's Captain
+The Commander is a conversational coordinator with no canvas. The user talks
+to it in persisted chat sessions; it delegates work to each project's Captain
 and relays their reports. It never does the project work itself, and it has
 no tool that could: its registry (#61, #73) holds delegation, status reads
 and project administration only. Captain replies and escalations come
@@ -13,70 +13,95 @@ across projects, each project's Captain coordinates the work inside one project
 Captain was called the Mastermind before #71; stored data is migrated (see
 docs/database-migrations.md, *The coordinator is the Captain*).
 
+## A session is an agent session
+
+Every Commander session runs through AgentManager and the coding-agent
+adapters, exactly like a task and like the Captain. There is one session stack,
+so a fix or improvement to agent sessions (auth, streaming, transcripts,
+approvals, stop, resume, voice) applies to the Commander too.
+
+- **The row.** Each session has a hidden `tasks` row with the **same id** and
+  `role = 'commander'` (`TASK_ROLE_COMMANDER` in `src/shared/task-roles.ts`).
+  It is a coordinator role, so the row is never listed, scheduled, triaged or
+  given a worktree, and its status never moves (the same rules as the
+  Captain's row). The session's conversation is that row's agent session:
+  its `session_id` is the resume anchor and its transcript is the task's
+  transcript (`transcript_parts`), streamed on the usual `agent:output` /
+  `transcript:changed` channels.
+- **The agent.** Every session runs on one agent: the `commander_agent_id` app
+  setting (chosen in the Commander view), else the default agent, else the
+  first agent. The model, thinking level, auth method (subscription or API
+  key) and permission mode are that agent's, as for any session.
+- **The prompt.** `assembleSessionConfig` gives a Commander row the Commander
+  prompt (`COMMANDER_SYSTEM_PROMPT` in `src/main/commander/prompts.ts`),
+  whatever the backend, followed by the agent's own system prompt. A session
+  started before this design gets its old conversation appended
+  (`earlierHistoryNote`: the rolling summary it kept and the newest messages,
+  about 8k characters), so the agent picks up where the old chat left off.
+- **The tools.** A Commander row gets one MCP server, `commander`, and nothing
+  else: not task-management, and not the agent's configured servers
+  (`mcpOptionsForTask` / `buildMcpServers` in
+  `src/main/agent-manager/session-config.ts`). The server is the in-process
+  task MCP endpoint with the scope `/mcp?commander=<sessionId>`
+  (`task-mcp-endpoint.ts`), which serves the Commander's registry through
+  the seam in `src/main/commander/commander-mcp.ts` and never falls through to
+  a task scope. The prompt also tells the agent not to use its built-in file,
+  shell or web tools.
+- **The service.** `CommanderService` (`src/main/commander/commander-service.ts`)
+  owns only what is particular to the Commander: the session list, the tools,
+  reports, and the agent choice. `prepareSession` makes sure the row exists
+  (and copies an old session's history into its transcript once, so it still
+  reads as one conversation). It listens to agent events: when the user speaks
+  in a session, an untitled session is named from the first words of the
+  message and moves to the top of the list; when its agent goes idle, the
+  session moves up and any report waiting for it is handed over.
+
+Sending, streaming, stopping, approvals and questions are the normal
+agent-session calls (`agentSession:*`). The renderer drives a Commander session
+with the same hook as the Captain drawer (`useCoordinatorChat`).
+
 ## Storage
 
-Both tables are created in `createTables()` with `CREATE TABLE IF NOT EXISTS`,
-so they need no schema-version bump. Timestamps are epoch ms.
+`commander_sessions` and `commander_messages` are created in `createTables()`.
+Timestamps are epoch ms.
 
-- `commander_sessions`: `id`, `title` (empty until named), `created_at`,
-  `updated_at` (bumped by every message), `archived`, `last_read_at`.
-- `commander_messages`: `id`, `session_id` (FK, `ON DELETE CASCADE`), `role`
-  (`user | assistant | tool | report | summary`), `content`, `tool_calls` (JSON
-  array of `ChatToolCall` on assistant rows), `tool_call_id`, `tool_name`,
-  `is_error` (tool rows), `project_id` (delegations and reports; references projects, set null on delete),
-  `correlation_id`, `created_at`. Indexed on `(session_id, created_at)`.
+- `commander_sessions`: `id` (also the id of the session's task row),
+  `title` (empty until named), `created_at`, `updated_at` (bumped by activity),
+  `archived`, `last_read_at`, `relayed_at` (reports stored up to then have been
+  handed to the agent; migration 18).
+- `commander_messages`: what is not part of the agent conversation. `role`
+  is `report` (a Captain report), `tool` (an `ask_captain` delegation,
+  kept so the report that answers it is routed back), or `user`, `assistant`,
+  `summary` (history written by the old chat runtime; never written now).
+  Columns: `id`, `session_id` (FK, `ON DELETE CASCADE`), `role`, `content`,
+  `tool_calls`, `tool_call_id`, `tool_name`, `is_error`, `project_id`
+  (references projects, set null on delete), `correlation_id`, `created_at`.
 
 `CommanderStore` (`src/main/commander/commander-store.ts`) handles sessions
-(list, search over titles and message text, create, rename, archive) and
-messages (append, list). Its clock never repeats, so ordering and "newer than"
-comparisons hold within one millisecond.
+(list, search over titles, reports and the conversation transcript, create,
+rename, archive, delete, which removes the task row too) and messages. Its
+clock never repeats, so ordering and "newer than" comparisons hold within one
+millisecond.
 
 **Unread** means the number of `report` messages newer than `last_read_at`.
-Opening a session, or sending in it, marks it read. A report that arrives in
-the session open in the Commander view is read on arrival. A report for any
-other session stays unread and shows a badge in the list.
-
-## Turns and the context budget
-
-`CommanderService.sendUserMessage` (`src/main/commander/commander-service.ts`)
-does the following:
-
-1. Builds the provider first, so a missing API key rejects before anything is
-   stored. Then it stores the user message.
-2. Builds the model context (`context.ts`). It splits the history into turns.
-   A turn starts at a `user` or `report` message. The newest turns are sent
-   verbatim, up to `keepTurns` (default 8) and `maxChars` (default 24k). The
-   newest turn is always kept. Anything older is covered by the latest `summary`
-   message, which is appended to the system prompt. Cuts always fall on turn
-   boundaries, so a tool call is never separated from its result. Reports go to
-   the model as user-side notes (`[Report from project X]`).
-3. Runs one `ChatRuntime` turn with the Commander system prompt (`prompts.ts`)
-   and the tools from `getTools`, which is called per turn with the session id
-   and the user message (the confirmation check reads it). Events stream on
-   `commander:event`.
-4. Stores the assistant and tool messages. A tool row whose result is a JSON
-   object carrying `project_id` / `correlation_id` (an `ask_captain`
-   result) is tagged with them, so #62 can match the report to the
-   delegation. Then it emits `messages_appended`, then `done`.
-5. After the turn, it does two things:
-   - Names an untitled session with a one-shot model call. If that fails, the
-     title falls back to the first six words of the first user message. A
-     rename made meanwhile is never overwritten.
-   - Folds turns that no longer fit the budget into a new rolling `summary`.
-     The previous summary is merged in. The summary's `correlation_id` is the
-     id of the last message it covers. If the summary call fails, nothing is
-     stored and the next turn just trims.
-
-Only one turn runs per session. Cancel aborts it, and whatever text arrived is
-kept.
+Opening a session marks it read. A report that arrives in the session open in
+the Commander view is read on arrival. A report for any other session stays
+unread and shows a badge in the list.
 
 ## Tools
 
-`src/main/commander/project-tools.ts` builds the project registry and
-`src/main/commander/skill-tools.ts` the skill registry (#74: `list_skills`,
+The agent calls these over MCP (above). `src/main/commander/project-tools.ts`
+builds the project registry and `src/main/commander/skill-tools.ts` the skill
+registry (#74: `list_skills`,
 `get_skill`, `create_skill`, `update_skill`, `remove_skill`, `promote_skill`,
 `move_skill`; see docs/skills.md, *Scope*). `ipc/commander.ts` concatenates
-the two under one confirmation table. Every result is a
+the two under one confirmation table. The registry is built for every MCP call
+with the call's context: the session id, the user's newest message, and
+whether the agent is answering the user or a relayed report. That context is
+read from the session's stored transcript: AgentManager stores the user's
+message before the prompt reaches the agent, so a call always sees the message
+that caused it. A successful `ask_captain` result is stored as a `tool` row
+with its project and correlation id. Every result is a
 small JSON object with fixed item and character caps (50 projects, 20 repos,
 20 resources, 30 approvals, 12k characters), never raw tasks or transcripts.
 A project is addressed by its stable id, or by its exact name when that name
@@ -133,27 +158,30 @@ Every mutating tool (`MUTATING_COMMANDER_TOOLS`) goes through
    `{ status: 'confirmation_required', confirmation_token }`.
 2. The model explains the change and asks the user to reply exactly
    `Confirm <token>`.
-3. The call is accepted only when it carries that token, the current turn's
-   user message is exactly `Confirm <token>`, the tool and action match the
+3. The call is accepted only when it carries that token, the user's newest
+   message in the session's transcript is exactly `Confirm <token>`, the tool and action match the
    challenge, and the token is unexpired (10 minutes) and unused. Anything else
    returns `confirmation_invalid`, `confirmation_mismatch` or
    `confirmation_absent` as an error result, and nothing is written.
 
-The confirmation is therefore part of the stored user/tool turn flow, checked
-in the main process, not a prompt convention. Successful mutations call
+The confirmation is therefore checked in the main process against what the
+user actually sent, not a prompt convention: the agent cannot confirm on the
+user's behalf, and an automated message (a relayed report) never counts as a
+confirmation. Successful mutations call
 `onProjectChanged`, which broadcasts `project:changed`.
 
 ## IPC
 
 `src/main/ipc/commander.ts` registers these handlers: `commander:listSessions`,
-`createSession`, `renameSession`, `archiveSession` (which also cancels a running
-turn), `listMessages` (returns `{ messages, activeTurnId }`), `markRead`,
-`setActiveSession` (the session the view shows, or null when it closes; see
-Reports), `send` and `cancel`. Every handler checks the sender with
-`assertTrustedSender`. It also installs the report bridge (`installCommanderReportBridge`).
-Callers are subscribed to `commander:event`, which carries these events:
-`turn_started`, `turn_event` (runtime events, where `done` carries only the stop
-reason), `messages_appended` and `session_updated`.
+`createSession`, `renameSession`, `archiveSession` (which also stops the
+session's agent), `prepareSession` (returns `{ taskId, agentId }`: the row and
+agent the renderer then starts or resumes with the normal agent-session
+calls), `getAgentId`, `markRead` and `setActiveSession` (the session the view
+shows, or null when it closes; see Reports). Every handler checks the sender
+with `assertTrustedSender`. It also installs the report bridge
+(`installCommanderReportBridge`) and the MCP tool host
+(`setCommanderToolHost`). Callers are subscribed to `commander:event`, which
+carries `messages_appended` (reports and delegations) and `session_updated`.
 
 It also wires the tool registry to the app: the agent manager, the held-action
 list from `escalation.ts`, the Task API's window notifier for UI commands, and
@@ -173,20 +201,13 @@ The Commander view is in the NavRail (`sidebarView === 'commander'`) and lives i
 
 - Session list: new, search, rename, archive, a show-archived toggle, and
   unread badges.
-- Chat pane:
-  - Streams the assistant's text as it arrives.
-  - Shows tool calls as chips (`tool-call-label.ts`): a delegation reads
-    "Asked Web: Ship the site", an administration call reads
-    "Archive project · Web". Chips are drawn from the stored `tool_calls`, and
-    a chip's result comes from the matching `tool` row.
-  - Shows reports as bordered, project-tagged cards.
-  - Has a Stop button and an empty state.
-  - The composer includes persistent model and thinking-level selectors. It
-    lists models saved on configured agents, default agent first (Claude Code
-    and `claude`-named models pick Anthropic; every other model picks
-    OpenAI-compatible). Model choices select the matching transport
-    automatically, so creating or editing an agent anywhere updates the list.
-- The state lives in `stores/commander-store.ts`.
+- Chat pane (`CommanderChatPane.tsx`): the shared `AgentTranscriptPanel`, the
+  same transcript and composer a task or the Captain drawer uses, bound to the
+  session's row through `useCoordinatorChat`. The header has the agent
+  selector, which saves `commander_agent_id` for every session and moves the
+  open conversation to the chosen agent.
+- The session list state lives in `stores/commander-store.ts`; the
+  conversation lives in the agent store like any task's.
 
 ## Reports (#62)
 
@@ -213,64 +234,41 @@ right place. The pieces:
   correlation id whichever rule applied. The tool result says which rule
   (`routed_by`: `correlation` | `latest` | `inbox`).
 - **Delivery** (`CommanderService.deliverReport`). The report is stored and
-  emitted (unread until read, as before). The renderer tells main which
-  session the Commander view shows (`commander:setActiveSession`, sent by the
-  store's `selectSession` and cleared when the view unmounts or the window
-  closes). If the report's session is that one and idle, a turn starts at
-  once with a relay note appended to the system prompt, so the Commander
-  relays it conversationally ("Project X says …"); the stored history ends
-  with the report, which the context builder already renders as a user-side
-  note. If that session is mid-turn, the relay runs when the turn ends. Any
-  other session only gets the unread report and its badge; opening it later
-  shows the report as a card without a relay turn. With no provider (no API
-  key) the report is still stored.
-- **Loop protection.** A turn started by a report may call `ask_captain`
-  only while the session's budget lasts: 3 calls
-  (`MAX_REPORT_ASKS_WITHOUT_USER_TURN`) across report-triggered turns since
-  the user last spoke. `guardReportAsks` wraps the tool for such turns and
-  returns a `loop_guard` error result beyond that; a user message resets the
-  count. User-triggered turns are not limited.
+  emitted (unread until read). The renderer tells main which session the
+  Commander view shows (`commander:setActiveSession`, sent by the store's
+  `selectSession` and cleared when the view unmounts or the window closes).
+  Reports are handed to the session's agent only while that session is open:
+  every report newer than `relayed_at` goes as one automated message
+  (`buildReportRelayMessage`: the `SYSTEM_MESSAGE_MARKER` provenance header,
+  the reports fenced as data, the authority notice, and a note asking the
+  Commander to relay them, naming the project). AgentManager starts or resumes
+  the agent when needed. A busy agent gets the message when it next goes idle,
+  so a report never interrupts an answer. A session that is not open keeps the
+  unread report and its badge, and its reports are handed over when the user
+  opens it. With no agent configured the report is still stored.
+- **Loop protection.** While the agent is answering a relayed report (the
+  newest input in the transcript is the automated message), `ask_captain` is
+  allowed only while the session's budget lasts: 3 calls
+  (`MAX_REPORT_ASKS_WITHOUT_USER_TURN`) since the user last spoke.
+  `guardReportAsks` wraps the tool for such calls and returns a `loop_guard`
+  error result beyond that; a new user message resets the count. Answers to
+  the user are not limited.
 - **Escalations.** `installCommanderReportBridge` also installs the
   `escalation.ts` handler: a `tell_commander` action the Captain performed
   (#66) becomes an unprompted, project-tagged report ("Escalation notice …")
   routed by the rules above. Held, approved and rejected `ask_user` calls are
   not reported; they are the user's business (`get_pending_approvals`).
 
-## Voice mode (#64)
+## Voice (#64)
 
-The Commander view has a push-to-talk voice mode
-(`components/commander/CommanderVoiceControls.tsx`, a narrow strip to the right
-of the chat). The wake word stays out of scope.
-
-- **Turning it on** tells main which session to speak for
-  (`voice:commander:setActive`). Turning it off, switching session or leaving
-  the view stops whatever is being read and closes any ElevenLabs connection.
-- **Talking**: one click opens the microphone, a second closes it. The final
-  transcript is sent as a user turn through `voice:commander:send`, which is
-  `CommanderService.sendUserMessage` after cancelling any reply still running.
-  Escape cancels listening. The Talk button needs voice input switched on
-  (Settings → Voice).
-- **The reply is spoken as it is written**, through whichever engine is
-  selected in Settings → Voice (system, downloaded, or ElevenLabs). Each
-  finished sentence is handed over as it arrives; a text run closed by a tool
-  call is released whole; the tail is flushed when the turn ends.
-- **Captain reports** that land in the session are spoken, introduced as
-  "Report from <project>.", only while voice mode is on for that session. A
-  report that arrives during a reply is read after it, not over it.
-- **Barge-in**: starting a new voice turn, the Stop button or Escape stops
-  playback in the renderer at once, then main interrupts the passage (which
-  cancels the synthesis request or closes the ElevenLabs connection and drops
-  late audio) and cancels the Commander turn (`voice:commander:bargeIn`). The
-  written part of the reply is kept, as with any cancel.
-
-Speaking in voice mode uses the `conversation` speech source: opening voice
-mode is the request, so it does not need the "read agent answers" switch or a
-voice-turn expectation. Voice failures never block the written reply.
-
-`src/main/voice/commander-voice.ts` is the main-process glue. It subscribes to
-the service through `CommanderService.onEvent(listener)`, a small additive hook
-that fans every event out to main-process observers after the renderer emit,
-and keys the passage as `commander:<sessionId>`.
+A Commander session is an agent session, so voice works as it does for a task
+and for the Captain drawer. The transcript composer registers under the
+session's task id: dictation fills it, a voice conversation sends each
+sentence through it and expects the spoken answer from that task, and
+`watchAgentAnswersForSpeech` reads the answer aloud through whichever engine is
+selected in Settings → Voice (system, downloaded, or ElevenLabs). Relayed
+reports are answered by the agent, so the relay is spoken like any answer.
+There is no Commander-only voice path.
 
 ## Scheduled briefing (#67)
 
@@ -294,19 +292,15 @@ one-minute tick, so it runs with the window closed. At each occurrence it:
    (agent steps waiting for approval, plus Captain actions held by the
    escalation policy). Projects that need the user come first. There is no
    model and no raw task data in this step;
-2. if a chat provider is configured, asks the Commander model for a three to
-   five sentence spoken-style summary of that text (`BRIEFING_SUMMARY_PROMPT`,
-   30 s timeout). With no provider, or on failure, this step is skipped;
-3. creates a new session titled `Briefing <YYYY-MM-DD>`. It stores the
+2. creates a new session titled `Briefing <YYYY-MM-DD>` and stores the
    briefing as a `report` message (through `CommanderService.appendReport`
-   when the service is running, so an open window sees it) and the summary,
-   if there is one, as the `assistant` message after it. The report leaves the
-   session unread;
-4. raises a desktop notification that says which projects need attention;
-5. if `speak` is on, a window is open, and a speech engine is ready, reads the
-   summary aloud (or the briefing when there is no summary) through the
-   speech service with the `manual` source and the `commander:<sessionId>`
-   key.
+   when the service is running, so an open window sees it). The report leaves
+   the session unread. When the user opens the session, the briefing is handed
+   to the Commander's agent like any report, and the agent sums it up;
+3. raises a desktop notification that says which projects need attention;
+4. if `speak` is on, a window is open, and a speech engine is ready, reads that
+   one-line verdict aloud ("Your briefing. …") through the speech service with
+   the `manual` source and the `commander:<sessionId>` key.
 
 The last occurrence handled is stored in the `commander_briefing_state` app
 setting before the work starts, so a restart does not brief twice. Turning
@@ -318,9 +312,10 @@ once at start-up if it is under 6 hours old. Otherwise it is skipped.
 
 - **Custom tools**: tests or integrations may pass `getTools` to
   `registerCommanderHandlers` (or `CommanderService`) to replace the default
-  registry. The tool context carries `trigger: 'user' | 'report'`.
+  registry. The tool context carries `trigger: 'user' | 'report'`. The agent
+  sees them on its `commander` MCP server with no other change.
 - **Reports from elsewhere**: `getCommanderService()?.deliverReport({ sessionId,
   content, projectId, projectName, correlationId })` stores, counts unread and
-  relays when the session is open; `appendReport` only stores. To route by
+  hands the report to the agent when the session is open; `appendReport` only stores. To route by
   correlation id first, go through `deliverCaptainReport` in
   `report-inbox.ts`.
