@@ -65,15 +65,37 @@ export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
     return { sessionId }
   })
 
-  ipcMain.handle('agentSession:sendByTaskId', async (event, taskId: string, message: string, attachments?: MessageAttachment[]) => {
-    const result = await agentManager.sendByTaskId(taskId, message, attachments, takeUserTypedMessage(event, taskId, message))
+  ipcMain.handle('captainRuntime:get', (_, projectId: string) => agentManager.getCaptainRuntime(projectId))
+  ipcMain.handle('captainRuntime:switch', async (_, projectId: string, agentId: string) =>
+    agentManager.switchCaptainAgent(projectId, agentId))
+  ipcMain.handle('captainRuntime:retry', async (_, projectId: string) =>
+    agentManager.retryCaptainSwitch(projectId))
+  ipcMain.handle('captainRuntime:rollback', (_, projectId: string) =>
+    agentManager.rollbackCaptainSwitch(projectId))
+
+  ipcMain.handle('agentSession:sendByTaskId', async (event, taskId: string, message: string, attachments?: MessageAttachment[], deliveryId?: string) => {
+    const result = await agentManager.sendByTaskId(
+      taskId,
+      message,
+      attachments,
+      takeUserTypedMessage(event, taskId, message),
+      deliveryId
+    )
     return { success: true, ...result }
   })
 
   ipcMain.handle(
     'agentSession:send',
-    async (event, sessionId: string, message: string, taskId?: string, agentId?: string, attachments?: MessageAttachment[]) => {
-      const result = await agentManager.sendMessage(sessionId, message, taskId, agentId, attachments, takeUserTypedMessage(event, taskId, message))
+    async (event, sessionId: string, message: string, taskId?: string, agentId?: string, attachments?: MessageAttachment[], deliveryId?: string) => {
+      const result = await agentManager.sendMessage(
+        sessionId,
+        message,
+        taskId,
+        agentId,
+        attachments,
+        takeUserTypedMessage(event, taskId, message),
+        deliveryId
+      )
       return { success: true, ...result }
     }
   )

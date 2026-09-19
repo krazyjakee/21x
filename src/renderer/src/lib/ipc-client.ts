@@ -23,6 +23,7 @@ import type {
 } from '@shared/voice-tts'
 import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
 import type { CommanderEvent, CommanderListSessionsRequest, CommanderMessage, CommanderSession } from '@shared/commander'
+import type { CaptainRuntimeState } from '@shared/captain-runtime'
 import type {
   ConnectorBridgeCredentialInput,
   ConnectorBridgeCredentialStatus,
@@ -182,12 +183,12 @@ export const agentSessionApi = {
     return window.electronAPI.agentSession.switchAgent(taskId, newAgentId)
   },
 
-  send: (sessionId: string, message: string, taskId?: string, agentId?: string, attachments?: AgentMessageAttachment[]): Promise<{ success: boolean; newSessionId?: string }> => {
-    return window.electronAPI.agentSession.send(sessionId, message, taskId, agentId, attachments)
+  send: (sessionId: string, message: string, taskId?: string, agentId?: string, attachments?: AgentMessageAttachment[], deliveryId?: string): Promise<{ success: boolean; newSessionId?: string }> => {
+    return window.electronAPI.agentSession.send(sessionId, message, taskId, agentId, attachments, deliveryId)
   },
 
-  sendByTaskId: (taskId: string, message: string, attachments?: AgentMessageAttachment[]): Promise<{ success: boolean; sessionId: string | null; newSessionId?: string }> => {
-    return window.electronAPI.agentSession.sendByTaskId(taskId, message, attachments)
+  sendByTaskId: (taskId: string, message: string, attachments?: AgentMessageAttachment[], deliveryId?: string): Promise<{ success: boolean; sessionId: string | null; newSessionId?: string }> => {
+    return window.electronAPI.agentSession.sendByTaskId(taskId, message, attachments, deliveryId)
   },
 
   approve: (sessionId: string, approved: boolean, message?: string, responseType?: 'permission' | 'question', requestId?: string): Promise<{ success: boolean }> => {
@@ -207,6 +208,13 @@ export const agentSessionApi = {
   getTranscriptDelta: (taskId: string, sinceRev: number): Promise<{ parts: TranscriptPartRecord[]; maxRev: number }> => {
     return window.electronAPI.agentSession.getTranscriptDelta(taskId, sinceRev)
   }
+}
+
+export const captainRuntimeApi = {
+  get: (projectId: string): Promise<CaptainRuntimeState | null> => window.electronAPI.captainRuntime.get(projectId),
+  switch: (projectId: string, agentId: string): Promise<CaptainRuntimeState> => window.electronAPI.captainRuntime.switch(projectId, agentId),
+  retry: (projectId: string): Promise<CaptainRuntimeState> => window.electronAPI.captainRuntime.retry(projectId),
+  rollback: (projectId: string): Promise<CaptainRuntimeState> => window.electronAPI.captainRuntime.rollback(projectId)
 }
 
 export const agentConfigApi = {

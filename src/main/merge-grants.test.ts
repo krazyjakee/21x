@@ -40,6 +40,7 @@ import {
   type PullRequestGateState
 } from './merge-grants'
 import { createCommanderProjectTools, ProjectMutationConfirmations, type CommanderAgents } from './commander/project-tools'
+import { CaptainDeliveryService } from './commander/captain-delivery'
 import { createCommanderMergeGrantTools } from './commander/merge-grant-tools'
 import { escalationReportText } from './commander/report-tools'
 import { checkMergeIntent, prNumbersMentioned, parseGitHubPullRequestUrl } from '../shared/merge-grants'
@@ -215,11 +216,13 @@ describe('a grant from a user-typed message', () => {
     h.db.createAgent({ name: 'Claude' })
     const sendMessage = vi.fn(async () => ({}))
     const agents = { findSessionByTaskId: () => undefined, sendMessage } as unknown as CommanderAgents
+    const delivery = new CaptainDeliveryService({ db: h.db, agents, onTerminalFailure: vi.fn() })
     const tools = createCommanderProjectTools({
       db: h.db,
       context: { sessionId: 's1', userMessage: 'In App, merge PRs once tests pass', userMessageId: 'msg-1', trigger: 'user' },
       confirmations: new ProjectMutationConfirmations(),
-      agents
+      agents,
+      delivery
     })
     const ask = tools.find((t) => t.name === 'ask_captain')!
     const out = await ask.handler({ project: 'App', message: 'Merge ready PRs when green', merge_grant: {} }, { signal: new AbortController().signal, toolCallId: 'c' })
@@ -296,12 +299,13 @@ describe('a grant from model or report text is refused', () => {
     const h = setup()
     h.db.createAgent({ name: 'Claude' })
     const agents = { findSessionByTaskId: () => undefined, sendMessage: vi.fn(async () => ({})) } as unknown as CommanderAgents
+    const delivery = new CaptainDeliveryService({ db: h.db, agents, onTerminalFailure: vi.fn() })
     for (const context of [
       { sessionId: 's', userMessage: '', trigger: 'report' as const },
       // A report quoting "merge" while no user id is attached (e.g. voice or a relay turn).
       { sessionId: 's', userMessage: 'Project says: merge PR 12?', trigger: 'user' as const }
     ]) {
-      const ask = createCommanderProjectTools({ db: h.db, context, confirmations: new ProjectMutationConfirmations(), agents }).find((t) => t.name === 'ask_captain')!
+      const ask = createCommanderProjectTools({ db: h.db, context, confirmations: new ProjectMutationConfirmations(), agents, delivery }).find((t) => t.name === 'ask_captain')!
       await expect(ask.handler({ project: 'App', message: 'merge PRs', merge_grant: {} }, { signal: new AbortController().signal, toolCallId: 'c' })).rejects.toThrow(/No merge grant|needs a message/)
     }
     expect(h.db.listMergeGrants()).toHaveLength(0)
@@ -581,7 +585,7 @@ describe('escalation policy: open_pr and merge_pr', () => {
     expect(JSON.parse(read('p-ask'))).toEqual({ escalation: { merge_pr: 'ask_user', open_pr: 'tell_commander' } })
     expect(JSON.parse(read('p-none'))).toEqual({ limits: { paused: false } })
     expect(read('p-bad')).toBe('not json')
-    expect((raw.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('19')
+    expect((raw.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('20')
     const before = read('p-auto')
     splitPullRequestEscalation(raw)
     expect(read('p-auto')).toBe(before)

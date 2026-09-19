@@ -2,6 +2,22 @@
 
 All schema migrations live in `src/main/database/schema.ts` as plain functions over the raw SQLite handle; `DatabaseManager.initialize()` applies them through `applySchema()`. Tests build their schema from the same functions (`test/helpers/db-test-helper.ts`).
 
+## Version 20 — managed runtime and durable delivery
+
+Version 20 adds `managed_agent_runtimes` and `delivery_outbox`. Runtime rows
+persist Captain startup/switch generations, verified health, deadlines,
+last-known-good rollback information and visible failure causes. Delivery rows
+persist stable idempotency keys, claim leases, acknowledgements, deadlines and
+terminal errors for typed agent messages, `ask_captain` requests and Captain
+reports. Both tables are created idempotently, so fresh and upgraded databases
+have the same schema; no legacy rows are rewritten or discarded.
+
+SQLite transactions provide exactly-once application effects (one transcript
+message/report for one idempotency key). Agent-provider transports do not offer
+transactional acknowledgement, so the handoff itself is at-least-once after a
+crash; the outbox and transcript/report inbox suppress duplicate application
+effects during reconciliation.
+
 ## How it works
 
 1. `createTables()` defines the canonical schema for **new** databases (`CREATE TABLE IF NOT EXISTS`).
@@ -92,9 +108,8 @@ escalation policy's combined `pr` item in `projects.settings.escalation`:
 the stored level moves to `merge_pr`, `open_pr` gets its default
 (`tell_commander`), and `pr` is removed (`splitPullRequestEscalation()`).
 Rows without `pr`, or with unreadable settings, are untouched, so re-runs are
-no-ops. **18 is skipped on purpose**: it is claimed by an open branch
-(`feat/commander-on-agent-sessions`). Every step of both is guarded, so
-whichever lands second only needs to renumber `SCHEMA_VERSION` and this note.
+no-ops. **18 was skipped on purpose** for a contemporaneous feature branch;
+the managed-runtime and durable-delivery migration follows as version 20.
 
 ## Adding a column to other tables
 

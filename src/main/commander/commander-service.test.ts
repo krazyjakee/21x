@@ -8,6 +8,7 @@ import { CommanderStore } from './commander-store'
 import { buildContext, planFold, splitTurns } from './context'
 import { createCommanderProjectTools, ProjectMutationConfirmations, type CommanderAgents } from './project-tools'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_TITLE_PROMPT } from './prompts'
+import { CaptainDeliveryService } from './captain-delivery'
 
 /** A model answer: text, a failure, or text plus tool calls (the turn then continues with their results). */
 type ModelAnswer = string | Error | { text?: string; toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> }
@@ -208,11 +209,12 @@ describe('CommanderService turns', () => {
       title: () => 'Two projects'
     })
     const confirmations = new ProjectMutationConfirmations()
+    const delivery = new CaptainDeliveryService({ db, agents, onTerminalFailure: vi.fn() })
     const service = new CommanderService({
       store,
       emit: (e) => events.push(e),
       createProvider: () => provider,
-      getTools: (context) => createCommanderProjectTools({ db, context, confirmations, agents })
+      getTools: (context) => createCommanderProjectTools({ db, context, confirmations, agents, delivery })
     })
     const session = store.createSession()
 
