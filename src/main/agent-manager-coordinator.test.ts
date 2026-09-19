@@ -43,6 +43,7 @@ const CAPTAIN_ID = 'mm-row'
 /** An in-memory task table: the Captain row plus whatever updateTask writes. */
 function makeDb(initial: Record<string, unknown>) {
   const task: Record<string, unknown> = { id: CAPTAIN_ID, title: 'Captain', role: 'captain', agent_id: null, status: TaskStatus.NotStarted, ...initial }
+  const settings = new Map<string, string>()
   return {
     task,
     getTask: vi.fn((id: string) => (id === CAPTAIN_ID ? task : undefined)),
@@ -52,13 +53,15 @@ function makeDb(initial: Record<string, unknown>) {
       if (id === CAPTAIN_ID) Object.assign(task, updates)
       return task
     }),
-    getAgent: vi.fn(() => ({ id: 'agent-1', name: 'Agent', config: { coding_agent: 'codex' } })),
+    getAgent: vi.fn((id: string) => ({ id, name: id === 'agent-2' ? 'Sol' : 'Agent', config: { coding_agent: 'codex' } })),
     getWorkspaceDir: vi.fn(() => '/tmp/test-workspace'),
     getMcpServer: vi.fn(() => null),
     getMcpServers: vi.fn(() => []),
     getSecretsByIds: vi.fn(() => []),
     getSecretsWithValues: vi.fn(() => []),
-    getSetting: vi.fn(() => null),
+    settings,
+    getSetting: vi.fn((key: string) => settings.get(key)),
+    setSetting: vi.fn((key: string, value: string) => { settings.set(key, value) }),
     getTranscriptParts: vi.fn(() => []),
     getSkillsByIds: vi.fn(() => [])
   }
@@ -192,5 +195,92 @@ describe('Captain session persistence', () => {
     expect(session.status).toBe('idle')
     expect(extract).not.toHaveBeenCalled()
     expect(db.task.status).toBe(TaskStatus.NotStarted)
+  })
+})
+
+/**
+ * Switching a Captain to another agent. A persisted session belongs to the
+ * agent that made it: another agent cannot continue it (Claude Code accepts a
+ * Codex thread id and only fails at the first message), and a runtime left
+ * running on the old agent must not keep answering.
+ */
+describe('Captain agent switch', () => {
+  it('starts fresh instead of resuming a session another agent made', async () => {
+    const db = makeDb({ session_id: null })
+    const adapter = makeAdapter()
+    const manager = makeManager(db, adapter)
+    await manager.startSession('agent-1', CAPTAIN_ID, undefined, true)
+    await manager.stopSession('fresh-session', false)
+    adapter.createSession.mockResolvedValueOnce('sol-session')
+
+    const sessionId = await manager.startSession('agent-2', CAPTAIN_ID, undefined, true)
+
+    expect(sessionId).toBe('sol-session')
+    expect(adapter.resumeSession).not.toHaveBeenCalled()
+    expect(db.task.session_id).toBe('sol-session')
+    expect(db.settings.get(`captain_session_agent:${CAPTAIN_ID}`)).toBe('agent-2')
+  })
+
+  it('still resumes a session recorded before sessions were bound to an agent', async () => {
+    const db = makeDb({ session_id: 'legacy-session' })
+    const adapter = makeAdapter()
+    const manager = makeManager(db, adapter)
+
+    const sessionId = await manager.startSession('agent-2', CAPTAIN_ID, undefined, true)
+
+    expect(sessionId).toBe('legacy-session')
+    expect(db.settings.get(`captain_session_agent:${CAPTAIN_ID}`)).toBe('agent-2')
+  })
+
+  it('stops the live session on the old agent rather than rejoining it', async () => {
+    const db = makeDb({ session_id: null })
+    const adapter = makeAdapter()
+    const manager = makeManager(db, adapter)
+    await manager.startSession('agent-1', CAPTAIN_ID, undefined, true)
+    adapter.createSession.mockResolvedValueOnce('sol-session')
+
+    const sessionId = await manager.startSession('agent-2', CAPTAIN_ID, undefined, true)
+
+    expect(sessionId).toBe('sol-session')
+    expect(adapter.destroySession).toHaveBeenCalledWith('fresh-session', expect.anything())
+    expect(manager.findSessionByTaskId(CAPTAIN_ID)?.session.agentId).toBe('agent-2')
+  })
+
+  it('does not resume another agent\'s session when a message arrives with no runtime', async () => {
+    const db = makeDb({ session_id: 'claude-session' })
+    db.settings.set(`captain_session_agent:${CAPTAIN_ID}`, 'agent-1')
+    const adapter = makeAdapter()
+    const manager = makeManager(db, adapter)
+    adapter.createSession.mockResolvedValueOnce('sol-session')
+
+    const result = await manager.sendMessage('', 'status?', CAPTAIN_ID, 'agent-2')
+
+    expect(result.newSessionId).toBe('sol-session')
+    expect(adapter.resumeSession).not.toHaveBeenCalled()
+    expect((manager as any).doSendAdapterMessage).toHaveBeenCalledOnce()
+  })
+
+  it('reports a start that never finishes as failed, and stops it if it comes up later', async () => {
+    vi.useFakeTimers()
+    try {
+      const db = makeDb({ session_id: null })
+      const adapter = makeAdapter()
+      let finish!: (id: string) => void
+      adapter.createSession.mockImplementationOnce(() => new Promise<string>((resolve) => { finish = resolve }))
+      const manager = makeManager(db, adapter)
+      const emitSystemError = vi.spyOn(manager as any, 'emitSystemError')
+
+      const starting = manager.startSession('agent-2', CAPTAIN_ID, undefined, true)
+      const failed = expect(starting).rejects.toThrow('Sol did not come up within 90 seconds')
+      await vi.advanceTimersByTimeAsync(90_000)
+      await failed
+      expect(emitSystemError).toHaveBeenCalledWith('', CAPTAIN_ID, expect.any(String), expect.stringContaining('Sol did not come up'))
+
+      finish('late-session')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(adapter.destroySession).toHaveBeenCalledWith('late-session', expect.anything())
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

@@ -464,16 +464,20 @@ function convertThreadItem(
   if (!isCompleted && seenPartIds.has(partId)) return []
   seenPartIds.add(partId)
 
+  // A rejected or failed call still arrives as item/completed. Reporting it
+  // as completed hid, for example, every task-management call a Captain made
+  // being refused by the approval policy.
+  const failure = isCompleted ? toolItemFailure(item) : null
   const part: MessagePart = {
     id: partId,
     type: MessagePartType.TOOL,
     role: MessageRole.ASSISTANT,
     tool: {
       name: toolName,
-      status: isCompleted ? 'completed' : 'running',
+      status: failure !== null ? 'error' : isCompleted ? 'completed' : 'running',
       title: toolTitle,
       input: stringifyForIpc(item, MAX_IPC_TOOL_INPUT_CHARS),
-      output: isCompleted ? stringifyForIpc(extractText(item) || item, MAX_IPC_TOOL_OUTPUT_CHARS) : undefined
+      output: isCompleted ? stringifyForIpc(failure || extractText(item) || item, MAX_IPC_TOOL_OUTPUT_CHARS) : undefined
     },
     update: isCompleted
   }
@@ -495,6 +499,15 @@ function convertThreadItem(
 
   partContentLengths.set(partId, `${part.tool?.status}:${toolName}`)
   return [part]
+}
+
+/** The error text of a tool item that failed, '' when it failed without one, null when it did not fail. */
+export function toolItemFailure(item: Record<string, unknown>): string | null {
+  const error = item.error
+  const message = typeof error === 'string' ? error : isObject(error) ? asString(error.message) : undefined
+  if (message) return message
+  if (error || item.status === 'failed' || item.status === 'declined') return ''
+  return null
 }
 
 function hasSeenAssistantTextForTurn(
