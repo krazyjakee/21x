@@ -17,6 +17,7 @@ import {
 /** What the user can do about each kind of failure. */
 const ERROR_HINTS: Record<VoiceTtsElevenLabsErrorKind, string> = {
   auth: 'Replace the key below.',
+  permission: 'Enable Voices Read and Text to Speech for this key in ElevenLabs, then press Reload.',
   quota: 'Add credits to the ElevenLabs account, or switch back to a voice on this computer.',
   rate_limit: 'Wait a moment, then press Reload.',
   unsupported_model: 'Choose another model below.',

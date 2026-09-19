@@ -61,6 +61,13 @@ export interface ComposerRegistration {
   submit?: () => void
   /** Sends supplied text through the same live handler as the composer. */
   sendMessage?: (message: string) => void
+  /**
+   * False when the composer owns its spoken-reply routing itself. Commander
+   * voice mode streams replies through its dedicated main-process bridge, so
+   * arming the task-answer reader as well would create a second, stale reply
+   * expectation for a task that does not exist.
+   */
+  expectsSpokenAnswer?: boolean
 }
 
 const composers = new Map<string, ComposerRegistration>()
@@ -92,6 +99,12 @@ export function registerComposer(key: string, registration: ComposerRegistration
  */
 export function composerCanSubmit(key: string): boolean {
   return Boolean(composers.get(key)?.submit)
+}
+
+/** Whether the generic task-answer bridge should read this composer's reply. */
+export function composerExpectsSpokenAnswer(key: string | null): boolean {
+  if (!key) return true
+  return composers.get(key)?.expectsSpokenAnswer !== false
 }
 
 /** Sends text through the live composer without changing its draft. */

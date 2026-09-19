@@ -50,7 +50,7 @@ export type ProjectChangeKind = 'created' | 'updated' | 'archived' | 'restored' 
 export type CommanderAgents = Pick<
   AgentManager,
   'getStartQueue' | 'findSessionByTaskId' | 'getSessionStatus' | 'getProjectLimitState' | 'sendMessage' | 'pauseAllProjects' | 'isAllProjectsPaused'
->
+> & Partial<Pick<AgentManager, 'releaseCaptainIfAgentChanged'>>
 
 export interface ProjectToolContext {
   sessionId: string
@@ -406,8 +406,29 @@ export function buildCommanderRelayMessage(input: { commanderSessionId: string; 
   ].join('\n')
 }
 
+/** Stops a Captain still running on the agent it was just switched away from. */
+function releaseCaptain(options: ProjectToolOptions, projectId: string): void {
+  options.agents?.releaseCaptainIfAgentChanged?.(projectId)?.catch((error: unknown) => {
+    console.error(`[Commander] Could not stop the previous Captain of ${projectId}:`, error)
+  })
+}
+
 function newCorrelationId(): string {
   return `cmd-${randomUUID().replaceAll('-', '').slice(0, 16)}`
+}
+
+/**
+ * What `ask_captain` reports about the Captain's runtime. A session that
+ * exists is not necessarily working: one in error is said so rather than
+ * "running", and no session at all means one is being started for this message.
+ */
+function captainSessionLabel(options: ProjectToolOptions, sessionId: string | undefined): string {
+  if (!sessionId) return 'starting'
+  const status = options.agents?.getSessionStatus(sessionId)?.status
+  if (status === 'error') return 'error'
+  if (status === 'waiting_approval') return 'waiting_approval'
+  if (status === 'idle') return 'idle'
+  return 'running'
 }
 
 function askCaptain(options: ProjectToolOptions, input: Record<string, unknown>): ChatToolResult {
@@ -418,9 +439,12 @@ function askCaptain(options: ProjectToolOptions, input: Record<string, unknown>)
   if (!agents) throw new Error('Agents are not available right now; the Captain cannot be reached.')
   const coordinator = db.ensureCoordinatorTask(project.id)
   if (!coordinator) throw new Error(`Project "${project.name}" has no Captain.`)
-  const live = agents.findSessionByTaskId(coordinator.id)
-  const agentId = live?.session.agentId ?? resolveCaptainAgentId(db, project)
+  const agentId = resolveCaptainAgentId(db, project)
   if (!agentId) throw new Error(`No agent is configured to run the Captain of "${project.name}". Set one in the project settings.`)
+  // A session left running on an agent the Captain was switched away from is
+  // not reused: the send below starts the configured agent and stops it.
+  const found = agents.findSessionByTaskId(coordinator.id)
+  const live = found?.session.agentId === agentId ? found : undefined
 
   // #137: created (and bound to the user's message) before anything is sent; a refusal throws.
   const grant = input.merge_grant === undefined || input.merge_grant === null ? null : grantForRelay(db, options.context, project, input.merge_grant)
@@ -444,7 +468,7 @@ function askCaptain(options: ProjectToolOptions, input: Record<string, unknown>)
     project_id: project.id,
     project_name: clip(project.name, MAX_NAME_CHARS),
     correlation_id: correlationId,
-    captain_session: live ? 'running' : 'starting',
+    captain_session: captainSessionLabel(options, live?.sessionId),
     ...(grant ? { merge_grant: { id: grant.id, expires_at: grant.expires_at, pr_numbers: grant.pr_numbers, repo: grant.repo } } : {}),
     note: grant
       ? 'The Captain answers later in a report tagged with this correlation_id. Tell the user the merge grant is in place for this project only, until it expires (7 days at most) or they revoke it in 20x.'
@@ -701,6 +725,7 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
         return mutation(options, 'update_project', input, action, () => {
           const updated = db.updateProject(project.id, changes)
           if (!updated) throw new Error('Project no longer exists')
+          if ('captain_agent_id' in changes || 'default_agent_id' in changes) releaseCaptain(options, project.id)
           notify(project.id, 'updated')
           return compactProject(db, updated, true)
         })

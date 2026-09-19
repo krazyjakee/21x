@@ -36,8 +36,10 @@ page, **Settings → Voice**, split into what 20x hears and what 20x says. Each
 half hides only its own tuning behind its own "Advanced options" disclosure. Speaking needs neither the
 microphone nor the optional speech runtime, so it works on its own.
 
-Do not describe this release as ChatGPT voice mode. It is local dictation and
-local task commands.
+Commander adds a hands-free conversation surface on top of this local
+recognition path: one click keeps the microphone open, sends each utterance
+after a pause, and reads the streamed reply through the selected speech engine.
+It still uses local speech recognition and has no wake word.
 
 ## Processes
 

@@ -45,7 +45,24 @@ is the built-in Captain prompt (`src/main/prompts/captain.ts`) followed
 by a project section built on every start, resume and send from the project
 row, its repos (with default branches) and resources
 (`src/main/agent-manager/captain-context.ts`), so an edit to the project
-reaches the next message. The Captain has no checkout of the project's
+reaches the next message.
+
+Changing the Captain's agent (the Captain drawer's picker, the project
+editor, or the Commander's `update_project`) is saved on the project as
+`captain_agent_id`, so the drawer, `ask_captain`, wake-ups, scheduled reviews
+and the next launch all start the same agent. Whenever it changes,
+`AgentManager.releaseCaptainIfAgentChanged` stops a live session still on
+the old agent. A persisted session is bound to the agent that made it (setting
+`captain_session_agent:<taskId>`): a start or send with another agent opens a
+fresh session instead of resuming it, because another backend cannot continue
+it (Claude Code even accepts a Codex thread id and fails only at the first
+message). A Captain start is bounded (`CAPTAIN_START_TIMEOUT_MS`, 90 s): past
+that it fails with the reason in the transcript, and a session that comes up
+late is stopped. The drawer then shows the reason with **Retry** and **Switch
+back to** the previous agent, and holds messages sent in the meantime until
+a start succeeds, then delivers each one once.
+
+The Captain has no checkout of the project's
 repos; the prompt tells it to ask a task agent instead (read-only clones are
 a follow-up). It keeps a long-lived `MEMORY.md` in its workspace — decisions,
 conventions, open threads — which the prompt injects (capped) and the project

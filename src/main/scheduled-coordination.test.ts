@@ -163,11 +163,12 @@ describe('scheduled Captain reviews', () => {
     project('Busy', { [SCHEDULED_REVIEW_SETTING]: { enabled: true, cron: REVIEW_CRON } })
     const s = scheduler()
     await s.tick()
-    agents.findSessionByTaskId.mockReturnValue({ sessionId: 's-1', session: { status: 'working', agentId: 'a' } })
+    const agentId = db.getAgents()[0].id
+    agents.findSessionByTaskId.mockReturnValue({ sessionId: 's-1', session: { status: 'working', agentId } })
     now = Date.parse('2026-09-21T12:00:30.000Z')
     await s.tick()
     expect(agents.sendMessage).not.toHaveBeenCalled()
-    agents.findSessionByTaskId.mockReturnValue({ sessionId: 's-1', session: { status: 'idle', agentId: 'a' } })
+    agents.findSessionByTaskId.mockReturnValue({ sessionId: 's-1', session: { status: 'idle', agentId } })
     now += MINUTE
     await s.tick()
     expect(agents.sendMessage).toHaveBeenCalledTimes(1)

@@ -1,5 +1,5 @@
 import type { Task, CreateTaskDTO, UpdateTaskDTO, FileAttachment, Agent, CreateAgentDTO, UpdateAgentDTO, McpServer, CreateMcpServerDTO, UpdateMcpServerDTO, Skill, CreateSkillDTO, UpdateSkillDTO, Secret, CreateSecretDTO, UpdateSecretDTO, TaskSource, CreateTaskSourceDTO, UpdateTaskSourceDTO, SyncResult, PluginMeta, ConfigFieldOption, ActionResult, SourceUser, ReassignResult, MarketplaceSource, InstalledPlugin, DiscoverablePlugin, MarketplaceCatalog, PluginResources } from '@/types'
-import type { AgentOutputEvent, AgentOutputBatchEvent, AgentStatusEvent, GhCliStatus, GlabCliStatus, TeaCliStatus, GitHubRepo, WorktreeProgressEvent, WorkspaceCleanupProgressEvent, McpTestResult, AgentMessageAttachment, TranscriptPartRecord, TranscriptChangedEvent, AgentSessionStartResult, AgentStartQueueChangedEvent, QueuedAgentStart } from '@/types/electron'
+import type { AgentStatusEvent, GhCliStatus, GlabCliStatus, TeaCliStatus, GitHubRepo, WorktreeProgressEvent, WorkspaceCleanupProgressEvent, McpTestResult, AgentMessageAttachment, TranscriptPartRecord, TranscriptChangedEvent, AgentSessionStartResult, AgentTaskStartResult, AgentStartQueueChangedEvent, QueuedAgentStart } from '@/types/electron'
 import type { ArtifactApi } from '@shared/artifacts'
 import type {
   MicrophonePermission,
@@ -158,6 +158,10 @@ export const agentSessionApi = {
     return window.electronAPI.agentSession.start(agentId, taskId, workspaceDir, skipInitialPrompt)
   },
 
+  startTask: (taskId: string): Promise<AgentTaskStartResult> => {
+    return window.electronAPI.agentSession.startTask(taskId)
+  },
+
   resume: (agentId: string, taskId: string, ocSessionId: string): Promise<{ sessionId: string; ended?: boolean }> => {
     return window.electronAPI.agentSession.resume(agentId, taskId, ocSessionId)
   },
@@ -257,14 +261,6 @@ export const attachmentApi = {
   download: (taskId: string, attachmentId: string): Promise<void> => {
     return window.electronAPI.attachments.download(taskId, attachmentId)
   }
-}
-
-export const onAgentOutput = (callback: (event: AgentOutputEvent) => void): (() => void) => {
-  return window.electronAPI.onAgentOutput(callback)
-}
-
-export const onAgentOutputBatch = (callback: (event: AgentOutputBatchEvent) => void): (() => void) => {
-  return window.electronAPI.onAgentOutputBatch(callback)
 }
 
 export const onArtifactUpdated = (callback: (event: { taskId: string; artifact: import('@shared/artifacts').Artifact }) => void): (() => void) => {

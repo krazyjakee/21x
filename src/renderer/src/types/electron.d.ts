@@ -79,6 +79,15 @@ export interface AgentSessionStartResult {
   queueReason?: 'agent_limit' | 'global_limit'
 }
 
+export interface AgentTaskStartResult {
+  action: 'task_started' | 'subtask_started' | 'triage_started' | 'already_running' | 'queued' | 'no_action'
+  sessionId?: string
+  startedTaskId?: string
+  agentId?: string
+  queuePosition?: number
+  queueReason?: 'agent_limit' | 'global_limit'
+}
+
 /** A session start waiting in the main-process queue for a free slot. */
 export interface QueuedAgentStart {
   taskId: string
@@ -104,19 +113,6 @@ export interface AgentMessageAttachment {
   filename: string
   size: number
   mime_type: string
-}
-
-export interface AgentOutputEvent {
-  sessionId: string
-  taskId?: string
-  type: 'message' | 'error' | 'status'
-  data: unknown
-}
-
-export interface AgentOutputBatchEvent {
-  sessionId: string
-  taskId: string
-  messages: Array<{ id: string; role: string; content: string; partType?: string; tool?: unknown; update?: boolean; taskProgress?: unknown }>
 }
 
 export interface AgentStatusEvent {
@@ -281,6 +277,7 @@ interface ElectronAPI {
   }
   agentSession: {
     start: (agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean) => Promise<AgentSessionStartResult>
+    startTask: (taskId: string) => Promise<AgentTaskStartResult>
     resume: (agentId: string, taskId: string, ocSessionId: string) => Promise<AgentSessionStartResult & { ended?: boolean }>
     abort: (sessionId: string) => Promise<AgentSessionSuccessResult>
     stop: (sessionId: string) => Promise<AgentSessionSuccessResult>
@@ -548,8 +545,6 @@ interface ElectronAPI {
   }
   onOverdueCheck: (callback: () => void) => () => void
   onTasksRefresh: (callback: () => void) => () => void
-  onAgentOutput: (callback: (event: AgentOutputEvent) => void) => () => void
-  onAgentOutputBatch: (callback: (event: AgentOutputBatchEvent) => void) => () => void
   onArtifactUpdated: (callback: (event: { taskId: string; artifact: import('@shared/artifacts').Artifact }) => void) => () => void
   onTranscriptChanged: (callback: (event: TranscriptChangedEvent) => void) => () => void
   onAgentStatus: (callback: (event: AgentStatusEvent) => void) => () => void

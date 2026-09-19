@@ -11,6 +11,7 @@ import type { BrowserWindow } from 'electron'
 import type { AgentRecord, DatabaseManager, TaskRecord } from './database'
 import { TaskStatus } from '../shared/constants'
 import { isCoordinatorTask } from '../shared/task-roles'
+import { resolveCaptainAgentId } from './captain-waker'
 import { emitTaskEvent } from './project-events'
 import { findBlockingSibling, isSuccessorGraphInProgress, successorsFireOnReview } from '../shared/subtask-graph'
 import type { WorktreeManager } from './worktree-manager'
@@ -47,6 +48,16 @@ const DONE_TODO_STATUSES = ['completed', 'cancelled', 'done', 'removed']
 /** Yields to the event loop between bursts of synchronous DB / FS calls so IPC
  *  and rendering are not starved (better-sqlite3 calls block the main thread). */
 const yieldEventLoop = (): Promise<void> => new Promise((r) => setImmediate(r))
+
+/** Settings key: the agent whose runtime made a coordinator row's persisted session. */
+const coordinatorSessionAgentKey = (taskId: string): string => `captain_session_agent:${taskId}`
+
+/**
+ * How long a Captain may take to come up (create or resume its session)
+ * before the start is reported as failed. Task sessions are not bounded: their
+ * worktree setup can legitimately clone a large repository first.
+ */
+export const CAPTAIN_START_TIMEOUT_MS = 90_000
 
 /** Outcome of a session start that went through admission control. */
 export type SessionStartOutcome =
@@ -644,6 +655,7 @@ export class AgentManager extends EventEmitter {
     })
 
     this.updateTaskFromLocalAgent(taskId, { session_id: adapterSessionId })
+    this.recordCoordinatorSessionAgent(taskId, agentId)
     console.log(`[SessionTracker] CREATED session=${adapterSessionId} task=${taskId} agent=${agentId} reason=new_session`)
 
     // Triage sessions keep the Triaging status; coordinator rows have none.
@@ -1680,6 +1692,7 @@ export class AgentManager extends EventEmitter {
     // renderer bound to a stale session id and the wake turn's output renders
     // late or not at all.
     this.updateTaskFromLocalAgent(taskId, { session_id: adapterSessionId })
+    this.recordCoordinatorSessionAgent(taskId, agentId)
     this.sendToRenderer('task:updated', { taskId, updates: { session_id: adapterSessionId } })
 
     this.emitStatus(adapterSessionId, { agentId, taskId }, 'idle')
@@ -1761,7 +1774,11 @@ export class AgentManager extends EventEmitter {
 
     this.admittedStarts.set(taskId, agentId)
     try {
-      return { status: 'started', sessionId: await this.startSessionNow(agentId, taskId, workspaceDir, skipInitialPrompt) }
+      const starting = this.startSessionNow(agentId, taskId, workspaceDir, skipInitialPrompt)
+      const sessionId = isCoordinatorTask(task)
+        ? await this.boundedCaptainStart(starting, agent.name, taskId)
+        : await starting
+      return { status: 'started', sessionId }
     } catch (error) {
       // The reserved slot is free again (released in finally, before the
       // deferred drain runs).
@@ -1781,6 +1798,35 @@ export class AgentManager extends EventEmitter {
     }
   }
 
+  /**
+   * A Captain start that has not finished within CAPTAIN_START_TIMEOUT_MS is
+   * reported as failed, so the drawer leaves "Agent is starting..." with the
+   * reason and a retry instead of waiting forever. If the start does finish
+   * later, that session is stopped: the caller has already been told it
+   * failed and may be starting another.
+   */
+  private boundedCaptainStart(starting: Promise<string>, agentName: string, taskId: string): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      let timedOut = false
+      const timer = setTimeout(() => {
+        timedOut = true
+        reject(new Error(`${agentName} did not come up within ${Math.round(CAPTAIN_START_TIMEOUT_MS / 1000)} seconds`))
+      }, CAPTAIN_START_TIMEOUT_MS)
+      starting.then(
+        (sessionId) => {
+          clearTimeout(timer)
+          if (!timedOut) return resolve(sessionId)
+          console.warn(`[AgentManager] Captain ${taskId} came up after its start timed out; stopping ${sessionId}`)
+          if (sessionId) void this.stopSession(sessionId, false)
+        },
+        (error: unknown) => {
+          clearTimeout(timer)
+          if (!timedOut) reject(error)
+        }
+      )
+    })
+  }
+
   /** Starts without admission control — callers are exempt or already admitted. */
   private async startSessionNow(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<string> {
     const agent = this.db.getAgent(agentId)
@@ -1791,10 +1837,17 @@ export class AgentManager extends EventEmitter {
     // A coordinator conversation outlives its runtime. Rejoin the live session
     // or resume the persisted one, so a restart (or a reaped runtime) continues
     // the same Captain conversation instead of opening a blank one.
-    const task = this.db.getTask(taskId)
+    let task = this.db.getTask(taskId)
     if (isCoordinatorTask(task)) {
       const live = this.findSessionByTaskId(taskId)
-      if (live) return live.sessionId
+      if (live && live.session.agentId === agentId) return live.sessionId
+      // The Captain was switched to another agent: the old runtime must not
+      // keep answering for it.
+      if (live) {
+        console.log(`[AgentManager] Captain ${taskId} switched from agent ${live.session.agentId} to ${agentId}; stopping ${live.sessionId}`)
+        await this.stopSession(live.sessionId, false)
+      }
+      task = this.dropForeignCoordinatorSession(taskId, agentId)
       if (task?.session_id) {
         const resumed = await this.resumeCoordinatorSession(agentId, taskId, task.session_id)
         if (resumed) return resumed
@@ -1816,6 +1869,46 @@ export class AgentManager extends EventEmitter {
   private heartbeatScopeTask(taskId: string, task: TaskRecord | null | undefined): TaskRecord | undefined {
     if (task || !taskId.startsWith('heartbeat-')) return undefined
     return this.db.getTask(taskId.slice('heartbeat-'.length)) ?? undefined
+  }
+
+  /**
+   * A Captain's persisted session belongs to the agent that made it. Another
+   * agent cannot continue it: a different backend fails (Claude Code even
+   * accepts a Codex thread id and only fails at the first message, losing it),
+   * and the user switched agents on purpose. Clears it so a fresh session
+   * starts; a session recorded before this binding existed is left to the
+   * resume attempt. Returns the task as it is now.
+   */
+  private dropForeignCoordinatorSession(taskId: string, agentId: string): TaskRecord | undefined {
+    const task = this.db.getTask(taskId) ?? undefined
+    if (!isCoordinatorTask(task) || !task?.session_id) return task
+    const owner = this.db.getSetting(coordinatorSessionAgentKey(taskId))
+    if (!owner || owner === agentId) return task
+    console.log(`[AgentManager] Captain ${taskId}: session ${task.session_id} was made by agent ${owner}, not ${agentId}; starting a new one`)
+    return this.updateTaskFromLocalAgent(taskId, { session_id: null })
+  }
+
+  /** Records which agent a coordinator row's session runs on (see dropForeignCoordinatorSession). */
+  private recordCoordinatorSessionAgent(taskId: string, agentId: string): void {
+    if (isCoordinatorTask(this.db.getTask(taskId))) this.db.setSetting(coordinatorSessionAgentKey(taskId), agentId)
+  }
+
+  /**
+   * The project's Captain agent changed (project editor, Captain drawer or the
+   * Commander). Stops a live Captain session that runs on another agent, so
+   * nothing keeps delivering to it; the next message or warm-up starts the new
+   * agent. Returns whether a session was stopped.
+   */
+  async releaseCaptainIfAgentChanged(projectId: string): Promise<boolean> {
+    const project = this.db.getProject(projectId)
+    const coordinator = this.db.getCoordinatorTask(projectId)
+    if (!project || !coordinator) return false
+    const live = this.findSessionByTaskId(coordinator.id)
+    const agentId = resolveCaptainAgentId(this.db, project)
+    if (!live || !agentId || live.session.agentId === agentId) return false
+    console.log(`[AgentManager] Captain agent of ${projectId} is now ${agentId}; stopping ${live.sessionId} on ${live.session.agentId}`)
+    await this.stopSession(live.sessionId, false)
+    return true
   }
 
   /** Resumes a coordinator's persisted session; '' when it cannot be continued. */
@@ -2936,10 +3029,11 @@ export class AgentManager extends EventEmitter {
     if (!session && taskId) {
       // Regular tasks carry their agent; the Captain (a coordinator row
       // with no agent_id) passes it in.
-      const task = this.db.getTask(taskId)
+      let task = this.db.getTask(taskId)
       const resolvedAgentId = task?.agent_id || agentId
 
       if (resolvedAgentId) {
+        if (isCoordinatorTask(task)) task = this.dropForeignCoordinatorSession(taskId, resolvedAgentId)
         const persistedSessionId = task?.session_id
         if (persistedSessionId) {
           try {
@@ -3503,12 +3597,18 @@ export class AgentManager extends EventEmitter {
     // mobile hydrate from snapshots (transcript:get) instead of depending on
     // catching live events, so output produced while no view is bound
     // (background wake-ups, silently resumed sessions) is never lost.
+    //
+    // Clients only read the `transcript:changed` delta that persisting emits,
+    // which carries display previews of oversized records. The raw event is
+    // never broadcast: nothing listens to it, and a single poll of large tool
+    // output can run to tens of megabytes.
     if (channel === 'agent:output' || channel === 'agent:output-batch') {
       try {
         this.persistTranscriptEvent(channel, data)
       } catch (err) {
         console.error('[AgentManager] Failed to persist transcript parts:', err)
       }
+      return
     }
 
     this.broadcast(channel, data)
