@@ -27,7 +27,7 @@ export const mergeGrantInputSchema = {
     '21x binds the grant to the user\'s message and refuses otherwise. One project per grant; it lasts at most 7 days and the user can revoke it.',
   properties: {
     repo: { type: 'string', description: 'owner/name; omit for all of the project\'s GitHub repos.' },
-    base_branch: { type: 'string', description: 'Only PRs into this branch.' },
+    base_branch: { type: 'string', description: 'Unsupported: GitHub cannot pin the base atomically; any base restriction is refused.' },
     pr_numbers: { type: 'array', items: { type: 'integer' }, description: 'Only these PRs. When the user named PRs, the grant is limited to those.' },
     expires_in_hours: { type: 'number', description: 'Default and maximum 168 (7 days).' },
     max_merges: { type: 'integer', description: 'At most this many merges.' }

@@ -86,8 +86,8 @@ may spell the old name; `src/shared/captain-terminology.test.ts` enforces that.
 
 ### Merge grants and the pull-request policy split (v19)
 
-Migration 19 (`migrateMergeGrants()`, #137) adds `merge_grants` and
-`merge_grant_uses` (new tables, also in `createTables()`) and splits the
+Migration 19 (`migrateMergeGrants()`, #137) adds `merge_grants`,
+`merge_grant_uses` and durable `merge_grant_reservations` (new tables, also in `createTables()`) and splits the
 escalation policy's combined `pr` item in `projects.settings.escalation`:
 the stored level moves to `merge_pr`, `open_pr` gets its default
 (`tell_commander`), and `pr` is removed (`splitPullRequestEscalation()`).

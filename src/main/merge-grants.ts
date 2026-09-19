@@ -58,6 +58,7 @@ export type MergeGrantDb = Pick<
   | 'reserveMergeGrantUse'
   | 'refundMergeGrantUse'
   | 'recordMergeGrantUse'
+  | 'listPendingMergeGrantReservations'
   | 'listMergeGrantUses'
   | 'appendProjectStatusJournal'
 >
@@ -247,6 +248,7 @@ export function createMergeGrantFromUserMessage(
   if (scope.base_branch !== undefined && scope.base_branch !== null && scope.base_branch !== '') {
     if (typeof scope.base_branch !== 'string' || !BRANCH_NAME.test(scope.base_branch.trim())) return { ok: false, error: 'base_branch is not a valid branch name' }
     baseBranch = scope.base_branch.trim()
+    return { ok: false, error: 'Base-branch-restricted merge grants are unavailable: GitHub cannot atomically pin the PR base during a merge. No grant was created.' }
   }
 
   let prNumbers: number[] = []
@@ -626,16 +628,25 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
   if (blocked) return blocked
 
   let grant: MergeGrant | undefined
+  let reservationId: string | undefined
   if (authority.kind === 'grant') {
     const current = findCoveringGrant(db, projectId, { ...pr, baseRefName: state.baseRefName }, authority.grantId)
     if (!current) return { error: 'The merge grant is no longer active or the project disabled it. Ask the user.' }
-    grant = db.reserveMergeGrantUse(authority.grantId)
+    if (current.base_branch) return { status: 'blocked', needs_external_approval: true, message: 'This grant restricts the base branch, which GitHub cannot pin atomically. Ask the user to handle this merge on GitHub; no grant authority was spent.' }
+    const reserved = db.reserveMergeGrantUse(authority.grantId, {
+      pr_url: pr.url, pr_title: state.title, base_branch: state.baseRefName,
+      head_sha: state.headRefOid, method, merge_state: state.mergeStateStatus,
+      review_decision: state.reviewDecision, checks: state.checks
+    })
+    grant = reserved?.grant
+    reservationId = reserved?.reservationId
+    if (reserved) grantsChanged(projectId)
     if (!grant || grant.project_id !== projectId) {
-      if (grant) db.refundMergeGrantUse(grant.id)
+      if (reservationId) db.refundMergeGrantUse(reservationId)
       return { error: 'The merge grant is no longer active (revoked, expired or used up). Ask the user.' }
     }
     if (!grantCoversPullRequest(grant, { ...pr, baseRefName: state.baseRefName })) {
-      db.refundMergeGrantUse(grant.id)
+      if (reservationId) db.refundMergeGrantUse(reservationId)
       return { error: `The merge grant ${grant.id} does not cover ${pr.url} (into ${state.baseRefName}).` }
     }
   }
@@ -645,27 +656,16 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
     if (response.merged !== true || !/^[0-9a-f]{40}$/i.test(response.sha ?? '')) {
       if (response.merged === false) throw new MergeRefusedError(response.message || 'GitHub did not merge the PR')
       // An ambiguous response cannot justify refunding possibly spent authority.
-      return { status: 'unknown', pr_url: pr.url, message: 'GitHub did not confirm the merge outcome. The grant use remains reserved; inspect the PR before retrying.' }
+      return { status: 'unknown', pr_url: pr.url, reservation_id: reservationId, message: `GitHub did not confirm the merge outcome. ${reservationId ? 'The grant use remains reserved. ' : ''}Inspect the PR before retrying.` }
     }
   } catch (error) {
-    if (!confirmedMergeFailure(error)) return { status: 'unknown', pr_url: pr.url, message: 'The merge outcome is unknown. The grant use remains reserved; inspect the PR before retrying.' }
-    if (grant) db.refundMergeGrantUse(grant.id)
+    if (!confirmedMergeFailure(error)) return { status: 'unknown', pr_url: pr.url, reservation_id: reservationId, message: `The merge outcome is unknown. ${reservationId ? 'The grant use remains reserved. ' : ''}Inspect the PR before retrying.` }
+    if (reservationId) { db.refundMergeGrantUse(reservationId); grantsChanged(projectId) }
     const detail = error instanceof Error ? error.message : String(error)
     return { error: `GitHub refused the merge of ${pr.url}: ${detail.slice(0, 1_000)}`, pr_url: pr.url }
   }
 
-  if (grant) {
-    db.recordMergeGrantUse(grant.id, {
-      pr_url: pr.url,
-      pr_title: state.title.slice(0, 300),
-      base_branch: state.baseRefName,
-      head_sha: state.headRefOid,
-      method,
-      merge_state: state.mergeStateStatus,
-      review_decision: state.reviewDecision,
-      checks: state.checks
-    })
-  }
+  if (reservationId) db.recordMergeGrantUse(reservationId)
   const { line } = authorityText(db, authority)
   const title = state.title ? ` "${state.title.slice(0, 120)}"` : ''
   const summary = `Merged ${pr.url}${title} (${method}, ${state.headRefOid.slice(0, 7)}) ${line}`
@@ -705,8 +705,34 @@ export function mergeGrantAudit(db: MergeGrantDb, projectId: string): MergeGrant
   return db.listMergeGrants({ projectId }).map((grant) => ({
     grant,
     status: mergeGrantStatus(grant, now),
-    uses: db.listMergeGrantUses(grant.id)
+    uses: db.listMergeGrantUses(grant.id),
+    pending: db.listPendingMergeGrantReservations(projectId).filter((reservation) => reservation.grant_id === grant.id)
   }))
+}
+
+/**
+ * Recover a saved attempt only when GitHub confirms the exact head merged into
+ * the observed base. OPEN, changed heads/bases, and transport failures remain
+ * reserved for inspection: a delayed remote operation must never free a use.
+ */
+export async function reconcileMergeGrantReservations(db: MergeGrantDb, projectId?: string): Promise<void> {
+  for (const reservation of db.listPendingMergeGrantReservations(projectId)) {
+    try {
+      const pr = parseGitHubPullRequestUrl(reservation.snapshot.pr_url)
+      if (!pr) continue
+      const state = await readPullRequestGate(pr)
+      if (state.state !== 'MERGED' || state.headRefOid !== reservation.snapshot.head_sha || state.baseRefName !== reservation.snapshot.base_branch) continue
+      const use = db.recordMergeGrantUse(reservation.id)
+      if (!use) continue
+      db.appendProjectStatusJournal(reservation.project_id, {
+        summary: `Recovered merge outcome for ${pr.url} after an interrupted request under merge grant ${reservation.grant_id}; GitHub confirms head ${state.headRefOid} merged.`,
+        completed: [`Confirmed merged: ${pr.url}`]
+      })
+      grantsChanged(reservation.project_id)
+    } catch {
+      // Keep the durable reservation and original snapshot until GitHub can confirm it.
+    }
+  }
 }
 
 /** One line for lists: the grant, its status and its uses. */

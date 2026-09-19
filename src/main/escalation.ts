@@ -44,7 +44,7 @@ import { escalationPolicyFromSettings, type EscalationAction, type EscalationLev
 import type { HeldAction } from '../shared/project-limit-types'
 import { handleMergeGrantTool } from './merge-grant-gate'
 import { MERGE_GRANT_TOOL_NAMES, MERGE_PULL_REQUEST_TOOL } from './mcp-servers/merge-grant-tools'
-import type { MergeGrantDb, MergeHooks } from './merge-grants'
+import { reconcileMergeGrantReservations, type MergeGrantDb, type MergeHooks } from './merge-grants'
 
 export type { HeldAction }
 
@@ -433,5 +433,6 @@ export function createCoordinatorEscalationGate(): CoordinatorCallGate {
 /** Main-process wiring: reads the policy from `db` and gates the Captain's tool calls. */
 export function installEscalation(db: DatabaseManager): void {
   configureEscalation({ db, mergeDb: db })
+  void reconcileMergeGrantReservations(db).catch((error) => console.error('[MergeGrants] Recovery failed:', error))
   setCoordinatorCallGate(createCoordinatorEscalationGate())
 }

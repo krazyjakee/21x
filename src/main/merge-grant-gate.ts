@@ -17,6 +17,7 @@
  */
 import {
   activeMergeGrants,
+  reconcileMergeGrantReservations,
   createMergeGrantFromUserMessage,
   findCoveringGrant,
   isMergeMethod,
@@ -142,6 +143,7 @@ export async function handleMergeGrantTool(tool: string, ctx: MergeGateContext):
     case GRANT_MERGE_AUTHORITY_TOOL:
       return grantCall(ctx)
     case LIST_MERGE_GRANTS_TOOL: {
+      await reconcileMergeGrantReservations(ctx.db, ctx.projectId)
       const grants = activeMergeGrants(ctx.db, ctx.projectId)
       return { grants: grants.map(mergeGrantSummary), total: grants.length }
     }

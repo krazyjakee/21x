@@ -34,6 +34,7 @@ import {
   makeUserTypedProjectMessage,
   latestUserTypedProjectMessage,
   performMerge,
+  reconcileMergeGrantReservations,
   revokeMergeGrant,
   setGhRunner,
   type PullRequestGateState
@@ -632,9 +633,9 @@ describe('independent review: fail-closed authority boundaries', () => {
   it('derives repository and base restrictions and refuses model widening', () => {
     const h = setup()
     h.db.addProjectRepo(h.projectId, { provider: 'github', org: 'acme', name: 'other' })
-    const binding = { source: 'commander' as const, sessionId: 's', messageId: 'repo', text: `Merge ${PR_URL} into release` }
+    const binding = { source: 'commander' as const, sessionId: 's', messageId: 'repo', text: `Merge ${PR_URL}` }
     const result = createMergeGrantFromUserMessage(h.db, h.projectId, binding)
-    expect(result.ok && result.grant).toMatchObject({ repo: 'acme/app', base_branch: 'release', pr_numbers: [12] })
+    expect(result.ok && result.grant).toMatchObject({ repo: 'acme/app', base_branch: null, pr_numbers: [12] })
     expect(createMergeGrantFromUserMessage(h.db, h.projectId, { ...binding, messageId: 'other' }, { repo: 'acme/other' }).ok).toBe(false)
     expect(createMergeGrantFromUserMessage(h.db, h.projectId, { ...binding, messageId: 'base' }, { base_branch: 'main' }).ok).toBe(false)
     expect(createMergeGrantFromUserMessage(h.db, h.projectId, { ...binding, messageId: 'project', text: 'In Other, merge PRs' }).ok).toBe(false)
@@ -735,6 +736,65 @@ describe('independent review: fail-closed authority boundaries', () => {
     })
     expect((await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).status).toBe('unknown')
     expect(h.db.listMergeGrants()[0].uses).toBe(1)
+  })
+
+  it('refuses base-scoped authority instead of racing a PR retarget', async () => {
+    const h = setup()
+    const binding = { source: 'commander' as const, sessionId: 's', messageId: 'base', text: 'merge PRs into main' }
+    expect(createMergeGrantFromUserMessage(h.db, h.projectId, binding).ok).toBe(false)
+    const created = createMergeGrantFromUserMessage(h.db, h.projectId, { ...binding, text: 'merge PRs' })
+    if (!created.ok) throw new Error(created.error)
+    // An existing grant from an earlier build must also fail closed.
+    h.db.db.prepare('UPDATE merge_grants SET base_branch = ? WHERE id = ?').run('main', created.grant.id)
+    const result = await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })
+    expect(result).toMatchObject({ status: 'blocked', needs_external_approval: true })
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(created.grant.id)?.uses).toBe(0)
+  })
+
+  it('recovers an uncertain committed merge after reopening SQLite, exactly once', async () => {
+    const h = setup()
+    const created = createMergeGrantFromUserMessage(h.db, h.projectId, { source: 'commander', sessionId: 's', messageId: 'restart', text: 'merge PRs' }, { max_merges: 1 })
+    if (!created.ok) throw new Error(created.error)
+    h.gh.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'pr') return JSON.stringify(prState())
+      expect(h.db.listPendingMergeGrantReservations()[0].snapshot).toMatchObject({ pr_url: PR_URL, head_sha: SHA })
+      throw new Error('Response lost after GitHub committed')
+    })
+    expect((await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).status).toBe('unknown')
+    const { db: reopened } = createTestDb()
+    reopened.db.close()
+    reopened.db = new Database(h.db.db.serialize())
+    clearUserTypedProjectMessages()
+    expect(reopened.listPendingMergeGrantReservations()).toHaveLength(1)
+    expect(reopened.getMergeGrant(created.grant.id)?.uses).toBe(1)
+    // An open PR or a different merged head cannot free the reservation.
+    await reconcileMergeGrantReservations(reopened)
+    expect(reopened.listPendingMergeGrantReservations()).toHaveLength(1)
+    h.gh.mockImplementation(async () => JSON.stringify(prState({ state: 'MERGED', headRefOid: 'b'.repeat(40) })))
+    await reconcileMergeGrantReservations(reopened)
+    expect(reopened.listPendingMergeGrantReservations()).toHaveLength(1)
+    h.gh.mockImplementation(async () => JSON.stringify(prState({ state: 'MERGED' })))
+    await reconcileMergeGrantReservations(reopened)
+    await reconcileMergeGrantReservations(reopened)
+    expect(reopened.listPendingMergeGrantReservations()).toHaveLength(0)
+    expect(reopened.listMergeGrantUses(created.grant.id)).toHaveLength(1)
+    expect(reopened.getMergeGrant(created.grant.id)?.uses).toBe(1)
+    expect(reopened.listProjectStatusJournal(h.projectId, { limit: 20 }).entries).toHaveLength(1)
+    reopened.close()
+  })
+
+  it('a repeated refund cannot refund a different reservation', () => {
+    const h = setup()
+    const created = createMergeGrantFromUserMessage(h.db, h.projectId, { source: 'commander', sessionId: 's', messageId: 'refund', text: 'merge PRs' })
+    if (!created.ok) throw new Error(created.error)
+    const snapshot = { pr_url: PR_URL, pr_title: '', base_branch: 'main', head_sha: SHA, method: 'squash', merge_state: 'CLEAN', review_decision: '', checks: [] }
+    const first = h.db.reserveMergeGrantUse(created.grant.id, snapshot)!
+    const second = h.db.reserveMergeGrantUse(created.grant.id, snapshot)!
+    h.db.refundMergeGrantUse(first.reservationId)
+    h.db.refundMergeGrantUse(first.reservationId)
+    expect(h.db.getMergeGrant(created.grant.id)?.uses).toBe(1)
+    expect(h.db.listPendingMergeGrantReservations().map((r) => r.id)).toEqual([second.reservationId])
   })
 
 })

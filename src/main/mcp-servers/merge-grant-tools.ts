@@ -46,7 +46,7 @@ export const mergeGrantTools: Tool[] = [
       type: 'object',
       properties: {
         repo: { type: 'string', description: 'owner/name, one of the project\'s GitHub repos. Omit for all of them.' },
-        base_branch: { type: 'string', description: 'Only PRs into this branch. Omit for any.' },
+        base_branch: { type: 'string', description: 'Unsupported: GitHub cannot pin the base atomically; any base restriction is refused.' },
         pr_numbers: { type: 'array', items: { type: 'integer' }, description: 'Only these PRs. When the user named PRs, the grant is limited to those.' },
         expires_in_hours: { type: 'number', description: 'Default and maximum 168 (7 days).' },
         max_merges: { type: 'integer', description: 'At most this many merges. Omit for no count limit.' }

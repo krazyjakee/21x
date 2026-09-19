@@ -70,7 +70,7 @@ export function MergeGrantsSection({
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       {projectId && audit.length > 0 && (
         <ul className="space-y-2" aria-label="Merge grant audit log">
-          {audit.map(({ grant, status, uses }) => (
+          {audit.map(({ grant, status, uses, pending }) => (
             <li key={grant.id} className="rounded-md border border-border/60 bg-background px-2.5 py-2 text-xs">
               <div className="flex items-start gap-2">
                 <ShieldCheck className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${status === 'active' ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`} />
@@ -82,6 +82,11 @@ export function MergeGrantsSection({
                     {' · '}{status}{grant.revoked_at ? ` ${formatRelativeDate(grant.revoked_at)} by ${grant.revoked_by ?? 'user'}` : ''}
                     {' · '}{grant.uses}{grant.max_uses !== null ? `/${grant.max_uses}` : ''} merge{grant.uses === 1 ? '' : 's'}
                   </div>
+                  {(pending?.length ?? 0) > 0 && (
+                    <ul aria-label="Unresolved merge attempts" className="text-amber-700 dark:text-amber-400">
+                      {pending?.map((attempt) => <li key={attempt.id}>Outcome awaiting confirmation: {attempt.snapshot.pr_url} · {attempt.snapshot.head_sha.slice(0, 7)}. A use remains reserved. Inspect the PR on GitHub before retrying.</li>)}
+                    </ul>
+                  )}
                   {uses.length > 0 && (
                     <ul className="space-y-0.5 pt-1" aria-label="Merges under this grant">
                       {uses.map((use) => (

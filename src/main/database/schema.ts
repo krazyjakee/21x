@@ -1031,6 +1031,16 @@ function createMergeGrantTables(db: Database.Database): void {
       merged_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_merge_grant_uses_grant ON merge_grant_uses(grant_id, merged_at DESC);
+    CREATE TABLE IF NOT EXISTS merge_grant_reservations (
+      id TEXT PRIMARY KEY,
+      grant_id TEXT NOT NULL REFERENCES merge_grants(id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      snapshot TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_merge_grant_reservations_pending ON merge_grant_reservations(state, project_id);
+
   `)
 }
 

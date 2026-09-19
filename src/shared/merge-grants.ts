@@ -88,11 +88,20 @@ export interface MergeGrantUse {
 
 export type MergeGrantUseInput = Omit<MergeGrantUse, 'id' | 'grant_id' | 'project_id' | 'merged_at'>
 
+export interface MergeGrantReservation {
+  id: string
+  grant_id: string
+  project_id: string
+  snapshot: MergeGrantUseInput
+  created_at: string
+}
+
 /** A grant with its merges, newest first: the per-project audit view. */
 export interface MergeGrantAuditEntry {
   grant: MergeGrant
   status: MergeGrantStatus
   uses: MergeGrantUse[]
+  pending?: MergeGrantReservation[]
 }
 
 /** What the model may ask for; everything else about a grant is set by the app. */
