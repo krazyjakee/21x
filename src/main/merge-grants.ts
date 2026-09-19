@@ -37,6 +37,10 @@ import {
   describeMergeGrant,
   grantCoversPullRequest,
   mergeGrantSettingsFrom,
+  mergeGrantFailure,
+  type MergeGrantFailure,
+  type MergeGrantProblem,
+  type MergeGrantReasonCode,
   mergeGrantStatus,
   prNumbersMentioned,
   parseGitHubPullRequestUrl,
@@ -50,6 +54,7 @@ import {
 export type MergeGrantDb = Pick<
   DatabaseManager,
   | 'getProject'
+  | 'getProjects'
   | 'getProjectRepos'
   | 'createMergeGrant'
   | 'getMergeGrant'
@@ -178,7 +183,7 @@ export interface UserMessageBinding {
   text: string
 }
 
-export type GrantResult = { ok: true; grant: MergeGrant; notes: string[] } | { ok: false; error: string }
+export type GrantResult = { ok: true; grant: MergeGrant; notes: string[] } | MergeGrantFailure
 
 const BRANCH_NAME = /^[A-Za-z0-9._/-]{1,200}$/
 const MAX_PR_FILTER = 50
@@ -209,55 +214,84 @@ export function createMergeGrantFromUserMessage(
   scope: MergeGrantScopeInput = {}
 ): GrantResult {
   const project = db.getProject(projectId)
-  if (!project) return { ok: false, error: `Project not found: ${projectId}` }
-  if (project.archived) return { ok: false, error: `Project "${project.name}" is archived.` }
+  const fail = (code: MergeGrantReasonCode, message: string, offending = binding.text): MergeGrantFailure =>
+    mergeGrantFailure([{ reason_code: code, message, offending_scope: offending }], project?.name)
+  if (!project) return fail('PROJECT_MISSING', `Project not found: ${projectId}`, projectId)
+  const blockers: MergeGrantProblem[] = []
+  const add = (reason_code: MergeGrantReasonCode, message: string, offending_scope: string): void => {
+    blockers.push({ reason_code, message, offending_scope })
+  }
+  // Stable precedence: project/configuration, provenance, then command/scope.
+  // Report independent failures together; rephrasing never enables the feature.
+  if (project.archived) add('PROJECT_ARCHIVED', `Project "${project.name}" is archived.`, projectId)
   if (!mergeGrantSettingsFrom(project.settings).enabled) {
-    return { ok: false, error: `Merge grants are turned off for "${project.name}". The user can turn them on in the project's settings (Escalation → Merge grants).` }
+    add('FEATURE_DISABLED', `Merge grants are turned off for "${project.name}". Enable merge_grants.enabled in project settings (Escalation → Merge grants) before creating a grant.`, projectId)
   }
-  if (!binding.messageId || typeof binding.text !== 'string' || !binding.text.trim()) {
-    return { ok: false, error: 'No message typed by the user is available to bind the grant to.' }
+  const eligible = (binding.source === 'commander' || binding.source === 'project_chat') &&
+    !!binding.messageId && typeof binding.text === 'string' && !!binding.text.trim()
+  if (!eligible) add('INELIGIBLE_PROVENANCE', 'There is no message the user typed available to bind the grant to. Use a current typed instruction; reports, voice and model text cannot grant authority.', binding.source)
+  const intent = checkMergeIntent(eligible && binding.text.length <= MAX_GRANT_USER_TEXT_CHARS ? binding.text : '')
+  if (eligible && binding.text.length > MAX_GRANT_USER_TEXT_CHARS) {
+    add('PR_SCOPE_UNSUPPORTED', `Use a separate merge instruction of at most ${MAX_GRANT_USER_TEXT_CHARS} characters; the audit must retain it verbatim.`, 'user_text')
+  } else if (eligible && !intent.ok) {
+    add(intent.reasonCode ?? 'AMBIGUOUS_COMMAND', intent.reason ?? 'The user did not ask for merging.', intent.offendingScope ?? binding.text)
   }
-  if (binding.text.length > MAX_GRANT_USER_TEXT_CHARS) return { ok: false, error: `Use a separate merge instruction of at most ${MAX_GRANT_USER_TEXT_CHARS} characters; the audit must retain it verbatim.` }
-  const intent = checkMergeIntent(binding.text)
-  if (!intent.ok) return { ok: false, error: intent.reason ?? 'The user did not ask for merging.' }
-
-  if (intent.projectName && intent.projectName.toLowerCase() !== project.name.toLowerCase()) {
-    return { ok: false, error: 'The instruction names a different project.' }
+  if (intent.ok && intent.projectName) {
+    const named = db.getProjects({ includeArchived: true }).filter((p) => p.name.toLowerCase() === intent.projectName!.toLowerCase())
+    if (named.length > 1) add('PROJECT_AMBIGUOUS', 'The project name is ambiguous. Use a unique owner/repository.', intent.projectName)
+    else if (named.length === 0) add('PROJECT_MISSING', 'No project has this exact name.', intent.projectName)
+    else if (named[0].id !== projectId) add('PROJECT_MISMATCH', 'The instruction names a different project.', intent.projectName)
   }
+  if (intent.ok && intent.scopeKind === 'project_wide' && intent.repo) {
+    const owners = db.getProjects({ includeArchived: true }).filter((p) =>
+      githubRepoNames(db, p.id).some((repo) => repo.toLowerCase() === intent.repo!.toLowerCase()))
+    if (owners.length > 1) add('PROJECT_AMBIGUOUS', 'The repository belongs to multiple projects. Name one unique project instead.', intent.repo)
+    else if (owners.length === 0) add('PROJECT_MISSING', 'No project owns this GitHub repository.', intent.repo)
+    else if (owners[0].id !== projectId) add('PROJECT_MISMATCH', 'The repository belongs to a different project.', intent.repo)
+  }
+  for (const key of ['repo', 'base_branch'] as const) {
+    if (scope[key] != null && typeof scope[key] !== 'string') add('PR_SCOPE_UNSUPPORTED', `${key} must be a string.`, key)
+  }
+  if (scope.pr_numbers != null && (!Array.isArray(scope.pr_numbers) || scope.pr_numbers.some((n) => !Number.isSafeInteger(n) || n <= 0))) {
+    add('PR_SCOPE_UNSUPPORTED', 'pr_numbers must be an array of positive integers.', 'pr_numbers')
+  }
+  if (scope.expires_in_hours != null && (typeof scope.expires_in_hours !== 'number' || !Number.isFinite(scope.expires_in_hours) || scope.expires_in_hours <= 0)) {
+    add('INVALID_EXPIRY', 'expires_in_hours must be a positive finite number.', 'expires_in_hours')
+  }
+  if (scope.max_merges != null && (!Number.isInteger(scope.max_merges) || scope.max_merges <= 0 || scope.max_merges > MAX_MERGES_CAP)) {
+    add('INVALID_USE_LIMIT', `max_merges must be an integer from 1 to ${MAX_MERGES_CAP}.`, 'max_merges')
+  }
+  if (blockers.length) return mergeGrantFailure(blockers, project.name)
   if (intent.repo && scope.repo && intent.repo.toLowerCase() !== scope.repo.trim().toLowerCase()) {
-    return { ok: false, error: 'The grant cannot cover a different repository from the user instruction.' }
+    return fail('PR_SCOPE_UNSUPPORTED', 'The grant cannot cover a different repository from the user instruction.')
   }
   if (intent.baseBranch && scope.base_branch && intent.baseBranch !== scope.base_branch.trim()) {
-    return { ok: false, error: 'The grant cannot cover a different base branch from the user instruction.' }
+    return fail('PR_SCOPE_UNSUPPORTED', 'The grant cannot cover a different base branch from the user instruction.')
   }
   scope = { ...scope, repo: intent.repo ?? scope.repo, base_branch: intent.baseBranch ?? scope.base_branch }
 
   const notes: string[] = []
   const repos = githubRepoNames(db, projectId)
-  if (repos.length === 0) return { ok: false, error: `"${project.name}" has no GitHub repository; merge grants cover GitHub pull requests only.` }
+  if (repos.length === 0) return fail('PR_SCOPE_UNSUPPORTED', `"${project.name}" has no GitHub repository; merge grants cover GitHub pull requests only.`)
 
   let repo: string | null = null
   if (scope.repo !== undefined && scope.repo !== null && scope.repo !== '') {
-    if (typeof scope.repo !== 'string') return { ok: false, error: 'repo must be "owner/name"' }
     const match = repos.find((name) => name.toLowerCase() === scope.repo!.trim().toLowerCase())
-    if (!match) return { ok: false, error: `repo must be one of the project's GitHub repositories: ${repos.join(', ')}` }
+    if (!match) return fail('PR_SCOPE_UNSUPPORTED', `repo must be one of the project's GitHub repositories: ${repos.join(', ')}`)
     repo = match
   }
 
   let baseBranch: string | null = null
   if (scope.base_branch !== undefined && scope.base_branch !== null && scope.base_branch !== '') {
-    if (typeof scope.base_branch !== 'string' || !BRANCH_NAME.test(scope.base_branch.trim())) return { ok: false, error: 'base_branch is not a valid branch name' }
+    if (!BRANCH_NAME.test(scope.base_branch.trim())) return fail('PR_SCOPE_UNSUPPORTED', 'base_branch is not a valid branch name')
     baseBranch = scope.base_branch.trim()
-    return { ok: false, error: 'Base-branch-restricted merge grants are unavailable: GitHub cannot atomically pin the PR base during a merge. No grant was created.' }
+    return fail('PR_SCOPE_UNSUPPORTED', 'Base-branch-restricted merge grants are unavailable: GitHub cannot atomically pin the PR base during a merge. No grant was created.')
   }
 
   let prNumbers: number[] = []
   if (scope.pr_numbers !== undefined && scope.pr_numbers !== null) {
-    if (!Array.isArray(scope.pr_numbers) || scope.pr_numbers.some((n) => !Number.isSafeInteger(n) || n <= 0)) {
-      return { ok: false, error: 'pr_numbers must be positive integers' }
-    }
     prNumbers = [...new Set(scope.pr_numbers)].sort((a, b) => a - b)
-    if (prNumbers.length > MAX_PR_FILTER) return { ok: false, error: `pr_numbers holds at most ${MAX_PR_FILTER} numbers` }
+    if (prNumbers.length > MAX_PR_FILTER) return fail('PR_SCOPE_UNSUPPORTED', `pr_numbers holds at most ${MAX_PR_FILTER} numbers`)
   }
   const mentioned = prNumbersMentioned(binding.text)
   if (mentioned.length > 0) {
@@ -267,21 +301,19 @@ export function createMergeGrantFromUserMessage(
     } else {
       const outside = prNumbers.filter((n) => !mentioned.includes(n))
       if (outside.length > 0) {
-        return { ok: false, error: `The user named ${mentioned.map((n) => `#${n}`).join(', ')}; the grant cannot also cover ${outside.map((n) => `#${n}`).join(', ')}.` }
+        return fail('PR_SCOPE_UNSUPPORTED', `The user named ${mentioned.map((n) => `#${n}`).join(', ')}; the grant cannot also cover ${outside.map((n) => `#${n}`).join(', ')}.`)
       }
     }
   }
 
   if (prNumbers.length > 0 && !repo) {
-    if (repos.length !== 1) return { ok: false, error: 'Name a repository or use a full PR URL: PR numbers are ambiguous across this project’s repositories.' }
+    if (repos.length !== 1) return fail('PR_SCOPE_UNSUPPORTED', 'Name a repository or use a full PR URL: PR numbers are ambiguous across this project’s repositories.')
     repo = repos[0]
   }
 
   let hours = DEFAULT_MERGE_GRANT_HOURS
   if (scope.expires_in_hours !== undefined && scope.expires_in_hours !== null) {
-    const value = Number(scope.expires_in_hours)
-    if (!Number.isFinite(value) || value <= 0) return { ok: false, error: 'expires_in_hours must be a positive number' }
-    hours = value
+    hours = scope.expires_in_hours
     if (hours > MAX_MERGE_GRANT_HOURS) {
       hours = MAX_MERGE_GRANT_HOURS
       notes.push(`Expiry capped at ${MAX_MERGE_GRANT_HOURS} hours (7 days).`)
@@ -290,9 +322,6 @@ export function createMergeGrantFromUserMessage(
 
   let maxUses: number | null = null
   if (scope.max_merges !== undefined && scope.max_merges !== null) {
-    if (!Number.isInteger(scope.max_merges) || scope.max_merges <= 0 || scope.max_merges > MAX_MERGES_CAP) {
-      return { ok: false, error: `max_merges must be an integer from 1 to ${MAX_MERGES_CAP}` }
-    }
     maxUses = scope.max_merges
   }
 
@@ -309,7 +338,7 @@ export function createMergeGrantFromUserMessage(
     max_uses: maxUses
   })
   if (!grant) {
-    return { ok: false, error: 'That user message already backs a merge grant. One instruction grants one project; ask the user for a separate instruction for each project.' }
+    return fail('MESSAGE_ALREADY_USED', 'That user message already backs a merge grant. One instruction grants one project; ask the user for a separate instruction for each project.')
   }
   grantsChanged(projectId)
   return { ok: true, grant, notes }
@@ -365,6 +394,7 @@ export interface PullRequestGateState {
   reviewDecision: string
   headRefOid: string
   baseRefName: string
+  baseRefOid?: string
   checks: Array<{ name: string; state: 'passed' | 'skipped' | 'failed' | 'pending' }>
 }
 
@@ -387,6 +417,8 @@ function checkState(check: RawCheck): 'passed' | 'skipped' | 'failed' | 'pending
 }
 
 const PR_VIEW_FIELDS = 'url,number,title,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefOid,baseRefName,statusCheckRollup'
+// gh pr view does not expose baseRefOid on supported CLI versions.
+const PR_REFS_QUERY = 'query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { headRefOid baseRefName baseRefOid } } }'
 
 /** Reads what the gate needs from GitHub, through the user's gh CLI. */
 export async function readPullRequestGate(pr: PullRequestRef): Promise<PullRequestGateState> {
@@ -396,6 +428,13 @@ export async function readPullRequestGate(pr: PullRequestRef): Promise<PullReque
       typeof raw.isDraft !== 'boolean' || typeof raw.baseRefName !== 'string' || !raw.baseRefName ||
       !Array.isArray(raw.statusCheckRollup) || raw.statusCheckRollup.some((check) => !check || typeof check !== 'object')) {
     throw new Error('GitHub returned incomplete or mismatched PR/check data')
+  }
+  const refs = JSON.parse(await ghRunner(['api', 'graphql', '-f', `query=${PR_REFS_QUERY}`,
+    '-f', `owner=${pr.owner}`, '-f', `repo=${pr.repo}`, '-F', `number=${pr.number}`,
+    '--jq', '.data.repository.pullRequest'])) as Record<string, unknown> | null
+  if (!refs || refs.headRefOid !== raw.headRefOid || refs.baseRefName !== raw.baseRefName ||
+      typeof refs.baseRefOid !== 'string' || !/^[0-9a-f]{40}$/i.test(refs.baseRefOid)) {
+    throw new Error('GitHub returned missing or changed PR head/base data; reevaluate before retrying')
   }
   const rollup = raw.statusCheckRollup as RawCheck[]
   return {
@@ -409,6 +448,7 @@ export async function readPullRequestGate(pr: PullRequestRef): Promise<PullReque
     reviewDecision: String(raw.reviewDecision ?? '').toUpperCase(),
     headRefOid: typeof raw.headRefOid === 'string' ? raw.headRefOid : '',
     baseRefName: typeof raw.baseRefName === 'string' ? raw.baseRefName : '',
+    baseRefOid: refs.baseRefOid,
     checks: rollup.map((check) => ({ name: check.name || check.context || 'check', state: checkState(check) }))
   }
 }
@@ -619,13 +659,21 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
 
   let state: PullRequestGateState
   try {
-    state = request.state ?? await readPullRequestGate(pr)
+    state = await readPullRequestGate(pr)
   } catch (error) {
     return { error: `Could not read ${pr.url} from GitHub: ${error instanceof Error ? error.message : String(error)}` }
   }
 
   const blocked = refuseUnmergeable(projectId, pr, state, hooks)
   if (blocked) return blocked
+
+  // A predecessor may have landed, or the PR may have been retargeted since
+  // the gate selected authority. Do not spend a use on that stale assessment.
+  if (request.state && (request.state.headRefOid !== state.headRefOid ||
+      request.state.baseRefName !== state.baseRefName || request.state.baseRefOid !== state.baseRefOid)) {
+    return { status: 'blocked', reason_code: 'PR_CHANGED', pr_url: pr.url,
+      message: 'The PR head or base changed. Reevaluate reviews, checks and stack predecessors before retrying; no grant use was spent.' }
+  }
 
   let grant: MergeGrant | undefined
   let reservationId: string | undefined
