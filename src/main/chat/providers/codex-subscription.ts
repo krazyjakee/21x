@@ -7,6 +7,8 @@ import type { ChatReasoningEffort, ChatUsage } from '../../../shared/chat'
 import { findExecutable } from '../../find-executable'
 import { applyCodexAuthEnv } from '../../adapters/shared/codex-auth'
 import { ChatAbortError, type ChatProvider, type ChatProviderEvent, type ChatProviderRequest } from './types'
+import { extractPromptImages, PROMPT_IMAGE_NOTE } from './prompt-images'
+import { chatImageExtension, type ChatImageInput } from '../../../shared/chat-images'
 
 /**
  * Commander transport for a Codex agent authenticated with a ChatGPT
@@ -36,6 +38,8 @@ export interface CodexExecInput {
   model: string
   reasoningEffort?: ChatReasoningEffort
   prompt: string
+  /** Passed to the CLI as image files (`--image`), in reference order. */
+  images?: ChatImageInput[]
   signal: AbortSignal
 }
 
@@ -90,7 +94,7 @@ function parseReply(raw: string): StructuredReply {
   return { response: raw, tool_calls: [] }
 }
 
-function promptFor(request: ChatProviderRequest): string {
+function promptFor(request: ChatProviderRequest, conversation: unknown[], hasImages: boolean): string {
   const tools = request.toolChoice === 'none' ? [] : request.tools
   const instructions = tools.length > 0
     ? [
@@ -108,12 +112,13 @@ function promptFor(request: ChatProviderRequest): string {
     'Produce the next assistant step for this chat conversation.',
     'Do not inspect files, run commands, browse, or use any built-in Codex tools.',
     ...instructions,
+    ...(hasImages ? [PROMPT_IMAGE_NOTE] : []),
     '',
     'SYSTEM_INSTRUCTIONS',
     request.system || '',
     '',
     'CONVERSATION_JSON',
-    JSON.stringify(request.messages),
+    JSON.stringify(conversation),
     '',
     'AVAILABLE_TOOLS_JSON',
     JSON.stringify(tools)
@@ -137,31 +142,49 @@ async function findCodexExecutable(): Promise<string> {
   return found
 }
 
-/** Runs one isolated, non-persistent Codex turn using the existing CLI login. */
-async function executeWithCodex(input: CodexExecInput): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), '21x-commander-codex-'))
-  const schemaPath = join(dir, 'output-schema.json')
-  const outputPath = join(dir, 'last-message.json')
-  writeFileSync(schemaPath, JSON.stringify(OUTPUT_SCHEMA), { mode: 0o600 })
-
-  const env: NodeJS.ProcessEnv = { ...process.env }
-  // The selected agent says subscription. Strip ambient API keys so they
-  // cannot silently switch billing/auth away from the cached ChatGPT login.
-  applyCodexAuthEnv(env, { authMethod: 'subscription' })
+/**
+ * The `codex exec` arguments. Images are written into the private temp dir and
+ * passed as one comma-separated `--image` value (the flag takes a list, so a
+ * space-separated list would swallow the arguments after it).
+ */
+export function codexExecArgs(input: Pick<CodexExecInput, 'model' | 'reasoningEffort'>, paths: { schema: string; output: string; images: string[] }): string[] {
   const args = [
     'exec',
     '--model', input.model,
     '--sandbox', 'read-only',
     '--skip-git-repo-check',
     '--ephemeral',
-    '--output-schema', schemaPath,
-    '--output-last-message', outputPath,
+    '--output-schema', paths.schema,
+    '--output-last-message', paths.output,
+    ...(paths.images.length > 0 ? ['--image', paths.images.join(',')] : []),
     '--color', 'never'
   ]
   if (input.reasoningEffort && input.reasoningEffort !== 'max') {
     args.push('--config', `model_reasoning_effort=${JSON.stringify(input.reasoningEffort)}`)
   }
   args.push('-')
+  return args
+}
+
+/** Runs one isolated, non-persistent Codex turn using the existing CLI login. */
+async function executeWithCodex(input: CodexExecInput): Promise<string> {
+  const dir = mkdtempSync(join(tmpdir(), '21x-commander-codex-'))
+  const schemaPath = join(dir, 'output-schema.json')
+  const outputPath = join(dir, 'last-message.json')
+  writeFileSync(schemaPath, JSON.stringify(OUTPUT_SCHEMA), { mode: 0o600 })
+  // Relative to the child's cwd (this dir), so no user path, which could hold
+  // a comma, ever reaches the comma-separated flag value.
+  const imagePaths = (input.images ?? []).map((image, index) => {
+    const name = `image-${index + 1}.${chatImageExtension(image.mimeType)}`
+    writeFileSync(join(dir, name), Buffer.from(image.data, 'base64'), { mode: 0o600 })
+    return name
+  })
+
+  const env: NodeJS.ProcessEnv = { ...process.env }
+  // The selected agent says subscription. Strip ambient API keys so they
+  // cannot silently switch billing/auth away from the cached ChatGPT login.
+  applyCodexAuthEnv(env, { authMethod: 'subscription' })
+  const args = codexExecArgs(input, { schema: schemaPath, output: outputPath, images: imagePaths })
 
   try {
     return await new Promise<string>((resolve, reject) => {
@@ -222,6 +245,7 @@ async function executeWithCodex(input: CodexExecInput): Promise<string> {
 
 export class CodexSubscriptionChatProvider implements ChatProvider {
   readonly id = 'codex-subscription'
+  readonly supportsImages = true
   readonly model: string
   private readonly reasoningEffort?: ChatReasoningEffort
   private readonly execute: CodexExecutor
@@ -239,11 +263,13 @@ export class CodexSubscriptionChatProvider implements ChatProvider {
     try {
       const executable = await this.resolveExecutable()
       if (signal.aborted) throw new ChatAbortError()
+      const { messages: conversation, images } = extractPromptImages(request.messages)
       const raw = await this.execute({
         executable,
         model: this.model,
         reasoningEffort: this.reasoningEffort,
-        prompt: promptFor(request),
+        prompt: promptFor(request, conversation, images.length > 0),
+        ...(images.length > 0 ? { images } : {}),
         signal
       })
       if (signal.aborted) throw new ChatAbortError()

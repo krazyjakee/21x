@@ -12,7 +12,7 @@ import { buildTranscriptItems, findActiveQuestionId, findLatestTodos } from '@sh
 import { ActivityMessageGroup } from './transcript/ActivityMessageGroup'
 import { MessageBubble } from './transcript/MessageBubble'
 import { TodoSummary } from './transcript/TodoMessages'
-import { TranscriptComposer, type ComposerAttachment, type SendHandler } from './transcript/TranscriptComposer'
+import { TranscriptComposer, type ComposerAttachment, type SaveImagesHandler, type SendHandler } from './transcript/TranscriptComposer'
 import { TranscriptHeader, TranscriptSearchBar } from './transcript/TranscriptHeader'
 import { useTranscriptAutoScroll } from './transcript/useTranscriptAutoScroll'
 import { useTranscriptSearch } from './transcript/useTranscriptSearch'
@@ -29,6 +29,8 @@ interface AgentTranscriptPanelProps {
   onSend?: SendHandler
   onPickAttachments?: () => Promise<ComposerAttachment[]>
   onAddAttachmentPaths?: (filePaths: string[]) => Promise<ComposerAttachment[]>
+  /** Stores pasted images (#144); without it the composer refuses them. */
+  onSaveImages?: SaveImagesHandler
   className?: string
   /** Transient system status (e.g. 'Compacting conversation history…') */
   systemStatus?: string | null
@@ -49,6 +51,7 @@ export function AgentTranscriptPanel({
   onSend,
   onPickAttachments,
   onAddAttachmentPaths,
+  onSaveImages,
   className,
   systemStatus,
   sessionId,
@@ -273,6 +276,7 @@ export function AgentTranscriptPanel({
             onSend={onSend}
             onPickAttachments={onPickAttachments}
             onAddAttachmentPaths={onAddAttachmentPaths}
+            onSaveImages={onSaveImages}
             taskId={taskId}
             isStarting={isStarting}
           />

@@ -6,6 +6,9 @@ import { voiceApi } from '@/lib/ipc-client'
 import { dispatchShortcutFeedback } from '@/lib/keyboard-shortcuts'
 import { CAPTAIN_COMPOSER_KEY, registerComposer } from '@/lib/voice-dictation-target'
 import { formatFileSize } from '@/lib/utils'
+import { AttachmentTray } from '@/components/chat/AttachmentTray'
+import { useChatAttachments } from '@/hooks/use-chat-attachments'
+import type { ChatImageInput } from '@shared/chat-images'
 
 export interface ComposerAttachment {
   id: string
@@ -16,10 +19,22 @@ export interface ComposerAttachment {
 
 export type SendHandler = (message: string, options?: { attachments?: ComposerAttachment[] }) => void | Promise<void>
 
+/** Stores pasted images (#144) and returns them as attachments for the message. */
+export type SaveImagesHandler = (images: ChatImageInput[]) => Promise<ComposerAttachment[]>
+
+/** An agent needs words; a message of images alone still says what it carries. */
+export function imageOnlyMessage(count: number): string {
+  return count === 1 ? 'See the attached image.' : 'See the attached images.'
+}
+
+export const IMAGES_UNSUPPORTED_HERE = 'Images can only be attached in a task’s chat.'
+
 interface TranscriptComposerProps {
   onSend: SendHandler
   onPickAttachments?: () => Promise<ComposerAttachment[]>
   onAddAttachmentPaths?: (filePaths: string[]) => Promise<ComposerAttachment[]>
+  /** Without it, pasted images are refused with a message and text pastes as usual. */
+  onSaveImages?: SaveImagesHandler
   taskId?: string
   isStarting: boolean
 }
@@ -35,9 +50,10 @@ function mergeAttachments(current: ComposerAttachment[], added: ComposerAttachme
   return merged
 }
 
-export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentPaths, taskId, isStarting }: TranscriptComposerProps) {
+export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentPaths, onSaveImages, taskId, isStarting }: TranscriptComposerProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [pendingAttachments, setPendingAttachments] = useState<ComposerAttachment[]>([])
+  const images = useChatAttachments({ unsupportedReason: onSaveImages ? null : IMAGES_UNSUPPORTED_HERE })
   const [isDragOver, setIsDragOver] = useState(false)
 
   /**
@@ -66,25 +82,36 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
   }, [])
 
   const handleSend = () => {
-    const value = inputRef.current?.value.trim()
-    if (!value) return
+    const typed = inputRef.current?.value.trim() ?? ''
+    const imagesAtSend = images.attachments
+    if (images.isReading || (!typed && imagesAtSend.length === 0)) return
+    const value = typed || imageOnlyMessage(imagesAtSend.length)
     // Whatever answer was expected by voice is not the answer that is now
     // coming, so it is dropped and this reply is not read aloud. A spoken
     // sentence goes through here too and arms a fresh expectation of its own
     // straight afterwards, so the conversation loop is unaffected.
     void voiceApi.answerNotExpected(taskId)
     const attachmentsAtSend = pendingAttachments
-    const sent = onSend(value, attachmentsAtSend.length > 0 ? { attachments: attachmentsAtSend } : undefined)
+    const imageInputs = images.toInputs()
+    // Images are stored first (as task attachments), then go with the message
+    // like any other attachment.
+    const sent = (async () => {
+      const savedImages = imageInputs.length > 0 && onSaveImages ? await onSaveImages(imageInputs) : []
+      const all = mergeAttachments(attachmentsAtSend, savedImages)
+      return onSend(value, all.length > 0 ? { attachments: all } : undefined)
+    })()
     inputRef.current!.value = ''
     inputRef.current!.style.height = 'auto'
     setPendingAttachments([])
+    images.clear()
     // The composer clears the text before the send resolves, so a rejected
     // send used to leave no trace at all — no message, no session, no error.
     // The text goes back into the box and the failure is announced.
     void Promise.resolve(sent).catch((error: unknown) => {
       console.error('[AgentTranscriptPanel] Message send failed:', error)
-      if (inputRef.current && !inputRef.current.value) inputRef.current.value = value
+      if (inputRef.current && !inputRef.current.value) inputRef.current.value = typed
       setPendingAttachments(attachmentsAtSend)
+      images.restore(imagesAtSend)
       const detail = error instanceof Error && error.message ? error.message.trim() : String(error ?? '').trim()
       // Surface the real failure (e.g. provider "name must be at most 64
       // characters") instead of a generic "session did not start" — the text
@@ -150,6 +177,7 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
           <span className="text-xs font-medium text-primary">Drop files to attach them to this message</span>
         </div>
       )}
+      <AttachmentTray controller={images} composerRef={inputRef} />
       {pendingAttachments.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {pendingAttachments.map((attachment) => (
@@ -176,6 +204,7 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
       <div className="flex items-end gap-2">
         <textarea
           ref={inputRef}
+          aria-label="Message the agent"
           rows={1}
           disabled={isStarting}
           placeholder={isStarting ? 'Starting agent…' : 'Write a message...'}
@@ -187,6 +216,7 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
             }
           }}
           onInput={autoResize}
+          onPaste={images.handlePaste}
         />
         <VoiceMicButton mode="dictation" onSubmit={handleSend} />
         {onPickAttachments && (

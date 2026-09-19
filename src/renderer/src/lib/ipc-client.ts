@@ -23,6 +23,7 @@ import type {
 } from '@shared/voice-tts'
 import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
 import type { CommanderEvent, CommanderListSessionsRequest, CommanderMessage, CommanderSession } from '@shared/commander'
+import type { ChatImageInput } from '@shared/chat-images'
 import type {
   ConnectorBridgeCredentialInput,
   ConnectorBridgeCredentialStatus,
@@ -238,6 +239,16 @@ export const onOverdueCheck = (callback: () => void): (() => void) => {
 
 export const onTasksRefresh = (callback: () => void): (() => void) => {
   return window.electronAPI.onTasksRefresh(callback)
+}
+
+// Chat image attachments (#144): the clipboard fallback and task storage.
+export const chatImageApi = {
+  readClipboard: (): Promise<{ images: ChatImageInput[]; errors: string[] }> =>
+    typeof window.electronAPI.chatImages?.readClipboard === 'function'
+      ? window.electronAPI.chatImages.readClipboard()
+      : Promise.resolve({ images: [], errors: [] }),
+  saveToTask: (taskId: string, images: ChatImageInput[]): Promise<FileAttachment[]> =>
+    window.electronAPI.chatImages.saveToTask(taskId, images)
 }
 
 export const attachmentApi = {
@@ -844,7 +855,9 @@ export const commanderApi = {
   /** Tells main which session the view shows (#62): a report for it is relayed at once, others only queue as unread. */
   setActiveSession: (sessionId: string | null): Promise<void> =>
     typeof window.electronAPI.commander.setActiveSession === 'function' ? window.electronAPI.commander.setActiveSession(sessionId) : Promise.resolve(),
-  send: (sessionId: string, text: string): Promise<{ turnId: string; message: CommanderMessage }> => window.electronAPI.commander.send(sessionId, text),
+  send: (sessionId: string, text: string, images?: ChatImageInput[]): Promise<{ turnId: string; message: CommanderMessage }> =>
+    images?.length ? window.electronAPI.commander.send(sessionId, text, images) : window.electronAPI.commander.send(sessionId, text),
+  getImage: (id: string): Promise<(ChatImageInput & { id: string }) | null> => window.electronAPI.commander.getImage(id),
   cancel: (sessionId: string): Promise<{ cancelled: boolean }> => window.electronAPI.commander.cancel(sessionId),
   onEvent: (callback: (event: CommanderEvent) => void): (() => void) => window.electronAPI.commander.onEvent(callback)
 }

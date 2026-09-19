@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { X, FolderKanban } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { AgentTranscriptPanel } from '@/components/agents/AgentTranscriptPanel'
@@ -8,6 +8,8 @@ import { useCurrentProject } from '@/hooks/use-project-tasks'
 import { agentApi, settingsApi } from '@/lib/ipc-client'
 import { captainAgentIdFor, useCaptainTaskId } from '@/stores/coordinator-store'
 import type { Agent } from '@/types'
+import type { ComposerAttachment } from '@/components/agents/transcript/TranscriptComposer'
+import { taskImageSaver, withAttachmentNote } from '@/lib/chat-image-attachments'
 
 /** Start the agent at app start, so the first sentence does not wait for it. */
 export const CAPTAIN_PREWARM_SETTING = 'captain_prewarm'
@@ -122,8 +124,10 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   }, [captainTaskId, start, removeSession])
 
   // Send message - the session is usually warm already, so this just sends.
+  const handleSaveImages = useMemo(() => (captainTaskId ? taskImageSaver(captainTaskId) : undefined), [captainTaskId])
+
   const handleSendMessage = useCallback(
-    async (message: string) => {
+    async (message: string, options?: { attachments?: ComposerAttachment[] }) => {
       if (!(await ensureSession())) return
 
       // Question answers should use approve() instead of sendMessage()
@@ -131,9 +135,9 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
       const messages = live?.messages || []
       const lastMessage = messages[messages.length - 1]
       if (lastMessage?.partType === 'question' && lastMessage?.tool?.questions) {
-        await approve(true, message)
+        await approve(true, withAttachmentNote(message, options?.attachments))
       } else {
-        await sendMessage(message)
+        await sendMessage(message, options)
       }
     },
     [captainTaskId, ensureSession, sendMessage, approve]
@@ -215,6 +219,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
           systemStatus={currentSession?.systemStatus}
           onStop={stop}
           onSend={handleSendMessage}
+          onSaveImages={handleSaveImages}
           className="flex-1 min-h-0"
           sessionId={currentSession?.sessionId}
           pendingSend={currentSession?.pendingSend}

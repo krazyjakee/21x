@@ -57,6 +57,7 @@ import type {
   VoiceTtsSnapshot
 } from '@shared/voice-tts'
 import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
+import type { ChatImageInput } from '@shared/chat-images'
 import type { CommanderEvent, CommanderListSessionsRequest, CommanderMessage, CommanderSession } from '@shared/commander'
 import type { CliMcpMutationResult, CliMcpProbeResult, CliMcpServerRef, CliMcpSnapshot, CliMcpUpsertRequest } from '@shared/cli-mcp-config'
 import type {
@@ -298,6 +299,13 @@ interface ElectronAPI {
     remove: (taskId: string, attachmentId: string) => Promise<void>
     open: (taskId: string, attachmentId: string) => Promise<void>
     download: (taskId: string, attachmentId: string) => Promise<void>
+  }
+  /** Chat image attachments (#144). */
+  chatImages: {
+    /** Main-process clipboard fallback for a paste whose event carried no image. */
+    readClipboard: () => Promise<{ images: ChatImageInput[]; errors: string[] }>
+    /** Stores pasted images as task attachments; resolves with the new attachments. */
+    saveToTask: (taskId: string, images: ChatImageInput[]) => Promise<FileAttachment[]>
   }
   shell: {
     openPath: (filePath: string) => Promise<void>
@@ -638,7 +646,9 @@ interface ElectronAPI {
     markRead: (sessionId: string) => Promise<CommanderSession | null>
     /** The session the view shows, or null when the view is closed (#62 report relay). */
     setActiveSession: (sessionId: string | null) => Promise<void>
-    send: (sessionId: string, text: string) => Promise<{ turnId: string; message: CommanderMessage }>
+    send: (sessionId: string, text: string, images?: ChatImageInput[]) => Promise<{ turnId: string; message: CommanderMessage }>
+    /** One stored image's bytes (#144), or null. */
+    getImage: (id: string) => Promise<(ChatImageInput & { id: string }) | null>
     cancel: (sessionId: string) => Promise<{ cancelled: boolean }>
     onEvent: (callback: (event: CommanderEvent) => void) => () => void
   }
