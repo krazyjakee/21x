@@ -39,6 +39,7 @@ import { WORKSPACES_DIR, listWorkspaceDirs, taskAttachmentsDir } from './workspa
 import { setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTranscriptProvider, startTaskApiServer, stopTaskApiServer } from './task-api-server'
 import { setTaskAutomationTrigger, setTaskSchedulers } from './task-updates'
 import { MastermindWaker } from './mastermind-waker'
+import { startScheduledCoordination } from './scheduled-coordination'
 import { startSecretBroker, stopSecretBroker, writeSecretShellWrapper } from './secret-broker'
 import { isMainWindowUrl } from './main-window-url'
 import { applyMobileAccessSettings, setMobileApiDeps, stopMobileApiServer, broadcastToMobileClients, setMobileApiNotifier } from './mobile-api-server'
@@ -769,6 +770,13 @@ app.whenReady().then(async () => {
   // message per burst, per-project setting, hourly cap.
   mastermindWaker = new MastermindWaker(db, agentManager)
   mastermindWaker.start()
+  // Scheduled Mastermind reviews and the Commander briefing (#67); both off by default.
+  startScheduledCoordination({
+    db,
+    agents: agentManager,
+    getVoice: () => voiceSessionManager,
+    canPlayAudio: () => mainWindow != null && !mainWindow.isDestroyed()
+  })
   workspaceCleanupScheduler = new WorkspaceCleanupScheduler(db, worktreeManager)
 
   claudePluginManager = new ClaudePluginManager(db)

@@ -266,6 +266,48 @@ the service through `CommanderService.onEvent(listener)`, a small additive hook
 that fans every event out to main-process observers after the renderer emit,
 and keys the passage as `commander:<sessionId>`.
 
+## Scheduled briefing (#67)
+
+A scheduled summary across all projects, off by default. It is one app
+setting, `commander_briefing`, holding JSON:
+
+```json
+{ "enabled": false, "cron": "0 8 * * 1-5", "speak": false }
+```
+
+Edit it in Settings → Projects → Commander briefing
+(`src/renderer/src/components/settings/CommanderBriefingSettings.tsx`). The
+cron is 5 fields in local time. Shapes and defaults are in
+`src/shared/scheduled-coordination.ts`.
+
+`src/main/scheduled-coordination.ts` runs it in the main process on a
+one-minute tick, so it runs with the window closed. At each occurrence it:
+
+1. builds the briefing from every active project's status record
+   (`buildProjectStatus`): summary, counts, top blockers, and pending approvals
+   (agent steps waiting for approval, plus Mastermind actions held by the
+   escalation policy). Projects that need the user come first. There is no
+   model and no raw task data in this step;
+2. if a chat provider is configured, asks the Commander model for a three to
+   five sentence spoken-style summary of that text (`BRIEFING_SUMMARY_PROMPT`,
+   30 s timeout). With no provider, or on failure, this step is skipped;
+3. creates a new session titled `Briefing <YYYY-MM-DD>`. It stores the
+   briefing as a `report` message (through `CommanderService.appendReport`
+   when the service is running, so an open window sees it) and the summary,
+   if there is one, as the `assistant` message after it. The report leaves the
+   session unread;
+4. raises a desktop notification that says which projects need attention;
+5. if `speak` is on, a window is open, and a speech engine is ready, reads the
+   summary aloud (or the briefing when there is no summary) through the
+   speech service with the `manual` source and the `commander:<sessionId>`
+   key.
+
+The last occurrence handled is stored in the `commander_briefing_state` app
+setting before the work starts, so a restart does not brief twice. Turning
+the briefing on, or changing its cron, starts from that moment: a past
+occurrence never fires. An occurrence missed while the app was closed runs
+once at start-up if it is under 6 hours old. Otherwise it is skipped.
+
 ## Extension points
 
 - **Custom tools**: tests or integrations may pass `getTools` to
