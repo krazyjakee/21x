@@ -14,7 +14,7 @@ import { callToolForScope } from '../mcp-servers/task-management-core'
 import { handleTaskRoute } from '../task-api/task-routes'
 import { CommanderService } from './commander-service'
 import { CommanderStore } from './commander-store'
-import { createCommanderProjectTools, ProjectMutationConfirmations, type CommanderAgents } from './project-tools'
+import { createCommanderProjectTools, type CommanderAgents } from './project-tools'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_TITLE_PROMPT } from './prompts'
 import { deliverCaptainReport, setCaptainReportHandler } from './report-inbox'
 import {
@@ -71,12 +71,11 @@ let agents: CommanderAgents
 let uninstall: (() => void) | null
 
 function makeService(provider: ChatProvider, over: { maxReportAsks?: number } = {}): CommanderService {
-  const confirmations = new ProjectMutationConfirmations()
   return new CommanderService({
     store,
     emit: (e) => events.push(e),
     createProvider: () => provider,
-    getTools: (context) => createCommanderProjectTools({ db, context, confirmations, agents }),
+    getTools: (context) => createCommanderProjectTools({ db, context, agents }),
     ...over
   })
 }

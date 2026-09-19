@@ -6,7 +6,7 @@ import type { ChatProvider } from '../chat/providers/types'
 import type { ChatToolDefinition } from '../chat/tools'
 import { CommanderService, type CommanderToolContext } from '../commander/commander-service'
 import { CommanderStore } from '../commander/commander-store'
-import { createCommanderProjectTools, ProjectMutationConfirmations } from '../commander/project-tools'
+import { createCommanderProjectTools } from '../commander/project-tools'
 import { createCommanderSkillTools } from '../commander/skill-tools'
 import { installCommanderReportBridge } from '../commander/report-tools'
 import { broadcastSkillsChanged } from './settings'
@@ -65,9 +65,6 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
     }
   }
   const createProvider = options.createProvider ?? ((d: IpcDeps) => createChatProviderFromSettings(d.db))
-  // One challenge table for the app: a token issued in a session is only
-  // valid for that session's next confirmed call.
-  const confirmations = new ProjectMutationConfirmations()
   // The connection is read on use, so registering never touches the database.
   const store = new CommanderStore({ get db() { return deps.db.db } })
   const commander: CommanderService = new CommanderService({
@@ -78,7 +75,6 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
       ...createCommanderProjectTools({
         db: deps.db,
         context,
-        confirmations,
         agents: deps.agentManager,
         listHeldActions,
         sendUiCommand,
@@ -99,12 +95,11 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
           }
         }
       }),
-      // Skill administration (#74): same confirmation table, so a token is
-      // bound to exactly one change whichever registry issued it.
+      // Skill administration (#74). Like the project tools, writes act on the
+      // first call; there is no confirmation step.
       ...createCommanderSkillTools({
         db: deps.db,
         context,
-        confirmations,
         onSkillChanged: (skillId, kind) => broadcastSkillsChanged({ skillId, kind })
       })
     ])

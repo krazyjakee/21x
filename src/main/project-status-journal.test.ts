@@ -8,7 +8,7 @@ import { createTestDb } from '../../test/helpers/db-test-helper'
 import type { DatabaseManager } from './database'
 import { decodeHistoryCursor, encodeHistoryCursor, readProjectStatusHistory } from './project-status'
 import { handleTaskRoute } from './task-api/task-routes'
-import { createCommanderProjectTools, ProjectMutationConfirmations } from './commander/project-tools'
+import { createCommanderProjectTools } from './commander/project-tools'
 import {
   PROJECT_STATUS_HISTORY_MAX_LIMIT,
   PROJECT_STATUS_JOURNAL_COMPACT_AFTER_DAYS,
@@ -26,7 +26,7 @@ const DAY = 24 * 60 * 60 * 1000
 const at = (now: Date, daysAgo: number, extraMs = 0): string => new Date(now.getTime() - daysAgo * DAY + extraMs).toISOString()
 
 function commanderTool(db: DatabaseManager, name: string) {
-  const tool = createCommanderProjectTools({ db, context: { sessionId: 's', userMessage: '' }, confirmations: new ProjectMutationConfirmations() })
+  const tool = createCommanderProjectTools({ db, context: { sessionId: 's' } })
     .find((candidate) => candidate.name === name)
   if (!tool) throw new Error(`Missing tool ${name}`)
   return async (input: Record<string, unknown>) => {

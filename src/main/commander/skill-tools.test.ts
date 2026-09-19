@@ -2,19 +2,16 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createTestDb } from '../../../test/helpers/db-test-helper'
 import type { DatabaseManager } from '../database'
 import type { ChatToolResult } from '../chat/tools'
-import { ProjectMutationConfirmations } from './project-tools'
 import { createCommanderSkillTools, MUTATING_COMMANDER_SKILL_TOOLS, type SkillChangeKind } from './skill-tools'
 
 /** The Commander's skill administration (#74). */
 let db: DatabaseManager
-let confirmations: ProjectMutationConfirmations
 let changes: Array<{ skillId: string; kind: SkillChangeKind }>
 
-async function call(name: string, input: Record<string, unknown>, userMessage = 'do it'): Promise<ChatToolResult> {
+async function call(name: string, input: Record<string, unknown>): Promise<ChatToolResult> {
   const tool = createCommanderSkillTools({
     db,
-    context: { sessionId: 'session-1', userMessage },
-    confirmations,
+    context: { sessionId: 'session-1' },
     onSkillChanged: (skillId, kind) => changes.push({ skillId, kind })
   }).find((candidate) => candidate.name === name)
   if (!tool) throw new Error(`Missing tool: ${name}`)
@@ -26,11 +23,9 @@ function body(output: ChatToolResult): Record<string, unknown> {
   return JSON.parse(output.content) as Record<string, unknown>
 }
 
-async function confirmedCall(name: string, input: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const first = body(await call(name, input))
-  expect(first.status, name).toBe('confirmation_required')
-  const token = first.confirmation_token as string
-  return body(await call(name, { ...input, confirmation_token: token }, `Confirm ${token}`))
+/** A plain call, parsed: every mutating skill tool acts on the first call. */
+async function callBody(name: string, input: Record<string, unknown>): Promise<Record<string, unknown>> {
+  return body(await call(name, input))
 }
 
 function snapshot(): string {
@@ -39,7 +34,6 @@ function snapshot(): string {
 
 beforeEach(() => {
   ;({ db } = createTestDb())
-  confirmations = new ProjectMutationConfirmations()
   changes = []
 })
 
@@ -82,38 +76,51 @@ describe('Commander skill reads', () => {
 })
 
 describe('Commander skill mutations', () => {
-  it('makes no write from any mutating skill tool until the user confirms', async () => {
+  /** A fresh database with two projects and two skills, and a valid input for every mutating skill tool. */
+  function mutationFixture(): Record<(typeof MUTATING_COMMANDER_SKILL_TOOLS)[number], Record<string, unknown>> {
+    ;({ db } = createTestDb())
+    changes = []
     const alpha = db.createProject({ name: 'Alpha' })!
     const beta = db.createProject({ name: 'Beta' })!
     const own = db.createSkill({ name: 'alpha-release', description: 'd', content: 'c', project_id: alpha.id })!
     db.createSkill({ name: 'pr-review', description: 'd', content: 'c' })
-    const inputs: Record<(typeof MUTATING_COMMANDER_SKILL_TOOLS)[number], Record<string, unknown>> = {
+    return {
       create_skill: { name: 'new-skill', description: 'd', content: 'c' },
-      update_skill: { skill: own.id, changes: { content: 'changed' } },
+      update_skill: { skill: own.id, changes: { content: 'changed' }, expected_version: own.version },
       remove_skill: { skill: own.id },
       promote_skill: { skill: own.id },
       move_skill: { skill: 'pr-review', project: beta.id }
     }
-    const before = snapshot()
+  }
+
+  it('acts on the first call of every mutating skill tool: no confirmation step', async () => {
     for (const name of MUTATING_COMMANDER_SKILL_TOOLS) {
-      const first = body(await call(name, inputs[name]))
-      expect(first.status, name).toBe('confirmation_required')
-      expect(body(await call(name, { ...inputs[name], confirmation_token: 'made-up' })).status, name).toBe('confirmation_invalid')
-      expect(body(await call(name, { ...inputs[name], confirmation_token: first.confirmation_token }, 'yes please')).status, name).toBe('confirmation_absent')
+      const input = mutationFixture()[name]
+      const before = snapshot()
+      const output = await call(name, input)
+      expect(body(output).status, name).toBe('ok')
+      expect(changes, name).toHaveLength(1)
+      expect(snapshot(), name).not.toBe(before)
     }
-    expect(snapshot()).toBe(before)
-    expect(changes).toEqual([])
+  })
+
+  it('ignores a stray confirmation_token from the old two-step flow', async () => {
+    for (const name of MUTATING_COMMANDER_SKILL_TOOLS) {
+      const output = await call(name, { ...mutationFixture()[name], confirmation_token: 'abc123def456' })
+      expect(body(output).status, name).toBe('ok')
+      expect(changes, name).toHaveLength(1)
+    }
   })
 
   it('creates a global skill by default, and a project skill when a project is named', async () => {
     const alpha = db.createProject({ name: 'Alpha' })!
-    const global = await confirmedCall('create_skill', { name: 'pr-review', description: 'Review PRs', content: '# Review' })
+    const global = await callBody('create_skill', { name: 'pr-review', description: 'Review PRs', content: '# Review' })
     expect(global.status).toBe('ok')
     expect(global.result).toMatchObject({ name: 'pr-review', scope: 'global', project_id: null })
     // Every project's session can now see it.
     expect(db.getSkills({ visibleToProject: alpha.id }).map((s) => s.name)).toContain('pr-review')
 
-    const scoped = await confirmedCall('create_skill', { name: 'alpha-release', description: 'd', content: 'c', project: 'Alpha' })
+    const scoped = await callBody('create_skill', { name: 'alpha-release', description: 'd', content: 'c', project: 'Alpha' })
     expect(scoped.result).toMatchObject({ scope: 'project', project_id: alpha.id })
     expect(changes.map((c) => c.kind)).toEqual(['created', 'created'])
 
@@ -121,18 +128,15 @@ describe('Commander skill mutations', () => {
     await expect(call('create_skill', { name: 'Bad Name', description: 'd', content: 'c' })).rejects.toThrow(/lowercase/)
   })
 
-  it('promotes a project skill to global only after confirmation', async () => {
+  it('promotes a project skill to global on the first call', async () => {
     const alpha = db.createProject({ name: 'Alpha' })!
     const beta = db.createProject({ name: 'Beta' })!
     const skill = db.createSkill({ name: 'alpha-release', description: 'd', content: 'c', project_id: alpha.id })!
 
-    const first = body(await call('promote_skill', { skill: skill.id }))
-    expect(first.status).toBe('confirmation_required')
-    expect(db.getSkill(skill.id)!.project_id).toBe(alpha.id)
     expect(db.getSkills({ visibleToProject: beta.id }).map((s) => s.id)).not.toContain(skill.id)
 
-    const token = first.confirmation_token as string
-    const done = body(await call('promote_skill', { skill: skill.id, confirmation_token: token }, `Confirm ${token}`))
+    const done = await callBody('promote_skill', { skill: skill.id })
+    expect(done.status).toBe('ok')
     expect(done.result).toMatchObject({ scope: 'global', previous_project_id: alpha.id })
     expect(db.getSkills({ visibleToProject: beta.id }).map((s) => s.id)).toContain(skill.id)
     expect(changes).toEqual([{ skillId: skill.id, kind: 'scope' }])
@@ -154,26 +158,24 @@ describe('Commander skill mutations', () => {
     expect(db.getSkill(skill.id)!.project_id).toBeNull()
 
     const free = db.createSkill({ name: 'free', description: 'd', content: 'c' })!
-    const moved = await confirmedCall('move_skill', { skill: 'free', project: 'Alpha' })
+    const moved = await callBody('move_skill', { skill: 'free', project: 'Alpha' })
     expect(moved.result).toMatchObject({ project_id: alpha.id })
     expect(db.getSkill(free.id)!.project_id).toBe(alpha.id)
   })
 
-  it('updates after confirmation, refuses a stale version, and soft-deletes', async () => {
+  it('updates on the first call, refuses a stale version, and soft-deletes', async () => {
     const skill = db.createSkill({ name: 'guide', description: 'd', content: 'v1' })!
-    const updated = await confirmedCall('update_skill', { skill: 'guide', changes: { content: 'v2' }, expected_version: skill.version })
+    const updated = await callBody('update_skill', { skill: 'guide', changes: { content: 'v2' }, expected_version: skill.version })
     expect(updated.result).toMatchObject({ version: skill.version + 1, content: 'v2' })
 
-    // Someone else wrote in between: the confirmed stale write is refused.
-    const first = body(await call('update_skill', { skill: 'guide', changes: { content: 'v3' }, expected_version: skill.version }))
-    const token = first.confirmation_token as string
-    await expect(call('update_skill', { skill: 'guide', changes: { content: 'v3' }, expected_version: skill.version, confirmation_token: token }, `Confirm ${token}`))
+    // Someone else wrote in between: the stale write is refused (expected_version still guards concurrency).
+    await expect(call('update_skill', { skill: 'guide', changes: { content: 'v3' }, expected_version: skill.version }))
       .rejects.toThrow(/Current version: 2/)
     expect(db.getSkill(skill.id)!.content).toBe('v2')
 
     await expect(call('update_skill', { skill: 'guide', changes: { project_id: null } })).rejects.toThrow(/changes may only contain/)
 
-    const removed = await confirmedCall('remove_skill', { skill: skill.id })
+    const removed = await callBody('remove_skill', { skill: skill.id })
     expect(removed.result).toMatchObject({ removed_skill_id: skill.id })
     expect(db.getSkill(skill.id)).toBeUndefined()
   })

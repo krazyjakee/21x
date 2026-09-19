@@ -6,7 +6,9 @@ import type { ChatToolDefinition } from '../chat/tools'
 import { normalizeTitle, type CommanderStore } from './commander-store'
 import { buildContext, DEFAULT_CONTEXT_BUDGET, planFold, transcriptForSummary, type ContextBudget } from './context'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_SYSTEM_PROMPT, COMMANDER_TITLE_PROMPT, reportRelayNote, withSummary } from './prompts'
+import { MUTATING_COMMANDER_TOOLS } from './project-tools'
 import { guardReportAsks, MAX_REPORT_ASKS_WITHOUT_USER_TURN } from './report-tools'
+import { MUTATING_COMMANDER_SKILL_TOOLS } from './skill-tools'
 
 /**
  * Runs Commander chat turns over persisted sessions (docs/commander.md).
@@ -20,19 +22,24 @@ import { guardReportAsks, MAX_REPORT_ASKS_WITHOUT_USER_TURN } from './report-too
  *
  * Extension points:
  * - The Commander's tools (project-tools.ts) are supplied through `getTools`,
- *   built per turn so a confirmation can be checked against the user message.
+ *   built per turn from that turn's context (session, user message, trigger).
  * - #62 delivers Captain reports through `deliverReport`: the report is
  *   stored (unread until the session is read) and, when the session is the
  *   one open in the Commander view (`setActiveSession`), a turn is started so
  *   the Commander relays it. A turn started by a report can only call
  *   `ask_captain` within the session's report-ask budget until the user
  *   speaks again (report-tools.ts).
+ * - Only a turn the user started gets the admin tools (the ones that write
+ *   projects or skills, {@link COMMANDER_ADMIN_TOOLS}). A report-started turn
+ *   runs on text a Captain wrote, which may carry instructions from untrusted
+ *   sources, so it gets the read-only tools and `ask_captain` only.
  */
+
+/** Tools that change projects or skills: never offered to a turn the user did not start. */
+export const COMMANDER_ADMIN_TOOLS: ReadonlySet<string> = new Set<string>([...MUTATING_COMMANDER_TOOLS, ...MUTATING_COMMANDER_SKILL_TOOLS])
 
 export interface CommanderToolContext {
   sessionId: string
-  /** The user message that immediately precedes this turn's tool calls; empty for a report-triggered turn. */
-  userMessage: string
   /** What started the turn: the user, or a report being relayed (#62). */
   trigger: 'user' | 'report'
 }
@@ -80,7 +87,6 @@ export interface DeliverReportResult {
 
 interface TurnStart {
   trigger: 'user' | 'report'
-  userMessage: string
   /** Extra system text for the turn (the relay note of a report-triggered turn). */
   systemNote?: string
 }
@@ -230,7 +236,7 @@ export class CommanderService {
     // A user turn resets the report-ask budget (#62).
     this.reportAsks.delete(sessionId)
 
-    const { turnId, done } = this.startTurn(sessionId, provider, { trigger: 'user', userMessage: content })
+    const { turnId, done } = this.startTurn(sessionId, provider, { trigger: 'user' })
     return { turnId, message, done }
   }
 
@@ -239,7 +245,9 @@ export class CommanderService {
     const context = buildContext(this.store.listMessages(sessionId), this.budget)
     let system = withSummary(this.options.systemPrompt ?? COMMANDER_SYSTEM_PROMPT, context.summary)
     if (start.systemNote) system = `${system}\n\n${start.systemNote}`
-    let tools = this.options.getTools?.({ sessionId, userMessage: start.userMessage, trigger: start.trigger }) ?? []
+    let tools = this.options.getTools?.({ sessionId, trigger: start.trigger }) ?? []
+    // Admin tools act only on turns the user started, whatever getTools returned.
+    if (start.trigger !== 'user') tools = tools.filter((tool) => !COMMANDER_ADMIN_TOOLS.has(tool.name))
     if (start.trigger === 'report') {
       const max = this.options.maxReportAsks ?? MAX_REPORT_ASKS_WITHOUT_USER_TURN
       tools = guardReportAsks(tools, {
@@ -469,7 +477,6 @@ export class CommanderService {
     if (!this.store.getSession(sessionId)) return false
     this.startTurn(sessionId, provider, {
       trigger: 'report',
-      userMessage: '',
       systemNote: reportRelayNote(projectName ? `"${projectName}"` : 'a project')
     })
     return true
