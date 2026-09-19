@@ -41,6 +41,7 @@ import type {
   ProjectChangedEvent
 } from '@shared/projects'
 import type { HeldAction, ProjectLimitState } from '@shared/project-limit-types'
+import type { ProjectConcurrencyState } from '@shared/concurrency'
 import type { ProjectStatus, ProjectStatusHistoryPage } from '@shared/project-status'
 import type { ProjectOverviewEntry } from '@shared/project-overview'
 import type { CaptainMemory } from '@shared/captain-memory'
@@ -527,6 +528,17 @@ export const projectLimitsApi = {
   getState: (projectId: string): Promise<ProjectLimitState> => window.electronAPI.projectLimits.getState(projectId),
   isAllPaused: (): Promise<boolean> => window.electronAPI.projectLimits.isAllPaused(),
   pauseAll: (paused: boolean): Promise<boolean> => window.electronAPI.projectLimits.pauseAll(paused)
+}
+
+/** Captain-managed concurrency under the user-set hard cap (#150). */
+export const concurrencyApi = {
+  getState: (projectId: string): Promise<ProjectConcurrencyState> => window.electronAPI.concurrency.getState(projectId),
+  setCaptainControl: (projectId: string, enabled: boolean): Promise<{ success: true } | { error: string }> =>
+    window.electronAPI.concurrency.setCaptainControl(projectId, enabled),
+  pin: (projectId: string, agentId: string, level: number | null): Promise<{ success: true } | { error: string }> =>
+    window.electronAPI.concurrency.pin(projectId, agentId, level),
+  onChanged: (callback: (event: { projectId: string }) => void): (() => void) =>
+    typeof window.electronAPI.concurrency?.onChanged === 'function' ? window.electronAPI.concurrency.onChanged(callback) : () => undefined
 }
 
 /** Captain tool calls held by the escalation policy (#66). */

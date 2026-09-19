@@ -5,6 +5,7 @@ import { DEFAULT_PROJECT_ID, DEFAULT_PROJECT_NAME } from '../../shared/projects'
 import { getRepoProviders, isGitProvider } from '../repo-providers'
 import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
 import { migrateCoordinatorToCaptain } from './captain-migration'
+import { createConcurrencyTables, migrateConcurrencyControl } from './concurrency-migration'
 
 /**
  * Bump this whenever new migrations are added so returning users skip
@@ -31,8 +32,14 @@ import { migrateCoordinatorToCaptain } from './captain-migration'
  *          tasks.role, projects.captain_agent_id, the captain_prewarm setting,
  *          projects.settings.captain_wakeups and project_status_journal.source
  *          (migrateCoordinatorToCaptain in captain-migration.ts)
+ * 17 → 20: Captain-managed concurrency (#150): concurrency_audit, task_touches,
+ *          and agents.config.concurrency_cap = min(max_parallel_sessions, 5)
+ *          where unset (migrateConcurrencyControl in concurrency-migration.ts).
+ *          18 and 19 are skipped on purpose: they are claimed by open
+ *          branches (feat/commander-on-agent-sessions, captain-merge-grants);
+ *          whichever lands after another renumbers.
  */
-const SCHEMA_VERSION = 17
+const SCHEMA_VERSION = 20
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -469,6 +476,9 @@ export function createTables(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_project_status_journal_project_created
       ON project_status_journal(project_id, created_at DESC, id DESC);
   `)
+
+  // Concurrency control (#150): audit feed and declared touches.
+  createConcurrencyTables(db)
 
   // Report routing (#62): a Captain report quotes the correlation id of
   // the `ask_captain` tool row it answers; this serves that lookup.
@@ -955,6 +965,10 @@ export function runMigrations(db: Database.Database): void {
   // Migration v17: the coordinator is renamed to Captain (#71). Runs after migrateToProjects so
   // the projects table (and its renamed column) exists.
   migrateCoordinatorToCaptain(db)
+
+  // Migration v20: concurrency control (#150). After migrateToProjects so the
+  // projects table the audit references exists.
+  migrateConcurrencyControl(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)

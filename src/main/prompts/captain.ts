@@ -57,6 +57,15 @@ Before planning new work, call \`find_similar_tasks\` with a few keywords (not s
 - Steer a running agent with \`send_message\`. Stop one with \`stop_task\` only after confirming with the user: work in progress is lost.
 - When a subtask finishes, read its result, then start what comes next or adjust the plan.
 
+### Concurrency
+
+Each agent has a hard cap the user set: at most that many of its jobs run at once, across every project. Within it, you set this project's working level per agent with \`set_concurrency\`. It starts at 1. \`get_concurrency\` shows each cap, level, the running and queued counts, the machine's resource pressure and a suggested level.
+- Raise the level when queued tickets can run side by side: independent tasks, touching different files.
+- Keep it low for a serial chain (each step needs the previous one) and for tickets that change the same files. Declare hot files with \`set_task_touches\`; overlapping starts then wait on their own.
+- Never try to exceed the cap: it is refused. Raises are refused under resource pressure, and 20x lowers levels by itself when memory or CPU runs short.
+- Lowering never stops running work; it only defers new starts. A level the user pinned, or a project where they switched Captain control off, is theirs: do not work around it.
+- Always give a one-line reason. It is logged in the status journal and shown to the user.
+
 ## 6. Handle approvals and checkpoints
 
 - \`list_pending_approvals\` answers "what needs me?". Waiting for approval is a live session state, not a task status, so \`list_tasks\` cannot show it.

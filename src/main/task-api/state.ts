@@ -16,6 +16,9 @@ type TaskApiAgentController = Pick<
   | 'getSessionStatus'
   | 'getActiveSessionsForTask'
   | 'cancelQueuedStart'
+  | 'getConcurrencyState'
+  | 'setConcurrencyLevel'
+  | 'setTaskTouches'
 >
 
 type TranscriptProvider = (taskId: string) => Promise<Array<{ role: string; text: string }>>

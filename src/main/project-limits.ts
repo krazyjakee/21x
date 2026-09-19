@@ -181,9 +181,13 @@ export function describeQueueReason(reason: string, limit?: number, running?: nu
       return `the project's daily cap of ${limit ?? '?'} agent sessions is used up (${running ?? '?'} started today). It starts tomorrow, or when the cap is raised; do not call start_task again for it.`
     case 'project_limit':
       return `the project's limit of ${limit ?? '?'} concurrent agents is reached. It starts automatically when one of the project's sessions finishes; do not call start_task again for it.`
+    case 'concurrency_level':
+      return `the project's working concurrency level of ${limit ?? '?'} for this agent is reached (${running ?? '?'} running). It starts automatically when one finishes, or sooner if the Captain raises the level; do not call start_task again for it.`
+    case 'file_overlap':
+      return 'it touches the same files as a running job in this project, so it waits for that job to finish; do not call start_task again for it.'
     case 'global_limit':
       return 'the global concurrent session limit is reached. It starts automatically when a running session finishes; do not call start_task again for it.'
     default:
-      return "the agent's concurrent session limit is reached. It starts automatically when a running session finishes; do not call start_task again for it."
+      return "the agent's hard cap on concurrent jobs is reached. It starts automatically when a running session finishes; do not call start_task again for it."
   }
 }

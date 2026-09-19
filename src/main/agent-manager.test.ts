@@ -124,6 +124,9 @@ function createMockDb(agentConfig: Record<string, unknown> = {}) {
     })),
     getTasks: vi.fn(() => []),
     getSubtasks: vi.fn(() => []),
+    // Concurrency control (#150): declared touches and the audit feed.
+    getTaskTouches: vi.fn(() => []),
+    listConcurrencyAudit: vi.fn(() => []),
     getAgent: vi.fn(() => ({
       id: 'agent-1',
       name: 'Test Agent',

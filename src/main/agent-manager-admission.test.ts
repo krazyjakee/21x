@@ -10,6 +10,7 @@ import { TaskAutomationScheduler } from './task-automation-scheduler'
 import { startMobileApiServer, stopMobileApiServer } from './mobile-api-server'
 import { MAX_CONCURRENT_AGENT_SESSIONS_SETTING } from './agent-manager/admission'
 import { TaskStatus } from '../shared/constants'
+import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import type { DatabaseManager, TaskRecord } from './database'
 
 /**
@@ -77,6 +78,11 @@ function setup(maxParallel = LIMIT): Harness {
     started.push(taskId)
     return id
   })
+
+  // Captain control off in the Default project (#150): the working level is
+  // the agent's hard cap, so this suite sees only the cap and the global limit.
+  // Levels are covered by agent-manager-concurrency.test.ts.
+  db.updateProject(DEFAULT_PROJECT_ID, { settings: { concurrency: { captain_control: false } } })
 
   const createAgent = (limit: number): string =>
     db.createAgent(makeAgent({ name: `Agent ${limit}`, config: { max_parallel_sessions: limit } as any }))!.id

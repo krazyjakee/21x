@@ -102,6 +102,44 @@ describe('DatabaseManager migrations on an existing install', () => {
   })
 
   /**
+   * Migration 20 (#150): every agent gets a hard cap of
+   * min(existing max_parallel_sessions, 5); an explicit cap is kept, the old
+   * field is left as it was, and the concurrency tables appear.
+   */
+  it('gives existing agents a hard cap of min(max_parallel_sessions, 5) on the upgrade to 20', () => {
+    const first = new DatabaseManager()
+    first.initialize()
+    first.close?.()
+
+    const raw = openRaw()
+    const now = new Date().toISOString()
+    const insert = raw.prepare('INSERT INTO agents (id, name, server_url, config, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)')
+    insert.run('a-eight', 'Eight', 'http://localhost:4096', JSON.stringify({ max_parallel_sessions: 8 }), now, now)
+    insert.run('a-three', 'Three', 'http://localhost:4096', JSON.stringify({ max_parallel_sessions: 3 }), now, now)
+    insert.run('a-unset', 'Unset', 'http://localhost:4096', JSON.stringify({}), now, now)
+    insert.run('a-explicit', 'Explicit', 'http://localhost:4096', JSON.stringify({ max_parallel_sessions: 9, concurrency_cap: 7 }), now, now)
+    raw.exec('DROP TABLE concurrency_audit')
+    raw.exec('DROP TABLE task_touches')
+    raw.prepare("UPDATE settings SET value = ? WHERE key = '__schema_version'").run('17')
+    raw.close()
+
+    const second = new DatabaseManager()
+    second.initialize()
+    second.close?.()
+
+    const after = openRaw()
+    const config = (id: string) => JSON.parse((after.prepare('SELECT config FROM agents WHERE id = ?').get(id) as { config: string }).config)
+    expect(config('a-eight')).toMatchObject({ concurrency_cap: 5, max_parallel_sessions: 8 })
+    expect(config('a-three')).toMatchObject({ concurrency_cap: 3, max_parallel_sessions: 3 })
+    expect(config('a-unset').concurrency_cap).toBe(1)
+    expect(config('a-explicit').concurrency_cap).toBe(7)
+    const tables = (after.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((t) => t.name)
+    expect(tables).toEqual(expect.arrayContaining(['concurrency_audit', 'task_touches']))
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('20')
+    after.close()
+  })
+
+  /**
    * Guards the gate itself. If someone adds an `ALTER TABLE` to
    * `runMigrations()` but leaves `SCHEMA_VERSION` alone, a returning user whose
    * stored version already equals `SCHEMA_VERSION` gets nothing — which is

@@ -84,6 +84,28 @@ file keeps the retirement of the legacy seeded "Mastermind" skill. It is the
 only place in `src/` (with its test and one commented compatibility alias) that
 may spell the old name; `src/shared/captain-terminology.test.ts` enforces that.
 
+### Concurrency control (#150)
+
+Migration 20 (`migrateConcurrencyControl()` in
+`src/main/database/concurrency-migration.ts`) supports Captain-managed
+concurrency under a user-set hard cap (see docs/concurrency.md):
+
+- `concurrency_audit` (new): one row per change to a working level, a pin or
+  Captain control, with the actor and the reason. It is the project's
+  concurrency activity feed. It goes with its project.
+- `task_touches` (new): the files a task declares it will change. It goes with
+  its task.
+- `agents.config.concurrency_cap` is set to min(`max_parallel_sessions`, 5) on
+  every agent that has none. Only a missing cap is filled, so a later re-run of
+  `runMigrations()` never overwrites a cap the user set.
+  `max_parallel_sessions` is left as it was.
+
+Both tables are also created in `createTables()`. Nothing is added to `tasks`,
+so `rebuildTasksTable()` is unchanged. Versions 18 and 19 are skipped on
+purpose, because open branches claim them (`feat/commander-on-agent-sessions`
+and `captain-merge-grants`). Whichever of those lands after this one must
+renumber above 20, or its migrations never run on a database already at 20.
+
 ## Adding a column to other tables
 
 Same pattern: update `createTables()`, add a guarded `ALTER TABLE` in `runMigrations()`, and bump `SCHEMA_VERSION`.

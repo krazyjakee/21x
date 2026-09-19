@@ -53,6 +53,7 @@ import {
 } from '@shared/captain-wakeups'
 import type { GitHubRepo } from '@/types/electron'
 import { ScheduledReviewSection } from './ScheduledReviewSection'
+import { ConcurrencySection } from './ConcurrencySection'
 import { withScheduledReviewSettings } from '@shared/scheduled-coordination'
 
 const PROVIDER_IDS = Object.keys(GIT_PROVIDER_LABELS) as GitProviderId[]
@@ -73,7 +74,9 @@ const QUEUE_REASON_LABELS: Record<string, string> = {
   global_pause: 'all projects are paused',
   project_paused: 'the project is paused',
   project_daily_cap: 'the daily session cap is used up',
-  project_limit: 'the concurrent agent limit is reached'
+  project_limit: 'the concurrent agent limit is reached',
+  concurrency_level: 'the working concurrency level is reached',
+  file_overlap: 'it touches the same files as a running job'
 }
 
 function MoveButtons({ index, count, onMove }: { index: number; count: number; onMove: (delta: -1 | 1) => void }) {
@@ -561,6 +564,9 @@ export function ProjectEditorDialog() {
                     <p className="text-xs text-amber-600 dark:text-amber-400">All projects are paused right now (global pause), so nothing starts here either.</p>
                   )}
                 </section>
+
+                {/* ── Concurrency (#150): applies at once, outside the draft ── */}
+                {project && <ConcurrencySection projectId={project.id} />}
 
                 {/* ── Escalation (#66) ── */}
                 <section className="space-y-3" aria-label="Escalation">

@@ -75,7 +75,7 @@ export function isCoordinatorScope(scope: TaskMcpScope): boolean {
 }
 
 /** Tools only the project's Captain may call. */
-const COORDINATOR_ONLY_TOOLS = new Set(['update_project_status', 'report_to_commander'])
+const COORDINATOR_ONLY_TOOLS = new Set(['update_project_status', 'report_to_commander', 'set_concurrency'])
 
 /**
  * The escalation policy hook (#66). The main process installs one from
@@ -120,7 +120,9 @@ const PROJECT_FILTERED_TOOLS = new Set([
   'list_repos',
   'create_task',
   'update_project_status',
-  'report_to_commander'
+  'report_to_commander',
+  'get_concurrency',
+  'set_concurrency'
 ])
 
 const PROJECT_ACCESS_DENIED = { error: 'Access denied: task is not in this project' }
