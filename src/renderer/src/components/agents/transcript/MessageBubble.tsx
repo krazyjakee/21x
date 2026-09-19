@@ -4,7 +4,9 @@ import { Markdown } from '@/components/ui/Markdown'
 import { SpeakMessageButton } from '@/components/voice/SpeakMessageButton'
 import type { AgentMessage, StepMeta } from '@shared/transcript/types'
 import { isCompactActivityMessage } from '@shared/transcript/tool-format'
+import { parseMachineMessage } from '@shared/transcript/machine-message'
 import { ActivityMessageGroup } from './ActivityMessageGroup'
+import { MachineMessage } from './MachineMessage'
 import { PlanReviewMessage } from './PlanReviewMessage'
 import { QuestionMessage } from './QuestionMessage'
 import { TaskProgressMessage } from './TaskProgressMessage'
@@ -54,6 +56,13 @@ export const MessageBubble = memo(function MessageBubble({ message, onAnswer, ca
   // session.systemStatus — skip any that slip through.
   if (message.partType === 'step-start' || message.partType === 'step-finish' || message.partType === 'system-status') {
     return null
+  }
+
+  // A relayed or automated prompt is mostly scaffolding written for the agent.
+  // Show the request; keep the rest one click away.
+  const machine = parseMachineMessage(message.content)
+  if (machine) {
+    return <MachineMessage message={message} view={machine} searchQuery={searchQuery} />
   }
 
   const isUser = message.role === 'user'

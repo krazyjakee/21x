@@ -3,7 +3,36 @@ import { Markdown } from '@/components/ui/Markdown'
 import { HighlightedText } from '@/components/agents/transcript/HighlightedText'
 import { deriveToolCommand, deriveToolSubtitle, formatDuration, isCompactActivityMessage, sanitizeToolContent } from '@shared/transcript/tool-format'
 import type { AgentMessage } from '@shared/transcript/types'
+import { parseMachineMessage, type MachineMessageView } from '@shared/transcript/machine-message'
 import { cn } from '../lib/utils'
+
+/**
+ * A relayed or automated prompt: the chip names its origin, the body is the
+ * request. The provenance header, the fence and the authority notice the
+ * agent was sent stay behind the chip.
+ */
+function MachineMessage({ message, view, searchQuery }: { message: AgentMessage; view: MachineMessageView; searchQuery?: string }) {
+  const [showRaw, setShowRaw] = useState(false)
+  return (
+    <div className="flex justify-end">
+      <div className="max-w-[90%] min-w-0 overflow-hidden rounded-md bg-secondary text-foreground px-3 py-2">
+        <button
+          onClick={() => setShowRaw(!showRaw)}
+          className="flex items-center gap-1.5 text-[10px] text-muted-foreground"
+        >
+          <span>{view.label}</span>
+          {view.authorizes && <span className="text-emerald-400">merge grant</span>}
+          <svg className={cn('h-3 w-3 transition-transform', showRaw && 'rotate-90')} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </button>
+        <div className="break-words min-w-0">
+          <Markdown size="sm" highlightQuery={searchQuery}>{showRaw ? message.content : view.body}</Markdown>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function QuestionMessage({ message, onAnswer, canAnswer, searchQuery }: { message: AgentMessage; onAnswer?: (answer: string) => void; canAnswer: boolean; searchQuery?: string }) {
   const questions = message.tool?.questions || []
@@ -414,6 +443,10 @@ export const MessageBubble = memo(function MessageBubble({ message, onAnswer, ca
 
   // Skip tool messages that have no content and no recognizable tool name
   if (message.partType === 'tool' && !message.content) return null
+
+  // A relayed or automated prompt shows its request, not its scaffolding.
+  const machine = parseMachineMessage(message.content)
+  if (machine) return <MachineMessage message={message} view={machine} searchQuery={searchQuery} />
 
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
