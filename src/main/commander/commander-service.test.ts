@@ -155,8 +155,8 @@ describe('CommanderService turns', () => {
     await service.sendUserMessage(session.id, 'Confirm abc123').done
 
     expect(seen).toEqual([
-      { sessionId: session.id, userMessage: 'propose a rename' },
-      { sessionId: session.id, userMessage: 'Confirm abc123' }
+      { sessionId: session.id, userMessage: 'propose a rename', trigger: 'user' },
+      { sessionId: session.id, userMessage: 'Confirm abc123', trigger: 'user' }
     ])
   })
 

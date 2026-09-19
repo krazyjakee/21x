@@ -4,16 +4,30 @@ import { Button } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogBody } from '@/components/ui/Dialog'
 import { useSkillStore } from '@/stores/skill-store'
+import { isSkillVisibleToProject } from '@shared/skill-scope'
+import { SkillScopeBadge } from './SkillList'
 
 interface SkillSelectorDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   initialSkillIds: string[]
   onConfirm: (skillIds: string[]) => void
+  /**
+   * Scope (#74). A task picks from global skills plus its project's own
+   * (`projectId`); an agent's defaults serve every project, so they may only
+   * be global (`globalOnly`). Without either, every skill is offered.
+   */
+  projectId?: string | null
+  globalOnly?: boolean
 }
 
-export function SkillSelectorDialog({ open, onOpenChange, initialSkillIds, onConfirm }: SkillSelectorDialogProps) {
-  const { skills, fetchSkills } = useSkillStore()
+export function SkillSelectorDialog({ open, onOpenChange, initialSkillIds, onConfirm, projectId, globalOnly }: SkillSelectorDialogProps) {
+  const { skills: allSkills, fetchSkills } = useSkillStore()
+  const skills = useMemo(() => {
+    if (globalOnly) return allSkills.filter((s) => !s.project_id)
+    if (projectId) return allSkills.filter((s) => isSkillVisibleToProject(s, projectId))
+    return allSkills
+  }, [allSkills, projectId, globalOnly])
   const [selected, setSelected] = useState<Set<string>>(new Set(initialSkillIds))
   const [search, setSearch] = useState('')
   const initialSkillIdsKey = useMemo(() => [...initialSkillIds].sort().join('\0'), [initialSkillIds])
@@ -85,7 +99,7 @@ export function SkillSelectorDialog({ open, onOpenChange, initialSkillIds, onCon
           <div className="max-h-80 overflow-y-auto -mx-1 px-1 space-y-1">
             {filtered.length === 0 ? (
               <div className="text-center py-8 text-sm text-muted-foreground">
-                {search ? 'No matching skills' : 'No skills available. Add skills from the Skills tab.'}
+                {search ? 'No matching skills' : globalOnly ? 'No global skills. Agent defaults can only use global skills; promote one from the Skills tab.' : 'No skills available. Add skills from the Skills tab.'}
               </div>
             ) : (
               filtered.map((skill) => (
@@ -99,7 +113,10 @@ export function SkillSelectorDialog({ open, onOpenChange, initialSkillIds, onCon
                     className="mt-0.5"
                   />
                   <div className="flex-1 min-w-0">
-                    <span className="text-sm font-medium">{skill.name}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{skill.name}</span>
+                      <SkillScopeBadge skill={skill} />
+                    </div>
                     {skill.description && (
                       <p className="text-xs text-muted-foreground truncate mt-0.5">{skill.description}</p>
                     )}

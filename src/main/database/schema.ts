@@ -24,8 +24,10 @@ import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
  * 14 → 15: projects, project_repos, project_resources; tasks.project_id and
  *          task_sources.project_id, everything moved into the Default project
  *          (migrateToProjects)
+ * 15 → 16: skills.project_id (null = global; every existing skill stays global)
+ *          (migrateSkillScope, #74)
  */
-const SCHEMA_VERSION = 15
+const SCHEMA_VERSION = 16
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -233,6 +235,7 @@ export function createTables(db: Database.Database): void {
       last_used TEXT,
       tags TEXT NOT NULL DEFAULT '[]',
       preferred_model TEXT DEFAULT NULL,
+      project_id TEXT REFERENCES projects(id),
       is_deleted INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -437,6 +440,36 @@ export function createTables(db: Database.Database): void {
       top_blockers TEXT NOT NULL DEFAULT '[]',
       updated_at TEXT NOT NULL
     );
+  `)
+
+  // Project status journal (#72): one row per Mastermind status update, kept
+  // beside the snapshot above. The lists are JSON arrays of short strings.
+  // `source` is 'mastermind' for a written update and 'compaction' for the
+  // monthly roll-up of entries older than the retention window. Rows go with
+  // their project. The index serves the newest-first (created_at, id) page
+  // reads. New table, so CREATE IF NOT EXISTS covers fresh and existing DBs alike.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS project_status_journal (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      summary TEXT NOT NULL,
+      completed TEXT NOT NULL DEFAULT '[]',
+      blockers TEXT NOT NULL DEFAULT '[]',
+      decisions TEXT NOT NULL DEFAULT '[]',
+      next_steps TEXT NOT NULL DEFAULT '[]',
+      source TEXT NOT NULL DEFAULT 'mastermind',
+      correlation_id TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_status_journal_project_created
+      ON project_status_journal(project_id, created_at DESC, id DESC);
+  `)
+
+  // Report routing (#62): a Mastermind report quotes the correlation id of
+  // the `ask_mastermind` tool row it answers; this serves that lookup.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_commander_messages_correlation
+      ON commander_messages(correlation_id) WHERE correlation_id IS NOT NULL;
   `)
 }
 
@@ -910,6 +943,10 @@ export function runMigrations(db: Database.Database): void {
   // Migration v15: projects. Everything that existed before moves into the Default project.
   migrateToProjects(db)
 
+  // Migration v16: skill scope (#74). Runs after migrateToProjects so the
+  // projects table the column references exists.
+  migrateSkillScope(db)
+
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)
 
@@ -975,6 +1012,27 @@ function migrateToProjects(db: Database.Database): void {
   db.prepare('UPDATE task_sources SET project_id = ? WHERE project_id IS NULL').run(DEFAULT_PROJECT_ID)
 
   ensureTaskProjectAssignment(db)
+}
+
+/**
+ * Migration v16: skill scope (#74).
+ *
+ * Adds `skills.project_id` (NULL = global, visible to every project; a project
+ * id = owned by that project). Nothing is backfilled: the column arrives NULL,
+ * which is exactly "every existing skill is global", so an upgrade keeps every
+ * skill available everywhere. Skill names stay unique across both scopes
+ * (`idx_skills_name` is unchanged), so a task workspace can hold global and
+ * project skills side by side without a SKILL.md directory collision.
+ *
+ * Idempotent: the column is only added when missing and the index uses
+ * IF NOT EXISTS, so re-runs on later schema bumps are no-ops.
+ */
+function migrateSkillScope(db: Database.Database): void {
+  const skillCols = new Set((db.pragma('table_info(skills)') as { name: string }[]).map((c) => c.name))
+  if (!skillCols.has('project_id')) {
+    db.exec(`ALTER TABLE skills ADD COLUMN project_id TEXT REFERENCES projects(id)`)
+  }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_skills_project ON skills(project_id)`)
 }
 
 /**

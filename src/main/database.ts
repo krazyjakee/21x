@@ -12,10 +12,17 @@ import { TASK_ROLE_MASTERMIND, type TaskRole } from '../shared/task-roles'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import {
   PROJECT_STATUS_BLOCKER_MAX_CHARS,
+  PROJECT_STATUS_JOURNAL_COMPACT_AFTER_DAYS,
+  PROJECT_STATUS_JOURNAL_ITEM_MAX_CHARS,
+  PROJECT_STATUS_JOURNAL_MAX_ITEMS,
   PROJECT_STATUS_MAX_BLOCKERS,
   PROJECT_STATUS_SUMMARY_MAX_CHARS,
-  type ProjectStatus
+  type ProjectStatus,
+  type ProjectStatusJournalEntry,
+  type ProjectStatusJournalInput,
+  type ProjectStatusJournalSource
 } from '../shared/project-status'
+import { SkillVersionConflictError } from './database/types'
 import {
   JSON_COLUMNS,
   UPDATABLE_COLUMNS,
@@ -48,14 +55,82 @@ import type {
   CreateProjectRepoData, ProjectRepoRecord, UpdateProjectRepoData,
   CreateProjectResourceData, ProjectResourceRecord, UpdateProjectResourceData,
   CreateSecretData, SecretRecord, SecretRecordWithValue, SecretRow, UpdateSecretData,
-  CreateSkillData, SkillRecord, SkillRow, UpdateSkillData,
+  CreateSkillData, SkillListFilter, SkillRecord, SkillRow, UpdateSkillData,
   CreateTaskData, HeartbeatLogRecord, TaskRecord, TaskRow, UpdateTaskData,
   CreateTaskSourceData, TaskSourceRecord, TaskSourceRow, UpdateTaskSourceData,
   TranscriptPartInput, TranscriptPartRecord
 } from './database/types'
 
 export type * from './database/types'
-export type { ProjectStatus } from '../shared/project-status'
+export { SkillVersionConflictError } from './database/types'
+export type { ProjectStatus, ProjectStatusJournalEntry, ProjectStatusJournalInput } from '../shared/project-status'
+
+/** A `project_status_journal` row (#72); the list columns hold JSON arrays. */
+interface ProjectStatusJournalRow {
+  id: string
+  project_id: string
+  summary: string
+  completed: string
+  blockers: string
+  decisions: string
+  next_steps: string
+  source: string
+  correlation_id: string | null
+  created_at: string
+}
+
+/** What `recordProjectStatus` writes: the snapshot fields plus the journal highlights. */
+export interface ProjectStatusUpdateInput extends ProjectStatusJournalInput {
+  /** The snapshot's top blockers; also the journal entry's `blockers` unless those are given. */
+  top_blockers?: string[]
+}
+
+/** Caps for a compaction entry: it stands for a month, so it may hold more than one update. */
+const JOURNAL_COMPACTION_MAX_ITEMS = PROJECT_STATUS_JOURNAL_MAX_ITEMS * 2
+const JOURNAL_COMPACTION_SUMMARY_MAX_CHARS = PROJECT_STATUS_SUMMARY_MAX_CHARS * 2
+const JOURNAL_COMPACTION_LINE_MAX_CHARS = 200
+
+function journalStringList(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function toJournalEntry(row: ProjectStatusJournalRow): ProjectStatusJournalEntry {
+  return {
+    id: row.id,
+    project_id: row.project_id,
+    summary: row.summary,
+    completed: journalStringList(row.completed),
+    blockers: journalStringList(row.blockers),
+    decisions: journalStringList(row.decisions),
+    next_steps: journalStringList(row.next_steps),
+    source: row.source === 'compaction' ? 'compaction' : 'mastermind',
+    correlation_id: row.correlation_id ?? null,
+    created_at: row.created_at
+  }
+}
+
+/** Trims, clips and caps one highlight list from the Mastermind. */
+function cleanJournalList(value: unknown, maxItems = PROJECT_STATUS_JOURNAL_MAX_ITEMS): string[] {
+  if (!Array.isArray(value)) return []
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const item of value) {
+    if (typeof item !== 'string') continue
+    const text = item.trim().slice(0, PROJECT_STATUS_JOURNAL_ITEM_MAX_CHARS)
+    const key = text.toLowerCase()
+    if (!text || seen.has(key)) continue
+    seen.add(key)
+    out.push(text)
+    if (out.length >= maxItems) break
+  }
+  return out
+}
 
 /** What only the agent manager knows about a project's tasks (#58): see getProjectStatus. */
 export interface ProjectStatusLiveState {
@@ -135,6 +210,14 @@ export class DatabaseManager {
     seedTaskManagementMcpServer(this.db)
     seedOrchestratorSkill(this.db)
     seedMastermindTasks(this.db)
+
+    // Status journal retention (#72): idempotent, so every start may run it.
+    try {
+      const { folded, written } = this.compactProjectStatusJournal()
+      if (folded > 0) console.log(`[Database] Rolled ${folded} project status journal entries into ${written} monthly entries`)
+    } catch (err) {
+      console.error('[Database] Project status journal compaction failed:', err)
+    }
   }
 
   getWorkspaceDir(taskId: string): string {
@@ -1007,6 +1090,185 @@ export class DatabaseManager {
     return this.getProjectStatus(projectId)
   }
 
+  // ── Project status journal (#72) ─────────────────────────────
+  // The snapshot above stays the cheap read; every update also lands here as
+  // one row, so "what changed?" has an answer without a growing blob anywhere.
+  // Reads are newest first over (created_at, id), which stays stable while new
+  // rows arrive: a newer row can never fall behind an older cursor.
+
+  /**
+   * Appends one journal entry. Lists are trimmed, deduplicated and capped
+   * (shared/project-status.ts); an empty summary or unknown project writes
+   * nothing. `createdAt` is for the roll-up and tests; callers normally omit it.
+   */
+  appendProjectStatusJournal(
+    projectId: string,
+    input: ProjectStatusJournalInput,
+    options: { source?: ProjectStatusJournalSource; createdAt?: string } = {}
+  ): ProjectStatusJournalEntry | undefined {
+    if (!this.ensureDbOpen() || !this.getProject(projectId)) return undefined
+    const summary = (input.summary ?? '').trim().slice(0, PROJECT_STATUS_SUMMARY_MAX_CHARS)
+    if (!summary) return undefined
+    const id = createId()
+    const correlationId = typeof input.correlation_id === 'string' && input.correlation_id.trim() ? input.correlation_id.trim().slice(0, 100) : null
+    this.prepare(`
+      INSERT INTO project_status_journal
+        (id, project_id, summary, completed, blockers, decisions, next_steps, source, correlation_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      projectId,
+      summary,
+      JSON.stringify(cleanJournalList(input.completed)),
+      JSON.stringify(cleanJournalList(input.blockers)),
+      JSON.stringify(cleanJournalList(input.decisions)),
+      JSON.stringify(cleanJournalList(input.next_steps)),
+      options.source ?? 'mastermind',
+      correlationId,
+      options.createdAt ?? new Date().toISOString()
+    )
+    return this.getProjectStatusJournalEntry(id)
+  }
+
+  getProjectStatusJournalEntry(id: string): ProjectStatusJournalEntry | undefined {
+    if (!this.ensureDbOpen()) return undefined
+    const row = this.prepare('SELECT * FROM project_status_journal WHERE id = ?').get(id) as ProjectStatusJournalRow | undefined
+    return row ? toJournalEntry(row) : undefined
+  }
+
+  /**
+   * One status update from the Mastermind: replaces the snapshot and appends
+   * the journal entry in one transaction. The entry's `blockers` default to
+   * the snapshot's `top_blockers`. Undefined for an unknown project.
+   */
+  recordProjectStatus(projectId: string, input: ProjectStatusUpdateInput): { status: ProjectStatus; entry: ProjectStatusJournalEntry } | undefined {
+    if (!this.ensureDbOpen() || !this.getProject(projectId)) return undefined
+    const write = this.db.transaction((): { status: ProjectStatus; entry: ProjectStatusJournalEntry } | undefined => {
+      const status = this.setProjectStatusSummary(projectId, input.summary, input.top_blockers ?? [])
+      if (!status) return undefined
+      const entry = this.appendProjectStatusJournal(projectId, { ...input, blockers: input.blockers ?? input.top_blockers ?? [] })
+      if (!entry) throw new Error('summary is required')
+      return { status, entry }
+    })
+    return write()
+  }
+
+  /**
+   * A page of journal entries, newest first. `before` is the (created_at, id)
+   * of the last entry of the previous page; the page holds up to `limit`
+   * entries and says whether more exist. The caller caps `limit`.
+   */
+  listProjectStatusJournal(
+    projectId: string,
+    options: { limit: number; before?: { created_at: string; id: string } | null }
+  ): { entries: ProjectStatusJournalEntry[]; has_more: boolean } {
+    if (!this.ensureDbOpen()) return { entries: [], has_more: false }
+    const limit = Math.max(1, Math.floor(options.limit))
+    const rows = (options.before
+      ? this.prepare(`
+          SELECT * FROM project_status_journal
+          WHERE project_id = ? AND (created_at < ? OR (created_at = ? AND id < ?))
+          ORDER BY created_at DESC, id DESC LIMIT ?
+        `).all(projectId, options.before.created_at, options.before.created_at, options.before.id, limit + 1)
+      : this.prepare(`
+          SELECT * FROM project_status_journal
+          WHERE project_id = ?
+          ORDER BY created_at DESC, id DESC LIMIT ?
+        `).all(projectId, limit + 1)) as ProjectStatusJournalRow[]
+    return { entries: rows.slice(0, limit).map(toJournalEntry), has_more: rows.length > limit }
+  }
+
+  countProjectStatusJournal(projectId: string): number {
+    if (!this.ensureDbOpen()) return 0
+    const row = this.prepare('SELECT COUNT(*) AS n FROM project_status_journal WHERE project_id = ?').get(projectId) as { n: number }
+    return row.n
+  }
+
+  /**
+   * Retention (#72): Mastermind entries older than the window (90 days) are
+   * rolled into one `compaction` entry per project and calendar month, then
+   * deleted. The roll-up keeps a dated line per folded summary (newest lines
+   * win when the cap is hit) and the union of each highlight list, so
+   * decisions stay findable. An existing roll-up for the month absorbs new
+   * arrivals, which makes the run idempotent: a second run folds nothing.
+   * Runs at startup; `now` is for tests.
+   */
+  compactProjectStatusJournal(now: Date = new Date()): { folded: number; written: number } {
+    if (!this.ensureDbOpen()) return { folded: 0, written: 0 }
+    const cutoff = new Date(now.getTime() - PROJECT_STATUS_JOURNAL_COMPACT_AFTER_DAYS * 24 * 60 * 60 * 1000).toISOString()
+    const stale = this.prepare(`
+      SELECT * FROM project_status_journal
+      WHERE source = 'mastermind' AND created_at < ?
+      ORDER BY project_id ASC, created_at ASC, id ASC
+    `).all(cutoff) as ProjectStatusJournalRow[]
+    if (stale.length === 0) return { folded: 0, written: 0 }
+
+    const groups = new Map<string, ProjectStatusJournalRow[]>()
+    for (const row of stale) {
+      const key = `${row.project_id}::${row.created_at.slice(0, 7)}`
+      const group = groups.get(key)
+      if (group) group.push(row)
+      else groups.set(key, [row])
+    }
+
+    const run = this.db.transaction((): { folded: number; written: number } => {
+      let written = 0
+      for (const [key, rows] of groups) {
+        const [projectId, month] = key.split('::')
+        const existing = this.prepare(`
+          SELECT * FROM project_status_journal
+          WHERE project_id = ? AND source = 'compaction' AND substr(created_at, 1, 7) = ?
+          ORDER BY created_at DESC LIMIT 1
+        `).get(projectId, month) as ProjectStatusJournalRow | undefined
+
+        // Newest lines first, so what survives the cap is the latest of the month.
+        const lines = rows
+          .map((row) => `${row.created_at.slice(0, 10)}: ${row.summary.replace(/\s+/g, ' ').trim().slice(0, JOURNAL_COMPACTION_LINE_MAX_CHARS)}`)
+          .reverse()
+        if (existing?.summary) lines.push(...existing.summary.split('\n').filter(Boolean).reverse())
+        const kept: string[] = []
+        let chars = 0
+        for (const line of lines) {
+          if (kept.length > 0 && chars + line.length + 1 > JOURNAL_COMPACTION_SUMMARY_MAX_CHARS) break
+          kept.push(line)
+          chars += line.length + 1
+        }
+        const summary = kept.reverse().join('\n').slice(0, JOURNAL_COMPACTION_SUMMARY_MAX_CHARS)
+
+        const union = (pick: (row: ProjectStatusJournalRow) => string): string[] =>
+          cleanJournalList([...(existing ? journalStringList(pick(existing)) : []), ...rows.flatMap((row) => journalStringList(pick(row)))], JOURNAL_COMPACTION_MAX_ITEMS)
+        const newest = rows[rows.length - 1].created_at
+        const createdAt = existing && existing.created_at > newest ? existing.created_at : newest
+        const values = [
+          summary,
+          JSON.stringify(union((row) => row.completed)),
+          JSON.stringify(union((row) => row.blockers)),
+          JSON.stringify(union((row) => row.decisions)),
+          JSON.stringify(union((row) => row.next_steps)),
+          createdAt
+        ]
+        if (existing) {
+          this.prepare(`
+            UPDATE project_status_journal
+            SET summary = ?, completed = ?, blockers = ?, decisions = ?, next_steps = ?, created_at = ?
+            WHERE id = ?
+          `).run(...values, existing.id)
+        } else {
+          this.prepare(`
+            INSERT INTO project_status_journal
+              (id, project_id, summary, completed, blockers, decisions, next_steps, source, correlation_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'compaction', NULL, ?)
+          `).run(createId(), projectId, ...values)
+        }
+        written += 1
+        const remove = this.prepare('DELETE FROM project_status_journal WHERE id = ?')
+        for (const row of rows) remove.run(row.id)
+      }
+      return { folded: stale.length, written }
+    })
+    return run()
+  }
+
   getProjectRepos(projectId: string): ProjectRepoRecord[] {
     if (!this.ensureDbOpen()) return []
     return this.prepare(
@@ -1213,11 +1475,26 @@ export class DatabaseManager {
   }
 
   // ── Skill CRUD ────────────────────────────────────────────
+  //
+  // Scope (#74): skills.project_id is null for a global skill and a project
+  // id for a project skill. Reads take a SkillListFilter; the access policy
+  // (who may see, create, change or move a skill) lives with the callers —
+  // skill-routes.ts for sessions, commander/skill-tools.ts for the Commander.
 
-  getSkills(): SkillRecord[] {
+  getSkills(filter?: SkillListFilter): SkillRecord[] {
+    const clauses = ['is_deleted = 0']
+    const params: string[] = []
+    if (filter?.visibleToProject !== undefined) {
+      clauses.push('(project_id IS NULL OR project_id = ?)')
+      params.push(filter.visibleToProject)
+    }
+    if (filter?.scope !== undefined) {
+      if (filter.scope === null) clauses.push('project_id IS NULL')
+      else { clauses.push('project_id = ?'); params.push(filter.scope) }
+    }
     const rows = this.prepare(
-      'SELECT * FROM skills WHERE is_deleted = 0 ORDER BY name ASC'
-    ).all() as SkillRow[]
+      `SELECT * FROM skills WHERE ${clauses.join(' AND ')} ORDER BY name ASC`
+    ).all(...params) as SkillRow[]
     return rows.map(deserializeSkill)
   }
 
@@ -1228,12 +1505,14 @@ export class DatabaseManager {
     return row ? deserializeSkill(row) : undefined
   }
 
-  getSkillsByIds(ids: string[]): SkillRecord[] {
+  /** The named skills; with `visibleToProject`, only the global ones and that project's own. */
+  getSkillsByIds(ids: string[], visibleToProject?: string): SkillRecord[] {
     if (ids.length === 0) return []
     const placeholders = ids.map(() => '?').join(', ')
+    const scope = visibleToProject !== undefined ? ' AND (project_id IS NULL OR project_id = ?)' : ''
     const rows = this.db.prepare(
-      `SELECT * FROM skills WHERE id IN (${placeholders}) AND is_deleted = 0 ORDER BY name ASC`
-    ).all(...ids) as SkillRow[]
+      `SELECT * FROM skills WHERE id IN (${placeholders}) AND is_deleted = 0${scope} ORDER BY name ASC`
+    ).all(...ids, ...(visibleToProject !== undefined ? [visibleToProject] : [])) as SkillRow[]
     return rows.map(deserializeSkill)
   }
 
@@ -1245,13 +1524,18 @@ export class DatabaseManager {
     const lastUsed = data.last_used ?? null
     const tags = JSON.stringify(data.tags ?? [])
     const preferredModel = normalizePreferredModel(data.preferred_model)
+    const projectId = data.project_id || null
     this.prepare(`
-      INSERT INTO skills (id, name, description, content, version, confidence, uses, last_used, tags, preferred_model, is_deleted, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 0, ?, ?)
-    `).run(id, data.name, data.description, data.content, confidence, uses, lastUsed, tags, preferredModel, now, now)
+      INSERT INTO skills (id, name, description, content, version, confidence, uses, last_used, tags, preferred_model, project_id, is_deleted, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+    `).run(id, data.name, data.description, data.content, confidence, uses, lastUsed, tags, preferredModel, projectId, now, now)
     return this.getSkill(id)
   }
 
+  /**
+   * Field updates. Throws SkillVersionConflictError when `expected_version`
+   * is given and a content change would overwrite a newer version.
+   */
   updateSkill(id: string, data: UpdateSkillData): SkillRecord | undefined {
     const existing = this.getSkill(id)
     if (!existing) return undefined
@@ -1276,6 +1560,9 @@ export class DatabaseManager {
     const isContentChange = data.name !== undefined || data.description !== undefined ||
       data.content !== undefined || data.confidence !== undefined || data.tags !== undefined ||
       data.preferred_model !== undefined
+    if (isContentChange && data.expected_version !== undefined && data.expected_version !== existing.version) {
+      throw new SkillVersionConflictError(id, existing.version, data.expected_version)
+    }
     if (isContentChange) {
       setClauses.push('version = version + 1')
     }
@@ -1287,11 +1574,52 @@ export class DatabaseManager {
     }
     values.push(id)
 
-    this.db.prepare(
-      `UPDATE skills SET ${setClauses.join(', ')} WHERE id = ?`
-    ).run(...values)
+    // The version guard is re-checked in the statement itself, so two writers
+    // that both read the same version cannot both get through.
+    const guard = isContentChange && data.expected_version !== undefined ? ' AND version = ?' : ''
+    if (guard) values.push(data.expected_version as number)
+    const changed = this.db.prepare(
+      `UPDATE skills SET ${setClauses.join(', ')} WHERE id = ?${guard}`
+    ).run(...values).changes
+    if (guard && changed === 0) {
+      const current = this.getSkill(id)
+      throw new SkillVersionConflictError(id, current?.version ?? existing.version, data.expected_version as number)
+    }
 
     return this.getSkill(id)
+  }
+
+  /**
+   * Moves a skill to a project (an id) or promotes it to global (null). The
+   * explicit scope change of #74: not part of updateSkill, so a plain field
+   * update can never change who sees a skill. Bumps the version.
+   */
+  setSkillProject(id: string, projectId: string | null): SkillRecord | undefined {
+    const existing = this.getSkill(id)
+    if (!existing) return undefined
+    const next = projectId || null
+    if (existing.project_id === next) return existing
+    this.prepare(
+      'UPDATE skills SET project_id = ?, version = version + 1, updated_at = ? WHERE id = ? AND is_deleted = 0'
+    ).run(next, new Date().toISOString(), id)
+    return this.getSkill(id)
+  }
+
+  /** Tasks (any project, any status) whose skill_ids name the skill; for scope-move validation. */
+  getTasksUsingSkill(skillId: string): Array<{ id: string; title: string; project_id: string }> {
+    const rows = this.prepare(
+      'SELECT id, title, project_id, skill_ids FROM tasks WHERE skill_ids LIKE ?'
+    ).all(`%${skillId}%`) as Array<{ id: string; title: string; project_id: string | null; skill_ids: string | null }>
+    return rows
+      .filter((row) => {
+        try {
+          const ids = JSON.parse(row.skill_ids ?? '[]') as unknown
+          return Array.isArray(ids) && ids.includes(skillId)
+        } catch {
+          return false
+        }
+      })
+      .map((row) => ({ id: row.id, title: row.title, project_id: row.project_id ?? DEFAULT_PROJECT_ID }))
   }
 
   getSkillByName(name: string): SkillRecord | undefined {

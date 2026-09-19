@@ -476,6 +476,7 @@ export interface SkillRow {
   last_used: string | null
   tags: string
   preferred_model: string | null
+  project_id: string | null
   is_deleted: number
   created_at: string
   updated_at: string
@@ -493,6 +494,8 @@ export interface SkillRecord {
   tags: string[]
   /** Model id this skill runs best with; null = no preference. */
   preferred_model: string | null
+  /** Owning project (#74); null = global, visible to every project. */
+  project_id: string | null
   created_at: string
   updated_at: string
 }
@@ -506,8 +509,15 @@ export interface CreateSkillData {
   last_used?: string | null
   tags?: string[]
   preferred_model?: string | null
+  /** Owning project; omitted or null = global. */
+  project_id?: string | null
 }
 
+/**
+ * Field updates. Scope is not a field here on purpose: moving a skill between
+ * projects or promoting it to global goes through `setSkillProject`, which
+ * every caller treats as an explicit, confirmed operation.
+ */
 export interface UpdateSkillData {
   name?: string
   description?: string
@@ -518,6 +528,28 @@ export interface UpdateSkillData {
   tags?: string[]
   /** null (or empty string) clears the preference. */
   preferred_model?: string | null
+  /**
+   * Optimistic concurrency: the version the caller last read. A content
+   * change against a different version throws SkillVersionConflictError
+   * instead of silently overwriting another editor's work.
+   */
+  expected_version?: number
+}
+
+/** Which skills a list should hold (#74). Without a filter: every skill. */
+export interface SkillListFilter {
+  /** A project scope's view: global skills plus the ones this project owns. */
+  visibleToProject?: string
+  /** Exactly one scope: null = global skills only, an id = that project's skills only. */
+  scope?: string | null
+}
+
+/** A skill write that named a version the row no longer has. */
+export class SkillVersionConflictError extends Error {
+  constructor(public readonly skillId: string, public readonly currentVersion: number, public readonly expectedVersion: number) {
+    super(`Skill ${skillId} is at version ${currentVersion}, not ${expectedVersion}. Read it again before writing.`)
+    this.name = 'SkillVersionConflictError'
+  }
 }
 
 export interface SecretRow {

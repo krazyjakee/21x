@@ -120,11 +120,16 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
 
   selectSession: async (id) => {
     set({ selectedSessionId: id })
+    // Main relays a report at once only for the open session (#62).
+    void Promise.resolve(commanderApi.setActiveSession(id)).catch(() => {})
     if (!id) return
     try {
       const { messages, activeTurnId } = await commanderApi.listMessages(id)
       set((state) => ({
-        messages: { ...state.messages, [id]: mergeMessages([], [...(state.messages[id] ?? []), ...messages]) },
+        // mergeMessages(existing, incoming) drops `incoming` entries whose id is
+        // already in `existing`, so the stored fetch dedupes against local state
+        // instead of the combined array (which contains each id twice).
+        messages: { ...state.messages, [id]: mergeMessages(state.messages[id] ?? [], messages) },
         // Main is the truth about running turns: events may have been missed
         // while the view was closed, so a turn that ended meanwhile is cleared.
         streaming: !activeTurnId

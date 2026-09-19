@@ -7,8 +7,8 @@ import type {
 import type { IpcDeps } from './deps'
 import { guardedIpcSend } from '../guarded-ipc-send'
 import { readMastermindMemory, type MastermindMemory } from '../agent-manager/mastermind-context'
-import { buildProjectStatus } from '../project-status'
-import type { ProjectStatus } from '../../shared/project-status'
+import { buildProjectStatus, readProjectStatusHistory } from '../project-status'
+import type { ProjectStatus, ProjectStatusHistoryPage } from '../../shared/project-status'
 import type { ProjectChangedEvent } from '../../shared/projects'
 import { approveHeldAction, listHeldActions, rejectHeldAction } from '../escalation'
 
@@ -34,6 +34,10 @@ export function registerProjectHandlers({ db, agentManager }: IpcDeps): void {
   // Project status (#58): counts from the database and live sessions, plus
   // the Mastermind's narrative snapshot.
   ipcMain.handle('project:getStatus', (_, projectId: string): ProjectStatus => buildProjectStatus(db, agentManager, projectId))
+  // Status history (#72): one bounded page of the journal, newest first, for
+  // the project editor's read-only view. Full summaries; the page cap still holds.
+  ipcMain.handle('project:getStatusHistory', (_, projectId: string, query?: { limit?: number; cursor?: string | null }): ProjectStatusHistoryPage =>
+    readProjectStatusHistory(db, projectId, { limit: query?.limit, cursor: query?.cursor ?? undefined }, { summaryChars: 2_000, listItems: 16, itemChars: 200, totalChars: 40_000 }))
   ipcMain.handle('project:getAll', (_, opts?: { includeArchived?: boolean }) => db.getProjects(opts))
   ipcMain.handle('project:get', (_, id: string) => db.getProject(id))
   ipcMain.handle('project:getDefault', () => db.getDefaultProject())

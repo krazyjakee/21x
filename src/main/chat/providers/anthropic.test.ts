@@ -147,6 +147,24 @@ describe('AnthropicChatProvider', () => {
     ])
   })
 
+  it('sends the selected Claude thinking effort', async () => {
+    let body: Record<string, unknown> = {}
+    const provider = new AnthropicChatProvider({
+      apiKey: 'k',
+      reasoningEffort: 'high',
+      fetch: async (_input, init) => {
+        body = JSON.parse(String(init?.body))
+        return sseResponse(textTurn)
+      }
+    })
+    await drain(provider.stream({
+      messages: [{ role: 'user', content: 'Think about this' }],
+      tools: [],
+      toolChoice: 'none'
+    }, new AbortController().signal))
+    expect(body.output_config).toEqual({ effort: 'high' })
+  })
+
   it('groups parallel tool results into one user message and flags errors', async () => {
     let body: Record<string, unknown> = {}
     const provider = new AnthropicChatProvider({

@@ -4,8 +4,10 @@ On macOS, the voice worker requires Node.js on PATH. Install Node.js from
 Settings → General if it is missing.
 
 Phase 1 gave 20x ears. This gives it a voice: it reads an agent answer aloud on
-the desktop. Speech is produced on this computer. No text and no audio leave the
-device.
+the desktop. With the default engines speech is produced on this computer, and
+no text and no audio leave the device. The one exception is the optional
+ElevenLabs engine (#64), which the user has to choose and acknowledge first; see
+[ElevenLabs](#elevenlabs-optional-online).
 
 Blueprint: the research subtask artifact `design.md`, §5.2 (provider contracts),
 §5.7 (spoken answers) and §5.10 (model management).
@@ -14,9 +16,10 @@ Blueprint: the research subtask artifact `design.md`, §5.2 (provider contracts)
 
 ## What is in it
 
-- Two speech engines behind one contract: the voice the operating system
-  already has, and a neural model that runs through the same `sherpa-onnx-node`
-  runtime speech recognition installs.
+- Three speech engines behind one contract: the voice the operating system
+  already has, a neural model that runs through the same `sherpa-onnx-node`
+  runtime speech recognition installs, and — only when the user opts in —
+  ElevenLabs over the network with the user's own key.
 - An answer is read as it is written, not after the agent stops.
 - An isolated synthesis worker. One sentence is produced at a time and is sent
   the moment it exists, so playback starts after the first sentence.
@@ -32,7 +35,8 @@ Blueprint: the research subtask artifact `design.md`, §5.2 (provider contracts)
 
 ## What is not in it
 
-OpenAI Realtime, LiveKit, a wake word, and speaking on mobile. The contracts in
+OpenAI Realtime, LiveKit, a wake word, speaking on mobile, and ElevenLabs speech
+to text, agents, voice cloning or Voice Library management. The contracts in
 `src/shared/voice-tts.ts` keep a place for each of them.
 
 ---
@@ -105,6 +109,94 @@ The text of an answer is written to a temporary file and the file is named on
 the command line. No part of an answer is ever interpolated into a command
 string, so an answer that contains quotes or shell characters cannot change the
 command that runs.
+
+---
+
+## ElevenLabs (optional, online)
+
+A hosted voice for users who want it, with their own ElevenLabs API key. The
+system and downloaded voices stay the default, stay available, and need no
+network; nothing is sent anywhere unless ElevenLabs is selected.
+
+### Before it can be chosen
+
+Settings → Voice shows a disclosure first, and the engine is refused — in main,
+not only in the page — until it is acknowledged
+(`voice_tts_elevenlabs_disclosure = 'true'`):
+
+- the text of every spoken reply, preview and report is sent to ElevenLabs and
+  leaves this computer;
+- generation uses the ElevenLabs account and may consume paid credits;
+- ElevenLabs' terms, privacy policy and data-retention rules apply.
+
+### The key
+
+Stored as `elevenlabs_api_key`. The `_api_key` suffix puts it on the existing
+encrypted settings path: encrypted with the OS keychain when `safeStorage` is
+available, returned to the renderer only as the "set" marker by `settings:get`,
+and never overwritten by that marker. The page's key field is write-only — it
+sends the key once over `voice:tts:elevenlabs:setKey` and clears itself — and
+every answer is the speech snapshot, whose `elevenlabs.keySet` says only whether
+a key is saved.
+
+Main reads the key from the settings row at the moment of each request and
+puts it in one header, `xi-api-key`. It is never in a URL, a WebSocket message,
+an IPC payload, a transcript, or a log line: failures are logged by kind only.
+
+### Voices and models
+
+Saving a key validates it (`GET /v1/user/subscription`, which also gives the
+character allowance), lists every voice of the account through the paginated
+`GET /v2/voices` (following `next_page_token`), and lists the models from
+`GET /v1/models`. Only models with `can_do_text_to_speech` that the WebSocket
+endpoint accepts are offered (`eleven_v3` is HTTP-only and is left out). The
+default is `eleven_flash_v2_5`, the lowest-latency model, which is what a spoken
+conversation needs.
+
+The voice and the model are remembered (`voice_tts_elevenlabs_voice_id`,
+`voice_tts_elevenlabs_model_id`), so switching to a local voice and back keeps
+them. The voice picker and the Listen preview work as for the other engines.
+
+### Streaming
+
+`ElevenLabsTtsClient` (`src/main/voice/voice-elevenlabs.ts`) implements the same
+passage contract as the synthesis worker — `speak` (open or closed), `append`,
+`finish`, `cancel`, and `chunk` / `done` / `error` events — so
+`VoiceSpeechService` routes a passage to whichever producer the selected engine
+names and everything after it is shared: correlation, sentence splitting,
+barge-in and the renderer's playback queue.
+
+One passage is one connection to
+`wss://api.elevenlabs.io/v1/text-to-speech/<voice>/stream-input` with
+`output_format=pcm_24000` (the same 16-bit mono PCM the local voices produce)
+and `auto_mode=true`. The first message carries the voice settings (speed
+clamped to ElevenLabs' 0.7–1.2); each finished sentence is sent as it is
+written, so playback begins while a long reply is still being generated. At the
+end of the turn `finish` sends the end-of-stream message (`{"text": ""}`), which
+makes the server generate whatever it still holds, so a short reply is never
+left in its buffer. A lone space keeps an open passage alive between slow
+sentences.
+
+Stopping, barge-in, closing Commander voice mode, changing engine and shutting
+down all close the connection. A message that arrives on a closed passage is
+dropped, so audio from a cancelled reply is never heard later. Nothing is
+resent and no other provider is tried.
+
+### Errors
+
+Every failure is mapped to a kind with a fix, shown in Settings → Voice and on
+the status line. The written reply is never held up: speech simply stays quiet.
+
+| Kind | From | What the user is told to do |
+|---|---|---|
+| `auth` | 401/403, a refused handshake | replace the key |
+| `quota` | 402, "quota"/"credits" in the error | add credits, or use a local voice |
+| `rate_limit` | 429, "too many"/"concurrent" | wait, then Reload |
+| `unsupported_model` | 400/404/422 naming the model | choose another model |
+| `network` | no answer, timeout, 5xx, dropped connection | check the connection, then Reload |
+
+After a failed listing, no new request is made by itself for 30 seconds, so a
+bad key does not cost a request on every attempt to speak.
 
 ---
 
@@ -202,7 +294,7 @@ recognised, so an answer that arrives after it is not read.
 
 ## What is read, and what is not
 
-Only these five reasons produce speech, and each has its own condition:
+Only these six reasons produce speech, and each has its own condition:
 
 | Reason | Condition |
 |---|---|
@@ -211,6 +303,7 @@ Only these five reasons produce speech, and each has its own condition:
 | “read the last answer” | always: the user asked for it |
 | the voice sample in settings | always |
 | the speak button on a message | always |
+| a reply or report in Commander voice mode | always: opening voice mode was the request |
 
 A code block, a table, a file path, a link, a heading mark and every other piece
 of Markdown punctuation are removed before anything is spoken. A code block is
@@ -536,7 +629,10 @@ previous one is still being heard, so its length costs nothing.
 | `src/main/voice/voice-tts-worker.js` | The synthesis worker (plain CommonJS) |
 | `src/main/voice/voice-tts-worker-client.ts` | Worker lifecycle |
 | `src/main/voice/voice-system-voices.ts` | The voices the system already has |
-| `src/main/voice/voice-speech-service.ts` | Policy, correlation, queue, barge-in |
+| `src/main/voice/voice-speech-service.ts` | Policy, correlation, queue, barge-in, engine routing |
+| `src/main/voice/voice-elevenlabs.ts` | ElevenLabs REST listing, error mapping, WebSocket streaming |
+| `src/main/voice/commander-voice.ts` | Commander voice mode: speaks replies and reports, barge-in |
+| `src/renderer/src/components/settings/tabs/ElevenLabsSettings.tsx` | Disclosure, key, model |
 | `src/renderer/src/lib/voice-playback.ts` | Web Audio playback queue |
 | `src/renderer/src/components/voice/SpeakMessageButton.tsx` | Read one message |
 | `src/renderer/src/components/settings/tabs/SpokenAnswerSettings.tsx` | Settings |

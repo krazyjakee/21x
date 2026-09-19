@@ -74,6 +74,8 @@ interface PiSession {
   promptMayBeCommandOnly: boolean
   closing: boolean
   mcpConfigPath?: string
+  /** Tail of everything Pi wrote to stderr, so an early exit can be explained. */
+  stderrTail: string
 }
 
 interface PiUiRequest {
@@ -267,6 +269,7 @@ export class PiAdapter implements CodingAgentAdapter {
       promptMayBeCommandOnly: false,
       closing: false,
       mcpConfigPath,
+      stderrTail: '',
     }
   }
 
@@ -361,8 +364,13 @@ export class PiAdapter implements CodingAgentAdapter {
       }
     })
     session.process.stderr.on('data', (chunk: Buffer | string) => {
-      const length = chunk.toString().trim().length
-      if (length > 0) console.warn(`[PiAdapter/${session.id}] Pi wrote ${length} character(s) to stderr`)
+      const text = chunk.toString().trim()
+      if (!text) return
+      // Keep the tail for the exit error message, and log the actual content
+      // rather than just its length — a silent early exit is useless to
+      // diagnose when the only trace is "Pi wrote 35 character(s) to stderr".
+      session.stderrTail = `${session.stderrTail}\n${text}`.slice(-4000)
+      console.warn(`[PiAdapter/${session.id}] Pi stderr: ${text.slice(0, 1000)}`)
     })
     session.process.on('error', (error) => {
       session.status = 'error'
@@ -375,7 +383,15 @@ export class PiAdapter implements CodingAgentAdapter {
         session.status = 'error'
         session.lastError = `Pi exited before the turn completed (${signal || `code ${code}`})`
       }
-      this.rejectPending(session, new Error(session.lastError || (session.closing ? 'Pi process closed' : 'Pi process exited')))
+      // Surface what Pi actually printed when it died early (unknown model,
+      // auth failure, bad flag...) instead of a bare "Pi process exited".
+      const stderr = session.stderrTail.trim()
+      const detail = stderr ? `: ${stderr.split('\n').slice(-3).join(' ').slice(-300)}` : ''
+      // "Unknown option: --mcp-config" means the pi-mcp-adapter extension is
+      // missing, so Pi's CLI never registered the flag. Point the user at the fix.
+      const missingExtensionHint = stderr.includes('Unknown option: --mcp-config')
+        ? ' Install the Pi MCP extension first with: pi install npm:pi-mcp-adapter' : ''
+      this.rejectPending(session, new Error(session.lastError || (session.closing ? 'Pi process closed' : `Pi process exited${detail}${missingExtensionHint}`)))
       this.onDataAvailable?.(session.id)
     })
   }

@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import type { ChatMessage } from '../../../shared/chat'
+import type { ChatMessage, ChatReasoningEffort } from '../../../shared/chat'
 import {
   ChatAbortError,
   type ChatProvider,
@@ -17,9 +17,13 @@ const DEFAULT_MAX_TOKENS = 4096
 export interface AnthropicChatProviderOptions {
   apiKey: string
   model?: string
+  /** Model identifier sent to the API; defaults to `model` (see OpenAICompatibleChatProviderOptions). */
+  modelId?: string
   /** Only for proxies; the SDK's default is the Anthropic API. */
   baseUrl?: string
   maxTokens?: number
+  /** Claude's adaptive thinking level, matching the Claude Code effort control. */
+  reasoningEffort?: Exclude<ChatReasoningEffort, 'minimal'>
   /** Injected transport for tests. */
   fetch?: FetchLike
 }
@@ -75,13 +79,17 @@ function toStopReason(reason: Anthropic.Message['stop_reason']): ChatProviderSto
 export class AnthropicChatProvider implements ChatProvider {
   readonly id = 'anthropic'
   readonly model: string
+  private readonly modelId: string
   private readonly client: Anthropic
   private readonly maxTokens: number
+  private readonly reasoningEffort: Exclude<ChatReasoningEffort, 'minimal'> | undefined
 
   constructor(options: AnthropicChatProviderOptions) {
     if (!options.apiKey) throw new Error('Anthropic API key is required for the chat runtime')
     this.model = options.model || DEFAULT_ANTHROPIC_CHAT_MODEL
+    this.modelId = options.modelId || this.model
     this.maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS
+    this.reasoningEffort = options.reasoningEffort
     this.client = new Anthropic({
       apiKey: options.apiKey,
       ...(options.baseUrl ? { baseURL: options.baseUrl } : {}),
@@ -99,10 +107,11 @@ export class AnthropicChatProvider implements ChatProvider {
 
     const stream = this.client.messages.stream(
       {
-        model: this.model,
+        model: this.modelId,
         max_tokens: request.maxTokens ?? this.maxTokens,
         ...(request.system ? { system: request.system } : {}),
         messages: toAnthropicMessages(request.messages),
+        ...(this.reasoningEffort ? { output_config: { effort: this.reasoningEffort } } : {}),
         ...(tools.length > 0
           ? { tools, tool_choice: request.toolChoice === 'none' ? { type: 'none' as const } : { type: 'auto' as const } }
           : {})

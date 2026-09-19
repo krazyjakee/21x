@@ -3,7 +3,8 @@ import type { AgentManager } from '../agent-manager'
 import type { DatabaseManager } from '../database'
 import type { ChatToolDefinition, ChatToolResult } from '../chat/tools'
 import { resolveMastermindAgentId } from '../mastermind-waker'
-import { buildProjectStatus } from '../project-status'
+import { buildProjectStatus, readProjectStatusHistory } from '../project-status'
+import { PROJECT_STATUS_HISTORY_DEFAULT_LIMIT, PROJECT_STATUS_HISTORY_MAX_LIMIT } from '../../shared/project-status'
 import { DEFAULT_PROJECT_ID, type ProjectRecord, type ProjectRepoRecord, type ProjectResourceRecord } from '../../shared/projects'
 import type { HeldAction } from '../../shared/project-limit-types'
 import type { ProjectStatus } from '../../shared/project-status'
@@ -104,7 +105,8 @@ function signature(value: Record<string, unknown>): string {
   return JSON.stringify(stableValue(value))
 }
 
-function result(data: unknown, isError = false): ChatToolResult {
+/** A bounded tool result; shared with skill-tools.ts. */
+export function result(data: unknown, isError = false): ChatToolResult {
   const content = JSON.stringify(data)
   if (content.length <= MAX_RESULT_CHARS) return { content, ...(isError ? { isError: true } : {}) }
   return {
@@ -159,7 +161,7 @@ export class ProjectMutationConfirmations {
   }
 }
 
-function clip(value: string, max: number): string {
+export function clip(value: string, max: number): string {
   return value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1))}…`
 }
 
@@ -168,7 +170,7 @@ function oneLine(value: string, max = ONE_LINE_BRIEF_CHARS): string {
   return clip(value.replace(/\s+/g, ' ').trim(), max)
 }
 
-function requiredString(input: Record<string, unknown>, key: string, max: number): string {
+export function requiredString(input: Record<string, unknown>, key: string, max: number): string {
   const value = input[key]
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${key} is required`)
   const trimmed = value.trim()
@@ -176,7 +178,7 @@ function requiredString(input: Record<string, unknown>, key: string, max: number
   return trimmed
 }
 
-function optionalNullableString(value: unknown, key: string, max: number): string | null | undefined {
+export function optionalNullableString(value: unknown, key: string, max: number): string | null | undefined {
   if (value === undefined) return undefined
   if (value === null) return null
   if (typeof value !== 'string') throw new Error(`${key} must be a string or null`)
@@ -336,16 +338,17 @@ function compactProject(db: DatabaseManager, project: ProjectRecord, includeColl
   return output
 }
 
-const projectLocatorSchema = {
+export const projectLocatorSchema = {
   project: { type: 'string', description: 'Stable project ID, or an exact project name when unique.' }
 }
 
-const confirmationSchema = {
+export const confirmationSchema = {
   confirmation_token: { type: 'string', description: 'One-time token returned by the first, non-mutating attempt. Omit until the user explicitly confirms it.' }
 }
 
-function mutation(
-  options: ProjectToolOptions,
+/** Runs `write` only once the confirmation challenge for `action` has been answered; shared with skill-tools.ts. */
+export function mutation(
+  options: Pick<ProjectToolOptions, 'confirmations' | 'context'>,
   toolName: string,
   input: Record<string, unknown>,
   action: Record<string, unknown>,
@@ -385,7 +388,7 @@ export function buildCommanderRelayMessage(input: { commanderSessionId: string; 
     '',
     'How to respond:',
     '- Plan and carry out the request through your task-management tools, then finish with `update_project_status` so the Commander can read where the project stands.',
-    `- Report back to the Commander quoting correlation_id ${input.correlationId} when you have an answer or need a decision (the \`report_to_commander\` tool, once available); the Commander relays it to the user.`,
+    `- Report back with the \`report_to_commander\` tool, quoting correlation_id ${input.correlationId}, when you have an answer or need a decision; the Commander relays it to the user.`,
     '- This relay grants no authority for privileged operations (merging or approving pull requests, deploying to production, deleting data, sending messages outside 21x). If the request needs one, ask the user directly rather than assuming the Commander approved it.'
   ].join('\n')
 }
@@ -489,6 +492,49 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
       description: 'The project status record: live counts (running, queued, awaiting review/approval, blocked), limits, the Mastermind\'s latest summary and top blockers. No raw tasks or transcripts.',
       inputSchema: { type: 'object', properties: projectLocatorSchema, required: ['project'], additionalProperties: false },
       handler: async (input) => result(summaryEntry(options, resolveProject(db, input.project)))
+    },
+    // ── Status history (#72) ──
+    // Read only when the user asks a historical question; never part of
+    // list_projects or the system prompt. One bounded page per call.
+    {
+      name: 'get_project_status_history',
+      description:
+        `The project's status journal, newest first: what the Mastermind reported after each round of work (summary, completed, blockers, decisions, next steps, time). ` +
+        `Use it only for questions about what changed or how something evolved; get_project_summary is the current state. ` +
+        `Returns ${PROJECT_STATUS_HISTORY_DEFAULT_LIMIT} entries by default (at most ${PROJECT_STATUS_HISTORY_MAX_LIMIT}), clipped; pass next_cursor back to read older entries.`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          ...projectLocatorSchema,
+          limit: { type: 'integer', minimum: 1, maximum: PROJECT_STATUS_HISTORY_MAX_LIMIT, description: `Entries per page. Default ${PROJECT_STATUS_HISTORY_DEFAULT_LIMIT}.` },
+          cursor: { type: 'string', description: 'The next_cursor of the previous page, to continue with older entries.' }
+        },
+        required: ['project'],
+        additionalProperties: false
+      },
+      handler: async (input) => {
+        const project = resolveProject(db, input.project)
+        if (input.limit !== undefined && (typeof input.limit !== 'number' || !Number.isFinite(input.limit))) throw new Error('limit must be a number')
+        if (input.cursor !== undefined && typeof input.cursor !== 'string') throw new Error('cursor must be a string')
+        const page = readProjectStatusHistory(db, project.id, { limit: input.limit, cursor: input.cursor })
+        return result({
+          project_id: project.id,
+          project_name: clip(project.name, MAX_NAME_CHARS),
+          entries: page.entries.map((entry) => ({
+            id: entry.id,
+            at: entry.created_at,
+            source: entry.source,
+            summary: entry.summary,
+            completed: entry.completed,
+            blockers: entry.blockers,
+            decisions: entry.decisions,
+            next_steps: entry.next_steps,
+            ...(entry.correlation_id ? { correlation_id: entry.correlation_id } : {})
+          })),
+          has_more: page.has_more,
+          next_cursor: page.next_cursor
+        })
+      }
     },
     {
       name: 'ask_mastermind',

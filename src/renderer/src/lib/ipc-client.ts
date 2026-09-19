@@ -41,7 +41,7 @@ import type {
   ProjectChangedEvent
 } from '@shared/projects'
 import type { HeldAction, ProjectLimitState } from '@shared/project-limit-types'
-import type { ProjectStatus } from '@shared/project-status'
+import type { ProjectStatus, ProjectStatusHistoryPage } from '@shared/project-status'
 import type { ProjectOverviewEntry } from '@shared/project-overview'
 import type { MastermindMemory } from '@shared/mastermind-memory'
 
@@ -500,6 +500,9 @@ export const projectApi = {
     typeof window.electronAPI.projects.onChanged === 'function' ? window.electronAPI.projects.onChanged(callback) : () => {},
   /** Project status (#58): counts computed now, plus the Mastermind's latest summary. */
   getStatus: (projectId: string): Promise<ProjectStatus> => window.electronAPI.projects.getStatus(projectId),
+  /** Status history (#72): one page of the Mastermind's journal, newest first; pass `next_cursor` back for older entries. */
+  getStatusHistory: (projectId: string, query?: { limit?: number; cursor?: string | null }): Promise<ProjectStatusHistoryPage> =>
+    window.electronAPI.projects.getStatusHistory(projectId, query),
   /** Fires when the Mastermind writes a new summary through `update_project_status`. */
   onStatusChanged: (callback: (event: { projectId: string }) => void): (() => void) =>
     typeof window.electronAPI.projects.onStatusChanged === 'function' ? window.electronAPI.projects.onStatusChanged(callback) : () => {},
@@ -561,6 +564,16 @@ export const skillApi = {
 
   delete: (id: string): Promise<boolean> => {
     return window.electronAPI.skills.delete(id)
+  },
+
+  /** Promote to global (null) or move into a project (#74). */
+  setProject: (id: string, projectId: string | null): Promise<Skill | undefined> => {
+    return window.electronAPI.skills.setProject(id, projectId)
+  },
+
+  /** A skill changed outside the Skills view (the Commander); absent on older preloads. */
+  onChanged: (callback: (event: { skillId: string; kind: string }) => void): (() => void) => {
+    return typeof window.electronAPI.skills.onChanged === 'function' ? window.electronAPI.skills.onChanged(callback) : () => {}
   }
 }
 
@@ -832,6 +845,9 @@ export const commanderApi = {
   listMessages: (sessionId: string): Promise<{ messages: CommanderMessage[]; activeTurnId: string | null }> =>
     window.electronAPI.commander.listMessages(sessionId),
   markRead: (sessionId: string): Promise<CommanderSession | null> => window.electronAPI.commander.markRead(sessionId),
+  /** Tells main which session the view shows (#62): a report for it is relayed at once, others only queue as unread. */
+  setActiveSession: (sessionId: string | null): Promise<void> =>
+    typeof window.electronAPI.commander.setActiveSession === 'function' ? window.electronAPI.commander.setActiveSession(sessionId) : Promise.resolve(),
   send: (sessionId: string, text: string): Promise<{ turnId: string; message: CommanderMessage }> => window.electronAPI.commander.send(sessionId, text),
   cancel: (sessionId: string): Promise<{ cancelled: boolean }> => window.electronAPI.commander.cancel(sessionId),
   onEvent: (callback: (event: CommanderEvent) => void): (() => void) => window.electronAPI.commander.onEvent(callback)
@@ -848,4 +864,23 @@ export const cliMcpApi = {
   setToolEnabled: (ref: CliMcpServerRef & { tool: string; enabled: boolean }): Promise<CliMcpMutationResult> =>
     window.electronAPI.cliMcp.setToolEnabled(ref),
   probe: (ref: CliMcpServerRef): Promise<CliMcpProbeResult> => window.electronAPI.cliMcp.probe(ref)
+}
+
+// ── Voice: ElevenLabs engine and Commander voice mode (#64) ──
+// The key is sent to main and never read back; every call returns the speech
+// snapshot, which only says whether a key is set.
+
+export const voiceElevenLabsApi = {
+  setKey: (key: string): Promise<VoiceTtsSnapshot> => window.electronAPI.voiceElevenLabs.setKey(key),
+  clearKey: (): Promise<VoiceTtsSnapshot> => window.electronAPI.voiceElevenLabs.clearKey(),
+  acceptDisclosure: (): Promise<VoiceTtsSnapshot> => window.electronAPI.voiceElevenLabs.acceptDisclosure(),
+  refresh: (): Promise<VoiceTtsSnapshot> => window.electronAPI.voiceElevenLabs.refresh(),
+  setModel: (modelId: string): Promise<VoiceTtsSnapshot> => window.electronAPI.voiceElevenLabs.setModel(modelId)
+}
+
+export const commanderVoiceApi = {
+  setActive: (sessionId: string | null): Promise<{ active: string | null }> => window.electronAPI.commanderVoice.setActive(sessionId),
+  bargeIn: (sessionId: string): Promise<{ cancelled: boolean }> => window.electronAPI.commanderVoice.bargeIn(sessionId),
+  send: (sessionId: string, text: string): Promise<{ turnId: string; message: CommanderMessage }> =>
+    window.electronAPI.commanderVoice.send(sessionId, text)
 }

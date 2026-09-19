@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { settingsApi, voiceApi, voiceTtsApi } from '@/lib/ipc-client'
+import { settingsApi, voiceApi, voiceElevenLabsApi, voiceTtsApi } from '@/lib/ipc-client'
 import { voiceCapture } from '@/lib/voice-capture'
 import { voicePlayback } from '@/lib/voice-playback'
 import { BargeInGate } from '@/lib/voice-barge-in'
@@ -126,6 +126,20 @@ interface VoiceStoreState {
   previewVoice: (voiceId: string) => Promise<void>
   speakText: (text: string, taskId?: string) => Promise<void>
   stopSpeaking: () => Promise<void>
+  /**
+   * Stops speech the user started by pressing a button — playback in this
+   * tick, synthesis in main — without the round trip. Used by barge-in paths
+   * that also cancel something else, such as a Commander turn (#64).
+   */
+  stopPlaybackNow: () => void
+
+  // ── ElevenLabs (#64) ────────────────────────────────────
+  // Every action returns the snapshot; the key is never read back.
+  setElevenLabsKey: (key: string) => Promise<boolean>
+  clearElevenLabsKey: () => Promise<void>
+  acceptElevenLabsDisclosure: () => Promise<void>
+  refreshElevenLabs: () => Promise<void>
+  setElevenLabsModel: (modelId: string) => Promise<void>
 }
 
 const IDLE_ENGINE: VoiceEngineStatus = { state: 'model_missing', message: 'No speech model is installed yet.' }
@@ -548,6 +562,35 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
   stopSpeaking: async () => {
     stopPlaybackForUser()
     await voiceTtsApi.stop()
+  },
+
+  stopPlaybackNow: () => stopPlaybackForUser(),
+
+  // ── ElevenLabs (#64) ──────────────────────────────────────
+  // A failure is shown on the settings page from the snapshot's `elevenlabs.error`;
+  // an exception from main (engine refused, model rejected) goes to `result`.
+
+  setElevenLabsKey: async (key) => {
+    try {
+      const tts = await voiceElevenLabsApi.setKey(key)
+      set({ tts })
+      return tts.elevenlabs.keySet && !tts.elevenlabs.error
+    } catch (err) {
+      set({ result: { kind: 'error', message: err instanceof Error ? err.message : String(err), at: Date.now() } })
+      return false
+    }
+  },
+
+  clearElevenLabsKey: async () => set({ tts: await voiceElevenLabsApi.clearKey() }),
+  acceptElevenLabsDisclosure: async () => set({ tts: await voiceElevenLabsApi.acceptDisclosure() }),
+  refreshElevenLabs: async () => set({ tts: await voiceElevenLabsApi.refresh() }),
+
+  setElevenLabsModel: async (modelId) => {
+    try {
+      set({ tts: await voiceElevenLabsApi.setModel(modelId) })
+    } catch (err) {
+      set({ result: { kind: 'error', message: err instanceof Error ? err.message : String(err), at: Date.now() } })
+    }
   },
 }))
 

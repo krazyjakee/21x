@@ -6,8 +6,10 @@
  * §5.10 model management).
  *
  * Phase 1 shipped speech to text and left `VoiceCapabilities.tts` false. This
- * module adds the other half: 20x speaks an answer aloud. Speech is produced on
- * this computer. No text and no audio leave the device.
+ * module adds the other half: 20x speaks an answer aloud. With the `system` and
+ * `local` engines speech is produced on this computer and no text and no audio
+ * leave the device. The `elevenlabs` engine is the one explicit exception: the
+ * user opts into it, and then the text to be spoken is sent to ElevenLabs.
  *
  * This module is imported by the main process, the preload bridge, the
  * renderer, the worker and the mobile client, so it must stay free of Node and
@@ -26,10 +28,18 @@
  * `local` uses a neural model through the same `sherpa-onnx-node` runtime that
  * speech to text installs. It sounds better and it needs both the runtime and a
  * downloaded model.
+ *
+ * `elevenlabs` is a hosted voice the user brings their own API key for. It is
+ * never the default, it needs the network, and the text of every passage
+ * leaves the device — so it cannot be selected until the disclosure has been
+ * acknowledged (#64).
  */
-export type VoiceTtsEngineId = 'system' | 'local'
+export type VoiceTtsEngineId = 'system' | 'local' | 'elevenlabs'
 
-export const VOICE_TTS_ENGINE_IDS: readonly VoiceTtsEngineId[] = ['system', 'local']
+export const VOICE_TTS_ENGINE_IDS: readonly VoiceTtsEngineId[] = ['system', 'local', 'elevenlabs']
+
+/** The engines that work offline. Text never leaves the device with these. */
+export const VOICE_TTS_OFFLINE_ENGINE_IDS: readonly VoiceTtsEngineId[] = ['system', 'local']
 
 export function isVoiceTtsEngineId(value: unknown): value is VoiceTtsEngineId {
   return typeof value === 'string' && VOICE_TTS_ENGINE_IDS.includes(value as VoiceTtsEngineId)
@@ -37,7 +47,10 @@ export function isVoiceTtsEngineId(value: unknown): value is VoiceTtsEngineId {
 
 /** One selectable speaker. */
 export interface VoiceTtsVoice {
-  /** `local:<modelId>:<speakerId>` or `system:<name>`. Stable across restarts. */
+  /**
+   * `local:<modelId>:<speakerId>`, `system:<name>` or
+   * `elevenlabs:<voice_id>`. Stable across restarts.
+   */
   id: string
   label: string
   engine: VoiceTtsEngineId
@@ -99,6 +112,87 @@ export interface VoiceTtsSnapshot {
   models: VoiceTtsModelState[]
   /** True while something is being spoken. */
   speaking: boolean
+  /** The hosted engine's account state. Never carries the key (#64). */
+  elevenlabs: VoiceTtsElevenLabsState
+}
+
+// ── ElevenLabs (#64) ────────────────────────────────────────
+
+/**
+ * Why a call to ElevenLabs failed, in the terms the settings page can act on.
+ *
+ * Each kind has its own fix — a new key, more credits, a slower pace, another
+ * model, the network — so the kind travels with the message rather than being
+ * guessed from it.
+ */
+export type VoiceTtsElevenLabsErrorKind =
+  | 'auth'
+  | 'quota'
+  | 'rate_limit'
+  | 'unsupported_model'
+  | 'network'
+  | 'unknown'
+
+export interface VoiceTtsElevenLabsError {
+  kind: VoiceTtsElevenLabsErrorKind
+  message: string
+}
+
+/** One ElevenLabs model that the streaming endpoint can use. */
+export interface VoiceTtsElevenLabsModel {
+  id: string
+  name: string
+  description: string
+  /** BCP-47-ish tags the model covers, as ElevenLabs reports them. */
+  languages: string[]
+}
+
+/** The ElevenLabs part of the settings snapshot. The key itself never crosses IPC. */
+export interface VoiceTtsElevenLabsState {
+  /** True when a key is stored. The renderer never learns its value. */
+  keySet: boolean
+  /** The disclosure was acknowledged. Required before the engine can be selected. */
+  disclosureAccepted: boolean
+  /** The selected model id; `VOICE_TTS_ELEVENLABS_DEFAULT_MODEL` until chosen. */
+  modelId: string
+  /** Models compatible with the streaming endpoint. Empty until loaded. */
+  models: VoiceTtsElevenLabsModel[]
+  /** Voices of the account. Empty until loaded. Also in `voices` when the engine is selected. */
+  voices: VoiceTtsVoice[]
+  /** The last failure, or null when the last call succeeded. */
+  error: VoiceTtsElevenLabsError | null
+  /** Characters used and allowed this billing period, when the account says. */
+  usage: { used: number; limit: number } | null
+}
+
+/**
+ * The default model. Flash is the lowest-latency family, which is what a
+ * spoken conversation needs; quality models can be picked in settings.
+ */
+export const VOICE_TTS_ELEVENLABS_DEFAULT_MODEL = 'eleven_flash_v2_5'
+
+/**
+ * What the user acknowledges before ElevenLabs can be selected. Shown in
+ * settings and recorded in `VOICE_TTS_SETTING_KEYS.elevenlabsDisclosure`.
+ */
+export const VOICE_TTS_ELEVENLABS_DISCLOSURE = [
+  'The text of every spoken reply, preview and report is sent to ElevenLabs to be turned into speech. It leaves this computer.',
+  'Generation uses your ElevenLabs account and may consume paid credits.',
+  'ElevenLabs’ terms of service, privacy policy and data-retention rules apply to that text.',
+] as const
+
+export const VOICE_TTS_ELEVENLABS_TERMS_URL = 'https://elevenlabs.io/terms-of-use'
+export const VOICE_TTS_ELEVENLABS_PRIVACY_URL = 'https://elevenlabs.io/privacy-policy'
+
+/** The empty state, for a build or a moment where nothing is known yet. */
+export const VOICE_TTS_ELEVENLABS_EMPTY_STATE: VoiceTtsElevenLabsState = {
+  keySet: false,
+  disclosureAccepted: false,
+  modelId: VOICE_TTS_ELEVENLABS_DEFAULT_MODEL,
+  models: [],
+  voices: [],
+  error: null,
+  usage: null,
 }
 
 // ── Model catalogue ─────────────────────────────────────────
@@ -197,6 +291,12 @@ export type VoiceSpeechSource =
   | 'preview'
   /** The user pressed the speak button on one message. */
   | 'manual'
+  /**
+   * A reply or a report in a voice conversation the user opened on purpose —
+   * Commander voice mode (#64). Opening the conversation is the request to be
+   * spoken to, so it needs neither the automatic switch nor a voice turn.
+   */
+  | 'conversation'
 
 export interface VoiceSpeechRequest {
   text: string
@@ -255,6 +355,17 @@ export const VOICE_TTS_SETTING_KEYS = {
   maxChars: 'voice_tts_max_chars',
   speakActionResults: 'voice_tts_speak_results',
   onlyVoiceTurns: 'voice_tts_only_voice_turns',
+  /**
+   * The ElevenLabs key (#64). The `_api_key` suffix is what puts it on the
+   * encrypted settings path: stored with the OS keychain when available, read
+   * back as plaintext in main only, and shown to the renderer as a marker.
+   */
+  elevenlabsApiKey: 'elevenlabs_api_key',
+  /** `elevenlabs:<voice_id>`, remembered across engine changes. */
+  elevenlabsVoiceId: 'voice_tts_elevenlabs_voice_id',
+  elevenlabsModelId: 'voice_tts_elevenlabs_model_id',
+  /** 'true' once the user has acknowledged the disclosure. */
+  elevenlabsDisclosure: 'voice_tts_elevenlabs_disclosure',
 } as const
 
 /**

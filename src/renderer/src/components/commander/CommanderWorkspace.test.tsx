@@ -2,19 +2,35 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { CommanderEvent, CommanderMessage, CommanderSession } from '@shared/commander'
 
-const api = vi.hoisted(() => ({
-  listSessions: vi.fn(),
-  createSession: vi.fn(),
-  renameSession: vi.fn(),
-  archiveSession: vi.fn(),
-  listMessages: vi.fn(),
-  markRead: vi.fn(),
-  send: vi.fn(),
-  cancel: vi.fn(),
-  onEvent: vi.fn()
+const mocks = vi.hoisted(() => ({
+  commanderApi: {
+    listSessions: vi.fn(),
+    createSession: vi.fn(),
+    renameSession: vi.fn(),
+    archiveSession: vi.fn(),
+    listMessages: vi.fn(),
+    markRead: vi.fn(),
+    setActiveSession: vi.fn(async () => undefined),
+    send: vi.fn(),
+    cancel: vi.fn(),
+    onEvent: vi.fn()
+  },
+  settingsApi: {
+    getAll: vi.fn(),
+    set: vi.fn()
+  },
+  agentApi: {
+    getAll: vi.fn()
+  },
+  agentSessionApi: {},
+  onAgentStatus: vi.fn(),
+  onTranscriptChanged: vi.fn()
 }))
-vi.mock('@/lib/ipc-client', () => ({ commanderApi: api }))
+vi.mock('@/lib/ipc-client', () => mocks)
 
+const api = mocks.commanderApi
+
+import { useAgentStore } from '@/stores/agent-store'
 import { useCommanderStore } from '@/stores/commander-store'
 import { CommanderWorkspace } from './CommanderWorkspace'
 import { toolCallLabel } from './tool-call-label'
@@ -43,6 +59,7 @@ function message(over: Partial<CommanderMessage> = {}): CommanderMessage {
 let emit: (event: CommanderEvent) => void = () => {}
 
 beforeEach(() => {
+  useAgentStore.setState({ agents: [], isLoading: false, error: null, sessions: new Map() })
   useCommanderStore.setState({
     sessions: [],
     selectedSessionId: null,
@@ -60,6 +77,17 @@ beforeEach(() => {
   })
   api.listMessages.mockResolvedValue({ messages: [], activeTurnId: null })
   api.markRead.mockImplementation(async (id: string) => session({ id, unread_count: 0 }))
+  mocks.settingsApi.getAll.mockResolvedValue({})
+  mocks.settingsApi.set.mockResolvedValue(undefined)
+  mocks.agentApi.getAll.mockResolvedValue([{
+    id: 'claude-agent',
+    name: 'Claude Agent',
+    server_url: '',
+    config: { coding_agent: 'claude-code', model: 'claude-saved', reasoning_effort: 'medium' },
+    is_default: true,
+    created_at: '',
+    updated_at: ''
+  }])
 })
 
 afterEach(() => {
@@ -145,6 +173,82 @@ describe('CommanderWorkspace', () => {
     expect(screen.queryByTestId('commander-streaming')).toBeNull()
     expect(screen.getByText('All good.')).toBeTruthy()
     expect(screen.getByLabelText('Send')).toBeTruthy()
+  })
+
+  it('does not duplicate messages when the open session is selected again', async () => {
+    api.listSessions.mockResolvedValue([session()])
+    api.listMessages.mockResolvedValue({
+      messages: [message({ id: 'u1', content: 'Hi there', created_at: 1 })],
+      activeTurnId: null
+    })
+    render(<CommanderWorkspace />)
+    fireEvent.click(await screen.findByText('Launch'))
+    expect(await screen.findByText('Hi there')).toBeTruthy()
+
+    // A stored reply arrives while the session is open...
+    act(() => {
+      emit({ type: 'messages_appended', sessionId: 's1', messages: [message({ id: 'a1', role: 'assistant', content: 'Hello!', created_at: 2 })] })
+    })
+    expect(screen.getByText('Hello!')).toBeTruthy()
+
+    // ...and the next selection click refetches the same history.
+    api.listMessages.mockResolvedValue({
+      messages: [
+        message({ id: 'u1', content: 'Hi there', created_at: 1 }),
+        message({ id: 'a1', role: 'assistant', content: 'Hello!', created_at: 2 })
+      ],
+      activeTurnId: null
+    })
+    fireEvent.click(within(screen.getByLabelText('Commander sessions')).getByText('Launch'))
+    await waitFor(async () => expect(api.listMessages).toHaveBeenCalledTimes(2))
+    expect(screen.getAllByText('Hi there')).toHaveLength(1)
+    expect(screen.getAllByText('Hello!')).toHaveLength(1)
+  })
+
+  it('persists model and thinking choices before sending', async () => {
+    api.listSessions.mockResolvedValue([session()])
+    api.send.mockResolvedValue({ turnId: 't-config', message: message({ content: 'Hello' }) })
+    mocks.agentApi.getAll.mockResolvedValue([
+      {
+        id: 'claude-agent', name: 'Claude Agent', server_url: '',
+        config: { coding_agent: 'claude-code', model: 'claude-saved', reasoning_effort: 'medium' },
+        is_default: true, created_at: '', updated_at: ''
+      },
+      {
+        id: 'codex-agent', name: 'Codex Agent', server_url: '',
+        config: { coding_agent: 'codex', model: 'gpt-saved', reasoning_effort: 'low' },
+        is_default: false, created_at: '', updated_at: ''
+      }
+    ])
+    render(<CommanderWorkspace />)
+    fireEvent.click(await screen.findByText('Launch'))
+
+    await waitFor(() => expect(screen.getByLabelText('Commander model')).not.toBeDisabled())
+    fireEvent.change(screen.getByLabelText('Commander model'), {
+      target: { value: 'codex-agent' }
+    })
+    fireEvent.change(screen.getByLabelText('Thinking level'), { target: { value: 'high' } })
+    fireEvent.change(screen.getByLabelText('Message the Commander'), { target: { value: 'Hello' } })
+    fireEvent.click(screen.getByLabelText('Send'))
+
+    await waitFor(() => expect(api.send).toHaveBeenCalledWith('s1', 'Hello'))
+    expect(mocks.settingsApi.set).toHaveBeenCalledWith('chat_provider', 'openai-compatible')
+    expect(mocks.settingsApi.set).toHaveBeenCalledWith('chat_model', 'gpt-saved')
+    expect(mocks.settingsApi.set).toHaveBeenCalledWith('chat_reasoning_effort', 'high')
+    const lastSettingWrite = Math.max(...mocks.settingsApi.set.mock.invocationCallOrder)
+    expect(lastSettingWrite).toBeLessThan(api.send.mock.invocationCallOrder[0])
+  })
+
+  it('does not offer or send with an unconfigured model', async () => {
+    api.listSessions.mockResolvedValue([session()])
+    mocks.agentApi.getAll.mockResolvedValue([])
+    render(<CommanderWorkspace />)
+    fireEvent.click(await screen.findByText('Launch'))
+
+    expect(await screen.findByText('No configured Commander model')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('Message the Commander'), { target: { value: 'Hello' } })
+    expect(screen.getByLabelText('Send')).toBeDisabled()
+    expect(api.send).not.toHaveBeenCalled()
   })
 
   it('does not restart streaming when the send reply arrives after the turn is over', async () => {

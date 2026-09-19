@@ -354,9 +354,50 @@ The Mastermind writes the narrative with the project-scoped tool
 the same project is refused). Its prompt tells it to call the tool after a
 meaningful round of work and after every wake-up. The renderer reads
 `project:getStatus` and is pinged on `project:statusChanged`; the project
-switcher and Settings → Projects show the counts, the summary and its age. A
-durable journal of earlier snapshots (#72) adds a table beside
-`project_status` without changing this snapshot.
+switcher and Settings → Projects show the counts, the summary and its age.
+
+### Status journal (#72)
+
+`project_status_journal` (`id`, `project_id` FK cascade, `summary`,
+`completed` / `blockers` / `decisions` / `next_steps` JSON lists, `source`
+(`mastermind` | `compaction`), `correlation_id`, `created_at`; indexed on
+`(project_id, created_at DESC, id DESC)`) keeps one row per status update
+beside the snapshot. `update_project_status` accepts the optional lists
+(`completed`, `blockers` — default `top_blockers` —, `decisions`,
+`next_steps`, at most 8 items of 200 characters each) and a
+`correlation_id`; `DatabaseManager.recordProjectStatus` writes the snapshot
+and the entry in one transaction. The snapshot stays the cheap read and its
+shape is unchanged; nothing from the journal is ever put in a system prompt
+or in `list_projects`.
+
+Reads are pages: `readProjectStatusHistory` (`src/main/project-status.ts`)
+returns entries newest first over `(created_at, id)`, with an opaque cursor
+(the boundary of the last entry served) so pages stay stable while new
+entries arrive. Default 5 entries, hard maximum 20; each entry's summary and
+lists are clipped, and entries are dropped from the end of a page that would
+exceed the page cap (`has_more` and `next_cursor` then point at them). The
+Commander's `get_project_status_history(project, limit?, cursor?)` and the
+project editor's read-only **Status history** section (IPC
+`project:getStatusHistory`) both read through it.
+
+Retention: `DatabaseManager.compactProjectStatusJournal` runs at every start
+(`initialize()`) and rolls Mastermind entries older than 90 days into one
+`compaction` entry per project and calendar month: a dated line per folded
+summary (capped at 2,000 characters, newest lines kept) and the deduplicated
+union of each list (capped at 16 items), dated at the newest folded entry. An
+existing roll-up for the month absorbs late arrivals, so the run is idempotent.
+Rows go with their project (`ON DELETE CASCADE`); archiving leaves them.
+
+### Reporting to the Commander (#62)
+
+`report_to_commander(message, correlation_id?)` (route `/report_to_commander`;
+coordinator-only and project-forced like `update_project_status`, message
+capped at 4,000 characters) hands a report to the Commander through the seam
+in `src/main/commander/report-inbox.ts`; docs/commander.md describes where it
+lands. Section 11 of the Mastermind prompt tells it to answer Commander
+requests with it (quoting the relay's correlation id) and to report unasked
+when the user must decide something. `tell_commander` escalations (#66)
+reach the Commander the same way, without the Mastermind doing anything.
 
 ## Project limits, pause and escalation policy (#65, #66)
 

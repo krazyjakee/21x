@@ -8,7 +8,9 @@ import { buildSimilarTasksQuery } from '../task-search'
 import { afterTaskCreated, afterTaskUpdated, triggerTaskAutomation } from '../task-updates'
 import { DEFAULT_PROJECT_ID } from '../../shared/projects'
 import { listProjectRepos, projectGitDefaults, taskProjectId, validateProjectRepos } from '../agent-manager/project-repos'
+import { deliverMastermindReport } from '../commander/report-inbox'
 import { agentController, notifyRenderer } from './state'
+import { validateSkillAssignment } from './skill-routes'
 
 type ApiTask = Record<string, unknown>
 
@@ -192,7 +194,12 @@ function updateTask(db: DatabaseManager, params: Record<string, unknown>): unkno
   if (params.resolution !== undefined) data.resolution = params.resolution as string
   if (params.attachments !== undefined) data.attachments = params.attachments as UpdateTaskData['attachments']
   if (params.labels !== undefined) data.labels = params.labels as string[]
-  if (params.skill_ids !== undefined) data.skill_ids = params.skill_ids as string[]
+  if (params.skill_ids !== undefined) {
+    // #74: only global skills and the task's own project's may be assigned.
+    const badSkills = validateSkillAssignment(db, params.skill_ids, taskProjectId(current))
+    if (badSkills) return badSkills
+    data.skill_ids = params.skill_ids as string[]
+  }
   if (params.agent_id !== undefined) data.agent_id = params.agent_id as string | null
   // These let a caller with no window hand a task to its agent, or let it finish by itself.
   if (params.auto_start_agent !== undefined) data.auto_start_agent = params.auto_start_agent === true
@@ -238,7 +245,9 @@ function createSubtask(db: DatabaseManager, params: Record<string, unknown>): un
   if (params.next_subtask_ids !== undefined && !Array.isArray(params.next_subtask_ids)) {
     return { error: 'next_subtask_ids must be an array' }
   }
-  // A subtask shares its parent's project, so its repos must belong to it.
+  // A subtask shares its parent's project, so its repos and skills must belong to it (#74).
+  const badSkills = validateSkillAssignment(db, params.skill_ids, taskProjectId(parent))
+  if (badSkills) return badSkills
   let repos = parent.repos
   if (params.repos !== undefined) {
     const checked = validateProjectRepos(db, taskProjectId(parent), reposParam(params.repos), parent.repos ?? [])
@@ -326,6 +335,9 @@ function createTopLevelTask(db: DatabaseManager, params: Record<string, unknown>
   if (!db.getProject(projectId)) return { error: `Project not found: ${projectId}` }
   const checked = validateProjectRepos(db, projectId, reposParam(params.repos))
   if ('error' in checked) return checked
+  // #74: a task carries global skills and its own project's, never another project's.
+  const badSkills = validateSkillAssignment(db, params.skill_ids, projectId)
+  if (badSkills) return badSkills
 
   const task = createTask(db, {
     title: String(params.title),
@@ -383,12 +395,53 @@ function updateProjectStatus(db: DatabaseManager, params: Record<string, unknown
   if (!projectId) return { error: 'project_id is required' }
   const summary = typeof params.summary === 'string' ? params.summary.trim() : ''
   if (!summary) return { error: 'summary is required' }
-  if (params.top_blockers !== undefined && !Array.isArray(params.top_blockers)) return { error: 'top_blockers must be an array of strings' }
-  const blockers = ((params.top_blockers as unknown[] | undefined) ?? []).filter((item): item is string => typeof item === 'string')
-  const status = db.setProjectStatusSummary(projectId, summary, blockers)
-  if (!status) return { error: 'Project not found' }
+  // #72: the same write appends a journal entry with the structured highlights.
+  const lists: Record<string, string[] | undefined> = {}
+  for (const key of ['top_blockers', 'completed', 'blockers', 'decisions', 'next_steps'] as const) {
+    if (params[key] === undefined) continue
+    if (!Array.isArray(params[key])) return { error: `${key} must be an array of strings` }
+    lists[key] = (params[key] as unknown[]).filter((item): item is string => typeof item === 'string')
+  }
+  const written = db.recordProjectStatus(projectId, {
+    summary,
+    top_blockers: lists.top_blockers ?? [],
+    completed: lists.completed,
+    blockers: lists.blockers,
+    decisions: lists.decisions,
+    next_steps: lists.next_steps,
+    correlation_id: typeof params.correlation_id === 'string' ? params.correlation_id : null
+  })
+  if (!written) return { error: 'Project not found' }
   notifyRenderer?.('project:statusChanged', { projectId })
-  return { success: true, status }
+  return { success: true, status: written.status, journal_entry_id: written.entry.id }
+}
+
+const MAX_REPORT_CHARS = 4_000
+
+/**
+ * A Mastermind's report to the Commander (#62). The scope forces `project_id`
+ * like `update_project_status`; the message is capped and handed to the
+ * Commander through the report seam (commander/report-inbox.ts), which
+ * routes it to the right session. Nothing is stored here.
+ */
+function reportToCommander(db: DatabaseManager, params: Record<string, unknown>): unknown {
+  const projectId = projectFilter(params)
+  if (!projectId) return { error: 'project_id is required' }
+  if (!db.getProject(projectId)) return { error: 'Project not found' }
+  const message = typeof params.message === 'string' ? params.message.trim() : ''
+  if (!message) return { error: 'message is required' }
+  if (message.length > MAX_REPORT_CHARS) return { error: `message must be at most ${MAX_REPORT_CHARS} characters` }
+  const correlationId = typeof params.correlation_id === 'string' && params.correlation_id.trim() ? params.correlation_id.trim().slice(0, 100) : null
+  const delivery = deliverMastermindReport({ projectId, message, correlationId, source: 'mastermind' })
+  if (!delivery.delivered) return { error: delivery.detail }
+  return {
+    success: true,
+    session_id: delivery.sessionId,
+    routed_by: delivery.routedBy,
+    note: delivery.relayed
+      ? 'The Commander is relaying your report to the user now.'
+      : 'The report is queued in the Commander; the user sees it when they next open that conversation.'
+  }
 }
 
 export async function handleTaskRoute(db: DatabaseManager, route: string, params: Record<string, unknown>): Promise<unknown> {
@@ -431,6 +484,9 @@ export async function handleTaskRoute(db: DatabaseManager, route: string, params
 
     case '/update_project_status':
       return updateProjectStatus(db, params)
+
+    case '/report_to_commander':
+      return reportToCommander(db, params)
 
     default:
       return undefined

@@ -89,6 +89,7 @@ function makeSkillRecord(overrides: Partial<{
   id: string; name: string; description: string; content: string;
   confidence: number; uses: number; last_used: string; tags: string[];
   version: number; is_deleted: boolean; created_at: string; updated_at: string;
+  project_id: string | null;
 }> = {}) {
   return {
     id: 'skill-1',
@@ -104,6 +105,7 @@ function makeSkillRecord(overrides: Partial<{
     created_at: '2026-03-01',
     updated_at: '2026-03-06',
     preferred_model: null as string | null,
+    project_id: null as string | null,
     ...overrides,
   }
 }
@@ -588,6 +590,65 @@ describe('AgentManager skill file paths', () => {
       const md: string = generateAgentsMd(db, [], [], '/tmp/ws', 'agent-1', {})
 
       expect(md).not.toContain('Available MCP Servers & Tools')
+    })
+
+    it('documents Pi sessions with gateway namespaced names and the mcp() call shape', () => {
+      // Pi keeps every MCP tool behind the one `mcp` gateway tool and calls it
+      // as `<server-slug>_<tool>`. The docs must say the names the model can
+      // actually call (the incident: a model tried the documented bare name and
+      // got "Tool not found. Did you mean: task-management_create_subtask").
+      const db = makeMcpDb()
+      db.getAgent = vi.fn(() => ({
+        id: 'agent-1', name: 'Test Agent',
+        config: { coding_agent: 'pi', mcp_servers: ['srv-configured'] },
+      }))
+
+      const md: string = generateAgentsMd(db, [], [], '/tmp/ws', 'agent-1', {
+        'task-management': { type: 'http', url: 'http://127.0.0.1:5555/mcp' },
+        'configured-server': { type: 'stdio', command: '/bin/configured', args: ['a.js'] }
+      })
+
+      expect(md).toContain('**`task-management_list_tasks`**')
+      expect(md).toContain('**`configured-server_configured_tool`**')
+      expect(md).not.toContain('**`list_tasks`**')
+      expect(md).toContain('mcp({ "tool": "task-management_list_tasks", "args": {} })')
+      expect(md).toContain('mcp({ "search": "keyword" })')
+      // Repetitive work: sequential calls are the normal pattern; mcpScript is
+      // the optional accelerator, never the only path.
+      expect(md).toContain('once per item')
+      expect(md).toContain('mcpScript')
+    })
+
+    it('uses the Pi server slug, not the display name, in documented tool names', () => {
+      const bracketed = {
+        id: 's1', name: '[Team] Workspace', type: 'local',
+        command: '/bin/t', args: [], tools: [{ name: 'do_thing', description: 'x' }]
+      }
+      const db = createMockDb({ coding_agent: 'pi' }) as any
+      db.getMcpServers = vi.fn(() => [bracketed])
+
+      const md: string = generateAgentsMd(db, [], [], '/tmp/ws', 'agent-1', {
+        '[Team] Workspace': { type: 'stdio', command: '/bin/t', args: [] }
+      })
+
+      // Same rule the adapter applies when it renames servers in the mcp config.
+      expect(md).toContain('**`team-workspace_do_thing`**')
+      expect(md).not.toContain('[Team] Workspace_do_thing')
+    })
+
+    it('documents Claude Code sessions with their actual mcp__ tool names', () => {
+      const db = makeMcpDb()
+      db.getAgent = vi.fn(() => ({
+        id: 'agent-1', name: 'Test Agent',
+        config: { coding_agent: 'claude-code', mcp_servers: ['srv-configured'] },
+      }))
+      const injected = { 'task-management': { type: 'http', url: 'http://127.0.0.1:5555/mcp' } } as const
+
+      const agents: string = generateAgentsMd(db, [], [], '/tmp/ws', 'agent-1', injected)
+      expect(agents).toContain('**`mcp__task-management__list_tasks`**')
+
+      const claude: string = generateClaudeMd(db, [], [], '/tmp/ws', 'agent-1', injected)
+      expect(claude).toContain('#### `mcp__task-management__list_tasks`')
     })
 
     it('documents the in-process HTTP endpoint, not a command that never runs', () => {

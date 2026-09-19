@@ -84,12 +84,22 @@ export function useAgentSessionActions(taskId: string | undefined) {
     async (agentId: string, tId: string, workspaceDir?: string, skipInitialPrompt?: boolean) => {
       // Pre-register so events arriving during start() are captured via taskId fallback
       initSession(tId, '', agentId)
-      const { sessionId } = await agentSessionApi.start(agentId, tId, workspaceDir, skipInitialPrompt)
-      // Update with the real sessionId (preserves any messages that arrived early)
-      initSession(tId, sessionId, agentId)
-      return sessionId
+      try {
+        const { sessionId } = await agentSessionApi.start(agentId, tId, workspaceDir, skipInitialPrompt)
+        // Update with the real sessionId (preserves any messages that arrived early)
+        initSession(tId, sessionId, agentId)
+        return sessionId
+      } catch (err) {
+        // Start failed (e.g. the backend died before it came up). The
+        // pre-registered session is left in WORKING and would otherwise pin
+        // the panel on "Agent is starting..." forever — drop it and let the
+        // user retry. The main process also surfaces the reason in the
+        // transcript and as an error status (see requestSession).
+        endSession(tId)
+        throw err
+      }
     },
-    [initSession]
+    [initSession, endSession]
   )
 
   const removeSession = useAgentStore((s) => s.removeSession)
@@ -102,16 +112,23 @@ export function useAgentSessionActions(taskId: string | undefined) {
       // The replay batch dedups against the hydrated messages (shared part ids),
       // so nothing is lost or duplicated by leaving them in place.
       initSession(tId, '', agentId)
-      const result = await agentSessionApi.resume(agentId, tId, ocSessionId)
-      if (result.ended) {
-        // Session ended normally (task completed) — clean up the pre-registered session
-        removeSession(tId)
-        return ''
+      try {
+        const result = await agentSessionApi.resume(agentId, tId, ocSessionId)
+        if (result.ended) {
+          // Session ended normally (task completed) — clean up the pre-registered session
+          removeSession(tId)
+          return ''
+        }
+        initSession(tId, result.sessionId, agentId)
+        return result.sessionId
+      } catch (err) {
+        // Resume failed — clear the pre-registered session so the panel
+        // doesn't sit on the "starting" state (start() does the same).
+        endSession(tId)
+        throw err
       }
-      initSession(tId, result.sessionId, agentId)
-      return result.sessionId
     },
-    [initSession, removeSession]
+    [initSession, removeSession, endSession]
   )
 
   const switchAgent = useCallback(
@@ -122,11 +139,18 @@ export function useAgentSessionActions(taskId: string | undefined) {
       // existing transcript — nothing to clear here, the durable transcript
       // projection already reflects the prior conversation.
       initSession(tId, '', newAgentId)
-      const { sessionId } = await agentSessionApi.switchAgent(tId, newAgentId)
-      initSession(tId, sessionId, newAgentId)
-      return sessionId
+      try {
+        const { sessionId } = await agentSessionApi.switchAgent(tId, newAgentId)
+        initSession(tId, sessionId, newAgentId)
+        return sessionId
+      } catch (err) {
+        // The outgoing session was already stopped on the main side; without
+        // this the panel would keep showing an agent that no longer exists.
+        endSession(tId)
+        throw err
+      }
     },
-    [initSession]
+    [initSession, endSession]
   )
 
   const abort = useCallback(async () => {

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { SpokenAnswerSettings } from './SpokenAnswerSettings'
 import { useVoiceStore } from '@/stores/voice-store'
-import type { VoiceTtsSnapshot } from '@shared/voice-tts'
+import { VOICE_TTS_ELEVENLABS_EMPTY_STATE, type VoiceTtsSnapshot } from '@shared/voice-tts'
 
 /**
  * The speaking half of Settings → Voice.
@@ -81,6 +81,7 @@ const SNAPSHOT: VoiceTtsSnapshot = {
     },
   ],
   speaking: false,
+  elevenlabs: VOICE_TTS_ELEVENLABS_EMPTY_STATE,
 }
 
 function reset(tts: Partial<VoiceTtsSnapshot> | null = {}): void {

@@ -18,6 +18,7 @@ import {
   buildPiMcpConfigDocument,
   sanitizePiMcpServerName,
   sanitizePiSessionName,
+  slugPiMcpServers,
   withProviderNameLimitHint,
 } from './pi-config'
 import { MessagePartType } from './coding-agent-adapter'
@@ -126,6 +127,34 @@ describe('PiAdapter', () => {
       expect.anything(),
       { type: 'set_model', provider: 'anthropic', modelId: 'model-one' },
     )
+  })
+
+  it('surfaces Pi stderr output in the error when the process exits before the first response', async () => {
+    const child = fakeProcess()
+    spawnMock.mockReturnValue(child)
+    // Write to stderr and exit while the pending `get_state` RPC is in flight
+    // — the silent early exit that left users guessing WHY the start failed.
+    child.stdin.write = vi.fn((_value: string, callback?: (error?: Error | null) => void) => {
+      child.stderr.emit('data', 'unknown model: cerebras/gpt-oss-120b\n')
+      child.emit('exit', 1, null)
+      child.exitCode = 1
+      callback?.(null)
+      return true
+    })
+    const adapter = new PiAdapter()
+    vi.spyOn(adapter as any, 'findPiExecutable').mockResolvedValue('/usr/local/bin/pi')
+    vi.spyOn(adapter as any, 'removeLegacyGatewayProvider').mockReturnValue(undefined)
+    vi.spyOn(adapter as any, 'buildMcpConfig').mockReturnValue(undefined)
+    vi.spyOn(adapter as any, 'installPermissionExtension').mockReturnValue('/tmp/20x-permissions.ts')
+
+    const started = adapter.createSession({
+      agentId: 'agent-1',
+      taskId: 'task-1',
+      workspaceDir: '/workspace',
+      permissionMode: 'ask',
+    })
+
+    await expect(started).rejects.toThrow(/Pi process exited: unknown model: cerebras\/gpt-oss-120b/)
   })
 
   it('discovers the effective Pi model catalog through RPC', async () => {
@@ -554,6 +583,25 @@ describe('PiAdapter', () => {
     // With direct tools disabled, this is the only server-specific tool name
     // registered with the provider; the 50-character suffix stays in MCP.
     expect('mcp__team-workspace').toHaveLength(19)
+  })
+
+  it('keeps AGENTS.md tool names and registered server keys in lockstep', () => {
+    // workspace-docs documents `<slug>_<tool>` names computed by slugPiMcpServers
+    // from the same server map the adapter passes to buildPiMcpConfigDocument.
+    // If the two drifted, the model would be told names it cannot call.
+    const servers = {
+      '[Team] Dashboard': { type: 'http', url: 'https://example.com/a' },
+      '[Team] Dashboard V2': { type: 'http', url: 'https://example.com/b' },
+    } as any
+    const renamed: Array<[string, string]> = []
+    const doc = buildPiMcpConfigDocument(servers, (name, slug) => renamed.push([name, slug])) as {
+      mcpServers: Record<string, unknown>
+    }
+    const slugs = slugPiMcpServers(Object.keys(servers))
+    expect(new Set(Object.keys(doc.mcpServers))).toEqual(new Set(slugs.values()))
+    for (const [name] of renamed) {
+      expect(slugs.get(name)).toBeDefined()
+    }
   })
 
   it('removes only the legacy hosted gateway provider from the Pi models file', () => {

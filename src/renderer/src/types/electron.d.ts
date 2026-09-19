@@ -66,7 +66,7 @@ import type {
   ProjectChangedEvent
 } from '@shared/projects'
 import type { HeldAction, ProjectLimitState } from '@shared/project-limit-types'
-import type { ProjectStatus } from '@shared/project-status'
+import type { ProjectStatus, ProjectStatusHistoryPage } from '@shared/project-status'
 import type { ProjectOverviewEntry } from '@shared/project-overview'
 import type { MastermindMemory } from '@shared/mastermind-memory'
 
@@ -380,6 +380,8 @@ interface ElectronAPI {
     onChanged: (callback: (event: ProjectChangedEvent) => void) => () => void
     /** Project status (#58). */
     getStatus: (projectId: string) => Promise<ProjectStatus>
+    /** Status history (#72): one page of the journal, newest first. */
+    getStatusHistory: (projectId: string, query?: { limit?: number; cursor?: string | null }) => Promise<ProjectStatusHistoryPage>
     onStatusChanged: (callback: (event: { projectId: string }) => void) => () => void
     repos: {
       list: (projectId: string) => Promise<ProjectRepoRecord[]>
@@ -418,6 +420,9 @@ interface ElectronAPI {
     create: (data: CreateSkillDTO) => Promise<Skill>
     update: (id: string, data: UpdateSkillDTO) => Promise<Skill | undefined>
     delete: (id: string) => Promise<boolean>
+    /** Promote to global (null) or move into a project (#74). */
+    setProject: (id: string, projectId: string | null) => Promise<Skill | undefined>
+    onChanged: (callback: (event: { skillId: string; kind: string }) => void) => () => void
   }
   secrets: {
     getAll: () => Promise<Secret[]>
@@ -636,9 +641,25 @@ interface ElectronAPI {
     archiveSession: (id: string, archived: boolean) => Promise<CommanderSession | null>
     listMessages: (sessionId: string) => Promise<{ messages: CommanderMessage[]; activeTurnId: string | null }>
     markRead: (sessionId: string) => Promise<CommanderSession | null>
+    /** The session the view shows, or null when the view is closed (#62 report relay). */
+    setActiveSession: (sessionId: string | null) => Promise<void>
     send: (sessionId: string, text: string) => Promise<{ turnId: string; message: CommanderMessage }>
     cancel: (sessionId: string) => Promise<{ cancelled: boolean }>
     onEvent: (callback: (event: CommanderEvent) => void) => () => void
+  }
+  /** ElevenLabs speech engine (#64). Answers with the speech snapshot; the key never comes back. */
+  voiceElevenLabs: {
+    setKey: (key: string) => Promise<VoiceTtsSnapshot>
+    clearKey: () => Promise<VoiceTtsSnapshot>
+    acceptDisclosure: () => Promise<VoiceTtsSnapshot>
+    refresh: () => Promise<VoiceTtsSnapshot>
+    setModel: (modelId: string) => Promise<VoiceTtsSnapshot>
+  }
+  /** Commander voice mode (#64): main speaks the active session's replies and reports. */
+  commanderVoice: {
+    setActive: (sessionId: string | null) => Promise<{ active: string | null }>
+    bargeIn: (sessionId: string) => Promise<{ cancelled: boolean }>
+    send: (sessionId: string, text: string) => Promise<{ turnId: string; message: CommanderMessage }>
   }
   onOAuthCallback: (callback: (event: { code: string; state: string }) => void) => () => void
 }

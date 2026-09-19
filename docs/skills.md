@@ -7,19 +7,104 @@ Skills are reusable SKILL.md instructions that agents discover and load on-deman
 ```
 Skill {
   id: string
-  name: string          // ^[a-z0-9]+(-[a-z0-9]+)*$ (1-64 chars)
+  name: string          // ^[a-z0-9]+(-[a-z0-9]+)*$ (1-64 chars), unique across all scopes
   description: string   // 1-1024 chars
   content: string       // markdown body
-  version: number       // auto-incremented on update
+  version: number       // auto-incremented on update and on a scope change
   preferred_model: string | null  // optional model id; null = use the agent's model
+  project_id: string | null       // null = global; an id = owned by that project (#74)
   created_at, updated_at
 }
 ```
 
 Skills can be assigned at two levels:
-- **Task-level**: `task.skill_ids`
-- **Agent-level**: `agent.config.skill_ids`
+- **Task-level**: `task.skill_ids` — global skills and the task's project's own
+- **Agent-level**: `agent.config.skill_ids` — global skills only (an agent serves every project)
 - **Unset** (both null): no skill files are written
+
+## Scope (#74)
+
+A skill is either **global** (`project_id` null) or a **project skill**
+(`project_id` set). Schema version 16 adds the column (`migrateSkillScope` in
+`src/main/database/schema.ts`); every skill that existed before the upgrade
+stays global, so nothing disappears from any project.
+
+Names are unique across both scopes (`idx_skills_name`, checked in every
+create/rename path). A project skill therefore never shadows a global one, and
+a task workspace can hold both kinds without a `SKILL.md` directory collision.
+Per-scope names with an explicit shadowing rule can come later.
+
+### Who sees what
+
+| Caller | Sees | May create | May change / delete | May change scope |
+|---|---|---|---|---|
+| Skills view (the user) | everything | any scope | anything | promote / move, confirmed in the dialog |
+| Commander (`commander/skill-tools.ts`) | everything (archived projects' skills on request) | global, or a named project's | anything, after the confirmation challenge | `promote_skill`, `move_skill`, after confirmation |
+| Mastermind (project scope) | global + its project's | its project's | its project's own | no |
+| Task agent / subtask agent | global + its project's | its project's | its project's own | no |
+| Feedback learning (`syncSkillsFromDirectory`) | — | in the task's project | the task's project's own | no |
+
+Visibility is enforced where a skill is read, not in the prompt:
+
+- `list_skills`, `get_skill`, `update_skill` and `delete_skill` for a session go
+  through `task-api/skill-routes.ts` with a scope the MCP dispatcher attaches
+  (`SKILL_SCOPE_PARAM` in `task-management-core.ts`; it overwrites anything the
+  caller sent under that key). A skill outside the visible set is refused with
+  the same message whether it exists or not, so ids cannot be probed.
+- `create_task`, `create_subtask` and `update_task` refuse `skill_ids` naming
+  another project's skill (`validateSkillAssignment`), with the skill names.
+- `writeSkillFiles` writes only the skills the task's project may see; an
+  agent-level default that is a project skill of another project is skipped
+  and logged rather than copied into the workspace.
+- The task skill picker offers global plus the task's project's skills; the
+  agent form offers global skills only.
+
+### Defaults
+
+- **Commander**: `create_skill` makes a global skill unless `project` names one.
+- **Mastermind / task agent**: `create_skill` makes a skill owned by the
+  session's project. `global: true` is refused with a message that the user
+  must create it in the Skills view or through the Commander: a session cannot
+  obtain the user's confirmation, and the #66 escalation policy has no action
+  for skill changes today. The Mastermind may still assign global skills to
+  its tasks.
+- **Feedback learning**: a skill the session wrote into its workspace is
+  created in the task's project. A changed **global** skill, or one another
+  project owns, is *not* written back: it is reported in
+  `SkillSyncResult.skipped` and logged. Improving a global skill from a task
+  is a promotion decision for the user.
+- **Skills view**: a new skill takes the scope of the active filter (a project
+  when one is selected, else global).
+
+### Promote and move
+
+Changing scope is never part of a field update (`UpdateSkillData` has no
+`project_id`); it is `DatabaseManager.setSkillProject`, reached only by:
+
+- the editor's Scope section (Promote / Move button, confirmation dialog);
+- the Commander's `promote_skill` (project → global) and `move_skill`
+  (→ a project), both behind the one-time confirmation challenge.
+
+Promotion never breaks anything. A move into a project is refused while tasks
+in other projects or agent-level defaults still reference the skill; the
+refusal names them. Both bump the version.
+
+### Concurrent edits
+
+`UpdateSkillData.expected_version` (the `expected_version` argument of the
+MCP and Commander `update_skill` tools; the editor sends the version it
+loaded) makes a content write conditional on the row still having that
+version. A stale write throws `SkillVersionConflictError` / returns
+`{ conflict: 'stale_version', current_version }`, so two Masterminds, a
+learning session and the Commander cannot silently overwrite each other.
+Usage updates (`uses`, `last_used`) are never version-checked.
+
+### Archived projects
+
+A project is archived, not deleted, so its skills keep their `project_id` and
+their history. They are hidden from the Commander's `list_skills` unless
+`include_archived_projects` is set, and the Skills view lists an archived
+project in the scope filter only while it still owns skills.
 
 ## SKILL.md Format
 
@@ -138,7 +223,11 @@ For each parsed skill:
 - No match → create new skill
 - Same content → skip
 
-`SkillSyncResult = { created: string[], updated: string[], unchanged: string[] }`
+`SkillSyncResult = { created: string[], updated: string[], unchanged: string[], skipped?: string[] }`
+
+`syncSkillsFromDirectory(db, dir, { projectId })` receives the task's project
+from `AgentManager.syncSkillsFromWorkspace`: new skills are created in it, and
+only skills it owns are updated (see *Scope* above for what `skipped` holds).
 
 ## The Mastermind is not a skill
 
@@ -161,7 +250,10 @@ The Mastermind's instructions are a built-in system prompt (`src/main/prompts/ma
 | `src/main/agent-manager/session-config.ts` | Applies the resolved model to the session config |
 | `src/main/agent-manager.ts` | `syncSkillsFromWorkspace`, `transitionToIdle` (learning completion) |
 | `src/main/session-feedback.ts` | `updateTaskFromUser`, `finishSessionFeedback` |
-| `src/main/database.ts` | `getSkillByName`, skill CRUD, `getSkillsByIds` |
+| `src/main/database.ts` | `getSkillByName`, skill CRUD, `getSkillsByIds`, `setSkillProject`, `getTasksUsingSkill` |
+| `src/main/task-api/skill-routes.ts` | Scope-aware skill routes, `validateSkillAssignment` |
+| `src/main/commander/skill-tools.ts` | The Commander's skill tools (list, get, create, update, remove, promote, move) |
+| `src/shared/skill-scope.ts` | `isSkillVisibleToProject`, `skillScopeLabel` |
 | `src/renderer/src/components/tasks/FeedbackDialog.tsx` | Rating dialog |
 | `src/renderer/src/components/tasks/workspace/useTaskFeedbackFlow.ts` | Feedback orchestration |
 | `src/renderer/src/components/skills/` | Skill management UI |

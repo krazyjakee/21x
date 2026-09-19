@@ -17,6 +17,7 @@ function makeSkill(overrides: Partial<Skill> = {}): Skill {
     last_used: '2026-03-10T00:00:00Z',
     tags: ['testing', 'vitest'],
     preferred_model: null,
+    project_id: null,
     created_at: '2026-03-01T00:00:00Z',
     updated_at: '2026-03-10T00:00:00Z',
     ...overrides

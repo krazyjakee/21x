@@ -69,6 +69,18 @@ export function sanitizePiMcpServerName(name: string, used: Set<string>): string
   return fallback
 }
 
+/**
+ * Slugs for a session's MCP server names, in map-insertion order.
+ *
+ * Shared by {@link buildPiMcpConfigDocument} (what the adapter registers) and
+ * workspace-docs.ts (what AGENTS.md tells the model to call), so the documented
+ * tool names and the registered ones can't drift.
+ */
+export function slugPiMcpServers(names: string[]): Map<string, string> {
+  const used = new Set<string>()
+  return new Map(names.map((name) => [name, sanitizePiMcpServerName(name, used)]))
+}
+
 export function withProviderNameLimitHint(error: string): string {
   if (!/name must be at most 64/i.test(error)) return error
   return `${error}\n\nHint: a tool name exceeded the provider 64-character limit. 21x now keeps MCP tools behind short namespace proxies. Stop and start the agent to rebuild its tool list.`
@@ -87,9 +99,9 @@ export function buildPiMcpConfigDocument(
   servers: NonNullable<SessionConfig['mcpServers']>,
   onRename?: (name: string, slug: string) => void,
 ): Record<string, unknown> {
-  const usedSlugs = new Set<string>()
+  const slugs = slugPiMcpServers(Object.keys(servers))
   const mcpServers = Object.fromEntries(Object.entries(servers).map(([name, server]) => {
-    const slug = sanitizePiMcpServerName(name, usedSlugs)
+    const slug = slugs.get(name) ?? name
     if (slug !== name) onRename?.(name, slug)
     if (server.type === 'stdio') {
       return [slug, {

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { VoiceSettings } from './VoiceSettings'
 import { useVoiceStore } from '@/stores/voice-store'
-import type { VoiceTtsSnapshot } from '@shared/voice-tts'
+import { VOICE_TTS_ELEVENLABS_EMPTY_STATE, type VoiceTtsSnapshot } from '@shared/voice-tts'
 
 /**
  * One voice page, in two parts, each with a disclosure of its own.
@@ -74,6 +74,7 @@ const TTS: VoiceTtsSnapshot = {
     },
   ],
   speaking: false,
+  elevenlabs: VOICE_TTS_ELEVENLABS_EMPTY_STATE,
 }
 
 beforeEach(() => {

@@ -309,6 +309,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Project status (#58): live counts plus the Mastermind's summary, and a
     // ping when the Mastermind writes a new summary.
     getStatus: (projectId: string): Promise<unknown> => ipcRenderer.invoke('project:getStatus', projectId),
+    // Status history (#72): one page of the journal, newest first.
+    getStatusHistory: (projectId: string, query?: { limit?: number; cursor?: string | null }): Promise<unknown> =>
+      ipcRenderer.invoke('project:getStatusHistory', projectId, query),
     onStatusChanged: (callback: (event: { projectId: string }) => void): (() => void) => {
       const handler = (_: unknown, event: { projectId: string }): void => callback(event)
       ipcRenderer.on('project:statusChanged', handler)
@@ -362,7 +365,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('skills:create', data),
     update: (id: string, data: Record<string, unknown>): Promise<unknown> =>
       ipcRenderer.invoke('skills:update', id, data),
-    delete: (id: string): Promise<boolean> => ipcRenderer.invoke('skills:delete', id)
+    delete: (id: string): Promise<boolean> => ipcRenderer.invoke('skills:delete', id),
+    // Scope (#74): promote to global (null) or move into a project.
+    setProject: (id: string, projectId: string | null): Promise<unknown> =>
+      ipcRenderer.invoke('skills:setProject', id, projectId),
+    onChanged: (callback: (event: unknown) => void): (() => void) => {
+      const handler = (_: unknown, data: unknown): void => callback(data)
+      ipcRenderer.on('skills:changed', handler)
+      return () => ipcRenderer.removeListener('skills:changed', handler)
+    }
   },
   secrets: {
     getAll: (): Promise<unknown[]> => ipcRenderer.invoke('secrets:getAll'),
@@ -750,6 +761,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     archiveSession: (id: string, archived: boolean): Promise<unknown> => ipcRenderer.invoke('commander:archiveSession', { id, archived }),
     listMessages: (sessionId: string): Promise<unknown> => ipcRenderer.invoke('commander:listMessages', { sessionId }),
     markRead: (sessionId: string): Promise<unknown> => ipcRenderer.invoke('commander:markRead', { sessionId }),
+    // Which session the Commander view shows (#62): a report for it is relayed at once; others only queue.
+    setActiveSession: (sessionId: string | null): Promise<void> => ipcRenderer.invoke('commander:setActiveSession', { sessionId }),
     send: (sessionId: string, text: string): Promise<unknown> => ipcRenderer.invoke('commander:send', { sessionId, text }),
     cancel: (sessionId: string): Promise<{ cancelled: boolean }> => ipcRenderer.invoke('commander:cancel', { sessionId }),
     onEvent: (callback: (data: unknown) => void): (() => void) => {
@@ -757,6 +770,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('commander:event', handler)
       return () => ipcRenderer.removeListener('commander:event', handler)
     }
+  },
+  // ── Voice: ElevenLabs engine and Commander voice mode (#64) ──
+  // The key goes to main and never comes back: every call answers with the
+  // speech snapshot, which only says whether a key is set.
+  voiceElevenLabs: {
+    setKey: (key: string): Promise<unknown> => ipcRenderer.invoke('voice:tts:elevenlabs:setKey', { key }),
+    clearKey: (): Promise<unknown> => ipcRenderer.invoke('voice:tts:elevenlabs:clearKey'),
+    acceptDisclosure: (): Promise<unknown> => ipcRenderer.invoke('voice:tts:elevenlabs:acceptDisclosure'),
+    refresh: (): Promise<unknown> => ipcRenderer.invoke('voice:tts:elevenlabs:refresh'),
+    setModel: (modelId: string): Promise<unknown> => ipcRenderer.invoke('voice:tts:elevenlabs:setModel', { modelId })
+  },
+  commanderVoice: {
+    setActive: (sessionId: string | null): Promise<{ active: string | null }> =>
+      ipcRenderer.invoke('voice:commander:setActive', { sessionId }),
+    bargeIn: (sessionId: string): Promise<{ cancelled: boolean }> => ipcRenderer.invoke('voice:commander:bargeIn', { sessionId }),
+    send: (sessionId: string, text: string): Promise<unknown> => ipcRenderer.invoke('voice:commander:send', { sessionId, text })
   },
   browser: {
     startRecording: (panelId: string, title?: string): Promise<{ ok: true; recording: BrowserRecordingManifest } | { error: string }> =>
