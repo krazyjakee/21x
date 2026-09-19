@@ -40,8 +40,6 @@ export const COMMANDER_ADMIN_TOOLS: ReadonlySet<string> = new Set<string>([...MU
 
 export interface CommanderToolContext {
   sessionId: string
-  /** The user message that immediately precedes this turn's tool calls; empty for a report-triggered turn. */
-  userMessage: string
   /** What started the turn: the user, or a report being relayed (#62). */
   trigger: 'user' | 'report'
 }
@@ -89,7 +87,6 @@ export interface DeliverReportResult {
 
 interface TurnStart {
   trigger: 'user' | 'report'
-  userMessage: string
   /** Extra system text for the turn (the relay note of a report-triggered turn). */
   systemNote?: string
 }
@@ -239,7 +236,7 @@ export class CommanderService {
     // A user turn resets the report-ask budget (#62).
     this.reportAsks.delete(sessionId)
 
-    const { turnId, done } = this.startTurn(sessionId, provider, { trigger: 'user', userMessage: content })
+    const { turnId, done } = this.startTurn(sessionId, provider, { trigger: 'user' })
     return { turnId, message, done }
   }
 
@@ -248,7 +245,7 @@ export class CommanderService {
     const context = buildContext(this.store.listMessages(sessionId), this.budget)
     let system = withSummary(this.options.systemPrompt ?? COMMANDER_SYSTEM_PROMPT, context.summary)
     if (start.systemNote) system = `${system}\n\n${start.systemNote}`
-    let tools = this.options.getTools?.({ sessionId, userMessage: start.userMessage, trigger: start.trigger }) ?? []
+    let tools = this.options.getTools?.({ sessionId, trigger: start.trigger }) ?? []
     // Admin tools act only on turns the user started, whatever getTools returned.
     if (start.trigger !== 'user') tools = tools.filter((tool) => !COMMANDER_ADMIN_TOOLS.has(tool.name))
     if (start.trigger === 'report') {
@@ -480,7 +477,6 @@ export class CommanderService {
     if (!this.store.getSession(sessionId)) return false
     this.startTurn(sessionId, provider, {
       trigger: 'report',
-      userMessage: '',
       systemNote: reportRelayNote(projectName ? `"${projectName}"` : 'a project')
     })
     return true

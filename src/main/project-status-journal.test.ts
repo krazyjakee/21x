@@ -26,7 +26,7 @@ const DAY = 24 * 60 * 60 * 1000
 const at = (now: Date, daysAgo: number, extraMs = 0): string => new Date(now.getTime() - daysAgo * DAY + extraMs).toISOString()
 
 function commanderTool(db: DatabaseManager, name: string) {
-  const tool = createCommanderProjectTools({ db, context: { sessionId: 's', userMessage: '' } })
+  const tool = createCommanderProjectTools({ db, context: { sessionId: 's' } })
     .find((candidate) => candidate.name === name)
   if (!tool) throw new Error(`Missing tool ${name}`)
   return async (input: Record<string, unknown>) => {
