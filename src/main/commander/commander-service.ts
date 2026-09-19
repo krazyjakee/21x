@@ -53,6 +53,15 @@ export interface CommanderServiceOptions {
   maxReportAsks?: number
 }
 
+/** A fold that could not write its summary; the turns stay verbatim until one succeeds. */
+export interface FoldFailure {
+  /** ISO time of the latest failure. */
+  at: string
+  error: string
+  /** Consecutive failed attempts. */
+  attempts: number
+}
+
 export interface SendResult {
   turnId: string
   message: CommanderMessage
@@ -148,6 +157,8 @@ export class CommanderService {
   private readonly active = new Map<string, ChatTurnHandle>()
   private readonly folding = new Set<string>()
   private readonly naming = new Set<string>()
+  /** Sessions whose last fold failed; cleared by the next successful one (read with foldFailure). */
+  private readonly foldFailures = new Map<string, FoldFailure>()
   /** The session open in the Commander view, as the renderer reports it (#62). */
   private activeSessionId: string | null = null
   /** Reports that arrived during a turn; relayed together once that turn ends. */
@@ -376,16 +387,32 @@ export class CommanderService {
     }
   }
 
+  /** The session's last failed fold, or null when folding is up to date. */
+  foldFailure(sessionId: string): FoldFailure | null {
+    return this.foldFailures.get(sessionId) ?? null
+  }
+
+  private recordFoldFailure(sessionId: string, error: string): void {
+    const attempts = (this.foldFailures.get(sessionId)?.attempts ?? 0) + 1
+    this.foldFailures.set(sessionId, { at: new Date().toISOString(), error, attempts })
+    console.warn(`[Commander] Fold failed for session ${sessionId} (attempt ${attempts}): ${error}. Turns stay verbatim; retrying after the next turn.`)
+  }
+
   /**
    * Folds turns that no longer fit the context budget into a new rolling
-   * summary. On failure nothing is stored; the next turn simply trims.
+   * summary. On failure nothing is stored and the failure is recorded
+   * (foldFailure): the turns stay verbatim in the context and the fold is
+   * retried after the next turn.
    */
   async foldHistory(sessionId: string, provider?: ChatProvider): Promise<CommanderMessage | null> {
     if (this.folding.has(sessionId)) return null
     this.folding.add(sessionId)
     try {
       const plan = planFold(this.store.listMessages(sessionId), this.budget)
-      if (!plan) return null
+      if (!plan) {
+        this.foldFailures.delete(sessionId)
+        return null
+      }
       const excerpt = transcriptForSummary(plan.toFold)
       const prompt = plan.previousSummary
         ? `Previous summary:\n${plan.previousSummary}\n\nNew conversation to fold in:\n${excerpt}`
@@ -399,12 +426,16 @@ export class CommanderService {
           AbortSignal.timeout(this.options.oneShotTimeoutMs ?? DEFAULT_ONE_SHOT_TIMEOUT_MS)
         )).trim()
       } catch (err) {
-        console.warn('[Commander] summary generation failed:', err instanceof Error ? err.message : err)
+        this.recordFoldFailure(sessionId, err instanceof Error ? err.message : String(err))
         return null
       }
-      if (!summary) return null
+      if (!summary) {
+        this.recordFoldFailure(sessionId, 'the summary came back empty')
+        return null
+      }
       if (!this.store.getSession(sessionId)) return null
       const stored = this.store.appendMessage(sessionId, { role: 'summary', content: summary, correlationId: plan.lastFoldedId })
+      this.foldFailures.delete(sessionId)
       this.emit({ type: 'messages_appended', sessionId, messages: [stored] })
       return stored
     } finally {

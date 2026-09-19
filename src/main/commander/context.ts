@@ -9,6 +9,11 @@ import type { CommanderMessage } from '../../shared/commander'
  * rolling `summary` message written by the chat model. Folding and trimming
  * always cut on turn boundaries, so an assistant tool call is never separated
  * from its results.
+ *
+ * Turns are never dropped silently. Turns past the budget that no summary
+ * covers yet (the fold failed, or has not run) stay verbatim up to
+ * PENDING_FOLD_CHAR_FACTOR × maxChars; any left out beyond that are replaced
+ * by a visible "N earlier turns omitted (summary pending)" marker.
  */
 
 export interface ContextBudget {
@@ -21,6 +26,18 @@ export interface ContextBudget {
 export const DEFAULT_CONTEXT_BUDGET: ContextBudget = { keepTurns: 8, maxChars: 24_000 }
 
 const TOOL_TEXT_IN_SUMMARY = 600
+
+/**
+ * While turns wait to be folded, the verbatim part may grow to this multiple
+ * of `maxChars` (ignoring `keepTurns`) rather than lose them. It bounds the
+ * context when folding keeps failing.
+ */
+export const PENDING_FOLD_CHAR_FACTOR = 2
+
+/** The marker standing in for turns left out of the context without a summary. */
+export function omittedTurnsMarker(count: number): string {
+  return `${count} earlier ${count === 1 ? 'turn' : 'turns'} omitted (summary pending)`
+}
 
 function startsTurn(message: CommanderMessage): boolean {
   return message.role === 'user' || message.role === 'report'
@@ -115,19 +132,36 @@ export function toChatMessages(messages: CommanderMessage[]): ChatMessage[] {
 export interface BuiltContext {
   summary: string | null
   messages: ChatMessage[]
-  /** Turns not covered by the summary that did not fit the budget. */
+  /** Turns not covered by the summary that are left out of `messages`; the first message then carries the omitted-turns marker. */
   droppedTurns: number
+  /** Turns past the budget kept verbatim because no summary covers them yet. */
+  pendingFoldTurns: number
 }
 
-/** The context for the next model call: latest summary + newest turns within budget. */
+/**
+ * The context for the next model call: latest summary + newest turns within
+ * budget, plus any unsummarised turns past the budget (see
+ * PENDING_FOLD_CHAR_FACTOR). Turns still left out are named by a marker at the
+ * start of the history.
+ */
 export function buildContext(messages: CommanderMessage[], budget: ContextBudget = DEFAULT_CONTEXT_BUDGET): BuiltContext {
   const { summary, rest } = unfoldedMessages(messages)
   const turns = splitTurns(rest)
-  const kept = keptTurnCount(turns, budget)
+  const withinBudget = keptTurnCount(turns, budget)
+  const kept = Math.max(
+    withinBudget,
+    keptTurnCount(turns, { keepTurns: Number.POSITIVE_INFINITY, maxChars: budget.maxChars * PENDING_FOLD_CHAR_FACTOR })
+  )
+  const droppedTurns = turns.length - kept
+  const history = toChatMessages(turns.slice(turns.length - kept).flat())
+  if (droppedTurns > 0 && history[0]?.role === 'user') {
+    history[0] = { ...history[0], content: `[${omittedTurnsMarker(droppedTurns)}]\n\n${history[0].content}` }
+  }
   return {
     summary: summary?.content ?? null,
-    messages: toChatMessages(turns.slice(turns.length - kept).flat()),
-    droppedTurns: turns.length - kept
+    messages: history,
+    droppedTurns,
+    pendingFoldTurns: kept - withinBudget
   }
 }
 

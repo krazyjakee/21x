@@ -61,3 +61,33 @@ export function buildAgentSwitchRecap(parts: TranscriptLike[], maxChars = DEFAUL
 
   return text
 }
+
+/**
+ * Size of the recap a replacement session gets after the backend lost the
+ * previous one. Deliberately small: it rides on the first prompt next to the
+ * task context (and, for a Captain, the memory file already in its system
+ * prompt), and only has to say where the conversation had got to.
+ */
+export const LOST_SESSION_RECAP_MAX_CHARS = 6_000
+
+/** The transcript notice shown when a lost session is replaced. */
+export const LOST_SESSION_NOTICE = 'Previous session was lost; starting a new session'
+
+/**
+ * The block that seeds a session replacing one the backend lost, or '' when
+ * the transcript has nothing worth recapping. The newest exchanges are kept
+ * when the conversation is longer than maxChars.
+ */
+export function buildLostSessionRecap(parts: TranscriptLike[], maxChars = LOST_SESSION_RECAP_MAX_CHARS): string {
+  const recap = buildAgentSwitchRecap(parts, maxChars)
+  if (!recap) return ''
+  return [
+    '## Continuing after a lost session',
+    '',
+    'Your previous session on this conversation was lost by the agent backend, so you are starting a new one. Here are the latest exchanges from it, for context only; do not redo work they show as finished:',
+    '',
+    recap,
+    '',
+    '---'
+  ].join('\n')
+}
