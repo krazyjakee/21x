@@ -120,6 +120,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   agentSession: {
     start: (agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<{ sessionId: string; queued?: boolean; queuePosition?: number; queueReason?: string }> =>
       ipcRenderer.invoke('agentSession:start', agentId, taskId, workspaceDir, skipInitialPrompt),
+    startTask: (taskId: string): Promise<{ action: 'task_started' | 'subtask_started' | 'triage_started' | 'already_running' | 'queued' | 'no_action'; sessionId?: string; startedTaskId?: string; agentId?: string; queuePosition?: number; queueReason?: string }> =>
+      ipcRenderer.invoke('agentSession:startTask', taskId),
     resume: (agentId: string, taskId: string, ocSessionId: string): Promise<{ sessionId: string; ended?: boolean }> =>
       ipcRenderer.invoke('agentSession:resume', agentId, taskId, ocSessionId),
     abort: (sessionId: string): Promise<{ success: boolean }> =>

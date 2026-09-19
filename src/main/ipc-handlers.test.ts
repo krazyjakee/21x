@@ -69,6 +69,7 @@ describe('registerIpcHandlers', () => {
     expect(channels).toContain('db:deleteTask')
     expect(channels).toContain('agent:getAll')
     expect(channels).toContain('agentSession:start')
+    expect(channels).toContain('agentSession:startTask')
     expect(channels).toContain('mcp:getAll')
     expect(channels).toContain('settings:get')
     expect(channels).toContain('skills:getAll')
@@ -80,6 +81,18 @@ describe('registerIpcHandlers', () => {
     expect(channels).toContain('voice:pushAudio')
     expect(channels).toContain('voice:confirm')
     expect(channels).toContain('voice:selectModel')
+  })
+
+  it('delegates high-level task starts to the agent manager', async () => {
+    const outcome = { action: 'task_started', sessionId: 'session-1', startedTaskId: 'task-1' }
+    const startTask = vi.fn().mockResolvedValue(outcome)
+    register({ agentManager: { startTask } })
+
+    const handlers = (ipcMain.handle as ReturnType<typeof vi.fn>).mock.calls as [string, (...args: unknown[]) => unknown][]
+    const handler = handlers.filter(([channel]) => channel === 'agentSession:startTask').pop()?.[1]
+
+    await expect(handler!({}, 'task-1')).resolves.toEqual(outcome)
+    expect(startTask).toHaveBeenCalledWith('task-1')
   })
 
   it('keeps a newly created source-less task local', async () => {

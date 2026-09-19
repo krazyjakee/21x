@@ -42,7 +42,10 @@ interface StoredProvider {
   models?: StoredModel[]
 }
 interface ModelsStoreFile {
+  /** Older Pi model-store shape. */
   providers?: Record<string, StoredProvider>
+  /** Current Pi model-store shape: provider names are top-level keys. */
+  [key: string]: unknown
 }
 interface CustomProvider {
   baseUrl?: string
@@ -94,7 +97,10 @@ export function readVendorConfig(vendor: string, modelId?: string): VendorConfig
   const config: VendorConfig = {}
 
   const store = readJson<ModelsStoreFile>(join(dir, 'models-store.json'))
-  const storedModel = store?.providers?.[vendor]?.models?.find((model) => model.id === modelId)
+  const topLevelProvider = store?.[vendor]
+  const storedProvider = store?.providers?.[vendor]
+    ?? (topLevelProvider && typeof topLevelProvider === 'object' ? topLevelProvider as StoredProvider : undefined)
+  const storedModel = storedProvider?.models?.find((model) => model.id === modelId)
   if (storedModel?.baseUrl) config.baseUrl = storedModel.baseUrl
 
   const models = readJson<ModelsFile>(join(dir, 'models.json'))

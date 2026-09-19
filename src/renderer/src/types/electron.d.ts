@@ -78,6 +78,15 @@ export interface AgentSessionStartResult {
   queueReason?: 'agent_limit' | 'global_limit'
 }
 
+export interface AgentTaskStartResult {
+  action: 'task_started' | 'subtask_started' | 'triage_started' | 'already_running' | 'queued' | 'no_action'
+  sessionId?: string
+  startedTaskId?: string
+  agentId?: string
+  queuePosition?: number
+  queueReason?: 'agent_limit' | 'global_limit'
+}
+
 /** A session start waiting in the main-process queue for a free slot. */
 export interface QueuedAgentStart {
   taskId: string
@@ -267,6 +276,7 @@ interface ElectronAPI {
   }
   agentSession: {
     start: (agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean) => Promise<AgentSessionStartResult>
+    startTask: (taskId: string) => Promise<AgentTaskStartResult>
     resume: (agentId: string, taskId: string, ocSessionId: string) => Promise<AgentSessionStartResult & { ended?: boolean }>
     abort: (sessionId: string) => Promise<AgentSessionSuccessResult>
     stop: (sessionId: string) => Promise<AgentSessionSuccessResult>

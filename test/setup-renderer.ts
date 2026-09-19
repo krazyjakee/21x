@@ -50,6 +50,7 @@ const mockElectronAPI = {
   },
   agentSession: {
     start: vi.fn().mockResolvedValue({ sessionId: 'test-session-id' }),
+    startTask: vi.fn().mockResolvedValue({ action: 'task_started', sessionId: 'test-session-id' }),
     resume: vi.fn().mockResolvedValue({ sessionId: 'test-session-id' }),
     abort: vi.fn().mockResolvedValue({ success: true }),
     stop: vi.fn().mockResolvedValue({ success: true }),
