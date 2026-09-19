@@ -116,11 +116,33 @@ function mapPullRequestCheck(check: RawPullRequestCheck): PullRequestCheck {
 }
 
 function parseActiveGhAccount(output: string): string | undefined | null {
-  const accounts = output.split(/\n(?=\s*(?:\S\s+)?Logged in to )/).filter((block) => block.includes('Logged in to'))
-  if (accounts.length === 0) return null
-  const active = accounts.find((block) => /Active account:\s*true/.test(block)) ?? accounts[0]
-  const match = active.match(/Logged in to \S+ account (\S+)/) || active.match(/Logged in to \S+ as (\S+)/)
-  return match?.[1]
+  const accounts: Array<{ authenticated: boolean; username?: string; active?: boolean }> = []
+  let account: (typeof accounts)[number] | undefined
+
+  for (const line of output.split(/\r?\n/)) {
+    const loggedIn = line.match(/Logged in to \S+ (?:account|as) (\S+)/)
+    if (loggedIn) {
+      account = { authenticated: true, username: loggedIn[1] }
+      accounts.push(account)
+      continue
+    }
+
+    if (/(?:Failed|Timeout trying) to log in to \S+/.test(line)) {
+      account = { authenticated: false }
+      accounts.push(account)
+      continue
+    }
+
+    const active = line.match(/Active account:\s*(true|false)/)
+    if (active && account) account.active = active[1] === 'true'
+  }
+
+  const hasActiveMarkers = accounts.some((entry) => entry.active !== undefined)
+  const selected = hasActiveMarkers
+    ? accounts.find((entry) => entry.active === true)
+    : accounts.find((entry) => entry.authenticated)
+
+  return selected?.authenticated ? selected.username : null
 }
 
 /**
@@ -163,11 +185,11 @@ export class GitHubManager {
       return { installed: false, authenticated: false }
     }
 
-    // `--active` only exists in gh >= 2.40, so parse the full status output instead.
-    // Older gh writes status to stderr, and a stale inactive account can make it exit 1.
+    // Older gh versions do not support `--active`, so parse the full status output instead.
+    // Some versions write status to stderr, and a stale inactive account can make it exit 1.
     let output: string
     try {
-      const { stdout, stderr } = await execFileAsync('gh', ['auth', 'status'])
+      const { stdout, stderr } = await execFileAsync('gh', ['auth', 'status', '--hostname', 'github.com'])
       output = `${stdout}\n${stderr}`
     } catch (error: unknown) {
       const execErr = error as { stderr?: string; stdout?: string }

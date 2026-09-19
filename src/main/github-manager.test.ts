@@ -62,7 +62,7 @@ describe('GitHubManager', () => {
 
       await expect(new GitHubManager().checkGhCli()).resolves.toEqual({ installed: true, authenticated: true, username: 'krazyjakee' })
       const authCall = execFileMock.mock.calls.find(([, args]) => args[0] === 'auth')
-      expect(authCall?.[1]).toEqual(['auth', 'status'])
+      expect(authCall?.[1]).toEqual(['auth', 'status', '--hostname', 'github.com'])
     })
 
     it('reads the legacy stderr "as <user>" format', async () => {
@@ -88,6 +88,23 @@ describe('GitHubManager', () => {
       })
 
       await expect(new GitHubManager().checkGhCli()).resolves.toEqual({ installed: true, authenticated: true, username: 'current' })
+    })
+
+    it('does not treat a valid inactive account as authenticated when the active account is stale', async () => {
+      mockAuthStatus({
+        error: true,
+        stderr: [
+          'github.com',
+          '  X Failed to log in to github.com account current (keyring)',
+          '  - Active account: true',
+          '  - The token in keyring is invalid.',
+          '',
+          '  ✓ Logged in to github.com account other (keyring)',
+          '  - Active account: false'
+        ].join('\n')
+      })
+
+      await expect(new GitHubManager().checkGhCli()).resolves.toEqual({ installed: true, authenticated: false })
     })
 
     it('reports unauthenticated when no account is logged in', async () => {
