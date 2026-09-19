@@ -5,7 +5,7 @@ import { AgentTranscriptPanel } from '@/components/agents/AgentTranscriptPanel'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useAgentSession } from '@/hooks/use-agent-session'
 import { useCurrentProject } from '@/hooks/use-project-tasks'
-import { agentApi, settingsApi } from '@/lib/ipc-client'
+import { agentApi, mergeGrantsApi, settingsApi } from '@/lib/ipc-client'
 import { captainAgentIdFor, useCaptainTaskId } from '@/stores/coordinator-store'
 import { useProjectStore } from '@/stores/project-store'
 import type { Agent } from '@/types'
@@ -61,7 +61,8 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
    * Messages sent while the Captain could not be started, per Captain row.
    * Each is delivered once, in order, when a start succeeds.
    */
-  const queuedRef = useRef(new Map<string, string[]>())
+  const queuedRef = useRef(new Map<string, Array<{ text: string; typed: boolean }>>())
+  const typedMessageRef = useRef<string | null>(null)
   const drainingRef = useRef(false)
   const [queuedCount, setQueuedCount] = useState(0)
 
@@ -188,15 +189,18 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   }, [captainTaskId, start, resetSession])
 
   const deliver = useCallback(
-    async (message: string) => {
+    async (message: { text: string; typed: boolean }) => {
       // Question answers should use approve() instead of sendMessage()
       const live = captainTaskId ? useAgentStore.getState().sessions.get(captainTaskId) : undefined
       const messages = live?.messages || []
       const lastMessage = messages[messages.length - 1]
       if (lastMessage?.partType === 'question' && lastMessage?.tool?.questions) {
-        await approve(true, message)
+        await approve(true, message.text)
       } else {
-        await sendMessage(message)
+        // Stage provenance at delivery, after session warm-up and queueing;
+        // IPC consumes this exact text once, then main tracks actual dispatch.
+        if (message.typed && captainTaskId) mergeGrantsApi.noteTyped(captainTaskId, message.text)
+        await sendMessage(message.text)
       }
     },
     [captainTaskId, sendMessage, approve]
@@ -212,7 +216,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
     try {
       while (queue.length > 0) {
         // Taken off before sending, so a second drain cannot send it again.
-        const next = queue.shift() as string
+        const next = queue.shift()!
         setQueuedCount(queue.length)
         try {
           await deliver(next)
@@ -232,17 +236,19 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   // goes out after a successful retry or switch.
   const handleSendMessage = useCallback(
     async (message: string) => {
+      const outgoing = { text: message, typed: typedMessageRef.current === message }
+      typedMessageRef.current = null
       const taskId = captainTaskId
       if (!(await ensureSession())) {
         if (!taskId) return
         const queue = queuedRef.current.get(taskId) ?? []
-        queue.push(message)
+        queue.push(outgoing)
         queuedRef.current.set(taskId, queue)
         setQueuedCount(queue.length)
         return
       }
       await drainQueue()
-      await deliver(message)
+      await deliver(outgoing)
     },
     [captainTaskId, ensureSession, drainQueue, deliver]
   )
@@ -282,6 +288,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
       if (detail?.message && typeof detail.message === 'string') {
         // Small delay to ensure the panel is mounted and agent is selected
         setTimeout(() => {
+          if (detail.typed === true) typedMessageRef.current = detail.message
           handleSendMessage(detail.message)
         }, 200)
       }
@@ -364,6 +371,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
           systemStatus={currentSession?.systemStatus}
           onStop={stop}
           onSend={handleSendMessage}
+          onTypedMessage={(text) => { typedMessageRef.current = text }}
           className="flex-1 min-h-0"
           sessionId={currentSession?.sessionId}
           pendingSend={currentSession?.pendingSend}

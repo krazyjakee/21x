@@ -16,8 +16,11 @@
  *     "stop_task": "tell_commander",
  *     "respond_to_checkpoint": "ask_user",
  *     "change_priority": "autonomous",
- *     "pr": "ask_user"
- *   }
+ *     "open_pr": "tell_commander",
+ *     "merge_pr": "ask_user"
+ *   },
+ *   "merge_grants": { "enabled": false }   // #137, shared/merge-grants.ts
+ * }
  * }
  * ```
  *
@@ -82,8 +85,17 @@ export type EscalationAction =
   | 'stop_task'
   | 'respond_to_checkpoint'
   | 'change_priority'
-  /** Opening or merging pull requests. No task-management tool does this today, so it is prompt-guidance only. */
-  | 'pr'
+  /**
+   * Opening pull requests (#137). Normal Captain authority: the agent doing
+   * the work opens them, so no tool carries it and it is prompt guidance.
+   */
+  | 'open_pr'
+  /**
+   * Merging pull requests (#137): the Captain's `merge_pull_request` tool,
+   * enforced by the escalation gate. Under `ask_user` a merge is held unless
+   * an active merge grant the user gave covers it.
+   */
+  | 'merge_pr'
 
 export type EscalationLevel = 'autonomous' | 'tell_commander' | 'ask_user'
 
@@ -95,15 +107,16 @@ export const ESCALATION_ACTIONS: readonly EscalationAction[] = [
   'stop_task',
   'respond_to_checkpoint',
   'change_priority',
-  'pr'
+  'open_pr',
+  'merge_pr'
 ]
 
 export const ESCALATION_LEVELS: readonly EscalationLevel[] = ['autonomous', 'tell_commander', 'ask_user']
 
 /**
- * Defaults: routine planning is free; stopping an agent (work is lost) is
- * reported; answering an agent's checkpoint and anything with pull requests
- * waits for the user.
+ * Defaults: routine planning is free; stopping an agent (work is lost) and
+ * opening a pull request are reported; answering an agent's checkpoint and
+ * merging a pull request wait for the user (or, for merges, a merge grant).
  */
 export const DEFAULT_ESCALATION_POLICY: EscalationPolicy = {
   create_task: 'autonomous',
@@ -111,7 +124,8 @@ export const DEFAULT_ESCALATION_POLICY: EscalationPolicy = {
   stop_task: 'tell_commander',
   respond_to_checkpoint: 'ask_user',
   change_priority: 'autonomous',
-  pr: 'ask_user'
+  open_pr: 'tell_commander',
+  merge_pr: 'ask_user'
 }
 
 export const ESCALATION_ACTION_LABELS: Record<EscalationAction, string> = {
@@ -120,7 +134,8 @@ export const ESCALATION_ACTION_LABELS: Record<EscalationAction, string> = {
   stop_task: 'Stopping agents',
   respond_to_checkpoint: 'Answering agent checkpoints',
   change_priority: 'Changing task priority',
-  pr: 'Opening or merging pull requests'
+  open_pr: 'Opening pull requests',
+  merge_pr: 'Merging pull requests'
 }
 
 export const ESCALATION_LEVEL_LABELS: Record<EscalationLevel, string> = {
@@ -133,6 +148,14 @@ export function isEscalationLevel(value: unknown): value is EscalationLevel {
   return typeof value === 'string' && (ESCALATION_LEVELS as readonly string[]).includes(value)
 }
 
+/**
+ * The combined pull-request item before #137 split it. Migration v19
+ * (`splitPullRequestEscalation` in database/schema.ts) rewrites stored
+ * settings; the reader honours it too, so a block written by an older
+ * client never loosens the merge rule.
+ */
+export const LEGACY_PR_ESCALATION_KEY = 'pr'
+
 /** The `escalation` block of a project's settings, defaults filling every gap. */
 export function escalationPolicyFromSettings(settings: Record<string, unknown> | null | undefined): EscalationPolicy {
   const raw = settings?.escalation
@@ -141,5 +164,25 @@ export function escalationPolicyFromSettings(settings: Record<string, unknown> |
   for (const action of ESCALATION_ACTIONS) {
     if (isEscalationLevel(block[action])) policy[action] = block[action] as EscalationLevel
   }
+  if (!isEscalationLevel(block.merge_pr) && isEscalationLevel(block[LEGACY_PR_ESCALATION_KEY])) {
+    policy.merge_pr = block[LEGACY_PR_ESCALATION_KEY] as EscalationLevel
+  }
   return policy
+}
+
+/**
+ * Splits a stored `escalation` block's legacy `pr` level (#137): it becomes
+ * `merge_pr` (unless one is already set), `open_pr` gets its default unless
+ * set, and `pr` is removed. Returns null when there is nothing to change.
+ */
+export function splitLegacyPullRequestEscalation(settings: Record<string, unknown>): Record<string, unknown> | null {
+  const raw = settings.escalation
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const block = raw as Record<string, unknown>
+  if (!(LEGACY_PR_ESCALATION_KEY in block)) return null
+  const { [LEGACY_PR_ESCALATION_KEY]: legacy, ...rest } = block
+  const next: Record<string, unknown> = { ...rest }
+  if (!isEscalationLevel(next.merge_pr) && isEscalationLevel(legacy)) next.merge_pr = legacy
+  if (!isEscalationLevel(next.open_pr)) next.open_pr = DEFAULT_ESCALATION_POLICY.open_pr
+  return { ...settings, escalation: next }
 }

@@ -87,6 +87,13 @@ export function guardReportAsks(tools: ChatToolDefinition[], budget: ReportAskBu
 
 /** The report text for an escalation event, or null when the event is not one the Commander relays (only `tell_commander` outcomes are). */
 export function escalationReportText(event: EscalationEvent): string | null {
+  // #137: a merge made under the user's merge grant, and a merge blocked on a person outside 21x.
+  if (event.outcome === 'merged_under_grant') {
+    return `Merge notice: the Captain merged under the user's merge grant${event.grantId ? ` ${event.grantId}` : ''} — ${event.summary}. The user can revoke the grant in 20x.`
+  }
+  if (event.outcome === 'needs_user') {
+    return `Blocked on an external approval: ${event.summary}`
+  }
   if (event.level !== 'tell_commander' || event.outcome !== 'performed') return null
   return `Escalation notice (policy: act, then tell the Commander): the Captain did this on its own — ${event.summary}.`
 }

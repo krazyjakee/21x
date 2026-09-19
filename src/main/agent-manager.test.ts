@@ -658,12 +658,13 @@ describe('AgentManager skill file paths', () => {
       const db = makeMcpDb()
 
       const md: string = generateAgentsMd(db, [], [], '/tmp/ws', 'agent-1', {
-        'task-management': { type: 'http', url: 'http://127.0.0.1:5555/mcp?token=session-secret&task=t1&parent=p1' }
+        'task-management': { type: 'http', url: 'http://127.0.0.1:5555/mcp?token=session-secret&scope_signature=captain-secret&task=t1&parent=p1' }
       })
 
       expect(md).toContain('**Type:** Local (HTTP, in-process)')
       expect(md).toContain('http://127.0.0.1:5555/mcp?task=t1&parent=p1')
       expect(md).not.toContain('session-secret')
+      expect(md).not.toContain('captain-secret')
       expect(md).not.toContain('/bin/Electron')
       expect(md).not.toContain('**Command:**')
     })

@@ -59,7 +59,9 @@ export function mcpOptionsForTask(taskId: string, task?: TaskRecord | null, scop
   // that lists task-management explicitly must still be confined to the
   // checked task's project, never given full access.
   if (!task && scopeTask) {
-    return { ensureTaskManagement: false, projectId: taskProjectId(scopeTask) }
+    // Heartbeats are workers, even when checking the Captain itself. An
+    // unpinned project scope would give this session Captain-only tools.
+    return { ensureTaskManagement: false, projectId: taskProjectId(scopeTask), artifactTaskId: scopeTask.id }
   }
   const taskScope = task?.parent_task_id ? { taskId, parentTaskId: task.parent_task_id } : undefined
   return {

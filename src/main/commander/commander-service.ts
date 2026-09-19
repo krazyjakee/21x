@@ -33,6 +33,8 @@ export interface CommanderToolContext {
   sessionId: string
   /** The user message that immediately precedes this turn's tool calls; empty for a report-triggered turn. */
   userMessage: string
+  /** The stored id of that message (#137: merge grants bind to it); absent for a report-triggered turn. */
+  userMessageId?: string
   /** What started the turn: the user, or a report being relayed (#62). */
   trigger: 'user' | 'report'
 }
@@ -81,6 +83,7 @@ export interface DeliverReportResult {
 interface TurnStart {
   trigger: 'user' | 'report'
   userMessage: string
+  userMessageId?: string
   /** Extra system text for the turn (the relay note of a report-triggered turn). */
   systemNote?: string
 }
@@ -212,7 +215,12 @@ export class CommanderService {
     return this.activeSessionId === sessionId
   }
 
-  sendUserMessage(sessionId: string, text: string): SendResult {
+  /**
+   * `origin` is how the user produced the text. Only a typed message can back
+   * a merge grant (#137): a voice transcript may be misheard, or pick up
+   * speech that is not the user's, so its id is not handed to the tools.
+   */
+  sendUserMessage(sessionId: string, text: string, origin: 'typed' | 'voice' = 'typed'): SendResult {
     const content = typeof text === 'string' ? text.trim() : ''
     if (!content) throw new Error('Message is empty')
     if (content.length > MAX_USER_MESSAGE_CHARS) throw new Error('Message is too long')
@@ -230,7 +238,7 @@ export class CommanderService {
     // A user turn resets the report-ask budget (#62).
     this.reportAsks.delete(sessionId)
 
-    const { turnId, done } = this.startTurn(sessionId, provider, { trigger: 'user', userMessage: content })
+    const { turnId, done } = this.startTurn(sessionId, provider, { trigger: 'user', userMessage: content, userMessageId: origin === 'typed' ? message.id : undefined })
     return { turnId, message, done }
   }
 
@@ -239,7 +247,7 @@ export class CommanderService {
     const context = buildContext(this.store.listMessages(sessionId), this.budget)
     let system = withSummary(this.options.systemPrompt ?? COMMANDER_SYSTEM_PROMPT, context.summary)
     if (start.systemNote) system = `${system}\n\n${start.systemNote}`
-    let tools = this.options.getTools?.({ sessionId, userMessage: start.userMessage, trigger: start.trigger }) ?? []
+    let tools = this.options.getTools?.({ sessionId, userMessage: start.userMessage, userMessageId: start.userMessageId, trigger: start.trigger }) ?? []
     if (start.trigger === 'report') {
       const max = this.options.maxReportAsks ?? MAX_REPORT_ASKS_WITHOUT_USER_TURN
       tools = guardReportAsks(tools, {
