@@ -119,7 +119,7 @@ export function CommanderMessageItem({ message, toolResults }: MessageItemProps)
             {calls.map((call) => {
               const result = toolResults.get(call.id)
               return (
-                <ToolChip key={call.id} name={call.name} input={call.input} result={result?.content ?? ''} isError={result?.is_error} />
+                <ToolChip key={call.id} name={call.name} input={call.input} result={result?.content} isError={result?.is_error} />
               )
             })}
           </div>

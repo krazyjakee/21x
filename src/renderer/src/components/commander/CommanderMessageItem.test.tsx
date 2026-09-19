@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { ToolChip } from './CommanderMessageItem'
+import type { CommanderMessage } from '@shared/commander'
+import { CommanderMessageItem, ToolChip } from './CommanderMessageItem'
 import { formatToolResult } from './tool-call-label'
 
 afterEach(cleanup)
@@ -32,6 +33,35 @@ describe('ToolChip', () => {
     render(<ToolChip name="list_projects" input={{}} result="" />)
     expect(screen.queryByRole('button')).toBeNull()
     expect(screen.getByTestId('commander-tool-chip').textContent).toBe('List projects')
+  })
+})
+
+describe('CommanderMessageItem tool calls', () => {
+  const assistant = {
+    id: 'm1',
+    session_id: 's1',
+    role: 'assistant',
+    content: '',
+    tool_calls: [{ id: 'call-1', name: 'list_projects', input: {} }],
+    tool_call_id: null,
+    is_error: false,
+    project_id: null,
+    created_at: '2026-09-19T00:00:00Z',
+  } as unknown as CommanderMessage
+
+  it('shows the running spinner while a call has no result yet', () => {
+    render(<CommanderMessageItem message={assistant} toolResults={new Map()} />)
+    const chip = screen.getByTestId('commander-tool-chip')
+    expect(chip.querySelector('.animate-spin')).not.toBeNull()
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  it('stops spinning once the result arrives', () => {
+    const result = { ...assistant, id: 'm2', role: 'tool', content: '["Web"]', tool_calls: null, tool_call_id: 'call-1' } as unknown as CommanderMessage
+    render(<CommanderMessageItem message={assistant} toolResults={new Map([['call-1', result]])} />)
+    const chip = screen.getByTestId('commander-tool-chip')
+    expect(chip.querySelector('.animate-spin')).toBeNull()
+    expect(chip.tagName).toBe('BUTTON')
   })
 })
 

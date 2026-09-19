@@ -284,6 +284,16 @@ of the chat). The wake word stays out of scope.
   `CommanderService.sendUserMessage` after cancelling any reply still running.
   Turning it off, switching session, pressing Escape or leaving the view closes
   the microphone, stops playback and closes any ElevenLabs connection.
+- **Half-heard words appear once** (#83). While its conversation runs, the
+  strip's status pill shows them and sets the voice store's `captionOwner`, so
+  the global `VoiceOverlay` leaves its listening bubble out. Confirmations and
+  results still appear in the overlay, and a microphone opened anywhere else
+  keeps the overlay as before.
+- **When voice cannot start**, the reason is visible text under the button
+  ("Mic blocked", "Voice not installed", "Voice not set up"; it also describes
+  the button to screen readers). Clicking either the label or the button
+  explains the problem in full and offers "Open voice settings" (Settings →
+  Voice). Typed chat is unaffected.
 - **The reply is spoken as it is written**, through whichever engine is
   selected in Settings → Voice (system, downloaded, or ElevenLabs). Each
   finished sentence is handed over as it arrives; a text run closed by a tool

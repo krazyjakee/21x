@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { AudioLines, Loader2, Mic, VolumeX } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { commanderVoiceApi } from '@/lib/ipc-client'
 import { useCommanderStore } from '@/stores/commander-store'
+import { useUIStore } from '@/stores/ui-store'
+import { SettingsTab } from '@/types'
 
 /**
  * Commander voice mode (#64, docs/commander.md "Voice mode").
@@ -69,6 +71,9 @@ function VoiceControls({ store, dictation }: { store: VoiceStoreModule; dictatio
   const setTtsEnabled = useVoiceStore((s) => s.setTtsEnabled)
   const cancelTurn = useVoiceStore((s) => s.cancel)
   const stopPlaybackNow = useVoiceStore((s) => s.stopPlaybackNow)
+  const setCaptionOwner = useVoiceStore((s) => s.setCaptionOwner)
+  const openSettings = useUIStore((s) => s.openSettings)
+  const setSettingsTab = useUIStore((s) => s.setSettingsTab)
 
   const [voiceMode, setVoiceMode] = useState(false)
   const [starting, setStarting] = useState(false)
@@ -82,6 +87,7 @@ function VoiceControls({ store, dictation }: { store: VoiceStoreModule; dictatio
     setOwnTurnIdState(id)
   }, [])
   const hiddenField = useRef<HTMLTextAreaElement>(null)
+  const setupLabelId = useId()
   const sessionRef = useRef(sessionId)
   sessionRef.current = sessionId
   const interruptedReply = useRef(false)
@@ -134,6 +140,32 @@ function VoiceControls({ store, dictation }: { store: VoiceStoreModule; dictatio
         : !micSetupComplete
           ? ('message' in engine && engine.message) || 'Turn on voice input and choose a speech model in Settings → Voice.'
           : null
+  /** A short, always-visible label for the same problem, under the button (#83). */
+  const setupLabel = permission === 'denied'
+    ? 'Mic blocked'
+    : !runtime.installed
+      ? 'Voice not installed'
+      : !micSetupComplete
+        ? 'Voice not set up'
+        : null
+
+  const openVoiceSettings = useCallback(() => {
+    setError(null)
+    setSettingsTab(SettingsTab.VOICE)
+    openSettings()
+  }, [openSettings, setSettingsTab])
+
+  // While this control's conversation runs, its status pill is the one place
+  // the half-heard words appear; the global voice overlay leaves them out
+  // (#83). A turn opened by another microphone keeps the overlay.
+  const ownsCaptions = voiceMode && (starting || !turnId || turnId === ownTurnId)
+  useEffect(() => {
+    if (!ownsCaptions) return undefined
+    setCaptionOwner(COMMANDER_VOICE_COMPOSER_KEY)
+    return () => {
+      if (useVoiceStore.getState().captionOwner === COMMANDER_VOICE_COMPOSER_KEY) setCaptionOwner(null)
+    }
+  }, [ownsCaptions, setCaptionOwner, useVoiceStore])
 
   // Turning voice mode on owns the complete loop. There is no second Talk
   // button: opening the mode immediately opens a persistent conversation turn.
@@ -268,7 +300,7 @@ function VoiceControls({ store, dictation }: { store: VoiceStoreModule; dictatio
       ? 'Commander is speaking — start talking to interrupt.'
       : replying
         ? 'Commander is thinking…'
-        : partial.trim() || 'Listening…'
+        : (listening && partial.trim()) || 'Listening…'
 
   return (
     <aside
@@ -281,12 +313,26 @@ function VoiceControls({ store, dictation }: { store: VoiceStoreModule; dictatio
         variant={voiceMode ? 'default' : 'ghost'}
         aria-pressed={voiceMode}
         aria-label={voiceMode ? 'Turn voice mode off' : 'Turn voice mode on'}
+        aria-describedby={!voiceMode && setupLabel ? setupLabelId : undefined}
         title={voiceMode ? 'Voice mode is on: replies and reports are read aloud.' : 'Voice mode: talk to the Commander and hear its replies.'}
         onClick={toggleVoiceMode}
         data-testid="commander-voice-mode"
       >
         {busy ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <AudioLines className="size-4" aria-hidden="true" />}
       </Button>
+
+      {!voiceMode && setupLabel && (
+        <button
+          type="button"
+          id={setupLabelId}
+          onClick={openVoiceSettings}
+          title={`${setupProblem ?? ''} Click to open Settings → Voice.`.trim()}
+          className="px-1 text-center text-[10px] leading-tight text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="commander-voice-setup"
+        >
+          {setupLabel}
+        </button>
+      )}
 
       {voiceMode && (
         <>
@@ -318,7 +364,18 @@ function VoiceControls({ store, dictation }: { store: VoiceStoreModule; dictatio
           role="alert"
           className={`fixed ${voiceMode ? 'bottom-36' : 'bottom-24'} right-20 z-40 max-w-sm rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive`}
         >
-          {error}
+          <p>{error}</p>
+          {!voiceMode && setupProblem && error === setupProblem && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-2 h-7 text-xs"
+              onClick={openVoiceSettings}
+              data-testid="commander-voice-fix"
+            >
+              Open voice settings
+            </Button>
+          )}
         </div>
       )}
 
