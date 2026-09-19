@@ -8,6 +8,7 @@ import {
   CAPTAIN_COMPOSER_KEY,
   clearActiveComposer,
   composerCanSubmit,
+  composerExpectsSpokenAnswer,
   getActiveComposer,
   insertAndSubmit,
   insertDictation,
@@ -112,7 +113,9 @@ export function useVoiceControl(): void {
         // The sentence has gone to an agent, so the answer that comes back is
         // the reply to it and may be read aloud. Without this the loop stops
         // after one turn: 20x hears the reply but never speaks the answer.
-        void voiceApi.expectAnswer(turnId, taskIdOfComposer(composer))
+        if (composerExpectsSpokenAnswer(composer)) {
+          void voiceApi.expectAnswer(turnId, taskIdOfComposer(composer))
+        }
       } else {
         // No composer to send from — show it instead of losing it.
         useVoiceStore.setState({ testTranscript: text })

@@ -257,18 +257,20 @@ right place. The pieces:
 
 ## Voice mode (#64)
 
-The Commander view has a push-to-talk voice mode
+The Commander view has a hands-free voice mode
 (`components/commander/CommanderVoiceControls.tsx`, a narrow strip to the right
 of the chat). The wake word stays out of scope.
 
 - **Turning it on** tells main which session to speak for
-  (`voice:commander:setActive`). Turning it off, switching session or leaving
-  the view stops whatever is being read and closes any ElevenLabs connection.
-- **Talking**: one click opens the microphone, a second closes it. The final
-  transcript is sent as a user turn through `voice:commander:send`, which is
+  (`voice:commander:setActive`) and immediately opens one `conversation` speech
+  turn. It first refreshes and prepares the persisted reply voice, so a saved
+  ElevenLabs configuration is reused even when the renderer still has its
+  initial loading snapshot or the general read-aloud switch was off. There is
+  no second Talk button. The microphone remains open; each pause
+  finishes an utterance and sends it through `voice:commander:send`, which is
   `CommanderService.sendUserMessage` after cancelling any reply still running.
-  Escape cancels listening. The Talk button needs voice input switched on
-  (Settings → Voice).
+  Turning it off, switching session, pressing Escape or leaving the view closes
+  the microphone, stops playback and closes any ElevenLabs connection.
 - **The reply is spoken as it is written**, through whichever engine is
   selected in Settings → Voice (system, downloaded, or ElevenLabs). Each
   finished sentence is handed over as it arrives; a text run closed by a tool
@@ -276,8 +278,8 @@ of the chat). The wake word stays out of scope.
 - **Captain reports** that land in the session are spoken, introduced as
   "Report from <project>.", only while voice mode is on for that session. A
   report that arrives during a reply is read after it, not over it.
-- **Barge-in**: starting a new voice turn, the Stop button or Escape stops
-  playback in the renderer at once, then main interrupts the passage (which
+- **Barge-in**: speaking while a reply is playing, or pressing the Stop button,
+  stops playback in the renderer at once, then main interrupts the passage (which
   cancels the synthesis request or closes the ElevenLabs connection and drops
   late audio) and cancels the Commander turn (`voice:commander:bargeIn`). The
   written part of the reply is kept, as with any cancel.
