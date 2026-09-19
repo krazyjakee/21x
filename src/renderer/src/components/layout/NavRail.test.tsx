@@ -8,15 +8,18 @@ vi.mock('@/lib/activity/use-activity', () => ({
   useCommanderActivity: () => ({ state: 'idle' })
 }))
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  document.documentElement.classList.remove('dark')
+})
 beforeEach(() => {
-  useUIStore.setState({ sidebarView: 'dashboard', activeModal: null })
+  useUIStore.setState({ sidebarView: 'dashboard', activeModal: null, sidebarCollapsed: false })
 })
 
 describe('NavRail Settings', () => {
   it('renders Settings last in its own bottom group inside the navigation landmark', () => {
     render(<NavRail />)
-    const nav = screen.getByRole('navigation')
+    const nav = screen.getByRole('navigation', { name: 'Primary' })
     const main = within(nav).getByRole('group', { name: 'Main views' })
     const bottom = within(nav).getByRole('group', { name: 'Settings' })
     const settings = within(bottom).getByRole('button', { name: 'Settings' })
@@ -59,7 +62,7 @@ describe('NavRail Settings', () => {
     for (const button of buttons) {
       expect(button.tabIndex).toBe(0)
       expect(button).not.toBeDisabled()
-      expect(button).toHaveClass('focus-visible:ring-2', 'focus-visible:ring-inset')
+      expect(button).toHaveClass('focus-visible:ring-2', 'focus-visible:ring-foreground', 'focus-visible:ring-inset')
       act(() => button.focus())
       expect(button).toHaveFocus()
     }
@@ -82,6 +85,44 @@ describe('NavRail Settings', () => {
     expect(tooltip).toHaveTextContent('Settings')
     expect(tooltip.parentElement).toBe(document.body)
     fireEvent.keyDown(settings, { key: 'Escape' })
+    expect(screen.queryByRole('tooltip')).toBeNull()
+  })
+
+  it.each([
+    ['light', false], ['light', true], ['dark', false], ['dark', true]
+  ] as const)('preserves the rail groups and focusable targets in %s theme, sidebar collapsed=%s', (theme, sidebarCollapsed) => {
+    document.documentElement.classList.toggle('dark', theme === 'dark')
+    useUIStore.setState({ sidebarCollapsed, sidebarView: 'tasks' })
+    render(<NavRail />)
+    const nav = screen.getByRole('navigation', { name: 'Primary' })
+    const groups = within(nav).getAllByRole('group')
+    expect(groups.map((group) => group.getAttribute('aria-label'))).toEqual(['Main views', 'Settings'])
+    // DOM fallback: happy-dom has no layout engine. The isolated Electron
+    // review checks the compiled CSS at real window sizes and zoom factors.
+    expect(nav).toHaveClass('min-h-0', 'flex-col', 'w-14')
+    expect(groups[0]).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto')
+    expect(groups[1]).toHaveClass('mt-auto', 'shrink-0')
+    const focusable = nav.querySelectorAll('button, a[href], input, select, textarea, [tabindex]')
+    expect(focusable).toHaveLength(NAV_ITEMS.length + 1)
+    expect(focusable[focusable.length - 1]).toBe(within(groups[1]).getByRole('button', { name: 'Settings' }))
+    for (const target of focusable) {
+      expect(target).toHaveClass('size-hit-lg', 'shrink-0')
+      expect(target).not.toHaveAttribute('tabindex')
+    }
+  })
+
+  it('keeps the Settings tooltip visible while focused when the pointer leaves', () => {
+    render(<NavRail />)
+    const settings = screen.getByRole('button', { name: 'Settings' })
+    fireEvent.mouseEnter(settings)
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Settings')
+    fireEvent.mouseLeave(settings)
+    expect(screen.queryByRole('tooltip')).toBeNull()
+    act(() => settings.focus())
+    fireEvent.mouseEnter(settings)
+    fireEvent.mouseLeave(settings)
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Settings')
+    act(() => settings.blur())
     expect(screen.queryByRole('tooltip')).toBeNull()
   })
 })

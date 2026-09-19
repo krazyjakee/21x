@@ -33,13 +33,15 @@ function RailButton({ name, active, shortcut, onClick, children }: {
       type="button"
       onClick={onClick}
       onMouseEnter={(event) => setAnchor(event.currentTarget)}
-      onMouseLeave={() => setAnchor(null)}
+      onMouseLeave={(event) => {
+        if (document.activeElement !== event.currentTarget) setAnchor(null)
+      }}
       onFocus={(event) => setAnchor(event.currentTarget)}
       onBlur={() => setAnchor(null)}
       onKeyDown={(event) => { if (event.key === 'Escape') setAnchor(null) }}
       aria-label={name}
       aria-current={active ? 'page' : undefined}
-      className={`relative grid size-hit-lg shrink-0 place-items-center rounded-lg transition-colors duration-150 cursor-pointer focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${
+      className={`relative grid size-hit-lg shrink-0 place-items-center rounded-lg transition-colors duration-150 cursor-pointer focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-inset ${
         active
           ? 'bg-primary/12 text-primary'
           : 'text-muted-foreground hover:bg-accent hover:text-foreground'
@@ -65,7 +67,7 @@ function RailButton({ name, active, shortcut, onClick, children }: {
   )
 }
 
-/** Primary navigation — slim vertical icon rail. */
+/** Primary navigation — leaves room for 44px targets plus the main group's scrollbar. */
 export function NavRail() {
   const sidebarView = useUIStore((s) => s.sidebarView)
   const setSidebarView = useUIStore((s) => s.setSidebarView)
@@ -78,7 +80,7 @@ export function NavRail() {
   const showCommanderState = !isQuietActivity(commander)
 
   return (
-    <nav className="ui-scale app-chrome no-drag flex min-h-0 w-11 flex-shrink-0 flex-col items-center bg-background py-1.5">
+    <nav aria-label="Primary" className="ui-scale app-chrome no-drag flex min-h-0 w-14 flex-shrink-0 flex-col items-center bg-background py-1.5">
       <div role="group" aria-label="Main views" className="flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto py-0.5">
         {NAV_ITEMS.map(({ key, label, icon: Icon }, i) => {
           const active = sidebarView === key && activeModal !== 'settings'
