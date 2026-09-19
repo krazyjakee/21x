@@ -3,6 +3,8 @@ import { setCommanderEscalationHandler, type EscalationEvent } from '../escalati
 import type { CommanderService } from './commander-service'
 import type { CommanderStore } from './commander-store'
 import { setCaptainReportHandler, type CaptainReportHandler, type ReportRoutedBy } from './report-inbox'
+import { createHash } from 'crypto'
+import type { DeliveryStore } from '../sessions/delivery-store'
 
 /**
  * Captain reports into Commander sessions (#62; docs/commander.md).
@@ -36,7 +38,11 @@ export interface ReportRoute {
   routedBy: ReportRoutedBy
 }
 
-export function resolveReportSession(store: ReportRoutingStore, correlationId?: string | null): ReportRoute {
+export function resolveReportSession(store: ReportRoutingStore, correlationId?: string | null, preferredSessionId?: string | null): ReportRoute {
+  if (preferredSessionId) {
+    const preferred = store.getSession(preferredSessionId)
+    if (preferred && !preferred.archived) return { sessionId: preferred.id, routedBy: 'correlation' }
+  }
   const id = correlationId?.trim()
   if (id) {
     const delegation = store.findDelegation(id)
@@ -105,6 +111,7 @@ export interface CommanderReportBridgeOptions {
   store: ReportRoutingStore
   /** The project a report names; unknown projects are refused. */
   getProject: (projectId: string) => { id: string; name: string } | null | undefined
+  deliveries: DeliveryStore
 }
 
 /** The handler behind `report_to_commander`: routes, stores and relays one report. */
@@ -112,13 +119,31 @@ export function createCaptainReportHandler(options: CommanderReportBridgeOptions
   return (report) => {
     const project = options.getProject(report.projectId)
     if (!project) return { delivered: false, detail: `Project not found: ${report.projectId}` }
-    const route = resolveReportSession(options.store, report.correlationId)
+    const correlationId = report.correlationId?.trim() || null
+    const request = correlationId ? options.deliveries.getCaptainRequest(correlationId) : null
+    const late = request?.state === 'timed_out'
+    // A correlated request has one terminal application-visible report even
+    // if a reconnect gives the transport attempt a different delivery id.
+    const baseKey = correlationId
+      ? `captain-report:${project.id}:${correlationId}:${late ? 'late' : 'terminal'}`
+      : report.deliveryId?.trim()
+        || `captain-report:${project.id}:${createHash('sha256').update(report.message).digest('hex')}`
+    const { record } = options.deliveries.enqueue({
+      idempotencyKey: baseKey,
+      kind: 'captain_report',
+      sourceSessionId: request?.sourceSessionId ?? null,
+      projectId: project.id,
+      correlationId,
+      payload: report.message
+    })
+    const route = resolveReportSession(options.store, correlationId, request?.sourceSessionId)
     const { relayed } = options.service.deliverReport({
       sessionId: route.sessionId,
-      content: report.message,
+      content: late ? `Late report after the request timed out: ${report.message}` : report.message,
       projectId: project.id,
       projectName: project.name,
-      correlationId: report.correlationId?.trim() || null
+      correlationId,
+      deliveryId: record.id
     })
     return { delivered: true, sessionId: route.sessionId, routedBy: route.routedBy, relayed }
   }

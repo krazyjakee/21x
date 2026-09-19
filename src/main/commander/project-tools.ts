@@ -12,6 +12,8 @@ import { isCoordinatorTask } from '../../shared/task-roles'
 import type { UiCommand } from '../../shared/ui-commands'
 import type { MergeGrant } from '../../shared/merge-grants'
 import { grantForRelay, mergeGrantInputSchema, relayGrantLines } from './merge-grant-tools'
+import type { CaptainDeliveryService } from './captain-delivery'
+import { correlationForDeliveryKey } from './captain-delivery'
 
 /**
  * The Commander's tools (#61, #73; docs/commander.md).
@@ -50,7 +52,7 @@ export type ProjectChangeKind = 'created' | 'updated' | 'archived' | 'restored' 
 export type CommanderAgents = Pick<
   AgentManager,
   'getStartQueue' | 'findSessionByTaskId' | 'getSessionStatus' | 'getProjectLimitState' | 'sendMessage' | 'pauseAllProjects' | 'isAllProjectsPaused'
-> & Partial<Pick<AgentManager, 'releaseCaptainIfAgentChanged'>>
+> & Partial<Pick<AgentManager, 'releaseCaptainIfAgentChanged' | 'getCaptainRuntime'>>
 
 export interface ProjectToolContext {
   sessionId: string
@@ -80,6 +82,8 @@ export interface ProjectToolOptions {
   onProjectChanged?: (projectId: string, kind: ProjectChangeKind) => void
   /** A delegation that could not reach its Captain after `ask_captain` returned. */
   onDeliveryFailed?: (dispatch: AskCaptainDispatch, error: unknown) => void
+  /** Durable ownership for accepted Captain requests. */
+  delivery?: Pick<CaptainDeliveryService, 'enqueueRequest'>
 }
 
 interface ConfirmationRequest {
@@ -413,17 +417,15 @@ function releaseCaptain(options: ProjectToolOptions, projectId: string): void {
   })
 }
 
-function newCorrelationId(): string {
-  return `cmd-${randomUUID().replaceAll('-', '').slice(0, 16)}`
-}
-
 /**
  * What `ask_captain` reports about the Captain's runtime. A session that
  * exists is not necessarily working: one in error is said so rather than
  * "running", and no session at all means one is being started for this message.
  */
-function captainSessionLabel(options: ProjectToolOptions, sessionId: string | undefined): string {
-  if (!sessionId) return 'starting'
+function captainSessionLabel(options: ProjectToolOptions, projectId: string, sessionId: string | undefined): string {
+  const persisted = options.agents?.getCaptainRuntime?.(projectId)
+  if (persisted && persisted.phase !== 'healthy') return persisted.phase
+  if (!sessionId) return persisted?.phase ?? 'starting'
   const status = options.agents?.getSessionStatus(sessionId)?.status
   if (status === 'error') return 'error'
   if (status === 'waiting_approval') return 'waiting_approval'
@@ -431,12 +433,13 @@ function captainSessionLabel(options: ProjectToolOptions, sessionId: string | un
   return 'running'
 }
 
-function askCaptain(options: ProjectToolOptions, input: Record<string, unknown>): ChatToolResult {
+function askCaptain(options: ProjectToolOptions, input: Record<string, unknown>, toolCallId: string): ChatToolResult {
   const { db, agents } = options
   const project = resolveProject(db, input.project)
   const message = requiredString(input, 'message', MAX_ASK_CHARS)
   if (project.archived) throw new Error(`Project "${project.name}" is archived. Restore it before delegating to it.`)
   if (!agents) throw new Error('Agents are not available right now; the Captain cannot be reached.')
+  if (!options.delivery) throw new Error('Durable Captain delivery is not available; the request was not accepted.')
   const coordinator = db.ensureCoordinatorTask(project.id)
   if (!coordinator) throw new Error(`Project "${project.name}" has no Captain.`)
   const agentId = resolveCaptainAgentId(db, project)
@@ -448,31 +451,29 @@ function askCaptain(options: ProjectToolOptions, input: Record<string, unknown>)
 
   // #137: created (and bound to the user's message) before anything is sent; a refusal throws.
   const grant = input.merge_grant === undefined || input.merge_grant === null ? null : grantForRelay(db, options.context, project, input.merge_grant)
-  const correlationId = newCorrelationId()
+  const idempotencyKey = `commander:${options.context.sessionId}:tool:${toolCallId}`
+  const correlationId = correlationForDeliveryKey(idempotencyKey)
   const dispatch: AskCaptainDispatch = { sessionId: options.context.sessionId, projectId: project.id, projectName: project.name, correlationId }
   const text = buildCommanderRelayMessage({ commanderSessionId: options.context.sessionId, correlationId, message, grant })
-  // Never block on the Captain: starting or resuming its session can take
-  // seconds and its answer arrives later as a report (#62).
-  Promise.resolve()
-    .then(() => agents.sendMessage(live?.sessionId ?? '', text, coordinator.id, agentId))
-    .catch((error: unknown) => {
-      console.error(`[Commander] Could not deliver ${correlationId} to the Captain of ${project.id}:`, error)
-      try {
-        options.onDeliveryFailed?.(dispatch, error)
-      } catch (err) {
-        console.error('[Commander] onDeliveryFailed handler failed:', err)
-      }
-    })
+  const queued = options.delivery.enqueueRequest({
+    idempotencyKey,
+    sourceSessionId: dispatch.sessionId,
+    projectId: project.id,
+    taskId: coordinator.id,
+    agentId,
+    payload: text
+  })
   return result({
-    status: 'sent',
+    status: queued.state === 'accepted' || queued.state === 'acknowledged' ? 'accepted' : 'queued',
     project_id: project.id,
     project_name: clip(project.name, MAX_NAME_CHARS),
     correlation_id: correlationId,
-    captain_session: captainSessionLabel(options, live?.sessionId),
+    captain_session: captainSessionLabel(options, project.id, live?.sessionId),
     ...(grant ? { merge_grant: { id: grant.id, expires_at: grant.expires_at, pr_numbers: grant.pr_numbers, repo: grant.repo } } : {}),
+    delivery_id: queued.id,
     note: grant
-      ? 'The Captain answers later in a report tagged with this correlation_id. Tell the user the merge grant is in place for this project only, until it expires (7 days at most) or they revoke it in 20x.'
-      : 'The Captain answers later in a report tagged with this correlation_id. Tell the user which project you asked and do not wait.'
+      ? 'Ownership is durable. The merge grant is in place for this project only until it expires or is revoked; the Captain answers later with this correlation_id, and startup failure or timeout returns here.'
+      : 'Ownership is durable. The Captain answers later in a report tagged with this correlation_id; a startup failure or report timeout is routed back to this same conversation.'
   })
 }
 
@@ -591,7 +592,7 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
         required: ['project', 'message'],
         additionalProperties: false
       },
-      handler: async (input) => askCaptain(options, input)
+      handler: async (input, context) => askCaptain(options, input, context.toolCallId)
     },
     {
       name: 'get_pending_approvals',

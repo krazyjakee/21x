@@ -170,7 +170,7 @@ describe('TaskWorkspace keyboard actions', () => {
     fireEvent.click(stars[3])
     fireEvent.click(screen.getByRole('button', {name: button}))
     if (button === 'Submit Feedback') {
-      await waitFor(() => expect(window.electronAPI.agentSession.send).toHaveBeenCalledWith('persisted', expect.stringContaining('Review the session and update skills'), task.id, 'agent-1', undefined))
+      await waitFor(() => expect(window.electronAPI.agentSession.send).toHaveBeenCalledWith('persisted', expect.stringContaining('Review the session and update skills'), task.id, 'agent-1', undefined, expect.stringMatching(/^renderer:/)))
       expect(window.electronAPI.db.updateTask).toHaveBeenCalledWith(task.id, {
         status: TaskStatus.AgentLearning, feedback_rating: 4, feedback_comment: null, complete_at_source: completeAtSource
       })
@@ -191,7 +191,7 @@ describe('TaskWorkspace keyboard actions', () => {
     fireEvent.click(screen.getAllByRole('button').filter(button => button.querySelector('svg.lucide-star'))[4])
     fireEvent.click(screen.getByRole('button', { name: 'Submit Feedback' }))
     await waitFor(() => expect(window.electronAPI.agentSession.send).toHaveBeenCalledWith(
-      'learning-session', expect.stringContaining('User rated this session 5/5'), task.id, 'agent-1', undefined
+      'learning-session', expect.stringContaining('User rated this session 5/5'), task.id, 'agent-1', undefined, expect.stringMatching(/^renderer:/)
     ))
     expect(window.electronAPI.agentSession.start).toHaveBeenCalledWith('agent-1', task.id, undefined, true)
     expect(window.electronAPI.db.updateTask).toHaveBeenCalledWith(task.id, expect.objectContaining({
@@ -415,7 +415,7 @@ describe('TaskWorkspace – messaging a task whose session has ended', () => {
     // instruction, so the initial prompt is skipped.
     expect(sessionApi().start).toHaveBeenCalledWith('agent-1', 'task-1', undefined, true)
     await waitFor(() =>
-      expect(sessionApi().send).toHaveBeenCalledWith('fresh-session-1', 'approved', 'task-1', 'agent-1', undefined)
+      expect(sessionApi().send).toHaveBeenCalledWith('fresh-session-1', 'approved', 'task-1', 'agent-1', undefined, expect.stringMatching(/^renderer:/))
     )
   })
 
@@ -426,7 +426,7 @@ describe('TaskWorkspace – messaging a task whose session has ended', () => {
     fireEvent.click(screen.getByTestId('mock-send'))
 
     await waitFor(() =>
-      expect(sessionApi().send).toHaveBeenCalledWith('persisted-session-1', 'approved', 'task-1', 'agent-1', undefined)
+      expect(sessionApi().send).toHaveBeenCalledWith('persisted-session-1', 'approved', 'task-1', 'agent-1', undefined, expect.stringMatching(/^renderer:/))
     )
     expect(sessionApi().start).not.toHaveBeenCalled()
   })
@@ -442,7 +442,7 @@ describe('TaskWorkspace – messaging a task whose session has ended', () => {
 
     // The main process starts the session for a direct message, bypassing the queue.
     await waitFor(() =>
-      expect(sessionApi().sendByTaskId).toHaveBeenCalledWith('task-1', 'approved', undefined)
+      expect(sessionApi().sendByTaskId).toHaveBeenCalledWith('task-1', 'approved', undefined, expect.stringMatching(/^renderer:/))
     )
   })
 })
@@ -722,7 +722,7 @@ describe('TaskWorkspace – stale triage session cleanup', () => {
     })
 
     await waitFor(() => {
-      expect(window.electronAPI.agentSession.send).toHaveBeenCalledWith('resumed-session-1', 'approved', taskId, agentId, undefined)
+      expect(window.electronAPI.agentSession.send).toHaveBeenCalledWith('resumed-session-1', 'approved', taskId, agentId, undefined, expect.stringMatching(/^renderer:/))
     })
   })
 })

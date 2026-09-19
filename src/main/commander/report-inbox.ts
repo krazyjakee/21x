@@ -18,6 +18,8 @@ export interface CaptainReport {
   /** The `correlation_id` the Captain quoted from an `ask_captain` relay; null when unprompted. */
   correlationId?: string | null
   source: CaptainReportSource
+  /** Stable transport retry key. Correlated reports derive one when omitted. */
+  deliveryId?: string | null
 }
 
 /** How the report found its session: by the correlation id, the most recent session, or an inbox created for it. */

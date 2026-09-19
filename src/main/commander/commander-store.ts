@@ -193,6 +193,57 @@ export class CommanderStore {
     return this.getMessage(id)!
   }
 
+  /**
+   * Inserts one application-visible effect for one delivery row and
+   * acknowledges that row in the same SQLite transaction. Replays return the
+   * original message without emitting a second report.
+   */
+  appendMessageOnce(
+    sessionId: string,
+    input: AppendCommanderMessageInput,
+    deliveryId: string
+  ): { message: CommanderMessage; inserted: boolean } {
+    if (!COMMANDER_MESSAGE_ROLES.includes(input.role)) throw new Error(`Unknown Commander message role: ${String(input.role)}`)
+    const id = `delivery-${deliveryId}`
+    const ts = this.now()
+    let inserted = false
+    this.db.transaction(() => {
+      const session = this.db.prepare('SELECT 1 FROM commander_sessions WHERE id = ?').get(sessionId)
+      if (!session) throw new Error(`Commander session not found: ${sessionId}`)
+      inserted = this.db.prepare(`INSERT OR IGNORE INTO commander_messages
+        (id, session_id, role, content, tool_calls, tool_call_id, tool_name, is_error, project_id, correlation_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(
+          id,
+          sessionId,
+          input.role,
+          input.content,
+          input.toolCalls && input.toolCalls.length > 0 ? JSON.stringify(input.toolCalls) : null,
+          input.toolCallId ?? null,
+          input.toolName ?? null,
+          input.isError ? 1 : 0,
+          input.projectId ?? null,
+          input.correlationId ?? null,
+          ts
+        ).changes === 1
+      if (inserted) this.db.prepare('UPDATE commander_sessions SET updated_at = ? WHERE id = ?').run(ts, sessionId)
+      this.db.prepare(`UPDATE delivery_outbox SET
+        state = 'acknowledged', destination_id = ?, claim_owner = NULL,
+        claim_expires_at = NULL, acknowledged_at = ?, updated_at = ?
+        WHERE id = ? AND state NOT IN ('failed', 'timed_out', 'cancelled')`)
+        .run(id, ts, ts, deliveryId)
+      if (input.correlationId) {
+        this.db.prepare(`UPDATE delivery_outbox SET
+          state = 'acknowledged', acknowledged_at = ?, updated_at = ?
+          WHERE kind = 'captain_request' AND correlation_id = ? AND state = 'accepted'`)
+          .run(ts, ts, input.correlationId)
+      }
+    })()
+    const message = this.getMessage(id)
+    if (!message) throw new Error(`Could not store Commander delivery ${deliveryId}`)
+    return { message, inserted }
+  }
+
   getMessage(id: string): CommanderMessage | null {
     const row = this.db.prepare('SELECT * FROM commander_messages WHERE id = ?').get(id) as CommanderMessageRow | undefined
     return row ? toMessage(row) : null
