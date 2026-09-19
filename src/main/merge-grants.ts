@@ -21,10 +21,11 @@
  * from GitHub and refuses unless it is open, not a draft, every check passed
  * and GitHub reports branch protection satisfied (`mergeStateStatus` CLEAN or
  * HAS_HOOKS, no review required or changes requested). The merge command is
- * built from a fixed allow-list ({@link buildMergeCommand}): no `--admin`,
- * no `--auto`, pinned to the head commit that was checked.
+ * built from a fixed allow-list ({@link buildMergeCommand}), using the synchronous
+ * REST merge endpoint with the checked SHA. It cannot enable auto-merge or queue.
  */
 import * as childProcess from 'child_process'
+import { randomUUID } from 'crypto'
 import { promisify } from 'util'
 import type { DatabaseManager } from './database'
 import {
@@ -38,6 +39,7 @@ import {
   mergeGrantSettingsFrom,
   mergeGrantStatus,
   prNumbersMentioned,
+  parseGitHubPullRequestUrl,
   type MergeGrant,
   type MergeGrantAuditEntry,
   type MergeGrantScopeInput,
@@ -100,7 +102,7 @@ function grantsChanged(projectId: string): void {
 
 // ── What the user typed in a project chat ─────────────────────
 
-interface TypedMessage {
+export interface TypedMessage {
   id: string
   projectId: string
   taskId: string
@@ -109,22 +111,47 @@ interface TypedMessage {
 }
 
 const typedByProject = new Map<string, TypedMessage>()
+const latestDispatch = new Map<string, string>()
 
-/**
- * Called only by `mergeGrants:noteTyped` (ipc/merge-grants.ts), which the
- * chat composer invokes for text the user typed and sent to a Captain. Wake-ups, Commander relays, `send_message` and
- * reports reach the Captain through other paths and are never recorded.
- */
-export function recordUserTypedProjectMessage(projectId: string, taskId: string, text: string, now: number = Date.now()): TypedMessage | null {
-  const value = typeof text === 'string' ? text.trim() : ''
-  if (!projectId || !value) return null
-  const entry: TypedMessage = { id: `pc-${taskId}-${now}-${Math.random().toString(36).slice(2, 10)}`, projectId, taskId, text: value, at: now }
-  typedByProject.set(projectId, entry)
+/** A delivery token is minted in main, before any asynchronous resume work. */
+export interface ProjectMessageDispatch {
+  id: string
+  projectId: string
+  typed?: TypedMessage
+}
+
+export function prepareProjectMessageDispatch(projectId: string, typed?: TypedMessage): ProjectMessageDispatch {
+  const dispatch = { id: randomUUID(), projectId, typed }
+  latestDispatch.set(projectId, dispatch.id)
+  typedByProject.delete(projectId)
+  return dispatch
+}
+
+/** Install provenance only at the adapter send boundary, and only for the latest dispatch. */
+export function activateProjectMessageDispatch(dispatch: ProjectMessageDispatch): void {
+  if (latestDispatch.get(dispatch.projectId) !== dispatch.id) return
+  if (dispatch.typed) typedByProject.set(dispatch.projectId, dispatch.typed)
+}
+
+export function failProjectMessageDispatch(dispatch: ProjectMessageDispatch): void {
+  if (latestDispatch.get(dispatch.projectId) === dispatch.id) typedByProject.delete(dispatch.projectId)
+}
+
+/** Main-process message identity, also used for the persisted transcript event. */
+export function makeUserTypedProjectMessage(projectId: string, taskId: string, text: string, now = Date.now()): TypedMessage {
+  return { id: `pc-${randomUUID()}`, projectId, taskId, text, at: now }
+}
+
+/** Test helper for an already-dispatched typed message. Production uses the dispatch functions. */
+export function recordUserTypedProjectMessage(projectId: string, taskId: string, text: string, now = Date.now()): TypedMessage | null {
+  if (!projectId || !text.trim()) return null
+  const entry = makeUserTypedProjectMessage(projectId, taskId, text, now)
+  activateProjectMessageDispatch(prepareProjectMessageDispatch(projectId, entry))
   return entry
 }
 
-/** The newest message the user typed to the project's Captain, within the window. */
-export function latestUserTypedProjectMessage(projectId: string, now: number = Date.now()): TypedMessage | null {
+/** The latest dispatched typed message. Any subsequent non-typed dispatch invalidates it. */
+export function latestUserTypedProjectMessage(projectId: string, now = Date.now()): TypedMessage | null {
   const entry = typedByProject.get(projectId)
   if (!entry) return null
   if (now - entry.at > PROJECT_CHAT_GRANT_WINDOW_MS) {
@@ -136,6 +163,7 @@ export function latestUserTypedProjectMessage(projectId: string, now: number = D
 
 export function clearUserTypedProjectMessages(): void {
   typedByProject.clear()
+  latestDispatch.clear()
 }
 
 // ── Creating a grant ──────────────────────────────────────────
@@ -188,8 +216,20 @@ export function createMergeGrantFromUserMessage(
   if (!binding.messageId || typeof binding.text !== 'string' || !binding.text.trim()) {
     return { ok: false, error: 'No message typed by the user is available to bind the grant to.' }
   }
+  if (binding.text.length > MAX_GRANT_USER_TEXT_CHARS) return { ok: false, error: `Use a separate merge instruction of at most ${MAX_GRANT_USER_TEXT_CHARS} characters; the audit must retain it verbatim.` }
   const intent = checkMergeIntent(binding.text)
   if (!intent.ok) return { ok: false, error: intent.reason ?? 'The user did not ask for merging.' }
+
+  if (intent.projectName && intent.projectName.toLowerCase() !== project.name.toLowerCase()) {
+    return { ok: false, error: 'The instruction names a different project.' }
+  }
+  if (intent.repo && scope.repo && intent.repo.toLowerCase() !== scope.repo.trim().toLowerCase()) {
+    return { ok: false, error: 'The grant cannot cover a different repository from the user instruction.' }
+  }
+  if (intent.baseBranch && scope.base_branch && intent.baseBranch !== scope.base_branch.trim()) {
+    return { ok: false, error: 'The grant cannot cover a different base branch from the user instruction.' }
+  }
+  scope = { ...scope, repo: intent.repo ?? scope.repo, base_branch: intent.baseBranch ?? scope.base_branch }
 
   const notes: string[] = []
   const repos = githubRepoNames(db, projectId)
@@ -230,6 +270,11 @@ export function createMergeGrantFromUserMessage(
     }
   }
 
+  if (prNumbers.length > 0 && !repo) {
+    if (repos.length !== 1) return { ok: false, error: 'Name a repository or use a full PR URL: PR numbers are ambiguous across this project’s repositories.' }
+    repo = repos[0]
+  }
+
   let hours = DEFAULT_MERGE_GRANT_HOURS
   if (scope.expires_in_hours !== undefined && scope.expires_in_hours !== null) {
     const value = Number(scope.expires_in_hours)
@@ -257,7 +302,7 @@ export function createMergeGrantFromUserMessage(
     source: binding.source,
     source_session_id: binding.sessionId,
     source_message_id: binding.messageId,
-    user_text: binding.text.trim().slice(0, MAX_GRANT_USER_TEXT_CHARS),
+    user_text: binding.text,
     expires_at: new Date(Date.now() + hours * 3_600_000).toISOString(),
     max_uses: maxUses
   })
@@ -345,7 +390,12 @@ const PR_VIEW_FIELDS = 'url,number,title,state,isDraft,mergeable,mergeStateStatu
 export async function readPullRequestGate(pr: PullRequestRef): Promise<PullRequestGateState> {
   const stdout = await ghRunner(['pr', 'view', pr.url, '--json', PR_VIEW_FIELDS])
   const raw = JSON.parse(stdout) as Record<string, unknown>
-  const rollup = Array.isArray(raw.statusCheckRollup) ? (raw.statusCheckRollup as RawCheck[]) : []
+  if (!raw || typeof raw !== 'object' || raw.url !== pr.url || raw.number !== pr.number ||
+      typeof raw.isDraft !== 'boolean' || typeof raw.baseRefName !== 'string' || !raw.baseRefName ||
+      !Array.isArray(raw.statusCheckRollup) || raw.statusCheckRollup.some((check) => !check || typeof check !== 'object')) {
+    throw new Error('GitHub returned incomplete or mismatched PR/check data')
+  }
+  const rollup = raw.statusCheckRollup as RawCheck[]
   return {
     url: typeof raw.url === 'string' ? raw.url : pr.url,
     number: typeof raw.number === 'number' ? raw.number : pr.number,
@@ -399,6 +449,10 @@ export function evaluatePullRequestGate(state: PullRequestGateState): GateVerdic
   if (running.length > 0) { reasons.push(`checks still running: ${running.join(', ')}`); pending = true }
 
   if (state.mergeable === 'CONFLICTING') { reasons.push('it has merge conflicts'); blocking = true }
+  else if (state.mergeable !== 'MERGEABLE') { reasons.push('GitHub has not confirmed that the PR is mergeable'); pending = true }
+  if (!['', 'APPROVED', 'REVIEW_REQUIRED', 'CHANGES_REQUESTED'].includes(state.reviewDecision)) {
+    reasons.push('GitHub returned an unknown review decision'); blocking = true
+  }
 
   switch (state.mergeStateStatus) {
     case 'CLEAN':
@@ -444,19 +498,33 @@ export function isMergeMethod(value: unknown): value is MergeMethod {
 
 /**
  * The only merge command 21x runs: the method, pinned to the head commit
- * the gate checked (`--match-head-commit`, so a push after the check makes
+ * the gate checked (the REST `sha` precondition, so a push after the check makes
  * GitHub refuse). Nothing from the model reaches it except a validated URL
  * and one of three methods.
  */
 export function buildMergeCommand(prUrl: string, method: MergeMethod, headSha: string): string[] {
   if (!isMergeMethod(method)) throw new Error(`Unsupported merge method: ${String(method)}`)
   if (!/^[0-9a-f]{40}$/i.test(headSha)) throw new Error('A full head commit SHA is required')
-  const args = ['pr', 'merge', prUrl, `--${method}`, '--match-head-commit', headSha]
+  const pr = parseGitHubPullRequestUrl(prUrl)
+  if (!pr) throw new Error('A canonical GitHub PR URL is required')
+  // The synchronous REST endpoint cannot silently enable auto-merge or enqueue
+  // a future merge (gh pr merge does that on branches requiring a merge queue).
+  const args = ['api', '--method', 'PUT', `repos/${pr.owner}/${pr.repo}/pulls/${pr.number}/merge`, '-f', `sha=${headSha}`, '-f', `merge_method=${method}`]
   if (args.some((arg) => (FORBIDDEN_MERGE_FLAGS as readonly string[]).includes(arg))) throw new Error('Refusing a merge bypass flag')
   return args
 }
 
 // ── Merging ───────────────────────────────────────────────────
+
+class MergeRefusedError extends Error {}
+
+/** A transport failure may occur after GitHub committed: only a definite refusal refunds authority. */
+function confirmedMergeFailure(error: unknown): boolean {
+  if (error instanceof MergeRefusedError) return true
+  if (!error || typeof error !== 'object') return false
+  if ('code' in error && error.code === 'ENOENT') return true // gh was never started
+  return 'stderr' in error && /\(HTTP (?:400|401|403|404|405|409|422)\)/.test(String(error.stderr))
+}
 
 /** Where the authority for one merge came from. */
 export type MergeAuthority =
@@ -559,6 +627,8 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
 
   let grant: MergeGrant | undefined
   if (authority.kind === 'grant') {
+    const current = findCoveringGrant(db, projectId, { ...pr, baseRefName: state.baseRefName }, authority.grantId)
+    if (!current) return { error: 'The merge grant is no longer active or the project disabled it. Ask the user.' }
     grant = db.reserveMergeGrantUse(authority.grantId)
     if (!grant || grant.project_id !== projectId) {
       if (grant) db.refundMergeGrantUse(grant.id)
@@ -571,8 +641,14 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
   }
 
   try {
-    await ghRunner(buildMergeCommand(pr.url, method, state.headRefOid))
+    const response = JSON.parse(await ghRunner(buildMergeCommand(pr.url, method, state.headRefOid))) as { merged?: boolean; sha?: string; message?: string }
+    if (response.merged !== true || !/^[0-9a-f]{40}$/i.test(response.sha ?? '')) {
+      if (response.merged === false) throw new MergeRefusedError(response.message || 'GitHub did not merge the PR')
+      // An ambiguous response cannot justify refunding possibly spent authority.
+      return { status: 'unknown', pr_url: pr.url, message: 'GitHub did not confirm the merge outcome. The grant use remains reserved; inspect the PR before retrying.' }
+    }
   } catch (error) {
+    if (!confirmedMergeFailure(error)) return { status: 'unknown', pr_url: pr.url, message: 'The merge outcome is unknown. The grant use remains reserved; inspect the PR before retrying.' }
     if (grant) db.refundMergeGrantUse(grant.id)
     const detail = error instanceof Error ? error.message : String(error)
     return { error: `GitHub refused the merge of ${pr.url}: ${detail.slice(0, 1_000)}`, pr_url: pr.url }
@@ -587,7 +663,7 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
       method,
       merge_state: state.mergeStateStatus,
       review_decision: state.reviewDecision,
-      checks: state.checks.slice(0, 100)
+      checks: state.checks
     })
   }
   const { line } = authorityText(db, authority)

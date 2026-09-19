@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { VoiceMicButton } from '@/components/voice/VoiceMicButton'
 import { voiceApi } from '@/lib/ipc-client'
 import { dispatchShortcutFeedback } from '@/lib/keyboard-shortcuts'
-import { CAPTAIN_COMPOSER_KEY, registerComposer } from '@/lib/voice-dictation-target'
+import { CAPTAIN_COMPOSER_KEY, registerComposer, hasDictatedText, clearDictatedText } from '@/lib/voice-dictation-target'
 import { formatFileSize } from '@/lib/utils'
 
 export interface ComposerAttachment {
@@ -75,7 +75,8 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
   const handleSend = (typed: boolean) => {
     const value = inputRef.current?.value.trim()
     if (!value) return
-    if (typed) onTypedMessage?.(value)
+    if (typed && inputRef.current && !hasDictatedText(inputRef.current)) onTypedMessage?.(value)
+    if (inputRef.current) clearDictatedText(inputRef.current)
     // Whatever answer was expected by voice is not the answer that is now
     // coming, so it is dropped and this reply is not read aloud. A spoken
     // sentence goes through here too and arms a fresh expectation of its own
@@ -194,7 +195,10 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
               handleSend(true)
             }
           }}
-          onInput={autoResize}
+          onInput={() => {
+            if (inputRef.current && !inputRef.current.value) clearDictatedText(inputRef.current)
+            autoResize()
+          }}
         />
         <VoiceMicButton mode="dictation" onSubmit={() => handleSend(false)} />
         {onPickAttachments && (

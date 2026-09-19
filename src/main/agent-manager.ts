@@ -1,3 +1,4 @@
+import { prepareProjectMessageDispatch, activateProjectMessageDispatch, failProjectMessageDispatch, type ProjectMessageDispatch, type TypedMessage } from './merge-grants'
 import { DEFAULT_SERVER_URL } from './adapters/opencode-server'
 import { guardedIpcSend } from './guarded-ipc-send'
 import { transcriptDisplayPart } from './transcript-display'
@@ -673,6 +674,7 @@ export class AgentManager extends EventEmitter {
     this.startAdapterPolling(adapterSessionId, adapter, sessionConfig)
 
     if (!skipInitialPrompt) {
+      if (task && isCoordinatorTask(task) && task.project_id) prepareProjectMessageDispatch(task.project_id)
       let promptText: string
       if (isTriageSession && task) {
         promptText = buildTriagePrompt(task, this.projectRepoNames(task))
@@ -3000,17 +3002,18 @@ export class AgentManager extends EventEmitter {
   async sendByTaskId(
     taskId: string,
     message: string,
-    attachments?: MessageAttachmentRef[]
+    attachments?: MessageAttachmentRef[],
+    typedMessage?: TypedMessage
   ): Promise<{ sessionId: string | null; newSessionId?: string }> {
     const found = this.findSessionByTaskId(taskId)
     if (found) {
       console.log(`[AgentManager] sendByTaskId: found live session ${found.sessionId} for task ${taskId}`)
-      const result = await this.sendMessage(found.sessionId, message, taskId, found.session.agentId, attachments)
+      const result = await this.sendMessage(found.sessionId, message, taskId, found.session.agentId, attachments, typedMessage)
       return { sessionId: found.sessionId, ...result }
     }
     // sendMessage resumes from the persisted session_id or creates a new session.
     console.log(`[AgentManager] sendByTaskId: no live session for task ${taskId}, delegating to sendMessage for recovery`)
-    const result = await this.sendMessage('', message, taskId, undefined, attachments)
+    const result = await this.sendMessage('', message, taskId, undefined, attachments, typedMessage)
     return { sessionId: null, ...result }
   }
 
@@ -3019,11 +3022,16 @@ export class AgentManager extends EventEmitter {
     message: string,
     taskId?: string,
     agentId?: string,
-    attachments?: MessageAttachmentRef[]
+    attachments?: MessageAttachmentRef[],
+    typedMessage?: TypedMessage
   ): Promise<{ newSessionId?: string }> {
     const resolved = this.resolveSession(sessionId, 'sendMessage')
     let session = resolved?.session
     if (resolved) sessionId = resolved.sessionId
+    const target = this.db.getTask(session?.taskId ?? taskId ?? '')
+    const dispatch = target && isCoordinatorTask(target) && target.project_id
+      ? prepareProjectMessageDispatch(target.project_id, typedMessage?.taskId === target.id && typedMessage.text === message ? typedMessage : undefined)
+      : undefined
 
     // Session gone from memory: RESUME first (keeps the conversation), else start a new one.
     if (!session && taskId) {
@@ -3070,19 +3078,20 @@ export class AgentManager extends EventEmitter {
           console.log(`[SessionTracker] CREATED_FALLBACK session=${newSessionId} task=${taskId} reason=resume_failed_or_no_persisted_session`)
         }
 
-        this.sendInBackground(session, sessionId, message, attachments)
+        this.sendInBackground(session, sessionId, message, attachments, dispatch)
         return { newSessionId: sessionId }
       }
     }
 
     if (!session) throw new Error(`Session not found: ${sessionId}`)
-    this.sendInBackground(session, sessionId, message, attachments)
+    this.sendInBackground(session, sessionId, message, attachments, dispatch)
     return {}
   }
 
   /** Fire-and-forget, so the IPC response is not blocked and the renderer does not freeze. */
-  private sendInBackground(session: AgentSession, sessionId: string, message: string, attachments?: MessageAttachmentRef[]): void {
-    this.doSendAdapterMessage(session, sessionId, message, attachments).catch((err) => {
+  private sendInBackground(session: AgentSession, sessionId: string, message: string, attachments?: MessageAttachmentRef[], dispatch?: ProjectMessageDispatch): void {
+    this.doSendAdapterMessage(session, sessionId, message, attachments, dispatch).catch((err) => {
+      if (dispatch) failProjectMessageDispatch(dispatch)
       console.error(`[AgentManager] doSendAdapterMessage failed for session ${sessionId}:`, err)
       return this.handleSessionError(sessionId, session, err)
     })
@@ -3115,8 +3124,12 @@ export class AgentManager extends EventEmitter {
     session: AgentSession,
     sessionId: string,
     message: string,
-    attachments?: MessageAttachmentRef[]
+    attachments?: MessageAttachmentRef[],
+    dispatch?: ProjectMessageDispatch
   ): Promise<void> {
+    const task = this.db.getTask(session.taskId)
+    // Nudges use this method directly, and must invalidate earlier typed authority too.
+    dispatch ??= task && isCoordinatorTask(task) && task.project_id ? prepareProjectMessageDispatch(task.project_id) : undefined
     session.autoAbortNotified = false
 
     if (session.status === 'error') {
@@ -3151,7 +3164,7 @@ export class AgentManager extends EventEmitter {
       taskId: session.taskId,
       type: 'message',
       data: {
-        id: `user-message-${Date.now()}`,
+        id: dispatch?.typed?.id ?? `user-message-${Date.now()}`,
         role: 'user',
         content: buildDisplayMessage(message, attachments),
         partType: 'text'
@@ -3165,7 +3178,13 @@ export class AgentManager extends EventEmitter {
     )
 
     const promptText = buildMessageWithAttachmentContext(session.workspaceDir, message, attachments)
-    await session.adapter.sendPrompt(sessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
+    if (dispatch) activateProjectMessageDispatch(dispatch)
+    try {
+      await session.adapter.sendPrompt(sessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
+    } catch (error) {
+      if (dispatch) failProjectMessageDispatch(dispatch)
+      throw error
+    }
 
     if (!session.pollingStarted) {
       console.log(`[AgentManager] Starting polling for session ${sessionId} (preserving dedup state)`)

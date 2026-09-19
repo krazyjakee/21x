@@ -1246,7 +1246,7 @@ export class DatabaseManager {
       this.prepare('UPDATE merge_grants SET uses = uses + 1 WHERE id = ?').run(grantId)
       return this.getMergeGrant(grantId)
     })
-    return reserve()
+    return reserve.immediate()
   }
 
   refundMergeGrantUse(grantId: string): void {

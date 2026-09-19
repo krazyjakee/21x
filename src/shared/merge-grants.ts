@@ -108,7 +108,7 @@ export type MergeGrantStatus = 'active' | 'expired' | 'revoked' | 'used_up'
 
 export function mergeGrantStatus(grant: MergeGrant, now: number = Date.now()): MergeGrantStatus {
   if (grant.revoked_at) return 'revoked'
-  if (Date.parse(grant.expires_at) <= now) return 'expired'
+  if (!Number.isFinite(Date.parse(grant.expires_at)) || Date.parse(grant.expires_at) <= now) return 'expired'
   if (grant.max_uses !== null && grant.uses >= grant.max_uses) return 'used_up'
   return 'active'
 }
@@ -131,36 +131,69 @@ export function mergeGrantSettingsFrom(settings: Record<string, unknown> | null 
 
 // ── The user's words ──────────────────────────────────────────
 
-const MERGE_WORD = /\bmerg(?:e|es|ed|ing)\b/i
-/**
- * A negation shortly before the merge word: "don't merge", "do not merge
- * anything", "never merge", "stop merging", "no merging", "without merging",
- * "hold off on merging". Checked per sentence, so "Tests are flaky, don't
- * merge yet" refuses even though it contains the word.
- */
-const NEGATED_MERGE = /\b(?:don'?t|do\s+not|doesn'?t|never|no|not|stop|without|avoid|hold\s+off(?:\s+on)?|wait\s+(?:before|to))\b[^.!?\n]{0,40}\bmerg(?:e|es|ed|ing)\b/i
-
 export interface MergeIntentResult {
   ok: boolean
   reason?: string
+  /** Restrictions read from the instruction itself, never from model arguments. */
+  repo?: string
+  baseBranch?: string
+  projectName?: string
 }
 
 /**
- * Whether the user's own words ask for merging. Deliberately literal: a
- * grant needs the word "merge" (or merging/merged/merges) in text the user
- * typed, and no negation of it. "Ship it" or "land the PRs" is not enough;
- * the Commander must ask the user to say it.
+ * Recognize a small, complete command grammar, not the presence of a keyword.
+ * Quoted material, reports, questions about merging, negations and unrecognized
+ * conditions fail closed. The model cannot decide that ambiguous text consents.
  */
 export function checkMergeIntent(text: string): MergeIntentResult {
-  const value = (text ?? '').trim()
-  if (!value) return { ok: false, reason: 'There is no message typed by the user to bind the grant to.' }
-  if (!MERGE_WORD.test(value)) {
-    return { ok: false, reason: 'The user\'s message does not ask for merging. A merge grant needs the user to say "merge" in their own words; ask them.' }
+  const refused = { ok: false, reason: 'No explicit merge instruction was recognized. Type a separate command, for example "Merge PR #12 when checks pass". Quoted text, reports and ambiguous instructions cannot grant authority.' }
+  let value = (text ?? '').trim().replace(/[.!]$/, '')
+  if (!value || /[\n\r"“”`]/.test(value)) return refused
+  let projectName: string | undefined
+  const project = value.match(/^in ([\w .-]+),\s*/i)
+  if (project) {
+    projectName = project[1]
+    value = value.slice(project[0].length)
   }
-  if (NEGATED_MERGE.test(value)) {
-    return { ok: false, reason: 'The user\'s message says not to merge. No grant was created.' }
+  const command = value.match(/^(?:please\s+|go ahead and\s+|(?:can|could|would|will) you (?:please )?|I (?:want|instruct|authorize) you to )?merge\s+/i)
+  if (!command) return refused
+  value = value.slice(command[0].length)
+  const target = value.match(/^(?:(?:the )?(?:ready |open |approved )?(?:PRs?|pull requests?)(?:\s+#?\d+)?|#\d+|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+)(?=$|[ ,])/i)
+  if (!target) return refused
+  const targets = [target[0]]
+  value = value.slice(target[0].length)
+  while (true) {
+    const next = value.match(/^(?:,\s*(?:and )?| and )((?:PR\s*#?|#)\d+|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+)(?=$|[ ,])/i)
+    if (!next) break
+    targets.push(next[1])
+    value = value.slice(next[0].length)
   }
-  return { ok: true }
+  let repo: string | undefined
+  for (const target of targets) {
+    const url = target.match(/github\.com\/([\w.-]+\/[\w.-]+)\/pull\//i)
+    if (url) {
+      if (repo && repo.toLowerCase() !== url[1].toLowerCase()) return refused
+      repo = url[1]
+    }
+  }
+  let baseBranch: string | undefined
+  let conditionSeen = false
+  while (value) {
+    const condition = value.match(/^ (?:when|once|after) (?:green|(?:checks|tests|CI)(?: pass(?:es)?| (?:are |is )?green))(?=$| )/i)
+    const into = value.match(/^ into ([\w./-]+)(?=$| )/i)
+    const inRepo = value.match(/^ in ([\w.-]+\/[\w.-]+)(?=$| )/i)
+    if (condition && !conditionSeen) {
+      conditionSeen = true
+      value = value.slice(condition[0].length)
+    } else if (into && !baseBranch) {
+      baseBranch = into[1]
+      value = value.slice(into[0].length)
+    } else if (inRepo && (!repo || repo.toLowerCase() === inRepo[1].toLowerCase())) {
+      repo = inRepo[1]
+      value = value.slice(inRepo[0].length)
+    } else return refused
+  }
+  return { ok: true, repo, baseBranch, projectName }
 }
 
 /** PR numbers the text names: `#12`, `PR 12`, `pull request 12`, `/pull/12`. */

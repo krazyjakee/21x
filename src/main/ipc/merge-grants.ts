@@ -3,9 +3,20 @@ import type { DatabaseManager } from '../database'
 import type { IpcDeps } from './deps'
 import { guardedIpcSend } from '../guarded-ipc-send'
 import { isTrustedSender } from '../ipc-sender'
-import { mergeGrantAudit, recordUserTypedProjectMessage, revokeMergeGrant, setMergeGrantChangeListener } from '../merge-grants'
+import { mergeGrantAudit, makeUserTypedProjectMessage, type TypedMessage, revokeMergeGrant, setMergeGrantChangeListener } from '../merge-grants'
 import { isCoordinatorTask } from '../../shared/task-roles'
 import type { MergeGrant, MergeGrantAuditEntry } from '../../shared/merge-grants'
+
+// Staging is tied to the exact window, task and text, and consumed by the send IPC.
+const pendingTyped = new Map<string, { sender: unknown; typed: TypedMessage }>()
+
+export function takeUserTypedMessage(event: IpcMainInvokeEvent, taskId: string | undefined, text: string): TypedMessage | undefined {
+  if (!taskId) return undefined
+  const pending = pendingTyped.get(taskId)
+  pendingTyped.delete(taskId)
+  if (!pending || !isTrustedSender(event) || pending.sender !== event.sender || pending.typed.text !== text || Date.now() - pending.typed.at > 5_000) return undefined
+  return pending.typed
+}
 
 export const MERGE_GRANTS_CHANGED_CHANNEL = 'mergeGrants:changed'
 
@@ -22,7 +33,7 @@ export function noteUserTypedMessage(db: Pick<DatabaseManager, 'getTask'>, event
   if (!isTrustedSender(event)) return
   const task = db.getTask(taskId)
   if (!task || !isCoordinatorTask(task) || !task.project_id) return
-  recordUserTypedProjectMessage(task.project_id, task.id, message)
+  pendingTyped.set(task.id, { sender: event.sender, typed: makeUserTypedProjectMessage(task.project_id, task.id, message) })
 }
 
 /** Merge grants for the approvals popover and the project editor: list, audit, revoke (#137). */

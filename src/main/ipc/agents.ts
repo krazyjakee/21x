@@ -1,3 +1,4 @@
+import { takeUserTypedMessage } from './merge-grants'
 import { guardedIpcSend } from '../guarded-ipc-send'
 import { MAX_IPC_REPLY_BYTES, MAX_IPC_REPLY_VALUES, measureIpcMessage } from '../ipc-message-size'
 import { transcriptDisplayPart } from '../transcript-display'
@@ -64,15 +65,15 @@ export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
     return { sessionId }
   })
 
-  ipcMain.handle('agentSession:sendByTaskId', async (_, taskId: string, message: string, attachments?: MessageAttachment[]) => {
-    const result = await agentManager.sendByTaskId(taskId, message, attachments)
+  ipcMain.handle('agentSession:sendByTaskId', async (event, taskId: string, message: string, attachments?: MessageAttachment[]) => {
+    const result = await agentManager.sendByTaskId(taskId, message, attachments, takeUserTypedMessage(event, taskId, message))
     return { success: true, ...result }
   })
 
   ipcMain.handle(
     'agentSession:send',
-    async (_, sessionId: string, message: string, taskId?: string, agentId?: string, attachments?: MessageAttachment[]) => {
-      const result = await agentManager.sendMessage(sessionId, message, taskId, agentId, attachments)
+    async (event, sessionId: string, message: string, taskId?: string, agentId?: string, attachments?: MessageAttachment[]) => {
+      const result = await agentManager.sendMessage(sessionId, message, taskId, agentId, attachments, takeUserTypedMessage(event, taskId, message))
       return { success: true, ...result }
     }
   )
