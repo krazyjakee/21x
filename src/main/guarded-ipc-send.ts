@@ -55,22 +55,20 @@ export function guardedIpcSend(
     return true
   }
 
-  // Only split known event contracts. Never split arbitrary objects or strings.
+  // Only transcript deltas are split; never arbitrary objects or strings.
   // Preflight the WHOLE batch before sending any chunk: a rejected part must not
   // advance the renderer revision past data it has not received.
-  if ((size.reason === 'size' || size.reason === 'complexity') && args.length === 1 &&
-      (channel === 'transcript:changed' || channel === 'agent:output-batch')) {
+  if ((size.reason === 'size' || size.reason === 'complexity') && args.length === 1 && channel === 'transcript:changed') {
     const payload = args[0]
     if (!payload || typeof payload !== 'object' || types.isProxy(payload) || Object.getPrototypeOf(payload) !== Object.prototype) {
       return reject(channel, size.bytes, 'unsupported')
     }
-    const field = channel === 'transcript:changed' ? 'parts' : 'messages'
-    const parts = Object.getOwnPropertyDescriptor(payload, field)?.value
+    const parts = Object.getOwnPropertyDescriptor(payload, 'parts')?.value
     if (Array.isArray(parts) && !types.isProxy(parts) && parts.length > 1 && parts.length <= MAX_IPC_VALUES) {
-      const envelope: Record<string, unknown> = { [field]: [] }
+      const envelope: Record<string, unknown> = { parts: [] }
       let keys = 0
       for (const key in payload) {
-        if (!Object.hasOwn(payload, key) || key === field) continue
+        if (!Object.hasOwn(payload, key) || key === 'parts') continue
         const descriptor = Object.getOwnPropertyDescriptor(payload, key)!
         if (++keys > 1000 || !('value' in descriptor)) return reject(channel, size.bytes, 'unsupported')
         Object.defineProperty(envelope, key, { value: descriptor.value, enumerable: true, writable: true, configurable: true })
@@ -110,10 +108,10 @@ export function guardedIpcSend(
       chunks.push(chunk)
       record(channel, totalCost, `splitting:${chunks.length}`)
       for (let index = 0; index < chunks.length; index++) {
-        const message = { ...envelope, [field]: chunks[index] }
+        const message: Record<string, unknown> = { ...envelope, parts: chunks[index] }
         // Do not claim the final revision until every chunk has been sent.
         // The renderer keeps its current cursor for intermediate events.
-        if (channel === 'transcript:changed' && index < chunks.length - 1) message.maxRev = 0
+        if (index < chunks.length - 1) message.maxRev = 0
         target.send(channel, message)
       }
       return true

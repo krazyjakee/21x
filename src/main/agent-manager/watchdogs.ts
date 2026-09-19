@@ -91,7 +91,5 @@ export function isWaitingForUserInput(
     const tool = msg.tool as { name?: string } | undefined
     return tool?.name === 'question' || tool?.name === 'permission'
   })
-  if (hasQuestion) return true
-  const approvals = adapter as unknown as { getPendingApproval?: (sid: string) => unknown }
-  return typeof approvals.getPendingApproval === 'function' && !!approvals.getPendingApproval(sessionId)
+  return hasQuestion || !!adapter.getPendingApproval?.(sessionId)
 }

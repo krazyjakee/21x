@@ -141,7 +141,7 @@ Database schema migrations are run automatically with version tracking (`SCHEMA_
 │  │ ┌───────┐ ┌───────┐ ┌───────┐ ┌───────┐ ┌───────┐│     │
 │  │ │  Open │ │ Claude│ │ Codex │ │  ACP  │ │   Pi  ││     │
 │  │ │  Code │ │  Code │ │ AppSrv│ │ Cursor│ │       ││     │
-│  │ │       │ │       │ │       │ │ +Codex│ │       ││     │
+│  │ │       │ │       │ │       │ │       │ │       ││     │
 │  │ └───────┘ └───────┘ └───────┘ └───────┘ └───────┘│     │
 │  │                                                   │     │
 │  │  ┌──────────────┐                                │     │
@@ -222,7 +222,7 @@ Keeps one Pi process per live session and talks to it over Pi's JSONL RPC protoc
 Instead of independent timers per session (which would cause event-loop starvation under load), a single centralized timer polls all active sessions sequentially every 2 seconds:
 
 ```typescript
-// src/main/agent-manager.ts — PollingEntry tracking
+// src/main/agent-manager/types.ts — PollingEntry tracking (owned by polling.ts)
 interface PollingEntry {
   sessionId: string
   adapter: CodingAgentAdapter
@@ -396,7 +396,7 @@ Secrets (encrypted API keys, database URLs, etc.) are injected into agent sessio
 - **Encryption**: Values encrypted with Electron `safeStorage` at rest
 - **Secret Broker**: An HTTP server on `localhost` that serves secrets to the agent's shell process
 - **Wrapper script**: `secret-shell.sh` intercepts bash commands to inject env vars
-- **Claude Code path**: `SHELL` points at the wrapper, and `PreToolUse` hooks inject secrets (`buildSecretHooks` in `claude-code-adapter.ts`)
+- **Claude Code path**: `SHELL` points at the wrapper, and `PreToolUse` hooks inject secrets (`buildSecretHooks` in `claude-code-options.ts`)
 - **System prompt awareness**: Agents are told which secrets are available (name/description only — never the value)
 
 ### Task API Server

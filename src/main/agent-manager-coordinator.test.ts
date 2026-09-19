@@ -81,7 +81,7 @@ function makeManager(db: ReturnType<typeof makeDb>, adapter: ReturnType<typeof m
   vi.spyOn(manager as any, 'buildMcpServersForAdapter').mockResolvedValue({})
   vi.spyOn(manager as any, 'setupSecretSession').mockReturnValue(undefined)
   vi.spyOn(manager as any, 'sendToRenderer').mockImplementation(() => undefined)
-  vi.spyOn(manager as any, 'startAdapterPolling').mockImplementation(() => undefined)
+  vi.spyOn((manager as any).poller, 'start').mockImplementation(() => undefined)
   vi.spyOn(manager as any, 'doSendAdapterMessage').mockResolvedValue(undefined)
   return manager
 }
@@ -164,14 +164,14 @@ describe('Captain session persistence', () => {
     const db = makeDb({ session_id: null })
     const adapter = makeAdapter()
     const manager = makeManager(db, adapter)
-    vi.spyOn(manager as any, 'hasActiveDelegationTools').mockResolvedValue(false)
+    vi.spyOn((manager as any).lifetime, 'hasActiveDelegationTools').mockResolvedValue(false)
 
     const sessionId = await manager.startSession('agent-1', CAPTAIN_ID, undefined, true)
     const session = (manager as any).sessions.get(sessionId)
     session.status = 'idle'
     session.lastActivityAt = Date.now() - 60 * 60 * 1000
 
-    await (manager as any).reapInactiveSessions()
+    await (manager as any).lifetime.reap()
 
     expect((manager as any).sessions.has(sessionId)).toBe(false)
     // The resume anchor survives the release.
@@ -180,17 +180,19 @@ describe('Captain session persistence', () => {
   })
 
   it('going idle sends status only: no review, no heartbeat, no parent wake-up', async () => {
-    const db = makeDb({ session_id: null })
-    const adapter = makeAdapter()
+    const db = makeDb({ session_id: null, output_fields: [{ id: 'f1', name: 'Result', type: 'text' }] })
+    const adapter = {
+      ...makeAdapter(),
+      getAllMessages: vi.fn(async () => [{ id: 'm1', role: 'assistant', parts: [{ id: 'p1', type: 'text', text: 'Result: done' }] }])
+    }
     const manager = makeManager(db, adapter)
-    const extract = vi.spyOn(manager as any, 'extractOutputValues').mockResolvedValue(undefined)
 
     const sessionId = await manager.startSession('agent-1', CAPTAIN_ID, undefined, true)
     const session = (manager as any).sessions.get(sessionId)
-    await (manager as any).transitionToIdle(sessionId, session)
+    await (manager as any).host.transitionToIdle(sessionId, session)
 
     expect(session.status).toBe('idle')
-    expect(extract).not.toHaveBeenCalled()
+    expect(db.updateTask).not.toHaveBeenCalledWith(CAPTAIN_ID, expect.objectContaining({ output_fields: expect.anything() }))
     expect(db.task.status).toBe(TaskStatus.NotStarted)
   })
 })
