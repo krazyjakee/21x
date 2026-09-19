@@ -22,6 +22,7 @@ export function MergeGrantsSection({
 }) {
   const enabled = mergeGrantSettingsFrom(settings).enabled
   const [audit, setAudit] = useState<MergeGrantAuditEntry[]>([])
+  const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
 
   const load = useCallback(() => {
@@ -36,9 +37,13 @@ export function MergeGrantsSection({
 
   const revoke = async (id: string) => {
     setBusy(id)
+    setError(null)
     try {
-      await mergeGrantsApi.revoke(id)
+      const result = await mergeGrantsApi.revoke(id)
+      if (!result.ok) throw new Error(result.error || 'Could not revoke the merge grant')
       load()
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Could not revoke the merge grant')
     } finally {
       setBusy(null)
     }
@@ -49,7 +54,7 @@ export function MergeGrantsSection({
       <div>
         <h3 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Merge grants</h3>
         <p className="text-xs text-muted-foreground">
-          Let the Captain merge pull requests you told it to merge (in your own words, with “merge”), without asking again for each one.
+          Let the Captain merge pull requests you told it to merge, without asking again for each one. Type a separate instruction such as “Merge PR #12 when checks pass”. Ambiguous or quoted instructions are refused.
           A grant covers this project only and lasts at most 7 days. Checks, required reviews and branch protection still apply; nothing is ever bypassed.
         </p>
       </div>
@@ -62,6 +67,7 @@ export function MergeGrantsSection({
         />
         Allow merge grants for this project
       </label>
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       {projectId && audit.length > 0 && (
         <ul className="space-y-2" aria-label="Merge grant audit log">
           {audit.map(({ grant, status, uses }) => (

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useId } from 'react'
 import { Check, ShieldAlert, ShieldCheck, X } from 'lucide-react'
 import { escalationApi, mergeGrantsApi } from '@/lib/ipc-client'
 import { useProjectStore } from '@/stores/project-store'
@@ -19,6 +19,11 @@ export function HeldActionsNotice() {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const projects = useProjectStore((s) => s.projects)
+  const [error, setError] = useState<string | null>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const dialogId = useId()
+  useEffect(() => { if (open) dialogRef.current?.focus() }, [open])
   const [grants, setGrants] = useState<MergeGrant[]>([])
 
   useEffect(() => {
@@ -60,9 +65,13 @@ export function HeldActionsNotice() {
 
   const revokeGrant = async (id: string) => {
     setBusy(id)
+    setError(null)
     try {
-      await mergeGrantsApi.revoke(id)
+      const result = await mergeGrantsApi.revoke(id)
+      if (!result.ok) throw new Error(result.error || 'Could not revoke the merge grant')
       setGrants((list) => list.filter((grant) => grant.id !== id))
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Could not revoke the merge grant')
     } finally {
       setBusy(null)
     }
@@ -79,8 +88,13 @@ export function HeldActionsNotice() {
   }
 
   return (
-    <div className="relative">
+    <div className="relative" onKeyDown={(event) => {
+      if (event.key === 'Escape') { event.stopPropagation(); setOpen(false); triggerRef.current?.focus() }
+    }} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false) }}>
       <button
+        ref={triggerRef}
+        aria-haspopup="dialog"
+        aria-controls={open ? dialogId : undefined}
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium cursor-pointer ${held.length > 0 ? 'text-amber-700 hover:bg-amber-500/10 dark:text-amber-400' : 'text-muted-foreground hover:bg-muted'}`}
@@ -98,10 +112,14 @@ export function HeldActionsNotice() {
       </button>
       {open && (
         <div
+          ref={dialogRef}
+          id={dialogId}
+          tabIndex={-1}
           role="dialog"
-          aria-label="Held Captain actions"
-          className="absolute bottom-full right-0 z-50 mb-2 w-96 rounded-lg border border-border bg-card p-2 text-xs text-foreground shadow-lg"
+          aria-label="Captain approvals and merge grants"
+          className="absolute bottom-full right-0 z-50 mb-2 max-h-[70vh] overflow-y-auto w-96 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-card p-2 text-xs text-foreground shadow-lg"
         >
+          {error && <p role="alert" className="mb-2 text-destructive">{error}</p>}
           {held.length > 0 && (
             <p className="mb-2 px-1 text-[11px] text-muted-foreground">
               The project’s escalation policy asks you before these run. Approve runs the call; Reject drops it and tells the Captain.
