@@ -27,6 +27,13 @@ export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
     return { sessionId: outcome.sessionId }
   })
 
+  // High-level task start used by surfaces such as the dashboard board. This
+  // preserves the same triage, subtask and admission-control rules as voice,
+  // mobile and automation instead of duplicating them in the renderer.
+  ipcMain.handle('agentSession:startTask', async (_, taskId: string) => {
+    return agentManager.startTask(taskId)
+  })
+
   ipcMain.handle('agent:getStartQueue', () => agentManager.getStartQueue())
 
   ipcMain.handle('agentSession:resume', async (_, agentId: string, taskId: string, ocSessionId: string) => {

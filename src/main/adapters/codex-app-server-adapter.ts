@@ -670,7 +670,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
       }
     }
     if (config.mcpServers && Object.keys(config.mcpServers).length > 0) {
-      overrides.mcp_servers = this.convertMcpServers(config.mcpServers)
+      overrides.mcp_servers = this.convertMcpServers(config.mcpServers, config.permissionMode === 'allow')
     }
     return overrides
   }
@@ -709,23 +709,33 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     }
   }
 
-  private convertMcpServers(servers: Record<string, McpServerConfig>): Record<string, unknown> {
+  /**
+   * Codex asks before most MCP tool calls. Under approvalPolicy 'never' there
+   * is nobody to ask, so it refuses them ("MCP tool call requires approval,
+   * but approval policy is never") — every task-management call, including a
+   * Captain's report_to_commander. An 'allow' agent has already been trusted
+   * with everything, so its configured servers are approved up front; an 'ask'
+   * agent keeps Codex's default and prompts through the approval flow.
+   */
+  private convertMcpServers(servers: Record<string, McpServerConfig>, approveTools: boolean): Record<string, unknown> {
     const result: Record<string, unknown> = {}
     for (const [name, server] of Object.entries(servers)) {
       const codexName = normalizeCodexMcpServerName(name)
+      let entry: Record<string, unknown>
       if (server.type === 'stdio') {
-        result[codexName] = {
+        entry = {
           command: server.command,
           args: server.args || [],
           env: server.env || {}
         }
       } else {
-        const remoteConfig: Record<string, unknown> = { url: server.url }
+        entry = { url: server.url }
         if (server.headers && Object.keys(server.headers).length > 0) {
-          remoteConfig.http_headers = server.headers
+          entry.http_headers = server.headers
         }
-        result[codexName] = remoteConfig
       }
+      if (approveTools) entry.default_tools_approval_mode = 'approve'
+      result[codexName] = entry
     }
     return result
   }
