@@ -80,10 +80,71 @@ describe('createChatProviderFromSettings', () => {
     expect(resolveChatApiKey(src, 'anthropic')).toBe('settings-key')
   })
 
-  it('fails with a clear message when no Anthropic key exists anywhere', () => {
-    expect(() => createChatProviderFromSettings(source({}, [
+  it('uses Claude Code subscription authentication when no Anthropic key exists', () => {
+    const provider = createChatProviderFromSettings(source({}, [
+      { config: { coding_agent: 'claude-code', model: 'claude-saved', auth_method: 'subscription' } }
+    ]))
+    expect(provider.id).toBe('claude-code-subscription')
+    expect(provider.model).toBe('claude-saved')
+  })
+
+  it('keeps a Claude Code subscription on subscription auth when a global API key is saved', () => {
+    const provider = createChatProviderFromSettings(source({ anthropic_api_key: 'unrelated-api-key' }, [
+      { config: { coding_agent: 'claude-code', model: 'claude-saved', auth_method: 'subscription' } }
+    ]))
+    expect(provider.id).toBe('claude-code-subscription')
+  })
+
+  it('treats an older Claude Code agent with no auth_method as subscription-backed', () => {
+    expect(createChatProviderFromSettings(source({}, [
       { config: { coding_agent: 'claude-code', model: 'claude-saved' } }
-    ]))).toThrow(/No Anthropic API key/)
+    ])).id).toBe('claude-code-subscription')
+  })
+
+  it('fails clearly when an API-key Claude agent has no Anthropic key', () => {
+    expect(() => createChatProviderFromSettings(source({}, [
+      { config: { coding_agent: 'claude-code', model: 'claude-saved', auth_method: 'api_key' } }
+    ]))).toThrow(/needs Anthropic authentication/)
+  })
+
+  it('uses Codex subscription authentication for Sol instead of requiring an OpenAI API key', () => {
+    const provider = createChatProviderFromSettings(source({}, [
+      { config: { coding_agent: 'codex', model: 'gpt-5.6-sol', auth_method: 'subscription' } }
+    ]))
+    expect(provider.id).toBe('codex-subscription')
+    expect(provider.model).toBe('gpt-5.6-sol')
+  })
+
+  it('keeps a Codex subscription on subscription auth when a global API key is saved', () => {
+    const provider = createChatProviderFromSettings(source({ openai_api_key: 'unrelated-api-key' }, [
+      { config: { coding_agent: 'codex', model: 'gpt-5.6-sol', auth_method: 'subscription' } }
+    ]))
+    expect(provider.id).toBe('codex-subscription')
+  })
+
+  it('treats a legacy Codex agent without an explicit key as subscription-backed', () => {
+    expect(createChatProviderFromSettings(source({}, [
+      { config: { coding_agent: 'codex', model: 'gpt-5.6-sol' } }
+    ])).id).toBe('codex-subscription')
+  })
+
+  it('uses direct OpenAI auth for an API-key Codex agent', () => {
+    expect(createChatProviderFromSettings(source({}, [
+      { config: { coding_agent: 'codex', model: 'gpt-5.6-sol', auth_method: 'api_key', api_keys: { openai: 'agent-key' } } }
+    ])).id).toBe('openai-compatible')
+  })
+
+  it('routes duplicate model names through the specifically selected agent auth', () => {
+    const agents: Array<Partial<AgentRecord>> = [
+      { id: 'subscription-agent', is_default: true, config: { coding_agent: 'codex', model: 'gpt-5.6-sol', auth_method: 'subscription' } },
+      { id: 'api-agent', config: { coding_agent: 'codex', model: 'gpt-5.6-sol', auth_method: 'api_key', api_keys: { openai: 'agent-key' } } }
+    ]
+    const provider = createChatProviderFromSettings(source({
+      chat_agent_id: 'api-agent',
+      chat_provider: 'openai-compatible',
+      chat_model: 'gpt-5.6-sol'
+    }, agents))
+    expect(provider.id).toBe('openai-compatible')
   })
 
   it('ignores a saved provider/model that is not configured', () => {

@@ -4,8 +4,13 @@ import { HeroSection } from './HeroSection'
 import { CommandInput } from './CommandInput'
 import { QuickChips } from './QuickChips'
 import { TaskBoard } from './TaskBoard'
+import type { Task, TaskStatus } from '@/types'
 
-export function DashboardWorkspace() {
+interface DashboardWorkspaceProps {
+  onTaskStatusChange?: (task: Task, status: TaskStatus) => void | Promise<void>
+}
+
+export function DashboardWorkspace({ onTaskStatusChange }: DashboardWorkspaceProps = {}) {
   const openCreateWithPrefill = useUIStore((s) => s.openCreateWithPrefill)
   const setShowOrchestrator = useUIStore((s) => s.setShowOrchestrator)
 
@@ -54,7 +59,7 @@ export function DashboardWorkspace() {
       {/* Full-width sections below — constrained + centered to align with kanban */}
       <div className="max-w-[1600px] mx-auto px-6 space-y-6 pb-8">
         {/* 4. Task Board (Kanban) — full width */}
-        <TaskBoard />
+        <TaskBoard onStatusChange={onTaskStatusChange} />
       </div>
     </div>
   )
