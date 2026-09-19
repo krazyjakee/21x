@@ -1567,6 +1567,9 @@ export class AgentManager extends EventEmitter {
     await yieldEventLoop()
 
     const mcpServers = await this.buildMcpServersForAdapter(agentId, mcpOptionsForTask(taskId, task, this.heartbeatScopeTask(taskId, task)))
+    // Resumed sessions must read current tool descriptions and assigned skills,
+    // not workspace instructions left behind by an older app version.
+    await writeSkillFiles(this.db, taskId, agentId, workspaceDir, mcpServers)
     // Task context in the system prompt survives context compaction.
     const taskContext = task && !isCoordinatorTask(task)
       ? `\n\n[Task Context]\nTask: "${task.title}"\n${task.description || ''}`

@@ -1447,6 +1447,15 @@ describe('CodexAppServerAdapter app-server lifecycle', () => {
     return { adapterInstance, adapter }
   }
 
+  it('refreshes developer instructions when resuming a persisted thread', async () => {
+    const session = fakeSession('thread-1', 4000)
+    const { adapterInstance, adapter } = harness([session])
+    await adapterInstance.resumeSession('thread-1', { ...config, systemPrompt: 'You are the Captain.' })
+    expect(adapter.sendRpcRequest).toHaveBeenCalledWith(session, 'thread/resume', expect.objectContaining({
+      threadId: 'thread-1', developerInstructions: 'You are the Captain.'
+    }))
+  })
+
   it('stops the previous app-server when a session is resumed again', async () => {
     // THE LARGER HALF OF THE LEAK. `resumeSession` spawned a new child and
     // wrote it over the same map key. The first child kept running with nobody

@@ -269,6 +269,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     await this.sendRpcRequest(session, 'thread/resume', {
       ...this.buildThreadParams(config),
       threadId: sessionId,
+      developerInstructions: config.systemPrompt || null,
       initialTurnsPage: { limit: 50 }
     })
 

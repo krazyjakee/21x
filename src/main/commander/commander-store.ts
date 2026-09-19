@@ -1,3 +1,4 @@
+import { captainTerminology } from '../../shared/captain-compat'
 import type Database from 'better-sqlite3'
 import { createId } from '@paralleldrive/cuid2'
 import type { ChatToolCall } from '../../shared/chat'
@@ -70,7 +71,11 @@ function toMessage(row: CommanderMessageRow): CommanderMessage {
     id: row.id,
     session_id: row.session_id,
     role: row.role as CommanderMessageRole,
-    content: row.content,
+    // Compatibility is a read projection: preserve the original report and
+    // summary bytes, routing IDs and all user/tool messages in storage.
+    content: row.role === 'report' || row.role === 'summary' || row.role === 'assistant'
+      ? captainTerminology(row.content)
+      : row.content,
     tool_calls: parseToolCalls(row.tool_calls),
     tool_call_id: row.tool_call_id ?? null,
     tool_name: row.tool_name ?? null,

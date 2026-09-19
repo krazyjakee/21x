@@ -36,6 +36,24 @@ function commanderTool(db: DatabaseManager, name: string) {
 }
 
 describe('update_project_status writes the journal (#72)', () => {
+  it('reads legacy Captain status prose without overwriting stored history', () => {
+    const { db, rawDb, project } = seed()
+    const legacy = ['Master', 'mind'].join('')
+    const summary = `The ${legacy} reviewed the release.`
+    const highlights = [`Ask the ${legacy}.`]
+    const result = db.recordProjectStatus(project.id, {
+      summary, top_blockers: highlights, completed: highlights,
+      blockers: highlights, decisions: highlights, next_steps: highlights
+    })!
+    expect(result.status).toMatchObject({ summary: 'The Captain reviewed the release.', top_blockers: ['Ask the Captain.'] })
+    expect(result.entry).toMatchObject({
+      summary: 'The Captain reviewed the release.', completed: ['Ask the Captain.'],
+      blockers: ['Ask the Captain.'], decisions: ['Ask the Captain.'], next_steps: ['Ask the Captain.']
+    })
+    expect(rawDb.prepare('SELECT summary FROM project_status_journal WHERE id = ?').get(result.entry.id)).toEqual({ summary })
+    expect(rawDb.prepare('SELECT summary FROM project_status WHERE project_id = ?').get(project.id)).toEqual({ summary })
+  })
+
   it('appends one entry per update and leaves the snapshot one small read', async () => {
     const { db, project } = seed()
     const first = await handleTaskRoute(db, '/update_project_status', {
