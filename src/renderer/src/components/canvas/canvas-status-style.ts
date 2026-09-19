@@ -70,3 +70,13 @@ export function shouldPulseCanvasTaskStatusTransition(previous: TaskStatus | und
     (previous === TaskStatus.AgentWorking && next === TaskStatus.ReadyForReview)
   )
 }
+
+/**
+ * Whether the panel itself flashes on a transition. The review transition is
+ * left to the header's single finished accent (#95), so a panel never shows
+ * two competing completion effects. The offscreen HUD beacon still uses
+ * shouldPulseCanvasTaskStatusTransition, because it is a different region.
+ */
+export function shouldFlashCanvasPanelTransition(previous: TaskStatus | undefined, next: TaskStatus | undefined): boolean {
+  return shouldPulseCanvasTaskStatusTransition(previous, next) && next !== TaskStatus.ReadyForReview
+}
