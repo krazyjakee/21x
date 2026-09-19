@@ -1,3 +1,4 @@
+import { prepareProjectMessageDispatch, activateProjectMessageDispatch, failProjectMessageDispatch, type ProjectMessageDispatch, type TypedMessage } from './merge-grants'
 import { DEFAULT_SERVER_URL } from './adapters/opencode-server'
 import { guardedIpcSend } from './guarded-ipc-send'
 import { transcriptDisplayPart } from './transcript-display'
@@ -42,6 +43,9 @@ import { FINDINGS_BEGIN, FINDINGS_END, SYSTEM_MESSAGE_MARKER } from '../shared/s
 import { BranchDiffCache, ResourceMonitor, agentCap, autoLowerForPressure, findFileOverlap, projectAgentLevel, readProjectConcurrency, setConcurrencyLevel, setUserConcurrency, type LevelChangeResult, type OverlapCandidate } from './concurrency-control'
 import { effectiveLevel, recommendLevel, type ProjectConcurrencyState, type ResourcePressure } from '../shared/concurrency'
 import { collectMissedParts, debugTranscript, emitArtifactUpdatesFromParts, textTranscript, type DebugTranscriptMessage, notifyStatusTransition, transcriptPartsFromEvent, transcriptPartsFromMessages, type OutputMessage } from './agent-manager/transcript-events'
+import { CaptainRuntimeStore } from './sessions/runtime-store'
+import { DeliveryStore, type DeliveryRecord } from './sessions/delivery-store'
+import type { CaptainRuntimeState } from '../shared/captain-runtime'
 
 // Default OpenCode server URL (matches database default)
 
@@ -55,11 +59,43 @@ const yieldEventLoop = (): Promise<void> => new Promise((r) => setImmediate(r))
 const coordinatorSessionAgentKey = (taskId: string): string => `captain_session_agent:${taskId}`
 
 /**
- * How long a Captain may take to come up (create or resume its session)
- * before the start is reported as failed. Task sessions are not bounded: their
- * worktree setup can legitimately clone a large repository first.
+ * Explicit upper bounds for server, session and whole-start readiness. Worktree
+ * preparation is included in the whole-start envelope so no renderer can be
+ * left in "starting" forever.
  */
 export const CAPTAIN_START_TIMEOUT_MS = 90_000
+export const AGENT_START_TIMEOUT_MS = 120_000
+export const AGENT_SERVER_START_TIMEOUT_MS = 30_000
+export const AGENT_SESSION_START_TIMEOUT_MS = 60_000
+const DELIVERY_CLAIM_MS = 60_000
+
+/** A deadline whose late completion is fenced from the winning generation. */
+export function withStartupDeadline<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  label: string,
+  onLate?: (value: T) => void | Promise<void>
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let expired = false
+    const timer = setTimeout(() => {
+      expired = true
+      const duration = timeoutMs < 1000 ? `${timeoutMs}ms` : `${Math.round(timeoutMs / 1000)} seconds`
+      reject(new Error(`${label} timed out after ${duration}`))
+    }, timeoutMs)
+    operation.then(
+      (value) => {
+        clearTimeout(timer)
+        if (!expired) resolve(value)
+        else void onLate?.(value)
+      },
+      (error: unknown) => {
+        clearTimeout(timer)
+        if (!expired) reject(error)
+      }
+    )
+  })
+}
 
 /** Outcome of a session start that went through admission control. */
 export type SessionStartOutcome =
@@ -157,6 +193,9 @@ export class AgentManager extends EventEmitter {
   private forgejoManager: ForgejoManager | null = null
   private oauthManager: import('./oauth/oauth-manager').OAuthManager | null = null
   private externalListeners: Array<(channel: string, data: unknown) => void> = []
+  private readonly captainRuntimes: CaptainRuntimeStore
+  private readonly deliveries: DeliveryStore
+  private readonly deliveryOwner = `agent-manager:${process.pid}:${randomUUID()}`
 
   // ── Centralized Polling Coordinator ──
   // Instead of N independent setTimeout loops (one per session),
@@ -242,6 +281,9 @@ export class AgentManager extends EventEmitter {
   /** taskId → agentId of admitted starts whose session is not registered yet.
    *  They hold their slot so concurrent requests cannot all slip past. */
   private admittedStarts: Map<string, string> = new Map()
+  /** In-flight admitted starts, so a durable message accepted during warm-up
+   * joins that start instead of opening a competing Captain session. */
+  private sessionStarts: Map<string, Promise<string>> = new Map()
   private startQueueDrainScheduled = false
   /** `projectId:reason` pairs the project's Captain has been told about (#65),
    *  cleared when one of the project's queued starts runs. */
@@ -250,8 +292,157 @@ export class AgentManager extends EventEmitter {
   constructor(db: DatabaseManager) {
     super()
     this.db = db
+    this.captainRuntimes = new CaptainRuntimeStore(db)
+    this.deliveries = new DeliveryStore(db)
     this.startIdleSessionReaper()
     this.resourceMonitor.start(30_000, () => this.refreshBranchDiffs())
+  }
+
+  getCaptainRuntime(projectId: string): CaptainRuntimeState | null {
+    return this.captainRuntimes.getByProject(projectId)
+  }
+
+  /** Repairs process-owned state after a crash before schedulers accept work. */
+  async reconcileStartup(): Promise<void> {
+    const expired = this.captainRuntimes.expireStale()
+    for (const state of expired) {
+      if (!state.lastGoodAgentId) continue
+      const candidateAgentId = state.candidateAgentId ?? state.agentId
+      const staleDetail = state.errorDetail ?? 'A stale Captain start timed out and was rolled back.'
+      this.db.updateProject(state.projectId, { captain_agent_id: state.lastGoodAgentId })
+      this.captainRuntimes.transition(state.ownerId, state.generation, 'rolled_back', {
+        agentId: state.lastGoodAgentId,
+        candidateAgentId,
+        deadlineAt: null,
+        probeOk: false
+      })
+      this.emitSystemError('', state.ownerId, `startup-recovery-${state.generation}`, staleDetail)
+      // Restoring a selection is not enough: verify (or recreate) the old
+      // runtime before startup reconciliation declares the app usable. Keep
+      // the rolled-back phase/cause visible even when that recovery succeeds.
+      try {
+        const recovered = await this.requestSession(state.lastGoodAgentId, state.ownerId, undefined, true)
+        if (recovered.status !== 'started') throw new Error(`Recovery was queued at position ${recovered.position}.`)
+        const latest = this.captainRuntimes.get(state.ownerId)
+        if (latest) {
+          this.captainRuntimes.transition(state.ownerId, latest.generation, 'rolled_back', {
+            agentId: state.lastGoodAgentId,
+            candidateAgentId,
+            lastGoodAgentId: state.lastGoodAgentId,
+            sessionId: recovered.sessionId,
+            deadlineAt: null,
+            lastProbeAt: Date.now(),
+            probeOk: true,
+            errorCode: 'STARTUP_TIMEOUT',
+            errorDetail: staleDetail
+          })
+        }
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error)
+        const latest = this.captainRuntimes.get(state.ownerId)
+        if (latest) {
+          this.captainRuntimes.transition(state.ownerId, latest.generation, 'failed', {
+            deadlineAt: null,
+            lastProbeAt: Date.now(),
+            probeOk: false,
+            errorCode: 'ROLLBACK_RECOVERY_FAILED',
+            errorDetail: `The stale candidate was rolled back, but the last-known-good Captain could not be recovered: ${detail}`
+          })
+        }
+      }
+    }
+
+    for (const state of this.captainRuntimes.list()) {
+      if (state.phase !== 'healthy' && state.phase !== 'recovering') continue
+      this.captainRuntimes.transition(state.ownerId, state.generation, 'recovering', {
+        deadlineAt: Date.now() + CAPTAIN_START_TIMEOUT_MS,
+        probeOk: null
+      })
+      try {
+        await this.requestSession(state.agentId, state.ownerId, undefined, true)
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error)
+        this.captainRuntimes.transition(state.ownerId, state.generation, 'failed', {
+          deadlineAt: null,
+          probeOk: false,
+          errorCode: 'RECOVERY_FAILED',
+          errorDetail: detail
+        })
+        this.emitSystemError('', state.ownerId, `startup-recovery-failed-${state.generation}`, `Captain recovery failed: ${detail}. Retry from the Captain panel.`)
+      }
+    }
+
+    const staleTasks = this.db.db.prepare(`
+      SELECT id, agent_id, session_id FROM tasks
+      WHERE role = 'task' AND status = ?
+    `).all(TaskStatus.AgentWorking) as Array<{ id: string; agent_id: string | null; session_id: string | null }>
+    for (const task of staleTasks) {
+      if (!task.agent_id || !task.session_id) {
+        this.updateTaskFromLocalAgent(task.id, { status: TaskStatus.NotStarted })
+        this.emitSystemError('', task.id, `stale-task-${Date.now()}`, 'The app restarted before this run had durable session ownership. The task was reset and can be retried.')
+        continue
+      }
+      try {
+        const sessionId = await withStartupDeadline(
+          this.resumeSession(task.agent_id, task.id, task.session_id),
+          AGENT_START_TIMEOUT_MS,
+          'Stale session recovery'
+        )
+        const status = sessionId ? this.getSessionStatus(sessionId)?.status : undefined
+        if (!sessionId || status === 'error') throw new Error('The saved backend session is not ready.')
+        if (status === 'idle') {
+          this.updateTaskFromLocalAgent(task.id, { status: TaskStatus.ReadyForReview })
+          this.emitSystemNotice(sessionId, task.id, `recovered-idle-${Date.now()}`, 'The app restarted while this task was marked running. Its session was recovered idle and moved to review; send a message to continue.')
+        }
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error)
+        this.updateTaskFromLocalAgent(task.id, { status: TaskStatus.NotStarted, session_id: null })
+        this.emitSystemError('', task.id, `stale-task-failed-${Date.now()}`, `The previous run could not be recovered: ${detail}. Retry to start a fresh session.`)
+      }
+    }
+
+    for (const record of this.deliveries.listRecoverable('agent_message')) {
+      try {
+        await this.dispatchAgentMessage(record)
+      } catch (error) {
+        console.warn(`[AgentManager] Deferred delivery ${record.id} remains pending:`, error)
+      }
+    }
+  }
+
+  private captainProject(task: TaskRecord | null | undefined): { id: string; captain_agent_id: string | null } | null {
+    if (!isCoordinatorTask(task) || !task?.project_id) return null
+    const project = this.db.getProject(task.project_id)
+    return project ? { id: project.id, captain_agent_id: project.captain_agent_id } : null
+  }
+
+  private beginCaptainRuntime(task: TaskRecord | null | undefined, agentId: string, retry = false): CaptainRuntimeState | null {
+    const project = this.captainProject(task)
+    if (!project || !task) return null
+    const previous = this.captainRuntimes.get(task.id)
+    if (
+      previous?.agentId === agentId
+      && ['starting_server', 'starting_session', 'verifying', 'retrying', 'recovering'].includes(previous.phase)
+      && (previous.deadlineAt ?? 0) > Date.now()
+    ) return previous
+    return this.captainRuntimes.begin({
+      ownerId: task.id,
+      projectId: project.id,
+      agentId,
+      lastGoodAgentId: previous?.lastGoodAgentId ?? project.captain_agent_id,
+      deadlineAt: Date.now() + CAPTAIN_START_TIMEOUT_MS,
+      retry
+    })
+  }
+
+  private transitionCaptainRuntime(
+    taskId: string,
+    phase: Parameters<CaptainRuntimeStore['transition']>[2],
+    patch?: Parameters<CaptainRuntimeStore['transition']>[3]
+  ): CaptainRuntimeState | null {
+    if (!isCoordinatorTask(this.db.getTask(taskId))) return null
+    const current = this.captainRuntimes.get(taskId)
+    return current ? this.captainRuntimes.transition(taskId, current.generation, phase, patch) : null
   }
 
   /**
@@ -562,6 +753,91 @@ export class AgentManager extends EventEmitter {
     }
   }
 
+  private async initializeAndProbeAdapter(adapter: CodingAgentAdapter, taskId: string): Promise<void> {
+    const init = adapter.initialize()
+    try {
+      await withStartupDeadline(init, AGENT_SERVER_START_TIMEOUT_MS, 'Agent server startup')
+      const health = typeof adapter.checkHealth === 'function'
+        ? await withStartupDeadline(adapter.checkHealth(), AGENT_SERVER_START_TIMEOUT_MS, 'Agent health probe')
+        : { available: true }
+      if (!health.available) {
+        this.transitionCaptainRuntime(taskId, 'unhealthy', {
+          lastProbeAt: Date.now(),
+          probeOk: false,
+          errorCode: 'HEALTH_PROBE_FAILED',
+          errorDetail: health.reason || 'Agent health probe failed'
+        })
+        throw new Error(health.reason || 'Agent health probe failed')
+      }
+      this.transitionCaptainRuntime(taskId, 'starting_session', {
+        lastProbeAt: Date.now(),
+        probeOk: true,
+        errorCode: null,
+        errorDetail: null
+      })
+    } catch (error) {
+      const stoppable = adapter as CodingAgentAdapter & { stopServer?: () => Promise<void> }
+      if (typeof stoppable.stopServer === 'function') void stoppable.stopServer().catch(() => {})
+      throw error
+    }
+  }
+
+  private async verifyAdapterSession(
+    adapter: CodingAgentAdapter,
+    sessionId: string,
+    sessionConfig: SessionConfig,
+    taskId: string,
+    markHealthy = true
+  ): Promise<void> {
+    this.transitionCaptainRuntime(taskId, 'verifying', { sessionId, lastProbeAt: Date.now() })
+    const readiness = adapter as CodingAgentAdapter & {
+      getSessionStatus?: (id: string, config: SessionConfig) => Promise<{ type: SessionStatusType; message?: string }>
+    }
+    // All production adapters implement getStatus. The compatibility branch
+    // keeps old third-party/test doubles usable while still probing whenever
+    // either supported status method exists.
+    const statusPromise: Promise<{ type: SessionStatusType; message?: string }> = typeof adapter.getStatus === 'function'
+      ? adapter.getStatus(sessionId, sessionConfig)
+      : typeof readiness.getSessionStatus === 'function'
+        ? readiness.getSessionStatus(sessionId, sessionConfig)
+        : Promise.resolve({ type: SessionStatusType.IDLE })
+    const status = await withStartupDeadline(
+      statusPromise,
+      AGENT_SERVER_START_TIMEOUT_MS,
+      'Agent session readiness probe'
+    )
+    if (status.type === SessionStatusType.ERROR) {
+      this.transitionCaptainRuntime(taskId, 'unhealthy', {
+        lastProbeAt: Date.now(),
+        probeOk: false,
+        errorCode: 'SESSION_READINESS_FAILED',
+        errorDetail: status.message || 'Agent session readiness probe failed'
+      })
+      throw new Error(status.message || 'Agent session readiness probe failed')
+    }
+    if (!markHealthy) {
+      this.transitionCaptainRuntime(taskId, 'verifying', {
+        sessionId,
+        lastProbeAt: Date.now(),
+        probeOk: true,
+        errorCode: null,
+        errorDetail: null
+      })
+      return
+    }
+    const runtime = this.captainRuntimes.get(taskId)
+    this.transitionCaptainRuntime(taskId, 'healthy', {
+      sessionId,
+      deadlineAt: null,
+      lastProbeAt: Date.now(),
+      probeOk: true,
+      candidateAgentId: null,
+      lastGoodAgentId: runtime?.agentId ?? null,
+      errorCode: null,
+      errorDetail: null
+    })
+  }
+
   /**
    * Starts a session using a coding agent adapter (Claude Code, etc.)
    *
@@ -579,7 +855,8 @@ export class AgentManager extends EventEmitter {
     workspaceDir?: string,
     skipInitialPrompt?: boolean,
     handoffFromAgentName?: string,
-    inheritedFallbackState?: AgentFallbackState
+    inheritedFallbackState?: AgentFallbackState,
+    deferCoordinatorBinding = false
   ): Promise<string> {
     const agent = this.db.getAgent(agentId)!
     workspaceDir ||= this.db.getWorkspaceDir(taskId)
@@ -610,10 +887,22 @@ export class AgentManager extends EventEmitter {
     await yieldEventLoop()
 
     console.log(`[AgentManager] startAdapterSession: agent=${agent.name}, coding_agent=${agent.config?.coding_agent || 'opencode'}, model=${agent.config?.model}, adapter=${adapter.constructor.name}`)
-    await adapter.initialize()
+    await this.initializeAndProbeAdapter(adapter, taskId)
 
-    const adapterSessionId = await adapter.createSession(sessionConfig)
+    const creating = adapter.createSession(sessionConfig)
+    const adapterSessionId = await withStartupDeadline(
+      creating,
+      AGENT_SESSION_START_TIMEOUT_MS,
+      'Agent session startup',
+      (lateSessionId) => adapter.destroySession(lateSessionId, sessionConfig).catch(() => {})
+    )
     console.log(`[AgentManager] Session created: ${adapterSessionId}, workspaceDir=${workspaceDir}`)
+    try {
+      await this.verifyAdapterSession(adapter, adapterSessionId, sessionConfig, taskId, !deferCoordinatorBinding)
+    } catch (error) {
+      await adapter.destroySession(adapterSessionId, sessionConfig).catch(() => {})
+      throw error
+    }
 
     // OpenCode receives its MCP servers through runtime calls, so attachment can
     // still fail after the documentation was written. Rewrite the documentation
@@ -663,8 +952,10 @@ export class AgentManager extends EventEmitter {
       attemptedAgentIds
     })
 
-    this.updateTaskFromLocalAgent(taskId, { session_id: adapterSessionId })
-    this.recordCoordinatorSessionAgent(taskId, agentId)
+    if (!deferCoordinatorBinding) {
+      this.updateTaskFromLocalAgent(taskId, { session_id: adapterSessionId })
+      this.recordCoordinatorSessionAgent(taskId, agentId)
+    }
     console.log(`[SessionTracker] CREATED session=${adapterSessionId} task=${taskId} agent=${agentId} reason=new_session`)
 
     // Triage sessions keep the Triaging status; coordinator rows have none.
@@ -682,6 +973,7 @@ export class AgentManager extends EventEmitter {
     this.startAdapterPolling(adapterSessionId, adapter, sessionConfig)
 
     if (!skipInitialPrompt) {
+      if (task && isCoordinatorTask(task) && task.project_id) prepareProjectMessageDispatch(task.project_id)
       let promptText: string
       if (isTriageSession && task) {
         promptText = buildTriagePrompt(task, this.projectRepoNames(task))
@@ -1604,12 +1896,17 @@ export class AgentManager extends EventEmitter {
     })
     await yieldEventLoop()
 
-    await adapter.initialize()
+    await this.initializeAndProbeAdapter(adapter, taskId)
 
     let messages: SessionMessage[]
     try {
       console.log('[AgentManager] Calling adapter.resumeSession...')
-      messages = await adapter.resumeSession(adapterSessionId, sessionConfig)
+      messages = await withStartupDeadline(
+        adapter.resumeSession(adapterSessionId, sessionConfig),
+        AGENT_SESSION_START_TIMEOUT_MS,
+        'Agent session resume',
+        () => adapter.destroySession(adapterSessionId, sessionConfig).catch(() => {})
+      )
       console.log('[AgentManager] adapter.resumeSession completed successfully')
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error)
@@ -1669,6 +1966,8 @@ export class AgentManager extends EventEmitter {
       }
       throw error
     }
+
+    await this.verifyAdapterSession(adapter, adapterSessionId, sessionConfig, taskId)
 
     // Seed the dedup state from the resumed history so polling won't re-emit
     // historical parts as new output. Resume does NOT push the transcript to
@@ -1786,11 +2085,15 @@ export class AgentManager extends EventEmitter {
     }
 
     this.admittedStarts.set(taskId, agentId)
+    const runtime = this.beginCaptainRuntime(task, agentId)
+    let trackedStart: Promise<string> | undefined
     try {
       const starting = this.startSessionNow(agentId, taskId, workspaceDir, skipInitialPrompt)
-      const sessionId = isCoordinatorTask(task)
-        ? await this.boundedCaptainStart(starting, agent.name, taskId)
-        : await starting
+      const timeout = isCoordinatorTask(task) ? CAPTAIN_START_TIMEOUT_MS : AGENT_START_TIMEOUT_MS
+      const boundedStart = this.boundedSessionStart(starting, agent.name, taskId, timeout)
+      trackedStart = boundedStart
+      this.sessionStarts.set(taskId, boundedStart)
+      const sessionId = await boundedStart
       return { status: 'started', sessionId }
     } catch (error) {
       // The reserved slot is free again (released in finally, before the
@@ -1802,12 +2105,32 @@ export class AgentManager extends EventEmitter {
       // status so every view leaves "Agent is starting..." instead of sitting
       // there forever (e.g. the backend process died before it came up).
       const message = error instanceof Error ? error.message : String(error)
+      if (runtime) {
+        const timedOut = /timed out|did not come up/i.test(message)
+        this.captainRuntimes.transition(taskId, runtime.generation, timedOut ? 'timed_out' : 'failed', {
+          errorCode: timedOut ? 'STARTUP_TIMEOUT' : 'STARTUP_FAILED',
+          errorDetail: message,
+          probeOk: false,
+          lastProbeAt: Date.now(),
+          deadlineAt: null
+        })
+        if (runtime.lastGoodAgentId) {
+          this.captainRuntimes.transition(taskId, runtime.generation, 'rolled_back', {
+            agentId: runtime.lastGoodAgentId,
+            candidateAgentId: agentId,
+            errorCode: timedOut ? 'STARTUP_TIMEOUT' : 'STARTUP_FAILED',
+            errorDetail: message,
+            probeOk: false
+          })
+        }
+      }
       console.error(`[AgentManager] Failed to start ${agent.name} for task ${taskId}:`, error)
       this.emitSystemError('', taskId, `session-start-failed-${Date.now()}`, `Could not start ${agent.name}: ${message}`)
       this.emitStatus('', { agentId, taskId }, 'error')
       throw error
     } finally {
       this.admittedStarts.delete(taskId)
+      if (this.sessionStarts.get(taskId) === trackedStart) this.sessionStarts.delete(taskId)
     }
   }
 
@@ -1818,25 +2141,10 @@ export class AgentManager extends EventEmitter {
    * later, that session is stopped: the caller has already been told it
    * failed and may be starting another.
    */
-  private boundedCaptainStart(starting: Promise<string>, agentName: string, taskId: string): Promise<string> {
-    return new Promise<string>((resolve, reject) => {
-      let timedOut = false
-      const timer = setTimeout(() => {
-        timedOut = true
-        reject(new Error(`${agentName} did not come up within ${Math.round(CAPTAIN_START_TIMEOUT_MS / 1000)} seconds`))
-      }, CAPTAIN_START_TIMEOUT_MS)
-      starting.then(
-        (sessionId) => {
-          clearTimeout(timer)
-          if (!timedOut) return resolve(sessionId)
-          console.warn(`[AgentManager] Captain ${taskId} came up after its start timed out; stopping ${sessionId}`)
-          if (sessionId) void this.stopSession(sessionId, false)
-        },
-        (error: unknown) => {
-          clearTimeout(timer)
-          if (!timedOut) reject(error)
-        }
-      )
+  private boundedSessionStart(starting: Promise<string>, agentName: string, taskId: string, timeoutMs: number): Promise<string> {
+    return withStartupDeadline(starting, timeoutMs, `${agentName} startup`, (sessionId) => {
+      console.warn(`[AgentManager] ${taskId} came up after its start timed out; stopping ${sessionId}`)
+      if (sessionId) void this.stopSession(sessionId, false)
     })
   }
 
@@ -1852,8 +2160,13 @@ export class AgentManager extends EventEmitter {
     // the same Captain conversation instead of opening a blank one.
     let task = this.db.getTask(taskId)
     if (isCoordinatorTask(task)) {
+      this.beginCaptainRuntime(task, agentId)
       const live = this.findSessionByTaskId(taskId)
-      if (live && live.session.agentId === agentId) return live.sessionId
+      if (live && live.session.agentId === agentId) {
+        if (!live.session.adapter) throw new Error(`Captain session ${live.sessionId} has no live adapter`)
+        await this.verifyAdapterSession(live.session.adapter, live.sessionId, this.sessionConfigFor(live.session), taskId)
+        return live.sessionId
+      }
       // The Captain was switched to another agent: the old runtime must not
       // keep answering for it.
       if (live) {
@@ -1922,6 +2235,127 @@ export class AgentManager extends EventEmitter {
     console.log(`[AgentManager] Captain agent of ${projectId} is now ${agentId}; stopping ${live.sessionId} on ${live.session.agentId}`)
     await this.stopSession(live.sessionId, false)
     return true
+  }
+
+  /**
+   * Starts and verifies a Captain candidate without changing the project's
+   * selected agent or stopping the last-known-good runtime. Only the final
+   * SQLite transaction commits the candidate and its session binding.
+   */
+  async switchCaptainAgent(projectId: string, candidateAgentId: string, retry = false): Promise<CaptainRuntimeState> {
+    const project = this.db.getProject(projectId)
+    const coordinator = this.db.getCoordinatorTask(projectId)
+    const candidate = this.db.getAgent(candidateAgentId)
+    if (!project || !coordinator) throw new Error(`Project Captain not found: ${projectId}`)
+    if (!candidate) throw new Error(`Agent not found: ${candidateAgentId}`)
+
+    const currentAgentId = resolveCaptainAgentId(this.db, project)
+    if (currentAgentId === candidateAgentId && !retry) {
+      const existing = this.captainRuntimes.get(coordinator.id)
+      if (existing) return existing
+    }
+
+    const oldLive = [...this.sessions.entries()].find(([, session]) =>
+      session.taskId === coordinator.id && session.agentId === currentAgentId
+    )
+    const runtime = this.captainRuntimes.begin({
+      ownerId: coordinator.id,
+      projectId,
+      agentId: candidateAgentId,
+      lastGoodAgentId: currentAgentId,
+      deadlineAt: Date.now() + CAPTAIN_START_TIMEOUT_MS,
+      retry
+    })
+
+    let candidateSessionId = ''
+    try {
+      const workspaceDir = await this.setupWorktreeIfNeeded(coordinator.id)
+      const adapter = this.getAdapter(candidateAgentId)
+      if (!adapter) throw new Error(`No adapter available for agent ${candidateAgentId}`)
+      candidateSessionId = await this.boundedSessionStart(
+        this.startAdapterSession(adapter, candidateAgentId, coordinator.id, workspaceDir, true, undefined, undefined, true),
+        candidate.name,
+        coordinator.id,
+        CAPTAIN_START_TIMEOUT_MS
+      )
+
+      const latest = this.captainRuntimes.get(coordinator.id)
+      if (!latest || latest.generation !== runtime.generation) {
+        await this.stopSession(candidateSessionId, false)
+        throw new Error('This Captain switch was superseded by a newer attempt.')
+      }
+
+      this.db.db.transaction(() => {
+        const now = new Date().toISOString()
+        this.db.db.prepare('UPDATE projects SET captain_agent_id = ?, updated_at = ? WHERE id = ?')
+          .run(candidateAgentId, now, projectId)
+        this.db.db.prepare('UPDATE tasks SET session_id = ?, updated_at = ? WHERE id = ?')
+          .run(candidateSessionId, now, coordinator.id)
+        this.db.db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+          .run(coordinatorSessionAgentKey(coordinator.id), candidateAgentId)
+        this.captainRuntimes.transition(coordinator.id, runtime.generation, 'healthy', {
+          agentId: candidateAgentId,
+          candidateAgentId: null,
+          lastGoodAgentId: candidateAgentId,
+          sessionId: candidateSessionId,
+          deadlineAt: null,
+          lastProbeAt: Date.now(),
+          probeOk: true,
+          errorCode: null,
+          errorDetail: null
+        })
+      })()
+
+      if (oldLive && oldLive[0] !== candidateSessionId) await this.stopSession(oldLive[0], false)
+      this.sendToRenderer('task:updated', { taskId: coordinator.id, updates: { session_id: candidateSessionId } })
+      return this.captainRuntimes.get(coordinator.id)!
+    } catch (error) {
+      if (candidateSessionId && this.sessions.has(candidateSessionId)) await this.stopSession(candidateSessionId, false)
+      const detail = error instanceof Error ? error.message : String(error)
+      const timedOut = /timed out/i.test(detail)
+      this.captainRuntimes.transition(coordinator.id, runtime.generation, timedOut ? 'timed_out' : 'failed', {
+        errorCode: timedOut ? 'STARTUP_TIMEOUT' : 'STARTUP_FAILED',
+        errorDetail: detail,
+        probeOk: false,
+        lastProbeAt: Date.now(),
+        deadlineAt: null
+      })
+      if (currentAgentId) {
+        const rolledBack = this.captainRuntimes.transition(coordinator.id, runtime.generation, 'rolled_back', {
+          agentId: currentAgentId,
+          candidateAgentId,
+          lastGoodAgentId: currentAgentId,
+          sessionId: oldLive?.[0] ?? coordinator.session_id ?? null,
+          errorCode: timedOut ? 'STARTUP_TIMEOUT' : 'STARTUP_FAILED',
+          errorDetail: detail,
+          probeOk: oldLive ? true : null
+        })
+        if (rolledBack) return rolledBack
+      }
+      const failed = this.captainRuntimes.get(coordinator.id)
+      if (failed) return failed
+      throw error
+    }
+  }
+
+  async retryCaptainSwitch(projectId: string): Promise<CaptainRuntimeState> {
+    const runtime = this.captainRuntimes.getByProject(projectId)
+    const candidate = runtime?.candidateAgentId
+    if (!candidate) throw new Error('There is no failed Captain candidate to retry.')
+    return this.switchCaptainAgent(projectId, candidate, true)
+  }
+
+  rollbackCaptainSwitch(projectId: string): CaptainRuntimeState {
+    const runtime = this.captainRuntimes.getByProject(projectId)
+    if (!runtime?.lastGoodAgentId) throw new Error('There is no last-known-good Captain to restore.')
+    const project = this.db.getProject(projectId)
+    if (!project) throw new Error(`Project not found: ${projectId}`)
+    this.db.updateProject(projectId, { captain_agent_id: runtime.lastGoodAgentId })
+    return this.captainRuntimes.transition(runtime.ownerId, runtime.generation, 'rolled_back', {
+      agentId: runtime.lastGoodAgentId,
+      errorCode: runtime.errorCode ?? 'ROLLED_BACK',
+      errorDetail: runtime.errorDetail ?? 'Restored the last-known-good Captain.'
+    })!
   }
 
   /** Resumes a coordinator's persisted session; '' when it cannot be continued. */
@@ -3187,17 +3621,19 @@ export class AgentManager extends EventEmitter {
   async sendByTaskId(
     taskId: string,
     message: string,
-    attachments?: MessageAttachmentRef[]
+    attachments?: MessageAttachmentRef[],
+    typedMessage?: TypedMessage,
+    deliveryId?: string
   ): Promise<{ sessionId: string | null; newSessionId?: string }> {
     const found = this.findSessionByTaskId(taskId)
     if (found) {
       console.log(`[AgentManager] sendByTaskId: found live session ${found.sessionId} for task ${taskId}`)
-      const result = await this.sendMessage(found.sessionId, message, taskId, found.session.agentId, attachments)
+      const result = await this.sendMessage(found.sessionId, message, taskId, found.session.agentId, attachments, typedMessage, deliveryId)
       return { sessionId: found.sessionId, ...result }
     }
     // sendMessage resumes from the persisted session_id or creates a new session.
     console.log(`[AgentManager] sendByTaskId: no live session for task ${taskId}, delegating to sendMessage for recovery`)
-    const result = await this.sendMessage('', message, taskId, undefined, attachments)
+    const result = await this.sendMessage('', message, taskId, undefined, attachments, typedMessage, deliveryId)
     return { sessionId: null, ...result }
   }
 
@@ -3206,11 +3642,91 @@ export class AgentManager extends EventEmitter {
     message: string,
     taskId?: string,
     agentId?: string,
-    attachments?: MessageAttachmentRef[]
+    attachments?: MessageAttachmentRef[],
+    typedMessage?: TypedMessage,
+    deliveryId = `agent-message:${randomUUID()}`
+  ): Promise<{ newSessionId?: string }> {
+    // A few focused unit tests use a structural DB double without SQLite.
+    // The shipped DatabaseManager always has `db`, so every application call
+    // takes the durable path below.
+    if (!this.db.db || typeof this.db.db.prepare !== 'function') {
+      return this.sendMessageNow(sessionId, message, taskId, agentId, attachments, typedMessage)
+    }
+    const { record } = this.deliveries.enqueue({
+      idempotencyKey: deliveryId,
+      kind: 'agent_message',
+      taskId: taskId ?? this.resolveSession(sessionId)?.session.taskId ?? null,
+      agentId: agentId ?? this.resolveSession(sessionId)?.session.agentId ?? null,
+      payload: JSON.stringify({ sessionId, message, taskId, agentId, attachments: attachments ?? [], typedMessage })
+    })
+    return this.dispatchAgentMessage(record)
+  }
+
+  private async dispatchAgentMessage(record: DeliveryRecord): Promise<{ newSessionId?: string }> {
+    if (record.state === 'acknowledged') return record.destinationId ? { newSessionId: record.destinationId } : {}
+    if (record.state === 'accepted') {
+      this.deliveries.acknowledge(record.id)
+      return record.destinationId ? { newSessionId: record.destinationId } : {}
+    }
+    const claimed = this.deliveries.claim(record.id, this.deliveryOwner, DELIVERY_CLAIM_MS)
+    if (!claimed) return {}
+    let payload: {
+      sessionId: string
+      message: string
+      taskId?: string
+      agentId?: string
+      attachments?: MessageAttachmentRef[]
+      typedMessage?: TypedMessage
+    }
+    try {
+      payload = JSON.parse(claimed.payload) as typeof payload
+      const result = await this.sendMessageNow(
+        payload.sessionId,
+        payload.message,
+        payload.taskId,
+        payload.agentId,
+        payload.attachments,
+        payload.typedMessage,
+        `delivery-${claimed.id}`
+      )
+      const destination = result.newSessionId || payload.sessionId || claimed.taskId || claimed.id
+      this.deliveries.accept(claimed.id, this.deliveryOwner, destination)
+      this.deliveries.acknowledge(claimed.id, this.deliveryOwner)
+      return result
+    } catch (error) {
+      this.deliveries.release(claimed.id, this.deliveryOwner, error instanceof Error ? error.message : String(error))
+      throw error
+    }
+  }
+
+  private async sendMessageNow(
+    sessionId: string,
+    message: string,
+    taskId?: string,
+    agentId?: string,
+    attachments?: MessageAttachmentRef[],
+    typedMessage?: TypedMessage,
+    transcriptPartId?: string
   ): Promise<{ newSessionId?: string }> {
     const resolved = this.resolveSession(sessionId, 'sendMessage')
     let session = resolved?.session
     if (resolved) sessionId = resolved.sessionId
+    const target = this.db.getTask(session?.taskId ?? taskId ?? '')
+    const dispatch = target && isCoordinatorTask(target) && target.project_id
+      ? prepareProjectMessageDispatch(target.project_id, typedMessage?.taskId === target.id && typedMessage.text === message ? typedMessage : undefined)
+      : undefined
+
+    // A renderer can send while its bounded warm-up IPC is still pending.
+    // The message is already durable at this point; join that exact start so
+    // we cannot create a second session for the same Captain.
+    if (!session && taskId) {
+      const starting = this.sessionStarts.get(taskId)
+      if (starting) {
+        sessionId = await starting
+        session = this.sessions.get(sessionId)
+        if (!session) throw new Error(`Started session was not registered: ${sessionId}`)
+      }
+    }
 
     // Session gone from memory: RESUME first (keeps the conversation), else start a new one.
     if (!session && taskId) {
@@ -3257,19 +3773,30 @@ export class AgentManager extends EventEmitter {
           console.log(`[SessionTracker] CREATED_FALLBACK session=${newSessionId} task=${taskId} reason=resume_failed_or_no_persisted_session`)
         }
 
-        this.sendInBackground(session, sessionId, message, attachments)
+        try {
+          await this.doSendAdapterMessage(session, sessionId, message, attachments, dispatch, transcriptPartId)
+        } catch (error) {
+          await this.handleSessionError(sessionId, session, error)
+          throw error
+        }
         return { newSessionId: sessionId }
       }
     }
 
     if (!session) throw new Error(`Session not found: ${sessionId}`)
-    this.sendInBackground(session, sessionId, message, attachments)
+    try {
+      await this.doSendAdapterMessage(session, sessionId, message, attachments, dispatch, transcriptPartId)
+    } catch (error) {
+      await this.handleSessionError(sessionId, session, error)
+      throw error
+    }
     return {}
   }
 
   /** Fire-and-forget, so the IPC response is not blocked and the renderer does not freeze. */
-  private sendInBackground(session: AgentSession, sessionId: string, message: string, attachments?: MessageAttachmentRef[]): void {
-    this.doSendAdapterMessage(session, sessionId, message, attachments).catch((err) => {
+  private sendInBackground(session: AgentSession, sessionId: string, message: string, attachments?: MessageAttachmentRef[], dispatch?: ProjectMessageDispatch): void {
+    this.doSendAdapterMessage(session, sessionId, message, attachments, dispatch).catch((err) => {
+      if (dispatch) failProjectMessageDispatch(dispatch)
       console.error(`[AgentManager] doSendAdapterMessage failed for session ${sessionId}:`, err)
       return this.handleSessionError(sessionId, session, err)
     })
@@ -3302,8 +3829,13 @@ export class AgentManager extends EventEmitter {
     session: AgentSession,
     sessionId: string,
     message: string,
-    attachments?: MessageAttachmentRef[]
+    attachments?: MessageAttachmentRef[],
+    dispatch?: ProjectMessageDispatch,
+    transcriptPartId?: string
   ): Promise<void> {
+    const task = this.db.getTask(session.taskId)
+    // Nudges use this method directly, and must invalidate earlier typed authority too.
+    dispatch ??= task && isCoordinatorTask(task) && task.project_id ? prepareProjectMessageDispatch(task.project_id) : undefined
     session.autoAbortNotified = false
 
     if (session.status === 'error') {
@@ -3338,7 +3870,7 @@ export class AgentManager extends EventEmitter {
       taskId: session.taskId,
       type: 'message',
       data: {
-        id: `user-message-${Date.now()}`,
+        id: transcriptPartId ?? dispatch?.typed?.id ?? `user-message-${Date.now()}`,
         role: 'user',
         content: buildDisplayMessage(message, attachments),
         partType: 'text'
@@ -3352,7 +3884,13 @@ export class AgentManager extends EventEmitter {
     )
 
     const promptText = buildMessageWithAttachmentContext(session.workspaceDir, message, attachments)
-    await session.adapter.sendPrompt(sessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
+    if (dispatch) activateProjectMessageDispatch(dispatch)
+    try {
+      await session.adapter.sendPrompt(sessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
+    } catch (error) {
+      if (dispatch) failProjectMessageDispatch(dispatch)
+      throw error
+    }
 
     if (!session.pollingStarted) {
       console.log(`[AgentManager] Starting polling for session ${sessionId} (preserving dedup state)`)
@@ -3525,6 +4063,8 @@ export class AgentManager extends EventEmitter {
 
   async stopAllSessions(): Promise<void> {
     console.log(`[AgentManager] Stopping all ${this.sessions.size} sessions`)
+
+    this.resourceMonitor.stop()
 
     // Shutdown: the stops below free slots, which must not start queued work.
     this.startQueue.clear()

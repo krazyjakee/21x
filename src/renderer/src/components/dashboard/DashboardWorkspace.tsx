@@ -15,11 +15,11 @@ export function DashboardWorkspace({ onTaskStatusChange }: DashboardWorkspacePro
   const setShowOrchestrator = useUIStore((s) => s.setShowOrchestrator)
 
   // Handler: send message to Captain and open the drawer
-  const handleSendToCaptain = useCallback((message: string) => {
+  const handleSendToCaptain = useCallback((message: string, typed = false) => {
     // Open the orchestrator panel — the panel itself handles sending messages
     setShowOrchestrator(true)
     // We dispatch a custom event so the OrchestratorPanel can pick up the message
-    window.dispatchEvent(new CustomEvent('captain-prefill', { detail: { message } }))
+    window.dispatchEvent(new CustomEvent('captain-prefill', { detail: { message, typed } }))
   }, [setShowOrchestrator])
 
   // Handler: create task from command input text

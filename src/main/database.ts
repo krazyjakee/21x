@@ -11,6 +11,7 @@ import { seedOrchestratorSkill } from './database/captain-migration'
 import { userTaskRoleFilter } from './database/task-roles'
 import { TASK_ROLE_CAPTAIN, type TaskRole } from '../shared/task-roles'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
+import { mergeGrantStatus, type MergeCheckRecord, type MergeGrant, type MergeGrantSource, type MergeGrantReservation, type MergeGrantUse, type MergeGrantUseInput } from '../shared/merge-grants'
 import { defaultHardCap, normalizeTouchPath, type ConcurrencyAuditEntry } from '../shared/concurrency'
 import {
   PROJECT_STATUS_BLOCKER_MAX_CHARS,
@@ -69,7 +70,7 @@ export type { ProjectStatus, ProjectStatusJournalEntry, ProjectStatusJournalInpu
 
 /**
  * A new agent's config with its hard cap (#150): an explicit cap is kept,
- * otherwise min(max_parallel_sessions, 5), as migration 20 gives existing agents.
+ * otherwise min(max_parallel_sessions, 5), as migration 21 gives existing agents.
  */
 function withDefaultHardCap(config: CreateAgentData['config']): NonNullable<CreateAgentData['config']> {
   const next = { ...(config ?? {}) }
@@ -93,6 +94,45 @@ interface ProjectStatusJournalRow {
   source: string
   correlation_id: string | null
   created_at: string
+}
+
+/** A `merge_grants` row (#137); `pr_numbers` holds a JSON array. */
+interface MergeGrantRow extends Omit<MergeGrant, 'pr_numbers' | 'action' | 'condition' | 'source'> {
+  action: string
+  condition: string
+  source: string
+  pr_numbers: string
+}
+
+function toMergeGrant(row: MergeGrantRow): MergeGrant {
+  let prNumbers: number[] = []
+  try {
+    const parsed = JSON.parse(row.pr_numbers) as unknown
+    if (Array.isArray(parsed)) prNumbers = parsed.filter((n): n is number => Number.isInteger(n) && n > 0)
+  } catch {
+    prNumbers = []
+  }
+  return {
+    ...row,
+    action: 'merge_pr',
+    condition: 'checks_green_and_protection_satisfied',
+    source: row.source === 'project_chat' ? 'project_chat' : 'commander',
+    pr_numbers: prNumbers
+  }
+}
+
+/** What the app (never the model) supplies when it stores a grant; see src/main/merge-grants.ts. */
+export interface CreateMergeGrantData {
+  project_id: string
+  repo: string | null
+  base_branch: string | null
+  pr_numbers: number[]
+  source: MergeGrantSource
+  source_session_id: string | null
+  source_message_id: string
+  user_text: string
+  expires_at: string
+  max_uses: number | null
 }
 
 /** What `recordProjectStatus` writes: the snapshot fields plus the journal highlights. */
@@ -1144,6 +1184,149 @@ export class DatabaseManager {
       options.createdAt ?? new Date().toISOString()
     )
     return this.getProjectStatusJournalEntry(id)
+  }
+
+  // ── Merge grants (#137) ─────────────────────────────────────
+  // Stored and read here; created, checked and used only through
+  // src/main/merge-grants.ts, which binds each grant to a user-typed message.
+
+  /**
+   * Undefined when the project is unknown or that user message already backs
+   * a grant (in any project: one message, one project).
+   */
+  createMergeGrant(data: CreateMergeGrantData): MergeGrant | undefined {
+    if (!this.ensureDbOpen() || !this.getProject(data.project_id)) return undefined
+    const existing = this.prepare('SELECT id FROM merge_grants WHERE source = ? AND source_message_id = ?')
+      .get(data.source, data.source_message_id)
+    if (existing) return undefined
+    const id = createId()
+    this.prepare(`
+      INSERT INTO merge_grants
+        (id, project_id, action, condition, repo, base_branch, pr_numbers, source, source_session_id, source_message_id, user_text, created_at, expires_at, max_uses, uses)
+      VALUES (?, ?, 'merge_pr', 'checks_green_and_protection_satisfied', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+    `).run(
+      id,
+      data.project_id,
+      data.repo,
+      data.base_branch,
+      JSON.stringify(data.pr_numbers),
+      data.source,
+      data.source_session_id,
+      data.source_message_id,
+      data.user_text,
+      new Date().toISOString(),
+      data.expires_at,
+      data.max_uses
+    )
+    return this.getMergeGrant(id)
+  }
+
+  getMergeGrant(id: string): MergeGrant | undefined {
+    if (!this.ensureDbOpen()) return undefined
+    const row = this.prepare('SELECT * FROM merge_grants WHERE id = ?').get(id) as MergeGrantRow | undefined
+    return row ? toMergeGrant(row) : undefined
+  }
+
+  /** Newest first. `activeOnly` drops revoked, expired and used-up grants. */
+  listMergeGrants(options: { projectId?: string; activeOnly?: boolean } = {}): MergeGrant[] {
+    if (!this.ensureDbOpen()) return []
+    const rows = (options.projectId
+      ? this.prepare('SELECT * FROM merge_grants WHERE project_id = ? ORDER BY created_at DESC, id DESC').all(options.projectId)
+      : this.prepare('SELECT * FROM merge_grants ORDER BY created_at DESC, id DESC').all()) as MergeGrantRow[]
+    const grants = rows.map(toMergeGrant)
+    if (!options.activeOnly) return grants
+    const now = Date.now()
+    return grants.filter((grant) => mergeGrantStatus(grant, now) === 'active')
+  }
+
+  /** Revokes a grant once; false when it does not exist or was already revoked. */
+  revokeMergeGrant(id: string, revokedBy: string = 'user'): boolean {
+    if (!this.ensureDbOpen()) return false
+    const info = this.prepare('UPDATE merge_grants SET revoked_at = ?, revoked_by = ? WHERE id = ? AND revoked_at IS NULL').run(new Date().toISOString(), revokedBy, id)
+    return info.changes > 0
+  }
+
+  /**
+   * Reserves one use of a grant before a merge runs, atomically and only
+   * while the grant is active (not revoked, not expired, under its count).
+   * Undefined when it is not. A merge that then fails gives the use back
+   * with {@link refundMergeGrantUse}; one that succeeds is recorded with
+   * {@link recordMergeGrantUse}.
+   */
+  reserveMergeGrantUse(grantId: string, snapshot: MergeGrantUseInput): { grant: MergeGrant; reservationId: string } | undefined {
+    if (!this.ensureDbOpen()) return undefined
+    return this.db.transaction(() => {
+      const grant = this.getMergeGrant(grantId)
+      if (!grant || mergeGrantStatus(grant) !== 'active') return undefined
+      // An uncertain/in-flight operation for this PR must be reconciled before
+      // another grant can spend authority on it or claim the same merge.
+      if (this.listPendingMergeGrantReservations(grant.project_id).some((pending) =>
+        pending.snapshot.pr_url.toLowerCase() === snapshot.pr_url.toLowerCase())) return undefined
+      const reservationId = createId()
+      this.prepare('UPDATE merge_grants SET uses = uses + 1 WHERE id = ?').run(grantId)
+      this.prepare('INSERT INTO merge_grant_reservations (id, grant_id, project_id, snapshot, created_at) VALUES (?, ?, ?, ?, ?)')
+        .run(reservationId, grantId, grant.project_id, JSON.stringify(snapshot), new Date().toISOString())
+      return { grant: this.getMergeGrant(grantId)!, reservationId }
+    }).immediate()
+  }
+
+  /** Resolves one pending reservation exactly once; retrying cannot refund another merge. */
+  refundMergeGrantUse(reservationId: string): void {
+    if (!this.ensureDbOpen()) return
+    this.db.transaction(() => {
+      const row = this.prepare("SELECT grant_id FROM merge_grant_reservations WHERE id = ? AND state = 'pending'").get(reservationId) as { grant_id: string } | undefined
+      if (!row) return
+      this.prepare("UPDATE merge_grant_reservations SET state = 'failed' WHERE id = ?").run(reservationId)
+      this.prepare('UPDATE merge_grants SET uses = uses - 1 WHERE id = ? AND uses > 0').run(row.grant_id)
+    }).immediate()
+  }
+
+  listPendingMergeGrantReservations(projectId?: string): MergeGrantReservation[] {
+    if (!this.ensureDbOpen()) return []
+    const rows = (projectId
+      ? this.prepare("SELECT * FROM merge_grant_reservations WHERE state = 'pending' AND project_id = ?").all(projectId)
+      : this.prepare("SELECT * FROM merge_grant_reservations WHERE state = 'pending'").all()) as Array<Omit<MergeGrantReservation, 'snapshot'> & { snapshot: string }>
+    return rows.map((row) => ({ ...row, snapshot: JSON.parse(row.snapshot) as MergeGrantUseInput }))
+  }
+
+  /** Finalizes the saved snapshot and audit together; recovery is idempotent. */
+  recordMergeGrantUse(reservationId: string): MergeGrantUse | undefined {
+    if (!this.ensureDbOpen()) return undefined
+    return this.db.transaction(() => {
+      const row = this.prepare("SELECT * FROM merge_grant_reservations WHERE id = ? AND state = 'pending'").get(reservationId) as { grant_id: string; project_id: string; snapshot: string } | undefined
+      if (!row) return undefined
+      const use = JSON.parse(row.snapshot) as MergeGrantUseInput
+      const now = new Date().toISOString()
+      this.prepare("UPDATE merge_grant_reservations SET state = 'merged' WHERE id = ?").run(reservationId)
+      this.prepare('UPDATE merge_grants SET last_used_at = ? WHERE id = ?').run(now, row.grant_id)
+      this.prepare(`
+        INSERT INTO merge_grant_uses
+          (id, grant_id, project_id, pr_url, pr_title, base_branch, head_sha, method, merge_state, review_decision, checks, merged_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(reservationId, row.grant_id, row.project_id, use.pr_url, use.pr_title, use.base_branch, use.head_sha, use.method, use.merge_state, use.review_decision, JSON.stringify(use.checks), now)
+      const entry = this.appendProjectStatusJournal(row.project_id, {
+        summary: `Merged ${use.pr_url} (${use.method}, ${use.head_sha.slice(0, 7)}) under the user's merge grant ${row.grant_id}.`,
+        completed: [`Merged ${use.pr_url}${use.pr_title ? ` "${use.pr_title.slice(0, 120)}"` : ''}`],
+        decisions: [`Merge authorised by merge grant ${row.grant_id}`]
+      })
+      if (!entry) throw new Error('Could not write the merge grant journal entry')
+      return { ...use, id: reservationId, grant_id: row.grant_id, project_id: row.project_id, merged_at: now }
+    }).immediate()
+  }
+
+  listMergeGrantUses(grantId: string): MergeGrantUse[] {
+    if (!this.ensureDbOpen()) return []
+    const rows = this.prepare('SELECT * FROM merge_grant_uses WHERE grant_id = ? ORDER BY merged_at DESC, id DESC').all(grantId) as Array<Omit<MergeGrantUse, 'checks'> & { checks: string }>
+    return rows.map((row) => {
+      let checks: MergeCheckRecord[] = []
+      try {
+        const parsed = JSON.parse(row.checks) as unknown
+        if (Array.isArray(parsed)) checks = parsed as MergeCheckRecord[]
+      } catch {
+        checks = []
+      }
+      return { ...row, checks }
+    })
   }
 
   getProjectStatusJournalEntry(id: string): ProjectStatusJournalEntry | undefined {

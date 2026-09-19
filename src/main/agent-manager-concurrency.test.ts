@@ -379,3 +379,46 @@ describe('Captain tools and audit (#150)', () => {
     expect(db.getTaskTouches(task.id)).toEqual(['src/a.ts', 'src/b.ts'])
   })
 })
+
+
+describe('independent concurrency review', () => {
+  it('reserves slots during a simultaneous cross-project burst and clamps lowered caps', async () => {
+    const { manager, db, createTask, createProject, projectId, agentId, started, stopSpy } = setup(5)
+    const beta = createProject('Beta')
+    manager.setConcurrencyLevel({ projectId, agentId, level: 3, reason: 'independent work' })
+    manager.setConcurrencyLevel({ projectId: beta, agentId, level: 3, reason: 'independent work' })
+    const tasks = Array.from({ length: 40 }, (_, i) => createTask({
+      title: `Burst ${i}`, project_id: i % 2 ? beta : projectId
+    }))
+    await Promise.all(tasks.map((t) => manager.startTask(t.id)))
+    expect(started).toHaveLength(5)
+    for (const id of [projectId, beta]) {
+      expect(manager.getConcurrencyState(id).agents[0].runningInProject).toBeLessThanOrEqual(3)
+    }
+    db.updateAgent(agentId, { config: { concurrency_cap: 2 } as any })
+    manager.recheckStartQueue()
+    await settle()
+    expect(started).toHaveLength(5)
+    expect(stopSpy).not.toHaveBeenCalled()
+    expect(manager.getConcurrencyState(projectId).agents[0]).toMatchObject({ cap: 2, level: 2 })
+    for (const id of started.slice(0, 3)) goIdle(manager, id)
+    await settle()
+    expect(started).toHaveLength(5) // two still hold the lowered cap
+    goIdle(manager, started[3])
+    await settle()
+    expect(started).toHaveLength(6)
+  })
+
+  it('stops resource sampling and automatic writes at shutdown', async () => {
+    vi.useFakeTimers()
+    try {
+      const { manager } = setup()
+      const tick = vi.spyOn((manager as any).resourceMonitor, 'tick')
+      await manager.stopAllSessions()
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(tick).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

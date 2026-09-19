@@ -1,6 +1,7 @@
 import type { TranscriptPartRecord } from '@shared/transcript/types'
 import type { BrowserRecordingManifest } from '@shared/browser-recording'
 import type { UiCommand } from '@shared/ui-commands'
+import type { CaptainRuntimeState } from '@shared/captain-runtime'
 import type {
   Task,
   CreateTaskDTO,
@@ -66,6 +67,7 @@ import type {
   ProjectChangedEvent
 } from '@shared/projects'
 import type { HeldAction, ProjectLimitState } from '@shared/project-limit-types'
+import type { MergeGrant, MergeGrantAuditEntry } from '@shared/merge-grants'
 import type { ProjectConcurrencyState } from '@shared/concurrency'
 import type { ProjectStatus, ProjectStatusHistoryPage } from '@shared/project-status'
 import type { ProjectOverviewEntry } from '@shared/project-overview'
@@ -283,12 +285,18 @@ interface ElectronAPI {
     stop: (sessionId: string) => Promise<AgentSessionSuccessResult>
     stopByTaskId: (taskId: string) => Promise<AgentSessionSuccessResult & { sessionId: string | null }>
     switchAgent: (taskId: string, newAgentId: string) => Promise<AgentSessionStartResult>
-    send: (sessionId: string, message: string, taskId?: string, agentId?: string, attachments?: AgentMessageAttachment[]) => Promise<AgentSessionSuccessResult & { newSessionId?: string }>
-    sendByTaskId: (taskId: string, message: string, attachments?: AgentMessageAttachment[]) => Promise<AgentSessionSuccessResult & { sessionId: string | null; newSessionId?: string }>
+    send: (sessionId: string, message: string, taskId?: string, agentId?: string, attachments?: AgentMessageAttachment[], deliveryId?: string) => Promise<AgentSessionSuccessResult & { newSessionId?: string }>
+    sendByTaskId: (taskId: string, message: string, attachments?: AgentMessageAttachment[], deliveryId?: string) => Promise<AgentSessionSuccessResult & { sessionId: string | null; newSessionId?: string }>
     approve: (sessionId: string, approved: boolean, message?: string, responseType?: 'permission' | 'question', requestId?: string) => Promise<AgentSessionSuccessResult>
     getRawTranscript: (taskId: string) => Promise<Array<{ role: string; parts: Array<{ type: string; content?: string; tool?: { name: string; status?: string; input?: string; output?: string; error?: string } }> }>>
     getTranscriptSnapshot: (taskId: string, sinceSeq?: number) => Promise<TranscriptPartRecord[]>
     getTranscriptDelta: (taskId: string, sinceRev: number) => Promise<{ parts: TranscriptPartRecord[]; maxRev: number }>
+  }
+  captainRuntime: {
+    get: (projectId: string) => Promise<CaptainRuntimeState | null>
+    switch: (projectId: string, agentId: string) => Promise<CaptainRuntimeState>
+    retry: (projectId: string) => Promise<CaptainRuntimeState>
+    rollback: (projectId: string) => Promise<CaptainRuntimeState>
   }
   agentConfig: {
     getProviders: (serverUrl?: string, backendType?: string) => Promise<{ providers: { id: string; name: string; models: unknown }[]; default: Record<string, string> } | null>
@@ -415,6 +423,14 @@ interface ElectronAPI {
     approve: (id: string) => Promise<{ ok: boolean; result?: unknown; error?: string }>
     reject: (id: string, note?: string) => Promise<boolean>
     onHeldChanged: (callback: (event: { held: HeldAction[] }) => void) => () => void
+  }
+  /** Merge grants the user gave Captains (#137). */
+  mergeGrants: {
+    noteTyped: (taskId: string, text: string) => Promise<void>
+    listActive: (projectId?: string) => Promise<MergeGrant[]>
+    audit: (projectId: string) => Promise<MergeGrantAuditEntry[]>
+    revoke: (id: string) => Promise<{ ok: boolean; error?: string }>
+    onChanged: (callback: (event: { projectId: string }) => void) => () => void
   }
   /** The all-projects overview (#63). */
   overview: {

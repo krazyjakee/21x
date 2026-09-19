@@ -3,6 +3,7 @@
  * and how calls are dispatched, is decided in task-management-core.ts.
  */
 import type { Tool } from '@modelcontextprotocol/server'
+import { mergeGrantTools } from './merge-grant-tools'
 
 // Tools available in both modes
 const artifactTools: Tool[] = [
@@ -435,7 +436,8 @@ export const captainTools: Tool[] = [
       type: 'object',
       properties: {
         message: { type: 'string', description: 'The report: outcome first, then what the user must decide, if anything. At most 4000 characters.' },
-        correlation_id: { type: 'string', description: 'The correlation_id from the Commander message this answers. Omit for an unprompted report.' }
+        correlation_id: { type: 'string', description: 'The correlation_id from the Commander message this answers. Omit for an unprompted report.' },
+        delivery_id: { type: 'string', description: 'Optional stable idempotency key retained across retries. Correlated terminal reports derive one automatically.' }
       },
       required: ['message']
     }
@@ -607,7 +609,9 @@ export const captainTools: Tool[] = [
       },
       required: ['task_id', 'artifact_id']
     }
-  }
+  },
+  // #137: the Captain's merge tools, answered by the escalation gate.
+  ...mergeGrantTools
 ]
 
 // Browser-panel tools. They drive canvas "Agent Browser" panels through the

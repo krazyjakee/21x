@@ -53,6 +53,7 @@ import {
 } from '@shared/captain-wakeups'
 import type { GitHubRepo } from '@/types/electron'
 import { ScheduledReviewSection } from './ScheduledReviewSection'
+import { MergeGrantsSection } from './MergeGrantsSection'
 import { ConcurrencySection } from './ConcurrencySection'
 import { withScheduledReviewSettings } from '@shared/scheduled-coordination'
 
@@ -590,9 +591,16 @@ export function ProjectEditorDialog() {
                     ))}
                   </div>
                   <p className="text-[11px] text-muted-foreground">
-                    Pull requests are guidance to the Captain only: none of its tools opens or merges one.
+                    Opening a pull request is done by the agent doing the work. Merging goes through the Captain’s merge tool, which always checks CI and branch protection first.
                   </p>
                 </section>
+
+                {/* ── Merge grants (#137) ── */}
+                <MergeGrantsSection
+                  projectId={project?.id ?? null}
+                  settings={draft.settings}
+                  onEnabledChange={(enabled) => setDraft((d) => ({ ...d, settings: { ...d.settings, merge_grants: { enabled } } }))}
+                />
 
                 {/* ── Captain wake-ups (#57) ── */}
                 <section className="space-y-3" aria-label="Captain wake-ups">

@@ -102,11 +102,11 @@ describe('DatabaseManager migrations on an existing install', () => {
   })
 
   /**
-   * Migration 20 (#150): every agent gets a hard cap of
+   * Migration 21 (#150): every agent gets a hard cap of
    * min(existing max_parallel_sessions, 5); an explicit cap is kept, the old
    * field is left as it was, and the concurrency tables appear.
    */
-  it('gives existing agents a hard cap of min(max_parallel_sessions, 5) on the upgrade to 20', () => {
+  it.each(['17', '19', '20'])('gives existing agents a hard cap on the upgrade from %s to 21', (version) => {
     const first = new DatabaseManager()
     first.initialize()
     first.close?.()
@@ -120,7 +120,7 @@ describe('DatabaseManager migrations on an existing install', () => {
     insert.run('a-explicit', 'Explicit', 'http://localhost:4096', JSON.stringify({ max_parallel_sessions: 9, concurrency_cap: 7 }), now, now)
     raw.exec('DROP TABLE concurrency_audit')
     raw.exec('DROP TABLE task_touches')
-    raw.prepare("UPDATE settings SET value = ? WHERE key = '__schema_version'").run('17')
+    raw.prepare("UPDATE settings SET value = ? WHERE key = '__schema_version'").run(version)
     raw.close()
 
     const second = new DatabaseManager()
@@ -135,7 +135,7 @@ describe('DatabaseManager migrations on an existing install', () => {
     expect(config('a-explicit').concurrency_cap).toBe(7)
     const tables = (after.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((t) => t.name)
     expect(tables).toEqual(expect.arrayContaining(['concurrency_audit', 'task_touches']))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('20')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('21')
     after.close()
   })
 

@@ -28,6 +28,7 @@ import {
   subtaskTools
 } from './task-management-tools'
 import { SKILL_SCOPE_PARAM, SKILL_TOOL_NAMES } from '../task-api/skill-routes'
+import { MERGE_GRANT_TOOL_NAMES } from './merge-grant-tools'
 
 /** Which task a session may act on. All fields null means full access. */
 export type TaskMcpScope = {
@@ -75,7 +76,12 @@ export function isCoordinatorScope(scope: TaskMcpScope): boolean {
 }
 
 /** Tools only the project's Captain may call. */
-const COORDINATOR_ONLY_TOOLS = new Set(['update_project_status', 'report_to_commander', 'set_concurrency'])
+const COORDINATOR_ONLY_TOOLS = new Set([
+  'update_project_status',
+  'report_to_commander',
+  'set_concurrency',
+  ...MERGE_GRANT_TOOL_NAMES
+])
 
 /**
  * The escalation policy hook (#66). The main process installs one from

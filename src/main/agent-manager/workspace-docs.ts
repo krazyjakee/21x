@@ -452,6 +452,7 @@ function withoutToken(url: string): string {
   try {
     const parsed = new URL(url)
     parsed.searchParams.delete('token')
+    parsed.searchParams.delete('scope_signature')
     return parsed.toString()
   } catch {
     return url

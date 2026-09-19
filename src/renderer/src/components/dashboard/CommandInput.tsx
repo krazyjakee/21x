@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { Paperclip, Plus, ArrowUp, ChevronDown, Settings } from 'lucide-react'
 import { agentApi, voiceApi } from '@/lib/ipc-client'
 import { VoiceMicButton } from '@/components/voice/VoiceMicButton'
-import { registerComposer, DASHBOARD_COMPOSER_KEY } from '@/lib/voice-dictation-target'
+import { registerComposer, DASHBOARD_COMPOSER_KEY, hasDictatedText, clearDictatedText } from '@/lib/voice-dictation-target'
 import { useCurrentProject } from '@/hooks/use-project-tasks'
 import type { Agent } from '@/types'
 
@@ -10,7 +10,7 @@ import type { Agent } from '@/types'
 const VOICE_COMPOSER_KEY = DASHBOARD_COMPOSER_KEY
 
 interface CommandInputProps {
-  onSendToCaptain: (message: string) => void
+  onSendToCaptain: (message: string, typed?: boolean) => void
   onCreateTask: (text: string) => void
 }
 
@@ -49,6 +49,7 @@ export function CommandInput({ onSendToCaptain, onCreateTask }: CommandInputProp
   // Auto-resize textarea
   const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setText(e.target.value)
+    if (!e.target.value) clearDictatedText(e.target)
     const el = e.target
     el.style.height = 'auto'
     el.style.height = Math.min(el.scrollHeight, 120) + 'px'
@@ -61,22 +62,24 @@ export function CommandInput({ onSendToCaptain, onCreateTask }: CommandInputProp
    * field and sends in the same tick. React has not re-rendered by then, so a
    * send that read `text` would send the previous value — usually nothing.
    */
-  const submitField = useCallback(() => {
+  const submitField = useCallback((typed = false) => {
     const trimmed = textareaRef.current?.value.trim() ?? ''
     if (!trimmed) return
     // No answer is expected by voice any more. A spoken sentence arms a fresh
     // expectation straight after this, so the conversation loop is unaffected;
     // a typed one does not, and its reply stays silent.
     void voiceApi.answerNotExpected()
-    onSendToCaptain(trimmed)
+    if (typed && textareaRef.current && !hasDictatedText(textareaRef.current)) onSendToCaptain(trimmed, true)
+    else onSendToCaptain(trimmed)
     setText('')
     if (textareaRef.current) {
       textareaRef.current.value = ''
+      clearDictatedText(textareaRef.current)
       textareaRef.current.style.height = 'auto'
     }
   }, [onSendToCaptain])
 
-  const handleSend = submitField
+  const handleSend = useCallback(() => submitField(true), [submitField])
 
   // Announce this box for as long as it is on screen, so a conversation keeps
   // working even after the dashboard re-renders.
@@ -91,6 +94,8 @@ export function CommandInput({ onSendToCaptain, onCreateTask }: CommandInputProp
     onCreateTask(text.trim())
     setText('')
     if (textareaRef.current) {
+      textareaRef.current.value = ''
+      clearDictatedText(textareaRef.current)
       textareaRef.current.style.height = 'auto'
     }
   }, [text, onCreateTask])

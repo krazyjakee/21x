@@ -2,6 +2,22 @@
 
 All schema migrations live in `src/main/database/schema.ts` as plain functions over the raw SQLite handle; `DatabaseManager.initialize()` applies them through `applySchema()`. Tests build their schema from the same functions (`test/helpers/db-test-helper.ts`).
 
+## Version 20 — managed runtime and durable delivery
+
+Version 20 adds `managed_agent_runtimes` and `delivery_outbox`. Runtime rows
+persist Captain startup/switch generations, verified health, deadlines,
+last-known-good rollback information and visible failure causes. Delivery rows
+persist stable idempotency keys, claim leases, acknowledgements, deadlines and
+terminal errors for typed agent messages, `ask_captain` requests and Captain
+reports. Both tables are created idempotently, so fresh and upgraded databases
+have the same schema; no legacy rows are rewritten or discarded.
+
+SQLite transactions provide exactly-once application effects (one transcript
+message/report for one idempotency key). Agent-provider transports do not offer
+transactional acknowledgement, so the handoff itself is at-least-once after a
+crash; the outbox and transcript/report inbox suppress duplicate application
+effects during reconciliation.
+
 ## How it works
 
 1. `createTables()` defines the canonical schema for **new** databases (`CREATE TABLE IF NOT EXISTS`).
@@ -84,9 +100,20 @@ file keeps the retirement of the legacy seeded "Mastermind" skill. It is the
 only place in `src/` (with its test and one commented compatibility alias) that
 may spell the old name; `src/shared/captain-terminology.test.ts` enforces that.
 
-### Concurrency control (#150)
+### Merge grants and the pull-request policy split (v19)
 
-Migration 20 (`migrateConcurrencyControl()` in
+Migration 19 (`migrateMergeGrants()`, #137) adds `merge_grants`,
+`merge_grant_uses` and durable `merge_grant_reservations` (new tables, also in `createTables()`) and splits the
+escalation policy's combined `pr` item in `projects.settings.escalation`:
+the stored level moves to `merge_pr`, `open_pr` gets its default
+(`tell_commander`), and `pr` is removed (`splitPullRequestEscalation()`).
+Rows without `pr`, or with unreadable settings, are untouched, so re-runs are
+no-ops. **18 was skipped on purpose** for a contemporaneous feature branch;
+the managed-runtime and durable-delivery migration follows as version 20.
+
+### Concurrency control (#150, v21)
+
+Migration 21 (`migrateConcurrencyControl()` in
 `src/main/database/concurrency-migration.ts`) supports Captain-managed
 concurrency under a user-set hard cap (see docs/concurrency.md):
 
@@ -101,10 +128,8 @@ concurrency under a user-set hard cap (see docs/concurrency.md):
   `max_parallel_sessions` is left as it was.
 
 Both tables are also created in `createTables()`. Nothing is added to `tasks`,
-so `rebuildTasksTable()` is unchanged. Versions 18 and 19 are skipped on
-purpose, because open branches claim them (`feat/commander-on-agent-sessions`
-and `captain-merge-grants`). Whichever of those lands after this one must
-renumber above 20, or its migrations never run on a database already at 20.
+so `rebuildTasksTable()` is unchanged. This migration follows the managed
+runtime and delivery-outbox migration at v20.
 
 ## Adding a column to other tables
 

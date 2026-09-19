@@ -33,7 +33,7 @@
 
 /**
  * The cap an agent gets when none was set: the user's chosen 5 for 21x, or
- * the agent's older `max_parallel_sessions` when that is lower. Migration 20
+ * the agent's older `max_parallel_sessions` when that is lower. Migration 21
  * writes exactly this onto every existing agent.
  */
 export const DEFAULT_HARD_CAP_CEILING = 5

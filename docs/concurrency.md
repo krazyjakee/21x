@@ -23,7 +23,7 @@ Coordinator, heartbeat and triage sessions are never counted and never queued.
 ## Defaults
 
 - **Hard cap:** min(the agent's old `max_parallel_sessions`, 5). This applies
-  to new agents and, through migration 20, to existing ones. The user chose a
+  to new agents and, through migration 21, to existing ones. The user chose a
   cap of 5 for 21x; an agent reaches 5 once its cap is set to 5, or once
   `max_parallel_sessions` was already 5 or more before migrating. The
   migration only fills a missing cap. It never raises a limit that is lower,

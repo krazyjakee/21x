@@ -1,5 +1,5 @@
 /**
- * Migration 20: Captain-managed concurrency under a user-set hard cap (#150).
+ * Migration 21: Captain-managed concurrency under a user-set hard cap (#150).
  *
  *  - `concurrency_audit`: one row per change of a working level, a pin or
  *    Captain control, with who made it and why. It is the project's

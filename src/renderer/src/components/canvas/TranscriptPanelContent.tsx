@@ -4,6 +4,7 @@ import { useAgentSession } from '@/hooks/use-agent-session'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useTaskStore } from '@/stores/task-store'
 import { Bot } from 'lucide-react'
+import { mergeGrantsApi } from '@/lib/ipc-client'
 
 interface TranscriptPanelContentProps {
   taskId: string
@@ -123,6 +124,7 @@ export function TranscriptPanelContent({ taskId }: TranscriptPanelContentProps) 
       taskId={taskId}
       agentId={task?.agent_id ?? undefined}
       pendingSend={session?.pendingSend}
+      onTypedMessage={(text) => mergeGrantsApi.noteTyped(taskId, text)}
     />
   )
 }

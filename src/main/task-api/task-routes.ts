@@ -432,7 +432,10 @@ function reportToCommander(db: DatabaseManager, params: Record<string, unknown>)
   if (!message) return { error: 'message is required' }
   if (message.length > MAX_REPORT_CHARS) return { error: `message must be at most ${MAX_REPORT_CHARS} characters` }
   const correlationId = typeof params.correlation_id === 'string' && params.correlation_id.trim() ? params.correlation_id.trim().slice(0, 100) : null
-  const delivery = deliverCaptainReport({ projectId, message, correlationId, source: 'captain' })
+  const deliveryId = typeof params.delivery_id === 'string' && params.delivery_id.trim()
+    ? params.delivery_id.trim().slice(0, 200)
+    : null
+  const delivery = deliverCaptainReport({ projectId, message, correlationId, deliveryId, source: 'captain' })
   if (!delivery.delivered) return { error: delivery.detail }
   return {
     success: true,
