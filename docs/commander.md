@@ -64,8 +64,13 @@ does the following:
      rename made meanwhile is never overwritten.
    - Folds turns that no longer fit the budget into a new rolling `summary`.
      The previous summary is merged in. The summary's `correlation_id` is the
-     id of the last message it covers. If the summary call fails, nothing is
-     stored and the next turn just trims.
+     id of the last message it covers. If the summary call fails (or comes
+     back empty), nothing is stored, the failure is logged and recorded
+     (`CommanderService.foldFailure`), and the fold is retried after the next
+     turn. Turns never drop silently: unsummarised turns past the budget stay
+     verbatim up to twice `maxChars`, and any left out beyond that are replaced
+     by a "N earlier turns omitted (summary pending)" marker at the start of
+     the history.
 
 Only one turn runs per session. Cancel aborts it, and whatever text arrived is
 kept.

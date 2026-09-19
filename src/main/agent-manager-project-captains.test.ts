@@ -10,7 +10,9 @@ import { seedCaptainTasks } from './database/seed'
 import { CAPTAIN_MEMORY_FILE } from './agent-manager/captain-context'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import type { DatabaseManager } from './database'
-import type { SessionConfig } from './adapters/coding-agent-adapter'
+import { SessionStatusType, type MessagePart, type SessionConfig } from './adapters/coding-agent-adapter'
+import { LOST_SESSION_NOTICE } from './agent-handoff'
+import { makeTask } from '../../test/helpers/task-fixtures'
 
 // Mock heavy dependencies to avoid loading electron/native modules. The
 // filesystem is real: sessions get workspaces under a temp dir, so the
@@ -199,5 +201,132 @@ describe('per-project Captain conversations', () => {
 
     expect(await second.startSession(agentId, betaCaptain, undefined, true)).toBe('beta-session')
     expect(db.getTask(betaCaptain)?.session_id).toBe('beta-session')
+    // Only the lost conversation gets the notice.
+    expect(lostNotices(betaCaptain)).toHaveLength(0)
+  })
+
+  // ── B2 (#98): a lost session is never replaced blank or silently ──
+
+  /** A user ask and an agent answer, as the durable transcript holds them. */
+  function seedTranscript(taskId: string, ask: string, answer: string): void {
+    db.upsertTranscriptParts(taskId, [
+      { id: `${taskId}-ask`, role: 'user', content: ask, partType: 'text', receivedAt: 1 },
+      { id: `${taskId}-answer`, role: 'assistant', content: answer, partType: 'text', receivedAt: 2 }
+    ])
+  }
+
+  function lostNotices(taskId: string): string[] {
+    return db.getTranscriptParts(taskId)
+      .filter((part) => part.role === 'system' && part.content.startsWith(LOST_SESSION_NOTICE))
+      .map((part) => part.content)
+  }
+
+  function promptTexts(fake: FakeAdapter): string[] {
+    return fake.sendPrompt.mock.calls.map((call) => (call[1] as MessagePart[]).map((part) => ('text' in part ? part.text : '')).join(''))
+  }
+
+  /** A Captain conversation that existed before a restart, with some history. */
+  async function captainBeforeRestart(): Promise<void> {
+    const first = newManager(new FakeAdapter({ sessionIds: ['alpha-session'] }))
+    await first.startSession(agentId, alphaCaptain, undefined, true)
+    await first.stopAllSessions()
+    seedTranscript(alphaCaptain, 'Plan the Friday release.', 'Release plan drafted: three tasks created.')
+  }
+
+  it.each([
+    ['the backend no longer has it', new Error('No conversation found'), 'No conversation found'],
+    ['resuming it fails outright', new Error('backend crashed'), 'backend crashed']
+  ])('replaces a lost Captain session with a notice and a recap when %s', async (_label, failure, reason) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await captainBeforeRestart()
+
+    const after = new FakeAdapter({ sessionIds: ['alpha-session-2'] })
+    after.resumeSession.mockImplementation(async () => {
+      throw failure
+    })
+    const second = newManager(after)
+    expect(await second.startSession(agentId, alphaCaptain, undefined, true)).toBe('alpha-session-2')
+
+    // Visible in the transcript, with the reason, and logged.
+    const notices = lostNotices(alphaCaptain)
+    expect(notices).toHaveLength(1)
+    expect(notices[0]).toContain(reason)
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Session alpha-session of task'))
+
+    // The first message the new session gets carries the recap; the transcript keeps the user's words only.
+    await second.sendMessage('alpha-session-2', 'What is left?', alphaCaptain)
+    await vi.waitFor(() => expect(after.sendPrompt).toHaveBeenCalledTimes(1))
+    const [firstPrompt] = promptTexts(after)
+    expect(firstPrompt).toContain('## Continuing after a lost session')
+    expect(firstPrompt).toContain('User: Plan the Friday release.')
+    expect(firstPrompt).toContain('Previous agent: Release plan drafted: three tasks created.')
+    expect(firstPrompt.endsWith('What is left?')).toBe(true)
+    expect(db.getTranscriptParts(alphaCaptain).filter((part) => part.role === 'user').map((part) => part.content))
+      .toEqual(['Plan the Friday release.', 'What is left?'])
+
+    // Once only.
+    await second.sendMessage('alpha-session-2', 'Thanks.', alphaCaptain)
+    await vi.waitFor(() => expect(after.sendPrompt).toHaveBeenCalledTimes(2))
+    expect(promptTexts(after)[1]).toBe('Thanks.')
+    warn.mockRestore()
+  })
+
+  describe('task sessions', () => {
+    let taskId: string
+
+    beforeEach(() => {
+      taskId = db.createTask(makeTask({ title: 'Fix the login bug' }))!.id
+      db.updateTask(taskId, { agent_id: agentId })
+    })
+
+    it('seeds the replacement for a session found incompatible while polling', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const fake = new FakeAdapter({ sessionIds: ['task-session-1', 'task-session-2'] })
+      const manager = newManager(fake)
+      expect(await manager.startSession(agentId, taskId)).toBe('task-session-1')
+      seedTranscript(taskId, 'The login button does nothing.', 'Found it: the handler is never bound.')
+
+      fake.setStatus(SessionStatusType.ERROR, 'INCOMPATIBLE_SESSION_ID: session expired')
+      fake.signalData('task-session-1')
+      await vi.waitFor(() => expect(db.getTask(taskId)?.session_id).toBeNull())
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Session task-session-1 of task'))
+
+      // The user chooses to start a new session.
+      fake.setStatus(SessionStatusType.BUSY)
+      expect(await manager.startSession(agentId, taskId)).toBe('task-session-2')
+      expect(lostNotices(taskId)).toEqual([expect.stringContaining('session expired')])
+      const prompts = promptTexts(fake)
+      expect(prompts).toHaveLength(2)
+      expect(prompts[0]).not.toContain('Continuing after a lost session')
+      expect(prompts[1]).toContain('## Continuing after a lost session')
+      expect(prompts[1]).toContain('Previous agent: Found it: the handler is never bound.')
+      // The recap leaves out the generated first prompt of the lost session.
+      expect(prompts[1].split('## Continuing after a lost session')[1].split('---')[0]).not.toContain('IMPORTANT: First, read')
+      warn.mockRestore()
+    })
+
+    it('seeds the replacement when a message finds the persisted session gone', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      db.updateTask(taskId, { session_id: 'task-session-old', status: 'agent_working' as any })
+      seedTranscript(taskId, 'The login button does nothing.', 'Found it: the handler is never bound.')
+
+      const fake = new FakeAdapter({ sessionIds: ['task-session-new'] })
+      fake.resumeSession.mockImplementation(async () => {
+        throw new Error('SESSION_FILE_NOT_FOUND')
+      })
+      const manager = newManager(fake)
+
+      const { newSessionId } = await manager.sendMessage('task-session-old', 'Please bind it.', taskId)
+      expect(newSessionId).toBe('task-session-new')
+      expect(lostNotices(taskId)).toEqual([expect.stringContaining('SESSION_FILE_NOT_FOUND')])
+      await vi.waitFor(() => expect(fake.sendPrompt).toHaveBeenCalledTimes(1))
+      const [prompt] = promptTexts(fake)
+      expect(prompt).toContain('## Continuing after a lost session')
+      expect(prompt).toContain('User: The login button does nothing.')
+      expect(prompt.endsWith('Please bind it.')).toBe(true)
+      vi.mocked(console.error).mockRestore()
+      warn.mockRestore()
+    })
   })
 })

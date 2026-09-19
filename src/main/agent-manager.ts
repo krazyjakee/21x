@@ -2,7 +2,7 @@ import { DEFAULT_SERVER_URL } from './adapters/opencode-server'
 import { guardedIpcSend } from './guarded-ipc-send'
 import { transcriptDisplayPart } from './transcript-display'
 import { finishSessionFeedback, updateTaskFromUser } from './session-feedback'
-import { buildAgentSwitchRecap, INITIAL_PROMPT_PART_PREFIX } from './agent-handoff'
+import { buildAgentSwitchRecap, buildLostSessionRecap, INITIAL_PROMPT_PART_PREFIX, LOST_SESSION_NOTICE } from './agent-handoff'
 import { EventEmitter } from 'events'
 import { join } from 'path'
 import { existsSync, readFileSync } from 'fs'
@@ -90,6 +90,8 @@ interface AgentSession {
   /** Prevents fallback cycles such as Claude -> Codex -> Claude. */
   attemptedAgentIds: Set<string>
   fallbackInProgress?: boolean
+  /** Recap of a lost predecessor session, prepended (adapter-side only) to the next prompt sent. */
+  pendingRecap?: string
 }
 
 interface AgentFallbackState {
@@ -223,6 +225,9 @@ export class AgentManager extends EventEmitter {
   /** taskId → agentId of admitted starts whose session is not registered yet.
    *  They hold their slot so concurrent requests cannot all slip past. */
   private admittedStarts: Map<string, string> = new Map()
+  /** taskId → why its backend session was lost. The next session started for
+   *  the task shows a notice and is seeded with a recap instead of starting blank. */
+  private lostSessions: Map<string, { previousSessionId: string; reason: string }> = new Map()
   private startQueueDrainScheduled = false
   /** `projectId:reason` pairs the project's Captain has been told about (#65),
    *  cleared when one of the project's queued starts runs. */
@@ -534,6 +539,41 @@ export class AgentManager extends EventEmitter {
     })
   }
 
+  /**
+   * Records that a task's backend session is gone, so the next session started
+   * for the task says so in the transcript and starts from a recap instead of
+   * blank (see startAdapterSession). Kept in memory only: after a restart the
+   * row has no session id and starts like any other.
+   */
+  private markSessionLost(taskId: string, previousSessionId: string, reason: string | undefined): void {
+    const why = (reason || 'unknown reason').replace(/\s+/g, ' ').trim().slice(0, 300)
+    console.warn(`[AgentManager] Session ${previousSessionId} of task ${taskId} was lost (${why}); the next session starts with a recap`)
+    this.lostSessions.set(taskId, { previousSessionId, reason: why })
+  }
+
+  /**
+   * The start of a session replacing a lost one: the transcript notice, a log
+   * line, and the recap to seed it with ('' when there is nothing to recap).
+   * The recap is read before anything new lands in the transcript.
+   */
+  private announceLostSessionReplacement(taskId: string, newSessionId: string): string {
+    const lost = this.lostSessions.get(taskId)
+    if (!lost) return ''
+    this.lostSessions.delete(taskId)
+    const recap = buildLostSessionRecap(this.db.getTranscriptParts(taskId))
+    console.warn(
+      `[AgentManager] Replacing lost session ${lost.previousSessionId} of task ${taskId} with ${newSessionId} ` +
+      `(${lost.reason}); ${recap ? `seeded with a ${recap.length}-char recap` : 'no transcript to recap'}`
+    )
+    this.emitSystemNotice(
+      newSessionId,
+      taskId,
+      `session-lost-${Date.now()}`,
+      `${LOST_SESSION_NOTICE}${recap ? ', seeded with a recap of the latest conversation.' : '.'}\n\nReason: ${lost.reason}`
+    )
+    return recap
+  }
+
   async stopServer(): Promise<void> {
     const adapter = this.adapters.get(CodingAgentType.OPENCODE)
     if (adapter && 'stopServer' in adapter && typeof (adapter as { stopServer: () => Promise<void> }).stopServer === 'function') {
@@ -646,6 +686,16 @@ export class AgentManager extends EventEmitter {
     this.updateTaskFromLocalAgent(taskId, { session_id: adapterSessionId })
     console.log(`[SessionTracker] CREATED session=${adapterSessionId} task=${taskId} agent=${agentId} reason=new_session`)
 
+    // A replacement for a lost session is never started blank or silently.
+    // A handoff already carries the full recap, so it only gets the notice.
+    const lostSessionRecap = this.announceLostSessionReplacement(taskId, adapterSessionId)
+    const seedRecap = handoffFromAgentName ? '' : lostSessionRecap
+    if (seedRecap && skipInitialPrompt) {
+      // No generated first prompt: the recap rides on the first message sent.
+      const created = this.sessions.get(adapterSessionId)
+      if (created) created.pendingRecap = seedRecap
+    }
+
     // Triage sessions keep the Triaging status; coordinator rows have none.
     if (!isTriageSession && !isCoordinatorTask(task)) {
       this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.AgentWorking })
@@ -683,6 +733,8 @@ export class AgentManager extends EventEmitter {
         if (recap) {
           promptText = `## Picking up from ${handoffFromAgentName}\n\nThis task was previously being worked on by a different agent. Here is the conversation so far:\n\n${recap}\n\n---\n\n${promptText}`
         }
+      } else if (seedRecap) {
+        promptText = `${seedRecap}\n\n${promptText}`
       }
 
       // Show the full prompt so the user can see the complete context sent to
@@ -1211,6 +1263,7 @@ export class AgentManager extends EventEmitter {
   ): Promise<void> {
     if (status.message?.includes('INCOMPATIBLE_SESSION_ID')) {
       console.warn('[AgentManager] Incompatible session detected during polling:', sessionId)
+      this.markSessionLost(config.taskId, sessionId, status.message)
       this.updateTaskFromLocalAgent(config.taskId, { session_id: null })
       this.sendToRenderer('agent:incompatible-session', {
         taskId: config.taskId,
@@ -1606,6 +1659,7 @@ export class AgentManager extends EventEmitter {
         // Don't show the alarming "incompatible" dialog — just clear the session_id
         // so the UI shows "Start" instead. This commonly happens with subtask sessions.
         const currentTask = this.db.getTask(taskId)
+        this.markSessionLost(taskId, adapterSessionId, errorMessage)
         // A coordinator conversation the backend no longer has is simply over;
         // the caller opens a new one. There is no task to ask the user about.
         if (isCoordinatorTask(currentTask)) {
@@ -1828,6 +1882,9 @@ export class AgentManager extends EventEmitter {
       // Backend restarted, files gone, or a different backend than the one
       // that made it. The next session starts fresh; nothing to ask the user.
       console.warn(`[AgentManager] Could not resume coordinator session ${sessionId} for ${taskId}; starting a new one:`, error)
+      if (!this.lostSessions.has(taskId)) {
+        this.markSessionLost(taskId, sessionId, error instanceof Error ? error.message : String(error))
+      }
       this.updateTaskFromLocalAgent(taskId, { session_id: null })
       return ''
     }
@@ -3070,8 +3127,14 @@ export class AgentManager extends EventEmitter {
       session.workspaceDir || process.cwd()
     )
 
-    const promptText = buildMessageWithAttachmentContext(session.workspaceDir, message, attachments)
+    let promptText = buildMessageWithAttachmentContext(session.workspaceDir, message, attachments)
+    // A session replacing a lost one starts from a recap, not blank. Only the
+    // backend sees it: the transcript keeps the user's own words.
+    const recap = session.pendingRecap
+    if (recap) promptText = `${recap}\n\n${promptText}`
     await session.adapter.sendPrompt(sessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
+    // Kept until a send gets through, so a failed first send retries with it.
+    if (recap && session.pendingRecap === recap) session.pendingRecap = undefined
 
     if (!session.pollingStarted) {
       console.log(`[AgentManager] Starting polling for session ${sessionId} (preserving dedup state)`)
