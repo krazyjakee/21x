@@ -1,19 +1,17 @@
 /**
- * OAuth Manager
- *
  * Generic OAuth 2.0 orchestrator that delegates provider-specific logic to OAuthProvider implementations.
- * Handles PKCE flow, token storage, refresh scheduling, and localhost server for providers that need it.
+ * Handles PKCE flow, token storage, on-demand refresh, and a localhost server for providers that need it.
  */
 
 import { createId } from '@paralleldrive/cuid2'
-import { randomBytes, createHash } from 'crypto'
 import { Notification, shell } from 'electron'
 import type { DatabaseManager } from '../database'
 import { LocalOAuthServer } from './local-oauth-server'
-import type { OAuthProvider } from './oauth-provider'
+import type { OAuthProvider, TokenResponse } from './oauth-provider'
 import { LinearProvider, HubSpotProvider, McpOAuthProvider } from './providers'
 import type { McpOAuthRegistration } from '../database'
 import { McpDiscovery } from './mcp-discovery'
+import { generatePkce } from './pkce'
 
 interface PendingFlow {
   verifier: string
@@ -31,23 +29,16 @@ export class OAuthManager {
     this.providers = new Map()
     this.pendingFlows = new Map()
 
-    // Register available providers
     this.registerProvider(new LinearProvider())
     this.registerProvider(new HubSpotProvider())
     this.registerProvider(new McpOAuthProvider())
   }
 
-  /**
-   * Register an OAuth provider
-   */
   private registerProvider(provider: OAuthProvider): void {
     this.providers.set(provider.id, provider)
     console.log(`[OAuthManager] Registered provider: ${provider.id}`)
   }
 
-  /**
-   * Get a registered provider by ID
-   */
   private getProvider(providerId: string): OAuthProvider {
     const provider = this.providers.get(providerId)
     if (!provider) {
@@ -57,20 +48,6 @@ export class OAuthManager {
   }
 
   /**
-   * Generate PKCE code verifier and challenge
-   */
-  private generatePKCE(): { verifier: string; challenge: string } {
-    // Generate 43-128 character random string
-    const verifier = randomBytes(32).toString('base64url')
-
-    // Create SHA256 hash and base64url encode
-    const challenge = createHash('sha256').update(verifier).digest('base64url')
-
-    return { verifier, challenge }
-  }
-
-  /**
-   * Generate OAuth authorization URL with PKCE
    * For custom URL scheme providers (Linear), returns the URL directly.
    * For localhost providers (HubSpot), this is handled by startLocalhostOAuthFlow instead.
    */
@@ -83,18 +60,13 @@ export class OAuthManager {
       )
     }
 
-    const { verifier, challenge } = this.generatePKCE()
+    const { verifier, challenge } = generatePkce()
     const state = createId()
-
-    // Store verifier for later exchange
     this.pendingFlows.set(state, { verifier, config })
 
     return provider.generateAuthUrl(config, state, challenge)
   }
 
-  /**
-   * Exchange authorization code for access token
-   */
   async exchangeCode(
     providerId: string,
     code: string,
@@ -102,8 +74,6 @@ export class OAuthManager {
     sourceId: string
   ): Promise<void> {
     const provider = this.getProvider(providerId)
-
-    // Retrieve pending flow
     const pending = this.pendingFlows.get(state)
     if (!pending) {
       throw new Error('Invalid OAuth state parameter')
@@ -111,48 +81,28 @@ export class OAuthManager {
 
     try {
       const data = await provider.exchangeCode(code, pending.verifier, pending.config)
-
-      // Delete existing token for this source if any
-      this.db.deleteOAuthTokenBySource(sourceId)
-
-      // Store encrypted token
-      this.db.createOAuthToken({
-        provider: providerId,
-        source_id: sourceId,
-        access_token: data.access_token,
-        refresh_token: data.refresh_token || null,
-        expires_in: data.expires_in,
-        scope: data.scope || null
-      })
+      this.replaceSourceToken(providerId, sourceId, data)
     } finally {
-      // Clean up pending flow
       this.pendingFlows.delete(state)
     }
   }
 
-  /**
-   * Get a valid access token, refreshing if necessary
-   */
+  /** Access token for a task source, refreshed first when it expires within five minutes. */
   async getValidToken(sourceId: string): Promise<string | null> {
     const tokenRecord = this.db.getOAuthTokenBySource(sourceId)
     if (!tokenRecord) {
       return null
     }
 
-    // Check if token expires in < 5 minutes
     const expiresAt = new Date(tokenRecord.expires_at).getTime()
     const nowPlus5Min = Date.now() + 5 * 60 * 1000
 
     if (expiresAt < nowPlus5Min) {
-      // Token expired or expiring soon, refresh it
       try {
         await this.refreshToken(tokenRecord.id, tokenRecord.provider, tokenRecord.refresh_token)
-
-        // Fetch the refreshed token
         const refreshedToken = this.db.getOAuthTokenBySource(sourceId)
         return refreshedToken?.access_token || null
       } catch (error) {
-        // If refresh fails (e.g., missing credentials), log and return null
         console.error(`[OAuthManager] Failed to refresh token for source ${sourceId}:`, error)
         return null
       }
@@ -161,9 +111,6 @@ export class OAuthManager {
     return tokenRecord.access_token
   }
 
-  /**
-   * Refresh an expired access token
-   */
   private async refreshToken(
     tokenId: string,
     providerId: string,
@@ -174,8 +121,6 @@ export class OAuthManager {
     }
 
     const provider = this.getProvider(providerId)
-
-    // Get the token record to access source
     const tokenRecord = this.db.getOAuthToken(tokenId)
     if (!tokenRecord) {
       throw new Error('Token not found')
@@ -187,7 +132,7 @@ export class OAuthManager {
       return
     }
 
-    // For task source tokens, get credentials from task source config
+    // Task source tokens take their client credentials from the source config.
     if (!tokenRecord.source_id) {
       throw new Error('Token has neither source_id nor mcp_server_id')
     }
@@ -210,36 +155,18 @@ export class OAuthManager {
       throw new Error('OAuth client credentials not found in task source config. Please re-authenticate.')
     }
 
-    // Delegate to provider
     const data = await provider.refreshToken(refreshToken, clientId, clientSecret)
-
-    // Update token in database
-    this.db.updateOAuthToken(
-      tokenId,
-      data.access_token,
-      data.refresh_token || refreshToken, // Use new refresh token if provided, otherwise keep old one
-      data.expires_in
-    )
+    // Providers that don't rotate refresh tokens omit it; keep the old one.
+    this.db.updateOAuthToken(tokenId, data.access_token, data.refresh_token || refreshToken, data.expires_in)
   }
 
-  /**
-   * Revoke OAuth token for a source
-   */
+  /** Most providers have no revocation endpoint, so revoking only forgets the local token. */
   async revokeToken(sourceId: string): Promise<void> {
     const tokenRecord = this.db.getOAuthTokenBySource(sourceId)
-    if (!tokenRecord) {
-      return
-    }
-
-    // Most providers don't have a revocation endpoint
-    // Just delete from our database
-    this.db.deleteOAuthToken(tokenRecord.id)
+    if (tokenRecord) this.db.deleteOAuthToken(tokenRecord.id)
   }
 
-  /**
-   * Start OAuth flow with localhost redirect (for providers like HubSpot)
-   * This is a complete flow that handles: server start → auth → callback → token exchange
-   */
+  /** Full flow for localhost-redirect providers (HubSpot): server start → auth → callback → token exchange. */
   async startLocalhostOAuthFlow(
     providerId: string,
     config: Record<string, unknown>,
@@ -256,56 +183,45 @@ export class OAuthManager {
     const server = new LocalOAuthServer()
 
     try {
-      // Start local server and get redirect URI
       const redirectUri = await server.start()
       console.log(`[OAuthManager] Local server started with redirect URI: ${redirectUri}`)
-
-      // Generate PKCE
-      const { verifier, challenge } = this.generatePKCE()
-      const state = createId()
-
-      // Build auth URL with localhost redirect
-      const authUrl = provider.generateAuthUrl(config, state, challenge, redirectUri)
-
-      // Open auth URL in browser
-      console.log(`[OAuthManager] Opening auth URL in browser`)
-      await shell.openExternal(authUrl)
-
-      // Wait for callback from server
-      console.log(`[OAuthManager] Waiting for OAuth callback...`)
-      const callback = await server.waitForCallback()
-
-      // Verify state matches
-      if (callback.state !== state) {
-        throw new Error('OAuth state mismatch - possible CSRF attack')
-      }
-
-      console.log(`[OAuthManager] Received callback, exchanging code for token`)
-
-      // Exchange code for token
-      const data = await provider.exchangeCode(callback.code, verifier, config, redirectUri)
-
-      // Delete existing token for this source if any
-      this.db.deleteOAuthTokenBySource(sourceId)
-
-      // Store encrypted token
-      this.db.createOAuthToken({
-        provider: providerId,
-        source_id: sourceId,
-        access_token: data.access_token,
-        refresh_token: data.refresh_token || null,
-        expires_in: data.expires_in,
-        scope: data.scope || null
-      })
-
+      const data = await this.runBrowserFlow(provider, config, server, redirectUri)
+      this.replaceSourceToken(providerId, sourceId, data)
       console.log(`[OAuthManager] OAuth flow completed successfully`)
     } finally {
-      // Always stop the server
       server.stop()
     }
   }
 
-  // ── MCP Server OAuth (spec-compliant discovery flow) ──────
+  /** Opens the provider's auth page, waits for the localhost callback, and exchanges the code (PKCE + state check). */
+  private async runBrowserFlow(
+    provider: OAuthProvider,
+    config: Record<string, unknown>,
+    server: LocalOAuthServer,
+    redirectUri: string
+  ): Promise<TokenResponse> {
+    const { verifier, challenge } = generatePkce()
+    const state = createId()
+    await shell.openExternal(provider.generateAuthUrl(config, state, challenge, redirectUri))
+    console.log(`[OAuthManager] Waiting for OAuth callback...`)
+    const callback = await server.waitForCallback()
+    if (callback.state !== state) {
+      throw new Error('OAuth state mismatch - possible CSRF attack')
+    }
+    return provider.exchangeCode(callback.code, verifier, config, redirectUri)
+  }
+
+  private replaceSourceToken(providerId: string, sourceId: string, data: TokenResponse): void {
+    this.db.deleteOAuthTokenBySource(sourceId)
+    this.db.createOAuthToken({
+      provider: providerId,
+      source_id: sourceId,
+      access_token: data.access_token,
+      refresh_token: data.refresh_token || null,
+      expires_in: data.expires_in,
+      scope: data.scope || null
+    })
+  }
 
   /**
    * Start OAuth flow for an MCP server.
@@ -336,33 +252,9 @@ export class OAuthManager {
         && registration.client_id
 
       if (!hasValidRegistration) {
-        // Run spec-compliant discovery flow
         console.log(`[OAuthManager] MCP OAuth: starting discovery for ${mcpServer.url}`)
-
         const discovery = await McpDiscovery.discover(mcpServer.url, redirectUri)
-
-        if (discovery.needsManualClientId) {
-          // Store partial discovery (without client_id) so user only needs to provide client_id
-          this.db.updateMcpServer(mcpServerId, {
-            oauth_metadata: {
-              resource_url: discovery.resourceUrl,
-              authorization_server_url: discovery.authorizationServerUrl,
-              authorization_endpoint: discovery.authorizationEndpoint,
-              token_endpoint: discovery.tokenEndpoint,
-              registration_endpoint: discovery.registrationEndpoint,
-              revocation_endpoint: discovery.revocationEndpoint,
-              scopes: discovery.scopes,
-              code_challenge_methods_supported: discovery.codeChallengeMethodsSupported,
-              client_id: '', // Placeholder — will be filled by completeManualRegistration
-              registration_method: 'manual',
-              discovered_at: new Date().toISOString()
-            } as McpOAuthRegistration
-          })
-          return { needsManualClientId: true }
-        }
-
-        // Full registration obtained (via DCR)
-        registration = {
+        const discovered = {
           resource_url: discovery.resourceUrl,
           authorization_server_url: discovery.authorizationServerUrl,
           authorization_endpoint: discovery.authorizationEndpoint,
@@ -371,43 +263,33 @@ export class OAuthManager {
           revocation_endpoint: discovery.revocationEndpoint,
           scopes: discovery.scopes,
           code_challenge_methods_supported: discovery.codeChallengeMethodsSupported,
+          discovered_at: new Date().toISOString()
+        }
+
+        if (discovery.needsManualClientId) {
+          // Keep the partial discovery so the user only has to supply a client_id
+          // (completeManualRegistration fills the empty placeholder).
+          this.db.updateMcpServer(mcpServerId, {
+            oauth_metadata: { ...discovered, client_id: '', registration_method: 'manual' } as McpOAuthRegistration
+          })
+          return { needsManualClientId: true }
+        }
+
+        registration = {
+          ...discovered,
           client_id: discovery.clientId!,
           client_secret: discovery.clientSecret,
-          registration_method: discovery.registrationMethod || 'dcr',
-          discovered_at: new Date().toISOString()
+          registration_method: discovery.registrationMethod || 'dcr'
         } as McpOAuthRegistration
-
-        // Persist registration to DB
         this.db.updateMcpServer(mcpServerId, { oauth_metadata: registration as McpOAuthRegistration })
       }
 
-      // Now run the actual OAuth 2.1 + PKCE flow (same server, same port)
-      const reg = registration as McpOAuthRegistration
+      // Same server and port as DCR: the registered redirect URI must match.
       const provider = this.getProvider('mcp-server')
-      const config: Record<string, unknown> = { ...reg }
+      const config: Record<string, unknown> = { ...(registration as McpOAuthRegistration) }
+      const data = await this.runBrowserFlow(provider, config, server, redirectUri)
 
-      const { verifier, challenge } = this.generatePKCE()
-      const state = createId()
-
-      const authUrl = provider.generateAuthUrl(config, state, challenge, redirectUri)
-
-      console.log(`[OAuthManager] MCP OAuth: opening auth URL in browser`)
-      await shell.openExternal(authUrl)
-
-      console.log(`[OAuthManager] MCP OAuth: waiting for callback...`)
-      const callback = await server.waitForCallback()
-
-      if (callback.state !== state) {
-        throw new Error('OAuth state mismatch - possible CSRF attack')
-      }
-
-      console.log(`[OAuthManager] MCP OAuth: exchanging code for token`)
-      const data = await provider.exchangeCode(callback.code, verifier, config, redirectUri)
-
-      // Delete existing token for this MCP server if any
       this.db.deleteOAuthTokenByMcpServer(mcpServerId)
-
-      // Store encrypted token linked to MCP server
       this.db.createOAuthToken({
         provider: 'mcp-server',
         mcp_server_id: mcpServerId,
@@ -437,21 +319,15 @@ export class OAuthManager {
       throw new Error('No partial registration found. Run startMcpServerOAuthFlow first.')
     }
 
-    // Update registration with user-provided client_id
     const reg: McpOAuthRegistration = {
       ...(partial as McpOAuthRegistration),
       client_id: clientId,
       registration_method: 'manual'
     }
     this.db.updateMcpServer(mcpServerId, { oauth_metadata: reg })
-
-    // Now run the OAuth flow
     return this.startMcpServerOAuthFlow(mcpServerId)
   }
 
-  /**
-   * Get a valid access token for an MCP server, refreshing if needed.
-   */
   async getValidMcpServerToken(mcpServerId: string): Promise<string | null> {
     const tokenRecord = this.db.getOAuthTokenByMcpServer(mcpServerId)
     if (!tokenRecord) return null
@@ -476,7 +352,6 @@ export class OAuthManager {
           console.warn(`[OAuthManager] Deleted stale OAuth token for "${serverName}" — re-authentication required`)
         }
 
-        // Notify user once per server per app run
         if (!this.notifiedOAuthFailures.has(mcpServerId)) {
           this.notifiedOAuthFailures.add(mcpServerId)
           try {
@@ -494,9 +369,6 @@ export class OAuthManager {
     return tokenRecord.access_token
   }
 
-  /**
-   * Refresh an MCP server's OAuth token using credentials from oauth_metadata registration.
-   */
   private async refreshMcpServerToken(tokenRecord: import('../database').OAuthTokenRecord): Promise<void> {
     if (!tokenRecord.refresh_token) throw new Error('No refresh token available')
     if (!tokenRecord.mcp_server_id) throw new Error('No MCP server ID on token')
@@ -526,16 +398,10 @@ export class OAuthManager {
     )
   }
 
-  /**
-   * Revoke OAuth token for an MCP server.
-   */
   async revokeMcpServerToken(mcpServerId: string): Promise<void> {
     this.db.deleteOAuthTokenByMcpServer(mcpServerId)
   }
 
-  /**
-   * Check if an MCP server has a valid OAuth token.
-   */
   getMcpServerOAuthStatus(mcpServerId: string): { connected: boolean; expiresAt?: string } {
     const token = this.db.getOAuthTokenByMcpServer(mcpServerId)
     if (!token) return { connected: false }

@@ -68,9 +68,7 @@ export interface DiscoveryResult {
   needsManualClientId: boolean
 }
 
-/**
- * Fetch JSON with timeout. Returns null on failure.
- */
+/** JSON from a GET with a timeout, or null on any failure. */
 async function fetchJson<T>(url: string): Promise<T | null> {
   try {
     const response = await fetch(url, {
@@ -84,42 +82,24 @@ async function fetchJson<T>(url: string): Promise<T | null> {
   }
 }
 
-/**
- * Parse a URL into origin and path components.
- */
 function parseUrlParts(url: string): { origin: string; path: string } {
   const parsed = new URL(url)
   const path = parsed.pathname === '/' ? '' : parsed.pathname
   return { origin: parsed.origin, path }
 }
 
-/**
- * Parse the WWW-Authenticate header for resource_metadata and scope values.
- */
+/** The quoted resource_metadata and scope values of a WWW-Authenticate header. */
 function parseWwwAuthenticate(header: string): { resourceMetadataUrl?: string; scope?: string } {
-  const result: { resourceMetadataUrl?: string; scope?: string } = {}
-
-  // Match resource_metadata="..." (quoted)
-  const rmMatch = header.match(/resource_metadata="([^"]+)"/)
-  if (rmMatch) {
-    result.resourceMetadataUrl = rmMatch[1]
+  return {
+    resourceMetadataUrl: header.match(/resource_metadata="([^"]+)"/)?.[1],
+    scope: header.match(/scope="([^"]+)"/)?.[1]
   }
-
-  // Match scope="..." (quoted)
-  const scopeMatch = header.match(/scope="([^"]+)"/)
-  if (scopeMatch) {
-    result.scope = scopeMatch[1]
-  }
-
-  return result
 }
 
 export class McpDiscovery {
   /**
-   * Step 1: Probe MCP server for auth requirements.
-   *
-   * Sends an unauthenticated request and checks for 401.
-   * Per spec, MCP servers MUST return 401 with WWW-Authenticate header.
+   * Step 1: an unauthenticated request. Per spec, a server that needs auth
+   * MUST answer 401 with a WWW-Authenticate header.
    */
   static async probeForAuth(serverUrl: string): Promise<ProbeResult> {
     try {
@@ -141,10 +121,9 @@ export class McpDiscovery {
         }
       }
 
-      // Server responded with non-401 — no auth required
       return { requiresAuth: false }
     } catch {
-      // Network error — can't determine, assume no auth
+      // Unreachable: can't tell, so assume no auth.
       return { requiresAuth: false }
     }
   }
@@ -161,7 +140,6 @@ export class McpDiscovery {
     serverUrl: string,
     resourceMetadataUrl?: string
   ): Promise<ProtectedResourceMetadata | null> {
-    // 1. Try explicit resource_metadata URL from WWW-Authenticate
     if (resourceMetadataUrl) {
       const meta = await fetchJson<ProtectedResourceMetadata>(resourceMetadataUrl)
       if (meta?.authorization_servers?.length) return meta
@@ -169,7 +147,6 @@ export class McpDiscovery {
 
     const { origin, path } = parseUrlParts(serverUrl)
 
-    // 2. Try path-specific well-known URI
     if (path) {
       const meta = await fetchJson<ProtectedResourceMetadata>(
         `${origin}/.well-known/oauth-protected-resource${path}`
@@ -177,7 +154,6 @@ export class McpDiscovery {
       if (meta?.authorization_servers?.length) return meta
     }
 
-    // 3. Fallback to root well-known URI
     const meta = await fetchJson<ProtectedResourceMetadata>(
       `${origin}/.well-known/oauth-protected-resource`
     )
@@ -186,12 +162,7 @@ export class McpDiscovery {
     return null
   }
 
-  /**
-   * Step 3: Discover Authorization Server Metadata (RFC 8414 + OIDC).
-   *
-   * For AS URLs with path: try 3 endpoints in priority order.
-   * For AS URLs without path: try 2 endpoints.
-   */
+  /** Step 3: Authorization Server Metadata (RFC 8414 + OIDC), well-known URLs in priority order. */
   static async discoverAuthorizationServer(
     authServerUrl: string
   ): Promise<AuthorizationServerMetadata | null> {
@@ -200,12 +171,10 @@ export class McpDiscovery {
     const urls: string[] = []
 
     if (path) {
-      // Path-aware discovery
       urls.push(`${origin}/.well-known/oauth-authorization-server${path}`)
       urls.push(`${origin}/.well-known/openid-configuration${path}`)
       urls.push(`${origin}${path}/.well-known/openid-configuration`)
     } else {
-      // Root discovery
       urls.push(`${origin}/.well-known/oauth-authorization-server`)
       urls.push(`${origin}/.well-known/openid-configuration`)
     }
@@ -221,10 +190,8 @@ export class McpDiscovery {
   }
 
   /**
-   * Step 4: Dynamic Client Registration (RFC 7591).
-   *
-   * Registers 20x as a public OAuth client with the authorization server.
-   * Uses token_endpoint_auth_method: "none" per OAuth 2.1 for public clients.
+   * Step 4: Dynamic Client Registration (RFC 7591) as a public client, so
+   * token_endpoint_auth_method is "none" per OAuth 2.1.
    */
   static async registerClient(
     registrationEndpoint: string,
@@ -256,20 +223,13 @@ export class McpDiscovery {
     }
   }
 
-  /**
-   * Full discovery pipeline.
-   *
-   * Runs: probe → Protected Resource Metadata → AS Metadata → DCR.
-   * Returns all data needed for McpOAuthRegistration.
-   */
+  /** probe → Protected Resource Metadata → AS Metadata → DCR; everything McpOAuthRegistration needs. */
   static async discover(serverUrl: string, redirectUri: string): Promise<DiscoveryResult> {
-    // Step 1: Probe for auth
     const probe = await McpDiscovery.probeForAuth(serverUrl)
     if (!probe.requiresAuth) {
       throw new Error('Server does not require authentication')
     }
 
-    // Step 2: Discover Protected Resource Metadata
     const prm = await McpDiscovery.discoverProtectedResource(serverUrl, probe.resourceMetadataUrl)
     if (!prm) {
       throw new Error(
@@ -278,7 +238,6 @@ export class McpDiscovery {
       )
     }
 
-    // Step 3: Discover Authorization Server Metadata
     let asMeta: AuthorizationServerMetadata | null = null
     for (const asUrl of prm.authorization_servers) {
       asMeta = await McpDiscovery.discoverAuthorizationServer(asUrl)
@@ -291,10 +250,8 @@ export class McpDiscovery {
       )
     }
 
-    // Determine scopes: prefer WWW-Authenticate scope, then PRM scopes_supported
     const scopes = probe.scope || prm.scopes_supported?.join(' ') || undefined
 
-    // Verify PKCE support
     if (
       asMeta.code_challenge_methods_supported &&
       !asMeta.code_challenge_methods_supported.includes('S256')
@@ -314,7 +271,6 @@ export class McpDiscovery {
       needsManualClientId: true
     }
 
-    // Step 4: Try Dynamic Client Registration
     if (asMeta.registration_endpoint) {
       const dcr = await McpDiscovery.registerClient(asMeta.registration_endpoint, redirectUri)
       if (dcr) {

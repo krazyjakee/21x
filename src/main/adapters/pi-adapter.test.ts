@@ -13,15 +13,23 @@ vi.mock('child_process', () => ({
   execFile: vi.fn(),
 }))
 
+// Keep session spawns away from the real ~/.20x and ~/.pi directories.
+vi.mock('./pi-files', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./pi-files')>(),
+  installPiPermissionExtension: vi.fn(() => '/tmp/20x-permissions.ts'),
+}))
+
 import { PiAdapter } from './pi-adapter'
 import {
   buildPiMcpConfigDocument,
+  piProcessEnv,
   sanitizePiMcpServerName,
   sanitizePiSessionName,
   slugPiMcpServers,
   withProviderNameLimitHint,
 } from './pi-config'
 import { MessagePartType } from './coding-agent-adapter'
+import { removeLegacyGatewayProvider } from './pi-files'
 
 function fakeProcess() {
   const process = new EventEmitter() as EventEmitter & Record<string, any>
@@ -40,7 +48,7 @@ function fakeProcess() {
   return process
 }
 
-// The adapter strips variables set by a parent agent harness (see processEnv),
+// The adapter strips variables set by a parent agent harness (see piProcessEnv),
 // so the expectation must too, or the test fails when run from inside an agent.
 function expectedPiEnv(): NodeJS.ProcessEnv {
   const env = { ...nodeWorkerRuntime().env }
@@ -89,9 +97,6 @@ describe('PiAdapter', () => {
     spawnMock.mockReturnValue(child)
     const adapter = new PiAdapter()
     vi.spyOn(adapter as any, 'findPiExecutable').mockResolvedValue('/usr/local/bin/pi')
-    vi.spyOn(adapter as any, 'removeLegacyGatewayProvider').mockReturnValue(undefined)
-    vi.spyOn(adapter as any, 'buildMcpConfig').mockReturnValue(undefined)
-    vi.spyOn(adapter as any, 'installPermissionExtension').mockReturnValue('/tmp/20x-permissions.ts')
     vi.spyOn(adapter as any, 'attachProcess').mockImplementation(() => undefined)
     const command = vi.spyOn(adapter as any, 'command')
       .mockResolvedValueOnce({
@@ -143,9 +148,6 @@ describe('PiAdapter', () => {
     })
     const adapter = new PiAdapter()
     vi.spyOn(adapter as any, 'findPiExecutable').mockResolvedValue('/usr/local/bin/pi')
-    vi.spyOn(adapter as any, 'removeLegacyGatewayProvider').mockReturnValue(undefined)
-    vi.spyOn(adapter as any, 'buildMcpConfig').mockReturnValue(undefined)
-    vi.spyOn(adapter as any, 'installPermissionExtension').mockReturnValue('/tmp/20x-permissions.ts')
 
     const started = adapter.createSession({
       agentId: 'agent-1',
@@ -162,7 +164,6 @@ describe('PiAdapter', () => {
     spawnMock.mockReturnValue(child)
     const adapter = new PiAdapter()
     vi.spyOn(adapter as any, 'findPiExecutable').mockResolvedValue('/usr/local/bin/pi')
-    vi.spyOn(adapter as any, 'removeLegacyGatewayProvider').mockReturnValue(undefined)
     vi.spyOn(adapter as any, 'attachProcess').mockImplementation(() => undefined)
     vi.spyOn(adapter as any, 'terminateProcess').mockResolvedValue(undefined)
     vi.spyOn(adapter as any, 'command')
@@ -616,14 +617,14 @@ describe('PiAdapter', () => {
           mine: { baseUrl: 'https://llm.example.com', apiKey: '$MY_KEY' },
         },
       }))
-      ;(new PiAdapter() as any).removeLegacyGatewayProvider()
+      removeLegacyGatewayProvider()
       expect(JSON.parse(readFileSync(modelsPath, 'utf8'))).toEqual({
         providers: { mine: { baseUrl: 'https://llm.example.com', apiKey: '$MY_KEY' } },
       })
 
       const ownPeakflo = { providers: { peakflo: { baseUrl: 'https://mine.example.com', apiKey: '$OTHER' } } }
       writeFileSync(modelsPath, JSON.stringify(ownPeakflo))
-      ;(new PiAdapter() as any).removeLegacyGatewayProvider()
+      removeLegacyGatewayProvider()
       expect(JSON.parse(readFileSync(modelsPath, 'utf8'))).toEqual(ownPeakflo)
     } finally {
       if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR
@@ -636,8 +637,7 @@ describe('PiAdapter', () => {
     const previous = process.env.MCP_DIRECT_TOOLS
     process.env.MCP_DIRECT_TOOLS = '*'
     try {
-      const adapter = new PiAdapter()
-      const env = (adapter as any).processEnv({ permissionMode: 'ask' })
+      const env = piProcessEnv({ permissionMode: 'ask' } as any)
       expect(env.MCP_DIRECT_TOOLS).toBeUndefined()
     } finally {
       if (previous === undefined) delete process.env.MCP_DIRECT_TOOLS

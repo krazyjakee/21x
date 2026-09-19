@@ -548,10 +548,3 @@ export async function readTaskArtifact(workspaceDir: string, artifactPath: strin
     return null
   }
 }
-
-export const ARTIFACT_FILE_LIMITS = {
-  maxImageBytes: MAX_IMAGE_BYTES,
-  maxScanDepth: MAX_SCAN_DEPTH,
-  maxScanFiles: MAX_SCAN_FILES,
-  maxTextBytes: MAX_TEXT_BYTES
-} as const

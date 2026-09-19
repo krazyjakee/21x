@@ -145,14 +145,12 @@ export function BrowserPanelContent({
     }
   }
 
-  // ── Bot-detection block state ───────────────────────────────
   // When a site (e.g. Xero via Akamai) blocks the embedded webview, we show
   // a banner offering to open the URL in the system browser instead.
   const [blockedUrl, setBlockedUrl] = useState<string | null>(null)
   const [authInProgress, setAuthInProgress] = useState(false)
   const [authStatus, setAuthStatus] = useState<string | null>(null)
 
-  // ── Check if this browser is connected to a task via an edge ──
   // Uses imperative reads + subscribe to avoid re-rendering on every panel move
   const [connectedTaskName, setConnectedTaskName] = useState<string | null>(null)
 
@@ -186,7 +184,6 @@ export function BrowserPanelContent({
     return unsub
   }, [panelId])
 
-  // ── Broker registration ──────────────────────────────────
   // The panel is registered with the in-app broker together with the task ids
   // it is edge-connected to, so browser_* MCP tools can address exactly this
   // panel for those tasks. Re-registered whenever edges or the webContentsId
@@ -262,7 +259,6 @@ export function BrowserPanelContent({
     }
   }, [panelId])
 
-  // ── Webview event wiring ──────────────────────────────────
   // Debounce store updates to avoid re-render storms from SPA sites (e.g. Google Maps)
   const pendingUrlUpdate = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingTitleUpdate = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -280,9 +276,7 @@ export function BrowserPanelContent({
     const onNavigate = (e: { url: string }) => {
       // Only update the URL bar text — never feed back into <webview src>
       setInputValue(e.url)
-      // Clear blocked state when navigating to a new URL
       setBlockedUrl(null)
-      // Debounce store update to avoid flooding zustand on SPA navigations
       if (pendingUrlUpdate.current) clearTimeout(pendingUrlUpdate.current)
       pendingUrlUpdate.current = setTimeout(() => {
         updatePanel(panelId, { url: e.url })
@@ -301,7 +295,7 @@ export function BrowserPanelContent({
       wv.executeJavaScript('document.exitFullscreen?.().catch(()=>{})').catch(() => {})
     }
 
-    // ── Detect bot-detection blocks (Akamai, Cloudflare, etc.) ────
+    // Detect bot-detection blocks (Akamai, Cloudflare, etc.)
     // After the page finishes loading, check if the page body contains
     // known WAF block signatures.  If so, show a banner with the option
     // to open the URL in the system browser.
@@ -354,12 +348,10 @@ export function BrowserPanelContent({
     }
   }, [panelId, updatePanel])
 
-  // ── Navigation handlers ───────────────────────────────────
   const navigate = useCallback((url: string) => {
     let finalUrl = url.trim()
     if (!finalUrl) return
     if (!/^https?:\/\//i.test(finalUrl)) {
-      // Check if it looks like a URL or a search query
       if (/^[\w-]+\.[\w]{2,}/.test(finalUrl)) {
         finalUrl = 'https://' + finalUrl
       } else {
@@ -412,11 +404,9 @@ export function BrowserPanelContent({
 
       if (result.success) {
         setAuthStatus(`Imported ${result.cookieCount} cookies — reloading…`)
-        // Reload the webview with the injected cookies
         setBlockedUrl(null)
         const wv = webviewRef.current
         if (wv) {
-          // Navigate to the final URL (post-login destination) or the original URL
           wv.loadURL(result.finalUrl || blockedUrl)
         }
         setTimeout(() => setAuthStatus(null), 2000)
@@ -432,7 +422,6 @@ export function BrowserPanelContent({
     }
   }, [blockedUrl])
 
-  // ── Live browser ──────────────────────────────────────────
   const cleanUA = useRef(getChromeUserAgent())
 
   return (
@@ -503,7 +492,6 @@ export function BrowserPanelContent({
         </div>
       )}
 
-      {/* Webview — real browser */}
       <div className="flex-1 min-h-0">
         <webview
           ref={webviewRef as any}
@@ -518,8 +506,6 @@ export function BrowserPanelContent({
     </div>
   )
 }
-
-// ── URL Bar component ─────────────────────────────────────────
 
 function BrowserUrlBar({
   inputValue,
@@ -554,7 +540,6 @@ function BrowserUrlBar({
       onSubmit={onSubmit}
       className="flex items-center gap-1.5 px-2 py-1.5 bg-[var(--canvas-chrome)] border-b border-border/20 flex-shrink-0"
     >
-      {/* Nav buttons */}
       <button
         type="button"
         onClick={onBack}
@@ -631,7 +616,6 @@ function BrowserUrlBar({
         )}
       </div>
 
-      {/* URL input */}
       <div className="flex-1 flex items-center gap-1.5 bg-[var(--canvas-panel)] rounded-md px-2 py-1 border border-border/20 focus-within:border-orange-500/30 transition-colors">
         <Globe className="h-3 w-3 text-muted-foreground/30 flex-shrink-0" />
         <input

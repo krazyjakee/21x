@@ -103,6 +103,12 @@ const NOTION_API = 'https://api.notion.com'
 const NOTION_VERSION = '2026-03-11'
 const RATE_LIMIT_DELAY = 350 // ms between paginated requests
 
+interface CursorPage<T> {
+  results: T[]
+  has_more: boolean
+  next_cursor: string | null
+}
+
 export class NotionClient {
   private token: string
 
@@ -127,16 +133,12 @@ export class NotionClient {
     })
   }
 
-  /** Collects every page of a cursor-paginated GET endpoint. */
-  private async paginateGet<T>(path: string): Promise<T[]> {
+  /** Collects every page of a cursor-paginated endpoint, pausing between requests. */
+  private async paginate<T>(fetchPage: (startCursor?: string) => Promise<CursorPage<T>>): Promise<T[]> {
     const results: T[] = []
     let startCursor: string | undefined
     do {
-      const cursorParam = startCursor ? `&start_cursor=${startCursor}` : ''
-      const data = await this.request<{ results: T[]; has_more: boolean; next_cursor: string | null }>(
-        'GET',
-        `${path}?page_size=100${cursorParam}`
-      )
+      const data = await fetchPage(startCursor)
       results.push(...data.results)
       startCursor = data.has_more && data.next_cursor ? data.next_cursor : undefined
       if (startCursor) await sleep(RATE_LIMIT_DELAY)
@@ -144,7 +146,11 @@ export class NotionClient {
     return results
   }
 
-  // ── Public methods ───────────────────────────────────────
+  private paginateGet<T>(path: string): Promise<T[]> {
+    return this.paginate((startCursor) =>
+      this.request<CursorPage<T>>('GET', `${path}?page_size=100${startCursor ? `&start_cursor=${startCursor}` : ''}`)
+    )
+  }
 
   /**
    * List data sources accessible to the integration.
@@ -155,21 +161,16 @@ export class NotionClient {
    * explicitly incomplete response must not be presented as a complete list.
    */
   async searchDataSources(): Promise<NotionDataSource[]> {
-    const results: NotionDataSource[] = []
     const seenCursors = new Set<string>()
-    let startCursor: string | undefined
 
-    do {
+    return this.paginate(async (startCursor) => {
       const body: Record<string, unknown> = {
         filter: { property: 'object', value: 'data_source' },
         page_size: 100
       }
       if (startCursor) body.start_cursor = startCursor
 
-      const data = await this.request<{
-        results: NotionDataSource[]
-        has_more: boolean
-        next_cursor: string | null
+      const data = await this.request<CursorPage<NotionDataSource> & {
         request_status?: {
           type?: 'complete' | 'incomplete'
           incomplete_reason?: string
@@ -192,25 +193,17 @@ export class NotionClient {
         throw new Error('Notion API omitted the next search cursor')
       }
 
-      results.push(...data.results)
-      const nextCursor = data.has_more && data.next_cursor ? data.next_cursor : undefined
-      if (nextCursor) {
-        if (seenCursors.has(nextCursor)) {
+      if (data.has_more && data.next_cursor) {
+        if (seenCursors.has(data.next_cursor)) {
           throw new Error('Notion API returned a repeated search cursor')
         }
-        seenCursors.add(nextCursor)
+        seenCursors.add(data.next_cursor)
       }
-      startCursor = nextCursor
-
-      if (startCursor) await sleep(RATE_LIMIT_DELAY)
-    } while (startCursor)
-
-    return results
+      return data
+    })
   }
 
-  /**
-   * Get a data source schema (property definitions).
-   */
+  /** The data source schema (property definitions). */
   async getDataSource(dataSourceId: string): Promise<NotionDataSource> {
     return this.request<NotionDataSource>(
       'GET',
@@ -218,17 +211,11 @@ export class NotionClient {
     )
   }
 
-  /**
-   * Query all pages from a data source with optional filters and incremental sync
-   */
   async queryAllPages(
     dataSourceId: string,
     filter?: NotionFilter,
     lastSyncedAt?: string | null
   ): Promise<NotionPage[]> {
-    const pages: NotionPage[] = []
-    let startCursor: string | undefined
-
     // Build the combined filter (flatten to avoid >2 nesting levels)
     const andClauses: NotionFilter[] = []
     if (filter) {
@@ -252,24 +239,12 @@ export class NotionClient {
       andClauses.length === 1 ? andClauses[0] :
       { and: andClauses }
 
-    do {
+    return this.paginate((startCursor) => {
       const body: Record<string, unknown> = { page_size: 100 }
       if (combinedFilter) body.filter = combinedFilter
       if (startCursor) body.start_cursor = startCursor
-
-      const data = await this.request<{
-        results: NotionPage[]
-        has_more: boolean
-        next_cursor: string | null
-      }>('POST', `/v1/data_sources/${encodeURIComponent(dataSourceId)}/query`, body)
-
-      pages.push(...data.results)
-      startCursor = data.has_more && data.next_cursor ? data.next_cursor : undefined
-
-      if (startCursor) await sleep(RATE_LIMIT_DELAY)
-    } while (startCursor)
-
-    return pages
+      return this.request<CursorPage<NotionPage>>('POST', `/v1/data_sources/${encodeURIComponent(dataSourceId)}/query`, body)
+    })
   }
 
   /**
@@ -280,9 +255,6 @@ export class NotionClient {
     return this.fetchBlocksRecursive(pageId, maxDepth)
   }
 
-  /**
-   * Fetch blocks and recursively fetch their children up to maxDepth.
-   */
   private async fetchBlocksRecursive(blockId: string, maxDepth: number): Promise<NotionBlock[]> {
     const blocks = await this.fetchBlocks(blockId)
 
@@ -304,16 +276,10 @@ export class NotionClient {
     return blocks
   }
 
-  /**
-   * Fetch all child blocks for a given block/page ID
-   */
   private fetchBlocks(blockId: string): Promise<NotionBlock[]> {
     return this.paginateGet<NotionBlock>(`/v1/blocks/${blockId}/children`)
   }
 
-  /**
-   * Update a page's properties
-   */
   async updatePage(
     pageId: string,
     properties: Record<string, unknown>
@@ -321,17 +287,11 @@ export class NotionClient {
     return this.request<NotionPage>('PATCH', `/v1/pages/${pageId}`, { properties })
   }
 
-  /**
-   * List workspace users
-   */
   getUsers(): Promise<NotionUser[]> {
     return this.paginateGet<NotionUser>('/v1/users')
   }
 
-  /**
-   * Download a file from a URL (Notion-hosted or external).
-   * Returns the buffer, detected filename, and content type.
-   */
+  /** Downloads a Notion-hosted or external file. */
   async downloadFile(url: string): Promise<{ buffer: Buffer; filename: string; contentType: string }> {
     const file = await downloadFile(url)
     return {
@@ -352,13 +312,11 @@ export class NotionClient {
       const fileInfo = this.extractFileFromBlock(block)
       if (fileInfo) files.push(fileInfo)
 
-      // Recurse into children
       if (block._children && block._children.length > 0) {
         files.push(...this.extractFilesFromBlocks(block._children))
       }
     }
 
-    // Deduplicate by URL
     const seen = new Set<string>()
     return files.filter(f => {
       if (seen.has(f.url)) return false
@@ -367,9 +325,6 @@ export class NotionClient {
     })
   }
 
-  /**
-   * Extract file URL from a single block (image, file, pdf, video, audio)
-   */
   private extractFileFromBlock(block: NotionBlock): { url: string; filename: string } | null {
     const fileBlockTypes = ['image', 'file', 'pdf', 'video', 'audio']
     if (!fileBlockTypes.includes(block.type)) return null
@@ -409,9 +364,6 @@ export class NotionClient {
     return { url, filename }
   }
 
-  /**
-   * Extract file URLs from a Files property value.
-   */
   extractFilesFromProperty(files: NotionFileObject[]): Array<{ url: string; filename: string }> {
     return files.map(f => {
       const url = f.type === 'file' ? f.file?.url : f.external?.url

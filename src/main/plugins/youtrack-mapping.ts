@@ -11,8 +11,6 @@ import type {
   YouTrackIssueLink
 } from './youtrack-client'
 
-// ── Status mapping ───────────────────────────────────────────
-
 export const STATUS_TO_LOCAL: Record<string, TaskStatus> = {
   'open': TaskStatus.NotStarted,
   'submitted': TaskStatus.NotStarted,
@@ -43,8 +41,6 @@ export const STATUS_TO_LOCAL: Record<string, TaskStatus> = {
   "can't reproduce": TaskStatus.Completed
 }
 
-// ── Priority mapping ─────────────────────────────────────────
-
 const PRIORITY_TO_LOCAL: Record<string, string> = {
   'show-stopper': 'critical',
   'critical': 'critical',
@@ -53,19 +49,13 @@ const PRIORITY_TO_LOCAL: Record<string, string> = {
   'minor': 'low'
 }
 
-// ── Custom field type IDs ────────────────────────────────────
-// YouTrack uses fieldType.id to identify field types programmatically
+// fieldType.id values; they identify a field when its name differs per project.
 
 export const STATE_FIELD_TYPE = 'state[1]'
 export const PRIORITY_FIELD_TYPE = 'ownedField[1]' // Priority bundle
 export const ENUM_FIELD_TYPE = 'enum[1]' // Type, etc.
 
-// ── Helpers ──────────────────────────────────────────────────
-
-/**
- * Extract a custom field value by field name from a YouTrack issue.
- * YouTrack stores most fields (State, Priority, Assignee, Type) in customFields.
- */
+/** YouTrack stores most fields (State, Priority, Assignee, Type) in customFields. */
 function getCustomField(
   issue: YouTrackIssue,
   fieldName: string
@@ -75,52 +65,27 @@ function getCustomField(
   )
 }
 
-/**
- * Extract the display name from a custom field value.
- * Handles single-value and array-value fields.
- */
 function getCustomFieldValueName(field: YouTrackCustomField | undefined): string | null {
   if (!field || field.value === null || field.value === undefined) return null
 
-  // Single object value (State, Priority, Type, etc.)
   if (typeof field.value === 'object' && !Array.isArray(field.value)) {
     const val = field.value as YouTrackCustomFieldValue
     return val.name || val.presentation || null
   }
 
-  // String or number value
   if (typeof field.value === 'string') return field.value
   if (typeof field.value === 'number') return String(field.value)
 
   return null
 }
 
-/**
- * Extract assignee name from a custom field.
- * Handles both single-user and multi-user Assignee fields.
- */
+/** Assignee fields may be single-user or multi-user; the first user wins. */
 function getAssigneeName(field: YouTrackCustomField | undefined): string | null {
-  if (!field || field.value === null || field.value === undefined) return null
-
-  // Single user value
-  if (typeof field.value === 'object' && !Array.isArray(field.value)) {
-    const val = field.value as YouTrackCustomFieldValue
-    return val.fullName || val.login || val.name || null
-  }
-
-  // Array of users (multi-value Assignee)
-  if (Array.isArray(field.value) && field.value.length > 0) {
-    const first = field.value[0] as YouTrackCustomFieldValue
-    return first.fullName || first.login || first.name || null
-  }
-
-  return null
+  if (!field || field.value === null || field.value === undefined || typeof field.value !== 'object') return null
+  const user = (Array.isArray(field.value) ? field.value[0] : field.value) as YouTrackCustomFieldValue | undefined
+  return user?.fullName || user?.login || user?.name || null
 }
 
-/**
- * Find a custom field by its fieldType.id rather than name.
- * Useful when field names vary across projects.
- */
 function getCustomFieldByType(
   issue: YouTrackIssue,
   fieldTypeId: string
@@ -130,65 +95,26 @@ function getCustomFieldByType(
   )
 }
 
-/**
- * Build a YQL query string from the config filters.
- * Combines project, assignee, state, priority, type, and custom query.
- */
+/** YQL for the source config's filters; the custom query is appended as-is. */
 export function buildYqlQuery(
   config: Record<string, unknown>
 ): string {
   const parts: string[] = []
 
-  // Project filter (always required)
   const project = config.project as string
   if (project) {
     parts.push(`project: {${project}}`)
   }
 
-  // Assignee filter — wrap each value in braces for names with spaces
-  const assignees = config.assignee as string[] | string | undefined
-  if (assignees) {
-    const assigneeList = Array.isArray(assignees) ? assignees : [assignees]
-    if (assigneeList.length > 0) {
-      const assigneeValues = assigneeList.map((a) => `{${a}}`).join(', ')
-      parts.push(`for: ${assigneeValues}`)
-    }
+  // Values are wrapped in braces so names with spaces work; `Field: {a}, {b}` is an OR.
+  const filters: Array<[string, string]> = [['assignee', 'for'], ['state', 'State'], ['priority', 'Priority'], ['issue_type', 'Type']]
+  for (const [key, yqlField] of filters) {
+    const value = config[key] as string[] | string | undefined
+    if (!value) continue
+    const values = Array.isArray(value) ? value : [value]
+    if (values.length > 0) parts.push(`${yqlField}: ${values.map((v) => `{${v}}`).join(', ')}`)
   }
 
-  // State filter
-  const states = config.state as string[] | string | undefined
-  if (states) {
-    const stateList = Array.isArray(states) ? states : [states]
-    if (stateList.length > 0) {
-      // YQL: State: {value1}, {value2} uses OR logic
-      const stateValues = stateList.map((s) => `{${s}}`).join(', ')
-      parts.push(`State: ${stateValues}`)
-    }
-  }
-
-  // Priority filter
-  const priorities = config.priority as string[] | string | undefined
-  if (priorities) {
-    const priorityList = Array.isArray(priorities)
-      ? priorities
-      : [priorities]
-    if (priorityList.length > 0) {
-      const priorityValues = priorityList.map((p) => `{${p}}`).join(', ')
-      parts.push(`Priority: ${priorityValues}`)
-    }
-  }
-
-  // Type filter
-  const types = config.issue_type as string[] | string | undefined
-  if (types) {
-    const typeList = Array.isArray(types) ? types : [types]
-    if (typeList.length > 0) {
-      const typeValues = typeList.map((t) => `{${t}}`).join(', ')
-      parts.push(`Type: ${typeValues}`)
-    }
-  }
-
-  // Custom YQL query (appended as-is)
   const customQuery = config.custom_query as string | undefined
   if (customQuery && customQuery.trim()) {
     parts.push(customQuery.trim())
@@ -197,9 +123,6 @@ export function buildYqlQuery(
   return parts.join(' ')
 }
 
-/**
- * Map a YouTrack issue to local task fields.
- */
 export function mapIssue(issue: YouTrackIssue): {
   title: string
   status?: string
@@ -210,7 +133,6 @@ export function mapIssue(issue: YouTrackIssue): {
 } {
   const title = issue.summary || ''
 
-  // State -> status
   let status: string | undefined
   const stateField =
     getCustomField(issue, 'State') ||
@@ -220,7 +142,6 @@ export function mapIssue(issue: YouTrackIssue): {
     status = STATUS_TO_LOCAL[rawState.toLowerCase()] || TaskStatus.NotStarted
   }
 
-  // Priority
   let priority: string | undefined
   const priorityField =
     getCustomField(issue, 'Priority') ||
@@ -230,17 +151,14 @@ export function mapIssue(issue: YouTrackIssue): {
     priority = PRIORITY_TO_LOCAL[rawPriority.toLowerCase()] || 'medium'
   }
 
-  // Assignee
   const assigneeField = getCustomField(issue, 'Assignee')
   const assignee: string | undefined = getAssigneeName(assigneeField) || undefined
 
-  // Labels from tags
   let labels: string[] | undefined
   if (issue.tags && issue.tags.length > 0) {
     labels = issue.tags.map((t) => t.name)
   }
 
-  // Type — map YouTrack issue types to local task types
   let type: string | undefined
   const typeField = getCustomField(issue, 'Type')
   const rawType = getCustomFieldValueName(typeField)
@@ -262,34 +180,27 @@ export function mapIssue(issue: YouTrackIssue): {
   return { title, status, priority, assignee, labels, type }
 }
 
-/**
- * Build a markdown description from a YouTrack issue.
- * Includes the issue description, custom fields table, and link.
- */
+/** Markdown description: the issue text, a properties table, linked issues, and a link back. */
 export function buildDescription(
   issue: YouTrackIssue,
   baseUrl: string
 ): string {
   const parts: string[] = []
 
-  // Issue description (may be null)
   if (issue.description) {
     parts.push(issue.description)
   }
 
-  // Custom fields table
   const fieldsSection = formatCustomFields(issue)
   if (fieldsSection) {
     parts.push(fieldsSection)
   }
 
-  // Linked issues with deep links
   const linksSection = formatLinkedIssues(issue, baseUrl)
   if (linksSection) {
     parts.push(linksSection)
   }
 
-  // Link to YouTrack issue
   const issueUrl = `${baseUrl}/issue/${issue.idReadable}`
   parts.push('')
   parts.push(`[View in YouTrack](${issueUrl})`)
@@ -305,7 +216,6 @@ function formatLinkedIssues(
   issue: YouTrackIssue,
   baseUrl: string
 ): string | null {
-  // Collect all link entries grouped by relationship label
   const grouped: Record<string, Array<{ id: string; summary: string; resolved: boolean }>> = {}
 
   const addLink = (label: string, linked: { idReadable: string; summary: string; resolved: number | null }) => {
@@ -323,7 +233,6 @@ function formatLinkedIssues(
   const processIssueLink = (link: YouTrackIssueLink) => {
     if (!link.linkType || !link.issues || link.issues.length === 0) return
 
-    // Determine the relationship label based on direction
     let label: string
     if (link.direction === 'OUTWARD') {
       label = link.linkType.sourceToTarget || link.linkType.name
@@ -338,7 +247,7 @@ function formatLinkedIssues(
     }
   }
 
-  // Process parent (dedicated field — separate from links array)
+  // Parent and subtasks come in dedicated fields, separate from the links array.
   if (issue.parent?.issues && issue.parent.issues.length > 0) {
     const parentLabel = issue.parent.linkType?.targetToSource || 'Subtask of'
     for (const linked of issue.parent.issues) {
@@ -346,7 +255,6 @@ function formatLinkedIssues(
     }
   }
 
-  // Process subtasks (dedicated field — separate from links array)
   if (issue.subtasks?.issues && issue.subtasks.issues.length > 0) {
     const subtaskLabel = issue.subtasks.linkType?.sourceToTarget || 'Parent for'
     for (const linked of issue.subtasks.issues) {
@@ -354,7 +262,6 @@ function formatLinkedIssues(
     }
   }
 
-  // Process general links
   if (issue.links) {
     for (const link of issue.links) {
       processIssueLink(link)
@@ -377,9 +284,6 @@ function formatLinkedIssues(
   return lines.join('\n')
 }
 
-/**
- * Format custom fields as a markdown properties table.
- */
 function formatCustomFields(issue: YouTrackIssue): string {
   const lines: string[] = []
 
@@ -411,13 +315,9 @@ function formatCustomFields(issue: YouTrackIssue): string {
   )
 }
 
-/**
- * Format a single custom field value as a string.
- */
 function formatCustomFieldValue(field: YouTrackCustomField): string | null {
   if (field.value === null || field.value === undefined) return null
 
-  // Single object value
   if (typeof field.value === 'object' && !Array.isArray(field.value)) {
     const val = field.value as YouTrackCustomFieldValue
     return (
@@ -425,7 +325,6 @@ function formatCustomFieldValue(field: YouTrackCustomField): string | null {
     )
   }
 
-  // Array value (multi-select, multi-user)
   if (Array.isArray(field.value)) {
     if (field.value.length === 0) return null
     return field.value
@@ -436,16 +335,12 @@ function formatCustomFieldValue(field: YouTrackCustomField): string | null {
       .join(', ')
   }
 
-  // String or number
   if (typeof field.value === 'string') return field.value || null
   if (typeof field.value === 'number') return String(field.value)
 
   return null
 }
 
-/**
- * Map a local 20x status back to a YouTrack State name.
- */
 export function localStatusToYouTrack(localStatus: string): string | null {
   const mapping: Record<string, string> = {
     [TaskStatus.NotStarted]: 'Open',
@@ -456,9 +351,6 @@ export function localStatusToYouTrack(localStatus: string): string | null {
   return mapping[localStatus] || null
 }
 
-/**
- * Map a local 20x priority back to a YouTrack Priority name.
- */
 export function localPriorityToYouTrack(localPriority: string): string | null {
   const mapping: Record<string, string> = {
     critical: 'Critical',

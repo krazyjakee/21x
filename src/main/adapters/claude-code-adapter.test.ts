@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi } from 'vitest'
 
-// Mock the SDK before importing the adapter
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: vi.fn(),
   // The real module exports this; the adapter uses it to tell a deliberate
@@ -9,7 +8,6 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   AbortError: class AbortError extends Error {},
 }))
 
-// Mock child_process and fs to avoid real filesystem operations
 vi.mock('child_process', () => ({ execFile: vi.fn() }))
 vi.mock('fs', () => ({ existsSync: vi.fn(() => false) }))
 // The executable lookup shells out (`execFile` is mocked to never call back),
@@ -22,8 +20,14 @@ vi.mock('./claude-code-executable', () => ({
 // can inspect exactly what the adapter handed the SDK.
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { ClaudeCodeAdapter } from './claude-code-adapter'
-import { ClaudeSystemSubtype } from './claude-code-message-converter'
+import { ClaudeSystemSubtype, convertSDKMessageToParts as convertSDKMessage } from './claude-code-message-converter'
+import { buildClaudeMcpServers, buildIsolationOptions, buildMcpToolLimitHooks } from './claude-code-options'
+import { trackBackgroundTask as trackTask } from './claude-code-background-tasks'
 import { MessagePartType } from './coding-agent-adapter'
+
+// Tests feed hand-built SDK messages that do not satisfy the full SDK types.
+const convertParts = convertSDKMessage as (...args: any[]) => any[]
+const trackBackgroundTask = trackTask as (...args: any[]) => void
 
 /**
  * Helper: creates an adapter with a pre-populated session so we can test
@@ -216,8 +220,6 @@ describe('ClaudeCodeAdapter error result handling', () => {
     it('resets queryIterator to null after error so next sendPrompt starts fresh process', async () => {
       const adapter = new ClaudeCodeAdapter()
 
-      // Simulate a session that had a previous query (queryIterator is set)
-      // and then hit an error (status = 'error')
       const fakeIterator = {
         [Symbol.asyncIterator]() { return this },
         async next() { return { done: true, value: undefined } },
@@ -240,16 +242,12 @@ describe('ClaudeCodeAdapter error result handling', () => {
       }
       ;(adapter as any).sessions.set('s1', session)
 
-      // Simulate consumeStream completing with error status
-      // (error result sets status to 'error' before stream ends normally)
       session.status = 'error'
       session.lastError = 'Rate limit exceeded'
 
-      // Call consumeStream directly (it reads from queryIterator which is exhausted)
       await (adapter as any).consumeStream('s1', session)
 
-      // After error, queryIterator should be null so next sendPrompt
-      // starts a fresh process instead of setting continue: true
+      // So the next sendPrompt starts a fresh process instead of continuing.
       expect(session.queryIterator).toBeNull()
       expect(session.status).toBe('error')
     })
@@ -317,7 +315,6 @@ describe('ClaudeCodeAdapter error result handling', () => {
 
       await (adapter as any).consumeStream('s1', session)
 
-      // After thrown error, queryIterator should be null for recovery
       expect(session.queryIterator).toBeNull()
       expect(session.status).toBe('error')
       // Non-resumed session should NOT get INCOMPATIBLE_SESSION_ID
@@ -388,128 +385,49 @@ describe('ClaudeCodeAdapter error result handling', () => {
       }
       ;(adapter as any).sessions.set('s1', session)
 
-      // Should not throw — undefined/null messages are skipped
       await (adapter as any).consumeStream('s1', session)
 
       expect(session.status).toBe('idle')
-      // Only the valid message should be buffered
       expect(session.messageBuffer.length).toBe(1)
     })
   })
 
   describe('sendPrompt session continuation mode', () => {
-    // These tests verify the continuation logic (--resume vs --continue vs new)
-    // by inspecting session state rather than calling through the real SDK,
-    // because the Claude Code binary is not available in CI.
+    async function optionsFor(state: { sessionId: string; isResumed: boolean; queryIterator?: unknown }): Promise<any> {
+      const queryMock = vi.mocked(query) as any
+      queryMock.mockClear()
+      queryMock.mockImplementation(() => ({ async *[Symbol.asyncIterator]() {} }))
+      const { adapter, session } = createAdapterWithSession('s1', [])
+      Object.assign(session, { queryIterator: null, enqueuePrompt: null, ...state })
+      await adapter.sendPrompt('s1', [{ type: MessagePartType.TEXT, text: 'hi' }] as any, {} as any)
+      await (session as any).streamTask
+      return queryMock.mock.calls[0][0].options
+    }
 
-    it('uses resume when queryIterator is null but session has a Claude Code UUID (error recovery)', () => {
-      // Session state: error recovery — queryIterator null, but has a real sessionId
-      const session: any = {
-        sessionId: 'abc-def-123', // Real Claude Code UUID from previous run
-        queryIterator: null,      // Null because of error recovery
-        isResumed: false,         // NOT a resumed session — was created via startSession
-      }
-
-      // sendPrompt determines isFirstPrompt from queryIterator:
-      const isFirstPrompt = !session.queryIterator
-      expect(isFirstPrompt).toBe(true)
-
-      // Continuation logic from sendPrompt (lines 643-652):
-      // if (isFirstPrompt && session.isResumed) → options.resume = sessionId
-      // else if (isFirstPrompt && session.sessionId) → options.resume = session.sessionId
-      // else if (!isFirstPrompt) → options.continue = true
-      const options: any = {}
-      if (isFirstPrompt && session.isResumed) {
-        options.resume = session.sessionId
-      } else if (isFirstPrompt && session.sessionId) {
-        options.resume = session.sessionId
-      } else if (!isFirstPrompt) {
-        options.continue = true
-      }
-
-      // Should use resume with the real Claude Code session UUID
+    it('resumes the real Claude Code session after error recovery', async () => {
+      const options = await optionsFor({ sessionId: 'abc-def-123', isResumed: false })
       expect(options.resume).toBe('abc-def-123')
       expect(options.continue).toBeUndefined()
     })
 
-    it('does NOT use resume for brand-new sessions with empty sessionId', () => {
-      // Brand-new session: empty sessionId, no queryIterator
-      const session: any = {
-        sessionId: '',           // Empty — brand new, no Claude Code UUID yet
-        queryIterator: null,
-        isResumed: false,
-      }
-
-      const isFirstPrompt = !session.queryIterator
-      expect(isFirstPrompt).toBe(true)
-
-      const options: any = {}
-      if (isFirstPrompt && session.isResumed) {
-        options.resume = session.sessionId
-      } else if (isFirstPrompt && session.sessionId) {
-        options.resume = session.sessionId
-      } else if (!isFirstPrompt) {
-        options.continue = true
-      }
-
-      // Should NOT resume — this is a brand new session (empty sessionId is falsy)
+    it('neither resumes nor continues a brand-new session', async () => {
+      const options = await optionsFor({ sessionId: '', isResumed: false })
       expect(options.resume).toBeUndefined()
       expect(options.continue).toBeUndefined()
     })
 
-    it('uses resume after normal idle completion (isResumed flag)', () => {
-      // After consumeStream ends normally, queryIterator is null and isResumed is true
-      const session: any = {
-        sessionId: 'session-uuid-456',
-        queryIterator: null,     // Reset after stream completion
-        isResumed: true,         // Set by consumeStream finally block
-      }
-
-      const isFirstPrompt = !session.queryIterator
-      expect(isFirstPrompt).toBe(true)
-
-      const options: any = {}
-      if (isFirstPrompt && session.isResumed) {
-        options.resume = session.sessionId
-      } else if (isFirstPrompt && session.sessionId) {
-        options.resume = session.sessionId
-      } else if (!isFirstPrompt) {
-        options.continue = true
-      }
-
-      // Should use resume with the session UUID (not --continue which picks up most-recent)
-      expect(options.resume).toBe('session-uuid-456')
+    it('resumes by exact id after the stream ended normally (not --continue)', async () => {
+      const options = await optionsFor({ sessionId: 'session-uuid-456', isResumed: true })
+      expect(options.resume).toBe('s1')
       expect(options.continue).toBeUndefined()
     })
 
-    it('uses continue when process is still alive (queryIterator truthy)', () => {
-      const fakeIterator = {
-        [Symbol.asyncIterator]() { return this },
-        async next() { return { done: true, value: undefined } },
-      }
-      const session: any = {
+    it('continues while the process is still alive', async () => {
+      const options = await optionsFor({
         sessionId: 'session-uuid-789',
-        queryIterator: fakeIterator,
-        backgroundTasks: new Map(),
-        sawResult: false,
-        releasePrompt: null, // Process still alive
-        pendingApprovals: [],
         isResumed: false,
-      }
-
-      const isFirstPrompt = !session.queryIterator
-      expect(isFirstPrompt).toBe(false)
-
-      const options: any = {}
-      if (isFirstPrompt && session.isResumed) {
-        options.resume = session.sessionId
-      } else if (isFirstPrompt && session.sessionId) {
-        options.resume = session.sessionId
-      } else if (!isFirstPrompt) {
-        options.continue = true
-      }
-
-      // Process is alive — use --continue for in-process continuation
+        queryIterator: { async *[Symbol.asyncIterator]() {} },
+      })
       expect(options.continue).toBe(true)
       expect(options.resume).toBeUndefined()
     })
@@ -693,7 +611,6 @@ describe('ClaudeCodeAdapter task_progress handling', () => {
     const partContentLengths = new Map<string, string>()
     const parts = await adapter.pollMessages('s1', new Set(), seenPartIds, partContentLengths, {} as any)
 
-    // Should have 2 parts: started + progress update
     expect(parts).toHaveLength(2)
 
     const progressPart = parts[1]
@@ -768,7 +685,6 @@ describe('ClaudeCodeAdapter task_progress handling', () => {
   })
 
   it('handles tool_progress by updating existing tool part', async () => {
-    // First emit a tool_use for the tool
     const toolUseMsg = {
       type: 'assistant',
       uuid: 'msg-1',
@@ -807,11 +723,9 @@ describe('ClaudeCodeAdapter task_progress handling', () => {
 
 describe('ClaudeCodeAdapter loadSessionHistory stable IDs (regression)', () => {
   it('convertSDKMessageToParts generates stable IDs using message.id (not streaming UUID)', () => {
-    const adapter = new ClaudeCodeAdapter()
     const seenPartIds = new Set<string>()
     const partContentLengths = new Map<string, string>()
 
-    // Simulate an assistant message with stable API message ID
     const chunk = {
       type: 'assistant',
       uuid: 'streaming-uuid-123', // unstable streaming UUID
@@ -824,7 +738,7 @@ describe('ClaudeCodeAdapter loadSessionHistory stable IDs (regression)', () => {
       }
     }
 
-    const parts = (adapter as any).convertSDKMessageToParts(chunk, seenPartIds, partContentLengths)
+    const parts = convertParts(chunk, seenPartIds, partContentLengths)
 
     // Text part ID should use stable message ID: `${stableId}-text-${blockIdx}`
     const textPart = parts.find((p: any) => p.type === 'text')
@@ -838,7 +752,6 @@ describe('ClaudeCodeAdapter loadSessionHistory stable IDs (regression)', () => {
   })
 
   it('emits update for streaming text parts with grown content', () => {
-    const adapter = new ClaudeCodeAdapter()
     const seenPartIds = new Set<string>()
     const partContentLengths = new Map<string, string>()
 
@@ -848,7 +761,7 @@ describe('ClaudeCodeAdapter loadSessionHistory stable IDs (regression)', () => {
       uuid: 'uuid-1',
       message: { id: 'msg_01DEF', content: [{ type: 'text', text: '' }] }
     }
-    const parts1 = (adapter as any).convertSDKMessageToParts(chunk1, seenPartIds, partContentLengths)
+    const parts1 = convertParts(chunk1, seenPartIds, partContentLengths)
     expect(parts1).toHaveLength(1)
     expect(parts1[0].text).toBe('')
 
@@ -858,14 +771,13 @@ describe('ClaudeCodeAdapter loadSessionHistory stable IDs (regression)', () => {
       uuid: 'uuid-2', // different UUID but same message.id
       message: { id: 'msg_01DEF', content: [{ type: 'text', text: 'Full response text' }] }
     }
-    const parts2 = (adapter as any).convertSDKMessageToParts(chunk2, seenPartIds, partContentLengths)
+    const parts2 = convertParts(chunk2, seenPartIds, partContentLengths)
     expect(parts2).toHaveLength(1)
     expect(parts2[0].update).toBe(true)
     expect(parts2[0].text).toBe('Full response text')
   })
 
   it('converts assistant thinking content blocks to reasoning parts', () => {
-    const adapter = new ClaudeCodeAdapter()
     const seenPartIds = new Set<string>()
     const partContentLengths = new Map<string, string>()
 
@@ -881,7 +793,7 @@ describe('ClaudeCodeAdapter loadSessionHistory stable IDs (regression)', () => {
       }
     }
 
-    const parts = (adapter as any).convertSDKMessageToParts(msg, seenPartIds, partContentLengths)
+    const parts = convertParts(msg, seenPartIds, partContentLengths)
     const thinkingPart = parts.find((p: any) => p.type === MessagePartType.REASONING)
 
     expect(thinkingPart).toBeDefined()
@@ -891,7 +803,6 @@ describe('ClaudeCodeAdapter loadSessionHistory stable IDs (regression)', () => {
   })
 
   it('surfaces non-error result text when no assistant text was emitted', () => {
-    const adapter = new ClaudeCodeAdapter()
     const seenPartIds = new Set<string>()
     const partContentLengths = new Map<string, string>()
 
@@ -902,7 +813,7 @@ describe('ClaudeCodeAdapter loadSessionHistory stable IDs (regression)', () => {
       result: 'Final answer from the agent'
     }
 
-    const parts = (adapter as any).convertSDKMessageToParts(resultMsg, seenPartIds, partContentLengths)
+    const parts = convertParts(resultMsg, seenPartIds, partContentLengths)
     expect(parts).toHaveLength(1)
     expect(parts[0].text).toBe('Final answer from the agent')
   })
@@ -988,7 +899,7 @@ describe('ClaudeCodeAdapter background subagent lifecycle', () => {
     const { adapter, session } = runStream([taskStarted('t1'), resultMsg('r1')])
 
     // Stop before the stream ends so we observe mid-flight state.
-    await (adapter as any).trackBackgroundTask('s1', session, taskStarted('t1'))
+    trackBackgroundTask('s1', session.backgroundTasks, taskStarted('t1'))
     session.sawResult = true
     ;(adapter as any).settleTurnIfComplete('s1', session)
 
@@ -1013,17 +924,17 @@ describe('ClaudeCodeAdapter background subagent lifecycle', () => {
     const release = vi.fn()
     session.releasePrompt = release
 
-    ;(adapter as any).trackBackgroundTask('s1', session, taskStarted('t1'))
-    ;(adapter as any).trackBackgroundTask('s1', session, taskStarted('t2', 'local_bash'))
+    trackBackgroundTask('s1', session.backgroundTasks, taskStarted('t1'))
+    trackBackgroundTask('s1', session.backgroundTasks, taskStarted('t2', 'local_bash'))
     session.sawResult = true
     ;(adapter as any).settleTurnIfComplete('s1', session)
     expect(session.status).toBe('busy')
 
-    ;(adapter as any).trackBackgroundTask('s1', session, taskNotification('t1', 'completed'))
+    trackBackgroundTask('s1', session.backgroundTasks, taskNotification('t1', 'completed'))
     ;(adapter as any).settleTurnIfComplete('s1', session)
     expect(session.status).toBe('busy')
 
-    ;(adapter as any).trackBackgroundTask('s1', session, taskNotification('t2', 'stopped'))
+    trackBackgroundTask('s1', session.backgroundTasks, taskNotification('t2', 'stopped'))
     ;(adapter as any).settleTurnIfComplete('s1', session)
     expect(session.backgroundTasks.size).toBe(0)
     expect(session.status).toBe('idle')
@@ -1033,11 +944,11 @@ describe('ClaudeCodeAdapter background subagent lifecycle', () => {
   })
 
   it('clears a background task from task_updated with a terminal patch status (killed)', async () => {
-    const { adapter, session } = runStream([])
-    ;(adapter as any).trackBackgroundTask('s1', session, taskStarted('t1'))
+    const { session } = runStream([])
+    trackBackgroundTask('s1', session.backgroundTasks, taskStarted('t1'))
     expect(session.backgroundTasks.size).toBe(1)
 
-    ;(adapter as any).trackBackgroundTask('s1', session, {
+    trackBackgroundTask('s1', session.backgroundTasks, {
       type: 'system', subtype: ClaudeSystemSubtype.TASK_UPDATED,
       task_id: 't1', patch: { status: 'killed' }, uuid: 'u-upd',
     })
@@ -1045,9 +956,9 @@ describe('ClaudeCodeAdapter background subagent lifecycle', () => {
   })
 
   it('ignores non-terminal task_updated patches', async () => {
-    const { adapter, session } = runStream([])
-    ;(adapter as any).trackBackgroundTask('s1', session, taskStarted('t1'))
-    ;(adapter as any).trackBackgroundTask('s1', session, {
+    const { session } = runStream([])
+    trackBackgroundTask('s1', session.backgroundTasks, taskStarted('t1'))
+    trackBackgroundTask('s1', session.backgroundTasks, {
       type: 'system', subtype: ClaudeSystemSubtype.TASK_UPDATED,
       task_id: 't1', patch: { status: 'running' }, uuid: 'u-upd2',
     })
@@ -1069,8 +980,8 @@ describe('ClaudeCodeAdapter background subagent lifecycle', () => {
 
   it('exposes in-flight background tasks as delegation tools so watchdogs stand down', async () => {
     const { adapter, session } = runStream([])
-    ;(adapter as any).trackBackgroundTask('s1', session, taskStarted('t1'))
-    ;(adapter as any).trackBackgroundTask('s1', session, taskStarted('t2', 'local_bash'))
+    trackBackgroundTask('s1', session.backgroundTasks, taskStarted('t1'))
+    trackBackgroundTask('s1', session.backgroundTasks, taskStarted('t2', 'local_bash'))
 
     const tools = await adapter.getRunningTools('s1', {} as any)
     expect(tools).toHaveLength(2)
@@ -1156,8 +1067,7 @@ describe('ClaudeCodeAdapter background task safety cap', () => {
  */
 describe('ClaudeCodeAdapter background-task system messages', () => {
   it('does not render task_updated as a transcript text bubble', () => {
-    const adapter = new ClaudeCodeAdapter()
-    const parts = (adapter as any).convertSDKMessageToParts(
+    const parts = convertParts(
       { type: 'system', subtype: ClaudeSystemSubtype.TASK_UPDATED, task_id: 't1',
         patch: { status: 'completed' }, uuid: 'u1' },
       new Set<string>(), new Map<string, string>()
@@ -1166,8 +1076,7 @@ describe('ClaudeCodeAdapter background-task system messages', () => {
   })
 
   it('does not render background_tasks_changed as a transcript text bubble', () => {
-    const adapter = new ClaudeCodeAdapter()
-    const parts = (adapter as any).convertSDKMessageToParts(
+    const parts = convertParts(
       { type: 'system', subtype: ClaudeSystemSubtype.BACKGROUND_TASKS_CHANGED,
         tasks: [{ task_id: 't1', task_type: 'local_agent' }], uuid: 'u2' },
       new Set<string>(), new Map<string, string>()
@@ -1176,8 +1085,7 @@ describe('ClaudeCodeAdapter background-task system messages', () => {
   })
 
   it('still renders genuinely unknown system subtypes so nothing is silently swallowed', () => {
-    const adapter = new ClaudeCodeAdapter()
-    const parts = (adapter as any).convertSDKMessageToParts(
+    const parts = convertParts(
       { type: 'system', subtype: 'some_future_subtype', uuid: 'u3' },
       new Set<string>(), new Map<string, string>()
     )
@@ -1186,10 +1094,9 @@ describe('ClaudeCodeAdapter background-task system messages', () => {
   })
 
   it('rebuilds the in-flight set from background_tasks_changed when the SDK passes it through', () => {
-    const adapter = new ClaudeCodeAdapter()
     const session: any = { backgroundTasks: new Map(), sawResult: false, releasePrompt: null, pendingApprovals: [], status: 'busy' }
 
-    ;(adapter as any).trackBackgroundTask('s1', session, {
+    trackBackgroundTask('s1', session.backgroundTasks, {
       type: 'system', subtype: ClaudeSystemSubtype.BACKGROUND_TASKS_CHANGED,
       tasks: [{ task_id: 'a', task_type: 'local_agent' }, { task_id: 'b', task_type: 'local_bash' }],
     })
@@ -1198,14 +1105,14 @@ describe('ClaudeCodeAdapter background-task system messages', () => {
     const startedAtA = session.backgroundTasks.get('a').startedAt
 
     // A later snapshot with 'a' drained must shrink the set...
-    ;(adapter as any).trackBackgroundTask('s1', session, {
+    trackBackgroundTask('s1', session.backgroundTasks, {
       type: 'system', subtype: ClaudeSystemSubtype.BACKGROUND_TASKS_CHANGED,
       tasks: [{ task_id: 'b', task_type: 'local_bash' }],
     })
     expect([...session.backgroundTasks.keys()]).toEqual(['b'])
 
     // ...and an empty snapshot drains it entirely.
-    ;(adapter as any).trackBackgroundTask('s1', session, {
+    trackBackgroundTask('s1', session.backgroundTasks, {
       type: 'system', subtype: ClaudeSystemSubtype.BACKGROUND_TASKS_CHANGED, tasks: [],
     })
     expect(session.backgroundTasks.size).toBe(0)
@@ -1213,14 +1120,13 @@ describe('ClaudeCodeAdapter background-task system messages', () => {
   })
 
   it('preserves startedAt across background_tasks_changed snapshots so the staleness cap stays meaningful', () => {
-    const adapter = new ClaudeCodeAdapter()
     const oldStart = Date.now() - 120_000
     const session: any = {
       backgroundTasks: new Map([['a', { taskId: 'a', taskType: 'local_agent', startedAt: oldStart }]]),
       sawResult: false, releasePrompt: null, pendingApprovals: [], status: 'busy',
     }
 
-    ;(adapter as any).trackBackgroundTask('s1', session, {
+    trackBackgroundTask('s1', session.backgroundTasks, {
       type: 'system', subtype: ClaudeSystemSubtype.BACKGROUND_TASKS_CHANGED,
       tasks: [{ task_id: 'a', task_type: 'local_agent' }],
     })
@@ -1331,7 +1237,7 @@ describe('sendPrompt permission mode', () => {
     }))
 
     const adapter = new ClaudeCodeAdapter()
-    await (adapter as any).ensureSDKLoaded()
+    await adapter.initialize()
 
     const session: any = {
       sessionId: '',
@@ -1547,7 +1453,7 @@ describe('ClaudeCodeAdapter MCP isolation and tool limits', () => {
   }
 
   it('passes strictMcpConfig so an on-disk .mcp.json cannot add a server', () => {
-    const options = (new ClaudeCodeAdapter() as any).buildIsolationOptions(config({
+    const options = buildIsolationOptions(config({
       chat: { type: 'http', url: 'https://chat.example/mcp', headers: {} },
     }))
     expect(options.strictMcpConfig).toBe(true)
@@ -1556,24 +1462,23 @@ describe('ClaudeCodeAdapter MCP isolation and tool limits', () => {
   })
 
   it('turns a per-agent tool limit into disallowedTools', () => {
-    const options = (new ClaudeCodeAdapter() as any).buildIsolationOptions(config({ chat: limitedChat }))
+    const options = buildIsolationOptions(config({ chat: limitedChat }))
     expect(options.disallowedTools).toEqual(['mcp__chat__delete_channel'])
   })
 
   it('normalizes server names in disallowedTools the way Claude Code does', () => {
-    const options = (new ClaudeCodeAdapter() as any).buildIsolationOptions(config({ 'Team Chat': limitedChat }))
+    const options = buildIsolationOptions(config({ 'Team Chat': limitedChat }))
     expect(options.disallowedTools).toEqual(['mcp__Team_Chat__delete_channel'])
   })
 
   it('sends NO disallowedTools and no hook for an unrestricted server', () => {
-    const adapter = new ClaudeCodeAdapter() as any
     const unrestricted = config({ chat: { type: 'http', url: 'https://chat.example/mcp', headers: {} } })
-    expect(adapter.buildIsolationOptions(unrestricted).disallowedTools).toBeUndefined()
-    expect(adapter.buildMcpToolLimitHooks(unrestricted)).toBeUndefined()
+    expect(buildIsolationOptions(unrestricted).disallowedTools).toBeUndefined()
+    expect(buildMcpToolLimitHooks(unrestricted)).toBeUndefined()
   })
 
   it('blocks tools outside the limit with a hook, including ones added after the limit was saved', async () => {
-    const hooks = (new ClaudeCodeAdapter() as any).buildMcpToolLimitHooks(config({ chat: limitedChat }))
+    const hooks = buildMcpToolLimitHooks(config({ chat: limitedChat }))
 
     expect(await runHook(hooks, 'mcp__chat__send_message')).toEqual({})
     expect((await runHook(hooks, 'mcp__chat__delete_channel')).hookSpecificOutput.permissionDecision).toBe('deny')
@@ -1592,7 +1497,7 @@ describe('ClaudeCodeAdapter MCP isolation and tool limits', () => {
       },
     }))
     const adapter = new ClaudeCodeAdapter() as any
-    await adapter.ensureSDKLoaded()
+    await adapter.initialize()
     adapter.claudeExecutablePath = '/usr/local/bin/claude'
     const cfg = config({ chat: limitedChat }, { secretEnvVars: { TOKEN: 'x' } })
     const session: any = {
@@ -1615,7 +1520,7 @@ describe('ClaudeCodeAdapter MCP isolation and tool limits', () => {
   })
 
   it('strips 21x bookkeeping fields before handing servers to the SDK', () => {
-    const cleaned = (new ClaudeCodeAdapter() as any).buildClaudeMcpServers(config({ chat: limitedChat }))
+    const cleaned: any = buildClaudeMcpServers(config({ chat: limitedChat }))
     expect(cleaned.chat.enabledTools).toBeUndefined()
     expect(cleaned.chat.knownTools).toBeUndefined()
     expect(cleaned.chat.url).toBe('https://chat.example/mcp')

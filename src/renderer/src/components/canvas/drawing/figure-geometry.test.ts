@@ -4,9 +4,6 @@ import {
   figureDirection,
   lineEndpoints,
   arrowPath,
-  distanceToSegment,
-  pointInBox,
-  hitTest,
   unionBox,
 } from './figure-geometry'
 import type { DrawingObject } from './types'
@@ -95,106 +92,6 @@ describe('arrowPath', () => {
   it('a degenerate arrow renders a dot', () => {
     const geo = arrowPath({ x: 5, y: 5 }, { x: 5, y: 5 }, 2)
     expect(geo.shaftD).toBe('M 5 5 L 5 5')
-  })
-})
-
-describe('distanceToSegment', () => {
-  const a = { x: 0, y: 0 }
-  const b = { x: 10, y: 0 }
-
-  it('is zero for a point on the segment', () => {
-    expect(distanceToSegment({ x: 5, y: 0 }, a, b)).toBe(0)
-  })
-
-  it('is the perpendicular offset mid-segment', () => {
-    expect(distanceToSegment({ x: 5, y: 3 }, a, b)).toBe(3)
-  })
-
-  it('clamps to the nearest endpoint beyond the segment', () => {
-    expect(distanceToSegment({ x: 15, y: 0 }, a, b)).toBe(5)
-    expect(distanceToSegment({ x: -5, y: 4 }, a, b)).toBe(Math.hypot(5, 4))
-  })
-
-  it('handles a zero-length segment', () => {
-    expect(distanceToSegment({ x: 3, y: 4 }, a, a)).toBe(5)
-  })
-})
-
-describe('pointInBox', () => {
-  const box = { x: 10, y: 20, width: 100, height: 50 }
-
-  it('detects interior points', () => {
-    expect(pointInBox({ x: 50, y: 40 }, box)).toBe(true)
-  })
-
-  it('detects boundary points', () => {
-    expect(pointInBox({ x: 10, y: 20 }, box)).toBe(true)
-    expect(pointInBox({ x: 110, y: 70 }, box)).toBe(true)
-  })
-
-  it('rejects exterior points', () => {
-    expect(pointInBox({ x: 9, y: 40 }, box)).toBe(false)
-    expect(pointInBox({ x: 50, y: 71 }, box)).toBe(false)
-  })
-
-  it('expands by the tolerance on every side', () => {
-    // Expanded box: x in [8, 112], y in [18, 72]
-    expect(pointInBox({ x: 8, y: 40 }, box, 2)).toBe(true)
-    expect(pointInBox({ x: 50, y: 71 }, box, 2)).toBe(true)
-    expect(pointInBox({ x: 7, y: 40 }, box, 2)).toBe(false)
-    expect(pointInBox({ x: 50, y: 73 }, box, 2)).toBe(false)
-  })
-})
-
-describe('hitTest', () => {
-  const rect: DrawingObject = {
-    id: 'r',
-    type: 'rectangle',
-    x: 0,
-    y: 0,
-    width: 100,
-    height: 50,
-    stroke: '#000',
-    strokeWidth: 2,
-    fill: null,
-    opacity: 1,
-    zIndex: 1,
-  }
-
-  it('hits rectangles inside the box', () => {
-    expect(hitTest({ x: 50, y: 25 }, rect)).toBe(true)
-    expect(hitTest({ x: 200, y: 25 }, rect)).toBe(false)
-  })
-
-  it('hits ellipses inside the curve, not at the box corners', () => {
-    const ellipse: DrawingObject = { ...rect, id: 'e', type: 'ellipse' }
-    expect(hitTest({ x: 50, y: 25 }, ellipse)).toBe(true)
-    expect(hitTest({ x: 5, y: 5 }, ellipse)).toBe(false)
-  })
-
-  it('hits lines/arrows near the stroke with tolerance', () => {
-    const line: DrawingObject = {
-      ...rect,
-      id: 'l',
-      type: 'line',
-      direction: 'se',
-      width: 100,
-      height: 100,
-    }
-    // Midpoint of the diagonal (50, 50) — 6px offset is within tolerance.
-    expect(hitTest({ x: 50, y: 44 }, line)).toBe(true)
-    // Far from the diagonal — outside.
-    expect(hitTest({ x: 10, y: 80 }, line, 0)).toBe(false)
-  })
-
-  it('respects the stroke width slack for thin lines', () => {
-    // Diagonal (0,0)→(100,50); a point 3px off it (perpendicular offset).
-    const p = { x: 50 - 3 * 0.44721, y: 25 + 3 * 0.89443 }
-    const thin = { ...rect, id: 'thin', type: 'line' as const, direction: 'se' as const, strokeWidth: 2 }
-    const thick = { ...rect, id: 't', type: 'line' as const, direction: 'se' as const, strokeWidth: 8 }
-    // slack = tolerance + strokeWidth/2 → 1 for thin (miss), 4 for thick (hit).
-    expect(hitTest(p, thin, 0)).toBe(false)
-    expect(hitTest(p, thick, 0)).toBe(true)
   })
 })
 

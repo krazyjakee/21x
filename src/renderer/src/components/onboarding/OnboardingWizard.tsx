@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import {
   Check,
   Loader2,
@@ -240,13 +241,12 @@ async function getDefaultModel(type: CodingAgentType): Promise<string> {
     if (result?.providers) {
       const providers = Array.isArray(result.providers) ? result.providers : []
 
-      // 1. Prefer the first free model from any provider
+      // Prefer a free model; otherwise the first model any provider offers.
       for (const p of providers) {
         const free = pickFreeModel(p.id, p.models)
         if (free) return free
       }
 
-      // 2. Fall back to first model from first provider
       for (const p of providers) {
         const first = pickFirstModel(p.id, p.models)
         if (first) return first
@@ -387,8 +387,11 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
   const [installing, setInstalling] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const { fetchAgents, agents, createAgent, updateAgent } = useAgentStore()
-  const { fetchSettings, setGitProvider } = useSettingsStore()
+  const { fetchAgents, agents, createAgent, updateAgent } = useAgentStore(
+    useShallow((s) => ({ fetchAgents: s.fetchAgents, agents: s.agents, createAgent: s.createAgent, updateAgent: s.updateAgent }))
+  )
+  const fetchSettings = useSettingsStore((s) => s.fetchSettings)
+  const setGitProvider = useSettingsStore((s) => s.setGitProvider)
 
   /** Re-probe every backend; reflects installs/removals since the last run. */
   const runDetection = useCallback(async () => {
@@ -404,29 +407,24 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
     }
   }, [])
 
-  // Initialize state on open
   useEffect(() => {
     if (!open) return
     setError(null)
 
     Promise.all([fetchAgents(), fetchSettings()]).then(() => {
-      // Restore an explicit default backend if one is already configured
       const existing = useAgentStore.getState().agents.find(
         (a) => a.is_default && a.config.coding_agent
       )
       if (existing?.config.coding_agent) {
         setPreferredBackend(existing.config.coding_agent as CodingAgentType)
       }
-      // Restore git provider choice
       const gp = useSettingsStore.getState().gitProvider
       if (gp) setProviderChoice(gp)
     })
 
-    // Detect tools in background
     void runDetection()
   }, [open, fetchAgents, fetchSettings, runDetection])
 
-  // Listen for install progress events
   useEffect(() => {
     if (!open) return
     const cleanup = window.electronAPI.agentInstaller.onProgress(
@@ -550,7 +548,7 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
         </DialogHeader>
 
         <DialogBody className="space-y-5">
-          {/* ── Installed backends ── */}
+          {/* Installed backends */}
           <div>
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs text-muted-foreground">
@@ -654,7 +652,7 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
             </div>
           </div>
 
-          {/* ── Availability summary / install-later notice ── */}
+          {/* Availability summary / install-later notice */}
           {toolStatus && (
             availableBackends.length > 0 ? (
               <p className="text-xs text-muted-foreground" data-testid="backend-summary">
@@ -675,24 +673,23 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
             )
           )}
 
-          {/* ── Default backend (separate from discovery, optional) ── */}
+          {/* Default backend (separate from discovery, optional) */}
           <DefaultBackendRow
             toolStatus={toolStatus}
             preferred={preferredBackend}
             onSelect={setPreferredBackend}
           />
 
-          {/* ── Git provider (optional) ── */}
+          {/* Git provider (optional) */}
           <GitProviderRow
             selected={providerChoice}
             onSelect={handleProviderSelect}
             toolStatus={toolStatus}
           />
 
-          {/* ── Voice control (optional extra download) ── */}
+          {/* Voice control (optional extra download) */}
           <VoiceRuntimeRow variant="compact" />
 
-          {/* ── Error ── */}
           {error && (
             <p className="text-xs text-destructive flex items-center gap-1.5">
               <AlertTriangle className="size-3.5 shrink-0" />
@@ -700,7 +697,6 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
             </p>
           )}
 
-          {/* ── Actions ── */}
           <div className="flex items-center gap-3">
             <Button
               onClick={handleStart}

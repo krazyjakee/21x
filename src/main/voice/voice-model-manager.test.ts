@@ -9,7 +9,6 @@ import {
   PARAKEET_V3_MODEL_ID,
   VOICE_MODEL_MANIFEST,
   isManifestVerified,
-  offeredManifestEntries,
 } from './voice-model-manifest'
 import type { VoiceModelManifestEntry, VoiceModelState } from '../../shared/voice'
 
@@ -377,7 +376,7 @@ describe('the shipped catalogue', () => {
   it('offers Parakeet v3 as the default, and nothing else', () => {
     expect(DEFAULT_VOICE_MODEL_ID).toBe(PARAKEET_V3_MODEL_ID)
     expect(VOICE_MODEL_MANIFEST[0].id).toBe(PARAKEET_V3_MODEL_ID)
-    expect(offeredManifestEntries().map((entry) => entry.id)).toEqual([PARAKEET_V3_MODEL_ID])
+    expect(VOICE_MODEL_MANIFEST.filter((entry) => !entry.legacy).map((entry) => entry.id)).toEqual([PARAKEET_V3_MODEL_ID])
     for (const entry of VOICE_MODEL_MANIFEST) {
       expect(isManifestVerified(entry), `${entry.id} has no checksum`).toBe(true)
       expect(entry.description.length).toBeGreaterThan(10)

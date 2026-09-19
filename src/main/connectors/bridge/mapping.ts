@@ -31,12 +31,8 @@ export const BRIDGE_MAX_DESCRIPTION_CHARS = 64 * 1024
 export const BRIDGE_MAX_LABELS = 20
 export const BRIDGE_MAX_LABEL_CHARS = 64
 export const BRIDGE_MAX_URL_CHARS = 2048
-/**
- * Attachments are out of scope (#13): mappings cannot name an attachment
- * field, so nothing is downloaded. The cap is kept explicit so a future typed
- * attachment contract starts from zero rather than unlimited.
- */
-export const BRIDGE_MAX_ATTACHMENT_BYTES = 0
+// Attachments are out of scope (#13): mappings cannot name an attachment
+// field, so nothing is downloaded.
 
 // ── Mapping types ─────────────────────────────────────────────
 
@@ -274,9 +270,7 @@ export type MapItemResult =
   | { ok: true; item: MappedItem }
   | { ok: false; externalId: string | null; error: string }
 
-// eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g
-// eslint-disable-next-line no-control-regex
 const HAS_CONTROL_CHARS = /[\u0000-\u001F\u007F]/
 
 function cleanText(value: string, creds: ConnectorCredentials | null): string {

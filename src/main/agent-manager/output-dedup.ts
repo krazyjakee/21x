@@ -1,3 +1,4 @@
+import { createHash } from 'crypto'
 import { MessagePartType, MessageRole, type SessionMessage } from '../adapters/coding-agent-adapter'
 
 // Dedup structures (seenMessageIds, seenPartIds, partContentLengths) grow by
@@ -31,14 +32,12 @@ function deleteOldest<T>(items: Set<T> | Map<T, unknown>, count: number): void {
  * go first. partContentLengths is also pruned by 50% once its values exceed
  * MAX_VALUE_CHARS_PER_SESSION (10% barely freed memory with large tool outputs).
  */
-export function pruneDedup(
-  seenMessageIds: Set<string>,
-  seenPartIds: Set<string>,
-  partContentLengths: Map<string, string>
-): void {
+export function pruneDedup(state: Omit<DedupState, 'assistantTextKeys'> & { assistantTextKeys?: Set<string> }): void {
+  const { seenMessageIds, seenPartIds, partContentLengths, assistantTextKeys } = state
   const pruneToSize = Math.floor(MAX_DEDUP_ENTRIES / 2)
-  if (seenMessageIds.size > MAX_DEDUP_ENTRIES) deleteOldest(seenMessageIds, seenMessageIds.size - pruneToSize)
-  if (seenPartIds.size > MAX_DEDUP_ENTRIES) deleteOldest(seenPartIds, seenPartIds.size - pruneToSize)
+  for (const ids of [seenMessageIds, seenPartIds, assistantTextKeys]) {
+    if (ids && ids.size > MAX_DEDUP_ENTRIES) deleteOldest(ids, ids.size - pruneToSize)
+  }
 
   let totalChars = 0
   for (const val of partContentLengths.values()) totalChars += val.length
@@ -52,7 +51,9 @@ export function pruneDedup(
 /**
  * Content key for assistant text/reasoning parts long enough to dedupe safely.
  * Codex reports a message's live delta and its finalized item under different
- * part ids (#427); the key lets the second copy be recognised.
+ * part ids (#427); the key lets the second copy be recognised. A digest, not
+ * the text: a streamed part adds a key per growth step, and storing each
+ * step's full text grew quadratically with the message length.
  */
 export function assistantTextKey(
   role: string | undefined,
@@ -67,7 +68,8 @@ export function assistantTextKey(
     return null
   }
   const normalized = (content || '').replace(/\s+/g, ' ').trim()
-  return normalized.length >= MIN_ASSISTANT_REPLAY_DEDUPE_CHARS ? normalized : null
+  if (normalized.length < MIN_ASSISTANT_REPLAY_DEDUPE_CHARS) return null
+  return createHash('sha1').update(normalized).digest('base64')
 }
 
 function normalizeErrorText(value?: string): string {

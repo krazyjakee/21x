@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getRepoProviders, recordRepoProviders, resolveRepoProvider, REPO_PROVIDERS_SETTING } from './repo-providers'
+import { getRepoProviders, recordRepoProviders, REPO_PROVIDERS_SETTING } from './repo-providers'
 
 function memoryDb(initial: Record<string, string> = {}) {
   const store = { ...initial }
@@ -11,17 +11,9 @@ function memoryDb(initial: Record<string, string> = {}) {
 }
 
 describe('repo-providers', () => {
-  it('falls back to the configured provider, then GitHub', () => {
-    expect(resolveRepoProvider(memoryDb(), 'a/b')).toBe('github')
-    expect(resolveRepoProvider(memoryDb({ git_provider: 'gitlab' }), 'a/b')).toBe('gitlab')
-    expect(resolveRepoProvider(memoryDb({ git_provider: '' }), 'a/b')).toBe('github')
-  })
-
-  it('prefers the provider recorded when the repo was attached', () => {
-    const db = memoryDb({ git_provider: 'github' })
+  it('records the provider each repo was attached from', () => {
+    const db = memoryDb()
     recordRepoProviders(db, ['team/app', 'team/lib'], 'forgejo')
-    expect(resolveRepoProvider(db, 'team/app')).toBe('forgejo')
-    expect(resolveRepoProvider(db, 'other/repo')).toBe('github')
     expect(getRepoProviders(db)).toEqual({ 'team/app': 'forgejo', 'team/lib': 'forgejo' })
   })
 

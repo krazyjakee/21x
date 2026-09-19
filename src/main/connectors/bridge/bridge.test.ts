@@ -200,8 +200,6 @@ beforeEach(() => {
   }
 })
 
-// ── Mapping ─────────────────────────────────────────────────────
-
 describe('mapping validation', () => {
   it('accepts the bundled mappings against the real allowlist', () => {
     for (const mapping of Object.values(CONNECTOR_TASK_MAPPINGS)) {
@@ -267,8 +265,6 @@ describe('retry classification', () => {
     expect(backoffDelayMs(1, RETRY, 5000)).toBe(5000)
   })
 })
-
-// ── Import ──────────────────────────────────────────────────────
 
 describe('import', () => {
   it('upserts idempotently by stable external id', async () => {
@@ -372,8 +368,6 @@ describe('import', () => {
   })
 })
 
-// ── Retries ─────────────────────────────────────────────────────
-
 describe('retries', () => {
   it('backs off on 429, honouring Retry-After even for manual syncs', async () => {
     handlers['action:list_items'] = () => {
@@ -445,8 +439,6 @@ describe('retries', () => {
   })
 })
 
-// ── Redaction ───────────────────────────────────────────────────
-
 describe('credential redaction', () => {
   it('keeps credentials out of errors, sync state, tasks and dead letters', async () => {
     remote = [
@@ -472,8 +464,6 @@ describe('credential redaction', () => {
     log.mockRestore()
   })
 })
-
-// ── Round trip ──────────────────────────────────────────────────
 
 describe('round trip', () => {
   it('completes an item at the source through the allowlisted update action', async () => {
@@ -524,8 +514,6 @@ describe('round trip', () => {
     expect(readCursor(store.getSyncState(instanceId)?.cursor).pending).toEqual({})
   })
 })
-
-// ── Scheduler ───────────────────────────────────────────────────
 
 describe('scheduler', () => {
   it('polls on the configured interval and skips manual-only sources', async () => {

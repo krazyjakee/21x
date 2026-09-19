@@ -5,6 +5,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { CodexAppServerAdapter } from './codex-app-server-adapter'
+import { buildConfigOverrides } from './codex-app-server-config'
+import { convertEventToMessageParts } from './codex-app-server-items'
 import { MessagePartType, MessageRole, SessionStatusType } from './coding-agent-adapter'
 
 vi.mock('child_process', () => ({
@@ -16,20 +18,6 @@ interface AppServerAdapterPrivate {
   sessions: Map<string, AppServerSessionForTest>
   liveSessions: Set<AppServerSessionForTest>
   handleRpcMessage(session: AppServerSessionForTest, message: unknown): void
-  convertEventToMessageParts(
-    event: unknown,
-    seenMessageIds: Set<string>,
-    seenPartIds: Set<string>,
-    partContentLengths: Map<string, string>,
-    session: AppServerSessionForTest
-  ): Array<{
-    id?: string
-    type: MessagePartType
-    text?: string
-    role?: string
-    update?: boolean
-    tool?: { name: string; status?: string; input?: unknown; output?: unknown }
-  }>
   buildEnvironment(config: {
     authMethod?: 'subscription' | 'api_key'
     apiKeys?: { openai?: string }
@@ -39,20 +27,6 @@ interface AppServerAdapterPrivate {
     usesApiKey: boolean
     summary: string
   }
-  buildConfigOverrides(config: {
-    workspaceDir: string
-    reasoningEffort?: string
-    sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access'
-    mcpServers?: Record<string, {
-      type: 'stdio' | 'http' | 'sse'
-      command?: string
-      args?: string[]
-      env?: Record<string, string>
-      url?: string
-      headers?: Record<string, string>
-    }>
-  }): Record<string, unknown>
-  buildRuntimeWorkspaceRoots(workspaceDir: string): string[]
   bufferAllThreadItems(session: AppServerSessionForTest, threadId: string): Promise<void>
   sendRpcRequest(session: AppServerSessionForTest, method: string, params?: unknown): Promise<unknown>
   startAppServerProcess(config: unknown, sessionId: string): Promise<AppServerSessionForTest>
@@ -96,8 +70,6 @@ interface AppServerSessionForTest {
     lastActivityMonotonicTime?: number
     input?: Record<string, unknown>
   }>
-  codexUseApiKey: boolean
-  codexAuthSummary: string
   terminated?: boolean
 }
 
@@ -127,8 +99,6 @@ function createSession(): AppServerSessionForTest {
     streamedTextByItemId: new Map(),
     assistantTextKeysByTurn: new Map(),
     runningTools: new Map(),
-    codexUseApiKey: false,
-    codexAuthSummary: ''
   }
 }
 
@@ -138,21 +108,19 @@ function flushPromises(): Promise<void> {
 
 describe('CodexAppServerAdapter', () => {
   it('accumulates agent message deltas into an updating text part', () => {
-    const adapter = adapterPrivate(new CodexAppServerAdapter())
     const session = createSession()
-    const seenMessageIds = new Set<string>()
     const seenPartIds = new Set<string>()
     const lengths = new Map<string, string>()
 
-    const first = adapter.convertEventToMessageParts({
+    const first = convertEventToMessageParts({
       method: 'item/agentMessage/delta',
       params: { itemId: 'item-1', delta: 'hel', threadId: 'thread-1', turnId: 'turn-1' }
-    }, seenMessageIds, seenPartIds, lengths, session)
+    }, seenPartIds, lengths, session)
 
-    const second = adapter.convertEventToMessageParts({
+    const second = convertEventToMessageParts({
       method: 'item/agentMessage/delta',
       params: { itemId: 'item-1', delta: 'lo', threadId: 'thread-1', turnId: 'turn-1' }
-    }, seenMessageIds, seenPartIds, lengths, session)
+    }, seenPartIds, lengths, session)
 
     expect(first[0]).toMatchObject({
       id: 'agent-item-1',
@@ -171,13 +139,11 @@ describe('CodexAppServerAdapter', () => {
   })
 
   it('converts generic assistant message items into final text parts', () => {
-    const adapter = adapterPrivate(new CodexAppServerAdapter())
     const session = createSession()
-    const seenMessageIds = new Set<string>()
     const seenPartIds = new Set<string>()
     const lengths = new Map<string, string>()
 
-    const parts = adapter.convertEventToMessageParts({
+    const parts = convertEventToMessageParts({
       method: 'item/completed',
       params: {
         item: {
@@ -189,7 +155,7 @@ describe('CodexAppServerAdapter', () => {
         threadId: 'thread-1',
         turnId: 'turn-1'
       }
-    }, seenMessageIds, seenPartIds, lengths, session)
+    }, seenPartIds, lengths, session)
 
     expect(parts).toHaveLength(1)
     expect(parts[0]).toMatchObject({
@@ -202,14 +168,12 @@ describe('CodexAppServerAdapter', () => {
   })
 
   it('deduplicates identical assistant final messages from different item ids in the same turn', () => {
-    const adapter = adapterPrivate(new CodexAppServerAdapter())
     const session = createSession()
-    const seenMessageIds = new Set<string>()
     const seenPartIds = new Set<string>()
     const lengths = new Map<string, string>()
     const finalText = 'Updated and verified.\n\nLatest link:\nhttps://3050-example.runworkflo.com/?exec=abc'
 
-    const first = adapter.convertEventToMessageParts({
+    const first = convertEventToMessageParts({
       method: 'item/completed',
       params: {
         item: {
@@ -221,9 +185,9 @@ describe('CodexAppServerAdapter', () => {
         threadId: 'thread-1',
         turnId: 'turn-1'
       }
-    }, seenMessageIds, seenPartIds, lengths, session)
+    }, seenPartIds, lengths, session)
 
-    const duplicate = adapter.convertEventToMessageParts({
+    const duplicate = convertEventToMessageParts({
       method: 'item/completed',
       params: {
         item: {
@@ -235,7 +199,7 @@ describe('CodexAppServerAdapter', () => {
         threadId: 'thread-1',
         turnId: 'turn-1'
       }
-    }, seenMessageIds, seenPartIds, lengths, session)
+    }, seenPartIds, lengths, session)
 
     expect(first).toHaveLength(1)
     expect(first[0]).toMatchObject({
@@ -248,23 +212,21 @@ describe('CodexAppServerAdapter', () => {
   })
 
   it('deduplicates live assistant text when reconcile supplies the turn id later', () => {
-    const adapter = adapterPrivate(new CodexAppServerAdapter())
     const session = createSession()
-    const seenMessageIds = new Set<string>()
     const seenPartIds = new Set<string>()
     const lengths = new Map<string, string>()
     const finalText = 'The API schema confirms expense lines and the dashboard result is now documented.'
 
-    const streamed = adapter.convertEventToMessageParts({
+    const streamed = convertEventToMessageParts({
       method: 'item/agentMessage/delta',
       params: {
         threadId: 'thread-1',
         itemId: 'streamed-assistant-1',
         delta: finalText
       }
-    }, seenMessageIds, seenPartIds, lengths, session)
+    }, seenPartIds, lengths, session)
 
-    const reconciled = adapter.convertEventToMessageParts({
+    const reconciled = convertEventToMessageParts({
       method: 'item/completed',
       params: {
         threadId: 'thread-1',
@@ -276,21 +238,19 @@ describe('CodexAppServerAdapter', () => {
           phase: 'final_answer'
         }
       }
-    }, seenMessageIds, seenPartIds, lengths, session)
+    }, seenPartIds, lengths, session)
 
     expect(streamed).toHaveLength(1)
     expect(reconciled).toHaveLength(0)
   })
 
   it('deduplicates assistant text across Codex raw event and response item turn metadata shapes', () => {
-    const adapter = adapterPrivate(new CodexAppServerAdapter())
     const session = createSession()
-    const seenMessageIds = new Set<string>()
     const seenPartIds = new Set<string>()
     const lengths = new Map<string, string>()
     const finalText = 'I could not directly sample raw Mongo here, but the bill-line schema findings are documented.'
 
-    const rawAgentMessage = adapter.convertEventToMessageParts({
+    const rawAgentMessage = convertEventToMessageParts({
       method: 'item/completed',
       params: {
         threadId: 'thread-1',
@@ -302,9 +262,9 @@ describe('CodexAppServerAdapter', () => {
           phase: 'final_answer'
         }
       }
-    }, seenMessageIds, seenPartIds, lengths, session)
+    }, seenPartIds, lengths, session)
 
-    const responseItemMessage = adapter.convertEventToMessageParts({
+    const responseItemMessage = convertEventToMessageParts({
       method: 'item/completed',
       params: {
         threadId: 'thread-1',
@@ -319,20 +279,18 @@ describe('CodexAppServerAdapter', () => {
           }
         }
       }
-    }, seenMessageIds, seenPartIds, lengths, session)
+    }, seenPartIds, lengths, session)
 
     expect(rawAgentMessage).toHaveLength(1)
     expect(responseItemMessage).toHaveLength(0)
   })
 
   it('does not deduplicate short repeated assistant answers across different turns', () => {
-    const adapter = adapterPrivate(new CodexAppServerAdapter())
     const session = createSession()
-    const seenMessageIds = new Set<string>()
     const seenPartIds = new Set<string>()
     const lengths = new Map<string, string>()
 
-    const first = adapter.convertEventToMessageParts({
+    const first = convertEventToMessageParts({
       method: 'item/completed',
       params: {
         threadId: 'thread-1',
@@ -343,9 +301,9 @@ describe('CodexAppServerAdapter', () => {
           text: 'Done'
         }
       }
-    }, seenMessageIds, seenPartIds, lengths, session)
+    }, seenPartIds, lengths, session)
 
-    const second = adapter.convertEventToMessageParts({
+    const second = convertEventToMessageParts({
       method: 'item/completed',
       params: {
         threadId: 'thread-1',
@@ -356,7 +314,7 @@ describe('CodexAppServerAdapter', () => {
           text: 'Done'
         }
       }
-    }, seenMessageIds, seenPartIds, lengths, session)
+    }, seenPartIds, lengths, session)
 
     expect(first).toHaveLength(1)
     expect(second).toHaveLength(1)
@@ -673,13 +631,11 @@ describe('CodexAppServerAdapter', () => {
   })
 
   it('tracks running tool items and clears them on completion', () => {
-    const adapter = adapterPrivate(new CodexAppServerAdapter())
     const session = createSession()
-    const seenMessageIds = new Set<string>()
     const seenPartIds = new Set<string>()
     const lengths = new Map<string, string>()
 
-    const started = adapter.convertEventToMessageParts({
+    const started = convertEventToMessageParts({
       method: 'item/started',
       params: {
         startedAtMs: 123,
@@ -687,7 +643,7 @@ describe('CodexAppServerAdapter', () => {
         threadId: 'thread-1',
         turnId: 'turn-1'
       }
-    }, seenMessageIds, seenPartIds, lengths, session)
+    }, seenPartIds, lengths, session)
 
     expect(started[0]).toMatchObject({
       id: 'tool-tool-1',
@@ -702,24 +658,24 @@ describe('CodexAppServerAdapter', () => {
 
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(456)
     const monotonicSpy = vi.spyOn(performance, 'now').mockReturnValue(789)
-    adapter.convertEventToMessageParts({
+    convertEventToMessageParts({
       method: 'item/commandExecution/outputDelta',
       params: { itemId: 'tool-1', delta: 'still running\n' }
-    }, seenMessageIds, seenPartIds, lengths, session)
+    }, seenPartIds, lengths, session)
     nowSpy.mockRestore()
     monotonicSpy.mockRestore()
 
     expect(session.runningTools.get('tool-tool-1')?.lastActivityTime).toBe(456)
     expect(session.runningTools.get('tool-tool-1')?.lastActivityMonotonicTime).toBe(789)
 
-    const completed = adapter.convertEventToMessageParts({
+    const completed = convertEventToMessageParts({
       method: 'item/completed',
       params: {
         item: { id: 'tool-1', type: 'commandExecution', output: 'ok' },
         threadId: 'thread-1',
         turnId: 'turn-1'
       }
-    }, seenMessageIds, seenPartIds, lengths, session)
+    }, seenPartIds, lengths, session)
 
     expect(completed[0]).toMatchObject({
       id: 'tool-tool-1',
@@ -976,20 +932,18 @@ describe('CodexAppServerAdapter', () => {
   })
 
   it('converts command output deltas into updating tool parts', () => {
-    const adapter = adapterPrivate(new CodexAppServerAdapter())
     const session = createSession()
-    const seenMessageIds = new Set<string>()
     const seenPartIds = new Set<string>()
     const lengths = new Map<string, string>()
 
-    const first = adapter.convertEventToMessageParts({
+    const first = convertEventToMessageParts({
       method: 'item/commandExecution/outputDelta',
       params: { itemId: 'cmd-1', delta: 'line 1\n' }
-    }, seenMessageIds, seenPartIds, lengths, session)
-    const second = adapter.convertEventToMessageParts({
+    }, seenPartIds, lengths, session)
+    const second = convertEventToMessageParts({
       method: 'item/commandExecution/outputDelta',
       params: { itemId: 'cmd-1', delta: 'line 2\n' }
-    }, seenMessageIds, seenPartIds, lengths, session)
+    }, seenPartIds, lengths, session)
 
     expect(first[0]).toMatchObject({
       id: 'tool-cmd-1',
@@ -1006,13 +960,11 @@ describe('CodexAppServerAdapter', () => {
   })
 
   it('serializes and caps command tool payloads before IPC delivery', () => {
-    const adapter = adapterPrivate(new CodexAppServerAdapter())
     const session = createSession()
-    const seenMessageIds = new Set<string>()
     const seenPartIds = new Set<string>()
     const lengths = new Map<string, string>()
 
-    const parts = adapter.convertEventToMessageParts({
+    const parts = convertEventToMessageParts({
       method: 'item/completed',
       params: {
         item: {
@@ -1024,7 +976,7 @@ describe('CodexAppServerAdapter', () => {
         threadId: 'thread-1',
         turnId: 'turn-1'
       }
-    }, seenMessageIds, seenPartIds, lengths, session)
+    }, seenPartIds, lengths, session)
 
     expect(parts[0].tool?.input).toEqual(expect.any(String))
     expect(parts[0].tool?.output).toEqual(expect.any(String))
@@ -1033,13 +985,11 @@ describe('CodexAppServerAdapter', () => {
   })
 
   it('uses server and tool names for app-server MCP tool calls', () => {
-    const adapter = adapterPrivate(new CodexAppServerAdapter())
     const session = createSession()
-    const seenMessageIds = new Set<string>()
     const seenPartIds = new Set<string>()
     const lengths = new Map<string, string>()
 
-    const parts = adapter.convertEventToMessageParts({
+    const parts = convertEventToMessageParts({
       method: 'item/completed',
       params: {
         item: {
@@ -1054,7 +1004,7 @@ describe('CodexAppServerAdapter', () => {
         threadId: 'thread-1',
         turnId: 'turn-1'
       }
-    }, seenMessageIds, seenPartIds, lengths, session)
+    }, seenPartIds, lengths, session)
 
     expect(parts[0]).toMatchObject({
       id: 'tool-call-1',
@@ -1068,13 +1018,11 @@ describe('CodexAppServerAdapter', () => {
   })
 
   it('uses changed file names for app-server file change tool titles', () => {
-    const adapter = adapterPrivate(new CodexAppServerAdapter())
     const session = createSession()
-    const seenMessageIds = new Set<string>()
     const seenPartIds = new Set<string>()
     const lengths = new Map<string, string>()
 
-    const parts = adapter.convertEventToMessageParts({
+    const parts = convertEventToMessageParts({
       method: 'item/completed',
       params: {
         item: {
@@ -1089,7 +1037,7 @@ describe('CodexAppServerAdapter', () => {
         threadId: 'thread-1',
         turnId: 'turn-1'
       }
-    }, seenMessageIds, seenPartIds, lengths, session)
+    }, seenPartIds, lengths, session)
 
     expect(parts[0]).toMatchObject({
       id: 'tool-call-2',
@@ -1103,13 +1051,11 @@ describe('CodexAppServerAdapter', () => {
   })
 
   it('uses command text for app-server command execution tool titles', () => {
-    const adapter = adapterPrivate(new CodexAppServerAdapter())
     const session = createSession()
-    const seenMessageIds = new Set<string>()
     const seenPartIds = new Set<string>()
     const lengths = new Map<string, string>()
 
-    const parts = adapter.convertEventToMessageParts({
+    const parts = convertEventToMessageParts({
       method: 'item/completed',
       params: {
         item: {
@@ -1127,7 +1073,7 @@ describe('CodexAppServerAdapter', () => {
         threadId: 'thread-1',
         turnId: 'turn-1'
       }
-    }, seenMessageIds, seenPartIds, lengths, session)
+    }, seenPartIds, lengths, session)
 
     expect(parts[0]).toMatchObject({
       id: 'tool-call-3',
@@ -1141,9 +1087,9 @@ describe('CodexAppServerAdapter', () => {
   })
 
   it('converts 20x MCP configs to codex app-server config shape', () => {
-    const adapter = adapterPrivate(new CodexAppServerAdapter())
-
-    const config = adapter.buildConfigOverrides({
+    const config = buildConfigOverrides({
+      agentId: 'agent-1',
+      taskId: 'task-1',
       workspaceDir: '/tmp/workspace',
       reasoningEffort: 'high',
       sandboxMode: 'workspace-write',
@@ -1270,7 +1216,7 @@ describe('CodexAppServerAdapter app-server error notifications', () => {
     )
 
     const seenPartIds = new Set<string>()
-    const parts = adapter.convertEventToMessageParts(notification, new Set(), seenPartIds, new Map(), session)
+    const parts = convertEventToMessageParts(notification, seenPartIds, new Map(), session)
     expect(parts).toEqual([
       expect.objectContaining({
         id: 'error-turn-1',
@@ -1289,14 +1235,13 @@ describe('CodexAppServerAdapter app-server error notifications', () => {
         turn: { id: 'turn-1', status: 'failed', items: [], error: capacityError }
       }
     }
-    expect(adapter.convertEventToMessageParts(completed, new Set(), seenPartIds, new Map(), session)).toEqual([])
+    expect(convertEventToMessageParts(completed, seenPartIds, new Map(), session)).toEqual([])
   })
 
   it('describes object-shaped codexErrorInfo with its HTTP status', () => {
-    const adapter = adapterPrivate(new CodexAppServerAdapter())
     const session = createSession()
 
-    const parts = adapter.convertEventToMessageParts({
+    const parts = convertEventToMessageParts({
       method: 'error',
       params: {
         threadId: 'thread-1',
@@ -1308,7 +1253,7 @@ describe('CodexAppServerAdapter app-server error notifications', () => {
           codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 502 } }
         }
       }
-    }, new Set(), new Set(), new Map(), session)
+    }, new Set(), new Map(), session)
 
     expect(parts).toHaveLength(1)
     expect(parts[0].text).toBe(
@@ -1342,7 +1287,7 @@ describe('CodexAppServerAdapter app-server error notifications', () => {
     expect(session.status).toBe(SessionStatusType.BUSY)
     expect(session.lastError).toBeNull()
 
-    const parts = adapter.convertEventToMessageParts(notification, new Set(), new Set(), new Map(), session)
+    const parts = convertEventToMessageParts(notification, new Set(), new Map(), session)
     expect(parts).toEqual([
       expect.objectContaining({
         type: MessagePartType.RETRY,
@@ -1385,7 +1330,7 @@ describe('CodexAppServerAdapter app-server error notifications', () => {
     expect(session.lastError).toBe(
       'Selected model is at capacity. Please try a different model. (serverOverloaded)'
     )
-    expect(adapter.convertEventToMessageParts(completed, new Set(), new Set(), new Map(), session)).toEqual([
+    expect(convertEventToMessageParts(completed, new Set(), new Map(), session)).toEqual([
       expect.objectContaining({ id: 'error-turn-3', type: MessagePartType.ERROR })
     ])
   })
@@ -1405,7 +1350,7 @@ describe('CodexAppServerAdapter app-server error notifications', () => {
       }
       adapter.handleRpcMessage(session, completed)
       expect(session.lastError).toBeNull()
-      expect(adapter.convertEventToMessageParts(completed, new Set(), new Set(), new Map(), session)).toEqual([])
+      expect(convertEventToMessageParts(completed, new Set(), new Map(), session)).toEqual([])
     }
   })
 })

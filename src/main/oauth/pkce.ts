@@ -16,8 +16,3 @@ export function generatePkce(): PkcePair {
   const challenge = createHash('sha256').update(verifier).digest('base64url')
   return { verifier, challenge }
 }
-
-/** The S256 challenge for a verifier; used by fake providers in tests. */
-export function pkceChallenge(verifier: string): string {
-  return createHash('sha256').update(verifier).digest('base64url')
-}

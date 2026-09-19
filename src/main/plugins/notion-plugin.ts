@@ -32,8 +32,6 @@ import {
   type PropertyMap
 } from './notion-properties'
 
-// ── Next statuses (stored in source config) ──────────────────
-
 /**
  * The statuses a user can move a task to from 20x. The user selects these in
  * the source form from the real options of the Notion status property, because
@@ -80,8 +78,6 @@ function configuredStatuses(config: Record<string, unknown>): string[] {
   return nextStatuses
 }
 
-
-// ── Plugin ───────────────────────────────────────────────────
 
 export class NotionPlugin implements TaskSourcePlugin {
   id = 'notion'
@@ -178,7 +174,6 @@ export class NotionPlugin implements TaskSourcePlugin {
         const db = await client.getDataSource(dataSourceId)
         const result: ConfigFieldOption[] = []
 
-        // Pre-fetch users if any people property exists
         const hasPeopleProperty = Object.values(db.properties).some(
           (p) => p.type === NotionPropertyType.People
         )
@@ -270,18 +265,14 @@ export class NotionPlugin implements TaskSourcePlugin {
     const client = new NotionClient(token)
 
     try {
-      // Fetch DB schema and build property map
       const db = await client.getDataSource(dataSourceId)
       const propMap = buildPropertyMap(db)
 
-      // Build filter from config
       const notionFilter = buildNotionFilter(config.filters as NotionFilterConfig[] | undefined)
 
-      // Get last synced time for incremental sync
       const source = ctx.db.getTaskSource(sourceId)
       const lastSyncedAt = source?.last_synced_at ?? null
 
-      // Fetch pages
       const pages = await client.queryAllPages(dataSourceId, notionFilter, lastSyncedAt)
 
       for (const page of pages) {
@@ -291,7 +282,6 @@ export class NotionPlugin implements TaskSourcePlugin {
           const mapped = this.mapPage(page, propMap, config)
           if (!mapped.title) continue
 
-          // Fetch page blocks for both content rendering and file extraction
           let blocks: NotionBlock[] = []
           const parts: string[] = []
           try {
@@ -302,11 +292,9 @@ export class NotionPlugin implements TaskSourcePlugin {
             // Non-fatal: page may have no content
           }
 
-          // Append properties table
           const propsSection = formatProperties(page, propMap.title)
           if (propsSection) parts.push(propsSection)
 
-          // Append link to Notion page
           if (page.url) {
             parts.push('')
             parts.push(`🔗 [View in Notion](${page.url})`)
@@ -338,22 +326,18 @@ export class NotionPlugin implements TaskSourcePlugin {
           if (upserted.created) result.imported++
           else result.updated++
 
-          // Collect all file URLs from page properties (Files type) and content blocks
           const fileUrls: Array<{ url: string; filename: string }> = []
 
-          // 1. Extract files from Files-type properties
           for (const [, prop] of Object.entries(page.properties)) {
             if (prop.type === 'files' && prop.files && prop.files.length > 0) {
               fileUrls.push(...client.extractFilesFromProperty(prop.files))
             }
           }
 
-          // 2. Extract files from content blocks (images, files, PDFs, videos, audio)
           if (blocks.length > 0) {
             fileUrls.push(...client.extractFilesFromBlocks(blocks))
           }
 
-          // Download and save attachments
           if (fileUrls.length > 0) {
             console.log(`[notion] Found ${fileUrls.length} files for page "${mapped.title}"`)
             await this.downloadNotionFiles(taskId, fileUrls, client, ctx)
@@ -665,8 +649,6 @@ The integration automatically maps Notion properties to task fields:
 `
   }
 
-  // ── Private helpers ────────────────────────────────────────
-
   /**
    * Extract task fields from a Notion page using the property map
    */
@@ -684,11 +666,9 @@ The integration automatically maps Notion properties to task fields:
   } {
     const props = page.properties
 
-    // Title
     const titleProp = props[propMap.title]
     const title = titleProp?.title?.map((t) => t.plain_text).join('') || ''
 
-    // Status
     let status: string | undefined
     if (propMap.status) {
       const statusProp = props[propMap.status.name]
@@ -709,7 +689,6 @@ The integration automatically maps Notion properties to task fields:
       }
     }
 
-    // Priority
     let priority: string | undefined
     if (propMap.priority) {
       const priProp = props[propMap.priority.name]
@@ -719,7 +698,6 @@ The integration automatically maps Notion properties to task fields:
       }
     }
 
-    // Assignee
     let assignee: string | undefined
     if (propMap.assignee) {
       const assigneeProp = props[propMap.assignee.name]
@@ -729,7 +707,6 @@ The integration automatically maps Notion properties to task fields:
       }
     }
 
-    // Due date
     let dueDate: string | null = null
     if (propMap.dueDate) {
       const dateProp = props[propMap.dueDate.name]
@@ -738,7 +715,6 @@ The integration automatically maps Notion properties to task fields:
       }
     }
 
-    // Labels
     let labels: string[] | undefined
     if (propMap.labels) {
       const labelProp = props[propMap.labels.name]

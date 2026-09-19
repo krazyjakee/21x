@@ -17,9 +17,8 @@
  * only after that value matches.
  */
 
-import { createHash } from 'crypto'
 import { createReadStream, createWriteStream } from 'fs'
-import { mkdir, rm, stat, rename, open } from 'fs/promises'
+import { mkdir, rm, stat, rename } from 'fs/promises'
 import { dirname, join, sep } from 'path'
 import { totalmem, freemem } from 'os'
 import { pipeline } from 'stream/promises'
@@ -33,6 +32,7 @@ import {
   findTtsManifestEntry,
   isTtsManifestVerified,
 } from './voice-tts-manifest'
+import { sha256OfFile } from './voice-model-manager'
 
 export interface ResolvedTtsModel {
   id: string
@@ -421,20 +421,4 @@ export function stripRoot(name: string): string | null {
   parts.shift()
   if (parts.length === 0) return null
   return parts.join(sep)
-}
-
-export async function sha256OfFile(path: string): Promise<string> {
-  const handle = await open(path, 'r')
-  try {
-    const hash = createHash('sha256')
-    const buffer = Buffer.alloc(1024 * 1024)
-    for (;;) {
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null)
-      if (bytesRead === 0) break
-      hash.update(buffer.subarray(0, bytesRead))
-    }
-    return hash.digest('hex')
-  } finally {
-    await handle.close()
-  }
 }

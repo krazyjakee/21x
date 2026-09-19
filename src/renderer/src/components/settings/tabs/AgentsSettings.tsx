@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Plus, Loader2, Wifi, WifiOff, RefreshCw, Edit3, Trash2, Terminal } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { SettingsSection } from '../SettingsSection'
@@ -23,7 +24,9 @@ interface AgentDialogState {
 }
 
 export function AgentsSettings() {
-  const { agents, fetchAgents, createAgent, updateAgent, deleteAgent } = useAgentStore()
+  const { agents, fetchAgents, createAgent, updateAgent, deleteAgent } = useAgentStore(
+    useShallow((s) => ({ agents: s.agents, fetchAgents: s.fetchAgents, createAgent: s.createAgent, updateAgent: s.updateAgent, deleteAgent: s.deleteAgent }))
+  )
   const [connections, setConnections] = useState<Map<string, ConnectionInfo>>(new Map())
   const [agentDialog, setAgentDialog] = useState<AgentDialogState>({ open: false })
 

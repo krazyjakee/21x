@@ -34,7 +34,7 @@ export function createAdapter(backendType: string, db: DatabaseManager): CodingA
     case CodingAgentType.CODEX:
       return new CodexAppServerAdapter()
     case CodingAgentType.CURSOR:
-      return new AcpAdapter('cursor')
+      return new AcpAdapter()
     case CodingAgentType.PI:
       return new PiAdapter()
     default:

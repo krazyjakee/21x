@@ -29,8 +29,6 @@ import {
   mapIssue
 } from './youtrack-mapping'
 
-// ── Plugin ───────────────────────────────────────────────────
-
 export class YouTrackPlugin implements TaskSourcePlugin {
   id = 'youtrack'
   displayName = 'YouTrack'
@@ -155,7 +153,6 @@ export class YouTrackPlugin implements TaskSourcePlugin {
       if (!projectShortName) return []
 
       try {
-        // First get the project ID from short name
         const projects = await client.getProjects()
         const project = projects.find((p) => p.shortName === projectShortName)
         if (!project) return []
@@ -242,13 +239,11 @@ export class YouTrackPlugin implements TaskSourcePlugin {
     const client = new YouTrackClient(serverUrl, token)
 
     try {
-      // Always do a full sync using the configured filters.
-      // This ensures all issues are kept up-to-date (description, links, status, etc.)
-      // regardless of when they were last modified in YouTrack.
+      // Always a full sync, so descriptions, links and status stay current
+      // regardless of when an issue was last modified in YouTrack.
       const yql = buildYqlQuery(config)
       console.log('[youtrack] YQL query:', yql)
 
-      // Fetch all matching issues
       const issues = await client.getAllIssues(yql)
       console.log(`[youtrack] Fetched ${issues.length} issues`)
 
@@ -257,7 +252,6 @@ export class YouTrackPlugin implements TaskSourcePlugin {
           const mapped = mapIssue(issue)
           if (!mapped.title) continue
 
-          // Build description with issue details
           const description = buildDescription(issue, client.getBaseUrl())
 
           const upserted = upsertSourcedTask(ctx, sourceId, issue.id, {
@@ -284,7 +278,6 @@ export class YouTrackPlugin implements TaskSourcePlugin {
           if (upserted.created) result.imported++
           else result.updated++
 
-          // Download attachments
           if (issue.attachments && issue.attachments.length > 0) {
             console.log(
               `[youtrack] Found ${issue.attachments.length} attachments for issue "${issue.idReadable}"`
@@ -336,7 +329,6 @@ export class YouTrackPlugin implements TaskSourcePlugin {
         updates.description = changedFields.description
       }
 
-      // For custom field updates, we need to use a different approach
       const customFieldUpdates: Array<{ $type: string; name: string; value: unknown }> = []
 
       if (changedFields.status) {
@@ -449,7 +441,6 @@ export class YouTrackPlugin implements TaskSourcePlugin {
           }]
         })
 
-        // Map back to local status
         const taskUpdate: Record<string, unknown> = {}
         const localStatus = STATUS_TO_LOCAL[input.toLowerCase()]
         if (localStatus) taskUpdate.status = localStatus
@@ -602,8 +593,6 @@ File attachments on YouTrack issues are downloaded and stored locally.
 - The instance must be reachable from your machine (VPN/LAN)
 `
   }
-
-  // ── Private helpers ────────────────────────────────────────
 
   /**
    * Download YouTrack attachments and save them as task attachments.

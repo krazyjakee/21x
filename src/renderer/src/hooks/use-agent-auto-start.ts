@@ -5,23 +5,13 @@ import { useAgentSessionActions } from './use-agent-session'
 import { onAgentStatus, onAgentStartQueueChanged, onTaskUpdated, onTaskCreated, taskApi } from '@/lib/ipc-client'
 import { TaskStatus } from '@/types'
 import { findBlockingSibling, isSuccessorGraphInProgress } from '@shared/subtask-graph'
-import type { Task, Agent, TaskPriority } from '@/types'
+import { PRIORITY_ORDER } from '@shared/constants'
+import { isSnoozed } from '@shared/date-format'
+import type { Task, Agent } from '@/types'
 import type { AgentStatusEvent } from '@/types/electron.d'
 import type { TaskSession } from '@/stores/agent-store'
 
-const PRIORITY_ORDER: Record<TaskPriority, number> = {
-  critical: 3,
-  high: 2,
-  medium: 1,
-  low: 0
-}
-
 const MAX_TRIAGE_ATTEMPTS = 2
-
-function isSnoozed(snoozedUntil: string | null): boolean {
-  if (!snoozedUntil) return false
-  return new Date(snoozedUntil) > new Date()
-}
 
 /** Recurring parent templates are never triaged or auto-started. */
 function isRecurringTemplate(task: Task): boolean {

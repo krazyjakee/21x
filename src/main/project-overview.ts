@@ -13,7 +13,7 @@ import { listHeldActions } from './escalation'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import { projectNeedsAttention, type ProjectOverviewEntry } from '../shared/project-overview'
 
-export type ProjectOverviewStore = Pick<DatabaseManager, 'getProjects' | 'getProjectStatus' | 'getTasks'>
+export type ProjectOverviewStore = Pick<DatabaseManager, 'getProjects' | 'getProjectStatus' | 'getTasks' | 'getLatestTaskUpdate'>
 
 /** Only a real agent manager can answer the live questions; a stub (tests, early start-up) counts as none. */
 function usableAgents(agents: unknown): ProjectStatusAgents | null {
@@ -25,12 +25,6 @@ function usableAgents(agents: unknown): ProjectStatusAgents | null {
   return ready ? (candidate as ProjectStatusAgents) : null
 }
 
-function newest(a: string | null, b: string | null | undefined): string | null {
-  if (!b) return a
-  if (!a) return b
-  return b > a ? b : a
-}
-
 export function buildProjectOverview(db: ProjectOverviewStore, agents: unknown): ProjectOverviewEntry[] {
   const liveAgents = usableAgents(agents)
   const heldByProject = new Map<string, number>()
@@ -38,8 +32,8 @@ export function buildProjectOverview(db: ProjectOverviewStore, agents: unknown):
 
   return db.getProjects().map((project) => {
     const status = buildProjectStatus(db, liveAgents, project.id)
-    let lastActivity: string | null = status.updated_at
-    for (const task of db.getTasks({ projectId: project.id })) lastActivity = newest(lastActivity, task.updated_at)
+    const latestTask = db.getLatestTaskUpdate(project.id)
+    const lastActivity = latestTask && (!status.updated_at || latestTask > status.updated_at) ? latestTask : status.updated_at
     const limits = status.limits
     const entry: Omit<ProjectOverviewEntry, 'needs_attention'> = {
       project_id: project.id,

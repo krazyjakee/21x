@@ -5,7 +5,7 @@ import type { SessionConfig } from '../coding-agent-adapter'
 
 /**
  * Decides how Codex authenticates for a session and mutates `env` to match.
- * Shared by the Codex ACP and Codex app-server adapters.
+ * Used by the Codex app-server adapter.
  *
  * The user's explicit choice (config.authMethod) is the source of truth:
  *   - 'subscription' -> use the Codex CLI login (~/.codex), exactly like running

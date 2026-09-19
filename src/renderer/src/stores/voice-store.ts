@@ -28,20 +28,20 @@ import type {
  * a task action runs.
  */
 
-export interface VoiceConfirmation {
+interface VoiceConfirmation {
   turnId: string
   proposal: VoiceIntentProposal
   reason: VoiceConfirmReason
   candidates?: VoiceCandidate[]
 }
 
-export interface VoiceResultNotice {
+interface VoiceResultNotice {
   kind: 'ok' | 'error'
   message: string
   at: number
 }
 
-export interface VoiceRuntimeInstall {
+interface VoiceRuntimeInstall {
   running: boolean
   percent: number
   /** The last few npm lines, so a failure is readable. */

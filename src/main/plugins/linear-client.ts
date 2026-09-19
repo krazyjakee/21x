@@ -89,9 +89,6 @@ export class LinearClient {
     }
   }
 
-  /**
-   * Get a single issue by ID
-   */
   async getIssue(issueId: string): Promise<LinearIssue | null> {
     const query = `
       query GetIssue($issueId: String!) {
@@ -153,11 +150,7 @@ export class LinearClient {
     return data.issue
   }
 
-  /**
-   * Get all issues, optionally filtered by assignee ID
-   */
   async getIssues(assigneeId?: string): Promise<LinearIssue[]> {
-    // Build filter based on whether assigneeId is provided
     const filterClause = assigneeId ? 'filter: { assignee: { id: { eq: $assigneeId } } }' : ''
 
     const query = `
@@ -220,9 +213,6 @@ export class LinearClient {
     return this.paginate<LinearIssue>(query, 'issues', { assigneeId: assigneeId || null })
   }
 
-  /**
-   * Get workflow states for a team
-   */
   async getWorkflowStates(teamId: string): Promise<LinearWorkflowState[]> {
     const query = `
       query GetWorkflowStates($teamId: ID!) {
@@ -245,9 +235,6 @@ export class LinearClient {
     return data.team.states.nodes
   }
 
-  /**
-   * Get users in the workspace
-   */
   async getUsers(): Promise<LinearUser[]> {
     const query = `
       query GetUsers($first: Int!, $after: String) {
@@ -271,9 +258,6 @@ export class LinearClient {
     return users
   }
 
-  /**
-   * Update an issue
-   */
   async updateIssue(
     issueId: string,
     updates: {
@@ -313,9 +297,6 @@ export class LinearClient {
     }
   }
 
-  /**
-   * Add a comment to an issue
-   */
   async addComment(issueId: string, body: string): Promise<void> {
     const mutation = `
       mutation CreateComment($issueId: String!, $body: String!) {
@@ -337,9 +318,6 @@ export class LinearClient {
     }
   }
 
-  /**
-   * Get attachment metadata by ID
-   */
   async getAttachmentMetadata(attachmentId: string): Promise<{ id: string; title?: string; url?: string } | null> {
     const query = `
       query GetAttachment($attachmentId: String!) {

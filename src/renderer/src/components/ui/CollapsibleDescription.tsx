@@ -5,6 +5,27 @@ import { Markdown } from './Markdown'
 const LINE_HEIGHT_PX = 20 // approximate line height for sm markdown text
 const STORAGE_KEY_PREFIX = '20x-desc-expanded-'
 
+// Touch screens have no hover, so the mobile app shows the edit control all
+// the time and gives buttons a pressed state and bigger hit areas.
+const VARIANT_CLASSES = {
+  desktop: {
+    cancel: 'text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 cursor-pointer px-2 py-1',
+    save: 'text-xs bg-primary text-primary-foreground hover:bg-primary/90 rounded-md px-3 py-1 cursor-pointer disabled:opacity-60',
+    placeholder: 'flex items-center gap-1.5 text-xs text-muted-foreground/70 hover:text-foreground transition-colors cursor-pointer',
+    wrapper: 'group relative',
+    editableContent: 'cursor-text rounded-md hover:bg-accent/30 -mx-2 px-2 py-1',
+    editTrigger: 'absolute top-1 right-1 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer'
+  },
+  touch: {
+    cancel: 'text-xs text-muted-foreground active:opacity-60 px-3 py-1.5 rounded-md hover:bg-accent disabled:opacity-50',
+    save: 'text-xs bg-primary text-primary-foreground hover:bg-primary/90 active:opacity-60 rounded-md px-3 py-1.5 disabled:opacity-60',
+    placeholder: 'flex items-center gap-1.5 text-xs text-muted-foreground/70 hover:text-foreground active:opacity-60',
+    wrapper: 'relative',
+    editableContent: 'cursor-text rounded-md active:bg-accent/30',
+    editTrigger: 'absolute top-0 right-0 p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent active:opacity-60'
+  }
+}
+
 interface CollapsibleDescriptionProps {
   taskId: string
   description: string
@@ -20,6 +41,7 @@ interface CollapsibleDescriptionProps {
   placeholder?: string
   /** Maximum preview lines before showing the expand control. */
   collapsedLines?: number
+  variant?: keyof typeof VARIANT_CLASSES
 }
 
 export function CollapsibleDescription({
@@ -29,8 +51,10 @@ export function CollapsibleDescription({
   className,
   onSave,
   placeholder = 'Add description...',
-  collapsedLines = 5
+  collapsedLines = 5,
+  variant = 'desktop'
 }: CollapsibleDescriptionProps) {
+  const classes = VARIANT_CLASSES[variant]
   const contentRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [needsCollapse, setNeedsCollapse] = useState(false)
@@ -81,11 +105,9 @@ export function CollapsibleDescription({
     if (!isEditing) setDraft(description)
   }, [description, isEditing])
 
-  // Focus textarea when entering edit mode
   useEffect(() => {
     if (isEditing && textareaRef.current) {
       textareaRef.current.focus()
-      // Move cursor to end
       const len = textareaRef.current.value.length
       textareaRef.current.setSelectionRange(len, len)
     }
@@ -137,7 +159,6 @@ export function CollapsibleDescription({
 
   const isCollapsed = needsCollapse && !expanded
 
-  // Edit mode view
   if (isEditing) {
     return (
       <div className={className} data-testid="description-edit-form">
@@ -165,7 +186,7 @@ export function CollapsibleDescription({
             type="button"
             onClick={cancelEdit}
             disabled={saving}
-            className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 cursor-pointer px-2 py-1"
+            className={classes.cancel}
             data-testid="description-edit-cancel"
           >
             Cancel
@@ -174,7 +195,7 @@ export function CollapsibleDescription({
             type="button"
             onClick={commitEdit}
             disabled={saving}
-            className="text-xs bg-primary text-primary-foreground hover:bg-primary/90 rounded-md px-3 py-1 cursor-pointer disabled:opacity-60"
+            className={classes.save}
             data-testid="description-edit-save"
           >
             {saving ? 'Saving…' : 'Save'}
@@ -190,7 +211,7 @@ export function CollapsibleDescription({
       <button
         type="button"
         onClick={beginEdit}
-        className={`${className ?? ''} flex items-center gap-1.5 text-xs text-muted-foreground/70 hover:text-foreground transition-colors cursor-pointer`}
+        className={`${className ?? ''} ${classes.placeholder}`}
         data-testid="description-add-placeholder"
       >
         <Plus className="h-3 w-3" />
@@ -201,10 +222,10 @@ export function CollapsibleDescription({
 
   return (
     <div className={className}>
-      <div className="group relative">
+      <div className={classes.wrapper}>
         <div
           ref={contentRef}
-          className={`overflow-hidden transition-all duration-200 ${editable ? 'cursor-text rounded-md hover:bg-accent/30 -mx-2 px-2 py-1' : ''}`}
+          className={`overflow-hidden transition-all duration-200 ${editable ? classes.editableContent : ''}`}
           style={isCollapsed ? { maxHeight: `${collapsedMaxHeight}px` } : undefined}
           onClick={editable ? beginEdit : undefined}
           role={editable ? 'button' : undefined}
@@ -223,7 +244,7 @@ export function CollapsibleDescription({
           <button
             type="button"
             onClick={beginEdit}
-            className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
+            className={classes.editTrigger}
             aria-label="Edit description"
             title="Edit description"
             data-testid="description-edit-trigger"

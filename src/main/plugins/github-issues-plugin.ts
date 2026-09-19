@@ -1,82 +1,17 @@
-import type { TaskRecord } from '../database'
-import type { GitHubManager, GitHubIssue } from '../github-manager'
-import type { SourceUser, ReassignResult } from '../../shared/types'
-import { TaskStatus } from '../../shared/constants'
-import {
-  PluginActionId,
-  type TaskSourcePlugin,
-  type PluginConfigSchema,
-  type ConfigFieldOption,
-  type PluginContext,
-  type PluginAction,
-  type PluginSyncResult,
-  type ActionResult
-} from './types'
-import { upsertSourcedTask } from './sourced-tasks'
+import type { GitHubManager } from '../github-manager'
+import type { ConfigFieldOption, PluginConfigSchema, PluginContext } from './types'
+import { IssuesPlugin, issueFilterFields } from './issues-plugin'
 
-// Labels that map to priority (case-insensitive)
-const PRIORITY_LABELS: Record<string, string> = {
-  'p0': 'critical',
-  'p1': 'high',
-  'p2': 'medium',
-  'p3': 'low',
-  'critical': 'critical',
-  'urgent': 'critical',
-  'priority:critical': 'critical',
-  'priority:high': 'high',
-  'priority:medium': 'medium',
-  'priority:low': 'low'
-}
-
-function isPriorityLabel(name: string): boolean {
-  return name.toLowerCase() in PRIORITY_LABELS
-}
-
-// ── Mapping helpers (shared with the Forgejo Issues plugin) ──
-
-export function mapIssueToTask(issue: GitHubIssue): Partial<TaskRecord> {
-  const labelNames = issue.labels.map((l) => l.name)
-  return {
-    title: issue.title,
-    description: issue.body || '',
-    status: mapIssueStatus(issue.state, labelNames),
-    priority: extractPriority(labelNames),
-    assignee: issue.assignees[0]?.login || '',
-    due_date: issue.milestone?.due_on?.split('T')[0] || null,
-    labels: labelNames.filter((n) => !isPriorityLabel(n))
-  }
-}
-
-function mapIssueStatus(state: string, labels: string[]): TaskStatus {
-  if (state === 'closed') return TaskStatus.Completed
-
-  const lower = labels.map((l) => l.toLowerCase())
-  if (lower.some((l) => l.includes('in progress') || l === 'wip')) return TaskStatus.AgentWorking
-  if (lower.some((l) => l.includes('review'))) return TaskStatus.ReadyForReview
-
-  return TaskStatus.NotStarted
-}
-
-export function mapLocalStatusToIssueState(localStatus: string): string {
-  if (localStatus === TaskStatus.Completed) return 'closed'
-  return 'open'
-}
-
-function extractPriority(labels: string[]): string {
-  for (const label of labels) {
-    const mapped = PRIORITY_LABELS[label.toLowerCase()]
-    if (mapped) return mapped
-  }
-  return 'medium'
-}
-
-export class GitHubIssuesPlugin implements TaskSourcePlugin {
+export class GitHubIssuesPlugin extends IssuesPlugin {
   id = 'github-issues'
   displayName = 'GitHub Issues'
   description = 'Import and sync issues from a GitHub repository'
   icon = 'Github'
+  protected sourceName = 'GitHub'
 
-  constructor(private githubManager: GitHubManager) {}
+  constructor(private githubManager: GitHubManager) {
+    super(githubManager)
+  }
 
   getConfigSchema(): PluginConfigSchema {
     return [
@@ -97,31 +32,7 @@ export class GitHubIssuesPlugin implements TaskSourcePlugin {
         description: 'Repository to import issues from',
         dependsOn: { field: 'owner', value: undefined }
       },
-      {
-        key: 'state',
-        label: 'Issue State',
-        type: 'select',
-        default: 'open',
-        options: [
-          { value: 'open', label: 'Open' },
-          { value: 'closed', label: 'Closed' },
-          { value: 'all', label: 'All' }
-        ]
-      },
-      {
-        key: 'assignee',
-        label: 'Assignee Filter',
-        type: 'text',
-        placeholder: 'GitHub username (optional)',
-        description: 'Only import issues assigned to this user'
-      },
-      {
-        key: 'labels',
-        label: 'Labels Filter',
-        type: 'text',
-        placeholder: 'bug, feature (optional)',
-        description: 'Comma-separated labels to filter by'
-      }
+      ...issueFilterFields('GitHub')
     ]
   }
 
@@ -130,229 +41,31 @@ export class GitHubIssuesPlugin implements TaskSourcePlugin {
     config: Record<string, unknown>,
     _ctx: PluginContext
   ): Promise<ConfigFieldOption[]> {
-    if (resolverKey === 'owners') {
-      try {
+    try {
+      if (resolverKey === 'owners') {
         const status = await this.githubManager.checkGhCli()
         if (!status.authenticated) return []
-
         const orgs = await this.githubManager.fetchUserOrgs()
-        const options: ConfigFieldOption[] = []
-
-        if (status.username) {
-          options.push({ value: status.username, label: `${status.username} (personal)` })
-        }
-        for (const org of orgs) {
-          options.push({ value: org, label: org })
-        }
-        return options
-      } catch {
-        return []
+        return [
+          ...(status.username ? [{ value: status.username, label: `${status.username} (personal)` }] : []),
+          ...orgs.map((org) => ({ value: org, label: org }))
+        ]
       }
-    }
 
-    if (resolverKey === 'repos') {
-      const owner = config.owner as string
-      if (!owner) return []
-
-      try {
+      if (resolverKey === 'repos') {
+        const owner = config.owner as string
+        if (!owner) return []
         const status = await this.githubManager.checkGhCli()
-        // Personal repos vs org repos
         const repos = owner === status.username
           ? await this.githubManager.fetchUserRepos()
           : await this.githubManager.fetchOrgRepos(owner)
-
         return repos.map((r) => ({ value: r.name, label: r.name }))
-      } catch {
-        return []
       }
-    }
-
-    return []
-  }
-
-  getActions(_config: Record<string, unknown>): PluginAction[] {
-    return [
-      {
-        id: PluginActionId.AddComment,
-        label: 'Add Comment',
-        icon: 'MessageSquare',
-        requiresInput: true,
-        inputLabel: 'Comment',
-        inputPlaceholder: 'Enter your comment...'
-      },
-      {
-        id: PluginActionId.CloseIssue,
-        label: 'Close Issue',
-        icon: 'XCircle',
-        variant: 'destructive'
-      },
-      {
-        id: PluginActionId.ReopenIssue,
-        label: 'Reopen Issue',
-        icon: 'RotateCcw'
-      }
-    ]
-  }
-
-  async importTasks(
-    sourceId: string,
-    config: Record<string, unknown>,
-    ctx: PluginContext
-  ): Promise<PluginSyncResult> {
-    const result: PluginSyncResult = { imported: 0, updated: 0, errors: [] }
-    const owner = config.owner as string
-    const repo = config.repo as string
-
-    try {
-      const issues = await this.githubManager.fetchIssues(owner, repo, {
-        state: (config.state as string) || 'open',
-        assignee: config.assignee as string | undefined,
-        labels: config.labels as string | undefined
-      })
-
-      const fullRepoName = `${owner}/${repo}`
-
-      for (const issue of issues) {
-        try {
-          const mapped = mapIssueToTask(issue)
-          const externalId = String(issue.number)
-          const upserted = upsertSourcedTask(ctx, sourceId, externalId, mapped, {
-            title: issue.title,
-            source: 'GitHub',
-            repos: [fullRepoName]
-          })
-          if (upserted?.created) result.imported++
-          else if (upserted) result.updated++
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Unknown error'
-          result.errors.push(`Failed to import #${issue.number} "${issue.title}": ${msg}`)
-        }
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error'
-      result.errors.push(`Import failed: ${msg}`)
-    }
-
-    return result
-  }
-
-  async exportUpdate(
-    task: TaskRecord,
-    changedFields: Record<string, unknown>,
-    config: Record<string, unknown>,
-    _ctx: PluginContext
-  ): Promise<void> {
-    if (!task.external_id) return
-    const owner = config.owner as string
-    const repo = config.repo as string
-    const number = parseInt(task.external_id, 10)
-
-    const updates: { title?: string; body?: string; state?: string; assignees?: string[]; labels?: string[] } = {}
-
-    if (changedFields.title) updates.title = changedFields.title as string
-    if (changedFields.description) updates.body = changedFields.description as string
-
-    if (changedFields.status) {
-      updates.state = mapLocalStatusToIssueState(changedFields.status as string)
-    }
-
-    if (changedFields.assignee) {
-      updates.assignees = [(changedFields.assignee as string)]
-    }
-
-    if (changedFields.labels) {
-      updates.labels = changedFields.labels as string[]
-    }
-
-    if (Object.keys(updates).length > 0) {
-      try {
-        await this.githubManager.updateIssue(owner, repo, number, updates)
-      } catch (err) {
-        console.error('[github-issues] Export update failed:', err)
-      }
-    }
-  }
-
-  async executeAction(
-    actionId: string,
-    task: TaskRecord,
-    input: string | undefined,
-    config: Record<string, unknown>,
-    _ctx: PluginContext
-  ): Promise<ActionResult> {
-    if (!task.external_id) {
-      return { success: false, error: 'Task has no external ID' }
-    }
-
-    const owner = config.owner as string
-    const repo = config.repo as string
-    const number = parseInt(task.external_id, 10)
-
-    try {
-      switch (actionId) {
-        case PluginActionId.AddComment:
-          if (!input) return { success: false, error: 'Comment text is required' }
-          await this.githubManager.addIssueComment(owner, repo, number, input)
-          return { success: true }
-
-        case PluginActionId.Complete:
-        case PluginActionId.CloseIssue:
-          await this.githubManager.updateIssue(owner, repo, number, { state: 'closed' })
-          return { success: true, taskUpdate: { status: TaskStatus.Completed } }
-
-        case PluginActionId.ReopenIssue:
-          await this.githubManager.updateIssue(owner, repo, number, { state: 'open' })
-          return { success: true, taskUpdate: { status: TaskStatus.NotStarted } }
-
-        default:
-          return { success: false, error: `Unknown action: ${actionId}` }
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error'
-      return { success: false, error: `Action failed: ${msg}` }
-    }
-  }
-
-  async getUsers(
-    config: Record<string, unknown>,
-    _ctx: PluginContext
-  ): Promise<SourceUser[]> {
-    const owner = config.owner as string
-    const repo = config.repo as string
-
-    try {
-      const collaborators = await this.githubManager.fetchRepoCollaborators(owner, repo)
-      return collaborators.map((c) => ({
-        id: c.login,
-        email: '',
-        name: c.login
-      }))
     } catch {
       return []
     }
-  }
 
-  async reassignTask(
-    task: TaskRecord,
-    userIds: string[],
-    config: Record<string, unknown>,
-    _ctx: PluginContext
-  ): Promise<ReassignResult> {
-    if (!task.external_id) {
-      return { success: false, error: 'Task has no external ID' }
-    }
-
-    const owner = config.owner as string
-    const repo = config.repo as string
-    const number = parseInt(task.external_id, 10)
-
-    try {
-      await this.githubManager.updateIssue(owner, repo, number, { assignees: userIds })
-      return { success: true }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error'
-      return { success: false, error: msg }
-    }
+    return []
   }
 
   getSetupDocumentation(): string {

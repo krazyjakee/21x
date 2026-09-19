@@ -15,7 +15,6 @@ beforeEach(() => {
   tempPluginsDir = mkdtempSync(join(tmpdir(), '20x-plugins-test-'))
   manager = new ClaudePluginManager(db, tempPluginsDir)
 
-  // Mock global fetch to prevent actual network requests during tests
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
     ok: false,
     status: 404,
@@ -214,10 +213,7 @@ describe('ClaudePluginManager: Install / Uninstall', () => {
   beforeEach(() => {
     const source = manager.addMarketplaceSource({ name: 'test-mp', source_url: 'owner/repo' })
     marketplaceId = source.id
-
-    // Manually set the catalog cache via fetchMarketplaceCatalog's internal path
-    // We'll use a workaround: directly populate the cache through the manager's internal state
-    // by calling discoverPlugins after setting up the catalog
+    // Seed the catalog cache directly; fetching it would hit the network.
     ;(manager as unknown as { catalogCache: Map<string, unknown> }).catalogCache.set(marketplaceId, {
       name: 'test-mp',
       owner: { name: 'Test' },
@@ -334,7 +330,6 @@ describe('Plugin Resource Materialization from Files', () => {
     const pluginDir = join(tempPluginsDir, 'file-plugin')
     mkdirSync(pluginDir, { recursive: true })
 
-    // Create skills/my-skill/SKILL.md
     const skillDir = join(pluginDir, 'skills', 'my-skill')
     mkdirSync(skillDir, { recursive: true })
     writeFileSync(join(skillDir, 'SKILL.md'), `---
@@ -347,13 +342,11 @@ description: A test skill from plugin
 This skill does something useful.
 `)
 
-    // Create skills/another.md (direct .md file)
     writeFileSync(join(pluginDir, 'skills', 'another.md'), `# Another Skill
 
 Direct skill file in skills directory.
 `)
 
-    // Create commands/build.md
     const cmdDir = join(pluginDir, 'commands')
     mkdirSync(cmdDir, { recursive: true })
     writeFileSync(join(cmdDir, 'build.md'), `---
@@ -366,7 +359,6 @@ description: Runs the build process
 Run \`npm run build\` in the project root.
 `)
 
-    // Create agents/verifier-py.md and agents/verifier-ts.md
     const agentsDir = join(pluginDir, 'agents')
     mkdirSync(agentsDir, { recursive: true })
     writeFileSync(join(agentsDir, 'verifier-py.md'), `---
@@ -386,7 +378,6 @@ model: sonnet
 You are a TypeScript Agent SDK application verifier.
 `)
 
-    // Create .mcp.json
     writeFileSync(join(pluginDir, '.mcp.json'), JSON.stringify({
       mcpServers: {
         'my-server': {
@@ -483,13 +474,11 @@ You are a TypeScript Agent SDK application verifier.
     const pluginAgents = allAgents.filter((a) => a.name.startsWith('file-plugin:'))
     expect(pluginAgents).toHaveLength(2)
 
-    // Verify system_prompt is set (frontmatter stripped)
     const pyAgent = pluginAgents.find((a) => a.name === 'file-plugin:verifier-py')!
     expect(pyAgent.config.system_prompt).toContain('Python Agent SDK application verifier')
     // Frontmatter should be stripped from system_prompt
     expect(pyAgent.config.system_prompt).not.toContain('---')
 
-    // Verify plugin skills are auto-assigned to agent
     const allSkills = db.getSkills()
     const pluginSkillIds = allSkills
       .filter((s) => s.tags.includes('plugin') && s.tags.includes('file-plugin'))
@@ -497,7 +486,6 @@ You are a TypeScript Agent SDK application verifier.
     expect(pluginSkillIds.length).toBeGreaterThan(0)
     expect(pyAgent.config.skill_ids).toEqual(pluginSkillIds)
 
-    // Verify plugin MCP servers are auto-assigned to agent
     const allMcp = db.getMcpServers()
     const pluginMcpIds = allMcp
       .filter((s) => s.name.startsWith('file-plugin:'))
@@ -510,16 +498,13 @@ You are a TypeScript Agent SDK application verifier.
     setupPluginFiles()
     const installed = await manager.installPlugin('file-plugin', marketplaceId)
 
-    // Verify resources exist
     const resources = manager.getPluginResources(installed.id)
     expect(resources.skills.length).toBeGreaterThan(0)
     expect(resources.mcpServers.length).toBeGreaterThan(0)
     expect(resources.agents.length).toBeGreaterThan(0)
 
-    // Uninstall
     await manager.uninstallPlugin(installed.id)
 
-    // Verify skills and MCP servers are cleaned up from DB
     const allSkills = db.getSkills()
     const pluginSkills = allSkills.filter((s) => s.tags.includes('plugin') && s.tags.includes('file-plugin'))
     expect(pluginSkills).toHaveLength(0)
@@ -528,7 +513,6 @@ You are a TypeScript Agent SDK application verifier.
     const pluginMcp = allMcp.filter((s) => s.name.startsWith('file-plugin:'))
     expect(pluginMcp).toHaveLength(0)
 
-    // Verify agents are cleaned up from DB
     const allAgents = db.getAgents()
     const pluginAgents = allAgents.filter((a) => a.name.startsWith('file-plugin:'))
     expect(pluginAgents).toHaveLength(0)

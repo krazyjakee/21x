@@ -8,7 +8,8 @@
  * (IPC, the Commander) gets the same numbers without an LLM anywhere.
  */
 import type { AgentManager } from './agent-manager'
-import type { DatabaseManager, ProjectStatus, ProjectStatusLiveState } from './database'
+import type { DatabaseManager, ProjectStatus } from './database'
+import type { ProjectStatusLiveState } from './database/project-status-store'
 import {
   PROJECT_STATUS_HISTORY_DEFAULT_LIMIT,
   PROJECT_STATUS_HISTORY_MAX_LIMIT,

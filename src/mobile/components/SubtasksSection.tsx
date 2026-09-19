@@ -2,7 +2,7 @@ import { useRef, useState, type TouchEvent } from 'react'
 import { TaskStatus } from '@shared/constants'
 import { cn } from '../lib/utils'
 import { taskStatusDotClass } from '@shared/task-status-styles'
-import type { Task } from '../stores/task-store'
+import type { Task } from '@/types'
 import { ChevronRightIcon } from './icons'
 
 export function SubtasksSection({ subtasks, onNavigateToTask, onReorderSubtasks }: { subtasks: Task[]; onNavigateToTask: (taskId: string) => void; onReorderSubtasks?: (orderedIds: string[]) => void }) {

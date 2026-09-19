@@ -1,8 +1,6 @@
 /**
- * Local OAuth Server
- *
- * Creates a temporary HTTP server on localhost to receive OAuth callbacks
- * for providers that don't support custom URL schemes (like HubSpot).
+ * Temporary localhost HTTP server that receives OAuth callbacks for providers
+ * that don't support custom URL schemes (like HubSpot).
  */
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'http'
@@ -20,27 +18,20 @@ export class LocalOAuthServer {
   private resolver: ((value: OAuthCallback) => void) | null = null
   private rejecter: ((reason: Error) => void) | null = null
 
-  /**
-   * Start the local server and return the redirect URI
-   */
+  /** Listens on the first free port in 3000-3010 and returns the redirect URI. */
   async start(): Promise<string> {
-    // Try ports 3000-3010 until we find an available one
     for (let port = 3000; port <= 3010; port++) {
       try {
         await this.startOnPort(port)
         this.port = port
         return `http://localhost:${port}/callback`
       } catch {
-        // Port in use, try next one
         continue
       }
     }
     throw new Error('Could not find available port for OAuth server')
   }
 
-  /**
-   * Start server on a specific port
-   */
   private startOnPort(port: number): Promise<void> {
     return new Promise((resolve, reject) => {
       this.server = createServer(this.handleRequest.bind(this))
@@ -60,15 +51,11 @@ export class LocalOAuthServer {
     })
   }
 
-  /**
-   * Wait for the OAuth callback
-   */
   waitForCallback(): Promise<OAuthCallback> {
     return new Promise((resolve, reject) => {
       this.resolver = resolve
       this.rejecter = reject
 
-      // Timeout after 5 minutes
       setTimeout(() => {
         if (this.resolver) {
           this.stop()
@@ -78,73 +65,45 @@ export class LocalOAuthServer {
     })
   }
 
-  /**
-   * Handle incoming HTTP requests
-   */
   private handleRequest(req: IncomingMessage, res: ServerResponse): void {
     const url = new URL(req.url || '/', `http://localhost:${this.port}`)
 
-    if (url.pathname === '/callback') {
-      const code = url.searchParams.get('code')
-      const state = url.searchParams.get('state')
-      const error = url.searchParams.get('error')
-      const errorDescription = url.searchParams.get('error_description')
-
-      if (error) {
-        // OAuth error
-        this.sendErrorPage(res, error, errorDescription)
-        if (this.rejecter) {
-          this.rejecter(new Error(`OAuth error: ${error} - ${errorDescription}`))
-          this.rejecter = null
-          this.resolver = null
-        }
-        this.stop()
-        return
-      }
-
-      if (!code || !state) {
-        // Missing parameters
-        this.sendErrorPage(res, 'invalid_request', 'Missing code or state parameter')
-        if (this.rejecter) {
-          this.rejecter(new Error('OAuth callback missing required parameters'))
-          this.rejecter = null
-          this.resolver = null
-        }
-        this.stop()
-        return
-      }
-
-      // Success - send success page to browser
-      this.sendSuccessPage(res)
-
-      // Resolve the promise with the callback data
-      if (this.resolver) {
-        this.resolver({ code, state, error: error || undefined, error_description: errorDescription || undefined })
-        this.resolver = null
-        this.rejecter = null
-      }
-
-      // Stop the server after a short delay (let the browser render the page)
-      setTimeout(() => this.stop(), 1000)
-    } else {
-      // Unknown path
+    if (url.pathname !== '/callback') {
       res.writeHead(404, { 'Content-Type': 'text/plain' })
       res.end('Not Found')
+      return
     }
-  }
 
-  private sendSuccessPage(res: ServerResponse): void {
+    const code = url.searchParams.get('code')
+    const state = url.searchParams.get('state')
+    const error = url.searchParams.get('error')
+    const errorDescription = url.searchParams.get('error_description')
+
+    if (error) {
+      this.fail(res, error, errorDescription, `OAuth error: ${error} - ${errorDescription}`)
+      return
+    }
+    if (!code || !state) {
+      this.fail(res, 'invalid_request', 'Missing code or state parameter', 'OAuth callback missing required parameters')
+      return
+    }
+
     sendPage(res, 'Authentication successful', 'You can close this window and return to the app.')
+    this.resolver?.({ code, state })
+    this.resolver = null
+    this.rejecter = null
+
+    // Give the browser a moment to render the page before closing the server.
+    setTimeout(() => this.stop(), 1000)
   }
 
-  private sendErrorPage(res: ServerResponse, error: string, description: string | null): void {
+  private fail(res: ServerResponse, error: string, description: string | null, reason: string): void {
     const details = description ? `${error}: ${description}` : error
     sendPage(res, 'Authentication failed', 'Close this window and try again.', details)
+    this.rejecter?.(new Error(reason))
+    this.stop()
   }
 
-  /**
-   * Stop the server
-   */
   stop(): void {
     if (this.server) {
       this.server.close(() => {

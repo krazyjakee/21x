@@ -24,7 +24,7 @@ import { replaceRemoteImageUrlsInTask } from './replace-image-urls'
 import { upsertSourcedTask } from './sourced-tasks'
 import { normalizeUrlForComparison, buildNormalizedUrlSet } from './url-utils'
 import { saveTaskAttachment } from './attachments'
-import { mimeTypeForPath, sniffMimeType } from '../mime'
+import { hasKnownExtension, mimeTypeForPath, sniffMimeType } from '../mime'
 
 export class LinearPlugin implements TaskSourcePlugin {
   id = 'linear'
@@ -560,7 +560,8 @@ export class LinearPlugin implements TaskSourcePlugin {
       try {
         const { buffer, filename, contentType } = await client.downloadAttachment(attachment.url)
         const actualFilename = filename || attachment.title || attachment.subtitle || `attachment-${attachment.id}`
-        const ext = extname(actualFilename) || this.guessExtensionFromUrl(attachment.url)
+        const urlPath = attachment.url.split(/[?#]/)[0]
+        const ext = extname(actualFilename) || (hasKnownExtension(urlPath) ? extname(urlPath) : '')
         const finalFilename = ext ? actualFilename : `${actualFilename}.bin`
 
         const saved = saveTaskAttachment(ctx, taskId, {
@@ -577,11 +578,6 @@ export class LinearPlugin implements TaskSourcePlugin {
         console.error(`[linear-plugin] Failed to download attachment ${attachment.title || attachment.url}:`, errorMsg)
       }
     }
-  }
-
-  private guessExtensionFromUrl(url: string): string {
-    const match = url.match(/\.(jpg|jpeg|png|gif|pdf|doc|docx|xls|xlsx|zip|txt|csv)(\?|$)/i)
-    return match ? `.${match[1]}` : ''
   }
 
   /**

@@ -1,7 +1,8 @@
 import { useCallback, useState } from 'react'
 import { TaskStatus } from '@shared/constants'
 import { api } from '../api/client'
-import { useTaskStore, type Task } from '../stores/task-store'
+import { useTaskStore } from '../stores/task-store'
+import type { Task } from '@/types'
 import { useAgentStore } from '../stores/agent-store'
 
 async function completeTaskNow(task: Task, completeAtSource = true): Promise<void> {

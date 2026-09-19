@@ -11,12 +11,10 @@ vi.mock('@/components/ui/CollapsibleDescription', () => ({
   )
 }))
 
-// Mock stores
 vi.mock('@/stores/skill-store', () => ({
   useSkillStore: () => ({ skills: [], fetchSkills: vi.fn() })
 }))
 
-// Add missing electronAPI mocks
 const api = window.electronAPI as unknown as Record<string, unknown>
 if (!api.tasks) api.tasks = { getWorkspaceDir: vi.fn().mockResolvedValue('/tmp') }
 if (!api.shell) (api as Record<string, unknown>).shell = { openPath: vi.fn() }
@@ -180,7 +178,6 @@ describe('TaskDetailView – parent task context panel', () => {
     expect(screen.getByText('Parent task:')).toBeInTheDocument()
     expect(screen.getByText('Parent Task Title')).toBeInTheDocument()
     expect(screen.getByText('Go to parent')).toBeInTheDocument()
-    // Description should not be visible when collapsed
     expect(screen.queryByText('This is the parent task description with important context.')).not.toBeInTheDocument()
   })
 
@@ -190,10 +187,8 @@ describe('TaskDetailView – parent task context panel', () => {
     // Click the expand button (the row with "Parent task:")
     fireEvent.click(screen.getByText('Parent task:'))
 
-    // Now description should be visible
     expect(screen.getByText('This is the parent task description with important context.')).toBeInTheDocument()
 
-    // Labels should be visible
     expect(screen.getByText('urgent')).toBeInTheDocument()
     expect(screen.getByText('backend')).toBeInTheDocument()
   })
@@ -201,11 +196,9 @@ describe('TaskDetailView – parent task context panel', () => {
   it('collapses details when clicked again', () => {
     renderDetailView({ parentTask, onNavigateToTask: noopFn })
 
-    // Expand
     fireEvent.click(screen.getByText('Parent task:'))
     expect(screen.getByText('This is the parent task description with important context.')).toBeInTheDocument()
 
-    // Collapse
     fireEvent.click(screen.getByText('Parent task:'))
     expect(screen.queryByText('This is the parent task description with important context.')).not.toBeInTheDocument()
   })
@@ -227,7 +220,6 @@ describe('TaskDetailView – parent task context panel', () => {
     })
     renderDetailView({ parentTask: parentWithoutLabels, onNavigateToTask: noopFn })
 
-    // Expand
     fireEvent.click(screen.getByText('Parent task:'))
 
     // Description should be visible but no labels
@@ -242,7 +234,6 @@ describe('TaskDetailView – parent task context panel', () => {
     })
     renderDetailView({ parentTask: parentNoDesc, onNavigateToTask: noopFn })
 
-    // Expand
     fireEvent.click(screen.getByText('Parent task:'))
 
     // Should not crash, status badges should still show
@@ -359,7 +350,6 @@ describe('TaskDetailView – main CTA priority', () => {
     expect(completeBtn).toBeInTheDocument()
     // Complete should be outline variant (no bg-primary class) when Start is primary
     expect(completeBtn.className).not.toMatch(/bg-primary/)
-    // Start should look primary
     expect(startBtn.className).toMatch(/bg-primary/)
 
     fireEvent.click(startBtn)
@@ -384,9 +374,7 @@ describe('TaskDetailView – main CTA priority', () => {
     const resumeBtn = screen.getByTestId('main-cta-resume')
     expect(completeBtn).toBeInTheDocument()
     expect(resumeBtn).toBeInTheDocument()
-    // Complete is the primary (filled bg-primary) button
     expect(completeBtn.className).toMatch(/bg-primary/)
-    // Resume is the outline/secondary button (no bg-primary fill)
     expect(resumeBtn.className).not.toMatch(/bg-primary/)
   })
 
@@ -424,7 +412,6 @@ describe('TaskDetailView – main CTA priority', () => {
     })
     const resumeBtn = screen.getByTestId('main-cta-resume')
     expect(resumeBtn).toBeInTheDocument()
-    // Resume must NOT be primary — outline only
     expect(resumeBtn.className).not.toMatch(/bg-primary/)
     // Our Complete button should not render (OutputFieldsDisplay has one)
     expect(screen.queryByTestId('main-cta-complete')).not.toBeInTheDocument()
