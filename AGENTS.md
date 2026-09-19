@@ -1,6 +1,6 @@
 # AGENTS.md — Multi-Agent Architecture (Implemented)
 
-This document describes the production multi-agent system powering 20x. The architecture spans five agent backends, a centralized polling coordinator, skill management, auto-triage, secret management, and heartbeat monitoring. Orchestration and storage run in the Electron main process on your machine; the agents call whichever model APIs they are configured to use.
+This document describes the production multi-agent system powering 20x. The architecture spans five agent backends, a centralized polling coordinator, admission control, project-scoped work (projects, per-project Captain, per-project skills), auto-triage, agent handoff on credit exhaustion, secret management, and heartbeat monitoring. Orchestration and storage run in the Electron main process on your machine; the agents call whichever model APIs they are configured to use.
 
 ## Overview
 
@@ -37,6 +37,8 @@ interface AgentConfigRecord {
     anthropic?: string
     cursor?: string
   }
+  fallback_agent_ids?: string[]  // tried in order on credit exhaustion (agent handoff)
+  max_parallel_sessions?: number // admission control; default 1
 }
 
 interface AgentMcpServerEntry {
@@ -45,7 +47,7 @@ interface AgentMcpServerEntry {
 }
 ```
 
-A default agent is seeded on first launch with sensible defaults.
+A default agent is seeded on first launch with sensible defaults. These types live in `src/main/database/types.ts`.
 
 ## Database Schema
 
@@ -74,6 +76,8 @@ CREATE TABLE skills (
   uses INTEGER NOT NULL DEFAULT 0,
   last_used TEXT,
   tags TEXT NOT NULL DEFAULT '[]',
+  preferred_model TEXT,                      -- optional: pin a model for this skill
+  project_id TEXT REFERENCES projects(id),   -- null = global skill
   is_deleted INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -106,9 +110,12 @@ CREATE TABLE mcp_servers (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+-- Projects: tasks belong to a project; per-project repos and resources:
+--   projects, project_repos, project_resources (+ captain_agent_id, settings)
 ```
 
-Database schema migrations are run automatically with version tracking (`SCHEMA_VERSION = 10` in `src/main/database/schema.ts`; see `docs/database-migrations.md`). Migration history includes column additions for attachments, repos, output fields, agent_id, session_id, snoozed_until, recurring tasks, heartbeat, subtasks, and more.
+Database schema migrations are run automatically with version tracking (`SCHEMA_VERSION = 17` in `src/main/database/schema.ts`; see `docs/database-migrations.md`). Migration history includes column additions for attachments, repos, output fields, agent_id, session_id, snoozed_until, recurring tasks, heartbeat, subtasks, and more; later versions added `tasks.complete_at_source`, `tasks.next_subtask_ids`, `tasks.role` (coordinator rows such as the Captain), `skills.preferred_model`, the `projects` / `project_repos` / `project_resources` tables with project IDs on tasks and sources (existing tasks migrated into the Default project), `skills.project_id` for global-vs-project skill scoping, and version 17 renames the coordinator from Mastermind to Captain (`tasks.role = 'captain'`, `projects.captain_agent_id`, the `captain_prewarm` setting, and `captain_wakeups` in project settings; `src/main/database/captain-migration.ts`).
 
 ## Architecture
 
@@ -193,7 +200,7 @@ interface CodingAgentAdapter {
   abortPrompt(sessionId: string, config: SessionConfig): Promise<void>
   destroySession(sessionId: string, config: SessionConfig): Promise<void>
   checkHealth(): Promise<{ available: boolean; reason?: string }>
-  // Optional: getProviders, getAllMessages, getRunningTools, respondToQuestion, notifyConfigChanged
+  // Optional: getProviders, getAllMessages, getPersistedMessages, getRunningTools, respondToQuestion, notifyConfigChanged
 }
 ```
 
@@ -256,33 +263,50 @@ Features:
 | `agent:create` | renderer -> main | `CreateAgentData` | `Agent` |
 | `agent:update` | renderer -> main | `id, UpdateAgentData` | `Agent` |
 | `agent:delete` | renderer -> main | `id` | `boolean` |
+| `agent:getStartQueue` | renderer -> main | — | queued start requests with positions and reasons |
 
 ### Agent Sessions
 
 | Channel | Direction | Payload | Response |
 |---------|-----------|---------|----------|
-| `agentSession:start` | renderer -> main | `agentId, taskId, workspaceDir?, skipInitialPrompt?` | `{ sessionId }` |
+| `agentSession:start` | renderer -> main | `agentId, taskId, workspaceDir?, skipInitialPrompt?` | `{ sessionId }` — or `{ sessionId: '', queued: true, queuePosition, queueReason }` when over a concurrency limit |
 | `agentSession:resume` | renderer -> main | `agentId, taskId, ocSessionId` | `{ sessionId, ended? }` |
 | `agentSession:abort` | renderer -> main | `sessionId` | `{ success }` |
 | `agentSession:stop` | renderer -> main | `sessionId` | `{ success }` |
 | `agentSession:stopByTaskId` | renderer -> main | `taskId` | `{ success, sessionId }` |
 | `agentSession:send` | renderer -> main | `sessionId, message, taskId?, agentId?, attachments?` | `{ success, ... }` |
 | `agentSession:sendByTaskId` | renderer -> main | `taskId, message, attachments?` | `{ success, ... }` |
-| `agentSession:approve` | renderer -> main | `sessionId, approved, message?` | `{ success }` |
+| `agentSession:approve` | renderer -> main | `sessionId, approved, message?, responseType?, requestId?` | `{ success }` |
 | `agentSession:getRawTranscript` | renderer -> main | `taskId` | transcript data |
+| `agentSession:switchAgent` | renderer -> main | `taskId, newAgentId` | `{ sessionId }` — stops the current agent and continues on the new one with a handoff recap |
+| `agentSession:getTranscriptSnapshot` | renderer -> main | `taskId, sinceSeq?` | durable transcript parts (projection snapshot) |
+| `agentSession:getTranscriptDelta` | renderer -> main | `taskId, sinceRev` | `{ parts, maxRev }` — parts changed since the rev cursor |
+
+The transcript is an event-sourced projection owned by the main process (`transcript_parts`): the renderer hydrates once with `agentSession:getTranscriptSnapshot` and then applies idempotent `transcript:changed` deltas — see `docs/transcript-event-sourcing-rewrite.md`.
 
 ### Agent Events (main -> renderer via `webContents.send`)
 
 | Channel | Payload |
 |---------|---------|
-| `agent:output` | `{ sessionId, data }` — streaming transcript parts |
-| `agent:status` | `{ agentId, status }` — status transitions |
+| `agent:output` | `{ sessionId, taskId, type, data }` — streaming transcript part |
+| `agent:output-batch` | `{ sessionId, taskId, messages }` — the same parts coalesced per tick (one IPC call) |
+| `agent:status` | `{ sessionId, agentId, taskId, status }` — status transitions |
+| `agent:startQueueChanged` | `{ queue }` — admission start queue updated |
+| `agent:incompatible-session` | `{ taskId, agentId, error }` — a resume failed; the renderer asks whether to start fresh |
+| `transcript:changed` | `{ taskId, parts, maxRev }` — projection delta (`{ parts: [], maxRev: 0, reloadRequired: true }` when a record is too large to serialize) |
 
 ### Agent Config
 
 | Channel | Direction | Description |
 |---------|-----------|-------------|
 | `agentConfig:getProviders` | renderer -> main | List available models from backend |
+
+### Agent Installer
+
+| Channel | Direction | Description |
+|---------|-----------|-------------|
+| `agent-installer:detect` | renderer -> main | Detect installed backend CLIs (Claude Code, OpenCode, Codex, Cursor, Pi) with versions and support status |
+| `agent-installer:install` | renderer -> main | Install a backend CLI (`src/main/agent-installer/`); progress streams via `agent-installer:progress` |
 
 ### Voice control
 
@@ -317,6 +341,10 @@ sent to the desktop window only, never to a mobile client.
 | `voice:setCustomModelDir` | renderer -> main | `{ dir }` | `VoiceSnapshot` |
 | `voice:pickModelDir` | renderer -> main | — | `{ dir }` |
 | `voice:setShortcut` | renderer -> main | `{ accelerator }` | `VoiceSnapshot` |
+| `voice:selectModel` | renderer -> main | `{ id }` — pick the active recognition model for a turn | `{ success }` |
+| `voice:setEndpointSilence` | renderer -> main | `{ ms }` — endpointing sensitivity | `VoiceSnapshot` |
+| `voice:expectAnswer` | renderer -> main | — | expect a spoken answer (keeps the turn listening) |
+| `voice:answerNotExpected` | renderer -> main | — | clear the answer expectation |
 
 ### Voice Events (main -> renderer and mobile)
 
@@ -325,6 +353,7 @@ sent to the desktop window only, never to a mobile client.
 | `voice:state` | `{ state, turnId?, detail? }` — state machine transitions |
 | `voice:partial` | `{ turnId, text }` — live transcript |
 | `voice:final` | `{ turnId, text }` — final transcript |
+| `voice:segment` | `{ turnId, text, index }` — completed sentence for progressive display |
 | `voice:outcome` | `VoiceActionOutcome` — confirm, executed, rejected, cancelled |
 | `voice:status` | engine and model status |
 | `voice:error` | `{ message, code? }` |
@@ -339,7 +368,7 @@ writer for voice.
 
 ## Agent Manager
 
-`src/main/agent-manager.ts` — the core orchestration layer. Helpers live in `src/main/agent-manager/` (adapter factory, session config, workspace docs and skill files, attachments, skill sync, MCP server test, prompts, transcript events, watchdogs, output dedup, worktree setup).
+`src/main/agent-manager.ts` — the core orchestration layer. Helpers live in `src/main/agent-manager/` (adapter factory, session config, workspace docs and skill files, attachments, skill sync, MCP server test, prompts, transcript events, watchdogs, output dedup, worktree setup, admission control, credit-exhaustion detection, Captain context, project repos, skill model resolution).
 
 ```typescript
 class AgentManager extends EventEmitter {
@@ -347,13 +376,16 @@ class AgentManager extends EventEmitter {
   private pollingEntries: Map<string, PollingEntry>
   private adapters: Map<string, CodingAgentAdapter>
 
-  // Session lifecycle
+  // Session lifecycle (every start goes through admission control)
+  async requestSession(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<SessionStartOutcome>
+  async startTask(taskId: string, opts?: { preferSubtasks?: boolean; allowTriage?: boolean }): Promise<{ action: 'task_started' | 'subtask_started' | 'triage_started' | 'already_running' | 'queued' | 'no_action', ... }>
   async startSession(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<string>
-  async resumeSession(agentId: string, taskId: string, ocSessionId: string): Promise<string | null>
-  async stopSession(sessionId: string): Promise<void>
+  async switchAgent(taskId: string, newAgentId: string): Promise<string>
+  async resumeSession(agentId: string, taskId: string, sessionId: string): Promise<string>
+  async stopSession(sessionId: string, resetTaskStatus?: boolean): Promise<void>
   async abortSession(sessionId: string): Promise<void>
-  async stopByTaskId(taskId: string): Promise<{ sessionId: string | undefined }>
-  stopAllSessions(): void
+  async stopByTaskId(taskId: string): Promise<{ sessionId: string | null }>
+  async stopAllSessions(): Promise<void>
   async stopServer(): Promise<void>
 
   // Communication
@@ -363,6 +395,10 @@ class AgentManager extends EventEmitter {
 
   // Skills
   syncSkillsFromWorkspace(sessionId: string): SkillSyncResult
+
+  // Transcript projection (event-sourced; docs/transcript-event-sourcing-rewrite.md)
+  async getTranscriptSnapshot(taskId: string, sinceSeq?: number): Promise<TranscriptPart[]>
+  async getTranscriptDelta(taskId: string, sinceRev: number): Promise<{ parts: TranscriptPart[]; maxRev: number }>
 
   // Diagnostics
   async getRawTranscriptForDebug(taskId: string): Promise<any>
@@ -376,16 +412,32 @@ class AgentManager extends EventEmitter {
 
 Each session wraps a coding agent adapter instance and streams events to the renderer via IPC.
 
-1. **Start** — Agent assigned, worktree setup, skill files written to workspace, MCP servers configured, session created
+1. **Start** — Admission control admits the start or queues it; then worktree setup, skill files written to workspace, MCP servers configured, session created
 2. **Streaming** — Centralized polling coordinator polls every 2s; adapter nudges on new data (50ms debounce)
 3. **Approval** — Agent pauses for human decisions; response sent back via `agentSession:approve`
 4. **Completion** — Idle detection transitions to `ready_for_review`, task updated
 5. **Learning** — Optional feedback loop: the feedback prompt is sent to the session; when it goes idle, skills are synced back to DB and the task is completed
 
+### Admission Control and Start Queue
+
+Every session start in the main process — UI, auto-run, MCP `start_task`, mobile API, voice, schedulers — goes through `AgentManager.requestSession`, which asks `checkAdmission` (`src/main/agent-manager/admission.ts`) whether the start fits under the limits. If not, the start waits in a FIFO `StartQueue` in the main process and runs on its own when a counted session goes idle or stops; the window does not have to be open.
+
+- **Counted**: only real-task sessions that are working (`working` or `waiting_approval`); idle sessions hold no slot. Coordinator (Captain), heartbeat, and triage sessions are exempt — they neither count nor queue.
+- **Limits**: per-agent `agent.config.max_parallel_sessions` (default 1); the global `max_concurrent_agent_sessions` setting (0/empty = unlimited); per-project `projects.settings.limits` (`max_concurrent_agents`, `daily_session_cap`, `paused`) plus the `all_projects_paused` setting (`src/main/project-limits.ts`).
+- **Surface**: `agent:getStartQueue`, the `agent:startQueueChanged` event, and the queued `agentSession:start` reply.
+
+### Agent Handoff (Credit Exhaustion)
+
+When the backend reports exhausted credits or quota, `src/main/agent-manager/credit-exhaustion.ts` detects it from output, errors, and status. The session is then stopped and, if `agent.config.fallback_agent_ids` is set, the task continues on the first configured fallback agent. `src/main/agent-handoff.ts` builds a handoff recap from the transcript (capped at 800k chars); the new agent starts with the recap plus a continuation prompt. The manual "Switch agent" action uses the same path via `agentSession:switchAgent`.
+
+### Task Automation (main process)
+
+`src/main/task-automation-scheduler.ts` runs a 60-second reconciliation loop in the main process so `auto_start_agent` (start `not_started` tasks) and `auto_complete_without_review` (complete `ready_for_review` tasks) keep working with no window open. It is the backstop for the renderer's sidebar auto-run hook (`use-agent-auto-start.ts`), which decides *what* to start (triage, next subtask, eligible tasks by priority); *whether* it may run now is always the main process's call (admission control).
+
 ### Worktree Management
 
 Before starting an agent session, the AgentManager optionally sets up git worktrees for the task's repositories:
-- Fetches repo metadata from GitHub or GitLab
+- Fetches repo metadata from GitHub, GitLab, or Forgejo (per-repo provider mapping in `src/main/repo-providers.ts`)
 - Creates isolated worktrees per branch per task
 - Supports multiple repos across different orgs
 - Falls back gracefully if worktree setup fails
@@ -403,7 +455,7 @@ Secrets (encrypted API keys, database URLs, etc.) are injected into agent sessio
 
 `src/main/task-api-server.ts` (routes in `src/main/task-api/*-routes.ts`) serves the task-management HTTP API on `127.0.0.1` (random port). Every request must present a per-launch random token (`getTaskApiToken()`), either as `Authorization: Bearer <token>` or as a `?token=` query parameter:
 - HTTP MCP sessions get the token in the MCP URL (`?token=`), built in `src/main/agent-manager/session-config.ts`
-- The stdio `task-management-mcp.js` server reads `TASK_API_URL` and `TASK_API_TOKEN` from its environment (`getTaskApiEnv()`) and sends the token as a bearer header
+- The stdio task-management MCP server (source `src/main/mcp-servers/task-management-mcp.ts`, compiled to `out/main/mcp-servers/task-management-mcp.js`) reads `TASK_API_URL` and `TASK_API_TOKEN` from its environment (`getTaskApiEnv()`) and sends the token as a bearer header
 
 ### Memory Management
 
@@ -425,6 +477,7 @@ Secrets (encrypted API keys, database URLs, etc.) are injected into agent sessio
 - Auth method (subscription vs API key) and permission mode (ask vs allow)
 - Skill assignment picker
 - Secret assignment picker
+- Concurrency cap (`max_parallel_sessions`) and fallback-agent picker (handoff on credit exhaustion)
 - Model selection dropdown (fetched from backend)
 - Test connection button
 
@@ -449,24 +502,38 @@ Secrets (encrypted API keys, database URLs, etc.) are injected into agent sessio
 - Command input for the current project's Captain (one per project, see `docs/task-lifecycle.md` → Coordinator rows) and task creation, with quick-start chips
 - Kanban task board grouped by status with drag-and-drop support
 
+## Projects and Captain
+
+Tasks belong to a **project** (`projects` table; all existing tasks migrated into the Default project). Projects own repositories (`project_repos`) and resources (`project_resources`) that agents can reference; triage may only assign repos from the task's project, and skills are scoped per project (see Skills System).
+
+Each project's **Captain** (renamed from "Mastermind" in schema v17; `src/main/database/captain-migration.ts` is the only file that may still spell the old name) is a durable coordinator row in `tasks` with `role = 'captain'` and the project's `project_id`. `seedCaptainTasks` gives every project one on startup (idempotent), and `createProject` creates one with the project (`ensureProjectCaptain`). It is a row so its `session_id` and transcript persist like a task's, but `isCoordinatorTask()` (`src/shared/task-roles.ts`) keeps it out of every task list — board, sidebar, mobile, MCP list tools.
+
+- Runs in its own workspace (no worktree) on the project's `captain_agent_id` (else `default_agent_id`, else the app default agent)
+- System prompt: the built-in Captain prompt (`src/main/prompts/captain.ts`) plus a project section rebuilt on every start/resume/send from the project row, its repos, and resources (`src/main/agent-manager/captain-context.ts`)
+- Keeps a long-lived `MEMORY.md` in its workspace (decisions, conventions, open threads) that is injected into the prompt (capped) and shown read-only in the project editor
+- Project events (`approval_pending`, `task_failed`, ...) flow through the project event bus (`src/main/project-events.ts`); `src/main/captain-waker.ts` batches them (3s debounce, hourly cap, self-caused events skipped) and wakes the project's Captain with one fenced system message, window open or not
+
 ## Auto-Triage System
 
-When auto-run is enabled and a new task has no `agent_id`, the system automatically triages it using the default agent (see `docs/task-lifecycle.md`):
+When auto-run is enabled and a new task has no `agent_id`, the system automatically triages it using the default agent (see `docs/task-lifecycle.md`). The renderer's sidebar auto-run hook (`use-agent-auto-start.ts`) or the main-process `TaskAutomationScheduler` calls `AgentManager.startTask(taskId)`; for an unassigned task with triage allowed, `startTask` does the rest:
 
 ```
-New task (no agent_id, status=not_started)
-  → selectTriageCandidates() detects it
-  → startTriage() → status='triaging' → start default agent
-  → Agent runs MCP tools:
+Task (no agent_id, status=not_started)
+  → AgentManager.startTask() → status='triaging' → startSession(default agent)
+  → Initial prompt = buildTriagePrompt(task, projectRepos)
+  → Agent runs task-management MCP tools:
     find_similar_tasks, list_agents, list_skills, list_repos
-    update_task(agent_id, skill_ids, labels, priority, repos)
-  → Agent goes idle → status back to 'not_started'
-  → Auto-run picks up assigned task → starts real agent
+    create_subtask (if the task clearly splits)
+    update_task(agent_id, output_fields, skill_ids, labels, priority, repos
+                — repos restricted to the task's project)
+  → Agent goes idle → triage detected → status back to 'not_started'
+  → Auto-run picks up the now-assigned task → starts the real agent
 ```
 
-- **Retry limit**: Max 2 triage attempts per task
-- **Status guard**: API skips status changes during triage
-- **Session cleanup**: Triage session removed from store post-completion
+- **Retry limit**: `MAX_TRIAGE_ATTEMPTS = 2` in the auto-run hook
+- **Status guard**: the task API skips status changes while a task is `triaging`
+- **Admission-exempt**: triage sessions never queue
+- **Session cleanup**: the triage session is released post-completion; the real run starts a fresh session
 
 ## Skills System
 
@@ -474,9 +541,11 @@ Skills are reusable `SKILL.md` instructions that agents discover and load on-dem
 
 ### Data Model
 
-- **Task-level**: `task.skill_ids`
-- **Agent-level**: `agent.config.skill_ids`
+- **Task-level**: `task.skill_ids` — global skills and the task's project's own skills
+- **Agent-level**: `agent.config.skill_ids` — global skills only (an agent serves every project)
 - Both selections are merged; when neither is set, no skill files are written
+- **Scope**: a skill is global (`skills.project_id` null) or a project skill (`project_id` set, schema 16, `migrateSkillScope`). Project skills never shadow global ones; assigning another project's skill is rejected (`validateSkillAssignment`), and `writeSkillFiles` only writes what the task's project may see
+- **Preferred model**: `skills.preferred_model` pins a model for a skill; session setup validates it against the backend's model listing (`src/main/agent-manager/skill-model.ts`) and uses it when supported
 
 ### File Layout
 
@@ -527,6 +596,14 @@ workspaces/<taskId>/
 | `src/main/adapters/acp-adapter.ts` | Agent Client Protocol (Cursor) |
 | `src/main/adapters/pi-adapter.ts` | Pi JSONL RPC integration |
 | `src/main/agent-manager/mcp-server-test.ts` | MCP connection probe (stdio + HTTP) behind `mcp:testConnection` |
+| `src/main/agent-manager/admission.ts` | Admission control + FIFO start queue |
+| `src/main/agent-manager/credit-exhaustion.ts` | Credit-exhaustion detection |
+| `src/main/agent-handoff.ts` | Handoff recap + fallback-agent switch |
+| `src/main/task-automation-scheduler.ts` | Main-process auto start/complete reconciliation |
+| `src/main/captain-waker.ts` | Batches project events and wakes the Captain |
+| `src/main/prompts/captain.ts` | Built-in Captain system prompt |
+| `src/main/mcp-servers/task-management-mcp.ts` | stdio task-management MCP server (compiled to `out/main/`) |
+| `src/main/agent-installer/` | Backend CLI detection and installation |
 | `src/main/mcp-client-messages.ts` | Hand-written MCP handshake messages shared by the probe and OAuth discovery |
 | `src/main/ipc-handlers.ts` | IPC entry point; calls the `register*` functions in `src/main/ipc/*.ts` |
 | `src/main/ipc/*.ts` | IPC channel handlers by area (agents, tasks, task sources, settings, ...) |
@@ -541,3 +618,4 @@ workspaces/<taskId>/
 | `src/main/claude-plugin-manager.ts` | Claude Plugin marketplace |
 | `docs/task-lifecycle.md` | Auto-triage and state transitions |
 | `docs/skills.md` | Skills system documentation |
+| `docs/transcript-event-sourcing-rewrite.md` | Transcript projection design record |
