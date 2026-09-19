@@ -1,5 +1,3 @@
-// ── Settings types ──────────────────────────────────────────
-
 export enum SettingsTab {
   GENERAL = 'general',
   PROJECTS = 'projects',
@@ -23,8 +21,6 @@ export const SETTINGS_TABS: { value: SettingsTab; label: string; icon: string }[
   { value: SettingsTab.PLUGINS, label: 'Plugins', icon: 'Puzzle' },
   { value: SettingsTab.ADVANCED, label: 'Advanced', icon: 'Wrench' }
 ]
-
-// ── Agent types ─────────────────────────────────────────────
 
 export enum CodingAgentType {
   OPENCODE = 'opencode',
@@ -105,12 +101,6 @@ export const CODEX_MODELS: { id: CodexModel; name: string }[] = [
   { id: CodexModel.GPT_5_4_MINI, name: 'GPT-5.4 Mini' },
   { id: CodexModel.GPT_5_3_CODEX_SPARK, name: 'GPT-5.3 Codex Spark' }
 ]
-
-export interface McpServerConfig {
-  name: string
-  command: string
-  args: string[]
-}
 
 export interface McpServerTool {
   name: string
@@ -220,8 +210,6 @@ export interface UpdateAgentDTO {
   is_default?: boolean
 }
 
-// ── Output field types ──────────────────────────────────────
-
 export type OutputFieldType =
   | 'text'
   | 'number'
@@ -259,12 +247,9 @@ export const OUTPUT_FIELD_TYPES: { value: OutputFieldType; label: string }[] = [
   { value: 'url', label: 'URL' }
 ]
 
-// ── Re-export shared constants & types ──────────────────────
 import { TaskStatus, TASK_STATUSES, HeartbeatStatus, PluginActionId } from '@shared/constants'
 export { TaskStatus, TASK_STATUSES, HeartbeatStatus, PluginActionId }
 export type { SourceUser, ReassignResult } from '@shared/types'
-
-// ── Task types ──────────────────────────────────────────────
 
 export type TaskType = 'coding' | 'manual' | 'review' | 'approval' | 'general'
 
@@ -394,8 +379,6 @@ export interface UpdateTaskDTO {
   sort_order?: number
 }
 
-// ── Heartbeat log types ─────────────────────────────────────
-
 export interface HeartbeatLog {
   id: string
   task_id: string
@@ -420,8 +403,6 @@ export const TASK_PRIORITIES: { value: TaskPriority; label: string }[] = [
   { value: 'low', label: 'Low' }
 ]
 
-
-// ── Task Source types ────────────────────────────────────────
 
 export interface TaskSource {
   id: string
@@ -473,8 +454,6 @@ export interface SyncResult {
   errors: string[]
 }
 
-// ── Skill types ──────────────────────────────────────────────
-
 export interface Skill {
   id: string
   name: string
@@ -520,8 +499,6 @@ export interface UpdateSkillDTO {
   expected_version?: number
 }
 
-// ── Secret types ──────────────────────────────────────────────
-
 export interface Secret {
   id: string
   name: string
@@ -546,8 +523,6 @@ export interface UpdateSecretDTO {
   value?: string  // Only set if user wants to change the value
 }
 
-// ── Plugin types ─────────────────────────────────────────────
-
 export interface PluginMeta {
   id: string
   displayName: string
@@ -555,43 +530,9 @@ export interface PluginMeta {
   icon: string
 }
 
-export type ConfigFieldType =
-  | 'text'
-  | 'number'
-  | 'checkbox'
-  | 'select'
-  | 'dynamic-select'
-  | 'key-value'
-  | 'password'
-
 export interface ConfigFieldOption {
   value: string
   label: string
-}
-
-export interface ConfigFieldSchema {
-  key: string
-  label: string
-  type: ConfigFieldType
-  placeholder?: string
-  required?: boolean
-  default?: unknown
-  description?: string
-  options?: ConfigFieldOption[]
-  optionsResolver?: string
-  multiSelect?: boolean
-  dependsOn?: { field: string; value: unknown }
-}
-
-export interface PluginAction {
-  id: string
-  label: string
-  icon?: string
-  variant?: 'default' | 'destructive'
-  requiresInput?: boolean
-  inputLabel?: string
-  inputPlaceholder?: string
-  inputOptions?: ConfigFieldOption[]
 }
 
 export interface ActionResult {
@@ -599,8 +540,6 @@ export interface ActionResult {
   error?: string
   taskUpdate?: Record<string, unknown>
 }
-
-// ── Claude Plugin Marketplace types ─────────────────────────
 
 export interface MarketplaceSource {
   id: string

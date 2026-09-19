@@ -23,36 +23,15 @@ export interface OrgEntry {
   provider: GitProvider
 }
 
-/**
- * Returns the appropriate API client for the given provider.
- * Defaults to GitHub if provider is not set.
- */
+const PROVIDER_APIS: Record<GitProvider, GitProviderApi> = {
+  github: githubApi,
+  gitlab: gitlabApi,
+  forgejo: forgejoApi
+}
+
+/** Defaults to GitHub when no provider is set. */
 export function getGitProviderApi(provider: GitProvider | null): GitProviderApi {
-  if (provider === 'gitlab') {
-    return {
-      checkCli: gitlabApi.checkCli,
-      fetchOrgs: gitlabApi.fetchOrgs,
-      fetchOrgRepos: gitlabApi.fetchOrgRepos,
-      fetchUserRepos: gitlabApi.fetchUserRepos
-    }
-  }
-
-  if (provider === 'forgejo') {
-    return {
-      checkCli: forgejoApi.checkCli,
-      fetchOrgs: forgejoApi.fetchOrgs,
-      fetchOrgRepos: forgejoApi.fetchOrgRepos,
-      fetchUserRepos: forgejoApi.fetchUserRepos
-    }
-  }
-
-  // Default: GitHub
-  return {
-    checkCli: githubApi.checkCli,
-    fetchOrgs: githubApi.fetchOrgs,
-    fetchOrgRepos: githubApi.fetchOrgRepos,
-    fetchUserRepos: githubApi.fetchUserRepos
-  }
+  return PROVIDER_APIS[provider ?? 'github'] ?? githubApi
 }
 
 /**
@@ -61,13 +40,8 @@ export function getGitProviderApi(provider: GitProvider | null): GitProviderApi 
  * can route repo fetches to the correct backend.
  */
 export async function fetchAllProviderOrgs(): Promise<OrgEntry[]> {
-  // Helper: fetch orgs from one provider, swallowing errors
-  const tryProvider = async (
-    provider: GitProvider,
-    checkCli: () => Promise<{ authenticated: boolean; username?: string }>,
-    fetchOrgs: () => Promise<string[]>,
-    providerLabel: string
-  ): Promise<OrgEntry[]> => {
+  const tryProvider = async (provider: GitProvider, providerLabel: string): Promise<OrgEntry[]> => {
+    const { checkCli, fetchOrgs } = PROVIDER_APIS[provider]
     try {
       const [status, orgs] = await Promise.all([checkCli(), fetchOrgs()])
       if (!status.authenticated) return []
@@ -89,9 +63,9 @@ export async function fetchAllProviderOrgs(): Promise<OrgEntry[]> {
   }
 
   const [ghEntries, glEntries, fjEntries] = await Promise.all([
-    tryProvider('github', githubApi.checkCli, githubApi.fetchOrgs, 'GitHub'),
-    tryProvider('gitlab', gitlabApi.checkCli, gitlabApi.fetchOrgs, 'GitLab'),
-    tryProvider('forgejo', forgejoApi.checkCli, forgejoApi.fetchOrgs, 'Forgejo')
+    tryProvider('github', 'GitHub'),
+    tryProvider('gitlab', 'GitLab'),
+    tryProvider('forgejo', 'Forgejo')
   ])
 
   return [...ghEntries, ...glEntries, ...fjEntries]

@@ -99,7 +99,6 @@ interface AgentState {
   bindTranscript: (taskId: string) => () => void
   endSession: (taskId: string) => void
   removeSession: (taskId: string) => void
-  clearMessageDedup: (taskId: string) => void
   getSession: (taskId: string) => TaskSession | undefined
   stopAndRemoveSessionForTask: (taskId: string) => Promise<void>
 }
@@ -391,11 +390,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
         return { sessions: next }
       })
     },
-
-    // Retained for API compatibility. In the projection model there is no client
-    // dedup state to clear and the message list is never rebuilt from replays,
-    // so this is a no-op (the durable projection remains the source of truth).
-    clearMessageDedup: () => {},
 
     stopAndRemoveSessionForTask: async (taskId) => {
       const session = get().sessions.get(taskId)

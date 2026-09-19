@@ -107,65 +107,6 @@ export function arrowPath(from: Point, to: Point, strokeWidth: number): ArrowGeo
   }
 }
 
-/** Shortest distance from point `p` to segment `a`–`b`. */
-export function distanceToSegment(p: Point, a: Point, b: Point): number {
-  const abx = b.x - a.x
-  const aby = b.y - a.y
-  const apx = p.x - a.x
-  const apy = p.y - a.y
-  const abLen2 = abx * abx + aby * aby
-  if (abLen2 === 0) return Math.hypot(apx, apy)
-  let t = (apx * abx + apy * aby) / abLen2
-  t = Math.max(0, Math.min(1, t))
-  const projX = a.x + t * abx
-  const projY = a.y + t * aby
-  return Math.hypot(p.x - projX, p.y - projY)
-}
-
-/** Is `p` inside box `box` (expanded by `tolerance` on every side)? */
-export function pointInBox(p: Point, box: Box, tolerance = 0): boolean {
-  return (
-    p.x >= box.x - tolerance &&
-    p.x <= box.x + box.width + tolerance &&
-    p.y >= box.y - tolerance &&
-    p.y <= box.y + box.height + tolerance
-  )
-}
-
-/**
- * Hit-test a canvas-space point against a single figure. `tolerance` is a
- * canvas-px slack added around the figure's hit region (use ~4 / zoom so thin
- * strokes are still easy to grab).
- */
-export function hitTest(p: Point, obj: DrawingObject, tolerance = 4): boolean {
-  const box: Box = { x: obj.x, y: obj.y, width: obj.width, height: obj.height }
-
-  switch (obj.type) {
-    case 'rectangle':
-    case 'text':
-    case 'image':
-      return pointInBox(p, box, tolerance)
-
-    case 'ellipse': {
-      const rx = obj.width / 2 + tolerance
-      const ry = obj.height / 2 + tolerance
-      if (rx <= 0 || ry <= 0) return false
-      const cx = box.x + obj.width / 2
-      const cy = box.y + obj.height / 2
-      const nx = (p.x - cx) / rx
-      const ny = (p.y - cy) / ry
-      return nx * nx + ny * ny <= 1
-    }
-
-    case 'line':
-    case 'arrow': {
-      const { from, to } = lineEndpoints(box, obj.direction)
-      const slack = tolerance + obj.strokeWidth / 2
-      return distanceToSegment(p, from, to) <= slack
-    }
-  }
-}
-
 /** Union bounding box of a set of figures (for selection outline / fit). */
 export function unionBox(objects: DrawingObject[]): Box | null {
   if (objects.length === 0) return null

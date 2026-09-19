@@ -2,24 +2,8 @@ import { useEffect, useMemo } from 'react'
 import { useTaskStore } from '@/stores/task-store'
 import { useProjectTasks } from './use-project-tasks'
 import { useUIStore } from '@/stores/ui-store'
-import { TaskStatus } from '@/types'
-import type { Task, TaskPriority } from '@/types'
-
-const PRIORITY_ORDER: Record<TaskPriority, number> = {
-  critical: 3,
-  high: 2,
-  medium: 1,
-  low: 0
-}
-
-const STATUS_ORDER: Record<TaskStatus, number> = {
-  [TaskStatus.AgentWorking]: 5,
-  [TaskStatus.AgentLearning]: 4,
-  [TaskStatus.Triaging]: 3,
-  [TaskStatus.ReadyForReview]: 2,
-  [TaskStatus.NotStarted]: 1,
-  [TaskStatus.Completed]: 0
-}
+import { PRIORITY_ORDER, STATUS_ORDER } from '@shared/constants'
+import type { Task } from '@/types'
 
 export function useTasks() {
   // Use individual selectors to avoid re-renders from unrelated store changes

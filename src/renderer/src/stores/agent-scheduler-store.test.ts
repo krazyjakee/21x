@@ -27,7 +27,6 @@ describe('useAgentSchedulerStore', () => {
     })
 
     it('disable sets isEnabled to false and clears state', () => {
-      // Setup some state
       useAgentSchedulerStore.setState({
         isEnabled: true,
         runningSessionsPerAgent: new Map([['agent-1', 2]]),
@@ -176,33 +175,26 @@ describe('useAgentSchedulerStore', () => {
     })
 
     it('simulates agent-1 with max=2, agent-2 with max=1', () => {
-      // Agent 1 starts 2 tasks
       useAgentSchedulerStore.getState().incrementRunningCount('agent-1')
       useAgentSchedulerStore.getState().incrementRunningCount('agent-1')
 
-      // Agent 2 starts 1 task
       useAgentSchedulerStore.getState().incrementRunningCount('agent-2')
 
-      // Add more tasks to queues
       useAgentSchedulerStore.getState().addToQueue('agent-1', 'task-3')
       useAgentSchedulerStore.getState().addToQueue('agent-1', 'task-4')
       useAgentSchedulerStore.getState().addToQueue('agent-2', 'task-5')
 
-      // Verify state
       expect(useAgentSchedulerStore.getState().getRunningCount('agent-1')).toBe(2)
       expect(useAgentSchedulerStore.getState().getRunningCount('agent-2')).toBe(1)
       expect(useAgentSchedulerStore.getState().queuedTasksPerAgent.get('agent-1')).toEqual(['task-3', 'task-4'])
       expect(useAgentSchedulerStore.getState().queuedTasksPerAgent.get('agent-2')).toEqual(['task-5'])
 
-      // Simulate agent-1 task completion
       useAgentSchedulerStore.getState().decrementRunningCount('agent-1')
       expect(useAgentSchedulerStore.getState().getRunningCount('agent-1')).toBe(1)
 
-      // Get next task for agent-1
       const nextTask = useAgentSchedulerStore.getState().getNextQueuedTask('agent-1')
       expect(nextTask).toBe('task-3')
 
-      // Remove from queue and start it
       useAgentSchedulerStore.getState().removeFromQueue('agent-1', 'task-3')
       useAgentSchedulerStore.getState().incrementRunningCount('agent-1')
 
@@ -214,7 +206,6 @@ describe('useAgentSchedulerStore', () => {
       // Setup: 3 agents with different capacities
       // Agent A: max=3, Agent B: max=2, Agent C: max=1
 
-      // Initial state: all agents start some tasks
       useAgentSchedulerStore.getState().incrementRunningCount('agent-a')
       useAgentSchedulerStore.getState().incrementRunningCount('agent-a')
       useAgentSchedulerStore.getState().incrementRunningCount('agent-a') // Agent A at capacity (3/3)
@@ -224,35 +215,29 @@ describe('useAgentSchedulerStore', () => {
 
       useAgentSchedulerStore.getState().incrementRunningCount('agent-c') // Agent C at capacity (1/1)
 
-      // Queue tasks
       useAgentSchedulerStore.getState().addToQueue('agent-a', 'a-task-4')
       useAgentSchedulerStore.getState().addToQueue('agent-a', 'a-task-5')
       useAgentSchedulerStore.getState().addToQueue('agent-b', 'b-task-3')
       useAgentSchedulerStore.getState().addToQueue('agent-c', 'c-task-2')
       useAgentSchedulerStore.getState().addToQueue('agent-c', 'c-task-3')
 
-      // Verify initial state
       expect(useAgentSchedulerStore.getState().getRunningCount('agent-a')).toBe(3)
       expect(useAgentSchedulerStore.getState().getRunningCount('agent-b')).toBe(2)
       expect(useAgentSchedulerStore.getState().getRunningCount('agent-c')).toBe(1)
 
-      // Agent A completes 1 task
       useAgentSchedulerStore.getState().decrementRunningCount('agent-a')
       expect(useAgentSchedulerStore.getState().getRunningCount('agent-a')).toBe(2)
       expect(useAgentSchedulerStore.getState().getNextQueuedTask('agent-a')).toBe('a-task-4')
 
-      // Agent B completes both tasks
       useAgentSchedulerStore.getState().decrementRunningCount('agent-b')
       useAgentSchedulerStore.getState().decrementRunningCount('agent-b')
       expect(useAgentSchedulerStore.getState().getRunningCount('agent-b')).toBe(0)
       expect(useAgentSchedulerStore.getState().getNextQueuedTask('agent-b')).toBe('b-task-3')
 
-      // Agent C completes task
       useAgentSchedulerStore.getState().decrementRunningCount('agent-c')
       expect(useAgentSchedulerStore.getState().getRunningCount('agent-c')).toBe(0)
       expect(useAgentSchedulerStore.getState().getNextQueuedTask('agent-c')).toBe('c-task-2')
 
-      // Start next tasks
       useAgentSchedulerStore.getState().removeFromQueue('agent-a', 'a-task-4')
       useAgentSchedulerStore.getState().incrementRunningCount('agent-a')
 
@@ -262,7 +247,6 @@ describe('useAgentSchedulerStore', () => {
       useAgentSchedulerStore.getState().removeFromQueue('agent-c', 'c-task-2')
       useAgentSchedulerStore.getState().incrementRunningCount('agent-c')
 
-      // Final state check
       expect(useAgentSchedulerStore.getState().getRunningCount('agent-a')).toBe(3)
       expect(useAgentSchedulerStore.getState().getRunningCount('agent-b')).toBe(1)
       expect(useAgentSchedulerStore.getState().getRunningCount('agent-c')).toBe(1)
@@ -284,17 +268,14 @@ describe('useAgentSchedulerStore', () => {
     })
 
     it('maintains state consistency after disable and re-enable', () => {
-      // Setup some state
       useAgentSchedulerStore.getState().enable()
       useAgentSchedulerStore.getState().incrementRunningCount('agent-1')
       useAgentSchedulerStore.getState().addToQueue('agent-1', 'task-1')
 
-      // Disable (clears state)
       useAgentSchedulerStore.getState().disable()
       expect(useAgentSchedulerStore.getState().runningSessionsPerAgent.size).toBe(0)
       expect(useAgentSchedulerStore.getState().queuedTasksPerAgent.size).toBe(0)
 
-      // Re-enable and add new state
       useAgentSchedulerStore.getState().enable()
       useAgentSchedulerStore.getState().incrementRunningCount('agent-2')
       useAgentSchedulerStore.getState().addToQueue('agent-2', 'task-2')

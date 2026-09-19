@@ -80,7 +80,7 @@ export function DrawingLayer() {
     }
   }, [])
 
-  // ── Commit text editing when the user clicks outside the edited figure ──
+  // Commit text editing when the user clicks outside the edited figure.
   // Figures are non-focusable divs (and the canvas preventDefaults its
   // mousedowns), so the browser never blurs the contentEditable on its own —
   // clicking another figure, the background, a panel or the minimap would
@@ -115,7 +115,6 @@ export function DrawingLayer() {
     }
   }, [])
 
-  // ── Create gesture ────────────────────────────────────────
   const startCreation = useCallback(
     (e: React.MouseEvent) => {
       const { activeTool, toolOptions, setLiveObject, addObject, setTool, setEditingTextId } =
@@ -281,7 +280,6 @@ export function DrawingLayer() {
     [toCanvasPoint]
   )
 
-  // ── Move gesture (select tool) ────────────────────────────
   const startSelectMove = useCallback((e: React.MouseEvent, hitId: string) => {
     const store = useDrawingStore.getState()
     const { selectedIds } = store
@@ -373,7 +371,7 @@ export function DrawingLayer() {
     window.addEventListener('mouseup', handleUp)
   }, [])
 
-  // ── Drag start on a figure being edited ───────────────────
+  // Drag start on a figure being edited
   // A text figure in editing mode must still be movable: plain clicks place
   // the caret (no preventDefault), but a drag past a small threshold commits
   // the text (blur) and turns into a regular move gesture.
@@ -411,7 +409,6 @@ export function DrawingLayer() {
     [startSelectMove]
   )
 
-  // ── Resize gesture (single selection, bottom-right handle) ──
   const startResize = useCallback(() => {
     const { selectedIds, objects } = useDrawingStore.getState()
     if (selectedIds.length !== 1) return
@@ -474,7 +471,6 @@ export function DrawingLayer() {
     window.addEventListener('mouseup', handleUp)
   }, [toCanvasPoint])
 
-  // ── Event delegation ──────────────────────────────────────
   const handleLayerMouseDown = useCallback(
     (e: React.MouseEvent) => {
       if (e.button !== 0) return
@@ -543,7 +539,6 @@ export function DrawingLayer() {
     setEditingTextId(null)
   }, [])
 
-  // ── Render ────────────────────────────────────────────────
   const sortedObjects = useMemo(
     () => [...objects].sort((a, b) => a.zIndex - b.zIndex),
     [objects]
@@ -660,7 +655,7 @@ export function DrawingLayer() {
   )
 }
 
-// ── Paste (Ctrl/Cmd+V in InfiniteCanvas, or a click with the image tool) ──
+// Paste (Ctrl/Cmd+V in InfiniteCanvas, or a click with the image tool)
 
 /**
  * Paste the clipboard image as a figure centered on canvas point (x, y).
@@ -685,8 +680,6 @@ export async function pasteImageAt(x: number, y: number): Promise<string | null>
     src: img.src,
   })
 }
-
-// ── Pure helpers ────────────────────────────────────────────
 
 /**
  * Stroke for new figures: while the user hasn't explicitly picked a color,

@@ -144,7 +144,6 @@ describe('useAgentAutoStart', () => {
       await Promise.resolve()
     })
 
-    // Should NOT update status or start a session for the template
     expect(mockElectronAPI.db.updateTask).not.toHaveBeenCalled()
     expect(mockElectronAPI.agentSession.start).not.toHaveBeenCalled()
   })
@@ -174,7 +173,6 @@ describe('useAgentAutoStart', () => {
       await Promise.resolve()
     })
 
-    // Should NOT start a session for the template
     expect(mockElectronAPI.agentSession.start).not.toHaveBeenCalled()
   })
 
@@ -200,7 +198,6 @@ describe('useAgentAutoStart', () => {
       await Promise.resolve()
     })
 
-    // Should triage the instance normally
     expect(mockElectronAPI.db.updateTask).toHaveBeenCalledWith(instanceTask.id, { status: TaskStatus.Triaging })
     expect(mockElectronAPI.agentSession.start).toHaveBeenCalledWith(triageAgent.id, instanceTask.id, undefined, undefined)
   })
@@ -250,8 +247,6 @@ describe('useAgentAutoStart', () => {
     )
   })
 
-  // ── Subtask auto-run tests ──
-
   it('does not auto-start parent tasks that have subtasks', async () => {
     const parentTask = makeTask({
       id: 'parent-1',
@@ -282,7 +277,6 @@ describe('useAgentAutoStart', () => {
       await Promise.resolve()
     })
 
-    // Should start the first subtask, NOT the parent
     const startCalls = (mockElectronAPI.agentSession.start as unknown as Mock).mock.calls
     const startedTaskIds = startCalls.map((call: unknown[]) => call[1])
     expect(startedTaskIds).toContain('sub-1')
@@ -319,7 +313,6 @@ describe('useAgentAutoStart', () => {
       await Promise.resolve()
     })
 
-    // Should NOT triage the subtask (parent_task_id is set)
     expect(mockElectronAPI.db.updateTask).not.toHaveBeenCalledWith('sub-notriage', { status: TaskStatus.Triaging })
     // Subtask should not be started (no agent_id and parent is already working)
     const startCalls = (mockElectronAPI.agentSession.start as unknown as Mock).mock.calls
@@ -365,7 +358,6 @@ describe('useAgentAutoStart', () => {
       await Promise.resolve()
     })
 
-    // Should only start subtask 1, not subtask 2
     const startCalls = (mockElectronAPI.agentSession.start as unknown as Mock).mock.calls
     const startedTaskIds = startCalls.map((call: unknown[]) => call[1])
     expect(startedTaskIds).toContain('sub-1')
@@ -464,14 +456,12 @@ describe('useAgentAutoStart', () => {
     const triageAgent = makeAgent({ id: 'agent-triage', is_default: true, name: 'Triage Agent' })
     const subtaskAgent = makeAgent({ id: 'agent-sub', is_default: false, name: 'Subtask Agent' })
 
-    // After triage: task has agent_id and subtasks
     ;(mockElectronAPI.db.getTask as unknown as Mock).mockResolvedValue({
       ...task,
       status: TaskStatus.NotStarted,
       agent_id: subtaskAgent.id
     })
 
-    // Triage created subtasks
     const subtasks = [
       makeTask({
         id: 'sub-1',
@@ -500,7 +490,6 @@ describe('useAgentAutoStart', () => {
       })
     )
 
-    // Trigger triage
     await act(async () => {
       vi.advanceTimersByTime(350)
       await Promise.resolve()
@@ -508,7 +497,6 @@ describe('useAgentAutoStart', () => {
 
     expect(mockElectronAPI.agentSession.start).toHaveBeenCalledWith(triageAgent.id, task.id, undefined, undefined)
 
-    // Complete triage → agent goes idle
     await act(async () => {
       getLatestAgentStatusCallback()?.({
         sessionId: 'triage-session',
@@ -520,11 +508,9 @@ describe('useAgentAutoStart', () => {
       await Promise.resolve()
     })
 
-    // Should start the first subtask, NOT the parent task
     const startCalls = (mockElectronAPI.agentSession.start as unknown as Mock).mock.calls
     const startedTaskIds = startCalls.map((call: unknown[]) => call[1])
     expect(startedTaskIds).toContain('sub-1')
-    // Parent task should NOT be started directly
     const parentStartCalls = startCalls.filter((call: unknown[]) => call[0] === subtaskAgent.id && call[1] === task.id)
     expect(parentStartCalls).toHaveLength(0)
   })
@@ -555,10 +541,8 @@ describe('useAgentAutoStart', () => {
     })
     const agent = makeAgent({ id: 'agent-next', is_default: true })
 
-    // When startNextSubtask fetches parent task, return it with NotStarted status
     ;(mockElectronAPI.db.getTask as unknown as Mock).mockResolvedValue(parentTask)
 
-    // When startNextSubtask fetches subtasks, return them with sub1 now completed
     ;(mockElectronAPI.db.getSubtasks as unknown as Mock).mockResolvedValue([
       { ...subtask1, status: TaskStatus.Completed },
       subtask2
@@ -578,13 +562,11 @@ describe('useAgentAutoStart', () => {
       await Promise.resolve()
     })
 
-    // Verify subtask2 was not started during initial check
     const initialStartCalls = (mockElectronAPI.agentSession.start as unknown as Mock).mock.calls
     expect(initialStartCalls.filter((c: unknown[]) => c[1] === 'sub-next-2')).toHaveLength(0)
 
     ;(mockElectronAPI.agentSession.start as unknown as Mock).mockClear()
 
-    // Get the onTaskUpdated callback
     const taskUpdatedCalls = (mockElectronAPI.onTaskUpdated as unknown as Mock).mock.calls
     const latestTaskUpdatedCb = taskUpdatedCalls[taskUpdatedCalls.length - 1]?.[0]
     expect(latestTaskUpdatedCb).toBeDefined()
@@ -599,7 +581,6 @@ describe('useAgentAutoStart', () => {
       await vi.advanceTimersByTimeAsync(400)
     })
 
-    // Should start subtask 2 after subtask 1 is completed
     const startCalls = (mockElectronAPI.agentSession.start as unknown as Mock).mock.calls
     const startedTaskIds = startCalls.map((call: unknown[]) => call[1])
     expect(startedTaskIds).toContain('sub-next-2')
@@ -641,10 +622,8 @@ describe('useAgentAutoStart', () => {
     })
     const agent = makeAgent({ id: 'agent-next', is_default: true })
 
-    // When startNextSubtask fetches parent task, return it with NotStarted status
     ;(mockElectronAPI.db.getTask as unknown as Mock).mockResolvedValue(parentTask)
 
-    // When startNextSubtask fetches subtasks, return them with sub1 now completed
     ;(mockElectronAPI.db.getSubtasks as unknown as Mock).mockResolvedValue([
       { ...subtask1, status: TaskStatus.Completed },
       subtask2,
@@ -665,13 +644,11 @@ describe('useAgentAutoStart', () => {
       await Promise.resolve()
     })
 
-    // Verify subtask2 was not started during initial check
     const initialStartCalls = (mockElectronAPI.agentSession.start as unknown as Mock).mock.calls
     expect(initialStartCalls.filter((c: unknown[]) => c[1] === 'sub-next-2')).toHaveLength(0)
 
     ;(mockElectronAPI.agentSession.start as unknown as Mock).mockClear()
 
-    // Get the onTaskUpdated callback
     const taskUpdatedCalls = (mockElectronAPI.onTaskUpdated as unknown as Mock).mock.calls
     const latestTaskUpdatedCb = taskUpdatedCalls[taskUpdatedCalls.length - 1]?.[0]
     expect(latestTaskUpdatedCb).toBeDefined()
@@ -719,10 +696,8 @@ describe('useAgentAutoStart', () => {
     })
     const agent = makeAgent({ id: 'agent-1', is_default: true })
 
-    // When startNextSubtask fetches parent task, return it with NotStarted status
     ;(mockElectronAPI.db.getTask as unknown as Mock).mockResolvedValue(parentTask)
 
-    // All subtasks completed
     ;(mockElectronAPI.db.getSubtasks as unknown as Mock).mockResolvedValue([subtask1, subtask2])
 
     renderHook(() =>
@@ -740,11 +715,9 @@ describe('useAgentAutoStart', () => {
 
     ;(mockElectronAPI.db.updateTask as unknown as Mock).mockClear()
 
-    // Get the onTaskUpdated callback
     const taskUpdatedCalls = (mockElectronAPI.onTaskUpdated as unknown as Mock).mock.calls
     const latestTaskUpdatedCb = taskUpdatedCalls[taskUpdatedCalls.length - 1]?.[0]
 
-    // Simulate the last subtask being completed
     await act(async () => {
       latestTaskUpdatedCb?.({
         taskId: 'sub-2',
@@ -754,11 +727,8 @@ describe('useAgentAutoStart', () => {
       await Promise.resolve()
     })
 
-    // Should mark parent as ReadyForReview
     expect(mockElectronAPI.db.updateTask).toHaveBeenCalledWith('parent-1', { status: TaskStatus.ReadyForReview })
   })
-
-  // ── Parent status guard tests ──
 
   it('does not start subtasks when parent is in ReadyForReview status', async () => {
     const parentTask = makeTask({
@@ -790,7 +760,6 @@ describe('useAgentAutoStart', () => {
       await Promise.resolve()
     })
 
-    // Subtask should NOT be started — parent is in ReadyForReview
     const startCalls = (mockElectronAPI.agentSession.start as unknown as Mock).mock.calls
     const startedTaskIds = startCalls.map((call: unknown[]) => call[1])
     expect(startedTaskIds).not.toContain('sub-rfr')
@@ -826,7 +795,6 @@ describe('useAgentAutoStart', () => {
       await Promise.resolve()
     })
 
-    // Subtask should NOT be started — parent is Completed
     const startCalls = (mockElectronAPI.agentSession.start as unknown as Mock).mock.calls
     const startedTaskIds = startCalls.map((call: unknown[]) => call[1])
     expect(startedTaskIds).not.toContain('sub-done')
@@ -862,7 +830,6 @@ describe('useAgentAutoStart', () => {
       await Promise.resolve()
     })
 
-    // Subtask should NOT be started — parent is AgentWorking
     const startCalls = (mockElectronAPI.agentSession.start as unknown as Mock).mock.calls
     const startedTaskIds = startCalls.map((call: unknown[]) => call[1])
     expect(startedTaskIds).not.toContain('sub-working')
@@ -919,11 +886,9 @@ describe('useAgentAutoStart', () => {
 
     ;(mockElectronAPI.agentSession.start as unknown as Mock).mockClear()
 
-    // Get the onTaskUpdated callback
     const taskUpdatedCalls = (mockElectronAPI.onTaskUpdated as unknown as Mock).mock.calls
     const latestTaskUpdatedCb = taskUpdatedCalls[taskUpdatedCalls.length - 1]?.[0]
 
-    // Simulate subtask 1 being completed → triggers startNextSubtask
     await act(async () => {
       latestTaskUpdatedCb?.({
         taskId: 'sub-changed-1',
@@ -932,12 +897,10 @@ describe('useAgentAutoStart', () => {
       await vi.advanceTimersByTimeAsync(400)
     })
 
-    // startNextSubtask should NOT start subtask 2 — parent is Completed in DB
     const startCalls = (mockElectronAPI.agentSession.start as unknown as Mock).mock.calls
     const startedTaskIds = startCalls.map((call: unknown[]) => call[1])
     expect(startedTaskIds).not.toContain('sub-changed-2')
 
-    // Should also NOT mark parent as ReadyForReview
     expect(mockElectronAPI.db.updateTask).not.toHaveBeenCalledWith('parent-changed', { status: TaskStatus.ReadyForReview })
   })
   /**
