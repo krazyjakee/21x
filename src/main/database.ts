@@ -12,156 +12,35 @@ import { userTaskRoleFilter } from './database/task-roles'
 import { TASK_ROLE_CAPTAIN, type TaskRole } from '../shared/task-roles'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import {
-  PROJECT_STATUS_BLOCKER_MAX_CHARS,
-  PROJECT_STATUS_JOURNAL_COMPACT_AFTER_DAYS,
-  PROJECT_STATUS_JOURNAL_ITEM_MAX_CHARS,
-  PROJECT_STATUS_JOURNAL_MAX_ITEMS,
-  PROJECT_STATUS_MAX_BLOCKERS,
-  PROJECT_STATUS_SUMMARY_MAX_CHARS,
-  type ProjectStatus,
-  type ProjectStatusJournalEntry,
-  type ProjectStatusJournalInput,
-  type ProjectStatusJournalSource
-} from '../shared/project-status'
-import { SkillVersionConflictError } from './database/types'
-import {
   JSON_COLUMNS,
   UPDATABLE_COLUMNS,
   deserializeAgent,
-  deserializeInstalledPlugin,
-  deserializeMarketplaceSource,
   deserializeMcpServer,
-  deserializeOAuthToken,
-  deserializeProject,
-  deserializeSecret,
-  deserializeSecretWithValue,
-  deserializeSkill,
   deserializeTask,
   deserializeTaskSource,
-  decryptSettingValue,
-  encryptSecret,
-  encryptSettingValue,
-  isApiKeySetting,
-  isEncryptedSettingValue,
-  normalizePreferredModel,
   parseJsonArray
 } from './database/serializers'
+import * as transcripts from './database/transcripts'
+import * as projects from './database/projects'
+import * as projectStatus from './database/project-status-store'
+import * as skills from './database/skills'
+import * as secrets from './database/secrets'
+import * as oauth from './database/oauth-tokens'
+import * as plugins from './database/plugins'
+import * as mobile from './database/mobile-auth'
 import type {
   AgentRecord, AgentRow, CreateAgentData, UpdateAgentData,
-  CreateInstalledPluginData, InstalledPluginRecord, InstalledPluginRow, UpdateInstalledPluginData,
-  CreateMarketplaceSourceData, MarketplaceSourceRecord, MarketplaceSourceRow,
   CreateMcpServerData, McpServerRecord, McpServerRow, McpServerSource, McpServerToolRecord, UpdateMcpServerData,
-  CreateOAuthTokenData, OAuthTokenRecord, OAuthTokenRow,
-  CreateProjectData, ProjectRecord, ProjectRow, UpdateProjectData,
-  CreateProjectRepoData, ProjectRepoRecord, UpdateProjectRepoData,
-  CreateProjectResourceData, ProjectResourceRecord, UpdateProjectResourceData,
-  CreateSecretData, SecretRecord, SecretRecordWithValue, SecretRow, UpdateSecretData,
-  CreateSkillData, SkillListFilter, SkillRecord, SkillRow, UpdateSkillData,
   CreateTaskData, HeartbeatLogRecord, TaskRecord, TaskRow, UpdateTaskData,
-  CreateTaskSourceData, TaskSourceRecord, TaskSourceRow, UpdateTaskSourceData,
-  TranscriptPartInput, TranscriptPartRecord
+  CreateTaskSourceData, TaskSourceRecord, TaskSourceRow, UpdateTaskSourceData
 } from './database/types'
 
 export type * from './database/types'
 export { SkillVersionConflictError } from './database/types'
 export type { ProjectStatus, ProjectStatusJournalEntry, ProjectStatusJournalInput } from '../shared/project-status'
 
-/** A `project_status_journal` row (#72); the list columns hold JSON arrays. */
-interface ProjectStatusJournalRow {
-  id: string
-  project_id: string
-  summary: string
-  completed: string
-  blockers: string
-  decisions: string
-  next_steps: string
-  source: string
-  correlation_id: string | null
-  created_at: string
-}
-
-/** What `recordProjectStatus` writes: the snapshot fields plus the journal highlights. */
-export interface ProjectStatusUpdateInput extends ProjectStatusJournalInput {
-  /** The snapshot's top blockers; also the journal entry's `blockers` unless those are given. */
-  top_blockers?: string[]
-}
-
-/** Caps for a compaction entry: it stands for a month, so it may hold more than one update. */
-const JOURNAL_COMPACTION_MAX_ITEMS = PROJECT_STATUS_JOURNAL_MAX_ITEMS * 2
-const JOURNAL_COMPACTION_SUMMARY_MAX_CHARS = PROJECT_STATUS_SUMMARY_MAX_CHARS * 2
-const JOURNAL_COMPACTION_LINE_MAX_CHARS = 200
-
-function journalStringList(raw: string | null | undefined): string[] {
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
-  } catch {
-    return []
-  }
-}
-
-function toJournalEntry(row: ProjectStatusJournalRow): ProjectStatusJournalEntry {
-  return {
-    id: row.id,
-    project_id: row.project_id,
-    summary: row.summary,
-    completed: journalStringList(row.completed),
-    blockers: journalStringList(row.blockers),
-    decisions: journalStringList(row.decisions),
-    next_steps: journalStringList(row.next_steps),
-    source: row.source === 'compaction' ? 'compaction' : 'captain',
-    correlation_id: row.correlation_id ?? null,
-    created_at: row.created_at
-  }
-}
-
-/** Trims, clips and caps one highlight list from the Captain. */
-function cleanJournalList(value: unknown, maxItems = PROJECT_STATUS_JOURNAL_MAX_ITEMS): string[] {
-  if (!Array.isArray(value)) return []
-  const out: string[] = []
-  const seen = new Set<string>()
-  for (const item of value) {
-    if (typeof item !== 'string') continue
-    const text = item.trim().slice(0, PROJECT_STATUS_JOURNAL_ITEM_MAX_CHARS)
-    const key = text.toLowerCase()
-    if (!text || seen.has(key)) continue
-    seen.add(key)
-    out.push(text)
-    if (out.length >= maxItems) break
-  }
-  return out
-}
-
-/** What only the agent manager knows about a project's tasks (#58): see getProjectStatus. */
-export interface ProjectStatusLiveState {
-  /** Tasks waiting in the admission queue (#47). */
-  queuedTaskIds?: Iterable<string>
-  /** Tasks whose live session is in `waiting_approval`. */
-  approvalTaskIds?: Iterable<string>
-}
-
-interface TranscriptPartRow {
-  task_id: string; part_id: string; seq: number; role: string; content: string
-  part_type: string | null; tool: string | null; payload: string | null
-  created_at: number; updated_at: number; rev: number
-}
-
-function toTranscriptPartRecord(r: TranscriptPartRow): TranscriptPartRecord {
-  return {
-    taskId: r.task_id,
-    partId: r.part_id,
-    seq: r.seq,
-    role: r.role,
-    content: r.content,
-    rev: r.rev ?? 0,
-    partType: r.part_type ?? undefined,
-    tool: r.tool ? (JSON.parse(r.tool) as unknown) : undefined,
-    payload: r.payload ? (JSON.parse(r.payload) as unknown) : undefined,
-    createdAt: r.created_at,
-    updatedAt: r.updated_at
-  }
-}
+/** A module function's arguments after the manager itself. */
+type Args<F> = F extends (m: DatabaseManager, ...args: infer A) => unknown ? A : never
 
 export class DatabaseManager {
   public db!: Database.Database
@@ -169,8 +48,8 @@ export class DatabaseManager {
   private statements = new Map<string, Database.Statement>()
   private statementsDb?: Database.Database
 
-  /** Static SQL is compiled once per connection and reused. */
-  private prepare(sql: string): Database.Statement {
+  /** Static SQL is compiled once per connection and reused. Also used by the area modules in database/. */
+  prepare(sql: string): Database.Statement {
     if (this.statementsDb !== this.db) {
       this.statements.clear()
       this.statementsDb = this.db
@@ -264,6 +143,15 @@ export class DatabaseManager {
     return rows.map(deserializeTask)
   }
 
+  /** Newest `updated_at` among a project's user tasks (coordinator rows excluded, as in getTasks). */
+  getLatestTaskUpdate(projectId: string): string | null {
+    if (!this.ensureDbOpen()) return null
+    const row = this.prepare(
+      `SELECT MAX(updated_at) AS latest FROM tasks WHERE project_id = ? AND ${userTaskRoleFilter()}`
+    ).get(projectId) as { latest: string | null }
+    return row.latest
+  }
+
   /**
    * The row that hosts a project's coordinator conversation: its Captain.
    * One per project (#55); the Default project's is the one every install has.
@@ -317,140 +205,16 @@ export class DatabaseManager {
     return rows.map(deserializeTask)
   }
 
-  // ── Durable transcript projection ──────────────────────────────
-  // Every transcript part delivered to any client is persisted here first.
-  // Parts are upserted by (task_id, part_id): streaming updates replace the
-  // content of an existing part while keeping its position (seq).
+  // Area CRUD lives in database/<area>.ts; these delegates keep `db.x()` the one API callers use.
+  upsertTranscriptParts(...a: Args<typeof transcripts.upsertTranscriptParts>) { return transcripts.upsertTranscriptParts(this, ...a) }
+  getTranscriptDelta(...a: Args<typeof transcripts.getTranscriptDelta>) { return transcripts.getTranscriptDelta(this, ...a) }
+  getTranscriptMaxRev(...a: Args<typeof transcripts.getTranscriptMaxRev>) { return transcripts.getTranscriptMaxRev(this, ...a) }
+  getTranscriptParts(...a: Args<typeof transcripts.getTranscriptParts>) { return transcripts.getTranscriptParts(this, ...a) }
+  getTranscriptPage(...a: Args<typeof transcripts.getTranscriptPage>) { return transcripts.getTranscriptPage(this, ...a) }
+  hasTranscriptParts(...a: Args<typeof transcripts.hasTranscriptParts>) { return transcripts.hasTranscriptParts(this, ...a) }
+  deleteTranscriptParts(...a: Args<typeof transcripts.deleteTranscriptParts>) { return transcripts.deleteTranscriptParts(this, ...a) }
 
-  /**
-   * Upsert a batch of transcript parts for a task inside one transaction.
-   * New parts get the next per-task seq; existing parts keep their seq and
-   * update content in place (streaming). Re-sending an unchanged part is a
-   * no-op: it keeps its rev and is not reported in changedPartIds, so the
-   * returned revs stay contiguous (maxRev - changedPartIds.length is the
-   * cursor before this batch).
-   */
-  upsertTranscriptParts(taskId: string, parts: TranscriptPartInput[]): { maxRev: number; changedPartIds: string[] } {
-    if (!this.ensureDbOpen() || parts.length === 0) return { maxRev: this.getTranscriptMaxRev(taskId), changedPartIds: [] }
-
-    const nextSeqStmt = this.prepare(
-      'SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM transcript_parts WHERE task_id = ?'
-    )
-    // created_at carries the part's ORIGINAL time (receivedAt) when known, not
-    // the write time. Otherwise a bulk seed/replay (which writes the whole
-    // history in one burst) would stamp every row with a near-identical
-    // timestamp and destroy the transcript's chronology. On conflict, created_at
-    // is preserved (never overwritten by a later reconcile pass).
-    // Each inserted or changed row gets a fresh globally-monotonic `rev` so a
-    // client can fetch everything changed since its last rev.
-    const upsertStmt = this.prepare(`
-      INSERT INTO transcript_parts (task_id, part_id, seq, role, content, part_type, tool, payload, created_at, updated_at, rev)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch('subsec') * 1000, ?)
-      ON CONFLICT(task_id, part_id) DO UPDATE SET
-        content = excluded.content,
-        part_type = COALESCE(excluded.part_type, transcript_parts.part_type),
-        tool = COALESCE(excluded.tool, transcript_parts.tool),
-        payload = COALESCE(excluded.payload, transcript_parts.payload),
-        updated_at = excluded.updated_at,
-        rev = excluded.rev
-      WHERE excluded.content IS NOT transcript_parts.content
-         OR COALESCE(excluded.part_type, transcript_parts.part_type) IS NOT transcript_parts.part_type
-         OR COALESCE(excluded.tool, transcript_parts.tool) IS NOT transcript_parts.tool
-         OR COALESCE(excluded.payload, transcript_parts.payload) IS NOT transcript_parts.payload
-    `)
-    // Served by idx_transcript_parts_rev; runs inside every write transaction.
-    const maxRevStmt = this.prepare('SELECT COALESCE(MAX(rev), 0) AS m FROM transcript_parts')
-
-    let maxRev = 0
-    const changedPartIds: string[] = []
-    const txn = this.db.transaction(() => {
-      let nextSeq = (nextSeqStmt.get(taskId) as { next: number }).next
-      let rev = (maxRevStmt.get() as { m: number }).m
-      const writeNow = Date.now()
-      for (const part of parts) {
-        if (!part.id) continue
-        const { changes } = upsertStmt.run(
-          taskId,
-          part.id,
-          nextSeq,
-          part.role || 'system',
-          part.content || '',
-          part.partType ?? null,
-          part.tool != null ? JSON.stringify(part.tool) : null,
-          part.payload != null ? JSON.stringify(part.payload) : null,
-          typeof part.receivedAt === 'number' ? part.receivedAt : writeNow,
-          rev + 1
-        )
-        nextSeq++
-        if (changes === 0) continue
-        rev += 1
-        changedPartIds.push(part.id)
-      }
-      maxRev = rev
-    })
-    // Reserve the WAL writer slot before reading seq/rev. A deferred
-    // transaction can take a read snapshot while another connection is
-    // writing, then fail immediately with SQLITE_BUSY when it tries to upgrade
-    // that stale snapshot. BEGIN IMMEDIATE lets busy_timeout wait for the
-    // writer and only calculates the counters after the lock is acquired.
-    txn.immediate()
-    return { maxRev, changedPartIds }
-  }
-
-  /**
-   * Delta query: all parts for a task whose rev > sinceRev, ordered chronologically.
-   * Captures both new parts and streaming content updates to existing ones.
-   * Returns the parts and the task's current maxRev so the client can advance its cursor.
-   */
-  getTranscriptDelta(taskId: string, sinceRev: number): { parts: TranscriptPartRecord[]; maxRev: number } {
-    if (!this.ensureDbOpen()) return { parts: [], maxRev: sinceRev }
-    const rows = this.prepare(
-      'SELECT * FROM transcript_parts WHERE task_id = ? AND rev > ? ORDER BY created_at ASC, seq ASC'
-    ).all(taskId, sinceRev) as TranscriptPartRow[]
-    const maxRow = this.prepare('SELECT COALESCE(MAX(rev), ?) AS m FROM transcript_parts WHERE task_id = ?').get(sinceRev, taskId) as { m: number }
-    return { parts: rows.map(toTranscriptPartRecord), maxRev: maxRow.m }
-  }
-
-  /** Current max rev for a task (0 when empty). */
-  getTranscriptMaxRev(taskId: string): number {
-    if (!this.ensureDbOpen()) return 0
-    const row = this.prepare('SELECT COALESCE(MAX(rev), 0) AS m FROM transcript_parts WHERE task_id = ?').get(taskId) as { m: number }
-    return row.m
-  }
-
-  /** Snapshot query: ordered transcript for a task, optionally only parts after seq. */
-  getTranscriptParts(taskId: string, sinceSeq?: number): TranscriptPartRecord[] {
-    if (!this.ensureDbOpen()) return []
-
-    // Order by REAL event time (created_at), with seq as a stable tiebreaker.
-    // Insertion order (seq) is not chronological when a partial projection is
-    // later backfilled with older history — ordering by created_at keeps the
-    // transcript correct regardless of when each part was ingested.
-    const rows = (sinceSeq != null
-      ? this.prepare('SELECT * FROM transcript_parts WHERE task_id = ? AND seq > ? ORDER BY created_at ASC, seq ASC').all(taskId, sinceSeq)
-      : this.prepare('SELECT * FROM transcript_parts WHERE task_id = ? ORDER BY created_at ASC, seq ASC').all(taskId)
-    ) as TranscriptPartRow[]
-    return rows.map(toTranscriptPartRecord)
-  }
-
-  /** True when the task already has persisted transcript parts. */
-  hasTranscriptParts(taskId: string): boolean {
-    if (!this.ensureDbOpen()) return false
-    const row = this.prepare('SELECT 1 FROM transcript_parts WHERE task_id = ? LIMIT 1').get(taskId)
-    return !!row
-  }
-
-  /** Remove a task's transcript (task deletion cleanup). */
-  deleteTranscriptParts(taskId: string): void {
-    if (!this.ensureDbOpen()) return
-    this.prepare('DELETE FROM transcript_parts WHERE task_id = ?').run(taskId)
-  }
-
-  /**
-   * Batch-update sort_order for subtasks under a parent.
-   * @param parentId  The parent task ID
-   * @param orderedIds  Subtask IDs in the desired order (index becomes sort_order)
-   */
+  /** Index in `orderedIds` becomes each subtask's sort_order; ids outside `parentId` are ignored. */
   reorderSubtasks(parentId: string, orderedIds: string[]): void {
     if (!this.ensureDbOpen()) return
 
@@ -534,7 +298,6 @@ export class DatabaseManager {
         ? (typeof data.recurrence_pattern === 'string' ? data.recurrence_pattern : JSON.stringify(data.recurrence_pattern))
         : null
 
-    // When creating a subtask, place it at the end by using max(sort_order) + 1
     let sortOrder = 0
     if (data.parent_task_id) {
       const maxRow = this.prepare(
@@ -643,7 +406,6 @@ export class DatabaseManager {
       values.push(this.resolveTaskProjectId({ parent_task_id: data.parent_task_id, project_id: currentTask?.project_id }))
     }
 
-    // Auto-set heartbeat_next_check_at when enabling heartbeat without explicit next check time
     if (data.heartbeat_enabled === true && data.heartbeat_next_check_at === undefined) {
       const interval = data.heartbeat_interval_minutes ?? 30
       const nextCheck = new Date(Date.now() + interval * 60_000).toISOString()
@@ -707,9 +469,7 @@ export class DatabaseManager {
     return result.changes > 0
   }
 
-  // ── Heartbeat CRUD ──────────────────────────────────────────
-
-  /** Get all tasks that have heartbeat due (enabled + next_check_at <= now, excluding completed tasks). */
+  /** Heartbeat-enabled tasks whose next check is due; completed tasks and subtasks of completed parents are skipped. */
   getHeartbeatDueTasks(): TaskRecord[] {
     const now = new Date().toISOString()
     const rows = this.prepare(`
@@ -729,7 +489,6 @@ export class DatabaseManager {
     return rows.map(deserializeTask)
   }
 
-  /** Create a heartbeat log entry. */
   createHeartbeatLog(data: {
     task_id: string
     status: string
@@ -747,7 +506,7 @@ export class DatabaseManager {
     return { id, task_id: data.task_id, status: data.status, summary: data.summary ?? null, session_id: data.session_id ?? null, created_at: now }
   }
 
-  /** Get heartbeat logs for a task, most recent first. */
+  /** Most recent first. */
   getHeartbeatLogs(taskId: string, limit = 20): HeartbeatLogRecord[] {
     return this.prepare(`
       SELECT * FROM heartbeat_logs
@@ -757,7 +516,7 @@ export class DatabaseManager {
     `).all(taskId, limit) as HeartbeatLogRecord[]
   }
 
-  /** Count consecutive errors for a task (from most recent). */
+  /** Errors in a row, counting back from the most recent log. */
   getHeartbeatConsecutiveErrors(taskId: string): number {
     const logs = this.prepare(`
       SELECT status FROM heartbeat_logs
@@ -773,8 +532,6 @@ export class DatabaseManager {
     }
     return count
   }
-
-  // ── Agent CRUD ────────────────────────────────────────────
 
   getAgents(): AgentRecord[] {
     const rows = this.prepare('SELECT * FROM agents ORDER BY created_at ASC').all() as AgentRow[]
@@ -844,8 +601,6 @@ export class DatabaseManager {
     const result = this.prepare('DELETE FROM agents WHERE id = ?').run(id)
     return result.changes > 0
   }
-
-  // ── MCP Server CRUD ────────────────────────────────────────
 
   getMcpServers(): McpServerRecord[] {
     const rows = this.prepare('SELECT * FROM mcp_servers ORDER BY created_at ASC').all() as McpServerRow[]
@@ -917,475 +672,33 @@ export class DatabaseManager {
     return result.changes > 0
   }
 
-  // ── Projects ─────────────────────────────────────────────────
-  // A project groups tasks and task sources and has zero, one or many repos
-  // plus context-only resources. Projects are archived, never deleted: tasks
-  // reference them without a cascade.
-
-  /** Active projects in sidebar order; `includeArchived` adds the archived ones. */
-  getProjects(opts?: { includeArchived?: boolean }): ProjectRecord[] {
-    if (!this.ensureDbOpen()) return []
-    const where = opts?.includeArchived ? '' : ' WHERE archived = 0'
-    const rows = this.prepare(
-      `SELECT * FROM projects${where} ORDER BY sort_order ASC, created_at ASC`
-    ).all() as ProjectRow[]
-    return rows.map(deserializeProject)
-  }
-
-  getProject(id: string): ProjectRecord | undefined {
-    if (!this.ensureDbOpen()) return undefined
-    const row = this.prepare('SELECT * FROM projects WHERE id = ?').get(id) as ProjectRow | undefined
-    return row ? deserializeProject(row) : undefined
-  }
-
-  /** The project unassigned tasks and sources belong to; created by schema migration 15. */
-  getDefaultProject(): ProjectRecord | undefined {
-    return this.getProject(DEFAULT_PROJECT_ID)
-  }
-
-  createProject(data: CreateProjectData): ProjectRecord | undefined {
-    const name = data.name?.trim()
-    if (!name) throw new Error('A project needs a name.')
-    const id = createId()
-    const now = new Date().toISOString()
-    const { next } = this.prepare('SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM projects').get() as { next: number }
-    this.prepare(`
-      INSERT INTO projects (id, name, description, default_agent_id, captain_agent_id, git_provider, git_org, settings, sort_order, archived, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-    `).run(
-      id,
-      name,
-      data.description ?? '',
-      data.default_agent_id ?? null,
-      data.captain_agent_id ?? null,
-      data.git_provider || null,
-      data.git_org || null,
-      JSON.stringify(data.settings ?? {}),
-      next,
-      now,
-      now
-    )
-    // A project is born with its Captain (#55); the conversation is ready
-    // before the user opens the drawer.
-    ensureProjectCaptain(this.db, id)
-    return this.getProject(id)
-  }
-
-  updateProject(id: string, data: UpdateProjectData): ProjectRecord | undefined {
-    const setClauses: string[] = []
-    const values: (string | null)[] = []
-    if (data.name !== undefined) {
-      const name = data.name.trim()
-      if (!name) throw new Error('A project needs a name.')
-      setClauses.push('name = ?'); values.push(name)
-    }
-    if (data.description !== undefined) { setClauses.push('description = ?'); values.push(data.description) }
-    if (data.default_agent_id !== undefined) { setClauses.push('default_agent_id = ?'); values.push(data.default_agent_id || null) }
-    if (data.captain_agent_id !== undefined) { setClauses.push('captain_agent_id = ?'); values.push(data.captain_agent_id || null) }
-    if (data.git_provider !== undefined) { setClauses.push('git_provider = ?'); values.push(data.git_provider || null) }
-    if (data.git_org !== undefined) { setClauses.push('git_org = ?'); values.push(data.git_org || null) }
-    if (data.settings !== undefined) { setClauses.push('settings = ?'); values.push(JSON.stringify(data.settings ?? {})) }
-    if (setClauses.length === 0) return this.getProject(id)
-
-    setClauses.push('updated_at = ?')
-    values.push(new Date().toISOString(), id)
-    this.db.prepare(`UPDATE projects SET ${setClauses.join(', ')} WHERE id = ?`).run(...values)
-    return this.getProject(id)
-  }
-
-  /**
-   * Archive (or restore) a project. The Default project always stays active.
-   * The project's Captain row is left alone either way: archiving keeps
-   * the conversation (its row is hidden anyway), restoring finds it again.
-   */
-  archiveProject(id: string, archived = true): ProjectRecord | undefined {
-    if (archived && id === DEFAULT_PROJECT_ID) throw new Error('The Default project cannot be archived.')
-    this.prepare('UPDATE projects SET archived = ?, updated_at = ? WHERE id = ?')
-      .run(archived ? 1 : 0, new Date().toISOString(), id)
-    if (!archived && this.getProject(id)) ensureProjectCaptain(this.db, id)
-    return this.getProject(id)
-  }
-
-  /** Index in `orderedIds` becomes each project's sort_order. */
-  reorderProjects(orderedIds: string[]): void {
-    this.reorderRows('projects', null, orderedIds)
-  }
-
-  // ── Project status (#58) ─────────────────────────────────────
-  // Counts come from the task rows every time (plus the caller's live session
-  // facts, which no row records); only the Captain's narrative is stored,
-  // one snapshot per project in `project_status`. A journal of earlier
-  // snapshots (#72) goes in its own table beside it.
-
-  /**
-   * The project's status: counts from the database and the stored narrative.
-   * `live` carries what only the agent manager knows: tasks waiting in the
-   * admission queue and tasks whose session is waiting for approval. Without
-   * it those two counts are 0, never guessed.
-   */
-  getProjectStatus(projectId: string, live?: ProjectStatusLiveState): ProjectStatus {
-    const empty: ProjectStatus = {
-      project_id: projectId,
-      counts: { running: 0, queued: 0, awaiting_review: 0, awaiting_approval: 0, blocked: 0 },
-      summary: '',
-      top_blockers: [],
-      updated_at: null
-    }
-    if (!this.ensureDbOpen()) return empty
-
-    const queued = new Set(live?.queuedTaskIds ?? [])
-    const approval = new Set(live?.approvalTaskIds ?? [])
-    const rows = this.prepare(
-      `SELECT id, status, agent_id FROM tasks WHERE project_id = ? AND ${userTaskRoleFilter()}`
-    ).all(projectId) as Array<{ id: string; status: string; agent_id: string | null }>
-    const counts = { ...empty.counts }
-    for (const row of rows) {
-      if (row.status === TaskStatus.AgentWorking || row.status === TaskStatus.Triaging) counts.running += 1
-      else if (row.status === TaskStatus.ReadyForReview) counts.awaiting_review += 1
-      if (approval.has(row.id)) counts.awaiting_approval += 1
-      if (queued.has(row.id)) counts.queued += 1
-      else if (row.status === TaskStatus.NotStarted && !row.agent_id) counts.blocked += 1
-    }
-
-    const stored = this.prepare('SELECT summary, top_blockers, updated_at FROM project_status WHERE project_id = ?')
-      .get(projectId) as { summary: string; top_blockers: string; updated_at: string } | undefined
-    let topBlockers: string[] = []
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored.top_blockers || '[]') as unknown
-        if (Array.isArray(parsed)) topBlockers = parsed.filter((item): item is string => typeof item === 'string')
-      } catch {
-        // An unreadable list is an empty list; the summary still shows.
-      }
-    }
-    return {
-      project_id: projectId,
-      counts,
-      summary: stored?.summary ?? '',
-      top_blockers: topBlockers,
-      updated_at: stored?.updated_at ?? null
-    }
-  }
-
-  /**
-   * Replaces the project's narrative snapshot. The text is trimmed and capped
-   * (shared/project-status.ts) so the record stays one small read. Undefined
-   * for an unknown project: no row is invented for it.
-   */
-  setProjectStatusSummary(projectId: string, summary: string, topBlockers: string[] = []): ProjectStatus | undefined {
-    if (!this.ensureDbOpen() || !this.getProject(projectId)) return undefined
-    const text = summary.trim().slice(0, PROJECT_STATUS_SUMMARY_MAX_CHARS)
-    const blockers = topBlockers
-      .map((item) => String(item).trim().slice(0, PROJECT_STATUS_BLOCKER_MAX_CHARS))
-      .filter(Boolean)
-      .slice(0, PROJECT_STATUS_MAX_BLOCKERS)
-    const now = new Date().toISOString()
-    this.prepare(`
-      INSERT INTO project_status (project_id, summary, top_blockers, updated_at)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(project_id) DO UPDATE SET
-        summary = excluded.summary,
-        top_blockers = excluded.top_blockers,
-        updated_at = excluded.updated_at
-    `).run(projectId, text, JSON.stringify(blockers), now)
-    return this.getProjectStatus(projectId)
-  }
-
-  // ── Project status journal (#72) ─────────────────────────────
-  // The snapshot above stays the cheap read; every update also lands here as
-  // one row, so "what changed?" has an answer without a growing blob anywhere.
-  // Reads are newest first over (created_at, id), which stays stable while new
-  // rows arrive: a newer row can never fall behind an older cursor.
-
-  /**
-   * Appends one journal entry. Lists are trimmed, deduplicated and capped
-   * (shared/project-status.ts); an empty summary or unknown project writes
-   * nothing. `createdAt` is for the roll-up and tests; callers normally omit it.
-   */
-  appendProjectStatusJournal(
-    projectId: string,
-    input: ProjectStatusJournalInput,
-    options: { source?: ProjectStatusJournalSource; createdAt?: string } = {}
-  ): ProjectStatusJournalEntry | undefined {
-    if (!this.ensureDbOpen() || !this.getProject(projectId)) return undefined
-    const summary = (input.summary ?? '').trim().slice(0, PROJECT_STATUS_SUMMARY_MAX_CHARS)
-    if (!summary) return undefined
-    const id = createId()
-    const correlationId = typeof input.correlation_id === 'string' && input.correlation_id.trim() ? input.correlation_id.trim().slice(0, 100) : null
-    this.prepare(`
-      INSERT INTO project_status_journal
-        (id, project_id, summary, completed, blockers, decisions, next_steps, source, correlation_id, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id,
-      projectId,
-      summary,
-      JSON.stringify(cleanJournalList(input.completed)),
-      JSON.stringify(cleanJournalList(input.blockers)),
-      JSON.stringify(cleanJournalList(input.decisions)),
-      JSON.stringify(cleanJournalList(input.next_steps)),
-      options.source ?? 'captain',
-      correlationId,
-      options.createdAt ?? new Date().toISOString()
-    )
-    return this.getProjectStatusJournalEntry(id)
-  }
-
-  getProjectStatusJournalEntry(id: string): ProjectStatusJournalEntry | undefined {
-    if (!this.ensureDbOpen()) return undefined
-    const row = this.prepare('SELECT * FROM project_status_journal WHERE id = ?').get(id) as ProjectStatusJournalRow | undefined
-    return row ? toJournalEntry(row) : undefined
-  }
-
-  /**
-   * One status update from the Captain: replaces the snapshot and appends
-   * the journal entry in one transaction. The entry's `blockers` default to
-   * the snapshot's `top_blockers`. Undefined for an unknown project.
-   */
-  recordProjectStatus(projectId: string, input: ProjectStatusUpdateInput): { status: ProjectStatus; entry: ProjectStatusJournalEntry } | undefined {
-    if (!this.ensureDbOpen() || !this.getProject(projectId)) return undefined
-    const write = this.db.transaction((): { status: ProjectStatus; entry: ProjectStatusJournalEntry } | undefined => {
-      const status = this.setProjectStatusSummary(projectId, input.summary, input.top_blockers ?? [])
-      if (!status) return undefined
-      const entry = this.appendProjectStatusJournal(projectId, { ...input, blockers: input.blockers ?? input.top_blockers ?? [] })
-      if (!entry) throw new Error('summary is required')
-      return { status, entry }
-    })
-    return write()
-  }
-
-  /**
-   * A page of journal entries, newest first. `before` is the (created_at, id)
-   * of the last entry of the previous page; the page holds up to `limit`
-   * entries and says whether more exist. The caller caps `limit`.
-   */
-  listProjectStatusJournal(
-    projectId: string,
-    options: { limit: number; before?: { created_at: string; id: string } | null }
-  ): { entries: ProjectStatusJournalEntry[]; has_more: boolean } {
-    if (!this.ensureDbOpen()) return { entries: [], has_more: false }
-    const limit = Math.max(1, Math.floor(options.limit))
-    const rows = (options.before
-      ? this.prepare(`
-          SELECT * FROM project_status_journal
-          WHERE project_id = ? AND (created_at < ? OR (created_at = ? AND id < ?))
-          ORDER BY created_at DESC, id DESC LIMIT ?
-        `).all(projectId, options.before.created_at, options.before.created_at, options.before.id, limit + 1)
-      : this.prepare(`
-          SELECT * FROM project_status_journal
-          WHERE project_id = ?
-          ORDER BY created_at DESC, id DESC LIMIT ?
-        `).all(projectId, limit + 1)) as ProjectStatusJournalRow[]
-    return { entries: rows.slice(0, limit).map(toJournalEntry), has_more: rows.length > limit }
-  }
-
-  countProjectStatusJournal(projectId: string): number {
-    if (!this.ensureDbOpen()) return 0
-    const row = this.prepare('SELECT COUNT(*) AS n FROM project_status_journal WHERE project_id = ?').get(projectId) as { n: number }
-    return row.n
-  }
-
-  /**
-   * Retention (#72): Captain entries older than the window (90 days) are
-   * rolled into one `compaction` entry per project and calendar month, then
-   * deleted. The roll-up keeps a dated line per folded summary (newest lines
-   * win when the cap is hit) and the union of each highlight list, so
-   * decisions stay findable. An existing roll-up for the month absorbs new
-   * arrivals, which makes the run idempotent: a second run folds nothing.
-   * Runs at startup; `now` is for tests.
-   */
-  compactProjectStatusJournal(now: Date = new Date()): { folded: number; written: number } {
-    if (!this.ensureDbOpen()) return { folded: 0, written: 0 }
-    const cutoff = new Date(now.getTime() - PROJECT_STATUS_JOURNAL_COMPACT_AFTER_DAYS * 24 * 60 * 60 * 1000).toISOString()
-    const stale = this.prepare(`
-      SELECT * FROM project_status_journal
-      WHERE source = 'captain' AND created_at < ?
-      ORDER BY project_id ASC, created_at ASC, id ASC
-    `).all(cutoff) as ProjectStatusJournalRow[]
-    if (stale.length === 0) return { folded: 0, written: 0 }
-
-    const groups = new Map<string, ProjectStatusJournalRow[]>()
-    for (const row of stale) {
-      const key = `${row.project_id}::${row.created_at.slice(0, 7)}`
-      const group = groups.get(key)
-      if (group) group.push(row)
-      else groups.set(key, [row])
-    }
-
-    const run = this.db.transaction((): { folded: number; written: number } => {
-      let written = 0
-      for (const [key, rows] of groups) {
-        const [projectId, month] = key.split('::')
-        const existing = this.prepare(`
-          SELECT * FROM project_status_journal
-          WHERE project_id = ? AND source = 'compaction' AND substr(created_at, 1, 7) = ?
-          ORDER BY created_at DESC LIMIT 1
-        `).get(projectId, month) as ProjectStatusJournalRow | undefined
-
-        // Newest lines first, so what survives the cap is the latest of the month.
-        const lines = rows
-          .map((row) => `${row.created_at.slice(0, 10)}: ${row.summary.replace(/\s+/g, ' ').trim().slice(0, JOURNAL_COMPACTION_LINE_MAX_CHARS)}`)
-          .reverse()
-        if (existing?.summary) lines.push(...existing.summary.split('\n').filter(Boolean).reverse())
-        const kept: string[] = []
-        let chars = 0
-        for (const line of lines) {
-          if (kept.length > 0 && chars + line.length + 1 > JOURNAL_COMPACTION_SUMMARY_MAX_CHARS) break
-          kept.push(line)
-          chars += line.length + 1
-        }
-        const summary = kept.reverse().join('\n').slice(0, JOURNAL_COMPACTION_SUMMARY_MAX_CHARS)
-
-        const union = (pick: (row: ProjectStatusJournalRow) => string): string[] =>
-          cleanJournalList([...(existing ? journalStringList(pick(existing)) : []), ...rows.flatMap((row) => journalStringList(pick(row)))], JOURNAL_COMPACTION_MAX_ITEMS)
-        const newest = rows[rows.length - 1].created_at
-        const createdAt = existing && existing.created_at > newest ? existing.created_at : newest
-        const values = [
-          summary,
-          JSON.stringify(union((row) => row.completed)),
-          JSON.stringify(union((row) => row.blockers)),
-          JSON.stringify(union((row) => row.decisions)),
-          JSON.stringify(union((row) => row.next_steps)),
-          createdAt
-        ]
-        if (existing) {
-          this.prepare(`
-            UPDATE project_status_journal
-            SET summary = ?, completed = ?, blockers = ?, decisions = ?, next_steps = ?, created_at = ?
-            WHERE id = ?
-          `).run(...values, existing.id)
-        } else {
-          this.prepare(`
-            INSERT INTO project_status_journal
-              (id, project_id, summary, completed, blockers, decisions, next_steps, source, correlation_id, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'compaction', NULL, ?)
-          `).run(createId(), projectId, ...values)
-        }
-        written += 1
-        const remove = this.prepare('DELETE FROM project_status_journal WHERE id = ?')
-        for (const row of rows) remove.run(row.id)
-      }
-      return { folded: stale.length, written }
-    })
-    return run()
-  }
-
-  getProjectRepos(projectId: string): ProjectRepoRecord[] {
-    if (!this.ensureDbOpen()) return []
-    return this.prepare(
-      'SELECT * FROM project_repos WHERE project_id = ? ORDER BY sort_order ASC, created_at ASC'
-    ).all(projectId) as ProjectRepoRecord[]
-  }
-
-  getProjectRepo(id: string): ProjectRepoRecord | undefined {
-    return this.prepare('SELECT * FROM project_repos WHERE id = ?').get(id) as ProjectRepoRecord | undefined
-  }
-
-  addProjectRepo(projectId: string, data: CreateProjectRepoData): ProjectRepoRecord | undefined {
-    const name = data.name?.trim()
-    if (!name) throw new Error('A repo needs a name.')
-    const id = createId()
-    const { next } = this.prepare(
-      'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM project_repos WHERE project_id = ?'
-    ).get(projectId) as { next: number }
-    this.prepare(`
-      INSERT INTO project_repos (id, project_id, provider, org, name, default_branch, sort_order, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, projectId, data.provider || 'github', data.org?.trim() ?? '', name, data.default_branch || null, next, new Date().toISOString())
-    return this.getProjectRepo(id)
-  }
-
-  updateProjectRepo(id: string, data: UpdateProjectRepoData): ProjectRepoRecord | undefined {
-    const setClauses: string[] = []
-    const values: (string | null)[] = []
-    if (data.name !== undefined) {
-      const name = data.name.trim()
-      if (!name) throw new Error('A repo needs a name.')
-      setClauses.push('name = ?'); values.push(name)
-    }
-    if (data.provider !== undefined) { setClauses.push('provider = ?'); values.push(data.provider || 'github') }
-    if (data.org !== undefined) { setClauses.push('org = ?'); values.push(data.org.trim()) }
-    if (data.default_branch !== undefined) { setClauses.push('default_branch = ?'); values.push(data.default_branch || null) }
-    if (setClauses.length > 0) {
-      values.push(id)
-      this.db.prepare(`UPDATE project_repos SET ${setClauses.join(', ')} WHERE id = ?`).run(...values)
-    }
-    return this.getProjectRepo(id)
-  }
-
-  removeProjectRepo(id: string): boolean {
-    return this.prepare('DELETE FROM project_repos WHERE id = ?').run(id).changes > 0
-  }
-
-  reorderProjectRepos(projectId: string, orderedIds: string[]): void {
-    this.reorderRows('project_repos', projectId, orderedIds)
-  }
-
-  getProjectResources(projectId: string): ProjectResourceRecord[] {
-    if (!this.ensureDbOpen()) return []
-    return this.prepare(
-      'SELECT * FROM project_resources WHERE project_id = ? ORDER BY sort_order ASC, created_at ASC'
-    ).all(projectId) as ProjectResourceRecord[]
-  }
-
-  getProjectResource(id: string): ProjectResourceRecord | undefined {
-    return this.prepare('SELECT * FROM project_resources WHERE id = ?').get(id) as ProjectResourceRecord | undefined
-  }
-
-  addProjectResource(projectId: string, data: CreateProjectResourceData): ProjectResourceRecord | undefined {
-    const label = data.label?.trim()
-    if (!label) throw new Error('A resource needs a label.')
-    const id = createId()
-    const { next } = this.prepare(
-      'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM project_resources WHERE project_id = ?'
-    ).get(projectId) as { next: number }
-    this.prepare(`
-      INSERT INTO project_resources (id, project_id, label, url, notes, sort_order, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(id, projectId, label, data.url?.trim() || null, data.notes ?? '', next, new Date().toISOString())
-    return this.getProjectResource(id)
-  }
-
-  updateProjectResource(id: string, data: UpdateProjectResourceData): ProjectResourceRecord | undefined {
-    const setClauses: string[] = []
-    const values: (string | null)[] = []
-    if (data.label !== undefined) {
-      const label = data.label.trim()
-      if (!label) throw new Error('A resource needs a label.')
-      setClauses.push('label = ?'); values.push(label)
-    }
-    if (data.url !== undefined) { setClauses.push('url = ?'); values.push(data.url?.trim() || null) }
-    if (data.notes !== undefined) { setClauses.push('notes = ?'); values.push(data.notes) }
-    if (setClauses.length > 0) {
-      values.push(id)
-      this.db.prepare(`UPDATE project_resources SET ${setClauses.join(', ')} WHERE id = ?`).run(...values)
-    }
-    return this.getProjectResource(id)
-  }
-
-  removeProjectResource(id: string): boolean {
-    return this.prepare('DELETE FROM project_resources WHERE id = ?').run(id).changes > 0
-  }
-
-  reorderProjectResources(projectId: string, orderedIds: string[]): void {
-    this.reorderRows('project_resources', projectId, orderedIds)
-  }
-
-  /** Index in `orderedIds` becomes sort_order; ids outside `projectId` are ignored. */
-  private reorderRows(table: 'projects' | 'project_repos' | 'project_resources', projectId: string | null, orderedIds: string[]): void {
-    if (!this.ensureDbOpen()) return
-    const stmt = projectId === null
-      ? this.prepare(`UPDATE ${table} SET sort_order = ? WHERE id = ?`)
-      : this.prepare(`UPDATE ${table} SET sort_order = ? WHERE id = ? AND project_id = ?`)
-    this.db.transaction(() => {
-      orderedIds.forEach((id, index) => {
-        if (projectId === null) stmt.run(index, id)
-        else stmt.run(index, id, projectId)
-      })
-    })()
-  }
-
-  // ── Task Source CRUD ─────────────────────────────────────────
+  getProjects(...a: Args<typeof projects.getProjects>) { return projects.getProjects(this, ...a) }
+  getProject(...a: Args<typeof projects.getProject>) { return projects.getProject(this, ...a) }
+  getDefaultProject(...a: Args<typeof projects.getDefaultProject>) { return projects.getDefaultProject(this, ...a) }
+  createProject(...a: Args<typeof projects.createProject>) { return projects.createProject(this, ...a) }
+  updateProject(...a: Args<typeof projects.updateProject>) { return projects.updateProject(this, ...a) }
+  archiveProject(...a: Args<typeof projects.archiveProject>) { return projects.archiveProject(this, ...a) }
+  reorderProjects(...a: Args<typeof projects.reorderProjects>) { return projects.reorderProjects(this, ...a) }
+  getProjectRepos(...a: Args<typeof projects.getProjectRepos>) { return projects.getProjectRepos(this, ...a) }
+  getProjectRepo(...a: Args<typeof projects.getProjectRepo>) { return projects.getProjectRepo(this, ...a) }
+  addProjectRepo(...a: Args<typeof projects.addProjectRepo>) { return projects.addProjectRepo(this, ...a) }
+  updateProjectRepo(...a: Args<typeof projects.updateProjectRepo>) { return projects.updateProjectRepo(this, ...a) }
+  removeProjectRepo(...a: Args<typeof projects.removeProjectRepo>) { return projects.removeProjectRepo(this, ...a) }
+  reorderProjectRepos(...a: Args<typeof projects.reorderProjectRepos>) { return projects.reorderProjectRepos(this, ...a) }
+  getProjectResources(...a: Args<typeof projects.getProjectResources>) { return projects.getProjectResources(this, ...a) }
+  getProjectResource(...a: Args<typeof projects.getProjectResource>) { return projects.getProjectResource(this, ...a) }
+  addProjectResource(...a: Args<typeof projects.addProjectResource>) { return projects.addProjectResource(this, ...a) }
+  updateProjectResource(...a: Args<typeof projects.updateProjectResource>) { return projects.updateProjectResource(this, ...a) }
+  removeProjectResource(...a: Args<typeof projects.removeProjectResource>) { return projects.removeProjectResource(this, ...a) }
+  reorderProjectResources(...a: Args<typeof projects.reorderProjectResources>) { return projects.reorderProjectResources(this, ...a) }
+  getProjectStatus(...a: Args<typeof projectStatus.getProjectStatus>) { return projectStatus.getProjectStatus(this, ...a) }
+  setProjectStatusSummary(...a: Args<typeof projectStatus.setProjectStatusSummary>) { return projectStatus.setProjectStatusSummary(this, ...a) }
+  appendProjectStatusJournal(...a: Args<typeof projectStatus.appendProjectStatusJournal>) { return projectStatus.appendProjectStatusJournal(this, ...a) }
+  getProjectStatusJournalEntry(...a: Args<typeof projectStatus.getProjectStatusJournalEntry>) { return projectStatus.getProjectStatusJournalEntry(this, ...a) }
+  recordProjectStatus(...a: Args<typeof projectStatus.recordProjectStatus>) { return projectStatus.recordProjectStatus(this, ...a) }
+  listProjectStatusJournal(...a: Args<typeof projectStatus.listProjectStatusJournal>) { return projectStatus.listProjectStatusJournal(this, ...a) }
+  countProjectStatusJournal(...a: Args<typeof projectStatus.countProjectStatusJournal>) { return projectStatus.countProjectStatusJournal(this, ...a) }
+  compactProjectStatusJournal(...a: Args<typeof projectStatus.compactProjectStatusJournal>) { return projectStatus.compactProjectStatusJournal(this, ...a) }
 
   /** Every project's sources unless `projectId` narrows it to one. */
   getTaskSources(projectId?: string): TaskSourceRecord[] {
@@ -1475,496 +788,54 @@ export class DatabaseManager {
     return row ? deserializeTask(row) : undefined
   }
 
-  // ── Skill CRUD ────────────────────────────────────────────
-  //
-  // Scope (#74): skills.project_id is null for a global skill and a project
-  // id for a project skill. Reads take a SkillListFilter; the access policy
-  // (who may see, create, change or move a skill) lives with the callers —
-  // skill-routes.ts for sessions, commander/skill-tools.ts for the Commander.
-
-  getSkills(filter?: SkillListFilter): SkillRecord[] {
-    const clauses = ['is_deleted = 0']
-    const params: string[] = []
-    if (filter?.visibleToProject !== undefined) {
-      clauses.push('(project_id IS NULL OR project_id = ?)')
-      params.push(filter.visibleToProject)
-    }
-    if (filter?.scope !== undefined) {
-      if (filter.scope === null) clauses.push('project_id IS NULL')
-      else { clauses.push('project_id = ?'); params.push(filter.scope) }
-    }
-    const rows = this.prepare(
-      `SELECT * FROM skills WHERE ${clauses.join(' AND ')} ORDER BY name ASC`
-    ).all(...params) as SkillRow[]
-    return rows.map(deserializeSkill)
-  }
-
-  getSkill(id: string): SkillRecord | undefined {
-    const row = this.prepare(
-      'SELECT * FROM skills WHERE id = ? AND is_deleted = 0'
-    ).get(id) as SkillRow | undefined
-    return row ? deserializeSkill(row) : undefined
-  }
-
-  /** The named skills; with `visibleToProject`, only the global ones and that project's own. */
-  getSkillsByIds(ids: string[], visibleToProject?: string): SkillRecord[] {
-    if (ids.length === 0) return []
-    const placeholders = ids.map(() => '?').join(', ')
-    const scope = visibleToProject !== undefined ? ' AND (project_id IS NULL OR project_id = ?)' : ''
-    const rows = this.db.prepare(
-      `SELECT * FROM skills WHERE id IN (${placeholders}) AND is_deleted = 0${scope} ORDER BY name ASC`
-    ).all(...ids, ...(visibleToProject !== undefined ? [visibleToProject] : [])) as SkillRow[]
-    return rows.map(deserializeSkill)
-  }
-
-  createSkill(data: CreateSkillData): SkillRecord | undefined {
-    const id = createId()
-    const now = new Date().toISOString()
-    const confidence = data.confidence ?? 0.5
-    const uses = data.uses ?? 0
-    const lastUsed = data.last_used ?? null
-    const tags = JSON.stringify(data.tags ?? [])
-    const preferredModel = normalizePreferredModel(data.preferred_model)
-    const projectId = data.project_id || null
-    this.prepare(`
-      INSERT INTO skills (id, name, description, content, version, confidence, uses, last_used, tags, preferred_model, project_id, is_deleted, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-    `).run(id, data.name, data.description, data.content, confidence, uses, lastUsed, tags, preferredModel, projectId, now, now)
-    return this.getSkill(id)
-  }
-
-  /**
-   * Field updates. Throws SkillVersionConflictError when `expected_version`
-   * is given and a content change would overwrite a newer version.
-   */
-  updateSkill(id: string, data: UpdateSkillData): SkillRecord | undefined {
-    const existing = this.getSkill(id)
-    if (!existing) return undefined
-
-    const setClauses: string[] = []
-    const values: (string | number | null)[] = []
-
-    if (data.name !== undefined) { setClauses.push('name = ?'); values.push(data.name) }
-    if (data.description !== undefined) { setClauses.push('description = ?'); values.push(data.description) }
-    if (data.content !== undefined) { setClauses.push('content = ?'); values.push(data.content) }
-    if (data.confidence !== undefined) { setClauses.push('confidence = ?'); values.push(data.confidence) }
-    if (data.uses !== undefined) { setClauses.push('uses = ?'); values.push(data.uses) }
-    if (data.last_used !== undefined) { setClauses.push('last_used = ?'); values.push(data.last_used) }
-    if (data.tags !== undefined) { setClauses.push('tags = ?'); values.push(JSON.stringify(data.tags)) }
-    if (data.preferred_model !== undefined) {
-      setClauses.push('preferred_model = ?'); values.push(normalizePreferredModel(data.preferred_model))
-    }
-
-    if (setClauses.length === 0) return existing
-
-    // Only increment version for content changes, not usage updates (uses / last_used)
-    const isContentChange = data.name !== undefined || data.description !== undefined ||
-      data.content !== undefined || data.confidence !== undefined || data.tags !== undefined ||
-      data.preferred_model !== undefined
-    if (isContentChange && data.expected_version !== undefined && data.expected_version !== existing.version) {
-      throw new SkillVersionConflictError(id, existing.version, data.expected_version)
-    }
-    if (isContentChange) {
-      setClauses.push('version = version + 1')
-    }
-    // `updated_at` means "when the content last changed", so usage updates
-    // leave it alone.
-    if (isContentChange) {
-      setClauses.push('updated_at = ?')
-      values.push(new Date().toISOString())
-    }
-    values.push(id)
-
-    // The version guard is re-checked in the statement itself, so two writers
-    // that both read the same version cannot both get through.
-    const guard = isContentChange && data.expected_version !== undefined ? ' AND version = ?' : ''
-    if (guard) values.push(data.expected_version as number)
-    const changed = this.db.prepare(
-      `UPDATE skills SET ${setClauses.join(', ')} WHERE id = ?${guard}`
-    ).run(...values).changes
-    if (guard && changed === 0) {
-      const current = this.getSkill(id)
-      throw new SkillVersionConflictError(id, current?.version ?? existing.version, data.expected_version as number)
-    }
-
-    return this.getSkill(id)
-  }
-
-  /**
-   * Moves a skill to a project (an id) or promotes it to global (null). The
-   * explicit scope change of #74: not part of updateSkill, so a plain field
-   * update can never change who sees a skill. Bumps the version.
-   */
-  setSkillProject(id: string, projectId: string | null): SkillRecord | undefined {
-    const existing = this.getSkill(id)
-    if (!existing) return undefined
-    const next = projectId || null
-    if (existing.project_id === next) return existing
-    this.prepare(
-      'UPDATE skills SET project_id = ?, version = version + 1, updated_at = ? WHERE id = ? AND is_deleted = 0'
-    ).run(next, new Date().toISOString(), id)
-    return this.getSkill(id)
-  }
-
-  /** Tasks (any project, any status) whose skill_ids name the skill; for scope-move validation. */
-  getTasksUsingSkill(skillId: string): Array<{ id: string; title: string; project_id: string }> {
-    const rows = this.prepare(
-      'SELECT id, title, project_id, skill_ids FROM tasks WHERE skill_ids LIKE ?'
-    ).all(`%${skillId}%`) as Array<{ id: string; title: string; project_id: string | null; skill_ids: string | null }>
-    return rows
-      .filter((row) => {
-        try {
-          const ids = JSON.parse(row.skill_ids ?? '[]') as unknown
-          return Array.isArray(ids) && ids.includes(skillId)
-        } catch {
-          return false
-        }
-      })
-      .map((row) => ({ id: row.id, title: row.title, project_id: row.project_id ?? DEFAULT_PROJECT_ID }))
-  }
-
-  getSkillByName(name: string): SkillRecord | undefined {
-    const row = this.prepare(
-      'SELECT * FROM skills WHERE name = ? AND is_deleted = 0'
-    ).get(name) as SkillRow | undefined
-    return row ? deserializeSkill(row) : undefined
-  }
-
-  deleteSkill(id: string): boolean {
-    const result = this.prepare(
-      'UPDATE skills SET is_deleted = 1, updated_at = ? WHERE id = ? AND is_deleted = 0'
-    ).run(new Date().toISOString(), id)
-    return result.changes > 0
-  }
-
-  // ── Secret CRUD ──────────────────────────────────────────
-
-  getSecrets(): SecretRecord[] {
-    const rows = this.prepare(
-      'SELECT * FROM secrets ORDER BY name ASC'
-    ).all() as SecretRow[]
-    return rows.map(deserializeSecret)
-  }
-
-  getSecret(id: string): SecretRecord | undefined {
-    const row = this.prepare(
-      'SELECT * FROM secrets WHERE id = ?'
-    ).get(id) as SecretRow | undefined
-    return row ? deserializeSecret(row) : undefined
-  }
-
-  getSecretsByIds(ids: string[]): SecretRecord[] {
-    if (ids.length === 0) return []
-    const placeholders = ids.map(() => '?').join(', ')
-    const rows = this.db.prepare(
-      `SELECT * FROM secrets WHERE id IN (${placeholders}) ORDER BY name ASC`
-    ).all(...ids) as SecretRow[]
-    return rows.map(deserializeSecret)
-  }
-
-  /**
-   * Decrypts and returns secrets with their plaintext values.
-   * ONLY for use within the main process (secret broker).
-   * NEVER expose this through IPC.
-   */
-  getSecretsWithValues(ids: string[]): SecretRecordWithValue[] {
-    if (ids.length === 0) return []
-    const placeholders = ids.map(() => '?').join(', ')
-    const rows = this.db.prepare(
-      `SELECT * FROM secrets WHERE id IN (${placeholders}) ORDER BY name ASC`
-    ).all(...ids) as SecretRow[]
-    return rows.map(deserializeSecretWithValue)
-  }
-
-  createSecret(data: CreateSecretData): SecretRecord | undefined {
-    const id = createId()
-    const now = new Date().toISOString()
-    const encryptedValue = encryptSecret(data.value)
-    this.prepare(`
-      INSERT INTO secrets (id, name, description, env_var_name, value, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(id, data.name, data.description, data.env_var_name, encryptedValue, now, now)
-    return this.getSecret(id)
-  }
-
-  updateSecret(id: string, data: UpdateSecretData): SecretRecord | undefined {
-    const existing = this.getSecret(id)
-    if (!existing) return undefined
-
-    const setClauses: string[] = []
-    const values: (string | Buffer)[] = []
-
-    if (data.name !== undefined) { setClauses.push('name = ?'); values.push(data.name) }
-    if (data.description !== undefined) { setClauses.push('description = ?'); values.push(data.description) }
-    if (data.env_var_name !== undefined) { setClauses.push('env_var_name = ?'); values.push(data.env_var_name) }
-    if (data.value !== undefined) {
-      setClauses.push('value = ?')
-      values.push(encryptSecret(data.value))
-    }
-
-    if (setClauses.length === 0) return existing
-
-    setClauses.push('updated_at = ?')
-    values.push(new Date().toISOString())
-    values.push(id)
-
-    this.db.prepare(
-      `UPDATE secrets SET ${setClauses.join(', ')} WHERE id = ?`
-    ).run(...values)
-
-    return this.getSecret(id)
-  }
-
-  deleteSecret(id: string): boolean {
-    const result = this.prepare('DELETE FROM secrets WHERE id = ?').run(id)
-    return result.changes > 0
-  }
-
-  // ── Settings CRUD ──────────────────────────────────────────
-
-  // API keys are encrypted at rest; callers in the main process always see plaintext.
-  getSetting(key: string): string | undefined {
-    const row = this.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined
-    if (!row) return undefined
-    return isApiKeySetting(key) ? decryptSettingValue(row.value) : row.value
-  }
-
-  setSetting(key: string, value: string): void {
-    const stored = isApiKeySetting(key) ? encryptSettingValue(value) : value
-    this.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, stored)
-  }
-
-  /**
-   * Re-encrypts API keys saved in plaintext by older versions (or while the
-   * keychain was unavailable). Runs on every startup and is a no-op once done.
-   */
-  encryptPlaintextApiKeys(): number {
-    const rows = this.prepare("SELECT key, value FROM settings WHERE key LIKE '%\\_api\\_key' ESCAPE '\\'")
-      .all() as { key: string; value: string }[]
-    let migrated = 0
-    for (const row of rows) {
-      if (!isApiKeySetting(row.key) || !row.value || isEncryptedSettingValue(row.value)) continue
-      const encrypted = encryptSettingValue(row.value)
-      if (encrypted === row.value) continue // keychain unavailable: keep the fallback
-      this.prepare('UPDATE settings SET value = ? WHERE key = ?').run(encrypted, row.key)
-      migrated++
-    }
-    return migrated
-  }
-
-  deleteSetting(key: string): void {
-    this.prepare('DELETE FROM settings WHERE key = ?').run(key)
-  }
-
-  getAllSettings(): Record<string, string> {
-    const rows = this.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[]
-    const result: Record<string, string> = {}
-    for (const row of rows) result[row.key] = isApiKeySetting(row.key) ? decryptSettingValue(row.value) : row.value
-    return result
-  }
-
-  // ── OAuth Token CRUD ────────────────────────────────────────
-
-  createOAuthToken(data: CreateOAuthTokenData): OAuthTokenRecord | undefined {
-    const id = createId()
-    const now = new Date().toISOString()
-    const expiresAt = new Date(Date.now() + data.expires_in * 1000).toISOString()
-
-    this.prepare(`
-      INSERT INTO oauth_tokens (id, provider, source_id, mcp_server_id, access_token, refresh_token, expires_at, scope, token_type, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id,
-      data.provider,
-      data.source_id ?? null,
-      data.mcp_server_id ?? null,
-      encryptSecret(data.access_token),
-      data.refresh_token ? encryptSecret(data.refresh_token) : null,
-      expiresAt,
-      data.scope,
-      'Bearer',
-      now,
-      now
-    )
-
-    return this.getOAuthToken(id)
-  }
-
-  getOAuthToken(id: string): OAuthTokenRecord | undefined {
-    const row = this.prepare(
-      'SELECT * FROM oauth_tokens WHERE id = ?'
-    ).get(id) as OAuthTokenRow | undefined
-
-    return row ? deserializeOAuthToken(row) : undefined
-  }
-
-  getOAuthTokenBySource(sourceId: string): OAuthTokenRecord | undefined {
-    const row = this.prepare(
-      'SELECT * FROM oauth_tokens WHERE source_id = ?'
-    ).get(sourceId) as OAuthTokenRow | undefined
-
-    return row ? deserializeOAuthToken(row) : undefined
-  }
-
-  updateOAuthToken(id: string, accessToken: string, refreshToken: string | null, expiresIn: number): OAuthTokenRecord | undefined {
-    const now = new Date().toISOString()
-    const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString()
-
-    this.prepare(
-      'UPDATE oauth_tokens SET access_token = ?, refresh_token = ?, expires_at = ?, updated_at = ? WHERE id = ?'
-    ).run(encryptSecret(accessToken), refreshToken ? encryptSecret(refreshToken) : null, expiresAt, now, id)
-
-    return this.getOAuthToken(id)
-  }
-
-  deleteOAuthToken(id: string): boolean {
-    const result = this.prepare('DELETE FROM oauth_tokens WHERE id = ?').run(id)
-    return result.changes > 0
-  }
-
-  deleteOAuthTokenBySource(sourceId: string): boolean {
-    const result = this.prepare('DELETE FROM oauth_tokens WHERE source_id = ?').run(sourceId)
-    return result.changes > 0
-  }
-
-  getOAuthTokenByMcpServer(mcpServerId: string): OAuthTokenRecord | undefined {
-    const row = this.prepare(
-      'SELECT * FROM oauth_tokens WHERE mcp_server_id = ?'
-    ).get(mcpServerId) as OAuthTokenRow | undefined
-    return row ? deserializeOAuthToken(row) : undefined
-  }
-
-  deleteOAuthTokenByMcpServer(mcpServerId: string): boolean {
-    const result = this.prepare('DELETE FROM oauth_tokens WHERE mcp_server_id = ?').run(mcpServerId)
-    return result.changes > 0
-  }
-
-  // ── Marketplace Sources ──────────────────────────────────────
-
-  getMarketplaceSources(): MarketplaceSourceRecord[] {
-    const rows = this.prepare('SELECT * FROM marketplace_sources ORDER BY created_at DESC').all() as MarketplaceSourceRow[]
-    return rows.map(deserializeMarketplaceSource)
-  }
-
-  getMarketplaceSource(id: string): MarketplaceSourceRecord | undefined {
-    const row = this.prepare('SELECT * FROM marketplace_sources WHERE id = ?').get(id) as MarketplaceSourceRow | undefined
-    return row ? deserializeMarketplaceSource(row) : undefined
-  }
-
-  getMarketplaceSourceByName(name: string): MarketplaceSourceRecord | undefined {
-    const row = this.prepare('SELECT * FROM marketplace_sources WHERE name = ?').get(name) as MarketplaceSourceRow | undefined
-    return row ? deserializeMarketplaceSource(row) : undefined
-  }
-
-  createMarketplaceSource(data: CreateMarketplaceSourceData): MarketplaceSourceRecord {
-    const id = createId()
-    const now = new Date().toISOString()
-    this.prepare(
-      'INSERT INTO marketplace_sources (id, name, source_type, source_url, metadata, auto_update, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(id, data.name, data.source_type || 'github', data.source_url, JSON.stringify(data.metadata || {}), data.auto_update ? 1 : 0, now, now)
-    return this.getMarketplaceSource(id)!
-  }
-
-  deleteMarketplaceSource(id: string): boolean {
-    const result = this.prepare('DELETE FROM marketplace_sources WHERE id = ?').run(id)
-    return result.changes > 0
-  }
-
-  // ── Installed Plugins ────────────────────────────────────────
-
-  getInstalledPlugins(): InstalledPluginRecord[] {
-    const rows = this.prepare('SELECT * FROM installed_plugins ORDER BY installed_at DESC').all() as InstalledPluginRow[]
-    return rows.map(deserializeInstalledPlugin)
-  }
-
-  getInstalledPlugin(id: string): InstalledPluginRecord | undefined {
-    const row = this.prepare('SELECT * FROM installed_plugins WHERE id = ?').get(id) as InstalledPluginRow | undefined
-    return row ? deserializeInstalledPlugin(row) : undefined
-  }
-
-  getInstalledPluginByName(name: string, marketplaceId: string): InstalledPluginRecord | undefined {
-    const row = this.prepare('SELECT * FROM installed_plugins WHERE name = ? AND marketplace_id = ?').get(name, marketplaceId) as InstalledPluginRow | undefined
-    return row ? deserializeInstalledPlugin(row) : undefined
-  }
-
-  createInstalledPlugin(data: CreateInstalledPluginData): InstalledPluginRecord {
-    const id = createId()
-    const now = new Date().toISOString()
-    this.prepare(
-      'INSERT INTO installed_plugins (id, name, marketplace_id, manifest, source, scope, enabled, version, installed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(
-      id, data.name, data.marketplace_id, JSON.stringify(data.manifest || {}),
-      JSON.stringify(data.source || {}), data.scope || 'user', 1, data.version || '1.0.0', now, now
-    )
-    return this.getInstalledPlugin(id)!
-  }
-
-  updateInstalledPlugin(id: string, data: UpdateInstalledPluginData): InstalledPluginRecord | undefined {
-    const existing = this.getInstalledPlugin(id)
-    if (!existing) return undefined
-    const now = new Date().toISOString()
-    const sets: string[] = ['updated_at = ?']
-    const values: unknown[] = [now]
-    if (data.enabled !== undefined) { sets.push('enabled = ?'); values.push(data.enabled ? 1 : 0) }
-    if (data.manifest !== undefined) { sets.push('manifest = ?'); values.push(JSON.stringify(data.manifest)) }
-    if (data.version !== undefined) { sets.push('version = ?'); values.push(data.version) }
-    if (data.scope !== undefined) { sets.push('scope = ?'); values.push(data.scope) }
-    values.push(id)
-    this.db.prepare(`UPDATE installed_plugins SET ${sets.join(', ')} WHERE id = ?`).run(...values)
-    return this.getInstalledPlugin(id)
-  }
-
-  deleteInstalledPlugin(id: string): boolean {
-    const result = this.prepare('DELETE FROM installed_plugins WHERE id = ?').run(id)
-    return result.changes > 0
-  }
-
-  // ── Mobile pairing ─────────────────────────────────────────
-
-  createMobilePairCode(id: string, pin: string, expiresAt: number): void {
-    this.prepare(
-      'INSERT INTO mobile_pair_codes (id, pin, expires_at) VALUES (?, ?, ?)'
-    ).run(id, pin, expiresAt)
-  }
-
-  getMobilePairCode(id: string): { id: string; pin: string; expires_at: number; attempts: number } | undefined {
-    return this.prepare('SELECT * FROM mobile_pair_codes WHERE id = ?').get(id) as { id: string; pin: string; expires_at: number; attempts: number } | undefined
-  }
-
-  incrementPairCodeAttempts(id: string): number {
-    this.prepare('UPDATE mobile_pair_codes SET attempts = attempts + 1 WHERE id = ?').run(id)
-    const row = this.prepare('SELECT attempts FROM mobile_pair_codes WHERE id = ?').get(id) as { attempts: number } | undefined
-    return row?.attempts ?? 0
-  }
-
-  deleteMobilePairCode(id: string): void {
-    this.prepare('DELETE FROM mobile_pair_codes WHERE id = ?').run(id)
-  }
-
-  createMobileSession(id: string, tokenHash: string, deviceName: string): void {
-    this.prepare(
-      'INSERT INTO mobile_sessions (id, token_hash, device_name) VALUES (?, ?, ?)'
-    ).run(id, tokenHash, deviceName)
-  }
-
-  getMobileSessionByTokenHash(tokenHash: string): { id: string; device_name: string; paired_at: number; last_seen: number; revoked: number } | undefined {
-    return this.prepare('SELECT * FROM mobile_sessions WHERE token_hash = ? AND revoked = 0').get(tokenHash) as { id: string; device_name: string; paired_at: number; last_seen: number; revoked: number } | undefined
-  }
-
-  getMobileSessions(): { id: string; device_name: string; paired_at: number; last_seen: number; revoked: number }[] {
-    return this.prepare('SELECT id, device_name, paired_at, last_seen, revoked FROM mobile_sessions WHERE revoked = 0 ORDER BY last_seen DESC').all() as { id: string; device_name: string; paired_at: number; last_seen: number; revoked: number }[]
-  }
-
-  touchMobileSession(tokenHash: string): void {
-    this.prepare('UPDATE mobile_sessions SET last_seen = unixepoch() WHERE token_hash = ?').run(tokenHash)
-  }
-
-  revokeMobileSession(id: string): boolean {
-    const result = this.prepare('UPDATE mobile_sessions SET revoked = 1 WHERE id = ?').run(id)
-    return result.changes > 0
-  }
-
-  revokeAllMobileSessions(): void {
-    this.prepare('UPDATE mobile_sessions SET revoked = 1').run()
-  }
+  getSkills(...a: Args<typeof skills.getSkills>) { return skills.getSkills(this, ...a) }
+  getSkill(...a: Args<typeof skills.getSkill>) { return skills.getSkill(this, ...a) }
+  getSkillsByIds(...a: Args<typeof skills.getSkillsByIds>) { return skills.getSkillsByIds(this, ...a) }
+  createSkill(...a: Args<typeof skills.createSkill>) { return skills.createSkill(this, ...a) }
+  updateSkill(...a: Args<typeof skills.updateSkill>) { return skills.updateSkill(this, ...a) }
+  setSkillProject(...a: Args<typeof skills.setSkillProject>) { return skills.setSkillProject(this, ...a) }
+  getTasksUsingSkill(...a: Args<typeof skills.getTasksUsingSkill>) { return skills.getTasksUsingSkill(this, ...a) }
+  getSkillByName(...a: Args<typeof skills.getSkillByName>) { return skills.getSkillByName(this, ...a) }
+  deleteSkill(...a: Args<typeof skills.deleteSkill>) { return skills.deleteSkill(this, ...a) }
+  getSecrets(...a: Args<typeof secrets.getSecrets>) { return secrets.getSecrets(this, ...a) }
+  getSecret(...a: Args<typeof secrets.getSecret>) { return secrets.getSecret(this, ...a) }
+  getSecretsByIds(...a: Args<typeof secrets.getSecretsByIds>) { return secrets.getSecretsByIds(this, ...a) }
+  getSecretsWithValues(...a: Args<typeof secrets.getSecretsWithValues>) { return secrets.getSecretsWithValues(this, ...a) }
+  createSecret(...a: Args<typeof secrets.createSecret>) { return secrets.createSecret(this, ...a) }
+  updateSecret(...a: Args<typeof secrets.updateSecret>) { return secrets.updateSecret(this, ...a) }
+  deleteSecret(...a: Args<typeof secrets.deleteSecret>) { return secrets.deleteSecret(this, ...a) }
+  getSetting(...a: Args<typeof secrets.getSetting>) { return secrets.getSetting(this, ...a) }
+  setSetting(...a: Args<typeof secrets.setSetting>) { return secrets.setSetting(this, ...a) }
+  encryptPlaintextApiKeys(...a: Args<typeof secrets.encryptPlaintextApiKeys>) { return secrets.encryptPlaintextApiKeys(this, ...a) }
+  deleteSetting(...a: Args<typeof secrets.deleteSetting>) { return secrets.deleteSetting(this, ...a) }
+  getAllSettings(...a: Args<typeof secrets.getAllSettings>) { return secrets.getAllSettings(this, ...a) }
+  createOAuthToken(...a: Args<typeof oauth.createOAuthToken>) { return oauth.createOAuthToken(this, ...a) }
+  getOAuthToken(...a: Args<typeof oauth.getOAuthToken>) { return oauth.getOAuthToken(this, ...a) }
+  getOAuthTokenBySource(...a: Args<typeof oauth.getOAuthTokenBySource>) { return oauth.getOAuthTokenBySource(this, ...a) }
+  updateOAuthToken(...a: Args<typeof oauth.updateOAuthToken>) { return oauth.updateOAuthToken(this, ...a) }
+  deleteOAuthToken(...a: Args<typeof oauth.deleteOAuthToken>) { return oauth.deleteOAuthToken(this, ...a) }
+  deleteOAuthTokenBySource(...a: Args<typeof oauth.deleteOAuthTokenBySource>) { return oauth.deleteOAuthTokenBySource(this, ...a) }
+  getOAuthTokenByMcpServer(...a: Args<typeof oauth.getOAuthTokenByMcpServer>) { return oauth.getOAuthTokenByMcpServer(this, ...a) }
+  deleteOAuthTokenByMcpServer(...a: Args<typeof oauth.deleteOAuthTokenByMcpServer>) { return oauth.deleteOAuthTokenByMcpServer(this, ...a) }
+  getMarketplaceSources(...a: Args<typeof plugins.getMarketplaceSources>) { return plugins.getMarketplaceSources(this, ...a) }
+  getMarketplaceSource(...a: Args<typeof plugins.getMarketplaceSource>) { return plugins.getMarketplaceSource(this, ...a) }
+  getMarketplaceSourceByName(...a: Args<typeof plugins.getMarketplaceSourceByName>) { return plugins.getMarketplaceSourceByName(this, ...a) }
+  createMarketplaceSource(...a: Args<typeof plugins.createMarketplaceSource>) { return plugins.createMarketplaceSource(this, ...a) }
+  deleteMarketplaceSource(...a: Args<typeof plugins.deleteMarketplaceSource>) { return plugins.deleteMarketplaceSource(this, ...a) }
+  getInstalledPlugins(...a: Args<typeof plugins.getInstalledPlugins>) { return plugins.getInstalledPlugins(this, ...a) }
+  getInstalledPlugin(...a: Args<typeof plugins.getInstalledPlugin>) { return plugins.getInstalledPlugin(this, ...a) }
+  getInstalledPluginByName(...a: Args<typeof plugins.getInstalledPluginByName>) { return plugins.getInstalledPluginByName(this, ...a) }
+  createInstalledPlugin(...a: Args<typeof plugins.createInstalledPlugin>) { return plugins.createInstalledPlugin(this, ...a) }
+  updateInstalledPlugin(...a: Args<typeof plugins.updateInstalledPlugin>) { return plugins.updateInstalledPlugin(this, ...a) }
+  deleteInstalledPlugin(...a: Args<typeof plugins.deleteInstalledPlugin>) { return plugins.deleteInstalledPlugin(this, ...a) }
+  createMobilePairCode(...a: Args<typeof mobile.createMobilePairCode>) { return mobile.createMobilePairCode(this, ...a) }
+  getMobilePairCode(...a: Args<typeof mobile.getMobilePairCode>) { return mobile.getMobilePairCode(this, ...a) }
+  incrementPairCodeAttempts(...a: Args<typeof mobile.incrementPairCodeAttempts>) { return mobile.incrementPairCodeAttempts(this, ...a) }
+  deleteMobilePairCode(...a: Args<typeof mobile.deleteMobilePairCode>) { return mobile.deleteMobilePairCode(this, ...a) }
+  createMobileSession(...a: Args<typeof mobile.createMobileSession>) { return mobile.createMobileSession(this, ...a) }
+  getMobileSessionByTokenHash(...a: Args<typeof mobile.getMobileSessionByTokenHash>) { return mobile.getMobileSessionByTokenHash(this, ...a) }
+  getMobileSessions(...a: Args<typeof mobile.getMobileSessions>) { return mobile.getMobileSessions(this, ...a) }
+  touchMobileSession(...a: Args<typeof mobile.touchMobileSession>) { return mobile.touchMobileSession(this, ...a) }
+  revokeMobileSession(...a: Args<typeof mobile.revokeMobileSession>) { return mobile.revokeMobileSession(this, ...a) }
+  revokeAllMobileSessions(...a: Args<typeof mobile.revokeAllMobileSessions>) { return mobile.revokeAllMobileSessions(this, ...a) }
 }
