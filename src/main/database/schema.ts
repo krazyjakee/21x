@@ -31,8 +31,10 @@ import { migrateCoordinatorToCaptain } from './captain-migration'
  *          tasks.role, projects.captain_agent_id, the captain_prewarm setting,
  *          projects.settings.captain_wakeups and project_status_journal.source
  *          (migrateCoordinatorToCaptain in captain-migration.ts)
+ * 24 → 25: commander_messages.input_mode records typed vs voice user turns
+ *          (#86). Versions 18–24 are allocated on main/concurrent branches.
  */
-const SCHEMA_VERSION = 17
+const SCHEMA_VERSION = 25
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -380,6 +382,7 @@ export function createTables(db: Database.Database): void {
       is_error INTEGER NOT NULL DEFAULT 0,
       project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
       correlation_id TEXT,
+      input_mode TEXT CHECK (input_mode IN ('voice', 'typed')),
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_commander_messages_session_created ON commander_messages(session_id, created_at);
@@ -955,6 +958,13 @@ export function runMigrations(db: Database.Database): void {
   // Migration v17: the coordinator is renamed to Captain (#71). Runs after migrateToProjects so
   // the projects table (and its renamed column) exists.
   migrateCoordinatorToCaptain(db)
+
+  // Migration v25 (#86): legacy messages stay null; new user turns record how
+  // they entered the Commander so action cards can attribute heard speech.
+  const commanderMessageCols = new Set((db.pragma('table_info(commander_messages)') as { name: string }[]).map((c) => c.name))
+  if (!commanderMessageCols.has('input_mode')) {
+    db.exec(`ALTER TABLE commander_messages ADD COLUMN input_mode TEXT CHECK (input_mode IN ('voice', 'typed'))`)
+  }
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)

@@ -45,7 +45,7 @@ class FakeWorker extends EventEmitter {
 class FakeCommander {
   private listeners = new Set<(event: CommanderEvent) => void>()
   cancelled: string[] = []
-  sent: Array<{ sessionId: string; text: string }> = []
+  sent: Array<{ sessionId: string; text: string; inputMode?: 'voice' | 'typed' }> = []
   running = new Map<string, string>()
 
   onEvent(listener: (event: CommanderEvent) => void): () => void {
@@ -66,8 +66,8 @@ class FakeCommander {
   activeTurnId(sessionId: string): string | null {
     return this.running.get(sessionId) ?? null
   }
-  sendUserMessage(sessionId: string, text: string): { turnId: string; message: CommanderMessage } {
-    this.sent.push({ sessionId, text })
+  sendUserMessage(sessionId: string, text: string, inputMode?: 'voice' | 'typed'): { turnId: string; message: CommanderMessage } {
+    this.sent.push({ sessionId, text, inputMode })
     return { turnId: 'next', message: report(sessionId, text) }
   }
 }
@@ -273,7 +273,7 @@ describe('barge-in', () => {
     start(commander, 's1', 't1')
     await voice.send('s1', 'Stop, do the other thing')
     expect(commander.cancelled).toEqual(['s1'])
-    expect(commander.sent).toEqual([{ sessionId: 's1', text: 'Stop, do the other thing' }])
+    expect(commander.sent).toEqual([{ sessionId: 's1', text: 'Stop, do the other thing', inputMode: 'voice' }])
   })
 
   it('closing voice mode stops the reading', async () => {

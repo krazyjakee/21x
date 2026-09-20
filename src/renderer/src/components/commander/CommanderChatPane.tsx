@@ -16,6 +16,8 @@ import { useAgentStore } from '@/stores/agent-store'
 import { useCommanderStore } from '@/stores/commander-store'
 import type { Agent } from '@/types'
 import { CommanderMessageItem, ToolChip } from './CommanderMessageItem'
+import { collectCommanderActions } from './commander-actions'
+import { commanderUndoCallId } from '@shared/commander-tools'
 
 const EMPTY: CommanderMessage[] = []
 
@@ -198,7 +200,13 @@ export function CommanderChatPane() {
     return map
   }, [messages])
 
-  const visible = useMemo(() => messages.filter((m) => m.role !== 'tool' && m.role !== 'summary'), [messages])
+  const actions = useMemo(() => {
+    return new Map(collectCommanderActions(messages).map((action) => [action.call.id, action]))
+  }, [messages])
+
+  const visible = useMemo(() => messages.filter((m) =>
+    m.role !== 'tool' && m.role !== 'summary' && !commanderUndoCallId(m.correlation_id)
+  ), [messages])
 
   useEffect(() => {
     const el = scrollRef.current
@@ -239,6 +247,7 @@ export function CommanderChatPane() {
             key={m.id}
             message={m}
             toolResults={toolResults}
+            actions={actions}
             turnActive={Boolean(streaming) && index === visible.length - 1}
           />
         ))}

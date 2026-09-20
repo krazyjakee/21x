@@ -18,6 +18,8 @@ export type CommanderMessageRole = 'user' | 'assistant' | 'tool' | 'report' | 's
 
 export const COMMANDER_MESSAGE_ROLES: readonly CommanderMessageRole[] = ['user', 'assistant', 'tool', 'report', 'summary']
 
+export type CommanderInputMode = 'voice' | 'typed'
+
 export interface CommanderSession {
   id: string
   /** Empty until the model (or the fallback) names it after the first exchange. */
@@ -49,6 +51,8 @@ export interface CommanderMessage {
   project_id: string | null
   /** Ties a delegation to the report that answers it (#61/#62). */
   correlation_id: string | null
+  /** User messages only. Null is a readable record written before migration 25. */
+  input_mode?: CommanderInputMode | null
   /** Epoch ms. */
   created_at: number
 }

@@ -1,5 +1,5 @@
 import type { ChatMessage } from '../../shared/chat'
-import type { CommanderEvent, CommanderMessage, CommanderSession } from '../../shared/commander'
+import type { CommanderEvent, CommanderInputMode, CommanderMessage, CommanderSession } from '../../shared/commander'
 import { ChatRuntime, type ChatTurnHandle, type ChatTurnResult } from '../chat/chat-runtime'
 import type { ChatProvider, ChatProviderRequest } from '../chat/providers/types'
 import type { ChatToolDefinition } from '../chat/tools'
@@ -217,7 +217,7 @@ export class CommanderService {
     return this.activeSessionId === sessionId
   }
 
-  sendUserMessage(sessionId: string, text: string): SendResult {
+  sendUserMessage(sessionId: string, text: string, inputMode: CommanderInputMode = 'typed'): SendResult {
     const content = typeof text === 'string' ? text.trim() : ''
     if (!content) throw new Error('Message is empty')
     if (content.length > MAX_USER_MESSAGE_CHARS) throw new Error('Message is too long')
@@ -227,7 +227,7 @@ export class CommanderService {
     // Built before anything is stored, so a missing key rejects cleanly.
     const provider = this.options.createProvider()
 
-    const message = this.store.appendMessage(sessionId, { role: 'user', content })
+    const message = this.store.appendMessage(sessionId, { role: 'user', content, inputMode })
     this.emit({ type: 'messages_appended', sessionId, messages: [message] })
     // Sending is reading: the user is looking at this session.
     this.store.markRead(sessionId)

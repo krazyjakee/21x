@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
     setActiveSession: vi.fn(async () => undefined),
     send: vi.fn(),
     cancel: vi.fn(),
+    undoAction: vi.fn(),
     onEvent: vi.fn()
   },
   settingsApi: {
@@ -165,6 +166,34 @@ describe('CommanderWorkspace', () => {
     fireEvent.click(screen.getAllByLabelText('Close side panel')[0])
     fireEvent.click(screen.getByLabelText('Open side panel'))
     expect(screen.getByLabelText('Message the Commander')).toHaveValue('Keep this draft')
+  })
+
+  it('lists validated action cards in the Actions tab', async () => {
+    api.listSessions.mockResolvedValue([session()])
+    api.listMessages.mockResolvedValue({
+      activeTurnId: null,
+      messages: [
+        message({ id: 'u1', role: 'user', content: 'archive web', input_mode: 'voice', created_at: 1 }),
+        message({
+          id: 'a1', role: 'assistant', created_at: 2,
+          tool_calls: [{ id: 'c1', name: 'archive_project', input: { project: 'Web' } }]
+        }),
+        message({
+          id: 't1', role: 'tool', tool_call_id: 'c1', tool_name: 'archive_project', created_at: 3,
+          content: JSON.stringify({
+            status: 'ok', result: { id: 'web' },
+            target: { kind: 'project', id: 'web', name: 'Web' },
+            changes: [{ field: 'status', before: 'active', after: 'archived' }]
+          })
+        })
+      ]
+    })
+    render(<CommanderWorkspace />)
+    await openSession()
+    fireEvent.click(screen.getByRole('tab', { name: 'Actions' }))
+    expect(screen.getByText('Archived project “Web”')).toBeInTheDocument()
+    expect(screen.getByText('Heard: “archive web”')).toBeInTheDocument()
+    expect(screen.queryByText('No recent actions')).toBeNull()
   })
 
   it('shows a report arrival as a plain project chip without relaying raw report text', async () => {

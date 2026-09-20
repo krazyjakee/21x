@@ -6,6 +6,7 @@ import type { ChatProvider } from '../chat/providers/types'
 import type { ChatToolDefinition } from '../chat/tools'
 import { CommanderService, type CommanderToolContext } from '../commander/commander-service'
 import { CommanderStore } from '../commander/commander-store'
+import { undoCommanderAction } from '../commander/commander-undo'
 import { createCommanderProjectTools } from '../commander/project-tools'
 import { createCommanderSkillTools } from '../commander/skill-tools'
 import { installCommanderReportBridge } from '../commander/report-tools'
@@ -186,6 +187,23 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
     trusted(event, 'commander:cancel')
     if (typeof payload?.sessionId !== 'string') return { cancelled: false }
     return { cancelled: commander.cancel(payload.sessionId) }
+  })
+
+  ipcMain.handle('commander:undoAction', (event, payload: { sessionId?: string; toolCallId?: string }) => {
+    trusted(event, 'commander:undoAction')
+    const sessionId = requireString(payload?.sessionId, 'sessionId')
+    const toolCallId = requireString(payload?.toolCallId, 'toolCallId')
+    const undone = undoCommanderAction({
+      db: deps.db,
+      store,
+      agents: deps.agentManager,
+      onProjectChanged: (projectId, kind) => broadcastProjectChanged({ projectId, kind }),
+      onSkillChanged: (skillId, kind) => broadcastSkillsChanged({ skillId, kind })
+    }, sessionId, toolCallId)
+    emit({ type: 'messages_appended', sessionId, messages: [undone.note] })
+    const session = store.getSession(sessionId)
+    if (session) emit({ type: 'session_updated', session })
+    return undone
   })
 
   return commander

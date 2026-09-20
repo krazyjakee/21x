@@ -63,7 +63,7 @@ describe('CommanderStore sessions', () => {
 describe('CommanderStore messages', () => {
   it('appends and lists messages in order with tool calls and delegation fields', () => {
     const s = store.createSession()
-    store.appendMessage(s.id, { role: 'user', content: 'ask alpha' })
+    store.appendMessage(s.id, { role: 'user', content: 'ask alpha', inputMode: 'voice' })
     store.appendMessage(s.id, {
       role: 'assistant',
       content: '',
@@ -73,10 +73,19 @@ describe('CommanderStore messages', () => {
 
     const messages = store.listMessages(s.id)
     expect(messages.map((m) => m.role)).toEqual(['user', 'assistant', 'tool'])
+    expect(messages[0].input_mode).toBe('voice')
     expect(messages[1].tool_calls).toEqual([{ id: 'c1', name: 'ask_project', input: { project: 'alpha' } }])
     expect(messages[2]).toMatchObject({ tool_call_id: 'c1', tool_name: 'ask_project', project_id: 'alpha', correlation_id: 'corr-1', is_error: false })
     // Same clock value: order still follows insertion.
     expect(messages[0].created_at).toBeLessThan(messages[1].created_at)
+  })
+
+  it('keeps legacy null input modes readable and records typed messages', () => {
+    const s = store.createSession()
+    const legacy = store.appendMessage(s.id, { role: 'user', content: 'old row' })
+    const typed = store.appendMessage(s.id, { role: 'user', content: 'new row', inputMode: 'typed' })
+    expect(legacy.input_mode).toBeNull()
+    expect(typed.input_mode).toBe('typed')
   })
 
   it('rejects unknown roles and missing sessions', () => {
