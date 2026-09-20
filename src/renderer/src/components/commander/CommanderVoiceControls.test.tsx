@@ -48,7 +48,8 @@ const mocks = vi.hoisted(() => {
   }
 })
 
-vi.mock('@/lib/ipc-client', () => ({
+vi.mock('@/lib/ipc-client', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/ipc-client')>(),
   commanderApi: { onEvent: vi.fn(() => () => {}) },
   commanderVoiceApi: {
     setActive: mocks.setActive,
@@ -123,7 +124,7 @@ describe('Commander voice conversation', () => {
     await waitFor(() => expect(mocks.voiceState.startTurn).toHaveBeenCalledWith('conversation'))
     expect(mocks.setActive).toHaveBeenCalledWith('session-1')
     expect(screen.queryByTestId('commander-voice-talk')).toBeNull()
-    expect(await screen.findByText('Listening…')).toBeTruthy()
+    expect(await screen.findByText('Listening')).toBeTruthy()
 
     act(() => {
       expect(insertAndSubmit('Hello Commander')).toBe(true)
@@ -240,6 +241,7 @@ describe('Commander voice not ready', () => {
 
     expect(useUIStore.getState().activeModal).toBe('settings')
     expect(useUIStore.getState().settingsTab).toBe(SettingsTab.VOICE)
-    expect(screen.queryByRole('alert')).toBeNull()
+    // The visible recovery banner remains as truthful stage state until setup changes.
+    expect(screen.getByRole('alert')).toHaveTextContent('Install the local speech runtime')
   })
 })

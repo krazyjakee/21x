@@ -212,7 +212,8 @@ describe('another microphone keeps its captions (#83 blocker 2)', () => {
       await capture.promise
     })
     act(() => useVoiceStore.setState({ partial: 'what is running' }))
-    expect(screen.getByTestId('commander-voice-status')).toHaveTextContent('what is running')
+    expect(screen.getByTestId('commander-captions')).toHaveTextContent('what is running')
+    expect(screen.getByTestId('commander-voice-status')).not.toHaveTextContent('what is running')
     expect(screen.queryByTestId('voice-transcript')).toBeNull()
     expect(screen.getAllByText('what is running')).toHaveLength(1)
 
@@ -241,7 +242,7 @@ describe('app-level call ownership', () => {
   it('keeps the call and composer alive while the Commander controls unmount and remount', async () => {
     const view = renderBoth()
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
-    expect(await screen.findByText('Listening…')).toBeTruthy()
+    expect(await screen.findByText('Listening')).toBeTruthy()
     const turnId = useCommanderCallStore.getState().turnId
 
     view.rerender(<><CommanderCallHost /><VoiceOverlay /></>)
@@ -314,7 +315,7 @@ describe('broken voice and missing devices have a way out (#83 blocker 3)', () =
     })
     renderBoth()
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
-    expect(await screen.findByText('Listening…')).toBeTruthy()
+    expect(await screen.findByText('Listening')).toBeTruthy()
     expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.queryByTestId('commander-voice-setup')).toBeNull()
   })
@@ -343,7 +344,7 @@ describe('broken voice and missing devices have a way out (#83 blocker 3)', () =
   it('offers the fix when the engine dies during a conversation', async () => {
     renderBoth()
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
-    expect(await screen.findByText('Listening…')).toBeTruthy()
+    expect(await screen.findByText('Listening')).toBeTruthy()
 
     act(() => useVoiceStore.setState({
       turnId: null,
@@ -375,7 +376,7 @@ describe('broken voice and missing devices have a way out (#83 blocker 3)', () =
     expect(screen.queryByTestId('commander-voice-setup')).toBeNull()
 
     fireEvent.click(button)
-    expect(await screen.findByText('Listening…')).toBeTruthy()
+    expect(await screen.findByText('Listening')).toBeTruthy()
     expect(useVoiceStore.getState().setEnabled).toHaveBeenCalledWith(true)
     expect(screen.queryByRole('alert')).toBeNull()
   })
@@ -385,7 +386,7 @@ describe('broken voice and missing devices have a way out (#83 blocker 3)', () =
     const { insertAndSubmit } = await import('@/lib/voice-dictation-target')
     renderBoth()
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
-    expect(await screen.findByText('Listening…')).toBeTruthy()
+    expect(await screen.findByText('Listening')).toBeTruthy()
     act(() => {
       insertAndSubmit('hello')
     })
