@@ -18,6 +18,17 @@ transactional acknowledgement, so the handoff itself is at-least-once after a
 crash; the outbox and transcript/report inbox suppress duplicate application
 effects during reconciliation.
 
+The independent #151 review retains the landed v20–v22 schema unchanged.
+Recovery now revisits unexpired crash claims after their leases expire, fences
+in-flight handoffs against concurrent replay, and retries failed application
+messages at most five times. An unresponsive handoff ends visibly with unknown
+backend acceptance and is not automatically resent. Captain terminal failures
+and report inbox insertion are replayable after restart; report destinations
+are persisted before insertion, including archived originating conversations.
+Cross-project correlations and delivery-key ownership changes are refused.
+Provider tool-call IDs are scoped to a Commander turn, independently of the
+typed-message identity used by merge grants.
+
 ## How it works
 
 1. `createTables()` defines the canonical schema for **new** databases (`CREATE TABLE IF NOT EXISTS`).
@@ -158,6 +169,38 @@ admission and fairness), then v22 (#148 reconciliation and durable starts).
 All three migrations are idempotent and fresh databases create the same final
 tables directly.
 
+Migration 23 adds the immutable human-authorization chain and durable dispatch
+bindings described in `docs/authorization-chain.md`. Issue writes consume that
+resolver; they do not create a parallel provenance store.
+
+### Delegated GitHub issue-write ledger (v24)
+
+Migration 24 (`migrateIssueWrites()` in
+`src/main/database/issue-writes-migration.ts`) adds `issue_writes`: one row per
+external GitHub issue write, claimed before the call and settled after it. The
+row is both the audit record and the idempotency claim, so the two cannot
+disagree — `idempotency_key` is UNIQUE and a claimed key is immutably bound to
+the project, repository, action, target, task, exact payload shape/hash and
+trusted authorization origin. Any mismatch is refused even after a confirmed
+failed attempt, leaving the original audit row unchanged. An exact retry
+recomputes the same key across a restart instead of filing a second issue. The
+provenance columns record the originating human instruction, the Commander
+correlation and the Captain task/session; `status` moves `reserved` →
+`succeeded` | `failed` | `unresolved`, and an expired lease becomes
+`unresolved` rather than free. Attempt epochs fence late external answers from
+newer reconciliation passes, and `payload_fields` lets interrupted partial
+updates be compared in the same shape that was requested. `effects_applied_at`
+is the durable commit marker for an atomic task-attachment + journal
+transaction; startup reconciliation replays any successful external row whose
+local effects were interrupted, exactly once. New table only, so
+`CREATE TABLE IF NOT EXISTS` covers fresh and existing databases alike.
+Create reconciliation accepts a marker only from a complete GitHub search
+response: missing/invalid counts, `incomplete_results`, pagination truncation,
+or more than one exact marker all remain unresolved. The surviving candidate's
+canonical repository/issue identity and the payload reconstructed in the
+stored `payload_fields` shape must also reproduce `payload_hash`; a copied
+marker with different title, body or labels is not success evidence.
+
 ## Adding a column to other tables
 
 Same pattern: update `createTables()`, add a guarded `ALTER TABLE` in `runMigrations()`, and bump `SCHEMA_VERSION`.
@@ -188,3 +231,32 @@ When adding a new column:
 - [ ] Added to `rebuildTasksTable()` (`CREATE TABLE tasks_new`)
 - [ ] Added guarded `ALTER TABLE` in `runMigrations()`
 - [ ] Bumped `SCHEMA_VERSION`
+
+### Meaningful task activity
+
+Migration 25 (#142) follows the v24 issue-write ledger and adds
+`tasks.last_activity_at` to the canonical schema, rebuild schema and guarded
+upgrade path. Existing rows start with
+the later of creation and recorded user/assistant transcript timestamps, then
+roll descendant activity into ancestors. `updated_at` is deliberately not a
+backfill source: it includes heartbeat, session and tracking housekeeping.
+An insert trigger initializes the timestamp for all new rows, including raw
+recurrence and seed inserts.
+
+`DatabaseManager.recordTaskActivity()` advances a task and its ancestors
+monotonically and publishes their timestamps to desktop and mobile clients.
+Explicit status/title/description/priority changes, resolution results,
+feedback comments and added attachments count. Changed live user/assistant
+transcript parts (including tool results) and agent progress count; identical
+upserts and history imports do not. Background source sync, system resets,
+session IDs, heartbeat schedules, labels and output-field metadata do not.
+Source actions explicitly requested by the user count when they change one of
+the meaningful fields. Successful Add Comment source actions record activity even
+without returned task fields. Automatic startup recovery, failed prompt delivery
+and queued/start-failure resets use the `system` origin; explicit user Stop
+continues to count as activity. Subtask `sort_order` remains independent of activity.
+
+Board manual ordering is a local presentation preference, persisted by project
+and status in `board-order-store.ts`, not another use of subtask `sort_order`.
+`setColumnOrder` is the integration point for future in-column drag ordering;
+the existing status-drop UI and PR #124 do not yet supply that interaction.

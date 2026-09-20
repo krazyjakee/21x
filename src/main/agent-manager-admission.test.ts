@@ -123,6 +123,7 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
+  vi.useRealTimers()
   setTaskApiAgentController(null)
   await stopMobileApiServer()
 })
@@ -713,6 +714,7 @@ describe('recovery ownership adversarial regressions', () => {
 
     expect(db.getTask(task.id)?.status).toBe(TaskStatus.AgentWorking)
     expect(manager.findSessionByTaskId(task.id)?.sessionId).toBe(live.sessionId)
+    expect((manager as any).ownsSessionGeneration(live.sessionId, live.session)).toBe(true)
     expect(manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'started', recoveryResult: 'session_acknowledged' })
 
     // A repeated stop addresses the same retained owner and can complete once
@@ -932,6 +934,12 @@ describe('real reconnect status and stale callbacks', () => {
     expect(dispatch).not.toHaveBeenCalled()
     expect(deliveries.get(record.id)).toMatchObject({ state: 'cancelled', lastError: expect.stringContaining('awaiting_approval') })
     expect(started).toEqual([])
+    // A delivery created after startup gets the same exclusion on later sweeps.
+    const later = deliveries.enqueue({ idempotencyKey: 'late-before-stop', kind: 'agent_message', taskId: task.id,
+      agentId, payload: JSON.stringify({ sessionId: '', taskId: task.id, agentId, message: 'continue' }) }).record
+    await (manager as any).recoverAgentMessages()
+    expect(deliveries.get(later.id)?.state).toBe('cancelled')
+    expect(dispatch).not.toHaveBeenCalled()
     await manager.stopAllSessions()
   })
 })
@@ -1039,7 +1047,9 @@ describe('manager retry budget and adapter availability', () => {
     await manager.stopAllSessions()
   })
 
-  it('does not replay an initial prompt whose transport acceptance is unknown', async () => {
+  it('does not replay an initial prompt whose transport acceptance is unknown or count its reset as activity', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime('2026-01-01T00:00:00.000Z')
     const { db, manager, agentId, createTasks } = setup(1)
     const [task] = createTasks(1)
     ;(manager as any).startSessionNow.mockRestore()
@@ -1048,7 +1058,10 @@ describe('manager retry budget and adapter availability', () => {
       createSession: vi.fn(async () => 'uncertain-session'),
       getStatus: vi.fn(async () => ({ type: 'idle' })),
       destroySession: vi.fn(async () => undefined),
-      sendPrompt: vi.fn(async () => { throw new Error('connection lost after send') })
+      sendPrompt: vi.fn(async () => {
+        vi.setSystemTime('2026-01-02T00:00:00.000Z')
+        throw new Error('connection lost after send')
+      })
     }
     vi.spyOn(manager as any, 'getAdapter').mockReturnValue(adapter)
     vi.spyOn(manager as any, 'setupWorktreeIfNeeded').mockResolvedValue('/tmp')
@@ -1060,6 +1073,7 @@ describe('manager retry budget and adapter availability', () => {
     expect(manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'failed', recoveryResult: 'prompt_delivery_unconfirmed' })
     expect(db.getTask(task.id)?.status).toBe(TaskStatus.NotStarted)
     expect(adapter.sendPrompt).toHaveBeenCalledTimes(1)
+    expect(db.getTask(task.id)?.last_activity_at).toBe('2026-01-01T00:00:00.000Z')
     await manager.stopAllSessions()
   })
 })
@@ -1085,5 +1099,70 @@ describe('task changes while reconnecting', () => {
     if (change === 'manual_stop') expect(manager.getStartRecoveryState(task.id)?.state).toBe('cancelled')
     expect((manager as any).startSessionNow).not.toHaveBeenCalledWith(agentId, task.id, expect.anything(), expect.anything())
     await manager.stopAllSessions()
+  })
+})
+
+
+describe('automatic reset activity exclusions (#142)', () => {
+  const before = '2026-01-01T00:00:00.000Z'
+  const after = '2026-01-02T00:00:00.000Z'
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(before) })
+
+  it.each(['unassigned', 'missing-session', 'failed', 'cancelled', 'reconnect-failure'])('does not lift a %s orphan during startup recovery', async (kind) => {
+    const { db, manager, agentId, createTasks } = setup(1)
+    const parent = db.createTask({ title: 'Parent' })!
+    const [task] = createTasks(1, { status: TaskStatus.AgentWorking, parent_task_id: parent.id })
+    if (kind === 'unassigned') db.updateTask(task.id, { agent_id: null })
+    if (kind === 'reconnect-failure') {
+      db.updateTask(task.id, { session_id: 'lost-session' })
+      vi.spyOn(manager, 'resumeSession').mockRejectedValue(new Error('Backend gone'))
+    }
+    if (kind === 'failed' || kind === 'cancelled') {
+      const queue = (manager as any).startQueue
+      queue.enqueue({ taskId: task.id, projectId: task.project_id, agentId, reason: 'recovery', queuedAt: before })
+      if (kind === 'failed') queue.fail(task.id, 'agent_missing', 'terminal_failure')
+      else queue.cancel(task.id, 'manual_stop', 'cancelled')
+    }
+    // Keep the requeued item waiting so only recovery, not a new agent start,
+    // can affect activity during this assertion.
+    vi.spyOn(manager, 'drainStartQueue').mockImplementation(() => undefined)
+    vi.setSystemTime(after)
+    await manager.reconcileStartup()
+    expect(db.getTask(task.id)).toMatchObject({ status: TaskStatus.NotStarted, last_activity_at: before })
+    expect(db.getTask(parent.id)?.last_activity_at).toBe(before)
+    await manager.stopAllSessions()
+    db.close()
+  })
+
+  it.each(['immediate', 'queued'])('does not lift on a failed %s start reset', async (mode) => {
+    const { db, manager, agentId, createTasks } = setup(1)
+    const [task] = createTasks(1)
+    ;(manager as any).startSessionNow.mockImplementation(async () => {
+      db.updateTask(task.id, { status: TaskStatus.AgentWorking })
+      vi.setSystemTime(after)
+      throw new Error('start failed')
+    })
+    if (mode === 'immediate') {
+      await expect(manager.requestSession(agentId, task.id)).rejects.toThrow('start failed')
+    } else {
+      ;(manager as any).startQueue.enqueue({ taskId: task.id, projectId: task.project_id, agentId, reason: 'recovery', queuedAt: before })
+      manager.drainStartQueue()
+      await settle()
+    }
+    expect(db.getTask(task.id)).toMatchObject({ status: TaskStatus.NotStarted, last_activity_at: before })
+    expect(manager.getStartRecoveryState(task.id)?.state).toBe('retrying')
+    await manager.stopAllSessions()
+    db.close()
+  })
+
+  it.each([false, true])('explicit Stop counts activity (live session: %s)', async (live) => {
+    const { db, manager, agentId, createTasks } = setup(1)
+    const [task] = createTasks(1, { status: TaskStatus.AgentWorking })
+    if (live) await manager.requestSession(agentId, task.id)
+    vi.setSystemTime(after)
+    await manager.stopByTaskId(task.id)
+    expect(db.getTask(task.id)).toMatchObject({ status: TaskStatus.NotStarted, last_activity_at: after })
+    await manager.stopAllSessions()
+    db.close()
   })
 })

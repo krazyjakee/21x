@@ -54,9 +54,13 @@ export function ConcurrencySection({ projectId }: ConcurrencySectionProps) {
   }, [projectId, reload])
 
   const apply = async (call: Promise<{ success: true } | { error: string }>) => {
-    const result = await call
-    setError('error' in result ? result.error : null)
-    reload()
+    try {
+      const result = await call
+      setError('error' in result ? result.error : null)
+      reload()
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Could not update concurrency settings')
+    }
   }
 
   if (!state) return null
@@ -126,7 +130,7 @@ export function ConcurrencySection({ projectId }: ConcurrencySectionProps) {
           </tbody>
         </table>
       )}
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       {state.recentChanges.length > 0 && (
         <div className="space-y-1">
           <p className="text-xs font-medium text-muted-foreground">Recent changes</p>

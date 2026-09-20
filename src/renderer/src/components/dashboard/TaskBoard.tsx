@@ -21,6 +21,9 @@ import { useTaskStore } from '@/stores/task-store'
 import { useProjectTasks } from '@/hooks/use-project-tasks'
 import { useAgentStore } from '@/stores/agent-store'
 import { useUIStore } from '@/stores/ui-store'
+import { useProjectStore } from '@/stores/project-store'
+import { useBoardOrderStore } from '@/stores/board-order-store'
+import { boardColumnKey, sortBoardColumn } from '@/lib/board-order'
 import { useSnoozeTick } from '@/hooks/use-snooze-tick'
 import { isSnoozed, isOverdue, formatDueDistance } from '@/lib/utils'
 import { agentApi, onAgentStartQueueChanged } from '@/lib/ipc-client'
@@ -54,21 +57,6 @@ const boardCollisionDetection: CollisionDetection = (args) => {
   const pointerCollisions = pointerWithin(args)
   if (pointerCollisions.length > 0) return pointerCollisions
   return args.pointerCoordinates ? [] : closestCenter(args)
-}
-
-const PRIORITY_ORDER: Record<string, number> = {
-  critical: 0,
-  high: 1,
-  medium: 2,
-  low: 3
-}
-
-function sortByPriority(tasks: Task[]): Task[] {
-  return [...tasks].sort((a, b) => {
-    const pa = PRIORITY_ORDER[a.priority || ''] ?? 4
-    const pb = PRIORITY_ORDER[b.priority || ''] ?? 4
-    return pa - pb
-  })
 }
 
 function getPriorityVariant(priority: string): 'red' | 'orange' | 'yellow' | 'default' {
@@ -340,7 +328,7 @@ const ColumnHeader = memo(function ColumnHeader({ column, count }: { column: Sta
 
 // ── Column wrapper ───────────────────────────────────────────
 
-const BoardColumn = memo(function BoardColumn({ column, tasks, onSelect, agentMap, isDraggingTask, transitionStates }: { column: StatusColumn; tasks: Task[]; onSelect: (id: string) => void; agentMap: Map<string, Agent>; isDraggingTask: boolean; transitionStates: Record<string, TaskBoardTransitionPhase> }) {
+const BoardColumn = memo(function BoardColumn({ column, tasks, onSelect, agentMap, isDraggingTask, transitionStates, manualOrder, onSortByActivity }: { column: StatusColumn; tasks: Task[]; onSelect: (id: string) => void; agentMap: Map<string, Agent>; isDraggingTask: boolean; transitionStates: Record<string, TaskBoardTransitionPhase>; manualOrder: boolean; onSortByActivity: (status: TaskStatus) => void }) {
   const { isOver, setNodeRef } = useDroppable({
     id: `status:${column.key}`,
     data: { status: column.key }
@@ -359,6 +347,12 @@ const BoardColumn = memo(function BoardColumn({ column, tasks, onSelect, agentMa
       {/* Sticky header within column */}
       <div className={`sticky top-0 z-10 ${column.columnBg} backdrop-blur-md rounded-t-xl border-b border-border/15`}>
         <ColumnHeader column={column} count={tasks.length} />
+        {manualOrder && (
+          <button type="button" className="mx-3 mb-2 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => onSortByActivity(column.key)}>
+            Sort by activity
+          </button>
+        )}
       </div>
 
       {/* Cards */}
@@ -424,6 +418,13 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
   const isLoading = useTaskStore((s) => s.isLoading)
   const agents = useAgentStore((s) => s.agents)
   const openDashboardPreview = useUIStore((s) => s.openDashboardPreview)
+  const projectId = useProjectStore((s) => s.currentProjectId)
+  const manualOrders = useBoardOrderStore((s) => s.orders)
+  const resetColumnOrder = useBoardOrderStore((s) => s.resetColumnOrder)
+  const previewTaskId = useUIStore((s) => s.dashboardPreviewTaskId)
+  const handleSortByActivity = useCallback((status: TaskStatus) => {
+    resetColumnOrder(projectId, status)
+  }, [projectId, resetColumnOrder])
   const snoozeTick = useSnoozeTick(tasks)
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null)
   const [transitionStates, setTransitionStates] = useState<Record<string, TaskBoardTransitionPhase>>({})
@@ -513,7 +514,7 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
     openDashboardPreview(taskId)
   }, [openDashboardPreview])
 
-  const tasksByStatus = useMemo(() => {
+  const sortedTasksByStatus = useMemo(() => {
     const grouped: Record<string, Task[]> = {}
     for (const col of COLUMNS) {
       grouped[col.key] = []
@@ -529,13 +530,12 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
         grouped[TaskStatus.NotStarted].push(task)
       }
     }
-    // Sort each column's tasks by priority within the same useMemo to avoid
-    // creating new arrays on every render via inline sortByPriority() calls
+    // Recompute only when task data, status overrides, or manual preferences change.
     for (const col of COLUMNS) {
-      grouped[col.key] = sortByPriority(grouped[col.key])
+      grouped[col.key] = sortBoardColumn(grouped[col.key], manualOrders[boardColumnKey(projectId, col.key)])
     }
     return { grouped, completedCount }
-  }, [topLevelTasks])
+  }, [topLevelTasks, manualOrders, projectId])
 
   // Once the acknowledged task status reaches an execution column, that
   // column itself is the truthful Working signal and the transient badge can
@@ -556,6 +556,17 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
       return changed ? next : current
     })
   }, [topLevelTasks])
+
+  // Freeze column membership and order during dragging or an open task preview.
+  // Data received during the interaction is applied when it closes. A project
+  // switch must never show the previous project's held cards.
+  const heldOrder = useRef({ projectId, value: sortedTasksByStatus })
+  const interactionLocked = !!draggedTaskId || topLevelTasks.some((task) => task.id === previewTaskId)
+  const tasksByStatus = interactionLocked && heldOrder.current.projectId === projectId
+    ? heldOrder.current.value : sortedTasksByStatus
+  useEffect(() => {
+    if (!interactionLocked) heldOrder.current = { projectId, value: sortedTasksByStatus }
+  }, [interactionLocked, projectId, sortedTasksByStatus])
 
   const activeTasks = topLevelTasks.length - tasksByStatus.completedCount
   const draggedTask = draggedTaskId
@@ -669,6 +680,8 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
                 agentMap={agentMap}
                 isDraggingTask={!!draggedTask}
                 transitionStates={displayedTransitions}
+                manualOrder={manualOrders[boardColumnKey(projectId, col.key)] !== undefined}
+                onSortByActivity={handleSortByActivity}
               />
             ))}
           </div>

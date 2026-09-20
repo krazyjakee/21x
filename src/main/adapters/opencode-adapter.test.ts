@@ -8,6 +8,12 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 
 describe('OpencodeAdapter', () => {
+  it('refuses a responding server whose protocol reports unhealthy', async () => {
+    const adapter = new OpencodeAdapter()
+    vi.spyOn(adapter as unknown as { getClient: () => Promise<unknown> }, 'getClient').mockResolvedValue({ global: { health: async () => ({ data: { healthy: false, version: 'test' } }) } })
+    expect(await adapter.checkHealth()).toMatchObject({ available: false })
+  })
+
   describe('runtime plugin generation', () => {
     afterEach(() => {
       vi.restoreAllMocks()

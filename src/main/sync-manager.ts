@@ -3,6 +3,7 @@ import type { PluginRegistry } from './plugins/registry'
 import type { OAuthManager } from './oauth/oauth-manager'
 import type { PluginContext, PluginSyncResult, ActionResult } from './plugins/types'
 import type { SourceUser, ReassignResult } from '../shared/types'
+import { PluginActionId } from '../shared/constants'
 import { emitTaskEvent } from './project-events'
 
 export interface SyncResult {
@@ -114,7 +115,12 @@ export class SyncManager {
     const result = await plugin.executeAction(actionId, task, input, config, ctx)
 
     if (result.success && result.taskUpdate && Object.keys(result.taskUpdate).length > 0) {
-      this.db.updateTask(task.id, result.taskUpdate, 'task-source')
+      this.db.updateTask(task.id, result.taskUpdate, 'task-source-action')
+    }
+
+    // Comments are meaningful even when the source returns no local field changes.
+    if (result.success && actionId === PluginActionId.AddComment) {
+      this.db.recordTaskActivity(task.id)
     }
 
     return result

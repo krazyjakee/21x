@@ -71,7 +71,7 @@
   --spacing-icon: 16px;     /* default control icon */
   --spacing-icon-lg: 20px;  /* primary navigation */
   --spacing-hit: 32px;      /* minimum icon-only control on desktop */
-  --spacing-hit-lg: 36px;   /* nav rail buttons */
+  --spacing-hit-lg: 44px;   /* nav rail buttons */
 }
 
 /* ── Light theme (default) — true-gray neutrals, azure brand ──────────────── */
@@ -431,6 +431,101 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; }
   animation: canvas-status-jump-popup 1.4s ease-in-out infinite;
 }
 
+/* ── Activity indicators (#95, docs/activity-indicators.md) ─────────────────
+   Semantic tones alias the system tokens. Light mode uses darker shades where
+   the base token would fall under 3:1 against paper; text on tinted
+   backgrounds is always the foreground colour, never the tone itself.
+   (--primary is 2.9:1 on the light background, so light "active" is a darker azure.) */
+:root {
+  --activity-active: #1478c0;
+  --activity-attention: #b45309;
+  --activity-review: #be185d;
+  --activity-success: #047857;
+  --activity-danger: #c62f22;
+  --activity-muted: #6b6a70;
+}
+
+.dark {
+  --activity-active: var(--primary);
+  --activity-attention: var(--warning);
+  --activity-review: #f472b6;
+  --activity-success: var(--success);
+  --activity-danger: var(--destructive);
+  --activity-muted: var(--muted-foreground);
+}
+
+.activity-tone-active { --activity-color: var(--activity-active); }
+.activity-tone-attention { --activity-color: var(--activity-attention); }
+.activity-tone-review { --activity-color: var(--activity-review); }
+.activity-tone-success { --activity-color: var(--activity-success); }
+.activity-tone-danger { --activity-color: var(--activity-danger); }
+.activity-tone-muted { --activity-color: var(--activity-muted); }
+
+/* Running dot: 0.65 → 1 opacity on a 2.4 s cycle, motion owner only. */
+@keyframes activity-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
+}
+.activity-breathe {
+  animation: activity-breathe 2.4s ease-in-out infinite;
+}
+
+/* Thinking ring: 1 → 1.03 scale, no layout change. */
+@keyframes activity-ring-breathe {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.03); opacity: 0.7; }
+}
+.activity-ring-breathe {
+  animation: activity-ring-breathe 2.4s ease-in-out infinite;
+}
+
+/* Tool shimmer: an indeterminate clipped sweep, never a percentage. */
+.activity-shimmer {
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--activity-color, var(--activity-active)) 30%, transparent);
+}
+.activity-shimmer[data-moving="true"]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--activity-color, var(--activity-active));
+  transform: translateX(-100%);
+  animation: activity-shimmer 2.4s ease-in-out infinite;
+}
+@keyframes activity-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* Finished tick: one 150 ms fade-in; the accent settles with a 250 ms fade. */
+@keyframes activity-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.activity-tick-fade-in {
+  animation: activity-fade-in 150ms ease-out both;
+}
+.activity-accent {
+  transition: opacity 250ms ease-out, background-color 250ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-breathe,
+  .activity-ring-breathe,
+  .activity-shimmer[data-moving="true"]::after,
+  .activity-tick-fade-in,
+  .canvas-status-transition-flash,
+  .canvas-status-transition-wave,
+  .canvas-status-jump-popup {
+    animation: none;
+  }
+  .activity-accent {
+    transition: none;
+  }
+}
+
+
 /* ── Recording ──────────────────────────────────────────────────────────────
    While the microphone is live the three chrome strips shift — the top bar,
    the icon rail and the sidebar, and the status bar. **The work itself is left
@@ -525,3 +620,4 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; }
     transition: none;
   }
 }
+

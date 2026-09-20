@@ -84,7 +84,7 @@ export function replaceRemoteImageUrlsInTask(
   )
 
   if (newDescription !== task.description) {
-    ctx.db.updateTask(taskId, { description: newDescription })
+    ctx.db.updateTask(taskId, { description: newDescription }, 'task-source')
     console.log(`${logPrefix} Replaced remote image URLs with local paths in task ${taskId}`)
   }
 }

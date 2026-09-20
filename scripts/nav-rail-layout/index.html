@@ -1,0 +1,8 @@
+<!doctype html>
+<html><head><meta charset="UTF-8"><title>Navigation rail layout regression</title></head>
+<body><div id="root"></div>
+<script>
+// Inert event subscriptions: the fixture never starts application services.
+window.electronAPI = new Proxy({}, {get: (_, key) => key.startsWith('on') ? () => () => {} : undefined})
+</script>
+<script type="module" src="/fixture.tsx"></script></body></html>

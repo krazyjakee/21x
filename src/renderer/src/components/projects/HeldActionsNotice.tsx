@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef, useId } from 'react'
-import { Check, ShieldAlert, ShieldCheck, X } from 'lucide-react'
+import { Check, ShieldAlert, ShieldCheck, ShieldQuestion, X } from 'lucide-react'
+import { ACTIVITY_REVALIDATE_MS, ACTIVITY_STALE_MS } from '@shared/activity'
+import { activityNow } from '@/lib/activity/activity-clock'
 import { escalationApi, mergeGrantsApi } from '@/lib/ipc-client'
 import { useProjectStore } from '@/stores/project-store'
 import type { HeldAction } from '@shared/project-limit-types'
@@ -9,7 +11,10 @@ import { describeMergeGrant, type MergeGrant } from '@shared/merge-grants'
  * Captain tool calls held by a project's escalation policy (#66), as a
  * status-bar pill that opens a small list with Approve / Reject. Renders
  * nothing while nothing is held. The list comes from the main process and is
- * pushed on every change, so this never has to poll.
+ * pushed on every change; while the window is visible it is also re-read every
+ * 5 s (#95), and when reads keep failing for 15 s a static "unavailable" pill
+ * replaces silence, because a failed read must not look like "nothing held".
+ * This is a policy-held action (orthogonal to session approval requests).
  *
  * Active merge grants (#137) are listed here too, each revocable in one
  * click, so standing authority the user gave is always in sight.
@@ -18,6 +23,7 @@ export function HeldActionsNotice() {
   const [held, setHeld] = useState<HeldAction[]>([])
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
+  const [unavailable, setUnavailable] = useState(false)
   const projects = useProjectStore((s) => s.projects)
   const [error, setError] = useState<string | null>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -46,20 +52,75 @@ export function HeldActionsNotice() {
 
   useEffect(() => {
     let cancelled = false
-    try {
-      escalationApi.listHeld()
-        .then((list) => { if (!cancelled) setHeld(list ?? []) })
-        .catch(() => { /* the bridge may be absent in a test shell */ })
-    } catch {
-      // Same: no bridge, nothing to show.
+    let lastOkAt: number | null = null
+    const startedAt = activityNow()
+    let generation = 0
+    const ok = (list: HeldAction[] | undefined): void => {
+      lastOkAt = activityNow()
+      setHeld(list ?? [])
+      setUnavailable(false)
     }
-    const off = escalationApi.onHeldChanged((event) => setHeld(event?.held ?? []))
-    return () => { cancelled = true; off() }
+    const read = (): void => {
+      const mine = ++generation
+      try {
+        escalationApi.listHeld()
+          .then((list) => { if (!cancelled && mine === generation) ok(list) })
+          .catch(() => {
+            if (cancelled) return
+            const since = lastOkAt ?? startedAt
+            if (activityNow() - since >= ACTIVITY_STALE_MS || lastOkAt === null) setUnavailable(true)
+          })
+      } catch {
+        // No bridge (a test shell): nothing to show.
+      }
+    }
+    read()
+    const timer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      read()
+    }, ACTIVITY_REVALIDATE_MS)
+    const onVisibility = (): void => {
+      if (document.visibilityState !== 'visible') return
+      const since = lastOkAt ?? startedAt
+      if (activityNow() - since >= ACTIVITY_STALE_MS) setUnavailable(true)
+      read()
+    }
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisibility)
+    const off = escalationApi.onHeldChanged((event) => {
+      generation += 1
+      ok(event?.held)
+    })
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility)
+      off()
+    }
   }, [])
 
   useEffect(() => { if (held.length === 0 && grants.length === 0) setOpen(false) }, [held.length, grants.length])
 
-  if (held.length === 0 && grants.length === 0) return null
+  // A stale cached action is useful only as evidence that the source is
+  // unavailable. It must not remain approvable/rejectable after freshness is
+  // lost. Merge grants have their own live source and remain usable.
+  const visibleHeld = unavailable ? [] : held
+
+  if (unavailable && grants.length === 0) {
+    return (
+      <span
+        className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+        title="Held Captain actions could not be read"
+        role="img"
+        aria-label="Held Captain actions unavailable"
+        data-testid="held-actions-unavailable"
+      >
+        <ShieldQuestion aria-hidden="true" className="h-3 w-3" />
+        held actions unavailable
+      </span>
+    )
+  }
+
+  if (visibleHeld.length === 0 && grants.length === 0) return null
 
   const projectName = (id: string): string => projects.find((p) => p.id === id)?.name ?? 'Project'
 
@@ -97,17 +158,20 @@ export function HeldActionsNotice() {
         aria-controls={open ? dialogId : undefined}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium cursor-pointer ${held.length > 0 ? 'text-amber-700 hover:bg-amber-500/10 dark:text-amber-400' : 'text-muted-foreground hover:bg-muted'}`}
-        title={held.length > 0 ? 'Captain actions waiting for your approval' : 'Active merge grants'}
+        className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium cursor-pointer ${visibleHeld.length > 0 ? 'text-amber-700 hover:bg-amber-500/10 dark:text-amber-400' : 'text-muted-foreground hover:bg-muted'}`}
+        title={unavailable ? 'Held Captain actions unavailable; active merge grants shown' : visibleHeld.length > 0 ? 'Captain actions waiting for your approval' : 'Active merge grants'}
         aria-label={[
-          held.length > 0 ? `${held.length} Captain action${held.length !== 1 ? 's' : ''} waiting for approval` : '',
+          unavailable ? 'Held Captain actions unavailable' : '',
+          visibleHeld.length > 0 ? `${visibleHeld.length} Captain action${visibleHeld.length !== 1 ? 's' : ''} waiting for approval` : '',
           grants.length > 0 ? `${grants.length} active merge grant${grants.length !== 1 ? 's' : ''}` : ''
         ].filter(Boolean).join(', ')}
         aria-expanded={open}
       >
-        {held.length > 0 ? <ShieldAlert className="h-3 w-3" /> : <ShieldCheck className="h-3 w-3" />}
-        {held.length > 0 && `${held.length} waiting for approval`}
-        {held.length > 0 && grants.length > 0 && ' · '}
+        {unavailable ? <ShieldQuestion className="h-3 w-3" /> : visibleHeld.length > 0 ? <ShieldAlert className="h-3 w-3" /> : <ShieldCheck className="h-3 w-3" />}
+        {unavailable && 'held actions unavailable'}
+        {unavailable && grants.length > 0 && ' · '}
+        {visibleHeld.length > 0 && `${visibleHeld.length} waiting for approval`}
+        {visibleHeld.length > 0 && grants.length > 0 && ' · '}
         {grants.length > 0 && `${grants.length} merge grant${grants.length !== 1 ? 's' : ''}`}
       </button>
       {open && (
@@ -120,13 +184,18 @@ export function HeldActionsNotice() {
           className="absolute bottom-full right-0 z-50 mb-2 max-h-[70vh] overflow-y-auto w-96 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-card p-2 text-xs text-foreground shadow-lg"
         >
           {error && <p role="alert" className="mb-2 text-destructive">{error}</p>}
-          {held.length > 0 && (
+          {unavailable && (
+            <p role="status" className="mb-2 px-1 text-[11px] text-muted-foreground">
+              Held Captain actions could not be read. Active merge grants remain available below.
+            </p>
+          )}
+          {visibleHeld.length > 0 && (
             <p className="mb-2 px-1 text-[11px] text-muted-foreground">
               The project’s escalation policy asks you before these run. Approve runs the call; Reject drops it and tells the Captain.
             </p>
           )}
           <ul className="space-y-1.5">
-            {held.map((action) => (
+            {visibleHeld.map((action) => (
               <li key={action.id} className="flex items-start gap-2 rounded-md border border-border/60 bg-background px-2 py-1.5">
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-medium" title={action.summary}>{action.summary}</div>

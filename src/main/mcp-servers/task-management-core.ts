@@ -29,6 +29,7 @@ import {
 } from './task-management-tools'
 import { SKILL_SCOPE_PARAM, SKILL_TOOL_NAMES } from '../task-api/skill-routes'
 import { MERGE_GRANT_TOOL_NAMES } from './merge-grant-tools'
+import { ISSUE_WRITE_TOOL_NAMES } from './issue-write-tools'
 
 /** Which task a session may act on. All fields null means full access. */
 export type TaskMcpScope = {
@@ -41,7 +42,7 @@ export type TaskMcpScope = {
 }
 
 /** Calls one Task API route. In process this is handleRoute; over stdio it is fetch. */
-export type TaskApiInvoke = (route: string, params: Record<string, unknown>) => Promise<unknown>
+export type TaskApiInvoke = (route: string, params: Record<string, unknown>, trustedScope?: TaskMcpScope) => Promise<unknown>
 
 /** Result shape of an MCP tools/call. */
 export type ToolCallResult = {
@@ -80,7 +81,8 @@ const COORDINATOR_ONLY_TOOLS = new Set([
   'update_project_status',
   'report_to_commander',
   'set_concurrency',
-  ...MERGE_GRANT_TOOL_NAMES
+  ...MERGE_GRANT_TOOL_NAMES,
+  ...ISSUE_WRITE_TOOL_NAMES
 ])
 
 /**

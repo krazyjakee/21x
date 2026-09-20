@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import type { ChatMessage } from '../../shared/chat'
 import type { CommanderEvent, CommanderMessage, CommanderSession } from '../../shared/commander'
 import { ChatRuntime, type ChatTurnHandle, type ChatTurnResult } from '../chat/chat-runtime'
@@ -5,9 +6,11 @@ import { imagesUnsupportedMessage, type ChatProvider, type ChatProviderRequest }
 import { validateChatImageInputs } from '../../shared/chat-images'
 import type { ChatToolDefinition } from '../chat/tools'
 import { normalizeTitle, type CommanderStore } from './commander-store'
-import { buildContext, DEFAULT_CONTEXT_BUDGET, planFold, transcriptForSummary, type ContextBudget } from './context'
+import { buildContext, DEFAULT_CONTEXT_BUDGET, MAX_SUMMARY_TRANSCRIPT_CHARS, planFold, transcriptForSummary, type ContextBudget } from './context'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_SYSTEM_PROMPT, COMMANDER_TITLE_PROMPT, reportRelayNote, withSummary } from './prompts'
+import { MUTATING_COMMANDER_TOOLS } from './project-tools'
 import { guardReportAsks, MAX_REPORT_ASKS_WITHOUT_USER_TURN } from './report-tools'
+import { MUTATING_COMMANDER_SKILL_TOOLS } from './skill-tools'
 
 /**
  * Runs Commander chat turns over persisted sessions (docs/commander.md).
@@ -21,21 +24,31 @@ import { guardReportAsks, MAX_REPORT_ASKS_WITHOUT_USER_TURN } from './report-too
  *
  * Extension points:
  * - The Commander's tools (project-tools.ts) are supplied through `getTools`,
- *   built per turn so a confirmation can be checked against the user message.
+ *   built per turn from that turn's context (session, user message, trigger).
  * - #62 delivers Captain reports through `deliverReport`: the report is
  *   stored (unread until the session is read) and, when the session is the
  *   one open in the Commander view (`setActiveSession`), a turn is started so
  *   the Commander relays it. A turn started by a report can only call
  *   `ask_captain` within the session's report-ask budget until the user
  *   speaks again (report-tools.ts).
+ * - Only a turn the user started gets the admin tools (the ones that write
+ *   projects, skills or merge grants, {@link COMMANDER_ADMIN_TOOLS}). A report-started turn
+ *   runs on text a Captain wrote, which may carry instructions from untrusted
+ *   sources, so it gets the read-only tools and `ask_captain` only.
  */
 
+/** Tools that change projects, skills or merge grants: never offered to a turn the user did not start. */
+export const COMMANDER_ADMIN_TOOLS: ReadonlySet<string> = new Set<string>([...MUTATING_COMMANDER_TOOLS, ...MUTATING_COMMANDER_SKILL_TOOLS, 'revoke_merge_grant'])
+
 export interface CommanderToolContext {
+  /** Unique per prepared turn, independent of typed-message grant authority. */
+  deliveryScope?: string
   sessionId: string
   /** The user message that immediately precedes this turn's tool calls; empty for a report-triggered turn. */
   userMessage: string
   /** The stored id of that message (#137: merge grants bind to it); absent for a report-triggered turn. */
   userMessageId?: string
+  authorizationMessageId?: string
   /** What started the turn: the user, or a report being relayed (#62). */
   trigger: 'user' | 'report'
 }
@@ -54,6 +67,15 @@ export interface CommanderServiceOptions {
   oneShotTimeoutMs?: number
   /** `ask_captain` calls report-triggered turns may make per session before a user turn resets the count (#62). */
   maxReportAsks?: number
+}
+
+/** A fold that could not write its summary; the turns stay verbatim until one succeeds. */
+export interface FoldFailure {
+  /** ISO time of the latest failure. */
+  at: string
+  error: string
+  /** Consecutive failed attempts. */
+  attempts: number
 }
 
 export interface SendResult {
@@ -87,6 +109,7 @@ interface TurnStart {
   trigger: 'user' | 'report'
   userMessage: string
   userMessageId?: string
+  authorizationMessageId?: string
   /** Extra system text for the turn (the relay note of a report-triggered turn). */
   systemNote?: string
 }
@@ -101,6 +124,7 @@ const MAX_USER_MESSAGE_CHARS = 100_000
 const FALLBACK_TITLE_WORDS = 6
 const MAX_TITLE_CHARS = 60
 const DEFAULT_ONE_SHOT_TIMEOUT_MS = 20_000
+const MAX_SUMMARY_CHUNKS = 8
 
 /** First words of the user's message, used when the model cannot name the session. */
 export function fallbackTitle(text: string): string {
@@ -148,7 +172,10 @@ export function toolResultTags(content: string, isError: boolean): { projectId?:
 export async function completeText(provider: ChatProvider, request: Omit<ChatProviderRequest, 'tools' | 'toolChoice'>, signal: AbortSignal): Promise<string> {
   let text = ''
   for await (const event of provider.stream({ ...request, tools: [], toolChoice: 'none' }, signal)) {
-    if (event.type === 'text_delta') text += event.text
+    if (event.type === 'text_delta') {
+      if (text.length + event.text.length > 8_000) throw new Error('One-shot response exceeded the size limit')
+      text += event.text
+    }
   }
   return text
 }
@@ -160,6 +187,8 @@ export class CommanderService {
   private readonly active = new Map<string, ChatTurnHandle>()
   private readonly folding = new Set<string>()
   private readonly naming = new Set<string>()
+  /** Sessions whose last fold failed; cleared by the next successful one (read with foldFailure). */
+  private readonly foldFailures = new Map<string, FoldFailure>()
   /** The session open in the Commander view, as the renderer reports it (#62). */
   private activeSessionId: string | null = null
   /** Reports that arrived during a turn; relayed together once that turn ends. */
@@ -242,21 +271,19 @@ export class CommanderService {
 
     let prepared!: PreparedTurn
     let session: CommanderSession | null = null
-    const message = this.store.appendMessage(sessionId, {
-      role: 'user',
-      content,
-      ...(attached.length > 0 ? { images: attached.map(({ name, mimeType, data }) => ({ name, mimeType, data })) } : {})
-    }, (pendingMessage) => {
-      prepared = this.prepareTurn(sessionId, provider, { trigger: 'user', userMessage: content, userMessageId: origin === 'typed' ? pendingMessage.id : undefined })
-      session = this.store.markRead(sessionId)
-    })
+    const message = this.store.appendHumanMessage(sessionId, content, origin,
+      attached.length > 0 ? attached.map(({ name, mimeType, data }) => ({ name, mimeType, data })) : undefined,
+      (pendingMessage) => {
+        prepared = this.prepareTurn(sessionId, provider, { trigger: 'user', userMessage: content, userMessageId: origin === 'typed' ? pendingMessage.id : undefined, authorizationMessageId: this.store.authorizationMessageId(pendingMessage) })
+        session = this.store.markRead(sessionId)
+      })
     this.emit({ type: 'messages_appended', sessionId, messages: [message] })
     // Sending is reading: the user is looking at this session.
     if (session) this.emit({ type: 'session_updated', session })
     // A user turn resets the report-ask budget (#62).
     this.reportAsks.delete(sessionId)
 
-    const { turnId, done } = this.startTurn(sessionId, provider, { trigger: 'user', userMessage: content, userMessageId: origin === 'typed' ? message.id : undefined }, prepared)
+    const { turnId, done } = this.startTurn(sessionId, provider, { trigger: 'user', userMessage: content, userMessageId: origin === 'typed' ? message.id : undefined, authorizationMessageId: this.store.authorizationMessageId(message) }, prepared)
     return { turnId, message, done }
   }
 
@@ -266,7 +293,9 @@ export class CommanderService {
       provider.supportsImages === true ? (id) => this.store.getMessageImages(id) : undefined)
     let system = withSummary(this.options.systemPrompt ?? COMMANDER_SYSTEM_PROMPT, context.summary)
     if (start.systemNote) system = `${system}\n\n${start.systemNote}`
-    let tools = this.options.getTools?.({ sessionId, userMessage: start.userMessage, userMessageId: start.userMessageId, trigger: start.trigger }) ?? []
+    let tools = this.options.getTools?.({ sessionId, deliveryScope: randomUUID(), userMessage: start.userMessage, userMessageId: start.userMessageId, authorizationMessageId: start.authorizationMessageId, trigger: start.trigger }) ?? []
+    // Admin tools act only on turns the user started, whatever getTools returned.
+    if (start.trigger !== 'user') tools = tools.filter((tool) => !COMMANDER_ADMIN_TOOLS.has(tool.name))
     if (start.trigger === 'report') {
       const max = this.options.maxReportAsks ?? MAX_REPORT_ASKS_WITHOUT_USER_TURN
       tools = guardReportAsks(tools, {
@@ -409,35 +438,70 @@ export class CommanderService {
     }
   }
 
+  /** The session's last failed fold, or null when folding is up to date. */
+  foldFailure(sessionId: string): FoldFailure | null {
+    return this.foldFailures.get(sessionId) ?? null
+  }
+
+  private recordFoldFailure(sessionId: string, error: string): void {
+    const attempts = (this.foldFailures.get(sessionId)?.attempts ?? 0) + 1
+    this.foldFailures.set(sessionId, { at: new Date().toISOString(), error, attempts })
+    console.warn(`[Commander] Fold failed for session ${sessionId} (attempt ${attempts}): ${error}. Turns stay verbatim; retrying after the next turn.`)
+  }
+
   /**
    * Folds turns that no longer fit the context budget into a new rolling
-   * summary. On failure nothing is stored; the next turn simply trims.
+   * summary. On failure nothing is stored and the failure is recorded
+   * (foldFailure): the turns stay verbatim in the context and the fold is
+   * retried after the next turn.
    */
   async foldHistory(sessionId: string, provider?: ChatProvider): Promise<CommanderMessage | null> {
     if (this.folding.has(sessionId)) return null
     this.folding.add(sessionId)
     try {
       const plan = planFold(this.store.listMessages(sessionId), this.budget)
-      if (!plan) return null
-      const excerpt = transcriptForSummary(plan.toFold)
-      const prompt = plan.previousSummary
-        ? `Previous summary:\n${plan.previousSummary}\n\nNew conversation to fold in:\n${excerpt}`
-        : `Conversation to summarise:\n${excerpt}`
-      let summary: string
-      try {
-        const model = provider ?? this.options.createProvider()
-        summary = (await completeText(
-          model,
-          { system: COMMANDER_SUMMARY_PROMPT, messages: [{ role: 'user', content: prompt }], maxTokens: 800 },
-          AbortSignal.timeout(this.options.oneShotTimeoutMs ?? DEFAULT_ONE_SHOT_TIMEOUT_MS)
-        )).trim()
-      } catch (err) {
-        console.warn('[Commander] summary generation failed:', err instanceof Error ? err.message : err)
+      if (!plan) {
+        this.foldFailures.delete(sessionId)
         return null
       }
-      if (!summary) return null
+      const excerpt = transcriptForSummary(plan.toFold)
+      // Never send unbounded retained history or an oversized legacy summary.
+      // Leave the fold cursor unchanged so stored turns remain recoverable.
+      if (excerpt.length > MAX_SUMMARY_TRANSCRIPT_CHARS * MAX_SUMMARY_CHUNKS || (plan.previousSummary?.length ?? 0) > 8_000) {
+        this.recordFoldFailure(sessionId, 'summary input exceeds the size limit; stored history retained')
+        return null
+      }
+      let summary = plan.previousSummary ?? ''
+      try {
+        const model = provider ?? this.options.createProvider()
+        const signal = AbortSignal.timeout(this.options.oneShotTimeoutMs ?? DEFAULT_ONE_SHOT_TIMEOUT_MS)
+        // A large single turn is folded in bounded requests. Intermediate
+        // summaries remain local: any failed/empty chunk leaves the durable
+        // summary and its cursor untouched, ready for a complete retry.
+        for (let offset = 0; offset < excerpt.length; offset += MAX_SUMMARY_TRANSCRIPT_CHARS) {
+          signal.throwIfAborted()
+          const chunk = excerpt.slice(offset, offset + MAX_SUMMARY_TRANSCRIPT_CHARS)
+          const prompt = summary
+            ? `Previous summary:\n${summary}\n\nNew conversation to fold in:\n${chunk}`
+            : `Conversation to summarise:\n${chunk}`
+          summary = (await completeText(
+            model,
+            { system: COMMANDER_SUMMARY_PROMPT, messages: [{ role: 'user', content: prompt }], maxTokens: 800 },
+            signal
+          )).trim()
+          if (!summary) {
+            this.recordFoldFailure(sessionId, 'the summary came back empty')
+            return null
+          }
+        }
+      } catch {
+        // Provider errors can include credentials, request text or private URLs.
+        this.recordFoldFailure(sessionId, 'summary request failed')
+        return null
+      }
       if (!this.store.getSession(sessionId)) return null
       const stored = this.store.appendMessage(sessionId, { role: 'summary', content: summary, correlationId: plan.lastFoldedId })
+      this.foldFailures.delete(sessionId)
       this.emit({ type: 'messages_appended', sessionId, messages: [stored] })
       return stored
     } finally {
