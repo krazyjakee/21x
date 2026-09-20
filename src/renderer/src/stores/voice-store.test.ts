@@ -25,9 +25,11 @@ function reset(): void {
     enabled: true,
     state: 'idle',
     turnId: null,
+    finalizingTurnId: null,
     partial: '',
     final: '',
     level: 0,
+    inputDeviceId: '',
     confirmation: null,
     result: null,
   })
@@ -92,6 +94,12 @@ describe('voice store — turns', () => {
     expect(window.electronAPI.voice.startTurn).toHaveBeenCalledWith('dictation', {})
     expect(voiceCapture.start).toHaveBeenCalledTimes(1)
     expect(useVoiceStore.getState().turnId).toBe('turn-1')
+  })
+
+  it('opens the selected local input device', async () => {
+    useVoiceStore.setState({ inputDeviceId: 'usb-microphone' })
+    await useVoiceStore.getState().startTurn('dictation')
+    expect(voiceCapture.start).toHaveBeenCalledWith(expect.any(Object), 'usb-microphone')
   })
 
   it('reports the reason when main refuses the turn', async () => {
@@ -204,7 +212,19 @@ describe('a turn always closes', () => {
     await useVoiceStore.getState().endTurn()
 
     expect(useVoiceStore.getState().turnId).toBeNull()
+    expect(useVoiceStore.getState().finalizingTurnId).toBe('turn-1')
     expect(voiceCapture.stop).toHaveBeenCalled()
+  })
+
+  it('accepts the final transcript after a locally-ended PTT turn', async () => {
+    await useVoiceStore.getState().startTurn('dictation')
+    await useVoiceStore.getState().endTurn()
+
+    onFinal({ turnId: 'turn-1', text: 'archive the project' })
+
+    expect(useVoiceStore.getState()).toMatchObject({ final: 'archive the project', finalizingTurnId: 'turn-1' })
+    onOutcome({ status: 'dictation', turnId: 'turn-1', text: 'archive the project' })
+    expect(useVoiceStore.getState().finalizingTurnId).toBeNull()
   })
 
   it('closes when the worker ended the turn itself at a pause', async () => {
@@ -240,5 +260,6 @@ describe('a turn always closes', () => {
     await useVoiceStore.getState().startTurn('dictation')
     onFinal({ turnId: 'an-older-turn', text: 'stale' })
     expect(useVoiceStore.getState().turnId).toBe('turn-1')
+    expect(useVoiceStore.getState().final).toBe('')
   })
 })

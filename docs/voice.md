@@ -36,10 +36,12 @@ page, **Settings → Voice**, split into what 20x hears and what 20x says. Each
 half hides only its own tuning behind its own "Advanced options" disclosure. Speaking needs neither the
 microphone nor the optional speech runtime, so it works on its own.
 
-Commander adds a hands-free conversation surface on top of this local
-recognition path: one click keeps the microphone open, sends each utterance
-after a pause, and reads the streamed reply through the selected speech engine.
-It still uses local speech recognition and has no wake word.
+Commander adds push-to-talk and hands-free modes on top of this local
+recognition path. Push-to-talk is the default: a call stays ready until the user
+holds Space outside a text control, and release finalizes one request. Open mic
+keeps the microphone open and sends each finalized utterance after a pause.
+Both read streamed replies through the selected speech engine, and the mic menu
+can select a local input device. Commander still has no wake word.
 
 ## Processes
 

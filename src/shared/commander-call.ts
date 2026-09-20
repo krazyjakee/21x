@@ -39,6 +39,11 @@ export const CALL_STATES: readonly CallState[] = [
   'error'
 ]
 
+/** How the Commander microphone opens. Push-to-talk is the safer default. */
+export type CommanderMicrophoneMode = 'push-to-talk' | 'open-mic'
+
+export const DEFAULT_COMMANDER_MICROPHONE_MODE: CommanderMicrophoneMode = 'push-to-talk'
+
 /**
  * The activity state each call state is drawn as. Only the states that exist
  * in both vocabularies map 1:1; the rest use the nearest activity meaning:

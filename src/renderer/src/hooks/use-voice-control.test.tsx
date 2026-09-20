@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
-const hotkey = vi.hoisted(() => ({ fire: null as ((event: { action: string }) => void) | null }))
+const events = vi.hoisted(() => ({
+  hotkey: null as ((event: { action: string }) => void) | null,
+  dictate: null as ((event: { turnId: string; text: string }) => void) | null,
+  segment: null as ((event: { turnId: string; text: string; index: number }) => void) | null
+}))
 
 vi.mock('@/lib/ipc-client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/ipc-client')>()),
@@ -9,11 +13,19 @@ vi.mock('@/lib/ipc-client', async (importOriginal) => ({
   voiceApi: new Proxy(
     {
       onHotkey: (cb: (event: { action: string }) => void) => {
-        hotkey.fire = cb
+        events.hotkey = cb
         return () => {
-          hotkey.fire = null
+          events.hotkey = null
         }
       },
+      onDictate: (cb: (event: { turnId: string; text: string }) => void) => {
+        events.dictate = cb
+        return () => { events.dictate = null }
+      },
+      onSegment: (cb: (event: { turnId: string; text: string; index: number }) => void) => {
+        events.segment = cb
+        return () => { events.segment = null }
+      }
     } as Record<string, unknown>,
     {
       get(target, prop: string) {
@@ -33,10 +45,12 @@ import {
   clearDictationTarget,
   getActiveComposer,
   registerComposer,
+  setActiveComposer,
 } from '@/lib/voice-dictation-target'
 import {
   __resetCommanderCall,
   bindCommanderCallDriver,
+  COMMANDER_VOICE_COMPOSER_KEY,
   useCommanderCallStore,
   type CommanderCallDriver
 } from '@/stores/commander-call-store'
@@ -61,7 +75,9 @@ beforeEach(() => {
   vi.clearAllMocks()
   clearDictationTarget()
   __resetCommanderCall()
-  hotkey.fire = null
+  events.hotkey = null
+  events.dictate = null
+  events.segment = null
   toggleTurn = vi.fn(async () => undefined)
   useUIStore.setState({ showOrchestrator: false })
   useVoiceStore.setState({
@@ -81,7 +97,7 @@ describe('the global shortcut', () => {
     })
 
     await act(async () => {
-      hotkey.fire?.({ action: 'toggle' })
+      events.hotkey?.({ action: 'toggle' })
     })
 
     // Never 'command': that mode is what rejected anything outside eight phrases.
@@ -99,7 +115,7 @@ describe('the global shortcut', () => {
     })
 
     await act(async () => {
-      hotkey.fire?.({ action: 'toggle' })
+      events.hotkey?.({ action: 'toggle' })
     })
     expect(toggleTurn).toHaveBeenCalledWith('dictation')
   })
@@ -112,7 +128,7 @@ describe('the global shortcut', () => {
     })
 
     await act(async () => {
-      hotkey.fire?.({ action: 'toggle' })
+      events.hotkey?.({ action: 'toggle' })
     })
     expect(toggleTurn).toHaveBeenCalledWith('dictation')
   })
@@ -120,18 +136,21 @@ describe('the global shortcut', () => {
   it('routes the global shortcut to an active Commander call instead of Captain', async () => {
     const driver: CommanderCallDriver = {
       setActive: vi.fn(async () => undefined),
+      prepare: vi.fn(async () => undefined),
       openMicrophone: vi.fn(async () => 'commander-mic'),
       closeMicrophone: vi.fn(),
+      finishMicrophone: vi.fn(),
       stopPlayback: vi.fn(),
       bargeIn: vi.fn(async () => undefined),
       send: vi.fn(async () => undefined)
     }
     bindCommanderCallDriver(driver)
+    await useCommanderCallStore.getState().setMicrophoneMode('open-mic')
     await useCommanderCallStore.getState().start('commander-session')
     useUIStore.setState({ sidebarView: 'tasks', lastNonCommanderView: 'tasks' })
     await act(async () => { render(<Harness />) })
 
-    await act(async () => { hotkey.fire?.({ action: 'toggle' }) })
+    await act(async () => { events.hotkey?.({ action: 'toggle' }) })
 
     // Routing voice does not expand PiP or throw the user out of their work.
     expect(useUIStore.getState().sidebarView).toBe('tasks')
@@ -139,5 +158,57 @@ describe('the global shortcut', () => {
     expect(driver.closeMicrophone).toHaveBeenCalledWith('commander-mic')
     expect(toggleTurn).not.toHaveBeenCalled()
     expect(useUIStore.getState().showOrchestrator).toBe(false)
+  })
+})
+
+describe('Commander transcript safety', () => {
+  it('submits a PTT dictation only from main\'s finalized dictate event', async () => {
+    const field = document.createElement('textarea')
+    document.body.appendChild(field)
+    const submit = vi.fn()
+    registerComposer(COMMANDER_VOICE_COMPOSER_KEY, { getField: () => field, submit })
+    setActiveComposer(COMMANDER_VOICE_COMPOSER_KEY)
+    await act(async () => { render(<Harness />) })
+
+    useVoiceStore.setState({ turnId: 'ptt-1', mode: 'dictation', partial: 'archive the' })
+    act(() => events.segment?.({ turnId: 'ptt-1', text: 'archive the project', index: 1 }))
+    expect(submit).not.toHaveBeenCalled()
+
+    act(() => events.dictate?.({ turnId: 'ptt-1', text: 'archive the project' }))
+    expect(field.value).toBe('archive the project')
+    expect(submit).toHaveBeenCalledTimes(1)
+    field.remove()
+  })
+
+  it('drops stale conversation segments before they can submit', async () => {
+    const field = document.createElement('textarea')
+    document.body.appendChild(field)
+    const submit = vi.fn()
+    registerComposer(COMMANDER_VOICE_COMPOSER_KEY, { getField: () => field, submit })
+    setActiveComposer(COMMANDER_VOICE_COMPOSER_KEY)
+    await act(async () => { render(<Harness />) })
+    useVoiceStore.setState({ turnId: 'live-turn', mode: 'conversation' })
+
+    act(() => events.segment?.({ turnId: 'old-turn', text: 'delete everything', index: 1 }))
+
+    expect(submit).not.toHaveBeenCalled()
+    expect(field.value).toBe('')
+    field.remove()
+  })
+
+  it('drops a finalized PTT dictate event after a newer turn has replaced it', async () => {
+    const field = document.createElement('textarea')
+    document.body.appendChild(field)
+    const submit = vi.fn()
+    registerComposer(COMMANDER_VOICE_COMPOSER_KEY, { getField: () => field, submit })
+    setActiveComposer(COMMANDER_VOICE_COMPOSER_KEY)
+    await act(async () => { render(<Harness />) })
+    useVoiceStore.setState({ turnId: 'new-turn', finalizingTurnId: null, mode: 'dictation' })
+
+    act(() => events.dictate?.({ turnId: 'old-turn', text: 'archive the project' }))
+
+    expect(submit).not.toHaveBeenCalled()
+    expect(field.value).toBe('')
+    field.remove()
   })
 })

@@ -11,12 +11,19 @@ import {
 function fakeDriver(openMicrophone: () => Promise<string> = async () => 'mic-1'): CommanderCallDriver {
   return {
     setActive: vi.fn(async () => undefined),
+    prepare: vi.fn(async () => undefined),
     openMicrophone: vi.fn(openMicrophone),
     closeMicrophone: vi.fn(),
+    finishMicrophone: vi.fn(),
     stopPlayback: vi.fn(),
     bargeIn: vi.fn(async () => undefined),
     send: vi.fn(async () => undefined)
   }
+}
+
+async function startOpenMic(sessionId = 'session-1'): Promise<void> {
+  await useCommanderCallStore.getState().setMicrophoneMode('open-mic')
+  await useCommanderCallStore.getState().start(sessionId)
 }
 
 beforeEach(() => {
@@ -31,25 +38,38 @@ afterEach(() => {
 })
 
 describe('Commander call lifetime', () => {
-  it('starts once, becomes live, and ignores a duplicate start for the same session', async () => {
+  it('defaults to a prepared PTT call with no microphone open', async () => {
     const driver = fakeDriver()
     bindCommanderCallDriver(driver)
 
     await useCommanderCallStore.getState().start('session-1')
+
+    expect(useCommanderCallStore.getState()).toMatchObject({
+      status: 'live', sessionId: 'session-1', turnId: null, microphoneMode: 'push-to-talk'
+    })
+    expect(driver.prepare).toHaveBeenCalledTimes(1)
+    expect(driver.openMicrophone).not.toHaveBeenCalled()
+  })
+
+  it('starts once, becomes live, and ignores a duplicate start for the same session', async () => {
+    const driver = fakeDriver()
+    bindCommanderCallDriver(driver)
+
+    await startOpenMic()
     expect(useCommanderCallStore.getState()).toMatchObject({
       status: 'live', sessionId: 'session-1', turnId: 'mic-1', error: null
     })
     expect(driver.setActive).toHaveBeenCalledWith('session-1')
     expect(driver.openMicrophone).toHaveBeenCalledTimes(1)
 
-    await useCommanderCallStore.getState().start('session-1')
+    await startOpenMic()
     expect(driver.openMicrophone).toHaveBeenCalledTimes(1)
   })
 
   it('End from a live call closes mic/playback/synthesis/turn and returns off', async () => {
     const driver = fakeDriver()
     bindCommanderCallDriver(driver)
-    await useCommanderCallStore.getState().start('session-1')
+    await startOpenMic()
 
     useCommanderCallStore.getState().end()
 
@@ -63,7 +83,7 @@ describe('Commander call lifetime', () => {
   it('mutes and reopens the microphone without ending the call', async () => {
     const driver = fakeDriver()
     bindCommanderCallDriver(driver)
-    await useCommanderCallStore.getState().start('session-1')
+    await startOpenMic()
 
     await useCommanderCallStore.getState().toggleMicrophone()
     expect(useCommanderCallStore.getState()).toMatchObject({ status: 'live', sessionId: 'session-1', turnId: null })
@@ -84,7 +104,7 @@ describe('Commander call lifetime', () => {
       return `mic-${attempts}`
     })
     bindCommanderCallDriver(driver)
-    await useCommanderCallStore.getState().start('session-1')
+    await startOpenMic()
     await useCommanderCallStore.getState().toggleMicrophone()
     await useCommanderCallStore.getState().toggleMicrophone()
     expect(useCommanderCallStore.getState()).toMatchObject({ status: 'live', turnId: null, error: 'Device is busy' })
@@ -100,8 +120,10 @@ describe('Commander call lifetime', () => {
     const driver = fakeDriver(() => opened)
     bindCommanderCallDriver(driver)
 
+    await useCommanderCallStore.getState().setMicrophoneMode('open-mic')
     const starting = useCommanderCallStore.getState().start('session-1')
     await vi.waitFor(() => expect(useCommanderCallStore.getState().status).toBe('starting'))
+    await vi.waitFor(() => expect(driver.openMicrophone).toHaveBeenCalled())
     useCommanderCallStore.getState().end()
     resolve('late-mic')
     await starting
@@ -113,7 +135,7 @@ describe('Commander call lifetime', () => {
   it('interrupts without ending, emits media events, and can accept another reply', async () => {
     const driver = fakeDriver()
     bindCommanderCallDriver(driver)
-    await useCommanderCallStore.getState().start('session-1')
+    await startOpenMic()
     const barge = vi.fn()
     const interrupted = vi.fn()
     onCallMediaEvent('barge_in', barge)
@@ -137,7 +159,7 @@ describe('Commander call lifetime', () => {
   it('turns failed start and lost media into retryable errors', async () => {
     const first = fakeDriver(async () => { throw new Error('No microphone') })
     bindCommanderCallDriver(first)
-    await useCommanderCallStore.getState().start('session-1')
+    await startOpenMic()
     expect(useCommanderCallStore.getState()).toMatchObject({
       status: 'off', error: 'No microphone', retrySessionId: 'session-1'
     })
@@ -167,5 +189,71 @@ describe('Commander call lifetime', () => {
     expect(useCommanderCallStore.getState().lastEvent).toBeNull()
     useCommanderCallStore.getState().recordEvent(event)
     expect(useCommanderCallStore.getState().lastEvent).toEqual(event)
+  })
+
+  it('opens one dictation while PTT is held and finalizes it exactly once on release', async () => {
+    const driver = fakeDriver()
+    bindCommanderCallDriver(driver)
+    await useCommanderCallStore.getState().start('session-1')
+
+    await Promise.all([
+      useCommanderCallStore.getState().beginPushToTalk(),
+      useCommanderCallStore.getState().beginPushToTalk()
+    ])
+    expect(driver.openMicrophone).toHaveBeenCalledTimes(1)
+    expect(driver.openMicrophone).toHaveBeenCalledWith('push-to-talk')
+    expect(useCommanderCallStore.getState()).toMatchObject({ turnId: 'mic-1', pushToTalkHeld: true })
+
+    useCommanderCallStore.getState().endPushToTalk()
+    useCommanderCallStore.getState().endPushToTalk()
+    expect(driver.finishMicrophone).toHaveBeenCalledTimes(1)
+    expect(driver.finishMicrophone).toHaveBeenCalledWith('mic-1')
+    expect(useCommanderCallStore.getState()).toMatchObject({ turnId: null, pushToTalkHeld: false, status: 'live' })
+  })
+
+  it('barges into an active reply before opening a PTT dictation', async () => {
+    const driver = {
+      ...fakeDriver(),
+      hasActiveReply: vi.fn(() => true)
+    }
+    bindCommanderCallDriver(driver)
+    await useCommanderCallStore.getState().start('session-1')
+
+    await useCommanderCallStore.getState().beginPushToTalk()
+
+    expect(driver.stopPlayback).toHaveBeenCalledTimes(1)
+    expect(driver.bargeIn).toHaveBeenCalledWith('session-1')
+    expect(driver.openMicrophone).toHaveBeenCalledWith('push-to-talk')
+    expect(useCommanderCallStore.getState()).toMatchObject({ replyInterrupted: true, pushToTalkHeld: true })
+  })
+
+  it('finalizes a slow PTT open that resolves after the key was released', async () => {
+    let resolve!: (turnId: string) => void
+    const opened = new Promise<string>((done) => { resolve = done })
+    const driver = fakeDriver(() => opened)
+    bindCommanderCallDriver(driver)
+    await useCommanderCallStore.getState().start('session-1')
+
+    const pressing = useCommanderCallStore.getState().beginPushToTalk()
+    useCommanderCallStore.getState().endPushToTalk()
+    resolve('late-ptt')
+    await pressing
+
+    expect(driver.finishMicrophone).toHaveBeenCalledWith('late-ptt')
+    expect(useCommanderCallStore.getState()).toMatchObject({ turnId: null, pushToTalkHeld: false })
+  })
+
+  it('switches a live call between PTT readiness and continuous open mic', async () => {
+    const driver = fakeDriver()
+    bindCommanderCallDriver(driver)
+    await useCommanderCallStore.getState().start('session-1')
+
+    await useCommanderCallStore.getState().setMicrophoneMode('open-mic')
+    expect(driver.openMicrophone).toHaveBeenLastCalledWith('open-mic')
+    expect(useCommanderCallStore.getState()).toMatchObject({ microphoneMode: 'open-mic', turnId: 'mic-1' })
+
+    await useCommanderCallStore.getState().setMicrophoneMode('push-to-talk')
+    expect(driver.closeMicrophone).toHaveBeenCalledWith('mic-1')
+    expect(useCommanderCallStore.getState()).toMatchObject({ microphoneMode: 'push-to-talk', turnId: null })
   })
 })
