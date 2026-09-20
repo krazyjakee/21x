@@ -704,6 +704,8 @@ describe('recovery ownership adversarial regressions', () => {
         .mockResolvedValueOnce(undefined)
     }
     live.session.adapter = adapter as any
+    live.session.pollingStarted = true
+    const restoredPolling = vi.spyOn(manager as any, 'startAdapterPolling').mockImplementation(() => undefined)
     vi.spyOn(manager as any, 'buildSessionConfig').mockResolvedValue({})
 
     await expect(prepareUserTaskUpdate(
@@ -714,7 +716,9 @@ describe('recovery ownership adversarial regressions', () => {
 
     expect(db.getTask(task.id)?.status).toBe(TaskStatus.AgentWorking)
     expect(manager.findSessionByTaskId(task.id)?.sessionId).toBe(live.sessionId)
+    expect(manager.findSessionByTaskId(task.id)?.session).toBe(live.session)
     expect((manager as any).ownsSessionGeneration(live.sessionId, live.session)).toBe(true)
+    expect(restoredPolling).toHaveBeenCalledWith(live.sessionId, adapter, expect.anything(), live.session)
     expect(manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'started', recoveryResult: 'session_acknowledged' })
 
     // A repeated stop addresses the same retained owner and can complete once
@@ -724,6 +728,193 @@ describe('recovery ownership adversarial regressions', () => {
     expect(manager.findSessionByTaskId(task.id)).toBeUndefined()
     expect(db.getTask(task.id)?.status).toBe(TaskStatus.NotStarted)
     expect(manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'cancelled', recoveryCause: 'manual_stop' })
+    await manager.stopAllSessions()
+  })
+
+  it('joins overlapping status moves to one pending Stop result', async () => {
+    const { db, manager, createTasks } = setup(1)
+    const [task] = createTasks(1)
+    await manager.startTask(task.id)
+    vi.spyOn(manager as any, 'buildSessionConfig').mockResolvedValue({})
+    let refuse!: (error: Error) => void
+    const destroySession = vi.fn(() => new Promise<void>((_resolve, reject) => { refuse = reject }))
+    vi.mocked((manager as any).getAdapter).mockReturnValue({ destroySession })
+
+    const first = prepareUserTaskUpdate(
+      manager,
+      db.getTask(task.id)!,
+      { status: TaskStatus.ReadyForReview }
+    ).catch((error) => error)
+    await vi.waitFor(() => expect(destroySession).toHaveBeenCalledTimes(1))
+    let secondSettled = false
+    const second = prepareUserTaskUpdate(
+      manager,
+      db.getTask(task.id)!,
+      { status: TaskStatus.Completed }
+    ).then((prepared) => {
+      secondSettled = true
+      db.updateTask(task.id, prepared.data)
+      return prepared
+    }).catch((error) => error)
+
+    await settle()
+    expect(secondSettled).toBe(false)
+    expect(manager.hasTaskStartOwnership(task.id)).toBe(true)
+    refuse(new Error('backend refused Stop'))
+    const results = await Promise.all([first, second])
+
+    expect(results[0]).toBeInstanceOf(Error)
+    expect(results[1]).toBeInstanceOf(Error)
+    expect(destroySession).toHaveBeenCalledTimes(1)
+    expect(db.getTask(task.id)?.status).toBe(TaskStatus.AgentWorking)
+    expect(manager.findSessionByTaskId(task.id)).toBeDefined()
+    vi.mocked((manager as any).getAdapter).mockReturnValue(null)
+    await manager.stopAllSessions()
+  })
+
+  it('joins duplicate Stop requests until one backend acknowledgement', async () => {
+    const { manager, createTasks } = setup(1)
+    const [task] = createTasks(1)
+    await manager.startTask(task.id)
+    vi.spyOn(manager as any, 'buildSessionConfig').mockResolvedValue({})
+    let finish!: () => void
+    const destroySession = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
+    vi.mocked((manager as any).getAdapter).mockReturnValue({ destroySession })
+
+    let duplicateSettled = false
+    const first = manager.stopByTaskId(task.id)
+    await vi.waitFor(() => expect(destroySession).toHaveBeenCalledTimes(1))
+    const duplicate = manager.stopByTaskId(task.id).then((result) => {
+      duplicateSettled = true
+      return result
+    })
+    await settle()
+
+    expect(duplicateSettled).toBe(false)
+    expect(manager.hasTaskStartOwnership(task.id)).toBe(true)
+    finish()
+    const [firstResult, duplicateResult] = await Promise.all([first, duplicate])
+    expect(duplicateResult).toEqual(firstResult)
+    expect(destroySession).toHaveBeenCalledTimes(1)
+    expect(manager.findSessionByTaskId(task.id)).toBeUndefined()
+    await manager.stopAllSessions()
+  })
+
+  it('retains admission, reconciliation, and task-start ownership while Stop is pending', async () => {
+    const { manager, createTasks, started } = setup(1)
+    const [task, other] = createTasks(2)
+    await manager.startTask(task.id)
+    vi.spyOn(manager as any, 'buildSessionConfig').mockResolvedValue({})
+    let finish!: () => void
+    const destroySession = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
+    vi.mocked((manager as any).getAdapter).mockReturnValue({ destroySession })
+
+    const stopping = manager.stopByTaskId(task.id)
+    await vi.waitFor(() => expect(destroySession).toHaveBeenCalledTimes(1))
+    expect(manager.hasTaskStartOwnership(task.id)).toBe(true)
+    await expect(manager.startTask(task.id)).resolves.toMatchObject({
+      action: 'already_running',
+      startedTaskId: task.id
+    })
+    await expect(manager.startTask(other.id)).resolves.toMatchObject({
+      action: 'queued',
+      queueReason: 'agent_limit'
+    })
+    expect(manager.reconcileTaskRuntime(task.id)).toBe(false)
+    await settle()
+    expect(started).toEqual([task.id])
+
+    finish()
+    await stopping
+    vi.mocked((manager as any).getAdapter).mockReturnValue(null)
+    manager.cancelQueuedStart(other.id)
+    await manager.stopAllSessions()
+  })
+
+  it('retains file-overlap ownership while Stop is pending', async () => {
+    const { db, manager, createTasks } = setup(2)
+    const [task, overlapping] = createTasks(2)
+    db.setTaskTouches(task.id, ['src/main/agent-manager.ts'])
+    db.setTaskTouches(overlapping.id, ['src/main/agent-manager.ts'])
+    await manager.startTask(task.id)
+    vi.spyOn(manager as any, 'buildSessionConfig').mockResolvedValue({})
+    let finish!: () => void
+    const destroySession = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
+    vi.mocked((manager as any).getAdapter).mockReturnValue({ destroySession })
+
+    const stopping = manager.stopByTaskId(task.id)
+    await vi.waitFor(() => expect(destroySession).toHaveBeenCalledTimes(1))
+    await expect(manager.startTask(overlapping.id)).resolves.toMatchObject({
+      action: 'queued',
+      queueReason: 'file_overlap'
+    })
+
+    finish()
+    await stopping
+    vi.mocked((manager as any).getAdapter).mockReturnValue(null)
+    manager.cancelQueuedStart(overlapping.id)
+    await manager.stopAllSessions()
+  })
+
+  it('does not launch a replacement during periodic reconciliation while Stop is pending', async () => {
+    const { manager, createTasks, started } = setup(1)
+    const [task] = createTasks(1)
+    await manager.startTask(task.id)
+    vi.spyOn(manager as any, 'buildSessionConfig').mockResolvedValue({})
+    let finish!: () => void
+    const destroySession = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
+    vi.mocked((manager as any).getAdapter).mockReturnValue({ destroySession })
+
+    const stopping = manager.stopByTaskId(task.id)
+    await vi.waitFor(() => expect(destroySession).toHaveBeenCalledTimes(1))
+    ;(manager as any).reconcileRuntimeDivergence()
+    await settle()
+
+    expect(started).toEqual([task.id])
+    finish()
+    await stopping
+    expect(manager.findSessionByTaskId(task.id)).toBeUndefined()
+    vi.mocked((manager as any).getAdapter).mockReturnValue(null)
+    await manager.stopAllSessions()
+  })
+
+  it('does not create another initial prompt during pending Stop', async () => {
+    const { db, manager, createTasks } = setup(1)
+    const [task] = createTasks(1)
+    ;(manager as any).startSessionNow.mockRestore()
+    let sequence = 0
+    let finish!: () => void
+    const adapter = {
+      initialize: vi.fn(async () => undefined),
+      createSession: vi.fn(async () => `real-${++sequence}`),
+      getStatus: vi.fn(async () => ({ type: 'idle' })),
+      destroySession: vi.fn(() => new Promise<void>((resolve) => { finish = resolve })),
+      sendPrompt: vi.fn(async () => undefined)
+    }
+    vi.mocked((manager as any).getAdapter).mockReturnValue(adapter)
+    vi.spyOn(manager as any, 'setupWorktreeIfNeeded').mockResolvedValue('/tmp')
+    vi.spyOn(manager as any, 'buildMcpServersForAdapter').mockResolvedValue({})
+    vi.spyOn(manager as any, 'setupSecretSession').mockReturnValue(null)
+    vi.spyOn(manager as any, 'startAdapterPolling').mockImplementation(() => undefined)
+    vi.spyOn(manager as any, 'buildSessionConfig').mockResolvedValue({})
+
+    await manager.startTask(task.id)
+    const stopping = manager.stopByTaskId(task.id)
+    await vi.waitFor(() => expect(adapter.destroySession).toHaveBeenCalledTimes(1))
+    const sending = manager.sendMessage('', 'do not recreate during Stop', task.id, task.agent_id!, undefined, undefined, 'pending-stop-send')
+      .catch((error) => error)
+    ;(manager as any).reconcileRuntimeDivergence()
+    await settle(30)
+
+    expect(adapter.createSession).toHaveBeenCalledTimes(1)
+    expect(adapter.sendPrompt).toHaveBeenCalledTimes(1)
+    expect(manager.hasTaskStartOwnership(task.id)).toBe(true)
+    finish()
+    await stopping
+    await expect(sending).resolves.toBeInstanceOf(Error)
+    expect(manager.findSessionByTaskId(task.id)).toBeUndefined()
+    expect(db.getTask(task.id)?.status).toBe(TaskStatus.NotStarted)
+    expect(manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'cancelled' })
     await manager.stopAllSessions()
   })
 

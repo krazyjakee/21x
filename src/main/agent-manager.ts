@@ -153,6 +153,12 @@ interface AgentFallbackState {
   attemptedAgentIds: Set<string>
 }
 
+interface PendingTaskStop {
+  sessionId: string
+  session: AgentSession
+  promise: Promise<void>
+}
+
 /** Entry tracked by the centralized polling coordinator */
 interface PollingEntry {
   sessionId: string
@@ -207,6 +213,10 @@ export class AgentManager extends EventEmitter {
   private readonly deliveryTaskTails = new Map<string, Promise<void>>()
   /** A Stop owns its exact session generation before teardown awaits anything. */
   private readonly stoppingSessions = new WeakSet<AgentSession>()
+  /** Task-addressable ownership retained until the backend acknowledges Stop.
+   * The existing durable start row remains `started` for the same generation;
+   * this index lets every in-process ownership consumer join that teardown. */
+  private readonly taskStops = new Map<string, PendingTaskStop>()
   private deliveryRecoveryTimer: ReturnType<typeof setInterval> | null = null
   private readonly captainSwitches = new Map<string, { agentId: string; promise: Promise<CaptainRuntimeState> }>()
   private readonly deliveryOwner = `agent-manager:${process.pid}:${randomUUID()}`
@@ -331,7 +341,7 @@ export class AgentManager extends EventEmitter {
 
   /** True when stopping/moving a task must first withdraw runtime ownership. */
   hasTaskStartOwnership(taskId: string): boolean {
-    if (this.sessionStarts.has(taskId) || this.admittedStarts.has(taskId)) return true
+    if (this.taskStops.has(taskId) || this.sessionStarts.has(taskId) || this.admittedStarts.has(taskId)) return true
     const live = this.findSessionByTaskId(taskId)
     if (live && live.session.status !== 'error') return true
     const recovery = this.startQueue.get(taskId)
@@ -346,7 +356,7 @@ export class AgentManager extends EventEmitter {
   reconcileTaskRuntime(taskId: string, cause = 'status_runtime_divergence'): boolean {
     const task = this.db.getTask(taskId)
     if (!task || (task.status !== TaskStatus.AgentWorking && task.status !== TaskStatus.Triaging)) return false
-    if (this.sessionStarts.has(taskId) || this.admittedStarts.has(taskId)) return false
+    if (this.taskStops.has(taskId) || this.sessionStarts.has(taskId) || this.admittedStarts.has(taskId)) return false
 
     const live = this.findSessionByTaskId(taskId)
     if (live && live.session.status !== 'error') {
@@ -2505,6 +2515,11 @@ export class AgentManager extends EventEmitter {
    */
   async requestSession(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<SessionStartOutcome> {
     if (this.shuttingDown) throw new Error('The app is shutting down; retry after restart.')
+    const stopping = this.taskStops.get(taskId)
+    if (stopping) {
+      await stopping.promise
+      throw new Error('The task finished stopping. Start it again to create a new session.')
+    }
     const pending = this.sessionStarts.get(taskId)
     if (pending) return { status: 'started', sessionId: await pending }
     const live = this.findSessionByTaskId(taskId)
@@ -2678,6 +2693,11 @@ export class AgentManager extends EventEmitter {
 
   /** Starts without admission control — callers are exempt or already admitted. */
   private async startSessionNow(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<string> {
+    const stopping = this.taskStops.get(taskId)
+    if (stopping) {
+      await stopping.promise
+      throw new Error('The task finished stopping. Start it again to create a new session.')
+    }
     const agent = this.db.getAgent(agentId)
     if (!agent) {
       throw new Error(`Agent not found: ${agentId}`)
@@ -3031,6 +3051,16 @@ export class AgentManager extends EventEmitter {
       throw new Error(`Task not found: ${taskId}`)
     }
 
+    const stopping = this.taskStops.get(taskId)
+    if (stopping) {
+      return {
+        action: 'already_running',
+        sessionId: stopping.sessionId,
+        startedTaskId: taskId,
+        agentId: stopping.session.agentId
+      }
+    }
+
     // An explicit UI/API start may reverse an earlier explicit stop. Automatic
     // schedulers omit this flag, so a manual-stop exclusion remains terminal
     // until the user actually asks to run the task again.
@@ -3224,6 +3254,7 @@ export class AgentManager extends EventEmitter {
    * Used by HeartbeatScheduler to avoid interrupting active user sessions.
    */
   hasActiveSessionForTask(taskId: string): boolean {
+    if (this.taskStops.has(taskId)) return true
     for (const session of this.sessions.values()) {
       if (session.taskId === taskId && session.status === 'working') {
         return true
@@ -3485,6 +3516,11 @@ export class AgentManager extends EventEmitter {
    */
   async resumeSession(agentId: string, taskId: string, sessionId: string): Promise<string> {
     console.log('[AgentManager] resumeSession called:', { agentId, taskId, sessionId })
+    const stopping = this.taskStops.get(taskId)
+    if (stopping) {
+      await stopping.promise
+      throw new Error('The task finished stopping. Start it again to resume its session.')
+    }
     const agent = this.db.getAgent(agentId)
     if (!agent) {
       throw new Error(`Agent not found: ${agentId}`)
@@ -3786,9 +3822,19 @@ export class AgentManager extends EventEmitter {
   async stopSession(sessionId: string, resetTaskStatus: boolean = true, requireAcknowledgement = false): Promise<void> {
     const pending = this.sessionStops.get(sessionId)
     if (pending) return pending
+    const owner = this.sessions.get(sessionId)
+    const pendingForTask = owner ? this.taskStops.get(owner.taskId) : undefined
+    if (pendingForTask) return pendingForTask.promise
     const stopping = this.stopSessionNow(sessionId, resetTaskStatus, requireAcknowledgement)
     this.sessionStops.set(sessionId, stopping)
-    try { await stopping } finally { this.sessionStops.delete(sessionId) }
+    const retainTaskOwnership = owner && (resetTaskStatus || requireAcknowledgement)
+    if (retainTaskOwnership) this.taskStops.set(owner.taskId, { sessionId, session: owner, promise: stopping })
+    try {
+      await stopping
+    } finally {
+      this.sessionStops.delete(sessionId)
+      if (retainTaskOwnership && this.taskStops.get(owner.taskId)?.promise === stopping) this.taskStops.delete(owner.taskId)
+    }
   }
 
   private async stopSessionNow(sessionId: string, resetTaskStatus: boolean, requireAcknowledgement: boolean): Promise<void> {
@@ -3883,6 +3929,11 @@ export class AgentManager extends EventEmitter {
    * is broken (Session: none) and the normal stop-by-sessionId path fails.
    */
   async stopByTaskId(taskId: string): Promise<{ sessionId: string | null }> {
+    const pending = this.taskStops.get(taskId)
+    if (pending) {
+      await pending.promise
+      return { sessionId: pending.sessionId }
+    }
     let found = this.findSessionByTaskId(taskId)
     if (!found) {
       // No backend exists yet, so cancel the durable generation first. Then
@@ -3955,6 +4006,11 @@ export class AgentManager extends EventEmitter {
       if (isExemptFromAdmission(session.taskId, task)) continue
       counted.set(session.taskId, { taskId: session.taskId, agentId: session.agentId, projectId: taskProjectId(task) })
     }
+    for (const [taskId, stopping] of this.taskStops) {
+      const task = this.db.getTask(taskId)
+      if (stopping.session.isTriageSession || isExemptFromAdmission(taskId, task)) continue
+      counted.set(taskId, { taskId, agentId: stopping.session.agentId, projectId: taskProjectId(task) })
+    }
     for (const [taskId, agentId] of this.admittedStarts) {
       if (!counted.has(taskId)) counted.set(taskId, { taskId, agentId, projectId: taskProjectId(this.db.getTask(taskId)) })
     }
@@ -4006,7 +4062,10 @@ export class AgentManager extends EventEmitter {
 
   /** Re-reads the branch diff of every working task session (resource monitor tick). */
   private refreshBranchDiffs(): void {
-    for (const session of this.sessions.values()) {
+    const owners = new Map<string, AgentSession>()
+    for (const session of this.sessions.values()) owners.set(session.taskId, session)
+    for (const [taskId, stopping] of this.taskStops) owners.set(taskId, stopping.session)
+    for (const session of owners.values()) {
       if (session.status !== 'working' && session.status !== 'waiting_approval') continue
       if (session.isTriageSession || isExemptFromAdmission(session.taskId, this.db.getTask(session.taskId))) continue
       const dir = session.workspaceDir || this.db.getWorkspaceDir(session.taskId)
@@ -4015,7 +4074,7 @@ export class AgentManager extends EventEmitter {
     // Finished or deleted tasks never run again; their diffs are dropped.
     for (const taskId of this.branchDiffs.taskIds()) {
       const task = this.db.getTask(taskId)
-      if (!task || task.status === TaskStatus.Completed) this.branchDiffs.forget(taskId)
+      if (!task || (task.status === TaskStatus.Completed && !this.taskStops.has(taskId))) this.branchDiffs.forget(taskId)
     }
     // A diff can clear an overlap as well as create one.
     this.scheduleStartQueueDrain()
@@ -4563,6 +4622,12 @@ export class AgentManager extends EventEmitter {
 
   /** Direct messages share one bounded startup with prewarm and other sends. */
   private recoverMessageSession(taskId: string, agentId: string): Promise<string> {
+    const stopping = this.taskStops.get(taskId)
+    if (stopping) {
+      return stopping.promise.then(() => {
+        throw new Error('Message delivery was cancelled because the user stopped this task.')
+      })
+    }
     const active = this.sessionStarts.get(taskId)
     if (active) return active
     const live = this.findSessionByTaskId(taskId)
@@ -5013,6 +5078,10 @@ export class AgentManager extends EventEmitter {
       if (session.taskId === taskId && session.status !== 'error') {
         sessionIds.push(sessionId)
       }
+    }
+    const stopping = this.taskStops.get(taskId)
+    if (stopping && stopping.session.status !== 'error' && !sessionIds.includes(stopping.sessionId)) {
+      sessionIds.push(stopping.sessionId)
     }
     return sessionIds
   }
