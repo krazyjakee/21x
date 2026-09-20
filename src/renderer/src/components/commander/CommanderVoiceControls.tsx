@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import {
   AudioLines,
   Captions,
@@ -20,6 +20,7 @@ import { ActivityRing } from '@/components/activity/ActivityRing'
 import { activityNow, scheduleActivityDeadline, useActivityClock } from '@/lib/activity/activity-clock'
 import { useCommanderActivityStore } from '@/lib/activity/commander-activity-adapter'
 import { useVoiceActivity } from '@/lib/activity/voice-activity-adapter'
+import { useSpeakingRing } from '@/lib/activity/use-speaking-ring'
 import { callUnavailability, deriveCallState, type CallPresentation, type CallTurn } from '@/lib/commander-call/derive-call-state'
 import { useCommanderCallStore } from '@/stores/commander-call-store'
 import { useCommanderStore } from '@/stores/commander-store'
@@ -192,7 +193,13 @@ export function CommanderVoiceControls({
   const call = useCommanderCallStore()
   const callSessionId = call.sessionId
   const observation = useCommanderActivityStore((s) => (callSessionId ? s.sessions[callSessionId] : undefined))
-  const voice = useVoiceActivity(callSessionId ? { kind: 'commander', id: callSessionId } : null)
+  const voiceTarget = useMemo(
+    () => (callSessionId ? { kind: 'commander' as const, id: callSessionId } : null),
+    [callSessionId]
+  )
+  const voice = useVoiceActivity(voiceTarget)
+  const speakingRing = useRef<HTMLSpanElement>(null)
+  useSpeakingRing(speakingRing, voiceTarget)
 
   const available = useVoiceStore((s) => s.available)
   const permission = useVoiceStore((s) => s.permission)
@@ -344,7 +351,14 @@ export function CommanderVoiceControls({
                 {chip}
               </div>
             )}
-            <ActivityRing result={result} entityKey="commander" region="commander-stage" size={64}>
+            <ActivityRing
+              result={result}
+              entityKey="commander"
+              region="commander-stage"
+              size={64}
+              levelDriven
+              elementRef={speakingRing}
+            >
               <span className="relative grid size-14 place-items-center overflow-hidden rounded-full bg-gradient-to-br from-primary via-primary/75 to-violet-500 shadow-inner">
                 <span aria-hidden="true" className="absolute -left-2 top-1 size-8 rounded-full bg-white/20 blur-sm" />
                 <span aria-hidden="true" className="absolute -bottom-3 -right-1 size-10 rounded-full bg-black/15 blur-sm" />

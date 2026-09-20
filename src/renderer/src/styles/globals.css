@@ -479,6 +479,16 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; }
   animation: activity-ring-breathe 2.4s ease-in-out infinite;
 }
 
+/* Real playback loudness; the owning visible surface writes one CSS value. */
+.activity-speaking-level {
+  --speaking-level: 0;
+}
+.activity-speaking-level[data-activity-state="speaking"] [data-activity-ring="true"] {
+  opacity: calc(0.82 + (var(--speaking-level) * 0.18));
+  transform: scale(calc(1 + (var(--speaking-level) * 0.14)));
+  box-shadow: 0 0 calc(2px + (var(--speaking-level) * 12px)) color-mix(in oklab, var(--activity-color) 55%, transparent);
+}
+
 /* Tool shimmer: an indeterminate clipped sweep, never a percentage. */
 .activity-shimmer {
   position: relative;
@@ -522,6 +532,10 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; }
   }
   .activity-accent {
     transition: none;
+  }
+  .activity-speaking-level[data-activity-state="speaking"] [data-activity-ring="true"] {
+    transform: none;
+    box-shadow: none;
   }
 }
 
@@ -620,4 +634,3 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; }
     transition: none;
   }
 }
-

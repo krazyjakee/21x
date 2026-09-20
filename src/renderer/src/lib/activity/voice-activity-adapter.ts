@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from 'react'
 import { create } from 'zustand'
 import { voicePlayback } from '@/lib/voice-playback'
 import { voiceCapture } from '@/lib/voice-capture'
@@ -67,6 +68,16 @@ function ownsPassage(passage: VoicePassageAttribution, target: VoiceTarget): boo
 
 function sameTarget(a: VoiceTarget, b: VoiceTarget): boolean {
   return a.kind === b.kind && (a.id ?? null) === (b.id ?? null)
+}
+
+/** True only when the playback passage is attributed to this exact entity. */
+export function hasVerifiedPlaybackOwnership(snapshot: VoiceActivitySnapshot, target: VoiceTarget): boolean {
+  const passage = snapshot.passage
+  return Boolean(
+    passage &&
+    snapshot.playbackSpeechId === passage.speechId &&
+    ownsPassage(passage, target) === true
+  )
 }
 
 /** Pure: the voice claim for one entity. */
@@ -164,8 +175,21 @@ export function useVoiceActivity(target: VoiceTarget | null): VoiceObservation |
   useVoiceStore((s) => s.state)
   useVoiceStore((s) => s.turnId)
   useVoiceAttributionStore((s) => s.version)
+  useSyncExternalStore(voicePlayback.subscribeActivity, voicePlayback.getActivityVersion, voicePlayback.getActivityVersion)
   if (!target) return null
   return deriveVoiceActivity(readVoiceActivitySnapshot(), target)
+}
+
+/**
+ * Playback ownership changes at passage boundaries, never at audio-frame
+ * frequency. A visible level ring uses this to decide whether to subscribe.
+ */
+export function useVoicePlaybackOwnership(target: VoiceTarget | null): boolean {
+  useVoiceStore((s) => s.speaking)
+  useVoiceAttributionStore((s) => s.version)
+  useSyncExternalStore(voicePlayback.subscribeActivity, voicePlayback.getActivityVersion, voicePlayback.getActivityVersion)
+  if (!target) return false
+  return hasVerifiedPlaybackOwnership(readVoiceActivitySnapshot(), target)
 }
 
 /** Test-only reset. */
