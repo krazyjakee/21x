@@ -12,7 +12,7 @@ import { createCommanderSkillTools } from '../commander/skill-tools'
 import { createCommanderMergeGrantTools } from '../commander/merge-grant-tools'
 import { installCommanderReportBridge } from '../commander/report-tools'
 import { broadcastSkillsChanged } from './settings'
-import { listHeldActions, recoverMergeGrantOutcomes } from '../escalation'
+import { listHeldActions, recoverMergeGrantOutcomes, recoverIssueWriteOutcomes } from '../escalation'
 import { guardedIpcSend } from '../guarded-ipc-send'
 import { assertTrustedSender } from '../ipc-sender'
 import { notifyRenderer, uiState } from '../task-api/state'
@@ -143,6 +143,7 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
   })
   void delivery.reconcile().catch((error) => console.error('[Commander] Durable Captain delivery recovery failed:', error))
   void recoverMergeGrantOutcomes(deps.db).catch((error) => console.error('[MergeGrants] Recovery failed:', error))
+  void recoverIssueWriteOutcomes(deps.db).catch((error) => console.error('[IssueWrites] Recovery failed:', error))
 
   /** Every Commander call is from the main window; the caller then receives events. */
   const trusted = (event: IpcMainInvokeEvent, channel: string): void => {

@@ -148,6 +148,22 @@ admission and fairness), then v22 (#148 reconciliation and durable starts).
 All three migrations are idempotent and fresh databases create the same final
 tables directly.
 
+### Delegated GitHub issue-write ledger (v23)
+
+Migration 23 (`migrateIssueWrites()` in
+`src/main/database/issue-writes-migration.ts`) adds `issue_writes`: one row per
+external GitHub issue write, claimed before the call and settled after it. The
+row is both the audit record and the idempotency claim, so the two cannot
+disagree — `idempotency_key` is UNIQUE, and it is derived from durable inputs
+only (project, repository, action, target, task, payload hash), never from who
+authorized the write. That is what lets the retry of an interrupted write
+recompute the same key across a restart instead of filing a second issue. The
+provenance columns record the originating human instruction, the Commander
+correlation and the Captain task/session; `status` moves `reserved` →
+`succeeded` | `failed` | `unresolved`, and an expired lease becomes
+`unresolved` rather than free. New table only, so `CREATE TABLE IF NOT EXISTS`
+covers fresh and existing databases alike.
+
 ## Adding a column to other tables
 
 Same pattern: update `createTables()`, add a guarded `ALTER TABLE` in `runMigrations()`, and bump `SCHEMA_VERSION`.
