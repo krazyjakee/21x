@@ -25,7 +25,8 @@ import {
   installCommanderReportBridge,
   MAX_REPORT_ASKS_WITHOUT_USER_TURN,
   REPORT_INBOX_TITLE,
-  resolveReportSession
+  resolveReportSession,
+  recoverCaptainReports
 } from './report-tools'
 
 type ModelAnswer = string | { text?: string; toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> }
@@ -124,6 +125,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  captainDelivery.dispose()
   uninstall?.()
   setCaptainReportHandler(null)
 })
@@ -223,6 +225,57 @@ describe('report delivery', () => {
     expect(store.listMessages(origin.id).filter((message) => message.role === 'report')).toHaveLength(1)
     expect(captainDelivery.store.get(request.id)).toMatchObject({ state: 'acknowledged' })
     expect(events.filter((event) => event.type === 'messages_appended' && event.sessionId === origin.id)).toHaveLength(1)
+  })
+
+
+
+  it('rejects oversized correlation and delivery IDs instead of truncating into collisions', async () => {
+    const alpha = db.createProject({ name: 'Alpha' })!
+    install(makeService(fakeProvider()))
+    for (const ids of [{ correlation_id: 'c'.repeat(101) }, { delivery_id: 'd'.repeat(201) }]) {
+      expect(await handleTaskRoute(db, '/report_to_commander', { project_id: alpha.id, message: 'Result', ...ids }))
+        .toMatchObject({ error: expect.stringContaining('at most') })
+    }
+  })
+
+  it('acknowledges an early reply while the provider handoff is still claimed', () => {
+    const alpha = db.createProject({ name: 'Alpha' })!
+    const origin = store.createSession('Origin')
+    install(makeService(fakeProvider()))
+    const request = captainDelivery.store.enqueue({ idempotencyKey: 'early', kind: 'captain_request',
+      projectId: alpha.id, sourceSessionId: origin.id, correlationId: 'cmd-early', payload: 'ask' }).record
+    captainDelivery.store.claim(request.id, 'sender', 60_000)
+    expect(deliverCaptainReport({ projectId: alpha.id, correlationId: 'cmd-early', message: 'Fast reply', source: 'captain' }).delivered).toBe(true)
+    expect(captainDelivery.store.get(request.id)?.state).toBe('acknowledged')
+    expect(captainDelivery.store.accept(request.id, 'sender', 'late-handoff')).toBeNull()
+  })
+
+  it('refuses another project reporting on the exact correlation of an owned request', () => {
+    const alpha = db.createProject({ name: 'Alpha' })!
+    const beta = db.createProject({ name: 'Beta' })!
+    const origin = store.createSession('Origin')
+    install(makeService(fakeProvider()))
+    const request = captainDelivery.store.enqueue({ idempotencyKey: 'foreign', kind: 'captain_request',
+      projectId: alpha.id, sourceSessionId: origin.id, correlationId: 'cmd-foreign', payload: 'ask' }).record
+    expect(deliverCaptainReport({ projectId: beta.id, correlationId: 'cmd-foreign', message: 'Wrong project', source: 'captain' }).delivered).toBe(false)
+    expect(store.listMessages(origin.id)).toEqual([])
+    expect(captainDelivery.store.get(request.id)?.state).toBe('pending')
+  })
+
+  it('recovers a crash before report inbox insertion into its archived origin exactly once', () => {
+    const alpha = db.createProject({ name: 'Alpha' })!
+    const origin = store.createSession('Origin')
+    const newer = store.createSession('Newer')
+    store.setArchived(origin.id, true)
+    const row = captainDelivery.store.enqueue({ idempotencyKey: 'report-before-insert', kind: 'captain_report',
+      projectId: alpha.id, sourceSessionId: origin.id, payload: 'Durable result' }).record
+    const service = makeService(fakeProvider())
+    const options = { service, store, deliveries: captainDelivery.store, getProject: (id: string) => db.getProject(id) }
+    recoverCaptainReports(options)
+    recoverCaptainReports(options)
+    expect(store.listMessages(origin.id)).toMatchObject([{ content: 'Durable result', role: 'report' }])
+    expect(store.listMessages(newer.id)).toEqual([])
+    expect(captainDelivery.store.get(row.id)?.state).toBe('acknowledged')
   })
 
   it('keeps timeout terminal while accepting one visibly late correlated report', async () => {

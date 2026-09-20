@@ -56,6 +56,7 @@ export type CommanderAgents = Pick<
 > & Partial<Pick<AgentManager, 'releaseCaptainIfAgentChanged' | 'getCaptainRuntime'>>
 
 export interface ProjectToolContext {
+  deliveryScope?: string
   sessionId: string
   userMessage: string
   /** The stored id of `userMessage` (#137); absent for a report-triggered turn. */
@@ -366,7 +367,7 @@ function askCaptain(options: ProjectToolOptions, input: Record<string, unknown>,
 
   // #137: created (and bound to the user's message) before anything is sent; a refusal throws.
   const grant = input.merge_grant === undefined || input.merge_grant === null ? null : grantForRelay(db, options.context, project, input.merge_grant)
-  const idempotencyKey = `commander:${options.context.sessionId}:tool:${toolCallId}`
+  const idempotencyKey = `commander:${options.context.sessionId}:${options.context.deliveryScope ?? options.context.userMessageId ?? 'legacy'}:tool:${toolCallId}`
   const correlationId = correlationForDeliveryKey(idempotencyKey)
   const dispatch: AskCaptainDispatch = { sessionId: options.context.sessionId, projectId: project.id, projectName: project.name, correlationId }
   const authorization = commanderAuthorization(db, { ...options.context, projectId: project.id, taskId: coordinator.id, correlationId, message })
@@ -381,7 +382,9 @@ function askCaptain(options: ProjectToolOptions, input: Record<string, unknown>,
     authorizationNodeId: authorization?.id
   })
   return result({
-    status: queued.state === 'accepted' || queued.state === 'acknowledged' ? 'accepted' : 'queued',
+    status: ['failed', 'timed_out', 'cancelled'].includes(queued.state) ? queued.state
+      : queued.state === 'accepted' || queued.state === 'acknowledged' ? 'accepted' : 'queued',
+    ...(queued.lastError ? { error: queued.lastError } : {}),
     project_id: project.id,
     project_name: clip(project.name, MAX_NAME_CHARS),
     correlation_id: correlationId,

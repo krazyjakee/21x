@@ -6,7 +6,7 @@ import {
   AUTHORIZATION_ACTIONS, AUTHORIZATION_TTL_MS, activateAuthorizationDispatch,
   authorizationHash, bindAuthorizationTransport, commanderAuthorization,
   delegateAuthorization, failAuthorizationDispatch, inheritTaskAuthorization,
-  prepareAuthorizationDispatch, recordHumanAuthorization, requestedActions,
+  prepareAuthorizationDispatch, prepareAuthorizationRetry, recordHumanAuthorization, requestedActions,
   resolveAuthorization, resolveTaskAuthorization, revokeAuthorization, taskAuthorization
 } from './authorization'
 import { CommanderStore } from './commander/commander-store'
@@ -166,6 +166,22 @@ describe('immutable human authorization chain', () => {
     activateAuthorizationDispatch(db, newer)
     expect(prepareAuthorizationDispatch(db, { key: 'delivery-1', taskId: captainId, text: payload })).toBe(seq)
     expect(() => activateAuthorizationDispatch(db, seq)).toThrow('Stale')
+    expect(taskAuthorization(db, captainId).effectivePermissions).toEqual([])
+  })
+
+  it('lets only an explicit durable retry re-reserve exact evidence and still rejects revocation', () => {
+    const { origin, payload, seq } = relay()
+    const newer = prepareAuthorizationDispatch(db, { key: 'new-turn', taskId: captainId, text: 'Status only' })
+    activateAuthorizationDispatch(db, newer)
+    expect(() => activateAuthorizationDispatch(db, seq)).toThrow('Stale')
+
+    expect(prepareAuthorizationRetry(db, { key: 'delivery-1', taskId: captainId, text: payload })).toBe(seq)
+    activateAuthorizationDispatch(db, seq)
+    expect(taskAuthorization(db, captainId).origin?.id).toBe(origin.id)
+
+    revokeAuthorization(db, origin.id, 'User stopped the authorized operation')
+    prepareAuthorizationRetry(db, { key: 'delivery-1', taskId: captainId, text: payload })
+    expect(() => activateAuthorizationDispatch(db, seq)).toThrow('expired or was revoked')
     expect(taskAuthorization(db, captainId).effectivePermissions).toEqual([])
   })
 

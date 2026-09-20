@@ -59,4 +59,31 @@ describe('DeliveryStore', () => {
     expect(store.acknowledge(row.id)).toBeNull()
     expect(store.get(row.id)).toMatchObject({ state: 'timed_out' })
   })
+  it('refuses reusing a delivery key across projects, tasks, kinds, or source sessions', () => {
+    const { db } = createTestDb()
+    const store = new DeliveryStore(db)
+    const a = db.createProject({ name: 'A' })!
+    const b = db.createProject({ name: 'B' })!
+    const input = { idempotencyKey: 'collision', kind: 'agent_message' as const, payload: 'first', taskId: db.getCoordinatorTask(a.id)!.id, sourceSessionId: 'origin-a', projectId: a.id }
+    store.enqueue(input)
+    for (const changed of [{ taskId: db.getCoordinatorTask(b.id)!.id }, { projectId: b.id }, { sourceSessionId: 'origin-b' }, { kind: 'captain_request' as const }]) {
+      expect(() => store.enqueue({ ...input, ...changed })).toThrow('different destination')
+    }
+    expect(store.getByKey('collision')?.payload).toBe('first')
+  })
+
+  it('retains pre-Stop rows as cancelled while leaving later rows enqueueable', () => {
+    const { db } = createTestDb()
+    const store = new DeliveryStore(db)
+    const task = db.createTask({ title: 'Stopped task' })!
+    const before = store.enqueue({ idempotencyKey: 'before-stop', kind: 'agent_message', taskId: task.id, payload: '{}' }).record
+    store.claim(before.id, 'owner', 1_000)
+    const cancelled = store.cancelUnacceptedForTask(task.id, 'stopped by user')
+    expect(cancelled.map((row) => row.id)).toEqual([before.id])
+    expect(store.get(before.id)).toMatchObject({ state: 'cancelled', lastError: 'stopped by user', claimOwner: null })
+
+    const after = store.enqueue({ idempotencyKey: 'after-stop', kind: 'agent_message', taskId: task.id, payload: '{}' }).record
+    expect(store.claim(after.id, 'owner', 1_000)).toMatchObject({ state: 'claimed' })
+  })
+
 })

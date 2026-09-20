@@ -18,6 +18,17 @@ transactional acknowledgement, so the handoff itself is at-least-once after a
 crash; the outbox and transcript/report inbox suppress duplicate application
 effects during reconciliation.
 
+The independent #151 review retains the landed v20–v22 schema unchanged.
+Recovery now revisits unexpired crash claims after their leases expire, fences
+in-flight handoffs against concurrent replay, and retries failed application
+messages at most five times. An unresponsive handoff ends visibly with unknown
+backend acceptance and is not automatically resent. Captain terminal failures
+and report inbox insertion are replayable after restart; report destinations
+are persisted before insertion, including archived originating conversations.
+Cross-project correlations and delivery-key ownership changes are refused.
+Provider tool-call IDs are scoped to a Commander turn, independently of the
+typed-message identity used by merge grants.
+
 ## How it works
 
 1. `createTables()` defines the canonical schema for **new** databases (`CREATE TABLE IF NOT EXISTS`).

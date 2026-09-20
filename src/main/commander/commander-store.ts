@@ -287,8 +287,9 @@ export class CommanderStore {
       if (input.correlationId) {
         this.db.prepare(`UPDATE delivery_outbox SET
           state = 'acknowledged', acknowledged_at = ?, updated_at = ?
-          WHERE kind = 'captain_request' AND correlation_id = ? AND state = 'accepted'`)
-          .run(ts, ts, input.correlationId)
+          WHERE kind = 'captain_request' AND correlation_id = ? AND project_id = ?
+            AND source_session_id = ? AND state IN ('pending', 'claimed', 'accepted')`)
+          .run(ts, ts, input.correlationId, input.projectId ?? null, sessionId)
       }
     })()
     const message = this.getMessage(id)

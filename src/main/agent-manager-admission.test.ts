@@ -721,6 +721,12 @@ describe('real reconnect status and stale callbacks', () => {
     expect(dispatch).not.toHaveBeenCalled()
     expect(deliveries.get(record.id)).toMatchObject({ state: 'cancelled', lastError: expect.stringContaining('awaiting_approval') })
     expect(started).toEqual([])
+    // A delivery created after startup gets the same exclusion on later sweeps.
+    const later = deliveries.enqueue({ idempotencyKey: 'late-before-stop', kind: 'agent_message', taskId: task.id,
+      agentId, payload: JSON.stringify({ sessionId: '', taskId: task.id, agentId, message: 'continue' }) }).record
+    await (manager as any).recoverAgentMessages()
+    expect(deliveries.get(later.id)?.state).toBe('cancelled')
+    expect(dispatch).not.toHaveBeenCalled()
     await manager.stopAllSessions()
   })
 })

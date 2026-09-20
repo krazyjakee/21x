@@ -4,6 +4,11 @@ import { activateAuthorizationDispatch, failAuthorizationDispatch } from './auth
 
 type Source = { db: Database.Database }
 type Snapshot = { dispatch_seq: number; node_id: string | null } | null
+export type AuthorizationDispatchFenceStage =
+  | 'before-status'
+  | 'after-status'
+  | 'before-activation'
+  | 'before-send'
 const pendingSends = new WeakMap<Database.Database, Map<string, Promise<void>>>()
 
 /** All adapter sends, including startup and worker nudges, share this lock. */
@@ -47,23 +52,30 @@ export async function sendWithAuthorization(
   status: () => Promise<{ type: string }>,
   send: () => Promise<void>,
   wait: () => Promise<unknown> = () => sleep(100),
-  timeoutMs = 60_000
+  timeoutMs = 60_000,
+  assertFence: (stage: AuthorizationDispatchFenceStage) => void = () => {}
 ): Promise<void> {
   const row = source.db.prepare('SELECT task_id, node_id FROM authorization_dispatches WHERE seq = ?').get(seq) as { task_id: string; node_id: string | null } | undefined
   if (!row) throw new Error('Unknown authorization dispatch')
   return serializeTaskSend(source, row.task_id, async () => {
     try {
       if (!row.node_id) {
+        assertFence('before-activation')
         activateAuthorizationDispatch(source, seq)
+        assertFence('before-send')
         await send()
         return
       }
       const deadline = Date.now() + timeoutMs
       while (true) {
+        assertFence('before-status')
         const current = await status()
+        assertFence('after-status')
         if (current.type === 'idle') {
           // Rechecks generation, expiry and revocation AFTER every await.
+          assertFence('before-activation')
           activateAuthorizationDispatch(source, seq)
+          assertFence('before-send')
           await send()
           return
         }
