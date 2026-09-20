@@ -3,7 +3,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog'
 import {
   Search, LayoutDashboard, Layers, CheckSquare, Zap, Settings, MessageSquare,
   Plus, Sun, Moon, CornerDownLeft, LayoutGrid, ArrowDown, ArrowUp, ExternalLink,
-  PanelRightOpen, FileDiff, PackageOpen, Copy, GitBranch, Mic, CircleHelp,
+  PanelRightOpen, FileDiff, PackageOpen, Copy, GitBranch, Mic, CircleHelp, MessagesSquare,
   CircleCheck, Clock3, Play, Trash2, LogOut, ListTree, CornerUpLeft, FolderKanban, FolderPlus, type LucideIcon
 } from 'lucide-react'
 import { useUIStore } from '@/stores/ui-store'
@@ -14,6 +14,7 @@ import { useProjectTasks } from '@/hooks/use-project-tasks'
 import { useSkillStore } from '@/stores/skill-store'
 import { cn } from '@/lib/utils'
 import { modKey as mod } from '@/lib/platform'
+import { navShortcutDigit } from './nav-items'
 
 interface CommandItem {
   id: string
@@ -89,12 +90,13 @@ export function CommandPalette({ open, onOpenChange, actions }: { open: boolean;
   const close = () => onOpenChange(false)
 
   const items = useMemo<CommandItem[]>(() => {
-    const goto = (view: 'dashboard' | 'canvas' | 'tasks' | 'skills') => () => { closeModal(); setSidebarView(view); close() }
+    const goto = (view: 'dashboard' | 'canvas' | 'tasks' | 'skills' | 'commander') => () => { closeModal(); setSidebarView(view); close() }
     const base: CommandItem[] = [
       { id: 'nav-dashboard', group: 'Navigation', label: 'Go to Dashboard', icon: LayoutDashboard, keywords: 'home overview', shortcut: `G D · ${mod}1`, run: goto('dashboard') },
       { id: 'nav-canvas', group: 'Navigation', label: 'Go to Canvas', icon: Layers, keywords: 'board panels', shortcut: `${mod}2`, run: goto('canvas') },
       { id: 'nav-tasks', group: 'Navigation', label: 'Go to Tasks', icon: CheckSquare, keywords: 'todo list', shortcut: `G T · ${mod}3`, run: goto('tasks') },
       { id: 'nav-skills', group: 'Navigation', label: 'Go to Skills', icon: Zap, keywords: 'abilities', shortcut: `G S · ${mod}4`, run: goto('skills') },
+      { id: 'nav-commander', group: 'Navigation', label: 'Go to Commander', icon: MessagesSquare, keywords: 'chat voice call assistant', shortcut: `${mod}${navShortcutDigit('commander')}`, run: goto('commander') },
       { id: 'nav-next-task', group: 'Navigation', label: 'Next visible task', icon: ArrowDown, shortcut: 'J', run: () => { actions.nextTask(); close() } },
       { id: 'nav-previous-task', group: 'Navigation', label: 'Previous visible task', icon: ArrowUp, shortcut: 'K', run: () => { actions.previousTask(); close() } },
       { id: 'nav-open-task', group: 'Navigation', label: 'Open selected task', icon: ExternalLink, shortcut: 'Enter', run: () => { actions.openTask(); close() } },

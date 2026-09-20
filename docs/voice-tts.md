@@ -145,10 +145,12 @@ an IPC payload, a transcript, or a log line: failures are logged by kind only.
 
 ### Voices and models
 
-Saving a key validates it (`GET /v1/user/subscription`, which also gives the
-character allowance), lists every voice of the account through the paginated
-`GET /v2/voices` (following `next_page_token`), and lists the models from
-`GET /v1/models`. Only models with `can_do_text_to_speech` that the WebSocket
+Saving a key validates it by listing every voice of the account through the
+paginated `GET /v2/voices` (following `next_page_token`) and lists the models
+from `GET /v1/models`. The character allowance from `GET /v1/user/subscription`
+is best-effort because scoped keys may omit the separate `user_read` permission;
+that omission does not make an otherwise usable speech key invalid. Only models
+with `can_do_text_to_speech` that the WebSocket
 endpoint accepts are offered (`eleven_v3` is HTTP-only and is left out). The
 default is `eleven_flash_v2_5`, the lowest-latency model, which is what a spoken
 conversation needs.

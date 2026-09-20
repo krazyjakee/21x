@@ -175,7 +175,9 @@ export class ConnectorStore {
   // ── Instances ──────────────────────────────────────────────
 
   listInstances(): ConnectorInstanceRecord[] {
-    const rows = this.db.prepare('SELECT * FROM connector_instances ORDER BY created_at ASC, id ASC').all() as InstanceRow[]
+    // created_at is in milliseconds, so instances created back to back often tie.
+    // rowid breaks the tie in insertion order; the random id would not.
+    const rows = this.db.prepare('SELECT * FROM connector_instances ORDER BY created_at ASC, rowid ASC').all() as InstanceRow[]
     return rows.map(toInstance)
   }
 

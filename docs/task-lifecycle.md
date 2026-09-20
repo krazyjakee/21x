@@ -45,7 +45,24 @@ is the built-in Captain prompt (`src/main/prompts/captain.ts`) followed
 by a project section built on every start, resume and send from the project
 row, its repos (with default branches) and resources
 (`src/main/agent-manager/captain-context.ts`), so an edit to the project
-reaches the next message. The Captain has no checkout of the project's
+reaches the next message.
+
+Changing the Captain's agent (the Captain drawer's picker, the project
+editor, or the Commander's `update_project`) is saved on the project as
+`captain_agent_id`, so the drawer, `ask_captain`, wake-ups, scheduled reviews
+and the next launch all start the same agent. Whenever it changes,
+`AgentManager.releaseCaptainIfAgentChanged` stops a live session still on
+the old agent. A persisted session is bound to the agent that made it (setting
+`captain_session_agent:<taskId>`): a start or send with another agent opens a
+fresh session instead of resuming it, because another backend cannot continue
+it (Claude Code even accepts a Codex thread id and fails only at the first
+message). A Captain start is bounded (`CAPTAIN_START_TIMEOUT_MS`, 90 s): past
+that it fails with the reason in the transcript, and a session that comes up
+late is stopped. The drawer then shows the reason with **Retry** and **Switch
+back to** the previous agent, and holds messages sent in the meantime until
+a start succeeds, then delivers each one once.
+
+The Captain has no checkout of the project's
 repos; the prompt tells it to ask a task agent instead (read-only clones are
 a follow-up). It keeps a long-lived `MEMORY.md` in its workspace — decisions,
 conventions, open threads — which the prompt injects (capped) and the project
@@ -427,9 +444,46 @@ Per action, one of `autonomous`, `tell_commander` or `ask_user`:
 | `stop_task` | tell_commander | `stop_task` |
 | `respond_to_checkpoint` | ask_user | `respond_to_checkpoint` |
 | `change_priority` | autonomous | `update_task` with a `priority` |
-| `pr` | ask_user | none: prompt guidance only, no task-management tool opens or merges pull requests |
+| `open_pr` | tell_commander | none: prompt guidance only; the agent doing the work opens its pull request |
+| `merge_pr` | ask_user | `merge_pull_request` (#137): under `ask_user` a merge runs without a held call only when an active merge grant covers it |
+
+Until #137 one `pr` item covered both. Migration v19 (`splitPullRequestEscalation` in `src/main/database/schema.ts`) moves a project's stored `pr` level to `merge_pr` and gives `open_pr` its default; `escalationPolicyFromSettings` also reads a leftover `pr` as `merge_pr`.
 
 The policy is a section of the Captain prompt (`src/main/prompts/captain.ts`) and is enforced for coordinator-scope calls by a gate on the project-scoped dispatch (`setCoordinatorCallGate` in `task-management-core.ts`, installed by `src/main/escalation.ts` when the Task API server starts). Task agents in the same project are not gated. `tell_commander` runs the call, then calls `escalateToCommander(event)` and shows a user notification; `ask_user` holds the call in memory, returns `{ status: 'held', id }` to the Captain, notifies the user, and the status bar's held-actions notice approves (runs the original call) or rejects it over IPC (`escalation:approve` / `escalation:reject`); either way the Captain's live session gets a fenced note with the outcome. `escalateToCommander` is a no-op seam until #62's `report_to_commander` installs a handler with `setCommanderEscalationHandler`. Held calls are not persisted: a restart forgets them.
+
+### Merge grants (`settings.merge_grants`, #137)
+
+`{ "merge_grants": { "enabled": false } }`, off by default and set in the project editor. A merge grant is standing authority for the project's Captain to merge pull requests the user told it to merge. The rules are in `src/shared/merge-grants.ts` and `src/main/merge-grants.ts`:
+
+- **Source.** Only a message the user typed. In the Commander chat, `ask_captain` takes `merge_grant` (scope only), and the app binds it to the stored id and verbatim text of the current user turn. A report-triggered turn, or a voice transcript, has no id, so it cannot create one. In a project chat, the chat composer reports text the user typed and sent with Enter or the Send button (not dictation, not app-generated sends such as the canvas terminal notice) over `mergeGrants:noteTyped`. `noteUserTypedMessage` stages it for five seconds, tied to the exact main-window sender, task and text. The send IPC consumes it once; AgentManager activates the binding only at dispatch, using the same message id for the transcript. Failed sends and intervening non-typed dispatches invalidate it, and a delayed resume cannot reinstate it. The dashboard Ask Captain box uses the same typed-only path; provenance is retained through session warm-up and staged immediately before delivery. The Captain’s `grant_merge_authority` can bind to that latest dispatch for at most 30 minutes. Dictation provenance follows the draft through manual Enter/Send. Wake-ups, relays, `send_message`, reports, issue and web text never pass through either path.
+- **Words.** The app recognizes a complete, explicit command such as "Merge PR #12 when checks pass", "Please merge the ready PRs", or "In App, merge https://github.com/acme/app/pull/12". Reports, quotations, negations and unrecognized conditions are refused; merely mentioning merge/merged/merging is insufficient. Repository and PR restrictions in the text cannot be widened by model arguments; instructions restricting the base are refused because GitHub cannot enforce that restriction atomically. Numeric PRs in projects with multiple repos require a repository. Accepted text is retained verbatim; oversized instructions are refused rather than truncated.
+- **Scope.** One project (one message can back one grant only, so no grant ever spans projects), the action `merge_pr`, the fixed condition "checks green and branch protection satisfied", optional repo and PR filters, and optional `max_merges`. Base-branch-restricted grants are refused (including old stored ones): GitHub has no atomic base-branch precondition, so a head pin cannot prevent retargeting. Expiry: 7 days by default and at most, or until revoked, whichever comes first.
+- **Enforcement.** The MCP URL carries a scope HMAC signed by main using a secret separate from the shared API token; unsigned/tampered scopes are refused before dispatch and scope signatures are stripped from generated workspace docs. Heartbeat sessions retain the checked task’s artifact pin, so they cannot become Captains. `merge_pull_request` has no Task API route; the escalation gate answers it (`src/main/merge-grant-gate.ts`). The PR must be in one of the project's GitHub repos. `gh pr view` must report: open, not a draft, every check passed or skipped, `mergeStateStatus` CLEAN or HAS_HOOKS, and no `REVIEW_REQUIRED`/`CHANGES_REQUESTED`. The app also requires `mergeable: MERGEABLE` and complete PR/check data. It uses `gh api --method PUT repos/<owner>/<repo>/pulls/<number>/merge -f sha=<checked-sha> -f merge_method=squash|merge|rebase`, with a fixed argument list and no bypass option. This synchronous endpoint cannot silently enable auto-merge or enqueue a merge, unlike `gh pr merge`. A grant’s use is reserved atomically before the request and refunded on confirmed failure. Each reservation persists its PR, head, checks and grant before dispatch. An ambiguous response or timeout keeps that reservation and returns an unknown outcome requiring inspection. Startup and Captain grant-list calls reconcile an exact head/base confirmed merged by GitHub into the audit, idempotently; an open or changed PR remains reserved. A pending operation prevents another reservation for the same PR. Only GitHub’s confirmed merged response is reported as success.
+- **External approvals.** A missing required review, CODEOWNERS approval, requested changes or unmet protection returns `blocked` with `needs_external_approval`, and is reported to the Commander once per PR head. It is never bypassed.
+- **Audit.** Each grant keeps who granted it (source, session, message id), the verbatim text, its scope, status and `revoked_by`. Each merge made under it gets a `merge_grant_uses` row (PR, title, base, head SHA, method, merge state, review decision, checks as reported) and a project status journal entry committed in the same transaction, a notification, and a report to the Commander. Recovered merges also report to the Commander; startup recovery waits until its report bridge is ready. The project editor's "Merge grants" section shows the audit log. The status-bar approvals popover lists active grants, and either place revokes one in one click (IPC `mergeGrants:*`).
+
+#### Explicit project-wide commands and validation (#155)
+
+With opt-in enabled, both of these user-typed commands are accepted:
+
+- `Merge every safe 21x pull request after required reviews and checks pass`
+- `Merge all open PRs in 21x when required reviews and checks pass`
+
+The deliberately narrow form is `Merge (all|every) (open|safe) <project-or-owner/repo> (PR|PRs|pull request|pull requests) (after|when|once) required reviews and checks pass`, or the same with `<project-or-owner/repo>` placed after `in` following the PR noun. Case is ignored; an optional leading `please` and final period/exclamation mark are allowed. The entire command must match. Questions (including “Can you merge” without a question mark), quotes, negation, extra conditions, missing projects and multiple-project lists fail closed. Existing imperative numbered-PR and legacy project-chat wording remains supported.
+
+The exact project name must resolve uniquely to the selected project. An `owner/repo` must resolve to exactly one owning project and is retained as a repository filter. Duplicate project names and repositories shared by several projects are rejected instead of trusting the model's selected project. No all-projects/wildcard grant exists. The persisted grant remains bound to one stable project ID; eligible open PRs are evaluated during its lifetime rather than captured as a fixed initial list. The existing project/repository filters, expiry and revocation remain authoritative; no schema migration is needed. Malformed scope arguments are rejected, never silently dropped.
+
+Creation failures contain `reason_code`, `offending_scope`, `accepted_examples` and an ordered `blockers` list alongside a readable `error`. Commander tool errors carry those reason codes, scope and wording examples in their error text. Precedence is project/configuration, then provenance, then command/scope and argument validation. Independent initial blockers are returned together. Settings `{}` produce `FEATURE_DISABLED`, even for syntactically accepted text; rephrasing does not enable the feature. Other codes include `INELIGIBLE_PROVENANCE`, `PROJECT_MISSING`, `PROJECT_AMBIGUOUS`, `PROJECT_MISMATCH`, `MULTIPLE_PROJECTS_UNSUPPORTED`, `PR_SCOPE_UNSUPPORTED`, `AMBIGUOUS_COMMAND`, `INVALID_EXPIRY`, `INVALID_USE_LIMIT`, and `MESSAGE_ALREADY_USED`. No grant is created on failure.
+
+Each merge call reads fresh GitHub state. When the gate's assessment and the final read disagree on head SHA, base branch or base SHA, `PR_CHANGED` stops execution before reserving a use. After a predecessor lands, discard prior readiness assessments and evaluate the successor again; a missing predecessor, stale checks or conflicts requires a safe stop/skip. GitHub still enforces protections and the exact head at execution. A base change after the final read cannot be atomically pinned by GitHub's merge endpoint; base-restricted grants remain refused.
+
+A merge under a grant additionally requires an independent approving review, enforced in code. GitHub reports `reviewDecision` `""` on a base branch that requires no reviews, however many people approved, so it cannot stand in for “someone looked at this”; `merge_pull_request` therefore also reads `author` and `latestReviews` and requires at least one `APPROVED` review by someone other than the PR author. Without one it returns `blocked` with `reason_code: INDEPENDENT_REVIEW_REQUIRED` and `needs_external_approval`, reports the blocker to the Commander once per PR head, and spends no grant use. A grant confers authority to merge, never evidence that a PR is safe.
+
+Whether a PR is obsolete, duplicate or depends on an unlanded predecessor remains a Captain workflow decision based on current task/repository evidence: the prompt requires that evidence before each merge and forbids blind retries. The grant parser does not infer these judgments from “safe”, and the merge tool does not claim to implement a dependency or semantic safety oracle. The independent-review gate is the backstop that keeps a standing grant from landing unreviewed work on its own.
+
+Regression coverage in `src/main/merge-grants.test.ts` includes both exact commands through project and Commander bindings, disabled settings versus parser errors, named/numbered scope, ambiguous and multiple projects, malicious/quoted/question input, invalid model restrictions, expiry/revocation/use limits, all existing GitHub gates, changed head/base, stack revalidation, pinned execution, reservations and reconciliation. IPC, Commander-service and renderer composer tests retain the real typed-versus-voice/report provenance boundaries.
+
+Residual risk: agents still have a shell with the user's `gh` credentials. The Captain prompt forbids merging any other way, but a shell-level `gh pr merge --admin` is outside what 21x can intercept.
 
 ## Scheduled Captain reviews (#67)
 

@@ -17,6 +17,7 @@ import { TASK_MCP_PATH, handleTaskMcpRequest } from './task-mcp-endpoint'
 import { bearerToken, parseJsonBody, readBody } from './http-utils'
 import { handleArtifactRoute } from './task-api/artifact-routes'
 import { handleBrowserRoute } from './task-api/browser-routes'
+import { handleConcurrencyRoute } from './task-api/concurrency-routes'
 import { handleSessionRoute } from './task-api/session-routes'
 import { handleSkillRoute } from './task-api/skill-routes'
 import { handleTaskRoute } from './task-api/task-routes'
@@ -151,7 +152,7 @@ export function stopTaskApiServer(): void {
   startupPromise = null
 }
 
-const ROUTE_HANDLERS = [handleTaskRoute, handleSkillRoute, handleSessionRoute, handleUiRoute, handleArtifactRoute, handleBrowserRoute]
+const ROUTE_HANDLERS = [handleTaskRoute, handleSkillRoute, handleSessionRoute, handleUiRoute, handleArtifactRoute, handleBrowserRoute, handleConcurrencyRoute]
 
 /** Exported so the routes can be tested without starting an HTTP server. */
 export async function handleRoute(db: DatabaseManager, route: string, params: Record<string, unknown>): Promise<unknown> {

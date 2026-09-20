@@ -232,6 +232,7 @@ describe('CommanderWorkspace', () => {
     fireEvent.click(screen.getByLabelText('Send'))
 
     await waitFor(() => expect(api.send).toHaveBeenCalledWith('s1', 'Hello'))
+    expect(mocks.settingsApi.set).toHaveBeenCalledWith('chat_agent_id', 'codex-agent')
     expect(mocks.settingsApi.set).toHaveBeenCalledWith('chat_provider', 'openai-compatible')
     expect(mocks.settingsApi.set).toHaveBeenCalledWith('chat_model', 'gpt-saved')
     expect(mocks.settingsApi.set).toHaveBeenCalledWith('chat_reasoning_effort', 'high')

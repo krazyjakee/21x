@@ -6,9 +6,9 @@
  * `start_task` / `start_sibling_subtask` tools, the mobile API, the IPC start
  * and the TaskAutomationScheduler all reach it). That one place asks
  * {@link checkAdmission} whether the start fits under the limits; if it does
- * not, the start waits in a FIFO {@link StartQueue} in the main process and is
- * started when a counted session goes idle or stops. The window does not have
- * to be open for any of this.
+ * not, the start waits in the durable shared start queue and is started when a
+ * counted session goes idle or stops. The queue survives process loss; the
+ * window does not have to be open for any of this.
  *
  * ## What counts
  *
@@ -35,11 +35,28 @@
  *    starts everywhere. Pauses and the daily cap are checked before the
  *    concurrency limits, so a paused project's starts queue with that reason
  *    and not as "agent limit".
+ *
+ *  - per project and agent (#150, shared/concurrency.ts): the agent's
+ *    user-set hard cap (`config.concurrency_cap`) bounds its jobs across
+ *    every project and replaces `max_parallel_sessions` as the agent limit;
+ *    within it, the project's working level (set by its Captain, or pinned
+ *    by the user) bounds that project's jobs of the agent
+ *    (`concurrency_level`). A start whose declared touched files overlap a
+ *    running job of the same project waits (`file_overlap`). Lowering a level
+ *    only defers new starts: running sessions are never stopped by it.
+ *
+ * ## Queue order
+ *
+ * The queue is not FIFO: {@link orderStartQueue} tries starts by priority
+ * within a project (FIFO within the same priority) and round robin across
+ * projects, so an urgent ticket jumps its project's queue without starving
+ * another project.
  */
 import type { AgentRecord, TaskRecord } from '../database'
 import { isCoordinatorTask } from '../../shared/task-roles'
 import type { ProjectLimitReason } from '../../shared/project-policies'
 import { isTriageSessionTask } from './session-config'
+import { agentHardCap } from '../../shared/concurrency'
 
 /** Settings key for the global cap on concurrently working agent sessions. */
 export const MAX_CONCURRENT_AGENT_SESSIONS_SETTING = 'max_concurrent_agent_sessions'
@@ -79,9 +96,24 @@ export interface AdmissionLimits {
   globalPaused?: boolean
   /** Absent when the task has no project row to read (never for real tasks). */
   project?: ProjectAdmissionLimits
+  /**
+   * #150: the project's working level for the requested agent. Absent for a
+   * task with no project, which only the hard cap bounds.
+   */
+  concurrencyLevel?: number
+  /**
+   * #150: a running job of the same project that touches the same files,
+   * found by the caller (it owns the touches and branch diffs).
+   */
+  fileOverlap?: { taskId: string; path: string } | null
 }
 
-export type AdmissionReason = 'agent_limit' | 'global_limit' | ProjectLimitReason
+/** Why a start waits because of the project's working level or file overlap (#150). */
+export type ConcurrencyReason = 'concurrency_level' | 'file_overlap'
+
+/** `recovery` and `dependency` are durable restoration reasons rather than
+ * capacity decisions, but share the one queue and visibility vocabulary. */
+export type AdmissionReason = 'agent_limit' | 'global_limit' | 'recovery' | 'dependency' | 'agent_unavailable' | ProjectLimitReason | ConcurrencyReason
 
 /** Reasons that block every start, so a drain can stop at the first one. */
 export function isGlobalAdmissionReason(reason: AdmissionReason): boolean {
@@ -99,11 +131,12 @@ export function isExemptFromAdmission(taskId: string, task: TaskRecord | undefin
   return isTriageSessionTask(taskId, task)
 }
 
-/** The agent's own cap; unset or invalid values fall back to 1. */
+/**
+ * The agent's hard cap (#150): `config.concurrency_cap`, or for an agent
+ * that has none yet min(max_parallel_sessions, 5).
+ */
 export function agentSessionLimit(agent: Pick<AgentRecord, 'config'>): number {
-  const config = agent.config as unknown as { max_parallel_sessions?: unknown } | undefined
-  const raw = Number(config?.max_parallel_sessions)
-  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 1
+  return agentHardCap(agent.config as unknown as { concurrency_cap?: unknown; max_parallel_sessions?: unknown } | undefined)
 }
 
 /** Parses the global setting; empty, 0 or garbage means unlimited. */
@@ -142,6 +175,18 @@ export function checkAdmission(
     return { admitted: false, reason: 'agent_limit', limit: agentLimit, running: agentRunning }
   }
 
+  // #150: the project's working level for this agent, then hot files.
+  if (project && limits.concurrencyLevel !== undefined) {
+    const level = Math.max(1, Math.min(limits.concurrencyLevel, agentLimit))
+    const levelRunning = others.filter((s) => s.agentId === ctx.agentId && s.projectId === project.projectId).length
+    if (levelRunning >= level) {
+      return { admitted: false, reason: 'concurrency_level', limit: level, running: levelRunning }
+    }
+  }
+  if (limits.fileOverlap) {
+    return { admitted: false, reason: 'file_overlap', limit: 1, running: 1 }
+  }
+
   if (project && project.maxConcurrent !== null) {
     const projectRunning = others.filter((s) => s.projectId === project.projectId).length
     if (projectRunning >= project.maxConcurrent) {
@@ -158,6 +203,9 @@ export interface QueuedStart {
   skipInitialPrompt?: boolean
   reason: AdmissionReason
   queuedAt: string
+  /** The task's project and priority, refreshed before every drain (#150). */
+  projectId?: string
+  priority?: string | null
 }
 
 /** What clients see: a queued start and its 1-based place in line. */
@@ -167,52 +215,5 @@ export interface QueuedStartInfo {
   reason: AdmissionReason
   queuedAt: string
   position: number
-}
-
-/** FIFO of starts waiting for a slot, at most one entry per task. */
-export class StartQueue {
-  private entries: QueuedStart[] = []
-
-  get size(): number {
-    return this.entries.length
-  }
-
-  /** Adds the start unless the task is already waiting; returns its position. */
-  enqueue(entry: QueuedStart): { position: number; added: boolean } {
-    const existing = this.positionOf(entry.taskId)
-    if (existing) return { position: existing, added: false }
-    this.entries.push(entry)
-    return { position: this.entries.length, added: true }
-  }
-
-  remove(taskId: string): boolean {
-    const index = this.entries.findIndex((e) => e.taskId === taskId)
-    if (index === -1) return false
-    this.entries.splice(index, 1)
-    return true
-  }
-
-  /** 1-based position, or 0 when the task is not queued. */
-  positionOf(taskId: string): number {
-    return this.entries.findIndex((e) => e.taskId === taskId) + 1
-  }
-
-  /** A copy in queue order, safe to iterate while removing. */
-  snapshot(): QueuedStart[] {
-    return [...this.entries]
-  }
-
-  list(): QueuedStartInfo[] {
-    return this.entries.map((e, i) => ({
-      taskId: e.taskId,
-      agentId: e.agentId,
-      reason: e.reason,
-      queuedAt: e.queuedAt,
-      position: i + 1
-    }))
-  }
-
-  clear(): void {
-    this.entries = []
-  }
+  priority?: string | null
 }

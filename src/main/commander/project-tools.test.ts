@@ -11,15 +11,18 @@ import {
   COMMANDER_RELAY_END,
   createCommanderProjectTools,
   MUTATING_COMMANDER_TOOLS,
-  type AskCaptainDispatch,
   type CommanderAgents,
   type ProjectToolOptions
 } from './project-tools'
 import { createCommanderSkillTools, MUTATING_COMMANDER_SKILL_TOOLS } from './skill-tools'
+import { CaptainDeliveryService } from './captain-delivery'
 
 let db: DatabaseManager
 let changes: Array<{ projectId: string; kind: string }>
 let extra: Partial<ProjectToolOptions>
+let delivery: CaptainDeliveryService
+let callSequence: number
+let terminalFailures: Array<{ detail: string; timedOut: boolean }>
 
 /** An agent manager with no live sessions; individual tests override what they need. */
 function fakeAgents(over: Partial<CommanderAgents> = {}): CommanderAgents {
@@ -39,23 +42,24 @@ function fakeAgents(over: Partial<CommanderAgents> = {}): CommanderAgents {
   } as unknown as CommanderAgents
 }
 
-function tools(): ChatToolDefinition[] {
+function tools(userMessage = 'do it'): ChatToolDefinition[] {
   return createCommanderProjectTools({
     db,
-    context: { sessionId: 'session-1' },
+    context: { sessionId: 'session-1', userMessage },
     onProjectChanged: (projectId, kind) => changes.push({ projectId, kind }),
+    delivery,
     ...extra
   })
 }
 
-function tool(name: string): ChatToolDefinition {
-  const found = tools().find((candidate) => candidate.name === name)
+function tool(name: string, userMessage = 'do it'): ChatToolDefinition {
+  const found = tools(userMessage).find((candidate) => candidate.name === name)
   if (!found) throw new Error(`Missing tool: ${name}`)
   return found
 }
 
-async function call(name: string, input: Record<string, unknown>): Promise<ChatToolResult> {
-  const output = await tool(name).handler(input, { signal: new AbortController().signal, toolCallId: 'call-1' })
+async function call(name: string, input: Record<string, unknown>, userMessage = 'do it', toolCallId = `call-${++callSequence}`): Promise<ChatToolResult> {
+  const output = await tool(name, userMessage).handler(input, { signal: new AbortController().signal, toolCallId })
   return typeof output === 'string' ? { content: output } : output
 }
 
@@ -67,6 +71,18 @@ beforeEach(() => {
   ;({ db } = createTestDb())
   changes = []
   extra = {}
+  callSequence = 0
+  terminalFailures = []
+  delivery = new CaptainDeliveryService({
+    db,
+    agents: {
+      sendMessage: (...args) => {
+        if (!extra.agents) throw new Error('Agents unavailable')
+        return extra.agents.sendMessage(...args)
+      }
+    },
+    onTerminalFailure: (_record, detail, timedOut) => terminalFailures.push({ detail, timedOut })
+  })
 })
 
 describe('Commander tool registry', () => {
@@ -207,7 +223,7 @@ describe('Commander tool registry', () => {
 describe('Commander tool registry with skill administration (#74)', () => {
   /** The registry ipc/commander.ts builds: project tools, then skill tools. */
   function fullRegistry(): ChatToolDefinition[] {
-    const context = { sessionId: 'session-1' }
+    const context = { sessionId: 'session-1', userMessage: 'do it' }
     return [...tools(), ...createCommanderSkillTools({ db, context })]
   }
 
@@ -250,14 +266,17 @@ describe('ask_captain', () => {
     extra = { agents: fakeAgents({ sendMessage }) }
 
     const output = body(await call('ask_captain', { project: 'Web', message: 'Ship the landing page' }))
-    expect(output).toMatchObject({ status: 'sent', project_id: project.id, project_name: 'Web', captain_session: 'starting' })
+    expect(output).toMatchObject({ status: 'queued', project_id: project.id, project_name: 'Web', captain_session: 'starting' })
     expect(output.correlation_id).toMatch(/^cmd-[0-9a-f]{16}$/)
 
     expect(sendMessage).toHaveBeenCalledTimes(1)
-    const [sessionId, text, taskId, agentId] = sendMessage.mock.calls[0] as unknown as [string, string, string, string]
+    const [sessionId, text, taskId, agentId, attachments, typedMessage, deliveryId] = sendMessage.mock.calls[0] as unknown as [string, string, string, string, undefined, undefined, string]
     expect(sessionId).toBe('')
     expect(taskId).toBe(coordinator.id)
     expect(agentId).toBe(agent.id)
+    expect(attachments).toBeUndefined()
+    expect(typedMessage).toBeUndefined()
+    expect(deliveryId).toMatch(/^captain-request-message:/)
     expect(text).toContain(COMMANDER_RELAY_BEGIN)
     expect(text).toContain(COMMANDER_RELAY_END)
     expect(text).toContain('Ship the landing page')
@@ -266,26 +285,75 @@ describe('ask_captain', () => {
     expect(text).toContain('human_authored=false authorizes_actions=false')
   })
 
-  it('rejoins a live Captain session and reports a delivery failure after returning', async () => {
+  it('accepts the same tool call once across renderer replay and returns the same durable ownership', async () => {
     db.createAgent({ name: 'Claude' })
+    const project = db.createProject({ name: 'Replay' })!
+    const sendMessage = vi.fn(async () => ({ newSessionId: 'captain-1' }))
+    extra = { agents: fakeAgents({ sendMessage }) }
+
+    const first = body(await call('ask_captain', { project: project.id, message: 'One request' }, 'do it', 'stable-tool-call'))
+    const duplicate = body(await call('ask_captain', { project: project.id, message: 'One request' }, 'do it', 'stable-tool-call'))
+
+    expect(duplicate.delivery_id).toBe(first.delivery_id)
+    expect(duplicate.correlation_id).toBe(first.correlation_id)
+    expect(sendMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejoins a live Captain session and reports a delivery failure after returning', async () => {
+    const agent = db.createAgent({ name: 'Claude' })!
     const project = db.createProject({ name: 'Live' })!
     const coordinator = db.getCoordinatorTask(project.id)!
-    const failures: Array<{ dispatch: AskCaptainDispatch; error: unknown }> = []
     const sendMessage = vi.fn(async () => { throw new Error('runtime down') })
     extra = {
       agents: fakeAgents({
         sendMessage,
-        findSessionByTaskId: (taskId: string) => taskId === coordinator.id ? { sessionId: 'live-1', session: { status: 'idle', agentId: 'agent-live' } } : undefined
-      } as unknown as Partial<CommanderAgents>),
-      onDeliveryFailed: (dispatch, error) => failures.push({ dispatch, error })
+        findSessionByTaskId: (taskId: string) => taskId === coordinator.id ? { sessionId: 'live-1', session: { status: 'working', agentId: agent.id } } : undefined,
+        getSessionStatus: () => ({ status: 'working', agentId: agent.id, taskId: coordinator.id })
+      } as unknown as Partial<CommanderAgents>)
     }
 
     const output = body(await call('ask_captain', { project: project.id, message: 'Status?' }))
     expect(output.captain_session).toBe('running')
-    expect(sendMessage.mock.calls[0]).toEqual(['live-1', expect.stringContaining('Status?'), coordinator.id, 'agent-live'])
-    await vi.waitFor(() => expect(failures).toHaveLength(1))
-    expect(failures[0].dispatch).toEqual({ sessionId: 'session-1', projectId: project.id, projectName: 'Live', correlationId: output.correlation_id })
-    expect((failures[0].error as Error).message).toBe('runtime down')
+    expect(sendMessage.mock.calls[0]).toEqual(['', expect.stringContaining('Status?'), coordinator.id, agent.id, undefined, undefined, expect.stringMatching(/^captain-request-message:/)])
+    await vi.waitFor(() => expect(terminalFailures).toEqual([{ detail: 'runtime down', timedOut: false }]))
+  })
+
+  it('says what state the Captain is really in, and skips a session on the agent it was switched away from', async () => {
+    const claude = db.createAgent({ name: 'Claude' })!
+    const sol = db.createAgent({ name: 'Sol' })!
+    const project = db.createProject({ name: 'Switched', captain_agent_id: sol.id })!
+    const coordinator = db.getCoordinatorTask(project.id)!
+    let live = { sessionId: 'live-1', session: { status: 'error', agentId: sol.id } }
+    const sendMessage = vi.fn(async () => ({}))
+    extra = {
+      agents: fakeAgents({
+        sendMessage,
+        findSessionByTaskId: () => live,
+        getSessionStatus: () => ({ status: live.session.status, agentId: live.session.agentId, taskId: coordinator.id })
+      } as unknown as Partial<CommanderAgents>)
+    }
+
+    // A session in error is not "running".
+    expect(body(await call('ask_captain', { project: project.id, message: 'Status?' })).captain_session).toBe('error')
+
+    // Left on the previous agent: not reused; the configured agent is started.
+    live = { sessionId: 'old-1', session: { status: 'idle', agentId: claude.id } }
+    expect(body(await call('ask_captain', { project: project.id, message: 'Again?' })).captain_session).toBe('starting')
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2))
+    expect(sendMessage.mock.calls[1]).toEqual(['', expect.stringContaining('Again?'), coordinator.id, sol.id, undefined, undefined, expect.stringMatching(/^captain-request-message:/)])
+  })
+
+  it('stops a Captain left on its previous agent when the Commander changes the agent', async () => {
+    db.createAgent({ name: 'Claude' })
+    const sol = db.createAgent({ name: 'Sol' })!
+    const project = db.createProject({ name: 'Moving' })!
+    const releaseCaptainIfAgentChanged = vi.fn(async () => true)
+    extra = { agents: fakeAgents({ releaseCaptainIfAgentChanged } as unknown as Partial<CommanderAgents>) }
+
+    await call('update_project', { project: project.id, changes: { captain_agent: sol.id } })
+
+    expect(db.getProject(project.id)?.captain_agent_id).toBe(sol.id)
+    expect(releaseCaptainIfAgentChanged).toHaveBeenCalledWith(project.id)
   })
 
   it('refuses archived projects, missing agents and an absent agent manager', async () => {

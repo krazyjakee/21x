@@ -566,7 +566,8 @@ describe('AcpAdapter - Turn Detection', () => {
 
       const messages = await adapter.resumeSession('persisted-session-id', {
         workspaceDir: '/tmp',
-        permissionMode: 'default'
+        permissionMode: 'default',
+        systemPrompt: 'You are the Captain.'
       } as any)
 
       expect(messages).toHaveLength(1)
@@ -574,6 +575,7 @@ describe('AcpAdapter - Turn Detection', () => {
       const session = adapterPrivate(adapter).sessions.get('persisted-session-id')
       expect(session).toBeTruthy()
       expect(session?.messageBuffer).toHaveLength(0)
+      expect(session?.pendingSystemPrompt).toBe('You are the Captain.')
 
       const polled = await adapter.pollMessages(
         'persisted-session-id',

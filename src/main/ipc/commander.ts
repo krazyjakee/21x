@@ -7,10 +7,12 @@ import type { ChatToolDefinition } from '../chat/tools'
 import { CommanderService, type CommanderToolContext } from '../commander/commander-service'
 import { CommanderStore } from '../commander/commander-store'
 import { createCommanderProjectTools } from '../commander/project-tools'
+import { CaptainDeliveryService } from '../commander/captain-delivery'
 import { createCommanderSkillTools } from '../commander/skill-tools'
+import { createCommanderMergeGrantTools } from '../commander/merge-grant-tools'
 import { installCommanderReportBridge } from '../commander/report-tools'
 import { broadcastSkillsChanged } from './settings'
-import { listHeldActions } from '../escalation'
+import { listHeldActions, recoverMergeGrantOutcomes } from '../escalation'
 import { guardedIpcSend } from '../guarded-ipc-send'
 import { assertTrustedSender } from '../ipc-sender'
 import { notifyRenderer, uiState } from '../task-api/state'
@@ -67,6 +69,37 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
   const createProvider = options.createProvider ?? ((d: IpcDeps) => createChatProviderFromSettings(d.db))
   // The connection is read on use, so registering never touches the database.
   const store = new CommanderStore({ get db() { return deps.db.db } })
+  let commanderRef: CommanderService | null = null
+  const delivery = new CaptainDeliveryService({
+    db: deps.db,
+    agents: deps.agentManager,
+    onTerminalFailure: (request, reason, timedOut) => {
+      if (!commanderRef || !request.sourceSessionId || !request.projectId) return
+      const project = deps.db.getProject(request.projectId)
+      const key = `captain-request:${request.id}:${timedOut ? 'timeout' : 'failure'}`
+      const { record } = delivery.store.enqueue({
+        idempotencyKey: key,
+        kind: 'captain_report',
+        sourceSessionId: request.sourceSessionId,
+        projectId: request.projectId,
+        correlationId: request.correlationId,
+        payload: reason
+      })
+      try {
+        commanderRef.appendReport({
+          sessionId: request.sourceSessionId,
+          content: timedOut
+            ? `The Captain of "${project?.name ?? request.projectId}" did not report back before the deadline. Retry the request when ready.`
+            : `Your request could not be delivered to the Captain of "${project?.name ?? request.projectId}": ${reason}. Retry the request when ready.`,
+          projectId: request.projectId,
+          correlationId: request.correlationId,
+          deliveryId: record.id
+        })
+      } catch (err) {
+        console.error('[Commander] Could not record the terminal Captain request outcome:', err)
+      }
+    }
+  })
   const commander: CommanderService = new CommanderService({
     store,
     emit,
@@ -76,27 +109,14 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
         db: deps.db,
         context,
         agents: deps.agentManager,
+        delivery,
         listHeldActions,
         sendUiCommand,
         onProjectChanged: (projectId, kind) => broadcastProjectChanged({ projectId, kind }),
-        // The tool already returned "sent"; the failure reaches the user the
-        // same way an answer would, as a report on the session.
-        onDeliveryFailed: (dispatch, error) => {
-          const reason = error instanceof Error ? error.message : String(error)
-          try {
-            commander.appendReport({
-              sessionId: dispatch.sessionId,
-              content: `Your request could not be delivered to the Captain of "${dispatch.projectName}": ${reason}`,
-              projectId: dispatch.projectId,
-              correlationId: dispatch.correlationId
-            })
-          } catch (err) {
-            console.error('[Commander] Could not record the delivery failure:', err)
-          }
-        }
       }),
-      // Skill administration (#74). Like the project tools, writes act on the
-      // first call; there is no confirmation step.
+      // Merge grants (#137): list and revoke; creating one goes through ask_captain.
+      ...createCommanderMergeGrantTools({ db: deps.db, context }),
+      // Skill administration (#74): writes act on the first call.
       ...createCommanderSkillTools({
         db: deps.db,
         context,
@@ -104,11 +124,19 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
       })
     ])
   })
+  commanderRef = commander
   service = commander
 
   // #62: `report_to_commander` (Task API route) and `tell_commander`
   // escalations reach the sessions through this bridge.
-  installCommanderReportBridge({ service: commander, store, getProject: (projectId) => deps.db.getProject(projectId) })
+  installCommanderReportBridge({
+    service: commander,
+    store,
+    deliveries: delivery.store,
+    getProject: (projectId) => deps.db.getProject(projectId)
+  })
+  void delivery.reconcile().catch((error) => console.error('[Commander] Durable Captain delivery recovery failed:', error))
+  void recoverMergeGrantOutcomes(deps.db).catch((error) => console.error('[MergeGrants] Recovery failed:', error))
 
   /** Every Commander call is from the main window; the caller then receives events. */
   const trusted = (event: IpcMainInvokeEvent, channel: string): void => {
@@ -175,11 +203,20 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
     commander.setActiveSession(sessionId)
   })
 
-  ipcMain.handle('commander:send', (event, payload: { sessionId?: string; text?: string }) => {
+  // `images` (#144) are checked again in the service: type by magic bytes,
+  // size, count and total, whatever the renderer already checked.
+  ipcMain.handle('commander:send', (event, payload: { sessionId?: string; text?: string; images?: unknown }) => {
     trusted(event, 'commander:send')
     const sessionId = requireString(payload?.sessionId, 'sessionId')
-    const { turnId, message } = commander.sendUserMessage(sessionId, typeof payload?.text === 'string' ? payload.text : '')
+    const { turnId, message } = commander.sendUserMessage(sessionId, typeof payload?.text === 'string' ? payload.text : '', 'typed', payload?.images)
     return { turnId, message }
+  })
+
+  // The bytes of one stored image, for the transcript's thumbnails (#144).
+  ipcMain.handle('commander:getImage', (event, payload: { id?: string }) => {
+    trusted(event, 'commander:getImage')
+    const image = store.getImage(requireString(payload?.id, 'id'))
+    return image ? { id: image.id, name: image.name, mimeType: image.mime_type, data: image.data } : null
   })
 
   ipcMain.handle('commander:cancel', (event, payload: { sessionId?: string }) => {

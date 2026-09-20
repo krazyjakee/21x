@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { commanderApi } from '@/lib/ipc-client'
+import { clearCommanderImageCache } from '@/lib/commander-images'
 import { useCommanderStore } from '@/stores/commander-store'
 import { CommanderChatPane } from './CommanderChatPane'
 import { CommanderSessionList } from './CommanderSessionList'
@@ -7,8 +8,11 @@ import { CommanderVoiceControls } from './CommanderVoiceControls'
 
 /** Top-level Commander view: persisted sessions on the left, the open chat on the right. No canvas. */
 export function CommanderWorkspace() {
+  const sessionId = useCommanderStore((s) => s.selectedSessionId)
   const subscribe = useCommanderStore((s) => s.subscribe)
   const fetchSessions = useCommanderStore((s) => s.fetchSessions)
+
+  useEffect(() => () => clearCommanderImageCache(), [sessionId])
 
   useEffect(() => {
     const unsubscribe = subscribe()
@@ -27,7 +31,7 @@ export function CommanderWorkspace() {
   return (
     <div className="flex h-full min-h-0">
       <CommanderSessionList />
-      <CommanderChatPane />
+      <CommanderChatPane key={sessionId} />
       <CommanderVoiceControls />
     </div>
   )
