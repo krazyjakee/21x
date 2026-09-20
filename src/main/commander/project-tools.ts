@@ -609,13 +609,8 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
   ]
 }
 
-/** The tools that write. Kept beside the registry so the tests that prove each one acts on the first call and says so cannot drift. */
-export const MUTATING_COMMANDER_TOOLS = [
-  'pause_all_projects', 'create_project', 'update_project',
-  'add_project_repo', 'update_project_repo', 'remove_project_repo', 'reorder_project_repos',
-  'add_project_resource', 'update_project_resource', 'remove_project_resource', 'reorder_project_resources',
-  'archive_project', 'restore_project'
-] as const
+/** The tools that write (listed in src/shared so the renderer can tell an action from a read). The tests that prove each one acts on the first call and says so keep the list honest. */
+export { MUTATING_COMMANDER_TOOLS } from '../../shared/commander-tools'
 
 interface RepoInput {
   name: string

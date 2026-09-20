@@ -276,9 +276,10 @@ right place. The pieces:
 
 ## Voice mode (#64)
 
-The Commander view has a hands-free voice mode
-(`components/commander/CommanderVoiceControls.tsx`, a narrow strip to the right
-of the chat). The wake word stays out of scope.
+The Commander has a hands-free call owned by `CommanderCallHost`, mounted once
+from `AppLayout`. `CommanderVoiceControls` is only the narrow strip beside the
+chat; unmounting that view does not own or end media. The wake word stays out
+of scope.
 
 - **Turning it on** tells main which session to speak for
   (`voice:commander:setActive`) and immediately opens one `conversation` speech
@@ -288,8 +289,10 @@ of the chat). The wake word stays out of scope.
   no second Talk button. The microphone remains open; each pause
   finishes an utterance and sends it through `voice:commander:send`, which is
   `CommanderService.sendUserMessage` after cancelling any reply still running.
-  Turning it off, switching session, pressing Escape or leaving the view closes
-  the microphone, stops playback and closes any ElevenLabs connection.
+  Ending the call closes the microphone, stops playback and synthesis, cancels
+  the active Commander turn, and closes any ElevenLabs connection without
+  deleting chat. Leaving the view does none of those things. Escape and Stop
+  interrupt the current reply, briefly show "Stopped", and leave the call open.
 - **Half-heard words appear once** (#83). While its own conversation turn
   runs, the strip's status pill shows them and sets the voice store's
   `captionOwner`, so the global `VoiceOverlay` leaves its listening bubble out.
@@ -322,6 +325,19 @@ of the chat). The wake word stays out of scope.
   on a reported failure. "Another microphone is already listening" and errors
   sending a message have no settings button, because Settings cannot fix them.
   Typed chat is unaffected throughout.
+- **The call state is derived, not independently advanced.**
+  `deriveCallState()` combines the app-level call lifetime, the microphone
+  snapshot, the Commander turn observation and verified speech attribution.
+  Its states are `off`, `unavailable`, `ready`, `listening`, `transcribing`,
+  `thinking`, `working`, `speaking`, `interrupted` and `error`. The overlapping
+  words and tones come from the shared activity vocabulary. A successful
+  mutating tool result is presented briefly as "action taken" and an incoming
+  report as "report arrived"; neither invents another running state.
+- **Media is provider-neutral.** `commanderCallMedia` exposes capability flags,
+  on-demand input/output levels, partial and final user captions, assistant
+  `speechText`, and speech/interruption events. `wordTimings` is false and no
+  word index is fabricated. A future cloud provider can implement the same
+  `CallMedia` contract without changing the call store.
 - **The reply is spoken as it is written**, through whichever engine is
   selected in Settings → Voice (system, downloaded, or ElevenLabs). Each
   finished sentence is handed over as it arrives; a text run closed by a tool

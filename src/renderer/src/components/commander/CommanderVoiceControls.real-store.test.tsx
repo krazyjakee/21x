@@ -33,9 +33,11 @@ vi.mock('@/stores/commander-store', () => ({
 
 import { selectVoiceReady, selectVoiceSetupComplete, useVoiceStore } from '@/stores/voice-store'
 import { useUIStore } from '@/stores/ui-store'
-import { clearDictationTarget } from '@/lib/voice-dictation-target'
+import { clearDictationTarget, insertAndSubmit } from '@/lib/voice-dictation-target'
 import { SettingsTab } from '@/types'
 import { VoiceOverlay } from '@/components/voice/VoiceOverlay'
+import { CommanderCallHost, commanderCallMedia } from './CommanderCallHost'
+import { __resetCommanderCall, useCommanderCallStore } from '@/stores/commander-call-store'
 import {
   COMMANDER_VOICE_COMPOSER_KEY,
   CommanderVoiceControls,
@@ -103,6 +105,7 @@ function taskMicrophoneIsListening(words: string): void {
 function renderBoth(): ReturnType<typeof render> {
   return render(
     <>
+      <CommanderCallHost />
       <CommanderVoiceControls />
       <VoiceOverlay />
     </>
@@ -114,6 +117,7 @@ beforeEach(() => {
   mocks.commanderState.selectedSessionId = 'session-1'
   mocks.commanderState.streaming = {}
   clearDictationTarget()
+  __resetCommanderCall()
   useUIStore.setState({ activeModal: null, settingsTab: SettingsTab.GENERAL })
   reset()
 })
@@ -121,6 +125,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   clearDictationTarget()
+  __resetCommanderCall()
 })
 
 describe('another microphone keeps its captions (#83 blocker 2)', () => {
@@ -215,7 +220,7 @@ describe('another microphone keeps its captions (#83 blocker 2)', () => {
     act(() => taskMicrophoneIsListening('over here now'))
     expect(useVoiceStore.getState().captionOwner).toBeNull()
     expect(screen.getByTestId('voice-transcript')).toHaveTextContent('over here now')
-    expect(screen.getByTestId('commander-voice-status')).not.toHaveTextContent('over here now')
+    expect(screen.queryByTestId('commander-voice-status')).toBeNull()
   })
 
   it('releases the captions when it unmounts mid-setup', async () => {
@@ -223,10 +228,46 @@ describe('another microphone keeps its captions (#83 blocker 2)', () => {
     reset({ initializeTts: vi.fn(() => tts.promise) })
     const view = renderBoth()
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
-    await waitFor(() => expect(useVoiceStore.getState().captionOwner).toBe(COMMANDER_VOICE_COMPOSER_KEY))
+    await waitFor(() => expect(useVoiceStore.getState().initializeTts).toHaveBeenCalled())
+    // Preparing output does not claim captions before this call owns a mic.
+    expect(useVoiceStore.getState().captionOwner).toBeNull()
     act(() => view.unmount())
     expect(useVoiceStore.getState().captionOwner).toBeNull()
     tts.resolve()
+  })
+})
+
+describe('app-level call ownership', () => {
+  it('keeps the call and composer alive while the Commander controls unmount and remount', async () => {
+    const view = renderBoth()
+    fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
+    expect(await screen.findByText('Listening…')).toBeTruthy()
+    const turnId = useCommanderCallStore.getState().turnId
+
+    view.rerender(<><CommanderCallHost /><VoiceOverlay /></>)
+    expect(useCommanderCallStore.getState()).toMatchObject({ status: 'live', sessionId: 'session-1', turnId })
+    expect(useVoiceStore.getState().cancel).not.toHaveBeenCalled()
+
+    act(() => insertAndSubmit('still connected'))
+    await waitFor(() => expect(mocks.send).toHaveBeenCalledWith('session-1', 'still connected'))
+
+    view.rerender(<><CommanderCallHost /><CommanderVoiceControls /><VoiceOverlay /></>)
+    expect(await screen.findByLabelText('Turn voice mode off')).toBeTruthy()
+    expect(useVoiceStore.getState().startTurn).toHaveBeenCalledTimes(1)
+  })
+
+  it('exposes real levels and captions without inventing word timings', () => {
+    useVoiceStore.setState({ level: 0.4, partial: 'half heard', final: 'heard', speaking: true, speechText: 'answer' })
+    expect(commanderCallMedia.capabilities).toEqual({
+      partialCaptions: true,
+      wordTimings: false,
+      speechBargeIn: true,
+      streamingTts: true
+    })
+    expect(commanderCallMedia.inputLevel()).toBe(0.4)
+    expect(commanderCallMedia.userCaption).toEqual({ partial: 'half heard', final: 'heard' })
+    expect(commanderCallMedia.assistantCaption).toEqual({ text: 'answer', speaking: true })
+    expect(commanderCallMedia.assistantCaption).not.toHaveProperty('wordIndex')
   })
 })
 
@@ -237,7 +278,7 @@ describe('broken voice and missing devices have a way out (#83 blocker 3)', () =
     expect(selectVoiceSetupComplete(useVoiceStore.getState())).toBe(true)
     expect(selectVoiceReady(useVoiceStore.getState())).toBe(false)
 
-    render(<CommanderVoiceControls />)
+    renderBoth()
     const label = await screen.findByTestId('commander-voice-setup')
     expect(label).toHaveTextContent('Voice engine error')
     expect(label.getAttribute('title')).toContain('Speech worker crashed.')
@@ -254,7 +295,7 @@ describe('broken voice and missing devices have a way out (#83 blocker 3)', () =
       // Main reloads the engine on enable; here it fails again.
       setEnabled: vi.fn(async () => useVoiceStore.setState({ enabled: true, engine: { state: 'error', message: 'Speech worker crashed again.' } })),
     })
-    render(<CommanderVoiceControls />)
+    renderBoth()
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Speech worker crashed again.')
@@ -271,7 +312,7 @@ describe('broken voice and missing devices have a way out (#83 blocker 3)', () =
       engine: { state: 'error', message: 'Speech worker crashed.' },
       setEnabled: vi.fn(async () => useVoiceStore.setState({ enabled: true, engine: { state: 'ready', modelId: 'parakeet', engine: 'sherpa-onnx' } })),
     })
-    render(<CommanderVoiceControls />)
+    renderBoth()
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
     expect(await screen.findByText('Listening…')).toBeTruthy()
     expect(screen.queryByRole('alert')).toBeNull()
@@ -287,7 +328,7 @@ describe('broken voice and missing devices have a way out (#83 blocker 3)', () =
       // What the real startTurn leaves behind when capture fails: an error result and no turn.
       startTurn: vi.fn(async () => useVoiceStore.setState({ turnId: null, result: { kind: 'error', message, at: Date.now() } })),
     })
-    render(<CommanderVoiceControls />)
+    renderBoth()
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
 
     const alert = await screen.findByRole('alert')
@@ -300,7 +341,7 @@ describe('broken voice and missing devices have a way out (#83 blocker 3)', () =
   })
 
   it('offers the fix when the engine dies during a conversation', async () => {
-    render(<CommanderVoiceControls />)
+    renderBoth()
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
     expect(await screen.findByText('Listening…')).toBeTruthy()
 
@@ -329,7 +370,7 @@ describe('broken voice and missing devices have a way out (#83 blocker 3)', () =
         engine: { state: 'ready', modelId: 'parakeet', engine: 'sherpa-onnx' },
       })),
     })
-    render(<CommanderVoiceControls />)
+    renderBoth()
     const button = await screen.findByLabelText('Turn voice mode on')
     expect(screen.queryByTestId('commander-voice-setup')).toBeNull()
 
@@ -342,7 +383,7 @@ describe('broken voice and missing devices have a way out (#83 blocker 3)', () =
   it('does not offer Settings for a failure Settings cannot fix', async () => {
     mocks.send.mockRejectedValueOnce(new Error('No chat model is configured.'))
     const { insertAndSubmit } = await import('@/lib/voice-dictation-target')
-    render(<CommanderVoiceControls />)
+    renderBoth()
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
     expect(await screen.findByText('Listening…')).toBeTruthy()
     act(() => {

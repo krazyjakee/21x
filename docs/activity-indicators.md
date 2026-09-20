@@ -1,6 +1,6 @@
 # Activity indicators
 
-Status of GitHub [#95](https://github.com/krazyjakee/21x/issues/95): **first implementation**. This covers the shared vocabulary, freshness rules, indicator primitives, the voice adapter and the surfaces that did not conflict with the in-progress hands-free voice work. Board cards, the Commander chat/voice surfaces, the presence stage/PiP and the AppLayout mounting come in the follow-up "Activity indicators 3: hook up hands-free voice, board cards and redesign presence/PiP" (see [Not wired yet](#not-wired-yet)).
+Status of GitHub [#95](https://github.com/krazyjakee/21x/issues/95): **first implementation plus Commander call integration**. This covers the shared vocabulary, freshness rules, indicator primitives, the voice adapter, and app-level call ownership. Board cards, the presence stage/PiP and remaining surfaces still come in follow-up work (see [Not wired yet](#not-wired-yet)).
 
 The indicators answer one question, "is the Commander, a Captain or a task session doing something right now?", and they never claim activity without evidence. **Unknown is not idle, and idle is not running.**
 
@@ -66,8 +66,12 @@ All evidence is stamped with monotonic time (`performance.now()`, via `activityN
 
 - The store's `speaking` flag is set when synthesis *starts*, before any audio, and it names no speaker. On its own it never counts as speaking.
 - `speaking` needs three things: the passage attributed by its `speechStart` event (`taskId`) belongs to this entity, the same passage is open in `voicePlayback`, and `hasQueuedAudio` is true.
-- Unattributed passages give `unknown` for everyone. Today the Commander has no attributed passages.
-- The microphone has no owner yet, so `listening` is `unknown` unless a caller passes a provable owner. The hands-free follow-up supplies one.
+- Unattributed passages give `unknown` for everyone. Commander passages use
+  the shared `commander:<sessionId>` key, so only that Commander session may
+  claim them.
+- The microphone has no owner of its own, so `listening` is `unknown` unless a
+  caller passes a provable owner. The app-level Commander call host supplies
+  the session whose microphone turn it opened.
 
 The adapter controls no audio or microphone and adds no audio loop. #89 owns the real output-level speaking ring. Here speaking is a static speaker icon and ring.
 
@@ -128,12 +132,12 @@ These files belonged to another session's uncommitted hands-free voice work when
 - Board task cards (`TaskBoard.tsx`): mount the prepared `TaskActivityBadge`.
 - The task workspace (`TaskWorkspace.tsx`).
 - Commander chat (`CommanderChatPane.tsx`): replace its thinking dots with the shared result.
-- Commander voice controls: pass a provable capture/playback owner to the voice adapter.
 - The Commander presence stage and PiP (#85/#87): consume the same results; #89 supplies the speaking ring.
-- AppLayout call-lifetime mounting (#84) and the Commander CallAnnouncer (#91).
+- The Commander CallAnnouncer (#91).
 - An authoritative Commander idle snapshot, and a typed transport for the new `agent:status` fields in `electron.d.ts`/preload. The fields pass through today because preload forwards the payload unchanged, and the renderer validates them at runtime (`readAgentStatusActivityMeta`).
 
-Until then the Commander's speaking and listening states are always `unknown`, and a quiet Commander turn becomes unknown after 15 s.
+A quiet Commander turn still becomes unknown after 15 s; the call's verified
+speaking and listening claims do not rely on that stale turn observation.
 
 ## Tests
 

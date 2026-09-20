@@ -33,6 +33,7 @@ export class VoicePlayback {
   private pending = 0
   private levelTimer: number | null = null
   private handlers: VoicePlaybackHandlers = {}
+  private levelData: Uint8Array<ArrayBuffer> | null = null
 
   get isPlaying(): boolean {
     return this.speechId !== null
@@ -146,19 +147,27 @@ export class VoicePlayback {
     return context
   }
 
+  /**
+   * The loudness of what is sounding now, 0..1, read on demand (#84). 0 when
+   * nothing is queued. No timer and no store write: a speaking ring polls it
+   * per animation frame, only while it is visible.
+   */
+  get outputLevel(): number {
+    const analyser = this.analyser
+    if (!analyser || !this.speechId || this.pending <= 0) return 0
+    if (!this.levelData || this.levelData.length !== analyser.frequencyBinCount) {
+      this.levelData = new Uint8Array(analyser.frequencyBinCount)
+    }
+    return readLevel(analyser, this.levelData)
+  }
+
   private startLevelReporting(): void {
     if (this.levelTimer !== null || !this.handlers.onLevel || !this.analyser) return
     const data = new Uint8Array(this.analyser.frequencyBinCount)
     const tick = (): void => {
       const analyser = this.analyser
       if (!analyser || !this.speechId) return
-      analyser.getByteTimeDomainData(data)
-      let sum = 0
-      for (let i = 0; i < data.length; i++) {
-        const centred = (data[i] - 128) / 128
-        sum += centred * centred
-      }
-      this.handlers.onLevel?.(Math.min(1, Math.sqrt(sum / data.length) * 2))
+      this.handlers.onLevel?.(readLevel(analyser, data))
       this.levelTimer = window.setTimeout(tick, 60)
     }
     tick()
@@ -168,6 +177,17 @@ export class VoicePlayback {
     if (this.levelTimer !== null) window.clearTimeout(this.levelTimer)
     this.levelTimer = null
   }
+}
+
+/** RMS loudness of the analyser's current window, scaled to 0..1. */
+function readLevel(analyser: AnalyserNode, data: Uint8Array<ArrayBuffer>): number {
+  analyser.getByteTimeDomainData(data)
+  let sum = 0
+  for (let i = 0; i < data.length; i++) {
+    const centred = (data[i] - 128) / 128
+    sum += centred * centred
+  }
+  return Math.min(1, Math.sqrt(sum / data.length) * 2)
 }
 
 /** Signed 16-bit little-endian PCM to one mono audio buffer. */
