@@ -428,9 +428,9 @@ const PR_VIEW_FIELDS = 'url,number,title,state,isDraft,mergeable,mergeStateStatu
 const PR_REFS_QUERY = 'query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { headRefOid baseRefName baseRefOid latestReviews(first: 100) { nodes { author { login } state commit { oid } } pageInfo { hasNextPage } } } } }'
 
 function loginOf(value: unknown): string {
-  if (!value || typeof value !== 'object') return ''
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return ''
   const login = (value as { login?: unknown }).login
-  return typeof login === 'string' ? login : ''
+  return typeof login === 'string' && /^\S+$/.test(login) ? login : ''
 }
 
 /**
@@ -439,29 +439,41 @@ function loginOf(value: unknown): string {
  * cannot stand in for "someone independent looked at this" (#155).
  */
 function independentApprovalsFrom(raw: Record<string, unknown>, headRefOid: string, authorLogin: string): string[] {
+  if (!authorLogin) throw new Error('GitHub returned missing PR author identity for exact-head review data')
   const connection = raw.latestReviews
   if (!connection || typeof connection !== 'object' || Array.isArray(connection)) {
     throw new Error('GitHub returned missing exact-head review data')
   }
   const reviews = (connection as { nodes?: unknown }).nodes
   const pageInfo = (connection as { pageInfo?: unknown }).pageInfo
-  if (!Array.isArray(reviews) || !pageInfo || typeof pageInfo !== 'object' ||
+  if (!Array.isArray(reviews) || reviews.length > 100 || !pageInfo || typeof pageInfo !== 'object' || Array.isArray(pageInfo) ||
       typeof (pageInfo as { hasNextPage?: unknown }).hasNextPage !== 'boolean' ||
       (pageInfo as { hasNextPage: boolean }).hasNextPage) {
     throw new Error('GitHub returned incomplete exact-head review data')
   }
   const author = authorLogin.toLowerCase()
-  const logins = reviews
-    .filter((review): review is Record<string, unknown> => !!review && typeof review === 'object')
-    .filter((review) => String(review.state ?? '').toUpperCase() === 'APPROVED')
-    .filter((review) => {
-      const commit = review.commit
-      return !!commit && typeof commit === 'object' &&
-        (commit as { oid?: unknown }).oid === headRefOid
-    })
-    .map((review) => loginOf(review.author))
-    .filter((login) => login && login.toLowerCase() !== author)
-  return [...new Set(logins)]
+  const seen = new Set<string>()
+  const logins: string[] = []
+  for (const review of reviews) {
+    // Do not silently discard malformed nodes: another node might be an old
+    // approval from the same reviewer. latestReviews promises one per user.
+    if (!review || typeof review !== 'object' || Array.isArray(review)) {
+      throw new Error('GitHub returned malformed exact-head review data')
+    }
+    const login = loginOf(review.author)
+    const commit = review.commit
+    if (!login || typeof review.state !== 'string' ||
+        !['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED', 'DISMISSED'].includes(review.state) ||
+        !commit || typeof commit !== 'object' || Array.isArray(commit) ||
+        typeof commit.oid !== 'string' || !/^[0-9a-f]{40}$/i.test(commit.oid)) {
+      throw new Error('GitHub returned malformed exact-head review data')
+    }
+    const reviewer = login.toLowerCase()
+    if (seen.has(reviewer)) throw new Error('GitHub returned inconsistent exact-head review data')
+    seen.add(reviewer)
+    if (review.state === 'APPROVED' && commit.oid === headRefOid && reviewer !== author) logins.push(login)
+  }
+  return logins
 }
 
 /** Reads what the gate needs from GitHub, through the user's gh CLI. */

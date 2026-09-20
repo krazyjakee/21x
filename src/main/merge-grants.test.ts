@@ -1119,6 +1119,10 @@ describe('explicit project-wide grants (#155)', () => {
     wideGrant(h)
     h.setPr({ reviewDecision: '', author: { login: 'astra' }, latestReviews: reviewConnection([{ author: { login: 'someone-else' }, state: 'APPROVED', commit: { oid: SHA } }]) })
     expect((await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).status).toBe('merged')
+    const query = h.gh.mock.calls.find(([args]) => args[1] === 'graphql')![0].join(' ')
+    expect(query).toContain('headRefOid baseRefName baseRefOid latestReviews(first: 100)')
+    expect(query).toContain('commit { oid }')
+    expect(query).toContain('pageInfo { hasNextPage }')
   })
 
   it('rejects an independent approval of an older head even when GitHub reports APPROVED', async () => {
@@ -1149,6 +1153,72 @@ describe('explicit project-wide grants (#155)', () => {
     })
     expect(h.merges).toHaveLength(0)
     expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+  })
+
+  it.each([null, {}, { login: '' }, { login: ' ' }, { login: 42 }])('rejects unknown PR author %j before spending authority', async (author) => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.setPr({ author })
+    expect((await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).status).not.toBe('merged')
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+    expect(h.db.listPendingMergeGrantReservations(h.projectId)).toHaveLength(0)
+  })
+
+  it.each([undefined, null, [], {}, { nodes: [] }, { nodes: [], pageInfo: {} },
+    { nodes: [], pageInfo: { hasNextPage: 'false' } }])('rejects missing or malformed review connection %j', async (latestReviews) => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.setPr({ latestReviews })
+    expect((await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).status).not.toBe('merged')
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+  })
+
+  it.each(['COMMENTED', 'DISMISSED', 'CHANGES_REQUESTED'])('does not treat a current-head %s review as approval', async (state) => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.setPr({ latestReviews: reviewConnection([{ author: { login: 'reviewer' }, state, commit: { oid: SHA } }]) })
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({ reason_code: 'INDEPENDENT_REVIEW_REQUIRED' })
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+  })
+
+  it('rereads the approval before reserving authority even when refs have not changed', async () => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.gh.mockResolvedValueOnce(JSON.stringify(prState())).mockResolvedValueOnce(JSON.stringify(prState()))
+      .mockResolvedValueOnce(JSON.stringify(prState())).mockResolvedValueOnce(JSON.stringify(prState({
+        latestReviews: reviewConnection([{ author: { login: 'reviewer-dev' }, state: 'DISMISSED', commit: { oid: SHA } }])
+      })))
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({ reason_code: 'INDEPENDENT_REVIEW_REQUIRED' })
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+  })
+
+  it.each([
+    null, {}, { state: 'UNKNOWN' },
+    { author: null, state: 'APPROVED', commit: { oid: SHA } },
+    { author: { login: ' ' }, state: 'APPROVED', commit: { oid: SHA } },
+    { author: { login: 'other' }, state: ['APPROVED'], commit: { oid: SHA } },
+    { author: { login: 'other' }, state: 'APPROVED', commit: null },
+    { author: { login: 'other' }, state: 'APPROVED', commit: { oid: 'short' } },
+    { author: { login: 'REVIEWER-DEV' }, state: 'DISMISSED', commit: { oid: SHA } }
+  ])('rejects malformed or inconsistent review node %j even alongside an approval', async (node) => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.setPr({ latestReviews: { nodes: [
+      { author: { login: 'reviewer-dev' }, state: 'APPROVED', commit: { oid: SHA } }, node
+    ], pageInfo: { hasNextPage: false } } })
+    expect((await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).status).not.toBe('merged')
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+    expect(h.db.listPendingMergeGrantReservations(h.projectId)).toHaveLength(0)
   })
 
   it.each([
