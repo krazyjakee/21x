@@ -3669,7 +3669,9 @@ export class AgentManager extends EventEmitter {
   /** Withdraws a queued start; true when one was waiting. */
   cancelQueuedStart(taskId: string): boolean {
     const task = this.db.getTask(taskId)
-    this.deliveries.cancelUnacceptedForTask(taskId, 'Delivery cancelled because the user stopped this task before backend acceptance.')
+    if (this.db.db && typeof this.db.db.prepare === 'function') {
+      this.deliveries.cancelUnacceptedForTask(taskId, 'Delivery cancelled because the user stopped this task before backend acceptance.')
+    }
     if (!this.startQueue.get(taskId) && task?.agent_id) {
       this.startQueue.enqueue({ taskId, agentId: task.agent_id, projectId: taskProjectId(task),
         priority: task.priority, reason: 'recovery', queuedAt: new Date().toISOString() })
