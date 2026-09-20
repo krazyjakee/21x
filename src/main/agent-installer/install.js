@@ -6,6 +6,7 @@ import { fail, spawnInstall, streamProcess } from './installer-utils.js'
 import { installNodejs } from './nodejs.js'
 import { installGit } from './git.js'
 import { installCliTool } from './cli-tools.js'
+import { configureRtk } from './rtk.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -105,7 +106,7 @@ async function installPi(onProgress) {
 
 /**
  * Install an agent CLI tool.
- * @param {string} agentName - One of 'claudeCode', 'opencode', 'codex', 'pi', 'pnpm', 'gh', 'glab', 'nodejs', 'npm', 'git'
+ * @param {string} agentName - One of 'claudeCode', 'opencode', 'codex', 'pi', 'pnpm', 'gh', 'glab', 'rtk', 'nodejs', 'npm', 'git'
  * @param {(progress: { stage: string, output: string, percent: number }) => void} onProgress
  * @returns {Promise<{ success: boolean, error: string | null, newStatus: object }>}
  */
@@ -119,6 +120,18 @@ export async function installAgent(agentName, onProgress) {
     return installNodejs(onProgress)
   }
   if (agentName === 'gh' || agentName === 'glab') return installCliTool(agentName, onProgress)
+  if (agentName === 'rtk') {
+    const current = await detectInstalledAgents()
+    if (!current.rtk?.installed) {
+      const installed = await installCliTool('rtk', (progress) => onProgress({
+        ...progress,
+        stage: progress.stage === 'error' ? 'error' : 'installing',
+        percent: Math.min(65, Math.round(progress.percent * 0.65))
+      }))
+      if (!installed.success) return installed
+    }
+    return configureRtk(onProgress)
+  }
   if (Object.hasOwn(STANDALONE_AGENTS, agentName)) return installStandaloneAgent(agentName, STANDALONE_AGENTS[agentName], onProgress)
   if (agentName === 'pi') return installPi(onProgress)
 

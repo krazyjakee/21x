@@ -719,6 +719,11 @@ app.whenReady().then(async () => {
 
   db = new DatabaseManager()
   db.initialize()
+  db.onTaskActivity = (taskId, last_activity_at) => {
+    const data = { taskId, updates: { last_activity_at } }
+    if (mainWindow && !mainWindow.isDestroyed()) guardedIpcSend(mainWindow.webContents, 'task:updated', data)
+    broadcastToMobileClients('task:updated', data)
+  }
   // The task-management MCP server script calls back into this HTTP API.
   startTaskApiServer(db).catch(err =>
     console.error('[Main] Failed to start task API server:', err)
@@ -768,6 +773,11 @@ app.whenReady().then(async () => {
 
   syncManager = new SyncManager(db, pluginRegistry, oauthManager)
   agentManager.setSyncManager(syncManager)
+
+  // Process memory is gone after a crash, but starts, switches and accepted
+  // messages are durable. Repair or visibly fail them before schedulers can
+  // enqueue more work against stale ownership.
+  await agentManager.reconcileStartup()
 
   recurrenceScheduler = new RecurrenceScheduler(db)
   heartbeatScheduler = new HeartbeatScheduler(db, agentManager)

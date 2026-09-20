@@ -5,9 +5,10 @@ import { CommandInput } from './CommandInput'
 import { QuickChips } from './QuickChips'
 import { TaskBoard } from './TaskBoard'
 import type { Task, TaskStatus } from '@/types'
+import type { TaskBoardTransitionResult } from './task-board-transition'
 
 interface DashboardWorkspaceProps {
-  onTaskStatusChange?: (task: Task, status: TaskStatus) => void | Promise<void>
+  onTaskStatusChange?: (task: Task, status: TaskStatus) => void | TaskBoardTransitionResult | Promise<void | TaskBoardTransitionResult>
 }
 
 export function DashboardWorkspace({ onTaskStatusChange }: DashboardWorkspaceProps = {}) {
@@ -15,11 +16,11 @@ export function DashboardWorkspace({ onTaskStatusChange }: DashboardWorkspacePro
   const setShowOrchestrator = useUIStore((s) => s.setShowOrchestrator)
 
   // Handler: send message to Captain and open the drawer
-  const handleSendToCaptain = useCallback((message: string) => {
+  const handleSendToCaptain = useCallback((message: string, typed = false) => {
     // Open the orchestrator panel — the panel itself handles sending messages
     setShowOrchestrator(true)
     // We dispatch a custom event so the OrchestratorPanel can pick up the message
-    window.dispatchEvent(new CustomEvent('captain-prefill', { detail: { message } }))
+    window.dispatchEvent(new CustomEvent('captain-prefill', { detail: { message, typed } }))
   }, [setShowOrchestrator])
 
   // Handler: create task from command input text

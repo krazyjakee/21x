@@ -5,8 +5,10 @@ import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-libra
 import { DashboardWorkspace } from './DashboardWorkspace'
 import { useTaskStore } from '@/stores/task-store'
 import { useUIStore } from '@/stores/ui-store'
+import { agentApi, onAgentStartQueueChanged } from '@/lib/ipc-client'
 import { TaskStatus } from '@/types'
 import type { Task } from '@/types'
+import type { AgentStartQueueChangedEvent, QueuedAgentStart } from '@/types/electron'
 
 // Mock use-snooze-tick to avoid IPC dependency in tests
 vi.mock('@/hooks/use-snooze-tick', () => ({
@@ -60,10 +62,13 @@ vi.mock('@/lib/ipc-client', () => ({
   onTaskDeleted: vi.fn(() => () => {}),
   onTasksRefresh: vi.fn(() => () => {}),
   onAgentStatus: vi.fn(() => () => {}),
+  onAgentStartQueueChanged: vi.fn(() => () => {}),
   onTranscriptChanged: vi.fn(() => () => {}),
   onAgentIncompatibleSession: vi.fn(() => () => {}),
   agentApi: {
     getAll: vi.fn().mockResolvedValue([]),
+    getStartQueue: vi.fn().mockResolvedValue([]),
+    getStartRecoveryState: vi.fn().mockResolvedValue(null),
     create: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
@@ -120,6 +125,8 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 }
 
 beforeEach(() => {
+  vi.mocked(agentApi.getStartQueue).mockResolvedValue([])
+  vi.mocked(agentApi.getStartRecoveryState).mockResolvedValue(null)
   useTaskStore.setState({
     tasks: [],
     selectedTaskId: null,
@@ -133,6 +140,13 @@ beforeEach(() => {
 })
 
 describe('DashboardWorkspace', () => {
+  it('rehydrates a durable terminal start failure after reopening the board', async () => {
+    useTaskStore.setState({ tasks: [makeTask()] })
+    vi.mocked(agentApi.getStartRecoveryState).mockResolvedValueOnce({ taskId: 'task-1', state: 'failed' } as never)
+    render(<DashboardWorkspace />)
+    await waitFor(() => expect(screen.getByTestId('task-transition-task-1')).toHaveTextContent('failed'))
+  })
+
   it('shows no hosted-service prompts', () => {
     render(<DashboardWorkspace />)
     expect(screen.queryByText(/20x Cloud/)).toBeNull()
@@ -290,7 +304,7 @@ describe('DashboardWorkspace', () => {
     rectSpy.mockRestore()
   })
 
-  it('uses the pointer position and anchors the card in its destination while the move saves', async () => {
+  it('uses the pointer position and keeps the card truthful while the start command is pending', async () => {
     const task = makeTask({ id: 'task-pointer', title: 'Pointer task', status: TaskStatus.NotStarted })
     let finishStatusChange: (() => void) | undefined
     const onTaskStatusChange = vi.fn(() => new Promise<void>((resolve) => {
@@ -324,16 +338,63 @@ describe('DashboardWorkspace', () => {
 
     await waitFor(() => expect(onTaskStatusChange).toHaveBeenCalledWith(task, TaskStatus.Triaging))
     expect(onTaskStatusChange).not.toHaveBeenCalledWith(task, TaskStatus.Completed)
-    expect(screen.getByTestId('task-column-triaging').contains(screen.getByTestId('task-card-task-pointer'))).toBe(true)
+    expect(screen.getByTestId('task-column-not_started').contains(screen.getByTestId('task-card-task-pointer'))).toBe(true)
+    expect(screen.getByTestId('task-transition-task-pointer')).toHaveTextContent('starting')
     await waitFor(() => expect(screen.queryByText('Drop to complete')).toBeNull())
     await act(async () => {
       useTaskStore.setState({ tasks: [{ ...task, status: TaskStatus.Triaging }] })
       finishStatusChange?.()
     })
+    expect(screen.getByTestId('task-column-triaging').contains(screen.getByTestId('task-card-task-pointer'))).toBe(true)
     // PointerSensor intentionally retains its click suppressor for 50 ms so
     // the release cannot accidentally open the dragged card.
     await new Promise((resolve) => window.setTimeout(resolve, 60))
     rectSpy.mockRestore()
+  })
+
+  it('preserves an authoritative Queued badge across unrelated task snapshots until queue acknowledgement', async () => {
+    const task = makeTask({ id: 'task-queued', title: 'Queued task', status: TaskStatus.AgentWorking })
+    const queued: QueuedAgentStart = {
+      id: 'queue-1',
+      taskId: task.id,
+      projectId: 'default',
+      agentId: 'agent-1',
+      reason: 'recovery',
+      queuedAt: '2026-09-20T00:00:00.000Z',
+      position: 1,
+      priority: 'medium',
+      state: 'queued',
+      retryCount: 0,
+      nextRetryAt: null,
+      generation: 1,
+      dependencyReason: null,
+      recoveryCause: null,
+      recoveryAction: null,
+      recoveryResult: null,
+      lastError: null
+    }
+    let recovery: QueuedAgentStart = queued
+    vi.mocked(agentApi.getStartRecoveryState).mockImplementation(async () => recovery)
+    useTaskStore.setState({ tasks: [task] })
+
+    render(<DashboardWorkspace />)
+    expect(await screen.findByTestId(`task-transition-${task.id}`)).toHaveTextContent('queued')
+
+    await act(async () => {
+      useTaskStore.setState({ tasks: [{ ...task, title: 'Renamed while queued' }] })
+    })
+    expect(screen.getByText('Renamed while queued')).toBeInTheDocument()
+    expect(screen.getByTestId(`task-transition-${task.id}`)).toHaveTextContent('queued')
+
+    // Repeated queue snapshots are idempotent; only an authoritative removal
+    // acknowledges that the active start ownership ended.
+    const listener = vi.mocked(onAgentStartQueueChanged).mock.calls.at(-1)?.[0]
+    expect(listener).toBeDefined()
+    act(() => listener?.({ queue: [queued] } as AgentStartQueueChangedEvent))
+    await waitFor(() => expect(screen.getByTestId(`task-transition-${task.id}`)).toHaveTextContent('queued'))
+    recovery = { ...queued, state: 'started' }
+    act(() => listener?.({ queue: [] } as AgentStartQueueChangedEvent))
+    await waitFor(() => expect(screen.queryByTestId(`task-transition-${task.id}`)).toBeNull())
   })
 
   it('quick chip click for task opens create modal with prefill', () => {

@@ -101,6 +101,8 @@ interface AgentState {
   bindTranscript: (taskId: string) => () => void
   endSession: (taskId: string) => void
   removeSession: (taskId: string) => void
+  /** Forget a task's live session state but keep its transcript, e.g. before starting it on another agent. */
+  resetSession: (taskId: string) => void
   clearMessageDedup: (taskId: string) => void
   getSession: (taskId: string) => TaskSession | undefined
   stopAndRemoveSessionForTask: (taskId: string) => Promise<void>
@@ -236,7 +238,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
     }
 
     const previousStatus = session.status
-    const updated = { ...session, status: event.status }
+    const updated = { ...session, status: event.status, agentId: event.agentId || session.agentId }
     if (event.sessionId && session.sessionId !== event.sessionId) updated.sessionId = event.sessionId
     // Turn confirmed running (or errored/awaiting input) — stop showing
     // "starting". Interim `idle` events during resume must NOT clear it.
@@ -393,6 +395,15 @@ export const useAgentStore = create<AgentState>((set, get) => {
     removeSession: (taskId) => {
       projections.delete(taskId)
       set((state) => {
+        const next = new Map(state.sessions)
+        next.delete(taskId)
+        return { sessions: next }
+      })
+    },
+
+    resetSession: (taskId) => {
+      set((state) => {
+        if (!state.sessions.has(taskId)) return state
         const next = new Map(state.sessions)
         next.delete(taskId)
         return { sessions: next }

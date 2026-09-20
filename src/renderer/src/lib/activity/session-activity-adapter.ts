@@ -59,6 +59,11 @@ export interface SessionTransition {
 
 type TransitionListener = (transition: SessionTransition) => void
 const transitionListeners = new Set<TransitionListener>()
+/** Epochs and session ids superseded during this renderer lifetime. Keeping
+ * them outside the Zustand state makes a delayed IPC delivery unable to
+ * switch the store back to an older process/session generation. */
+const retiredEpochs = new Set<string>()
+const retiredSessions = new Map<string, Set<string>>()
 
 /** Subscribe to observed session transitions (not heartbeats, not first sightings). */
 export function onSessionTransition(listener: TransitionListener): () => void {
@@ -76,38 +81,66 @@ export function recordAgentStatus(event: unknown, now: number = activityNow()): 
   if (!event || typeof event !== 'object') return false
   const e = event as { taskId?: unknown; sessionId?: unknown; agentId?: unknown; status?: unknown }
   if (typeof e.taskId !== 'string' || !e.taskId) return false
+  if (typeof e.sessionId !== 'string') return false
   if (typeof e.status !== 'string' || !KNOWN_PHASES.has(e.status)) return false
   const meta = readAgentStatusActivityMeta(event)
+  // Activity evidence is fail-closed. A status without process generation and
+  // ordering metadata may still update the legacy agent store, but cannot
+  // prove freshness here.
+  if (!meta || retiredEpochs.has(meta.epoch)) return false
   const state = useSessionActivityStore.getState()
 
-  let epoch = state.epoch
-  let seq = state.seq
-  if (meta) {
-    if (meta.epoch === state.epoch && meta.seq <= state.seq) return false
-    epoch = meta.epoch
-    seq = meta.seq
+  const epoch = meta.epoch
+  const seq = meta.seq
+  let sessions = state.sessions
+  if (state.epoch !== null && meta.epoch !== state.epoch) {
+    retiredEpochs.add(state.epoch)
+    retiredSessions.clear()
+    // A main-process restart invalidates every observation at once. Individual
+    // sessions become known again only when the new epoch observes them.
+    sessions = {}
+  } else if (meta.epoch === state.epoch && meta.seq <= state.seq) {
+    return false
   }
 
   const taskId = e.taskId
   const status = e.status as LivePhase
-  const previous = state.sessions[taskId]
-  const sessionId = typeof e.sessionId === 'string' ? e.sessionId : previous?.sessionId ?? ''
-  const changed = previous !== undefined && previous.status !== status
+  if (!e.sessionId && status !== 'error') return false
+  // Startup failures are task-scoped and intentionally have no backend
+  // session id. Give that authoritative error a stable observation identity
+  // without making the legacy agent store invent a live session.
+  const sessionId = e.sessionId || `start-error:${taskId}`
+  let previous: SessionObservation | undefined = sessions[taskId]
+  const retiredForTask = retiredSessions.get(taskId)
+  if (retiredForTask?.has(sessionId)) return false
+  if (previous && previous.sessionId !== sessionId) {
+    // A heartbeat can only renew the session generation already observed for
+    // this task. A transition may introduce a resumed generation in any phase
+    // (including waiting approval or verified idle); once introduced, the old
+    // id is retired and can never switch ownership back.
+    if (meta.heartbeat) return false
+    const retired = retiredForTask ?? new Set<string>()
+    if (previous.sessionId) retired.add(previous.sessionId)
+    retiredSessions.set(taskId, retired)
+    previous = undefined
+  }
+  const transition: SessionTransition | null = previous && previous.status !== status
+    ? { taskId, from: previous.status, to: status, at: now }
+    : null
   const next: SessionObservation = {
     taskId,
     sessionId,
     agentId: typeof e.agentId === 'string' ? e.agentId : previous?.agentId ?? '',
     status,
     observedAt: now,
-    ...(changed
-      ? { lastTransition: { from: previous.status, to: status, at: now } }
+    ...(transition
+      ? { lastTransition: { from: transition.from, to: transition.to, at: transition.at } }
       : previous?.lastTransition
         ? { lastTransition: previous.lastTransition }
         : {})
   }
-  useSessionActivityStore.setState({ sessions: { ...state.sessions, [taskId]: next }, epoch, seq })
-  if (changed) {
-    const transition = { taskId, from: previous.status, to: status, at: now }
+  useSessionActivityStore.setState({ sessions: { ...sessions, [taskId]: next }, epoch, seq })
+  if (transition) {
     for (const listener of transitionListeners) {
       try {
         listener(transition)
@@ -138,6 +171,8 @@ export function recordStartQueue(
 /** Test-only reset. */
 export function __resetSessionActivity(): void {
   useSessionActivityStore.setState({ sessions: {}, queue: {}, queueObservedAt: null, epoch: null, seq: 0 })
+  retiredEpochs.clear()
+  retiredSessions.clear()
   transitionListeners.clear()
 }
 

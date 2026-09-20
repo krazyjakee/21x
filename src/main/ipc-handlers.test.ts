@@ -40,14 +40,21 @@ import { setTaskSchedulers } from './task-updates'
 
 /** Registers every handler with empty stand-ins for anything the test does not supply. */
 function register(overrides: Partial<Record<keyof IpcDeps, unknown>> = {}): void {
+  const agentManager = {
+    startTask: vi.fn().mockResolvedValue({ action: 'task_started', sessionId: 'session-1' }),
+    stopByTaskId: vi.fn().mockResolvedValue({ sessionId: null }),
+    hasTaskStartOwnership: vi.fn().mockReturnValue(false),
+    reconcileTaskRuntime: vi.fn(),
+    ...(overrides.agentManager as Record<string, unknown> | undefined)
+  }
   registerIpcHandlers({
     db: {},
-    agentManager: {},
     githubManager: {},
     worktreeManager: {},
     syncManager: {},
     pluginRegistry: {},
-    ...overrides
+    ...overrides,
+    agentManager
   } as unknown as IpcDeps)
 }
 
@@ -92,7 +99,7 @@ describe('registerIpcHandlers', () => {
     const handler = handlers.filter(([channel]) => channel === 'agentSession:startTask').pop()?.[1]
 
     await expect(handler!({}, 'task-1')).resolves.toEqual(outcome)
-    expect(startTask).toHaveBeenCalledWith('task-1')
+    expect(startTask).toHaveBeenCalledWith('task-1', { resumeManualStop: true })
   })
 
   it('keeps a newly created source-less task local', async () => {
@@ -220,67 +227,74 @@ describe('registerIpcHandlers', () => {
 describe('db:updateTask coordinator wake-up', () => {
   function setup(existing: Record<string, unknown>, updated: Record<string, unknown>) {
     const notifyParent = vi.fn().mockResolvedValue(undefined)
+    const startTask = vi.fn().mockResolvedValue({ action: 'task_started', sessionId: 'session-1' })
+    const stopByTaskId = vi.fn().mockResolvedValue({ sessionId: 'session-old' })
+    const updateTask = vi.fn(() => updated)
     register({
-      agentManager: { notifyParentOfSubtaskCompletion: notifyParent },
+      agentManager: { notifyParentOfSubtaskCompletion: notifyParent, startTask, stopByTaskId },
       db: {
         getTask: vi.fn(() => existing),
         getSetting: vi.fn(() => undefined),
-        updateTask: vi.fn(() => updated)
+        updateTask
       }
     })
 
     const handleCalls = (ipcMain.handle as ReturnType<typeof vi.fn>).mock.calls as [string, (...args: unknown[]) => unknown][]
     const updateHandler = handleCalls.filter((call) => call[0] === 'db:updateTask').pop()?.[1]
     expect(updateHandler).toBeDefined()
-    return { notifyParent, updateHandler: updateHandler! }
+    return { notifyParent, startTask, stopByTaskId, updateTask, updateHandler: updateHandler! }
   }
 
-  it('wakes the parent coordinator when a subtask is moved to a terminal state from the UI', () => {
+  it('wakes the parent coordinator when a subtask is moved to a terminal state from the UI', async () => {
     const existing = { id: 'sub-1', parent_task_id: 'parent-1', status: 'agent_working' }
     const updated = { ...existing, status: 'ready_for_review' }
-    const { notifyParent, updateHandler } = setup(existing, updated)
+    const { notifyParent, stopByTaskId, updateTask, updateHandler } = setup(existing, updated)
 
-    updateHandler({}, 'sub-1', { status: 'ready_for_review' })
+    await updateHandler({}, 'sub-1', { status: 'ready_for_review' })
 
     expect(notifyParent).toHaveBeenCalledWith('parent-1', 'sub-1')
+    expect(stopByTaskId).toHaveBeenCalledWith('sub-1')
+    expect(stopByTaskId.mock.invocationCallOrder[0]).toBeLessThan(updateTask.mock.invocationCallOrder[0])
   })
 
-  it('wakes the parent when a UI completion closes a subtask', () => {
+  it('wakes the parent when a UI completion closes a subtask', async () => {
     const existing = { id: 'sub-2', parent_task_id: 'parent-1', status: 'ready_for_review' }
     const updated = { ...existing, status: 'completed' }
     const { notifyParent, updateHandler } = setup(existing, updated)
 
-    updateHandler({}, 'sub-2', { status: 'completed' })
+    await updateHandler({}, 'sub-2', { status: 'completed' })
 
     expect(notifyParent).toHaveBeenCalledWith('parent-1', 'sub-2')
   })
 
-  it('does not wake the parent for a non-terminal status change', () => {
+  it('does not wake the parent for a non-terminal status change', async () => {
     const existing = { id: 'sub-3', parent_task_id: 'parent-1', status: 'not_started' }
     const updated = { ...existing, status: 'agent_working' }
-    const { notifyParent, updateHandler } = setup(existing, updated)
+    const { notifyParent, startTask, updateTask, updateHandler } = setup(existing, updated)
 
-    updateHandler({}, 'sub-3', { status: 'agent_working' })
+    await updateHandler({}, 'sub-3', { status: 'agent_working' })
 
     expect(notifyParent).not.toHaveBeenCalled()
+    expect(startTask).toHaveBeenCalledWith('sub-3', { resumeManualStop: true })
+    expect(updateTask).not.toHaveBeenCalled()
   })
 
-  it('does not wake the parent when the status did not change', () => {
+  it('does not wake the parent when the status did not change', async () => {
     const existing = { id: 'sub-4', parent_task_id: 'parent-1', status: 'ready_for_review' }
     const updated = { ...existing, title: 'rename only path' }
     const { notifyParent, updateHandler } = setup(existing, updated)
 
-    updateHandler({}, 'sub-4', { title: 'rename only path' })
+    await updateHandler({}, 'sub-4', { title: 'rename only path' })
 
     expect(notifyParent).not.toHaveBeenCalled()
   })
 
-  it('does not wake anything for a top-level task', () => {
+  it('does not wake anything for a top-level task', async () => {
     const existing = { id: 'top-1', parent_task_id: null, status: 'agent_working' }
     const updated = { ...existing, status: 'ready_for_review' }
     const { notifyParent, updateHandler } = setup(existing, updated)
 
-    updateHandler({}, 'top-1', { status: 'ready_for_review' })
+    await updateHandler({}, 'top-1', { status: 'ready_for_review' })
 
     expect(notifyParent).not.toHaveBeenCalled()
   })
@@ -312,7 +326,7 @@ describe('db:updateTask heartbeat cascade on parent completion', () => {
     return { disableHeartbeat, updateHandler: updateHandler! }
   }
 
-  it('disables heartbeat on subtasks still in review when the parent is completed', () => {
+  it('disables heartbeat on subtasks still in review when the parent is completed', async () => {
     const existing = { id: 'parent-1', status: 'ready_for_review' }
     const updated = { ...existing, status: 'completed' }
     const { disableHeartbeat, updateHandler } = setup({
@@ -324,13 +338,13 @@ describe('db:updateTask heartbeat cascade on parent completion', () => {
       ]
     })
 
-    updateHandler({}, 'parent-1', { status: 'completed' })
+    await updateHandler({}, 'parent-1', { status: 'completed' })
 
     expect(disableHeartbeat).toHaveBeenCalledWith('sub-1')
     expect(disableHeartbeat).not.toHaveBeenCalledWith('sub-2')
   })
 
-  it('does not touch subtask heartbeats for a non-completion status change', () => {
+  it('does not touch subtask heartbeats for a non-completion status change', async () => {
     const existing = { id: 'parent-1', status: 'not_started' }
     const updated = { ...existing, status: 'agent_working' }
     const { disableHeartbeat, updateHandler } = setup({
@@ -339,7 +353,7 @@ describe('db:updateTask heartbeat cascade on parent completion', () => {
       subtasks: [{ id: 'sub-1', heartbeat_enabled: true }]
     })
 
-    updateHandler({}, 'parent-1', { status: 'agent_working' })
+    await updateHandler({}, 'parent-1', { status: 'agent_working' })
 
     expect(disableHeartbeat).not.toHaveBeenCalled()
   })

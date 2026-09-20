@@ -18,6 +18,8 @@ describe('shared activity contract', () => {
     expect(readAgentStatusActivityMeta({ epoch: 'E', seq: 3, heartbeat: true })).toEqual({ epoch: 'E', seq: 3, heartbeat: true })
     expect(readAgentStatusActivityMeta({ epoch: '', seq: 3 })).toBeNull()
     expect(readAgentStatusActivityMeta({ epoch: 'E', seq: 'x' })).toBeNull()
+    expect(readAgentStatusActivityMeta({ epoch: 'E', seq: 0 })).toBeNull()
+    expect(readAgentStatusActivityMeta({ epoch: 'E', seq: 1.5 })).toBeNull()
     expect(readAgentStatusActivityMeta({ taskId: 't', status: 'idle' })).toBeNull()
     expect(readAgentStatusActivityMeta(null)).toBeNull()
   })

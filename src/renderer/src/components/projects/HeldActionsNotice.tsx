@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
-import { Check, ShieldAlert, ShieldQuestion, X } from 'lucide-react'
+import { useEffect, useState, useRef, useId } from 'react'
+import { Check, ShieldAlert, ShieldCheck, ShieldQuestion, X } from 'lucide-react'
 import { ACTIVITY_REVALIDATE_MS, ACTIVITY_STALE_MS } from '@shared/activity'
 import { activityNow } from '@/lib/activity/activity-clock'
-import { escalationApi } from '@/lib/ipc-client'
+import { escalationApi, mergeGrantsApi } from '@/lib/ipc-client'
 import { useProjectStore } from '@/stores/project-store'
 import type { HeldAction } from '@shared/project-limit-types'
+import { describeMergeGrant, type MergeGrant } from '@shared/merge-grants'
 
 /**
  * Captain tool calls held by a project's escalation policy (#66), as a
@@ -14,6 +15,9 @@ import type { HeldAction } from '@shared/project-limit-types'
  * 5 s (#95), and when reads keep failing for 15 s a static "unavailable" pill
  * replaces silence, because a failed read must not look like "nothing held".
  * This is a policy-held action (orthogonal to session approval requests).
+ *
+ * Active merge grants (#137) are listed here too, each revocable in one
+ * click, so standing authority the user gave is always in sight.
  */
 export function HeldActionsNotice() {
   const [held, setHeld] = useState<HeldAction[]>([])
@@ -21,6 +25,30 @@ export function HeldActionsNotice() {
   const [busy, setBusy] = useState<string | null>(null)
   const [unavailable, setUnavailable] = useState(false)
   const projects = useProjectStore((s) => s.projects)
+  const [error, setError] = useState<string | null>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const dialogId = useId()
+  useEffect(() => { if (open) dialogRef.current?.focus() }, [open])
+  const [grants, setGrants] = useState<MergeGrant[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    const load = () => {
+      mergeGrantsApi.listActive()
+        .then((list) => { if (!cancelled) setGrants(list ?? []) })
+        .catch(() => { /* no bridge in a test shell */ })
+    }
+    try {
+      load()
+    } catch {
+      // No bridge, nothing to show.
+    }
+    // Expiry is time-based: refresh now and then as well as on change.
+    const timer = setInterval(load, 60_000)
+    const off = mergeGrantsApi.onChanged(() => load())
+    return () => { cancelled = true; clearInterval(timer); off() }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -51,16 +79,33 @@ export function HeldActionsNotice() {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
       read()
     }, ACTIVITY_REVALIDATE_MS)
+    const onVisibility = (): void => {
+      if (document.visibilityState !== 'visible') return
+      const since = lastOkAt ?? startedAt
+      if (activityNow() - since >= ACTIVITY_STALE_MS) setUnavailable(true)
+      read()
+    }
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisibility)
     const off = escalationApi.onHeldChanged((event) => {
       generation += 1
       ok(event?.held)
     })
-    return () => { cancelled = true; clearInterval(timer); off() }
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility)
+      off()
+    }
   }, [])
 
-  useEffect(() => { if (held.length === 0) setOpen(false) }, [held.length])
+  useEffect(() => { if (held.length === 0 && grants.length === 0) setOpen(false) }, [held.length, grants.length])
 
-  if (unavailable) {
+  // A stale cached action is useful only as evidence that the source is
+  // unavailable. It must not remain approvable/rejectable after freshness is
+  // lost. Merge grants have their own live source and remain usable.
+  const visibleHeld = unavailable ? [] : held
+
+  if (unavailable && grants.length === 0) {
     return (
       <span
         className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-muted-foreground"
@@ -75,9 +120,23 @@ export function HeldActionsNotice() {
     )
   }
 
-  if (held.length === 0) return null
+  if (visibleHeld.length === 0 && grants.length === 0) return null
 
   const projectName = (id: string): string => projects.find((p) => p.id === id)?.name ?? 'Project'
+
+  const revokeGrant = async (id: string) => {
+    setBusy(id)
+    setError(null)
+    try {
+      const result = await mergeGrantsApi.revoke(id)
+      if (!result.ok) throw new Error(result.error || 'Could not revoke the merge grant')
+      setGrants((list) => list.filter((grant) => grant.id !== id))
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Could not revoke the merge grant')
+    } finally {
+      setBusy(null)
+    }
+  }
 
   const answer = async (id: string, approve: boolean) => {
     setBusy(id)
@@ -90,29 +149,53 @@ export function HeldActionsNotice() {
   }
 
   return (
-    <div className="relative">
+    <div className="relative" onKeyDown={(event) => {
+      if (event.key === 'Escape') { event.stopPropagation(); setOpen(false); triggerRef.current?.focus() }
+    }} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false) }}>
       <button
+        ref={triggerRef}
+        aria-haspopup="dialog"
+        aria-controls={open ? dialogId : undefined}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-amber-700 hover:bg-amber-500/10 dark:text-amber-400 cursor-pointer"
-        title="Captain actions waiting for your approval"
-        aria-label={`${held.length} Captain action${held.length !== 1 ? 's' : ''} waiting for approval`}
+        className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium cursor-pointer ${visibleHeld.length > 0 ? 'text-amber-700 hover:bg-amber-500/10 dark:text-amber-400' : 'text-muted-foreground hover:bg-muted'}`}
+        title={unavailable ? 'Held Captain actions unavailable; active merge grants shown' : visibleHeld.length > 0 ? 'Captain actions waiting for your approval' : 'Active merge grants'}
+        aria-label={[
+          unavailable ? 'Held Captain actions unavailable' : '',
+          visibleHeld.length > 0 ? `${visibleHeld.length} Captain action${visibleHeld.length !== 1 ? 's' : ''} waiting for approval` : '',
+          grants.length > 0 ? `${grants.length} active merge grant${grants.length !== 1 ? 's' : ''}` : ''
+        ].filter(Boolean).join(', ')}
         aria-expanded={open}
       >
-        <ShieldAlert className="h-3 w-3" />
-        {held.length} waiting for approval
+        {unavailable ? <ShieldQuestion className="h-3 w-3" /> : visibleHeld.length > 0 ? <ShieldAlert className="h-3 w-3" /> : <ShieldCheck className="h-3 w-3" />}
+        {unavailable && 'held actions unavailable'}
+        {unavailable && grants.length > 0 && ' · '}
+        {visibleHeld.length > 0 && `${visibleHeld.length} waiting for approval`}
+        {visibleHeld.length > 0 && grants.length > 0 && ' · '}
+        {grants.length > 0 && `${grants.length} merge grant${grants.length !== 1 ? 's' : ''}`}
       </button>
       {open && (
         <div
+          ref={dialogRef}
+          id={dialogId}
+          tabIndex={-1}
           role="dialog"
-          aria-label="Held Captain actions"
-          className="absolute bottom-full right-0 z-50 mb-2 w-96 rounded-lg border border-border bg-card p-2 text-xs text-foreground shadow-lg"
+          aria-label="Captain approvals and merge grants"
+          className="absolute bottom-full right-0 z-50 mb-2 max-h-[70vh] overflow-y-auto w-96 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-card p-2 text-xs text-foreground shadow-lg"
         >
-          <p className="mb-2 px-1 text-[11px] text-muted-foreground">
-            The project’s escalation policy asks you before these run. Approve runs the call; Reject drops it and tells the Captain.
-          </p>
+          {error && <p role="alert" className="mb-2 text-destructive">{error}</p>}
+          {unavailable && (
+            <p role="status" className="mb-2 px-1 text-[11px] text-muted-foreground">
+              Held Captain actions could not be read. Active merge grants remain available below.
+            </p>
+          )}
+          {visibleHeld.length > 0 && (
+            <p className="mb-2 px-1 text-[11px] text-muted-foreground">
+              The project’s escalation policy asks you before these run. Approve runs the call; Reject drops it and tells the Captain.
+            </p>
+          )}
           <ul className="space-y-1.5">
-            {held.map((action) => (
+            {visibleHeld.map((action) => (
               <li key={action.id} className="flex items-start gap-2 rounded-md border border-border/60 bg-background px-2 py-1.5">
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-medium" title={action.summary}>{action.summary}</div>
@@ -141,6 +224,34 @@ export function HeldActionsNotice() {
               </li>
             ))}
           </ul>
+          {grants.length > 0 && (
+            <>
+              <p className="mb-2 mt-2 px-1 text-[11px] text-muted-foreground">
+                Merge grants you gave: the Captain merges covered PRs without asking, once checks and branch protection pass. Revoke stops it at once.
+              </p>
+              <ul className="space-y-1.5" aria-label="Active merge grants">
+                {grants.map((grant) => (
+                  <li key={grant.id} className="flex items-start gap-2 rounded-md border border-border/60 bg-background px-2 py-1.5">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium" title={describeMergeGrant(grant)}>{describeMergeGrant(grant)}</div>
+                      <div className="truncate text-[10px] italic text-muted-foreground" title={grant.user_text}>“{grant.user_text}”</div>
+                      <div className="text-[10px] text-muted-foreground">{projectName(grant.project_id)} · {grant.uses}{grant.max_uses !== null ? `/${grant.max_uses}` : ''} used</div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={busy === grant.id}
+                      onClick={() => void revokeGrant(grant.id)}
+                      className="flex items-center gap-1 rounded px-1.5 py-1 text-destructive hover:bg-destructive/10 disabled:opacity-50 cursor-pointer"
+                      title="Revoke this merge grant"
+                      aria-label={`Revoke merge grant: ${describeMergeGrant(grant)}`}
+                    >
+                      <X className="h-3.5 w-3.5" /> Revoke
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </div>
       )}
     </div>

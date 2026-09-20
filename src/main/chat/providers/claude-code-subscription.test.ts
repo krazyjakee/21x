@@ -10,7 +10,7 @@ async function drain(iterable: AsyncIterable<ChatProviderEvent>): Promise<ChatPr
 }
 
 function fakeQuery(result: { type: string; [key: string]: unknown }) {
-  return vi.fn((_input: { prompt: string; options: Record<string, unknown> }) => ({
+  return vi.fn((_input: { prompt: string | AsyncIterable<unknown>; options: Record<string, unknown> }) => ({
     async *[Symbol.asyncIterator]() {
       yield result
     },
@@ -101,7 +101,7 @@ describe('ClaudeCodeSubscriptionChatProvider', () => {
         usage: {}
       }
     ]
-    const query = vi.fn((_input: { prompt: string; options: Record<string, unknown> }) => ({
+    const query = vi.fn((_input: { prompt: string | AsyncIterable<unknown>; options: Record<string, unknown> }) => ({
       async *[Symbol.asyncIterator]() {
         yield results.shift()!
       }

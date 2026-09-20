@@ -23,7 +23,9 @@ export type ProjectStatusAgents = Pick<AgentManager, 'getStartQueue' | 'findSess
 /** The live state of a project's tasks; empty when no agent manager is around (tests, early start-up). */
 export function liveProjectState(db: ProjectStatusStore, agents: ProjectStatusAgents | null | undefined, projectId: string): ProjectStatusLiveState {
   if (!agents) return {}
-  const queuedTaskIds = agents.getStartQueue().map((entry) => entry.taskId)
+  const queuedTaskIds = agents.getStartQueue()
+    .filter((entry) => !('state' in entry) || entry.state === 'queued' || entry.state === 'retrying')
+    .map((entry) => entry.taskId)
   const approvalTaskIds: string[] = []
   for (const task of db.getTasks({ projectId })) {
     const found = agents.findSessionByTaskId(task.id)

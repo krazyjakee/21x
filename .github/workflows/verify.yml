@@ -40,3 +40,11 @@ jobs:
 
       - name: Test
         run: pnpm test:run
+
+      - name: Navigation rail real-scrollport regression
+        run: |
+          # Hosted Linux needs Chromium's packaged SUID helper configured.
+          electron_sandbox="$(node -p "require('node:path').join(require('node:path').dirname(require('electron')), 'chrome-sandbox')")"
+          sudo chown root:root "$electron_sandbox"
+          sudo chmod 4755 "$electron_sandbox"
+          xvfb-run --auto-servernum pnpm test:nav-rail

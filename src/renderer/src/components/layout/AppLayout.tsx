@@ -14,7 +14,7 @@ import { useAgentStore } from '@/stores/agent-store'
 import { useProjectStore } from '@/stores/project-store'
 import { useAgentAutoStart } from '@/hooks/use-agent-auto-start'
 import { useOverdueNotifications } from '@/hooks/use-overdue-notifications'
-import { agentSessionApi, settingsApi, projectApi, onTaskSourceActionFailed } from '@/lib/ipc-client'
+import { agentApi, agentSessionApi, settingsApi, projectApi, onTaskSourceActionFailed } from '@/lib/ipc-client'
 import { isOverdue, isSnoozed } from '@/lib/utils'
 import { onShortcutFeedback } from '@/lib/keyboard-shortcuts'
 import { TASK_STATUSES, TaskStatus } from '@/types'
@@ -29,6 +29,8 @@ import { TaskDialogs } from './TaskDialogs'
 import { ProjectEditorDialog } from '@/components/projects/ProjectEditorDialog'
 import { useActiveTaskActions } from './hooks/use-active-task-actions'
 import { useGlobalShortcuts } from './hooks/use-global-shortcuts'
+import { transitionTaskFromBoard } from '@/components/dashboard/task-board-transition'
+import type { TaskBoardTransitionResult } from '@/components/dashboard/task-board-transition'
 import { CommanderCallHost } from '@/components/commander/CommanderCallHost'
 
 // Lazy-load heavy workspaces so they are only imported when their view is active;
@@ -134,30 +136,23 @@ export function AppLayout() {
   const handleUpdateTask = useCallback(async (taskId: string, data: Record<string, unknown>) => {
     await updateTask(taskId, data as UpdateTaskDTO)
   }, [updateTask])
-  const handleDashboardTaskStatusChange = useCallback(async (task: Task, status: TaskStatus) => {
+  const handleDashboardTaskStatusChange = useCallback(async (task: Task, status: TaskStatus): Promise<TaskBoardTransitionResult> => {
     try {
-      if (status === TaskStatus.Completed) {
-        await completeTask(task.id)
-        return
+      const result = await transitionTaskFromBoard(task, status, {
+        startTask: agentSessionApi.startTask,
+        stopByTaskId: agentSessionApi.stopByTaskId,
+        getStartRecoveryState: agentApi.getStartRecoveryState,
+        updateTask,
+        completeTask
+      })
+      if (result.phase === 'queued') {
+        showToast(`Queued "${task.title}" to start${result.queuePosition ? ` (position ${result.queuePosition})` : ''}`)
       }
-      await updateTask(task.id, { status })
-
-      // Dropping into an execution stage replaces opening the ticket and
-      // pressing Triage/Start. The main process owns the exact behavior: an
-      // unassigned task is triaged, an assigned task starts, and a constrained
-      // start is queued through normal admission control.
-      if (status === TaskStatus.Triaging || status === TaskStatus.AgentWorking) {
-        const result = await agentSessionApi.startTask(task.id)
-        if (result.action === 'no_action') {
-          throw new Error('No configured agent is available to start this task')
-        }
-        if (result.action === 'queued') {
-          showToast(`Queued "${task.title}" to start${result.queuePosition ? ` (position ${result.queuePosition})` : ''}`)
-        }
-      }
+      return result
     } catch (error) {
       const statusLabel = TASK_STATUSES.find((entry) => entry.value === status)?.label ?? status
       showToast(`Could not move "${task.title}" to ${statusLabel}: ${error instanceof Error ? error.message : String(error)}`, true)
+      throw error
     }
   }, [completeTask, showToast, updateTask])
   const handleNavigateToTask = useCallback((taskId: string) => selectTask(taskId), [selectTask])

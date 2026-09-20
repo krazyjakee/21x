@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { createTestDb } from '../../test/helpers/db-test-helper'
 import { SyncManager } from './sync-manager'
-import { TaskStatus } from '../shared/constants'
+import { PluginActionId, TaskStatus } from '../shared/constants'
 import type { DatabaseManager, TaskRecord } from './database'
 import type { PluginRegistry } from './plugins/registry'
 import type { TaskSourcePlugin } from './plugins/types'
@@ -227,7 +228,40 @@ describe('SyncManager', () => {
       const result = await syncManager.executeAction('approve', task, undefined, 'src-1')
 
       expect(result.success).toBe(true)
-      expect(db.updateTask).toHaveBeenCalledWith('t1', { status: TaskStatus.Completed }, 'task-source')
+      expect(db.updateTask).toHaveBeenCalledWith('t1', { status: TaskStatus.Completed }, 'task-source-action')
     })
+  })
+})
+
+// Exercise the common action boundary with a real database, including ancestor
+// activity. These are the four comment-capable source plugins' result shapes.
+describe.each(['github-issues', 'linear', 'forgejo-issues', 'youtrack'])('%s comment activity', (pluginId) => {
+  let db: DatabaseManager
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime('2026-01-01T00:00:00.000Z')
+    ;({ db } = createTestDb())
+  })
+  afterEach(() => { db.close(); vi.useRealTimers() })
+
+  it.each([
+    { name: 'success without taskUpdate', action: PluginActionId.AddComment, result: { success: true }, active: true },
+    { name: 'success with empty taskUpdate', action: PluginActionId.AddComment, result: { success: true, taskUpdate: {} }, active: true },
+    { name: 'failed comment', action: PluginActionId.AddComment, result: { success: false }, active: false },
+    { name: 'passive source action', action: 'open_url', result: { success: true }, active: false }
+  ])('$name', async ({ action, result, active }) => {
+    const parent = db.createTask({ title: 'Parent' })!
+    const task = db.createTask({ title: 'Issue', parent_task_id: parent.id })!
+    vi.spyOn(db, 'getTaskSource').mockReturnValue({ id: 'source', plugin_id: pluginId, config: {} } as ReturnType<DatabaseManager['getTaskSource']>)
+    const plugin = makeMockPlugin({ id: pluginId, executeAction: vi.fn().mockResolvedValue(result) })
+    const registry = { get: vi.fn(() => plugin) } as unknown as PluginRegistry
+    const notify = vi.fn()
+    db.onTaskActivity = notify
+    vi.setSystemTime('2026-01-02T00:00:00.000Z')
+    expect(await new SyncManager(db, registry).executeAction(action, task, 'Comment', 'source')).toEqual(result)
+    for (const id of [task.id, parent.id]) {
+      expect(db.getTask(id)?.last_activity_at).toBe(active ? '2026-01-02T00:00:00.000Z' : task.last_activity_at)
+    }
+    expect(notify).toHaveBeenCalledTimes(active ? 2 : 0)
   })
 })

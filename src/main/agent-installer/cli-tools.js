@@ -24,6 +24,18 @@ export function selectGhMacAsset(release, arch = process.arch) {
   return null
 }
 
+/** Pick the RTK archive for the current OS and CPU architecture. */
+export function selectRtkAsset(release, platform = process.platform, arch = process.arch) {
+  const cpu = arch === 'arm64' ? 'aarch64' : 'x86_64'
+  const suffix = platform === 'darwin'
+    ? `rtk-${cpu}-apple-darwin.tar.gz`
+    : platform === 'linux'
+      ? `rtk-${cpu}-unknown-linux-${arch === 'arm64' ? 'gnu' : 'musl'}.tar.gz`
+      : null
+  if (!suffix) return null
+  return release?.assets?.find((asset) => asset?.name === suffix && asset?.browser_download_url) || null
+}
+
 function githubAsset(asset) {
   return asset?.browser_download_url ? { url: asset.browser_download_url, name: asset.name } : null
 }
@@ -59,6 +71,17 @@ const CLI_TOOLS = {
     releaseUrl: 'https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/releases/permalink/latest',
     macAsset: (release) => glabAsset(release, 'macOS'),
     linuxAsset: (release) => glabAsset(release, 'Linux')
+  },
+  rtk: {
+    label: 'RTK',
+    wingetId: 'rtk-ai.rtk',
+    host: 'github.com',
+    docsUrl: 'https://github.com/rtk-ai/rtk',
+    unsupported: 'RTK must be installed manually on this platform. See https://github.com/rtk-ai/rtk',
+    releaseUrl: 'https://api.github.com/repos/rtk-ai/rtk/releases/latest',
+    headers: { 'User-Agent': '21x-app' },
+    macAsset: (release) => selectRtkAsset(release, 'darwin'),
+    linuxAsset: (release) => selectRtkAsset(release, 'linux')
   }
 }
 
@@ -161,9 +184,9 @@ async function installLinux(name, tool, onProgress) {
 }
 
 /**
- * Install the GitHub (gh) or GitLab (glab) CLI: winget on Windows, release
+ * Install the GitHub (gh), GitLab (glab), or RTK CLI: winget on Windows, release
  * download elsewhere.
- * @param {'gh' | 'glab'} name
+ * @param {'gh' | 'glab' | 'rtk'} name
  */
 export async function installCliTool(name, onProgress) {
   const tool = CLI_TOOLS[name]

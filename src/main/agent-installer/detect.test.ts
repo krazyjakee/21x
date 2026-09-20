@@ -73,7 +73,14 @@ describe('detectInstalledAgents', () => {
     expect(status.opencode).toEqual({ installed: true, version: '0.6.2' })
     expect(status.cursor).toEqual({ installed: false, version: null })
     expect(status.pi).toMatchObject({ installed: false, supported: false })
+    expect(status.rtk).toMatchObject({ installed: false, configured: false })
     expect(getInstalledBackends(status)).toEqual(['claudeCode', 'opencode', 'codex'])
+  })
+
+  it('detects RTK independently from coding-agent availability', async () => {
+    const status = await detectInstalledAgents({ exec: fakeExec({ rtk: 'rtk 0.49.0' }) })
+
+    expect(status.rtk).toMatchObject({ installed: true, version: '0.49.0', configured: false })
   })
 
   it('reports a fresh snapshot on each run so installs and removals show up', async () => {

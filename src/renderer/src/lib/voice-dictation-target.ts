@@ -52,6 +52,11 @@ export function taskIdOfComposer(key: string | null): string | undefined {
   return key
 }
 
+const dictatedDrafts = new WeakSet<Element>()
+
+export function hasDictatedText(field: Element): boolean { return dictatedDrafts.has(field) }
+export function clearDictatedText(field: Element): void { dictatedDrafts.delete(field) }
+
 export type DictationTarget = HTMLTextAreaElement | HTMLInputElement
 
 export interface ComposerRegistration {
@@ -206,6 +211,7 @@ export function insertDictation(text: string): boolean {
   if (setter) setter.call(field, next)
   else field.value = next
 
+  dictatedDrafts.add(field)
   field.dispatchEvent(new Event('input', { bubbles: true }))
   field.focus()
   field.setSelectionRange(next.length, next.length)

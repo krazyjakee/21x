@@ -9,7 +9,67 @@ import type { HeartbeatScheduler } from './heartbeat-scheduler'
 import { TaskStatus } from '../shared/constants'
 import { emitTaskEvent } from './project-events'
 
-type ParentWaker = Pick<AgentManager, 'notifyParentOfSubtaskCompletion'>
+type TaskLifecycleController = Pick<
+  AgentManager,
+  'notifyParentOfSubtaskCompletion' | 'startTask' | 'stopByTaskId' | 'hasTaskStartOwnership' | 'reconcileTaskRuntime'
+>
+
+export interface PreparedUserTaskUpdate {
+  /** Fields that remain ordinary data after lifecycle intent is removed. */
+  data: UpdateTaskData
+  /** Execution-stage moves must enter AgentManager's durable admission path. */
+  startAfterWrite: boolean
+}
+
+export function isExecutionTaskStatus(status: string | undefined): boolean {
+  return status === TaskStatus.Triaging || status === TaskStatus.AgentWorking
+}
+
+/**
+ * Turn a user/API status edit into a lifecycle command before anything is
+ * persisted. Execution stages are owned by AgentManager: callers write any
+ * accompanying metadata first, then call `startPreparedTask`. Moving away
+ * first withdraws durable admission ownership and stops the live runtime, so
+ * a board/API edit can never silently strand an agent behind a cosmetic status.
+ */
+export async function prepareUserTaskUpdate(
+  agents: TaskLifecycleController | null | undefined,
+  previous: TaskRecord,
+  requested: UpdateTaskData
+): Promise<PreparedUserTaskUpdate> {
+  if (requested.status === undefined) return { data: requested, startAfterWrite: false }
+
+  // Feedback is a command to reuse the retained conversation for learning.
+  // The user-write route validates the rating and records its completion marker.
+  if (requested.status === TaskStatus.AgentLearning && requested.feedback_rating !== undefined) {
+    return { data: requested, startAfterWrite: false }
+  }
+
+  if (isExecutionTaskStatus(requested.status)) {
+    if (!agents) throw new Error('Agent runtime is unavailable; the task was not started.')
+    const data = { ...requested }
+    delete data.status
+    return { data, startAfterWrite: true }
+  }
+
+  const ownsRuntime = agents?.hasTaskStartOwnership?.(previous.id) ?? false
+  if (isExecutionTaskStatus(previous.status) || ownsRuntime) {
+    if (!agents) throw new Error('Agent runtime is unavailable; the running task was not moved.')
+    await agents.stopByTaskId(previous.id)
+  }
+  return { data: requested, startAfterWrite: false }
+}
+
+export async function startPreparedTask(
+  agents: TaskLifecycleController,
+  taskId: string
+): Promise<Awaited<ReturnType<AgentManager['startTask']>>> {
+  const result = await agents.startTask(taskId, { resumeManualStop: true })
+  if (result.action === 'no_action') {
+    throw new Error('No configured agent is available to start this task.')
+  }
+  return result
+}
 
 let automationTrigger: (() => void) | null = null
 let recurrenceScheduler: Pick<RecurrenceScheduler, 'initializeRecurringTask'> | null = null
@@ -51,7 +111,7 @@ export function afterTaskCreated(task: TaskRecord): void {
 
 export function afterTaskUpdated(
   db: DatabaseManager,
-  agents: ParentWaker | null | undefined,
+  agents: TaskLifecycleController | null | undefined,
   previous: TaskRecord,
   data: UpdateTaskData,
   updated: TaskRecord
@@ -74,6 +134,15 @@ export function afterTaskUpdated(
   // auto-complete flag has to be honoured.
   if (data.status !== undefined || data.auto_start_agent !== undefined || data.auto_complete_without_review !== undefined) {
     triggerTaskAutomation()
+  }
+
+  // Defense in depth for old integrations or source adapters that still write
+  // an execution status directly. Command-backed routes remove that status
+  // before this point; any remaining mismatch is reconciled synchronously into
+  // a durable queue row (or a visible terminal failure) rather than being left
+  // as manufactured working state until the next restart.
+  if (data.status !== undefined && isExecutionTaskStatus(updated.status)) {
+    agents?.reconcileTaskRuntime?.(updated.id, 'uncommanded_status_write')
   }
 
   // Project event (#57): a task reaching review wakes the project's Captain

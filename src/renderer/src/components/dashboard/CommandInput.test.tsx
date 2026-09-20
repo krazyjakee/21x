@@ -10,12 +10,13 @@ vi.mock('@/lib/voice-capture', () => ({
   },
 }))
 
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { CommandInput } from './CommandInput'
 import { useVoiceStore } from '@/stores/voice-store'
 import {
   clearDictationTarget,
   insertAndSubmit,
+  insertDictation,
   setActiveComposer,
 } from '@/lib/voice-dictation-target'
 
@@ -46,6 +47,25 @@ describe('CommandInput — dictation', () => {
       render(<CommandInput onSendToCaptain={vi.fn()} onCreateTask={vi.fn()} />)
     })
     expect(screen.getByTestId('voice-mic-button')).toBeInTheDocument()
+  })
+
+  it.each(['Enter', 'Send'])('marks only manually typed text via %s as grant evidence', async (button) => {
+    const send = vi.fn()
+    await act(async () => { render(<CommandInput onSendToCaptain={send} onCreateTask={vi.fn()} />) })
+    const field = screen.getByRole('textbox')
+    fireEvent.change(field, { target: { value: 'Merge PR #12' } })
+    if (button === 'Enter') fireEvent.keyDown(field, { key: 'Enter' })
+    else fireEvent.click(screen.getByRole('button', { name: 'Send to Captain' }))
+    expect(send).toHaveBeenCalledWith('Merge PR #12', true)
+  })
+
+  it('does not mark a dictated draft as typed on manual Send', async () => {
+    const send = vi.fn()
+    await act(async () => { render(<CommandInput onSendToCaptain={send} onCreateTask={vi.fn()} />) })
+    setActiveComposer('dashboard-command')
+    await act(async () => { expect(insertDictation('Merge PR #12')).toBe(true) })
+    fireEvent.click(screen.getByRole('button', { name: 'Send to Captain' }))
+    expect(send).toHaveBeenCalledWith('Merge PR #12')
   })
 
   it('hides the microphone while voice is switched off', async () => {

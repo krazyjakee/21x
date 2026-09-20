@@ -63,9 +63,10 @@ export function useActiveTaskActions({
   )
 
   const completeTask = useCallback(
-    async (taskId: string, options?: { selectNextTask?: boolean; completeAtSource?: boolean }) => {
+    async (taskId: string, options?: { selectNextTask?: boolean; completeAtSource?: boolean; beforeComplete?: () => Promise<void> }) => {
       await requestComplete(taskId, {
         completeAtSource: options?.completeAtSource,
+        beforeComplete: options?.beforeComplete,
         onCompleted: options?.selectNextTask
           ? (task) => selectNextActiveTask(task.id)
           : undefined

@@ -4,6 +4,7 @@ const agentSessionApi = vi.hoisted(() => ({
   start: vi.fn(),
   stop: vi.fn(async () => undefined),
   send: vi.fn(async () => ({ newSessionId: null })),
+  sendByTaskId: vi.fn(async () => ({ success: true, sessionId: null, newSessionId: 'session-1' })),
   respondToApproval: vi.fn(async () => undefined),
   resume: vi.fn(),
   getTranscriptSnapshot: vi.fn(async () => ({ parts: [], rev: 0 })),
@@ -26,8 +27,37 @@ const taskApi = vi.hoisted(() => ({
     (projectId === 'proj-b' ? 'captain-row-b' : 'captain-row-1') as string | null),
 }))
 const projectApi = vi.hoisted(() => ({
-  getAll: vi.fn(async () => []),
+  getAll: vi.fn(async (): Promise<unknown[]> => []),
+  update: vi.fn(async (id: string, data: Record<string, unknown>) => ({ id, ...data })),
 }))
+const mergeGrantsApi = vi.hoisted(() => ({ noteTyped: vi.fn() }))
+const captainRuntimeApi = vi.hoisted(() => {
+  const state = (projectId: string, agentId: string, phase = 'healthy') => ({
+    ownerId: projectId === 'proj-b' ? 'captain-row-b' : 'captain-row-1',
+    projectId,
+    generation: 1,
+    agentId,
+    candidateAgentId: null,
+    lastGoodAgentId: agentId,
+    sessionId: 'session-1',
+    phase,
+    deadlineAt: null,
+    lastProbeAt: Date.now(),
+    probeOk: true,
+    attemptCount: 1,
+    errorCode: null,
+    errorDetail: null,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  })
+  return {
+    state,
+    get: vi.fn(async (): Promise<Record<string, unknown> | null> => null),
+    switch: vi.fn(async (projectId: string, agentId: string) => state(projectId, agentId)),
+    retry: vi.fn(async (projectId: string) => state(projectId, 'other-agent')),
+    rollback: vi.fn(async (projectId: string) => state(projectId, 'default-agent', 'rolled_back')),
+  }
+})
 
 vi.mock('@/lib/ipc-client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/ipc-client')>()),
@@ -36,16 +66,19 @@ vi.mock('@/lib/ipc-client', async (importOriginal) => ({
   agentSessionApi,
   taskApi,
   projectApi,
+  mergeGrantsApi,
+  captainRuntimeApi,
 }))
 
 /**
  * The transcript is a large tree with its own IPC; this file is about the
  * session. Its send handler is captured so a test can send like a user.
  */
-const composer = vi.hoisted(() => ({ send: null as ((text: string) => void) | null }))
+const composer = vi.hoisted(() => ({ send: null as ((text: string) => void) | null, typed: null as ((text: string) => void) | null }))
 vi.mock('@/components/agents/AgentTranscriptPanel', () => ({
-  AgentTranscriptPanel: ({ onSend }: { onSend?: (text: string) => void }) => {
+  AgentTranscriptPanel: ({ onSend, onTypedMessage }: { onSend?: (text: string) => void; onTypedMessage?: (text: string) => void }) => {
     composer.send = onSend ?? null
+    composer.typed = onTypedMessage ?? null
     return null
   },
 }))
@@ -82,6 +115,13 @@ function projectRecord(overrides: Partial<ProjectRecord> & { id: string; name: s
  */
 
 
+/** The Default project as a real row, which the app always has; the agent choice is saved on it. */
+function seedDefaultProject(): void {
+  const row = projectRecord({ id: DEFAULT_PROJECT_ID, name: 'Default' })
+  useProjectStore.setState({ projects: [row], currentProjectId: DEFAULT_PROJECT_ID })
+  projectApi.update.mockImplementation(async (id: string, data: Record<string, unknown>) => ({ ...row, id, ...data }))
+}
+
 /** Resolves `start` by hand, so the warm-up can be held mid-flight. */
 function deferredStart(): { resolve: () => void } {
   let release!: () => void
@@ -102,12 +142,39 @@ beforeEach(() => {
   useProjectStore.setState({ projects: [], currentProjectId: DEFAULT_PROJECT_ID })
   taskApi.getCoordinatorTaskId.mockImplementation(async (projectId?: string) =>
     projectId === 'proj-b' ? CAPTAIN_B : CAPTAIN)
+  projectApi.getAll.mockResolvedValue([])
   settingsApi.get.mockResolvedValue(null)
   agentSessionApi.start.mockResolvedValue({ sessionId: 'session-1' })
+  captainRuntimeApi.get.mockResolvedValue(null)
+  captainRuntimeApi.switch.mockImplementation(async (projectId: string, agentId: string) => captainRuntimeApi.state(projectId, agentId))
+  captainRuntimeApi.retry.mockImplementation(async (projectId: string) => captainRuntimeApi.state(projectId, 'other-agent'))
+  captainRuntimeApi.rollback.mockImplementation(async (projectId: string) => captainRuntimeApi.state(projectId, 'default-agent', 'rolled_back'))
   composer.send = null
 })
 
 describe('OrchestratorPanel — warming the session', () => {
+  it('persists typed evidence with the durable send while warm-up is still in flight', async () => {
+    const pending = deferredStart()
+    await act(async () => { render(<OrchestratorPanel onClose={vi.fn()} />) })
+    await waitFor(() => expect(agentSessionApi.start).toHaveBeenCalled())
+    await act(async () => {
+      composer.typed?.('Merge PR #12')
+      void composer.send?.('Merge PR #12')
+    })
+    await waitFor(() => expect(agentSessionApi.sendByTaskId).toHaveBeenCalled())
+    expect(mergeGrantsApi.noteTyped).toHaveBeenCalledWith(CAPTAIN, 'Merge PR #12')
+    expect(mergeGrantsApi.noteTyped.mock.invocationCallOrder[0]).toBeLessThan(agentSessionApi.sendByTaskId.mock.invocationCallOrder[0])
+    await act(async () => { pending.resolve() })
+  })
+
+  it.each([true, false])('only a typed dashboard prefill stages grant evidence (typed=%s)', async (typed) => {
+    await act(async () => { render(<OrchestratorPanel onClose={vi.fn()} />) })
+    await waitFor(() => expect(agentSessionApi.start).toHaveBeenCalled())
+    act(() => { window.dispatchEvent(new CustomEvent('captain-prefill', { detail: { message: 'Merge PR #12', typed } })) })
+    await waitFor(() => expect(agentSessionApi.send).toHaveBeenCalled())
+    expect(mergeGrantsApi.noteTyped).toHaveBeenCalledTimes(typed ? 1 : 0)
+  })
+
   it('starts the default agent at launch, before any message', async () => {
     await act(async () => {
       render(<OrchestratorPanel onClose={vi.fn()} />)
@@ -142,6 +209,7 @@ describe('OrchestratorPanel — warming the session', () => {
   })
 
   it('lets the user swap agents once a conversation is in flight', async () => {
+    seedDefaultProject()
     await act(async () => {
       render(<OrchestratorPanel onClose={vi.fn()} />)
     })
@@ -172,21 +240,24 @@ describe('OrchestratorPanel — warming the session', () => {
     const combobox = screen.getByRole('combobox') as HTMLSelectElement
     expect(combobox).not.toBeDisabled()
 
-    const started = deferredStart()
+    let finishSwitch!: () => void
+    captainRuntimeApi.switch.mockImplementationOnce((projectId: string, agentId: string) => new Promise((resolve) => {
+      finishSwitch = () => resolve(captainRuntimeApi.state(projectId, agentId))
+    }))
     await act(async () => {
       combobox.value = 'other-agent'
       combobox.dispatchEvent(new Event('change', { bubbles: true }))
     })
 
-    // The outgoing session is stopped and the pre-warm restarts, still pending
-    // on the deferred start.
-    expect(agentSessionApi.stop).toHaveBeenCalledWith('session-1')
-    await waitFor(() =>
-      expect(agentSessionApi.start).toHaveBeenLastCalledWith('other-agent', CAPTAIN, undefined, true)
-    )
-    await act(async () => {
-      started.resolve()
-    })
+    // Main owns the transaction and only returns healthy after persisting the
+    // candidate selection; the renderer never tears down the good session.
+    await waitFor(() => expect(captainRuntimeApi.switch).toHaveBeenCalledWith(DEFAULT_PROJECT_ID, 'other-agent'))
+    expect(screen.getByTestId('captain-runtime-state')).toHaveTextContent('Captain is starting server on Codex')
+    expect(combobox.value).toBe('default-agent')
+    expect(agentSessionApi.start.mock.calls.every((call) => call[0] !== 'other-agent')).toBe(true)
+    expect(agentSessionApi.stop).not.toHaveBeenCalled()
+    expect(projectApi.update).not.toHaveBeenCalled()
+    await act(async () => finishSwitch())
   })
 
   it('starts the session only once, however many times it re-renders', async () => {
@@ -225,13 +296,47 @@ describe('OrchestratorPanel — warming the session', () => {
 
     // One session, and the sentence survived the wait.
     expect(agentSessionApi.start).toHaveBeenCalledTimes(1)
-    expect(agentSessionApi.send).toHaveBeenCalledWith(
-      'session-1',
-      'what is blocking the release',
+    expect(agentSessionApi.sendByTaskId).toHaveBeenCalledWith(
       CAPTAIN,
-      'default-agent',
-      undefined
+      'what is blocking the release',
+      undefined,
+      expect.stringMatching(/^captain-drawer:/)
     )
+  })
+
+  it('retains image attachments and the delivery ID when a failed send is queued and retried', async () => {
+    settingsApi.get.mockResolvedValue('false')
+    await act(async () => { render(<OrchestratorPanel onClose={vi.fn()} />) })
+    await waitFor(() => expect(composer.send).toBeTypeOf('function'))
+    const attachments = [{ id: 'image-1', filename: 'failure.png', size: 64, mime_type: 'image/png' }]
+    agentSessionApi.sendByTaskId.mockRejectedValueOnce(new Error('Captain unavailable'))
+    await act(async () => {
+      composer.typed?.('Inspect this')
+      await (composer.send as (text: string, options?: unknown) => Promise<unknown>)('Inspect this', { attachments })
+    })
+    expect(await screen.findByRole('alert')).toHaveTextContent('1 message is waiting')
+    const firstCall = vi.mocked(agentSessionApi.sendByTaskId).mock.calls[0] as unknown[]
+    expect(firstCall).toEqual([CAPTAIN, 'Inspect this', attachments, expect.stringMatching(/^captain-drawer:/)])
+
+    // A subsequent send drains the held message first, with the same ID.
+    await act(async () => { await composer.send?.('Next message') })
+    expect(agentSessionApi.sendByTaskId).toHaveBeenNthCalledWith(2, ...firstCall)
+    expect(agentSessionApi.send).toHaveBeenCalledTimes(1)
+    expect(agentSessionApi.send).toHaveBeenCalledWith('session-1', 'Next message', CAPTAIN, '', undefined, expect.stringMatching(/^captain-drawer:/))
+    expect(mergeGrantsApi.noteTyped).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps an image-only message while warm-up is pending', async () => {
+    const pending = deferredStart()
+    await act(async () => { render(<OrchestratorPanel onClose={vi.fn()} />) })
+    await waitFor(() => expect(agentSessionApi.start).toHaveBeenCalled())
+    const attachments = [{ id: 'image-only', filename: 'shot.png', size: 64, mime_type: 'image/png' }]
+    await act(async () => {
+      await (composer.send as (text: string, options?: unknown) => Promise<unknown>)('', { attachments })
+    })
+    expect(agentSessionApi.sendByTaskId).toHaveBeenCalledWith(CAPTAIN, '', attachments, expect.stringMatching(/^captain-drawer:/))
+    expect(mergeGrantsApi.noteTyped).not.toHaveBeenCalled()
+    await act(async () => pending.resolve())
   })
 
   it('sends at once when the session is already warm', async () => {
@@ -302,6 +407,103 @@ describe('OrchestratorPanel — the current project\'s Captain', () => {
     await act(async () => {
       await (composer.send as (t: string) => Promise<unknown>)('status?')
     })
-    expect(agentSessionApi.send).toHaveBeenCalledWith('session-1', 'status?', CAPTAIN_B, 'other-agent', undefined)
+    expect(agentSessionApi.send).toHaveBeenCalledWith('session-1', 'status?', CAPTAIN_B, 'other-agent', undefined, expect.stringMatching(/^captain-drawer:/))
+  })
+})
+
+/**
+ * A Captain that will not start. The drawer must not sit on "Agent is
+ * starting..." forever: it says why, offers Retry and the way back to the
+ * previous agent, and delivers what the user said in the meantime once.
+ */
+describe('OrchestratorPanel — a Captain that will not start', () => {
+  const failure = new Error("Error invoking remote method 'agentSession:start': Error: Sol did not come up within 90 seconds")
+
+  it('shows persisted unhealthy probe state instead of calling the process healthy', async () => {
+    seedDefaultProject()
+    captainRuntimeApi.get.mockResolvedValue({
+      ...captainRuntimeApi.state(DEFAULT_PROJECT_ID, 'other-agent', 'unhealthy'),
+      candidateAgentId: 'other-agent',
+      lastGoodAgentId: 'default-agent',
+      errorCode: 'HEALTH_PROBE_FAILED',
+      errorDetail: 'protocol health check failed',
+      probeOk: false,
+    })
+    await act(async () => {
+      render(<OrchestratorPanel onClose={vi.fn()} />)
+    })
+
+    expect(await screen.findByTestId('captain-runtime-state')).toHaveTextContent('Captain is unhealthy on Codex')
+    expect(screen.getByRole('alert')).toHaveTextContent('protocol health check failed')
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+  })
+
+  it('explains the failure and retries on request', async () => {
+    agentSessionApi.start.mockRejectedValueOnce(failure)
+    await act(async () => {
+      render(<OrchestratorPanel onClose={vi.fn()} />)
+    })
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('The Captain could not start on Claude.')
+    expect(alert).toHaveTextContent('Sol did not come up within 90 seconds')
+    expect(alert).not.toHaveTextContent('invoking remote method')
+    // Not "starting" any more.
+    expect(useAgentStore.getState().sessions.get(CAPTAIN)?.status).not.toBe('working')
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'Retry' }).click()
+    })
+    await waitFor(() => expect(agentSessionApi.start).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+  })
+
+  it('restores a persisted failed switch and retries it manually', async () => {
+    seedDefaultProject()
+    captainRuntimeApi.get.mockResolvedValue({
+      ...captainRuntimeApi.state(DEFAULT_PROJECT_ID, 'default-agent', 'rolled_back'),
+      candidateAgentId: 'other-agent',
+      lastGoodAgentId: 'default-agent',
+      errorCode: 'STARTUP_TIMEOUT',
+      errorDetail: 'Codex readiness probe timed out',
+      probeOk: false,
+    })
+    await act(async () => {
+      render(<OrchestratorPanel onClose={vi.fn()} />)
+    })
+    expect(await screen.findByRole('alert')).toHaveTextContent('Codex readiness probe timed out')
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('default-agent')
+    projectApi.getAll.mockResolvedValue([
+      projectRecord({ id: DEFAULT_PROJECT_ID, name: 'Default', captain_agent_id: 'other-agent' })
+    ])
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'Retry' }).click()
+    })
+    await waitFor(() => expect(captainRuntimeApi.retry).toHaveBeenCalledWith(DEFAULT_PROJECT_ID))
+    await waitFor(() => expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('other-agent'))
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+  })
+
+  it('offers and completes an explicit rollback to the last-known-good Captain', async () => {
+    seedDefaultProject()
+    captainRuntimeApi.get.mockResolvedValue({
+      ...captainRuntimeApi.state(DEFAULT_PROJECT_ID, 'default-agent', 'rolled_back'),
+      candidateAgentId: 'other-agent',
+      lastGoodAgentId: 'default-agent',
+      errorCode: 'STARTUP_FAILED',
+      errorDetail: 'Candidate process exited during startup',
+      probeOk: false,
+    })
+    await act(async () => {
+      render(<OrchestratorPanel onClose={vi.fn()} />)
+    })
+    expect(await screen.findByRole('alert')).toHaveTextContent('Candidate process exited during startup')
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'Roll back to Claude' }).click()
+    })
+    await waitFor(() => expect(captainRuntimeApi.rollback).toHaveBeenCalledWith(DEFAULT_PROJECT_ID))
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('default-agent')
   })
 })

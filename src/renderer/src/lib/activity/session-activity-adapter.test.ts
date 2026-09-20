@@ -34,6 +34,7 @@ describe('recordAgentStatus', () => {
     expect(recordAgentStatus(null, 0)).toBe(false)
     expect(recordAgentStatus({ taskId: 't', status: 'bogus' }, 0)).toBe(false)
     expect(recordAgentStatus({ status: 'working' }, 0)).toBe(false)
+    expect(recordAgentStatus(status('t', 'working'), 0)).toBe(false)
   })
 
   it('a quiet session stays fresh on heartbeats and goes unknown when they stop', () => {
@@ -59,6 +60,34 @@ describe('recordAgentStatus', () => {
     recordAgentStatus(status('t', 'working', 50), 0)
     expect(recordAgentStatus({ ...status('t', 'idle'), epoch: 'E2', seq: 1 }, 10)).toBe(true)
     expect(useSessionActivityStore.getState()).toMatchObject({ epoch: 'E2', seq: 1 })
+  })
+
+  it('invalidates all old observations on restart and rejects a delayed retired epoch', () => {
+    recordAgentStatus(status('t', 'working', 50), 0)
+    recordAgentStatus(status('other', 'working', 51), 0)
+    expect(recordAgentStatus({ ...status('t', 'idle'), epoch: 'E2', seq: 1 }, 10)).toBe(true)
+    expect(useSessionActivityStore.getState().sessions.other).toBeUndefined()
+    expect(recordAgentStatus(status('t', 'working', 52, { heartbeat: true }), 20)).toBe(false)
+    expect(useSessionActivityStore.getState().sessions.t).toMatchObject({ status: 'idle', observedAt: 10 })
+  })
+
+  it('retires a replaced session so its late heartbeat cannot relight the task', () => {
+    recordAgentStatus(status('t', 'working', 1), 0)
+    expect(recordAgentStatus({ ...status('t', 'working', 2), sessionId: 's-new' }, 10)).toBe(true)
+    expect(recordAgentStatus(status('t', 'working', 3, { heartbeat: true }), 20)).toBe(false)
+    expect(recordAgentStatus(status('t', 'idle', 4), 30)).toBe(false)
+    expect(useSessionActivityStore.getState().sessions.t).toMatchObject({ sessionId: 's-new', observedAt: 10 })
+  })
+
+  it('accepts a resumed replacement whose first observed phase needs approval', () => {
+    recordAgentStatus(status('t', 'working', 1), 0)
+    expect(recordAgentStatus({ ...status('t', 'waiting_approval', 2), sessionId: 's-resumed' }, 10)).toBe(true)
+    expect(useSessionActivityStore.getState().sessions.t).toMatchObject({ sessionId: 's-resumed', status: 'waiting_approval' })
+  })
+
+  it('records an authoritative task-scoped startup failure without inventing a backend session', () => {
+    expect(recordAgentStatus({ ...status('t', 'error', 1), sessionId: '' }, 10)).toBe(true)
+    expect(useSessionActivityStore.getState().sessions.t).toMatchObject({ sessionId: 'start-error:t', status: 'error' })
   })
 
   it('emits transitions but not first sightings or unchanged heartbeats', () => {

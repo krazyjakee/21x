@@ -319,6 +319,8 @@ export class AcpAdapter implements CodingAgentAdapter {
         cwd: config.workspaceDir,
         mcpServers: convertAcpMcpServers(config.mcpServers)
       })
+      // session/load replays history, but does not refresh our instructions.
+      if (config.systemPrompt?.trim()) session.pendingSystemPrompt = config.systemPrompt.trim()
       console.log(`[${this.label}] Session loaded successfully: ${sessionId}`)
 
       // Notifications replayed during session/load become the returned history.

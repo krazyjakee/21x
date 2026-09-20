@@ -86,7 +86,7 @@ function setup(getStatus: () => Promise<unknown>) {
   ;(mgr as any).startAdapterPolling('session-1', adapter, { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' }, session)
   const entry = (mgr as any).pollingEntries.get('session-1')
   const heartbeats = () => windowSend.mock.calls.filter(([channel, data]) => channel === 'agent:status' && (data as any)?.heartbeat)
-  return { mgr, entry, windowSend, sendToRenderer, heartbeats, adapter }
+  return { mgr, entry, session, windowSend, sendToRenderer, heartbeats, adapter }
 }
 
 describe('AgentManager activity heartbeats (#95)', () => {
@@ -125,6 +125,23 @@ describe('AgentManager activity heartbeats (#95)', () => {
     ;(mgr as any).sessions.get('session-1').status = 'idle'
     await (mgr as any).pollSingleSession(entry)
     expect(heartbeats()).toHaveLength(0)
+  })
+
+  it('an in-flight poll cannot publish a heartbeat after Stop fenced its session generation', async () => {
+    let finishStatus!: (status: unknown) => void
+    const status = new Promise<unknown>((resolve) => { finishStatus = resolve })
+    const { mgr, entry, session, heartbeats, adapter } = setup(() => status)
+    const polling = (mgr as any).pollSingleSession(entry)
+    await vi.waitFor(() => expect(adapter.getStatus).toHaveBeenCalled())
+
+    ;(mgr as any).stoppingSessions.add(session)
+    ;(mgr as any).sessions.delete('session-1')
+    ;(mgr as any).stopAdapterPolling('session-1')
+    finishStatus({ type: SessionStatusType.BUSY })
+    await polling
+
+    expect(heartbeats()).toHaveLength(0)
+    expect((mgr as any).pollingEntries.size).toBe(0)
   })
 
   it('transition pushes carry the same epoch and an increasing sequence', () => {

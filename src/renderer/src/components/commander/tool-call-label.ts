@@ -1,3 +1,5 @@
+import { captainToolName } from '@shared/captain-compat'
+
 /**
  * Chip text for a Commander tool call.
  *
@@ -7,10 +9,10 @@
 
 /**
  * Tools that hand a message to a project. Compatibility aliases for stored
- * Commander transcript rows: `ask_project` is the pre-#61 name and
- * `ask_mastermind` the pre-#71 name of `ask_captain`.
+ * Commander transcript rows: `ask_project` is the pre-#61 name; the other
+ * legacy name is resolved at the shared compatibility boundary.
  */
-const DELEGATION_TOOLS = new Set(['ask_captain', 'ask_mastermind', 'ask_project'])
+const DELEGATION_TOOLS = new Set(['ask_captain', 'ask_project'])
 const PROJECT_KEYS = ['project_name', 'projectName', 'project', 'project_id', 'projectId'] as const
 const TEXT_KEYS = ['message', 'question', 'request', 'task', 'prompt', 'text'] as const
 const SNIPPET_CHARS = 60
@@ -24,7 +26,7 @@ function firstString(input: Record<string, unknown>, keys: readonly string[]): s
 }
 
 export function humanizeToolName(name: string): string {
-  const words = name.replace(/[_-]+/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').trim().toLowerCase()
+  const words = captainToolName(name).replace(/[_-]+/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').trim().toLowerCase()
   return words ? words[0].toUpperCase() + words.slice(1) : 'Tool'
 }
 
@@ -35,7 +37,7 @@ export function toolCallProject(input: Record<string, unknown> | undefined): str
 export function toolCallLabel(name: string, input: Record<string, unknown> | undefined): string {
   const project = toolCallProject(input)
   if (!project) return humanizeToolName(name)
-  if (!DELEGATION_TOOLS.has(name)) return `${humanizeToolName(name)} · ${project}`
+  if (!DELEGATION_TOOLS.has(captainToolName(name))) return `${humanizeToolName(name)} · ${project}`
   const text = input ? firstString(input, TEXT_KEYS) : null
   if (!text) return `Asked ${project}…`
   const snippet = text.length > SNIPPET_CHARS ? `${text.slice(0, SNIPPET_CHARS).trimEnd()}…` : text

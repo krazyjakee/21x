@@ -3,6 +3,7 @@ import { promisify } from 'util'
 import { dirname, join } from 'path'
 import { homedir } from 'os'
 import { existsSync } from 'fs'
+import { detectRtkIntegrations } from './rtk-integrations.js'
 
 const execFileAsync = promisify(execFile)
 export const MINIMUM_PI_VERSION = '0.80.5'
@@ -180,7 +181,7 @@ export async function detectInstalledAgents(options = {}) {
   }
 
   // Run all probes in parallel — shell:true on Windows resolves .cmd automatically
-  const [nodejs, npm, pnpm, git, gh, glab, tea, claudeCode, opencode, codex, cursor, pi] = await Promise.all([
+  const [nodejs, npm, pnpm, git, gh, glab, tea, rtkProbe, claudeCode, opencode, codex, cursor, pi] = await Promise.all([
     probe('node', ['--version']),
     probe('npm', ['--version']),
     probe('pnpm', ['--version']),
@@ -188,6 +189,7 @@ export async function detectInstalledAgents(options = {}) {
     probe('gh', ['--version']),
     probe('glab', ['--version']),
     probe('tea', ['--version']),
+    probe('rtk', ['--version']),
     probe('claude', ['--version']),
     probe('opencode', ['--version']),
     probe('codex', ['--version']),
@@ -195,5 +197,15 @@ export async function detectInstalledAgents(options = {}) {
     probePi()
   ])
 
-  return { nodejs, npm, pnpm, git, gh, glab, tea, claudeCode, opencode, codex, cursor, pi }
+  const integrations = detectRtkIntegrations()
+  const requiredIntegrations = AGENT_BACKEND_KEYS.filter((key) =>
+    isBackendReady({ claudeCode, opencode, codex, cursor, pi }[key]))
+  const rtk = {
+    ...rtkProbe,
+    configured: rtkProbe.installed && requiredIntegrations.length > 0 &&
+      requiredIntegrations.every((key) => integrations[key]),
+    integrations
+  }
+
+  return { nodejs, npm, pnpm, git, gh, glab, tea, rtk, claudeCode, opencode, codex, cursor, pi }
 }

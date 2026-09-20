@@ -4,7 +4,9 @@ import { Markdown } from '@/components/ui/Markdown'
 import { SpeakMessageButton } from '@/components/voice/SpeakMessageButton'
 import type { AgentMessage, StepMeta } from '@shared/transcript/types'
 import { isCompactActivityMessage } from '@shared/transcript/tool-format'
+import { isMachineMessageCandidate } from '@shared/transcript/machine-message'
 import { ActivityMessageGroup } from './ActivityMessageGroup'
+import { MachineMessage } from './MachineMessage'
 import { PlanReviewMessage } from './PlanReviewMessage'
 import { QuestionMessage } from './QuestionMessage'
 import { TaskProgressMessage } from './TaskProgressMessage'
@@ -54,6 +56,10 @@ export const MessageBubble = memo(function MessageBubble({ message, onAnswer, ca
   // session.systemStatus — skip any that slip through.
   if (message.partType === 'step-start' || message.partType === 'step-finish' || message.partType === 'system-status') {
     return null
+  }
+
+  if (isMachineMessageCandidate(message)) {
+    return <MachineMessage message={message} searchQuery={searchQuery} />
   }
 
   const isUser = message.role === 'user'

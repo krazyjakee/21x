@@ -6,6 +6,7 @@
  * main-process CommanderService and the renderer.
  */
 import type { ChatRuntimeEvent, ChatStopReason, ChatToolCall } from './chat'
+import type { ChatImageRef } from './chat-images'
 
 /**
  * - `user` / `assistant` / `tool`: the conversation the model sees.
@@ -51,6 +52,8 @@ export interface CommanderMessage {
   correlation_id: string | null
   /** Epoch ms. */
   created_at: number
+  /** User messages: attached images, metadata only (#144). Fetch the bytes with `commander:getImage`. */
+  images?: ChatImageRef[]
 }
 
 export interface CommanderListSessionsRequest {

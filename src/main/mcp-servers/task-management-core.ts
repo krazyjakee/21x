@@ -28,6 +28,9 @@ import {
   subtaskTools
 } from './task-management-tools'
 import { SKILL_SCOPE_PARAM, SKILL_TOOL_NAMES } from '../task-api/skill-routes'
+import { MERGE_GRANT_TOOL_NAMES } from './merge-grant-tools'
+import { ISSUE_WRITE_TOOL_NAMES } from './issue-write-tools'
+import { RECORD_REVIEW_ATTESTATION_TOOL } from './review-attestation-tools'
 
 /** Which task a session may act on. All fields null means full access. */
 export type TaskMcpScope = {
@@ -40,7 +43,7 @@ export type TaskMcpScope = {
 }
 
 /** Calls one Task API route. In process this is handleRoute; over stdio it is fetch. */
-export type TaskApiInvoke = (route: string, params: Record<string, unknown>) => Promise<unknown>
+export type TaskApiInvoke = (route: string, params: Record<string, unknown>, trustedScope?: TaskMcpScope) => Promise<unknown>
 
 /** Result shape of an MCP tools/call. */
 export type ToolCallResult = {
@@ -75,7 +78,13 @@ export function isCoordinatorScope(scope: TaskMcpScope): boolean {
 }
 
 /** Tools only the project's Captain may call. */
-const COORDINATOR_ONLY_TOOLS = new Set(['update_project_status', 'report_to_commander'])
+const COORDINATOR_ONLY_TOOLS = new Set([
+  'update_project_status',
+  'report_to_commander',
+  'set_concurrency',
+  ...MERGE_GRANT_TOOL_NAMES,
+  ...ISSUE_WRITE_TOOL_NAMES
+])
 
 /**
  * The escalation policy hook (#66). The main process installs one from
@@ -120,7 +129,9 @@ const PROJECT_FILTERED_TOOLS = new Set([
   'list_repos',
   'create_task',
   'update_project_status',
-  'report_to_commander'
+  'report_to_commander',
+  'get_concurrency',
+  'set_concurrency'
 ])
 
 const PROJECT_ACCESS_DENIED = { error: 'Access denied: task is not in this project' }
@@ -340,6 +351,34 @@ export async function callToolForScope(
     if (SKILL_TOOL_NAMES.has(name)) {
       const skillScope = await skillScopeFor(scope, invoke)
       if (skillScope) normalizedArgs[SKILL_SCOPE_PARAM] = skillScope
+    }
+    if (name === RECORD_REVIEW_ATTESTATION_TOOL) {
+      if (!scope.taskId) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ error: 'A task-scoped reviewer session is required' }) }],
+          isError: true
+        }
+      }
+      const own = await invoke('/get_task', { task_id: scope.taskId }) as Record<string, unknown> | null
+      const projectId = own && !own.error && typeof own.project_id === 'string' ? own.project_id : ''
+      if (!projectId) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ error: 'The reviewer task has no project' }) }],
+          isError: true
+        }
+      }
+      // The route receives the signed MCP scope out of band. Never put task or
+      // agent provenance in model-controlled arguments.
+      const result = await invoke(`/${name}`, normalizedArgs, scope) as Record<string, unknown> | null
+      if (result?.error) return { content: [{ type: 'text', text: JSON.stringify(result) }], isError: true }
+      if (toolCallObserver) {
+        try {
+          toolCallObserver({ scope, name, args: normalizedArgs, result })
+        } catch (err) {
+          console.error('[TaskManagementMcp] Tool call observer failed:', err)
+        }
+      }
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
     }
 
     const result = isScopedSession(scope)

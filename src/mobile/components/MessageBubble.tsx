@@ -3,6 +3,8 @@ import { Markdown } from '@/components/ui/Markdown'
 import { HighlightedText } from '@/components/agents/transcript/HighlightedText'
 import { deriveToolCommand, deriveToolSubtitle, formatDuration, isCompactActivityMessage, sanitizeToolContent } from '@shared/transcript/tool-format'
 import type { AgentMessage } from '@shared/transcript/types'
+import { isMachineMessageCandidate } from '@shared/transcript/machine-message'
+import { MachineMessage } from '@/components/agents/transcript/MachineMessage'
 import { cn } from '../lib/utils'
 
 function QuestionMessage({ message, onAnswer, canAnswer, searchQuery }: { message: AgentMessage; onAnswer?: (answer: string) => void; canAnswer: boolean; searchQuery?: string }) {
@@ -414,6 +416,8 @@ export const MessageBubble = memo(function MessageBubble({ message, onAnswer, ca
 
   // Skip tool messages that have no content and no recognizable tool name
   if (message.partType === 'tool' && !message.content) return null
+
+  if (isMachineMessageCandidate(message)) return <MachineMessage message={message} searchQuery={searchQuery} />
 
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
