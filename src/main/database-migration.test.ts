@@ -121,7 +121,7 @@ describe('DatabaseManager migrations on an existing install', () => {
    * min(existing max_parallel_sessions, 5); an explicit cap is kept, the old
    * field is left as it was, and the concurrency tables appear.
    */
-  it('gives existing agents a hard cap and the unified recovery schema on upgrade to 22', () => {
+  it('gives existing agents a hard cap and the unified recovery schema on upgrade to 24', () => {
     const first = new DatabaseManager()
     first.initialize()
     first.close?.()
@@ -154,7 +154,7 @@ describe('DatabaseManager migrations on an existing install', () => {
       'concurrency_audit', 'task_touches',
       'agent_start_queue', 'agent_start_queue_fairness'
     ]))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('23')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('24')
     after.close()
   })
 
@@ -162,8 +162,9 @@ describe('DatabaseManager migrations on an existing install', () => {
     { name: 'main v19', version: '19', drop: ['managed_agent_runtimes', 'delivery_outbox', 'concurrency_audit', 'task_touches', 'agent_start_queue', 'agent_start_queue_fairness'] },
     { name: '#151-only v20', version: '20', drop: ['concurrency_audit', 'task_touches', 'agent_start_queue', 'agent_start_queue_fairness'] },
     { name: '#152-only v20', version: '20', drop: ['managed_agent_runtimes', 'delivery_outbox', 'agent_start_queue', 'agent_start_queue_fairness'] },
-    { name: 'integrated v21', version: '21', drop: ['agent_start_queue', 'agent_start_queue_fairness'] }
-  ])('produces schema-equivalent v22 from $name', ({ version, drop }) => {
+    { name: 'integrated v21', version: '21', drop: ['agent_start_queue', 'agent_start_queue_fairness'] },
+    { name: 'authorization-chain v23', version: '23', drop: ['issue_writes'] }
+  ])('produces schema-equivalent v24 from $name', ({ version, drop }) => {
     const fresh = new DatabaseManager()
     fresh.initialize()
     fresh.close?.()
@@ -184,13 +185,16 @@ describe('DatabaseManager migrations on an existing install', () => {
     expect(columns('managed_agent_runtimes')).toEqual(expect.arrayContaining(['owner_id', 'generation', 'session_id', 'phase']))
     expect(columns('delivery_outbox')).toEqual(expect.arrayContaining(['idempotency_key', 'state', 'claim_owner', 'acknowledged_at']))
     expect(columns('concurrency_audit')).toEqual(expect.arrayContaining(['project_id', 'kind', 'actor', 'reason']))
+    expect(columns('issue_writes')).toEqual(expect.arrayContaining([
+      'idempotency_key', 'payload_hash', 'payload_fields', 'attempt_epoch', 'effects_applied_at'
+    ]))
     expect(columns('agent_start_queue')).toEqual(expect.arrayContaining([
       'id', 'task_id', 'project_id', 'agent_id', 'priority', 'fifo_seq',
       'dependency_reason', 'admission_reason', 'retry_count', 'next_retry_at',
       'generation', 'lease_owner', 'lease_expires_at', 'recovery_cause',
       'recovery_action', 'recovery_result', 'queued_at', 'acknowledged_at'
     ]))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('23')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('24')
     after.close()
   })
 

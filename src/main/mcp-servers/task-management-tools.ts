@@ -4,6 +4,7 @@
  */
 import type { Tool } from '@modelcontextprotocol/server'
 import { mergeGrantTools } from './merge-grant-tools'
+import { issueWriteTools } from './issue-write-tools'
 
 // Tools available in both modes
 const artifactTools: Tool[] = [
@@ -611,7 +612,8 @@ export const captainTools: Tool[] = [
     }
   },
   // #137: the Captain's merge tools, answered by the escalation gate.
-  ...mergeGrantTools
+  ...mergeGrantTools,
+  ...issueWriteTools
 ]
 
 // Browser-panel tools. They drive canvas "Agent Browser" panels through the
