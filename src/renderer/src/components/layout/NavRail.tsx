@@ -67,7 +67,7 @@ function RailButton({ name, active, shortcut, onClick, children }: {
   )
 }
 
-/** Primary navigation — leaves room for 44px targets plus the main group's scrollbar. */
+/** 64px accommodates a 44px target plus classic scrollbars up to 17px wide. */
 export function NavRail() {
   const sidebarView = useUIStore((s) => s.sidebarView)
   const setSidebarView = useUIStore((s) => s.setSidebarView)
@@ -80,7 +80,7 @@ export function NavRail() {
   const showCommanderState = !isQuietActivity(commander)
 
   return (
-    <nav aria-label="Primary" className="ui-scale app-chrome no-drag flex min-h-0 w-14 flex-shrink-0 flex-col items-center bg-background py-1.5">
+    <nav aria-label="Primary" className="ui-scale app-chrome no-drag flex min-h-0 w-16 flex-shrink-0 flex-col items-center bg-background py-1.5">
       <div role="group" aria-label="Main views" className="flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto py-0.5">
         {NAV_ITEMS.map(({ key, label, icon: Icon }, i) => {
           const active = sidebarView === key && activeModal !== 'settings'

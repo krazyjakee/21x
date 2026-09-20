@@ -10,10 +10,9 @@ vi.mock('@/lib/activity/use-activity', () => ({
 
 afterEach(() => {
   cleanup()
-  document.documentElement.classList.remove('dark')
 })
 beforeEach(() => {
-  useUIStore.setState({ sidebarView: 'dashboard', activeModal: null, sidebarCollapsed: false })
+  useUIStore.setState({ sidebarView: 'dashboard', activeModal: null })
 })
 
 describe('NavRail Settings', () => {
@@ -88,18 +87,14 @@ describe('NavRail Settings', () => {
     expect(screen.queryByRole('tooltip')).toBeNull()
   })
 
-  it.each([
-    ['light', false], ['light', true], ['dark', false], ['dark', true]
-  ] as const)('preserves the rail groups and focusable targets in %s theme, sidebar collapsed=%s', (theme, sidebarCollapsed) => {
-    document.documentElement.classList.toggle('dark', theme === 'dark')
-    useUIStore.setState({ sidebarCollapsed, sidebarView: 'tasks' })
+  it('keeps the rail groups and full-size focusable targets', () => {
     render(<NavRail />)
     const nav = screen.getByRole('navigation', { name: 'Primary' })
     const groups = within(nav).getAllByRole('group')
     expect(groups.map((group) => group.getAttribute('aria-label'))).toEqual(['Main views', 'Settings'])
     // DOM fallback: happy-dom has no layout engine. The isolated Electron
-    // review checks the compiled CSS at real window sizes and zoom factors.
-    expect(nav).toHaveClass('min-h-0', 'flex-col', 'w-14')
+    // layout regression checks real scrollports, including 15/17px scrollbars.
+    expect(nav).toHaveClass('min-h-0', 'flex-col', 'w-16')
     expect(groups[0]).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto')
     expect(groups[1]).toHaveClass('mt-auto', 'shrink-0')
     const focusable = nav.querySelectorAll('button, a[href], input, select, textarea, [tabindex]')

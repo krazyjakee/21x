@@ -40,3 +40,6 @@ jobs:
 
       - name: Test
         run: pnpm test:run
+
+      - name: Navigation rail real-scrollport regression
+        run: xvfb-run --auto-servernum pnpm test:nav-rail

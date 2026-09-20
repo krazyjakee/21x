@@ -1,0 +1,28 @@
+# Navigation rail layout regression
+
+Run `pnpm test:nav-rail` with a graphical display, or
+`xvfb-run --auto-servernum pnpm test:nav-rail` on headless Linux (as in Verify).
+This uses the existing Electron, Vite and Tailwind dependencies. It loads only
+production NavRail and CSS, with inert event subscriptions, no app backend,
+a temporary Electron profile and blocked external requests.
+
+The 96 distinct layouts cover light/dark, 1200×900/900×600 physical window
+sizes, 100/125/150/200% Electron zoom, normal/doubled text, and forced 8/15/17px
+scrollbars. Sidebar collapse is not a dimension: this fixture does not mount
+the adjacent sidebar, and the rail does not consume its collapse state.
+
+Every row measures `clientWidth`, `scrollWidth`, the actual consumed scrollbar
+width and target bounds. Overflowing main groups must consume exactly the
+requested scrollbar width; all main buttons must fit wholly within the actual
+client scrollport and remain at least 44×44 CSS pixels. It also checks pinning,
+scroll separation, real Tab/Enter/Escape, focused/unfocused pointer tooltips,
+focus contrast in both themes and Chromium navigation/group semantics.
+The layout test fails on the previous 56px rail with both 15px and 17px
+scrollbars. DOM tests separately check state transitions and alternate entries.
+
+JSON measurements and four screenshots are written to a temporary output
+directory reported at exit (`NAV_RAIL_OUTPUT` can select a directory). The
+screenshots show 17px scrollbars and are review evidence, not snapshot baselines.
+Text preferences are emulated with root/chrome text sizing; the fixture does
+not certify native OS text preferences, external screen readers or the full
+application/sidebar integration.
