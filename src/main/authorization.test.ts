@@ -302,6 +302,12 @@ describe('immutable human authorization chain', () => {
     expect(classifyCapabilityIntents(wording, ['21x']).map((intent) => intent.capability)).toEqual(expected)
   })
 
+  it('carries cross-clause restrictions and explicit denials into the classified result', () => {
+    expect(requestedActions('Only if I approve:\nOpen gh issues for 21x', ['21x'])).toEqual([])
+    expect(requestedActions('Example instructions:\nOpen gh issues for 21x', ['21x'])).toEqual([])
+    expect(requestedActions('Refactor the code. Do not open PRs.', ['21x'])).toEqual(['task.update', 'task.start'])
+  })
+
   it('distinguishes omitted inheritance from an explicit empty or narrowed subset', () => {
     const parent = root()
     const inherited = delegateAuthorization(db, { parentId: parent.id, author: 'captain', text: 'inherit', taskId: captainId, projectId })!
@@ -310,6 +316,27 @@ describe('immutable human authorization chain', () => {
     expect(resolveAuthorization(db, inherited.id).effectivePermissions).toEqual(parent.actions)
     expect(resolveAuthorization(db, empty.id).effectivePermissions).toEqual([])
     expect(resolveAuthorization(db, narrowed.id).effectivePermissions).toEqual(['github.issue.create'])
+  })
+
+  it('keeps immutable assigned-work authority across an untrusted machine follow-up', () => {
+    relay()
+    const child = db.createTask({ title: 'Delegated worker', project_id: projectId, repos: ['krazyjakee/21x'] })!
+    inheritTaskAuthorization(db, captainId, child.id, 'Implement the delegated work')
+    const assigned = taskAuthorization(db, child.id)
+    expect(assigned.status).toBe('active')
+
+    const machine = prepareAuthorizationDispatch(db, { key: 'captain-follow-up', taskId: child.id, text: 'Machine-authored progress request' })
+    activateAuthorizationDispatch(db, machine)
+    expect(taskAuthorization(db, child.id)).toMatchObject({
+      status: 'active',
+      nodeId: assigned.nodeId,
+      effectivePermissions: assigned.effectivePermissions
+    })
+    const reopened = new Database(db.db.serialize())
+    expect(taskAuthorization({ db: reopened }, child.id)).toMatchObject({ status: 'active', nodeId: assigned.nodeId })
+    reopened.close()
+    expect(() => db.db.prepare('UPDATE authorization_task_bindings SET assignment_node_id = NULL WHERE task_id = ?').run(child.id))
+      .toThrow('immutable')
   })
 
   it('audits create/update/start through lineage while preserving admission outcomes', async () => {
@@ -343,6 +370,22 @@ describe('immutable human authorization chain', () => {
       projectId, taskId: denied.task.id, artifactTaskId: denied.task.id, parentTaskId: null
     })).toMatchObject({ code: 'capability_refused', missing_capability: 'task.start' })
     expect(startTask).toHaveBeenCalledOnce()
+  })
+
+  it('requires task.start for every update that causes present or deferred execution', async () => {
+    relay()
+    const child = db.createTask({ title: 'Update-only worker', project_id: projectId, repos: ['krazyjakee/21x'] })!
+    inheritTaskAuthorization(db, captainId, child.id, 'Update metadata only', ['task.update'])
+    const startTask = vi.fn(async () => ({ action: 'task_started', startedTaskId: child.id }))
+    setTaskApiAgentController({ startTask } as never)
+    const childScope = { projectId, taskId: child.id, artifactTaskId: child.id, parentTaskId: null }
+
+    expect(await handleTaskRoute(db, '/update_task', { task_id: child.id, status: 'agent_working' }, childScope))
+      .toMatchObject({ code: 'capability_refused', missing_capability: 'task.start' })
+    expect(await handleTaskRoute(db, '/update_task', { task_id: child.id, auto_start_agent: true }, childScope))
+      .toMatchObject({ code: 'capability_refused', missing_capability: 'task.start' })
+    expect(startTask).not.toHaveBeenCalled()
+    expect(db.getTask(child.id)).toMatchObject({ status: 'not_started', auto_start_agent: false })
   })
 
   it('returns one structured adjacent-to-execution refusal with origin and remediation', () => {

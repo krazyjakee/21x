@@ -38,7 +38,7 @@ Schema 23 adds an append-only ledger:
 | Delegation node | Parent ID and hash, root ID, relay author, exact interpretation and hash, Commander correlation/session, destination task, timestamp, narrowed actions/repos, unchanged or shorter expiry |
 | Transport binding | Durable delivery key, node ID, destination task and exact payload hash |
 | Dispatch reservation | Monotonic sequence, idempotency key, task, node and payload hash |
-| Task binding | Current dispatch sequence and active node; the only mutable projection |
+| Task binding | Current dispatch sequence/turn node plus a write-once assigned-work node; machine follow-ups can replace the former but never erase the latter |
 | Revocation | Append-only node ID, time and reason; applies to all descendants |
 
 SQLite triggers forbid updates/deletes of evidence. Hashes detect inconsistent
@@ -78,8 +78,11 @@ necessarily carries their ordinary update/start lifecycle; creating an issue
 necessarily carries its 21x link; an authenticated coding assignment carries
 draft-PR opening. Conditional, negated, approval-dependent, mock-only, quoted,
 interrogative, ambiguous, oversized and protected-action clauses retain human
-evidence but produce no capability. This remains a bounded grammar, not a
-general natural-language consent model.
+evidence but produce no capability. Conditional/example prefixes carry across
+punctuation to the command they qualify, while an explicit later prohibition
+removes the corresponding necessary capability (for example “Refactor. Do not
+open PRs.” retains task work but not `github.pr.open`). This remains a bounded
+grammar, not a general natural-language consent model.
 
 Project scope comes from a single named configured project, the trusted project
 chat destination, or the last platform-captured human conversational project
@@ -98,9 +101,10 @@ their own payload/action policies at the write boundary.
 For task creation, omitted `permissions` inherits that effective set. A supplied
 array can only intersect it, and an explicit empty array intentionally gives the
 new branch no ordinary mutation authority. Task update/start, issue writes and
-draft-PR opening resolve the same live record next to execution. Recovery uses
-the task's immutable binding; recap, wake-up and retry prose cannot mint or renew
-rights.
+draft-PR opening resolve the same live record next to execution. A status update
+or automation flag that would start an agent consumes `task.start` as well as
+`task.update`. Recovery uses the task's immutable assigned-work binding; recap,
+wake-up and retry prose cannot mint, renew or erase rights.
 
 ## Dispatch, recovery and revocation
 
@@ -115,9 +119,11 @@ worker nudges, and adapters that await before marking a prompt busy. A worker
 continuation captures both generation and active node before asynchronous
 preparation, and refuses to borrow a newer human instruction. Activation rechecks the latest sequence,
 expiry and revocation after asynchronous waits. Error, approval-wait, unknown
-status, or a 60-second idle timeout leave authority inactive. Machine Captain
-nudges clear earlier turn authority. Normal worker continuation retains the fixed
-instruction assigned at creation.
+status, or a 60-second idle timeout leave turn authority inactive. Machine
+Captain nudges clear earlier turn authority but fall back to the write-once
+delegation assigned atomically at task creation. Normal worker continuation
+therefore retains the fixed instruction assigned at creation without treating
+machine prose as new authority.
 
 The preload exposes trusted-window-only `authorization.inspectTask(taskId)` and
 `authorization.revoke(nodeId)`. UI integration can display the original instruction
@@ -158,7 +164,7 @@ does not edit relay wording and retry.
 | Human chat → Commander → Captain → task | One immutable origin; every hop can only narrow. Covered ordinary work needs no repeated grant. |
 | Task create/update/start | Same lineage; signed caller scope and project membership remain mandatory. Admission/capacity still decides when a valid start runs. |
 | GitHub issue create/update/link | Same resolver plus the existing immutable issue-write claim/ledger and restart reconciliation. |
-| Draft PR opening | `open_draft_pull_request` only: configured task repo, clean named branch, exact head/base, non-force push, draft creation and exact retry recovery. |
+| Draft PR opening | `open_draft_pull_request` only, available to signed nested and top-level task agents: configured task repo, clean named branch, one validated fetch/push destination with no URL rewrite, immutable source SHA/ref, post-push verification, draft creation and exact retry recovery. |
 | Merge and review approval | Separate merge grant/readiness gate and GitHub branch-protection/formal approval. Ordinary capability never satisfies either. |
 | Deploy/release/delete/replay/migration/protection bypass/credentials/messages | Separate explicit gate; absent from the ordinary registry. |
 | Cross-project or cross-repository writes | Denied by live task/project/repository intersection. |

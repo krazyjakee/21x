@@ -1,10 +1,12 @@
 import { mkdirSync, mkdtempSync, rmSync } from 'fs'
+import { execFileSync } from 'child_process'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTestDb } from '../../test/helpers/db-test-helper'
 import { makeTask } from '../../test/helpers/task-fixtures'
 import {
+  AUTHORIZATION_TTL_MS,
   activateAuthorizationDispatch,
   prepareAuthorizationDispatch,
   recordHumanAuthorization,
@@ -44,6 +46,7 @@ describe('narrow draft pull-request capability gate', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     setPrWriteRunner(null)
     db.close()
     rmSync(workspace, { recursive: true, force: true })
@@ -51,19 +54,26 @@ describe('narrow draft pull-request capability gate', () => {
   })
 
   const scope = () => ({ parentTaskId: null, taskId, artifactTaskId: taskId, projectId })
+  const gitState = (command: string, args: string[], options: { dirty?: boolean; pushUrl?: string } = {}): string | null => {
+    if (command !== 'git') return null
+    if (args[0] === 'rev-parse') return `${head}\n`
+    if (args[0] === 'branch') return 'fix/capabilities\n'
+    if (args[0] === 'status') return options.dirty ? ' M src/main/file.ts\n' : ''
+    if (args[0] === 'remote' && args.includes('--push')) return `${options.pushUrl ?? 'https://github.com/krazyjakee/21x.git'}\n`
+    if (args[0] === 'remote') return 'https://github.com/krazyjakee/21x.git\n'
+    if (args[0] === 'config') return ''
+    if (args[0] === 'merge-base' || args[0] === 'push') return ''
+    if (args[0] === 'ls-remote') return `${head}\trefs/heads/fix/capabilities\n`
+    return null
+  }
 
   it('pushes without force, opens one exact draft and recovers an identical retry', async () => {
     const calls: Array<{ command: string; args: string[] }> = []
     let existing: Record<string, unknown> | null = null
     setPrWriteRunner(async (command, args) => {
       calls.push({ command, args })
-      if (command === 'git') {
-        if (args[0] === 'rev-parse') return `${head}\n`
-        if (args[0] === 'branch') return 'fix/capabilities\n'
-        if (args[0] === 'status') return ''
-        if (args[0] === 'remote') return 'git@github.com:krazyjakee/21x.git\n'
-        if (args[0] === 'merge-base' || args[0] === 'push') return ''
-      }
+      const git = gitState(command, args)
+      if (git !== null) return git
       if (args[0] === 'pr' && args[1] === 'list') return JSON.stringify(existing ? [existing] : [])
       if (args[0] === 'pr' && args[1] === 'create') {
         existing = { url, isDraft: true, state: 'OPEN', headRefOid: head, baseRefName: 'main' }
@@ -91,11 +101,8 @@ describe('narrow draft pull-request capability gate', () => {
     const calls: Array<{ command: string; args: string[] }> = []
     setPrWriteRunner(async (command, args) => {
       calls.push({ command, args })
-      if (command === 'git' && args[0] === 'rev-parse') return `${head}\n`
-      if (command === 'git' && args[0] === 'branch') return 'fix/capabilities\n'
-      if (command === 'git' && args[0] === 'status') return ''
-      if (command === 'git' && args[0] === 'remote') return 'https://github.com/krazyjakee/21x.git\n'
-      if (command === 'git' && args[0] === 'merge-base') return ''
+      const git = gitState(command, args)
+      if (git !== null && args[0] !== 'push') return git
       if (command === 'gh' && args[0] === 'pr' && args[1] === 'list') {
         revokeAuthorization(db, rootId, 'withdrawn during PR inspection')
         return '[]'
@@ -106,6 +113,56 @@ describe('narrow draft pull-request capability gate', () => {
     expect(await handlePrWriteRoute(db, `/${OPEN_DRAFT_PR_TOOL}`, { repo: 'krazyjakee/21x', title: 'No longer authorized' }, scope()))
       .toMatchObject({ status: 'refused', code: 'capability_refused', authorization_status: 'revoked', origin_node_id: rootId })
     expect(calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false)
+  })
+
+  it.each(['revoked', 'expired', 'repository_removed'] as const)('rechecks %s after the final remote lookup and before creating', async (change) => {
+    let lookups = 0
+    let created = false
+    setPrWriteRunner(async (command, args) => {
+      const git = gitState(command, args)
+      if (git !== null) return git
+      if (command === 'gh' && args[0] === 'pr' && args[1] === 'list') {
+        lookups++
+        if (lookups === 2) {
+          if (change === 'revoked') revokeAuthorization(db, rootId, 'withdrawn during final lookup')
+          if (change === 'repository_removed') db.removeProjectRepo(db.getProjectRepos(projectId)[0].id)
+          if (change === 'expired') vi.useFakeTimers({ now: Date.now() + AUTHORIZATION_TTL_MS + 1 })
+        }
+        return '[]'
+      }
+      if (command === 'gh' && args[0] === 'pr' && args[1] === 'create') {
+        created = true
+        return `${url}\n`
+      }
+      throw new Error(`unexpected command: ${command} ${args.join(' ')}`)
+    })
+
+    expect(await handlePrWriteRoute(db, `/${OPEN_DRAFT_PR_TOOL}`, { repo: 'krazyjakee/21x', title: 'Final boundary' }, scope()))
+      .toMatchObject({ status: 'refused', code: 'capability_refused' })
+    expect(created).toBe(false)
+  })
+
+  it('refuses a real Git worktree whose authorized fetch URL has a different pushurl', async () => {
+    const repoDir = join(workspace, '21x')
+    const other = mkdtempSync(join(tmpdir(), '21x-other-remote-'))
+    try {
+      rmSync(repoDir, { recursive: true, force: true })
+      mkdirSync(repoDir, { recursive: true })
+      execFileSync('git', ['init', '--initial-branch=fix/capabilities'], { cwd: repoDir })
+      execFileSync('git', ['config', 'user.name', 'Test'], { cwd: repoDir })
+      execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoDir })
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'initial'], { cwd: repoDir })
+      execFileSync('git', ['init', '--bare'], { cwd: other })
+      execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/krazyjakee/21x.git'], { cwd: repoDir })
+      execFileSync('git', ['remote', 'set-url', '--add', '--push', 'origin', other], { cwd: repoDir })
+      setPrWriteRunner(null)
+
+      expect(await handlePrWriteRoute(db, `/${OPEN_DRAFT_PR_TOOL}`, { repo: 'krazyjakee/21x', title: 'Wrong destination' }, scope()))
+        .toMatchObject({ status: 'refused', code: 'push_destination_mismatch' })
+      expect(execFileSync('git', ['for-each-ref', '--format=%(refname)'], { cwd: other, encoding: 'utf8' })).toBe('')
+    } finally {
+      rmSync(other, { recursive: true, force: true })
+    }
   })
 
   it('refuses raw, cross-repository, dirty and notification-bearing requests', async () => {
@@ -121,10 +178,8 @@ describe('narrow draft pull-request capability gate', () => {
       .toMatchObject({ status: 'refused', code: 'payload_rejected' })
 
     setPrWriteRunner(async (command, args) => {
-      if (command === 'git' && args[0] === 'rev-parse') return `${head}\n`
-      if (command === 'git' && args[0] === 'branch') return 'fix/capabilities\n'
-      if (command === 'git' && args[0] === 'status') return ' M src/main/file.ts\n'
-      if (command === 'git' && args[0] === 'remote') return 'https://github.com/krazyjakee/21x.git\n'
+      const git = gitState(command, args, { dirty: true })
+      if (git !== null) return git
       throw new Error('must stop at dirty status')
     })
     expect(await handlePrWriteRoute(db, `/${OPEN_DRAFT_PR_TOOL}`, { repo: 'krazyjakee/21x', title: 'Dirty' }, scope()))

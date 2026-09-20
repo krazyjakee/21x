@@ -134,6 +134,21 @@ describe('MCP endpoint over HTTP', () => {
     await client.close()
   })
 
+  it('serves draft PR opening to a signed top-level task but not its Captain', async () => {
+    const project = db.createProject({ name: 'Top-level project' })!
+    const task = db.createTask(makeTask({ title: 'Top-level coding task', type: 'coding', project_id: project.id }))!
+    const port = await startTaskApiServer(db)
+    const worker = await connect(buildTaskMcpUrl(port, getTaskApiToken(), {
+      projectId: project.id, taskId: task.id, artifactTaskId: task.id
+    }))
+    const captain = await connect(buildTaskMcpUrl(port, getTaskApiToken(), { projectId: project.id }))
+
+    expect((await worker.listTools()).tools.map((tool) => tool.name)).toContain('open_draft_pull_request')
+    expect((await captain.listTools()).tools.map((tool) => tool.name)).not.toContain('open_draft_pull_request')
+    await worker.close()
+    await captain.close()
+  })
+
   it('reads real data from the database through tools/call', async () => {
     const task = db.createTask(makeTask({ title: 'Findable task' }))!
     const port = await startTaskApiServer(db)

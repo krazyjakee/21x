@@ -92,6 +92,7 @@ type ClassifiedIntent = Pick<CapabilityIntent, 'capability' | 'basis' | 'clauseH
 const UNSAFE_CLAUSE = /\b(?:if|unless|provided|assuming|once|when|after|before|pending|subject\s+to|mock|dry[ -]?run|simulate|hypothetical|example|do\s+not|don't|dont|shouldn't|shouldnt|without|refrain|ask\s+(?:me|the\s+user)\s+(?:first|before)|(?:my|user|human)\s+approval|approve[sd]?|confirmation|merge|squash|rebase|deploy|release|promote|rollback|delete|destroy|purge|force[ -]?push|bypass|credential|token|secret|password)\b/i
 const INTERROGATIVE = /^(?:why|how|what|which|who|where|can|could|would|will|may|should|do|does|did|is|are|was|were)\b/i
 const CODING_ASSIGNMENT = /^(?:please\s+)?(?:implement|fix|repair|build|develop|code|refactor)\b/i
+const UNSAFE_CONTEXT_PREFIX = /^(?:(?:only\s+)?if\b|unless\b|when\b|once\b|pending\b|subject\s+to\b|example(?:\s+instructions?)?\b|hypothetical\b|mock\b|wait\s+for\b)/i
 
 function clauses(text: string): Array<{ text: string; start: number; end: number }> {
   const result: Array<{ text: string; start: number; end: number }> = []
@@ -136,7 +137,35 @@ function addClassified(
  */
 export function classifyCapabilityIntents(text: string, projectNames: string[] = []): ClassifiedIntent[] {
   const found = new Map<AuthorizationAction, ClassifiedIntent>()
+  const denied = new Set<AuthorizationAction>()
+  let unsafeNextClause = false
   for (const clause of clauses(text)) {
+    const denial = /\b(?:do\s+not|don't|dont|never|refrain\s+from)\s+(create|add|make|file|open|opening|publish|update|link|start|starting)\s+(?:(?:the|a|an|any|all|draft)\s+)*(tasks?|(?:github|gh)\s+issues?|prs?|pull\s+requests?)\b/ig
+    for (const match of clause.text.matchAll(denial)) {
+      const verb = match[1].replace(/ing$/, '').toLowerCase()
+      const target = match[2].toLowerCase()
+      if (/^(?:pr|pull)/.test(target)) denied.add('github.pr.open')
+      else if (/^(?:github|gh)/.test(target)) {
+        if (verb === 'update') denied.add('github.issue.update')
+        else if (verb === 'link') denied.add('github.issue.link')
+        else {
+          denied.add('github.issue.create')
+          denied.add('github.issue.link')
+        }
+      } else if (verb === 'update') denied.add('task.update')
+      else if (verb === 'start') denied.add('task.start')
+      else denied.add('task.create')
+    }
+    if (unsafeNextClause) {
+      if (CODING_ASSIGNMENT.test(clause.text) || /^(?:please\s+)?(?:create|add|make|file|open|publish|update|link|start|prioriti[sz]e)\b/i.test(clause.text)) {
+        unsafeNextClause = false
+      }
+      continue
+    }
+    if (UNSAFE_CONTEXT_PREFIX.test(clause.text)) {
+      unsafeNextClause = /:\s*$/.test(clause.text) || !/\b(?:tasks?|(?:github|gh)\s+issues?|prs?|pull\s+requests?)\b/i.test(clause.text)
+      continue
+    }
     if (clause.text.length > 1_000 || INTERROGATIVE.test(clause.text) || UNSAFE_CLAUSE.test(clause.text) || /["“”`]/.test(clause.text)) continue
 
     if (CODING_ASSIGNMENT.test(clause.text)) {
@@ -204,6 +233,7 @@ export function classifyCapabilityIntents(text: string, projectNames: string[] =
       addClassified(found, 'task.start', 'necessary', clause)
     }
   }
+  for (const capability of denied) found.delete(capability)
   return AUTHORIZATION_ACTIONS.flatMap((capability) => found.has(capability) ? [found.get(capability)!] : [])
 }
 
@@ -426,7 +456,11 @@ export function prepareAuthorizationDispatch(source: Source, input: { key: strin
       if (node?.source === 'project-chat' && node.taskId === input.taskId && node.textHash === hash) nodeId = node.id
     }
     const seq = Number(source.db.prepare('INSERT INTO authorization_dispatches (delivery_key, task_id, node_id, payload_hash) VALUES (?, ?, ?, ?)').run(input.key, input.taskId, nodeId, hash).lastInsertRowid)
-    source.db.prepare('INSERT INTO authorization_task_bindings VALUES (?, ?, NULL) ON CONFLICT(task_id) DO UPDATE SET dispatch_seq = excluded.dispatch_seq, node_id = NULL').run(input.taskId, seq)
+    source.db.prepare(`
+      INSERT INTO authorization_task_bindings (task_id, dispatch_seq, node_id, assignment_node_id)
+      VALUES (?, ?, NULL, NULL)
+      ON CONFLICT(task_id) DO UPDATE SET dispatch_seq = excluded.dispatch_seq, node_id = NULL
+    `).run(input.taskId, seq)
     return seq
   })()
 }
@@ -464,8 +498,9 @@ export function failAuthorizationDispatch(source: Source, seq: number): void {
 }
 
 export function taskAuthorization(source: Source, taskId: string, now = Date.now()): AuthorizationEvidence {
-  const row = source.db.prepare('SELECT node_id FROM authorization_task_bindings WHERE task_id = ?').get(taskId) as { node_id: string | null } | undefined
-  return resolveAuthorization(source, row?.node_id ?? null, now)
+  const row = source.db.prepare('SELECT node_id, assignment_node_id FROM authorization_task_bindings WHERE task_id = ?')
+    .get(taskId) as { node_id: string | null; assignment_node_id: string | null } | undefined
+  return resolveAuthorization(source, row?.node_id ?? row?.assignment_node_id ?? null, now)
 }
 
 /** Policy integration: taskId must come from the server's caller scope. */
@@ -510,15 +545,21 @@ export function resolveTaskAuthorization(source: Source, input: { taskId: string
 
 /** A newly created task gets a fixed child of its caller's CURRENT chain. */
 export function inheritTaskAuthorization(source: Source, callerTaskId: string, taskId: string, text: string, actions?: AuthorizationAction[]): void {
-  const evidence = taskAuthorization(source, callerTaskId)
-  const task = source.db.prepare('SELECT project_id, repos FROM tasks WHERE id = ?').get(taskId) as { project_id: string; repos: string } | undefined
-  if (!task || evidence.status !== 'active' || !evidence.nodeId) return
-  const repos = JSON.parse(task.repos || '[]') as string[]
-  const node = delegateAuthorization(source, { parentId: evidence.nodeId, author: 'agent', text, taskId, projectId: task.project_id, actions, repos: repos.length ? repos.map(r => r.toLowerCase()) : undefined })
-  if (!node) return
-  const key = `task-creation:${taskId}`
-  bindAuthorizationTransport(source, key, node.id, taskId, text)
-  activateAuthorizationDispatch(source, prepareAuthorizationDispatch(source, { key, taskId, text }))
+  source.db.transaction(() => {
+    const evidence = taskAuthorization(source, callerTaskId)
+    const task = source.db.prepare('SELECT project_id, repos FROM tasks WHERE id = ?').get(taskId) as { project_id: string; repos: string } | undefined
+    if (!task || evidence.status !== 'active' || !evidence.nodeId) return
+    const repos = JSON.parse(task.repos || '[]') as string[]
+    const node = delegateAuthorization(source, { parentId: evidence.nodeId, author: 'agent', text, taskId, projectId: task.project_id, actions, repos: repos.length ? repos.map(r => r.toLowerCase()) : undefined })
+    if (!node) return
+    const key = `task-creation:${taskId}`
+    bindAuthorizationTransport(source, key, node.id, taskId, text)
+    activateAuthorizationDispatch(source, prepareAuthorizationDispatch(source, { key, taskId, text }))
+    source.db.prepare(`
+      UPDATE authorization_task_bindings SET assignment_node_id = ?
+      WHERE task_id = ? AND assignment_node_id IS NULL
+    `).run(node.id, taskId)
+  })()
 }
 
 /** Called only by trusted UI/main-process code. No model-facing revoke/grant API. */

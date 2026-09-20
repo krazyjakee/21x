@@ -18,6 +18,18 @@ const SCOPED: TaskMcpScope = {
   taskId: 'task-own',
   artifactTaskId: 'task-own'
 }
+const TOP_LEVEL_TASK: TaskMcpScope = {
+  parentTaskId: null,
+  taskId: 'task-top',
+  artifactTaskId: 'task-top',
+  projectId: 'project-one'
+}
+const CAPTAIN: TaskMcpScope = {
+  parentTaskId: null,
+  taskId: null,
+  artifactTaskId: null,
+  projectId: 'project-one'
+}
 
 const toolByName = (scope: TaskMcpScope, name: string) =>
   listToolsForScope(scope).find((tool) => tool.name === name)
@@ -111,6 +123,21 @@ describe('tool sets per scope', () => {
     expect(names).not.toContain('list_tasks')
     expect(names).not.toContain('create_task')
     expect(names).toContain('open_draft_pull_request')
+  })
+
+  it('offers draft PR opening to nested and top-level task agents, never Captains or raw sessions', async () => {
+    expect(listToolsForScope(SCOPED).map((tool) => tool.name)).toContain('open_draft_pull_request')
+    expect(listToolsForScope(TOP_LEVEL_TASK).map((tool) => tool.name)).toContain('open_draft_pull_request')
+    expect(listToolsForScope(CAPTAIN).map((tool) => tool.name)).not.toContain('open_draft_pull_request')
+    expect(listToolsForScope(FULL_ACCESS_SCOPE).map((tool) => tool.name)).not.toContain('open_draft_pull_request')
+
+    const calls: Array<{ route: string; trustedScope?: TaskMcpScope }> = []
+    await callToolForScope('open_draft_pull_request', { repo: 'acme/app', title: 'Draft' }, TOP_LEVEL_TASK,
+      async (route, _params, trustedScope) => {
+        calls.push({ route, trustedScope })
+        return { status: 'refused' }
+      })
+    expect(calls).toEqual([{ route: '/open_draft_pull_request', trustedScope: TOP_LEVEL_TASK }])
   })
 
   it('never advertises the same tool twice', () => {

@@ -73,7 +73,7 @@ function authorizeScopedTaskAction(
   db: DatabaseManager,
   scope: TaskMcpScope | undefined,
   projectId: string,
-  action: 'task.create' | 'task.update'
+  action: 'task.create' | 'task.update' | 'task.start'
 ): Record<string, unknown> | null {
   if (!scope) return null
   const caller = callerTaskId(db, scope, projectId)
@@ -294,6 +294,12 @@ async function updateTask(db: DatabaseManager, params: Record<string, unknown>, 
   let prepared: Awaited<ReturnType<typeof prepareUserTaskUpdate>>
   try {
     prepared = await prepareUserTaskUpdate(agentController, current, data)
+    const updateRefused = authorizeScopedTaskAction(db, trustedScope, taskProjectId(current), 'task.update')
+    if (updateRefused) return updateRefused
+    if (prepared.startAfterWrite || prepared.data.auto_start_agent === true) {
+      const startRefused = authorizeScopedTaskAction(db, trustedScope, taskProjectId(current), 'task.start')
+      if (startRefused) return startRefused
+    }
     updated = Object.keys(prepared.data).length > 0
       ? db.updateTask(taskId, prepared.data)
       : db.getTask(taskId)
@@ -307,6 +313,8 @@ async function updateTask(db: DatabaseManager, params: Record<string, unknown>, 
     afterTaskUpdated(db, agentController, current, prepared.data, updated)
   }
   if (prepared.startAfterWrite) {
+    const startRefused = authorizeScopedTaskAction(db, trustedScope, taskProjectId(current), 'task.start')
+    if (startRefused) return startRefused
     try {
       await startPreparedTask(agentController!, taskId)
     } catch (error) {

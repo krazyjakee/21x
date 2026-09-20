@@ -21,9 +21,19 @@ export function createAuthorizationTables(db: Database.Database): void {
       task_id TEXT NOT NULL, node_id TEXT REFERENCES authorization_nodes(id), payload_hash TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS authorization_task_bindings (
-      task_id TEXT PRIMARY KEY, dispatch_seq INTEGER NOT NULL, node_id TEXT REFERENCES authorization_nodes(id)
+      task_id TEXT PRIMARY KEY, dispatch_seq INTEGER NOT NULL,
+      node_id TEXT REFERENCES authorization_nodes(id),
+      assignment_node_id TEXT REFERENCES authorization_nodes(id)
     );
   `)
+  const bindingColumns = db.prepare('PRAGMA table_info(authorization_task_bindings)').all() as Array<{ name: string }>
+  if (!bindingColumns.some((column) => column.name === 'assignment_node_id')) {
+    db.exec('ALTER TABLE authorization_task_bindings ADD COLUMN assignment_node_id TEXT REFERENCES authorization_nodes(id)')
+  }
+  db.exec(`CREATE TRIGGER IF NOT EXISTS authorization_assignment_no_replace
+    BEFORE UPDATE OF assignment_node_id ON authorization_task_bindings
+    WHEN OLD.assignment_node_id IS NOT NULL AND NEW.assignment_node_id IS NOT OLD.assignment_node_id
+    BEGIN SELECT RAISE(ABORT, 'Assigned authorization lineage is immutable'); END`)
   for (const table of ['authorization_nodes', 'authorization_revocations', 'authorization_transports', 'authorization_dispatches']) {
     for (const operation of ['UPDATE', 'DELETE']) {
       db.exec(`CREATE TRIGGER IF NOT EXISTS ${table}_no_${operation.toLowerCase()}

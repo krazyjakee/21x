@@ -526,7 +526,7 @@ describe('report_to_commander route and scope', () => {
     const captain = { parentTaskId: null, taskId: null, artifactTaskId: null, projectId: 'p1' }
     const ok = await callToolForScope('report_to_commander', { message: 'Done', project_id: 'other' }, captain, invoke)
     expect(ok.isError).toBeUndefined()
-    expect(invoke).toHaveBeenCalledWith('/report_to_commander', { message: 'Done', project_id: 'p1' })
+    expect(invoke).toHaveBeenCalledWith('/report_to_commander', { message: 'Done', project_id: 'p1' }, captain)
 
     const taskAgent = { parentTaskId: null, taskId: null, artifactTaskId: 't1', projectId: 'p1' }
     const denied = await callToolForScope('report_to_commander', { message: 'Done' }, taskAgent, invoke)

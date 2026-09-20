@@ -507,16 +507,24 @@ Trusted human intent is classified once. Task creation, update and start consume
 lineage. A child omitting `permissions` inherits; a supplied list only narrows;
 `permissions: []` is an intentional deny. Starting still goes through the
 existing admission controller, so authority never overrides capacity, dependency
-or file-overlap decisions.
+or file-overlap decisions. Updates that request `agent_working` or enable
+`auto_start_agent` also require `task.start`; changing the route name cannot
+bypass a narrowed lifecycle capability. Machine follow-ups preserve the
+write-once assigned-work lineage without treating their text as authority.
 
 A coding task with `github.pr.open` uses `open_draft_pull_request`. The operation
 derives the task workspace from the signed scope, intersects the task repo with
 current project configuration, requires a clean non-base branch whose origin
-matches the repository, checks that the configured base is an ancestor, pushes
-`HEAD` without force, and opens a draft through fixed argument arrays. It checks
-for an exact existing PR before and after the push so restart or a lost response
-does not duplicate it. The tool has no merge, approval, auto-merge, admin,
-force-push or protection option; those controls remain separate.
+matches the repository, refuses multiple/different push URLs and URL rewriting,
+checks that the configured base is an ancestor, pushes an immutable SHA to its
+exact branch ref without force, verifies that remote ref, and opens a draft
+through fixed argument arrays. It re-reads worktree, live scope and authorization
+after every remote lookup and checks for an exact existing PR before and after
+the push, so revocation/repository removal wins and restart or a lost response
+does not duplicate the PR. The task-only tool is served to nested and top-level
+signed agents, never Captains or raw sessions. It has no merge, approval,
+auto-merge, admin, force-push or protection option; those controls remain
+separate.
 
 ## Scheduled Captain reviews (#67)
 

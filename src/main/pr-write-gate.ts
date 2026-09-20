@@ -103,18 +103,44 @@ export async function handlePrWriteRoute(
   if (!existsSync(cwd) || !existsSync(join(cwd, '.git'))) return refusal('worktree_missing', `The task worktree for ${repo} is not available.`)
 
   try {
-    const [head, branch, status, remote] = await Promise.all([
-      runner('git', ['rev-parse', 'HEAD'], cwd),
-      runner('git', ['branch', '--show-current'], cwd),
-      runner('git', ['status', '--porcelain'], cwd),
-      runner('git', ['remote', 'get-url', 'origin'], cwd)
-    ])
-    const headSha = head.trim()
-    const branchName = branch.trim()
-    if (!/^[0-9a-f]{40}$/i.test(headSha)) return refusal('head_invalid', 'The task worktree has no immutable 40-character Git head.')
-    if (!branchName || ['main', 'master', base].includes(branchName)) return refusal('branch_invalid', 'Open a pull request only from a named non-base task branch.')
-    if (status.trim()) return refusal('worktree_dirty', 'Commit the task worktree before opening its pull request.')
-    if (!remoteMatches(remote, repo)) return refusal('repo_mismatch', `The worktree origin does not match ${repo}.`)
+    const inspect = async (): Promise<{
+      headSha: string
+      branchName: string
+      pushUrl: string
+      denial?: Record<string, unknown>
+    }> => {
+      const rewritesPromise = runner('git', ['config', '--get-regexp', '^url\\..*\\.(insteadOf|pushInsteadOf)$'], cwd)
+        .catch((error: unknown) => {
+          if (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === 1) return ''
+          throw error
+        })
+      const [head, branch, status, fetchUrl, pushUrlsRaw, rewrites] = await Promise.all([
+        runner('git', ['rev-parse', 'HEAD'], cwd),
+        runner('git', ['branch', '--show-current'], cwd),
+        runner('git', ['status', '--porcelain'], cwd),
+        runner('git', ['remote', 'get-url', 'origin'], cwd),
+        runner('git', ['remote', 'get-url', '--push', '--all', 'origin'], cwd),
+        rewritesPromise
+      ])
+      const headSha = head.trim()
+      const branchName = branch.trim()
+      const pushUrls = pushUrlsRaw.split(/\r?\n/).map((value) => value.trim()).filter(Boolean)
+      if (!/^[0-9a-f]{40}$/i.test(headSha)) return { headSha, branchName, pushUrl: '', denial: refusal('head_invalid', 'The task worktree has no immutable 40-character Git head.') }
+      if (!branchName || ['main', 'master', base].includes(branchName)) return { headSha, branchName, pushUrl: '', denial: refusal('branch_invalid', 'Open a pull request only from a named non-base task branch.') }
+      if (status.trim()) return { headSha, branchName, pushUrl: '', denial: refusal('worktree_dirty', 'Commit the task worktree before opening its pull request.') }
+      if (!remoteMatches(fetchUrl, repo)) return { headSha, branchName, pushUrl: '', denial: refusal('repo_mismatch', `The worktree fetch URL does not match ${repo}.`) }
+      if (pushUrls.length !== 1 || !remoteMatches(pushUrls[0], repo)) {
+        return { headSha, branchName, pushUrl: '', denial: refusal('push_destination_mismatch', `The worktree must have exactly one push destination and it must match ${repo}.`) }
+      }
+      if (rewrites.trim()) {
+        return { headSha, branchName, pushUrl: '', denial: refusal('push_destination_ambiguous', 'Git URL rewrite rules are active; remove them for this isolated worktree before opening a pull request.') }
+      }
+      return { headSha, branchName, pushUrl: pushUrls[0] }
+    }
+
+    const first = await inspect()
+    if (first.denial) return first.denial
+    const { headSha, branchName } = first
     await runner('git', ['merge-base', '--is-ancestor', `origin/${base}`, 'HEAD'], cwd)
 
     const existing = await findExisting(repo, branchName, cwd)
@@ -123,17 +149,29 @@ export async function handlePrWriteRoute(
       return { status: 'already_done', pr_url: existing.url, draft: existing.isDraft, head_sha: headSha, base }
     }
 
+    const pushState = await inspect()
+    if (pushState.denial) return pushState.denial
+    if (pushState.headSha !== headSha || pushState.branchName !== branchName) return refusal('worktree_changed', 'The branch or immutable head changed during pull-request inspection.')
     const beforePush = resolveTaskAuthorization(db, { taskId, projectId, action: 'github.pr.open', repo })
     if (!beforePush.allowed) return { status: 'refused', ...authorizationRefusal(beforePush) }
-    await runner('git', ['push', '--set-upstream', 'origin', 'HEAD'], cwd)
+    await runner('git', ['push', pushState.pushUrl, `${headSha}:refs/heads/${branchName}`], cwd)
+    const pushed = (await runner('git', ['ls-remote', '--heads', pushState.pushUrl, `refs/heads/${branchName}`], cwd)).trim()
+    if (pushed !== `${headSha}\trefs/heads/${branchName}`) {
+      return refusal('push_verification_failed', 'The authorized repository did not report the exact immutable head after push; inspect the branch before retrying.')
+    }
 
-    const beforeCreate = resolveTaskAuthorization(db, { taskId, projectId, action: 'github.pr.open', repo })
-    if (!beforeCreate.allowed) return { status: 'refused', ...authorizationRefusal(beforeCreate) }
     const recovered = await findExisting(repo, branchName, cwd)
     if (recovered) {
       if (recovered.headRefOid !== headSha || recovered.baseRefName !== base) return refusal('existing_pr_mismatch', 'An open PR appeared for another head or base; 21x stopped.')
       return { status: 'already_done', pr_url: recovered.url, draft: recovered.isDraft, head_sha: headSha, base }
     }
+    const createState = await inspect()
+    if (createState.denial) return createState.denial
+    if (createState.headSha !== headSha || createState.branchName !== branchName || createState.pushUrl !== pushState.pushUrl) {
+      return refusal('worktree_changed', 'The branch, immutable head or push destination changed before pull-request creation.')
+    }
+    const beforeCreate = resolveTaskAuthorization(db, { taskId, projectId, action: 'github.pr.open', repo })
+    if (!beforeCreate.allowed) return { status: 'refused', ...authorizationRefusal(beforeCreate) }
 
     const url = (await runner('gh', [
       'pr', 'create', '--draft', '--repo', repo, '--base', base, '--head', branchName,

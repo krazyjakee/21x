@@ -79,6 +79,9 @@ const artifactTools: Tool[] = [
 
 export const artifactToolNames = new Set(artifactTools.map((tool) => tool.name))
 
+/** Mutations available only to a signed ordinary task, nested or top-level. */
+export const taskAgentTools: Tool[] = [...prWriteTools]
+
 export const sharedTools: Tool[] = [
   ...artifactTools,
   ...reviewAttestationTools,
@@ -813,7 +816,6 @@ export const browserTools: Tool[] = [
 
 // Subtask-scoped tools (can only access parent task + sibling subtasks)
 export const subtaskTools: Tool[] = [
-  ...prWriteTools,
   {
     name: 'get_parent_task',
     description: 'Get the parent task details including description, resolution, and output fields.',
