@@ -47,6 +47,8 @@ import {
   type MergeGrant,
   type MergeAuthorizationContext,
   type MergeGrantAuditEntry,
+  type MergeGrantReservation,
+  type MergeGrantUse,
   type MergeGrantScopeInput,
   type MergeGrantSource,
   type PullRequestRef
@@ -704,6 +706,73 @@ function authorizationContext(
   }
 }
 
+function recordedGrantUseForPullRequest(
+  db: MergeGrantDb,
+  projectId: string,
+  prUrl: string
+): { grant: MergeGrant; use: MergeGrantUse } | null {
+  const normalizedUrl = prUrl.toLowerCase()
+  let found: { grant: MergeGrant; use: MergeGrantUse } | null = null
+  for (const grant of db.listMergeGrants({ projectId })) {
+    for (const use of db.listMergeGrantUses(grant.id)) {
+      if (use.pr_url.toLowerCase() !== normalizedUrl) continue
+      if (!found || use.merged_at > found.use.merged_at) found = { grant, use }
+    }
+  }
+  return found
+}
+
+function recordedGrantUseResult(
+  pr: PullRequestRef,
+  prior: { grant: MergeGrant; use: MergeGrantUse }
+): Record<string, unknown> {
+  return {
+    status: 'merged', already_recorded: true, pr_url: pr.url,
+    head_sha: prior.use.head_sha, method: prior.use.method,
+    authorized_by: authorizedBy({ kind: 'grant', grantId: prior.grant.id }, prior.grant),
+    authorization_context: prior.use.authorization_context,
+    message: `This exact PR merge is already recorded under merge grant ${prior.grant.id}; no second merge or grant use was attempted.`
+  }
+}
+
+function pendingGrantResult(
+  db: MergeGrantDb,
+  request: MergeRequest,
+  pending: MergeGrantReservation,
+  state: PullRequestGateState,
+  hooks: MergeHooks,
+  requestedGrantId: string | null
+): Record<string, unknown> {
+  const { projectId, pr } = request
+  const grant = db.getMergeGrant(pending.grant_id)
+  const context = pending.snapshot.authorization_context ??
+    authorizationContext(request, grant, requestedGrantId)
+  if (state.state === 'MERGED' &&
+      state.headRefOid === pending.snapshot.head_sha &&
+      state.baseRefName === pending.snapshot.base_branch) {
+    const use = db.recordMergeGrantUse(pending.id)
+    if (use) {
+      grantsChanged(projectId)
+      const summary = `Recovered merge outcome for ${pr.url} after a retried request under merge grant ${pending.grant_id}; GitHub confirms head ${state.headRefOid} merged.`
+      hooks.pushToRenderer?.('project:statusChanged', { projectId })
+      hooks.report?.(projectId, 'merged_under_grant', summary, pending.grant_id, context)
+    }
+    return {
+      status: 'merged', already_recorded: true, pr_url: pr.url,
+      head_sha: pending.snapshot.head_sha, method: pending.snapshot.method,
+      authorized_by: authorizedBy({ kind: 'grant', grantId: pending.grant_id }, grant),
+      authorization_context: context,
+      message: `GitHub confirms the reserved merge under grant ${pending.grant_id}; the audit was finalized without dispatching another merge.`
+    }
+  }
+  return {
+    status: 'unknown', pr_url: pr.url, reservation_id: pending.id,
+    authorized_by: authorizedBy({ kind: 'grant', grantId: pending.grant_id }, grant),
+    authorization_context: context,
+    message: 'A merge attempt for this PR is already reserved under a merge grant. Reconcile its GitHub outcome before retrying; no second merge or grant use was attempted.'
+  }
+}
+
 /**
  * The result for a PR that cannot be merged now, or null when it can. A
  * missing external approval is reported to the Commander once per PR head.
@@ -768,25 +837,31 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
     : request.authority.kind === 'policy' && request.requestedGrantId
       ? request.requestedGrantId
       : null
-  const requestedGrant = requestedGrantId ? db.getMergeGrant(requestedGrantId) : undefined
-  if (requestedGrant?.project_id === projectId) {
-    const priorUse = db.listMergeGrantUses(requestedGrant.id)
-      .find((use) => use.pr_url.toLowerCase() === pr.url.toLowerCase())
-    if (priorUse) {
-      return {
-        status: 'merged', already_recorded: true, pr_url: pr.url,
-        head_sha: priorUse.head_sha, method: priorUse.method,
-        authorized_by: authorizedBy({ kind: 'grant', grantId: requestedGrant.id }, requestedGrant),
-        authorization_context: priorUse.authorization_context,
-        message: `This exact PR merge is already recorded under merge grant ${requestedGrantId}; no second merge or grant use was attempted.`
-      }
-    }
-  }
+  const prior = recordedGrantUseForPullRequest(db, projectId, pr.url)
+  if (prior) return recordedGrantUseResult(pr, prior)
+
+  // A PR with a durable in-flight grant reservation is already owned by that
+  // attempt. Every retry must honor it, even when the caller omits grant_id or
+  // names another grant, so policy can never dispatch a second merge.
+  let pending = db.listPendingMergeGrantReservations(projectId).find((reservation) =>
+    reservation.snapshot.pr_url.toLowerCase() === pr.url.toLowerCase())
+  const pendingGrant = pending ? db.getMergeGrant(pending.grant_id) : undefined
+  const pendingContext = pending
+    ? pending.snapshot.authorization_context ?? authorizationContext(request, pendingGrant, requestedGrantId)
+    : undefined
 
   let state: PullRequestGateState
   try {
     state = await readPullRequestGate(pr)
   } catch (error) {
+    if (pending) {
+      return {
+        status: 'unknown', pr_url: pr.url, reservation_id: pending.id,
+        authorized_by: authorizedBy({ kind: 'grant', grantId: pending.grant_id }, pendingGrant),
+        authorization_context: pendingContext,
+        message: 'A merge attempt for this PR is already reserved under a merge grant, and GitHub could not confirm its outcome. Reconcile it before retrying; no second merge or grant use was attempted.'
+      }
+    }
     return { error: `Could not read ${pr.url} from GitHub: ${error instanceof Error ? error.message : String(error)}` }
   }
 
@@ -794,37 +869,11 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
   // lost, must keep the original grant attribution and never dispatch a
   // second merge. If GitHub now confirms the saved head/base as merged,
   // finalize that durable reservation exactly once.
-  if (requestedGrantId) {
-    const pending = db.listPendingMergeGrantReservations(projectId).find((reservation) =>
-      reservation.grant_id === requestedGrantId &&
-      reservation.snapshot.pr_url.toLowerCase() === pr.url.toLowerCase())
-    if (pending) {
-      const pendingGrant = requestedGrant?.project_id === projectId ? requestedGrant : undefined
-      const pendingContext = pending.snapshot.authorization_context ?? authorizationContext(request, pendingGrant, requestedGrantId)
-      if (state.state === 'MERGED' && state.headRefOid === pending.snapshot.head_sha && state.baseRefName === pending.snapshot.base_branch) {
-        const use = db.recordMergeGrantUse(pending.id)
-        if (use) {
-          grantsChanged(projectId)
-          const summary = `Recovered merge outcome for ${pr.url} after a retried request under merge grant ${requestedGrantId}; GitHub confirms head ${state.headRefOid} merged.`
-          hooks.pushToRenderer?.('project:statusChanged', { projectId })
-          hooks.report?.(projectId, 'merged_under_grant', summary, requestedGrantId, pendingContext)
-        }
-        return {
-          status: 'merged', already_recorded: true, pr_url: pr.url,
-          head_sha: pending.snapshot.head_sha, method: pending.snapshot.method,
-          authorized_by: authorizedBy({ kind: 'grant', grantId: requestedGrantId }, pendingGrant),
-          authorization_context: pendingContext,
-          message: `GitHub confirms the reserved merge under grant ${requestedGrantId}; the audit was finalized without dispatching another merge.`
-        }
-      }
-      return {
-        status: 'unknown', pr_url: pr.url, reservation_id: pending.id,
-        authorized_by: authorizedBy({ kind: 'grant', grantId: requestedGrantId }, pendingGrant),
-        authorization_context: pendingContext,
-        message: 'A merge attempt for this PR is already reserved under the requested grant. Reconcile its GitHub outcome before retrying; no second merge or grant use was attempted.'
-      }
-    }
-  }
+  const completedDuringRead = recordedGrantUseForPullRequest(db, projectId, pr.url)
+  if (completedDuringRead) return recordedGrantUseResult(pr, completedDuringRead)
+  pending = db.listPendingMergeGrantReservations(projectId).find((reservation) =>
+    reservation.snapshot.pr_url.toLowerCase() === pr.url.toLowerCase())
+  if (pending) return pendingGrantResult(db, request, pending, state, hooks, requestedGrantId)
 
   const blocked = refuseUnmergeable(projectId, pr, state, hooks)
   if (blocked) return blocked
@@ -840,6 +889,9 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
   // Resolve the effective authority only after the final GitHub read. Policy
   // explains why the call was allowed, but an explicitly requested covering
   // grant is the authority that must be reserved, spent and audited (#159).
+  // When policy dispatched without naming one, the narrowest active covering
+  // grant is still the effective authority; optional grant_id is a selector,
+  // not the switch that enables grant attribution.
   // A named grant that no longer covers the PR fails closed; it never silently
   // falls back to broader policy authority.
   let authority: MergeAuthority = request.authority
@@ -854,6 +906,22 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
       }
     }
     authority = { kind: 'grant', grantId: grant.id }
+  } else if (request.authority.kind === 'policy') {
+    grant = findCoveringGrant(db, projectId, { ...pr, baseRefName: state.baseRefName }) ?? undefined
+    if (grant) authority = { kind: 'grant', grantId: grant.id }
+  }
+
+  // Close the policy/grant race: if authority resolution observed no active
+  // grant because another request just reserved or finalized it, honor that
+  // ownership instead of falling through to a policy PUT.
+  if (authority.kind === 'policy') {
+    const lateUse = recordedGrantUseForPullRequest(db, projectId, pr.url)
+    if (lateUse) return recordedGrantUseResult(pr, lateUse)
+    const latePending = db.listPendingMergeGrantReservations(projectId).find((reservation) =>
+      reservation.snapshot.pr_url.toLowerCase() === pr.url.toLowerCase())
+    if (latePending) return pendingGrantResult(db, request, latePending, state, hooks, requestedGrantId)
+    grant = findCoveringGrant(db, projectId, { ...pr, baseRefName: state.baseRefName }) ?? undefined
+    if (grant) authority = { kind: 'grant', grantId: grant.id }
   }
   const context = authorizationContext(request, grant, requestedGrantId)
 
@@ -892,12 +960,21 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
       review_decision: state.reviewDecision, checks: state.checks,
       authorization_context: context
     })
-    grant = reserved?.grant
-    reservationId = reserved?.reservationId
-    if (reserved) grantsChanged(projectId)
-    if (!grant || grant.project_id !== projectId) {
-      if (reservationId) db.refundMergeGrantUse(reservationId)
-      return { error: 'The merge grant is no longer active (revoked, expired or used up). Ask the user.' }
+    if (!reserved) {
+      grant = db.getMergeGrant(authority.grantId) ?? grant
+      return {
+        error: 'The merge grant is no longer active, already reserved for this PR, or used up. Reconcile pending attempts or ask the user.',
+        authorized_by: authorizedBy(authority, grant),
+        authorization_context: context
+      }
+    }
+    grant = reserved.grant
+    reservationId = reserved.reservationId
+    grantsChanged(projectId)
+    if (grant.project_id !== projectId) {
+      db.refundMergeGrantUse(reservationId)
+      return { error: 'The merge grant does not belong to this project. Ask the user.',
+        authorized_by: authorizedBy(authority, grant), authorization_context: context }
     }
     if (!grantCoversPullRequest(grant, { ...pr, baseRefName: state.baseRefName })) {
       if (reservationId) db.refundMergeGrantUse(reservationId)
@@ -918,7 +995,11 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
     if (!confirmedMergeFailure(error)) return { status: 'unknown', pr_url: pr.url, reservation_id: reservationId,
       authorized_by: authorizedBy(authority, grant), authorization_context: context,
       message: `The merge outcome is unknown. ${reservationId ? 'The grant use remains reserved. ' : ''}Inspect the PR before retrying.` }
-    if (reservationId) { db.refundMergeGrantUse(reservationId); grantsChanged(projectId) }
+    if (reservationId) {
+      db.refundMergeGrantUse(reservationId)
+      grantsChanged(projectId)
+      if (authority.kind === 'grant') grant = db.getMergeGrant(authority.grantId)
+    }
     const detail = error instanceof Error ? error.message : String(error)
     return { error: `GitHub refused the merge of ${pr.url}: ${detail.slice(0, 1_000)}`, pr_url: pr.url,
       authorized_by: authorizedBy(authority, grant), authorization_context: context }
