@@ -66,6 +66,21 @@ beforeEach(() => {
 })
 
 describe('Commander messages with images', () => {
+  it('preserves image metadata and user text alongside Captain terminology read compatibility', () => {
+    const legacy = ['Master', 'mind'].join('')
+    const session = store.createSession()
+    const original = `${legacy} says inspect attachments/${legacy}.png`
+    const user = store.appendMessage(session.id, { role: 'user', content: original, images: [png(`${legacy}.png`)] })
+    const reply = store.appendMessage(session.id, { role: 'assistant', content: original })
+    const reloaded = new CommanderStore(db)
+    expect(reloaded.listMessages(session.id)).toEqual([
+      expect.objectContaining({ id: user.id, content: original, images: user.images }),
+      expect.objectContaining({ id: reply.id, content: `Captain says inspect attachments/${legacy}.png` })
+    ])
+    expect(reloaded.getMessageImages(user.id)).toEqual([png(`${legacy}.png`)])
+    expect(db.db.prepare('SELECT content FROM commander_messages WHERE id = ?').get(reply.id)).toEqual({ content: original })
+  })
+
   it('stores delivery-ID images atomically and preserves the original images on replay after restart', () => {
     const session = store.createSession()
     const deliveries = new DeliveryStore(db)
