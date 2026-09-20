@@ -109,17 +109,17 @@ describe('meaningful task activity', () => {
   })
 })
 
-describe('activity migration 20', () => {
-  it('upgrades version 19, backfills creation and transcript time, rolls up children, and is idempotent', () => {
+describe('activity migration 25', () => {
+  it('upgrades version 24, backfills creation and transcript time, rolls up children, and is idempotent', () => {
     const parent = db.createTask({ title: 'Parent' })!
     const child = db.createTask({ title: 'Child', parent_task_id: parent.id })!
     const quiet = db.createTask({ title: 'Quiet' })!
     db.upsertTranscriptParts(child.id, [{ id: 'message', role: 'assistant', content: 'Old message', receivedAt: Date.parse(later) }])
     db.db.exec('DROP TRIGGER tasks_initial_activity; ALTER TABLE tasks DROP COLUMN last_activity_at')
     db.db.prepare('UPDATE tasks SET updated_at = ?').run('2099-01-01T00:00:00.000Z')
-    db.setSetting('__schema_version', '19')
+    db.setSetting('__schema_version', '24')
     expect(applySchema(db.db)).toBe(true)
-    expect(db.getSetting('__schema_version')).toBe('20')
+    expect(db.getSetting('__schema_version')).toBe('25')
     expect(db.getTask(parent.id)?.last_activity_at).toBe(later)
     expect(db.getTask(child.id)?.last_activity_at).toBe(later)
     expect(db.getTask(quiet.id)?.last_activity_at).toBe(start)

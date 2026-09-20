@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 
-/** v20. Never infer activity from updated_at: it includes scheduler bookkeeping. */
+/** v25. Never infer activity from updated_at: it includes scheduler bookkeeping. */
 export function migrateTaskActivity(db: Database.Database): void {
   const columns = db.pragma('table_info(tasks)') as { name: string }[]
   if (!columns.some((column) => column.name === 'last_activity_at')) {

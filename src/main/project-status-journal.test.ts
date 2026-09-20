@@ -3,12 +3,12 @@
  * entry beside the unchanged snapshot; history reads are newest first,
  * cursor-stable and capped; old entries roll up by month, idempotently.
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { createTestDb } from '../../test/helpers/db-test-helper'
 import type { DatabaseManager } from './database'
 import { decodeHistoryCursor, encodeHistoryCursor, readProjectStatusHistory } from './project-status'
 import { handleTaskRoute } from './task-api/task-routes'
-import { createCommanderProjectTools, ProjectMutationConfirmations } from './commander/project-tools'
+import { createCommanderProjectTools } from './commander/project-tools'
 import {
   PROJECT_STATUS_HISTORY_MAX_LIMIT,
   PROJECT_STATUS_JOURNAL_COMPACT_AFTER_DAYS,
@@ -26,7 +26,7 @@ const DAY = 24 * 60 * 60 * 1000
 const at = (now: Date, daysAgo: number, extraMs = 0): string => new Date(now.getTime() - daysAgo * DAY + extraMs).toISOString()
 
 function commanderTool(db: DatabaseManager, name: string) {
-  const tool = createCommanderProjectTools({ db, context: { sessionId: 's', userMessage: '' }, confirmations: new ProjectMutationConfirmations() })
+  const tool = createCommanderProjectTools({ db, context: { sessionId: 's', userMessage: '' } })
     .find((candidate) => candidate.name === name)
   if (!tool) throw new Error(`Missing tool ${name}`)
   return async (input: Record<string, unknown>) => {
@@ -36,7 +36,29 @@ function commanderTool(db: DatabaseManager, name: string) {
 }
 
 describe('update_project_status writes the journal (#72)', () => {
-  it('appends one entry per update and leaves the snapshot one small read', async () => {
+  it('reads legacy Captain status prose without overwriting stored history', () => {
+    const { db, rawDb, project } = seed()
+    const legacy = ['Master', 'mind'].join('')
+    const summary = `The ${legacy} reviewed the release.`
+    const highlights = [`Ask the ${legacy}.`]
+    const result = db.recordProjectStatus(project.id, {
+      summary, top_blockers: highlights, completed: highlights,
+      blockers: highlights, decisions: highlights, next_steps: highlights
+    })!
+    expect(result.status).toMatchObject({ summary: 'The Captain reviewed the release.', top_blockers: ['Ask the Captain.'] })
+    expect(result.entry).toMatchObject({
+      summary: 'The Captain reviewed the release.', completed: ['Ask the Captain.'],
+      blockers: ['Ask the Captain.'], decisions: ['Ask the Captain.'], next_steps: ['Ask the Captain.']
+    })
+    expect(rawDb.prepare('SELECT summary FROM project_status_journal WHERE id = ?').get(result.entry.id)).toEqual({ summary })
+    expect(rawDb.prepare('SELECT summary FROM project_status WHERE project_id = ?').get(project.id)).toEqual({ summary })
+  })
+
+  it('appends one entry per update and leaves the snapshot one small read', async ({ onTestFinished }) => {
+    // These two updates must have distinct timestamps: IDs break ties randomly.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    onTestFinished(() => { vi.useRealTimers() })
+    vi.setSystemTime(new Date('2026-09-19T12:00:00.000Z'))
     const { db, project } = seed()
     const first = await handleTaskRoute(db, '/update_project_status', {
       project_id: project.id, summary: 'Round one.', top_blockers: ['Design review'],
@@ -54,6 +76,7 @@ describe('update_project_status writes the journal (#72)', () => {
       decisions: ['Use OAuth'], next_steps: ['Wire billing'], source: 'captain', correlation_id: 'cmd-1'
     })
 
+    vi.setSystemTime(new Date('2026-09-19T12:00:01.000Z'))
     await handleTaskRoute(db, '/update_project_status', { project_id: project.id, summary: 'Round two.', blockers: ['Billing API key'] })
     expect(db.countProjectStatusJournal(project.id)).toBe(2)
     expect(db.getProjectStatus(project.id).summary).toBe('Round two.')

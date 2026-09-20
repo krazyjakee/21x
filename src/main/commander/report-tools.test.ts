@@ -14,7 +14,9 @@ import { callToolForScope } from '../mcp-servers/task-management-core'
 import { handleTaskRoute } from '../task-api/task-routes'
 import { CommanderService } from './commander-service'
 import { CommanderStore } from './commander-store'
-import { createCommanderProjectTools, ProjectMutationConfirmations, type CommanderAgents } from './project-tools'
+import { CommanderVoice, type CommanderVoiceSpeech } from '../voice/commander-voice'
+import { createCommanderProjectTools, type CommanderAgents } from './project-tools'
+import { CaptainDeliveryService } from './captain-delivery'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_TITLE_PROMPT } from './prompts'
 import { deliverCaptainReport, setCaptainReportHandler } from './report-inbox'
 import {
@@ -69,20 +71,20 @@ let events: CommanderEvent[]
 let sendMessage: ReturnType<typeof vi.fn>
 let agents: CommanderAgents
 let uninstall: (() => void) | null
+let captainDelivery: CaptainDeliveryService
 
 function makeService(provider: ChatProvider, over: { maxReportAsks?: number } = {}): CommanderService {
-  const confirmations = new ProjectMutationConfirmations()
   return new CommanderService({
     store,
     emit: (e) => events.push(e),
     createProvider: () => provider,
-    getTools: (context) => createCommanderProjectTools({ db, context, confirmations, agents }),
+    getTools: (context) => createCommanderProjectTools({ db, context, agents, delivery: captainDelivery }),
     ...over
   })
 }
 
 function install(service: CommanderService): void {
-  uninstall = installCommanderReportBridge({ service, store, getProject: (id) => db.getProject(id) })
+  uninstall = installCommanderReportBridge({ service, store, deliveries: captainDelivery.store, getProject: (id) => db.getProject(id) })
 }
 
 /** The correlation id inside the relay text a Captain received. */
@@ -113,6 +115,11 @@ beforeEach(() => {
     pauseAllProjects: vi.fn(),
     isAllProjectsPaused: () => false
   } as unknown as CommanderAgents
+  captainDelivery = new CaptainDeliveryService({
+    db,
+    agents,
+    onTerminalFailure: () => {}
+  })
   uninstall = null
 })
 
@@ -181,6 +188,75 @@ describe('report routing', () => {
 })
 
 describe('report delivery', () => {
+  it('routes by durable request ownership and stores duplicate delivery/ack once', async () => {
+    const alpha = db.createProject({ name: 'Alpha' })!
+    const service = makeService(fakeProvider())
+    install(service)
+    const origin = store.createSession('Origin')
+    store.createSession('Newer')
+    const request = captainDelivery.store.enqueue({
+      idempotencyKey: 'request:owned',
+      kind: 'captain_request',
+      sourceSessionId: origin.id,
+      projectId: alpha.id,
+      correlationId: 'cmd-owned',
+      payload: 'ask'
+    }).record
+    captainDelivery.store.claim(request.id, 'test', 1_000)
+    captainDelivery.store.accept(request.id, 'test', 'captain-session')
+
+    const first = await handleTaskRoute(db, '/report_to_commander', {
+      project_id: alpha.id,
+      message: 'Done once.',
+      correlation_id: 'cmd-owned',
+      delivery_id: 'provider-attempt-1'
+    })
+    const duplicate = await handleTaskRoute(db, '/report_to_commander', {
+      project_id: alpha.id,
+      message: 'Done once.',
+      correlation_id: 'cmd-owned',
+      delivery_id: 'provider-attempt-2'
+    })
+
+    expect(first).toMatchObject({ success: true, session_id: origin.id, routed_by: 'correlation' })
+    expect(duplicate).toMatchObject({ success: true, session_id: origin.id, routed_by: 'correlation' })
+    expect(store.listMessages(origin.id).filter((message) => message.role === 'report')).toHaveLength(1)
+    expect(captainDelivery.store.get(request.id)).toMatchObject({ state: 'acknowledged' })
+    expect(events.filter((event) => event.type === 'messages_appended' && event.sessionId === origin.id)).toHaveLength(1)
+  })
+
+  it('keeps timeout terminal while accepting one visibly late correlated report', async () => {
+    const alpha = db.createProject({ name: 'Alpha' })!
+    const service = makeService(fakeProvider())
+    install(service)
+    const origin = store.createSession('Origin')
+    const request = captainDelivery.store.enqueue({
+      idempotencyKey: 'request:late',
+      kind: 'captain_request',
+      sourceSessionId: origin.id,
+      projectId: alpha.id,
+      correlationId: 'cmd-late',
+      payload: 'ask'
+    }).record
+    captainDelivery.store.terminal(request.id, 'timed_out', 'deadline')
+
+    await handleTaskRoute(db, '/report_to_commander', {
+      project_id: alpha.id,
+      message: 'Eventually done.',
+      correlation_id: 'cmd-late'
+    })
+    await handleTaskRoute(db, '/report_to_commander', {
+      project_id: alpha.id,
+      message: 'Eventually done.',
+      correlation_id: 'cmd-late'
+    })
+
+    expect(store.listMessages(origin.id).filter((message) => message.role === 'report')).toMatchObject([
+      { content: 'Late report after the request timed out: Eventually done.', correlation_id: 'cmd-late' }
+    ])
+    expect(captainDelivery.store.get(request.id)).toMatchObject({ state: 'timed_out' })
+  })
+
   it('relays a report in the open session with a Commander turn, and only queues it unread elsewhere', async () => {
     const alpha = db.createProject({ name: 'Alpha' })!
     const provider = fakeProvider((request) => (startedByReport(request) ? 'Alpha says the site shipped.' : 'ok'))
@@ -206,6 +282,10 @@ describe('report delivery', () => {
     expect(messages[1].content).toBe('Alpha says the site shipped.')
     const [request] = chatRequests(provider)
     expect(request.system).toContain('A report from project "Alpha" has just arrived')
+    // The turn is told to summarise in plain language, not to relay (#107).
+    expect(request.system).toContain('Summarise it for the user now in plain language')
+    expect(request.system).toContain('Leave out issue and PR numbers, branch names')
+    expect(request.system).not.toContain('Relay it to the user now')
     expect(request.messages.at(-1)?.content).toContain(`[Report from project ${alpha.id}]\nSite shipped.`)
   })
 
@@ -237,6 +317,56 @@ describe('report delivery', () => {
     await vi.waitFor(() => expect(chatRequests(provider)).toHaveLength(2))
     await settled(service, session.id)
     expect(store.listMessages(session.id).map((m) => m.role)).toEqual(['user', 'assistant', 'report', 'assistant'])
+  })
+
+  it.each([false, true])('speaks only the summary and retains the report (mid-turn: %s)', async (midTurn) => {
+    const alpha = db.createProject({ name: 'Alpha' })!
+    const raw = 'PR #104 merged on sessions-b2 (630894c); waiting for #99.'
+    const summary = 'Alpha finished the history fix and is waiting for your review.'
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const provider = fakeProvider((request) => startedByReport(request) ? summary : 'Checking now.')
+    const service = makeService({
+      ...provider,
+      stream(request, signal) {
+        const inner = provider.stream(request, signal)
+        return (async function* () {
+          if (midTurn && !startedByReport(request)) await gate
+          yield* inner
+        })()
+      }
+    })
+    const spoken: string[] = []
+    const speech: CommanderVoiceSpeech = {
+      beginStreamingAnswer: vi.fn(async () => true),
+      pushStreamingAnswer: (_key, parts) => { spoken.push(...parts.map((part) => part.content)) },
+      endStreamingAnswer: vi.fn(),
+      speak: vi.fn(async () => true),
+      interrupt: vi.fn(),
+      stop: vi.fn(),
+      streamingTaskId: null,
+      currentTaskId: null,
+    }
+    const voice = new CommanderVoice({ commander: service, speech })
+    const session = store.createSession()
+    service.setActiveSession(session.id)
+    voice.setActiveSession(session.id)
+    try {
+      const turn = midTurn ? service.sendUserMessage(session.id, 'hello') : null
+      expect(service.deliverReport({ sessionId: session.id, content: raw, projectId: alpha.id, projectName: 'Alpha' }).relayed).toBe(true)
+      release()
+      await turn?.done
+      await vi.waitFor(() => expect(spoken).toContain(summary))
+      await settled(service, session.id)
+      expect(spoken.join(' ')).not.toContain(raw)
+      expect(speech.speak).not.toHaveBeenCalled()
+      expect(store.listMessages(session.id).filter((message) => message.role === 'report')).toEqual([
+        expect.objectContaining({ content: raw, project_id: alpha.id })
+      ])
+    } finally {
+      release()
+      voice.dispose()
+    }
   })
 
   it('stores the report unread even when no provider can be built', () => {

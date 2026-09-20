@@ -39,8 +39,9 @@ import {
   setGhRunner,
   type PullRequestGateState
 } from './merge-grants'
-import { createCommanderProjectTools, ProjectMutationConfirmations, type CommanderAgents } from './commander/project-tools'
-import { createCommanderMergeGrantTools } from './commander/merge-grant-tools'
+import { createCommanderProjectTools, type CommanderAgents } from './commander/project-tools'
+import { CaptainDeliveryService } from './commander/captain-delivery'
+import { createCommanderMergeGrantTools, grantForRelay } from './commander/merge-grant-tools'
 import { escalationReportText } from './commander/report-tools'
 import { checkMergeIntent, prNumbersMentioned, parseGitHubPullRequestUrl } from '../shared/merge-grants'
 import {
@@ -60,6 +61,10 @@ vi.mock('electron', () => ({
 const SHA = 'a'.repeat(40)
 const PR_URL = 'https://github.com/acme/app/pull/12'
 
+function reviewConnection(nodes: Array<Record<string, unknown>>, hasNextPage = false): Record<string, unknown> {
+  return { nodes, pageInfo: { hasNextPage } }
+}
+
 function prState(over: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
   return {
     url: PR_URL,
@@ -72,6 +77,9 @@ function prState(over: Partial<Record<string, unknown>> = {}): Record<string, un
     reviewDecision: 'APPROVED',
     headRefOid: SHA,
     baseRefName: 'main',
+    baseRefOid: 'd'.repeat(40),
+    author: { login: 'author-dev' },
+    latestReviews: reviewConnection([{ author: { login: 'reviewer-dev' }, state: 'APPROVED', commit: { oid: SHA } }]),
     statusCheckRollup: [{ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }],
     ...over
   }
@@ -98,7 +106,7 @@ function setup(options: { enabled?: boolean; mergePolicy?: string } = {}): Harne
   let pr = prState()
   const merges: string[][] = []
   const gh = vi.fn(async (args: string[]) => {
-    if (args[0] === 'pr' && args[1] === 'view') return JSON.stringify(pr)
+    if ((args[0] === 'pr' && args[1] === 'view') || args[1] === 'graphql') return JSON.stringify(pr)
     if (args[0] === 'api' && args[2] === 'PUT') { merges.push(args); return JSON.stringify({ merged: true, sha: SHA }) }
     throw new Error(`unexpected gh ${args.join(' ')}`)
   })
@@ -215,11 +223,12 @@ describe('a grant from a user-typed message', () => {
     h.db.createAgent({ name: 'Claude' })
     const sendMessage = vi.fn(async () => ({}))
     const agents = { findSessionByTaskId: () => undefined, sendMessage } as unknown as CommanderAgents
+    const delivery = new CaptainDeliveryService({ db: h.db, agents, onTerminalFailure: vi.fn() })
     const tools = createCommanderProjectTools({
       db: h.db,
       context: { sessionId: 's1', userMessage: 'In App, merge PRs once tests pass', userMessageId: 'msg-1', trigger: 'user' },
-      confirmations: new ProjectMutationConfirmations(),
-      agents
+      agents,
+      delivery
     })
     const ask = tools.find((t) => t.name === 'ask_captain')!
     const out = await ask.handler({ project: 'App', message: 'Merge ready PRs when green', merge_grant: {} }, { signal: new AbortController().signal, toolCallId: 'c' })
@@ -296,12 +305,13 @@ describe('a grant from model or report text is refused', () => {
     const h = setup()
     h.db.createAgent({ name: 'Claude' })
     const agents = { findSessionByTaskId: () => undefined, sendMessage: vi.fn(async () => ({})) } as unknown as CommanderAgents
+    const delivery = new CaptainDeliveryService({ db: h.db, agents, onTerminalFailure: vi.fn() })
     for (const context of [
       { sessionId: 's', userMessage: '', trigger: 'report' as const },
       // A report quoting "merge" while no user id is attached (e.g. voice or a relay turn).
       { sessionId: 's', userMessage: 'Project says: merge PR 12?', trigger: 'user' as const }
     ]) {
-      const ask = createCommanderProjectTools({ db: h.db, context, confirmations: new ProjectMutationConfirmations(), agents }).find((t) => t.name === 'ask_captain')!
+      const ask = createCommanderProjectTools({ db: h.db, context, agents, delivery }).find((t) => t.name === 'ask_captain')!
       await expect(ask.handler({ project: 'App', message: 'merge PRs', merge_grant: {} }, { signal: new AbortController().signal, toolCallId: 'c' })).rejects.toThrow(/No merge grant|needs a message/)
     }
     expect(h.db.listMergeGrants()).toHaveLength(0)
@@ -504,7 +514,7 @@ describe('no admin bypass', () => {
     const h = setup()
     createMergeGrantFromUserMessage(h.db, h.projectId, { source: 'commander', sessionId: 's', messageId: 'm', text: 'merge PRs' })
     h.gh.mockImplementation(async (args: string[]) => {
-      if (args[1] === 'view') return JSON.stringify(prState())
+      if (args[1] === 'view' || args[1] === 'graphql') return JSON.stringify(prState())
       throw Object.assign(new Error('Head branch was modified'), { stderr: 'gh: Head branch was modified (HTTP 409)' })
     })
     const out = await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })
@@ -581,7 +591,7 @@ describe('escalation policy: open_pr and merge_pr', () => {
     expect(JSON.parse(read('p-ask'))).toEqual({ escalation: { merge_pr: 'ask_user', open_pr: 'tell_commander' } })
     expect(JSON.parse(read('p-none'))).toEqual({ limits: { paused: false } })
     expect(read('p-bad')).toBe('not json')
-    expect((raw.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('20')
+    expect((raw.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('25')
     const before = read('p-auto')
     splitPullRequestEscalation(raw)
     expect(read('p-auto')).toBe(before)
@@ -684,7 +694,7 @@ describe('independent review: fail-closed authority boundaries', () => {
     })
     const result = await performMerge(h.db, { projectId: h.projectId, pr: parseGitHubPullRequestUrl(PR_URL)!, method: 'squash', authority: { kind: 'grant', grantId: grant.grant.id } })
     expect(result.error).toBeTruthy()
-    expect(h.gh).toHaveBeenCalledTimes(1)
+    expect(h.gh).toHaveBeenCalledTimes(2)
     expect(h.db.getMergeGrant(grant.grant.id)?.uses).toBe(0)
   })
 
@@ -695,7 +705,7 @@ describe('independent review: fail-closed authority boundaries', () => {
     let release!: () => void
     const pending = new Promise<void>((resolve) => { release = resolve })
     h.gh.mockImplementation(async (args: string[]) => {
-      if (args[0] === 'pr') return JSON.stringify(prState())
+      if (args[0] === 'pr' || args[1] === 'graphql') return JSON.stringify(prState())
       expect(h.db.getMergeGrant(grant.grant.id)?.uses).toBe(1)
       h.merges.push(args)
       await pending
@@ -722,7 +732,7 @@ describe('independent review: fail-closed authority boundaries', () => {
   it('does not report success or refund possibly spent authority on an ambiguous response', async () => {
     const h = setup()
     createMergeGrantFromUserMessage(h.db, h.projectId, { source: 'commander', sessionId: 's', messageId: 'ambiguous', text: 'merge PRs' })
-    h.gh.mockImplementation(async (args: string[]) => args[0] === 'pr' ? JSON.stringify(prState()) : '{}')
+    h.gh.mockImplementation(async (args: string[]) => (args[0] === 'pr' || args[1] === 'graphql') ? JSON.stringify(prState()) : '{}')
     expect((await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).status).toBe('unknown')
     expect(mergeGrantAudit(h.db, h.projectId)[0]).toMatchObject({ grant: { uses: 1 }, uses: [] })
     expect(journal(h)).toEqual([])
@@ -731,7 +741,7 @@ describe('independent review: fail-closed authority boundaries', () => {
     const h = setup()
     createMergeGrantFromUserMessage(h.db, h.projectId, { source: 'commander', sessionId: 's', messageId: 'transport', text: 'merge PRs' })
     h.gh.mockImplementation(async (args: string[]) => {
-      if (args[0] === 'pr') return JSON.stringify(prState())
+      if (args[0] === 'pr' || args[1] === 'graphql') return JSON.stringify(prState())
       throw new Error('Connection lost while reading response')
     })
     expect((await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).status).toBe('unknown')
@@ -757,7 +767,7 @@ describe('independent review: fail-closed authority boundaries', () => {
     const created = createMergeGrantFromUserMessage(h.db, h.projectId, { source: 'commander', sessionId: 's', messageId: 'restart', text: 'merge PRs' }, { max_merges: 1 })
     if (!created.ok) throw new Error(created.error)
     h.gh.mockImplementation(async (args: string[]) => {
-      if (args[0] === 'pr') return JSON.stringify(prState())
+      if (args[0] === 'pr' || args[1] === 'graphql') return JSON.stringify(prState())
       expect(h.db.listPendingMergeGrantReservations()[0].snapshot).toMatchObject({ pr_url: PR_URL, head_sha: SHA })
       throw new Error('Response lost after GitHub committed')
     })
@@ -814,7 +824,7 @@ describe('independent review: fail-closed authority boundaries', () => {
     const h = setup()
     createMergeGrantFromUserMessage(h.db, h.projectId, { source: 'commander', sessionId: 's', messageId: 'recover-report', text: 'Merge PRs' })
     h.gh.mockImplementation(async (args: string[]) => {
-      if (args[0] === 'pr') return JSON.stringify(prState())
+      if (args[0] === 'pr' || args[1] === 'graphql') return JSON.stringify(prState())
       throw new Error('Lost response')
     })
     await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })
@@ -840,4 +850,435 @@ describe('independent review: fail-closed authority boundaries', () => {
     expect(journal(h)).toHaveLength(1)
   })
 
+})
+
+// #155: exercise the explicit project-wide path through the real grant and merge gates.
+const PROJECT_WIDE_COMMANDS = [
+  'Merge every safe 21x pull request after required reviews and checks pass',
+  'Merge all open PRs in 21x when required reviews and checks pass'
+]
+
+function setupWide() {
+  const h = setup()
+  h.db.updateProject(h.projectId, { name: '21x' })
+  return h
+}
+
+function wideGrant(h: Harness, scope = {}) {
+  return createMergeGrantFromUserMessage(h.db, h.projectId, {
+    source: 'project_chat', sessionId: 'captain', messageId: 'wide', text: PROJECT_WIDE_COMMANDS[0]
+  }, scope)
+}
+
+describe('explicit project-wide grants (#155)', () => {
+  it.each(PROJECT_WIDE_COMMANDS)('accepts the exact reported command: %s', async (text) => {
+    const h = setupWide()
+    userTypes(h, text)
+    const granted = await captainCall(h, 'grant_merge_authority', {})
+    expect(granted.status).toBe('granted')
+    expect(granted.allows).toContain('this project only')
+    expect(h.db.getMergeGrant(String(granted.grant_id))).toMatchObject({
+      project_id: h.projectId, repo: null, pr_numbers: [], user_text: text
+    })
+    expect((await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).status).toBe('merged')
+    expect(h.db.listMergeGrantUses(String(granted.grant_id))).toHaveLength(1)
+    expect(journal(h)).toHaveLength(1)
+  })
+
+  it.each(PROJECT_WIDE_COMMANDS)('binds verified Commander typed provenance: %s', (text) => {
+    const h = setupWide()
+    const context = { sessionId: 's', userMessage: text, userMessageId: 'stored', trigger: 'user' as const }
+    const grant = grantForRelay(h.db, context, h.db.getProject(h.projectId)!, {})
+    expect(grant).toMatchObject({ project_id: h.projectId, source: 'commander', source_message_id: 'stored', user_text: text })
+  })
+
+  it.each(['report', 'voice'] as const)('explains rejected Commander %s provenance without creating a grant', (origin) => {
+    const h = setupWide()
+    const context = { sessionId: 's', userMessage: PROJECT_WIDE_COMMANDS[0],
+      userMessageId: origin === 'report' ? 'report-id' : undefined, trigger: origin === 'report' ? 'report' as const : 'user' as const }
+    expect(() => grantForRelay(h.db, context, h.db.getProject(h.projectId)!, {})).toThrow(/INELIGIBLE_PROVENANCE.*Accepted wording/)
+    expect(h.db.listMergeGrants()).toHaveLength(0)
+  })
+
+  it.each([
+    [{ pr_numbers: 'all' }, 'PR_SCOPE_UNSUPPORTED'],
+    [{ repo: 123 }, 'PR_SCOPE_UNSUPPORTED'],
+    [{ max_merges: '1' }, 'INVALID_USE_LIMIT'],
+    [{ expires_in_hours: '24' }, 'INVALID_EXPIRY']
+  ])('never drops malformed model restrictions: %j', async (scope, code) => {
+    const h = setupWide()
+    userTypes(h, PROJECT_WIDE_COMMANDS[0])
+    expect(await captainCall(h, 'grant_merge_authority', scope as Record<string, unknown>)).toMatchObject({ reason_code: code })
+    expect(() => grantForRelay(h.db, { sessionId: 's', userMessage: PROJECT_WIDE_COMMANDS[0], userMessageId: 'stored' }, h.db.getProject(h.projectId)!, scope)).toThrow(String(code))
+    expect(h.db.listMergeGrants()).toHaveLength(0)
+  })
+
+  it.each(PROJECT_WIDE_COMMANDS)('reports opt-in off separately for valid wording: %s', async (text) => {
+    const h = setupWide()
+    h.db.updateProject(h.projectId, { settings: {} })
+    userTypes(h, text)
+    const out = await captainCall(h, 'grant_merge_authority', {})
+    expect(out).toMatchObject({ ok: false, reason_code: 'FEATURE_DISABLED', offending_scope: h.projectId })
+    expect(out.blockers).toHaveLength(1)
+    expect(out.accepted_examples).toContain(text)
+    expect(out.error).toMatch(/No merge grant was created.*turned off/)
+    expect(h.db.listMergeGrants()).toHaveLength(0)
+    expect(h.db.getProject(h.projectId)?.settings).toEqual({})
+  })
+
+  it('reports disabled configuration and unsupported wording together, in stable order', () => {
+    const h = setupWide()
+    h.db.updateProject(h.projectId, { settings: {} })
+    const out = createMergeGrantFromUserMessage(h.db, h.projectId, {
+      source: 'project_chat', sessionId: 's', messageId: 'bad', text: 'Merge all PRs everywhere'
+    })
+    expect(out).toMatchObject({ reason_code: 'FEATURE_DISABLED', blockers: [
+      { reason_code: 'FEATURE_DISABLED' }, { reason_code: 'PR_SCOPE_UNSUPPORTED', offending_scope: 'Merge all PRs everywhere' }
+    ] })
+  })
+
+  it.each([
+    ['Merge all open PRs when required reviews and checks pass', 'PROJECT_MISSING'],
+    ['Merge all open PRs in Missing when required reviews and checks pass', 'PROJECT_MISSING'],
+    ['Merge all open PRs in 21x and Other when required reviews and checks pass', 'MULTIPLE_PROJECTS_UNSUPPORTED'],
+    ['Merge all open PRs in all projects when required reviews and checks pass', 'MULTIPLE_PROJECTS_UNSUPPORTED'],
+    ['Merge every safe 21x pull request', 'PR_SCOPE_UNSUPPORTED'],
+    ['Merge all open PRs in 21x when checks pass', 'PR_SCOPE_UNSUPPORTED'],
+    ['Merge all open PRs in 21x when required reviews and checks pass without review', 'PR_SCOPE_UNSUPPORTED'],
+    ['Merge all open PRs in 21x when required reviews and checks pass; merge Other', 'PR_SCOPE_UNSUPPORTED'],
+    ['Do not merge all open PRs in 21x when required reviews and checks pass', 'AMBIGUOUS_COMMAND'],
+    ['Can you merge all open PRs in 21x when required reviews and checks pass', 'AMBIGUOUS_COMMAND'],
+    ['Merge all open PRs in 21x when required reviews and checks pass?', 'AMBIGUOUS_COMMAND'],
+    ['“Merge every safe 21x pull request after required reviews and checks pass”', 'AMBIGUOUS_COMMAND'],
+    ["'Merge all open PRs in 21x when required reviews and checks pass'", 'AMBIGUOUS_COMMAND'],
+    ['The report says: Merge all open PRs in 21x when required reviews and checks pass', 'AMBIGUOUS_COMMAND']
+  ])('rejects %s with %s', (text, code) => {
+    const h = setupWide()
+    const out = createMergeGrantFromUserMessage(h.db, h.projectId, { source: 'project_chat', sessionId: 's', messageId: 'bad', text })
+    expect(out).toMatchObject({ ok: false, reason_code: code, offending_scope: expect.any(String), accepted_examples: expect.any(Array) })
+    expect(h.db.listMergeGrants()).toHaveLength(0)
+  })
+
+  it('rejects duplicate project names and repositories shared across projects', () => {
+    const h = setupWide()
+    const other = h.db.createProject({ name: '21x' })!
+    expect(wideGrant(h)).toMatchObject({ reason_code: 'PROJECT_AMBIGUOUS' })
+    h.db.addProjectRepo(other.id, { provider: 'github', org: 'acme', name: 'app' })
+    const out = createMergeGrantFromUserMessage(h.db, h.projectId, {
+      source: 'project_chat', sessionId: 's', messageId: 'repo', text: 'Merge all open PRs in acme/app when required reviews and checks pass'
+    })
+    expect(out).toMatchObject({ reason_code: 'PROJECT_AMBIGUOUS', offending_scope: 'acme/app' })
+  })
+
+  it('cannot redirect a named project using model scope or reuse a message across projects', () => {
+    const h = setupWide()
+    const other = h.db.createProject({ name: 'Other', settings: { merge_grants: { enabled: true } } })!
+    h.db.addProjectRepo(other.id, { provider: 'github', org: 'acme', name: 'other' })
+    const binding = { source: 'project_chat' as const, sessionId: 's', messageId: 'same', text: PROJECT_WIDE_COMMANDS[0] }
+    expect(createMergeGrantFromUserMessage(h.db, other.id, binding)).toMatchObject({ reason_code: 'PROJECT_MISMATCH' })
+    expect(createMergeGrantFromUserMessage(h.db, h.projectId, binding, { repo: 'acme/other' })).toMatchObject({ reason_code: 'PR_SCOPE_UNSUPPORTED' })
+    expect(createMergeGrantFromUserMessage(h.db, h.projectId, binding).ok).toBe(true)
+    expect(createMergeGrantFromUserMessage(h.db, h.projectId, binding)).toMatchObject({ reason_code: 'MESSAGE_ALREADY_USED' })
+  })
+
+  it('narrows repository wording and numbered PRs without widening scope', () => {
+    const h = setupWide()
+    h.db.addProjectRepo(h.projectId, { provider: 'github', org: 'acme', name: 'second' })
+    const binding = { source: 'project_chat' as const, sessionId: 's', messageId: 'repo', text: 'Merge every safe acme/app pull request once required reviews and checks pass' }
+    const result = createMergeGrantFromUserMessage(h.db, h.projectId, binding)
+    expect(result.ok && result.grant).toMatchObject({ repo: 'acme/app', pr_numbers: [] })
+    expect(createMergeGrantFromUserMessage(h.db, h.projectId, { ...binding, messageId: 'widen' }, { repo: 'acme/second' })).toMatchObject({ reason_code: 'PR_SCOPE_UNSUPPORTED' })
+    const numbered = createMergeGrantFromUserMessage(h.db, h.projectId, { ...binding, messageId: 'numbered', text: 'Merge PR #12 in 21x after required reviews and checks pass' }, { repo: 'acme/app' })
+    expect(numbered.ok && numbered.grant).toMatchObject({ repo: 'acme/app', pr_numbers: [12] })
+  })
+
+  it.each(['voice', 'report', 'model', 'web', 'commander_relay'])('rejects ineligible source %s even with exact command text', (source) => {
+    const h = setupWide()
+    expect(createMergeGrantFromUserMessage(h.db, h.projectId, {
+      source: source as 'project_chat', sessionId: 's', messageId: 'forged', text: PROJECT_WIDE_COMMANDS[0]
+    })).toMatchObject({ reason_code: 'INELIGIBLE_PROVENANCE' })
+    expect(h.db.listMergeGrants()).toHaveLength(0)
+  })
+
+  it.each([
+    [{ expires_in_hours: 0 }, 'INVALID_EXPIRY'],
+    [{ expires_in_hours: NaN }, 'INVALID_EXPIRY'],
+    [{ max_merges: 0 }, 'INVALID_USE_LIMIT'],
+    [{ max_merges: 1.5 }, 'INVALID_USE_LIMIT'],
+    [{ base_branch: 'main' }, 'PR_SCOPE_UNSUPPORTED']
+  ] as const)('reports invalid scope %j', (scope, code) => {
+    expect(wideGrant(setupWide(), scope)).toMatchObject({ reason_code: code })
+  })
+
+  it.each(['expired', 'revoked', 'disabled', 'used_up'] as const)('does not merge with a project-wide grant that is %s', async (change) => {
+    const h = setupWide()
+    const result = wideGrant(h, { max_merges: 1, expires_in_hours: 999 })
+    if (!result.ok) throw new Error(result.error)
+    expect(Date.parse(result.grant.expires_at) - Date.parse(result.grant.created_at)).toBeLessThanOrEqual(168 * 3_600_000)
+    if (change === 'expired') { vi.useFakeTimers(); vi.setSystemTime(Date.now() + 169 * 3_600_000) }
+    if (change === 'revoked') revokeMergeGrant(h.db, result.grant.id)
+    if (change === 'disabled') h.db.updateProject(h.projectId, { settings: {} })
+    if (change === 'used_up') await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })
+    expect((await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).status).toBe('held')
+    expect(h.merges).toHaveLength(change === 'used_up' ? 1 : 0)
+  })
+
+  it.each([
+    { state: 'CLOSED' }, { state: 'MERGED' }, { isDraft: true },
+    { mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' }, { mergeable: 'UNKNOWN' },
+    { mergeStateStatus: 'BLOCKED' }, { mergeStateStatus: 'BEHIND' }, { mergeStateStatus: 'UNKNOWN' },
+    { reviewDecision: 'REVIEW_REQUIRED' }, { reviewDecision: 'CHANGES_REQUESTED' }, { reviewDecision: 'UNRECOGNIZED' },
+    { headRefOid: '' }, { baseRefOid: undefined }, { baseRefOid: 'short' }, { statusCheckRollup: null },
+    { statusCheckRollup: [{ name: 'required', status: 'IN_PROGRESS' }] },
+    { statusCheckRollup: [{ name: 'required', status: 'COMPLETED', conclusion: 'FAILURE' }] }
+  ])('preserves the merge gate for %j', async (over) => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.setPr(over)
+    expect((await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).status).not.toBe('merged')
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+  })
+
+  it.each(['CLEAN', 'HAS_HOOKS'])('merges ready PRs in %s with pinned SHA and no bypass', async (mergeStateStatus) => {
+    const h = setupWide()
+    wideGrant(h)
+    h.setPr({ mergeStateStatus })
+    expect((await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).status).toBe('merged')
+    expect(h.merges[0]).toContain(`sha=${SHA}`)
+    for (const flag of FORBIDDEN_MERGE_FLAGS) expect(h.merges[0]).not.toContain(flag)
+  })
+
+  it('rejects inconsistent GitHub ref reads before spending authority', async () => {
+    const h = setupWide()
+    wideGrant(h)
+    h.gh.mockResolvedValueOnce(JSON.stringify(prState()))
+      .mockResolvedValueOnce(JSON.stringify(prState({ headRefOid: 'b'.repeat(40) })))
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({ error: expect.stringContaining('changed PR head/base') })
+    expect(h.db.listMergeGrants()[0].uses).toBe(0)
+    expect(h.merges).toHaveLength(0)
+  })
+
+  it.each([{ headRefOid: 'b'.repeat(40) }, { baseRefName: 'release' }, { baseRefOid: 'c'.repeat(40) }])('stops if the PR changes before merge: %j', async (changed) => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.gh.mockResolvedValueOnce(JSON.stringify(prState())).mockResolvedValueOnce(JSON.stringify(prState()))
+      .mockResolvedValueOnce(JSON.stringify(prState(changed))).mockResolvedValueOnce(JSON.stringify(prState(changed)))
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({ status: 'blocked', reason_code: 'PR_CHANGED' })
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+    expect(h.merges).toHaveLength(0)
+  })
+
+  it('reevaluates a stack after its predecessor merges and skips until fresh checks pass', async () => {
+    const h = setupWide()
+    wideGrant(h)
+    expect((await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).status).toBe('merged')
+    const successor = 'https://github.com/acme/app/pull/13'
+    h.setPr({ url: successor, number: 13, baseRefOid: 'b'.repeat(40), mergeStateStatus: 'BEHIND' })
+    expect((await captainCall(h, 'merge_pull_request', { pr_url: successor })).status).toBe('blocked')
+    expect(h.merges).toHaveLength(1)
+    h.setPr({ url: successor, number: 13, baseRefOid: 'b'.repeat(40), statusCheckRollup: [{ name: 'test', status: 'IN_PROGRESS' }] })
+    expect((await captainCall(h, 'merge_pull_request', { pr_url: successor })).status).toBe('blocked')
+    h.setPr({ url: successor, number: 13, baseRefOid: 'b'.repeat(40) })
+    expect((await captainCall(h, 'merge_pull_request', { pr_url: successor })).status).toBe('merged')
+    expect(h.merges).toHaveLength(2)
+  })
+
+  // #156 review: on a repository whose base branch requires no reviews GitHub
+  // reports reviewDecision "", so the mechanical gate alone called an entirely
+  // unreviewed PR ready. A standing grant would then land obsolete or
+  // duplicate work without anyone looking at it.
+  it('refuses a mechanically green but unreviewed PR and spends no grant use', async () => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.setPr({ reviewDecision: '', latestReviews: reviewConnection([]) })
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({
+      status: 'blocked',
+      reason_code: 'INDEPENDENT_REVIEW_REQUIRED',
+      needs_external_approval: true
+    })
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+  })
+
+  it('does not count the PR author approving their own PR as independent review', async () => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.setPr({ reviewDecision: '', author: { login: 'astra' }, latestReviews: reviewConnection([{ author: { login: 'astra' }, state: 'APPROVED', commit: { oid: SHA } }]) })
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({ status: 'blocked', reason_code: 'INDEPENDENT_REVIEW_REQUIRED' })
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+  })
+
+  it.each([
+    ['missing', undefined],
+    ['null', null],
+    ['empty', {}],
+    ['blank', { login: '' }],
+    ['non-string', { login: 7 }]
+  ] as const)('fails closed when PR author data is %s', async (_label, author) => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.setPr({
+      author,
+      reviewDecision: 'APPROVED',
+      latestReviews: reviewConnection([
+        { author: { login: 'author-dev' }, state: 'APPROVED', commit: { oid: SHA } }
+      ])
+    })
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({
+      error: expect.stringContaining('author')
+    })
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+  })
+
+  it('fails closed when the pinned reread disagrees about the PR author', async () => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.gh.mockResolvedValueOnce(JSON.stringify(prState({ author: { login: 'author-dev' } })))
+      .mockResolvedValueOnce(JSON.stringify(prState({ author: { login: 'someone-else' } })))
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({
+      error: expect.stringContaining('author')
+    })
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+  })
+
+  it('accepts an independent approval on a branch that requires no reviews', async () => {
+    const h = setupWide()
+    wideGrant(h)
+    h.setPr({ reviewDecision: '', author: { login: 'astra' }, latestReviews: reviewConnection([{ author: { login: 'someone-else' }, state: 'APPROVED', commit: { oid: SHA } }]) })
+    expect((await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).status).toBe('merged')
+    const query = h.gh.mock.calls.find(([args]) => args[1] === 'graphql')![0].join(' ')
+      expect(query).toContain('headRefOid baseRefName baseRefOid author { login }')
+      expect(query).toContain('latestReviews(first: 100)')
+    expect(query).toContain('commit { oid }')
+    expect(query).toContain('pageInfo { hasNextPage }')
+  })
+
+  it('rejects an independent approval of an older head even when GitHub reports APPROVED', async () => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.setPr({
+      reviewDecision: 'APPROVED',
+      author: { login: 'astra' },
+      latestReviews: reviewConnection([{ author: { login: 'someone-else' }, state: 'APPROVED', commit: { oid: 'b'.repeat(40) } }])
+    })
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({
+      status: 'blocked', reason_code: 'INDEPENDENT_REVIEW_REQUIRED'
+    })
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+  })
+
+  it('fails closed when exact-head review data is truncated', async () => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.setPr({ latestReviews: reviewConnection([
+      { author: { login: 'someone-else' }, state: 'APPROVED', commit: { oid: SHA } }
+    ], true) })
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({
+      error: expect.stringContaining('incomplete exact-head review data')
+    })
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+  })
+
+  it.each([null, {}, { login: '' }, { login: ' ' }, { login: 42 }])('rejects unknown PR author %j before spending authority', async (author) => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.setPr({ author })
+    expect((await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).status).not.toBe('merged')
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+    expect(h.db.listPendingMergeGrantReservations(h.projectId)).toHaveLength(0)
+  })
+
+  it.each([undefined, null, [], {}, { nodes: [] }, { nodes: [], pageInfo: {} },
+    { nodes: [], pageInfo: { hasNextPage: 'false' } }])('rejects missing or malformed review connection %j', async (latestReviews) => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.setPr({ latestReviews })
+    expect((await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).status).not.toBe('merged')
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+  })
+
+  it.each(['COMMENTED', 'DISMISSED', 'CHANGES_REQUESTED'])('does not treat a current-head %s review as approval', async (state) => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.setPr({ latestReviews: reviewConnection([{ author: { login: 'reviewer' }, state, commit: { oid: SHA } }]) })
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({ reason_code: 'INDEPENDENT_REVIEW_REQUIRED' })
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+  })
+
+  it('rereads the approval before reserving authority even when refs have not changed', async () => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.gh.mockResolvedValueOnce(JSON.stringify(prState())).mockResolvedValueOnce(JSON.stringify(prState()))
+      .mockResolvedValueOnce(JSON.stringify(prState())).mockResolvedValueOnce(JSON.stringify(prState({
+        latestReviews: reviewConnection([{ author: { login: 'reviewer-dev' }, state: 'DISMISSED', commit: { oid: SHA } }])
+      })))
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({ reason_code: 'INDEPENDENT_REVIEW_REQUIRED' })
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+  })
+
+  it.each([
+    null, {}, { state: 'UNKNOWN' },
+    { author: null, state: 'APPROVED', commit: { oid: SHA } },
+    { author: { login: ' ' }, state: 'APPROVED', commit: { oid: SHA } },
+    { author: { login: 'other' }, state: ['APPROVED'], commit: { oid: SHA } },
+    { author: { login: 'other' }, state: 'APPROVED', commit: null },
+    { author: { login: 'other' }, state: 'APPROVED', commit: { oid: 'short' } },
+    { author: { login: 'REVIEWER-DEV' }, state: 'DISMISSED', commit: { oid: SHA } }
+  ])('rejects malformed or inconsistent review node %j even alongside an approval', async (node) => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.setPr({ latestReviews: { nodes: [
+      { author: { login: 'reviewer-dev' }, state: 'APPROVED', commit: { oid: SHA } }, node
+    ], pageInfo: { hasNextPage: false } } })
+    expect((await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).status).not.toBe('merged')
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+    expect(h.db.listPendingMergeGrantReservations(h.projectId)).toHaveLength(0)
+  })
+
+  it.each([
+    'Merge all open PRs in 21x in 22x when required reviews and checks pass',
+    'Merge all open PRs in 21x without review when required reviews and checks pass',
+    'Merge all safe PRs in 21x skipping required reviews when required reviews and checks pass'
+  ])('refuses a scope slot carrying extra conditions: %s', (text) => {
+    expect(checkMergeIntent(text)).toMatchObject({ ok: false, reasonCode: 'PR_SCOPE_UNSUPPORTED' })
+  })
+
+  // Reported live against this branch: the command names one project and both
+  // gates, but the extra "after resolving its conflicts and" clause is outside
+  // the grammar, so it must fail closed and say so specifically.
+  it('refuses a numbered command with an extra trailing condition', () => {
+    const text = 'Merge PR #156 in 21x after resolving its conflicts and after all required reviews and checks pass.'
+    expect(checkMergeIntent(text)).toMatchObject({ ok: false, reasonCode: 'AMBIGUOUS_COMMAND' })
+  })
+
+  it('requires the Captain to verify independent review, disposition and stack predecessors', () => {
+    const prompt = buildCaptainSystemPrompt()
+    expect(prompt).toMatch(/Before each merge verify independent review/)
+    expect(prompt).toMatch(/Never merge unsafe, obsolete, duplicate, draft, conflicted or failing PRs/)
+    expect(prompt).toMatch(/Stop or skip when a predecessor is missing/)
+  })
 })

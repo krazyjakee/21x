@@ -774,6 +774,11 @@ app.whenReady().then(async () => {
   syncManager = new SyncManager(db, pluginRegistry, oauthManager)
   agentManager.setSyncManager(syncManager)
 
+  // Process memory is gone after a crash, but starts, switches and accepted
+  // messages are durable. Repair or visibly fail them before schedulers can
+  // enqueue more work against stale ownership.
+  await agentManager.reconcileStartup()
+
   recurrenceScheduler = new RecurrenceScheduler(db)
   heartbeatScheduler = new HeartbeatScheduler(db, agentManager)
   taskAutomationScheduler = new TaskAutomationScheduler(db, agentManager)

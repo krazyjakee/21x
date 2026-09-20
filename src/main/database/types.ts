@@ -61,6 +61,12 @@ export interface AgentConfigRecord {
   /** Ordered agents to try when this agent exhausts its credits or usage quota. */
   fallback_agent_ids?: string[]
   max_parallel_sessions?: number
+  /**
+   * The user-set hard cap on this agent's concurrent jobs across every
+   * project (#150, shared/concurrency.ts). Unset reads as
+   * min(max_parallel_sessions, 5).
+   */
+  concurrency_cap?: number
   api_keys?: {
     openai?: string
     anthropic?: string

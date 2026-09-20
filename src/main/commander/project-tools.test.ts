@@ -11,17 +11,18 @@ import {
   COMMANDER_RELAY_END,
   createCommanderProjectTools,
   MUTATING_COMMANDER_TOOLS,
-  ProjectMutationConfirmations,
-  type AskCaptainDispatch,
   type CommanderAgents,
   type ProjectToolOptions
 } from './project-tools'
 import { createCommanderSkillTools, MUTATING_COMMANDER_SKILL_TOOLS } from './skill-tools'
+import { CaptainDeliveryService } from './captain-delivery'
 
 let db: DatabaseManager
-let confirmations: ProjectMutationConfirmations
 let changes: Array<{ projectId: string; kind: string }>
 let extra: Partial<ProjectToolOptions>
+let delivery: CaptainDeliveryService
+let callSequence: number
+let terminalFailures: Array<{ detail: string; timedOut: boolean }>
 
 /** An agent manager with no live sessions; individual tests override what they need. */
 function fakeAgents(over: Partial<CommanderAgents> = {}): CommanderAgents {
@@ -45,8 +46,8 @@ function tools(userMessage = 'do it'): ChatToolDefinition[] {
   return createCommanderProjectTools({
     db,
     context: { sessionId: 'session-1', userMessage },
-    confirmations,
     onProjectChanged: (projectId, kind) => changes.push({ projectId, kind }),
+    delivery,
     ...extra
   })
 }
@@ -57,8 +58,8 @@ function tool(name: string, userMessage = 'do it'): ChatToolDefinition {
   return found
 }
 
-async function call(name: string, input: Record<string, unknown>, userMessage = 'do it'): Promise<ChatToolResult> {
-  const output = await tool(name, userMessage).handler(input, { signal: new AbortController().signal, toolCallId: 'call-1' })
+async function call(name: string, input: Record<string, unknown>, userMessage = 'do it', toolCallId = `call-${++callSequence}`): Promise<ChatToolResult> {
+  const output = await tool(name, userMessage).handler(input, { signal: new AbortController().signal, toolCallId })
   return typeof output === 'string' ? { content: output } : output
 }
 
@@ -66,27 +67,22 @@ function body(output: ChatToolResult): Record<string, unknown> {
   return JSON.parse(output.content) as Record<string, unknown>
 }
 
-async function confirmedCall(name: string, input: Record<string, unknown>): Promise<ChatToolResult> {
-  const first = await call(name, input)
-  expect(body(first).status).toBe('confirmation_required')
-  const token = body(first).confirmation_token as string
-  return call(name, { ...input, confirmation_token: token }, `Confirm ${token}`)
-}
-
-/** Everything the tools could write, for "no write happened" assertions. */
-function snapshot(): string {
-  return JSON.stringify({
-    projects: db.getProjects({ includeArchived: true }),
-    repos: db.getProjects({ includeArchived: true }).flatMap((p) => db.getProjectRepos(p.id)),
-    resources: db.getProjects({ includeArchived: true }).flatMap((p) => db.getProjectResources(p.id))
-  })
-}
-
 beforeEach(() => {
   ;({ db } = createTestDb())
-  confirmations = new ProjectMutationConfirmations()
   changes = []
   extra = {}
+  callSequence = 0
+  terminalFailures = []
+  delivery = new CaptainDeliveryService({
+    db,
+    agents: {
+      sendMessage: (...args) => {
+        if (!extra.agents) throw new Error('Agents unavailable')
+        return extra.agents.sendMessage(...args)
+      }
+    },
+    onTerminalFailure: (_record, detail, timedOut) => terminalFailures.push({ detail, timedOut })
+  })
 })
 
 describe('Commander tool registry', () => {
@@ -101,19 +97,19 @@ describe('Commander tool registry', () => {
     ])
     // Structural: nothing named for a task, and nothing that starts, stops or approves anything.
     expect(names.filter((name) => /task|session|checkpoint|approve|reject|start|stop|delete/.test(name))).toEqual([])
-    // Every mutating tool declares the confirmation token; every read does not.
-    for (const entry of tools()) {
-      const declaresToken = 'confirmation_token' in (entry.inputSchema.properties ?? {})
-      expect(declaresToken, entry.name).toBe((MUTATING_COMMANDER_TOOLS as readonly string[]).includes(entry.name))
-    }
+    // No tool declares a confirmation token: there is no confirmation step.
+    for (const entry of tools()) expect(Object.keys(entry.inputSchema.properties ?? {}), entry.name).not.toContain('confirmation_token')
   })
 
-  it('makes no write from any mutating tool until the user confirms', async () => {
+  /** A fresh database with a project, a repo and a resource, and a valid input for every mutating tool. */
+  function mutationFixture(): Record<(typeof MUTATING_COMMANDER_TOOLS)[number], Record<string, unknown>> {
+    ;({ db } = createTestDb())
+    changes = []
     extra = { agents: fakeAgents() }
-    const project = db.createProject({ name: 'Guarded' })!
+    const project = db.createProject({ name: 'Target' })!
     const repo = db.addProjectRepo(project.id, { name: 'api', org: 'acme' })!
     const resource = db.addProjectResource(project.id, { label: 'Runbook' })!
-    const inputs: Record<(typeof MUTATING_COMMANDER_TOOLS)[number], Record<string, unknown>> = {
+    return {
       pause_all_projects: { paused: true },
       create_project: { name: 'Another' },
       update_project: { project: project.id, changes: { name: 'Renamed' } },
@@ -128,18 +124,27 @@ describe('Commander tool registry', () => {
       archive_project: { project: project.id },
       restore_project: { project: project.id }
     }
-    const before = snapshot()
-    for (const name of MUTATING_COMMANDER_TOOLS) {
-      const first = body(await call(name, inputs[name]))
-      expect(first.status, name).toBe('confirmation_required')
-      expect(typeof first.confirmation_token, name).toBe('string')
-      // A token the model invents, and a real token without the user's confirmation, both refuse.
-      expect(body(await call(name, { ...inputs[name], confirmation_token: 'made-up' })).status, name).toBe('confirmation_invalid')
-      expect(body(await call(name, { ...inputs[name], confirmation_token: first.confirmation_token }, 'yes please')).status, name).toBe('confirmation_absent')
-    }
-    expect(snapshot()).toBe(before)
-    expect(changes).toEqual([])
-    expect(extra.agents!.isAllProjectsPaused()).toBe(false)
+  }
+
+  /** Calls one mutating tool once and proves the write happened on that first call. */
+  async function expectActsOnFirstCall(name: (typeof MUTATING_COMMANDER_TOOLS)[number], input: Record<string, unknown>): Promise<void> {
+    const output = await call(name, input)
+    expect(output.isError, name).toBeUndefined()
+    expect(body(output).status, name).toBe('ok')
+    if (name === 'pause_all_projects') expect(extra.agents!.isAllProjectsPaused(), name).toBe(true)
+    else expect(changes, name).toHaveLength(1)
+  }
+
+  it('acts on the first call of every mutating tool: no confirmation step', async () => {
+    for (const name of MUTATING_COMMANDER_TOOLS) await expectActsOnFirstCall(name, mutationFixture()[name])
+  })
+
+  it('ignores a stray confirmation_token from the old two-step flow', async () => {
+    for (const name of MUTATING_COMMANDER_TOOLS) await expectActsOnFirstCall(name, { ...mutationFixture()[name], confirmation_token: 'abc123def456' })
+    // The token is ignored, not checked: a made-up one still changes exactly what was asked.
+    const project = db.createProject({ name: 'Before' })!
+    await call('update_project', { project: project.id, changes: { name: 'After' }, confirmation_token: 'made-up' })
+    expect(db.getProject(project.id)?.name).toBe('After')
   })
 
   it('caps every read result and rejects ambiguous exact-name lookup', async () => {
@@ -216,10 +221,10 @@ describe('Commander tool registry', () => {
 })
 
 describe('Commander tool registry with skill administration (#74)', () => {
-  /** The registry ipc/commander.ts builds: project tools, then skill tools, one confirmation table. */
+  /** The registry ipc/commander.ts builds: project tools, then skill tools. */
   function fullRegistry(): ChatToolDefinition[] {
     const context = { sessionId: 'session-1', userMessage: 'do it' }
-    return [...tools(), ...createCommanderSkillTools({ db, context, confirmations })]
+    return [...tools(), ...createCommanderSkillTools({ db, context })]
   }
 
   it('adds skill administration and still no task-mutating or skill-assigning tool', () => {
@@ -228,13 +233,26 @@ describe('Commander tool registry with skill administration (#74)', () => {
     expect(new Set(names).size).toBe(names.length)
     expect(names.filter((name) => /task|session|checkpoint|approve|reject|start|stop|delete|assign/.test(name))).toEqual([])
     const mutating = new Set<string>([...MUTATING_COMMANDER_TOOLS, ...MUTATING_COMMANDER_SKILL_TOOLS])
+    expect(mutating.size).toBe(18)
     for (const entry of fullRegistry()) {
-      const declaresToken = 'confirmation_token' in (entry.inputSchema.properties ?? {})
-      expect(declaresToken, entry.name).toBe(mutating.has(entry.name))
+      expect(Object.keys(entry.inputSchema.properties ?? {}), entry.name).not.toContain('confirmation_token')
       // No tool takes a task or skill_ids argument: the Commander cannot assign skills to tasks.
       const properties = Object.keys(entry.inputSchema.properties ?? {})
       expect(properties.filter((key) => /task|skill_ids/.test(key)), entry.name).toEqual([])
     }
+  })
+
+  it('says in every admin tool description that it takes effect immediately, and warns on the powerful ones', () => {
+    const mutating = new Set<string>([...MUTATING_COMMANDER_TOOLS, ...MUTATING_COMMANDER_SKILL_TOOLS])
+    const powerful = ['pause_all_projects', 'archive_project', 'remove_project_repo', 'remove_project_resource', 'remove_skill', 'promote_skill', 'move_skill']
+    for (const entry of fullRegistry()) {
+      if (!mutating.has(entry.name)) continue
+      expect(entry.description, entry.name).toMatch(/immediately/i)
+      expect(entry.description, entry.name).not.toMatch(/confirm|token/i)
+      if (powerful.includes(entry.name)) expect(entry.description, entry.name).toMatch(/Destructive|Wide-reaching/)
+    }
+    expect(fullRegistry().find((entry) => entry.name === 'pause_all_projects')!.description).toMatch(/every project/i)
+    expect(fullRegistry().find((entry) => entry.name === 'promote_skill')!.description).toMatch(/every project/i)
   })
 })
 
@@ -248,14 +266,17 @@ describe('ask_captain', () => {
     extra = { agents: fakeAgents({ sendMessage }) }
 
     const output = body(await call('ask_captain', { project: 'Web', message: 'Ship the landing page' }))
-    expect(output).toMatchObject({ status: 'sent', project_id: project.id, project_name: 'Web', captain_session: 'starting' })
+    expect(output).toMatchObject({ status: 'queued', project_id: project.id, project_name: 'Web', captain_session: 'starting' })
     expect(output.correlation_id).toMatch(/^cmd-[0-9a-f]{16}$/)
 
     expect(sendMessage).toHaveBeenCalledTimes(1)
-    const [sessionId, text, taskId, agentId] = sendMessage.mock.calls[0] as unknown as [string, string, string, string]
+    const [sessionId, text, taskId, agentId, attachments, typedMessage, deliveryId] = sendMessage.mock.calls[0] as unknown as [string, string, string, string, undefined, undefined, string]
     expect(sessionId).toBe('')
     expect(taskId).toBe(coordinator.id)
     expect(agentId).toBe(agent.id)
+    expect(attachments).toBeUndefined()
+    expect(typedMessage).toBeUndefined()
+    expect(deliveryId).toMatch(/^captain-request-message:/)
     expect(text).toContain(COMMANDER_RELAY_BEGIN)
     expect(text).toContain(COMMANDER_RELAY_END)
     expect(text).toContain('Ship the landing page')
@@ -264,27 +285,37 @@ describe('ask_captain', () => {
     expect(text).toContain('human_authored=false authorizes_actions=false')
   })
 
+  it('accepts the same tool call once across renderer replay and returns the same durable ownership', async () => {
+    db.createAgent({ name: 'Claude' })
+    const project = db.createProject({ name: 'Replay' })!
+    const sendMessage = vi.fn(async () => ({ newSessionId: 'captain-1' }))
+    extra = { agents: fakeAgents({ sendMessage }) }
+
+    const first = body(await call('ask_captain', { project: project.id, message: 'One request' }, 'do it', 'stable-tool-call'))
+    const duplicate = body(await call('ask_captain', { project: project.id, message: 'One request' }, 'do it', 'stable-tool-call'))
+
+    expect(duplicate.delivery_id).toBe(first.delivery_id)
+    expect(duplicate.correlation_id).toBe(first.correlation_id)
+    expect(sendMessage).toHaveBeenCalledTimes(1)
+  })
+
   it('rejoins a live Captain session and reports a delivery failure after returning', async () => {
     const agent = db.createAgent({ name: 'Claude' })!
     const project = db.createProject({ name: 'Live' })!
     const coordinator = db.getCoordinatorTask(project.id)!
-    const failures: Array<{ dispatch: AskCaptainDispatch; error: unknown }> = []
     const sendMessage = vi.fn(async () => { throw new Error('runtime down') })
     extra = {
       agents: fakeAgents({
         sendMessage,
         findSessionByTaskId: (taskId: string) => taskId === coordinator.id ? { sessionId: 'live-1', session: { status: 'working', agentId: agent.id } } : undefined,
         getSessionStatus: () => ({ status: 'working', agentId: agent.id, taskId: coordinator.id })
-      } as unknown as Partial<CommanderAgents>),
-      onDeliveryFailed: (dispatch, error) => failures.push({ dispatch, error })
+      } as unknown as Partial<CommanderAgents>)
     }
 
     const output = body(await call('ask_captain', { project: project.id, message: 'Status?' }))
     expect(output.captain_session).toBe('running')
-    expect(sendMessage.mock.calls[0]).toEqual(['live-1', expect.stringContaining('Status?'), coordinator.id, agent.id])
-    await vi.waitFor(() => expect(failures).toHaveLength(1))
-    expect(failures[0].dispatch).toEqual({ sessionId: 'session-1', projectId: project.id, projectName: 'Live', correlationId: output.correlation_id })
-    expect((failures[0].error as Error).message).toBe('runtime down')
+    expect(sendMessage.mock.calls[0]).toEqual(['', expect.stringContaining('Status?'), coordinator.id, agent.id, undefined, undefined, expect.stringMatching(/^captain-request-message:/)])
+    await vi.waitFor(() => expect(terminalFailures).toEqual([{ detail: 'runtime down', timedOut: false }]))
   })
 
   it('says what state the Captain is really in, and skips a session on the agent it was switched away from', async () => {
@@ -309,7 +340,7 @@ describe('ask_captain', () => {
     live = { sessionId: 'old-1', session: { status: 'idle', agentId: claude.id } }
     expect(body(await call('ask_captain', { project: project.id, message: 'Again?' })).captain_session).toBe('starting')
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2))
-    expect(sendMessage.mock.calls[1]).toEqual(['', expect.stringContaining('Again?'), coordinator.id, sol.id])
+    expect(sendMessage.mock.calls[1]).toEqual(['', expect.stringContaining('Again?'), coordinator.id, sol.id, undefined, undefined, expect.stringMatching(/^captain-request-message:/)])
   })
 
   it('stops a Captain left on its previous agent when the Commander changes the agent', async () => {
@@ -319,7 +350,7 @@ describe('ask_captain', () => {
     const releaseCaptainIfAgentChanged = vi.fn(async () => true)
     extra = { agents: fakeAgents({ releaseCaptainIfAgentChanged } as unknown as Partial<CommanderAgents>) }
 
-    await confirmedCall('update_project', { project: project.id, changes: { captain_agent: sol.id } })
+    await call('update_project', { project: project.id, changes: { captain_agent: sol.id } })
 
     expect(db.getProject(project.id)?.captain_agent_id).toBe(sol.id)
     expect(releaseCaptainIfAgentChanged).toHaveBeenCalledWith(project.id)
@@ -404,65 +435,20 @@ describe('get_pending_approvals, navigate_to_project and pause_all_projects', ()
     await expect(call('navigate_to_project', { project: project.id })).rejects.toThrow(/archived/i)
   })
 
-  it('pauses and resumes every project only through a confirmed call', async () => {
+  it('pauses and resumes every project on the first call', async () => {
     const agents = fakeAgents()
     extra = { agents }
-    expect(body(await confirmedCall('pause_all_projects', { paused: true }))).toEqual({ status: 'ok', result: { all_projects_paused: true } })
+    expect(body(await call('pause_all_projects', { paused: true }))).toEqual({ status: 'ok', result: { all_projects_paused: true } })
     expect(agents.pauseAllProjects).toHaveBeenCalledWith(true)
-    expect(body(await confirmedCall('pause_all_projects', { paused: false }))).toEqual({ status: 'ok', result: { all_projects_paused: false } })
+    expect(body(await call('pause_all_projects', { paused: false }))).toEqual({ status: 'ok', result: { all_projects_paused: false } })
     expect(agents.isAllProjectsPaused()).toBe(false)
     await expect(call('pause_all_projects', { paused: 'yes' })).rejects.toThrow(/true or false/)
   })
 })
 
-describe('Commander project mutation confirmation', () => {
-  it('does not write without the exact user confirmation and consumes a valid token once', async () => {
-    const project = db.createProject({ name: 'Before' })!
-    const input = { project: project.id, changes: { name: 'After', brief: 'New brief' } }
-
-    const challenge = body(await call('update_project', input))
-    expect(challenge.status).toBe('confirmation_required')
-    expect(db.getProject(project.id)?.name).toBe('Before')
-
-    const token = challenge.confirmation_token as string
-    const cancelled = await call('update_project', { ...input, confirmation_token: token }, 'Cancel')
-    expect(body(cancelled).status).toBe('confirmation_absent')
-    expect(cancelled.isError).toBe(true)
-    expect(db.getProject(project.id)?.name).toBe('Before')
-
-    // Asking again before confirming re-issues the same token rather than a new one.
-    expect(body(await call('update_project', input)).confirmation_token).toBe(token)
-
-    const updated = await call('update_project', { ...input, confirmation_token: token }, `Confirm ${token}`)
-    expect(body(updated).status).toBe('ok')
-    expect(db.getProject(project.id)).toMatchObject({ name: 'After', description: 'New brief' })
-    expect(changes).toEqual([{ projectId: project.id, kind: 'updated' }])
-
-    const replay = await call('update_project', { ...input, confirmation_token: token }, `Confirm ${token}`)
-    expect(body(replay).status).toBe('confirmation_invalid')
-  })
-
-  it('binds confirmation to the exact operation, tool and session', async () => {
-    const project = db.createProject({ name: 'Bound' })!
-    const firstInput = { project: project.id, changes: { name: 'First' } }
-    const token = body(await call('update_project', firstInput)).confirmation_token as string
-
-    const changed = await call('update_project', { project: project.id, changes: { name: 'Second' }, confirmation_token: token }, `Confirm ${token}`)
-    expect(body(changed).status).toBe('confirmation_mismatch')
-    const otherTool = await call('archive_project', { project: project.id, confirmation_token: token }, `Confirm ${token}`)
-    expect(body(otherTool).status).toBe('confirmation_mismatch')
-
-    const otherSession = createCommanderProjectTools({ db, context: { sessionId: 'session-2', userMessage: `Confirm ${token}` }, confirmations })
-      .find((entry) => entry.name === 'update_project')!
-    const foreign = await otherSession.handler({ ...firstInput, confirmation_token: token }, { signal: new AbortController().signal, toolCallId: 'c' })
-    expect(body(typeof foreign === 'string' ? { content: foreign } : foreign).status).toBe('confirmation_invalid')
-
-    expect(db.getProject(project.id)).toMatchObject({ name: 'Bound', archived: false })
-    expect(changes).toEqual([])
-  })
-
-  it('creates (with repos and a Captain), renames, archives and restores only through confirmed calls, and protects Default', async () => {
-    const createdOutput = await confirmedCall('create_project', { name: 'Lifecycle', brief: 'A brief', repos: [{ org: 'acme', name: 'api' }, { name: 'web', provider: 'gitlab', org: 'acme' }] })
+describe('Commander project administration', () => {
+  it('creates (with repos and a Captain), renames, archives and restores on the first call, and protects Default', async () => {
+    const createdOutput = await call('create_project', { name: 'Lifecycle', brief: 'A brief', repos: [{ org: 'acme', name: 'api' }, { name: 'web', provider: 'gitlab', org: 'acme' }] })
     const created = body(createdOutput).result as Record<string, unknown>
     expect(created.name).toBe('Lifecycle')
     const projectId = created.id as string
@@ -472,31 +458,31 @@ describe('Commander project mutation confirmation', () => {
 
     await expect(call('create_project', { name: 'Bad repo', repos: [{ name: 'x', provider: 'svn' }] })).rejects.toThrow(/provider/)
 
-    const renamed = body(await confirmedCall('update_project', { project: projectId, changes: { name: 'Lifecycle 2', brief: 'Revised' } })).result as Record<string, unknown>
+    const renamed = body(await call('update_project', { project: projectId, changes: { name: 'Lifecycle 2', brief: 'Revised' } })).result as Record<string, unknown>
     expect(renamed).toMatchObject({ name: 'Lifecycle 2', brief: 'Revised' })
     await expect(call('update_project', { project: projectId, changes: { settings: {} } })).rejects.toThrow(/may only contain/)
 
     await expect(call('archive_project', { project: DEFAULT_PROJECT_ID })).rejects.toThrow(/cannot be archived/i)
     expect(db.getProject(DEFAULT_PROJECT_ID)?.archived).toBe(false)
 
-    expect((body(await confirmedCall('archive_project', { project: projectId })).result as Record<string, unknown>).archived).toBe(true)
+    expect((body(await call('archive_project', { project: projectId })).result as Record<string, unknown>).archived).toBe(true)
     expect(db.getProject(projectId)?.archived).toBe(true)
-    expect((body(await confirmedCall('restore_project', { project: projectId })).result as Record<string, unknown>).archived).toBe(false)
+    expect((body(await call('restore_project', { project: projectId })).result as Record<string, unknown>).archived).toBe(false)
     expect(db.getProject(projectId)?.archived).toBe(false)
     expect(changes.map((change) => change.kind)).toEqual(['created', 'updated', 'archived', 'restored'])
   })
 
   it('maintains repos and resources through stable IDs', async () => {
     const project = db.createProject({ name: 'Context' })!
-    const repo = body(await confirmedCall('add_project_repo', { project: project.id, name: 'api', org: 'acme' })).result as Record<string, unknown>
-    const resource = body(await confirmedCall('add_project_resource', { project: project.id, label: 'Runbook', url: 'docs.example.com/runbook', notes: 'Ask ops' })).result as Record<string, unknown>
+    const repo = body(await call('add_project_repo', { project: project.id, name: 'api', org: 'acme' })).result as Record<string, unknown>
+    const resource = body(await call('add_project_resource', { project: project.id, label: 'Runbook', url: 'docs.example.com/runbook', notes: 'Ask ops' })).result as Record<string, unknown>
     expect(resource.url).toBe('https://docs.example.com/runbook')
 
     const repoId = repo.id as string
     const resourceId = resource.id as string
 
-    await confirmedCall('update_project_repo', { project: project.id, repo_id: repoId, changes: { default_branch: 'develop' } })
-    await confirmedCall('update_project_resource', { project: project.id, resource_id: resourceId, changes: { notes: 'Updated' } })
+    await call('update_project_repo', { project: project.id, repo_id: repoId, changes: { default_branch: 'develop' } })
+    await call('update_project_resource', { project: project.id, resource_id: resourceId, changes: { notes: 'Updated' } })
     expect(db.getProjectRepo(repoId)?.default_branch).toBe('develop')
     expect(db.getProjectResource(resourceId)?.notes).toBe('Updated')
 
@@ -506,10 +492,10 @@ describe('Commander project mutation confirmation', () => {
     await expect(call('reorder_project_repos', { project: project.id, ordered_ids: [] })).rejects.toThrow(/every current repository ID/)
     await expect(call('add_project_resource', { project: project.id, label: 'Bad', url: 'javascript:alert(1)' })).rejects.toThrow(/HTTP/)
 
-    await confirmedCall('reorder_project_repos', { project: project.id, ordered_ids: [repoId] })
-    await confirmedCall('reorder_project_resources', { project: project.id, ordered_ids: [resourceId] })
-    await confirmedCall('remove_project_repo', { project: project.id, repo_id: repoId })
-    await confirmedCall('remove_project_resource', { project: project.id, resource_id: resourceId })
+    await call('reorder_project_repos', { project: project.id, ordered_ids: [repoId] })
+    await call('reorder_project_resources', { project: project.id, ordered_ids: [resourceId] })
+    await call('remove_project_repo', { project: project.id, repo_id: repoId })
+    await call('remove_project_resource', { project: project.id, resource_id: resourceId })
     expect(db.getProjectRepos(project.id)).toEqual([])
     expect(db.getProjectResources(project.id)).toEqual([])
     expect(changes.map((change) => change.kind)).toEqual(['repos', 'resources', 'repos', 'resources', 'repos', 'resources', 'repos', 'resources'])
