@@ -12,6 +12,9 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Database from 'better-sqlite3'
+import { execFile } from 'child_process'
+import { createServer } from 'http'
+import { promisify } from 'util'
 import { createTestDb } from '../../test/helpers/db-test-helper'
 import { makeAgent, makeTask } from '../../test/helpers/task-fixtures'
 import type { DatabaseManager } from './database'
@@ -71,7 +74,7 @@ interface Harness {
   invoke: ReturnType<typeof vi.fn<TaskApiInvoke>>
   gh: ReturnType<typeof vi.fn>
   requests: GhRequest[]
-  created: Array<{ repo: string; number: number; title: string; body: string }>
+  created: Array<{ repo: string; number: number; title: string; body: string; labels?: string[] }>
   events: EscalationEvent[]
   notifyUser: ReturnType<typeof vi.fn>
   /** Make the next N gh calls behave in a particular way. */
@@ -101,7 +104,7 @@ function setup(options: { issuePolicy?: string; repos?: Array<[string, string]> 
   taskIds.foreign = foreign.id
 
   const requests: GhRequest[] = []
-  const created: Array<{ repo: string; number: number; title: string; body: string }> = []
+  const created: Array<{ repo: string; number: number; title: string; body: string; labels?: string[] }> = []
   let nextNumber = 200
   let behaviour: 'timeout' | 'refused' | null = null
 
@@ -114,7 +117,13 @@ function setup(options: { issuePolicy?: string; repos?: Array<[string, string]> 
       const key = /21x-issue-write:([A-Za-z0-9_-]+)/.exec(args.find((a) => a.startsWith('q=')) ?? '')?.[1]
       const items = created
         .filter((issue) => findIdempotencyMarker(issue.body) === key)
-        .map((issue) => ({ number: issue.number, html_url: `https://github.com/${issue.repo}/issues/${issue.number}`, body: issue.body }))
+        .map((issue) => ({
+          number: issue.number,
+          html_url: `https://github.com/${issue.repo}/issues/${issue.number}`,
+          title: issue.title,
+          body: issue.body,
+          labels: issue.labels ?? []
+        }))
       return JSON.stringify({ total_count: items.length, incomplete_results: false, items })
     }
 
@@ -125,8 +134,10 @@ function setup(options: { issuePolicy?: string; repos?: Array<[string, string]> 
       const repo = /\/repos\/(.+)\/issues$/.exec(path)![1]
       const title = args[args.indexOf('-f', args.indexOf(path)) + 1]?.replace(/^title=/, '') ?? ''
       const body = args.find((a) => a.startsWith('body='))?.slice(5) ?? ''
+      const labels = args.flatMap((arg, index) =>
+        (args[index - 1] === '-f' || args[index - 1] === '-F') && arg.startsWith('labels[]=') ? [arg.slice('labels[]='.length)] : [])
       const number = nextNumber++
-      created.push({ repo, number, title, body })
+      created.push({ repo, number, title, body, labels })
       return JSON.stringify({ number, html_url: `https://github.com/${repo}/issues/${number}`, title, state: 'open' })
     }
     if (method === 'PATCH') {
@@ -236,6 +247,28 @@ function commanderAsked(h: Harness, options: { correlationId?: string; messageId
 }
 
 const creates = (h: Harness): GhRequest[] => h.requests.filter((r) => r.args.includes('POST'))
+
+function holdNextIssuePreflight(h: Harness): { ready: () => boolean; release: () => void } {
+  let finish: (() => void) | null = null
+  h.gh.mockImplementationOnce((args: string[]) => new Promise<string>((resolve) => {
+    h.requests.push({ args })
+    finish = () => resolve(JSON.stringify({
+      number: 77,
+      html_url: 'https://github.com/krazyjakee/21x/issues/77',
+      title: 'Existing issue',
+      body: '',
+      labels: [],
+      state: 'open'
+    }))
+  }))
+  return {
+    ready: () => finish !== null,
+    release: () => {
+      if (!finish) throw new Error('GitHub preflight is not pending')
+      finish()
+    }
+  }
+}
 
 beforeEach(() => {
   clearHeldActions()
@@ -729,6 +762,59 @@ describe('an interrupted write is reconciled, never repeated', () => {
     })
   })
 
+  it('keeps a copied marker unresolved when the candidate payload does not match the durable claim', async () => {
+    const h = setup()
+    userAsked(h)
+    h.failNext('timeout')
+    expect(await captainCall(h, 'create_github_issue', {
+      repo: 'krazyjakee/21x', title: 'Expected title', body: 'Expected body'
+    })).toMatchObject({ status: 'unresolved' })
+    const row = h.db.listIssueWrites({ projectId: h.projectId })[0]
+    const copiedMarker = `<!-- 21x-issue-write:${row.idempotency_key} -->`
+    h.gh.mockImplementationOnce(async () => JSON.stringify({
+      total_count: 1,
+      incomplete_results: false,
+      items: [{
+        number: 301,
+        html_url: 'https://github.com/krazyjakee/21x/issues/301',
+        title: 'Attacker-controlled title',
+        body: `Attacker-controlled body\n\n${copiedMarker}`,
+        labels: []
+      }]
+    }))
+
+    expect(await reconcileIssueWrites(h.db, h.projectId)).toBe(0)
+    expect(h.db.listIssueWrites({ projectId: h.projectId })[0]).toMatchObject({
+      status: 'unresolved', external_url: null, effects_applied_at: null
+    })
+    expect(h.db.countProjectStatusJournal(h.projectId)).toBe(0)
+  })
+
+  it('requires create defaults to match when body and labels were omitted from the durable shape', async () => {
+    const h = setup()
+    userAsked(h)
+    h.failNext('timeout')
+    expect(await captainCall(h, 'create_github_issue', {
+      repo: 'krazyjakee/21x', title: 'Same visible title'
+    })).toMatchObject({ status: 'unresolved' })
+    const row = h.db.listIssueWrites({ projectId: h.projectId })[0]
+    const copiedMarker = `<!-- 21x-issue-write:${row.idempotency_key} -->`
+    h.gh.mockImplementationOnce(async () => JSON.stringify({
+      total_count: 1,
+      incomplete_results: false,
+      items: [{
+        number: 302,
+        html_url: 'https://github.com/krazyjakee/21x/issues/302',
+        title: 'Same visible title',
+        body: `Unrelated copied-marker content\n\n${copiedMarker}`,
+        labels: []
+      }]
+    }))
+
+    expect(await reconcileIssueWrites(h.db, h.projectId)).toBe(0)
+    expect(h.db.listIssueWrites({ projectId: h.projectId })[0]).toMatchObject({ status: 'unresolved', external_url: null })
+  })
+
   it('reconciles the same interrupted write repeatedly without double-counting it', async () => {
     const h = setup()
     userAsked(h)
@@ -995,15 +1081,15 @@ describe('linking and updating', () => {
     expect(h.db.getTask(h.taskIds[VOICE_INPUT_TASK])!.attachments).toHaveLength(0)
   })
 
-  it('serializes labels as typed GitHub arrays, including an explicit empty array', async () => {
+  it('serializes label values as raw strings while retaining an explicit empty array', async () => {
     const h = setup()
     userAsked(h)
     await captainCall(h, 'create_github_issue', {
       repo: 'krazyjakee/21x', title: 'Typed labels', labels: ['bug', 'voice']
     })
     const post = h.requests.find((request) => request.args.includes('POST'))!.args
-    expect(post).toEqual(expect.arrayContaining(['-F', 'labels[]=bug', 'labels[]=voice']))
-    expect(post.some((arg) => arg === '--raw-field' || arg.startsWith('labels=['))).toBe(false)
+    expect(post).toEqual(expect.arrayContaining(['-f', 'labels[]=bug', 'labels[]=voice']))
+    expect(post.some((arg, index) => arg === '-F' && post[index + 1]?.startsWith('labels[]='))).toBe(false)
 
     await captainCall(h, 'update_github_issue', {
       repo: 'krazyjakee/21x', issue_number: 200, labels: []
@@ -1011,6 +1097,72 @@ describe('linking and updating', () => {
     const patch = h.requests.find((request) => request.args.includes('PATCH'))!.args
     expect(patch).toEqual(expect.arrayContaining(['-F', 'labels[]']))
     expect(patch.some((arg) => arg === '--raw-field' || arg === 'labels=[]' || arg === 'labels="[]"')).toBe(false)
+  })
+
+  it('preserves scalar-looking label names as JSON strings on the actual gh wire', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = []
+      request.on('data', (chunk: Buffer) => chunks.push(chunk))
+      request.on('end', () => {
+        if (request.method === 'PATCH') {
+          bodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>)
+        }
+        const match = /\/issues\/(\d+)$/.exec(request.url ?? '')
+        const number = Number(match?.[1] ?? 77)
+        response.writeHead(200, { 'content-type': 'application/json' })
+        response.end(JSON.stringify({
+          number,
+          html_url: `https://github.com/krazyjakee/21x/issues/${number}`,
+          title: 'Existing issue',
+          body: '',
+          labels: [],
+          state: 'open'
+        }))
+      })
+    })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', resolve)
+    })
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('Loopback server did not expose a TCP port')
+    const host = `127.0.0.1:${address.port}`
+    const run = promisify(execFile)
+    const h = setup()
+    userAsked(h)
+    setIssueGhRunner(async (args) => {
+      const localArgs = [...args]
+      const endpoint = localArgs.findIndex((arg) => arg.startsWith('/'))
+      if (endpoint < 0) throw new Error('gh test request has no API endpoint')
+      localArgs[endpoint] = `http://${host}${localArgs[endpoint]}`
+      const { stdout } = await run('gh', localArgs, {
+        env: {
+          ...process.env,
+          GH_TOKEN: 'ghp_000000000000000000000000000000000000',
+          GH_NO_UPDATE_NOTIFIER: '1'
+        },
+        encoding: 'utf8',
+        maxBuffer: 1024 * 1024
+      })
+      return stdout
+    })
+    try {
+      const scalarResult = await captainCall(h, 'update_github_issue', {
+        repo: 'krazyjakee/21x', issue_number: 77, labels: ['true', 'false', '123', '00123', 'null']
+      })
+      expect(scalarResult).toMatchObject({ status: 'updated' })
+      expect(await captainCall(h, 'update_github_issue', {
+        repo: 'krazyjakee/21x', issue_number: 78, labels: []
+      })).toMatchObject({ status: 'updated' })
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+    }
+
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0].labels).toEqual(['true', 'false', '123', '00123', 'null'])
+    expect(Array.isArray(bodies[0].labels) && bodies[0].labels.every((label) => typeof label === 'string')).toBe(true)
+    expect(bodies[1].labels).toEqual([])
   })
 
   it('updates an issue and refuses an empty update', async () => {
@@ -1128,6 +1280,111 @@ describe('the durable authorization chain', () => {
     h.created.push({ repo: 'krazyjakee/docs', number: 7, title: 'Existing', body: '' })
     expect(await captainCall(h, 'update_github_issue', { repo: 'krazyjakee/docs', issue_number: 7, body: 'In scope' }))
       .toMatchObject({ status: 'updated' })
+  })
+
+  it('fails closed when the human origin is revoked while issue preflight is pending', async () => {
+    const h = setup()
+    const root = userAsked(h)
+    const gate = holdNextIssuePreflight(h)
+    const pending = captainCall(h, 'update_github_issue', {
+      repo: 'krazyjakee/21x', issue_number: 77, body: 'Must not dispatch'
+    })
+    await vi.waitFor(() => expect(gate.ready()).toBe(true))
+    revokeAuthorization(h.db, root.id, 'withdrawn during GitHub preflight')
+    gate.release()
+
+    expect(await pending).toMatchObject({ status: 'refused', code: 'no_human_origin' })
+    expect(h.gh.mock.calls.some(([args]) => (args as string[]).includes('PATCH'))).toBe(false)
+    expect(h.db.listIssueWrites({ projectId: h.projectId })).toHaveLength(0)
+  })
+
+  it('re-resolves authorization immediately after the claim and before external dispatch', async () => {
+    const h = setup()
+    const root = userAsked(h)
+    const begin = h.db.beginIssueWrite.bind(h.db)
+    vi.spyOn(h.db, 'beginIssueWrite').mockImplementationOnce((input) => {
+      const claim = begin(input)
+      revokeAuthorization(h.db, root.id, 'withdrawn while the claim was recorded')
+      return claim
+    })
+
+    expect(await captainCall(h, 'create_github_issue', {
+      repo: 'krazyjakee/21x', title: 'Must not dispatch after claim'
+    })).toMatchObject({ status: 'refused', code: 'no_human_origin' })
+    expect(h.gh.mock.calls.some(([args]) => (args as string[]).includes('POST'))).toBe(false)
+    expect(h.db.listIssueWrites({ projectId: h.projectId })[0]).toMatchObject({ status: 'failed' })
+  })
+
+  it('fails closed when the human origin expires while issue preflight is pending', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-20T10:00:00Z'))
+    const h = setup()
+    userAsked(h)
+    const gate = holdNextIssuePreflight(h)
+    const pending = captainCall(h, 'update_github_issue', {
+      repo: 'krazyjakee/21x', issue_number: 77, body: 'Must not dispatch'
+    })
+    await vi.waitFor(() => expect(gate.ready()).toBe(true))
+    vi.setSystemTime(new Date(Date.now() + AUTHORIZATION_TTL_MS + 1))
+    gate.release()
+
+    expect(await pending).toMatchObject({ status: 'refused', code: 'no_human_origin' })
+    expect(h.gh.mock.calls.some(([args]) => (args as string[]).includes('PATCH'))).toBe(false)
+    expect(h.db.listIssueWrites({ projectId: h.projectId })).toHaveLength(0)
+  })
+
+  it('fails closed when a different human origin replaces the authorization during preflight', async () => {
+    const h = setup()
+    userAsked(h)
+    const gate = holdNextIssuePreflight(h)
+    const pending = captainCall(h, 'update_github_issue', {
+      repo: 'krazyjakee/21x', issue_number: 77, body: 'Must not dispatch'
+    })
+    await vi.waitFor(() => expect(gate.ready()).toBe(true))
+    userAsked(h, 'Please update GitHub issues and link GitHub issues.')
+    gate.release()
+
+    expect(await pending).toMatchObject({ status: 'refused', code: 'origin_not_trusted' })
+    expect(h.gh.mock.calls.some(([args]) => (args as string[]).includes('PATCH'))).toBe(false)
+    expect(h.db.listIssueWrites({ projectId: h.projectId })).toHaveLength(0)
+  })
+
+  it.each([
+    {
+      scope: 'current project configuration',
+      mutate: (h: Harness) => {
+        const repo = h.db.getProjectRepos(h.projectId).find((item) => item.org === 'krazyjakee' && item.name === '21x')!
+        h.db.removeProjectRepo(repo.id)
+      },
+      taskId: false
+    },
+    {
+      scope: 'calling Captain task',
+      mutate: (h: Harness) => h.db.updateTask(h.captainTaskId, { repos: ['krazyjakee/other'] }),
+      taskId: false
+    },
+    {
+      scope: 'target task',
+      mutate: (h: Harness) => h.db.updateTask(h.taskIds[VOICE_INPUT_TASK], { repos: ['krazyjakee/other'] }),
+      taskId: true
+    }
+  ])('fails closed when the $scope repository scope narrows during preflight', async ({ mutate, taskId }) => {
+    const h = setup({ repos: [['krazyjakee', '21x'], ['krazyjakee', 'other']] })
+    userAsked(h)
+    const gate = holdNextIssuePreflight(h)
+    const pending = captainCall(h, 'update_github_issue', {
+      repo: 'krazyjakee/21x',
+      issue_number: 77,
+      body: 'Must not dispatch',
+      ...(taskId ? { task_id: h.taskIds[VOICE_INPUT_TASK] } : {})
+    })
+    await vi.waitFor(() => expect(gate.ready()).toBe(true))
+    mutate(h)
+    gate.release()
+
+    expect(await pending).toMatchObject({ status: 'refused', code: 'repo_not_in_project' })
+    expect(h.gh.mock.calls.some(([args]) => (args as string[]).includes('PATCH'))).toBe(false)
+    expect(h.db.listIssueWrites({ projectId: h.projectId })).toHaveLength(0)
   })
 
   it('rechecks revocation and expiry at the write boundary', async () => {

@@ -371,22 +371,34 @@ function payloadFields(payload: IssuePayload): Array<typeof ISSUE_PAYLOAD_FIELDS
   return ISSUE_PAYLOAD_FIELDS.filter((field) => payload[field] !== undefined)
 }
 
-function payloadForFields(current: GhIssueResponse, fieldsJson: string): IssuePayload | null {
+function parsePayloadFields(fieldsJson: string): Array<typeof ISSUE_PAYLOAD_FIELDS[number]> | null {
   let fields: unknown
   try { fields = JSON.parse(fieldsJson) } catch { return null }
   if (!Array.isArray(fields) || fields.some((field) => !(ISSUE_PAYLOAD_FIELDS as readonly unknown[]).includes(field))) return null
+  return fields as Array<typeof ISSUE_PAYLOAD_FIELDS[number]>
+}
+
+function issueLabels(current: GhIssueResponse): string[] | null {
+  if (!Array.isArray(current.labels)) return null
+  const labels = current.labels.map((label) => typeof label === 'string' ? label : label.name)
+  if (labels.some((label) => typeof label !== 'string')) return null
+  return (labels as string[]).sort()
+}
+
+function payloadForFields(current: GhIssueResponse, fieldsJson: string): IssuePayload | null {
+  const fields = parsePayloadFields(fieldsJson)
+  if (!fields) return null
   const payload: IssuePayload = {}
-  for (const field of fields as Array<typeof ISSUE_PAYLOAD_FIELDS[number]>) {
+  for (const field of fields) {
     if (field === 'title') {
       if (typeof current.title !== 'string') return null
       payload.title = current.title
     } else if (field === 'body') {
       payload.body = current.body ?? ''
     } else {
-      if (!Array.isArray(current.labels)) return null
-      const labels = current.labels.map((label) => typeof label === 'string' ? label : label.name)
-      if (labels.some((label) => typeof label !== 'string')) return null
-      payload.labels = (labels as string[]).sort()
+      const labels = issueLabels(current)
+      if (!labels) return null
+      payload.labels = labels
     }
   }
   return payload
@@ -415,15 +427,16 @@ function updateArgs(slug: string, number: number, payload: IssuePayload): string
   return args
 }
 
-/** gh's typed nested-field syntax produces a JSON array, including [] when
- * labels is explicitly empty. A raw field containing JSON text is a string. */
+/** Raw nested fields preserve every label as a JSON string. `gh -F` performs
+ * scalar coercion (`null` even becomes an empty array), so it is safe only for
+ * the valueless sentinel that explicitly constructs an empty array. */
 function appendLabelFields(args: string[], labels: string[] | undefined): void {
   if (labels === undefined) return
   if (labels.length === 0) {
     args.push('-F', 'labels[]')
     return
   }
-  for (const label of labels) args.push('-F', `labels[]=${label}`)
+  for (const label of labels) args.push('-f', `labels[]=${label}`)
 }
 
 export class AmbiguousIssueMarkerError extends Error {
@@ -448,12 +461,15 @@ export class IncompleteIssueMarkerSearchError extends Error {
  * marker in its body. This is how an external success that 21x never saw the
  * answer to is recovered instead of repeated.
  */
-export async function findIssueByIdempotencyKey(slug: string, key: string): Promise<{ number: number; url: string } | null> {
-  const query = `repo:${slug} in:body "21x-issue-write:${key}"`
+export async function findIssueByIdempotencyKey(
+  expected: Pick<IssueWriteRecord, 'repo' | 'action' | 'idempotency_key' | 'payload_hash' | 'payload_fields'>
+): Promise<{ number: number; url: string } | null> {
+  if (expected.action !== 'create_issue') return null
+  const query = `repo:${expected.repo} in:body "21x-issue-write:${expected.idempotency_key}"`
   const response = await ghJson(['api', '-X', 'GET', '/search/issues', '-f', `q=${query}`, '-f', 'per_page=100']) as unknown as {
     total_count?: number
     incomplete_results?: boolean
-    items?: Array<{ number?: number; html_url?: string; body?: string | null; pull_request?: unknown }>
+    items?: GhIssueResponse[]
   }
   const items = Array.isArray(response.items) ? response.items : []
   const totalCount = typeof response.total_count === 'number' && Number.isSafeInteger(response.total_count) && response.total_count >= 0
@@ -465,16 +481,32 @@ export async function findIssueByIdempotencyKey(slug: string, key: string): Prom
   if (response.incomplete_results !== false || totalCount === null || totalCount !== items.length) {
     throw new IncompleteIssueMarkerSearchError(totalCount, items.length, response.incomplete_results !== false)
   }
-  const matches = new Map<string, { number: number; url: string }>()
+  const markerMatches = new Map<string, { number: number; url: string; issue: GhIssueResponse }>()
   for (const item of items) {
     if (item.pull_request) continue
-    if (findIdempotencyMarker(item.body) !== key) continue
+    if (findIdempotencyMarker(item.body) !== expected.idempotency_key) continue
     if (typeof item.number !== 'number' || !item.html_url) continue
-    matches.set(`${item.number}\u0000${item.html_url}`, { number: item.number, url: item.html_url })
+    const parsed = parseGitHubIssueUrl(item.html_url)
+    if (!parsed || parsed.slug !== expected.repo || parsed.number !== item.number) continue
+    markerMatches.set(`${item.number}\u0000${parsed.url}`, { number: item.number, url: parsed.url, issue: item })
   }
-  const candidates = [...matches.values()].sort((left, right) => left.number - right.number || left.url.localeCompare(right.url))
+  const candidates = [...markerMatches.values()].sort((left, right) => left.number - right.number || left.url.localeCompare(right.url))
   if (candidates.length > 1) throw new AmbiguousIssueMarkerError(candidates)
-  return candidates[0] ?? null
+  const candidate = candidates[0]
+  if (!candidate) return null
+  const expectedFields = parsePayloadFields(expected.payload_fields)
+  if (!expectedFields) return null
+  // For creates, omitted body/labels still have exact wire defaults. Require
+  // those defaults too, otherwise a copied marker plus a matching title could
+  // impersonate a title-only request while carrying unrelated content.
+  if (!expectedFields.includes('body') && stripIdempotencyMarker(candidate.issue.body) !== '') return null
+  if (!expectedFields.includes('labels')) {
+    const labels = issueLabels(candidate.issue)
+    if (!labels || labels.length !== 0) return null
+  }
+  const candidatePayload = payloadForFields(candidate.issue, expected.payload_fields)
+  if (!candidatePayload || hashPayload(candidatePayload) !== expected.payload_hash) return null
+  return { number: candidate.number, url: candidate.url }
 }
 
 async function rejectPullRequestTarget(target: { slug: string; number: number | null }): Promise<IssueWriteDenial | null> {
@@ -513,6 +545,85 @@ function taskRepoDenial(repos: readonly string[], slug: string, subject: string)
   }
 }
 
+interface IssueWriteAuthorizationSnapshot {
+  captainTaskId: string
+  captainSessionId: string | null
+  origin: IssueWriteOrigin
+}
+
+function sameOrigin(left: IssueWriteOrigin, right: IssueWriteOrigin): boolean {
+  return left.kind === right.kind &&
+    left.messageId === right.messageId &&
+    left.sessionId === right.sessionId &&
+    left.textHash === right.textHash &&
+    left.authoredAt === right.authoredAt &&
+    left.correlationId === right.correlationId
+}
+
+/** Rebuilds the complete live capability from storage. Callers use it before
+ * and after asynchronous preflights, and once more immediately before a
+ * claimed write is dispatched, so an earlier snapshot can never outlive a
+ * revocation, expiry, origin replacement or repository-scope narrowing. */
+function authorizeIssueWriteNow(
+  db: IssueWriteDb,
+  request: IssueWriteRequest,
+  target: { slug: string; number: number | null },
+  expected?: IssueWriteAuthorizationSnapshot
+): { snapshot: IssueWriteAuthorizationSnapshot } | { denial: IssueWriteDenial } {
+  let taskProjectId: string | null = null
+  let targetTaskRepos: readonly string[] = []
+  if (request.taskId) {
+    const task = db.getTask(request.taskId)
+    if (!task) {
+      return { denial: { code: 'cross_project_target', actionClass: DELEGATED_ACTION_CLASS, message: 'That task does not exist in this project.' } }
+    }
+    taskProjectId = task.project_id ?? null
+    targetTaskRepos = task.repos ?? []
+  }
+
+  const captain = db.getCoordinatorTask(request.projectId)
+  const resolved = issueWriteCapability(db, {
+    projectId: request.projectId,
+    captainTaskId: captain?.id ?? null,
+    action: request.action,
+    repo: target.slug,
+    now: Date.now()
+  })
+  if (!resolved.capability) return { denial: resolved.denial }
+  const capabilityDenial = checkIssueWriteCapability(
+    { projectId: request.projectId, action: request.action, repo: target.slug, taskProjectId },
+    resolved.capability
+  )
+  if (capabilityDenial) return { denial: capabilityDenial }
+  const captainRepoDenial = taskRepoDenial(captain?.repos ?? [], target.slug, 'The calling Captain task')
+  if (captainRepoDenial) return { denial: captainRepoDenial }
+  const targetTaskRepoDenial = taskRepoDenial(targetTaskRepos, target.slug, 'The target task')
+  if (targetTaskRepoDenial) return { denial: targetTaskRepoDenial }
+  if (!captain) {
+    return { denial: { code: 'capability_unavailable', actionClass: DELEGATED_ACTION_CLASS, message: 'The project Captain task no longer exists.' } }
+  }
+
+  const snapshot: IssueWriteAuthorizationSnapshot = {
+    captainTaskId: captain.id,
+    captainSessionId: captain.session_id ?? null,
+    origin: resolved.origin
+  }
+  if (expected && (
+    snapshot.captainTaskId !== expected.captainTaskId ||
+    snapshot.captainSessionId !== expected.captainSessionId ||
+    !sameOrigin(snapshot.origin, expected.origin)
+  )) {
+    return {
+      denial: {
+        code: 'origin_not_trusted',
+        actionClass: DELEGATED_ACTION_CLASS,
+        message: 'The Captain or originating human authorization changed while GitHub was being checked. 21x stopped before writing; retry from the current human instruction.'
+      }
+    }
+  }
+  return { snapshot }
+}
+
 /**
  * Authorizes, claims, performs and records one delegated issue write.
  *
@@ -533,37 +644,10 @@ export async function performIssueWrite(
   const target = resolveTarget(request)
   if ('code' in target) return denial(target)
 
-  // 3. The task the issue belongs to must be in this project.
-  let taskProjectId: string | null = null
-  let targetTaskRepos: readonly string[] = []
-  if (request.taskId) {
-    const task = db.getTask(request.taskId)
-    if (!task) return denial({ code: 'cross_project_target', actionClass: DELEGATED_ACTION_CLASS, message: 'That task does not exist in this project.' })
-    taskProjectId = task.project_id ?? null
-    targetTaskRepos = task.repos ?? []
-  }
-
-  // 4. The capability, from the project and a trusted human origin.
-  const captain = db.getCoordinatorTask(request.projectId)
-  const resolved = issueWriteCapability(db, {
-    projectId: request.projectId,
-    captainTaskId: captain?.id ?? null,
-    action: request.action,
-    repo: target.slug,
-    now: Date.now()
-  })
-  if (!resolved.capability) return denial(resolved.denial)
-  const { capability, origin } = resolved
-
-  const capabilityDenial = checkIssueWriteCapability(
-    { projectId: request.projectId, action: request.action, repo: target.slug, taskProjectId },
-    capability
-  )
-  if (capabilityDenial) return denial(capabilityDenial)
-  const captainRepoDenial = taskRepoDenial(captain?.repos ?? [], target.slug, 'The calling Captain task')
-  if (captainRepoDenial) return denial(captainRepoDenial)
-  const targetTaskRepoDenial = taskRepoDenial(targetTaskRepos, target.slug, 'The target task')
-  if (targetTaskRepoDenial) return denial(targetTaskRepoDenial)
+  // 3–4. The task scope and trusted human capability, captured once for the
+  // origin identity and re-resolved after every asynchronous preflight.
+  const initialAuthorization = authorizeIssueWriteNow(db, request, target)
+  if ('denial' in initialAuthorization) return denial(initialAuthorization.denial)
 
   // 5. The payload itself.
   const payloadDenial = validateIssuePayload(request.payload, { requireTitle: request.action === 'create_issue' })
@@ -583,12 +667,17 @@ export async function performIssueWrite(
     if (targetDenial) return denial(targetDenial)
   }
 
+  // The GET above is a check/use boundary: authorization and every repository
+  // intersection may have changed while it was in flight.
+  const dispatchAuthorization = authorizeIssueWriteNow(db, request, target, initialAuthorization.snapshot)
+  if ('denial' in dispatchAuthorization) return denial(dispatchAuthorization.denial)
+
   if (request.checkOnly) {
     return {
       status: 'allowed',
       repo: target.slug,
       action: request.action,
-      authorized_by: { origin: origin.kind, human_message: origin.messageId, correlation_id: origin.correlationId, authored_at: origin.authoredAt }
+      authorized_by: { origin: dispatchAuthorization.snapshot.origin.kind, human_message: dispatchAuthorization.snapshot.origin.messageId, correlation_id: dispatchAuthorization.snapshot.origin.correlationId, authored_at: dispatchAuthorization.snapshot.origin.authoredAt }
     }
   }
 
@@ -607,15 +696,15 @@ export async function performIssueWrite(
   const claim = db.beginIssueWrite({
     idempotency_key: key,
     project_id: request.projectId,
-    captain_task_id: captain?.id ?? null,
-    captain_session_id: captain?.session_id ?? null,
+    captain_task_id: dispatchAuthorization.snapshot.captainTaskId,
+    captain_session_id: dispatchAuthorization.snapshot.captainSessionId,
     task_id: request.taskId ?? null,
     repo: target.slug,
     action: request.action,
     target_number: target.number,
     payload_hash: payloadHash,
     payload_fields: fields,
-    origin,
+    origin: dispatchAuthorization.snapshot.origin,
     lease_ms: CLAIM_LEASE_MS
   })
 
@@ -665,27 +754,31 @@ export async function performIssueWrite(
       }
     }
     // Reconciliation proved nothing was written: claim again and go on.
+    // Rebuild authorization after its asynchronous GitHub search before the
+    // retry claim; a revocation or scope change during reconciliation wins.
+    const retryAuthorization = authorizeIssueWriteNow(db, request, target, initialAuthorization.snapshot)
+    if ('denial' in retryAuthorization) return denial(retryAuthorization.denial)
     const again = db.beginIssueWrite({
       idempotency_key: key,
       project_id: request.projectId,
-      captain_task_id: captain?.id ?? null,
-      captain_session_id: captain?.session_id ?? null,
+      captain_task_id: retryAuthorization.snapshot.captainTaskId,
+      captain_session_id: retryAuthorization.snapshot.captainSessionId,
       task_id: request.taskId ?? null,
       repo: target.slug,
       action: request.action,
       target_number: target.number,
       payload_hash: payloadHash,
       payload_fields: fields,
-      origin,
+      origin: retryAuthorization.snapshot.origin,
       lease_ms: CLAIM_LEASE_MS
     })
     if (again.state !== 'reserved') {
       return { status: 'unresolved', error: 'This write could not be claimed for a retry.', ...ledgerView(again.record) }
     }
-    return runClaimedWrite(db, again.record, request, target, key, hooks)
+    return runClaimedWrite(db, again.record, request, target, key, hooks, initialAuthorization.snapshot)
   }
 
-  return runClaimedWrite(db, claim.record, request, target, key, hooks)
+  return runClaimedWrite(db, claim.record, request, target, key, hooks, initialAuthorization.snapshot)
 }
 
 async function runClaimedWrite(
@@ -694,8 +787,23 @@ async function runClaimedWrite(
   request: IssueWriteRequest,
   target: { slug: string; number: number | null },
   key: string,
-  hooks: IssueWriteHooks
+  hooks: IssueWriteHooks,
+  expectedAuthorization: IssueWriteAuthorizationSnapshot
 ): Promise<Record<string, unknown>> {
+  // beginIssueWrite is synchronous, but keep a second live check immediately
+  // adjacent to the external dispatch. This also protects alternative DB
+  // implementations/hooks that may change state while a claim is recorded.
+  const currentAuthorization = authorizeIssueWriteNow(db, request, target, expectedAuthorization)
+  if ('denial' in currentAuthorization) {
+    const failed = db.settleIssueWrite(record.id, {
+      status: 'failed',
+      attempt_epoch: record.attempt_epoch,
+      error: currentAuthorization.denial.message
+    })
+    hooks.pushToRenderer?.('issueWrites:changed', { projectId: record.project_id })
+    if (!failed) return staleAttemptResult(db, key)
+    return denial(currentAuthorization.denial)
+  }
   // `link_issue` writes nothing to GitHub: it records the association in 21x.
   if (request.action === 'link_issue') {
     const url = `https://github.com/${target.slug}/issues/${target.number}`
@@ -826,7 +934,7 @@ export async function reconcileIssueWrites(db: IssueWriteDb, projectId?: string,
   for (const record of db.listUnresolvedIssueWrites(projectId)) {
     try {
       if (record.action === 'create_issue') {
-        const found = await findIssueByIdempotencyKey(record.repo, record.idempotency_key)
+        const found = await findIssueByIdempotencyKey(record)
         if (!found) {
           // Search is not a linearizable negative answer: GitHub may index a
           // create after this query returns. Keep the claim unresolved rather

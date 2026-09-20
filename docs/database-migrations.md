@@ -185,7 +185,10 @@ local effects were interrupted, exactly once. New table only, so
 `CREATE TABLE IF NOT EXISTS` covers fresh and existing databases alike.
 Create reconciliation accepts a marker only from a complete GitHub search
 response: missing/invalid counts, `incomplete_results`, pagination truncation,
-or more than one exact marker all remain unresolved.
+or more than one exact marker all remain unresolved. The surviving candidate's
+canonical repository/issue identity and the payload reconstructed in the
+stored `payload_fields` shape must also reproduce `payload_hash`; a copied
+marker with different title, body or labels is not success evidence.
 
 ## Adding a column to other tables
 
