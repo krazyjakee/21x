@@ -4458,6 +4458,8 @@ export class AgentManager extends EventEmitter {
   async stopAllSessions(): Promise<void> {
     console.log(`[AgentManager] Stopping all ${this.sessions.size} sessions`)
 
+    this.resourceMonitor.stop()
+
     // Shutdown preserves the durable queue. The next process reconciles any
     // outstanding claim; stops below must not drain it in this process.
     this.shuttingDown = true
