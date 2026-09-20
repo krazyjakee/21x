@@ -466,6 +466,20 @@ describe('admission control — exempt sessions', () => {
 })
 
 describe('startup self-healing (#148)', () => {
+  it('does not replay a crashed triage claim as an ordinary assigned run', async () => {
+    const { db, manager, agentId, createTasks, started } = setup(1)
+    const [task] = createTasks(1, { status: TaskStatus.Triaging })
+    const queue = (manager as any).startQueue
+    queue.enqueue({ taskId: task.id, agentId, projectId: task.project_id, reason: 'recovery', queuedAt: new Date().toISOString() })
+    const claim = queue.claim(task.id, 'previous-process')
+    queue.markStarting(claim.id, claim.generation)
+    await manager.reconcileStartup()
+    await settle()
+    expect(started).toEqual([])
+    expect(db.getTask(task.id)?.status).toBe(TaskStatus.NotStarted)
+    expect(manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'failed', recoveryCause: 'orphaned_triage' })
+  })
+
   it('immediately repairs a direct agent_working write through one stable durable row', async () => {
     const { db, manager, started, createTasks } = setup(1)
     const [task] = createTasks(1)
@@ -816,6 +830,39 @@ describe('real reconnect status and stale callbacks', () => {
 })
 
 describe('adapter start fencing before effects', () => {
+  it('fences an unassigned triage prompt when stopped during backend creation', async () => {
+    const { db, manager } = setup(1)
+    const task = db.createTask(makeTask({ title: 'Triage race' }))!
+    ;(manager as any).startSessionNow.mockRestore()
+    let finish!: (id: string) => void
+    const adapter = {
+      initialize: vi.fn(async () => undefined),
+      createSession: vi.fn(() => new Promise<string>(resolve => { finish = resolve })),
+      getStatus: vi.fn(async () => ({ type: 'idle' })),
+      destroySession: vi.fn(async () => undefined),
+      sendPrompt: vi.fn(async () => undefined)
+    }
+    vi.spyOn(manager as any, 'getAdapter').mockReturnValue(adapter)
+    vi.spyOn(manager as any, 'setupWorktreeIfNeeded').mockResolvedValue('/tmp')
+    vi.spyOn(manager as any, 'buildMcpServersForAdapter').mockResolvedValue({})
+    vi.spyOn(manager as any, 'setupSecretSession').mockReturnValue(null)
+    const starting = manager.startTask(task.id)
+    const rejected = expect(starting).rejects.toThrow('Start ownership was withdrawn')
+    await vi.waitFor(() => expect(adapter.createSession).toHaveBeenCalledTimes(1))
+    const stopping = manager.stopByTaskId(task.id)
+    expect(manager.getStartRecoveryState(task.id)?.state).toBe('cancelled')
+    finish('cancelled-triage')
+    await Promise.all([rejected, stopping])
+    expect(adapter.sendPrompt).not.toHaveBeenCalled()
+    expect(manager.findSessionByTaskId(task.id)).toBeUndefined()
+    expect(db.getTask(task.id)?.status).toBe(TaskStatus.NotStarted)
+
+    adapter.createSession.mockResolvedValue('restarted-triage')
+    expect(await manager.startTask(task.id, { resumeManualStop: true })).toMatchObject({ action: 'triage_started' })
+    expect(adapter.sendPrompt).toHaveBeenCalledTimes(1)
+    await manager.stopAllSessions()
+  })
+
   it.each(['stop', 'complete', 'delete', 'shutdown'] as const)('fences a late created session after %s', async (action) => {
     const { db, manager, agentId, createTasks } = setup(1)
     const [task] = createTasks(1)

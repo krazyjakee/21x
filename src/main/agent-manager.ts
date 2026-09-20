@@ -446,8 +446,16 @@ export class AgentManager extends EventEmitter {
     // recovered instead of dispatching a second start.
     for (const claim of this.startQueue.interruptedClaims(this.startQueueLeaseOwner)) {
       if (this.sessionStarts.has(claim.taskId)) continue
-      const requeued = this.startQueue.requeueInterrupted(claim, claim.state === 'claimed' ? 'crash_after_claim' : 'crash_after_start')
       const task = this.db.getTask(claim.taskId)
+      if (task?.status === TaskStatus.Triaging) {
+        // Triage can change assignment while it runs. Never replay a crashed
+        // triage claim as an ordinary run under the newly selected agent.
+        this.startQueue.fail(task.id, 'orphaned_triage', 'visible_terminal_failure', 'Triage was interrupted; explicitly continue to retry.')
+        this.updateTaskFromLocalAgent(task.id, { status: TaskStatus.NotStarted, session_id: null })
+        this.recordRecoveryAudit(task, 'orphaned_triage', 'terminal_failure', 'visible_terminal_failure')
+        continue
+      }
+      const requeued = this.startQueue.requeueInterrupted(claim, claim.state === 'claimed' ? 'crash_after_claim' : 'crash_after_start')
       if (requeued && task) {
         this.recordRecoveryAudit(task, requeued.recoveryCause ?? 'interrupted_claim', 'retry', requeued.recoveryResult ?? 'requeued_after_restart')
       }
@@ -2397,17 +2405,20 @@ export class AgentManager extends EventEmitter {
         this.tellCaptainAboutLimit(task, decision)
         return { status: 'queued', position, reason: decision.reason }
       }
-      if (task) {
-        this.startQueue.enqueue({ taskId, agentId, projectId: taskProjectId(task), workspaceDir,
-          skipInitialPrompt, priority: task.priority, reason: 'recovery', queuedAt: new Date().toISOString() })
-        startClaim = this.startQueue.claim(taskId, this.startQueueLeaseOwner)
-        if (!startClaim || !this.startQueue.markStarting(startClaim.id, startClaim.generation)) {
-          throw new Error('Start ownership could not be acquired.')
-        }
-        this.emitStartQueueChanged()
-      }
       this.recordCountedStart(task)
       this.startQueue.markServed(task ? taskProjectId(task) : undefined)
+    }
+
+    // Triage remains exempt from capacity, but its initial prompt still needs
+    // durable ownership so an unassigned task can be cancelled during startup.
+    if (task && !isCoordinatorTask(task)) {
+      this.startQueue.enqueue({ taskId, agentId, projectId: taskProjectId(task), workspaceDir,
+        skipInitialPrompt, priority: task.priority, reason: 'recovery', queuedAt: new Date().toISOString() })
+      startClaim = this.startQueue.claim(taskId, this.startQueueLeaseOwner)
+      if (!startClaim || !this.startQueue.markStarting(startClaim.id, startClaim.generation)) {
+        throw new Error('Start ownership could not be acquired.')
+      }
+      this.emitStartQueueChanged()
     }
 
     this.admittedStarts.set(taskId, agentId)
@@ -2466,8 +2477,13 @@ export class AgentManager extends EventEmitter {
             this.recordRecoveryAudit(task, exclusion, 'exclude_from_retry', 'excluded_failure_not_retried', message)
           } else {
             this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.NotStarted, session_id: null })
-            const retried = this.startQueue.failOrRetry(startClaim.id, startClaim.generation, message)
-            if (retried) this.recordRecoveryAudit(task, 'recoverable_start_failure', 'retry', retried.record.recoveryResult ?? 'retry_scheduled', message)
+            if (task.status === TaskStatus.Triaging) {
+              this.startQueue.fail(taskId, 'triage_start_failure', 'visible_terminal_failure', message)
+              this.recordRecoveryAudit(task, 'triage_start_failure', 'terminal_failure', 'visible_terminal_failure', message)
+            } else {
+              const retried = this.startQueue.failOrRetry(startClaim.id, startClaim.generation, message)
+              if (retried) this.recordRecoveryAudit(task, 'recoverable_start_failure', 'retry', retried.record.recoveryResult ?? 'retry_scheduled', message)
+            }
           }
           this.emitStartQueueChanged()
           this.scheduleStartQueueDrain()
@@ -2816,13 +2832,13 @@ export class AgentManager extends EventEmitter {
     // An explicit UI/API start may reverse an earlier explicit stop. Automatic
     // schedulers omit this flag, so a manual-stop exclusion remains terminal
     // until the user actually asks to run the task again.
-    const requestSelectedTask = (selected: TaskRecord): Promise<SessionStartOutcome> => {
+    const requestSelectedTask = (selected: TaskRecord, selectedAgentId = selected.agent_id!): Promise<SessionStartOutcome> => {
       const recovery = this.startQueue.get(selected.id)
       if (opts?.resumeManualStop && recovery?.state === 'cancelled' && recovery.recoveryCause === 'manual_stop') {
         const queued = this.startQueue.enqueue({
           taskId: selected.id,
           projectId: taskProjectId(selected),
-          agentId: selected.agent_id!,
+          agentId: selectedAgentId,
           reason: 'recovery',
           queuedAt: new Date().toISOString(),
           priority: selected.priority,
@@ -2832,7 +2848,7 @@ export class AgentManager extends EventEmitter {
         this.emitStartQueueChanged()
         this.scheduleStartQueueDrain()
       }
-      return this.requestSession(selected.agent_id!, selected.id)
+      return this.requestSession(selectedAgentId, selected.id)
     }
 
     const preferSubtasks = opts?.preferSubtasks !== false
@@ -2898,7 +2914,8 @@ export class AgentManager extends EventEmitter {
       })
 
       // Triage is exempt from the limits, so this never queues.
-      const sessionId = await this.startSession(defaultAgentId, taskId)
+      const outcome = await requestSelectedTask(task, defaultAgentId)
+      const sessionId = outcome.status === 'started' ? outcome.sessionId : ''
       return {
         action: 'triage_started',
         sessionId,
