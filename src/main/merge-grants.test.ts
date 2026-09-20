@@ -34,11 +34,13 @@ import {
   makeUserTypedProjectMessage,
   latestUserTypedProjectMessage,
   performMerge,
+  readPullRequestReadiness,
   reconcileMergeGrantReservations,
   revokeMergeGrant,
   setGhRunner,
   type PullRequestGateState
 } from './merge-grants'
+import { recordPullRequestReviewAttestation } from './pr-review-attestations'
 import { createCommanderProjectTools, type CommanderAgents } from './commander/project-tools'
 import { CaptainDeliveryService } from './commander/captain-delivery'
 import { createCommanderMergeGrantTools, grantForRelay } from './commander/merge-grant-tools'
@@ -596,7 +598,7 @@ describe('escalation policy: open_pr and merge_pr', () => {
     expect(JSON.parse(read('p-ask'))).toEqual({ escalation: { merge_pr: 'ask_user', open_pr: 'tell_commander' } })
     expect(JSON.parse(read('p-none'))).toEqual({ limits: { paused: false } })
     expect(read('p-bad')).toBe('not json')
-    expect((raw.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('26')
+    expect((raw.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('27')
     const before = read('p-auto')
     splitPullRequestEscalation(raw)
     expect(read('p-auto')).toBe(before)
@@ -1122,6 +1124,29 @@ function wideGrant(h: Harness, scope = {}) {
   }, scope)
 }
 
+function attestExactHead(h: Harness, options: { baseSha?: string; sameAgent?: boolean; verdict?: 'CLEAN' | 'CHANGES_REQUIRED' } = {}) {
+  const implementationAgent = h.db.createAgent({ name: 'Implementation agent' })!
+  const reviewerAgent = options.sameAgent ? implementationAgent : h.db.createAgent({ name: 'Independent reviewer' })!
+  const implementation = h.db.createTask({
+    title: 'Implement PR', type: 'coding', project_id: h.projectId, repos: ['acme/app']
+  })!
+  const review = h.db.createTask({
+    title: 'Independent security review', type: 'review', project_id: h.projectId, repos: ['acme/app'], labels: ['security']
+  })!
+  h.db.updateTask(implementation.id, { agent_id: implementationAgent.id })
+  h.db.updateTask(review.id, { agent_id: reviewerAgent.id })
+  return recordPullRequestReviewAttestation(h.db, {
+    projectId: h.projectId,
+    reviewTaskId: review.id,
+    implementationTaskId: implementation.id,
+    prUrl: PR_URL,
+    headSha: SHA,
+    baseSha: options.baseSha ?? 'd'.repeat(40),
+    verdict: options.verdict ?? 'CLEAN',
+    summary: 'Exact-head security review completed.'
+  })
+}
+
 describe('explicit project-wide grants (#155)', () => {
   it.each(PROJECT_WIDE_COMMANDS)('accepts the exact reported command: %s', async (text) => {
     const h = setupWide()
@@ -1350,10 +1375,120 @@ describe('explicit project-wide grants (#155)', () => {
     expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({
       status: 'blocked',
       reason_code: 'INDEPENDENT_REVIEW_REQUIRED',
-      needs_external_approval: true
+      blocker_class: 'independent_review_required',
+      needs_external_approval: false,
+      retry_later: false
     })
     expect(h.merges).toHaveLength(0)
     expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+  })
+
+  it('accepts a verified exact-head 21x attestation when GitHub does not require approval, without treating COMMENT as approval', async () => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    expect(attestExactHead(h)).toMatchObject({ ok: true, attestation: { verdict: 'CLEAN' } })
+    h.setPr({
+      reviewDecision: '',
+      latestReviews: reviewConnection([{ author: { login: 'commenter' }, state: 'COMMENTED', commit: { oid: SHA } }])
+    })
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({
+      status: 'merged', authorized_by: { kind: 'grant' }
+    })
+    expect(h.merges).toHaveLength(1)
+  })
+
+  it('classifies a protected-branch approval as externally owned even with a CLEAN 21x attestation', async () => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    expect(attestExactHead(h).ok).toBe(true)
+    h.setPr({
+      mergeStateStatus: 'BLOCKED',
+      reviewDecision: 'REVIEW_REQUIRED',
+      reviewRequests: [{ login: 'code-owner' }],
+      latestReviews: reviewConnection([{ author: { login: 'commenter' }, state: 'COMMENTED', commit: { oid: SHA } }])
+    })
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({
+      status: 'blocked',
+      blocker_class: 'external_approval_required',
+      reason_code: 'EXTERNAL_APPROVAL_REQUIRED',
+      needs_external_approval: true,
+      retry_later: false,
+      approval_ownership: {
+        owner: 'github_branch_protection',
+        requestedReviewers: ['code-owner'],
+        formalApprovalRequired: true
+      }
+    })
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+    expect(h.merges).toHaveLength(0)
+  })
+
+  it('refuses a same-agent attestation and leaves the product review gate closed', async () => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    expect(attestExactHead(h, { sameAgent: true })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('different assigned agent')
+    })
+    h.setPr({ reviewDecision: '', latestReviews: reviewConnection([]) })
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({
+      reason_code: 'INDEPENDENT_REVIEW_REQUIRED'
+    })
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+  })
+
+  it('invalidates an exact-head attestation and its readiness revision when the base advances', async () => {
+    const h = setupWide()
+    expect(attestExactHead(h).ok).toBe(true)
+    h.setPr({ reviewDecision: '', latestReviews: reviewConnection([]) })
+    const first = await readPullRequestReadiness(h.db, h.projectId, parseGitHubPullRequestUrl(PR_URL)!)
+    expect(first.snapshot).toMatchObject({ classification: 'ready', base_sha: 'd'.repeat(40), invalidated_at: null })
+
+    h.setPr({ reviewDecision: '', latestReviews: reviewConnection([]), baseRefOid: 'e'.repeat(40) })
+    const second = await readPullRequestReadiness(h.db, h.projectId, parseGitHubPullRequestUrl(PR_URL)!)
+    expect(second.snapshot).toMatchObject({ classification: 'independent_review_required', base_sha: 'e'.repeat(40) })
+    const history = h.db.listPullRequestReadinessSnapshots(h.projectId, 'acme/app', 12)
+    expect(history).toHaveLength(2)
+    expect(history.find((snapshot) => snapshot.invalidated_at)).toMatchObject({
+      invalidated_reason: 'base_changed', invalidated_at: expect.any(String)
+    })
+  })
+
+  it('invalidates on a check rerun and spends no grant use when the result is unchanged', async () => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    const first = prState({
+      statusCheckRollup: [{ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS', detailsUrl: 'https://checks/runs/1' }]
+    })
+    const rerun = prState({
+      statusCheckRollup: [{ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS', detailsUrl: 'https://checks/runs/2' }]
+    })
+    h.gh.mockResolvedValueOnce(JSON.stringify(first)).mockResolvedValueOnce(JSON.stringify(first))
+      .mockResolvedValueOnce(JSON.stringify(rerun)).mockResolvedValueOnce(JSON.stringify(rerun))
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({
+      status: 'blocked', reason_code: 'PR_CHANGED'
+    })
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+    expect(h.merges).toHaveLength(0)
+    const history = h.db.listPullRequestReadinessSnapshots(h.projectId, 'acme/app', 12)
+    expect(history.find((snapshot) => snapshot.invalidated_at)?.invalidated_reason).toBe('checks_changed')
+  })
+
+  it.each([
+    [{ isDraft: true }, 'draft_changed'],
+    [{ mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN' }, 'mergeability_changed']
+  ] as const)('invalidates durable readiness when live draft/mergeability changes: %j', async (changed, reason) => {
+    const h = setupWide()
+    await readPullRequestReadiness(h.db, h.projectId, parseGitHubPullRequestUrl(PR_URL)!)
+    h.setPr(changed)
+    await readPullRequestReadiness(h.db, h.projectId, parseGitHubPullRequestUrl(PR_URL)!)
+    const history = h.db.listPullRequestReadinessSnapshots(h.projectId, 'acme/app', 12)
+    expect(history).toHaveLength(2)
+    expect(history.find((snapshot) => snapshot.invalidated_at)?.invalidated_reason).toContain(reason)
   })
 
   it('does not count the PR author approving their own PR as independent review', async () => {
@@ -1485,7 +1620,7 @@ describe('explicit project-wide grants (#155)', () => {
       .mockResolvedValueOnce(JSON.stringify(prState())).mockResolvedValueOnce(JSON.stringify(prState({
         latestReviews: reviewConnection([{ author: { login: 'reviewer-dev' }, state: 'DISMISSED', commit: { oid: SHA } }])
       })))
-    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({ reason_code: 'INDEPENDENT_REVIEW_REQUIRED' })
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({ reason_code: 'PR_CHANGED' })
     expect(h.merges).toHaveLength(0)
     expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
   })

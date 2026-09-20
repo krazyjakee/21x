@@ -13,6 +13,12 @@ import { userTaskRoleFilter } from './database/task-roles'
 import { TASK_ROLE_CAPTAIN, type TaskRole } from '../shared/task-roles'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import { mergeGrantStatus, type MergeAuthorizationContext, type MergeCheckRecord, type MergeGrant, type MergeGrantSource, type MergeGrantReservation, type MergeGrantUse, type MergeGrantUseInput } from '../shared/merge-grants'
+import type {
+  CreatePullRequestReadinessSnapshot,
+  CreatePullRequestReviewAttestation,
+  PullRequestReadinessSnapshot,
+  PullRequestReviewAttestation
+} from '../shared/pr-readiness'
 import { defaultHardCap, normalizeTouchPath, type ConcurrencyAuditEntry } from '../shared/concurrency'
 import type { IssueAction, IssueWriteOrigin, IssueWriteRecord, IssueWriteStatus } from '../shared/issue-actions'
 import {
@@ -1438,6 +1444,88 @@ export class DatabaseManager {
       }
       return { ...row, checks, authorization_context: authorizationContext }
     })
+  }
+
+  // ── Exact-head pull-request readiness ───────────────────────────────────
+
+  createPullRequestReviewAttestation(data: CreatePullRequestReviewAttestation): PullRequestReviewAttestation | undefined {
+    if (!this.ensureDbOpen()) return undefined
+    const id = createId()
+    const createdAt = new Date().toISOString()
+    this.prepare(`
+      INSERT INTO pr_review_attestations
+        (id, project_id, repo, pr_number, head_sha, base_sha,
+         implementation_task_id, review_task_id, implementation_agent_id,
+         reviewer_agent_id, verdict, summary, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, data.project_id, data.repo, data.pr_number, data.head_sha, data.base_sha,
+      data.implementation_task_id, data.review_task_id, data.implementation_agent_id,
+      data.reviewer_agent_id, data.verdict, data.summary, createdAt)
+    return this.prepare('SELECT * FROM pr_review_attestations WHERE id = ?').get(id) as PullRequestReviewAttestation | undefined
+  }
+
+  getCleanPullRequestReviewAttestation(input: {
+    projectId: string; repo: string; prNumber: number; headSha: string; baseSha: string
+  }): PullRequestReviewAttestation | undefined {
+    if (!this.ensureDbOpen()) return undefined
+    const latest = this.prepare(`
+      SELECT * FROM pr_review_attestations
+      WHERE project_id = ? AND lower(repo) = lower(?) AND pr_number = ?
+        AND head_sha = ? AND base_sha = ?
+        AND implementation_agent_id <> reviewer_agent_id
+      ORDER BY rowid DESC LIMIT 1
+    `).get(input.projectId, input.repo, input.prNumber, input.headSha, input.baseSha) as PullRequestReviewAttestation | undefined
+    return latest?.verdict === 'CLEAN' ? latest : undefined
+  }
+
+  getCurrentPullRequestReadinessSnapshot(projectId: string, repo: string, prNumber: number): PullRequestReadinessSnapshot | undefined {
+    if (!this.ensureDbOpen()) return undefined
+    const row = this.prepare(`
+      SELECT * FROM pr_readiness_snapshots
+      WHERE project_id = ? AND lower(repo) = lower(?) AND pr_number = ? AND invalidated_at IS NULL
+    `).get(projectId, repo, prNumber) as (Omit<PullRequestReadinessSnapshot, 'reasons' | 'observed_state'> & { reasons: string; observed_state: string }) | undefined
+    if (!row) return undefined
+    return { ...row, reasons: JSON.parse(row.reasons) as string[], observed_state: JSON.parse(row.observed_state) as Record<string, unknown> }
+  }
+
+  recordPullRequestReadinessSnapshot(
+    data: CreatePullRequestReadinessSnapshot,
+    invalidationReason: string
+  ): { snapshot: PullRequestReadinessSnapshot; changed: boolean } {
+    if (!this.ensureDbOpen()) throw new Error('Database is closed')
+    return this.db.transaction(() => {
+      const current = this.getCurrentPullRequestReadinessSnapshot(data.project_id, data.repo, data.pr_number)
+      if (current && current.head_sha === data.head_sha && current.base_sha === data.base_sha &&
+          current.state_fingerprint === data.state_fingerprint && current.classification === data.classification &&
+          current.attestation_id === data.attestation_id) {
+        return { snapshot: current, changed: false }
+      }
+      const now = new Date().toISOString()
+      if (current) {
+        this.prepare(`UPDATE pr_readiness_snapshots SET invalidated_at = ?, invalidated_reason = ? WHERE id = ? AND invalidated_at IS NULL`)
+          .run(now, invalidationReason, current.id)
+      }
+      const id = createId()
+      this.prepare(`
+        INSERT INTO pr_readiness_snapshots
+          (id, project_id, repo, pr_number, head_sha, base_sha, state_fingerprint,
+           classification, reasons, observed_state, attestation_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, data.project_id, data.repo, data.pr_number, data.head_sha, data.base_sha,
+        data.state_fingerprint, data.classification, JSON.stringify(data.reasons),
+        JSON.stringify(data.observed_state), data.attestation_id, now)
+      return { snapshot: this.getCurrentPullRequestReadinessSnapshot(data.project_id, data.repo, data.pr_number)!, changed: true }
+    }).immediate()
+  }
+
+  listPullRequestReadinessSnapshots(projectId: string, repo: string, prNumber: number): PullRequestReadinessSnapshot[] {
+    if (!this.ensureDbOpen()) return []
+    const rows = this.prepare(`
+      SELECT * FROM pr_readiness_snapshots
+      WHERE project_id = ? AND lower(repo) = lower(?) AND pr_number = ?
+      ORDER BY created_at DESC, id DESC
+    `).all(projectId, repo, prNumber) as Array<Omit<PullRequestReadinessSnapshot, 'reasons' | 'observed_state'> & { reasons: string; observed_state: string }>
+    return rows.map((row) => ({ ...row, reasons: JSON.parse(row.reasons) as string[], observed_state: JSON.parse(row.observed_state) as Record<string, unknown> }))
   }
 
   // ── Delegated GitHub issue writes ───────────────────────────

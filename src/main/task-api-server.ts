@@ -22,6 +22,7 @@ import { handleConcurrencyRoute } from './task-api/concurrency-routes'
 import { handleSessionRoute } from './task-api/session-routes'
 import { handleSkillRoute } from './task-api/skill-routes'
 import { handleTaskRoute } from './task-api/task-routes'
+import { handleReviewAttestationRoute } from './task-api/review-attestation-routes'
 import { handleUiRoute } from './task-api/ui-routes'
 import { installEscalation } from './escalation'
 
@@ -153,7 +154,7 @@ export function stopTaskApiServer(): void {
   startupPromise = null
 }
 
-const ROUTE_HANDLERS = [handleTaskRoute, handleSkillRoute, handleSessionRoute, handleUiRoute, handleArtifactRoute, handleBrowserRoute, handleConcurrencyRoute]
+const ROUTE_HANDLERS = [handleTaskRoute, handleSkillRoute, handleSessionRoute, handleUiRoute, handleArtifactRoute, handleBrowserRoute, handleConcurrencyRoute, handleReviewAttestationRoute]
 
 /** Exported so the routes can be tested without starting an HTTP server. */
 export async function handleRoute(db: DatabaseManager, route: string, params: Record<string, unknown>, trustedScope?: TaskMcpScope): Promise<unknown> {

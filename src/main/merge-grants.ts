@@ -25,7 +25,7 @@
  * REST merge endpoint with the checked SHA. It cannot enable auto-merge or queue.
  */
 import * as childProcess from 'child_process'
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { promisify } from 'util'
 import type { DatabaseManager } from './database'
 import {
@@ -53,6 +53,11 @@ import {
   type MergeGrantSource,
   type PullRequestRef
 } from '../shared/merge-grants'
+import type {
+  PullRequestReadinessClassification,
+  PullRequestReadinessSnapshot,
+  PullRequestReviewAttestation
+} from '../shared/pr-readiness'
 
 export type MergeGrantDb = Pick<
   DatabaseManager,
@@ -69,6 +74,9 @@ export type MergeGrantDb = Pick<
   | 'listPendingMergeGrantReservations'
   | 'listMergeGrantUses'
   | 'appendProjectStatusJournal'
+  | 'getCleanPullRequestReviewAttestation'
+  | 'getCurrentPullRequestReadinessSnapshot'
+  | 'recordPullRequestReadinessSnapshot'
 >
 
 // ── gh ────────────────────────────────────────────────────────
@@ -402,15 +410,25 @@ export interface PullRequestGateState {
   authorLogin?: string
   /** Logins that approved the current PR and are not its author (#155). */
   independentApprovals?: string[]
-  checks: Array<{ name: string; state: 'passed' | 'skipped' | 'failed' | 'pending' }>
+  /** Formal GitHub approval is required by branch protection when true. */
+  githubApprovalRequired?: boolean
+  /** Requested users/teams that can own a missing formal approval. */
+  approvalOwners?: string[]
+  reviews?: Array<{ reviewer: string; state: string; commitSha: string }>
+  checks: Array<{ name: string; state: 'passed' | 'skipped' | 'failed' | 'pending'; identity?: string }>
 }
 
 interface RawCheck {
+  __typename?: string
   name?: string
   context?: string
   status?: string
   conclusion?: string
   state?: string
+  detailsUrl?: string
+  targetUrl?: string
+  startedAt?: string
+  completedAt?: string
 }
 
 function checkState(check: RawCheck): 'passed' | 'skipped' | 'failed' | 'pending' {
@@ -423,7 +441,7 @@ function checkState(check: RawCheck): 'passed' | 'skipped' | 'failed' | 'pending
   return 'pending'
 }
 
-const PR_VIEW_FIELDS = 'url,number,title,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefOid,baseRefName,statusCheckRollup,author'
+const PR_VIEW_FIELDS = 'url,number,title,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefOid,baseRefName,statusCheckRollup,author,reviewRequests'
 // gh pr view does not expose baseRefOid on supported CLI versions.
 // Read the latest review per reviewer here as well because gh pr view omits
 // the commit each review covered. A standing grant needs exact-head evidence,
@@ -441,7 +459,10 @@ function loginOf(value: unknown): string {
  * repository without required reviews even when people have approved, so it
  * cannot stand in for "someone independent looked at this" (#155).
  */
-function independentApprovalsFrom(raw: Record<string, unknown>, headRefOid: string, authorLogin: string): string[] {
+function independentReviewsFrom(raw: Record<string, unknown>, headRefOid: string, authorLogin: string): {
+  approvals: string[]
+  reviews: Array<{ reviewer: string; state: string; commitSha: string }>
+} {
   if (!authorLogin) throw new Error('GitHub returned missing PR author identity for exact-head review data')
   const connection = raw.latestReviews
   if (!connection || typeof connection !== 'object' || Array.isArray(connection)) {
@@ -457,6 +478,7 @@ function independentApprovalsFrom(raw: Record<string, unknown>, headRefOid: stri
   const author = authorLogin.toLowerCase()
   const seen = new Set<string>()
   const logins: string[] = []
+  const parsed: Array<{ reviewer: string; state: string; commitSha: string }> = []
   for (const review of reviews) {
     // Do not silently discard malformed nodes: another node might be an old
     // approval from the same reviewer. latestReviews promises one per user.
@@ -474,9 +496,27 @@ function independentApprovalsFrom(raw: Record<string, unknown>, headRefOid: stri
     const reviewer = login.toLowerCase()
     if (seen.has(reviewer)) throw new Error('GitHub returned inconsistent exact-head review data')
     seen.add(reviewer)
+    parsed.push({ reviewer: login, state: review.state, commitSha: commit.oid })
     if (review.state === 'APPROVED' && commit.oid === headRefOid && reviewer !== author) logins.push(login)
   }
-  return logins
+  return { approvals: logins, reviews: parsed }
+}
+
+function approvalOwnersFrom(value: unknown): string[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) throw new Error('GitHub returned malformed requested-reviewer data')
+  const owners = value.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error('GitHub returned malformed requested-reviewer data')
+    }
+    const record = entry as Record<string, unknown>
+    for (const key of ['login', 'slug', 'name']) {
+      const candidate = record[key]
+      if (typeof candidate === 'string' && candidate.trim() && candidate.trim() === candidate) return candidate
+    }
+    throw new Error('GitHub returned malformed requested-reviewer identity')
+  })
+  return [...new Set(owners)]
 }
 
 /** Reads what the gate needs from GitHub, through the user's gh CLI. */
@@ -503,6 +543,8 @@ export async function readPullRequestGate(pr: PullRequestRef): Promise<PullReque
       authorLogin.trim() !== authorLogin || rawAuthorLogin.toLowerCase() !== authorLogin.toLowerCase()) {
     throw new Error('GitHub returned missing, malformed or changed PR author data; reevaluate before retrying')
   }
+  const reviewData = independentReviewsFrom(refs, headRefOid, authorLogin)
+  const reviewDecision = String(raw.reviewDecision ?? '').toUpperCase()
   return {
     url: typeof raw.url === 'string' ? raw.url : pr.url,
     number: typeof raw.number === 'number' ? raw.number : pr.number,
@@ -511,13 +553,25 @@ export async function readPullRequestGate(pr: PullRequestRef): Promise<PullReque
     isDraft: raw.isDraft === true,
     mergeable: String(raw.mergeable ?? '').toUpperCase(),
     mergeStateStatus: String(raw.mergeStateStatus ?? '').toUpperCase(),
-    reviewDecision: String(raw.reviewDecision ?? '').toUpperCase(),
+    reviewDecision,
     headRefOid,
     baseRefName: typeof raw.baseRefName === 'string' ? raw.baseRefName : '',
     baseRefOid: refs.baseRefOid,
     authorLogin,
-    independentApprovals: independentApprovalsFrom(refs, headRefOid, authorLogin),
-    checks: rollup.map((check) => ({ name: check.name || check.context || 'check', state: checkState(check) }))
+    independentApprovals: reviewData.approvals,
+    githubApprovalRequired: reviewDecision === 'REVIEW_REQUIRED' || reviewDecision === 'APPROVED',
+    approvalOwners: approvalOwnersFrom(raw.reviewRequests),
+    reviews: reviewData.reviews,
+    checks: rollup.map((check) => ({
+      name: check.name || check.context || 'check',
+      state: checkState(check),
+      identity: JSON.stringify({
+        type: check.__typename ?? '', name: check.name ?? '', context: check.context ?? '',
+        status: check.status ?? '', conclusion: check.conclusion ?? '', state: check.state ?? '',
+        detailsUrl: check.detailsUrl ?? '', targetUrl: check.targetUrl ?? '',
+        startedAt: check.startedAt ?? '', completedAt: check.completedAt ?? ''
+      })
+    }))
   }
 }
 
@@ -529,6 +583,11 @@ export interface GateVerdict {
   needsExternalApproval: boolean
   /** Only waiting (checks running, mergeability not computed): try again later. */
   pending: boolean
+  externalApproval?: {
+    owner: 'github_branch_protection'
+    requestedReviewers: string[]
+    formalApprovalRequired: boolean
+  }
 }
 
 /**
@@ -593,7 +652,123 @@ export function evaluatePullRequestGate(state: PullRequestGateState): GateVerdic
   }
 
   const ok = reasons.length === 0
-  return { ok, reasons, needsExternalApproval, pending: !ok && pending && !blocking && !needsExternalApproval }
+  return {
+    ok,
+    reasons,
+    needsExternalApproval,
+    pending: !ok && pending && !blocking && !needsExternalApproval,
+    ...(needsExternalApproval
+      ? {
+          externalApproval: {
+            owner: 'github_branch_protection' as const,
+            requestedReviewers: state.approvalOwners ?? [],
+            formalApprovalRequired: state.githubApprovalRequired === true || state.reviewDecision === 'REVIEW_REQUIRED'
+          }
+        }
+      : {})
+  }
+}
+
+export interface PullRequestReadinessEvaluation {
+  state: PullRequestGateState
+  verdict: GateVerdict
+  snapshot: PullRequestReadinessSnapshot
+  changed: boolean
+  attestation?: PullRequestReviewAttestation
+}
+
+function observedReadinessState(state: PullRequestGateState): Record<string, unknown> {
+  return {
+    state: state.state,
+    draft: state.isDraft,
+    mergeable: state.mergeable,
+    merge_state: state.mergeStateStatus,
+    review_decision: state.reviewDecision,
+    github_approval_required: state.githubApprovalRequired === true,
+    approval_owners: state.approvalOwners ?? [],
+    reviews: state.reviews ?? [],
+    checks: state.checks
+  }
+}
+
+function readinessInvalidationReason(
+  current: PullRequestReadinessSnapshot | undefined,
+  state: PullRequestGateState,
+  observed: Record<string, unknown>
+): string {
+  if (!current) return 'initial_observation'
+  const reasons: string[] = []
+  if (current.head_sha !== state.headRefOid) reasons.push('head_changed')
+  if (current.base_sha !== state.baseRefOid) reasons.push('base_changed')
+  const before = current.observed_state
+  if (before.draft !== observed.draft) reasons.push('draft_changed')
+  if (before.mergeable !== observed.mergeable || before.merge_state !== observed.merge_state) reasons.push('mergeability_changed')
+  if (JSON.stringify(before.reviews) !== JSON.stringify(observed.reviews) ||
+      before.review_decision !== observed.review_decision ||
+      before.github_approval_required !== observed.github_approval_required ||
+      JSON.stringify(before.approval_owners) !== JSON.stringify(observed.approval_owners)) reasons.push('review_changed')
+  if (JSON.stringify(before.checks) !== JSON.stringify(observed.checks)) reasons.push('checks_changed')
+  if (before.state !== observed.state) reasons.push('pr_state_changed')
+  return reasons.length > 0 ? reasons.join(',') : 'review_attestation_changed'
+}
+
+/** Persist one exact live view and invalidate the prior view on every material change. */
+export function reconcilePullRequestReadiness(
+  db: MergeGrantDb,
+  projectId: string,
+  pr: PullRequestRef,
+  state: PullRequestGateState
+): PullRequestReadinessEvaluation {
+  const verdict = evaluatePullRequestGate(state)
+  const baseSha = state.baseRefOid ?? ''
+  const repo = `${pr.owner}/${pr.repo}`
+  const attestation = /^[0-9a-f]{40}$/i.test(state.headRefOid) && /^[0-9a-f]{40}$/i.test(baseSha)
+    ? db.getCleanPullRequestReviewAttestation({
+        projectId, repo, prNumber: pr.number, headSha: state.headRefOid.toLowerCase(), baseSha: baseSha.toLowerCase()
+      })
+    : undefined
+  const independentlyReviewed = (state.independentApprovals ?? []).length > 0 || !!attestation
+  let classification: PullRequestReadinessClassification
+  let reasons = [...verdict.reasons]
+  if (!verdict.ok) {
+    classification = verdict.needsExternalApproval
+      ? 'external_approval_required'
+      : verdict.pending
+        ? 'pending'
+        : 'blocked'
+  } else if (!independentlyReviewed) {
+    classification = 'independent_review_required'
+    reasons = [`head ${state.headRefOid} has neither an exact-head GitHub approval nor a verified 21x independent-review attestation`]
+  } else {
+    classification = 'ready'
+  }
+  const observed = observedReadinessState(state)
+  const fingerprint = createHash('sha256').update(JSON.stringify({
+    repo: repo.toLowerCase(), pr: pr.number, head: state.headRefOid, base: baseSha, observed
+  })).digest('hex')
+  const current = db.getCurrentPullRequestReadinessSnapshot(projectId, repo, pr.number)
+  const saved = db.recordPullRequestReadinessSnapshot({
+    project_id: projectId,
+    repo,
+    pr_number: pr.number,
+    head_sha: state.headRefOid,
+    base_sha: baseSha,
+    state_fingerprint: fingerprint,
+    classification,
+    reasons,
+    observed_state: observed,
+    attestation_id: attestation?.id ?? null
+  }, readinessInvalidationReason(current, state, observed))
+  return { state, verdict, snapshot: saved.snapshot, changed: saved.changed, attestation }
+}
+
+/** Reads GitHub live and immediately records the authoritative readiness revision. */
+export async function readPullRequestReadiness(
+  db: MergeGrantDb,
+  projectId: string,
+  pr: PullRequestRef
+): Promise<PullRequestReadinessEvaluation> {
+  return reconcilePullRequestReadiness(db, projectId, pr, await readPullRequestGate(pr))
 }
 
 export type MergeMethod = 'squash' | 'merge' | 'rebase'
@@ -660,6 +835,8 @@ export interface MergeRequest {
   policyLevel?: MergeAuthorizationContext['policy_level']
   /** The state the caller just read, to avoid a second read; re-read when absent. */
   state?: PullRequestGateState
+  /** Durable snapshot paired with `state`; all material live changes invalidate it. */
+  readiness?: PullRequestReadinessEvaluation
 }
 
 // External-approval blockers are reported once per PR head.
@@ -778,23 +955,33 @@ function pendingGrantResult(
  * missing external approval is reported to the Commander once per PR head.
  * Nothing is merged and no authority is consulted.
  */
-export function refuseUnmergeable(projectId: string, pr: PullRequestRef, state: PullRequestGateState, hooks: MergeHooks = {}): Record<string, unknown> | null {
-  const verdict = evaluatePullRequestGate(state)
+export function refuseUnmergeable(
+  projectId: string,
+  pr: PullRequestRef,
+  state: PullRequestGateState,
+  hooks: MergeHooks = {},
+  readiness?: PullRequestReadinessEvaluation
+): Record<string, unknown> | null {
+  const verdict = readiness?.verdict ?? evaluatePullRequestGate(state)
   if (verdict.ok) return null
   const summary = `${pr.url} cannot be merged: ${verdict.reasons.join('; ')}`
   if (verdict.needsExternalApproval) {
     const key = `${pr.url}@${state.headRefOid}`
-    if (!reportedBlocks.has(key)) {
+    if ((readiness ? readiness.changed : !reportedBlocks.has(key))) {
       reportedBlocks.add(key)
       hooks.report?.(projectId, 'needs_user', `${summary}. This needs a person on GitHub; 21x will not bypass it.`)
     }
   }
   return {
     status: 'blocked',
+    blocker_class: verdict.needsExternalApproval ? 'external_approval_required' : verdict.pending ? 'pending' : 'blocked',
+    reason_code: verdict.needsExternalApproval ? 'EXTERNAL_APPROVAL_REQUIRED' : undefined,
     pr_url: pr.url,
     reasons: verdict.reasons,
     needs_external_approval: verdict.needsExternalApproval,
     retry_later: verdict.pending,
+    approval_ownership: verdict.externalApproval,
+    readiness_snapshot_id: readiness?.snapshot.id,
     message: verdict.needsExternalApproval
       ? 'Not merged. A genuine external approval is missing; report it to the user as a blocker. Do not try to merge another way.'
       : verdict.pending
@@ -809,11 +996,18 @@ export function refuseUnmergeable(projectId: string, pr: PullRequestRef, state: 
  * reviews; on an unprotected branch it is empty however many people approved,
  * so an explicit approval by someone other than the author is what counts.
  */
-export function missingIndependentReview(state: PullRequestGateState): string | null {
+export function missingIndependentReview(
+  state: PullRequestGateState,
+  attestation?: PullRequestReviewAttestation
+): string | null {
   if ((state.independentApprovals ?? []).length > 0) return null
+  // This is product-level review evidence only. It is consulted after the
+  // GitHub gate, so it can never satisfy a formal protected-branch approval.
+  if (attestation?.verdict === 'CLEAN' && attestation.head_sha === state.headRefOid &&
+      attestation.base_sha === state.baseRefOid && attestation.implementation_agent_id !== attestation.reviewer_agent_id) return null
   return state.authorLogin
-    ? `no one other than ${state.authorLogin} has approved its current head ${state.headRefOid}`
-    : `its current head ${state.headRefOid} has no independent approving review`
+    ? `head ${state.headRefOid} has neither an exact-head approval by someone other than ${state.authorLogin} nor a verified 21x independent-review attestation`
+    : `head ${state.headRefOid} has neither an exact-head GitHub approval nor a verified 21x independent-review attestation`
 }
 
 /**
@@ -850,9 +1044,11 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
     ? pending.snapshot.authorization_context ?? authorizationContext(request, pendingGrant, requestedGrantId)
     : undefined
 
+  let readiness: PullRequestReadinessEvaluation
   let state: PullRequestGateState
   try {
-    state = await readPullRequestGate(pr)
+    readiness = await readPullRequestReadiness(db, projectId, pr)
+    state = readiness.state
   } catch (error) {
     if (pending) {
       return {
@@ -875,15 +1071,19 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
     reservation.snapshot.pr_url.toLowerCase() === pr.url.toLowerCase())
   if (pending) return pendingGrantResult(db, request, pending, state, hooks, requestedGrantId)
 
-  const blocked = refuseUnmergeable(projectId, pr, state, hooks)
+  const blocked = refuseUnmergeable(projectId, pr, state, hooks, readiness)
   if (blocked) return blocked
 
   // A predecessor may have landed, or the PR may have been retargeted since
   // the gate selected authority. Do not spend a use on that stale assessment.
-  if (request.state && (request.state.headRefOid !== state.headRefOid ||
-      request.state.baseRefName !== state.baseRefName || request.state.baseRefOid !== state.baseRefOid)) {
-    return { status: 'blocked', reason_code: 'PR_CHANGED', pr_url: pr.url,
-      message: 'The PR head or base changed. Reevaluate reviews, checks and stack predecessors before retrying; no grant use was spent.' }
+  if ((request.readiness && request.readiness.snapshot.state_fingerprint !== readiness.snapshot.state_fingerprint) ||
+      (request.state && (request.state.headRefOid !== state.headRefOid ||
+        request.state.baseRefName !== state.baseRefName || request.state.baseRefOid !== state.baseRefOid))) {
+    return {
+      status: 'blocked', blocker_class: 'changed', reason_code: 'PR_CHANGED', pr_url: pr.url,
+      readiness_snapshot_id: readiness.snapshot.id,
+      message: 'The PR head, base, review, check, draft or mergeability state changed. Reevaluate the new exact state before retrying; no grant use was spent.'
+    }
   }
 
   // Resolve the effective authority only after the final GitHub read. Policy
@@ -930,22 +1130,25 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
   // required reviews, so the mechanical gate alone would merge an unreviewed,
   // obsolete or duplicate PR under a project-wide grant. Require a real
   // independent approval instead, and spend no grant use without one (#155).
-  const review = missingIndependentReview(state)
+  const review = missingIndependentReview(state, readiness.attestation)
   if (authority.kind === 'grant' && review) {
     const key = `independent-review:${pr.url}@${state.headRefOid}`
-    if (!reportedBlocks.has(key)) {
+    if (request.readiness?.changed || readiness.changed) {
       reportedBlocks.add(key)
-      hooks.report?.(projectId, 'needs_user', `${pr.url} was not merged under the merge grant: ${review}`, grant?.id, context)
+      hooks.report?.(projectId, 'needs_user', `${pr.url} was not merged under the merge grant: ${review}. The blocker is owned by a different 21x review agent, not GitHub branch protection.`, grant?.id, context)
     }
     return {
       status: 'blocked',
+      blocker_class: 'independent_review_required',
       reason_code: 'INDEPENDENT_REVIEW_REQUIRED',
       pr_url: pr.url,
-      needs_external_approval: true,
+      needs_external_approval: false,
+      retry_later: false,
       reasons: [review],
+      readiness_snapshot_id: readiness.snapshot.id,
       authorized_by: authorizedBy(authority, grant),
       authorization_context: context,
-      message: `Not merged and no grant use was spent. ${review} A merge grant authorises merging; it is not evidence that this PR is safe, current or not superseded. Get an independent approving review on GitHub, or ask the user to merge it themselves.`
+      message: `Not merged and no grant use was spent. ${review} A merge grant authorises merging; it is not evidence that this PR is safe, current or not superseded. Hand this exact head/base to a different 21x review agent. A GitHub approval is only required when branch protection says so.`
     }
   }
 

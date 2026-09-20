@@ -58,8 +58,9 @@ import { createIssueWriteTables, migrateIssueWrites } from './issue-writes-migra
  * 24 → 25: meaningful task activity timestamps (#142).
  * 25 → 26: merge-grant uses retain policy/relay context separately from the
  *          effective grant authority (#159, migrateMergeGrantAttribution).
+ * 26 → 27: exact-head PR review attestations and durable readiness snapshots.
  */
-const SCHEMA_VERSION = 26
+const SCHEMA_VERSION = 27
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -549,6 +550,7 @@ export function createTables(db: Database.Database): void {
   `)
 
   createMergeGrantTables(db)
+  createPullRequestReadinessTables(db)
   // Concurrency control (#150): audit feed and declared touches.
   createConcurrencyTables(db)
 
@@ -1084,6 +1086,9 @@ export function runMigrations(db: Database.Database): void {
   // Migration v26: durable context for effective merge-grant attribution.
   migrateMergeGrantAttribution(db)
 
+  // Migration v27: exact-head review evidence and invalidatable readiness.
+  createPullRequestReadinessTables(db)
+
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)
 
@@ -1156,6 +1161,55 @@ function createMergeGrantTables(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_merge_grant_reservations_pending ON merge_grant_reservations(state, project_id);
 
+  `)
+}
+
+/**
+ * Application-authenticated review attestations are deliberately separate
+ * from GitHub reviews. A COMMENT never becomes an approval. Readiness rows are
+ * append-only revisions: the current row has invalidated_at NULL, and every
+ * material live-state change closes it before a replacement is inserted.
+ */
+function createPullRequestReadinessTables(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pr_review_attestations (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      repo TEXT NOT NULL,
+      pr_number INTEGER NOT NULL,
+      head_sha TEXT NOT NULL,
+      base_sha TEXT NOT NULL,
+      implementation_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
+      review_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
+      implementation_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+      reviewer_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+      verdict TEXT NOT NULL CHECK (verdict IN ('CLEAN', 'CHANGES_REQUIRED')),
+      summary TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_pr_review_attestations_exact
+      ON pr_review_attestations(project_id, repo, pr_number, head_sha, base_sha, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS pr_readiness_snapshots (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      repo TEXT NOT NULL,
+      pr_number INTEGER NOT NULL,
+      head_sha TEXT NOT NULL,
+      base_sha TEXT NOT NULL,
+      state_fingerprint TEXT NOT NULL,
+      classification TEXT NOT NULL,
+      reasons TEXT NOT NULL DEFAULT '[]',
+      observed_state TEXT NOT NULL DEFAULT '{}',
+      attestation_id TEXT REFERENCES pr_review_attestations(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL,
+      invalidated_at TEXT,
+      invalidated_reason TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_pr_readiness_snapshots_exact
+      ON pr_readiness_snapshots(project_id, repo, pr_number, head_sha, base_sha, created_at DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pr_readiness_snapshots_current
+      ON pr_readiness_snapshots(project_id, repo, pr_number) WHERE invalidated_at IS NULL;
   `)
 }
 
