@@ -34,7 +34,7 @@ Schema 23 adds an append-only ledger:
 
 | Record | Content |
 | --- | --- |
-| Human node | Message ID, exact stored text, SHA-256, capture timestamp, typed/voice input mode, source/session/task, requested action classes, project/repository snapshot, 24-hour expiry, and human scope-origin message reference |
+| Human node | Message ID, exact stored text, SHA-256, capture timestamp, typed/voice input mode, source/session/task, versioned capability intents, project/repository snapshot, 24-hour expiry, and human scope-origin message reference |
 | Delegation node | Parent ID and hash, root ID, relay author, exact interpretation and hash, Commander correlation/session, destination task, timestamp, narrowed actions/repos, unchanged or shorter expiry |
 | Transport binding | Durable delivery key, node ID, destination task and exact payload hash |
 | Dispatch reservation | Monotonic sequence, idempotency key, task, node and payload hash |
@@ -57,20 +57,29 @@ outside this boundary.
 
 ## Requested actions versus effective permissions
 
-Supported capabilities are `task.create`, `task.update`,
-`github.issue.create`, `github.issue.update`, and `github.issue.link`.
+Supported ordinary capabilities are `task.create`, `task.update`, `task.start`,
+`github.pr.open`, `github.issue.create`, `github.issue.update`, and
+`github.issue.link`.
 Merge, review approval, deployment, deletion, migration/replay, protection bypass,
 credential elevation and arbitrary messages are absent.
 
-The platform uses a deliberately limited, fully consumed command grammar rather
-than letting a model classify its own authority. Directly coordinated imperative
-objects are supported, for example “Create 21x tasks plus GitHub issues” and
-“Create tasks and GitHub issues for 21x”. The incident's recommendation preamble,
-“for this” reference and Commander-refactor context sentence are explicitly
-supported. The staged-issue command naming two task IDs is supported as well.
-Unknown suffixes, conditions, investigative purpose clauses, quotes and questions
-retain human evidence but produce no automatic capabilities. This is not a
-general natural-language consent classifier.
+Version-2 human nodes use a deliberately limited, clause-aware classifier at
+trusted ingress; models never classify their own authority. Each intent stores
+the canonical capability, `explicit` or `necessary` basis, classifier version,
+source message id, exact source range and SHA-256, immutable project/repository
+snapshot, creation time and expiry. `actions` remains a derived compatibility
+view. Version-1 nodes continue to resolve exactly as stored and are never
+backfilled or reclassified.
+
+Direct imperative objects are supported, including “Create 21x tasks plus
+GitHub issues”, “Open gh issues and tasks”, and staged-issue commands naming
+task IDs. `gh` and `GitHub` normalize to the same issue object. Creating tasks
+necessarily carries their ordinary update/start lifecycle; creating an issue
+necessarily carries its 21x link; an authenticated coding assignment carries
+draft-PR opening. Conditional, negated, approval-dependent, mock-only, quoted,
+interrogative, ambiguous, oversized and protected-action clauses retain human
+evidence but produce no capability. This remains a bounded grammar, not a
+general natural-language consent model.
 
 Project scope comes from a single named configured project, the trusted project
 chat destination, or the last platform-captured human conversational project
@@ -85,6 +94,13 @@ and revocation state. The original human words remain the substantive instructio
 the relay cannot substitute different work merely because its action class fits.
 Consumers must use those words when interpreting the requested work, and enforce
 their own payload/action policies at the write boundary.
+
+For task creation, omitted `permissions` inherits that effective set. A supplied
+array can only intersect it, and an explicit empty array intentionally gives the
+new branch no ordinary mutation authority. Task update/start, issue writes and
+draft-PR opening resolve the same live record next to execution. Recovery uses
+the task's immutable binding; recap, wake-up and retry prose cannot mint or renew
+rights.
 
 ## Dispatch, recovery and revocation
 
@@ -123,12 +139,30 @@ resolveTaskAuthorization(db, {
 ```
 
 The result includes `allowed`, `status`, `nodeId`, `origin`, ordered `chain`,
-`effectivePermissions`, `scope` and `revocations`. `origin` carries `messageId`,
+`effectivePermissions`, `effectiveIntents`, `scope` and `revocations`. `origin` carries `messageId`,
 `text`, `textHash`, `at` and `expiresAt`; delegation nodes carry `correlationId`,
 `sessionId`, `taskId`, author and transformation text. Call immediately before a
 privileged operation and recheck after any approval/network wait that precedes
 the write. An envelope or previously cached `allowed=true` is not a capability.
 Idempotency of external side effects is the consuming issue service's concern.
+
+A denial additionally returns `requested_capability`, `missing_capability`,
+`origin_node_id`, `origin_message_id`, `effective_capabilities`,
+`failure_dimension` and `safe_remediation`. A caller reports these fields; it
+does not edit relay wording and retry.
+
+## Unified boundary and retained controls
+
+| Boundary | Contract |
+| --- | --- |
+| Human chat → Commander → Captain → task | One immutable origin; every hop can only narrow. Covered ordinary work needs no repeated grant. |
+| Task create/update/start | Same lineage; signed caller scope and project membership remain mandatory. Admission/capacity still decides when a valid start runs. |
+| GitHub issue create/update/link | Same resolver plus the existing immutable issue-write claim/ledger and restart reconciliation. |
+| Draft PR opening | `open_draft_pull_request` only: configured task repo, clean named branch, exact head/base, non-force push, draft creation and exact retry recovery. |
+| Merge and review approval | Separate merge grant/readiness gate and GitHub branch-protection/formal approval. Ordinary capability never satisfies either. |
+| Deploy/release/delete/replay/migration/protection bypass/credentials/messages | Separate explicit gate; absent from the ordinary registry. |
+| Cross-project or cross-repository writes | Denied by live task/project/repository intersection. |
+| OS sandbox, provider auth/network and capacity | Independent platform controls; capability lineage cannot bypass them. |
 
 ## Regression coverage
 

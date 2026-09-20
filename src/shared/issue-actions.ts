@@ -235,6 +235,12 @@ export interface IssueWriteDenial {
   /** The class the caller reached for, when it is a known one. */
   actionClass?: ExternalActionClass
   message: string
+  missingCapability?: string | null
+  originNodeId?: string | null
+  originMessageId?: string | null
+  effectiveCapabilities?: readonly string[]
+  failureDimension?: string | null
+  safeRemediation?: string | null
 }
 
 export interface IssueWriteRequest {

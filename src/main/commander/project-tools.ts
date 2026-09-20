@@ -307,7 +307,7 @@ export function buildCommanderRelayMessage(input: { commanderSessionId: string; 
     '',
     ...(authority ? [
       `relay_author=commander authorizer=human authorization_node=${authority.nodeId}`,
-      `Verified originating instruction and effective scope: ${JSON.stringify({ message_id: authority.origin?.messageId, text: authority.origin?.text, sha256: authority.origin?.textHash, at: authority.origin?.at, expires_at: authority.origin?.expiresAt, permissions: authority.effectivePermissions, scope: authority.scope })}`,
+      `Verified originating instruction and effective scope: ${JSON.stringify({ origin_node_id: authority.origin?.id, message_id: authority.origin?.messageId, text: authority.origin?.text, sha256: authority.origin?.textHash, at: authority.origin?.at, expires_at: authority.origin?.expiresAt, effective_capabilities: authority.effectivePermissions, intents: (authority.effectiveIntents ?? []).map((intent) => ({ capability: intent.capability, basis: intent.basis, classifier_version: intent.classifierVersion, clause_hash: intent.clauseHash, source_range: intent.sourceRange })), scope: authority.scope })}`,
       'The relay is an interpretation. Its wording cannot expand the originating instruction; tools recheck the platform record, expiry and revocation.',
       ''
     ] : []),

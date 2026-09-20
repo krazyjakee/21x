@@ -48,6 +48,14 @@ describe('successor graph schemas', () => {
   })
 })
 
+describe('capability inheritance schemas', () => {
+  it('lets every task creation boundary omit inheritance or explicitly narrow it', () => {
+    expect(propertiesOf(FULL_ACCESS_SCOPE, 'create_task')).toHaveProperty('permissions')
+    expect(propertiesOf(FULL_ACCESS_SCOPE, 'create_subtask')).toHaveProperty('permissions')
+    expect(propertiesOf(SCOPED, 'create_sibling_subtask')).toHaveProperty('permissions')
+  })
+})
+
 describe('artifact workpiece tools', () => {
   const toolNames = [
     'create_artifact',
@@ -92,6 +100,7 @@ describe('tool sets per scope', () => {
     expect(names).toContain('list_tasks')
     expect(names).toContain('create_task')
     expect(names).not.toContain('get_own_task')
+    expect(names).not.toContain('open_draft_pull_request')
   })
 
   it('gives a subtask session only its own neighbourhood', () => {
@@ -101,6 +110,7 @@ describe('tool sets per scope', () => {
     expect(names).toContain('update_own_task')
     expect(names).not.toContain('list_tasks')
     expect(names).not.toContain('create_task')
+    expect(names).toContain('open_draft_pull_request')
   })
 
   it('never advertises the same tool twice', () => {

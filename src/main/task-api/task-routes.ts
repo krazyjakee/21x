@@ -1,4 +1,10 @@
-import { inheritTaskAuthorization } from '../authorization'
+import {
+  AUTHORIZATION_ACTIONS,
+  authorizationRefusal,
+  inheritTaskAuthorization,
+  resolveTaskAuthorization,
+  type AuthorizationAction
+} from '../authorization'
 import type { TaskMcpScope } from '../mcp-servers/task-management-core'
 import { setTimeout as sleep } from 'timers/promises'
 import type { CreateTaskData, DatabaseManager, TaskRecord, UpdateTaskData } from '../database'
@@ -56,7 +62,53 @@ function rowToApiTask(row: TaskRow): ApiTask {
 }
 
 /** db.createTask has no agent/skill columns, so those are applied as a follow-up write. */
-function createTask(db: DatabaseManager, data: CreateTaskData, params: Record<string, unknown>, trustedScope?: TaskMcpScope): TaskRecord | undefined {
+function callerTaskId(db: DatabaseManager, scope: TaskMcpScope | undefined, projectId: string): string | null {
+  if (!scope) return null
+  return scope.taskId ?? scope.artifactTaskId ??
+    (db.db.prepare("SELECT id FROM tasks WHERE project_id = ? AND role = 'captain'").get(projectId) as { id: string } | undefined)?.id ?? null
+}
+
+/** Raw internal/UI routes are already a human boundary. Signed agent scopes consume lineage. */
+function authorizeScopedTaskAction(
+  db: DatabaseManager,
+  scope: TaskMcpScope | undefined,
+  projectId: string,
+  action: 'task.create' | 'task.update'
+): Record<string, unknown> | null {
+  if (!scope) return null
+  const caller = callerTaskId(db, scope, projectId)
+  if (!caller) {
+    return {
+      error: 'The signed caller scope has no task authorization lineage.',
+      code: 'capability_refused',
+      requested_capability: action,
+      missing_capability: action,
+      origin_node_id: null,
+      origin_message_id: null,
+      effective_capabilities: [],
+      failure_dimension: 'task',
+      safe_remediation: 'Start this work from an authenticated human project instruction; model text cannot grant authority.'
+    }
+  }
+  const decision = resolveTaskAuthorization(db, { taskId: caller, projectId, action })
+  return decision.allowed ? null : authorizationRefusal(decision)
+}
+
+function capabilityNarrowing(value: unknown): { actions?: AuthorizationAction[]; error?: string } {
+  if (value === undefined) return {}
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || !AUTHORIZATION_ACTIONS.includes(item as AuthorizationAction))) {
+    return { error: `permissions must be an array containing only: ${AUTHORIZATION_ACTIONS.join(', ')}` }
+  }
+  return { actions: [...new Set(value as AuthorizationAction[])] }
+}
+
+function createTask(
+  db: DatabaseManager,
+  data: CreateTaskData,
+  params: Record<string, unknown>,
+  trustedScope?: TaskMcpScope,
+  inheritedActions?: AuthorizationAction[]
+): TaskRecord | undefined {
   const created = db.db.transaction(() => {
     const created = db.createTask(data)
     if (!created) return undefined
@@ -67,7 +119,7 @@ function createTask(db: DatabaseManager, data: CreateTaskData, params: Record<st
     if (trustedScope) {
       const caller = trustedScope.taskId ?? trustedScope.artifactTaskId ?? (db.db.prepare("SELECT id FROM tasks WHERE project_id = ? AND role = 'captain'").get(trustedScope.projectId ?? '') as { id: string } | undefined)?.id
       if (caller && db.getTask(caller)?.project_id === created.project_id) {
-        inheritTaskAuthorization(db, caller, created.id, JSON.stringify({ title: created.title, description: created.description, repos: created.repos }))
+        inheritTaskAuthorization(db, caller, created.id, JSON.stringify({ title: created.title, description: created.description, repos: created.repos }), inheritedActions)
       }
     }
     return created
@@ -185,10 +237,12 @@ function getTaskStatistics(db: DatabaseManager, metric: unknown, projectId?: str
   }
 }
 
-async function updateTask(db: DatabaseManager, params: Record<string, unknown>): Promise<unknown> {
+async function updateTask(db: DatabaseManager, params: Record<string, unknown>, trustedScope?: TaskMcpScope): Promise<unknown> {
   const taskId = params.task_id as string
   const current = db.getTask(taskId)
   if (!current) return { error: 'Task not found' }
+  const refused = authorizeScopedTaskAction(db, trustedScope, taskProjectId(current), 'task.update')
+  if (refused) return refused
 
   const data: UpdateTaskData = {}
   // 'in_progress' is the legacy name for 'agent_working'
@@ -267,6 +321,10 @@ function createSubtask(db: DatabaseManager, params: Record<string, unknown>, tru
   if (!params.title) return { error: 'title is required' }
   const parent = db.getTask(String(params.parent_task_id))
   if (!parent) return { error: 'Parent task not found' }
+  const refused = authorizeScopedTaskAction(db, trustedScope, taskProjectId(parent), 'task.create')
+  if (refused) return refused
+  const narrowing = capabilityNarrowing(params.permissions)
+  if (narrowing.error) return { error: narrowing.error }
   if (params.next_subtask_ids !== undefined && !Array.isArray(params.next_subtask_ids)) {
     return { error: 'next_subtask_ids must be an array' }
   }
@@ -299,7 +357,7 @@ function createSubtask(db: DatabaseManager, params: Record<string, unknown>, tru
       auto_complete_without_review: params.auto_complete_without_review === undefined
         ? parent.auto_complete_without_review
         : params.auto_complete_without_review === true
-    }, params, trustedScope)
+    }, params, trustedScope, narrowing.actions)
   } catch (error) {
     // db.createTask removes the row when its successor links are invalid.
     return { error: error instanceof Error ? error.message : String(error) }
@@ -358,6 +416,10 @@ function createTopLevelTask(db: DatabaseManager, params: Record<string, unknown>
   // for, else the Default project.
   const projectId = parent ? taskProjectId(parent) : (projectFilter(params) ?? DEFAULT_PROJECT_ID)
   if (!db.getProject(projectId)) return { error: `Project not found: ${projectId}` }
+  const refused = authorizeScopedTaskAction(db, trustedScope, projectId, 'task.create')
+  if (refused) return refused
+  const narrowing = capabilityNarrowing(params.permissions)
+  if (narrowing.error) return { error: narrowing.error }
   const checked = validateProjectRepos(db, projectId, reposParam(params.repos))
   if ('error' in checked) return checked
   // #74: a task carries global skills and its own project's, never another project's.
@@ -381,7 +443,7 @@ function createTopLevelTask(db: DatabaseManager, params: Record<string, unknown>
     project_id: projectId,
     auto_start_agent: params.auto_start_agent === true,
     auto_complete_without_review: params.auto_complete_without_review === true
-  }, params, trustedScope)
+  }, params, trustedScope, narrowing.actions)
   if (!task) return { error: 'Failed to create task' }
   return { success: true, task: toApiTask(task) }
 }
@@ -488,7 +550,7 @@ export async function handleTaskRoute(db: DatabaseManager, route: string, params
     }
 
     case '/update_task':
-      return updateTask(db, params)
+      return updateTask(db, params, trustedScope)
 
     case '/list_agents':
       return db.getAgents()
