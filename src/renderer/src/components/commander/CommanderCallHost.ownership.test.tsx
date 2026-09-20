@@ -170,9 +170,9 @@ describe('Independent PR 164 adversarial review', () => {
     const speechStart = vi.fn()
     onCallMediaEvent('speech_start', speechStart)
     act(() => {
-      voicePlayback.start('speech-1')
+      voicePlayback.start('speech-1', {}, 1)
       useVoiceStore.setState({ speaking: true, speechText: 'spoken reply' })
-      useVoiceAttributionStore.setState({ passage: { speechId: 'speech-1', taskId: 'commander:session-1' }, version: 1 })
+      useVoiceAttributionStore.setState({ passage: { speechId: 'speech-1', speechGeneration: 1, taskId: 'commander:session-1' }, version: 1 })
     })
     expect(screen.getByTestId('commander-voice-controls')).not.toHaveAttribute('data-call-state', 'speaking')
     // Drive production playback, substituting only the native Web Audio graph.
@@ -335,7 +335,9 @@ describe('Independent media caption attribution', () => {
   ])('late final from $foreignTurn cannot replace the live owned caption', async ({ priorFinal, foreignTurn }) => {
     view(); await start()
     act(() => useVoiceStore.setState({ final: priorFinal, partial: 'own current sentence' }))
-    act(() => onVoiceFinal({turnId: foreignTurn, text: 'private foreign words'}))
+    act(() => onVoiceFinal({
+      turnId: foreignTurn, turnEpoch: 'foreign-epoch', text: 'private foreign words',
+    }))
     expect(useCommanderCallStore.getState()).toMatchObject({status: 'live', turnId: 'mic-1'})
     expect(useVoiceStore.getState().turnId).toBe('mic-1')
     expect.soft(commanderCallMedia.userCaption.final).toBe(priorFinal)

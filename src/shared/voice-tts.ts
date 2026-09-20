@@ -317,7 +317,7 @@ export interface VoiceSpeechRequest {
 export interface VoiceSpeechStartEvent {
   speechId: string
   /** Monotonic main-process lease. Older passages must never replace a newer one. */
-  speechGeneration?: number
+  speechGeneration: number
   source: VoiceSpeechSource
   /** The cleaned text, exactly as it will be spoken. */
   text: string
@@ -330,7 +330,7 @@ export interface VoiceSpeechStartEvent {
 export interface VoiceSpeechChunkEvent {
   speechId: string
   /** Matches the generation announced by `VoiceSpeechStartEvent`. */
-  speechGeneration?: number
+  speechGeneration: number
   /** 0-based order. The renderer plays chunks back to back. */
   index: number
   /** Mono signed 16-bit little-endian PCM. */
@@ -345,7 +345,7 @@ export type VoiceSpeechEndReason = 'complete' | 'cancelled' | 'error' | 'skipped
 export interface VoiceSpeechEndEvent {
   speechId: string
   /** Matches the generation announced by `VoiceSpeechStartEvent`. */
-  speechGeneration?: number
+  speechGeneration: number
   reason: VoiceSpeechEndReason
   message?: string
 }

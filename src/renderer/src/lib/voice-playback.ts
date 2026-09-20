@@ -190,6 +190,12 @@ export class VoicePlayback {
     await context?.close().catch(() => undefined)
   }
 
+  /** Restores the singleton lease counter between isolated tests. */
+  __resetForTests(): void {
+    this.stop()
+    this.latestSpeechGeneration = 0
+  }
+
   // ── Internals ─────────────────────────────────────────────
 
   private ensureContext(): AudioContext | null {

@@ -188,22 +188,28 @@ describe('VoiceSessionManager — turns', () => {
   })
 
   it('drops audio that belongs to an older turn', async () => {
-    const first = await ctx.manager.startTurn('command', {}) as { turnId: string }
+    const first = await ctx.manager.startTurn('command', {}) as {
+      turnId: string; turnEpoch: string
+    }
     ctx.manager.pushAudio(first.turnId, Buffer.alloc(4))
     expect(ctx.worker.pushAudio).toHaveBeenCalledTimes(1)
 
-    ctx.manager.cancelTurn(first.turnId)
+    ctx.manager.cancelTurn(first.turnId, first.turnEpoch)
     ctx.manager.pushAudio(first.turnId, Buffer.alloc(4))
     expect(ctx.worker.pushAudio).toHaveBeenCalledTimes(1)
   })
 
   it('ignores partial text from a stale turn', async () => {
-    const turn = await ctx.manager.startTurn('command', {}) as { turnId: string }
+    const turn = await ctx.manager.startTurn('command', {}) as {
+      turnId: string; turnEpoch: string
+    }
     ctx.worker.emit('partial', 'an-old-turn', 'stale words')
     ctx.worker.emit('partial', turn.turnId, 'live words')
     const partials = ctx.notify.mock.calls.filter(([channel]) => channel === 'voice:partial')
     expect(partials).toHaveLength(1)
-    expect(partials[0][1]).toEqual({ turnId: turn.turnId, text: 'live words' })
+    expect(partials[0][1]).toEqual({
+      turnId: turn.turnId, turnEpoch: expect.any(String), text: 'live words',
+    })
   })
 
   it('ignores a final transcript from a stale turn', async () => {
@@ -268,6 +274,20 @@ describe('VoiceSessionManager — turns', () => {
       status: 'cancelled', turnId: active.turnId, turnEpoch: active.turnEpoch,
     })
   })
+
+  it('does not let an unleased cancellation borrow the current epoch', async () => {
+    const active = await ctx.manager.startTurn('command', {}) as {
+      turnId: string; turnEpoch: string
+    }
+    ctx.worker.cancelTurn.mockClear()
+    ctx.notify.mockClear()
+
+    ctx.manager.cancelTurn(active.turnId)
+
+    expect(ctx.manager.getState()).toBe('listening')
+    expect(ctx.worker.cancelTurn).not.toHaveBeenCalled()
+    expect(outcomes(ctx.notify)).toEqual([{ status: 'cancelled', turnId: active.turnId }])
+  })
 })
 
 describe('VoiceSessionManager — dictation and commands', () => {
@@ -303,7 +323,9 @@ describe('VoiceSessionManager — dictation and commands', () => {
 
   it('asks for a confirmation before it creates a task', async () => {
     const ctx = makeReadyManager()
-    const turn = await ctx.manager.startTurn('command', {}) as { turnId: string }
+    const turn = await ctx.manager.startTurn('command', {}) as {
+      turnId: string; turnEpoch: string
+    }
     ctx.worker.emit('final', turn.turnId, 'create a task to fix login')
     await vi.waitFor(() => expect(outcomes(ctx.notify)).toHaveLength(1))
 
@@ -312,7 +334,7 @@ describe('VoiceSessionManager — dictation and commands', () => {
     expect(ctx.manager.getState()).toBe('awaiting_confirmation')
     expect(ctx.db.createTask).not.toHaveBeenCalled()
 
-    await ctx.manager.confirm(turn.turnId)
+    await ctx.manager.confirm(turn.turnId, undefined, turn.turnEpoch)
     expect(ctx.db.createTask).toHaveBeenCalledTimes(1)
     expect(ctx.manager.getState()).toBe('idle')
   })
@@ -485,6 +507,29 @@ describe('VoiceSessionManager — engine and shutdown', () => {
     expect(outcomes(ctx.notify).at(-1)).toMatchObject({ status: 'rejected', reason: 'failed' })
   })
 
+  it.each([
+    { status: { state: 'error' as const, message: 'engine crashed' }, terminal: 'error' },
+    { status: { state: 'model_missing' as const, message: 'model disappeared' }, terminal: 'model_needed' },
+  ])('settles the exact active lifecycle on $terminal engine status', async ({ status, terminal }) => {
+    const ctx = makeReadyManager()
+    const turn = await ctx.manager.startTurn('command', {})
+    if ('error' in turn) throw new Error(turn.error)
+    ctx.notify.mockClear()
+
+    ctx.worker.emit('status', status)
+
+    expect(ctx.manager.getState()).toBe(terminal)
+    expect(ctx.worker.cancelTurn).toHaveBeenCalledWith(turn.turnId)
+    expect(ctx.notify.mock.calls).toContainEqual([
+      VOICE_EVENTS.state,
+      expect.objectContaining({
+        state: terminal,
+        turnId: turn.turnId,
+        turnEpoch: turn.turnEpoch,
+      }),
+    ])
+  })
+
   it('stops the worker and switches off on request', async () => {
     const ctx = makeReadyManager()
     await ctx.manager.setEnabled(false)
@@ -515,8 +560,14 @@ describe('VoiceSessionManager — the conversational loop', () => {
     ctx.worker.emit('segment', turn.turnId, 'show me the failing test', 2)
 
     expect(segments(ctx.notify)).toEqual([
-      { turnId: turn.turnId, text: 'what broke the build', index: 1 },
-      { turnId: turn.turnId, text: 'show me the failing test', index: 2 },
+      {
+        turnId: turn.turnId, turnEpoch: turn.turnEpoch,
+        text: 'what broke the build', index: 1,
+      },
+      {
+        turnId: turn.turnId, turnEpoch: turn.turnEpoch,
+        text: 'show me the failing test', index: 2,
+      },
     ])
     // The turn is still open, so the next sentence needs no new click.
     expect(ctx.manager.getState()).toBe('listening')

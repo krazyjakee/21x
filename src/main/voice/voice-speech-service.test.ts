@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { EventEmitter } from 'events'
 import { VOICE_TTS_EVENTS, VOICE_TTS_SETTING_KEYS, type VoiceTtsStatus, type VoiceTtsVoice } from '../../shared/voice-tts'
-import { VoiceSpeechService, localVoicesForModel } from './voice-speech-service'
+import {
+  VoiceSpeechService,
+  localVoicesForModel,
+  type VoiceSpeechLifecycleOwner,
+} from './voice-speech-service'
 import type { VoiceTtsWorkerClient } from './voice-tts-worker-client'
 import type { VoiceTtsModelManager } from './voice-tts-model-manager'
 
@@ -448,6 +452,104 @@ describe('one voice at a time', () => {
     worker.emit('done', worker.spoken[0].speechId, false)
 
     expect(states).toEqual([true, false])
+  })
+
+  it('settles the exact lifecycle when its current worker passage crashes', async () => {
+    const { service, worker, events } = makeService({
+      [VOICE_TTS_SETTING_KEYS.enabled]: 'true',
+    })
+    await service.prepare()
+    const owner = { turnId: 'turn-current', turnEpoch: 'epoch-current' }
+    const states: Array<{ speaking: boolean; owner?: VoiceSpeechLifecycleOwner }> = []
+    service.setSpeakingListener((speaking, lifecycleOwner) => {
+      states.push({ speaking, owner: lifecycleOwner })
+    })
+    await service.speak(
+      { text: 'Current action result.', source: 'action_result' },
+      () => true,
+      owner
+    )
+    const speechId = worker.spoken[0].speechId
+
+    worker.emit('error', 'worker crashed', speechId)
+
+    expect(service.speaking).toBe(false)
+    expect(states).toEqual([
+      { speaking: true, owner },
+      { speaking: false, owner },
+    ])
+    expect(events.at(-1)).toMatchObject({
+      channel: VOICE_TTS_EVENTS.speechEnd,
+      data: { speechId, speechGeneration: expect.any(Number), reason: 'error' },
+    })
+  })
+
+  it('makes stale and unowned worker errors inert after passage replacement', async () => {
+    const { service, worker, events } = makeService({
+      [VOICE_TTS_SETTING_KEYS.enabled]: 'true',
+    })
+    await service.prepare()
+    const oldOwner = { turnId: 'same-turn', turnEpoch: 'old-epoch' }
+    const currentOwner = { turnId: 'same-turn', turnEpoch: 'current-epoch' }
+    const states: Array<{ speaking: boolean; owner?: VoiceSpeechLifecycleOwner }> = []
+    service.setSpeakingListener((speaking, owner) => states.push({ speaking, owner }))
+    await service.speak(
+      { text: 'Old action result.', source: 'action_result' },
+      () => true,
+      oldOwner
+    )
+    const oldSpeechId = worker.spoken[0].speechId
+    await service.speak(
+      { text: 'Replacement action result.', source: 'action_result' },
+      () => true,
+      currentOwner
+    )
+    const currentSpeechId = worker.spoken[1].speechId
+    const endCount = events.filter((event) => event.channel === VOICE_TTS_EVENTS.speechEnd).length
+
+    worker.emit('error', 'late old crash', oldSpeechId)
+    worker.emit('error', 'unlabelled retired preparation crash')
+
+    expect(service.speaking).toBe(true)
+    expect(service.currentTaskId).toBeNull()
+    expect(states).toEqual([
+      { speaking: true, owner: oldOwner },
+      { speaking: false, owner: oldOwner },
+      { speaking: true, owner: currentOwner },
+    ])
+    expect(events.filter((event) => event.channel === VOICE_TTS_EVENTS.speechEnd)).toHaveLength(endCount)
+
+    worker.emit('error', 'current crash', currentSpeechId)
+    expect(service.speaking).toBe(false)
+    expect(states.at(-1)).toEqual({ speaking: false, owner: currentOwner })
+  })
+
+  it('keeps one speaking lifecycle across a same-owner passage replacement', async () => {
+    const { service } = makeService({
+      [VOICE_TTS_SETTING_KEYS.enabled]: 'true',
+    })
+    await service.prepare()
+    const owner = { turnId: 'turn-current', turnEpoch: 'epoch-current' }
+    const states: Array<{ speaking: boolean; owner?: VoiceSpeechLifecycleOwner }> = []
+    service.setSpeakingListener((speaking, lifecycleOwner) => {
+      states.push({ speaking, owner: lifecycleOwner })
+    })
+
+    await service.speak(
+      { text: 'First action result.', source: 'action_result' },
+      () => true,
+      owner
+    )
+    await service.speak(
+      { text: 'Second action result.', source: 'action_result' },
+      () => true,
+      owner
+    )
+
+    expect(states).toEqual([
+      { speaking: true, owner },
+      { speaking: true, owner },
+    ])
   })
 })
 

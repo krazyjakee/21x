@@ -34,6 +34,7 @@ export interface VoiceTarget {
 
 export interface VoicePassageAttribution {
   speechId: string
+  speechGeneration: number
   source?: string
   taskId?: string
 }
@@ -43,6 +44,7 @@ export interface VoiceActivitySnapshot {
   passage: VoicePassageAttribution | null
   /** The passage the playback object has open. */
   playbackSpeechId: string | null
+  playbackSpeechGeneration: number | null
   /** Sentences queued or sounding for that passage. */
   hasQueuedAudio: boolean
   /** The store's global flag (synthesis started). Never sufficient on its own. */
@@ -76,6 +78,7 @@ export function hasVerifiedPlaybackOwnership(snapshot: VoiceActivitySnapshot, ta
   return Boolean(
     passage &&
     snapshot.playbackSpeechId === passage.speechId &&
+    snapshot.playbackSpeechGeneration === passage.speechGeneration &&
     ownsPassage(passage, target) === true
   )
 }
@@ -93,7 +96,12 @@ export function deriveVoiceActivity(snapshot: VoiceActivitySnapshot, target: Voi
 
   // Speaking: attributed passage, the same passage open in playback, audio queued/sounding.
   const passage = snapshot.passage
-  const playbackLive = Boolean(passage && snapshot.playbackSpeechId === passage.speechId && snapshot.hasQueuedAudio)
+  const playbackLive = Boolean(
+    passage &&
+    snapshot.playbackSpeechId === passage.speechId &&
+    snapshot.playbackSpeechGeneration === passage.speechGeneration &&
+    snapshot.hasQueuedAudio
+  )
   if (passage && playbackLive) {
     const owned = ownsPassage(passage, target)
     if (owned === true) return { state: 'speaking', ...(micOpen ? { micOpen: true } : {}) }
@@ -121,6 +129,7 @@ interface VoiceAttributionState {
 export const useVoiceAttributionStore = create<VoiceAttributionState>(() => ({ passage: null, version: 0 }))
 
 let attributionOff: (() => void) | null = null
+let latestAttributionGeneration = 0
 
 /** Starts recording which entity each spoken passage belongs to. Idempotent; safe without a bridge. */
 export function ensureVoiceAttribution(): void {
@@ -129,13 +138,26 @@ export function ensureVoiceAttribution(): void {
     const tts = typeof window !== 'undefined' ? window.electronAPI?.voice?.tts : undefined
     if (typeof tts?.onSpeechStart !== 'function' || typeof tts?.onSpeechEnd !== 'function') return
     const offStart = tts.onSpeechStart((event) => {
-      if (!event?.speechId) return
+      if (!event?.speechId || !Number.isSafeInteger(event.speechGeneration) || event.speechGeneration <= 0) return
+      if (event.speechGeneration < latestAttributionGeneration) return
+      if (event.speechGeneration === latestAttributionGeneration) {
+        const current = useVoiceAttributionStore.getState().passage
+        if (!current || current.speechId !== event.speechId) return
+      }
+      latestAttributionGeneration = event.speechGeneration
       useVoiceAttributionStore.setState((s) => ({
-        passage: { speechId: event.speechId, source: event.source, ...(event.taskId ? { taskId: event.taskId } : {}) },
+        passage: {
+          speechId: event.speechId,
+          speechGeneration: event.speechGeneration,
+          source: event.source,
+          ...(event.taskId ? { taskId: event.taskId } : {})
+        },
         version: s.version + 1
       }))
     })
-    const offEnd = tts.onSpeechEnd(() => {
+    const offEnd = tts.onSpeechEnd((event) => {
+      const passage = useVoiceAttributionStore.getState().passage
+      if (!passage || event.speechId !== passage.speechId || event.speechGeneration !== passage.speechGeneration) return
       // The passage may still be draining; the playback object decides. Only re-read.
       useVoiceAttributionStore.setState((s) => ({ version: s.version + 1 }))
     })
@@ -154,6 +176,7 @@ export function readVoiceActivitySnapshot(owner?: VoiceTarget | null): VoiceActi
   return {
     passage: useVoiceAttributionStore.getState().passage,
     playbackSpeechId: voicePlayback.currentSpeechId,
+    playbackSpeechGeneration: voicePlayback.currentSpeechGeneration,
     hasQueuedAudio: voicePlayback.hasQueuedAudio,
     storeSpeaking: voice.speaking,
     capture: {
@@ -184,5 +207,7 @@ export function useVoiceActivity(target: VoiceTarget | null): VoiceObservation |
 export function __resetVoiceAttribution(): void {
   attributionOff?.()
   attributionOff = null
+  latestAttributionGeneration = 0
+  voicePlayback.__resetForTests()
   useVoiceAttributionStore.setState({ passage: null, version: 0 })
 }

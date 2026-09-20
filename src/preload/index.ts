@@ -669,18 +669,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('voice:state', handler)
       return () => ipcRenderer.removeListener('voice:state', handler)
     },
-    onPartial: (callback: (data: { turnId: string; text: string }) => void): (() => void) => {
-      const handler = (_: unknown, d: { turnId: string; text: string }): void => callback(d)
+    onPartial: (callback: (data: { turnId: string; turnEpoch: string | null; text: string }) => void): (() => void) => {
+      const handler = (_: unknown, d: { turnId: string; turnEpoch: string | null; text: string }): void => callback(d)
       ipcRenderer.on('voice:partial', handler)
       return () => ipcRenderer.removeListener('voice:partial', handler)
     },
-    onFinal: (callback: (data: { turnId: string; text: string }) => void): (() => void) => {
-      const handler = (_: unknown, d: { turnId: string; text: string }): void => callback(d)
+    onFinal: (callback: (data: { turnId: string; turnEpoch: string | null; text: string }) => void): (() => void) => {
+      const handler = (_: unknown, d: { turnId: string; turnEpoch: string | null; text: string }): void => callback(d)
       ipcRenderer.on('voice:final', handler)
       return () => ipcRenderer.removeListener('voice:final', handler)
     },
-    onSegment: (callback: (data: { turnId: string; text: string; index: number }) => void): (() => void) => {
-      const handler = (_: unknown, d: { turnId: string; text: string; index: number }): void => callback(d)
+    onSegment: (callback: (data: { turnId: string; turnEpoch: string | null; text: string; index: number }) => void): (() => void) => {
+      const handler = (_: unknown, d: { turnId: string; turnEpoch: string | null; text: string; index: number }): void => callback(d)
       ipcRenderer.on('voice:segment', handler)
       return () => ipcRenderer.removeListener('voice:segment', handler)
     },
@@ -694,8 +694,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('voice:status', handler)
       return () => ipcRenderer.removeListener('voice:status', handler)
     },
-    onError: (callback: (data: { message: string; code?: string }) => void): (() => void) => {
-      const handler = (_: unknown, d: { message: string; code?: string }): void => callback(d)
+    onError: (callback: (data: { message: string; code?: string; turnId?: string; turnEpoch?: string | null }) => void): (() => void) => {
+      const handler = (_: unknown, d: { message: string; code?: string; turnId?: string; turnEpoch?: string | null }): void => callback(d)
       ipcRenderer.on('voice:error', handler)
       return () => ipcRenderer.removeListener('voice:error', handler)
     },

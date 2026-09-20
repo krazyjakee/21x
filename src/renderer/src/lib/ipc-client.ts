@@ -4,6 +4,7 @@ import type { ArtifactApi } from '@shared/artifacts'
 import type {
   MicrophonePermission,
   VoiceActionOutcome,
+  VoiceErrorEvent,
   VoiceModelState,
   VoiceRuntimeProgressEvent,
   VoiceRuntimeStatus,
@@ -809,18 +810,18 @@ export const voiceApi = {
     window.electronAPI?.voice?.answerNotExpected?.(taskId) ?? Promise.resolve(),
   onState: (callback: (event: VoiceStateEvent) => void): (() => void) =>
     window.electronAPI.voice.onState(callback),
-  onPartial: (callback: (event: { turnId: string; text: string }) => void): (() => void) =>
+  onPartial: (callback: (event: { turnId: string; turnEpoch: string | null; text: string }) => void): (() => void) =>
     window.electronAPI.voice.onPartial(callback),
-  onFinal: (callback: (event: { turnId: string; text: string }) => void): (() => void) =>
+  onFinal: (callback: (event: { turnId: string; turnEpoch: string | null; text: string }) => void): (() => void) =>
     window.electronAPI.voice.onFinal(callback),
   onSegment: (
-    callback: (event: { turnId: string; text: string; index: number }) => void
+    callback: (event: { turnId: string; turnEpoch: string | null; text: string; index: number }) => void
   ): (() => void) => window.electronAPI.voice.onSegment(callback),
   onOutcome: (callback: (event: VoiceActionOutcome) => void): (() => void) =>
     window.electronAPI.voice.onOutcome(callback),
   onStatus: (callback: (event: Partial<VoiceSnapshot> & { model?: VoiceModelState }) => void): (() => void) =>
     window.electronAPI.voice.onStatus(callback),
-  onError: (callback: (event: { message: string; code?: string }) => void): (() => void) =>
+  onError: (callback: (event: VoiceErrorEvent) => void): (() => void) =>
     window.electronAPI.voice.onError(callback),
   onNavigate: (callback: (event: { destination: VoiceViewName; taskId: string | null }) => void): (() => void) =>
     window.electronAPI.voice.onNavigate(callback),

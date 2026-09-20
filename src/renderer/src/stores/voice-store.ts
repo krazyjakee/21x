@@ -4,7 +4,7 @@ import { voiceCapture } from '@/lib/voice-capture'
 import { voicePlayback } from '@/lib/voice-playback'
 import { BargeInGate } from '@/lib/voice-barge-in'
 import { clearActiveComposer } from '@/lib/voice-dictation-target'
-import { VOICE_SETTING_KEYS } from '@shared/voice'
+import { VOICE_SETTING_KEYS, type VoiceErrorEvent, type VoiceStateEvent } from '@shared/voice'
 import type { VoiceTtsEngineId, VoiceTtsSnapshot } from '@shared/voice-tts'
 import type {
   MicrophonePermission,
@@ -225,14 +225,28 @@ function hasTtsBridge(): boolean {
  */
 interface RendererSpeechOwner {
   speechId: string
-  speechGeneration?: number
+  speechGeneration: number
 }
 
 function sameSpeechOwner(a: RendererSpeechOwner | null, b: RendererSpeechOwner): boolean {
+  return Boolean(a && a.speechId === b.speechId && a.speechGeneration === b.speechGeneration)
+}
+
+function speechOwnerOf(event: { speechId?: unknown; speechGeneration?: unknown }): RendererSpeechOwner | null {
+  if (typeof event.speechId !== 'string' || !event.speechId) return null
+  if (!Number.isSafeInteger(event.speechGeneration) || Number(event.speechGeneration) <= 0) return null
+  return { speechId: event.speechId, speechGeneration: Number(event.speechGeneration) }
+}
+
+function ownsRendererTurn(
+  current: Pick<VoiceStoreState, 'turnId' | 'turnEpoch'>,
+  event: Pick<VoiceStateEvent, 'turnId' | 'turnEpoch'>
+): boolean {
   return Boolean(
-    a && a.speechId === b.speechId &&
-    (a.speechGeneration === undefined || b.speechGeneration === undefined ||
-      a.speechGeneration === b.speechGeneration)
+    current.turnId &&
+    current.turnEpoch &&
+    event.turnId === current.turnId &&
+    event.turnEpoch === current.turnEpoch
   )
 }
 
@@ -264,12 +278,8 @@ let openPassage: RendererSpeechOwner | null = null
 function stopPlaybackForUser(): void {
   const currentSpeechId = voicePlayback.currentSpeechId
   stoppedSpeech = currentSpeechId
-    ? {
-        speechId: currentSpeechId,
-        ...(voicePlayback.currentSpeechGeneration !== null
-          ? { speechGeneration: voicePlayback.currentSpeechGeneration }
-          : {}),
-      }
+    && voicePlayback.currentSpeechGeneration !== null
+    ? { speechId: currentSpeechId, speechGeneration: voicePlayback.currentSpeechGeneration }
     : stoppedSpeech
   openPassage = null
   voicePlayback.stop()
@@ -680,18 +690,26 @@ if (hasVoiceBridge()) {
   voiceApi.onState((event) => {
     const current = useVoiceStore.getState()
     // Owned lifecycle events are allowed to affect only the exact start that
-    // produced them. Unowned events remain compatible with older main builds
-    // and with engine-wide state changes.
-    if (current.turnId && (event.turnId || event.turnEpoch)) {
-      const ownsCurrent = (!event.turnId || current.turnId === event.turnId)
-        && (!event.turnEpoch || current.turnEpoch === event.turnEpoch)
-      if (!ownsCurrent) return
+    // produced them. Engine-wide, unowned state is still accepted when no
+    // renderer turn is live; it cannot terminate a replacement turn.
+    if (current.turnId) {
+      const terminal = event.state === 'idle' ||
+        event.state === 'error' ||
+        event.state === 'disabled' ||
+        event.state === 'model_needed' ||
+        event.state === 'permission_needed'
+      if ((terminal || event.turnId || event.turnEpoch) && !ownsRendererTurn(current, event)) return
     }
     // Main owns the state machine, so it is the authority on whether a turn is
     // open. When it reports idle, any turn the renderer still holds is gone —
     // release the microphone and clear it. Without this, one stranded turn
     // disables every microphone button in the app for ever.
-    if (event.state === 'idle' && current.turnId) {
+    const terminal = event.state === 'idle' ||
+      event.state === 'error' ||
+      event.state === 'disabled' ||
+      event.state === 'model_needed' ||
+      event.state === 'permission_needed'
+    if (terminal && current.turnId) {
       voiceCapture.stop()
       useVoiceStore.setState({ state: event.state, turnId: null, turnEpoch: null, level: 0, partial: '' })
       return
@@ -700,7 +718,7 @@ if (hasVoiceBridge()) {
   })
 
   voiceApi.onPartial((event) => {
-    if (event.turnId !== useVoiceStore.getState().turnId) return
+    if (!ownsRendererTurn(useVoiceStore.getState(), event)) return
     // Words reached the recogniser while an answer was being read. Whatever
     // the gate did or failed to do, the user is talking and 20x is talking
     // over them, so it stops. This is a net under barge-in, not a substitute
@@ -722,7 +740,7 @@ if (hasVoiceBridge()) {
   voiceApi.onFinal((event) => {
     // A provider can deliver the final packet after its turn was cancelled or
     // replaced. It owns neither the current caption nor the current partial.
-    if (useVoiceStore.getState().turnId !== event.turnId) return
+    if (!ownsRendererTurn(useVoiceStore.getState(), event)) return
     useVoiceStore.setState({ final: event.text, partial: '' })
     // A turn also ends by itself: the worker closes it when the speaker pauses.
     // Release the microphone here too, or it would stay open with no way to
@@ -735,8 +753,13 @@ if (hasVoiceBridge()) {
     const current = useVoiceStore.getState()
     const ownsCurrent = !current.turnId || (
       current.turnId === outcome.turnId
-      && (!outcome.turnEpoch || current.turnEpoch === outcome.turnEpoch)
+      && Boolean(outcome.turnEpoch)
+      && current.turnEpoch === outcome.turnEpoch
     )
+    // An outcome is terminal for the start lease that produced it. While a
+    // replacement is live, a missing or different epoch owns neither its UI
+    // result nor its microphone/caption state.
+    if (current.turnId && !ownsCurrent) return
     if (outcome.status === 'needs_confirmation') {
       useVoiceStore.setState({
         confirmation: {
@@ -767,11 +790,8 @@ if (hasVoiceBridge()) {
     // `completed` closes a conversation whose sentences were already sent. It
     // is a normal ending, so it shows nothing.
     if (outcome.status === 'cancelled') {
-      const current = useVoiceStore.getState()
-      // New main versions echo the exact start epoch. The turn ID fallback is
-      // retained for old bridges, while leased outcomes must own both fields.
-      if (current.turnId !== outcome.turnId
-        || (outcome.turnEpoch && current.turnEpoch !== outcome.turnEpoch)) return
+      // A cancellation is terminal only for the exact start lease.
+      if (!ownsCurrent) return
       useVoiceStore.setState({ turnId: null, turnEpoch: null, partial: '' })
       return
     }
@@ -807,7 +827,9 @@ if (hasVoiceBridge()) {
     }))
   })
 
-  voiceApi.onError((event) => {
+  voiceApi.onError((event: VoiceErrorEvent) => {
+    const current = useVoiceStore.getState()
+    if (current.turnId && !ownsRendererTurn(current, event)) return
     useVoiceStore.setState({ result: { kind: 'error', message: event.message, at: Date.now() } })
   })
 }
@@ -821,19 +843,14 @@ if (hasTtsBridge()) {
     // next push arrives as another `speechStart`. Re-opening the passage here
     // let that sentence play out in full, which is 20x finishing its sentence
     // after being told to stop.
-    const owner = {
-      speechId: event.speechId,
-      ...(event.speechGeneration !== undefined
-        ? { speechGeneration: event.speechGeneration }
-        : {}),
-    }
+    const owner = speechOwnerOf(event)
+    if (!owner) return
     if (sameSpeechOwner(stoppedSpeech, owner) || sameSpeechOwner(closedSpeech, owner)) return
 
     // Playback retains the highest generation even after stop. This is the
     // renderer-side backstop against delayed IPC or a reused speech ID.
-    const wasCurrent = voicePlayback.currentSpeechId === event.speechId &&
-      (event.speechGeneration === undefined ||
-        voicePlayback.currentSpeechGeneration === event.speechGeneration)
+    const wasCurrent = voicePlayback.currentSpeechId === owner.speechId &&
+      voicePlayback.currentSpeechGeneration === owner.speechGeneration
     const accepted = voicePlayback.start(event.speechId, {
       // The worker finishes producing before the last sentence finishes
       // playing, so the speaking state ends here and not on the end event.
@@ -845,7 +862,7 @@ if (hasTtsBridge()) {
         bargeInGate.setSpeaking(false)
         useVoiceStore.setState({ speaking: false, speechText: '' })
       },
-    }, event.speechGeneration)
+    }, owner.speechGeneration)
     if (!accepted) return
 
     if (!wasCurrent) {
@@ -868,9 +885,10 @@ if (hasTtsBridge()) {
   })
 
   voiceTtsApi.onSpeechChunk((event) => {
-    const owner = { speechId: event.speechId, speechGeneration: event.speechGeneration }
+    const owner = speechOwnerOf(event)
+    if (!owner) return
     if (sameSpeechOwner(stoppedSpeech, owner) || sameSpeechOwner(closedSpeech, owner)) return
-    voicePlayback.play(event.speechId, event.pcm, event.sampleRate, event.speechGeneration)
+    voicePlayback.play(owner.speechId, event.pcm, event.sampleRate, owner.speechGeneration)
   })
 
   voiceTtsApi.onSpeechEnd((event) => {
@@ -882,21 +900,21 @@ if (hasTtsBridge()) {
     // microphone.
     // Main will send nothing more for this passage, so the next drain is the
     // real end of it.
-    const owner = { speechId: event.speechId, speechGeneration: event.speechGeneration }
+    const owner = speechOwnerOf(event)
+    if (!owner) return
     closedSpeech = owner
     if (sameSpeechOwner(openPassage, owner)) openPassage = null
     if (event.reason === 'complete' && voicePlayback.hasQueuedAudio) return
     if (
-      voicePlayback.currentSpeechId !== event.speechId ||
-      (event.speechGeneration !== undefined &&
-        voicePlayback.currentSpeechGeneration !== event.speechGeneration)
+      voicePlayback.currentSpeechId !== owner.speechId ||
+      voicePlayback.currentSpeechGeneration !== owner.speechGeneration
     ) {
       // The event names a passage that is already gone. Nothing is sounding,
       // so nothing may still be held back from the recogniser.
       if (!voicePlayback.isPlaying) bargeInGate.setSpeaking(false)
       return
     }
-    voicePlayback.stop(event.speechGeneration)
+    voicePlayback.stop(owner.speechGeneration)
     bargeInGate.setSpeaking(false)
     useVoiceStore.setState({ speaking: false, speechText: '' })
     if (event.reason === 'error' && event.message) {

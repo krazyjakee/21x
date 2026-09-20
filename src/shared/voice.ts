@@ -31,8 +31,8 @@ export type VoiceState =
   | 'error'
 
 /**
- * Allowed transitions. `error` and `idle` are reachable from every active
- * state (cancellation and failure), so they are not repeated in each row.
+ * Allowed transitions. Terminal readiness and failure states are reachable
+ * from every active state, so they are not repeated in each row.
  */
 export const VOICE_TRANSITIONS: Record<VoiceState, readonly VoiceState[]> = {
   disabled: ['permission_needed', 'model_needed', 'idle'],
@@ -53,7 +53,13 @@ export const VOICE_TRANSITIONS: Record<VoiceState, readonly VoiceState[]> = {
   error: ['idle', 'disabled'],
 } as const
 
-const ALWAYS_REACHABLE: readonly VoiceState[] = ['idle', 'error', 'disabled']
+const ALWAYS_REACHABLE: readonly VoiceState[] = [
+  'idle',
+  'error',
+  'disabled',
+  'model_needed',
+  'permission_needed',
+]
 
 /** True when `to` is a legal next state after `from`. */
 export function canTransition(from: VoiceState, to: VoiceState): boolean {
@@ -375,6 +381,14 @@ export interface VoiceStateEvent {
   /** Exact start lease that owns this lifecycle transition. */
   turnEpoch?: string | null
   detail?: string
+}
+
+/** A runtime failure, optionally owned by the exact microphone start it ended. */
+export interface VoiceErrorEvent {
+  message: string
+  code?: string
+  turnId?: string
+  turnEpoch?: string | null
 }
 
 export interface VoiceStatusEvent {

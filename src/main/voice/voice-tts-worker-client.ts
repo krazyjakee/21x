@@ -97,6 +97,14 @@ export class VoiceTtsWorkerClient extends EventEmitter {
   private idleTimer: NodeJS.Timeout | null = null
   private restarts = 0
   private modulePath: string | null = null
+  /**
+   * Passage currently owned by the live child process.
+   *
+   * Process-level failures do not carry a speech id themselves. Recording the
+   * passage at the producer boundary lets a crash retire exactly the passage
+   * that child was synthesising without guessing in the speech service.
+   */
+  private childSpeechId: string | null = null
 
   constructor(private scriptPath = defaultTtsWorkerScript()) {
     super()
@@ -167,6 +175,7 @@ export class VoiceTtsWorkerClient extends EventEmitter {
     this.clearIdleTimer()
 
     if (this.isLoaded) {
+      this.childSpeechId = request.speechId
       this.send({ t: 'speak', ...request })
       return
     }
@@ -221,6 +230,7 @@ export class VoiceTtsWorkerClient extends EventEmitter {
     this.pendingAppends = []
     this.pendingFinish = false
     this.request = null
+    this.childSpeechId = null
     const child = this.child
     this.child = null
     if (!child) return
@@ -263,20 +273,30 @@ export class VoiceTtsWorkerClient extends EventEmitter {
         console.error('[voice-tts-worker] pipe error:', err.message)
       })
     }
+    const child = this.child
     this.child.on('error', (err) => {
       console.error('[voice-tts-worker] process error:', err.message)
-      this.emit('error', 'The speech worker could not be started.')
+      // Only the current child may retire the passage it owns. A late process
+      // event from a replaced child is inert.
+      this.emit(
+        'error',
+        'The speech worker could not be started.',
+        this.child === child ? (this.childSpeechId ?? undefined) : undefined
+      )
     })
     this.child.stderr?.on('data', (data: Buffer) => {
       console.error('[voice-tts-worker]', data.toString().trim())
     })
     this.child.on('message', (raw) => this.onMessage(raw as WorkerMessage))
     this.child.on('exit', (code) => {
+      if (this.child !== child) return
       const wasLoaded = this.request
+      const speechId = this.childSpeechId
       this.child = null
       this.request = null
+      this.childSpeechId = null
       if (code === 0) return
-      this.emit('error', `The speech worker stopped (code ${code}).`)
+      this.emit('error', `The speech worker stopped (code ${code}).`, speechId ?? undefined)
       // One automatic restart. A repeated crash leaves speech off rather than
       // spawning processes in a loop.
       if (wasLoaded && this.restarts < 1) {
@@ -327,10 +347,12 @@ export class VoiceTtsWorkerClient extends EventEmitter {
         return
       case 'done':
         if (!message.speechId) return
+        if (this.childSpeechId === message.speechId) this.childSpeechId = null
         this.scheduleIdleUnload()
         this.emit('done', message.speechId, Boolean(message.cancelled), message.chunks ?? 0)
         return
       case 'error':
+        if (message.speechId && this.childSpeechId === message.speechId) this.childSpeechId = null
         this.emit('error', message.message ?? 'Speech synthesis failed.', message.speechId)
         return
       default:
@@ -349,6 +371,7 @@ export class VoiceTtsWorkerClient extends EventEmitter {
     this.pendingFinish = false
     this.clearReloadTimeout()
 
+    this.childSpeechId = pending.speechId
     this.send({ t: 'speak', ...pending })
     if (appends.length > 0) this.send({ t: 'append', speechId: pending.speechId, sentences: appends })
     if (finish) this.send({ t: 'finish', speechId: pending.speechId })

@@ -99,7 +99,9 @@ export function useVoiceControl(): void {
 
     // A conversation stays open: each pause finishes one sentence, the sentence
     // is sent, and the microphone keeps listening for the next one.
-    const offSegment = voiceApi.onSegment(({ turnId, text }) => {
+    const offSegment = voiceApi.onSegment(({ turnId, turnEpoch, text }) => {
+      const voice = useVoiceStore.getState()
+      if (voice.turnId !== turnId || voice.turnEpoch !== turnEpoch) return
       const composer = getActiveComposer()
       const sent = insertAndSubmit(text)
       if (sent) {

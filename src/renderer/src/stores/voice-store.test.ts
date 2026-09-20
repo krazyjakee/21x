@@ -18,6 +18,7 @@ const onPartial = vi.mocked(voiceBridge.onPartial).mock.calls[0][0]
 const onOutcome = vi.mocked(voiceBridge.onOutcome).mock.calls[0][0]
 const onFinal = vi.mocked(voiceBridge.onFinal).mock.calls[0][0]
 const onState = vi.mocked(voiceBridge.onState).mock.calls[0][0]
+const onError = vi.mocked(voiceBridge.onError).mock.calls[0][0]
 
 function reset(): void {
   useVoiceStore.setState({
@@ -61,7 +62,9 @@ describe('voice store — words heard while reading', () => {
   it('stops reading as soon as any word is recognised', async () => {
     const stop = await readingWithTurnOpen()
 
-    onPartial({ turnId: 'turn-1', text: 'stop' })
+    onPartial({
+      turnId: 'turn-1', turnEpoch: useVoiceStore.getState().turnEpoch, text: 'stop',
+    })
 
     expect(stop).toHaveBeenCalled()
   })
@@ -69,7 +72,9 @@ describe('voice store — words heard while reading', () => {
   it('leaves the reading alone when nothing was heard', async () => {
     const stop = await readingWithTurnOpen()
 
-    onPartial({ turnId: 'turn-1', text: '   ' })
+    onPartial({
+      turnId: 'turn-1', turnEpoch: useVoiceStore.getState().turnEpoch, text: '   ',
+    })
 
     expect(stop).not.toHaveBeenCalled()
   })
@@ -175,11 +180,11 @@ describe('voice store — events from main', () => {
   })
 
   it('ignores partial text from an old turn', () => {
-    useVoiceStore.setState({ turnId: 'turn-9' })
-    onPartial({ turnId: 'an-old-turn', text: 'stale words' })
+    useVoiceStore.setState({ turnId: 'turn-9', turnEpoch: 'epoch-9' })
+    onPartial({ turnId: 'an-old-turn', turnEpoch: 'old-epoch', text: 'stale words' })
     expect(useVoiceStore.getState().partial).toBe('')
 
-    onPartial({ turnId: 'turn-9', text: 'live words' })
+    onPartial({ turnId: 'turn-9', turnEpoch: 'epoch-9', text: 'live words' })
     expect(useVoiceStore.getState().partial).toBe('live words')
   })
 
@@ -210,13 +215,15 @@ describe('voice store — events from main', () => {
     expect(useVoiceStore.getState()).toMatchObject({ turnId: null, turnEpoch: null, partial: '' })
   })
 
-  it('keeps compatible unleased cancellation ownership by turn id', () => {
+  it('rejects unleased cancellation even when a provider turn id is reused', () => {
     useVoiceStore.setState({ turnId: 'active-turn', turnEpoch: 'active-epoch', partial: 'words' })
     onOutcome({ status: 'cancelled', turnId: 'old-turn' })
     expect(useVoiceStore.getState().turnId).toBe('active-turn')
 
     onOutcome({ status: 'cancelled', turnId: 'active-turn' })
-    expect(useVoiceStore.getState()).toMatchObject({ turnId: null, turnEpoch: null, partial: '' })
+    expect(useVoiceStore.getState()).toMatchObject({
+      turnId: 'active-turn', turnEpoch: 'active-epoch', partial: 'words',
+    })
   })
 
   it('shows a confirmation card instead of running the action', () => {
@@ -284,18 +291,62 @@ describe('voice store — events from main', () => {
   })
 
   it.each([
-    { turnId: 'old-turn', turnEpoch: 'active-epoch' },
-    { turnId: 'shared-turn', turnEpoch: 'old-epoch' },
-  ])('ignores an idle lifecycle event not owned by the active start %#', (event) => {
+    { state: 'idle' as const, turnId: 'old-turn', turnEpoch: 'active-epoch' },
+    { state: 'error' as const, turnId: 'shared-turn', turnEpoch: 'old-epoch' },
+    { state: 'disabled' as const, turnId: 'shared-turn', turnEpoch: null },
+    { state: 'model_needed' as const, turnId: 'shared-turn', turnEpoch: 'old-epoch' },
+    { state: 'permission_needed' as const, turnId: 'old-turn', turnEpoch: 'active-epoch' },
+  ])('ignores a stale or unowned $state lifecycle event', (event) => {
     useVoiceStore.setState({
       state: 'listening', turnId: 'shared-turn', turnEpoch: 'active-epoch', partial: 'live words', level: 0.5,
     })
 
-    onState({ state: 'idle', ...event })
+    onState(event)
 
     expect(voiceCapture.stop).not.toHaveBeenCalled()
     expect(useVoiceStore.getState()).toMatchObject({
       state: 'listening', turnId: 'shared-turn', turnEpoch: 'active-epoch', partial: 'live words', level: 0.5,
+    })
+  })
+
+  it.each([
+    { label: 'unowned', event: { message: 'old crash' } },
+    {
+      label: 'stale',
+      event: { message: 'old crash', turnId: 'shared-turn', turnEpoch: 'old-epoch' },
+    },
+  ])('ignores a $label error while a replacement owns the lifecycle', ({ event }) => {
+    useVoiceStore.setState({
+      state: 'waiting_for_agent',
+      turnId: 'shared-turn',
+      turnEpoch: 'active-epoch',
+      result: null,
+    })
+
+    onError(event)
+
+    expect(useVoiceStore.getState()).toMatchObject({
+      state: 'waiting_for_agent',
+      turnId: 'shared-turn',
+      turnEpoch: 'active-epoch',
+      result: null,
+    })
+  })
+
+  it('accepts an error owned by the current start lease', () => {
+    useVoiceStore.setState({
+      state: 'speaking',
+      turnId: 'shared-turn',
+      turnEpoch: 'active-epoch',
+      result: null,
+    })
+
+    onError({
+      message: 'current crash', turnId: 'shared-turn', turnEpoch: 'active-epoch',
+    })
+
+    expect(useVoiceStore.getState().result).toMatchObject({
+      kind: 'error', message: 'current crash',
     })
   })
 
@@ -353,7 +404,11 @@ describe('a turn always closes', () => {
 
   it('closes when the worker ended the turn itself at a pause', async () => {
     await useVoiceStore.getState().startTurn('dictation')
-    onFinal({ turnId: 'turn-1', text: 'what broke the build' })
+    onFinal({
+      turnId: 'turn-1',
+      turnEpoch: useVoiceStore.getState().turnEpoch,
+      text: 'what broke the build',
+    })
 
     expect(useVoiceStore.getState().turnId).toBeNull()
     expect(voiceCapture.stop).toHaveBeenCalled()
@@ -361,18 +416,54 @@ describe('a turn always closes', () => {
 
   it('closes on a dictation outcome', async () => {
     await useVoiceStore.getState().startTurn('dictation')
-    onOutcome({ status: 'dictation', turnId: 'turn-1', text: 'hello' })
+    onOutcome({
+      status: 'dictation',
+      turnId: 'turn-1',
+      turnEpoch: useVoiceStore.getState().turnEpoch ?? undefined,
+      text: 'hello',
+    })
     expect(useVoiceStore.getState().turnId).toBeNull()
   })
 
-  it('closes when main reports it is idle, whatever the renderer thinks', () => {
-    useVoiceStore.setState({ turnId: 'a-turn-that-main-forgot', state: 'listening' })
+  it('ignores an unowned idle event while a renderer turn is live', () => {
+    useVoiceStore.setState({
+      turnId: 'a-live-turn', turnEpoch: 'live-epoch', state: 'listening',
+    })
 
     onState({ state: 'idle' })
+
+    expect(useVoiceStore.getState()).toMatchObject({
+      turnId: 'a-live-turn', turnEpoch: 'live-epoch', state: 'listening',
+    })
+    expect(voiceCapture.stop).not.toHaveBeenCalled()
+  })
+
+  it('closes when the exact main lifecycle reports idle', () => {
+    useVoiceStore.setState({
+      turnId: 'a-live-turn', turnEpoch: 'live-epoch', state: 'listening',
+    })
+
+    onState({ state: 'idle', turnId: 'a-live-turn', turnEpoch: 'live-epoch' })
 
     expect(useVoiceStore.getState().turnId).toBeNull()
     expect(voiceCapture.stop).toHaveBeenCalled()
   })
+
+  it.each(['error', 'disabled', 'model_needed', 'permission_needed'] as const)(
+    'closes when the exact main lifecycle reports %s',
+    (state) => {
+      useVoiceStore.setState({
+        turnId: 'a-live-turn', turnEpoch: 'live-epoch', state: 'listening', partial: 'words', level: 0.5,
+      })
+
+      onState({ state, turnId: 'a-live-turn', turnEpoch: 'live-epoch' })
+
+      expect(useVoiceStore.getState()).toMatchObject({
+        state, turnId: null, turnEpoch: null, partial: '', level: 0,
+      })
+      expect(voiceCapture.stop).toHaveBeenCalled()
+    }
+  )
 
   it('keeps the turn while main is still listening', () => {
     useVoiceStore.setState({ turnId: 'turn-1', state: 'listening' })
@@ -383,7 +474,7 @@ describe('a turn always closes', () => {
   it('leaves a final from an older turn alone', async () => {
     await useVoiceStore.getState().startTurn('dictation')
     useVoiceStore.setState({ partial: 'current words', final: 'current final' })
-    onFinal({ turnId: 'an-older-turn', text: 'stale' })
+    onFinal({ turnId: 'an-older-turn', turnEpoch: 'old-epoch', text: 'stale' })
     expect(useVoiceStore.getState()).toMatchObject({
       turnId: 'turn-1', partial: 'current words', final: 'current final'
     })

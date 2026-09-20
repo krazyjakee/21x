@@ -18,6 +18,7 @@ import {
   canTransition,
   type VoiceActionOutcome,
   type VoiceEngineStatus,
+  type VoiceErrorEvent,
   type VoiceIntent,
   type VoiceIntentProposal,
   type VoiceModelState,
@@ -41,7 +42,11 @@ import {
   removeVoiceRuntime,
   unsupportedHardwareReason,
 } from './voice-runtime-installer'
-import { VoiceSpeechService, type VoiceAnswerPart } from './voice-speech-service'
+import {
+  VoiceSpeechService,
+  type VoiceAnswerPart,
+  type VoiceSpeechLifecycleOwner,
+} from './voice-speech-service'
 
 export interface VoiceSessionManagerOptions {
   db: VoiceActionDb & { setSetting: (key: string, value: string) => void }
@@ -168,13 +173,25 @@ export class VoiceSessionManager {
       })
     // The state machine shows one audio state for the whole feature, so the
     // speaking indicator is the same indicator the microphone uses.
-    this.speech.setSpeakingListener((speaking) => {
+    this.speech.setSpeakingListener((speaking, owner) => {
+      // Lifecycle speech must carry the exact start lease in both directions.
+      // Unowned/manual speech may update the global state only when no command
+      // lifecycle exists; otherwise a late terminal callback could settle it.
+      if (owner) {
+        if (!this.ownsLifecycle(owner.turnId, owner.turnEpoch)) return
+        if (speaking) {
+          this.clearAnswerTimer()
+          this.setOwnedState('speaking', owner.turnId, owner.turnEpoch)
+        } else if (this.state === 'speaking') {
+          this.setOwnedState('idle', owner.turnId, owner.turnEpoch)
+        }
+        return
+      }
+      if (this.lifecycleOwner) return
       if (speaking) {
         this.clearAnswerTimer()
         this.setState('speaking')
-      } else if (this.state === 'speaking') {
-        this.setState('idle')
-      }
+      } else if (this.state === 'speaking') this.setState('idle')
     })
   }
 
@@ -203,6 +220,12 @@ export class VoiceSessionManager {
   shutdown(): void {
     this.unregisterShortcut()
     this.clearAnswerTimer()
+    if (this.turnId) this.cancelTurn(this.turnId, this.turnEpoch ?? undefined)
+    else if (this.lifecycleOwner) {
+      const owner = this.lifecycleOwner
+      this.setOwnedState('idle', owner.turnId, owner.turnEpoch)
+    }
+    this.pending.clear()
     this.worker.stop()
     this.speech.shutdown()
   }
@@ -217,7 +240,9 @@ export class VoiceSessionManager {
       this.cancelTurn(this.turnId ?? undefined)
       this.unregisterShortcut()
       this.worker.stop()
-      this.setState('disabled')
+      const owner = this.copyLifecycleOwner()
+      if (owner) this.setOwnedState('disabled', owner.turnId, owner.turnEpoch)
+      else this.setState('disabled')
       return this.snapshot()
     }
     this.registerShortcut(this.shortcut())
@@ -228,19 +253,22 @@ export class VoiceSessionManager {
 
   /** Loads the selected model when the runtime and a model are both present. */
   async prepareEngine(): Promise<void> {
+    const owner = this.copyLifecycleOwner()
     if (!this.runtime.installed) {
       this.engine = {
         state: 'engine_missing',
         message: 'The local speech runtime is not installed yet.',
       }
-      this.setState('model_needed')
+      if (owner) this.settleOwnedLifecycle('model_needed', owner)
+      else this.setState('model_needed')
       void this.broadcastStatus()
       return
     }
     const resolved = await this.resolveModel()
     if (!resolved) {
       this.engine = { state: 'model_missing', message: 'No speech model is installed yet.' }
-      this.setState('model_needed')
+      if (owner) this.settleOwnedLifecycle('model_needed', owner)
+      else this.setState('model_needed')
       void this.broadcastStatus()
       return
     }
@@ -360,25 +388,37 @@ export class VoiceSessionManager {
   }
 
   cancelTurn(turnId?: string, turnEpoch?: string): void {
-    const id = turnId ?? this.turnId
+    const implicitOwner = turnId === undefined ? this.copyLifecycleOwner() : null
+    const id = turnId ?? this.turnId ?? implicitOwner?.turnId
     if (!id) return
-    const currentEpoch = this.turnId === id ? this.turnEpoch : null
-    const ownsCurrent = this.turnId === id && (!turnEpoch || turnEpoch === currentEpoch)
-    if (ownsCurrent) {
+    const currentEpoch = this.turnId === id
+      ? this.turnEpoch
+      : this.lifecycleOwner?.turnId === id
+        ? this.lifecycleOwner.turnEpoch
+        : null
+    const requestedEpoch = turnEpoch ?? implicitOwner?.turnEpoch
+    const ownsCurrentTurn =
+      this.turnId === id && requestedEpoch === this.turnEpoch
+    const ownsCurrentLifecycle =
+      this.lifecycleOwner?.turnId === id &&
+      requestedEpoch === this.lifecycleOwner.turnEpoch
+    if (ownsCurrentTurn) {
       this.turnId = null
       this.turnEpoch = null
       this.partial = ''
       this.segmentsSent = 0
+    }
+    if (ownsCurrentLifecycle) {
       this.stopSpeaking()
       this.setOwnedState('idle', id, currentEpoch)
     }
-    const pending = this.findPending(id, turnEpoch)
+    const pending = requestedEpoch ? this.findPending(id, requestedEpoch) : undefined
     if (pending) this.pending.delete(this.confirmationKey(id, pending.turnEpoch))
-    // A leased stale request is only an acknowledgement. The worker has one
-    // active turn, so forwarding it could cancel a replacement that reused the
-    // provider ID. Legacy unleased callers retain their previous behaviour.
-    if (ownsCurrent || !turnEpoch) this.worker.cancelTurn(id)
-    const ownedEpoch = turnEpoch ?? currentEpoch ?? pending?.turnEpoch ?? undefined
+    // A stale or unleased request is only an acknowledgement. The worker has
+    // one active turn, so forwarding it could cancel a replacement that reused
+    // the provider ID.
+    if (ownsCurrentTurn) this.worker.cancelTurn(id)
+    const ownedEpoch = requestedEpoch ?? pending?.turnEpoch ?? undefined
     this.options.notify(VOICE_EVENTS.outcome, {
       status: 'cancelled',
       turnId: id,
@@ -403,25 +443,27 @@ export class VoiceSessionManager {
     if (words.length < VOICE_MIN_SEGMENT_CHARS) return
     this.partial = ''
     this.segmentsSent += 1
-    this.options.notify(VOICE_EVENTS.segment, { turnId, text: words, index })
+    this.options.notify(VOICE_EVENTS.segment, {
+      turnId, turnEpoch: this.turnEpoch, text: words, index,
+    })
   }
 
   private onPartial(turnId: string, text: string): void {
     if (turnId !== this.turnId) return
     this.partial = text
-    this.options.notify(VOICE_EVENTS.partial, { turnId, text })
+    this.options.notify(VOICE_EVENTS.partial, { turnId, turnEpoch: this.turnEpoch, text })
   }
 
   private async onFinal(turnId: string, text: string): Promise<void> {
     if (turnId !== this.turnId) return
+    const turnEpoch = this.turnEpoch
     this.final = text
     this.partial = ''
-    this.options.notify(VOICE_EVENTS.final, { turnId, text })
+    this.options.notify(VOICE_EVENTS.final, { turnId, turnEpoch, text })
 
     const mode = this.turnMode
     const context = this.turnContext
     const delivered = this.segmentsSent
-    const turnEpoch = this.turnEpoch
     this.turnId = null
     this.turnEpoch = null
     this.segmentsSent = 0
@@ -481,22 +523,28 @@ export class VoiceSessionManager {
 
   private onEngineStatus(status: VoiceEngineStatus): void {
     this.engine = status
+    const owner = this.copyLifecycleOwner()
     if (status.state === 'ready') {
       if (this.state === 'disabled' || this.state === 'model_needed' || this.state === 'error') {
-        this.setState('idle')
+        if (owner) this.setOwnedState('idle', owner.turnId, owner.turnEpoch)
+        else this.setState('idle')
       }
     } else if (status.state === 'engine_missing' || status.state === 'model_missing') {
-      this.setState('model_needed')
+      if (owner) this.settleOwnedLifecycle('model_needed', owner)
+      else this.setState('model_needed')
     } else if (status.state === 'error') {
-      this.setState('error')
+      if (owner) this.settleOwnedLifecycle('error', owner)
+      else this.setState('error')
     }
     void this.broadcastStatus()
   }
 
   private onWorkerError(message: string, code?: string): void {
-    if (this.turnId) {
-      const turnId = this.turnId
-      const turnEpoch = this.turnEpoch
+    const failedOwner = this.turnId
+      ? { turnId: this.turnId, turnEpoch: this.turnEpoch }
+      : null
+    if (failedOwner) {
+      const { turnId, turnEpoch } = failedOwner
       this.options.notify(VOICE_EVENTS.outcome, {
         status: 'rejected',
         turnId,
@@ -508,7 +556,11 @@ export class VoiceSessionManager {
       this.turnEpoch = null
       this.setOwnedState('idle', turnId, turnEpoch)
     }
-    this.options.notify(VOICE_EVENTS.error, { message, code })
+    this.options.notify(VOICE_EVENTS.error, {
+      message,
+      code,
+      ...(failedOwner ?? {}),
+    } satisfies VoiceErrorEvent)
     if (this.turnId === null && this.lifecycleOwner === null) this.setState('idle')
   }
 
@@ -522,9 +574,11 @@ export class VoiceSessionManager {
     if (turnEpoch !== undefined) {
       return this.pending.get(this.confirmationKey(turnId, turnEpoch))
     }
-    // Legacy renderers did not send an epoch. Preserve their prior behavior by
-    // choosing the newest retained confirmation with this provider ID.
-    return [...this.pending.values()].reverse().find((entry) => entry.turnId === turnId)
+    // An unleased request may address only a genuinely legacy confirmation.
+    // It must never borrow the epoch of a newer entry with the same provider ID.
+    return [...this.pending.values()].reverse().find(
+      (entry) => entry.turnId === turnId && entry.turnEpoch === null
+    )
   }
 
   private async runProposal(
@@ -542,6 +596,7 @@ export class VoiceSessionManager {
     }
     this.setOwnedState(confirmed ? 'executing' : 'transcribing', turnId, turnEpoch)
     const outcome = await this.actions.apply(turnId, proposal, context, confirmed)
+    if (!this.ownsLifecycle(turnId, turnEpoch)) return
     const ownedOutcome = {
       ...outcome,
       ...(turnEpoch ? { turnEpoch } : {}),
@@ -587,13 +642,14 @@ export class VoiceSessionManager {
     if (outcome.intent === 'reply_to_agent' && outcome.taskId) {
       // Remember which turn asked, so the answer that arrives minutes later is
       // matched to this turn and no other agent answer is read out.
-      this.speech.expectAnswer(outcome.taskId, turnId)
+      this.speech.expectAnswer(outcome.taskId, turnId, turnEpoch)
       this.setOwnedState('waiting_for_agent', turnId, turnEpoch)
-      this.armAnswerTimer(outcome.taskId)
+      this.armAnswerTimer(outcome.taskId, { turnId, turnEpoch })
       return
     }
 
     const source = outcome.intent === 'read_last_answer' ? 'read_last_answer' : 'action_result'
+    const owner = { turnId, turnEpoch }
     const spoken = await this.speech.speak(
       {
         text: outcome.message,
@@ -601,7 +657,8 @@ export class VoiceSessionManager {
         voiceTurnId: turnId,
         ...(outcome.taskId ? { taskId: outcome.taskId } : {}),
       },
-      () => this.ownsLifecycle(turnId, turnEpoch)
+      () => this.ownsLifecycle(turnId, turnEpoch),
+      owner
     )
     // Ownership may change at any await inside preparation. A stale action is
     // not allowed to settle the replacement call even when no speech started.
@@ -619,8 +676,11 @@ export class VoiceSessionManager {
    * behalf — and then the next answer to arrive is taken as the reply.
    */
   expectSpokenAnswer(turnId: string, taskId?: string): void {
-    if (taskId) this.speech.expectAnswer(taskId, turnId)
-    else this.speech.expectAnyAnswer(turnId)
+    const turnEpoch = this.lifecycleOwner?.turnId === turnId
+      ? this.lifecycleOwner.turnEpoch
+      : null
+    if (taskId) this.speech.expectAnswer(taskId, turnId, turnEpoch)
+    else this.speech.expectAnyAnswer(turnId, turnEpoch)
   }
 
   /**
@@ -663,7 +723,14 @@ export class VoiceSessionManager {
     // interrupted it, and then 20x starts reading the old answer again.
     if (this.speech.audibleParts(taskId, parts).length === 0) return
     if (this.speech.streamingTaskId !== taskId) {
-      if (!(await this.speech.beginStreamingAnswer(taskId, parts))) return
+      const owner = this.speech.answerLifecycleOwner(taskId) ?? this.copyLifecycleOwner()
+      if (!(await this.speech.beginStreamingAnswer(
+        taskId,
+        parts,
+        'agent_answer',
+        owner ? () => this.ownsLifecycle(owner.turnId, owner.turnEpoch) : () => true,
+        owner ?? undefined
+      ))) return
     }
     this.speech.pushStreamingAnswer(taskId, parts)
   }
@@ -683,13 +750,23 @@ export class VoiceSessionManager {
 
   /** Speaks one finished agent answer. Called from the agent status stream. */
   async speakAgentAnswer(taskId: string, text: string): Promise<boolean> {
+    const owner = this.speech.answerLifecycleOwner(taskId) ?? this.copyLifecycleOwner()
     if (!this.isListening()) {
       this.speech.forgetAnswer(taskId)
-      if (this.state === 'waiting_for_agent') this.setState('idle')
+      if (owner && this.state === 'waiting_for_agent') {
+        this.setOwnedState('idle', owner.turnId, owner.turnEpoch)
+      }
       return false
     }
-    const spoken = await this.speech.speakAgentAnswer(taskId, text)
-    if (!spoken && this.state === 'waiting_for_agent') this.setState('idle')
+    const spoken = await this.speech.speakAgentAnswer(
+      taskId,
+      text,
+      owner ? () => this.ownsLifecycle(owner.turnId, owner.turnEpoch) : () => true,
+      owner ?? undefined
+    )
+    if (!spoken && owner && this.state === 'waiting_for_agent') {
+      this.setOwnedState('idle', owner.turnId, owner.turnEpoch)
+    }
     return spoken
   }
 
@@ -697,11 +774,14 @@ export class VoiceSessionManager {
    * A question that is never answered must not leave the indicator waiting for
    * ever.
    */
-  private armAnswerTimer(taskId: string): void {
+  private armAnswerTimer(taskId: string, owner: VoiceSpeechLifecycleOwner): void {
     this.clearAnswerTimer()
     this.answerTimer = setTimeout(() => {
+      if (!this.ownsLifecycle(owner.turnId, owner.turnEpoch)) return
       this.speech.forgetAnswer(taskId)
-      if (this.state === 'waiting_for_agent') this.setState('idle')
+      if (this.state === 'waiting_for_agent') {
+        this.setOwnedState('idle', owner.turnId, owner.turnEpoch)
+      }
     }, VOICE_ANSWER_WAIT_MS)
     this.answerTimer.unref?.()
   }
@@ -866,6 +946,7 @@ export class VoiceSessionManager {
 
   /** Deletes the runtime and switches voice off, because it cannot run. */
   async removeRuntime(): Promise<VoiceRuntimeStatus> {
+    this.cancelTurn()
     this.worker.stop()
     await removeVoiceRuntime(this.runtimeRootDir)
     await this.refreshRuntime()
@@ -935,6 +1016,7 @@ export class VoiceSessionManager {
   }
 
   async removeAllModels(): Promise<void> {
+    this.cancelTurn()
     await this.models.removeAll()
     this.worker.stop()
     this.engine = { state: 'model_missing', message: 'No speech model is installed yet.' }
@@ -943,6 +1025,7 @@ export class VoiceSessionManager {
   }
 
   async setCustomModelDir(dir: string): Promise<VoiceSnapshot> {
+    this.cancelTurn()
     this.options.db.setSetting(VOICE_SETTING_KEYS.customModelDir, dir)
     await this.prepareEngine()
     return this.snapshot()
@@ -1008,6 +1091,31 @@ export class VoiceSessionManager {
     return owner?.turnId === turnId && owner.turnEpoch === turnEpoch
   }
 
+  private copyLifecycleOwner(): VoiceSpeechLifecycleOwner | null {
+    const owner = this.lifecycleOwner
+    return owner ? { turnId: owner.turnId, turnEpoch: owner.turnEpoch } : null
+  }
+
+  /** Closes every main-process resource held by one exact terminal lifecycle. */
+  private settleOwnedLifecycle(
+    next: Extract<VoiceState, 'idle' | 'disabled' | 'error' | 'model_needed' | 'permission_needed'>,
+    owner: VoiceSpeechLifecycleOwner
+  ): boolean {
+    if (!this.ownsLifecycle(owner.turnId, owner.turnEpoch)) return false
+    if (this.turnId === owner.turnId && this.turnEpoch === owner.turnEpoch) {
+      this.worker.cancelTurn(owner.turnId)
+      this.turnId = null
+      this.turnEpoch = null
+      this.partial = ''
+      this.segmentsSent = 0
+    }
+    this.pending.delete(this.confirmationKey(owner.turnId, owner.turnEpoch))
+    this.clearAnswerTimer()
+    const settled = this.setOwnedState(next, owner.turnId, owner.turnEpoch)
+    if (settled) this.speech.stop(next === 'error' ? 'error' : 'cancelled')
+    return settled
+  }
+
   /**
    * Applies a turn lifecycle transition only while that exact start lease
    * still owns the state machine. The owner deliberately survives the final
@@ -1021,7 +1129,13 @@ export class VoiceSessionManager {
   ): boolean {
     if (!this.ownsLifecycle(turnId, turnEpoch)) return false
     this.setState(next, detail, { turnId, turnEpoch })
-    if (next === 'idle' || next === 'disabled' || next === 'error') this.lifecycleOwner = null
+    if (
+      next === 'idle' ||
+      next === 'disabled' ||
+      next === 'error' ||
+      next === 'model_needed' ||
+      next === 'permission_needed'
+    ) this.lifecycleOwner = null
     return true
   }
 

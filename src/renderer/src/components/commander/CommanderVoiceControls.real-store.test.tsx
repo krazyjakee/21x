@@ -288,9 +288,9 @@ describe('app-level call ownership', () => {
     expect(commanderCallMedia.userCaption).toEqual({ partial: 'half heard', final: 'heard' })
 
     act(() => {
-      voicePlayback.start('speech-1')
+      voicePlayback.start('speech-1', {}, 1)
       useVoiceAttributionStore.setState({
-        passage: { speechId: 'speech-1', taskId: 'commander:session-1' },
+        passage: { speechId: 'speech-1', speechGeneration: 1, taskId: 'commander:session-1' },
         version: 1
       })
     })
@@ -300,7 +300,7 @@ describe('app-level call ownership', () => {
     expect(commanderCallMedia.assistantCaption).toEqual({ text: 'answer', speaking: true })
 
     act(() => useVoiceAttributionStore.setState({
-      passage: { speechId: 'speech-1', taskId: 'task-1' },
+      passage: { speechId: 'speech-1', speechGeneration: 1, taskId: 'task-1' },
       version: 2
     }))
     expect(commanderCallMedia.outputLevel()).toBe(0)
@@ -374,10 +374,10 @@ describe('app-level call ownership', () => {
     act(() => {
       useVoiceStore.setState({ speaking: true, speechText: 'First sentence' })
       useVoiceAttributionStore.setState({
-        passage: { speechId: 'speech-1', taskId: 'commander:session-1' },
+        passage: { speechId: 'speech-1', speechGeneration: 1, taskId: 'commander:session-1' },
         version: 1
       })
-      voicePlayback.start('speech-1')
+      voicePlayback.start('speech-1', {}, 1)
     })
     expect(speechStart).not.toHaveBeenCalled()
 

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { EventEmitter } from 'events'
 import { VoiceSessionManager } from './voice-session-manager'
 import type { VoiceWorkerClient } from './voice-worker-client'
-import type { VoiceSpeechService } from './voice-speech-service'
+import type { VoiceSpeechLifecycleOwner, VoiceSpeechService } from './voice-speech-service'
 import type { VoiceActionOutcome, VoiceState } from '../../shared/voice'
 
 /**
@@ -30,36 +30,58 @@ class FakeWorker extends EventEmitter {
 /** A speech service stand-in. Nothing here produces audio. */
 class FakeSpeech {
   spoken: Array<{ text: string; source: string; taskId?: string; voiceTurnId?: string }> = []
-  expectations: Array<{ taskId: string; voiceTurnId: string }> = []
+  expectations: Array<{ taskId: string; voiceTurnId: string; turnEpoch: string | null }> = []
   forgotten: string[] = []
   stops = 0
   /** What `speak` returns. Set to false to model "nothing was spoken". */
   willSpeak = true
-  private listener: ((speaking: boolean) => void) | null = null
+  private listener: ((speaking: boolean, owner?: VoiceSpeechLifecycleOwner) => void) | null = null
+  private activeOwner: VoiceSpeechLifecycleOwner | undefined
 
-  setSpeakingListener(listener: ((speaking: boolean) => void) | null): void {
+  setSpeakingListener(
+    listener: ((speaking: boolean, owner?: VoiceSpeechLifecycleOwner) => void) | null
+  ): void {
     this.listener = listener
   }
   setRuntimeModulePath = vi.fn()
   shutdown = vi.fn()
   prepare = vi.fn(async () => undefined)
-  expectAnswer(taskId: string, voiceTurnId: string): void {
-    this.expectations.push({ taskId, voiceTurnId })
+  expectAnswer(taskId: string, voiceTurnId: string, turnEpoch: string | null): void {
+    this.expectations.push({ taskId, voiceTurnId, turnEpoch })
+  }
+  answerLifecycleOwner(taskId: string): VoiceSpeechLifecycleOwner | null {
+    const expectation = [...this.expectations].reverse().find((entry) => entry.taskId === taskId)
+    return expectation
+      ? { turnId: expectation.voiceTurnId, turnEpoch: expectation.turnEpoch }
+      : null
   }
   forgetAnswer(taskId: string): void {
     this.forgotten.push(taskId)
   }
-  async speak(request: { text: string; source: string; taskId?: string; voiceTurnId?: string }): Promise<boolean> {
+  async speak(
+    request: { text: string; source: string; taskId?: string; voiceTurnId?: string },
+    _isOwnerCurrent?: () => boolean,
+    owner?: VoiceSpeechLifecycleOwner
+  ): Promise<boolean> {
     this.spoken.push(request)
-    if (this.willSpeak) this.listener?.(true)
+    if (this.willSpeak) {
+      this.activeOwner = owner
+      this.listener?.(true, owner)
+    }
     return this.willSpeak
   }
-  async speakAgentAnswer(taskId: string, text: string): Promise<boolean> {
-    return this.speak({ text, source: 'agent_answer', taskId })
+  async speakAgentAnswer(
+    taskId: string,
+    text: string,
+    isOwnerCurrent?: () => boolean,
+    owner?: VoiceSpeechLifecycleOwner
+  ): Promise<boolean> {
+    return this.speak({ text, source: 'agent_answer', taskId }, isOwnerCurrent, owner)
   }
   stop(): void {
     this.stops += 1
-    this.listener?.(false)
+    this.listener?.(false, this.activeOwner)
+    this.activeOwner = undefined
   }
   interrupts = 0
   /** Barge-in. Silences the message being read, then stops. */
@@ -72,7 +94,8 @@ class FakeSpeech {
   }
   /** Ends the passage, as the worker would when the last sentence is produced. */
   finish(): void {
-    this.listener?.(false)
+    this.listener?.(false, this.activeOwner)
+    this.activeOwner = undefined
   }
 }
 
@@ -193,7 +216,9 @@ describe('after a spoken command', () => {
 
     expect(ctx.manager.getState()).toBe('waiting_for_agent')
     expect(ctx.speech.spoken).toHaveLength(0)
-    expect(ctx.speech.expectations).toEqual([{ taskId: 'task-1', voiceTurnId: turnId }])
+    expect(ctx.speech.expectations).toEqual([
+      { taskId: 'task-1', voiceTurnId: turnId, turnEpoch: expect.any(String) },
+    ])
   })
 
   it('says the short result of every other command', async () => {
@@ -316,7 +341,7 @@ describe('only while the microphone is open', () => {
     if ('error' in started) throw new Error(started.error)
     await ctx.manager.speakAgentAnswer('task-1', 'A long answer.')
 
-    ctx.manager.cancelTurn(started.turnId)
+    ctx.manager.cancelTurn(started.turnId, started.turnEpoch)
 
     expect(ctx.speech.interrupts).toBe(1)
   })
