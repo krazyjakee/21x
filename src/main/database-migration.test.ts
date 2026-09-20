@@ -116,12 +116,35 @@ describe('DatabaseManager migrations on an existing install', () => {
     after.close()
   })
 
+  it('adds durable authorization context to merge uses from schema version 25', () => {
+    const first = new DatabaseManager()
+    first.initialize()
+    first.close?.()
+
+    const raw = openRaw()
+    raw.exec('ALTER TABLE merge_grant_uses DROP COLUMN authorization_context')
+    raw.prepare("UPDATE settings SET value = ? WHERE key = '__schema_version'").run('25')
+    expect((raw.pragma('table_info(merge_grant_uses)') as { name: string }[]).map((column) => column.name))
+      .not.toContain('authorization_context')
+    raw.close()
+
+    const second = new DatabaseManager()
+    second.initialize()
+    second.close?.()
+
+    const after = openRaw()
+    expect((after.pragma('table_info(merge_grant_uses)') as { name: string }[]).map((column) => column.name))
+      .toContain('authorization_context')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('26')
+    after.close()
+  })
+
   /**
    * Migration 21 (#150): every agent gets a hard cap of
    * min(existing max_parallel_sessions, 5); an explicit cap is kept, the old
    * field is left as it was, and the concurrency tables appear.
    */
-  it('gives existing agents a hard cap and the unified recovery schema on upgrade to 25', () => {
+  it('gives existing agents a hard cap and the unified recovery schema on upgrade to 26', () => {
     const first = new DatabaseManager()
     first.initialize()
     first.close?.()
@@ -154,7 +177,7 @@ describe('DatabaseManager migrations on an existing install', () => {
       'concurrency_audit', 'task_touches',
       'agent_start_queue', 'agent_start_queue_fairness'
     ]))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('25')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('26')
     after.close()
   })
 
@@ -165,7 +188,7 @@ describe('DatabaseManager migrations on an existing install', () => {
     { name: 'integrated v21', version: '21', drop: ['agent_start_queue', 'agent_start_queue_fairness'] },
     { name: 'authorization-chain v23', version: '23', drop: ['issue_writes'] },
     { name: 'live main v24', version: '24', drop: [] }
-  ])('produces schema-equivalent v25 from $name', ({ version, drop }) => {
+  ])('produces schema-equivalent v26 from $name', ({ version, drop }) => {
     const fresh = new DatabaseManager()
     fresh.initialize()
     fresh.close?.()
@@ -201,7 +224,7 @@ describe('DatabaseManager migrations on an existing install', () => {
       'generation', 'lease_owner', 'lease_expires_at', 'recovery_cause',
       'recovery_action', 'recovery_result', 'queued_at', 'acknowledged_at'
     ]))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('25')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('26')
     after.close()
   })
 
