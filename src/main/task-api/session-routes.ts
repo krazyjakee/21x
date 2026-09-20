@@ -164,15 +164,19 @@ export async function handleSessionRoute(db: DatabaseManager, route: string, par
       if (!params.task_id) return { error: 'task_id is required' }
       if (!agentController) return { error: 'Agent controller not available' }
       const taskId = String(params.task_id)
-      if (agentController.getActiveSessionsForTask(taskId).length === 0) {
-        // A start still waiting for a slot is withdrawn instead.
-        if (agentController.cancelQueuedStart(taskId)) {
-          return { success: true, task_id: taskId, session_id: null, cancelled_queued_start: true }
-        }
+      if (
+        agentController.getActiveSessionsForTask(taskId).length === 0 &&
+        !agentController.hasTaskStartOwnership(taskId)
+      ) {
         return { success: false, task_id: taskId, reason: 'nothing_running' }
       }
       const result = await agentController.stopByTaskId(taskId)
-      return { success: true, task_id: taskId, session_id: result.sessionId }
+      return {
+        success: true,
+        task_id: taskId,
+        session_id: result.sessionId,
+        ...(result.sessionId === null ? { cancelled_queued_start: true } : {})
+      }
     }
 
     case '/start_task': {

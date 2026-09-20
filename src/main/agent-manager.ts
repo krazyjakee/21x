@@ -3591,13 +3591,13 @@ export class AgentManager extends EventEmitter {
       return
     }
 
-    if (resetTaskStatus) this.cancelQueuedStart(session.taskId)
-
     console.log(`[AgentManager] Destroying session ${sessionId} (resetTaskStatus=${resetTaskStatus})`)
+
+    if (resetTaskStatus && !requireAcknowledgement) this.cancelQueuedStart(session.taskId)
 
     if (!requireAcknowledgement) this.stopAdapterPolling(sessionId)
 
-    const adapter = this.getAdapter(session.agentId)
+    const adapter = session.adapter ?? this.getAdapter(session.agentId)
     if (adapter) {
       try {
         const sessionConfig = await this.buildSessionConfig(session.agentId, session.taskId, session.workspaceDir)
@@ -3609,7 +3609,13 @@ export class AgentManager extends EventEmitter {
         if (requireAcknowledgement) throw error
       }
     }
-    if (requireAcknowledgement) this.stopAdapterPolling(sessionId)
+    if (requireAcknowledgement) {
+      // Only withdraw durable ownership after the backend confirms destruction.
+      // A failed stop leaves both the live handle and its acknowledged start row
+      // intact so a caller can retry without manufacturing a stopped state.
+      if (resetTaskStatus) this.cancelQueuedStart(session.taskId)
+      this.stopAdapterPolling(sessionId)
+    }
 
     if (session.secretSessionToken) {
       unregisterSecretSession(session.secretSessionToken)
@@ -3648,15 +3654,18 @@ export class AgentManager extends EventEmitter {
    * is broken (Session: none) and the normal stop-by-sessionId path fails.
    */
   async stopByTaskId(taskId: string): Promise<{ sessionId: string | null }> {
-    // Stopping a task also withdraws a start still waiting for a slot.
-    this.cancelQueuedStart(taskId)
-    // A cancelled lease fences the late start, but acknowledgement must also
-    // wait for that start's backend cleanup before callers write a new status.
-    const starting = this.sessionStarts.get(taskId)
-    if (starting) {
-      try { await starting } catch { /* The start path reports its own failure. */ }
+    let found = this.findSessionByTaskId(taskId)
+    if (!found) {
+      // No backend exists yet, so cancel the durable generation first. Then
+      // wait for an in-flight creation to acknowledge that fence and clean up
+      // any late backend before the caller commits a destination status.
+      this.cancelQueuedStart(taskId)
+      const starting = this.sessionStarts.get(taskId)
+      if (starting) {
+        try { await starting } catch { /* The start path reports its own failure. */ }
+        found = this.findSessionByTaskId(taskId)
+      }
     }
-    const found = this.findSessionByTaskId(taskId)
     if (!found) {
       const task = this.db.getTask(taskId)
       if (task?.status === TaskStatus.AgentWorking || task?.status === TaskStatus.Triaging) {
@@ -3691,8 +3700,10 @@ export class AgentManager extends EventEmitter {
   /** Withdraws a queued start; true when one was waiting. */
   cancelQueuedStart(taskId: string): boolean {
     const task = this.db.getTask(taskId)
-    if (!this.startQueue.get(taskId) && task?.agent_id) {
-      this.startQueue.enqueue({ taskId, agentId: task.agent_id, projectId: taskProjectId(task),
+    const inFlightAgentId = this.admittedStarts.get(taskId) ?? this.findSessionByTaskId(taskId)?.session.agentId
+    const ownerAgentId = task?.agent_id ?? inFlightAgentId
+    if (!this.startQueue.get(taskId) && task && ownerAgentId) {
+      this.startQueue.enqueue({ taskId, agentId: ownerAgentId, projectId: taskProjectId(task),
         priority: task.priority, reason: 'recovery', queuedAt: new Date().toISOString() })
     }
     if (!this.startQueue.cancel(taskId, 'manual_stop', 'manual_stop_not_retried')) return false

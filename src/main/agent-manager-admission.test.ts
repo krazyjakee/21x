@@ -692,6 +692,113 @@ describe('recovery dispatch adversarial regressions', () => {
 })
 
 describe('recovery ownership adversarial regressions', () => {
+  it('rejects a move away when backend destruction fails and keeps the live owner retryable', async () => {
+    const { db, manager, createTasks } = setup(1)
+    const [task] = createTasks(1)
+    await manager.startTask(task.id)
+    const live = manager.findSessionByTaskId(task.id)!
+    const adapter = {
+      destroySession: vi.fn()
+        .mockRejectedValueOnce(new Error('backend refused stop'))
+        .mockResolvedValueOnce(undefined)
+    }
+    live.session.adapter = adapter as any
+    vi.spyOn(manager as any, 'buildSessionConfig').mockResolvedValue({})
+
+    await expect(prepareUserTaskUpdate(
+      manager,
+      db.getTask(task.id)!,
+      { status: TaskStatus.ReadyForReview }
+    )).rejects.toThrow('backend refused stop')
+
+    expect(db.getTask(task.id)?.status).toBe(TaskStatus.AgentWorking)
+    expect(manager.findSessionByTaskId(task.id)?.sessionId).toBe(live.sessionId)
+    expect(manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'started', recoveryResult: 'session_acknowledged' })
+
+    // A repeated stop addresses the same retained owner and can complete once
+    // the backend acknowledges destruction.
+    await expect(manager.stopByTaskId(task.id)).resolves.toEqual({ sessionId: live.sessionId })
+    expect(adapter.destroySession).toHaveBeenCalledTimes(2)
+    expect(manager.findSessionByTaskId(task.id)).toBeUndefined()
+    expect(db.getTask(task.id)?.status).toBe(TaskStatus.NotStarted)
+    expect(manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'cancelled', recoveryCause: 'manual_stop' })
+    await manager.stopAllSessions()
+  })
+
+  it('durably fences an unassigned triage start before acknowledging move-away, restart, and duplicate stops', async () => {
+    const { db, manager } = setup(1)
+    const task = db.createTask(makeTask({ title: 'Needs triage' }))!
+    ;(manager as any).startSessionNow.mockRestore()
+    let finish!: (id: string) => void
+    const adapter = {
+      initialize: vi.fn(async () => undefined),
+      createSession: vi.fn(() => new Promise<string>((resolve) => { finish = resolve })),
+      getStatus: vi.fn(async () => ({ type: 'idle' })),
+      destroySession: vi.fn(async () => undefined),
+      sendPrompt: vi.fn(async () => undefined)
+    }
+    vi.spyOn(manager as any, 'getAdapter').mockReturnValue(adapter)
+    vi.spyOn(manager as any, 'setupWorktreeIfNeeded').mockResolvedValue('/tmp')
+    vi.spyOn(manager as any, 'buildMcpServersForAdapter').mockResolvedValue({})
+    vi.spyOn(manager as any, 'setupSecretSession').mockReturnValue(null)
+    vi.spyOn(manager as any, 'startAdapterPolling').mockImplementation(() => undefined)
+
+    const starting = manager.startTask(task.id)
+    const rejected = expect(starting).rejects.toThrow('Start ownership was withdrawn')
+    await vi.waitFor(() => expect(adapter.createSession).toHaveBeenCalledTimes(1))
+
+    const preparing = prepareUserTaskUpdate(
+      manager,
+      db.getTask(task.id)!,
+      { status: TaskStatus.ReadyForReview }
+    )
+    const duplicateStop = manager.stopByTaskId(task.id)
+    expect(manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'cancelled', recoveryCause: 'manual_stop' })
+
+    finish('late-triage-session')
+    const prepared = await preparing
+    await expect(duplicateStop).resolves.toEqual({ sessionId: null })
+    db.updateTask(task.id, prepared.data)
+
+    const restarted = new AgentManager(db)
+    vi.spyOn(restarted as any, 'sendToRenderer').mockImplementation(() => undefined)
+    const restartedStart = vi.spyOn(restarted as any, 'startSessionNow').mockResolvedValue('should-not-start')
+    await restarted.reconcileStartup()
+    await settle()
+    expect(restartedStart).not.toHaveBeenCalled()
+
+    await rejected
+    expect(adapter.sendPrompt).not.toHaveBeenCalled()
+    expect(adapter.destroySession).toHaveBeenCalledTimes(1)
+    expect(manager.findSessionByTaskId(task.id)).toBeUndefined()
+    expect(db.getTask(task.id)?.status).toBe(TaskStatus.ReadyForReview)
+    await Promise.all([manager.stopAllSessions(), restarted.stopAllSessions()])
+  })
+
+  it('restarts only the selected child when a manually stopped parent has pending subtasks', async () => {
+    const { manager, agentId, started, createTasks } = setup(2)
+    const [parent] = createTasks(1, { title: 'Stopped parent' })
+    const [child] = createTasks(1, { title: 'Pending child', parent_task_id: parent.id }, agentId)
+    await manager.startTask(parent.id, { preferSubtasks: false })
+    await manager.stopByTaskId(parent.id)
+
+    expect(await manager.startTask(parent.id, { resumeManualStop: true })).toMatchObject({
+      action: 'subtask_started',
+      startedTaskId: child.id
+    })
+    expect(await manager.startTask(parent.id, { resumeManualStop: true })).toMatchObject({
+      action: 'already_running',
+      startedTaskId: child.id
+    })
+    await settle()
+
+    expect(started).toEqual([parent.id, child.id])
+    expect(manager.getStartRecoveryState(parent.id)).toMatchObject({ state: 'cancelled', recoveryCause: 'manual_stop' })
+    expect(manager.findSessionByTaskId(parent.id)).toBeUndefined()
+    expect(manager.findSessionByTaskId(child.id)).toBeDefined()
+    await manager.stopAllSessions()
+  })
+
   it('keeps a manual stop terminal across automation and restart', async () => {
     const { db, manager, agentId, started, createTasks } = setup(1)
     const [task] = createTasks(1, { auto_start_agent: true })
