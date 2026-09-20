@@ -2,6 +2,9 @@
 
 Run `pnpm test:nav-rail` with a graphical display, or
 `xvfb-run --auto-servernum pnpm test:nav-rail` on headless Linux (as in Verify).
+Verify configures Chromium’s packaged SUID sandbox helper on its ephemeral
+Linux runner before launching Electron. Local systems need a working Chromium
+sandbox (user namespaces or a correctly installed SUID helper).
 This uses the existing Electron, Vite and Tailwind dependencies. It loads only
 production NavRail and CSS, with inert event subscriptions, no app backend,
 a temporary Electron profile and blocked external requests.
