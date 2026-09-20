@@ -94,8 +94,7 @@ const INTERROGATIVE = /^(?:why|how|what|which|who|where|can|could|would|will|may
 const CODING_ASSIGNMENT = /^(?:please\s+)?(?:implement|fix|repair|build|develop|code|refactor)\b/i
 const UNSAFE_CONTEXT_PREFIX = /^(?:(?:only\s+)?if\b|unless\b|when\b|once\b|pending\b|subject\s+to\b|example(?:\s+instructions?)?\b|hypothetical\b|mock\b|wait\s+for\b)/i
 const AMBIGUOUS_CONTEXT = /\b(?:if|unless|provided|assuming|once|when|after|before|pending|subject\s+to|mock|dry[ -]?run|simulate|hypothetical|example|approval|confirmation)\b/i
-const AUTHORIZATION_COMMAND = /^(?:please\s+)?(?:create|add|make|file|open|publish|update|link|start|prioriti[sz]e)\b/i
-const AUTHORIZATION_DENIAL = /\b(?:do\s+not|don't|dont|never|refrain\s+from)\s+(?:create|add|make|file|open|opening|publish|update|link|start|starting)\b/i
+const AUTHORIZATION_DENIAL = /^(?:please\s+)?(?:do\s+not|don't|dont|never|refrain\s+from)\s+(?:create|add|make|file|open|opening|publish|update|link|start|starting)\b/i
 
 /**
  * Non-authorizing clauses allowed beside an explicit command. Everything else
@@ -104,10 +103,31 @@ const AUTHORIZATION_DENIAL = /\b(?:do\s+not|don't|dont|never|refrain\s+from)\s+(
  * because a later clause happens to look imperative.
  */
 function safeAuthorizationContext(clause: string): boolean {
-  return /^(?:why|how|what|which|who|where)\b/i.test(clause) || /^\d+\b/.test(clause) ||
-    /^come\s+up\s+with\s+(?:a\s+)?technical\s+solution\b/i.test(clause) ||
-    /^i\s+(?:do\s+not|don't|dont)\s+want\s+recommendations?\b/i.test(clause) ||
-    /^(?:the\s+)?(?:github|gh)\s+issues?\s+(?:will|would|should|may|might|probably)\b/i.test(clause)
+  return /^\d+\s+(?:pull\s+requests?|prs?)\s+(?:are\s+)?(?:still\s+)?open$/i.test(clause) ||
+    /^why\s+have\s+we\s+stalled$/i.test(clause) ||
+    /^come\s+up\s+with\s+(?:a\s+)?technical\s+solution\s+for\s+[a-z0-9][a-z0-9_.-]{0,80}\s+that\s+will\s+prevent\s+this\s+stalling\s+in\s+future$/i.test(clause) ||
+    /^i\s+(?:do\s+not|don't|dont)\s+want\s+recommendations?$/i.test(clause) ||
+    /^(?:the\s+)?(?:github|gh)\s+issues?\s+(?:will|would|should|may|might)\s+(?:probably\s+)?need\s+to\s+be\s+part\s+of\s+(?:the\s+)?[a-z0-9][a-z0-9 -]{0,100}$/i.test(clause)
+}
+
+function deniedCapabilities(clause: string): Set<AuthorizationAction> | null {
+  const match = /^(?:please\s+)?(?:do\s+not|don't|dont|never|refrain\s+from)\s+(create|add|make|file|open|opening|publish|update|link|start|starting)\s+(?:(?:the|a|an|any|all|draft)\s+)*(tasks?|(?:github|gh)\s+issues?|(?:(?:github|gh)\s+)?(?:prs?|pull\s+requests?))(?:\s+(?:yet|now))?$/i.exec(clause)
+  if (!match) return null
+  const denied = new Set<AuthorizationAction>()
+  const verb = match[1].replace(/ing$/, '').toLowerCase()
+  const target = match[2].toLowerCase()
+  if (/\b(?:pr|pull\s+request)/.test(target)) denied.add('github.pr.open')
+  else if (/\bissues?\b/.test(target)) {
+    if (verb === 'update') denied.add('github.issue.update')
+    else if (verb === 'link') denied.add('github.issue.link')
+    else {
+      denied.add('github.issue.create')
+      denied.add('github.issue.link')
+    }
+  } else if (verb === 'update') denied.add('task.update')
+  else if (verb === 'start') denied.add('task.start')
+  else denied.add('task.create')
+  return denied
 }
 
 function clauses(text: string): Array<{ text: string; start: number; end: number }> {
@@ -155,35 +175,22 @@ export function classifyCapabilityIntents(text: string, projectNames: string[] =
   const found = new Map<AuthorizationAction, ClassifiedIntent>()
   const denied = new Set<AuthorizationAction>()
   const parsedClauses = clauses(text)
-  if (parsedClauses.some((clause) =>
-    !CODING_ASSIGNMENT.test(clause.text) &&
-    !AUTHORIZATION_COMMAND.test(clause.text) &&
-    !AUTHORIZATION_DENIAL.test(clause.text) &&
-    !safeAuthorizationContext(clause.text)
-  )) return []
   // A conditional/example heading can govern every following imperative, and
   // a trailing condition can qualify commands that came before it. This small
   // grammar cannot safely determine that scope, so the message grants nothing.
   const ambiguousContext = parsedClauses.some((clause) => UNSAFE_CONTEXT_PREFIX.test(clause.text)) || AMBIGUOUS_CONTEXT.test(text)
+  if (ambiguousContext) return []
   for (const clause of parsedClauses) {
-    const denial = /\b(?:do\s+not|don't|dont|never|refrain\s+from)\s+(create|add|make|file|open|opening|publish|update|link|start|starting)\s+(?:(?:the|a|an|any|all|draft)\s+)*(tasks?|(?:github|gh)\s+issues?|(?:(?:github|gh)\s+)?(?:prs?|pull\s+requests?))\b/ig
-    for (const match of clause.text.matchAll(denial)) {
-      const verb = match[1].replace(/ing$/, '').toLowerCase()
-      const target = match[2].toLowerCase()
-      if (/\b(?:pr|pull\s+request)/.test(target)) denied.add('github.pr.open')
-      else if (/\bissues?\b/.test(target)) {
-        if (verb === 'update') denied.add('github.issue.update')
-        else if (verb === 'link') denied.add('github.issue.link')
-        else {
-          denied.add('github.issue.create')
-          denied.add('github.issue.link')
-        }
-      } else if (verb === 'update') denied.add('task.update')
-      else if (verb === 'start') denied.add('task.start')
-      else denied.add('task.create')
+    if (safeAuthorizationContext(clause.text)) continue
+
+    if (AUTHORIZATION_DENIAL.test(clause.text)) {
+      const parsed = deniedCapabilities(clause.text)
+      if (!parsed) return []
+      for (const capability of parsed) denied.add(capability)
+      continue
     }
-    if (ambiguousContext) continue
-    if (clause.text.length > 1_000 || INTERROGATIVE.test(clause.text) || UNSAFE_CLAUSE.test(clause.text) || /["“”`]/.test(clause.text)) continue
+
+    if (clause.text.length > 1_000 || INTERROGATIVE.test(clause.text) || UNSAFE_CLAUSE.test(clause.text) || /["“”`]/.test(clause.text)) return []
 
     if (CODING_ASSIGNMENT.test(clause.text)) {
       addClassified(found, 'task.start', 'necessary', clause)
@@ -193,7 +200,7 @@ export function classifyCapabilityIntents(text: string, projectNames: string[] =
     }
 
     const command = /^(?:please\s+)?(create|add|make|file|open|publish|update|link|start|prioriti[sz]e)\s+(.+)$/i.exec(clause.text)
-    if (!command) continue
+    if (!command) return []
     let verb = command[1].toLowerCase()
     let rest = command[2].trim()
     for (const name of projectNames) {
@@ -240,8 +247,7 @@ export function classifyCapabilityIntents(text: string, projectNames: string[] =
     const namedScope = projectNames.some((name) => new RegExp(`^(?:for|in)\\s+${name.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}$`, 'i').test(tail))
     const safeTail = !tail || namedScope || /^(?:for|in)\s+(?:this|it|the\s+project)\b(?:\s+and\s+prioriti[sz]e\s+(?:them|the\s+tasks?))?$/i.test(tail)
       || /^for tasks [a-z0-9]{24} and [a-z0-9]{24}$/i.test(tail)
-      || /^to\s+(?!merge|deploy|delete|bypass)[a-z0-9][a-z0-9 ,'-]{0,300}$/i.test(tail)
-    if (!safeTail || explicit.size === 0) continue
+    if (!safeTail || explicit.size === 0) return []
 
     for (const capability of explicit) addClassified(found, capability, 'explicit', clause)
     if (explicit.has('github.issue.create')) addClassified(found, 'github.issue.link', 'necessary', clause)

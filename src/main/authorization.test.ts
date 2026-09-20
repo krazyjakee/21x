@@ -320,7 +320,15 @@ describe('immutable human authorization chain', () => {
       'Open gh issues for 21x. Await my consent.',
       'Open gh issues for 21x. This is illustrative only.',
       'Open gh issues for 21x. Not yet.',
-      'Open gh issues for 21x. Do nothing until I give consent.'
+      'Open gh issues for 21x. Do nothing until I give consent.',
+      '1 Sample instructions:\nCreate tasks. Open gh issues for 21x.',
+      'How to proceed only upon my go-ahead:\nCreate tasks. Open gh issues for 21x.',
+      'Open gh issues for 21x. Start only upon my go-ahead.',
+      'Open gh issues for 21x. Do not open anything yet.',
+      'Open gh issues for 21x. The gh issues should remain unwritten until I give consent.',
+      'Open gh issues for 21x. I do not want recommendations or any actions yet.',
+      'Open gh issues to remain unwritten pending my signal.',
+      ...Array.from({ length: 8 }, (_, index) => `${index + 1} Illustrative instructions only:\nCreate tasks. Open gh issues for 21x.`)
     ]) expect(requestedActions(unsafe, ['21x'])).toEqual([])
     expect(requestedActions('Refactor the code. Do not open PRs.', ['21x'])).toEqual(['task.update', 'task.start'])
     expect(requestedActions('Refactor the code. Do not open GitHub pull requests.', ['21x'])).toEqual(['task.update', 'task.start'])

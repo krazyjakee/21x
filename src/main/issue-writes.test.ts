@@ -1252,6 +1252,26 @@ describe('the durable authorization chain', () => {
     expect(h.db.listIssueWrites({ projectId: h.projectId })[0]).toMatchObject({ correlation_id: correlationId, status: 'succeeded' })
   })
 
+  it.each([
+    '1 Sample instructions:\nCreate tasks. Open gh issues for 21x.',
+    'How to proceed only upon my go-ahead:\nCreate tasks. Open gh issues for 21x.',
+    'Open gh issues for 21x. Start only upon my go-ahead.',
+    'Open gh issues for 21x. Do not open anything yet.',
+    'Open gh issues for 21x. The gh issues should remain unwritten until I give consent.',
+    'Open gh issues for 21x. I do not want recommendations or any actions yet.'
+  ])('refuses an unparsed governing restriction before the issue ledger can write: %s', async (text) => {
+    const h = setup({ projectName: '21x' })
+    commanderAsked(h, { text, relay: 'Open the issue requested by the human.' })
+    const result = await captainCall(h, 'create_github_issue', {
+      repo: 'krazyjakee/21x',
+      title: 'Must remain unwritten',
+      task_id: h.taskIds[VOICE_INPUT_TASK]
+    })
+    expect(result).toMatchObject({ status: 'refused', code: 'action_not_in_capability' })
+    expect(creates(h)).toHaveLength(0)
+    expect(h.db.listIssueWrites({ projectId: h.projectId }).filter((row) => row.status === 'succeeded')).toHaveLength(0)
+  })
+
   it('uses the bound human root and the platform-derived Captain identity', async () => {
     const h = setup()
     const root = userAsked(h)
