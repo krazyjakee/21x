@@ -107,7 +107,14 @@ export class DeliveryStore {
       ts,
       ts
     )
-    return { record: this.getByKey(input.idempotencyKey)!, inserted: result.changes === 1 }
+    const record = this.getByKey(input.idempotencyKey)!
+    // The first payload wins on retry, but a key can never change its owner.
+    if (record.kind !== input.kind || record.projectId !== (input.projectId ?? null)
+      || record.taskId !== (input.taskId ?? null) || (input.kind !== 'captain_report' && record.sourceSessionId !== (input.sourceSessionId ?? null))
+      || record.correlationId !== (input.correlationId ?? null)) {
+      throw new Error('Delivery idempotency key belongs to a different destination or request.')
+    }
+    return { record, inserted: result.changes === 1 }
   }
 
   get(id: string): DeliveryRecord | null {
@@ -142,6 +149,17 @@ export class DeliveryStore {
       ORDER BY created_at ASC
     `).all(...params) as DeliveryRow[]
     return rows.map(delivery)
+  }
+
+  bindReport(id: string, sessionId: string, content: string): void {
+    this.source.db.prepare(`UPDATE delivery_outbox SET source_session_id = ?, payload = ?,
+      destination_id = ?, updated_at = ? WHERE id = ? AND kind = 'captain_report'
+      AND state = 'pending' AND destination_id IS NULL`).run(sessionId, content, sessionId, this.now(), id)
+  }
+
+  listTerminalRequests(): DeliveryRecord[] {
+    return (this.source.db.prepare(`SELECT * FROM delivery_outbox
+      WHERE kind = 'captain_request' AND state IN ('failed', 'timed_out')`).all() as DeliveryRow[]).map(delivery)
   }
 
   claim(id: string, owner: string, leaseMs: number): DeliveryRecord | null {
@@ -192,6 +210,24 @@ export class DeliveryStore {
       WHERE id = ? AND state NOT IN ('acknowledged', 'failed', 'timed_out', 'cancelled')
     `).run(state, error, this.now(), id)
     return this.get(id)
+  }
+
+  /** A user Stop is a durable boundary: work not yet accepted by the backend
+   * stays recorded for audit, but can never be claimed or replayed later. */
+  cancelUnacceptedForTask(taskId: string, error: string): DeliveryRecord[] {
+    const rows = this.source.db.prepare(`
+      SELECT * FROM delivery_outbox
+      WHERE task_id = ? AND kind = 'agent_message' AND state IN ('pending', 'claimed')
+      ORDER BY created_at ASC
+    `).all(taskId) as DeliveryRow[]
+    if (rows.length === 0) return []
+    const ts = this.now()
+    this.source.db.prepare(`
+      UPDATE delivery_outbox SET state = 'cancelled', claim_owner = NULL,
+        claim_expires_at = NULL, last_error = ?, updated_at = ?
+      WHERE task_id = ? AND kind = 'agent_message' AND state IN ('pending', 'claimed')
+    `).run(error, ts, taskId)
+    return rows.map((row) => this.get(row.id)!).filter(Boolean)
   }
 
   expireDeadlines(now = this.now()): DeliveryRecord[] {

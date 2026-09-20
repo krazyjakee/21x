@@ -257,6 +257,26 @@ export function prepareAuthorizationDispatch(source: Source, input: { key: strin
   })()
 }
 
+/**
+ * Re-reserve one exact durable dispatch after a failed adapter handoff.
+ *
+ * Generic replays stay stale: only the delivery retry path calls this after
+ * reclaiming the same outbox row. Re-reservation installs no authority until
+ * activateAuthorizationDispatch rechecks expiry and revocation at the adapter
+ * boundary.
+ */
+export function prepareAuthorizationRetry(source: Source, input: { key: string; taskId: string; text: string; messageId?: string }): number {
+  return source.db.transaction(() => {
+    const seq = prepareAuthorizationDispatch(source, input)
+    source.db.prepare(`
+      INSERT INTO authorization_task_bindings (task_id, dispatch_seq, node_id)
+      VALUES (?, ?, NULL)
+      ON CONFLICT(task_id) DO UPDATE SET dispatch_seq = excluded.dispatch_seq, node_id = NULL
+    `).run(input.taskId, seq)
+    return seq
+  })()
+}
+
 export function activateAuthorizationDispatch(source: Source, seq: number): void {
   const row = source.db.prepare('SELECT task_id, node_id FROM authorization_dispatches WHERE seq = ?').get(seq) as { task_id: string; node_id: string | null } | undefined
   if (!row) throw new Error('Unknown authorization dispatch')

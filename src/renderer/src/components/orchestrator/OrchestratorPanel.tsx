@@ -135,8 +135,6 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   const handleAgentChange = async (newAgentId: string) => {
     const previous = selectedAgentIdRef.current
     if (!newAgentId || newAgentId === previous) return
-    selectedAgentIdRef.current = newAgentId
-    setSelectedAgentId(newAgentId)
     setStartFailure(null)
     if (!projectId) return
     setRuntimeActivity({ phase: 'starting_server', agentId: newAgentId })
@@ -147,6 +145,8 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
       const next = await captainRuntimeApi.switch(projectId, newAgentId)
       setRuntime(next)
       if (next.phase === 'healthy') {
+        selectedAgentIdRef.current = next.agentId
+        setSelectedAgentId(next.agentId)
         await fetchProjects()
         return
       }
@@ -285,7 +285,8 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
       const taskId = captainTaskId
       if (!taskId) return
       try {
-        await drainQueue()
+        // A failing older retry must not prevent main from owning this message.
+        await drainQueue().catch(() => {})
         await deliver(outgoing)
       } catch (err) {
         const queue = queuedRef.current.get(taskId) ?? []
@@ -328,12 +329,16 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
 
   const rollbackSwitch = useCallback(async () => {
     if (!projectId) return
-    const next = await captainRuntimeApi.rollback(projectId)
-    setRuntime(next)
-    setStartFailure(next.errorDetail ? { agentId: next.candidateAgentId ?? next.agentId, message: next.errorDetail } : null)
-    selectedAgentIdRef.current = next.agentId
-    setSelectedAgentId(next.agentId)
-    await fetchProjects()
+    try {
+      const next = await captainRuntimeApi.rollback(projectId)
+      setRuntime(next)
+      setStartFailure(next.errorDetail ? { agentId: next.candidateAgentId ?? next.agentId, message: next.errorDetail } : null)
+      selectedAgentIdRef.current = next.agentId
+      setSelectedAgentId(next.agentId)
+      await fetchProjects()
+    } catch (error) {
+      setStartFailure({ agentId: selectedAgentIdRef.current ?? '', message: startFailureMessage(error) })
+    }
   }, [projectId, fetchProjects])
 
   /**

@@ -238,7 +238,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
     }
 
     const previousStatus = session.status
-    const updated = { ...session, status: event.status }
+    const updated = { ...session, status: event.status, agentId: event.agentId || session.agentId }
     if (event.sessionId && session.sessionId !== event.sessionId) updated.sessionId = event.sessionId
     // Turn confirmed running (or errored/awaiting input) — stop showing
     // "starting". Interim `idle` events during resume must NOT clear it.
