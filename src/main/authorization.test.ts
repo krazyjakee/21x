@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTestDb } from '../../test/helpers/db-test-helper'
 import { applySchema } from './database/schema'
+import { createAuthorizationTables } from './database/authorization-schema'
 import {
   AUTHORIZATION_ACTIONS, AUTHORIZATION_CLASSIFIER_VERSION, AUTHORIZATION_TTL_MS, activateAuthorizationDispatch,
   authorizationHash, bindAuthorizationTransport, commanderAuthorization,
@@ -11,6 +12,7 @@ import {
 } from './authorization'
 import { CommanderStore } from './commander/commander-store'
 import { buildCommanderRelayMessage } from './commander/project-tools'
+import { sendWithAuthorization } from './authorization-dispatch'
 import { handleTaskRoute } from './task-api/task-routes'
 import { handleSessionRoute } from './task-api/session-routes'
 import { setTaskApiAgentController } from './task-api/state'
@@ -308,6 +310,9 @@ describe('immutable human authorization chain', () => {
     expect(requestedActions('Example instructions:\nOpen gh issues for 21x', ['21x'])).toEqual([])
     expect(requestedActions('Example instructions:\nCreate tasks. Open gh issues for 21x.', ['21x'])).toEqual([])
     expect(requestedActions('Open gh issues for 21x. Only if I approve.', ['21x'])).toEqual([])
+    expect(requestedActions('After approval:\nCreate tasks. Open gh issues for 21x.', ['21x'])).toEqual([])
+    expect(requestedActions('For example:\nCreate tasks. Open gh issues for 21x.', ['21x'])).toEqual([])
+    expect(requestedActions('Open gh issues for 21x. Provided I approve.', ['21x'])).toEqual([])
     expect(requestedActions('Refactor the code. Do not open PRs.', ['21x'])).toEqual(['task.update', 'task.start'])
     expect(requestedActions('Refactor the code. Do not open GitHub pull requests.', ['21x'])).toEqual(['task.update', 'task.start'])
   })
@@ -377,6 +382,57 @@ describe('immutable human authorization chain', () => {
     expect(taskAuthorization(db, child.id).effectivePermissions).not.toContain('github.pr.open')
 
     const reopened = new Database(db.db.serialize())
+    expect(taskAuthorization({ db: reopened }, child.id).effectivePermissions).not.toContain('github.pr.open')
+    reopened.close()
+  })
+
+  it.each(['retry', 'new-human'] as const)('retains accepted human supersession when %s fails before activation', async (kind) => {
+    const assignmentText = 'Implement the delegated repair'
+    const assignment = recordHumanAuthorization(db, {
+      messageId: `assignment-${kind}`, text: assignmentText, at: now,
+      source: 'project-chat', taskId: captainId, projectId
+    })
+    activateAuthorizationDispatch(db, prepareAuthorizationDispatch(db, {
+      key: `assignment-${kind}`, taskId: captainId, text: assignmentText, messageId: assignment.messageId
+    }))
+    const child = db.createTask({ title: `Restricted ${kind}`, project_id: projectId, repos: ['krazyjakee/21x'] })!
+    inheritTaskAuthorization(db, captainId, child.id, 'Implement the delegated repair')
+    const originalAssignment = taskAuthorization(db, child.id).nodeId
+    const restrictionText = 'Refactor the code. Do not open PRs.'
+    const restriction = recordHumanAuthorization(db, {
+      messageId: `restriction-${kind}`, text: restrictionText, at: now,
+      source: 'project-chat', taskId: child.id, projectId
+    })
+    activateAuthorizationDispatch(db, prepareAuthorizationDispatch(db, {
+      key: `restriction-${kind}`, taskId: child.id, text: restrictionText, messageId: restriction.messageId
+    }))
+    const restrictedNode = taskAuthorization(db, child.id).nodeId
+    expect(restrictedNode).not.toBe(originalAssignment)
+
+    let failedSeq: number
+    if (kind === 'retry') {
+      failedSeq = prepareAuthorizationRetry(db, {
+        key: `restriction-${kind}`, taskId: child.id, text: restrictionText, messageId: restriction.messageId
+      })
+    } else {
+      const nextText = 'Update tasks'
+      const next = recordHumanAuthorization(db, {
+        messageId: 'replacement-human', text: nextText, at: now,
+        source: 'project-chat', taskId: child.id, projectId
+      })
+      failedSeq = prepareAuthorizationDispatch(db, {
+        key: 'replacement-human', taskId: child.id, text: nextText, messageId: next.messageId
+      })
+    }
+    await expect(sendWithAuthorization(db, failedSeq, async () => ({ type: 'error' }), async () => {}))
+      .rejects.toThrow('backend is error')
+
+    const reopened = new Database(db.db.serialize())
+    const machine = prepareAuthorizationDispatch({ db: reopened }, {
+      key: `machine-after-${kind}`, taskId: child.id, text: 'Progress update please'
+    })
+    activateAuthorizationDispatch({ db: reopened }, machine)
+    expect(taskAuthorization({ db: reopened }, child.id)).toMatchObject({ nodeId: restrictedNode })
     expect(taskAuthorization({ db: reopened }, child.id).effectivePermissions).not.toContain('github.pr.open')
     reopened.close()
   })
@@ -460,6 +516,24 @@ describe('immutable human authorization chain', () => {
     expect(sendByTaskId).not.toHaveBeenCalled()
   })
 
+  it('requires task.start for Captain-scoped message recovery', async () => {
+    const text = 'Update tasks'
+    const origin = recordHumanAuthorization(db, {
+      messageId: 'captain-update-only', text, at: now,
+      source: 'project-chat', taskId: captainId, projectId
+    })
+    activateAuthorizationDispatch(db, prepareAuthorizationDispatch(db, {
+      key: 'captain-update-only', taskId: captainId, text, messageId: origin.messageId
+    }))
+    const target = db.createTask({ title: 'Stopped worker', project_id: projectId })!
+    const sendByTaskId = vi.fn(async () => ({ sessionId: 'resumed' }))
+    setTaskApiAgentController({ sendByTaskId, findSessionByTaskId: vi.fn(() => ({ sessionId: 'stopped' })) } as never)
+    expect(await handleSessionRoute(db, '/send_message', { task_id: target.id, text: 'Resume' }, {
+      projectId, taskId: null, artifactTaskId: null, parentTaskId: null
+    })).toMatchObject({ code: 'capability_refused', missing_capability: 'task.start' })
+    expect(sendByTaskId).not.toHaveBeenCalled()
+  })
+
   it('returns one structured adjacent-to-execution refusal with origin and remediation', () => {
     relay()
     const decision = resolveTaskAuthorization(db, { taskId: captainId, projectId, action: 'github.pr.open', repo: 'krazyjakee/21x' })
@@ -520,5 +594,34 @@ describe('immutable human authorization chain', () => {
     expect(applySchema(db.db)).toBe(true)
     expect(db.db.prepare('SELECT COUNT(*) AS n FROM authorization_nodes').get()).toEqual({ n: 0 })
     expect(applySchema(db.db)).toBe(false)
+  })
+
+  it('migrates an accepted assignment supersession without exposing the older assignment', () => {
+    const legacy = new Database(':memory:')
+    legacy.pragma('foreign_keys = ON')
+    legacy.exec(`
+      CREATE TABLE authorization_nodes (
+        id TEXT PRIMARY KEY, parent_id TEXT, root_id TEXT NOT NULL,
+        message_id TEXT, correlation_id TEXT UNIQUE, body TEXT NOT NULL, hash TEXT NOT NULL
+      );
+      CREATE TABLE authorization_dispatches (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT, delivery_key TEXT NOT NULL UNIQUE,
+        task_id TEXT NOT NULL, node_id TEXT, payload_hash TEXT NOT NULL
+      );
+      CREATE TABLE authorization_task_bindings (
+        task_id TEXT PRIMARY KEY, dispatch_seq INTEGER NOT NULL,
+        node_id TEXT REFERENCES authorization_nodes(id),
+        assignment_node_id TEXT REFERENCES authorization_nodes(id)
+      );
+      INSERT INTO authorization_nodes VALUES
+        ('assignment', NULL, 'assignment', 'a', NULL, '{}', 'a'),
+        ('restriction', NULL, 'restriction', 'r', NULL, '{}', 'r');
+      INSERT INTO authorization_dispatches VALUES (1, 'restriction', 'worker', 'restriction', 'hash');
+      INSERT INTO authorization_task_bindings VALUES ('worker', 1, 'restriction', 'assignment');
+    `)
+    createAuthorizationTables(legacy)
+    expect(legacy.prepare('SELECT supersession_node_id FROM authorization_task_bindings WHERE task_id = ?').get('worker'))
+      .toEqual({ supersession_node_id: 'restriction' })
+    legacy.close()
   })
 })

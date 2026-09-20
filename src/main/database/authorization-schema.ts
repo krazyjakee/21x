@@ -23,12 +23,25 @@ export function createAuthorizationTables(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS authorization_task_bindings (
       task_id TEXT PRIMARY KEY, dispatch_seq INTEGER NOT NULL,
       node_id TEXT REFERENCES authorization_nodes(id),
-      assignment_node_id TEXT REFERENCES authorization_nodes(id)
+      assignment_node_id TEXT REFERENCES authorization_nodes(id),
+      supersession_node_id TEXT REFERENCES authorization_nodes(id)
     );
   `)
   const bindingColumns = db.prepare('PRAGMA table_info(authorization_task_bindings)').all() as Array<{ name: string }>
   if (!bindingColumns.some((column) => column.name === 'assignment_node_id')) {
     db.exec('ALTER TABLE authorization_task_bindings ADD COLUMN assignment_node_id TEXT REFERENCES authorization_nodes(id)')
+  }
+  if (!bindingColumns.some((column) => column.name === 'supersession_node_id')) {
+    db.exec('ALTER TABLE authorization_task_bindings ADD COLUMN supersession_node_id TEXT REFERENCES authorization_nodes(id)')
+    // Existing installs may already have an accepted human node overriding a
+    // delegated assignment. Preserve that fail-closed state across migration.
+    db.exec(`
+      UPDATE authorization_task_bindings
+      SET supersession_node_id = node_id
+      WHERE assignment_node_id IS NOT NULL
+        AND node_id IS NOT NULL
+        AND node_id IS NOT assignment_node_id
+    `)
   }
   db.exec(`CREATE TRIGGER IF NOT EXISTS authorization_assignment_no_replace
     BEFORE UPDATE OF assignment_node_id ON authorization_task_bindings

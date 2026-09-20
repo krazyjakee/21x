@@ -55,8 +55,22 @@ function authorizeMessageRecovery(
   scope: TaskMcpScope | undefined,
   projectId: string
 ): Record<string, unknown> | null {
-  const caller = scope?.taskId ?? scope?.artifactTaskId
-  if (!caller) return null
+  if (!scope) return null
+  const caller = scope.taskId ?? scope.artifactTaskId ??
+    (scope.projectId === projectId ? db.getCoordinatorTask(projectId)?.id : null)
+  if (!caller) {
+    return {
+      error: 'The signed caller scope has no task authorization lineage.',
+      code: 'capability_refused',
+      requested_capability: 'task.start',
+      missing_capability: 'task.start',
+      origin_node_id: null,
+      origin_message_id: null,
+      effective_capabilities: [],
+      failure_dimension: 'task',
+      safe_remediation: 'Resume this work from an authenticated human project instruction; machine recovery text cannot grant authority.'
+    }
+  }
   const decision = resolveTaskAuthorization(db, { taskId: caller, projectId, action: 'task.start' })
   return decision.allowed ? null : authorizationRefusal(decision)
 }

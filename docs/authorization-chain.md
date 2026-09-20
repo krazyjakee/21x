@@ -38,7 +38,7 @@ Schema 23 adds an append-only ledger:
 | Delegation node | Parent ID and hash, root ID, relay author, exact interpretation and hash, Commander correlation/session, destination task, timestamp, narrowed actions/repos, unchanged or shorter expiry |
 | Transport binding | Durable delivery key, node ID, destination task and exact payload hash |
 | Dispatch reservation | Monotonic sequence, idempotency key, task, node and payload hash |
-| Task binding | Current dispatch sequence/turn node plus a write-once assigned-work node; machine follow-ups can replace the former but never erase the latter |
+| Task binding | Current dispatch sequence/turn node, a write-once assigned-work node, and the last accepted human supersession; pending, failed, retried, and machine-only deliveries cannot expose authority removed by that supersession |
 | Revocation | Append-only node ID, time and reason; applies to all descendants |
 
 SQLite triggers forbid updates/deletes of evidence. Hashes detect inconsistent
