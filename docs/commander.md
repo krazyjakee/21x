@@ -197,7 +197,13 @@ The Commander view is in the NavRail (`sidebarView === 'commander'`) and lives i
   - Shows tool calls as chips (`tool-call-label.ts`): a delegation reads
     "Asked Web: Ship the site", an administration call reads
     "Archive project · Web". Chips are drawn from the stored `tool_calls`, and
-    a chip's result comes from the matching `tool` row.
+    a chip's result comes from the matching `tool` row. A chip spins only while
+    its call can still finish: the live turn's chips, and a stored call of the
+    newest message while that turn runs. A stored call with no `tool` row
+    anywhere else (saved by an older build, before the runtime closed every
+    unanswered call) reads "Not run" as a failure; it never spins and never
+    shows a success tick (#83). The state is also text for screen readers, and
+    the spinner honours reduced motion.
   - Shows reports as bordered, project-tagged cards.
   - Has a Stop button and an empty state.
   - The composer includes persistent model and thinking-level selectors. It
@@ -284,16 +290,38 @@ of the chat). The wake word stays out of scope.
   `CommanderService.sendUserMessage` after cancelling any reply still running.
   Turning it off, switching session, pressing Escape or leaving the view closes
   the microphone, stops playback and closes any ElevenLabs connection.
-- **Half-heard words appear once** (#83). While its conversation runs, the
-  strip's status pill shows them and sets the voice store's `captionOwner`, so
-  the global `VoiceOverlay` leaves its listening bubble out. Confirmations and
-  results still appear in the overlay, and a microphone opened anywhere else
-  keeps the overlay as before.
-- **When voice cannot start**, the reason is visible text under the button
-  ("Mic blocked", "Voice not installed", "Voice not set up"; it also describes
-  the button to screen readers). Clicking either the label or the button
-  explains the problem in full and offers "Open voice settings" (Settings →
-  Voice). Typed chat is unaffected.
+- **Half-heard words appear once** (#83). While its own conversation turn
+  runs, the strip's status pill shows them and sets the voice store's
+  `captionOwner`, so the global `VoiceOverlay` leaves its listening bubble out.
+  Confirmations and results still appear in the overlay. Ownership follows the
+  turn the strip actually opened, never the fact that it is starting: a
+  microphone opened anywhere else keeps the overlay and its words. If another
+  microphone is already listening, clicking the voice button is refused at once
+  ("Another microphone is already listening…") before voice mode or the reply
+  voice is touched, and the check runs again just before the turn opens.
+- **When voice cannot start**, the reason is visible text under the button. It
+  also describes the button to screen readers, and its tooltip holds the full
+  reason. The two controls do different things:
+  - **The label** opens Settings → Voice directly.
+  - **The voice button** shows the full reason in an alert with an **Open voice
+    settings** button. It does not start anything while the reason is blocking.
+
+  | Label | Meaning | Button click |
+  | --- | --- | --- |
+  | Mic blocked | The OS refused microphone access | explains |
+  | Voice not installed | The local speech runtime is missing | explains |
+  | Voice not set up | No speech model is installed | explains |
+  | Voice engine error | A model is installed but the speech engine failed (for example, the worker crashed) | tries again: turning voice on reloads the engine |
+  | Voice unavailable | This build has no voice bridge | explains (no settings button) |
+
+  An installed engine that is merely switched off shows no label: one click
+  turns it on and starts the conversation. A start that fails later (the engine
+  does not recover, the reply voice cannot be prepared, no microphone is found,
+  access is refused, or the device is in use) also ends in the alert with
+  **Open voice settings** and says what to do, as does a conversation that ends
+  on a reported failure. "Another microphone is already listening" and errors
+  sending a message have no settings button, because Settings cannot fix them.
+  Typed chat is unaffected throughout.
 - **The reply is spoken as it is written**, through whichever engine is
   selected in Settings → Voice (system, downloaded, or ElevenLabs). Each
   finished sentence is handed over as it arrives; a text run closed by a tool

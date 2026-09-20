@@ -273,3 +273,101 @@ describe('toolCallLabel', () => {
     expect(toolCallLabel('navigate_to_project', { project: 'Web' })).toBe('Navigate to project · Web')
   })
 })
+
+/**
+ * The pane decides which stored tool call may still be running, and it is the
+ * only place that decision is made from real state (#83). `CommanderMessageItem`
+ * is always handed `turnActive` directly, so these cases are what stop the
+ * "a call with no result is running" bug from coming back through the pane.
+ */
+describe('CommanderChatPane: a stored tool call spins only while it can still finish (#83)', () => {
+  const CALL = { id: 'c1', name: 'ask_project', input: { project: 'web', message: 'deploy' } }
+
+  async function openWith(messages: CommanderMessage[], activeTurnId: string | null): Promise<void> {
+    api.listSessions.mockResolvedValue([session()])
+    api.listMessages.mockResolvedValue({ messages, activeTurnId })
+    render(<CommanderWorkspace />)
+    fireEvent.click(await screen.findByText('Launch'))
+    expect(await screen.findByText('Asked web: deploy')).toBeTruthy()
+  }
+
+  function chipState(): string {
+    return screen.getByTestId('commander-tool-state').textContent ?? ''
+  }
+
+  function spinners(): number {
+    return document.querySelectorAll('.animate-spin').length
+  }
+
+  it('reads a call of a finished turn as "Not run", never as running', async () => {
+    // A session saved by an older build: the call has no `tool` row and no
+    // turn is live, so nothing will ever answer it.
+    await openWith(
+      [
+        message({ id: 'u1', content: 'Ask web to deploy', created_at: 1 }),
+        message({ id: 'a1', role: 'assistant', content: '', created_at: 2, tool_calls: [CALL] })
+      ],
+      null
+    )
+    expect(chipState()).toBe('(Not run)')
+    expect(spinners()).toBe(0)
+  })
+
+  it('does not revive an older turn\'s unanswered call just because a new turn is running', async () => {
+    // The adversarial case for the pane's rule: a turn IS live, but it is not
+    // this message's turn. Gating on `streaming` alone would spin for ever.
+    await openWith(
+      [
+        message({ id: 'u1', content: 'Ask web to deploy', created_at: 1 }),
+        message({ id: 'a1', role: 'assistant', content: '', created_at: 2, tool_calls: [CALL] }),
+        message({ id: 'u2', content: 'Any news?', created_at: 3 })
+      ],
+      'turn-live'
+    )
+    expect(useCommanderStore.getState().streaming.s1?.turnId).toBe('turn-live')
+    expect(chipState()).toBe('(Not run)')
+    expect(spinners()).toBe(0)
+  })
+
+  it('still spins for the running turn\'s own newest call', async () => {
+    // The other half: the fix must not stop every stored call from spinning.
+    await openWith(
+      [
+        message({ id: 'u1', content: 'Ask web to deploy', created_at: 1 }),
+        message({ id: 'a1', role: 'assistant', content: '', created_at: 2, tool_calls: [CALL] })
+      ],
+      'turn-live'
+    )
+    expect(chipState()).toBe('(Running)')
+    expect(spinners()).toBeGreaterThan(0)
+  })
+
+  it('stops spinning as soon as that turn ends, with no result ever stored', async () => {
+    await openWith(
+      [
+        message({ id: 'u1', content: 'Ask web to deploy', created_at: 1 }),
+        message({ id: 'a1', role: 'assistant', content: '', created_at: 2, tool_calls: [CALL] })
+      ],
+      'turn-live'
+    )
+    expect(chipState()).toBe('(Running)')
+    act(() => {
+      emit({ type: 'turn_event', sessionId: 's1', turnId: 'turn-live', event: { type: 'done', stopReason: 'max_tokens' } })
+    })
+    await waitFor(() => expect(chipState()).toBe('(Not run)'))
+    expect(spinners()).toBe(0)
+  })
+
+  it('lets a stored result win over the running turn', async () => {
+    await openWith(
+      [
+        message({ id: 'u1', content: 'Ask web to deploy', created_at: 1 }),
+        message({ id: 'a1', role: 'assistant', content: '', created_at: 2, tool_calls: [CALL] }),
+        message({ id: 't1', role: 'tool', content: 'queued', tool_call_id: 'c1', tool_name: 'ask_project', created_at: 3 })
+      ],
+      'turn-live'
+    )
+    expect(screen.queryByTestId('commander-tool-state')).toBeNull()
+    expect(spinners()).toBe(0)
+  })
+})

@@ -293,6 +293,62 @@ describe('CommanderService turns', () => {
     expect(doneEvent).toMatchObject({ event: { stopReason: 'end_turn' } })
   })
 
+  it('stores a failed result for every call of a turn that ends without running them, so a reopened session has no running call (#83)', async () => {
+    // The tool-call limit is 0 and the model calls tools regardless, twice in one message.
+    let round = 0
+    const provider = fakeProvider({
+      chat: (request) => {
+        // After the first user turn is over, answer in text.
+        if (request.messages.filter((m) => m.role === 'user').length > 1) return 'Nothing new.'
+        round++
+        return { text: 'Checking.', toolCalls: [{ id: `r${round}-a`, name: 'list_projects', input: {} }, { id: `r${round}-b`, name: 'list_projects', input: {} }] }
+      },
+      title: () => 'T'
+    })
+    const handler = vi.fn(async () => '[]')
+    const service = new CommanderService({
+      store,
+      createProvider: () => provider,
+      emit: (e) => events.push(e),
+      maxToolCalls: 0,
+      getTools: () => [{ name: 'list_projects', description: 'Lists projects', inputSchema: { type: 'object', properties: {} }, handler }]
+    })
+    const session = store.createSession()
+    await service.sendUserMessage(session.id, 'What is running?').done
+
+    // What a reopened session reads from the database.
+    const rows = store.listMessages(session.id)
+    const calls = rows.flatMap((m) => (m.role === 'assistant' ? m.tool_calls ?? [] : []))
+    const results = new Map(rows.filter((m) => m.role === 'tool').map((m) => [m.tool_call_id, m]))
+    expect(calls.length).toBeGreaterThan(0)
+    for (const call of calls) {
+      const result = results.get(call.id)
+      expect(result, `call ${call.id} has a stored result`).toBeDefined()
+      expect(result?.is_error).toBe(true)
+      expect(result?.content).toMatch(/limit|Not run/i)
+    }
+    // Round 1 was refused by the limit inside the loop; round 2 came back after
+    // `toolChoice: 'none'` and is the one the runtime used to leave unanswered.
+    expect([...results.keys()].sort()).toEqual(['r1-a', 'r1-b', 'r2-a', 'r2-b'])
+    expect(results.get('r2-b')?.content).toMatch(/^Not run: the tool-call limit/)
+    expect(handler).not.toHaveBeenCalled()
+
+    // The renderer got the same rows before it was told the turn is done.
+    const appended = events.flatMap((e) => (e.type === 'messages_appended' ? e.messages : []))
+    expect(appended.filter((m) => m.role === 'tool').map((m) => m.tool_call_id).sort()).toEqual([...results.keys()].sort())
+    const doneAt = events.findIndex((e) => e.type === 'turn_event' && e.event.type === 'done')
+    const appendedAt = events.findIndex((e) => e.type === 'messages_appended' && e.messages.some((m) => m.role === 'tool'))
+    expect(appendedAt).toBeGreaterThan(-1)
+    expect(appendedAt).toBeLessThan(doneAt)
+
+    // The stored history is valid to send again: the next turn reaches the model with every call answered.
+    await service.sendUserMessage(session.id, 'And now?').done
+    const next = chatRequests(provider).at(-1)!
+    const sentCalls = next.messages.flatMap((m) => (m.role === 'assistant' ? m.toolCalls ?? [] : []))
+    const sentResults = new Set(next.messages.flatMap((m) => (m.role === 'tool' ? [m.toolCallId] : [])))
+    for (const call of sentCalls) expect(sentResults.has(call.id)).toBe(true)
+  })
+
   it('tags tool rows only from successful object results', () => {
     expect(toolResultTags('{"status":"sent","project_id":"p1","correlation_id":"cmd-1"}', false)).toEqual({ projectId: 'p1', correlationId: 'cmd-1' })
     expect(toolResultTags('{"status":"sent","project_id":"p1","correlation_id":"cmd-1"}', true)).toEqual({})
