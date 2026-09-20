@@ -128,6 +128,10 @@ export class ChatRuntime {
     listener: ChatEventListener
   ): Promise<ChatTurnResult> {
     const messages: ChatMessage[] = [...options.messages]
+    const hasImages = messages.some((message) => message.role === 'user' && message.images?.length)
+    const errorMessage = (error: unknown): string => hasImages
+      ? 'The chat request with images failed. Check the selected model and try again.'
+      : error instanceof Error ? error.message : String(error)
     const usage: ChatUsage = { inputTokens: 0, outputTokens: 0 }
     const emit = (event: ChatRuntimeEvent): void => {
       try {
@@ -146,7 +150,7 @@ export class ChatRuntime {
     try {
       toolsByName = validateTools(options.tools ?? [])
     } catch (err) {
-      return finish('error', err instanceof Error ? err.message : String(err))
+      return finish('error', errorMessage(err))
     }
     const providerTools = [...toolsByName.values()].map(({ name, description, inputSchema }) => ({ name, description, inputSchema }))
     const limit = clampToolLimit(options.maxToolCalls)
@@ -236,8 +240,8 @@ export class ChatRuntime {
         closeUnansweredToolCalls(messages)
         return finish('cancelled')
       }
-      console.error(`[ChatRuntime] turn ${turnId} failed:`, err)
-      return finish('error', err instanceof Error ? err.message : String(err))
+      console.error(`[ChatRuntime] turn ${turnId} failed:`, hasImages ? errorMessage(err) : err)
+      return finish('error', errorMessage(err))
     }
   }
 }

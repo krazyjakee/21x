@@ -127,6 +127,7 @@ export interface VoiceTtsSnapshot {
  */
 export type VoiceTtsElevenLabsErrorKind =
   | 'auth'
+  | 'permission'
   | 'quota'
   | 'rate_limit'
   | 'unsupported_model'

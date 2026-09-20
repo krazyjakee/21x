@@ -99,6 +99,8 @@ interface AgentState {
   bindTranscript: (taskId: string) => () => void
   endSession: (taskId: string) => void
   removeSession: (taskId: string) => void
+  /** Forget a task's live session state but keep its transcript, e.g. before starting it on another agent. */
+  resetSession: (taskId: string) => void
   clearMessageDedup: (taskId: string) => void
   getSession: (taskId: string) => TaskSession | undefined
   stopAndRemoveSessionForTask: (taskId: string) => Promise<void>
@@ -386,6 +388,15 @@ export const useAgentStore = create<AgentState>((set, get) => {
     removeSession: (taskId) => {
       projections.delete(taskId)
       set((state) => {
+        const next = new Map(state.sessions)
+        next.delete(taskId)
+        return { sessions: next }
+      })
+    },
+
+    resetSession: (taskId) => {
+      set((state) => {
+        if (!state.sessions.has(taskId)) return state
         const next = new Map(state.sessions)
         next.delete(taskId)
         return { sessions: next }

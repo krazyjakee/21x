@@ -352,6 +352,41 @@ describe('schema equivalence: legacy database migrated vs fresh database', () =>
     expect(applySchema(db)).toBe(false)
     expect(snapshotSchema(db)).toEqual(before)
   })
+
+  it('adds Commander images to a current-version database and preserves message ownership on restart', () => {
+    const db = openMemory()
+    applySchema(db)
+    const currentSchema = snapshotSchema(db)
+    const version = schemaVersion(db)
+    // This feature adds a table without bumping the migration version. Model
+    // an installation that already passed the version gate before the update.
+    db.exec('DROP TABLE commander_images')
+    expect(applySchema(db)).toBe(false)
+    expect(schemaVersion(db)).toBe(version)
+    expect(snapshotSchema(db)).toEqual(currentSchema)
+
+    db.prepare('INSERT INTO commander_sessions (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)')
+      .run('image-session', 'Pictures', NOW, NOW)
+    db.prepare('INSERT INTO commander_messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run('image-message', 'image-session', 'user', 'Look', NOW)
+    const insert = db.prepare('INSERT INTO commander_images (id, message_id, mime_type, size, data) VALUES (?, ?, ?, ?, ?)')
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47])
+    insert.run('image-one', 'image-message', 'image/png', bytes.length, bytes)
+    expect(() => insert.run('orphan', 'missing-message', 'image/png', bytes.length, bytes)).toThrow(/FOREIGN KEY/)
+
+    expect(applySchema(db)).toBe(false)
+    expect(db.prepare('SELECT data FROM commander_images WHERE id = ?').get('image-one')).toEqual({ data: bytes })
+    db.prepare('DELETE FROM commander_messages WHERE id = ?').run('image-message')
+    expect(db.prepare('SELECT COUNT(*) AS count FROM commander_images').get()).toEqual({ count: 0 })
+
+    db.prepare('INSERT INTO commander_messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run('image-message-2', 'image-session', 'user', 'Look again', NOW)
+    insert.run('image-two', 'image-message-2', 'image/png', bytes.length, bytes)
+    db.prepare('DELETE FROM commander_sessions WHERE id = ?').run('image-session')
+    expect(db.prepare('SELECT COUNT(*) AS count FROM commander_images').get()).toEqual({ count: 0 })
+    expect(db.pragma('foreign_key_check')).toEqual([])
+    db.close()
+  })
 })
 
 // ── removeHostedServiceData ──────────────────────────────────

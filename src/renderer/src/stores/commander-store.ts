@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import type { CommanderEvent, CommanderMessage, CommanderSession } from '@shared/commander'
 import { commanderApi } from '@/lib/ipc-client'
+import { seedCommanderImages } from '@/lib/commander-images'
+import type { ChatImageInput } from '@shared/chat-images'
 
 /**
  * Commander sessions in the renderer (docs/commander.md).
@@ -46,7 +48,8 @@ interface CommanderState {
   createSession: () => Promise<CommanderSession | null>
   renameSession: (id: string, title: string) => Promise<void>
   archiveSession: (id: string, archived: boolean) => Promise<void>
-  send: (text: string) => Promise<boolean>
+  /** `images` (#144) may stand in for text: a message needs one or the other. */
+  send: (text: string, images?: ChatImageInput[]) => Promise<boolean>
   cancel: () => Promise<void>
   handleEvent: (event: CommanderEvent) => void
 }
@@ -172,13 +175,17 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
     if (archived && get().selectedSessionId === id && !get().showArchived) set({ selectedSessionId: null })
   },
 
-  send: async (text) => {
+  send: async (text, images) => {
     const sessionId = get().selectedSessionId
     const trimmed = text.trim()
-    if (!sessionId || !trimmed || get().streaming[sessionId]) return false
+    if (!sessionId || (!trimmed && !images?.length) || get().streaming[sessionId]) return false
     set((state) => ({ turnErrors: { ...state.turnErrors, [sessionId]: undefined } }))
     try {
-      const { turnId, message } = await commanderApi.send(sessionId, trimmed)
+      const { turnId, message } = images?.length
+        ? await commanderApi.send(sessionId, trimmed, images)
+        : await commanderApi.send(sessionId, trimmed)
+      // The thumbnails are on screen already; no need to fetch the bytes back.
+      if (images?.length) seedCommanderImages(message.images, images)
       set((state) => ({
         messages: { ...state.messages, [sessionId]: mergeMessages(state.messages[sessionId] ?? [], [message]) },
         // turn_started may already have arrived (keep whatever streamed), or
@@ -189,7 +196,10 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
       }))
       return true
     } catch (err) {
-      set((state) => ({ turnErrors: { ...state.turnErrors, [sessionId]: err instanceof Error ? err.message : String(err) } }))
+      // Electron wraps a handler's error ("Error invoking remote method 'x': Error: …");
+      // the user reads only the reason, e.g. that the model can't read images.
+      const reason = (err instanceof Error ? err.message : String(err)).replace(/^Error invoking remote method '[^']*': (?:\w*Error: )?/, '')
+      set((state) => ({ turnErrors: { ...state.turnErrors, [sessionId]: reason } }))
       return false
     }
   },

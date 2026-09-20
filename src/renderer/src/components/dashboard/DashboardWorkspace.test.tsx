@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { render, screen, cleanup, fireEvent } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react'
 import { DashboardWorkspace } from './DashboardWorkspace'
 import { useTaskStore } from '@/stores/task-store'
 import { useUIStore } from '@/stores/ui-store'
@@ -60,8 +60,6 @@ vi.mock('@/lib/ipc-client', () => ({
   onTaskDeleted: vi.fn(() => () => {}),
   onTasksRefresh: vi.fn(() => () => {}),
   onAgentStatus: vi.fn(() => () => {}),
-  onAgentOutput: vi.fn(() => () => {}),
-  onAgentOutputBatch: vi.fn(() => () => {}),
   onTranscriptChanged: vi.fn(() => () => {}),
   onAgentIncompatibleSession: vi.fn(() => () => {}),
   agentApi: {
@@ -252,6 +250,90 @@ describe('DashboardWorkspace', () => {
 
     // Should set the preview task ID in the UI store (dialog rendered by AppLayout)
     expect(useUIStore.getState().dashboardPreviewTaskId).toBe('task-abc')
+  })
+
+  it('moves a task to another status with the keyboard drag interaction', async () => {
+    const task = makeTask({ id: 'task-drag', title: 'Draggable task', status: TaskStatus.NotStarted })
+    const onTaskStatusChange = vi.fn()
+    useTaskStore.setState({ tasks: [task] })
+
+    const rects: Record<string, [number, number, number, number]> = {
+      'task-card-task-drag': [10, 150, 220, 100],
+      'task-column-not_started': [0, 100, 250, 500],
+      'task-column-triaging': [280, 100, 250, 500],
+      'task-column-agent_working': [560, 100, 250, 500],
+      'task-column-ready_for_review': [840, 100, 250, 500],
+      'task-column-agent_learning': [1120, 100, 250, 500],
+      'task-column-completed': [1400, 20, 160, 32]
+    }
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const [x, y, width, height] = rects[this.dataset.testid ?? ''] ?? [0, 0, 0, 0]
+      return DOMRect.fromRect({ x, y, width, height })
+    })
+
+    render(<DashboardWorkspace onTaskStatusChange={onTaskStatusChange} />)
+    const card = screen.getByTestId('task-card-task-drag')
+    card.focus()
+    fireEvent.keyDown(card, { key: ' ', code: 'Space' })
+    await screen.findByText('Drop to complete')
+    for (const status of [TaskStatus.NotStarted, TaskStatus.Triaging, TaskStatus.AgentWorking, TaskStatus.ReadyForReview, TaskStatus.AgentLearning]) {
+      const column = screen.getByTestId(`task-column-${status}`)
+      expect(column.dataset.dropActive).toBe('true')
+      expect(column.querySelector('.border-dashed')).not.toBeNull()
+    }
+    // KeyboardSensor attaches its document listener on the next tick.
+    await new Promise((resolve) => window.setTimeout(resolve, 0))
+    for (let i = 0; i < 12; i++) fireEvent.keyDown(card, { key: 'ArrowRight', code: 'ArrowRight' })
+    fireEvent.keyDown(card, { key: ' ', code: 'Space' })
+
+    await waitFor(() => expect(onTaskStatusChange).toHaveBeenCalledWith(task, TaskStatus.Triaging))
+    rectSpy.mockRestore()
+  })
+
+  it('uses the pointer position and anchors the card in its destination while the move saves', async () => {
+    const task = makeTask({ id: 'task-pointer', title: 'Pointer task', status: TaskStatus.NotStarted })
+    let finishStatusChange: (() => void) | undefined
+    const onTaskStatusChange = vi.fn(() => new Promise<void>((resolve) => {
+      finishStatusChange = resolve
+    }))
+    useTaskStore.setState({ tasks: [task] })
+
+    const rects: Record<string, [number, number, number, number]> = {
+      'task-card-task-pointer': [10, 150, 220, 100],
+      'task-column-not_started': [0, 100, 250, 500],
+      'task-column-triaging': [280, 100, 250, 500],
+      'task-column-agent_working': [560, 100, 250, 500],
+      'task-column-ready_for_review': [840, 100, 250, 500],
+      'task-column-agent_learning': [1120, 100, 250, 500],
+      // Deliberately make Completed closer to the pointer than the center of
+      // Triaging. A closest-center strategy would complete this task.
+      'task-column-completed': [280, 20, 160, 32]
+    }
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const [x, y, width, height] = rects[this.dataset.testid ?? ''] ?? [0, 0, 0, 0]
+      return DOMRect.fromRect({ x, y, width, height })
+    })
+
+    render(<DashboardWorkspace onTaskStatusChange={onTaskStatusChange} />)
+    const card = screen.getByTestId('task-card-task-pointer')
+    fireEvent.pointerDown(card, { pointerId: 1, button: 0, buttons: 1, isPrimary: true, clientX: 20, clientY: 170 })
+    fireEvent.pointerMove(document, { pointerId: 1, buttons: 1, isPrimary: true, clientX: 350, clientY: 180 })
+    await screen.findByText('Drop to complete')
+    fireEvent.pointerMove(document, { pointerId: 1, buttons: 1, isPrimary: true, clientX: 350, clientY: 180 })
+    fireEvent.pointerUp(document, { pointerId: 1, button: 0, buttons: 0, isPrimary: true, clientX: 350, clientY: 180 })
+
+    await waitFor(() => expect(onTaskStatusChange).toHaveBeenCalledWith(task, TaskStatus.Triaging))
+    expect(onTaskStatusChange).not.toHaveBeenCalledWith(task, TaskStatus.Completed)
+    expect(screen.getByTestId('task-column-triaging').contains(screen.getByTestId('task-card-task-pointer'))).toBe(true)
+    await waitFor(() => expect(screen.queryByText('Drop to complete')).toBeNull())
+    await act(async () => {
+      useTaskStore.setState({ tasks: [{ ...task, status: TaskStatus.Triaging }] })
+      finishStatusChange?.()
+    })
+    // PointerSensor intentionally retains its click suppressor for 50 ms so
+    // the release cannot accidentally open the dragged card.
+    await new Promise((resolve) => window.setTimeout(resolve, 60))
+    rectSpy.mockRestore()
   })
 
   it('quick chip click for task opens create modal with prefill', () => {
