@@ -1,3 +1,5 @@
+import { sendWithAuthorization } from './authorization-dispatch'
+import { prepareAuthorizationDispatch, failAuthorizationDispatch } from './authorization'
 import { prepareProjectMessageDispatch, activateProjectMessageDispatch, failProjectMessageDispatch, type ProjectMessageDispatch, type TypedMessage } from './merge-grants'
 import { DEFAULT_SERVER_URL } from './adapters/opencode-server'
 import { guardedIpcSend } from './guarded-ipc-send'
@@ -1125,7 +1127,12 @@ export class AgentManager extends EventEmitter {
     this.startAdapterPolling(adapterSessionId, adapter, sessionConfig)
 
     if (!skipInitialPrompt) {
-      if (task && isCoordinatorTask(task) && task.project_id) prepareProjectMessageDispatch(task.project_id)
+      if (task && isCoordinatorTask(task) && task.project_id) {
+        prepareProjectMessageDispatch(task.project_id)
+        if (this.db.db && typeof this.db.db.prepare === 'function') {
+          prepareAuthorizationDispatch(this.db, { key: `captain-start:${randomUUID()}`, taskId: task.id, text: 'Platform Captain startup' })
+        }
+      }
       let promptText: string
       if (isTriageSession && task) {
         promptText = buildTriagePrompt(task, this.projectRepoNames(task))
@@ -4036,13 +4043,17 @@ export class AgentManager extends EventEmitter {
     if (!this.db.db || typeof this.db.db.prepare !== 'function') {
       return this.sendMessageNow(sessionId, message, taskId, agentId, attachments, typedMessage)
     }
-    const { record } = this.deliveries.enqueue({
-      idempotencyKey: deliveryId,
-      kind: 'agent_message',
-      taskId: taskId ?? this.resolveSession(sessionId)?.session.taskId ?? null,
-      agentId: agentId ?? this.resolveSession(sessionId)?.session.agentId ?? null,
-      payload: JSON.stringify({ sessionId, message, taskId, agentId, attachments: attachments ?? [], typedMessage })
-    })
+    const record = this.db.db.transaction(() => {
+      const { record } = this.deliveries.enqueue({
+        idempotencyKey: deliveryId,
+        kind: 'agent_message',
+        taskId: taskId ?? this.resolveSession(sessionId)?.session.taskId ?? null,
+        agentId: agentId ?? this.resolveSession(sessionId)?.session.agentId ?? null,
+        payload: JSON.stringify({ sessionId, message, taskId, agentId, attachments: attachments ?? [], typedMessage })
+      })
+      prepareAuthorizationDispatch(this.db, { key: deliveryId, taskId: record.taskId ?? '', text: message, messageId: typedMessage?.id })
+      return record
+    })()
     return this.dispatchAgentMessage(record)
   }
 
@@ -4064,6 +4075,7 @@ export class AgentManager extends EventEmitter {
     }
     try {
       payload = JSON.parse(claimed.payload) as typeof payload
+      const authorizationDispatch = prepareAuthorizationDispatch(this.db, { key: claimed.idempotencyKey, taskId: claimed.taskId ?? '', text: payload.message, messageId: payload.typedMessage?.id })
       const result = await this.sendMessageNow(
         payload.sessionId,
         payload.message,
@@ -4071,7 +4083,8 @@ export class AgentManager extends EventEmitter {
         payload.agentId,
         payload.attachments,
         payload.typedMessage,
-        `delivery-${claimed.id}`
+        `delivery-${claimed.id}`,
+        authorizationDispatch
       )
       const destination = result.newSessionId || payload.sessionId || claimed.taskId || claimed.id
       this.deliveries.accept(claimed.id, this.deliveryOwner, destination)
@@ -4090,7 +4103,8 @@ export class AgentManager extends EventEmitter {
     agentId?: string,
     attachments?: MessageAttachmentRef[],
     typedMessage?: TypedMessage,
-    transcriptPartId?: string
+    transcriptPartId?: string,
+    authorizationDispatch?: number
   ): Promise<{ newSessionId?: string }> {
     const resolved = this.resolveSession(sessionId, 'sendMessage')
     let session = resolved?.session
@@ -4158,7 +4172,7 @@ export class AgentManager extends EventEmitter {
         }
 
         try {
-          await this.doSendAdapterMessage(session, sessionId, message, attachments, dispatch, transcriptPartId)
+          await this.doSendAdapterMessage(session, sessionId, message, attachments, dispatch, transcriptPartId, authorizationDispatch)
         } catch (error) {
           await this.handleSessionError(sessionId, session, error)
           throw error
@@ -4169,7 +4183,7 @@ export class AgentManager extends EventEmitter {
 
     if (!session) throw new Error(`Session not found: ${sessionId}`)
     try {
-      await this.doSendAdapterMessage(session, sessionId, message, attachments, dispatch, transcriptPartId)
+      await this.doSendAdapterMessage(session, sessionId, message, attachments, dispatch, transcriptPartId, authorizationDispatch)
     } catch (error) {
       await this.handleSessionError(sessionId, session, error)
       throw error
@@ -4215,11 +4229,18 @@ export class AgentManager extends EventEmitter {
     message: string,
     attachments?: MessageAttachmentRef[],
     dispatch?: ProjectMessageDispatch,
-    transcriptPartId?: string
+    transcriptPartId?: string,
+    authorizationDispatch?: number
   ): Promise<void> {
     const task = this.db.getTask(session.taskId)
     // Nudges use this method directly, and must invalidate earlier typed authority too.
     dispatch ??= task && isCoordinatorTask(task) && task.project_id ? prepareProjectMessageDispatch(task.project_id) : undefined
+    // Captain wake-ups and continuation nudges are new machine turns, not
+    // permission to reuse the last human turn. Workers retain the fixed
+    // instruction inherited when their task was created.
+    if (authorizationDispatch === undefined && task && isCoordinatorTask(task) && this.db.db && typeof this.db.db.prepare === 'function') {
+      authorizationDispatch = prepareAuthorizationDispatch(this.db, { key: `internal:${randomUUID()}`, taskId: task.id, text: message })
+    }
     session.autoAbortNotified = false
 
     if (session.status === 'error') {
@@ -4268,10 +4289,19 @@ export class AgentManager extends EventEmitter {
     )
 
     const promptText = buildMessageWithAttachmentContext(session.workspaceDir, message, attachments)
-    if (dispatch) activateProjectMessageDispatch(dispatch)
     try {
-      await session.adapter.sendPrompt(sessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
+      const adapter = session.adapter
+      const send = (): Promise<void> => {
+        if (dispatch) activateProjectMessageDispatch(dispatch)
+        return adapter.sendPrompt(sessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
+      }
+      if (authorizationDispatch !== undefined) {
+        await sendWithAuthorization(this.db, authorizationDispatch, () => adapter.getStatus(sessionId, sessionConfig), send)
+      } else {
+        await send()
+      }
     } catch (error) {
+      if (authorizationDispatch !== undefined) failAuthorizationDispatch(this.db, authorizationDispatch)
       if (dispatch) failProjectMessageDispatch(dispatch)
       throw error
     }

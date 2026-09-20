@@ -1,3 +1,4 @@
+import { recordHumanAuthorization } from '../authorization'
 import type Database from 'better-sqlite3'
 import { createId } from '@paralleldrive/cuid2'
 import type { ChatToolCall } from '../../shared/chat'
@@ -163,6 +164,29 @@ export class CommanderStore {
   }
 
   // ── Messages ──────────────────────────────────────────────
+
+  /** Only CommanderService's authenticated human submission path calls this. */
+  appendHumanMessage(sessionId: string, content: string, inputMode: 'typed' | 'voice' = 'typed'): CommanderMessage {
+    return this.db.transaction(() => {
+      const message = this.appendMessage(sessionId, { role: 'user', content })
+      recordHumanAuthorization(this.source, { messageId: message.id, text: content, at: message.created_at, source: 'commander-chat', sessionId, inputMode })
+      return message
+    })()
+  }
+
+  /** Backchannels cannot replace the instruction they acknowledge. */
+  authorizationMessageId(message: CommanderMessage): string {
+    if (!/^(?:um|uh|mm)[.!]?$/i.test(message.content.trim())) return message.id
+    const rows = this.db.prepare(`SELECT message_id, body FROM authorization_nodes
+      WHERE parent_id IS NULL AND json_extract(body, '$.sessionId') = ?
+      ORDER BY rowid DESC`).all(message.session_id) as { message_id: string; body: string }[]
+    for (const row of rows) {
+      const node = JSON.parse(row.body) as { text: string; actions: string[] }
+      if (/^(?:um|uh|mm)[.!]?$/i.test(node.text.trim())) continue
+      return node.actions.length ? row.message_id : message.id
+    }
+    return message.id
+  }
 
   appendMessage(sessionId: string, input: AppendCommanderMessageInput): CommanderMessage {
     if (!COMMANDER_MESSAGE_ROLES.includes(input.role)) throw new Error(`Unknown Commander message role: ${String(input.role)}`)

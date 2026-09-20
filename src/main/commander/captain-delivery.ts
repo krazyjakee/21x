@@ -1,3 +1,4 @@
+import { bindAuthorizationTransport, resolveAuthorization } from '../authorization'
 import { createHash, randomUUID } from 'crypto'
 import type { AgentManager } from '../agent-manager'
 import type { DatabaseManager } from '../database'
@@ -13,6 +14,7 @@ export interface CaptainRequestInput {
   taskId: string
   agentId: string
   payload: string
+  authorizationNodeId?: string
 }
 
 export interface CaptainDeliveryOptions {
@@ -39,17 +41,27 @@ export class CaptainDeliveryService {
 
   enqueueRequest(input: CaptainRequestInput): DeliveryRecord {
     const correlationId = correlationForDeliveryKey(input.idempotencyKey)
-    const { record } = this.store.enqueue({
-      idempotencyKey: input.idempotencyKey,
-      kind: 'captain_request',
-      sourceSessionId: input.sourceSessionId,
-      projectId: input.projectId,
-      taskId: input.taskId,
-      agentId: input.agentId,
-      correlationId,
-      payload: input.payload,
-      deadlineAt: this.now() + CAPTAIN_REPORT_DEADLINE_MS
-    })
+    const record = this.options.db.db.transaction(() => {
+      const { record } = this.store.enqueue({
+        idempotencyKey: input.idempotencyKey,
+        kind: 'captain_request',
+        sourceSessionId: input.sourceSessionId,
+        projectId: input.projectId,
+        taskId: input.taskId,
+        agentId: input.agentId,
+        correlationId,
+        payload: input.payload,
+        deadlineAt: this.now() + CAPTAIN_REPORT_DEADLINE_MS
+      })
+      if (input.authorizationNodeId) {
+        if (record.payload !== input.payload || record.taskId !== input.taskId || record.projectId !== input.projectId) throw new Error('Captain delivery replay changed the payload or scope')
+        const evidence = resolveAuthorization(this.options.db, input.authorizationNodeId, this.now())
+        const leaf = evidence.chain.at(-1)
+        if (evidence.status !== 'active' || leaf?.taskId !== input.taskId || leaf.correlationId !== correlationId || leaf.sessionId !== input.sourceSessionId) throw new Error('Invalid Captain authorization binding')
+        bindAuthorizationTransport(this.options.db, `captain-request-message:${record.id}`, input.authorizationNodeId, input.taskId, input.payload)
+      }
+      return record
+    })()
     if (record.state === 'pending' || (record.state === 'claimed' && (record.claimExpiresAt ?? 0) <= this.now())) {
       void this.dispatch(record)
     }

@@ -154,7 +154,7 @@ describe('DatabaseManager migrations on an existing install', () => {
       'concurrency_audit', 'task_touches',
       'agent_start_queue', 'agent_start_queue_fairness'
     ]))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('22')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('23')
     after.close()
   })
 
@@ -190,7 +190,7 @@ describe('DatabaseManager migrations on an existing install', () => {
       'generation', 'lease_owner', 'lease_expires_at', 'recovery_cause',
       'recovery_action', 'recovery_result', 'queued_at', 'acknowledged_at'
     ]))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('22')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('23')
     after.close()
   })
 

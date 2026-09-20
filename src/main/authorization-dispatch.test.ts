@@ -1,0 +1,116 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createTestDb } from '../../test/helpers/db-test-helper'
+import { prepareAuthorizationDispatch, recordHumanAuthorization, revokeAuthorization, taskAuthorization } from './authorization'
+import { sendWithAuthorization } from './authorization-dispatch'
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(done => { resolve = done })
+  return { promise, resolve }
+}
+
+let db: ReturnType<typeof createTestDb>['db']
+let projectId: string
+let taskId: string
+let counter: number
+beforeEach(() => {
+  db = createTestDb().db
+  projectId = db.createProject({ name: '21x' })!.id
+  taskId = db.getCoordinatorTask(projectId)!.id
+  counter = 0
+})
+afterEach(() => { db.close(); vi.restoreAllMocks() })
+
+function dispatch() {
+  const key = `human-${++counter}`
+  const text = 'Create tasks'
+  const root = recordHumanAuthorization(db, { messageId: key, text, at: Date.now(), source: 'project-chat', projectId, taskId })
+  const seq = prepareAuthorizationDispatch(db, { key, taskId, text, messageId: key })
+  return { root, seq }
+}
+
+describe('adapter authorization boundary', () => {
+  it('withholds new authority from old tools until backend idle is confirmed', async () => {
+    const { root, seq } = dispatch()
+    const idle = deferred<unknown>()
+    const status = vi.fn().mockResolvedValueOnce({ type: 'busy' }).mockResolvedValueOnce({ type: 'idle' })
+    const send = vi.fn(async () => { expect(taskAuthorization(db, taskId).origin!.id).toBe(root.id) })
+    const wait = vi.fn(() => idle.promise)
+    const pending = sendWithAuthorization(db, seq, status, send, wait)
+    await vi.waitFor(() => expect(wait).toHaveBeenCalledOnce())
+    expect(send).not.toHaveBeenCalled()
+    expect(taskAuthorization(db, taskId).effectivePermissions).toEqual([])
+    idle.resolve(undefined)
+    await pending
+    expect(send).toHaveBeenCalledOnce()
+  })
+
+  it('rejects the generation superseded during an asynchronous status/config boundary', async () => {
+    const first = dispatch()
+    const idle = deferred<{ type: string }>()
+    const send = vi.fn(async () => {})
+    const pending = sendWithAuthorization(db, first.seq, () => idle.promise, send)
+    const rejection = expect(pending).rejects.toThrow('Stale')
+    const second = dispatch()
+    idle.resolve({ type: 'idle' })
+    await rejection
+    expect(send).not.toHaveBeenCalled()
+    await sendWithAuthorization(db, second.seq, async () => ({ type: 'idle' }), send)
+    expect(taskAuthorization(db, taskId).origin!.id).toBe(second.root.id)
+  })
+
+  it('serializes concurrent sends even when sendPrompt awaits before marking itself busy', async () => {
+    const first = dispatch()
+    const accepted = deferred<void>()
+    const sendFirst = vi.fn(() => accepted.promise)
+    const one = sendWithAuthorization(db, first.seq, async () => ({ type: 'idle' }), sendFirst)
+    await vi.waitFor(() => expect(sendFirst).toHaveBeenCalledOnce())
+    const second = dispatch()
+    const idle = deferred<unknown>()
+    const status = vi.fn().mockResolvedValueOnce({ type: 'busy' }).mockResolvedValueOnce({ type: 'idle' })
+    const sendSecond = vi.fn(async () => {})
+    const wait = vi.fn(() => idle.promise)
+    const two = sendWithAuthorization(db, second.seq, status, sendSecond, wait)
+    await Promise.resolve()
+    expect(status).not.toHaveBeenCalled()
+    expect(taskAuthorization(db, taskId).effectivePermissions).toEqual([])
+    accepted.resolve(undefined)
+    await one
+    await vi.waitFor(() => expect(wait).toHaveBeenCalledOnce())
+    expect(sendSecond).not.toHaveBeenCalled()
+    idle.resolve(undefined)
+    await two
+    expect(sendSecond).toHaveBeenCalledOnce()
+  })
+
+  it.each(['revoked', 'expired'])('rechecks %s authorization after the final await', async reason => {
+    const start = Date.now()
+    vi.spyOn(Date, 'now').mockReturnValue(start)
+    const { root, seq } = dispatch()
+    const idle = deferred<{ type: string }>()
+    const send = vi.fn(async () => {})
+    const pending = sendWithAuthorization(db, seq, () => idle.promise, send)
+    const rejection = expect(pending).rejects.toThrow('expired or was revoked')
+    if (reason === 'revoked') revokeAuthorization(db, root.id, 'User cancelled')
+    else vi.spyOn(Date, 'now').mockReturnValue(root.expiresAt)
+    idle.resolve({ type: 'idle' })
+    await rejection
+    expect(send).not.toHaveBeenCalled()
+    expect(taskAuthorization(db, taskId).effectivePermissions).toEqual([])
+  })
+
+  it.each(['error', 'waiting_approval', 'unknown'])('does not treat backend %s as confirmed idle', async type => {
+    const { seq } = dispatch()
+    const send = vi.fn(async () => {})
+    await expect(sendWithAuthorization(db, seq, async () => ({ type }), send)).rejects.toThrow('Cannot authorize')
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('times out busy backends without activating authority', async () => {
+    const { seq } = dispatch()
+    const send = vi.fn(async () => {})
+    await expect(sendWithAuthorization(db, seq, async () => ({ type: 'busy' }), send, async () => {}, 0)).rejects.toThrow('did not become idle')
+    expect(send).not.toHaveBeenCalled()
+    expect(taskAuthorization(db, taskId).effectivePermissions).toEqual([])
+  })
+})
