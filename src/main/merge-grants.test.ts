@@ -40,7 +40,7 @@ import {
   setGhRunner,
   type PullRequestGateState
 } from './merge-grants'
-import { recordPullRequestReviewAttestation } from './pr-review-attestations'
+import { createPullRequestReviewHandoff, recordPullRequestReviewAttestation } from './pr-review-attestations'
 import { createCommanderProjectTools, type CommanderAgents } from './commander/project-tools'
 import { CaptainDeliveryService } from './commander/captain-delivery'
 import { createCommanderMergeGrantTools, grantForRelay } from './commander/merge-grant-tools'
@@ -598,7 +598,7 @@ describe('escalation policy: open_pr and merge_pr', () => {
     expect(JSON.parse(read('p-ask'))).toEqual({ escalation: { merge_pr: 'ask_user', open_pr: 'tell_commander' } })
     expect(JSON.parse(read('p-none'))).toEqual({ limits: { paused: false } })
     expect(read('p-bad')).toBe('not json')
-    expect((raw.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('27')
+    expect((raw.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('28')
     const before = read('p-auto')
     splitPullRequestEscalation(raw)
     expect(read('p-auto')).toBe(before)
@@ -1135,9 +1135,20 @@ function attestExactHead(h: Harness, options: { baseSha?: string; sameAgent?: bo
   })!
   h.db.updateTask(implementation.id, { agent_id: implementationAgent.id })
   h.db.updateTask(review.id, { agent_id: reviewerAgent.id })
+  const handoff = createPullRequestReviewHandoff(h.db, {
+    projectId: h.projectId,
+    implementationTaskId: implementation.id,
+    implementationAgentId: implementationAgent.id,
+    reviewTaskId: review.id,
+    prUrl: PR_URL,
+    headSha: SHA,
+    baseSha: options.baseSha ?? 'd'.repeat(40)
+  })
+  if (!handoff.ok) return handoff
   return recordPullRequestReviewAttestation(h.db, {
     projectId: h.projectId,
     reviewTaskId: review.id,
+    reviewerAgentId: reviewerAgent.id,
     implementationTaskId: implementation.id,
     prUrl: PR_URL,
     headSha: SHA,
@@ -1476,6 +1487,29 @@ describe('explicit project-wide grants (#155)', () => {
     expect(h.merges).toHaveLength(0)
     const history = h.db.listPullRequestReadinessSnapshots(h.projectId, 'acme/app', 12)
     expect(history.find((snapshot) => snapshot.invalidated_at)?.invalidated_reason).toBe('checks_changed')
+  })
+
+  it('binds the attestation revision into readiness and spends no grant use after replacement', async () => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    expect(attestExactHead(h)).toMatchObject({ ok: true })
+    h.setPr({ reviewDecision: '', latestReviews: reviewConnection([]) })
+    const first = await readPullRequestReadiness(h.db, h.projectId, parseGitHubPullRequestUrl(PR_URL)!)
+    expect(first.snapshot.classification).toBe('ready')
+
+    expect(attestExactHead(h, { verdict: 'CHANGES_REQUIRED' })).toMatchObject({ ok: true })
+    const outcome = await performMerge(h.db, {
+      projectId: h.projectId,
+      pr: parseGitHubPullRequestUrl(PR_URL)!,
+      method: 'squash',
+      authority: { kind: 'grant', grantId: result.grant.id },
+      state: first.state,
+      readiness: first
+    })
+    expect(outcome).toMatchObject({ status: 'blocked', reason_code: 'PR_CHANGED' })
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+    expect(h.merges).toHaveLength(0)
   })
 
   it.each([

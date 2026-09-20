@@ -938,7 +938,7 @@ export class AgentManager extends EventEmitter {
       throw new Error(`Agent not found: ${agentId}`)
     }
     const task = this.db.getTask(taskId)
-    const mcpServers = await this.buildMcpServersForAdapter(agentId, mcpOptionsForTask(taskId, task, this.heartbeatScopeTask(taskId, task)))
+    const mcpServers = await this.buildMcpServersForAdapter(agentId, mcpOptionsForTask(taskId, task, this.heartbeatScopeTask(taskId, task), agentId))
     // Task context keeps follow-up messages after idle aware of the task;
     // without it doSendAdapterMessage sends a bare prompt. A coordinator row
     // is not work to describe.
@@ -1232,7 +1232,7 @@ export class AgentManager extends EventEmitter {
     const isTriageSession = isTriageSessionTask(taskId, task)
     await yieldEventLoop()
 
-    const mcpServers = await this.buildMcpServersForAdapter(agentId, mcpOptionsForTask(taskId, task, this.heartbeatScopeTask(taskId, task)))
+    const mcpServers = await this.buildMcpServersForAdapter(agentId, mcpOptionsForTask(taskId, task, this.heartbeatScopeTask(taskId, task), agentId))
 
     // Written AFTER the MCP map is built so the documentation describes the
     // servers this session really gets, instead of the agent configuration,
@@ -2324,7 +2324,7 @@ export class AgentManager extends EventEmitter {
     const task = this.db.getTask(taskId)
     await yieldEventLoop()
 
-    const mcpServers = await this.buildMcpServersForAdapter(agentId, mcpOptionsForTask(taskId, task, this.heartbeatScopeTask(taskId, task)))
+    const mcpServers = await this.buildMcpServersForAdapter(agentId, mcpOptionsForTask(taskId, task, this.heartbeatScopeTask(taskId, task), agentId))
     // Resumed sessions must read current tool descriptions and assigned skills,
     // not workspace instructions left behind by an older app version.
     await writeSkillFiles(this.db, taskId, agentId, workspaceDir, mcpServers)

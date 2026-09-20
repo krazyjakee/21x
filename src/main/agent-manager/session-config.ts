@@ -14,6 +14,9 @@ import { taskProjectId } from './project-repos'
 
 export interface McpServerOptions {
   ensureTaskManagement?: boolean
+  /** Real task identity and running agent, carried in the signed MCP URL. */
+  taskId?: string
+  agentId?: string
   taskScope?: { taskId: string; parentTaskId: string }
   /** Project scope for a non-subtask session (task-management-core.ts). */
   projectId?: string
@@ -54,7 +57,7 @@ export function coordinatorProjectScope(task: TaskRecord): string {
  *  another project's tasks. Only a session with no task row behind it stays
  *  unscoped. The Captain's artifact calls stay unpinned, because it is not
  *  a workpiece of its own. */
-export function mcpOptionsForTask(taskId: string, task?: TaskRecord | null, scopeTask?: TaskRecord | null): McpServerOptions {
+export function mcpOptionsForTask(taskId: string, task?: TaskRecord | null, scopeTask?: TaskRecord | null, agentId?: string): McpServerOptions {
   // A pseudo-task session (heartbeat-<id>) has no row of its own, but an agent
   // that lists task-management explicitly must still be confined to the
   // checked task's project, never given full access.
@@ -64,8 +67,11 @@ export function mcpOptionsForTask(taskId: string, task?: TaskRecord | null, scop
     return { ensureTaskManagement: false, projectId: taskProjectId(scopeTask), artifactTaskId: scopeTask.id }
   }
   const taskScope = task?.parent_task_id ? { taskId, parentTaskId: task.parent_task_id } : undefined
+  const realTask = task && !isCoordinatorTask(task)
   return {
     ensureTaskManagement: !!task,
+    taskId: realTask ? taskId : undefined,
+    agentId: realTask ? agentId : undefined,
     taskScope,
     projectId: task && !taskScope
       ? (isCoordinatorTask(task) ? coordinatorProjectScope(task) : taskProjectId(task))
@@ -88,10 +94,11 @@ function buildTaskManagementMcpConfig(opts?: McpServerOptions): McpServerConfig 
   return {
     type: 'http',
     url: buildTaskMcpUrl(apiPort, getTaskApiToken(), {
-      taskId: opts?.taskScope?.taskId,
+      taskId: opts?.taskId ?? opts?.taskScope?.taskId,
       parentTaskId: opts?.taskScope?.parentTaskId,
       projectId: opts?.taskScope ? undefined : opts?.projectId,
-      artifactTaskId: opts?.artifactTaskId
+      artifactTaskId: opts?.artifactTaskId,
+      agentId: opts?.agentId
     })
   }
 }

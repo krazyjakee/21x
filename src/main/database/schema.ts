@@ -59,8 +59,10 @@ import { createIssueWriteTables, migrateIssueWrites } from './issue-writes-migra
  * 25 → 26: merge-grant uses retain policy/relay context separately from the
  *          effective grant authority (#159, migrateMergeGrantAttribution).
  * 26 → 27: exact-head PR review attestations and durable readiness snapshots.
+ * 27 → 28: signed implementation-to-review handoffs bind attestation task and
+ *          agent provenance; legacy unbound attestations fail closed.
  */
-const SCHEMA_VERSION = 27
+const SCHEMA_VERSION = 28
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -1089,6 +1091,9 @@ export function runMigrations(db: Database.Database): void {
   // Migration v27: exact-head review evidence and invalidatable readiness.
   createPullRequestReadinessTables(db)
 
+  // Migration v28: immutable task/agent provenance for review handoffs.
+  migratePullRequestAttestationSecurity(db)
+
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)
 
@@ -1172,6 +1177,22 @@ function createMergeGrantTables(db: Database.Database): void {
  */
 function createPullRequestReadinessTables(db: Database.Database): void {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS pr_review_handoffs (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      repo TEXT NOT NULL,
+      pr_number INTEGER NOT NULL,
+      head_sha TEXT NOT NULL,
+      base_sha TEXT NOT NULL,
+      implementation_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
+      review_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
+      implementation_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+      reviewer_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_pr_review_handoffs_exact
+      ON pr_review_handoffs(project_id, repo, pr_number, head_sha, base_sha, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS pr_review_attestations (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -1183,6 +1204,7 @@ function createPullRequestReadinessTables(db: Database.Database): void {
       review_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
       implementation_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
       reviewer_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+      handoff_id TEXT NOT NULL REFERENCES pr_review_handoffs(id) ON DELETE RESTRICT,
       verdict TEXT NOT NULL CHECK (verdict IN ('CLEAN', 'CHANGES_REQUIRED')),
       summary TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL
@@ -1211,6 +1233,16 @@ function createPullRequestReadinessTables(db: Database.Database): void {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_pr_readiness_snapshots_current
       ON pr_readiness_snapshots(project_id, repo, pr_number) WHERE invalidated_at IS NULL;
   `)
+}
+
+/** Migration v28: attestations without a signed handoff remain stored for audit but cannot satisfy readiness. */
+function migratePullRequestAttestationSecurity(db: Database.Database): void {
+  createPullRequestReadinessTables(db)
+  const columns = new Set((db.pragma('table_info(pr_review_attestations)') as { name: string }[]).map((column) => column.name))
+  if (!columns.has('handoff_id')) {
+    db.exec('ALTER TABLE pr_review_attestations ADD COLUMN handoff_id TEXT REFERENCES pr_review_handoffs(id) ON DELETE RESTRICT')
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_pr_review_attestations_handoff ON pr_review_attestations(handoff_id)')
 }
 
 /** Migration v19 (#137). Idempotent: `createTables()` already ran the same statements. */

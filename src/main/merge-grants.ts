@@ -744,7 +744,22 @@ export function reconcilePullRequestReadiness(
   }
   const observed = observedReadinessState(state)
   const fingerprint = createHash('sha256').update(JSON.stringify({
-    repo: repo.toLowerCase(), pr: pr.number, head: state.headRefOid, base: baseSha, observed
+    repo: repo.toLowerCase(), pr: pr.number, head: state.headRefOid, base: baseSha, observed,
+    // An attestation is mutable evidence about an immutable revision. Bind
+    // its exact audit row into the fingerprint so CLEAN -> CHANGES_REQUIRED,
+    // replacement, or provenance changes invalidate an already-read gate.
+    attestation: attestation
+      ? {
+          id: attestation.id,
+          handoff: attestation.handoff_id,
+          implementation_task: attestation.implementation_task_id,
+          review_task: attestation.review_task_id,
+          implementation_agent: attestation.implementation_agent_id,
+          reviewer_agent: attestation.reviewer_agent_id,
+          verdict: attestation.verdict,
+          created_at: attestation.created_at
+        }
+      : null
   })).digest('hex')
   const current = db.getCurrentPullRequestReadinessSnapshot(projectId, repo, pr.number)
   const saved = db.recordPullRequestReadinessSnapshot({

@@ -16,8 +16,10 @@ import { mergeGrantStatus, type MergeAuthorizationContext, type MergeCheckRecord
 import type {
   CreatePullRequestReadinessSnapshot,
   CreatePullRequestReviewAttestation,
+  CreatePullRequestReviewHandoff,
   PullRequestReadinessSnapshot,
-  PullRequestReviewAttestation
+  PullRequestReviewAttestation,
+  PullRequestReviewHandoff
 } from '../shared/pr-readiness'
 import { defaultHardCap, normalizeTouchPath, type ConcurrencyAuditEntry } from '../shared/concurrency'
 import type { IssueAction, IssueWriteOrigin, IssueWriteRecord, IssueWriteStatus } from '../shared/issue-actions'
@@ -1448,6 +1450,48 @@ export class DatabaseManager {
 
   // ── Exact-head pull-request readiness ───────────────────────────────────
 
+  createPullRequestReviewHandoff(data: CreatePullRequestReviewHandoff): PullRequestReviewHandoff | undefined {
+    if (!this.ensureDbOpen()) return undefined
+    const existing = this.prepare(`
+      SELECT * FROM pr_review_handoffs
+      WHERE project_id = ? AND lower(repo) = lower(?) AND pr_number = ?
+        AND head_sha = ? AND base_sha = ?
+        AND implementation_task_id = ? AND review_task_id = ?
+        AND implementation_agent_id = ? AND reviewer_agent_id = ?
+      ORDER BY rowid DESC LIMIT 1
+    `).get(data.project_id, data.repo, data.pr_number, data.head_sha, data.base_sha,
+      data.implementation_task_id, data.review_task_id, data.implementation_agent_id,
+      data.reviewer_agent_id) as PullRequestReviewHandoff | undefined
+    if (existing) return existing
+    const id = createId()
+    const createdAt = new Date().toISOString()
+    this.prepare(`
+      INSERT INTO pr_review_handoffs
+        (id, project_id, repo, pr_number, head_sha, base_sha,
+         implementation_task_id, review_task_id, implementation_agent_id,
+         reviewer_agent_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, data.project_id, data.repo, data.pr_number, data.head_sha, data.base_sha,
+      data.implementation_task_id, data.review_task_id, data.implementation_agent_id,
+      data.reviewer_agent_id, createdAt)
+    return this.prepare('SELECT * FROM pr_review_handoffs WHERE id = ?').get(id) as PullRequestReviewHandoff | undefined
+  }
+
+  getPullRequestReviewHandoff(input: {
+    projectId: string; repo: string; prNumber: number; headSha: string; baseSha: string
+    implementationTaskId: string; reviewTaskId: string
+  }): PullRequestReviewHandoff | undefined {
+    if (!this.ensureDbOpen()) return undefined
+    return this.prepare(`
+      SELECT * FROM pr_review_handoffs
+      WHERE project_id = ? AND lower(repo) = lower(?) AND pr_number = ?
+        AND head_sha = ? AND base_sha = ?
+        AND implementation_task_id = ? AND review_task_id = ?
+      ORDER BY rowid DESC LIMIT 1
+    `).get(input.projectId, input.repo, input.prNumber, input.headSha, input.baseSha,
+      input.implementationTaskId, input.reviewTaskId) as PullRequestReviewHandoff | undefined
+  }
+
   createPullRequestReviewAttestation(data: CreatePullRequestReviewAttestation): PullRequestReviewAttestation | undefined {
     if (!this.ensureDbOpen()) return undefined
     const id = createId()
@@ -1456,11 +1500,11 @@ export class DatabaseManager {
       INSERT INTO pr_review_attestations
         (id, project_id, repo, pr_number, head_sha, base_sha,
          implementation_task_id, review_task_id, implementation_agent_id,
-         reviewer_agent_id, verdict, summary, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         reviewer_agent_id, handoff_id, verdict, summary, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, data.project_id, data.repo, data.pr_number, data.head_sha, data.base_sha,
       data.implementation_task_id, data.review_task_id, data.implementation_agent_id,
-      data.reviewer_agent_id, data.verdict, data.summary, createdAt)
+      data.reviewer_agent_id, data.handoff_id, data.verdict, data.summary, createdAt)
     return this.prepare('SELECT * FROM pr_review_attestations WHERE id = ?').get(id) as PullRequestReviewAttestation | undefined
   }
 
@@ -1472,6 +1516,7 @@ export class DatabaseManager {
       SELECT * FROM pr_review_attestations
       WHERE project_id = ? AND lower(repo) = lower(?) AND pr_number = ?
         AND head_sha = ? AND base_sha = ?
+        AND handoff_id IS NOT NULL
         AND implementation_agent_id <> reviewer_agent_id
       ORDER BY rowid DESC LIMIT 1
     `).get(input.projectId, input.repo, input.prNumber, input.headSha, input.baseSha) as PullRequestReviewAttestation | undefined

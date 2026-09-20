@@ -30,7 +30,7 @@ import {
 import { SKILL_SCOPE_PARAM, SKILL_TOOL_NAMES } from '../task-api/skill-routes'
 import { MERGE_GRANT_TOOL_NAMES } from './merge-grant-tools'
 import { ISSUE_WRITE_TOOL_NAMES } from './issue-write-tools'
-import { RECORD_REVIEW_ATTESTATION_TOOL } from './review-attestation-tools'
+import { CREATE_REVIEW_HANDOFF_TOOL, RECORD_REVIEW_ATTESTATION_TOOL } from './review-attestation-tools'
 
 /** Which task a session may act on. All fields null means full access. */
 export type TaskMcpScope = {
@@ -40,6 +40,8 @@ export type TaskMcpScope = {
   artifactTaskId: string | null
   /** The only project this session may see and act in (project scope). */
   projectId?: string | null
+  /** Agent bound into the signed session URL. Never accepted from tool arguments. */
+  agentId?: string | null
 }
 
 /** Calls one Task API route. In process this is handleRoute; over stdio it is fetch. */
@@ -352,10 +354,10 @@ export async function callToolForScope(
       const skillScope = await skillScopeFor(scope, invoke)
       if (skillScope) normalizedArgs[SKILL_SCOPE_PARAM] = skillScope
     }
-    if (name === RECORD_REVIEW_ATTESTATION_TOOL) {
-      if (!scope.taskId) {
+    if (name === RECORD_REVIEW_ATTESTATION_TOOL || name === CREATE_REVIEW_HANDOFF_TOOL) {
+      if (!scope.taskId || !scope.agentId) {
         return {
-          content: [{ type: 'text', text: JSON.stringify({ error: 'A task-scoped reviewer session is required' }) }],
+          content: [{ type: 'text', text: JSON.stringify({ error: 'A task- and agent-scoped session is required' }) }],
           isError: true
         }
       }

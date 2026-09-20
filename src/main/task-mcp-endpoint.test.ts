@@ -46,7 +46,8 @@ describe('buildTaskMcpUrl and parseScopeFromUrl', () => {
       parentTaskId: null,
       taskId: null,
       artifactTaskId: null,
-      projectId: null
+      projectId: null,
+      agentId: null
     })
   })
 
@@ -57,17 +58,19 @@ describe('buildTaskMcpUrl and parseScopeFromUrl', () => {
       taskId: 'task-child',
       // Artifact writes fall back to the session's own task.
       artifactTaskId: 'task-child',
-      projectId: null
+      projectId: null,
+      agentId: null
     })
   })
 
   it('round-trips a project-scoped session', () => {
-    const url = buildTaskMcpUrl(1234, 'tok', { projectId: 'proj-1', artifactTaskId: 'task-1' })
+    const url = buildTaskMcpUrl(1234, 'tok', { projectId: 'proj-1', taskId: 'task-1', artifactTaskId: 'task-1', agentId: 'agent-1' })
     expect(parseScopeFromUrl(new URL(url))).toEqual({
       parentTaskId: null,
-      taskId: null,
+      taskId: 'task-1',
       artifactTaskId: 'task-1',
-      projectId: 'proj-1'
+      projectId: 'proj-1',
+      agentId: 'agent-1'
     })
   })
 
@@ -379,22 +382,27 @@ describe('merge-grant scope credential over real HTTP', () => {
     const project = db.createProject({ name: 'App', settings: { merge_grants: { enabled: true } } })!
     db.addProjectRepo(project.id, { provider: 'github', org: 'acme', name: 'app' })
     const worker = db.createTask(makeTask({ title: 'Worker', project_id: project.id }))!
+    const workerAgent = db.createAgent({ name: 'Worker agent' })!
+    db.updateTask(worker.id, { agent_id: workerAgent.id })
     createMergeGrantFromUserMessage(db, project.id, { source: 'commander', sessionId: 's', messageId: 'typed', text: 'merge PRs' })
     const port = await startTaskApiServer(db)
     const gh = vi.fn(async () => { throw new Error('No GitHub call is permitted for the worker') })
     setGhRunner(gh)
-    const issued = buildTaskMcpUrl(port, getTaskApiToken(), { projectId: project.id, artifactTaskId: worker.id })
+    const issued = buildTaskMcpUrl(port, getTaskApiToken(), {
+      projectId: project.id, taskId: worker.id, artifactTaskId: worker.id, agentId: workerAgent.id
+    })
     const client = await connect(issued)
     const denied = await client.callTool({ name: 'merge_pull_request', arguments: { pr_url: 'https://github.com/acme/app/pull/12' } })
     expect(textOf(denied)).toContain('only the project')
     await client.close()
-    for (const change of ['artifact', 'project', 'signature', 'unsigned', 'all-pins']) {
+    for (const change of ['artifact', 'project', 'agent', 'signature', 'unsigned', 'all-pins']) {
       const forged = new URL(issued)
-      if (change === 'artifact') forged.searchParams.delete('artifact')
+      if (change === 'artifact') forged.searchParams.set('artifact', 'other-task')
       if (change === 'project') forged.searchParams.set('project', 'other')
+      if (change === 'agent') forged.searchParams.set('agent', 'other-agent')
       if (change === 'signature') forged.searchParams.set('scope_signature', '0'.repeat(64))
       if (change === 'unsigned') forged.searchParams.delete('scope_signature')
-      if (change === 'all-pins') for (const key of ['artifact', 'task', 'parent', 'project']) forged.searchParams.delete(key)
+      if (change === 'all-pins') for (const key of ['artifact', 'task', 'parent', 'project', 'agent']) forged.searchParams.delete(key)
       const response = await fetch(forged, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'merge_pull_request', arguments: { pr_url: 'https://github.com/acme/app/pull/12' } } })
