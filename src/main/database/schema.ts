@@ -7,6 +7,7 @@ import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
 import { migrateCoordinatorToCaptain } from './captain-migration'
 import { splitLegacyPullRequestEscalation } from '../../shared/project-policies'
 import { createConcurrencyTables, migrateConcurrencyControl } from './concurrency-migration'
+import { createAuthorizationTables } from './authorization-schema'
 import { createDurableStartQueueTables, migrateDurableStartQueue } from './start-queue-migration'
 
 /**
@@ -45,10 +46,11 @@ import { createDurableStartQueueTables, migrateDurableStartQueue } from './start
  * 20 → 21: Captain-managed concurrency (#150): concurrency_audit, task_touches,
  *          and agents.config.concurrency_cap = min(max_parallel_sessions, 5)
  *          where unset (migrateConcurrencyControl in concurrency-migration.ts).
+ * 22 → 23: immutable human authorization chains and durable dispatch bindings.
  * 21 → 22: durable agent start queue, leases, generations, retry state and
  *          cross-project fairness (#148, migrateDurableStartQueue).
  */
-const SCHEMA_VERSION = 22
+const SCHEMA_VERSION = 23
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -1056,6 +1058,7 @@ export function runMigrations(db: Database.Database): void {
   // Migration v22: durable start claims and recovery (#148). This extends the
   // v20 runtime and v21 admission model rather than introducing a second one.
   migrateDurableStartQueue(db)
+  createAuthorizationTables(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)
