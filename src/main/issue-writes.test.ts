@@ -372,13 +372,16 @@ describe('specially gated actions stay gated', () => {
     expect(creates(h)).toHaveLength(0)
   })
 
-  it('refuses a body carrying a credential, or an @mention', async () => {
+  it('refuses credentials anywhere in the outgoing payload, or an @mention', async () => {
     const h = setup()
     userAsked(h)
     expect(await captainCall(h, 'create_github_issue', { repo: 'krazyjakee/21x', title: 'Leak', body: 'token ghp_0123456789abcdefghijABCDEFGHIJ0123' }))
       .toMatchObject({ status: 'refused', code: 'credential_escalation' })
     expect(await captainCall(h, 'create_github_issue', { repo: 'krazyjakee/21x', title: 'Ping', body: 'cc @krazyjakee' }))
       .toMatchObject({ status: 'refused', code: 'payload_rejected' })
+    expect(await captainCall(h, 'create_github_issue', {
+      repo: 'krazyjakee/21x', title: 'Label leak', labels: ['ghp_0123456789abcdefghijABCDEFGHIJ0123']
+    })).toMatchObject({ status: 'refused', code: 'credential_escalation' })
     expect(creates(h)).toHaveLength(0)
   })
 })
@@ -416,6 +419,25 @@ describe('scope: the project\'s own repositories and tasks only', () => {
     userAsked(h)
     expect(await captainCall(h, 'create_github_issue', { repo: 'krazyjakee/21x', title: 'Nowhere' }))
       .toMatchObject({ status: 'refused', code: 'repo_not_in_project' })
+  })
+
+  it('intersects project scope with both target-task and calling-Captain repository scopes', async () => {
+    const targetScoped = setup({ repos: [['krazyjakee', '21x'], ['krazyjakee', 'other']] })
+    userAsked(targetScoped)
+    targetScoped.db.updateTask(targetScoped.taskIds[VOICE_INPUT_TASK], { repos: ['krazyjakee/other'] })
+    expect(await captainCall(targetScoped, 'link_github_issue', {
+      issue_url: 'https://github.com/krazyjakee/21x/issues/82',
+      task_id: targetScoped.taskIds[VOICE_INPUT_TASK]
+    })).toMatchObject({ status: 'refused', code: 'repo_not_in_project' })
+    expect(targetScoped.requests).toHaveLength(0)
+
+    const callerScoped = setup({ repos: [['krazyjakee', '21x'], ['krazyjakee', 'other']] })
+    userAsked(callerScoped)
+    callerScoped.db.updateTask(callerScoped.captainTaskId, { repos: ['krazyjakee/other'] })
+    expect(await captainCall(callerScoped, 'create_github_issue', {
+      repo: 'krazyjakee/21x', title: 'Outside caller task scope'
+    })).toMatchObject({ status: 'refused', code: 'repo_not_in_project' })
+    expect(creates(callerScoped)).toHaveLength(0)
   })
 
   it('does not offer the tools to a task agent in the same project', async () => {
@@ -499,6 +521,65 @@ describe('idempotency', () => {
     expect(creates(h)).toHaveLength(0)
   })
 
+  it('binds a client key immutably to the exact operation and human origin, even after failure', async () => {
+    const h = setup({ repos: [['krazyjakee', '21x'], ['krazyjakee', 'docs']] })
+    const firstOrigin = userAsked(h)
+    const original = {
+      repo: 'krazyjakee/21x',
+      title: 'Original payload',
+      body: 'Original body',
+      task_id: h.taskIds[VOICE_INPUT_TASK],
+      idempotency_key: 'stable-client-key'
+    }
+    h.failNext('refused')
+    expect(await captainCall(h, 'create_github_issue', original)).toMatchObject({ status: 'failed' })
+    const before = h.db.listIssueWrites({ projectId: h.projectId })[0]
+
+    expect(await captainCall(h, 'create_github_issue', { ...original, title: 'Changed payload' }))
+      .toMatchObject({ status: 'refused', code: 'idempotency_conflict' })
+    expect(await captainCall(h, 'create_github_issue', { ...original, repo: 'krazyjakee/docs' }))
+      .toMatchObject({ status: 'refused', code: 'idempotency_conflict' })
+
+    userAsked(h)
+    expect(await captainCall(h, 'create_github_issue', original))
+      .toMatchObject({ status: 'refused', code: 'idempotency_conflict' })
+
+    const after = h.db.listIssueWrites({ projectId: h.projectId })[0]
+    expect(after).toMatchObject({
+      id: before.id,
+      status: 'failed',
+      attempts: 1,
+      payload_hash: hashPayload({ title: original.title, body: original.body }),
+      task_id: h.taskIds[VOICE_INPUT_TASK],
+      origin_message_id: firstOrigin.messageId
+    })
+    expect(h.db.listIssueWrites({ projectId: h.projectId })).toHaveLength(1)
+    expect(creates(h)).toHaveLength(1)
+  })
+
+  it('rejects rebinding one client key to another action or target', async () => {
+    const h = setup()
+    userAsked(h)
+    h.created.push(
+      { repo: 'krazyjakee/21x', number: 10, title: 'Ten', body: '' },
+      { repo: 'krazyjakee/21x', number: 11, title: 'Eleven', body: '' }
+    )
+    h.gh.mockImplementationOnce(async () => JSON.stringify({ number: 10, title: 'Ten', body: '', state: 'open' }))
+    h.gh.mockImplementationOnce(async () => { throw new Error('gh: Validation Failed (HTTP 422)') })
+    expect(await captainCall(h, 'update_github_issue', {
+      repo: 'krazyjakee/21x', issue_number: 10, body: 'Changed', idempotency_key: 'one-binding'
+    })).toMatchObject({ status: 'failed' })
+
+    expect(await captainCall(h, 'update_github_issue', {
+      repo: 'krazyjakee/21x', issue_number: 11, body: 'Changed', idempotency_key: 'one-binding'
+    })).toMatchObject({ status: 'refused', code: 'idempotency_conflict' })
+    expect(await captainCall(h, 'create_github_issue', {
+      repo: 'krazyjakee/21x', title: 'Different action', idempotency_key: 'one-binding'
+    })).toMatchObject({ status: 'refused', code: 'idempotency_conflict' })
+    expect(h.db.listIssueWrites({ projectId: h.projectId })).toHaveLength(1)
+    expect(h.db.listIssueWrites({ projectId: h.projectId })[0]).toMatchObject({ action: 'update_issue', target_number: 10, status: 'failed' })
+  })
+
   it('computes a key from durable inputs only, never from who authorized it', () => {
     const base = { projectId: 'p', repo: 'o/r', action: 'create_issue' as const, taskId: 't', payloadHash: hashPayload({ title: 'a' }) }
     expect(computeIdempotencyKey(base)).toBe(computeIdempotencyKey({ ...base }))
@@ -563,6 +644,59 @@ describe('an interrupted write is reconciled, never repeated', () => {
     expect(h.created).toHaveLength(1)
   })
 
+  it('recovers post-success task links and journal effects exactly once', async () => {
+    const h = setup()
+    userAsked(h)
+    vi.spyOn(h.db, 'applyIssueWriteEffects').mockImplementationOnce(() => {
+      throw new Error('crash after external success')
+    })
+
+    const result = await captainCall(h, 'create_github_issue', {
+      repo: 'krazyjakee/21x',
+      title: 'External success, local crash',
+      task_id: h.taskIds[VOICE_INPUT_TASK]
+    })
+    expect(result).toMatchObject({ status: 'unresolved', issue_url: 'https://github.com/krazyjakee/21x/issues/200' })
+    expect(h.db.listIssueWrites({ projectId: h.projectId })[0]).toMatchObject({
+      status: 'succeeded',
+      effects_applied_at: null
+    })
+    expect(h.db.getTask(h.taskIds[VOICE_INPUT_TASK])!.attachments).toHaveLength(0)
+    expect(h.db.countProjectStatusJournal(h.projectId)).toBe(0)
+
+    expect(await reconcileIssueWrites(h.db, h.projectId)).toBe(1)
+    expect(h.db.getTask(h.taskIds[VOICE_INPUT_TASK])!.attachments).toHaveLength(1)
+    expect(h.db.countProjectStatusJournal(h.projectId)).toBe(1)
+    expect(h.db.listIssueWrites({ projectId: h.projectId })[0].effects_applied_at).toBeTruthy()
+
+    expect(await reconcileIssueWrites(h.db, h.projectId)).toBe(0)
+    expect(h.db.getTask(h.taskIds[VOICE_INPUT_TASK])!.attachments).toHaveLength(1)
+    expect(h.db.countProjectStatusJournal(h.projectId)).toBe(1)
+    expect(creates(h)).toHaveLength(1)
+  })
+
+  it('keeps duplicate recovery markers unresolved instead of picking a hit', async () => {
+    const h = setup()
+    userAsked(h)
+    h.gh.mockImplementationOnce(async (callArgs: string[]) => {
+      const body = callArgs.find((arg) => arg.startsWith('body='))!.slice(5)
+      h.created.push(
+        { repo: 'krazyjakee/21x', number: 301, title: 'Duplicate marker A', body },
+        { repo: 'krazyjakee/21x', number: 302, title: 'Duplicate marker B', body }
+      )
+      throw new Error('ECONNRESET')
+    })
+    expect(await captainCall(h, 'create_github_issue', { repo: 'krazyjakee/21x', title: 'Ambiguous marker' }))
+      .toMatchObject({ status: 'unresolved' })
+
+    expect(await reconcileIssueWrites(h.db, h.projectId)).toBe(0)
+    expect(h.db.listIssueWrites({ projectId: h.projectId })[0]).toMatchObject({
+      status: 'unresolved',
+      external_url: null,
+      effects_applied_at: null
+    })
+  })
+
   it('reconciles the same interrupted write repeatedly without double-counting it', async () => {
     const h = setup()
     userAsked(h)
@@ -606,6 +740,7 @@ describe('an interrupted write is reconciled, never repeated', () => {
     const h = setup()
     userAsked(h)
     h.created.push({ repo: 'krazyjakee/21x', number: 88, title: 'Keep this title', body: 'Before' })
+    h.gh.mockImplementationOnce(async () => JSON.stringify({ number: 88, title: 'Keep this title', body: 'Before', state: 'open' }))
     h.gh.mockImplementationOnce(async () => {
       h.created[0].body = 'After'
       throw new Error('socket hang up')
@@ -786,7 +921,7 @@ describe('the project\'s issue_write level', () => {
 // ── Linking, updating and the fixtures ────────────────────────
 
 describe('linking and updating', () => {
-  it('links an existing issue to its task without touching GitHub', async () => {
+  it('links an existing issue to its task without writing to GitHub', async () => {
     const h = setup()
     userAsked(h)
     const result = await captainCall(h, 'link_github_issue', {
@@ -794,13 +929,56 @@ describe('linking and updating', () => {
       task_id: h.taskIds[VOICE_INPUT_TASK]
     })
     expect(result).toMatchObject({ status: 'linked', issue_number: 82 })
-    expect(h.requests).toHaveLength(0)
+    expect(h.requests.filter((request) => request.args.includes('POST') || request.args.includes('PATCH'))).toHaveLength(0)
     const task = h.db.getTask(h.taskIds[VOICE_INPUT_TASK])!
     expect(task.attachments.some((item) => item.filename === 'https://github.com/krazyjakee/21x/issues/82')).toBe(true)
     // Linking the same issue twice adds one attachment and one ledger row.
     await captainCall(h, 'link_github_issue', { issue_url: 'https://github.com/krazyjakee/21x/issues/82', task_id: h.taskIds[VOICE_INPUT_TASK] })
     expect(h.db.getTask(h.taskIds[VOICE_INPUT_TASK])!.attachments).toHaveLength(1)
     expect(h.db.listIssueWrites({ projectId: h.projectId })).toHaveLength(1)
+  })
+
+  it('refuses pull-request numbers on both update and link paths', async () => {
+    const h = setup()
+    userAsked(h)
+    h.gh.mockImplementationOnce(async () => JSON.stringify({
+      number: 160,
+      html_url: 'https://github.com/krazyjakee/21x/pull/160',
+      pull_request: { url: 'https://api.github.com/repos/krazyjakee/21x/pulls/160' }
+    }))
+    expect(await captainCall(h, 'update_github_issue', {
+      repo: 'krazyjakee/21x', issue_number: 160, title: 'Do not PATCH this PR'
+    })).toMatchObject({ status: 'refused', code: 'target_not_issue' })
+
+    h.gh.mockImplementationOnce(async () => JSON.stringify({
+      number: 160,
+      html_url: 'https://github.com/krazyjakee/21x/pull/160',
+      pull_request: { url: 'https://api.github.com/repos/krazyjakee/21x/pulls/160' }
+    }))
+    expect(await captainCall(h, 'link_github_issue', {
+      issue_url: 'https://github.com/krazyjakee/21x/issues/160', task_id: h.taskIds[VOICE_INPUT_TASK]
+    })).toMatchObject({ status: 'refused', code: 'target_not_issue' })
+    expect(h.requests.some((request) => request.args.includes('PATCH'))).toBe(false)
+    expect(h.db.listIssueWrites({ projectId: h.projectId })).toHaveLength(0)
+    expect(h.db.getTask(h.taskIds[VOICE_INPUT_TASK])!.attachments).toHaveLength(0)
+  })
+
+  it('serializes labels as typed GitHub arrays, including an explicit empty array', async () => {
+    const h = setup()
+    userAsked(h)
+    await captainCall(h, 'create_github_issue', {
+      repo: 'krazyjakee/21x', title: 'Typed labels', labels: ['bug', 'voice']
+    })
+    const post = h.requests.find((request) => request.args.includes('POST'))!.args
+    expect(post).toEqual(expect.arrayContaining(['-F', 'labels[]=bug', 'labels[]=voice']))
+    expect(post.some((arg) => arg === '--raw-field' || arg.startsWith('labels=['))).toBe(false)
+
+    await captainCall(h, 'update_github_issue', {
+      repo: 'krazyjakee/21x', issue_number: 200, labels: []
+    })
+    const patch = h.requests.find((request) => request.args.includes('PATCH'))!.args
+    expect(patch).toEqual(expect.arrayContaining(['-F', 'labels[]']))
+    expect(patch.some((arg) => arg === '--raw-field' || arg === 'labels=[]' || arg === 'labels="[]"')).toBe(false)
   })
 
   it('updates an issue and refuses an empty update', async () => {

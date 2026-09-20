@@ -13,10 +13,11 @@
  *
  * Exactly once. Every write claims an {@link computeIdempotencyKey idempotency
  * key} in the `issue_writes` ledger before GitHub is called, and created
- * issues carry that key as a hidden marker in their body. The key is derived
- * from durable things only (project, repository, action, target, task and a
- * hash of the payload), so a retry after a crash or a restart recomputes the
- * same key and finds the claim. A claim whose lease ran out becomes
+ * issues carry that key as a hidden marker in their body. A default key is
+ * derived from durable operation inputs; a caller key is a project-scoped
+ * immutable name. The claimed row binds either kind to the full operation and
+ * trusted authorization origin, so an exact retry after a restart finds the
+ * claim while any rebinding is refused. A claim whose lease ran out becomes
  * `unresolved` rather than free: the write may well have landed, so
  * {@link reconcileIssueWrites} asks GitHub before anything retries.
  *
@@ -58,8 +59,10 @@ export type IssueWriteDb = Pick<
   | 'updateTask'
   | 'beginIssueWrite'
   | 'settleIssueWrite'
+  | 'applyIssueWriteEffects'
   | 'getIssueWriteByKey'
   | 'listIssueWrites'
+  | 'listIssueWritesPendingEffects'
   | 'listUnresolvedIssueWrites'
   | 'appendProjectStatusJournal'
 > & Pick<DatabaseManager, 'db'>
@@ -247,15 +250,17 @@ export interface IdempotencyInput {
 }
 
 /**
- * The key a write claims. Derived only from things that survive a restart, so
+ * The key a write claims. It contains only things that survive a restart, so
  * the retry of an interrupted create computes the same key and finds its own
- * claim instead of filing a second issue. The originating instruction is
- * deliberately *not* part of it: the same ticket asked for twice, or asked for
- * again after a crash, is still one ticket.
+ * claim instead of filing a second issue. The ledger row, not this digest,
+ * holds the immutable full operation and authorization-origin binding.
  */
 export function computeIdempotencyKey(input: IdempotencyInput): string {
   const material = input.clientKey
-    ? ['client', input.projectId, input.repo, input.action, input.clientKey].join('\u0000')
+    // A caller-named key is one immutable project-scoped name. Keeping repo,
+    // action, target and payload out of the hash makes any attempted rebinding
+    // find the original row, where beginIssueWrite rejects the mismatch.
+    ? ['client', input.projectId, input.clientKey].join('\u0000')
     : ['derived', input.projectId, input.repo, input.action, String(input.targetNumber ?? ''), input.taskId ?? '', input.payloadHash].join('\u0000')
   return createHash('sha256').update(material).digest('hex').slice(0, 32)
 }
@@ -356,6 +361,7 @@ interface GhIssueResponse {
   state?: string
   body?: string | null
   labels?: Array<string | { name?: string }> | null
+  pull_request?: unknown
 }
 
 const ISSUE_PAYLOAD_FIELDS = ['title', 'body', 'labels'] as const
@@ -397,7 +403,7 @@ async function ghJson(args: string[]): Promise<GhIssueResponse> {
 
 function createArgs(slug: string, payload: Required<Pick<IssuePayload, 'title'>> & IssuePayload, key: string): string[] {
   const args = ['api', '-X', 'POST', `/repos/${slug}/issues`, '-f', `title=${payload.title}`, '-f', `body=${withIdempotencyMarker(payload.body ?? '', key)}`]
-  if (payload.labels?.length) args.push('--raw-field', `labels=${JSON.stringify(payload.labels)}`)
+  appendLabelFields(args, payload.labels)
   return args
 }
 
@@ -405,8 +411,26 @@ function updateArgs(slug: string, number: number, payload: IssuePayload): string
   const args = ['api', '-X', 'PATCH', `/repos/${slug}/issues/${number}`]
   if (payload.title !== undefined) args.push('-f', `title=${payload.title}`)
   if (payload.body !== undefined) args.push('-f', `body=${payload.body}`)
-  if (payload.labels !== undefined) args.push('--raw-field', `labels=${JSON.stringify(payload.labels)}`)
+  appendLabelFields(args, payload.labels)
   return args
+}
+
+/** gh's typed nested-field syntax produces a JSON array, including [] when
+ * labels is explicitly empty. A raw field containing JSON text is a string. */
+function appendLabelFields(args: string[], labels: string[] | undefined): void {
+  if (labels === undefined) return
+  if (labels.length === 0) {
+    args.push('-F', 'labels[]')
+    return
+  }
+  for (const label of labels) args.push('-F', `labels[]=${label}`)
+}
+
+export class AmbiguousIssueMarkerError extends Error {
+  constructor(readonly candidates: ReadonlyArray<{ number: number; url: string }>) {
+    super(`More than one GitHub issue carries this 21x idempotency marker (${candidates.map((item) => item.url).join(', ')}).`)
+    this.name = 'AmbiguousIssueMarkerError'
+  }
 }
 
 /**
@@ -419,13 +443,52 @@ export async function findIssueByIdempotencyKey(slug: string, key: string): Prom
   const response = await ghJson(['api', '-X', 'GET', '/search/issues', '-f', `q=${query}`, '-f', 'per_page=10']) as unknown as {
     items?: Array<{ number?: number; html_url?: string; body?: string | null; pull_request?: unknown }>
   }
+  const matches = new Map<string, { number: number; url: string }>()
   for (const item of response.items ?? []) {
     if (item.pull_request) continue
     if (findIdempotencyMarker(item.body) !== key) continue
     if (typeof item.number !== 'number' || !item.html_url) continue
-    return { number: item.number, url: item.html_url }
+    matches.set(`${item.number}\u0000${item.html_url}`, { number: item.number, url: item.html_url })
   }
-  return null
+  const candidates = [...matches.values()].sort((left, right) => left.number - right.number || left.url.localeCompare(right.url))
+  if (candidates.length > 1) throw new AmbiguousIssueMarkerError(candidates)
+  return candidates[0] ?? null
+}
+
+async function rejectPullRequestTarget(target: { slug: string; number: number | null }): Promise<IssueWriteDenial | null> {
+  if (!target.number) return null
+  try {
+    const current = await ghJson(['api', '-X', 'GET', `/repos/${target.slug}/issues/${target.number}`])
+    if (current.pull_request !== undefined) {
+      return {
+        code: 'target_not_issue',
+        actionClass: DELEGATED_ACTION_CLASS,
+        message: `${target.slug}#${target.number} is a pull request. Delegated issue authority cannot update or link pull requests.`
+      }
+    }
+    if (current.number !== target.number) {
+      return { code: 'target_not_issue', actionClass: DELEGATED_ACTION_CLASS, message: `GitHub did not confirm ${target.slug}#${target.number} as an issue.` }
+    }
+    return null
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return {
+      code: 'target_not_issue',
+      actionClass: DELEGATED_ACTION_CLASS,
+      message: `21x could not confirm ${target.slug}#${target.number} as an issue, so it will not use issue authority for it: ${message}`
+    }
+  }
+}
+
+function taskRepoDenial(repos: readonly string[], slug: string, subject: string): IssueWriteDenial | null {
+  if (repos.length === 0) return null
+  const scoped = repos.map(normalizeRepoSlug).filter((repo): repo is string => !!repo)
+  if (scoped.includes(slug)) return null
+  return {
+    code: 'repo_not_in_project',
+    actionClass: DELEGATED_ACTION_CLASS,
+    message: `${subject} is restricted to ${scoped.join(', ') || 'an invalid/unknown repository scope'}, not ${slug}. Issue writes never widen a task's repository scope.`
+  }
 }
 
 /**
@@ -450,10 +513,12 @@ export async function performIssueWrite(
 
   // 3. The task the issue belongs to must be in this project.
   let taskProjectId: string | null = null
+  let targetTaskRepos: readonly string[] = []
   if (request.taskId) {
     const task = db.getTask(request.taskId)
     if (!task) return denial({ code: 'cross_project_target', actionClass: DELEGATED_ACTION_CLASS, message: 'That task does not exist in this project.' })
     taskProjectId = task.project_id ?? null
+    targetTaskRepos = task.repos ?? []
   }
 
   // 4. The capability, from the project and a trusted human origin.
@@ -473,6 +538,10 @@ export async function performIssueWrite(
     capability
   )
   if (capabilityDenial) return denial(capabilityDenial)
+  const captainRepoDenial = taskRepoDenial(captain?.repos ?? [], target.slug, 'The calling Captain task')
+  if (captainRepoDenial) return denial(captainRepoDenial)
+  const targetTaskRepoDenial = taskRepoDenial(targetTaskRepos, target.slug, 'The target task')
+  if (targetTaskRepoDenial) return denial(targetTaskRepoDenial)
 
   // 5. The payload itself.
   const payloadDenial = validateIssuePayload(request.payload, { requireTitle: request.action === 'create_issue' })
@@ -482,6 +551,14 @@ export async function performIssueWrite(
   }
   if (request.action === 'update_issue' && request.payload.title === undefined && request.payload.body === undefined && request.payload.labels === undefined) {
     return denial({ code: 'payload_rejected', actionClass: DELEGATED_ACTION_CLASS, message: 'Give a title, a body or labels to change.' })
+  }
+
+  // GitHub serves issues and pull requests from the same REST endpoint. A
+  // numeric target therefore needs a read preflight; otherwise issue authority
+  // could silently PATCH a pull request.
+  if (request.action !== 'create_issue') {
+    const targetDenial = await rejectPullRequestTarget(target)
+    if (targetDenial) return denial(targetDenial)
   }
 
   if (request.checkOnly) {
@@ -520,7 +597,25 @@ export async function performIssueWrite(
     lease_ms: CLAIM_LEASE_MS
   })
 
+  if (claim.state === 'conflict') {
+    return denial({
+      code: 'idempotency_conflict',
+      actionClass: DELEGATED_ACTION_CLASS,
+      message:
+        'That idempotency key is already bound to a different action, repository, target, payload, task or human authorization. ' +
+        'The original audit record was left unchanged; use its exact request or choose a new key.'
+    })
+  }
+
   if (claim.state === 'duplicate') {
+    const completed = applyPostSuccessEffects(db, claim.record)
+    if (!completed?.effects_applied_at) {
+      return {
+        status: 'unresolved',
+        error: 'The GitHub write already succeeded, but its local task link/journal is still pending recovery. Nothing was sent to GitHub again.',
+        ...ledgerView(claim.record)
+      }
+    }
     return {
       status: 'already_done',
       message: 'This exact write was already made under the same idempotency key; nothing was sent to GitHub again.',
@@ -590,9 +685,11 @@ async function runClaimedWrite(
       external_result: 'linked locally'
     })
     if (!settled) return staleAttemptResult(db, key)
-    if (request.taskId) linkIssueToTask(db, request.taskId, url)
-    journal(db, settled, 'linked')
+    const completed = applyPostSuccessEffects(db, settled)
     hooks.pushToRenderer?.('issueWrites:changed', { projectId: record.project_id })
+    if (!completed?.effects_applied_at) {
+      return { status: 'unresolved', error: 'The issue link is durable but its task attachment/journal is awaiting recovery.', ...ledgerView(settled) }
+    }
     return { status: 'linked', ...ledgerView(settled) }
   }
 
@@ -646,9 +743,15 @@ async function runClaimedWrite(
     external_result: JSON.stringify({ number, state: response.state ?? null, title: response.title ?? null })
   })
   if (!settled) return staleAttemptResult(db, key)
-  if (request.taskId && url) linkIssueToTask(db, request.taskId, url)
-  journal(db, settled, request.action === 'create_issue' ? 'created' : 'updated')
+  const completed = applyPostSuccessEffects(db, settled)
   hooks.pushToRenderer?.('issueWrites:changed', { projectId: record.project_id })
+  if (!completed?.effects_applied_at) {
+    return {
+      status: 'unresolved',
+      error: 'GitHub confirmed the write, but its local task link/journal is awaiting recovery. The external write will not be repeated.',
+      ...ledgerView(settled)
+    }
+  }
   return { status: request.action === 'create_issue' ? 'created' : 'updated', ...ledgerView(settled) }
 }
 
@@ -660,29 +763,23 @@ export const ISSUE_LINK_MIME = 'text/x-github-issue'
  * it. The URL goes in `filename`, because that is the only field a task
  * attachment keeps (database/types.ts) and the mime type says what it is.
  */
-function linkIssueToTask(db: IssueWriteDb, taskId: string, url: string): void {
+function applyPostSuccessEffects(db: IssueWriteDb, record: IssueWriteRecord): IssueWriteRecord | undefined {
+  if (record.effects_applied_at) return record
+  const verb = record.action === 'create_issue' ? 'created' : record.action === 'update_issue' ? 'updated' : 'linked'
   try {
-    const task = db.getTask(taskId)
-    if (!task) return
-    const attachments = Array.isArray(task.attachments) ? task.attachments : []
-    if (attachments.some((item) => item.filename === url)) return
-    db.updateTask(taskId, {
-      attachments: [...attachments, { id: randomUUID(), filename: url, size: 0, mime_type: ISSUE_LINK_MIME, added_at: new Date().toISOString() }]
+    return db.applyIssueWriteEffects(record.id, {
+      ...(record.task_id && record.external_url
+        ? { attachment: { taskId: record.task_id, url: record.external_url, id: randomUUID(), addedAt: new Date().toISOString() } }
+        : {}),
+      journal: {
+        summary: `${verb === 'created' ? 'Filed' : verb === 'updated' ? 'Updated' : 'Linked'} ${record.external_url ?? record.repo} for ${record.task_id ?? 'the project'}.`,
+        completed: [`${verb} ${record.external_url ?? record.repo}`],
+        decisions: [`Delegated issue write authorized by the user's ${record.origin_kind === 'commander_relay' ? 'Commander instruction' : 'message'} ${record.origin_message_id}${record.correlation_id ? ` (correlation ${record.correlation_id})` : ''}`]
+      }
     })
   } catch (error) {
-    console.error('[IssueWrites] Could not link the issue to its task:', error)
-  }
-}
-
-function journal(db: IssueWriteDb, record: IssueWriteRecord, verb: string): void {
-  try {
-    db.appendProjectStatusJournal(record.project_id, {
-      summary: `${verb === 'created' ? 'Filed' : verb === 'updated' ? 'Updated' : 'Linked'} ${record.external_url ?? record.repo} for ${record.task_id ?? 'the project'}.`,
-      completed: [`${verb} ${record.external_url ?? record.repo}`],
-      decisions: [`Delegated issue write authorized by the user's ${record.origin_kind === 'commander_relay' ? 'Commander instruction' : 'message'} ${record.origin_message_id}${record.correlation_id ? ` (correlation ${record.correlation_id})` : ''}`]
-    })
-  } catch (error) {
-    console.error('[IssueWrites] Could not write the journal entry:', error)
+    console.error('[IssueWrites] Could not apply post-success effects:', error)
+    return undefined
   }
 }
 
@@ -699,6 +796,11 @@ function journal(db: IssueWriteDb, record: IssueWriteRecord, verb: string): void
  */
 export async function reconcileIssueWrites(db: IssueWriteDb, projectId?: string, hooks: IssueWriteHooks = {}): Promise<number> {
   let settledCount = 0
+  // A crash after the external result was committed but before the local task
+  // link/journal transaction is recoverable from the succeeded ledger row.
+  for (const record of db.listIssueWritesPendingEffects(projectId)) {
+    if (applyPostSuccessEffects(db, record)?.effects_applied_at) settledCount++
+  }
   for (const record of db.listUnresolvedIssueWrites(projectId)) {
     try {
       if (record.action === 'create_issue') {
@@ -718,8 +820,7 @@ export async function reconcileIssueWrites(db: IssueWriteDb, projectId?: string,
         })
         if (!settled) continue
         settledCount++
-        if (settled.task_id) linkIssueToTask(db, settled.task_id, found.url)
-        journal(db, settled, 'created')
+        applyPostSuccessEffects(db, settled)
         hooks.report?.(settled.project_id, 'recovered', `Recovered an interrupted issue write: ${found.url} already existed and is now recorded.`, settled)
         hooks.pushToRenderer?.('issueWrites:changed', { projectId: settled.project_id })
       } else if (record.action === 'update_issue' && record.target_number) {
@@ -735,6 +836,7 @@ export async function reconcileIssueWrites(db: IssueWriteDb, projectId?: string,
         })
         if (!settled) continue
         settledCount++
+        applyPostSuccessEffects(db, settled)
         hooks.report?.(settled.project_id, 'recovered', `Recovered an interrupted issue update: ${record.repo}#${record.target_number} already carries it.`, settled)
         hooks.pushToRenderer?.('issueWrites:changed', { projectId: settled.project_id })
       }

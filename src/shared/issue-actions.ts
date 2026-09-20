@@ -225,6 +225,8 @@ export type IssueWriteDenialCode =
   | 'repo_missing'
   | 'repo_not_in_project'
   | 'cross_project_target'
+  | 'target_not_issue'
+  | 'idempotency_conflict'
   | 'credential_escalation'
   | 'payload_rejected'
 
@@ -395,7 +397,10 @@ export function validateIssuePayload(payload: IssuePayload, options: { requireTi
       }
     }
   }
-  const text = `${title ?? ''}\n${payload.body ?? ''}`
+  // Labels leave the process just as title/body do. Treating them as harmless
+  // metadata would let a caller publish a token as a label even though the
+  // same token is refused everywhere else in the outgoing payload.
+  const text = `${title ?? ''}\n${payload.body ?? ''}\n${payload.labels?.join('\n') ?? ''}`
   for (const { label, pattern } of SECRET_PATTERNS) {
     if (pattern.test(text)) {
       return {
@@ -534,6 +539,8 @@ export interface IssueWriteRecord {
   created_at: string
   updated_at: string
   settled_at: string | null
+  /** When the task attachment and journal entry were committed atomically. */
+  effects_applied_at: string | null
 }
 
 /** One line of the audit ledger for a person to read. */

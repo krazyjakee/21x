@@ -185,6 +185,9 @@ describe('DatabaseManager migrations on an existing install', () => {
     expect(columns('managed_agent_runtimes')).toEqual(expect.arrayContaining(['owner_id', 'generation', 'session_id', 'phase']))
     expect(columns('delivery_outbox')).toEqual(expect.arrayContaining(['idempotency_key', 'state', 'claim_owner', 'acknowledged_at']))
     expect(columns('concurrency_audit')).toEqual(expect.arrayContaining(['project_id', 'kind', 'actor', 'reason']))
+    expect(columns('issue_writes')).toEqual(expect.arrayContaining([
+      'idempotency_key', 'payload_hash', 'payload_fields', 'attempt_epoch', 'effects_applied_at'
+    ]))
     expect(columns('agent_start_queue')).toEqual(expect.arrayContaining([
       'id', 'task_id', 'project_id', 'agent_id', 'priority', 'fifo_seq',
       'dependency_reason', 'admission_reason', 'retry_count', 'next_retry_at',

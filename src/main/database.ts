@@ -157,8 +157,13 @@ export interface BeginIssueWriteInput {
 
 /** What a claim attempt is allowed to do next. */
 export interface BeginIssueWriteResult {
-  state: 'reserved' | 'duplicate' | 'in_flight' | 'needs_reconcile'
+  state: 'reserved' | 'duplicate' | 'in_flight' | 'needs_reconcile' | 'conflict'
   record: IssueWriteRecord
+}
+
+export interface ApplyIssueWriteEffectsInput {
+  attachment?: { taskId: string; url: string; id: string; addedAt: string }
+  journal: ProjectStatusJournalInput
 }
 
 /** The outcome of one attempt, written once. */
@@ -1395,7 +1400,8 @@ export class DatabaseManager {
       origin_authored_at: input.origin.authoredAt, correlation_id: input.origin.correlationId, status: 'unresolved',
       external_url: null, external_number: null, external_result: null, error: 'The database is not open.',
       attempts: 1, attempt_epoch: 1, lease_expires_at: null,
-      created_at: new Date().toISOString(), updated_at: new Date().toISOString(), settled_at: null
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(), settled_at: null,
+      effects_applied_at: null
     }
     if (!this.ensureDbOpen()) return { state: 'needs_reconcile', record: fallback }
     return this.db.transaction((): BeginIssueWriteResult => {
@@ -1420,6 +1426,29 @@ export class DatabaseManager {
         )
         return { state: 'reserved', record: this.getIssueWrite(id)! }
       }
+      // An idempotency key is a durable binding, not a mutable slot. Check the
+      // complete operation and trusted human origin before *any* status-based
+      // retry logic, including failed rows. A mismatch leaves the original
+      // audit row byte-for-byte attributable to the operation it recorded.
+      const sameNullable = (left: string | number | null, right: string | number | null): boolean => left === right
+      const sameBinding =
+        existing.project_id === input.project_id &&
+        sameNullable(existing.captain_task_id, input.captain_task_id ?? null) &&
+        sameNullable(existing.captain_session_id, input.captain_session_id ?? null) &&
+        existing.repo === input.repo &&
+        existing.action === input.action &&
+        sameNullable(existing.target_number, input.target_number ?? null) &&
+        sameNullable(existing.task_id, input.task_id ?? null) &&
+        existing.payload_hash === input.payload_hash &&
+        existing.payload_fields === input.payload_fields &&
+        existing.origin_kind === input.origin.kind &&
+        existing.origin_message_id === input.origin.messageId &&
+        sameNullable(existing.origin_session_id, input.origin.sessionId) &&
+        existing.origin_text_hash === input.origin.textHash &&
+        existing.origin_excerpt === input.origin.excerpt &&
+        existing.origin_authored_at === input.origin.authoredAt &&
+        sameNullable(existing.correlation_id, input.origin.correlationId)
+      if (!sameBinding) return { state: 'conflict', record: existing }
       if (existing.status === 'succeeded') return { state: 'duplicate', record: existing }
       if (existing.status === 'unresolved') return { state: 'needs_reconcile', record: existing }
       if (existing.status === 'reserved') {
@@ -1462,6 +1491,46 @@ export class DatabaseManager {
         outcome.status, outcome.external_url ?? null, outcome.external_number ?? null,
         outcome.external_result ?? null, outcome.error ?? null, nextEpoch, settledAt, nowIso, id, outcome.attempt_epoch
       )
+      return this.getIssueWrite(id)
+    }).immediate()
+  }
+
+  /**
+   * Commits the recoverable local half of a successful issue write exactly
+   * once. The task attachment, status-journal entry and durable marker share
+   * one SQLite transaction, so a crash can leave either all three or none.
+   */
+  applyIssueWriteEffects(id: string, input: ApplyIssueWriteEffectsInput): IssueWriteRecord | undefined {
+    if (!this.ensureDbOpen()) return undefined
+    return this.db.transaction((): IssueWriteRecord | undefined => {
+      const record = this.getIssueWrite(id)
+      if (!record || record.status !== 'succeeded') return undefined
+      if (record.effects_applied_at) return record
+
+      if (input.attachment) {
+        if (record.task_id !== input.attachment.taskId || record.external_url !== input.attachment.url) return undefined
+        const task = this.getTask(input.attachment.taskId)
+        if (!task) return undefined
+        if (!task.attachments.some((item) => item.filename === input.attachment!.url)) {
+          this.updateTask(task.id, {
+            attachments: [...task.attachments, {
+              id: input.attachment.id,
+              filename: input.attachment.url,
+              size: 0,
+              mime_type: 'text/x-github-issue',
+              added_at: input.attachment.addedAt
+            }]
+          })
+        }
+      }
+
+      const entry = this.appendProjectStatusJournal(record.project_id, input.journal)
+      if (!entry) throw new Error('Could not write the delegated issue journal entry')
+      const now = new Date().toISOString()
+      const changed = this.prepare(
+        "UPDATE issue_writes SET effects_applied_at = ?, updated_at = ? WHERE id = ? AND status = 'succeeded' AND effects_applied_at IS NULL"
+      ).run(now, now, id).changes
+      if (changed !== 1) throw new Error('Could not mark delegated issue effects as applied')
       return this.getIssueWrite(id)
     }).immediate()
   }
@@ -1511,6 +1580,17 @@ export class DatabaseManager {
         ? this.prepare("SELECT * FROM issue_writes WHERE project_id = ? AND status = 'unresolved' ORDER BY created_at ASC").all(projectId)
         : this.prepare("SELECT * FROM issue_writes WHERE status = 'unresolved' ORDER BY created_at ASC").all()) as IssueWriteRecord[]
     }).immediate()
+  }
+
+  /** Successful external writes whose atomic local task/journal effects have
+   * not committed yet. Unbounded on purpose: startup recovery must not strand
+   * an older row behind a display-oriented page limit. */
+  listIssueWritesPendingEffects(projectId?: string): IssueWriteRecord[] {
+    if (!this.ensureDbOpen()) return []
+    return (projectId
+      ? this.prepare("SELECT * FROM issue_writes WHERE project_id = ? AND status = 'succeeded' AND effects_applied_at IS NULL ORDER BY created_at ASC, id ASC").all(projectId)
+      : this.prepare("SELECT * FROM issue_writes WHERE status = 'succeeded' AND effects_applied_at IS NULL ORDER BY created_at ASC, id ASC").all()
+    ) as IssueWriteRecord[]
   }
 
   getProjectStatusJournalEntry(id: string): ProjectStatusJournalEntry | undefined {

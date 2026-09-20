@@ -168,16 +168,20 @@ Migration 24 (`migrateIssueWrites()` in
 `src/main/database/issue-writes-migration.ts`) adds `issue_writes`: one row per
 external GitHub issue write, claimed before the call and settled after it. The
 row is both the audit record and the idempotency claim, so the two cannot
-disagree — `idempotency_key` is UNIQUE, and it is derived from durable inputs
-only (project, repository, action, target, task, payload hash), never from who
-authorized the write. That is what lets the retry of an interrupted write
-recompute the same key across a restart instead of filing a second issue. The
+disagree — `idempotency_key` is UNIQUE and a claimed key is immutably bound to
+the project, repository, action, target, task, exact payload shape/hash and
+trusted authorization origin. Any mismatch is refused even after a confirmed
+failed attempt, leaving the original audit row unchanged. An exact retry
+recomputes the same key across a restart instead of filing a second issue. The
 provenance columns record the originating human instruction, the Commander
 correlation and the Captain task/session; `status` moves `reserved` →
 `succeeded` | `failed` | `unresolved`, and an expired lease becomes
 `unresolved` rather than free. Attempt epochs fence late external answers from
 newer reconciliation passes, and `payload_fields` lets interrupted partial
-updates be compared in the same shape that was requested. New table only, so
+updates be compared in the same shape that was requested. `effects_applied_at`
+is the durable commit marker for an atomic task-attachment + journal
+transaction; startup reconciliation replays any successful external row whose
+local effects were interrupted, exactly once. New table only, so
 `CREATE TABLE IF NOT EXISTS` covers fresh and existing databases alike.
 
 ## Adding a column to other tables

@@ -7,10 +7,11 @@ import type Database from 'better-sqlite3'
  * called and settled afterwards. The row is both the audit record and the
  * idempotency claim, so the two can never disagree:
  *
- * - `idempotency_key` is UNIQUE. It is derived from durable things only
- *   (project, repository, action, target, task, payload hash), so the retry of
- *   an interrupted write recomputes the same key across a restart and finds
- *   its own claim instead of filing a second issue. A claim never expires: a
+ * - `idempotency_key` is UNIQUE. A default key is derived from durable things
+ *   (project, repository, action, target, task, payload hash); a caller key is
+ *   a project-scoped name. Either kind is immutably bound to the complete
+ *   operation and trusted authorization origin, so an exact retry finds its
+ *   own claim while a rebinding is refused. A claim never expires: a
  *   `succeeded` row deduplicates its key for good, which is the point.
  * - `payload_hash` is the hash of what was asked for, and `payload_fields`
  *   names which fields were in it. Reconciliation needs both: to decide
@@ -33,6 +34,9 @@ import type Database from 'better-sqlite3'
  *   was taken away therefore cannot resolve a row a newer attempt owns — the
  *   same protection `merge_grant_reservations` gets from minting a fresh
  *   reservation id per attempt.
+ * - `effects_applied_at` fences the local half of success. The task attachment,
+ *   journal entry and marker commit in one transaction; startup can therefore
+ *   replay an interrupted local effect without duplicating it.
  *
  * The CHECK constraints below encode the invariants the code relies on, so a
  * row that would be invisible to reconciliation (a `reserved` row with no
@@ -76,6 +80,7 @@ export function createIssueWriteTables(db: Database.Database): void {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       settled_at TEXT,
+      effects_applied_at TEXT,
 
       -- A create names no target; updates and local links always do. A row
       -- that broke this would either target the wrong issue or be impossible
@@ -87,7 +92,10 @@ export function createIssueWriteTables(db: Database.Database): void {
       -- A success nobody can point at is not a success; it is unresolved.
       CHECK (status != 'succeeded' OR external_url IS NOT NULL),
       -- Terminal rows are stamped; open ones are not.
-      CHECK ((status IN ('reserved', 'unresolved')) = (settled_at IS NULL))
+      CHECK ((status IN ('reserved', 'unresolved')) = (settled_at IS NULL)),
+      -- Local effects are applied only after GitHub/local-link success. Their
+      -- timestamp is the durable exactly-once marker for task links+journal.
+      CHECK (effects_applied_at IS NULL OR status = 'succeeded')
     );
     CREATE INDEX IF NOT EXISTS idx_issue_writes_project
       ON issue_writes(project_id, created_at DESC, id DESC);
@@ -99,6 +107,9 @@ export function createIssueWriteTables(db: Database.Database): void {
       ON issue_writes(project_id, status) WHERE status IN ('reserved', 'unresolved');
     CREATE INDEX IF NOT EXISTS idx_issue_writes_correlation
       ON issue_writes(correlation_id) WHERE correlation_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_issue_writes_pending_effects
+      ON issue_writes(project_id, created_at)
+      WHERE status = 'succeeded' AND effects_applied_at IS NULL;
   `)
 }
 

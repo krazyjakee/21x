@@ -166,6 +166,11 @@ describe('payload checks', () => {
       .toMatchObject({ code: 'credential_escalation' })
   })
 
+  it('scans labels as outgoing content, not harmless metadata', () => {
+    expect(validateIssuePayload({ title: 'Report', labels: ['ghp_0123456789abcdefghijABCDEFGHIJ0123'] }, { requireTitle: true }))
+      .toMatchObject({ code: 'credential_escalation' })
+  })
+
   it('refuses an @mention, because an issue write is not an outbound message', () => {
     const denial = validateIssuePayload({ title: 'Ping', body: 'cc @krazyjakee please look' }, { requireTitle: true })
     expect(denial).toMatchObject({ code: 'payload_rejected' })
