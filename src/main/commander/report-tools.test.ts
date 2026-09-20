@@ -15,7 +15,7 @@ import { handleTaskRoute } from '../task-api/task-routes'
 import { CommanderService } from './commander-service'
 import { CommanderStore } from './commander-store'
 import { CommanderVoice, type CommanderVoiceSpeech } from '../voice/commander-voice'
-import { createCommanderProjectTools, ProjectMutationConfirmations, type CommanderAgents } from './project-tools'
+import { createCommanderProjectTools, type CommanderAgents } from './project-tools'
 import { CaptainDeliveryService } from './captain-delivery'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_TITLE_PROMPT } from './prompts'
 import { deliverCaptainReport, setCaptainReportHandler } from './report-inbox'
@@ -74,12 +74,11 @@ let uninstall: (() => void) | null
 let captainDelivery: CaptainDeliveryService
 
 function makeService(provider: ChatProvider, over: { maxReportAsks?: number } = {}): CommanderService {
-  const confirmations = new ProjectMutationConfirmations()
   return new CommanderService({
     store,
     emit: (e) => events.push(e),
     createProvider: () => provider,
-    getTools: (context) => createCommanderProjectTools({ db, context, confirmations, agents, delivery: captainDelivery }),
+    getTools: (context) => createCommanderProjectTools({ db, context, agents, delivery: captainDelivery }),
     ...over
   })
 }

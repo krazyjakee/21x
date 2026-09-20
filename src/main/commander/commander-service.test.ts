@@ -6,7 +6,7 @@ import type { DatabaseManager } from '../database'
 import { COMMANDER_ADMIN_TOOLS, CommanderService, cleanGeneratedTitle, fallbackTitle, toolResultTags } from './commander-service'
 import { CommanderStore } from './commander-store'
 import { buildContext, MAX_SUMMARY_TRANSCRIPT_CHARS, planFold, splitTurns } from './context'
-import { createCommanderProjectTools, MUTATING_COMMANDER_TOOLS, ProjectMutationConfirmations, type CommanderAgents } from './project-tools'
+import { createCommanderProjectTools, MUTATING_COMMANDER_TOOLS, type CommanderAgents } from './project-tools'
 import { createCommanderSkillTools, MUTATING_COMMANDER_SKILL_TOOLS } from './skill-tools'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_TITLE_PROMPT } from './prompts'
 import { createCommanderMergeGrantTools } from './merge-grant-tools'
@@ -153,16 +153,16 @@ describe('CommanderService turns', () => {
         return []
       }
     })
-    const session = store.createSession('Confirmation context')
+    const session = store.createSession('Turn context')
     const first = service.sendUserMessage(session.id, 'propose a rename')
     await first.done
-    const second = service.sendUserMessage(session.id, 'Confirm abc123')
+    const second = service.sendUserMessage(session.id, 'yes, rename it')
     await second.done
 
     // #137: the stored id of that message rides along, so a merge grant can bind to it.
     expect(seen).toEqual([
       { sessionId: session.id, userMessage: 'propose a rename', userMessageId: first.message.id, authorizationMessageId: first.message.id, trigger: 'user' },
-      { sessionId: session.id, userMessage: 'Confirm abc123', userMessageId: second.message.id, authorizationMessageId: second.message.id, trigger: 'user' }
+      { sessionId: session.id, userMessage: 'yes, rename it', userMessageId: second.message.id, authorizationMessageId: second.message.id, trigger: 'user' }
     ])
   })
 
@@ -170,14 +170,13 @@ describe('CommanderService turns', () => {
     const adminTools = [...MUTATING_COMMANDER_TOOLS, ...MUTATING_COMMANDER_SKILL_TOOLS, 'revoke_merge_grant'] as string[]
 
     function serviceWithFullRegistry(provider: ChatProvider): CommanderService {
-      const confirmations = new ProjectMutationConfirmations()
       return new CommanderService({
         store,
         emit: (e) => events.push(e),
         createProvider: () => provider,
         getTools: (context) => [
-          ...createCommanderProjectTools({ db, context, confirmations }),
-          ...createCommanderSkillTools({ db, context, confirmations }),
+          ...createCommanderProjectTools({ db, context }),
+          ...createCommanderSkillTools({ db, context }),
           ...createCommanderMergeGrantTools({ db, context })
         ]
       })
@@ -305,13 +304,12 @@ describe('CommanderService turns', () => {
             },
       title: () => 'Two projects'
     })
-    const confirmations = new ProjectMutationConfirmations()
     const delivery = new CaptainDeliveryService({ db, agents, onTerminalFailure: vi.fn() })
     const service = new CommanderService({
       store,
       emit: (e) => events.push(e),
       createProvider: () => provider,
-      getTools: (context) => createCommanderProjectTools({ db, context, confirmations, agents, delivery })
+      getTools: (context) => createCommanderProjectTools({ db, context, agents, delivery })
     })
     const session = store.createSession()
 

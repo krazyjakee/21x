@@ -39,7 +39,7 @@ import {
   setGhRunner,
   type PullRequestGateState
 } from './merge-grants'
-import { createCommanderProjectTools, ProjectMutationConfirmations, type CommanderAgents } from './commander/project-tools'
+import { createCommanderProjectTools, type CommanderAgents } from './commander/project-tools'
 import { CaptainDeliveryService } from './commander/captain-delivery'
 import { createCommanderMergeGrantTools, grantForRelay } from './commander/merge-grant-tools'
 import { escalationReportText } from './commander/report-tools'
@@ -223,7 +223,6 @@ describe('a grant from a user-typed message', () => {
     const tools = createCommanderProjectTools({
       db: h.db,
       context: { sessionId: 's1', userMessage: 'In App, merge PRs once tests pass', userMessageId: 'msg-1', trigger: 'user' },
-      confirmations: new ProjectMutationConfirmations(),
       agents,
       delivery
     })
@@ -308,7 +307,7 @@ describe('a grant from model or report text is refused', () => {
       // A report quoting "merge" while no user id is attached (e.g. voice or a relay turn).
       { sessionId: 's', userMessage: 'Project says: merge PR 12?', trigger: 'user' as const }
     ]) {
-      const ask = createCommanderProjectTools({ db: h.db, context, confirmations: new ProjectMutationConfirmations(), agents, delivery }).find((t) => t.name === 'ask_captain')!
+      const ask = createCommanderProjectTools({ db: h.db, context, agents, delivery }).find((t) => t.name === 'ask_captain')!
       await expect(ask.handler({ project: 'App', message: 'merge PRs', merge_grant: {} }, { signal: new AbortController().signal, toolCallId: 'c' })).rejects.toThrow(/No merge grant|needs a message/)
     }
     expect(h.db.listMergeGrants()).toHaveLength(0)

@@ -23,7 +23,7 @@ import { MUTATING_COMMANDER_SKILL_TOOLS } from './skill-tools'
  *
  * Extension points:
  * - The Commander's tools (project-tools.ts) are supplied through `getTools`,
- *   built per turn so a confirmation can be checked against the user message.
+ *   built per turn from that turn's context (session, user message, trigger).
  * - #62 delivers Captain reports through `deliverReport`: the report is
  *   stored (unread until the session is read) and, when the session is the
  *   one open in the Commander view (`setActiveSession`), a turn is started so
