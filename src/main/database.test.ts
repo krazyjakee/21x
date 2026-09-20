@@ -237,7 +237,8 @@ describe('Agent CRUD', () => {
     const agent = db.createAgent(makeAgent({ name: 'My Agent' }))
     expect(agent).toBeDefined()
     expect(agent!.name).toBe('My Agent')
-    expect(agent!.config).toEqual({})
+    // #150: a new agent gets a hard cap of min(max_parallel_sessions, 5); unset reads as 1.
+    expect(agent!.config).toEqual({ concurrency_cap: 1 })
     expect(agent!.is_default).toBe(false)
   })
 

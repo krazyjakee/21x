@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   clearDictationTarget,
+  composerExpectsSpokenAnswer,
   findComposerField,
   findComposerKey,
   insertAndSubmit,
@@ -149,6 +150,22 @@ describe('insertAndSubmit — the conversational loop', () => {
     insertAndSubmit('one sentence')
 
     expect(b.field.value).toBe('')
+  })
+})
+
+describe('spoken reply ownership', () => {
+  it('defaults to the generic task reply bridge', () => {
+    registerComposer('task-1', { getField: () => null, submit: vi.fn() })
+    expect(composerExpectsSpokenAnswer('task-1')).toBe(true)
+  })
+
+  it('lets a dedicated conversation bridge own its replies', () => {
+    registerComposer('commander', {
+      getField: () => null,
+      submit: vi.fn(),
+      expectsSpokenAnswer: false,
+    })
+    expect(composerExpectsSpokenAnswer('commander')).toBe(false)
   })
 })
 

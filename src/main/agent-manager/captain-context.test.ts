@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { createTestDb } from '../../../test/helpers/db-test-helper'
@@ -87,6 +87,15 @@ describe('readCaptainMemory', () => {
     const memory = readCaptainMemory(workspace)
     expect(memory.content).toBe('# Memory\n\n- Use pnpm.')
     expect(memory.truncated).toBe(false)
+  })
+
+  it('reads legacy coordinator memory as Captain without modifying the file', () => {
+    const legacy = ['Master', 'mind'].join('')
+    const content = `# Daccord — ${legacy} memory\nKeep the release decision.`
+    const path = join(workspace, CAPTAIN_MEMORY_FILE)
+    writeFileSync(path, content)
+    expect(readCaptainMemory(workspace).content).toBe('# Daccord — Captain memory\nKeep the release decision.')
+    expect(readFileSync(path, 'utf-8')).toBe(content)
   })
 
   it('caps a long file and says so', () => {

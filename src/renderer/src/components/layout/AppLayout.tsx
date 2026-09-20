@@ -14,11 +14,11 @@ import { useAgentStore } from '@/stores/agent-store'
 import { useProjectStore } from '@/stores/project-store'
 import { useAgentAutoStart } from '@/hooks/use-agent-auto-start'
 import { useOverdueNotifications } from '@/hooks/use-overdue-notifications'
-import { settingsApi, projectApi, onTaskSourceActionFailed } from '@/lib/ipc-client'
+import { agentSessionApi, settingsApi, projectApi, onTaskSourceActionFailed } from '@/lib/ipc-client'
 import { isOverdue, isSnoozed } from '@/lib/utils'
 import { onShortcutFeedback } from '@/lib/keyboard-shortcuts'
-import { TaskStatus } from '@/types'
-import type { FileAttachment, OutputField, UpdateTaskDTO } from '@/types'
+import { TASK_STATUSES, TaskStatus } from '@/types'
+import type { FileAttachment, OutputField, Task, UpdateTaskDTO } from '@/types'
 import { SubtaskPickerDialog } from '@/components/tasks/SubtaskPickerDialog'
 import { StatusBar } from './StatusBar'
 import { CommandPalette } from './CommandPalette'
@@ -133,6 +133,32 @@ export function AppLayout() {
   const handleUpdateTask = useCallback(async (taskId: string, data: Record<string, unknown>) => {
     await updateTask(taskId, data as UpdateTaskDTO)
   }, [updateTask])
+  const handleDashboardTaskStatusChange = useCallback(async (task: Task, status: TaskStatus) => {
+    try {
+      if (status === TaskStatus.Completed) {
+        await completeTask(task.id)
+        return
+      }
+      await updateTask(task.id, { status })
+
+      // Dropping into an execution stage replaces opening the ticket and
+      // pressing Triage/Start. The main process owns the exact behavior: an
+      // unassigned task is triaged, an assigned task starts, and a constrained
+      // start is queued through normal admission control.
+      if (status === TaskStatus.Triaging || status === TaskStatus.AgentWorking) {
+        const result = await agentSessionApi.startTask(task.id)
+        if (result.action === 'no_action') {
+          throw new Error('No configured agent is available to start this task')
+        }
+        if (result.action === 'queued') {
+          showToast(`Queued "${task.title}" to start${result.queuePosition ? ` (position ${result.queuePosition})` : ''}`)
+        }
+      }
+    } catch (error) {
+      const statusLabel = TASK_STATUSES.find((entry) => entry.value === status)?.label ?? status
+      showToast(`Could not move "${task.title}" to ${statusLabel}: ${error instanceof Error ? error.message : String(error)}`, true)
+    }
+  }, [completeTask, showToast, updateTask])
   const handleNavigateToTask = useCallback((taskId: string) => selectTask(taskId), [selectTask])
 
   const overdueCount = useMemo(
@@ -234,7 +260,7 @@ export function AppLayout() {
               </Suspense>
             ) : sidebarView === 'dashboard' ? (
               <Suspense fallback={workspaceFallback}>
-                <DashboardWorkspace />
+                <DashboardWorkspace onTaskStatusChange={handleDashboardTaskStatusChange} />
               </Suspense>
             ) : sidebarView === 'skills' ? (
               <Suspense fallback={workspaceFallback}>

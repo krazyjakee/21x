@@ -151,13 +151,23 @@ describe('CaptainWaker', () => {
     expect(waker.pendingEvents(DEFAULT_PROJECT_ID)).toHaveLength(2)
   })
 
-  it('rejoins a live idle session and passes its agent', async () => {
-    const agents = fakeAgents({ sessionId: 'live-1', status: 'idle', agentId: 'agent-live' })
+  it('rejoins a live idle session on the Captain agent', async () => {
+    const agents = fakeAgents({ sessionId: 'live-1', status: 'idle', agentId: 'agent-1' })
     const waker = makeWaker(fakeStore(), agents)
     waker.handleEvent(event({ taskId: 'a' }))
     await clock.advance(3_000)
     const [sessionId, , taskId, agentId] = (agents.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0] as string[]
-    expect([sessionId, taskId, agentId]).toEqual(['live-1', 'mm-1', 'agent-live'])
+    expect([sessionId, taskId, agentId]).toEqual(['live-1', 'mm-1', 'agent-1'])
+  })
+
+  it('does not wake a session left on an agent the Captain was switched away from', async () => {
+    const agents = fakeAgents({ sessionId: 'live-1', status: 'idle', agentId: 'agent-old' })
+    const waker = makeWaker(fakeStore(), agents)
+    waker.handleEvent(event({ taskId: 'a' }))
+    await clock.advance(3_000)
+    // No session id: main starts the configured agent and stops the old one.
+    const [sessionId, , taskId, agentId] = (agents.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0] as string[]
+    expect([sessionId, taskId, agentId]).toEqual(['', 'mm-1', 'agent-1'])
   })
 
   it('waits for a working Captain instead of interrupting it', async () => {

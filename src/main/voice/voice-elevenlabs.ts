@@ -91,6 +91,7 @@ export class ElevenLabsError extends Error {
 
 const MESSAGES: Record<VoiceTtsElevenLabsErrorKind, string> = {
   auth: 'ElevenLabs did not accept the API key. Check the key in Settings → Voice.',
+  permission: 'The ElevenLabs API key is valid but does not have the permissions this voice needs.',
   quota: 'The ElevenLabs account has no characters left this period. Add credits or wait for the period to reset.',
   rate_limit: 'ElevenLabs is rate-limiting this account. Wait a moment and try again.',
   unsupported_model: 'ElevenLabs rejected the selected model for streaming. Choose another model in Settings → Voice.',
@@ -101,8 +102,9 @@ const MESSAGES: Record<VoiceTtsElevenLabsErrorKind, string> = {
 /** Words in an ElevenLabs error body that name a kind. */
 function kindFromText(text: string): VoiceTtsElevenLabsErrorKind | null {
   const t = text.toLowerCase()
+  if (/missing[_ ]permissions?|insufficient[_ ]permissions?|permission[_ ]denied|does not have (?:the )?permissions?|permissions? (?:is |are )?required/.test(t)) return 'permission'
   if (/quota|credit|character limit|characters? remaining|insufficient|payment required|exceeded/.test(t)) return 'quota'
-  if (/api key|api_key|unauthori[sz]ed|authenticat|invalid_api|xi-api-key|permission/.test(t)) return 'auth'
+  if (/api key|api_key|unauthori[sz]ed|authenticat|invalid_api|xi-api-key/.test(t)) return 'auth'
   if (/too many|rate limit|concurren/.test(t)) return 'rate_limit'
   if (/model/.test(t)) return 'unsupported_model'
   return null
@@ -129,10 +131,10 @@ export function mapElevenLabsFailure(status: number | undefined, body?: unknown)
   const detail = detailOf(body)
   const named = kindFromText(detail)
   let kind: VoiceTtsElevenLabsErrorKind
-  if (status === 401 || status === 403) kind = 'auth'
+  if (named) kind = named
+  else if (status === 401 || status === 403) kind = 'auth'
   else if (status === 402) kind = 'quota'
   else if (status === 429) kind = 'rate_limit'
-  else if (named) kind = named
   else if (status === 400 || status === 404 || status === 422) kind = 'unsupported_model'
   else if (status !== undefined && status >= 500) kind = 'network'
   else kind = 'unknown'
@@ -674,19 +676,32 @@ export class ElevenLabsEngine {
       this.reset()
       return
     }
-    try {
-      const [usage, voices, models] = await Promise.all([this.api.subscription(), this.api.listVoices(), this.api.listModels()])
-      this.usage = usage
-      this.voices = voices
-      this.models = models
-      this.error = null
-      this.loaded = true
-    } catch (err) {
-      const error = toElevenLabsError(err)
+    // Subscription data requires a separate `user_read` scope. A key can be
+    // perfectly valid for speech and voice listing without it, so usage is
+    // best-effort and must not decide whether the key is accepted. Models are
+    // also optional: the known default remains usable if their public listing
+    // is temporarily unavailable. Voice listing is the one required request,
+    // because the service cannot open a passage without a voice id.
+    const [voices, models, usage] = await Promise.allSettled([
+      this.api.listVoices(),
+      this.api.listModels(),
+      this.api.subscription(),
+    ])
+
+    this.voices = voices.status === 'fulfilled' ? voices.value : []
+    this.models = models.status === 'fulfilled' ? models.value : []
+    this.usage = usage.status === 'fulfilled' ? usage.value : null
+
+    if (voices.status === 'rejected') {
+      const error = toElevenLabsError(voices.reason)
       this.error = error.toState()
       this.loaded = false
       console.warn(`[voice] ElevenLabs listing failed (${error.kind})`)
+      return
     }
+
+    this.error = null
+    this.loaded = true
   }
 
   /**

@@ -60,6 +60,7 @@ export async function handleSessionRoute(db: DatabaseManager, route: string, par
 
       const found = agentController.findSessionByTaskId(taskId)
       const live = found ? agentController.getSessionStatus(found.sessionId) : null
+      const recovery = agentController.getStartRecoveryState?.(taskId) ?? null
       return {
         task_id: taskId,
         title: task.title,
@@ -69,7 +70,8 @@ export async function handleSessionRoute(db: DatabaseManager, route: string, par
         session_status: live?.status ?? 'none',
         session_id: found?.sessionId ?? null,
         agent_id: task.agent_id,
-        waiting_for_you: live?.status === 'waiting_approval'
+        waiting_for_you: live?.status === 'waiting_approval',
+        recovery
       }
     }
 
@@ -96,11 +98,18 @@ export async function handleSessionRoute(db: DatabaseManager, route: string, par
         .map((task) => {
           const found = agentController?.findSessionByTaskId(task.id)
           const live = found ? agentController?.getSessionStatus(found.sessionId) : null
+          const recovery = agentController?.getStartRecoveryState?.(task.id) ?? null
           return {
             task_id: task.id,
             title: task.title,
             status: task.status,
             session_status: live?.status ?? 'none',
+            recovery_state: recovery?.state ?? null,
+            recovery_cause: recovery?.recoveryCause ?? null,
+            recovery_action: recovery?.recoveryAction ?? null,
+            recovery_result: recovery?.recoveryResult ?? null,
+            retry_count: recovery?.retryCount ?? 0,
+            next_retry_at: recovery?.nextRetryAt ?? null,
             updated_at: task.updated_at
           }
         })

@@ -188,7 +188,9 @@ export interface AgentConfig {
   secret_ids?: string[]
   /** Ordered agents to try when this agent exhausts its credits or usage quota. */
   fallback_agent_ids?: string[]
-  max_parallel_sessions?: number  // Default: 1, range: 1-10
+  max_parallel_sessions?: number  // Legacy mirror of concurrency_cap
+  /** The user-set hard cap on concurrent jobs across every project (#150). */
+  concurrency_cap?: number
   api_keys?: {
     openai?: string  // For Codex
     anthropic?: string  // For Claude Code

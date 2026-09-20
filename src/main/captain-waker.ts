@@ -300,11 +300,14 @@ export class CaptainWaker {
       return
     }
 
-    const agentId = live?.session.agentId ?? resolveCaptainAgentId(this.db, project)
+    const agentId = resolveCaptainAgentId(this.db, project)
     if (!agentId) {
       console.warn(`[CaptainWaker] No agent to run the Captain of ${projectId}; dropping ${batch.events.length} event(s)`)
       return
     }
+    // A live session on an agent the Captain was switched away from is not
+    // reused; sending without it starts the configured agent and stops it.
+    const liveSessionId = live?.session.agentId === agentId ? live.sessionId : ''
 
     const listed = batch.events.slice(0, this.maxEventsPerWake)
     const message = buildCaptainWakeMessage(coordinator.id, project.name, listed, batch.events.length - listed.length)
@@ -312,7 +315,7 @@ export class CaptainWaker {
     this.flushing.add(projectId)
     try {
       console.log(`[CaptainWaker] Waking Captain of ${projectId} with ${batch.events.length} event(s)`)
-      await this.agents.sendMessage(live?.sessionId ?? '', message, coordinator.id, agentId)
+      await this.agents.sendMessage(liveSessionId, message, coordinator.id, agentId)
     } catch (err) {
       console.error(`[CaptainWaker] Could not wake the Captain of ${projectId}:`, err)
     } finally {
