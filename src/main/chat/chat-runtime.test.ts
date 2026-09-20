@@ -36,6 +36,27 @@ function collect(): { events: ChatRuntimeEvent[]; listener: (e: ChatRuntimeEvent
 }
 
 describe('ChatRuntime', () => {
+  it('does not reflect image transport errors containing secrets, image data or local paths into events or logs', async () => {
+    const leaked = 'secret-token data:image/png;base64,PRIVATE_IMAGE /home/private/image.png'
+    const provider = scriptedProvider(async function* () {
+      yield { type: 'text_delta', text: '' }
+      throw new Error(leaked)
+    })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const { events, listener } = collect()
+      const result = await new ChatRuntime().startTurn({ provider, messages: [{ role: 'user', content: 'look', images: [{ name: 'image.png', mimeType: 'image/png', data: 'iVBORw0KGgo=' }] }] }, listener).done
+      expect(result.stopReason).toBe('error')
+      expect(result.error).toBe('The chat request with images failed. Check the selected model and try again.')
+      for (const secret of ['secret-token', 'PRIVATE_IMAGE', '/home/private/']) {
+        expect(JSON.stringify(events)).not.toContain(secret)
+        expect(JSON.stringify(log.mock.calls)).not.toContain(secret)
+      }
+    } finally {
+      log.mockRestore()
+    }
+  })
+
   it('streams text, runs one tool round trip and returns the extended history', async () => {
     const provider = scriptedProvider(async function* (request) {
       const lastIsTool = request.messages[request.messages.length - 1].role === 'tool'

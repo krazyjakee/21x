@@ -1,3 +1,4 @@
+import { captainTerminology } from '../shared/captain-compat'
 import Database from 'better-sqlite3'
 import { app } from 'electron'
 import { join } from 'path'
@@ -12,6 +13,7 @@ import { userTaskRoleFilter } from './database/task-roles'
 import { TASK_ROLE_CAPTAIN, type TaskRole } from '../shared/task-roles'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import { mergeGrantStatus, type MergeCheckRecord, type MergeGrant, type MergeGrantSource, type MergeGrantReservation, type MergeGrantUse, type MergeGrantUseInput } from '../shared/merge-grants'
+import { defaultHardCap, normalizeTouchPath, type ConcurrencyAuditEntry } from '../shared/concurrency'
 import {
   PROJECT_STATUS_BLOCKER_MAX_CHARS,
   PROJECT_STATUS_JOURNAL_COMPACT_AFTER_DAYS,
@@ -66,6 +68,20 @@ import type {
 export type * from './database/types'
 export { SkillVersionConflictError } from './database/types'
 export type { ProjectStatus, ProjectStatusJournalEntry, ProjectStatusJournalInput } from '../shared/project-status'
+
+/**
+ * A new agent's config with its hard cap (#150): an explicit cap is kept,
+ * otherwise min(max_parallel_sessions, 5), as migration 20 gives existing agents.
+ */
+function withDefaultHardCap(config: CreateAgentData['config']): NonNullable<CreateAgentData['config']> {
+  const next = { ...(config ?? {}) }
+  const explicit = Number(next.concurrency_cap)
+  if (!(Number.isFinite(explicit) && explicit >= 1)) next.concurrency_cap = defaultHardCap(next.max_parallel_sessions)
+  return next
+}
+
+/** Most paths one task may declare it touches (#150). */
+const MAX_TASK_TOUCHES = 200
 
 /** A `project_status_journal` row (#72); the list columns hold JSON arrays. */
 interface ProjectStatusJournalRow {
@@ -145,12 +161,12 @@ function toJournalEntry(row: ProjectStatusJournalRow): ProjectStatusJournalEntry
   return {
     id: row.id,
     project_id: row.project_id,
-    summary: row.summary,
-    completed: journalStringList(row.completed),
-    blockers: journalStringList(row.blockers),
-    decisions: journalStringList(row.decisions),
-    next_steps: journalStringList(row.next_steps),
-    source: row.source === 'compaction' ? 'compaction' : 'captain',
+    summary: captainTerminology(row.summary),
+    completed: journalStringList(row.completed).map(captainTerminology),
+    blockers: journalStringList(row.blockers).map(captainTerminology),
+    decisions: journalStringList(row.decisions).map(captainTerminology),
+    next_steps: journalStringList(row.next_steps).map(captainTerminology),
+    source: row.source === 'compaction' ? 'compaction' : row.source === 'system_recovery' ? 'system_recovery' : 'captain',
     correlation_id: row.correlation_id ?? null,
     created_at: row.created_at
   }
@@ -837,7 +853,7 @@ export class DatabaseManager {
       id,
       data.name,
       data.server_url ?? 'http://localhost:4096',
-      JSON.stringify(data.config ?? {}),
+      JSON.stringify(withDefaultHardCap(data.config)),
       data.is_default ? 1 : 0,
       now,
       now
@@ -1101,8 +1117,8 @@ export class DatabaseManager {
     return {
       project_id: projectId,
       counts,
-      summary: stored?.summary ?? '',
-      top_blockers: topBlockers,
+      summary: captainTerminology(stored?.summary ?? ''),
+      top_blockers: topBlockers.map(captainTerminology),
       updated_at: stored?.updated_at ?? null
     }
   }
@@ -1451,6 +1467,62 @@ export class DatabaseManager {
       return { folded: stale.length, written }
     })
     return run()
+  }
+
+  // ── Concurrency control (#150) ───────────────────────────────
+
+  /** Appends one row to the project's concurrency audit feed. */
+  appendConcurrencyAudit(entry: Omit<ConcurrencyAuditEntry, 'id' | 'created_at'> & { created_at?: string }): ConcurrencyAuditEntry | undefined {
+    if (!this.ensureDbOpen() || !this.getProject(entry.project_id)) return undefined
+    const row: ConcurrencyAuditEntry = {
+      id: createId(),
+      project_id: entry.project_id,
+      agent_id: entry.agent_id,
+      kind: entry.kind,
+      previous_level: entry.previous_level,
+      level: entry.level,
+      cap: entry.cap,
+      actor: entry.actor,
+      reason: entry.reason.trim().slice(0, 500),
+      created_at: entry.created_at ?? new Date().toISOString()
+    }
+    this.prepare(`
+      INSERT INTO concurrency_audit (id, project_id, agent_id, kind, previous_level, level, cap, actor, reason, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(row.id, row.project_id, row.agent_id, row.kind, row.previous_level, row.level, row.cap, row.actor, row.reason, row.created_at)
+    return row
+  }
+
+  /** The project's concurrency changes, newest first. */
+  listConcurrencyAudit(projectId: string, limit = 20): ConcurrencyAuditEntry[] {
+    if (!this.ensureDbOpen()) return []
+    return this.prepare(`
+      SELECT id, project_id, agent_id, kind, previous_level, level, cap, actor, reason, created_at
+      FROM concurrency_audit WHERE project_id = ?
+      ORDER BY created_at DESC, rowid DESC LIMIT ?
+    `).all(projectId, Math.max(1, Math.min(200, Math.floor(limit)))) as ConcurrencyAuditEntry[]
+  }
+
+  /** The files a task declared it will change; [] when it declared none. */
+  getTaskTouches(taskId: string): string[] {
+    if (!this.ensureDbOpen()) return []
+    const row = this.prepare('SELECT paths FROM task_touches WHERE task_id = ?').get(taskId) as { paths: string } | undefined
+    return row ? parseJsonArray(row.paths) : []
+  }
+
+  /** Replaces a task's declared touches; an empty list clears them. Returns what is stored. */
+  setTaskTouches(taskId: string, paths: string[]): string[] {
+    if (!this.ensureDbOpen() || !this.getTask(taskId)) return []
+    const cleaned = [...new Set(paths.map((p) => normalizeTouchPath(String(p))).filter(Boolean))].slice(0, MAX_TASK_TOUCHES)
+    if (cleaned.length === 0) {
+      this.prepare('DELETE FROM task_touches WHERE task_id = ?').run(taskId)
+      return []
+    }
+    this.prepare(`
+      INSERT INTO task_touches (task_id, paths, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(task_id) DO UPDATE SET paths = excluded.paths, updated_at = excluded.updated_at
+    `).run(taskId, JSON.stringify(cleaned), new Date().toISOString())
+    return cleaned
   }
 
   getProjectRepos(projectId: string): ProjectRepoRecord[] {

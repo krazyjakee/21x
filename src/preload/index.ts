@@ -49,6 +49,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     download: (taskId: string, attachmentId: string): Promise<void> =>
       ipcRenderer.invoke('attachments:download', taskId, attachmentId)
   },
+  // Chat image attachments (#144).
+  chatImages: {
+    readClipboard: (): Promise<unknown> => ipcRenderer.invoke('chatImages:readClipboard'),
+    saveToTask: (taskId: string, images: unknown[]): Promise<unknown> =>
+      ipcRenderer.invoke('chatImages:saveToTask', { taskId, images })
+  },
   shell: {
     openPath: (filePath: string): Promise<void> =>
       ipcRenderer.invoke('shell:openPath', filePath),
@@ -87,7 +93,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     update: (id: string, data: Record<string, unknown>): Promise<unknown> =>
       ipcRenderer.invoke('agent:update', id, data),
     delete: (id: string): Promise<boolean> => ipcRenderer.invoke('agent:delete', id),
-    getStartQueue: (): Promise<unknown[]> => ipcRenderer.invoke('agent:getStartQueue')
+    getStartQueue: (): Promise<unknown[]> => ipcRenderer.invoke('agent:getStartQueue'),
+    getStartRecoveryState: (taskId: string): Promise<unknown> => ipcRenderer.invoke('agent:getStartRecoveryState', taskId)
   },
   mcpServers: {
     getAll: (): Promise<unknown[]> => ipcRenderer.invoke('mcp:getAll'),
@@ -342,6 +349,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getState: (projectId: string): Promise<unknown> => ipcRenderer.invoke('projectLimits:getState', projectId),
     isAllPaused: (): Promise<boolean> => ipcRenderer.invoke('projectLimits:isAllPaused'),
     pauseAll: (paused: boolean): Promise<boolean> => ipcRenderer.invoke('projectLimits:pauseAll', paused)
+  },
+  // Captain-managed concurrency under the user-set hard cap (#150).
+  concurrency: {
+    getState: (projectId: string): Promise<unknown> => ipcRenderer.invoke('concurrency:getState', projectId),
+    setCaptainControl: (projectId: string, enabled: boolean): Promise<unknown> =>
+      ipcRenderer.invoke('concurrency:setCaptainControl', projectId, enabled),
+    pin: (projectId: string, agentId: string, level: number | null): Promise<unknown> =>
+      ipcRenderer.invoke('concurrency:pin', projectId, agentId, level),
+    onChanged: (callback: (event: { projectId: string }) => void): (() => void) => {
+      const handler = (_: unknown, event: { projectId: string }): void => callback(event)
+      ipcRenderer.on('concurrency:changed', handler)
+      return () => ipcRenderer.removeListener('concurrency:changed', handler)
+    }
   },
   // Captain tool calls held by the escalation policy (#66).
   escalation: {
@@ -774,7 +794,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     markRead: (sessionId: string): Promise<unknown> => ipcRenderer.invoke('commander:markRead', { sessionId }),
     // Which session the Commander view shows (#62): a report for it is relayed at once; others only queue.
     setActiveSession: (sessionId: string | null): Promise<void> => ipcRenderer.invoke('commander:setActiveSession', { sessionId }),
-    send: (sessionId: string, text: string): Promise<unknown> => ipcRenderer.invoke('commander:send', { sessionId, text }),
+    send: (sessionId: string, text: string, images?: unknown[]): Promise<unknown> =>
+      ipcRenderer.invoke('commander:send', images?.length ? { sessionId, text, images } : { sessionId, text }),
+    getImage: (id: string): Promise<unknown> => ipcRenderer.invoke('commander:getImage', { id }),
     cancel: (sessionId: string): Promise<{ cancelled: boolean }> => ipcRenderer.invoke('commander:cancel', { sessionId }),
     onEvent: (callback: (data: unknown) => void): (() => void) => {
       const handler = (_: unknown, d: unknown): void => callback(d)

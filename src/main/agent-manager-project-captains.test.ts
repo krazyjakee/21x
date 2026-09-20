@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { AgentManager } from './agent-manager'
@@ -162,6 +162,20 @@ describe('per-project Captain conversations', () => {
     const second = newManager(after)
     // A project edit made while the app was closed reaches the resumed conversation.
     db.updateProject(alphaId, { description: 'The alpha brief, revised.' })
+    const legacy = ['Master', 'mind'].join('')
+    const workspace = db.getWorkspaceDir(alphaCaptain)
+    for (const name of ['AGENTS.md', 'CLAUDE.md']) {
+      writeFileSync(join(workspace, name), `Only the project ${legacy} may call report_to_commander.`)
+    }
+    const memory = `# Alpha — ${legacy} memory`
+    writeFileSync(join(workspace, CAPTAIN_MEMORY_FILE), memory)
+    after.resumeSession.mockImplementation(async (sessionId: string) => {
+      if (sessionId !== 'alpha-session') return []
+      for (const name of ['AGENTS.md', 'CLAUDE.md']) {
+        expect(readFileSync(join(workspace, name), 'utf-8')).not.toContain(legacy)
+      }
+      return []
+    })
 
     expect(await second.startSession(agentId, betaCaptain, undefined, true)).toBe('beta-session')
     expect(await second.startSession(agentId, alphaCaptain, undefined, true)).toBe('alpha-session')
@@ -175,6 +189,9 @@ describe('per-project Captain conversations', () => {
     expect(alphaResume[0]).toBe('alpha-session')
     expect(configOf(alphaResume, 1).systemPrompt).toContain('The alpha brief, revised.')
     expect(configOf(alphaResume, 1).systemPrompt).not.toContain('Beta')
+    expect(configOf(alphaResume, 1).systemPrompt).toContain('# Alpha — Captain memory')
+    expect(configOf(alphaResume, 1).systemPrompt).not.toContain(legacy)
+    expect(readFileSync(join(workspace, CAPTAIN_MEMORY_FILE), 'utf-8')).toBe(memory)
 
     // The same conversation is rejoined, not started twice.
     expect(await second.startSession(agentId, alphaCaptain, undefined, true)).toBe('alpha-session')
@@ -310,6 +327,42 @@ describe('per-project Captain conversations', () => {
       probeOk: true,
       errorCode: 'STARTUP_TIMEOUT'
     })
+  })
+
+  it('recovers a queued image message after restart and deduplicates a retry with the same delivery ID', async () => {
+    const image = { id: 'pasted-image', filename: 'shot.png', size: 8, mime_type: 'image/png', added_at: new Date().toISOString() }
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    const source = join(root, 'stored-images')
+    mkdirSync(source)
+    db.getAttachmentsDir = vi.fn(() => source)
+    writeFileSync(join(source, `${image.id}-${image.filename}`), bytes)
+    db.updateTask(alphaCaptain, { attachments: [image] })
+    const first = newManager(new FakeAdapter())
+    // The delivery is durable before startup; losing the process now leaves
+    // its original image references in the outbox for the next manager.
+    vi.spyOn(first as any, 'sendMessageNow').mockRejectedValueOnce(new Error('startup interrupted'))
+    await expect(first.sendMessage('', '', alphaCaptain, agentId, [image], undefined, 'captain-drawer:image-retry')).rejects.toThrow('startup interrupted')
+    const store = new DeliveryStore(db)
+    const queued = store.getByKey('captain-drawer:image-retry')!
+    expect(queued.state).toBe('pending')
+    expect(JSON.parse(queued.payload).attachments).toEqual([image])
+    await first.stopAllSessions()
+
+    const fake = new FakeAdapter({ sessionIds: ['recovered-image-session'] })
+    const second = newManager(fake)
+    await second.reconcileStartup()
+    expect(fake.sendPrompt).toHaveBeenCalledTimes(1)
+    expect(fake.sendPrompt).toHaveBeenCalledWith('recovered-image-session', [expect.objectContaining({
+      text: expect.stringContaining('attachments/shot.png')
+    })], expect.any(Object))
+    expect(readFileSync(join(db.getWorkspaceDir(alphaCaptain), 'attachments', image.filename))).toEqual(bytes)
+    expect(store.get(queued.id)?.state).toBe('acknowledged')
+
+    // The renderer may retry with stale/empty options after reconnecting;
+    // the acknowledged delivery must not dispatch or replace its attachments.
+    await second.sendMessage('', 'changed retry', alphaCaptain, agentId, [], undefined, 'captain-drawer:image-retry')
+    expect(fake.sendPrompt).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(store.get(queued.id)!.payload).attachments).toEqual([image])
   })
 
   it('acknowledges a crash-after-provider-handoff message without visibly sending it again', async () => {

@@ -23,6 +23,7 @@ import type {
 } from '@shared/voice-tts'
 import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
 import type { CommanderEvent, CommanderListSessionsRequest, CommanderMessage, CommanderSession } from '@shared/commander'
+import type { ChatImageInput } from '@shared/chat-images'
 import type { CaptainRuntimeState } from '@shared/captain-runtime'
 import type {
   ConnectorBridgeCredentialInput,
@@ -43,6 +44,7 @@ import type {
 } from '@shared/projects'
 import type { HeldAction, ProjectLimitState } from '@shared/project-limit-types'
 import type { MergeGrant, MergeGrantAuditEntry } from '@shared/merge-grants'
+import type { ProjectConcurrencyState } from '@shared/concurrency'
 import type { ProjectStatus, ProjectStatusHistoryPage } from '@shared/project-status'
 import type { ProjectOverviewEntry } from '@shared/project-overview'
 import type { CaptainMemory } from '@shared/captain-memory'
@@ -148,9 +150,16 @@ export const agentApi = {
     return window.electronAPI.agents.delete(id)
   },
 
-  /** Starts the main process is holding back behind concurrency limits. */
+  /** Durable starts waiting on capacity, dependencies or retry deadlines. */
   getStartQueue: (): Promise<QueuedAgentStart[]> => {
     return window.electronAPI.agents.getStartQueue()
+  },
+
+  /** Latest durable queue/recovery outcome for one task, including terminal states. */
+  getStartRecoveryState: (taskId: string): Promise<QueuedAgentStart | null> => {
+    return typeof window.electronAPI.agents.getStartRecoveryState === 'function'
+      ? window.electronAPI.agents.getStartRecoveryState(taskId)
+      : Promise.resolve(null)
   }
 }
 
@@ -247,6 +256,16 @@ export const onOverdueCheck = (callback: () => void): (() => void) => {
 
 export const onTasksRefresh = (callback: () => void): (() => void) => {
   return window.electronAPI.onTasksRefresh(callback)
+}
+
+// Chat image attachments (#144): the clipboard fallback and task storage.
+export const chatImageApi = {
+  readClipboard: (): Promise<{ images: ChatImageInput[]; errors: string[] }> =>
+    typeof window.electronAPI.chatImages?.readClipboard === 'function'
+      ? window.electronAPI.chatImages.readClipboard()
+      : Promise.resolve({ images: [], errors: [] }),
+  saveToTask: (taskId: string, images: ChatImageInput[]): Promise<FileAttachment[]> =>
+    window.electronAPI.chatImages.saveToTask(taskId, images)
 }
 
 export const attachmentApi = {
@@ -552,6 +571,17 @@ export const mergeGrantsApi = {
   revoke: (id: string): Promise<{ ok: boolean; error?: string }> => window.electronAPI.mergeGrants.revoke(id),
   onChanged: (callback: (event: { projectId: string }) => void): (() => void) =>
     typeof window.electronAPI.mergeGrants?.onChanged === 'function' ? window.electronAPI.mergeGrants.onChanged(callback) : () => {}
+}
+
+/** Captain-managed concurrency under the user-set hard cap (#150). */
+export const concurrencyApi = {
+  getState: (projectId: string): Promise<ProjectConcurrencyState> => window.electronAPI.concurrency.getState(projectId),
+  setCaptainControl: (projectId: string, enabled: boolean): Promise<{ success: true } | { error: string }> =>
+    window.electronAPI.concurrency.setCaptainControl(projectId, enabled),
+  pin: (projectId: string, agentId: string, level: number | null): Promise<{ success: true } | { error: string }> =>
+    window.electronAPI.concurrency.pin(projectId, agentId, level),
+  onChanged: (callback: (event: { projectId: string }) => void): (() => void) =>
+    typeof window.electronAPI.concurrency?.onChanged === 'function' ? window.electronAPI.concurrency.onChanged(callback) : () => undefined
 }
 
 /** Captain tool calls held by the escalation policy (#66). */
@@ -869,7 +899,9 @@ export const commanderApi = {
   /** Tells main which session the view shows (#62): a report for it is relayed at once, others only queue as unread. */
   setActiveSession: (sessionId: string | null): Promise<void> =>
     typeof window.electronAPI.commander.setActiveSession === 'function' ? window.electronAPI.commander.setActiveSession(sessionId) : Promise.resolve(),
-  send: (sessionId: string, text: string): Promise<{ turnId: string; message: CommanderMessage }> => window.electronAPI.commander.send(sessionId, text),
+  send: (sessionId: string, text: string, images?: ChatImageInput[]): Promise<{ turnId: string; message: CommanderMessage }> =>
+    images?.length ? window.electronAPI.commander.send(sessionId, text, images) : window.electronAPI.commander.send(sessionId, text),
+  getImage: (id: string): Promise<(ChatImageInput & { id: string }) | null> => window.electronAPI.commander.getImage(id),
   cancel: (sessionId: string): Promise<{ cancelled: boolean }> => window.electronAPI.commander.cancel(sessionId),
   onEvent: (callback: (event: CommanderEvent) => void): (() => void) => window.electronAPI.commander.onEvent(callback)
 }

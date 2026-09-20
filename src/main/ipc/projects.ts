@@ -11,6 +11,7 @@ import { buildProjectStatus, readProjectStatusHistory } from '../project-status'
 import type { ProjectStatus, ProjectStatusHistoryPage } from '../../shared/project-status'
 import type { ProjectChangedEvent } from '../../shared/projects'
 import { approveHeldAction, listHeldActions, rejectHeldAction } from '../escalation'
+import type { ProjectConcurrencyState } from '../../shared/concurrency'
 
 export const PROJECT_CHANGED_CHANNEL = 'project:changed'
 
@@ -46,6 +47,16 @@ export function registerProjectHandlers({ db, agentManager }: IpcDeps): void {
     return changed(created, created?.id, 'created')
   })
   ipcMain.handle('project:update', (_, id: string, data: UpdateProjectData) => {
+    // #150: the concurrency block is changed only through its own channels
+    // (below) and the Captain's set_concurrency, each audited. An editor
+    // draft opened before such a change must not write the old levels back.
+    if (data.settings !== undefined) {
+      const stored = db.getProject(id)?.settings?.concurrency
+      const next = { ...(data.settings ?? {}) }
+      if (stored !== undefined) next.concurrency = stored
+      else delete next.concurrency
+      data = { ...data, settings: next }
+    }
     const updated = db.updateProject(id, data)
     // #65: a pause lifted or a cap raised in the editor must start queued work now.
     if (data.settings !== undefined) agentManager.recheckStartQueue()
@@ -114,6 +125,13 @@ export function registerProjectHandlers({ db, agentManager }: IpcDeps): void {
     agentManager.pauseAllProjects(paused === true)
     return agentManager.isAllProjectsPaused()
   })
+
+  // ── Captain-managed concurrency (#150) ──
+  ipcMain.handle('concurrency:getState', (_, projectId: string): ProjectConcurrencyState => agentManager.getConcurrencyState(projectId, 20))
+  ipcMain.handle('concurrency:setCaptainControl', (_, projectId: string, enabled: boolean) =>
+    agentManager.setUserConcurrency(projectId, { captainControl: enabled === true }))
+  ipcMain.handle('concurrency:pin', (_, projectId: string, agentId: string, level: number | null) =>
+    agentManager.setUserConcurrency(projectId, { agentId, pinnedLevel: level === null || level === undefined ? null : Number(level) }))
 
   // ── Escalation policy: held Captain calls (#66) ──
   ipcMain.handle('escalation:listHeld', (_, projectId?: string) => listHeldActions(projectId))

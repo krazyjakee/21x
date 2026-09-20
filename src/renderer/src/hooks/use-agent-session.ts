@@ -87,7 +87,14 @@ export function useAgentSessionActions(taskId: string | undefined) {
       // Pre-register so events arriving during start() are captured via taskId fallback
       initSession(tId, '', agentId)
       try {
-        const { sessionId } = await agentSessionApi.start(agentId, tId, workspaceDir, skipInitialPrompt)
+        const result = await agentSessionApi.start(agentId, tId, workspaceDir, skipInitialPrompt)
+        if (result.queued) {
+          // A durable queue row is not a live session. Leave the task idle;
+          // TaskWorkspace renders queue/retry state separately.
+          endSession(tId)
+          return ''
+        }
+        const { sessionId } = result
         // Update with the real sessionId (preserves any messages that arrived early)
         initSession(tId, sessionId, agentId)
         return sessionId

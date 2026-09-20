@@ -6,6 +6,8 @@ import { getRepoProviders, isGitProvider } from '../repo-providers'
 import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
 import { migrateCoordinatorToCaptain } from './captain-migration'
 import { splitLegacyPullRequestEscalation } from '../../shared/project-policies'
+import { createConcurrencyTables, migrateConcurrencyControl } from './concurrency-migration'
+import { createDurableStartQueueTables, migrateDurableStartQueue } from './start-queue-migration'
 
 /**
  * Bump this whenever new migrations are added so returning users skip
@@ -40,8 +42,13 @@ import { splitLegacyPullRequestEscalation } from '../../shared/project-policies'
  *          contemporaneous feature branch.
  * 19 → 20: managed Captain runtime generations and the durable delivery
  *          outbox used by task messages, Commander requests and reports.
+ * 20 → 21: Captain-managed concurrency (#150): concurrency_audit, task_touches,
+ *          and agents.config.concurrency_cap = min(max_parallel_sessions, 5)
+ *          where unset (migrateConcurrencyControl in concurrency-migration.ts).
+ * 21 → 22: durable agent start queue, leases, generations, retry state and
+ *          cross-project fairness (#148, migrateDurableStartQueue).
  */
-const SCHEMA_VERSION = 20
+const SCHEMA_VERSION = 22
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -530,12 +537,34 @@ export function createTables(db: Database.Database): void {
   `)
 
   createMergeGrantTables(db)
+  // Concurrency control (#150): audit feed and declared touches.
+  createConcurrencyTables(db)
+
+  // Captain self-healing (#148): the one durable admission/start queue.
+  createDurableStartQueueTables(db)
 
   // Report routing (#62): a Captain report quotes the correlation id of
   // the `ask_captain` tool row it answers; this serves that lookup.
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_commander_messages_correlation
       ON commander_messages(correlation_id) WHERE correlation_id IS NOT NULL;
+  `)
+
+  // Images attached to a Commander user message (#144). The bytes live in
+  // their own table so message rows, events and searches stay small; they go
+  // with their message. New table, so CREATE IF NOT EXISTS covers fresh and
+  // existing DBs alike.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS commander_images (
+      id TEXT PRIMARY KEY,
+      message_id TEXT NOT NULL REFERENCES commander_messages(id) ON DELETE CASCADE,
+      position INTEGER NOT NULL DEFAULT 0,
+      name TEXT NOT NULL DEFAULT '',
+      mime_type TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      data BLOB NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_commander_images_message ON commander_images(message_id, position);
   `)
 }
 
@@ -1020,6 +1049,13 @@ export function runMigrations(db: Database.Database): void {
   // Migration v19: merge grants (#137). New tables only; runs after
   // migrateToProjects so the projects table they reference exists.
   migrateMergeGrants(db)
+  // Migration v21: concurrency control (#150). After migrateToProjects so the
+  // projects table the audit references exists.
+  migrateConcurrencyControl(db)
+
+  // Migration v22: durable start claims and recovery (#148). This extends the
+  // v20 runtime and v21 admission model rather than introducing a second one.
+  migrateDurableStartQueue(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)

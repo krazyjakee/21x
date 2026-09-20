@@ -47,8 +47,8 @@ export const PROJECT_STATUS_MAX_BLOCKERS = 5
 // history survives beside the snapshot. Reads are paginated newest first and
 // capped; nothing here is ever injected into a system prompt.
 
-/** Where an entry came from: the Captain's own update, or the monthly roll-up of old entries. */
-export type ProjectStatusJournalSource = 'captain' | 'compaction'
+/** Where an entry came from: Captain prose, platform recovery, or compaction. */
+export type ProjectStatusJournalSource = 'captain' | 'system_recovery' | 'compaction'
 
 export interface ProjectStatusJournalEntry {
   id: string

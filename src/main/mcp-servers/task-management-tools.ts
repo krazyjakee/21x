@@ -443,6 +443,54 @@ export const captainTools: Tool[] = [
     }
   },
   {
+    name: 'get_concurrency',
+    description:
+      "How many jobs of each agent this project may run at once (#150): each agent's hard cap (set by the user, the ceiling for every project together), " +
+      "the project's working level (what admission applies here), who sets it (captain, pinned by the user, or cap when Captain control is off), " +
+      'running and queued counts, the machine\'s resource pressure, a suggested level with its reason, and the recent changes. Read it before set_concurrency.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_id: { type: 'string', description: 'Only this agent. Omit for every agent with work in the project.' },
+        project: { type: 'string', description: 'Project ID. Implied for a project-scoped session.' }
+      }
+    }
+  },
+  {
+    name: 'set_concurrency',
+    description:
+      "Set this project's working concurrency level for one agent (#150): how many of the project's jobs on that agent may run at once. " +
+      'The level starts at 1. Raise it when queued tickets can run in parallel; keep or lower it for a serial chain (each step needs the previous one), ' +
+      'for tickets that touch the same files, and under resource pressure. A level above the agent\'s hard cap is refused, as is a raise under resource pressure, ' +
+      'a pinned level, and a project whose user switched Captain control off. Lowering never stops running work: it only defers new starts. ' +
+      'Every change is logged with your reason in the status journal and the concurrency feed. Only the project Captain may call it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_id: { type: 'string', description: 'The agent whose level changes (from list_agents or get_concurrency).' },
+        level: { type: 'integer', minimum: 1, description: "The new level: at least 1, at most the agent's hard cap." },
+        reason: { type: 'string', description: 'Why, in one line: queue depth, a serial chain, file overlap, resource pressure. Required; it is logged.' },
+        project: { type: 'string', description: 'Project ID. Implied for the Captain (its own project only).' }
+      },
+      required: ['agent_id', 'level', 'reason']
+    }
+  },
+  {
+    name: 'set_task_touches',
+    description:
+      'Declare the files or directories a task will change (repo-relative, e.g. "src/main/agent-manager.ts" or "src/renderer/"), #150. ' +
+      "Starts in this project whose touches overlap a running task's (declared, or changed on its branch) wait until it finishes, so hot files are changed one ticket at a time. " +
+      'Pass [] to clear.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string', description: 'Task ID' },
+        paths: { type: 'array', items: { type: 'string' }, description: 'Repo-relative paths; a directory covers everything under it.' }
+      },
+      required: ['task_id', 'paths']
+    }
+  },
+  {
     name: 'get_ui_state',
     description:
       'What the user is looking at right now: the open view, the selected task, any open dialog, and the canvas panels. Read this before you act on "this task" or "here".',

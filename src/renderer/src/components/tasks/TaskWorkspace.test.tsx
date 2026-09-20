@@ -132,6 +132,24 @@ beforeEach(() => {
     github_org: 'peakflo',
     git_provider: 'github'
   })
+  ;(window.electronAPI.agents.getStartRecoveryState as ReturnType<typeof vi.fn>).mockResolvedValue(null)
+})
+
+describe('TaskWorkspace – durable recovery visibility', () => {
+  it('shows queued state without creating a live session', async () => {
+    ;(window.electronAPI.agents.getStartRecoveryState as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'queue-1', taskId: 'task-1', projectId: 'default', agentId: 'agent-1',
+      reason: 'global_limit', queuedAt: '2026-01-01T00:00:00.000Z', position: 2,
+      priority: 'medium', state: 'queued', retryCount: 0, nextRetryAt: null,
+      generation: 1, dependencyReason: null, recoveryCause: null,
+      recoveryAction: null, recoveryResult: null, lastError: null
+    })
+
+    renderWorkspace(makeRendererTask())
+
+    expect(await screen.findByTestId('task-recovery-state')).toHaveTextContent('Queued #2')
+    expect(useAgentStore.getState().sessions.get('task-1')).toBeUndefined()
+  })
 })
 
 describe('clampTranscriptWidth', () => {

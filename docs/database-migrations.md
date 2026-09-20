@@ -83,22 +83,32 @@ scopes (`idx_skills_name`). See docs/skills.md, *Scope*.
 
 Migration 17 (`migrateCoordinatorToCaptain()` in
 `src/main/database/captain-migration.ts`, #71) renames the coordinator's
-persisted identifiers from its former name, Mastermind, in place:
+persisted identifiers in place. The exact legacy identifiers are isolated in
+that compatibility module and its schema-16 fixture.
 
-| Before (≤ 16) | After (17) |
+| Stored field | Current value (17) |
 | --- | --- |
-| `tasks.role = 'mastermind'`, title `Mastermind` | `tasks.role = 'captain'`, title `Captain` (same row, id, session and transcript) |
-| `projects.mastermind_agent_id` | `projects.captain_agent_id` (`RENAME COLUMN`, values kept) |
-| setting `mastermind_prewarm` | setting `captain_prewarm` |
-| `projects.settings.mastermind_wakeups` | `projects.settings.captain_wakeups` |
-| `project_status_journal.source = 'mastermind'` (and column default) | `'captain'` (table rebuilt by named columns when the old default is present) |
+| Coordinator task role, title and seeded description | `captain`, `Captain`, current description (same row, id and session) |
+| Project agent column | `projects.captain_agent_id` (values kept) |
+| App prewarm setting | `captain_prewarm` |
+| Project wakeup settings | `projects.settings.captain_wakeups` |
+| Status journal source and column default | `captain` |
 
 No row is inserted, so `seedCaptainTasks()` finds the renamed row and never
 adds a second coordinator. A value already stored under a new key wins over the
 old key. Every step only matches old values, so re-runs are no-ops. The same
-file keeps the retirement of the legacy seeded "Mastermind" skill. It is the
-only place in `src/` (with its test and one commented compatibility alias) that
-may spell the old name; `src/shared/captain-terminology.test.ts` enforces that.
+file retires the untouched legacy seeded skill; edited user skills are preserved.
+
+The #136 follow-up uses read compatibility for persisted prose and delegation
+labels (`src/shared/captain-compat.ts`), retaining original history and routing
+IDs. No schema change or new migration is needed: version 17 already migrates
+roles, agent columns and settings. Version 18 remains reserved for the concurrent
+sessions/redesign work. See [Captain terminology](captain-terminology.md) for
+resume behavior and the stale-context investigation.
+
+The repository terminology guard covers source, docs, prompts and tests. Only
+migration fixtures and exact shared compatibility declarations may spell the
+retired name.
 
 ### Merge grants and the pull-request policy split (v19)
 
@@ -110,6 +120,43 @@ the stored level moves to `merge_pr`, `open_pr` gets its default
 Rows without `pr`, or with unreadable settings, are untouched, so re-runs are
 no-ops. **18 was skipped on purpose** for a contemporaneous feature branch;
 the managed-runtime and durable-delivery migration follows as version 20.
+
+### Concurrency control (#150, v21)
+
+Migration 21 (`migrateConcurrencyControl()` in
+`src/main/database/concurrency-migration.ts`) supports Captain-managed
+concurrency under a user-set hard cap (see docs/concurrency.md):
+
+- `concurrency_audit` (new): one row per change to a working level, a pin or
+  Captain control, with the actor and the reason. It is the project's
+  concurrency activity feed. It goes with its project.
+- `task_touches` (new): the files a task declares it will change. It goes with
+  its task.
+- `agents.config.concurrency_cap` is set to min(`max_parallel_sessions`, 5) on
+  every agent that has none. Only a missing cap is filled, so a later re-run of
+  `runMigrations()` never overwrites a cap the user set.
+  `max_parallel_sessions` is left as it was.
+
+Both tables are also created in `createTables()`. Nothing is added to `tasks`,
+so `rebuildTasksTable()` is unchanged. This migration follows the managed
+runtime and delivery-outbox migration at v20.
+
+### Durable Captain recovery queue (#148, v22)
+
+Migration 22 (`migrateDurableStartQueue()` in
+`src/main/database/start-queue-migration.ts`) adds the single durable agent
+start queue and its cross-project fairness cursor. Each task keeps one stable
+queue ID. Priority/FIFO position, admission or dependency reason, retry and
+backoff state, claim generation, lease, session acknowledgement, recovery
+cause/action/result, and timestamps are committed before a queued result is
+returned. Claims and acknowledgements are generation-fenced, so replaying
+startup reconciliation or crashing around claim/start/ack cannot double-start
+the logical item.
+
+Landing order is v20 (#151 runtime and delivery outbox), v21 (#152 priority,
+admission and fairness), then v22 (#148 reconciliation and durable starts).
+All three migrations are idempotent and fresh databases create the same final
+tables directly.
 
 ## Adding a column to other tables
 
