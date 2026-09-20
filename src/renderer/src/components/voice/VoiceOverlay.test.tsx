@@ -205,9 +205,21 @@ describe('VoiceOverlay', () => {
       state: 'listening',
       turnId: 't1',
       partial: 'change the project',
-      result: { kind: 'ok', message: 'Done', at: Date.now() }
+      result: { kind: 'ok', message: 'Done', at: Date.now(), ownerSessionId: 's1' }
     })
     const { container } = render(<VoiceOverlay />)
     expect(container).toBeEmptyDOMElement()
+  })
+
+  it('keeps a recoverable Commander error scoped to its retry session', () => {
+    useCommanderCallStore.setState({
+      status: 'off', sessionId: null, turnId: null, error: 'Microphone failed', retrySessionId: 's1'
+    })
+    reset({ result: { kind: 'error', message: 'Microphone failed', at: Date.now(), ownerSessionId: 's1' } })
+    const { container } = render(<VoiceOverlay />)
+    expect(container).toBeEmptyDOMElement()
+
+    act(() => reset({ result: { kind: 'error', message: 'Captain failed', at: Date.now(), ownerSessionId: 'foreign' } }))
+    expect(screen.getByTestId('voice-result')).toHaveTextContent('Captain failed')
   })
 })

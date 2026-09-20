@@ -5,6 +5,7 @@ import type { CommandPaletteActions } from '../CommandPalette'
 import { NAV_ITEMS } from '../nav-items'
 import { useCommanderCallStore } from '@/stores/commander-call-store'
 import { useCommanderStore } from '@/stores/commander-store'
+import { useVoiceStore } from '@/stores/voice-store'
 import {
   canUndoLatestCommanderAction,
   toggleCommanderPictureInPicture,
@@ -42,12 +43,35 @@ export function useGlobalShortcuts(actions: CommandPaletteActions, setCmdOpen: D
 
   useEffect(() => {
     const onCommanderKey = (e: KeyboardEvent) => {
-      if (e.repeat || e.altKey || document.querySelector('[role="dialog"], [role="alertdialog"]')) return
       const key = e.key.toLowerCase()
       const mod = e.metaKey || e.ctrlKey
       const call = useCommanderCallStore.getState()
       const ui = useUIStore.getState()
       const inCommanderContext = call.status !== 'off' || ui.sidebarView === 'commander'
+      const commanderKey = (e.key === 'Escape' && call.status !== 'off') || (
+        inCommanderContext && mod && (
+          (!e.shiftKey && (key === 'd' || e.key === '\\' || key === 'z')) ||
+          (e.shiftKey && ['c', 'm', 'e'].includes(key))
+        )
+      )
+      if (!commanderKey) return
+      if (e.defaultPrevented || e.isComposing || e.altKey || isKeyboardInput(e.target) ||
+          document.querySelector('[role="dialog"], [role="alertdialog"]')) return
+
+      const voiceState = useVoiceStore.getState()
+      const voiceTurnId = voiceState.turnId
+      const foreignVoiceTurn = Boolean(voiceTurnId && voiceTurnId !== call.turnId)
+      const foreignConfirmation = Boolean(
+        voiceState.confirmation && voiceState.confirmation.ownerSessionId !== call.sessionId
+      )
+      if (foreignVoiceTurn || foreignConfirmation) return
+      if (e.repeat) {
+        // A held Commander chord is consumed once. Do not let it fall through
+        // to the older bubbling listeners and turn one press into many actions.
+        e.preventDefault()
+        e.stopImmediatePropagation()
+        return
+      }
       let handled = false
 
       if (e.key === 'Escape' && call.status !== 'off') {
@@ -72,7 +96,7 @@ export function useGlobalShortcuts(actions: CommandPaletteActions, setCmdOpen: D
       } else if (mod && e.shiftKey && key === 'e' && call.status !== 'off') {
         call.end()
         handled = true
-      } else if (mod && !e.shiftKey && key === 'z' && !isKeyboardInput(e.target) && canUndoLatestCommanderAction()) {
+      } else if (mod && !e.shiftKey && key === 'z' && canUndoLatestCommanderAction()) {
         void undoLatestCommanderActionWithFeedback()
         handled = true
       }
@@ -158,7 +182,17 @@ export function useGlobalShortcuts(actions: CommandPaletteActions, setCmdOpen: D
       if (key === 'j') { e.preventDefault(); actions.nextTask() }
       else if (key === 'k') { e.preventDefault(); actions.previousTask() }
       else if (e.key === 'Enter' && !(e.target as HTMLElement | null)?.closest('button, a')) { e.preventDefault(); actions.openTask() }
-      else if (e.key === 'Escape') { e.preventDefault(); if (showOrchestrator) setShowOrchestrator(false); else actions.clearSelection() }
+      else if (e.key === 'Escape') {
+        // A foreign Captain voice turn remains the authoritative Escape owner
+        // even while a muted Commander call is open. Leave the event untouched
+        // for VoiceOverlay instead of clearing the selected task first.
+        const call = useCommanderCallStore.getState()
+        const voiceTurnId = useVoiceStore.getState().turnId
+        if (call.status !== 'off' && voiceTurnId && voiceTurnId !== call.turnId) return
+        e.preventDefault()
+        if (showOrchestrator) setShowOrchestrator(false)
+        else actions.clearSelection()
+      }
       else if (key === 'c') { e.preventDefault(); openCreateModal() }
       else if (key === 'e') { e.preventDefault(); actions.completeTask() }
       else if (key === 'h' && e.shiftKey) { e.preventDefault(); actions.runHeartbeat() }

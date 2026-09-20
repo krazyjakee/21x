@@ -34,6 +34,8 @@ interface CommanderState {
   streaming: Record<string, StreamingTurn | undefined>
   /** The last turn error per session, cleared by the next send. */
   turnErrors: Record<string, string | undefined>
+  /** Unsent text is renderer-local but survives full-view/PiP and session switches. */
+  drafts: Record<string, string | undefined>
   isLoading: boolean
   error: string | null
 
@@ -48,6 +50,7 @@ interface CommanderState {
   archiveSession: (id: string, archived: boolean) => Promise<void>
   send: (text: string) => Promise<boolean>
   cancel: () => Promise<void>
+  setDraft: (sessionId: string, draft: string) => void
   handleEvent: (event: CommanderEvent) => void
 }
 
@@ -84,6 +87,7 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
   messages: {},
   streaming: {},
   turnErrors: {},
+  drafts: {},
   isLoading: false,
   error: null,
 
@@ -198,6 +202,10 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
     const sessionId = get().selectedSessionId
     if (sessionId) await commanderApi.cancel(sessionId)
   },
+
+  setDraft: (sessionId, draft) => set((state) => ({
+    drafts: { ...state.drafts, [sessionId]: draft || undefined }
+  })),
 
   handleEvent: (event) => {
     switch (event.type) {

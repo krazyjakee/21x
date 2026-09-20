@@ -336,7 +336,7 @@ export const VOICE_EVENTS = {
   segment: 'voice:segment',
   /** `VoiceActionOutcome` */
   outcome: 'voice:outcome',
-  /** `{ message, code? }` */
+  /** `{ message, code?, turnId? }` — turnId preserves ownership for late failures. */
   error: 'voice:error',
   /** `{ engine, models }` */
   status: 'voice:status',
@@ -397,4 +397,3 @@ export const MOBILE_VOICE_CAPABILITIES: VoiceCapabilities = {
   tts: false,
   wakeWord: false,
 }
-

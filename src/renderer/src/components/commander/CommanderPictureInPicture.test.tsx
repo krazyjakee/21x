@@ -86,7 +86,7 @@ afterEach(() => {
 describe('Commander picture in picture', () => {
   it('shows the shared call after leaving Commander, with caption and controls', () => {
     render(<CommanderPictureInPicture />)
-    expect(screen.getByTestId('commander-pip')).toHaveClass('w-[280px]')
+    expect(screen.getByTestId('commander-pip')).toHaveStyle({ width: '280px' })
     expect(screen.getByLabelText('Commander picture in picture')).toHaveTextContent('Commander')
     expect(screen.getByLabelText('Commander picture in picture')).toHaveTextContent('archive the web project')
     expect(screen.getByRole('toolbar', { name: 'Commander picture in picture controls' })).toBeInTheDocument()
@@ -124,11 +124,19 @@ describe('Commander picture in picture', () => {
       sessionId: 'session-1',
       turnId: 'turn-1',
       toolCallId: 'call-1',
-      toolName: 'archive_project'
+      toolName: 'archive_project',
+      action: {
+        status: 'ok',
+        result: { id: 'web' },
+        target: { kind: 'project', id: 'web', name: 'Web' },
+        changes: [{ field: 'status', before: 'active', after: 'archived' }]
+      }
     }))
     render(<CommanderPictureInPicture />)
 
     expect(screen.getByTestId('commander-action-toast')).toHaveTextContent('Archive project')
+    expect(screen.getByTestId('commander-action-toast')).toHaveTextContent('Web')
+    expect(screen.getByTestId('commander-action-toast')).toHaveTextContent('active → archived')
     expect(screen.getByTestId('commander-action-toast')).toHaveClass('bottom-full')
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
     await waitFor(() => expect(mocks.undoAction).toHaveBeenCalledWith('session-1', 'call-1'))

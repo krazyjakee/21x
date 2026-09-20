@@ -76,7 +76,7 @@ async function openSession(title = 'Launch'): Promise<void> {
 }
 
 beforeEach(() => {
-  useUIStore.setState({ commanderCaptionsEnabled: true, commanderPanelOpen: true })
+  useUIStore.setState({ commanderCaptionsEnabled: true, commanderPanelOpen: true, commanderPanelTab: 'chat' })
   useCommanderCallStore.setState({
     status: 'off',
     sessionId: null,
@@ -97,6 +97,7 @@ beforeEach(() => {
     messages: {},
     streaming: {},
     turnErrors: {},
+    drafts: {},
     isLoading: false,
     error: null
   })

@@ -12,6 +12,7 @@
  */
 
 import type { ActivityState } from './activity'
+import type { CommanderActionResult } from './commander-tools'
 
 /** The states a call can be in. `off` and `unavailable` mean no call is open. */
 export type CallState =
@@ -87,6 +88,10 @@ export type CallEvent =
       turnId: string
       toolCallId: string
       toolName: string
+      /** Trusted structured result from the matching successful tool execution. */
+      action?: CommanderActionResult
+      /** Renderer call lifetime that observed this execution. Filled by the call store. */
+      generation?: number
     }
   | {
       kind: 'report'
@@ -94,7 +99,17 @@ export type CallEvent =
       sessionId: string
       messageId: string
       projectId: string | null
+      /** Renderer call lifetime that observed this report. Filled by the call store. */
+      generation?: number
     }
+
+/** Immutable identity for one observed call event, including its owning call lifetime. */
+export function callEventIdentity(event: CallEvent): string {
+  const suffix = event.kind === 'action'
+    ? `${event.turnId}:${event.toolCallId}`
+    : event.messageId
+  return `${event.generation ?? -1}:${event.sessionId}:${event.kind}:${suffix}:${event.at}`
+}
 
 // ── Provider-neutral media (epic #82, "Provider-neutral media") ──
 

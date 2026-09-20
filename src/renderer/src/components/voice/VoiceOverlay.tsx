@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { selectVoiceReady, useVoiceStore } from '@/stores/voice-store'
 import type { VoiceCandidate } from '@shared/voice'
 import { COMMANDER_VOICE_COMPOSER_KEY, useCommanderCallStore } from '@/stores/commander-call-store'
+import { isGlobalShortcutBlocked } from '@/lib/keyboard-shortcuts'
 
 const RESULT_VISIBLE_MS = 6000
 
@@ -34,12 +35,16 @@ export function VoiceOverlay() {
   // words. Showing them here as well would print every word twice (#83).
   const captionOwner = useVoiceStore((s) => s.captionOwner)
   const captionsElsewhere = captionOwner !== null
-  const commanderOwnsSurface = commanderCallStatus !== 'off' && (
-    !voiceTurnId || voiceTurnId === commanderTurnId || captionOwner === COMMANDER_VOICE_COMPOSER_KEY
-  )
+  const commanderSessionId = useCommanderCallStore((s) => s.sessionId ?? s.retrySessionId)
   const level = useVoiceStore((s) => s.level)
   const confirmation = useVoiceStore((s) => s.confirmation)
   const result = useVoiceStore((s) => s.result)
+  const commanderOwnsVoice = commanderCallStatus !== 'off' && (
+    Boolean(commanderTurnId) && voiceTurnId === commanderTurnId ||
+    captionOwner === COMMANDER_VOICE_COMPOSER_KEY
+  )
+  const commanderOwnsConfirmation = confirmation?.ownerSessionId === commanderSessionId && Boolean(commanderSessionId)
+  const commanderOwnsResult = result?.ownerSessionId === commanderSessionId && Boolean(commanderSessionId)
   const confirm = useVoiceStore((s) => s.confirm)
   const dismiss = useVoiceStore((s) => s.dismiss)
   const cancel = useVoiceStore((s) => s.cancel)
@@ -52,7 +57,7 @@ export function VoiceOverlay() {
   // Escape cancels the current turn or the open confirmation.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return
+      if (event.key !== 'Escape' || event.repeat || event.isComposing || isGlobalShortcutBlocked(event)) return
       if (confirmation) void dismiss()
       else if (state === 'listening') void cancel()
       // Escape also stops speech. It is the one key a user reaches for when
@@ -69,13 +74,15 @@ export function VoiceOverlay() {
     return () => clearTimeout(timer)
   }, [result, clearResult])
 
-  if (!ready || commanderOwnsSurface) return null
+  if (!ready) return null
 
   const listening = state === 'listening'
   const transcribing = state === 'transcribing'
   const loudness = Math.min(Math.max(level, 0), 1)
-  const showBubble = !captionsElsewhere && (listening || transcribing || Boolean(partial))
-  if (!showBubble && !confirmation && !result) return null
+  const showBubble = !commanderOwnsVoice && !captionsElsewhere && (listening || transcribing || Boolean(partial))
+  const visibleConfirmation = commanderOwnsConfirmation ? null : confirmation
+  const visibleResult = commanderOwnsResult ? null : result
+  if (!showBubble && !visibleConfirmation && !visibleResult) return null
 
   return (
     <div
@@ -131,7 +138,7 @@ export function VoiceOverlay() {
         </div>
       )}
 
-      {confirmation && (
+      {visibleConfirmation && (
         <div
           className="pointer-events-auto w-full max-w-xl rounded-2xl border border-yellow-500/40 bg-card/98 p-4 shadow-xl backdrop-blur"
           role="alertdialog"
@@ -141,14 +148,14 @@ export function VoiceOverlay() {
           <div className="flex items-start gap-3">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-500" />
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-foreground">{confirmation.proposal.summary}</p>
+              <p className="text-sm font-medium text-foreground">{visibleConfirmation.proposal.summary}</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Heard: “{confirmation.proposal.transcript}” · {reasonText(confirmation.reason)}
+                Heard: “{visibleConfirmation.proposal.transcript}” · {reasonText(visibleConfirmation.reason)}
               </p>
 
-              {confirmation.candidates && confirmation.candidates.length > 0 ? (
+              {visibleConfirmation.candidates && visibleConfirmation.candidates.length > 0 ? (
                 <div className="mt-3 space-y-1.5">
-                  {confirmation.candidates.map((candidate: VoiceCandidate) => (
+                  {visibleConfirmation.candidates.map((candidate: VoiceCandidate) => (
                     <Button
                       key={`${candidate.kind}-${candidate.id}`}
                       size="sm"
@@ -186,17 +193,17 @@ export function VoiceOverlay() {
         </div>
       )}
 
-      {result && (
+      {visibleResult && (
         <div
           className={`pointer-events-auto max-w-xl rounded-xl border px-4 py-2 text-sm shadow-lg backdrop-blur ${
-            result.kind === 'ok'
+            visibleResult.kind === 'ok'
               ? 'border-border bg-card/95 text-foreground'
               : 'border-red-500/40 bg-card/95 text-red-400'
           }`}
           role="status"
           data-testid="voice-result"
         >
-          {result.message}
+          {visibleResult.message}
         </div>
       )}
     </div>

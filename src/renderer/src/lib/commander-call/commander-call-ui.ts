@@ -1,4 +1,4 @@
-import { CALL_EVENT_MS } from '@shared/commander-call'
+import { CALL_EVENT_MS, callEventIdentity } from '@shared/commander-call'
 import { isCommanderActionUndoable } from '@shared/commander-tools'
 import { activityNow } from '@/lib/activity/activity-clock'
 import { commanderApi } from '@/lib/ipc-client'
@@ -8,7 +8,7 @@ import { useProjectStore } from '@/stores/project-store'
 import { useSkillStore } from '@/stores/skill-store'
 import { useUIStore } from '@/stores/ui-store'
 
-let undoInFlight: string | null = null
+const undoInFlight = new Set<string>()
 
 function focusAfterViewChange(selector: string): void {
   window.setTimeout(() => document.querySelector<HTMLElement>(selector)?.focus(), 0)
@@ -16,7 +16,8 @@ function focusAfterViewChange(selector: string): void {
 
 /** Collapse the full call into the app-level PiP and move focus to its counterpart control. */
 export function enterCommanderPictureInPicture(focus = true): boolean {
-  if (useCommanderCallStore.getState().status === 'off') return false
+  const call = useCommanderCallStore.getState()
+  if (call.status === 'off' && !call.error) return false
   const ui = useUIStore.getState()
   if (ui.activeModal === 'settings') ui.closeModal()
   ui.setSidebarView(ui.lastNonCommanderView)
@@ -26,7 +27,8 @@ export function enterCommanderPictureInPicture(focus = true): boolean {
 
 /** Restore the full call and focus the PiP button that replaced Expand. */
 export function expandCommanderCall(): boolean {
-  if (useCommanderCallStore.getState().status === 'off') return false
+  const call = useCommanderCallStore.getState()
+  if (call.status === 'off' && !call.error) return false
   const ui = useUIStore.getState()
   if (ui.activeModal === 'settings') ui.closeModal()
   ui.setSidebarView('commander')
@@ -49,7 +51,7 @@ export function canUndoLatestCommanderAction(): boolean {
     event.kind === 'action' &&
     age >= 0 &&
     age < CALL_EVENT_MS &&
-    undoInFlight !== event.toolCallId &&
+    !undoInFlight.has(callEventIdentity(event)) &&
     isCommanderActionUndoable(event.toolName)
   )
 }
@@ -60,15 +62,16 @@ export async function undoLatestCommanderAction(): Promise<boolean> {
   const event = call.lastEvent
   if (!canUndoLatestCommanderAction() || !event || event.kind !== 'action') return false
 
-  undoInFlight = event.toolCallId
+  const identity = callEventIdentity(event)
+  undoInFlight.add(identity)
   try {
     await commanderApi.undoAction(event.sessionId, event.toolCallId)
-    useCommanderCallStore.getState().clearEvent(event.toolCallId)
+    useCommanderCallStore.getState().clearEvent(event)
     void useProjectStore.getState().fetchProjects()
     void useSkillStore.getState().fetchSkills()
     return true
   } finally {
-    if (undoInFlight === event.toolCallId) undoInFlight = null
+    undoInFlight.delete(identity)
   }
 }
 

@@ -18,6 +18,7 @@ const onPartial = vi.mocked(voiceBridge.onPartial).mock.calls[0][0]
 const onOutcome = vi.mocked(voiceBridge.onOutcome).mock.calls[0][0]
 const onFinal = vi.mocked(voiceBridge.onFinal).mock.calls[0][0]
 const onState = vi.mocked(voiceBridge.onState).mock.calls[0][0]
+const onError = vi.mocked(voiceBridge.onError).mock.calls[0][0]
 
 function reset(): void {
   useVoiceStore.setState({
@@ -25,6 +26,7 @@ function reset(): void {
     enabled: true,
     state: 'idle',
     turnId: null,
+    turnOwnerSessionId: null,
     partial: '',
     final: '',
     level: 0,
@@ -166,6 +168,23 @@ describe('voice store — events from main', () => {
     })
     expect(useVoiceStore.getState().result).toMatchObject({ kind: 'error' })
     expect(useVoiceStore.getState().turnId).toBeNull()
+  })
+
+  it('retains Commander ownership for the worker error that follows a terminal outcome', async () => {
+    await useVoiceStore.getState().startTurn('conversation', 'commander-session')
+    onOutcome({
+      status: 'rejected',
+      turnId: 'turn-1',
+      reason: 'failed',
+      message: 'Capture failed.',
+    })
+    onError({ message: 'Capture failed.', turnId: 'turn-1' })
+
+    expect(useVoiceStore.getState().result).toMatchObject({
+      kind: 'error',
+      message: 'Capture failed.',
+      ownerSessionId: 'commander-session'
+    })
   })
 
   it('sends the picked record with the confirmation', async () => {

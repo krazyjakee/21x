@@ -457,16 +457,17 @@ export class VoiceSessionManager {
   }
 
   private onWorkerError(message: string, code?: string): void {
-    if (this.turnId) {
+    const failedTurnId = this.turnId
+    if (failedTurnId) {
       this.options.notify(VOICE_EVENTS.outcome, {
         status: 'rejected',
-        turnId: this.turnId,
+        turnId: failedTurnId,
         reason: 'failed',
         message,
       } satisfies VoiceActionOutcome)
       this.turnId = null
     }
-    this.options.notify(VOICE_EVENTS.error, { message, code })
+    this.options.notify(VOICE_EVENTS.error, { message, code, ...(failedTurnId ? { turnId: failedTurnId } : {}) })
     this.setState('idle')
   }
 

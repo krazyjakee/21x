@@ -140,4 +140,39 @@ describe('the global shortcut', () => {
     expect(toggleTurn).not.toHaveBeenCalled()
     expect(useUIStore.getState().showOrchestrator).toBe(false)
   })
+
+  it('does not claim the system shortcut from an editable control', async () => {
+    const textarea = document.createElement('textarea')
+    document.body.appendChild(textarea)
+    textarea.focus()
+    await act(async () => { render(<Harness />) })
+
+    await act(async () => { hotkey.fire?.({ action: 'toggle' }) })
+
+    expect(toggleTurn).not.toHaveBeenCalled()
+    expect(useUIStore.getState().showOrchestrator).toBe(false)
+    textarea.remove()
+  })
+
+  it('leaves a muted Commander call foreign to an existing Captain voice turn', async () => {
+    const driver: CommanderCallDriver = {
+      setActive: vi.fn(async () => undefined),
+      openMicrophone: vi.fn(async () => 'commander-mic'),
+      closeMicrophone: vi.fn(),
+      stopPlayback: vi.fn(),
+      bargeIn: vi.fn(async () => undefined),
+      send: vi.fn(async () => undefined)
+    }
+    bindCommanderCallDriver(driver)
+    await useCommanderCallStore.getState().start('commander-session')
+    await useCommanderCallStore.getState().toggleMicrophone()
+    useVoiceStore.setState({ turnId: 'captain-mic' })
+    registerComposer(CAPTAIN_COMPOSER_KEY, { getField: () => null, submit: vi.fn() })
+    await act(async () => { render(<Harness />) })
+
+    await act(async () => { hotkey.fire?.({ action: 'toggle' }) })
+
+    expect(toggleTurn).toHaveBeenCalledWith('conversation')
+    expect(useUIStore.getState().showOrchestrator).toBe(true)
+  })
 })

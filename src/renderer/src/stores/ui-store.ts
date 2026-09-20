@@ -65,6 +65,7 @@ interface UIState {
   /** Shared call chrome so full view, PiP and shortcuts always agree. */
   commanderCaptionsEnabled: boolean
   commanderPanelOpen: boolean
+  commanderPanelTab: 'chat' | 'actions'
 
   setSidebarView: (view: SidebarView) => void
   setStatusFilter: (filter: TaskStatus | 'all') => void
@@ -105,6 +106,7 @@ interface UIState {
   closeProjectEditor: () => void
   setCommanderCaptionsEnabled: (enabled: boolean) => void
   setCommanderPanelOpen: (open: boolean) => void
+  setCommanderPanelTab: (tab: 'chat' | 'actions') => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -131,6 +133,7 @@ export const useUIStore = create<UIState>((set) => ({
   projectEditorTarget: null,
   commanderCaptionsEnabled: true,
   commanderPanelOpen: true,
+  commanderPanelTab: 'chat',
 
   setSidebarView: (sidebarView) => set(
     sidebarView === 'commander'
@@ -207,7 +210,8 @@ export const useUIStore = create<UIState>((set) => ({
   openProjectEditor: (projectEditorTarget) => set({ projectEditorTarget, projectSwitcherOpen: false }),
   closeProjectEditor: () => set({ projectEditorTarget: null }),
   setCommanderCaptionsEnabled: (commanderCaptionsEnabled) => set({ commanderCaptionsEnabled }),
-  setCommanderPanelOpen: (commanderPanelOpen) => set({ commanderPanelOpen })
+  setCommanderPanelOpen: (commanderPanelOpen) => set({ commanderPanelOpen }),
+  setCommanderPanelTab: (commanderPanelTab) => set({ commanderPanelTab })
 }))
 
 // A source filter or a dashboard preview from the project left behind would

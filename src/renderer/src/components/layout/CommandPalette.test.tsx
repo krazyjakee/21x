@@ -9,6 +9,7 @@ vi.mock('@/lib/ipc-client', async (importOriginal) => {
 
 import { useUIStore } from '@/stores/ui-store'
 import { useSkillStore } from '@/stores/skill-store'
+import { useVoiceStore } from '@/stores/voice-store'
 import { modKey } from '@/lib/platform'
 import { CommandPalette, type CommandPaletteActions } from './CommandPalette'
 import { useGlobalShortcuts } from './hooks/use-global-shortcuts'
@@ -25,6 +26,7 @@ const actions = new Proxy({}, { get: () => vi.fn() }) as CommandPaletteActions
 beforeEach(() => {
   __resetCommanderCall()
   useSkillStore.setState({ fetchSkills: vi.fn(async () => undefined), skills: [] } as never)
+  useVoiceStore.setState({ turnId: null, confirmation: null })
   useUIStore.setState({
     sidebarView: 'dashboard',
     lastNonCommanderView: 'dashboard',
@@ -127,5 +129,43 @@ describe('Commander navigation', () => {
     fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
     await vi.waitFor(() => expect(useCommanderCallStore.getState().lastEvent).toBeNull())
     input.remove()
+  })
+
+  it.each([
+    ['d', false], ['c', true], ['\\', false], ['m', true], ['e', true], ['z', false], ['Escape', false]
+  ])('leaves Commander shortcut %s to editable/native handling', async (key, shiftKey) => {
+    const driver = await openCall()
+    renderHook(() => useGlobalShortcuts(actions, vi.fn()))
+    const textarea = document.createElement('textarea')
+    document.body.appendChild(textarea)
+
+    expect(fireEvent.keyDown(textarea, {
+      key,
+      ctrlKey: key !== 'Escape',
+      shiftKey
+    })).toBe(true)
+    expect(driver.closeMicrophone).not.toHaveBeenCalled()
+    expect(driver.bargeIn).not.toHaveBeenCalled()
+    expect(useCommanderCallStore.getState().status).toBe('live')
+    textarea.remove()
+  })
+
+  it('suppresses repeated Commander shortcuts without falling through', async () => {
+    const driver = await openCall()
+    renderHook(() => useGlobalShortcuts(actions, vi.fn()))
+
+    expect(fireEvent.keyDown(window, { key: 'd', ctrlKey: true, repeat: true })).toBe(false)
+    expect(driver.closeMicrophone).not.toHaveBeenCalled()
+    expect(useCommanderCallStore.getState().turnId).toBe('mic-1')
+  })
+
+  it('leaves Escape to a foreign Captain voice turn while Commander is muted', async () => {
+    const driver = await openCall()
+    await useCommanderCallStore.getState().toggleMicrophone()
+    useVoiceStore.setState({ turnId: 'captain-turn', confirmation: null })
+    renderHook(() => useGlobalShortcuts(actions, vi.fn()))
+
+    expect(fireEvent.keyDown(window, { key: 'Escape' })).toBe(true)
+    expect(driver.bargeIn).not.toHaveBeenCalled()
   })
 })

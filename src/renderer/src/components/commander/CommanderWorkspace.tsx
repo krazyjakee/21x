@@ -43,7 +43,8 @@ export function CommanderWorkspace() {
   const setPanelOpen = useUIStore((s) => s.setCommanderPanelOpen)
   const captionsEnabled = useUIStore((s) => s.commanderCaptionsEnabled)
   const setCaptionsEnabled = useUIStore((s) => s.setCommanderCaptionsEnabled)
-  const [panelTab, setPanelTab] = useState<'chat' | 'actions'>('chat')
+  const panelTab = useUIStore((s) => s.commanderPanelTab)
+  const setPanelTab = useUIStore((s) => s.setCommanderPanelTab)
   const sessionsButton = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {

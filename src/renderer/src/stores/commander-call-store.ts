@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { CallEvent, CallMediaEvent } from '@shared/commander-call'
+import { callEventIdentity, type CallEvent, type CallMediaEvent } from '@shared/commander-call'
 import { activityNow } from '@/lib/activity/activity-clock'
 
 /**
@@ -76,12 +76,17 @@ interface CommanderCallState {
   /** The microphone turn closed without End (worker failure, timeout, another mic). */
   mediaLost: (message: string) => void
   recordEvent: (event: CallEvent) => void
-  clearEvent: (toolCallId?: string) => void
+  clearEvent: (expected?: CallEvent) => void
 }
 
 let driver: CommanderCallDriver | null = null
 /** Bumped by every start and end, so a slow start cannot revive an ended call. */
 let generation = 0
+/** Bumped for call lifetimes and events, so async UI work cannot affect any replacement. */
+let eventGeneration = 0
+/** A muted call may have only one microphone acquisition in flight. */
+let pendingMicrophone: Promise<void> | null = null
+let pendingMicrophoneToken: object | null = null
 const listeners = new Map<CallMediaEvent, Set<() => void>>()
 
 /** Binds the media driver. Returns an unbind. Only the host calls this. */
@@ -159,7 +164,10 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
         set({ error: 'Voice is not available in this build.', retrySessionId: sessionId })
         return
       }
+      pendingMicrophone = null
+      pendingMicrophoneToken = null
       const mine = ++generation
+      eventGeneration++
       const media = driver
       let activated = false
       set({ ...OFF, status: 'starting', sessionId, error: null, retrySessionId: null, lastEvent: null })
@@ -185,6 +193,9 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
 
     end: () => {
       generation++
+      eventGeneration++
+      pendingMicrophone = null
+      pendingMicrophoneToken = null
       teardown()
       set({ ...OFF, error: null, retrySessionId: null, lastEvent: null })
     },
@@ -199,19 +210,33 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
         return
       }
 
+      if (pendingMicrophone) return pendingMicrophone
+
       const mine = ++generation
       const activeSessionId = current.sessionId
-      try {
-        const turnId = await driver.openMicrophone()
-        const latest = get()
-        if (mine !== generation || latest.status !== 'live' || latest.sessionId !== activeSessionId) {
-          driver.closeMicrophone(turnId)
-          return
+      const media = driver
+      const acquisitionToken = {}
+      const acquisition = (async (): Promise<void> => {
+        try {
+          const turnId = await media.openMicrophone()
+          const latest = get()
+          if (mine !== generation || latest.status !== 'live' || latest.sessionId !== activeSessionId || driver !== media) {
+            media.closeMicrophone(turnId)
+            return
+          }
+          set({ turnId, error: null })
+        } catch (err) {
+          if (mine === generation && get().sessionId === activeSessionId && driver === media) set({ error: messageOf(err) })
+        } finally {
+          if (pendingMicrophoneToken === acquisitionToken) {
+            pendingMicrophone = null
+            pendingMicrophoneToken = null
+          }
         }
-        set({ turnId, error: null })
-      } catch (err) {
-        if (mine === generation && get().sessionId === activeSessionId) set({ error: messageOf(err) })
-      }
+      })()
+      pendingMicrophone = acquisition
+      pendingMicrophoneToken = acquisitionToken
+      return acquisition
     },
 
     interrupt: (cause = 'stop') => {
@@ -259,6 +284,8 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
       const { status, sessionId } = get()
       if (status !== 'live') return
       generation++
+      pendingMicrophone = null
+      pendingMicrophoneToken = null
       // The turn is already gone; only speech and main's voice mode remain.
       set({ turnId: null })
       teardown()
@@ -268,12 +295,12 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
     recordEvent: (event) => {
       const { status, sessionId } = get()
       if (status === 'off' || event.sessionId !== sessionId) return
-      set({ lastEvent: event })
+      set({ lastEvent: { ...event, generation: ++eventGeneration } })
     },
 
-    clearEvent: (toolCallId) => {
+    clearEvent: (expected) => {
       const event = get().lastEvent
-      if (!event || (toolCallId && (event.kind !== 'action' || event.toolCallId !== toolCallId))) return
+      if (!event || (expected && callEventIdentity(event) !== callEventIdentity(expected))) return
       set({ lastEvent: null })
     }
   }
@@ -283,6 +310,9 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
 export function __resetCommanderCall(): void {
   driver = null
   generation++
+  eventGeneration++
+  pendingMicrophone = null
+  pendingMicrophoneToken = null
   listeners.clear()
   useCommanderCallStore.setState({ ...OFF, error: null, retrySessionId: null, lastEvent: null })
 }

@@ -17,6 +17,7 @@ import {
 } from '@/lib/voice-dictation-target'
 import type { VoiceUiContext } from '@shared/voice'
 import { useCommanderCallStore } from '@/stores/commander-call-store'
+import { isKeyboardInput } from '@/lib/keyboard-shortcuts'
 
 /**
  * Connects voice control to the application shell. Mount it once.
@@ -79,8 +80,13 @@ export function useVoiceControl(): void {
 
     const offHotkey = voiceApi.onHotkey(({ action }) => {
       if (action !== 'toggle') return
+      // The native accelerator has no KeyboardEvent, so use the focused node
+      // to preserve browser/editor commands and native undo contexts.
+      if (isKeyboardInput(document.activeElement)) return
       const commanderCall = useCommanderCallStore.getState()
-      if (commanderCall.status !== 'off') {
+      const voiceTurnId = useVoiceStore.getState().turnId
+      const foreignVoiceTurn = Boolean(voiceTurnId && voiceTurnId !== commanderCall.turnId)
+      if (commanderCall.status !== 'off' && !foreignVoiceTurn) {
         // D6: while a Commander call exists the system-wide voice shortcut
         // belongs to that call, never the Captain composer.
         if (commanderCall.status === 'live') void commanderCall.toggleMicrophone()

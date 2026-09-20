@@ -19,6 +19,7 @@ import {
   setActiveComposer
 } from '@/lib/voice-dictation-target'
 import { voicePlayback } from '@/lib/voice-playback'
+import { isGlobalShortcutBlocked } from '@/lib/keyboard-shortcuts'
 import {
   bindCommanderCallDriver,
   COMMANDER_VOICE_COMPOSER_KEY,
@@ -162,7 +163,7 @@ export function CommanderCallHost() {
         setActiveComposer(COMMANDER_VOICE_COMPOSER_KEY)
         current.setCaptionOwner(COMMANDER_VOICE_COMPOSER_KEY)
         try {
-          await current.startTurn('conversation')
+          await current.startTurn('conversation', useCommanderCallStore.getState().sessionId ?? undefined)
           const opened = useVoiceStore.getState().turnId
           if (!opened) {
             throw new Error(captureAdvice(useVoiceStore.getState().result?.message || 'The microphone could not be started.'))
@@ -203,14 +204,18 @@ export function CommanderCallHost() {
           const key = keyOf(event, inner.id)
           const toolName = tools.get(key)
           tools.delete(key)
-          if (toolName && !inner.isError && isCommanderAdminTool(toolName) && parseCommanderActionResult(inner.content)) {
+          const action = toolName && !inner.isError && isCommanderAdminTool(toolName)
+            ? parseCommanderActionResult(inner.content)
+            : null
+          if (toolName && action) {
             recordEvent({
               kind: 'action',
               at: activityNow(),
               sessionId: event.sessionId,
               turnId: event.turnId,
               toolCallId: inner.id,
-              toolName
+              toolName,
+              action
             })
           }
         } else if (inner.type === 'done') {
@@ -275,7 +280,10 @@ export function CommanderCallHost() {
   useEffect(() => {
     if (status !== 'live') return undefined
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') interrupt('stop')
+      if (event.key !== 'Escape' || event.repeat || event.isComposing || isGlobalShortcutBlocked(event)) return
+      const activeVoiceTurn = useVoiceStore.getState().turnId
+      if (activeVoiceTurn && activeVoiceTurn !== useCommanderCallStore.getState().turnId) return
+      interrupt('stop')
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
