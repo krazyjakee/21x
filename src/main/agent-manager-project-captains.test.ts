@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { AgentManager } from './agent-manager'
@@ -11,6 +11,8 @@ import { CAPTAIN_MEMORY_FILE } from './agent-manager/captain-context'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import type { DatabaseManager } from './database'
 import type { SessionConfig } from './adapters/coding-agent-adapter'
+import { CaptainRuntimeStore } from './sessions/runtime-store'
+import { DeliveryStore } from './sessions/delivery-store'
 
 // Mock heavy dependencies to avoid loading electron/native modules. The
 // filesystem is real: sessions get workspaces under a temp dir, so the
@@ -199,5 +201,176 @@ describe('per-project Captain conversations', () => {
 
     expect(await second.startSession(agentId, betaCaptain, undefined, true)).toBe('beta-session')
     expect(db.getTask(betaCaptain)?.session_id).toBe('beta-session')
+  })
+
+  it('keeps the last-known-good Captain when the candidate health probe fails, then commits a manual retry', async () => {
+    const candidate = db.createAgent({ name: 'Sol', config: { coding_agent: 'claude-code' } as any })!
+    const fake = new FakeAdapter({ sessionIds: ['good-session', 'candidate-session'] })
+    const manager = newManager(fake)
+    await manager.startSession(agentId, alphaCaptain, undefined, true)
+    fake.checkHealth.mockResolvedValueOnce({ available: false, reason: 'protocol probe refused connection' })
+
+    const failed = await manager.switchCaptainAgent(alphaId, candidate.id)
+
+    expect(failed).toMatchObject({
+      phase: 'rolled_back',
+      agentId,
+      candidateAgentId: candidate.id,
+      lastGoodAgentId: agentId,
+      errorCode: 'STARTUP_FAILED',
+      errorDetail: 'protocol probe refused connection'
+    })
+    expect(db.getProject(alphaId)?.captain_agent_id).toBeNull()
+    expect(manager.findSessionByTaskId(alphaCaptain)).toMatchObject({ sessionId: 'good-session', session: { agentId } })
+
+    const retried = await manager.retryCaptainSwitch(alphaId)
+    expect(retried).toMatchObject({
+      phase: 'healthy',
+      agentId: candidate.id,
+      sessionId: 'candidate-session',
+      candidateAgentId: null,
+      lastGoodAgentId: candidate.id,
+      attemptCount: 3
+    })
+    expect(db.getProject(alphaId)?.captain_agent_id).toBe(candidate.id)
+    expect(fake.destroySession).toHaveBeenCalledWith('good-session', expect.any(Object))
+  })
+
+  it('rolls back without changing selection when the candidate process exits during session startup', async () => {
+    const candidate = db.createAgent({ name: 'Sol', config: { coding_agent: 'claude-code' } as any })!
+    const fake = new FakeAdapter({ sessionIds: ['good-session'] })
+    const manager = newManager(fake)
+    await manager.startSession(agentId, alphaCaptain, undefined, true)
+    fake.createSession.mockRejectedValueOnce(new Error('agent process exited with code 17'))
+
+    const result = await manager.switchCaptainAgent(alphaId, candidate.id)
+
+    expect(result).toMatchObject({
+      phase: 'rolled_back',
+      agentId,
+      candidateAgentId: candidate.id,
+      errorDetail: 'agent process exited with code 17'
+    })
+    expect(db.getProject(alphaId)?.captain_agent_id).toBeNull()
+    expect(manager.findSessionByTaskId(alphaCaptain)?.sessionId).toBe('good-session')
+  })
+
+  it('rejects a process-alive candidate whose session readiness probe is unhealthy', async () => {
+    const candidate = db.createAgent({ name: 'Sol', config: { coding_agent: 'claude-code' } as any })!
+    const fake = new FakeAdapter({ sessionIds: ['good-session', 'unhealthy-session'] })
+    const manager = newManager(fake)
+    await manager.startSession(agentId, alphaCaptain, undefined, true)
+    fake.setStatus('error' as any, 'backend protocol is not ready')
+
+    const result = await manager.switchCaptainAgent(alphaId, candidate.id)
+
+    expect(result).toMatchObject({
+      phase: 'rolled_back',
+      agentId,
+      candidateAgentId: candidate.id,
+      errorDetail: 'backend protocol is not ready',
+      probeOk: true
+    })
+    expect(fake.destroySession).toHaveBeenCalledWith('unhealthy-session', expect.any(Object))
+    expect(manager.findSessionByTaskId(alphaCaptain)?.sessionId).toBe('good-session')
+  })
+
+  it('reconciles an expired switch after app restart and probes the restored Captain', async () => {
+    const candidate = db.createAgent({ name: 'Sol', config: { coding_agent: 'claude-code' } as any })!
+    const before = new FakeAdapter({ sessionIds: ['good-session'] })
+    const first = newManager(before)
+    await first.startSession(agentId, alphaCaptain, undefined, true)
+    await first.stopAllSessions()
+
+    // Simulate a crash after selection/start intent was persisted but before
+    // the candidate became ready or the transaction committed.
+    db.updateProject(alphaId, { captain_agent_id: candidate.id })
+    new CaptainRuntimeStore(db).begin({
+      ownerId: alphaCaptain,
+      projectId: alphaId,
+      agentId: candidate.id,
+      lastGoodAgentId: agentId,
+      deadlineAt: Date.now() - 1
+    })
+
+    const after = new FakeAdapter({ sessionIds: ['should-not-create'] })
+    const second = newManager(after)
+    await second.reconcileStartup()
+
+    expect(db.getProject(alphaId)?.captain_agent_id).toBe(agentId)
+    expect(after.resumeSession).toHaveBeenCalledWith('good-session', expect.objectContaining({ agentId, taskId: alphaCaptain }))
+    expect(after.checkHealth).toHaveBeenCalled()
+    expect(after.getStatus).toHaveBeenCalledWith('good-session', expect.any(Object))
+    expect(second.findSessionByTaskId(alphaCaptain)?.sessionId).toBe('good-session')
+    expect(second.getCaptainRuntime(alphaId)).toMatchObject({
+      phase: 'rolled_back',
+      agentId,
+      candidateAgentId: candidate.id,
+      sessionId: 'good-session',
+      probeOk: true,
+      errorCode: 'STARTUP_TIMEOUT'
+    })
+  })
+
+  it('recovers a queued image message after restart and deduplicates a retry with the same delivery ID', async () => {
+    const image = { id: 'pasted-image', filename: 'shot.png', size: 8, mime_type: 'image/png', added_at: new Date().toISOString() }
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    const source = join(root, 'stored-images')
+    mkdirSync(source)
+    db.getAttachmentsDir = vi.fn(() => source)
+    writeFileSync(join(source, `${image.id}-${image.filename}`), bytes)
+    db.updateTask(alphaCaptain, { attachments: [image] })
+    const first = newManager(new FakeAdapter())
+    // The delivery is durable before startup; losing the process now leaves
+    // its original image references in the outbox for the next manager.
+    vi.spyOn(first as any, 'sendMessageNow').mockRejectedValueOnce(new Error('startup interrupted'))
+    await expect(first.sendMessage('', '', alphaCaptain, agentId, [image], undefined, 'captain-drawer:image-retry')).rejects.toThrow('startup interrupted')
+    const store = new DeliveryStore(db)
+    const queued = store.getByKey('captain-drawer:image-retry')!
+    expect(queued.state).toBe('pending')
+    expect(JSON.parse(queued.payload).attachments).toEqual([image])
+    await first.stopAllSessions()
+
+    const fake = new FakeAdapter({ sessionIds: ['recovered-image-session'] })
+    const second = newManager(fake)
+    await second.reconcileStartup()
+    expect(fake.sendPrompt).toHaveBeenCalledTimes(1)
+    expect(fake.sendPrompt).toHaveBeenCalledWith('recovered-image-session', [expect.objectContaining({
+      text: expect.stringContaining('attachments/shot.png')
+    })], expect.any(Object))
+    expect(readFileSync(join(db.getWorkspaceDir(alphaCaptain), 'attachments', image.filename))).toEqual(bytes)
+    expect(store.get(queued.id)?.state).toBe('acknowledged')
+
+    // The renderer may retry with stale/empty options after reconnecting;
+    // the acknowledged delivery must not dispatch or replace its attachments.
+    await second.sendMessage('', 'changed retry', alphaCaptain, agentId, [], undefined, 'captain-drawer:image-retry')
+    expect(fake.sendPrompt).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(store.get(queued.id)!.payload).attachments).toEqual([image])
+  })
+
+  it('acknowledges a crash-after-provider-handoff message without visibly sending it again', async () => {
+    const store = new DeliveryStore(db)
+    const row = store.enqueue({
+      idempotencyKey: 'renderer:crash-after-send',
+      kind: 'agent_message',
+      taskId: alphaCaptain,
+      agentId,
+      payload: JSON.stringify({
+        sessionId: 'good-session',
+        message: 'Do not duplicate this',
+        taskId: alphaCaptain,
+        agentId,
+        attachments: []
+      })
+    }).record
+    store.claim(row.id, 'process-before-crash', 1_000)
+    store.accept(row.id, 'process-before-crash', 'provider-turn-1')
+
+    const manager = newManager(new FakeAdapter())
+    const send = vi.spyOn(manager as any, 'sendMessageNow')
+    await manager.reconcileStartup()
+
+    expect(send).not.toHaveBeenCalled()
+    expect(store.get(row.id)).toMatchObject({ state: 'acknowledged', destinationId: 'provider-turn-1' })
   })
 })

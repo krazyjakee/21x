@@ -7,6 +7,7 @@ import type { ChatToolDefinition } from '../chat/tools'
 import { CommanderService, type CommanderToolContext } from '../commander/commander-service'
 import { CommanderStore } from '../commander/commander-store'
 import { createCommanderProjectTools, ProjectMutationConfirmations } from '../commander/project-tools'
+import { CaptainDeliveryService } from '../commander/captain-delivery'
 import { createCommanderSkillTools } from '../commander/skill-tools'
 import { createCommanderMergeGrantTools } from '../commander/merge-grant-tools'
 import { installCommanderReportBridge } from '../commander/report-tools'
@@ -71,6 +72,37 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
   const confirmations = new ProjectMutationConfirmations()
   // The connection is read on use, so registering never touches the database.
   const store = new CommanderStore({ get db() { return deps.db.db } })
+  let commanderRef: CommanderService | null = null
+  const delivery = new CaptainDeliveryService({
+    db: deps.db,
+    agents: deps.agentManager,
+    onTerminalFailure: (request, reason, timedOut) => {
+      if (!commanderRef || !request.sourceSessionId || !request.projectId) return
+      const project = deps.db.getProject(request.projectId)
+      const key = `captain-request:${request.id}:${timedOut ? 'timeout' : 'failure'}`
+      const { record } = delivery.store.enqueue({
+        idempotencyKey: key,
+        kind: 'captain_report',
+        sourceSessionId: request.sourceSessionId,
+        projectId: request.projectId,
+        correlationId: request.correlationId,
+        payload: reason
+      })
+      try {
+        commanderRef.appendReport({
+          sessionId: request.sourceSessionId,
+          content: timedOut
+            ? `The Captain of "${project?.name ?? request.projectId}" did not report back before the deadline. Retry the request when ready.`
+            : `Your request could not be delivered to the Captain of "${project?.name ?? request.projectId}": ${reason}. Retry the request when ready.`,
+          projectId: request.projectId,
+          correlationId: request.correlationId,
+          deliveryId: record.id
+        })
+      } catch (err) {
+        console.error('[Commander] Could not record the terminal Captain request outcome:', err)
+      }
+    }
+  })
   const commander: CommanderService = new CommanderService({
     store,
     emit,
@@ -81,24 +113,10 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
         context,
         confirmations,
         agents: deps.agentManager,
+        delivery,
         listHeldActions,
         sendUiCommand,
         onProjectChanged: (projectId, kind) => broadcastProjectChanged({ projectId, kind }),
-        // The tool already returned "sent"; the failure reaches the user the
-        // same way an answer would, as a report on the session.
-        onDeliveryFailed: (dispatch, error) => {
-          const reason = error instanceof Error ? error.message : String(error)
-          try {
-            commander.appendReport({
-              sessionId: dispatch.sessionId,
-              content: `Your request could not be delivered to the Captain of "${dispatch.projectName}": ${reason}`,
-              projectId: dispatch.projectId,
-              correlationId: dispatch.correlationId
-            })
-          } catch (err) {
-            console.error('[Commander] Could not record the delivery failure:', err)
-          }
-        }
       }),
       // Merge grants (#137): list and revoke; creating one goes through ask_captain.
       ...createCommanderMergeGrantTools({ db: deps.db, context }),
@@ -112,11 +130,18 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
       })
     ])
   })
+  commanderRef = commander
   service = commander
 
   // #62: `report_to_commander` (Task API route) and `tell_commander`
   // escalations reach the sessions through this bridge.
-  installCommanderReportBridge({ service: commander, store, getProject: (projectId) => deps.db.getProject(projectId) })
+  installCommanderReportBridge({
+    service: commander,
+    store,
+    deliveries: delivery.store,
+    getProject: (projectId) => deps.db.getProject(projectId)
+  })
+  void delivery.reconcile().catch((error) => console.error('[Commander] Durable Captain delivery recovery failed:', error))
   void recoverMergeGrantOutcomes(deps.db).catch((error) => console.error('[MergeGrants] Recovery failed:', error))
 
   /** Every Commander call is from the main window; the caller then receives events. */

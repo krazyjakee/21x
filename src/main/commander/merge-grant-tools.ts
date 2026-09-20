@@ -1,7 +1,7 @@
 import type { ChatToolDefinition } from '../chat/tools'
 import type { DatabaseManager } from '../database'
 import { createMergeGrantFromUserMessage, mergeGrantSummary, revokeMergeGrant } from '../merge-grants'
-import { describeMergeGrant, type MergeGrant, type MergeGrantScopeInput } from '../../shared/merge-grants'
+import { describeMergeGrant, mergeGrantFailure, mergeGrantScopeFrom, type MergeGrant, type MergeGrantScopeInput } from '../../shared/merge-grants'
 import type { ProjectRecord } from '../../shared/projects'
 import { projectLocatorSchema, resolveProject, result, type ProjectToolContext } from './project-tools'
 
@@ -24,7 +24,7 @@ export const mergeGrantInputSchema = {
   type: 'object',
   description:
     'Only when the user explicitly told you, in this message, to merge pull requests in this project (they must say "merge"; "ship it" or "land it" do not count). ' +
-    '21x binds the grant to the user\'s message and refuses otherwise. One project per grant; it lasts at most 7 days and the user can revoke it.',
+    '21x binds the grant to the user\'s message and refuses otherwise. One project per grant; it lasts at most 7 days and the user can revoke it. Project-wide example: Merge all open PRs in 21x when required reviews and checks pass. Rejections include reason codes and accepted wording; never infer opt-in from a command.',
   properties: {
     repo: { type: 'string', description: 'owner/name; omit for all of the project\'s GitHub repos.' },
     base_branch: { type: 'string', description: 'Unsupported: GitHub cannot pin the base atomically; any base restriction is refused.' },
@@ -36,15 +36,8 @@ export const mergeGrantInputSchema = {
 } as const
 
 function scopeInput(value: unknown): MergeGrantScopeInput {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('merge_grant must be an object')
-  const input = value as Record<string, unknown>
-  return {
-    repo: typeof input.repo === 'string' ? input.repo : undefined,
-    base_branch: typeof input.base_branch === 'string' ? input.base_branch : undefined,
-    pr_numbers: Array.isArray(input.pr_numbers) ? (input.pr_numbers as number[]) : undefined,
-    expires_in_hours: typeof input.expires_in_hours === 'number' ? input.expires_in_hours : undefined,
-    max_merges: typeof input.max_merges === 'number' ? input.max_merges : undefined
-  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(mergeGrantFailure([{ reason_code: 'PR_SCOPE_UNSUPPORTED', message: 'merge_grant must be an object', offending_scope: 'merge_grant' }]).error)
+  return mergeGrantScopeFrom(value as Record<string, unknown>)
 }
 
 /**
@@ -55,13 +48,10 @@ function scopeInput(value: unknown): MergeGrantScopeInput {
  */
 export function grantForRelay(db: DatabaseManager, context: ProjectToolContext, project: ProjectRecord, value: unknown): MergeGrant {
   const scope = scopeInput(value)
-  if (context.trigger === 'report' || !context.userMessageId || !context.userMessage.trim()) {
-    throw new Error('A merge grant needs a message the user typed in this turn. Nothing was sent; ask the user.')
-  }
   const created = createMergeGrantFromUserMessage(db, project.id, {
     source: 'commander',
     sessionId: context.sessionId,
-    messageId: context.userMessageId,
+    messageId: context.trigger === 'report' ? '' : context.userMessageId ?? '',
     text: context.userMessage
   }, scope)
   if (!created.ok) throw new Error(`No merge grant was created and nothing was sent: ${created.error}`)

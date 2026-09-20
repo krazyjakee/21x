@@ -20,6 +20,7 @@ import { registerCommanderHandlers } from '../ipc/commander'
 import type { IpcDeps } from '../ipc/deps'
 import { CommanderService } from './commander-service'
 import { CommanderStore } from './commander-store'
+import { DeliveryStore } from '../sessions/delivery-store'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_TITLE_PROMPT } from './prompts'
 
 /** Commander images end to end in main (#144): storage, context, refusal, IPC, clipboard, task attachments. */
@@ -65,6 +66,38 @@ beforeEach(() => {
 })
 
 describe('Commander messages with images', () => {
+  it('stores delivery-ID images atomically and preserves the original images on replay after restart', () => {
+    const session = store.createSession()
+    const deliveries = new DeliveryStore(db)
+    const row = deliveries.enqueue({
+      idempotencyKey: 'commander-image-delivery', kind: 'agent_message', payload: '{}'
+    }).record
+    const input = { role: 'user' as const, content: '', images: [png('first.png'), png('second.png')] }
+    const first = store.appendMessageOnce(session.id, input, row.id)
+    expect(first.inserted).toBe(true)
+    expect(first.message.images?.map((image) => image.name)).toEqual(['first.png', 'second.png'])
+    expect(deliveries.get(row.id)?.state).toBe('acknowledged')
+
+    const restarted = new CommanderStore(db)
+    const replay = restarted.appendMessageOnce(session.id, { ...input, images: [png('replacement.png')] }, row.id)
+    expect(replay).toEqual({ message: first.message, inserted: false })
+    expect(restarted.getMessageImages(first.message.id)).toEqual(input.images)
+    expect(restarted.listMessages(session.id)).toHaveLength(1)
+    expect(db.db.prepare('SELECT COUNT(*) AS n FROM commander_images').get()).toEqual({ n: 2 })
+  })
+
+  it('rolls back a delivery message and acknowledgement when image persistence fails', () => {
+    const session = store.createSession()
+    const deliveries = new DeliveryStore(db)
+    const row = deliveries.enqueue({ idempotencyKey: 'broken-image', kind: 'agent_message', payload: '{}' }).record
+    db.db.exec("CREATE TRIGGER fail_image BEFORE INSERT ON commander_images BEGIN SELECT RAISE(ABORT, 'disk failure'); END")
+    expect(() => store.appendMessageOnce(session.id, { role: 'user', content: '', images: [png()] }, row.id)).toThrow('disk failure')
+    expect(store.listMessages(session.id)).toEqual([])
+    expect(deliveries.get(row.id)?.state).toBe('pending')
+    db.db.exec('DROP TRIGGER fail_image')
+    expect(store.appendMessageOnce(session.id, { role: 'user', content: '', images: [png()] }, row.id).message.images).toHaveLength(1)
+  })
+
   it('stores the images, sends them to the provider as image input, and returns metadata only', async () => {
     const provider = recordingProvider({ supportsImages: true })
     const service = new CommanderService({ store, createProvider: () => provider, emit: (e) => events.push(e) })

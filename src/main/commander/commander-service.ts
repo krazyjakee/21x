@@ -68,6 +68,8 @@ export interface AppendReportInput {
   content: string
   projectId?: string | null
   correlationId?: string | null
+  /** Delivery-outbox row id. Replays return the original report. */
+  deliveryId?: string
 }
 
 export interface DeliverReportInput extends AppendReportInput {
@@ -448,19 +450,27 @@ export class CommanderService {
    * session is read, and the model sees it on the next turn.
    */
   appendReport(input: AppendReportInput, emit = true): CommanderMessage {
+    return this.storeReport(input, emit).message
+  }
+
+  private storeReport(input: AppendReportInput, emit = true): { message: CommanderMessage; inserted: boolean } {
     const content = input.content?.trim()
     if (!content) throw new Error('Report is empty')
-    const message = this.store.appendMessage(input.sessionId, {
+    const messageInput = {
       role: 'report',
       content,
       projectId: input.projectId ?? null,
       correlationId: input.correlationId ?? null
-    })
-    if (emit) {
+    } as const
+    const stored = input.deliveryId
+      ? this.store.appendMessageOnce(input.sessionId, messageInput, input.deliveryId)
+      : { message: this.store.appendMessage(input.sessionId, messageInput), inserted: true }
+    const { message, inserted } = stored
+    if (emit && inserted) {
       this.emit({ type: 'messages_appended', sessionId: input.sessionId, messages: [message] })
     }
-    this.emitSession(input.sessionId)
-    return message
+    if (inserted) this.emitSession(input.sessionId)
+    return { message, inserted }
   }
 
   // ── Report delivery (#62) ───────────────────────────────────
@@ -474,7 +484,8 @@ export class CommanderService {
    */
   deliverReport(input: DeliverReportInput): DeliverReportResult {
     const waitsForCurrentTurn = this.isSessionActive(input.sessionId) && this.active.has(input.sessionId)
-    const message = this.appendReport(input, !waitsForCurrentTurn)
+    const { message, inserted } = this.storeReport(input, !waitsForCurrentTurn)
+    if (!inserted) return { message, relayed: false }
     if (!this.isSessionActive(input.sessionId)) return { message, relayed: false }
     if (waitsForCurrentTurn) {
       const pending = this.pendingRelay.get(input.sessionId)

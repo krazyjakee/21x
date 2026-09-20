@@ -17,6 +17,7 @@ import { CLAUDE_REASONING_EFFORT_VALUES, CODEX_REASONING_EFFORT_VALUES } from '@
 import type { Agent, CreateAgentDTO, UpdateAgentDTO, AgentMcpServerEntry, ClaudeAuthMethod, AgentPermissionMode, AgentSandboxMode } from '@/types'
 import type { ReasoningEffort } from '@/types'
 import { CodingAgentType, CODING_AGENTS, CLAUDE_MODELS, CODEX_MODELS, CURSOR_MODELS } from '@/types'
+import { MAX_HARD_CAP, agentHardCap } from '@shared/concurrency'
 
 interface AgentFormProps {
   agent?: Agent
@@ -50,7 +51,8 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
   const [model, setModel] = useState(agent?.config.model ?? '')
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort | ''>(agent?.config.reasoning_effort ?? '')
   const [systemPrompt, setSystemPrompt] = useState(agent?.config.system_prompt ?? '')
-  const [maxParallelSessions, setMaxParallelSessions] = useState(agent?.config.max_parallel_sessions ?? 1)
+  // #150: the user-set hard cap. An agent saved before it existed shows min(max_parallel_sessions, 5).
+  const [maxParallelSessions, setMaxParallelSessions] = useState(agent ? agentHardCap(agent.config) : 1)
   const [skillIds, setSkillIds] = useState<string[] | undefined>(agent?.config.skill_ids)
   const [showSkillSelector, setShowSkillSelector] = useState(false)
   const [secretIds, setSecretIds] = useState<string[]>(agent?.config.secret_ids ?? [])
@@ -251,7 +253,9 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
         permission_mode: permissionMode,
         sandbox_mode: codingAgent === CodingAgentType.CODEX ? sandboxMode : undefined,
         system_prompt: systemPrompt.trim() || undefined,
-        max_parallel_sessions: maxParallelSessions,
+        // #150: the hard cap. max_parallel_sessions mirrors it for older readers.
+        concurrency_cap: Math.max(1, Math.min(MAX_HARD_CAP, Math.floor(maxParallelSessions) || 1)),
+        max_parallel_sessions: Math.max(1, Math.min(MAX_HARD_CAP, Math.floor(maxParallelSessions) || 1)),
         mcp_servers: mcpServersConfig.length > 0 ? mcpServersConfig : undefined,
         skill_ids: skillIds,
         secret_ids: secretIds.length > 0 ? secretIds : undefined,
@@ -668,18 +672,20 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="max-parallel-sessions">Parallel Task Limit</Label>
+        <Label htmlFor="max-parallel-sessions">Hard cap (concurrent jobs)</Label>
         <Input
           id="max-parallel-sessions"
           type="number"
           min={1}
-          max={10}
+          max={MAX_HARD_CAP}
           value={maxParallelSessions}
           onChange={(e) => setMaxParallelSessions(Number(e.target.value))}
           placeholder="1"
         />
         <p className="text-xs text-muted-foreground">
-          How many tasks this agent can work on at the same time (1-10)
+          The most tasks this agent works on at the same time, across all projects (1-{MAX_HARD_CAP}). Each project&apos;s
+          Captain runs fewer when the work calls for it (serial steps, shared files, a busy machine), never more.
+          Pin a project&apos;s level, or switch Captain control off, under Concurrency in the project editor.
         </p>
       </div>
 

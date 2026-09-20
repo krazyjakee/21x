@@ -6,6 +6,8 @@ import { getRepoProviders, isGitProvider } from '../repo-providers'
 import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
 import { migrateCoordinatorToCaptain } from './captain-migration'
 import { splitLegacyPullRequestEscalation } from '../../shared/project-policies'
+import { createConcurrencyTables, migrateConcurrencyControl } from './concurrency-migration'
+import { createDurableStartQueueTables, migrateDurableStartQueue } from './start-queue-migration'
 
 /**
  * Bump this whenever new migrations are added so returning users skip
@@ -36,11 +38,17 @@ import { splitLegacyPullRequestEscalation } from '../../shared/project-policies'
  *          (migrateMergeGrants), and the escalation policy's combined `pr`
  *          item split into `open_pr` / `merge_pr` in projects.settings
  *          (splitPullRequestEscalation: the old level goes to merge_pr,
- *          open_pr gets its default "tell_commander"). 18 is skipped on purpose: it is claimed by
- *          an open branch (feat/commander-on-agent-sessions); whichever lands
- *          second renumbers.
+ *          open_pr gets its default "tell_commander"). 18 was skipped for a
+ *          contemporaneous feature branch.
+ * 19 → 20: managed Captain runtime generations and the durable delivery
+ *          outbox used by task messages, Commander requests and reports.
+ * 20 → 21: Captain-managed concurrency (#150): concurrency_audit, task_touches,
+ *          and agents.config.concurrency_cap = min(max_parallel_sessions, 5)
+ *          where unset (migrateConcurrencyControl in concurrency-migration.ts).
+ * 21 → 22: durable agent start queue, leases, generations, retry state and
+ *          cross-project fairness (#148, migrateDurableStartQueue).
  */
-const SCHEMA_VERSION = 19
+const SCHEMA_VERSION = 22
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -391,6 +399,56 @@ export function createTables(db: Database.Database): void {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_commander_messages_session_created ON commander_messages(session_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS managed_agent_runtimes (
+      owner_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      generation INTEGER NOT NULL DEFAULT 0,
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      candidate_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+      last_good_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+      session_id TEXT,
+      phase TEXT NOT NULL,
+      deadline_at INTEGER,
+      last_probe_at INTEGER,
+      probe_ok INTEGER,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      error_code TEXT,
+      error_detail TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_managed_agent_runtimes_project
+      ON managed_agent_runtimes(project_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_managed_agent_runtimes_phase_deadline
+      ON managed_agent_runtimes(phase, deadline_at);
+
+    CREATE TABLE IF NOT EXISTS delivery_outbox (
+      id TEXT PRIMARY KEY,
+      idempotency_key TEXT NOT NULL UNIQUE,
+      kind TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'pending',
+      source_session_id TEXT,
+      project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+      task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+      agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+      correlation_id TEXT,
+      payload TEXT NOT NULL,
+      destination_id TEXT,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      claim_owner TEXT,
+      claim_expires_at INTEGER,
+      deadline_at INTEGER,
+      last_error TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      acknowledged_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_delivery_outbox_recovery
+      ON delivery_outbox(kind, state, claim_expires_at, created_at);
+    CREATE INDEX IF NOT EXISTS idx_delivery_outbox_correlation
+      ON delivery_outbox(correlation_id, kind, created_at DESC)
+      WHERE correlation_id IS NOT NULL;
   `)
 
   // Embedded connector pieces (docs/connectors.md). Timestamps are epoch ms.
@@ -479,6 +537,11 @@ export function createTables(db: Database.Database): void {
   `)
 
   createMergeGrantTables(db)
+  // Concurrency control (#150): audit feed and declared touches.
+  createConcurrencyTables(db)
+
+  // Captain self-healing (#148): the one durable admission/start queue.
+  createDurableStartQueueTables(db)
 
   // Report routing (#62): a Captain report quotes the correlation id of
   // the `ask_captain` tool row it answers; this serves that lookup.
@@ -986,6 +1049,13 @@ export function runMigrations(db: Database.Database): void {
   // Migration v19: merge grants (#137). New tables only; runs after
   // migrateToProjects so the projects table they reference exists.
   migrateMergeGrants(db)
+  // Migration v21: concurrency control (#150). After migrateToProjects so the
+  // projects table the audit references exists.
+  migrateConcurrencyControl(db)
+
+  // Migration v22: durable start claims and recovery (#148). This extends the
+  // v20 runtime and v21 admission model rather than introducing a second one.
+  migrateDurableStartQueue(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)

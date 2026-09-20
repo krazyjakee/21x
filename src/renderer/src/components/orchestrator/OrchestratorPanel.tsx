@@ -5,12 +5,13 @@ import { AgentTranscriptPanel } from '@/components/agents/AgentTranscriptPanel'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useAgentSession } from '@/hooks/use-agent-session'
 import { useCurrentProject } from '@/hooks/use-project-tasks'
-import { agentApi, mergeGrantsApi, settingsApi } from '@/lib/ipc-client'
+import { agentApi, captainRuntimeApi, mergeGrantsApi, settingsApi } from '@/lib/ipc-client'
 import { captainAgentIdFor, useCaptainTaskId } from '@/stores/coordinator-store'
 import { useProjectStore } from '@/stores/project-store'
 import type { Agent } from '@/types'
 import type { ComposerAttachment } from '@/components/agents/transcript/TranscriptComposer'
 import { taskImageSaver, withAttachmentNote } from '@/lib/chat-image-attachments'
+import type { CaptainRuntimeState } from '@shared/captain-runtime'
 
 /** Start the agent at app start, so the first sentence does not wait for it. */
 export const CAPTAIN_PREWARM_SETTING = 'captain_prewarm'
@@ -26,6 +27,13 @@ export const CAPTAIN_START_TIMEOUT_MS = 100_000
 interface StartFailure {
   agentId: string
   message: string
+}
+
+interface QueuedCaptainMessage {
+  message: string
+  deliveryId: string
+  typed: boolean
+  options?: { attachments?: ComposerAttachment[] }
 }
 
 /** The reason without Electron's "Error invoking remote method '…': Error: " wrapper. */
@@ -50,20 +58,20 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   const { start, stop, sendMessage, approve } = useAgentSession(captainTaskId ?? undefined)
   const currentSession = useAgentStore((state) => (captainTaskId ? state.sessions.get(captainTaskId) : undefined))
   const resetSession = useAgentStore((state) => state.resetSession)
-  const updateProject = useProjectStore((state) => state.updateProject)
+  const fetchProjects = useProjectStore((state) => state.fetchProjects)
   /** The start in flight and whose it is, shared so a message can wait for it instead of racing. */
   const startingRef = useRef<{ taskId: string; promise: Promise<void> } | null>(null)
   const selectedAgentIdRef = useRef<string | null>(null)
   selectedAgentIdRef.current = selectedAgentId
   const [prewarm, setPrewarm] = useState(false)
-  /** The agent in use before the last switch, offered as the way back when the new one will not start. */
-  const [previousAgentId, setPreviousAgentId] = useState<string | null>(null)
+  const [runtime, setRuntime] = useState<CaptainRuntimeState | null>(null)
+  const [runtimeActivity, setRuntimeActivity] = useState<{ phase: 'starting_server' | 'retrying'; agentId: string } | null>(null)
   const [startFailure, setStartFailure] = useState<StartFailure | null>(null)
   /**
    * Messages sent while the Captain could not be started, per Captain row.
    * Each is delivered once, in order, when a start succeeds.
    */
-  const queuedRef = useRef(new Map<string, Array<{ text: string; typed: boolean; options?: { attachments?: ComposerAttachment[] } }>>())
+  const queuedRef = useRef(new Map<string, QueuedCaptainMessage[]>())
   const typedMessageRef = useRef<string | null>(null)
   const drainingRef = useRef(false)
   const [queuedCount, setQueuedCount] = useState(0)
@@ -105,26 +113,53 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   useEffect(() => {
     setStartFailure(null)
     setQueuedCount(captainTaskId ? queuedRef.current.get(captainTaskId)?.length ?? 0 : 0)
-  }, [captainTaskId])
+    if (!projectId) {
+      setRuntime(null)
+      return
+    }
+    let cancelled = false
+    void captainRuntimeApi.get(projectId).then((state) => {
+      if (cancelled) return
+      setRuntime(state)
+      if (state && ['failed', 'timed_out', 'rolled_back', 'unhealthy'].includes(state.phase) && state.errorDetail) {
+        setStartFailure({ agentId: state.candidateAgentId ?? state.agentId, message: state.errorDetail })
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [captainTaskId, projectId])
 
-  // Switch agent. The new choice is recorded before the old session is
-  // stopped, or the warm-up would race in and start the old agent again. It
-  // is saved on the project too: the Commander, wake-ups and the next launch
-  // start the Captain on the project's agent, and a choice that lived only
-  // here was silently undone by all three. Main stops a session still
-  // running on the old agent when the project changes.
+  // Main owns the transaction: the old Captain remains selected and usable
+  // until the candidate passes server, protocol and session readiness probes.
   const handleAgentChange = async (newAgentId: string) => {
     const previous = selectedAgentIdRef.current
     if (!newAgentId || newAgentId === previous) return
-    setPreviousAgentId(previous)
     selectedAgentIdRef.current = newAgentId
     setSelectedAgentId(newAgentId)
     setStartFailure(null)
-    if (projectId) void updateProject(projectId, { captain_agent_id: newAgentId })
-    if (currentSession?.sessionId && captainTaskId) {
-      await stop()
-      // Keeps the transcript: the conversation is the same Captain's.
-      resetSession(captainTaskId)
+    if (!projectId) return
+    setRuntimeActivity({ phase: 'starting_server', agentId: newAgentId })
+    if (runtime) {
+      setRuntime({ ...runtime, phase: 'starting_server', candidateAgentId: newAgentId, errorCode: null, errorDetail: null })
+    }
+    try {
+      const next = await captainRuntimeApi.switch(projectId, newAgentId)
+      setRuntime(next)
+      if (next.phase === 'healthy') {
+        await fetchProjects()
+        return
+      }
+      const restored = next.lastGoodAgentId ?? previous
+      selectedAgentIdRef.current = restored
+      setSelectedAgentId(restored)
+      setStartFailure({ agentId: next.candidateAgentId ?? newAgentId, message: next.errorDetail ?? 'The candidate did not become healthy.' })
+    } catch (err) {
+      selectedAgentIdRef.current = previous
+      setSelectedAgentId(previous)
+      setStartFailure({ agentId: newAgentId, message: startFailureMessage(err) })
+    } finally {
+      setRuntimeActivity(null)
     }
   }
 
@@ -193,16 +228,18 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   const handleSaveImages = useMemo(() => (captainTaskId ? taskImageSaver(captainTaskId) : undefined), [captainTaskId])
 
   const deliver = useCallback(
-    async (message: { text: string; typed: boolean; options?: { attachments?: ComposerAttachment[] } }) => {
+    async (message: QueuedCaptainMessage) => {
       // Question answers should use approve() instead of sendMessage()
       const live = captainTaskId ? useAgentStore.getState().sessions.get(captainTaskId) : undefined
       const messages = live?.messages || []
       const lastMessage = messages[messages.length - 1]
       if (lastMessage?.partType === 'question' && lastMessage?.tool?.questions) {
-        await approve(true, withAttachmentNote(message.text, message.options?.attachments))
+        await approve(true, withAttachmentNote(message.message, message.options?.attachments))
       } else {
-        if (message.typed && captainTaskId) mergeGrantsApi.noteTyped(captainTaskId, message.text)
-        await sendMessage(message.text, message.options)
+        // Stage provenance at delivery, after session warm-up and queueing;
+        // IPC consumes this exact text once, then main tracks actual dispatch.
+        if (message.typed && captainTaskId) mergeGrantsApi.noteTyped(captainTaskId, message.message)
+        await sendMessage(message.message, { ...message.options, deliveryId: message.deliveryId })
       }
     },
     [captainTaskId, sendMessage, approve]
@@ -218,7 +255,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
     try {
       while (queue.length > 0) {
         // Taken off before sending, so a second drain cannot send it again.
-        const next = queue.shift()!
+        const next = queue.shift() as QueuedCaptainMessage
         setQueuedCount(queue.length)
         try {
           await deliver(next)
@@ -238,31 +275,66 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   // goes out after a successful retry or switch.
   const handleSendMessage = useCallback(
     async (message: string, options?: { attachments?: ComposerAttachment[] }) => {
-      const outgoing = { text: message, typed: typedMessageRef.current === message, options }
+      const outgoing: QueuedCaptainMessage = {
+        message,
+        typed: typedMessageRef.current === message,
+        deliveryId: `captain-drawer:${crypto.randomUUID()}`,
+        options
+      }
       typedMessageRef.current = null
       const taskId = captainTaskId
-      if (!(await ensureSession())) {
-        if (!taskId) return
+      if (!taskId) return
+      try {
+        await drainQueue()
+        await deliver(outgoing)
+      } catch (err) {
         const queue = queuedRef.current.get(taskId) ?? []
-        queue.push(outgoing)
+        // The main process already persisted this id before attempting the
+        // handoff. Keeping it here only drives immediate manual retry; a full
+        // renderer/app restart recovers the same row from SQLite.
+        if (!queue.some((entry) => entry.deliveryId === outgoing.deliveryId)) queue.push(outgoing)
         queuedRef.current.set(taskId, queue)
         setQueuedCount(queue.length)
-        return
+        setStartFailure({ agentId: selectedAgentIdRef.current ?? '', message: startFailureMessage(err) })
       }
-      await drainQueue()
-      await deliver(outgoing)
     },
-    [captainTaskId, ensureSession, drainQueue, deliver]
+    [captainTaskId, drainQueue, deliver]
   )
 
   const retryStart = useCallback(async () => {
     setStartFailure(null)
+    setRuntimeActivity({ phase: 'retrying', agentId: runtime?.candidateAgentId ?? selectedAgentIdRef.current ?? '' })
     try {
+      if (projectId && runtime?.candidateAgentId) {
+        const next = await captainRuntimeApi.retry(projectId)
+        setRuntime(next)
+        if (next.phase === 'healthy') {
+          selectedAgentIdRef.current = next.agentId
+          setSelectedAgentId(next.agentId)
+          await fetchProjects()
+          return
+        }
+        setStartFailure({ agentId: next.candidateAgentId ?? runtime.candidateAgentId, message: next.errorDetail ?? 'Retry failed.' })
+        return
+      }
       if (await ensureSession()) await drainQueue()
     } catch (err) {
       console.error('Failed to deliver held Captain messages:', err)
+      setStartFailure({ agentId: runtime?.candidateAgentId ?? selectedAgentIdRef.current ?? '', message: startFailureMessage(err) })
+    } finally {
+      setRuntimeActivity(null)
     }
-  }, [ensureSession, drainQueue])
+  }, [projectId, runtime, fetchProjects, ensureSession, drainQueue])
+
+  const rollbackSwitch = useCallback(async () => {
+    if (!projectId) return
+    const next = await captainRuntimeApi.rollback(projectId)
+    setRuntime(next)
+    setStartFailure(next.errorDetail ? { agentId: next.candidateAgentId ?? next.agentId, message: next.errorDetail } : null)
+    selectedAgentIdRef.current = next.agentId
+    setSelectedAgentId(next.agentId)
+    await fetchProjects()
+  }, [projectId, fetchProjects])
 
   /**
    * Start the agent in the background, before there is anything to say.
@@ -302,8 +374,8 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   const projectName = project?.name ?? 'Default'
   const agentName = (id: string | null): string => agents.find((agent) => agent.id === id)?.name ?? 'the agent'
   const rollbackAgentId =
-    startFailure && previousAgentId && previousAgentId !== startFailure.agentId && agents.some((agent) => agent.id === previousAgentId)
-      ? previousAgentId
+    startFailure && runtime?.lastGoodAgentId && runtime.lastGoodAgentId !== startFailure.agentId && agents.some((agent) => agent.id === runtime.lastGoodAgentId)
+      ? runtime.lastGoodAgentId
       : null
 
   return (
@@ -339,6 +411,16 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
         </Button>
       </div>
 
+      {runtimeActivity ? (
+        <div data-testid="captain-runtime-state" className="border-b border-border bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
+          Captain is {runtimeActivity.phase.replaceAll('_', ' ')} on {agentName(runtimeActivity.agentId)}.
+        </div>
+      ) : runtime && !['healthy', 'failed', 'timed_out', 'rolled_back'].includes(runtime.phase) && (
+        <div data-testid="captain-runtime-state" className="border-b border-border bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
+          Captain is {runtime.phase.replaceAll('_', ' ')} on {agentName(runtime.candidateAgentId ?? runtime.agentId)}.
+        </div>
+      )}
+
       {/* A start that failed or timed out: why, and the ways out. */}
       {startFailure && (
         <div role="alert" className="flex flex-col gap-2 border-b border-destructive/30 bg-destructive/10 px-4 py-2.5 text-xs shrink-0">
@@ -356,8 +438,8 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
               Retry
             </Button>
             {rollbackAgentId && (
-              <Button size="sm" variant="ghost" onClick={() => void handleAgentChange(rollbackAgentId)}>
-                Switch back to {agentName(rollbackAgentId)}
+              <Button size="sm" variant="ghost" onClick={() => void rollbackSwitch()}>
+                Roll back to {agentName(rollbackAgentId)}
               </Button>
             )}
           </div>
