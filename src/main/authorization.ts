@@ -94,6 +94,21 @@ const INTERROGATIVE = /^(?:why|how|what|which|who|where|can|could|would|will|may
 const CODING_ASSIGNMENT = /^(?:please\s+)?(?:implement|fix|repair|build|develop|code|refactor)\b/i
 const UNSAFE_CONTEXT_PREFIX = /^(?:(?:only\s+)?if\b|unless\b|when\b|once\b|pending\b|subject\s+to\b|example(?:\s+instructions?)?\b|hypothetical\b|mock\b|wait\s+for\b)/i
 const AMBIGUOUS_CONTEXT = /\b(?:if|unless|provided|assuming|once|when|after|before|pending|subject\s+to|mock|dry[ -]?run|simulate|hypothetical|example|approval|confirmation)\b/i
+const AUTHORIZATION_COMMAND = /^(?:please\s+)?(?:create|add|make|file|open|publish|update|link|start|prioriti[sz]e)\b/i
+const AUTHORIZATION_DENIAL = /\b(?:do\s+not|don't|dont|never|refrain\s+from)\s+(?:create|add|make|file|open|opening|publish|update|link|start|starting)\b/i
+
+/**
+ * Non-authorizing clauses allowed beside an explicit command. Everything else
+ * makes the complete message ambiguous and therefore non-authorizing. This is
+ * a positive grammar: unknown headings/restrictions never disappear merely
+ * because a later clause happens to look imperative.
+ */
+function safeAuthorizationContext(clause: string): boolean {
+  return /^(?:why|how|what|which|who|where)\b/i.test(clause) || /^\d+\b/.test(clause) ||
+    /^come\s+up\s+with\s+(?:a\s+)?technical\s+solution\b/i.test(clause) ||
+    /^i\s+(?:do\s+not|don't|dont)\s+want\s+recommendations?\b/i.test(clause) ||
+    /^(?:the\s+)?(?:github|gh)\s+issues?\s+(?:will|would|should|may|might|probably)\b/i.test(clause)
+}
 
 function clauses(text: string): Array<{ text: string; start: number; end: number }> {
   const result: Array<{ text: string; start: number; end: number }> = []
@@ -140,6 +155,12 @@ export function classifyCapabilityIntents(text: string, projectNames: string[] =
   const found = new Map<AuthorizationAction, ClassifiedIntent>()
   const denied = new Set<AuthorizationAction>()
   const parsedClauses = clauses(text)
+  if (parsedClauses.some((clause) =>
+    !CODING_ASSIGNMENT.test(clause.text) &&
+    !AUTHORIZATION_COMMAND.test(clause.text) &&
+    !AUTHORIZATION_DENIAL.test(clause.text) &&
+    !safeAuthorizationContext(clause.text)
+  )) return []
   // A conditional/example heading can govern every following imperative, and
   // a trailing condition can qualify commands that came before it. This small
   // grammar cannot safely determine that scope, so the message grants nothing.

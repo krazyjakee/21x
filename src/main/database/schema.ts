@@ -63,8 +63,10 @@ import { createIssueWriteTables, migrateIssueWrites } from './issue-writes-migra
  *          agent provenance; legacy unbound attestations fail closed.
  * 28 → 29: per-session MCP scope nonces invalidate stale signed task/agent
  *          credentials when a task session is replaced or resumed.
+ * 29 → 30: durable last-accepted human capability supersession for task
+ *          bindings, including backfill from an existing accepted turn node.
  */
-const SCHEMA_VERSION = 29
+const SCHEMA_VERSION = 30
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from

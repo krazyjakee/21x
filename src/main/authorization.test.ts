@@ -313,6 +313,15 @@ describe('immutable human authorization chain', () => {
     expect(requestedActions('After approval:\nCreate tasks. Open gh issues for 21x.', ['21x'])).toEqual([])
     expect(requestedActions('For example:\nCreate tasks. Open gh issues for 21x.', ['21x'])).toEqual([])
     expect(requestedActions('Open gh issues for 21x. Provided I approve.', ['21x'])).toEqual([])
+    for (const unsafe of [
+      'As an illustration:\nCreate tasks. Open gh issues for 21x.',
+      'Sample instructions:\nCreate tasks. Open gh issues for 21x.',
+      'Only upon my go-ahead:\nCreate tasks. Open gh issues for 21x.',
+      'Open gh issues for 21x. Await my consent.',
+      'Open gh issues for 21x. This is illustrative only.',
+      'Open gh issues for 21x. Not yet.',
+      'Open gh issues for 21x. Do nothing until I give consent.'
+    ]) expect(requestedActions(unsafe, ['21x'])).toEqual([])
     expect(requestedActions('Refactor the code. Do not open PRs.', ['21x'])).toEqual(['task.update', 'task.start'])
     expect(requestedActions('Refactor the code. Do not open GitHub pull requests.', ['21x'])).toEqual(['task.update', 'task.start'])
   })
@@ -623,5 +632,48 @@ describe('immutable human authorization chain', () => {
     expect(legacy.prepare('SELECT supersession_node_id FROM authorization_task_bindings WHERE task_id = ?').get('worker'))
       .toEqual({ supersession_node_id: 'restriction' })
     legacy.close()
+  })
+
+  it.each(['assignment-current', 'base-v29'] as const)('runs the production v29 to v30 authorization migration: %s', (kind) => {
+    const assignmentText = 'Implement the delegated repair'
+    const assignment = recordHumanAuthorization(db, {
+      messageId: `migration-assignment-${kind}`, text: assignmentText, at: now,
+      source: 'project-chat', taskId: captainId, projectId
+    })
+    activateAuthorizationDispatch(db, prepareAuthorizationDispatch(db, {
+      key: `migration-assignment-${kind}`, taskId: captainId, text: assignmentText, messageId: assignment.messageId
+    }))
+    const child = db.createTask({ title: `Migration ${kind}`, project_id: projectId, repos: ['krazyjakee/21x'] })!
+    inheritTaskAuthorization(db, captainId, child.id, 'Implement repair')
+    const restrictionText = 'Refactor the code. Do not open PRs.'
+    const restriction = recordHumanAuthorization(db, {
+      messageId: `migration-restriction-${kind}`, text: restrictionText, at: now,
+      source: 'project-chat', taskId: child.id, projectId
+    })
+    activateAuthorizationDispatch(db, prepareAuthorizationDispatch(db, {
+      key: `migration-restriction-${kind}`, taskId: child.id, text: restrictionText, messageId: restriction.messageId
+    }))
+    const accepted = taskAuthorization(db, child.id).nodeId
+
+    db.db.exec('ALTER TABLE authorization_task_bindings DROP COLUMN supersession_node_id')
+    if (kind === 'base-v29') {
+      db.db.exec('DROP TRIGGER authorization_assignment_no_replace')
+      db.db.exec('ALTER TABLE authorization_task_bindings DROP COLUMN assignment_node_id')
+    }
+    db.db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('__schema_version', '29')").run()
+    expect(applySchema(db.db)).toBe(true)
+    const columns = (db.db.prepare('PRAGMA table_info(authorization_task_bindings)').all() as Array<{ name: string }>).map((column) => column.name)
+    expect(columns).toEqual(expect.arrayContaining(['assignment_node_id', 'supersession_node_id']))
+    expect(() => taskAuthorization(db, child.id)).not.toThrow()
+    expect(applySchema(db.db)).toBe(false)
+
+    if (kind === 'assignment-current') {
+      const machine = prepareAuthorizationDispatch(db, {
+        key: 'migration-machine', taskId: child.id, text: 'Progress update please'
+      })
+      activateAuthorizationDispatch(db, machine)
+      expect(taskAuthorization(db, child.id)).toMatchObject({ nodeId: accepted })
+      expect(taskAuthorization(db, child.id).effectivePermissions).not.toContain('github.pr.open')
+    }
   })
 })
