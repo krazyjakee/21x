@@ -60,6 +60,40 @@ describe('Commander call lifetime', () => {
     expect(driver.setActive).toHaveBeenLastCalledWith(null)
   })
 
+  it('mutes and reopens the microphone without ending the call', async () => {
+    const driver = fakeDriver()
+    bindCommanderCallDriver(driver)
+    await useCommanderCallStore.getState().start('session-1')
+
+    await useCommanderCallStore.getState().toggleMicrophone()
+    expect(useCommanderCallStore.getState()).toMatchObject({ status: 'live', sessionId: 'session-1', turnId: null })
+    expect(driver.closeMicrophone).toHaveBeenCalledWith('mic-1')
+    expect(driver.setActive).toHaveBeenCalledTimes(1)
+
+    await useCommanderCallStore.getState().toggleMicrophone()
+    expect(useCommanderCallStore.getState()).toMatchObject({ status: 'live', sessionId: 'session-1', turnId: 'mic-1' })
+    expect(driver.openMicrophone).toHaveBeenCalledTimes(2)
+    expect(driver.setActive).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries a failed microphone unmute without reopening the call session', async () => {
+    let attempts = 0
+    const driver = fakeDriver(async () => {
+      attempts++
+      if (attempts === 2) throw new Error('Device is busy')
+      return `mic-${attempts}`
+    })
+    bindCommanderCallDriver(driver)
+    await useCommanderCallStore.getState().start('session-1')
+    await useCommanderCallStore.getState().toggleMicrophone()
+    await useCommanderCallStore.getState().toggleMicrophone()
+    expect(useCommanderCallStore.getState()).toMatchObject({ status: 'live', turnId: null, error: 'Device is busy' })
+
+    await useCommanderCallStore.getState().retry()
+    expect(useCommanderCallStore.getState()).toMatchObject({ status: 'live', turnId: 'mic-3', error: null })
+    expect(driver.setActive).toHaveBeenCalledTimes(1)
+  })
+
   it('End during start prevents a slow microphone from reviving the call', async () => {
     let resolve!: (turnId: string) => void
     const opened = new Promise<string>((done) => { resolve = done })

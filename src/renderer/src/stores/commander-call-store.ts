@@ -65,6 +65,8 @@ interface CommanderCallState {
 
   start: (sessionId: string) => Promise<void>
   end: () => void
+  /** Mutes or reopens capture without ending the shared call. */
+  toggleMicrophone: () => Promise<void>
   /** Stop, Esc or talking over a reply. */
   interrupt: (cause?: 'stop' | 'barge_in') => void
   retry: () => Promise<void>
@@ -74,6 +76,7 @@ interface CommanderCallState {
   /** The microphone turn closed without End (worker failure, timeout, another mic). */
   mediaLost: (message: string) => void
   recordEvent: (event: CallEvent) => void
+  clearEvent: (toolCallId?: string) => void
 }
 
 let driver: CommanderCallDriver | null = null
@@ -186,6 +189,31 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
       set({ ...OFF, error: null, retrySessionId: null, lastEvent: null })
     },
 
+    toggleMicrophone: async () => {
+      const current = get()
+      if (current.status !== 'live' || !current.sessionId || !driver) return
+      if (current.turnId) {
+        generation++
+        driver.closeMicrophone(current.turnId)
+        set({ turnId: null })
+        return
+      }
+
+      const mine = ++generation
+      const activeSessionId = current.sessionId
+      try {
+        const turnId = await driver.openMicrophone()
+        const latest = get()
+        if (mine !== generation || latest.status !== 'live' || latest.sessionId !== activeSessionId) {
+          driver.closeMicrophone(turnId)
+          return
+        }
+        set({ turnId, error: null })
+      } catch (err) {
+        if (mine === generation && get().sessionId === activeSessionId) set({ error: messageOf(err) })
+      }
+    },
+
     interrupt: (cause = 'stop') => {
       const { status, sessionId } = get()
       if (status !== 'live' || !sessionId || !driver) return
@@ -197,10 +225,11 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
     },
 
     retry: async () => {
-      const { status, retrySessionId, sessionId } = get()
+      const { status, retrySessionId, sessionId, turnId } = get()
       if (status !== 'off') {
-        // A failed send in a live call: the microphone is still open.
+        // A failed send keeps its microphone; a failed unmute reopens it.
         set({ error: null })
+        if (!turnId) await get().toggleMicrophone()
         return
       }
       const target = retrySessionId ?? sessionId
@@ -240,6 +269,12 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
       const { status, sessionId } = get()
       if (status === 'off' || event.sessionId !== sessionId) return
       set({ lastEvent: event })
+    },
+
+    clearEvent: (toolCallId) => {
+      const event = get().lastEvent
+      if (!event || (toolCallId && (event.kind !== 'action' || event.toolCallId !== toolCallId))) return
+      set({ lastEvent: null })
     }
   }
 })

@@ -7,6 +7,7 @@ export type SortField = 'created_at' | 'updated_at' | 'priority' | 'due_date' | 
 export type SortDirection = 'asc' | 'desc'
 export type ActiveModal = 'create' | 'edit' | 'delete' | 'settings' | 'repo-selector' | 'gh-setup' | null
 export type SidebarView = 'tasks' | 'skills' | 'dashboard' | 'canvas' | 'commander' | 'overview'
+export type NonCommanderSidebarView = Exclude<SidebarView, 'commander'>
 
 // ── Persisted sidebar layout (localStorage) ──
 const SIDEBAR_WIDTH_KEY = 'ui-sidebar-width'
@@ -33,6 +34,8 @@ function readStoredCollapsed(): boolean {
 
 interface UIState {
   sidebarView: SidebarView
+  /** The surface restored when the full Commander call is collapsed to PiP. */
+  lastNonCommanderView: NonCommanderSidebarView
   statusFilter: TaskStatus | 'all'
   priorityFilter: TaskPriority | 'all'
   sourceFilter: string
@@ -59,6 +62,9 @@ interface UIState {
   projectSwitcherOpen: boolean
   /** The project being edited: an id, 'new' for the create flow, or null when the editor is closed */
   projectEditorTarget: string | 'new' | null
+  /** Shared call chrome so full view, PiP and shortcuts always agree. */
+  commanderCaptionsEnabled: boolean
+  commanderPanelOpen: boolean
 
   setSidebarView: (view: SidebarView) => void
   setStatusFilter: (filter: TaskStatus | 'all') => void
@@ -97,10 +103,13 @@ interface UIState {
   /** Open the project editor for a project, or for a new one */
   openProjectEditor: (target: string | 'new') => void
   closeProjectEditor: () => void
+  setCommanderCaptionsEnabled: (enabled: boolean) => void
+  setCommanderPanelOpen: (open: boolean) => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
   sidebarView: 'dashboard',
+  lastNonCommanderView: 'dashboard',
   statusFilter: 'all',
   priorityFilter: 'all',
   sourceFilter: 'all',
@@ -120,8 +129,14 @@ export const useUIStore = create<UIState>((set) => ({
   sidebarWidth: readStoredWidth(),
   projectSwitcherOpen: false,
   projectEditorTarget: null,
+  commanderCaptionsEnabled: true,
+  commanderPanelOpen: true,
 
-  setSidebarView: (sidebarView) => set({ sidebarView }),
+  setSidebarView: (sidebarView) => set(
+    sidebarView === 'commander'
+      ? { sidebarView }
+      : { sidebarView, lastNonCommanderView: sidebarView }
+  ),
   setStatusFilter: (statusFilter) => set({ statusFilter }),
   setPriorityFilter: (priorityFilter) => set({ priorityFilter }),
   setSourceFilter: (sourceFilter) => set({ sourceFilter }),
@@ -190,7 +205,9 @@ export const useUIStore = create<UIState>((set) => ({
   },
   setProjectSwitcherOpen: (projectSwitcherOpen) => set({ projectSwitcherOpen }),
   openProjectEditor: (projectEditorTarget) => set({ projectEditorTarget, projectSwitcherOpen: false }),
-  closeProjectEditor: () => set({ projectEditorTarget: null })
+  closeProjectEditor: () => set({ projectEditorTarget: null }),
+  setCommanderCaptionsEnabled: (commanderCaptionsEnabled) => set({ commanderCaptionsEnabled }),
+  setCommanderPanelOpen: (commanderPanelOpen) => set({ commanderPanelOpen })
 }))
 
 // A source filter or a dashboard preview from the project left behind would

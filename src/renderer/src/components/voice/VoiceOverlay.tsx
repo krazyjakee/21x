@@ -3,6 +3,7 @@ import { AlertTriangle, Check, Mic, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { selectVoiceReady, useVoiceStore } from '@/stores/voice-store'
 import type { VoiceCandidate } from '@shared/voice'
+import { COMMANDER_VOICE_COMPOSER_KEY, useCommanderCallStore } from '@/stores/commander-call-store'
 
 const RESULT_VISIBLE_MS = 6000
 
@@ -20,13 +21,22 @@ const RESULT_VISIBLE_MS = 6000
  * Escape still stops the reading, and so does speaking.
  */
 export function VoiceOverlay() {
+  // The app-level Commander PiP/full stage is the single caption and control
+  // surface for its call. Captain and task voice keep this overlay unchanged.
+  const commanderCallStatus = useCommanderCallStore((s) => s.status)
+  const commanderTurnId = useCommanderCallStore((s) => s.turnId)
   // Hidden until the optional runtime is installed and voice is switched on.
   const ready = useVoiceStore(selectVoiceReady)
   const state = useVoiceStore((s) => s.state)
+  const voiceTurnId = useVoiceStore((s) => s.turnId)
   const partial = useVoiceStore((s) => s.partial)
   // Commander voice mode draws its own listening pill with the half-heard
   // words. Showing them here as well would print every word twice (#83).
-  const captionsElsewhere = useVoiceStore((s) => s.captionOwner !== null)
+  const captionOwner = useVoiceStore((s) => s.captionOwner)
+  const captionsElsewhere = captionOwner !== null
+  const commanderOwnsSurface = commanderCallStatus !== 'off' && (
+    !voiceTurnId || voiceTurnId === commanderTurnId || captionOwner === COMMANDER_VOICE_COMPOSER_KEY
+  )
   const level = useVoiceStore((s) => s.level)
   const confirmation = useVoiceStore((s) => s.confirmation)
   const result = useVoiceStore((s) => s.result)
@@ -59,7 +69,7 @@ export function VoiceOverlay() {
     return () => clearTimeout(timer)
   }, [result, clearResult])
 
-  if (!ready) return null
+  if (!ready || commanderOwnsSurface) return null
 
   const listening = state === 'listening'
   const transcribing = state === 'transcribing'

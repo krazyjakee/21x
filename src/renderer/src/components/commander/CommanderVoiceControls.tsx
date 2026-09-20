@@ -28,6 +28,7 @@ import { selectSpeechReady, selectVoiceSetupComplete, useVoiceStore } from '@/st
 import { useUIStore } from '@/stores/ui-store'
 import { SettingsTab } from '@/types'
 import { MICROPHONE_BUSY_MESSAGE } from './CommanderCallHost'
+import { enterCommanderPictureInPicture } from '@/lib/commander-call/commander-call-ui'
 
 export { COMMANDER_VOICE_COMPOSER_KEY } from '@/stores/commander-call-store'
 export { MICROPHONE_BUSY_MESSAGE }
@@ -295,7 +296,7 @@ export function CommanderVoiceControls({
     setLocalProblem(null)
     const sameCall = call.status !== 'off' && call.sessionId === selectedSessionId
     if (sameCall) {
-      call.end()
+      void call.toggleMicrophone()
       return
     }
     if (readiness?.blocking) {
@@ -303,7 +304,7 @@ export function CommanderVoiceControls({
       return
     }
     if (selectedSessionId) void call.start(selectedSessionId)
-  }, [call.status, call.sessionId, call.end, call.start, selectedSessionId, readiness?.blocking, readiness?.problem])
+  }, [call.status, call.sessionId, call.toggleMicrophone, call.start, selectedSessionId, readiness?.blocking, readiness?.problem])
 
   const sameCall = call.status !== 'off' && call.sessionId === selectedSessionId
   const ownMicrophone = sameCall && Boolean(call.turnId) && voiceTurnId === call.turnId
@@ -457,16 +458,16 @@ export function CommanderVoiceControls({
         <Button
           data-toolbar-item
           size="sm"
-          variant={sameCall ? 'secondary' : 'default'}
-          aria-pressed={sameCall}
-          aria-label={sameCall ? 'Turn voice mode off' : 'Turn voice mode on'}
+          variant={ownMicrophone ? 'secondary' : 'default'}
+          aria-pressed={ownMicrophone}
+          aria-label={sameCall ? (ownMicrophone ? 'Mute microphone' : 'Unmute microphone') : 'Turn voice mode on'}
           aria-describedby={!sameCall && setupLabel ? setupLabelId : undefined}
-          title={sameCall ? 'Microphone is on' : 'Start talking to the Commander'}
+          title={sameCall ? (ownMicrophone ? 'Mute microphone' : 'Unmute microphone') : 'Start talking to the Commander'}
           onClick={toggle}
           data-testid="commander-voice-mode"
         >
-          {busy ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : sameCall ? <Mic className="size-4" aria-hidden="true" /> : <MicOff className="size-4" aria-hidden="true" />}
-          <span>{sameCall ? 'Mic on' : 'Start talking'}</span>
+          {busy ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : ownMicrophone ? <Mic className="size-4" aria-hidden="true" /> : <MicOff className="size-4" aria-hidden="true" />}
+          <span>{sameCall ? (ownMicrophone ? 'Mic on' : 'Mic off') : 'Start talking'}</span>
         </Button>
 
         <details className="relative">
@@ -530,7 +531,16 @@ export function CommanderVoiceControls({
         <Button data-toolbar-item size="icon" variant="ghost" aria-label="Open voice settings" title="Voice settings" onClick={openVoiceSettings}>
           <Settings className="size-4" aria-hidden="true" />
         </Button>
-        <Button data-toolbar-item size="icon" variant="ghost" disabled aria-label="Picture in picture unavailable" title="Picture in picture arrives in the next UI batch">
+        <Button
+          data-toolbar-item
+          data-commander-pip-toggle
+          size="icon"
+          variant="ghost"
+          disabled={!sameCall}
+          aria-label="Switch to picture in picture"
+          title="Picture in picture"
+          onClick={() => enterCommanderPictureInPicture()}
+        >
           <Shrink className="size-4" aria-hidden="true" />
         </Button>
         <span className="mx-0.5 h-6 w-px shrink-0 bg-border" aria-hidden="true" />

@@ -9,6 +9,7 @@ import { CommanderActionsPane } from './CommanderActionsPane'
 import { CommanderSessionDrawer } from './CommanderSessionDrawer'
 import { UNTITLED_SESSION } from './CommanderSessionList'
 import { CommanderVoiceControls } from './CommanderVoiceControls'
+import { useUIStore } from '@/stores/ui-store'
 
 function formatDuration(startedAt: number | null, now: number): string {
   if (!startedAt) return '00:00'
@@ -38,8 +39,10 @@ export function CommanderWorkspace() {
   const callSessionId = useCommanderCallStore((s) => s.sessionId)
   const startedAt = useCommanderCallStore((s) => s.startedAt)
   const [sessionsOpen, setSessionsOpen] = useState(false)
-  const [panelOpen, setPanelOpen] = useState(true)
-  const [captionsEnabled, setCaptionsEnabled] = useState(true)
+  const panelOpen = useUIStore((s) => s.commanderPanelOpen)
+  const setPanelOpen = useUIStore((s) => s.setCommanderPanelOpen)
+  const captionsEnabled = useUIStore((s) => s.commanderCaptionsEnabled)
+  const setCaptionsEnabled = useUIStore((s) => s.setCommanderCaptionsEnabled)
   const [panelTab, setPanelTab] = useState<'chat' | 'actions'>('chat')
   const sessionsButton = useRef<HTMLButtonElement>(null)
 

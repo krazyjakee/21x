@@ -192,7 +192,7 @@ describe('Commander voice conversation', () => {
     await waitFor(() => expect(mocks.voiceState.startTurn).toHaveBeenCalled())
     expect(mocks.voiceState.captionOwner).toBe('commander-voice')
 
-    fireEvent.click(screen.getByLabelText('Turn voice mode off'))
+    fireEvent.click(screen.getByLabelText('Mute microphone'))
     await waitFor(() => expect(mocks.voiceState.captionOwner).toBeNull())
   })
 

@@ -34,6 +34,12 @@ import {
   getActiveComposer,
   registerComposer,
 } from '@/lib/voice-dictation-target'
+import {
+  __resetCommanderCall,
+  bindCommanderCallDriver,
+  useCommanderCallStore,
+  type CommanderCallDriver
+} from '@/stores/commander-call-store'
 
 /**
  * The global shortcut.
@@ -54,6 +60,7 @@ beforeEach(() => {
   cleanup()
   vi.clearAllMocks()
   clearDictationTarget()
+  __resetCommanderCall()
   hotkey.fire = null
   toggleTurn = vi.fn(async () => undefined)
   useUIStore.setState({ showOrchestrator: false })
@@ -108,5 +115,29 @@ describe('the global shortcut', () => {
       hotkey.fire?.({ action: 'toggle' })
     })
     expect(toggleTurn).toHaveBeenCalledWith('dictation')
+  })
+
+  it('routes the global shortcut to an active Commander call instead of Captain', async () => {
+    const driver: CommanderCallDriver = {
+      setActive: vi.fn(async () => undefined),
+      openMicrophone: vi.fn(async () => 'commander-mic'),
+      closeMicrophone: vi.fn(),
+      stopPlayback: vi.fn(),
+      bargeIn: vi.fn(async () => undefined),
+      send: vi.fn(async () => undefined)
+    }
+    bindCommanderCallDriver(driver)
+    await useCommanderCallStore.getState().start('commander-session')
+    useUIStore.setState({ sidebarView: 'tasks', lastNonCommanderView: 'tasks' })
+    await act(async () => { render(<Harness />) })
+
+    await act(async () => { hotkey.fire?.({ action: 'toggle' }) })
+
+    // Routing voice does not expand PiP or throw the user out of their work.
+    expect(useUIStore.getState().sidebarView).toBe('tasks')
+    expect(useCommanderCallStore.getState().turnId).toBeNull()
+    expect(driver.closeMicrophone).toHaveBeenCalledWith('commander-mic')
+    expect(toggleTurn).not.toHaveBeenCalled()
+    expect(useUIStore.getState().showOrchestrator).toBe(false)
   })
 })

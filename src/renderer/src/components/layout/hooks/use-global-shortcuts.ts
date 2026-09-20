@@ -1,8 +1,15 @@
 import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
 import { useUIStore, type SidebarView } from '@/stores/ui-store'
-import { findComposerElement, insertIntoComposer, isGlobalShortcutBlocked, shouldAutoFocusComposer } from '@/lib/keyboard-shortcuts'
+import { findComposerElement, insertIntoComposer, isGlobalShortcutBlocked, isKeyboardInput, shouldAutoFocusComposer } from '@/lib/keyboard-shortcuts'
 import type { CommandPaletteActions } from '../CommandPalette'
 import { NAV_ITEMS } from '../nav-items'
+import { useCommanderCallStore } from '@/stores/commander-call-store'
+import { useCommanderStore } from '@/stores/commander-store'
+import {
+  canUndoLatestCommanderAction,
+  toggleCommanderPictureInPicture,
+  undoLatestCommanderActionWithFeedback
+} from '@/lib/commander-call/commander-call-ui'
 
 type ChordPrefix = 'g' | 'o' | 'y' | 'v'
 
@@ -34,6 +41,49 @@ export function useGlobalShortcuts(actions: CommandPaletteActions, setCmdOpen: D
   const chordRef = useRef<{ key: ChordPrefix; timer: number } | null>(null)
 
   useEffect(() => {
+    const onCommanderKey = (e: KeyboardEvent) => {
+      if (e.repeat || e.altKey || document.querySelector('[role="dialog"], [role="alertdialog"]')) return
+      const key = e.key.toLowerCase()
+      const mod = e.metaKey || e.ctrlKey
+      const call = useCommanderCallStore.getState()
+      const ui = useUIStore.getState()
+      const inCommanderContext = call.status !== 'off' || ui.sidebarView === 'commander'
+      let handled = false
+
+      if (e.key === 'Escape' && call.status !== 'off') {
+        call.interrupt('stop')
+        handled = true
+      } else if (mod && !e.shiftKey && key === 'd' && inCommanderContext) {
+        if (call.status === 'live') void call.toggleMicrophone()
+        else {
+          const sessionId = useCommanderStore.getState().selectedSessionId
+          if (sessionId) void call.start(sessionId)
+        }
+        handled = true
+      } else if (mod && e.shiftKey && key === 'c' && inCommanderContext) {
+        ui.setCommanderCaptionsEnabled(!ui.commanderCaptionsEnabled)
+        handled = true
+      } else if (mod && !e.shiftKey && e.key === '\\' && inCommanderContext) {
+        ui.setCommanderPanelOpen(!ui.commanderPanelOpen)
+        handled = true
+      } else if (mod && e.shiftKey && key === 'm' && call.status !== 'off') {
+        toggleCommanderPictureInPicture()
+        handled = true
+      } else if (mod && e.shiftKey && key === 'e' && call.status !== 'off') {
+        call.end()
+        handled = true
+      } else if (mod && !e.shiftKey && key === 'z' && !isKeyboardInput(e.target) && canUndoLatestCommanderAction()) {
+        void undoLatestCommanderActionWithFeedback()
+        handled = true
+      }
+
+      if (!handled) return
+      e.preventDefault()
+      // VoiceOverlay and the ordinary task shortcuts must not also react to
+      // the same Escape/chord after the call has claimed it.
+      e.stopImmediatePropagation()
+    }
+
     const onKey = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase()
       if ((e.metaKey || e.ctrlKey) && !e.altKey) {
@@ -119,8 +169,10 @@ export function useGlobalShortcuts(actions: CommandPaletteActions, setCmdOpen: D
       else if (e.key === '?') { e.preventDefault(); actions.showShortcuts() }
       else if (e.key === '/') { e.preventDefault(); actions.focusSearch() }
     }
+    window.addEventListener('keydown', onCommanderKey, true)
     window.addEventListener('keydown', onKey)
     return () => {
+      window.removeEventListener('keydown', onCommanderKey, true)
       window.removeEventListener('keydown', onKey)
       if (chordRef.current) window.clearTimeout(chordRef.current.timer)
     }
