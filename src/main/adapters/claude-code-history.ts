@@ -14,9 +14,13 @@ import { parseMaybeJson } from './shared/parse-maybe-json'
 const MAX_PLAN_CHARS = 50_000
 const MAX_TOOL_OUTPUT_CHARS = 2_000
 
-/** Claude Code session IDs are UUIDs. */
+/**
+ * Claude Code session IDs are random (version 4) UUIDs. The version matters:
+ * Codex thread IDs are version 7 UUIDs, and accepting one here "resumed" a
+ * Codex conversation that then failed only when the first message was sent.
+ */
 export function isValidClaudeSessionId(sessionId: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sessionId)
 }
 
 function sessionFilePath(sessionId: string, workspaceDir: string): string {

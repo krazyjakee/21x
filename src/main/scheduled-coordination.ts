@@ -386,12 +386,14 @@ export class ScheduledCoordination {
       // Mid-turn: try again next tick, while the occurrence is still recent (decide() drops it after catchUpMs).
       return
     }
-    const agentId = live?.session.agentId ?? resolveCaptainAgentId(db, project)
+    const agentId = resolveCaptainAgentId(db, project)
     if (!agentId) {
       console.warn(`[ScheduledCoordination] No agent to run the Captain of ${project.id}; skipping its scheduled review`)
       this.markHandled(key, cron, occurrence)
       return
     }
+    // Not reused when it runs on an agent the Captain was switched away from.
+    const liveSessionId = live?.session.agentId === agentId ? live.sessionId : ''
 
     const message = buildScheduledReviewMessage(coordinator.id, project, this.statusOf(project.id), occurrence)
     // Recorded before the send: a crash or restart mid-send must not fire it again.
@@ -399,7 +401,7 @@ export class ScheduledCoordination {
     this.waking.add(project.id)
     try {
       console.log(`[ScheduledCoordination] Waking the Captain of ${project.id} for its scheduled review`)
-      await agents.sendMessage(live?.sessionId ?? '', message, coordinator.id, agentId)
+      await agents.sendMessage(liveSessionId, message, coordinator.id, agentId)
     } catch (err) {
       console.error(`[ScheduledCoordination] Could not wake the Captain of ${project.id}:`, err)
     } finally {

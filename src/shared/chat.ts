@@ -1,3 +1,5 @@
+import type { ChatImageInput } from './chat-images'
+
 /**
  * Wire types for the lightweight chat runtime (docs/chat-runtime.md).
  *
@@ -16,10 +18,11 @@ export interface ChatToolCall {
 
 /**
  * Provider-neutral conversation history. A `tool` message answers exactly one
- * `ChatToolCall` from the preceding assistant message.
+ * `ChatToolCall` from the preceding assistant message. A user message may
+ * carry images (#144); each provider turns them into its own image blocks.
  */
 export type ChatMessage =
-  | { role: 'user'; content: string }
+  | { role: 'user'; content: string; images?: ChatImageInput[] }
   | { role: 'assistant'; content: string; toolCalls?: ChatToolCall[] }
   | { role: 'tool'; toolCallId: string; name: string; content: string; isError?: boolean }
 
@@ -61,6 +64,7 @@ export interface ChatIpcEvent {
 
 /** Settings keys read by the provider factory. Keys themselves never hold secrets. */
 export const CHAT_SETTING_KEYS = {
+  agentId: 'chat_agent_id',
   provider: 'chat_provider',
   model: 'chat_model',
   baseUrl: 'chat_base_url',

@@ -1,6 +1,9 @@
+import { recordHumanAuthorization } from '../authorization'
+import { captainTerminology } from '../../shared/captain-compat'
 import type Database from 'better-sqlite3'
 import { createId } from '@paralleldrive/cuid2'
 import type { ChatToolCall } from '../../shared/chat'
+import { isChatImageMimeType, type ChatImageInput, type ChatImageRef } from '../../shared/chat-images'
 import { COMMANDER_MESSAGE_ROLES } from '../../shared/commander'
 import type {
   CommanderMessage,
@@ -27,6 +30,16 @@ export interface AppendCommanderMessageInput {
   isError?: boolean
   projectId?: string | null
   correlationId?: string | null
+  /** User messages only: images already validated by the caller (#144). */
+  images?: ChatImageInput[]
+}
+
+interface CommanderImageRow {
+  id: string
+  message_id: string
+  name: string
+  mime_type: string
+  size: number
 }
 
 export interface CommanderStoreOptions {
@@ -65,19 +78,29 @@ function parseToolCalls(raw: string | null): ChatToolCall[] | null {
   }
 }
 
-function toMessage(row: CommanderMessageRow): CommanderMessage {
+function toImageRef(row: CommanderImageRow): ChatImageRef | null {
+  if (!isChatImageMimeType(row.mime_type)) return null
+  return { id: row.id, name: row.name, mime_type: row.mime_type, size: row.size }
+}
+
+function toMessage(row: CommanderMessageRow, images?: ChatImageRef[]): CommanderMessage {
   return {
     id: row.id,
     session_id: row.session_id,
     role: row.role as CommanderMessageRole,
-    content: row.content,
+    // Compatibility is a read projection over report, summary and assistant
+    // prose: stored bytes, routing IDs and user/tool messages stay untouched.
+    content: row.role === 'report' || row.role === 'summary' || row.role === 'assistant'
+      ? captainTerminology(row.content)
+      : row.content,
     tool_calls: parseToolCalls(row.tool_calls),
     tool_call_id: row.tool_call_id ?? null,
     tool_name: row.tool_name ?? null,
     is_error: row.is_error === 1,
     project_id: row.project_id ?? null,
     correlation_id: row.correlation_id ?? null,
-    created_at: row.created_at
+    created_at: row.created_at,
+    ...(images && images.length > 0 ? { images } : {})
   }
 }
 
@@ -164,7 +187,30 @@ export class CommanderStore {
 
   // ── Messages ──────────────────────────────────────────────
 
-  appendMessage(sessionId: string, input: AppendCommanderMessageInput): CommanderMessage {
+  /** Only CommanderService's authenticated human submission path calls this. */
+  appendHumanMessage(sessionId: string, content: string, inputMode: 'typed' | 'voice' = 'typed', images?: ChatImageInput[], beforeCommit?: (message: CommanderMessage) => void): CommanderMessage {
+    return this.appendMessage(sessionId, { role: 'user', content, images }, message => {
+      recordHumanAuthorization(this.source, { messageId: message.id, text: content, at: message.created_at, source: 'commander-chat', sessionId, inputMode })
+      beforeCommit?.(message)
+    })
+  }
+
+  /** Backchannels cannot replace the instruction they acknowledge. */
+  authorizationMessageId(message: CommanderMessage): string {
+    if (!/^(?:um|uh|mm)[.!]?$/i.test(message.content.trim())) return message.id
+    const rows = this.db.prepare(`SELECT message_id, body FROM authorization_nodes
+      WHERE parent_id IS NULL AND json_extract(body, '$.sessionId') = ?
+      ORDER BY rowid DESC`).all(message.session_id) as { message_id: string; body: string }[]
+    for (const row of rows) {
+      const node = JSON.parse(row.body) as { text: string; actions: string[] }
+      if (/^(?:um|uh|mm)[.!]?$/i.test(node.text.trim())) continue
+      return node.actions.length ? row.message_id : message.id
+    }
+    return message.id
+  }
+
+  /** beforeCommit prepares a turn against the inserted message; a failure rolls back its images too. */
+  appendMessage(sessionId: string, input: AppendCommanderMessageInput, beforeCommit?: (message: CommanderMessage) => void): CommanderMessage {
     if (!COMMANDER_MESSAGE_ROLES.includes(input.role)) throw new Error(`Unknown Commander message role: ${String(input.role)}`)
     const id = createId()
     const ts = this.now()
@@ -188,14 +234,117 @@ export class CommanderStore {
           input.correlationId ?? null,
           ts
         )
+      this.insertImages(id, input.images)
+      const message = this.getMessage(id)!
+      beforeCommit?.(message)
+      return message
     })
-    insert()
-    return this.getMessage(id)!
+    return insert()
+  }
+
+  /**
+   * Inserts one application-visible effect for one delivery row and
+   * acknowledges that row in the same SQLite transaction. Replays return the
+   * original message without emitting a second report.
+   */
+  appendMessageOnce(
+    sessionId: string,
+    input: AppendCommanderMessageInput,
+    deliveryId: string
+  ): { message: CommanderMessage; inserted: boolean } {
+    if (!COMMANDER_MESSAGE_ROLES.includes(input.role)) throw new Error(`Unknown Commander message role: ${String(input.role)}`)
+    const id = `delivery-${deliveryId}`
+    const ts = this.now()
+    let inserted = false
+    this.db.transaction(() => {
+      const session = this.db.prepare('SELECT 1 FROM commander_sessions WHERE id = ?').get(sessionId)
+      if (!session) throw new Error(`Commander session not found: ${sessionId}`)
+      inserted = this.db.prepare(`INSERT OR IGNORE INTO commander_messages
+        (id, session_id, role, content, tool_calls, tool_call_id, tool_name, is_error, project_id, correlation_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(
+          id,
+          sessionId,
+          input.role,
+          input.content,
+          input.toolCalls && input.toolCalls.length > 0 ? JSON.stringify(input.toolCalls) : null,
+          input.toolCallId ?? null,
+          input.toolName ?? null,
+          input.isError ? 1 : 0,
+          input.projectId ?? null,
+          input.correlationId ?? null,
+          ts
+        ).changes === 1
+      if (inserted) {
+        this.insertImages(id, input.images)
+        this.db.prepare('UPDATE commander_sessions SET updated_at = ? WHERE id = ?').run(ts, sessionId)
+      }
+      this.db.prepare(`UPDATE delivery_outbox SET
+        state = 'acknowledged', destination_id = ?, claim_owner = NULL,
+        claim_expires_at = NULL, acknowledged_at = ?, updated_at = ?
+        WHERE id = ? AND state NOT IN ('failed', 'timed_out', 'cancelled')`)
+        .run(id, ts, ts, deliveryId)
+      if (input.correlationId) {
+        this.db.prepare(`UPDATE delivery_outbox SET
+          state = 'acknowledged', acknowledged_at = ?, updated_at = ?
+          WHERE kind = 'captain_request' AND correlation_id = ? AND state = 'accepted'`)
+          .run(ts, ts, input.correlationId)
+      }
+    })()
+    const message = this.getMessage(id)
+    if (!message) throw new Error(`Could not store Commander delivery ${deliveryId}`)
+    return { message, inserted }
+  }
+
+  /** Called inside the message transaction, including idempotent deliveries. */
+  private insertImages(messageId: string, images: ChatImageInput[] = []): void {
+    const insert = this.db.prepare(
+      'INSERT INTO commander_images (id, message_id, position, name, mime_type, size, data) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    )
+    images.forEach((image, position) => {
+      const bytes = Buffer.from(image.data, 'base64')
+      insert.run(createId(), messageId, position, image.name, image.mimeType, bytes.length, bytes)
+    })
   }
 
   getMessage(id: string): CommanderMessage | null {
     const row = this.db.prepare('SELECT * FROM commander_messages WHERE id = ?').get(id) as CommanderMessageRow | undefined
-    return row ? toMessage(row) : null
+    return row ? toMessage(row, this.imageRefs('message_id = ?', id).get(id)) : null
+  }
+
+  /** Image metadata by message id, in attachment order. */
+  private imageRefs(where: string, param: string): Map<string, ChatImageRef[]> {
+    const rows = this.db
+      .prepare(`SELECT id, message_id, name, mime_type, size FROM commander_images WHERE ${where} ORDER BY message_id, position`)
+      .all(param) as CommanderImageRow[]
+    const byMessage = new Map<string, ChatImageRef[]>()
+    for (const row of rows) {
+      const ref = toImageRef(row)
+      if (!ref) continue
+      const list = byMessage.get(row.message_id)
+      if (list) list.push(ref)
+      else byMessage.set(row.message_id, [ref])
+    }
+    return byMessage
+  }
+
+  /** One stored image with its bytes (base64), or null. */
+  getImage(id: string): (ChatImageRef & { data: string }) | null {
+    const row = this.db
+      .prepare('SELECT id, message_id, name, mime_type, size, data FROM commander_images WHERE id = ?')
+      .get(id) as (CommanderImageRow & { data: Buffer }) | undefined
+    const ref = row ? toImageRef(row) : null
+    return row && ref ? { ...ref, data: Buffer.from(row.data).toString('base64') } : null
+  }
+
+  /** A message's images with their bytes, ready for a provider. */
+  getMessageImages(messageId: string): ChatImageInput[] {
+    const rows = this.db
+      .prepare('SELECT name, mime_type, data FROM commander_images WHERE message_id = ? ORDER BY position')
+      .all(messageId) as Array<{ name: string; mime_type: string; data: Buffer }>
+    return rows.flatMap((row) => isChatImageMimeType(row.mime_type)
+      ? [{ name: row.name, mimeType: row.mime_type, data: Buffer.from(row.data).toString('base64') }]
+      : [])
   }
 
   /**
@@ -221,7 +370,8 @@ export class CommanderStore {
     const rows = this.db
       .prepare('SELECT * FROM commander_messages WHERE session_id = ? ORDER BY created_at ASC, rowid ASC')
       .all(sessionId) as CommanderMessageRow[]
-    return rows.map(toMessage)
+    const images = this.imageRefs('message_id IN (SELECT id FROM commander_messages WHERE session_id = ?)', sessionId)
+    return rows.map((row) => toMessage(row, images.get(row.id)))
   }
 
   unreadCount(sessionId: string): number {

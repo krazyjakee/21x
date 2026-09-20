@@ -5,6 +5,11 @@ import { DEFAULT_PROJECT_ID, DEFAULT_PROJECT_NAME } from '../../shared/projects'
 import { getRepoProviders, isGitProvider } from '../repo-providers'
 import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
 import { migrateCoordinatorToCaptain } from './captain-migration'
+import { splitLegacyPullRequestEscalation } from '../../shared/project-policies'
+import { createConcurrencyTables, migrateConcurrencyControl } from './concurrency-migration'
+import { createAuthorizationTables } from './authorization-schema'
+import { createDurableStartQueueTables, migrateDurableStartQueue } from './start-queue-migration'
+import { createIssueWriteTables, migrateIssueWrites } from './issue-writes-migration'
 
 /**
  * Bump this whenever new migrations are added so returning users skip
@@ -31,8 +36,26 @@ import { migrateCoordinatorToCaptain } from './captain-migration'
  *          tasks.role, projects.captain_agent_id, the captain_prewarm setting,
  *          projects.settings.captain_wakeups and project_status_journal.source
  *          (migrateCoordinatorToCaptain in captain-migration.ts)
+ * 17 → 19: merge grants (#137): merge_grants, merge_grant_uses
+ *          (migrateMergeGrants), and the escalation policy's combined `pr`
+ *          item split into `open_pr` / `merge_pr` in projects.settings
+ *          (splitPullRequestEscalation: the old level goes to merge_pr,
+ *          open_pr gets its default "tell_commander"). 18 was skipped for a
+ *          contemporaneous feature branch.
+ * 19 → 20: managed Captain runtime generations and the durable delivery
+ *          outbox used by task messages, Commander requests and reports.
+ * 20 → 21: Captain-managed concurrency (#150): concurrency_audit, task_touches,
+ *          and agents.config.concurrency_cap = min(max_parallel_sessions, 5)
+ *          where unset (migrateConcurrencyControl in concurrency-migration.ts).
+ * 21 → 22: durable agent start queue, leases, generations, retry state and
+ *          cross-project fairness (#148, migrateDurableStartQueue).
+ * 22 → 23: immutable human authorization chains and durable dispatch bindings.
+ * 23 → 24: the delegated GitHub issue-write ledger: issue_writes, one row per
+ *          external issue write, carrying both its audit provenance and its
+ *          unique idempotency claim (migrateIssueWrites in
+ *          issue-writes-migration.ts).
  */
-const SCHEMA_VERSION = 17
+const SCHEMA_VERSION = 24
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -383,6 +406,56 @@ export function createTables(db: Database.Database): void {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_commander_messages_session_created ON commander_messages(session_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS managed_agent_runtimes (
+      owner_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      generation INTEGER NOT NULL DEFAULT 0,
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      candidate_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+      last_good_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+      session_id TEXT,
+      phase TEXT NOT NULL,
+      deadline_at INTEGER,
+      last_probe_at INTEGER,
+      probe_ok INTEGER,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      error_code TEXT,
+      error_detail TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_managed_agent_runtimes_project
+      ON managed_agent_runtimes(project_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_managed_agent_runtimes_phase_deadline
+      ON managed_agent_runtimes(phase, deadline_at);
+
+    CREATE TABLE IF NOT EXISTS delivery_outbox (
+      id TEXT PRIMARY KEY,
+      idempotency_key TEXT NOT NULL UNIQUE,
+      kind TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'pending',
+      source_session_id TEXT,
+      project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+      task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+      agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+      correlation_id TEXT,
+      payload TEXT NOT NULL,
+      destination_id TEXT,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      claim_owner TEXT,
+      claim_expires_at INTEGER,
+      deadline_at INTEGER,
+      last_error TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      acknowledged_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_delivery_outbox_recovery
+      ON delivery_outbox(kind, state, claim_expires_at, created_at);
+    CREATE INDEX IF NOT EXISTS idx_delivery_outbox_correlation
+      ON delivery_outbox(correlation_id, kind, created_at DESC)
+      WHERE correlation_id IS NOT NULL;
   `)
 
   // Embedded connector pieces (docs/connectors.md). Timestamps are epoch ms.
@@ -470,11 +543,38 @@ export function createTables(db: Database.Database): void {
       ON project_status_journal(project_id, created_at DESC, id DESC);
   `)
 
+  createMergeGrantTables(db)
+  // Concurrency control (#150): audit feed and declared touches.
+  createConcurrencyTables(db)
+
+  // Captain self-healing (#148): the one durable admission/start queue.
+  createDurableStartQueueTables(db)
+
+  // Delegated GitHub issue writes: the audit ledger and idempotency claims.
+  createIssueWriteTables(db)
+
   // Report routing (#62): a Captain report quotes the correlation id of
   // the `ask_captain` tool row it answers; this serves that lookup.
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_commander_messages_correlation
       ON commander_messages(correlation_id) WHERE correlation_id IS NOT NULL;
+  `)
+
+  // Images attached to a Commander user message (#144). The bytes live in
+  // their own table so message rows, events and searches stay small; they go
+  // with their message. New table, so CREATE IF NOT EXISTS covers fresh and
+  // existing DBs alike.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS commander_images (
+      id TEXT PRIMARY KEY,
+      message_id TEXT NOT NULL REFERENCES commander_messages(id) ON DELETE CASCADE,
+      position INTEGER NOT NULL DEFAULT 0,
+      name TEXT NOT NULL DEFAULT '',
+      mime_type TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      data BLOB NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_commander_images_message ON commander_images(message_id, position);
   `)
 }
 
@@ -956,6 +1056,22 @@ export function runMigrations(db: Database.Database): void {
   // the projects table (and its renamed column) exists.
   migrateCoordinatorToCaptain(db)
 
+  // Migration v19: merge grants (#137). New tables only; runs after
+  // migrateToProjects so the projects table they reference exists.
+  migrateMergeGrants(db)
+  // Migration v21: concurrency control (#150). After migrateToProjects so the
+  // projects table the audit references exists.
+  migrateConcurrencyControl(db)
+
+  // Migration v22: durable start claims and recovery (#148). This extends the
+  // v20 runtime and v21 admission model rather than introducing a second one.
+  migrateDurableStartQueue(db)
+  createAuthorizationTables(db)
+
+  // Migration v24: the delegated GitHub issue-write ledger. New table only;
+  // runs after migrateToProjects so the projects table it references exists.
+  migrateIssueWrites(db)
+
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)
 
@@ -965,6 +1081,101 @@ export function runMigrations(db: Database.Database): void {
 
   // Migration v11: the Claude Code adapter now honours permission_mode.
   preserveClaudeCodePermissionBehaviour(db)
+}
+
+/**
+ * Merge grants (#137): standing merge authority the user gave a project's
+ * Captain in words they typed (src/main/merge-grants.ts). A grant is bound
+ * to that message (`source_message_id`, `user_text` verbatim; one grant per
+ * message, so one message can never reach several projects), has one fixed
+ * action and condition, optional filters, and always an expiry.
+ * `merge_grant_uses` is the audit trail: one row per merge made under a
+ * grant, with the PR, the head SHA merged and the checks and protection
+ * state GitHub reported at that moment. `revoked_by` says who revoked it. Both go with their project. New tables, so CREATE IF NOT EXISTS
+ * covers fresh and existing DBs alike.
+ */
+function createMergeGrantTables(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS merge_grants (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      action TEXT NOT NULL DEFAULT 'merge_pr',
+      condition TEXT NOT NULL DEFAULT 'checks_green_and_protection_satisfied',
+      repo TEXT,
+      base_branch TEXT,
+      pr_numbers TEXT NOT NULL DEFAULT '[]',
+      source TEXT NOT NULL,
+      source_session_id TEXT,
+      source_message_id TEXT NOT NULL,
+      user_text TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      max_uses INTEGER,
+      uses INTEGER NOT NULL DEFAULT 0,
+      last_used_at TEXT,
+      revoked_at TEXT,
+      revoked_by TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_merge_grants_project ON merge_grants(project_id, created_at DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_merge_grants_source_message ON merge_grants(source, source_message_id);
+    CREATE TABLE IF NOT EXISTS merge_grant_uses (
+      id TEXT PRIMARY KEY,
+      grant_id TEXT NOT NULL REFERENCES merge_grants(id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      pr_url TEXT NOT NULL,
+      pr_title TEXT NOT NULL DEFAULT '',
+      base_branch TEXT NOT NULL DEFAULT '',
+      head_sha TEXT NOT NULL,
+      method TEXT NOT NULL,
+      merge_state TEXT NOT NULL DEFAULT '',
+      review_decision TEXT NOT NULL DEFAULT '',
+      checks TEXT NOT NULL DEFAULT '[]',
+      merged_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_merge_grant_uses_grant ON merge_grant_uses(grant_id, merged_at DESC);
+    CREATE TABLE IF NOT EXISTS merge_grant_reservations (
+      id TEXT PRIMARY KEY,
+      grant_id TEXT NOT NULL REFERENCES merge_grants(id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      snapshot TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_merge_grant_reservations_pending ON merge_grant_reservations(state, project_id);
+
+  `)
+}
+
+/** Migration v19 (#137). Idempotent: `createTables()` already ran the same statements. */
+function migrateMergeGrants(db: Database.Database): void {
+  createMergeGrantTables(db)
+  splitPullRequestEscalation(db)
+}
+
+/**
+ * Migration v19 (#137): the escalation policy's combined "opening or merging
+ * pull requests" item (`pr`) becomes two. Whatever level a project had for
+ * `pr` now applies to `merge_pr`; `open_pr` gets its new default. Rows
+ * without a `pr` key are untouched, so re-runs are no-ops. Unreadable
+ * settings are left alone (the reader falls back to defaults).
+ */
+export function splitPullRequestEscalation(db: Database.Database): void {
+  const cols = new Set((db.pragma('table_info(projects)') as { name: string }[]).map((c) => c.name))
+  if (!cols.has('settings')) return
+  const rows = db.prepare('SELECT id, settings FROM projects').all() as Array<{ id: string; settings: string | null }>
+  const update = db.prepare('UPDATE projects SET settings = ? WHERE id = ?')
+  for (const row of rows) {
+    if (!row.settings) continue
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(row.settings)
+    } catch {
+      continue
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue
+    const next = splitLegacyPullRequestEscalation(parsed as Record<string, unknown>)
+    if (next) update.run(JSON.stringify(next), row.id)
+  }
 }
 
 function readSetting(db: Database.Database, key: string): string | null {
