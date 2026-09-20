@@ -53,8 +53,13 @@ interface WireChunk {
   error?: { message?: string } | string
 }
 
+type WireUserContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+
 type WireMessage =
-  | { role: 'system' | 'user'; content: string }
+  | { role: 'system'; content: string }
+  | { role: 'user'; content: string | WireUserContentPart[] }
   | { role: 'assistant'; content: string | null; tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> }
   | { role: 'tool'; tool_call_id: string; content: string }
 
@@ -63,7 +68,16 @@ function toWireMessages(system: string | undefined, messages: ChatMessage[]): Wi
   if (system) out.push({ role: 'system', content: system })
   for (const message of messages) {
     if (message.role === 'user') {
-      out.push({ role: 'user', content: message.content })
+      if (message.images?.length) {
+        const parts: WireUserContentPart[] = []
+        if (message.content) parts.push({ type: 'text', text: message.content })
+        for (const image of message.images) {
+          parts.push({ type: 'image_url', image_url: { url: `data:${image.mimeType};base64,${image.data}` } })
+        }
+        out.push({ role: 'user', content: parts })
+      } else {
+        out.push({ role: 'user', content: message.content })
+      }
     } else if (message.role === 'assistant') {
       const toolCalls = (message.toolCalls ?? []).map((call) => ({
         id: call.id,
@@ -127,6 +141,8 @@ async function* sseData(body: ReadableStream<Uint8Array>, signal: AbortSignal): 
 
 export class OpenAICompatibleChatProvider implements ChatProvider {
   readonly id = 'openai-compatible'
+  /** The wire format takes images; whether the model can see them is the server's call, and its error reaches the user. */
+  readonly supportsImages = true
   readonly model: string
   readonly baseUrl: string
   private readonly modelId: string

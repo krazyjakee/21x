@@ -1,7 +1,8 @@
 import type { ChatMessage } from '../../shared/chat'
 import type { CommanderEvent, CommanderMessage, CommanderSession } from '../../shared/commander'
 import { ChatRuntime, type ChatTurnHandle, type ChatTurnResult } from '../chat/chat-runtime'
-import type { ChatProvider, ChatProviderRequest } from '../chat/providers/types'
+import { imagesUnsupportedMessage, type ChatProvider, type ChatProviderRequest } from '../chat/providers/types'
+import { validateChatImageInputs } from '../../shared/chat-images'
 import type { ChatToolDefinition } from '../chat/tools'
 import { normalizeTitle, type CommanderStore } from './commander-store'
 import { buildContext, DEFAULT_CONTEXT_BUDGET, planFold, transcriptForSummary, type ContextBudget } from './context'
@@ -88,6 +89,12 @@ interface TurnStart {
   userMessageId?: string
   /** Extra system text for the turn (the relay note of a report-triggered turn). */
   systemNote?: string
+}
+
+interface PreparedTurn {
+  context: ReturnType<typeof buildContext>
+  system: string
+  tools: ChatToolDefinition[]
 }
 
 const MAX_USER_MESSAGE_CHARS = 100_000
@@ -218,35 +225,45 @@ export class CommanderService {
   }
 
   /**
-   * `origin` is how the user produced the text. Only a typed message can back
-   * a merge grant (#137): a voice transcript may be misheard, or pick up
-   * speech that is not the user's, so its id is not handed to the tools.
+   * Images are validated before storage. Only typed text can back a merge
+   * grant; voice-origin messages never provide a userMessageId to tools.
    */
-  sendUserMessage(sessionId: string, text: string, origin: 'typed' | 'voice' = 'typed'): SendResult {
+  sendUserMessage(sessionId: string, text: string, origin: 'typed' | 'voice' = 'typed', images?: unknown): SendResult {
     const content = typeof text === 'string' ? text.trim() : ''
-    if (!content) throw new Error('Message is empty')
+    const attached = validateChatImageInputs(images)
+    if (!content && attached.length === 0) throw new Error('Message is empty')
     if (content.length > MAX_USER_MESSAGE_CHARS) throw new Error('Message is too long')
     if (!this.store.getSession(sessionId)) throw new Error(`Commander session not found: ${sessionId}`)
     if (this.active.has(sessionId)) throw new Error('The Commander is still answering in this session')
 
     // Built before anything is stored, so a missing key rejects cleanly.
     const provider = this.options.createProvider()
+    if (attached.length > 0 && provider.supportsImages !== true) throw new Error(imagesUnsupportedMessage(provider))
 
-    const message = this.store.appendMessage(sessionId, { role: 'user', content })
+    let prepared!: PreparedTurn
+    let session: CommanderSession | null = null
+    const message = this.store.appendMessage(sessionId, {
+      role: 'user',
+      content,
+      ...(attached.length > 0 ? { images: attached.map(({ name, mimeType, data }) => ({ name, mimeType, data })) } : {})
+    }, (pendingMessage) => {
+      prepared = this.prepareTurn(sessionId, provider, { trigger: 'user', userMessage: content, userMessageId: origin === 'typed' ? pendingMessage.id : undefined })
+      session = this.store.markRead(sessionId)
+    })
     this.emit({ type: 'messages_appended', sessionId, messages: [message] })
     // Sending is reading: the user is looking at this session.
-    this.store.markRead(sessionId)
-    this.emitSession(sessionId)
+    if (session) this.emit({ type: 'session_updated', session })
     // A user turn resets the report-ask budget (#62).
     this.reportAsks.delete(sessionId)
 
-    const { turnId, done } = this.startTurn(sessionId, provider, { trigger: 'user', userMessage: content, userMessageId: origin === 'typed' ? message.id : undefined })
+    const { turnId, done } = this.startTurn(sessionId, provider, { trigger: 'user', userMessage: content, userMessageId: origin === 'typed' ? message.id : undefined }, prepared)
     return { turnId, message, done }
   }
 
-  /** One model turn over the session as stored right now. The caller has checked that no turn is running. */
-  private startTurn(sessionId: string, provider: ChatProvider, start: TurnStart): { turnId: string; done: Promise<void> } {
-    const context = buildContext(this.store.listMessages(sessionId), this.budget)
+  /** Prepare synchronously inside the user-message transaction, before accepting the draft. */
+  private prepareTurn(sessionId: string, provider: ChatProvider, start: TurnStart): PreparedTurn {
+    const context = buildContext(this.store.listMessages(sessionId), this.budget,
+      provider.supportsImages === true ? (id) => this.store.getMessageImages(id) : undefined)
     let system = withSummary(this.options.systemPrompt ?? COMMANDER_SYSTEM_PROMPT, context.summary)
     if (start.systemNote) system = `${system}\n\n${start.systemNote}`
     let tools = this.options.getTools?.({ sessionId, userMessage: start.userMessage, userMessageId: start.userMessageId, trigger: start.trigger }) ?? []
@@ -258,6 +275,12 @@ export class CommanderService {
       })
     }
 
+    return { context, system, tools }
+  }
+
+  /** One model turn over the session as stored right now. The caller has checked that no turn is running. */
+  private startTurn(sessionId: string, provider: ChatProvider, start: TurnStart, prepared?: PreparedTurn): { turnId: string; done: Promise<void> } {
+    const { context, system, tools } = prepared ?? this.prepareTurn(sessionId, provider, start)
     let turnId = ''
     const handle = this.runtime.startTurn(
       { provider, messages: context.messages, system, tools, maxToolCalls: this.options.maxToolCalls },
@@ -364,7 +387,7 @@ export class CommanderService {
             model,
             {
               system: COMMANDER_TITLE_PROMPT,
-              messages: [{ role: 'user', content: `User: ${firstUser.content.slice(0, 2000)}\n\nCommander: ${firstReply.content.slice(0, 2000)}` }],
+              messages: [{ role: 'user', content: `User: ${firstUser.content.slice(0, 2000) || '[shared an image]'}\n\nCommander: ${firstReply.content.slice(0, 2000)}` }],
               maxTokens: 32
             },
             AbortSignal.timeout(this.options.oneShotTimeoutMs ?? DEFAULT_ONE_SHOT_TIMEOUT_MS)
@@ -374,7 +397,7 @@ export class CommanderService {
           console.warn('[Commander] title generation failed, using fallback:', err instanceof Error ? err.message : err)
         }
       }
-      if (!title) title = fallbackTitle(firstUser.content)
+      if (!title) title = fallbackTitle(firstUser.content || (firstUser.images?.length ? 'Shared an image' : ''))
 
       // A rename while the model was thinking wins.
       if (this.store.getSession(sessionId)?.title) return null

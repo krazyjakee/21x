@@ -302,6 +302,41 @@ describe('OrchestratorPanel — warming the session', () => {
     )
   })
 
+  it('retains image attachments and the delivery ID when a failed send is queued and retried', async () => {
+    settingsApi.get.mockResolvedValue('false')
+    await act(async () => { render(<OrchestratorPanel onClose={vi.fn()} />) })
+    await waitFor(() => expect(composer.send).toBeTypeOf('function'))
+    const attachments = [{ id: 'image-1', filename: 'failure.png', size: 64, mime_type: 'image/png' }]
+    agentSessionApi.sendByTaskId.mockRejectedValueOnce(new Error('Captain unavailable'))
+    await act(async () => {
+      composer.typed?.('Inspect this')
+      await (composer.send as (text: string, options?: unknown) => Promise<unknown>)('Inspect this', { attachments })
+    })
+    expect(await screen.findByRole('alert')).toHaveTextContent('1 message is waiting')
+    const firstCall = vi.mocked(agentSessionApi.sendByTaskId).mock.calls[0] as unknown[]
+    expect(firstCall).toEqual([CAPTAIN, 'Inspect this', attachments, expect.stringMatching(/^captain-drawer:/)])
+
+    // A subsequent send drains the held message first, with the same ID.
+    await act(async () => { await composer.send?.('Next message') })
+    expect(agentSessionApi.sendByTaskId).toHaveBeenNthCalledWith(2, ...firstCall)
+    expect(agentSessionApi.send).toHaveBeenCalledTimes(1)
+    expect(agentSessionApi.send).toHaveBeenCalledWith('session-1', 'Next message', CAPTAIN, '', undefined, expect.stringMatching(/^captain-drawer:/))
+    expect(mergeGrantsApi.noteTyped).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps an image-only message while warm-up is pending', async () => {
+    const pending = deferredStart()
+    await act(async () => { render(<OrchestratorPanel onClose={vi.fn()} />) })
+    await waitFor(() => expect(agentSessionApi.start).toHaveBeenCalled())
+    const attachments = [{ id: 'image-only', filename: 'shot.png', size: 64, mime_type: 'image/png' }]
+    await act(async () => {
+      await (composer.send as (text: string, options?: unknown) => Promise<unknown>)('', { attachments })
+    })
+    expect(agentSessionApi.sendByTaskId).toHaveBeenCalledWith(CAPTAIN, '', attachments, expect.stringMatching(/^captain-drawer:/))
+    expect(mergeGrantsApi.noteTyped).not.toHaveBeenCalled()
+    await act(async () => pending.resolve())
+  })
+
   it('sends at once when the session is already warm', async () => {
     await act(async () => {
       render(<OrchestratorPanel onClose={vi.fn()} />)

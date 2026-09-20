@@ -2042,6 +2042,9 @@ export class AgentManager extends EventEmitter {
     await yieldEventLoop()
 
     const mcpServers = await this.buildMcpServersForAdapter(agentId, mcpOptionsForTask(taskId, task, this.heartbeatScopeTask(taskId, task)))
+    // Resumed sessions must read current tool descriptions and assigned skills,
+    // not workspace instructions left behind by an older app version.
+    await writeSkillFiles(this.db, taskId, agentId, workspaceDir, mcpServers)
     // Task context in the system prompt survives context compaction.
     const taskContext = task && !isCoordinatorTask(task)
       ? `\n\n[Task Context]\nTask: "${task.title}"\n${task.description || ''}`
@@ -4315,16 +4318,23 @@ export class AgentManager extends EventEmitter {
       }
 
       // The renderer sends "Header1: Answer1\nHeader2: Answer2" or a single answer.
+      // A free-form answer may include paragraphs and image attachment notes;
+      // splitting those into fields loses all but the last unlabelled line.
       const answers: Record<string, string> = {}
       if (message) {
-        const lines = message.split('\n')
-        for (const line of lines) {
-          const colonIdx = line.indexOf(':')
-          if (colonIdx > 0) {
+        const lines = message.split('\n').filter((line) => line.trim())
+        if (lines.length > 0 && lines.every((line) => line.indexOf(':') > 0)) {
+          for (const line of lines) {
+            const colonIdx = line.indexOf(':')
             answers[line.slice(0, colonIdx).trim()] = line.slice(colonIdx + 1).trim()
-          } else {
-            answers['answer'] = line.trim()
           }
+        } else {
+          answers['answer'] = message.trim()
+        }
+        // Question replies bypass doSendAdapterMessage. Make newly pasted
+        // task images available before the adapter resumes the waiting turn.
+        if (session.workspaceDir) {
+          syncAttachmentsToWorkspace(this.db, session.taskId, session.workspaceDir)
         }
       }
 

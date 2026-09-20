@@ -11,6 +11,7 @@ import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useTaskStore } from '@/stores/task-store'
 import { taskApi, worktreeApi, taskSourceApi, attachmentApi, artifactApi, agentApi, onAgentStartQueueChanged } from '@/lib/ipc-client'
+import { taskImageSaver, withAttachmentNote } from '@/lib/chat-image-attachments'
 import { memo, useEffect, useCallback, useRef, useState, useMemo } from 'react'
 import { TaskStatus } from '@/types'
 import type { Task, FileAttachment, OutputField, Agent } from '@/types'
@@ -389,10 +390,10 @@ function TaskWorkspaceComponent({
           const readySessionId = await ensureChatSession()
           if (!readySessionId) {
             submittedQuestionIdsRef.current.delete(questionKey)
-            return
+            throw new Error('The agent session did not start')
           }
           const responseType = question.tool?.name === 'permission' ? 'permission' : 'question'
-          await approve(true, message, responseType, question.tool?.requestId)
+          await approve(true, withAttachmentNote(message, options?.attachments), responseType, question.tool?.requestId)
         } catch (error) {
           submittedQuestionIdsRef.current.delete(questionKey)
           throw error
@@ -430,6 +431,9 @@ function TaskWorkspaceComponent({
     onUpdateAttachments(merged)
     return saved
   }, [onUpdateAttachments, task?.attachments, task?.id])
+
+  // Pasted images (#144): main stores them as task attachments and updates the task.
+  const handleSaveImages = useMemo(() => (task?.id ? taskImageSaver(task.id) : undefined), [task?.id])
 
   const handlePickAttachments = useCallback(async () => {
     if (!task?.id) return []
@@ -713,6 +717,7 @@ function TaskWorkspaceComponent({
       onSend={handleSend}
       onPickAttachments={handlePickAttachments}
       onAddAttachmentPaths={handleAddAttachmentPaths}
+      onSaveImages={handleSaveImages}
     />
   )
 

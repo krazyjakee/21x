@@ -210,11 +210,20 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
     commander.setActiveSession(sessionId)
   })
 
-  ipcMain.handle('commander:send', (event, payload: { sessionId?: string; text?: string }) => {
+  // `images` (#144) are checked again in the service: type by magic bytes,
+  // size, count and total, whatever the renderer already checked.
+  ipcMain.handle('commander:send', (event, payload: { sessionId?: string; text?: string; images?: unknown }) => {
     trusted(event, 'commander:send')
     const sessionId = requireString(payload?.sessionId, 'sessionId')
-    const { turnId, message } = commander.sendUserMessage(sessionId, typeof payload?.text === 'string' ? payload.text : '')
+    const { turnId, message } = commander.sendUserMessage(sessionId, typeof payload?.text === 'string' ? payload.text : '', 'typed', payload?.images)
     return { turnId, message }
+  })
+
+  // The bytes of one stored image, for the transcript's thumbnails (#144).
+  ipcMain.handle('commander:getImage', (event, payload: { id?: string }) => {
+    trusted(event, 'commander:getImage')
+    const image = store.getImage(requireString(payload?.id, 'id'))
+    return image ? { id: image.id, name: image.name, mimeType: image.mime_type, data: image.data } : null
   })
 
   ipcMain.handle('commander:cancel', (event, payload: { sessionId?: string }) => {
