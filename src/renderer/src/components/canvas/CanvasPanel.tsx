@@ -17,7 +17,8 @@ import { TranscriptPanelContent } from './TranscriptPanelContent'
 import { WebPagePanelContent } from './WebPagePanelContent'
 import { TerminalPanelContent } from './TerminalPanelContent'
 import { BrowserPanelContent } from './BrowserPanelContent'
-import { getCanvasTaskStatusStyle, shouldPulseCanvasTaskStatusTransition } from './canvas-status-style'
+import { getCanvasTaskStatusStyle, shouldFlashCanvasPanelTransition } from './canvas-status-style'
+import { TaskActivityBadge } from '@/components/activity/TaskActivityBadge'
 
 /**
  * Off-viewport ("frozen") resource panel content.
@@ -398,6 +399,14 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
     return unsub
   }, [panel.id])
 
+  // Only the frontmost task panel's activity indicator may move (#95).
+  const isFrontTaskPanel = useCanvasStore(useCallback((s) => {
+    if (panel.type !== 'task') return false
+    let top: CanvasPanelData | null = null
+    for (const p of s.panels) if (p.type === 'task' && (!top || p.zIndex > top.zIndex)) top = p
+    return top?.id === panel.id
+  }, [panel.type, panel.id]))
+
   // ── Task status for dynamic color coding ─────────────────
   const taskStatus = useTaskStore(useCallback((s) =>
     panel.type === 'task' ? s.tasks.find(t => t.id === panel.refId)?.status : undefined,
@@ -413,7 +422,7 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
 
     const previous = previousTaskStatusRef.current
     previousTaskStatusRef.current = taskStatus
-    if (shouldPulseCanvasTaskStatusTransition(previous, taskStatus) && taskStatus) {
+    if (shouldFlashCanvasPanelTransition(previous, taskStatus) && taskStatus) {
       const key = Date.now()
       setStatusPulse({ status: taskStatus, key })
       const timeout = window.setTimeout(() => {
@@ -539,6 +548,18 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
         <span className="text-xs text-foreground truncate flex-1 font-medium">
           {panel.title}
         </span>
+
+        {/* Live activity (#95). Offscreen panels are not mounted here at all;
+            only the frontmost task panel may animate (dense canvas rule). */}
+        {panel.type === 'task' && panel.refId && !frozen && (
+          <TaskActivityBadge
+            taskId={panel.refId}
+            title={panel.title}
+            region={`canvas-panel:${panel.id}`}
+            allowMotion={isFrontTaskPanel}
+            className="shrink-0 max-w-[45%]"
+          />
+        )}
 
         {/* Task layout toggle — always visible for task panels */}
         {panel.type === 'task' && (

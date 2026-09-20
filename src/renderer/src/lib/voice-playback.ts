@@ -33,6 +33,25 @@ export class VoicePlayback {
   private pending = 0
   private levelTimer: number | null = null
   private handlers: VoicePlaybackHandlers = {}
+  private activityRevision = 0
+  private readonly activityListeners = new Set<() => void>()
+
+  /** A low-frequency lifecycle signal for truthful activity indicators. It is
+   * emitted only when a passage opens/closes or queued audio starts/drains —
+   * never for analyser frames. */
+  subscribeActivity = (listener: () => void): (() => void) => {
+    this.activityListeners.add(listener)
+    return () => this.activityListeners.delete(listener)
+  }
+
+  get activitySnapshot(): number {
+    return this.activityRevision
+  }
+
+  private notifyActivity(): void {
+    this.activityRevision += 1
+    for (const listener of this.activityListeners) listener()
+  }
 
   get isPlaying(): boolean {
     return this.speechId !== null
@@ -68,6 +87,7 @@ export class VoicePlayback {
     this.speechId = speechId
     this.pending = 0
     this.nextStartTime = 0
+    this.notifyActivity()
   }
 
   /**
@@ -92,9 +112,11 @@ export class VoicePlayback {
     const startAt = Math.max(context.currentTime + SCHEDULING_LEAD_SECONDS, this.nextStartTime)
     this.nextStartTime = startAt + buffer.duration
     this.pending += 1
+    this.notifyActivity()
     source.onended = () => {
       this.sources.delete(source)
       this.pending -= 1
+      this.notifyActivity()
       if (this.pending <= 0 && this.speechId === speechId) this.handlers.onDrained?.()
     }
     this.sources.add(source)
@@ -104,6 +126,7 @@ export class VoicePlayback {
 
   /** Stops at once and forgets everything queued. This is barge-in. */
   stop(): void {
+    const changed = this.speechId !== null || this.pending > 0
     for (const source of this.sources) {
       try {
         source.onended = null
@@ -118,6 +141,7 @@ export class VoicePlayback {
     this.nextStartTime = 0
     this.stopLevelReporting()
     this.handlers.onLevel?.(0)
+    if (changed) this.notifyActivity()
   }
 
   /** Releases the audio graph. Used when spoken answers are switched off. */
