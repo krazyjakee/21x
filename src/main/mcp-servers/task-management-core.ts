@@ -30,6 +30,7 @@ import {
 import { SKILL_SCOPE_PARAM, SKILL_TOOL_NAMES } from '../task-api/skill-routes'
 import { MERGE_GRANT_TOOL_NAMES } from './merge-grant-tools'
 import { ISSUE_WRITE_TOOL_NAMES } from './issue-write-tools'
+import { RECORD_REVIEW_ATTESTATION_TOOL } from './review-attestation-tools'
 
 /** Which task a session may act on. All fields null means full access. */
 export type TaskMcpScope = {
@@ -350,6 +351,34 @@ export async function callToolForScope(
     if (SKILL_TOOL_NAMES.has(name)) {
       const skillScope = await skillScopeFor(scope, invoke)
       if (skillScope) normalizedArgs[SKILL_SCOPE_PARAM] = skillScope
+    }
+    if (name === RECORD_REVIEW_ATTESTATION_TOOL) {
+      if (!scope.taskId) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ error: 'A task-scoped reviewer session is required' }) }],
+          isError: true
+        }
+      }
+      const own = await invoke('/get_task', { task_id: scope.taskId }) as Record<string, unknown> | null
+      const projectId = own && !own.error && typeof own.project_id === 'string' ? own.project_id : ''
+      if (!projectId) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ error: 'The reviewer task has no project' }) }],
+          isError: true
+        }
+      }
+      // The route receives the signed MCP scope out of band. Never put task or
+      // agent provenance in model-controlled arguments.
+      const result = await invoke(`/${name}`, normalizedArgs, scope) as Record<string, unknown> | null
+      if (result?.error) return { content: [{ type: 'text', text: JSON.stringify(result) }], isError: true }
+      if (toolCallObserver) {
+        try {
+          toolCallObserver({ scope, name, args: normalizedArgs, result })
+        } catch (err) {
+          console.error('[TaskManagementMcp] Tool call observer failed:', err)
+        }
+      }
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
     }
 
     const result = isScopedSession(scope)

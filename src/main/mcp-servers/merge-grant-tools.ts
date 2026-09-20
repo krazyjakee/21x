@@ -24,8 +24,9 @@ export const mergeGrantTools: Tool[] = [
     name: MERGE_PULL_REQUEST_TOOL,
     description:
       'Merge a GitHub pull request of this project, through 21x. 21x checks it first: open, not a draft, every check passed, and branch protection satisfied (required reviews, CODEOWNERS). ' +
+      'A verified exact-head 21x independent-review attestation may satisfy the product review gate only when GitHub does not require a formal approval; COMMENT reviews never count as approvals. ' +
       'It never uses admin or bypass flags. The project\'s escalation policy for pull requests applies: under "ask the user first" the call is held for the user unless an active merge grant the user gave covers the PR. ' +
-      'Returns status merged, blocked (with reasons; a missing external approval is a blocker to report to the user), held, or an error. Only the project Captain may call it. Never merge any other way.',
+      'Returns status merged, blocked (with a durable blocker class; external_approval_required is not retryable), held, or an error. Only the project Captain may call it. Never merge any other way.',
     inputSchema: {
       type: 'object',
       properties: {

@@ -24,12 +24,12 @@ import {
   latestUserTypedProjectMessage,
   mergeGrantSummary,
   performMerge,
-  readPullRequestGate,
+  readPullRequestReadiness,
   refuseUnmergeable,
   type MergeGrantDb,
   type MergeHooks,
   type MergeMethod,
-  type PullRequestGateState
+  type PullRequestReadinessEvaluation
 } from './merge-grants'
 import { GRANT_MERGE_AUTHORITY_TOOL, LIST_MERGE_GRANTS_TOOL, MERGE_PULL_REQUEST_TOOL } from './mcp-servers/merge-grant-tools'
 import { describeMergeGrant, mergeGrantScopeFrom, parseGitHubPullRequestUrl } from '../shared/merge-grants'
@@ -73,15 +73,16 @@ async function mergeCall(ctx: MergeGateContext): Promise<unknown> {
   }
 
   // ask_user: a grant, or the user.
-  let state: PullRequestGateState
+  let readiness: PullRequestReadinessEvaluation
   try {
-    state = await readPullRequestGate(pr)
+    readiness = await readPullRequestReadiness(db, projectId, pr)
   } catch (error) {
     return { error: `Could not read ${pr.url} from GitHub: ${error instanceof Error ? error.message : String(error)}` }
   }
   // Not mergeable anyway: say why instead of asking the user to approve a
   // merge that would fail. Nothing is merged, so no authority is needed.
-  const blocked = refuseUnmergeable(projectId, pr, state, hooks)
+  const state = readiness.state
+  const blocked = refuseUnmergeable(projectId, pr, state, hooks, readiness)
   if (blocked) return blocked
 
   const grantId = requestedGrantId
@@ -89,7 +90,7 @@ async function mergeCall(ctx: MergeGateContext): Promise<unknown> {
   if (grant) {
     return performMerge(db, {
       projectId, pr, method, authority: { kind: 'grant', grantId: grant.id },
-      requestedGrantId: grantId, policyLevel: level, state
+      requestedGrantId: grantId, policyLevel: level, state, readiness
     }, hooks)
   }
 

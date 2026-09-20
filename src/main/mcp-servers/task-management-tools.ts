@@ -5,6 +5,7 @@
 import type { Tool } from '@modelcontextprotocol/server'
 import { mergeGrantTools } from './merge-grant-tools'
 import { issueWriteTools } from './issue-write-tools'
+import { reviewAttestationTools } from './review-attestation-tools'
 
 // Tools available in both modes
 const artifactTools: Tool[] = [
@@ -79,6 +80,7 @@ export const artifactToolNames = new Set(artifactTools.map((tool) => tool.name))
 
 export const sharedTools: Tool[] = [
   ...artifactTools,
+  ...reviewAttestationTools,
   {
     name: 'list_agents',
     description: 'List all available agents with their capabilities and configurations',
