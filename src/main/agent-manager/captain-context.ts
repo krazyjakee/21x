@@ -8,6 +8,7 @@
  * edit to the project reaches the next message without restarting anything.
  * It is deliberately cheap: three indexed reads and one small file.
  */
+import { captainTerminology } from '../../shared/captain-compat'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import type { DatabaseManager, TaskRecord } from '../database'
@@ -40,7 +41,7 @@ export function readCaptainMemory(workspaceDir: string): CaptainMemory {
   } catch (error) {
     console.warn(`[AgentManager] Could not read Captain memory at ${path}:`, error)
   }
-  const trimmed = raw.trim()
+  const trimmed = captainTerminology(raw.trim())
   const truncated = trimmed.length > CAPTAIN_MEMORY_MAX_CHARS
   return { path, content: truncated ? trimmed.slice(0, CAPTAIN_MEMORY_MAX_CHARS) : trimmed, truncated }
 }

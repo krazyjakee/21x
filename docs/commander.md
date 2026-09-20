@@ -10,7 +10,7 @@ back as reports routed to the right session (#62, below).
 The hierarchy is **Commander → Captain → task agent**: the Commander works
 across projects, each project's Captain coordinates the work inside one project
 (one persistent conversation per project), and task agents do the work. The
-Captain was called the Mastermind before #71; stored data is migrated (see
+Captain replaced the legacy coordinator name in #71; stored data is migrated (see
 docs/database-migrations.md, *The coordinator is the Captain*).
 
 ## Storage
@@ -42,7 +42,10 @@ other session stays unread and shows a badge in the list.
 does the following:
 
 1. Builds the provider first, so a missing API key rejects before anything is
-   stored. Then it stores the user message.
+   stored, and validates any images against the provider's capabilities.
+   `appendHumanMessage` stores the message, images and human authorization
+   record in one transaction. Turn preparation runs before commit; a failure
+   rolls that transaction back.
 2. Builds the model context (`context.ts`). It splits the history into turns.
    A turn starts at a `user` or `report` message. The newest turns are sent
    verbatim, up to `keepTurns` (default 8) and `maxChars` (default 24k). The
@@ -51,9 +54,14 @@ does the following:
    boundaries, so a tool call is never separated from its result. Reports go to
    the model as user-side notes (`[Report from project X]`).
 3. Runs one `ChatRuntime` turn with the Commander system prompt (`prompts.ts`)
-   and the tools from `getTools`, which is called per turn with the session id
-   and the trigger (`user` or `report`). A report-started turn gets no admin
-   tools (see *Immediate administration*). Events stream on `commander:event`.
+   and the tools from `getTools`, which is called per turn with the session id,
+   user message, `userMessageId`, `authorizationMessageId`, and trigger (`user`
+   or `report`). Only typed input supplies `userMessageId` for merge grants.
+   Both trusted typed and voice input can supply `authorizationMessageId` for
+   the separate authorization chain; a backchannel such as "um" can retain
+   the preceding instruction's identity without renewing its expiry.
+   Report turns supply neither identity and receive no admin tools (see
+   *Immediate administration*). Events stream on `commander:event`.
 4. Stores the assistant and tool messages. A tool row whose result is a JSON
    object carrying `project_id` / `correlation_id` (an `ask_captain`
    result) is tagged with them, so #62 can match the report to the
@@ -64,8 +72,31 @@ does the following:
      rename made meanwhile is never overwritten.
    - Folds turns that no longer fit the budget into a new rolling `summary`.
      The previous summary is merged in. The summary's `correlation_id` is the
-     id of the last message it covers. If the summary call fails, nothing is
-     stored and the next turn just trims.
+     id of the last message it covers. If the summary call fails (or comes
+     back empty), nothing is stored, the failure is logged and recorded
+     (`CommanderService.foldFailure`), and the fold is retried after the next
+     turn. Turns never drop silently: unsummarised turns past the budget stay
+     verbatim up to twice `maxChars`, and any left out beyond that are replaced
+     by a "N earlier turns omitted (summary pending)" marker at the start of
+     the history. The newest turn is always kept, so this is a soft ceiling
+     rather than a token limit. Stored messages are never deleted by folding.
+     Retries process oldest-first batches of at most 32,000 transcript characters,
+     plus at most 8,000 characters of previous summary. A larger individual turn
+     uses up to eight bounded requests under one timeout; its summary cursor is
+     committed only after all chunks succeed. A turn beyond 256,000 transcript
+     characters remains pending with its stored history intact. Empty, failed, or oversized model responses do not
+     create a summary. Provider error details are not copied to fold diagnostics.
+
+Lost task and Captain sessions record recovery intent in the durable transcript
+before their binding is cleared. Replacement creation or reconnect emits a
+notice and seeds the next prompt with up to 6,000 characters total of recent
+user/assistant text. Tool output, reasoning, backend errors and generated initial
+prompts are excluded. The seed is historical context, not authorization. Recovery
+intent is acknowledged only after the adapter accepts a prompt, so failed starts,
+failed sends and restarts retain it. A crash between provider acceptance and the
+local acknowledgement can replay this context; durable delivery rules still
+control whether the message itself may be retried. Notices use fixed error
+categories rather than raw backend errors. No schema migration is needed.
 
 Only one turn runs per session. Cancel aborts it, and whatever text arrived is
 kept.
@@ -76,7 +107,7 @@ kept.
 `src/main/commander/skill-tools.ts` the skill registry (#74: `list_skills`,
 `get_skill`, `create_skill`, `update_skill`, `remove_skill`, `promote_skill`,
 `move_skill`; see docs/skills.md, *Scope*). `ipc/commander.ts` concatenates
-the two into one registry per turn. Every result is a
+them with the merge-grant tools into one registry per turn. Every result is a
 small JSON object with fixed item and character caps (50 projects, 20 repos,
 20 resources, 30 approvals, 12k characters), never raw tasks or transcripts.
 A project is addressed by its stable id, or by its exact name when that name
@@ -99,15 +130,37 @@ Delegation and status (#61):
   entries arrived meanwhile. The prompt reserves it for "what changed?"
   questions; it is never part of `list_projects` or the system prompt. See
   docs/task-lifecycle.md, "Status journal".
-- `ask_captain(project, message)`: sends a fenced relay message to the
-  project's Captain through `AgentManager.sendMessage` on its coordinator
-  row (the same rejoin-or-resume path the wake-ups use) and returns at once
-  with a `correlation_id`. The message carries the Commander session id and
-  the correlation id in a provenance line, quotes the request inside
-  `<<<BEGIN COMMANDER MESSAGE … END COMMANDER MESSAGE>>>`, and states that it
-  grants no authority for privileged operations. Delivery is not awaited; a
-  failure after the tool returned is stored on the session as a report through
-  `onDeliveryFailed`.
+- `ask_captain(project, message, merge_grant?)`: enqueues a fenced relay to the
+  project's Captain and returns at once with a `correlation_id`. The durable
+  delivery service owns the request, retries recoverable failures, and stores
+  terminal failures as reports (see [Captain recovery](captain-recovery.md)).
+  The relay carries the Commander session and correlation ids, declares
+  `human_authored=false`, and quotes the model's interpretation inside
+  `<<<BEGIN COMMANDER MESSAGE … END COMMANDER MESSAGE>>>`.
+  A user-started turn can bind a delegation to its platform-recorded human
+  instruction. An active chain with effective permissions produces
+  `authorizes_actions=authorization_chain:<node id>` and includes the original
+  instruction and resolved scope. Without such authority or a merge grant,
+  it says `authorizes_actions=false`. These text fields are informational:
+  consumers recheck the immutable platform record, live scope, expiry and
+  revocation. A report-started turn cannot create that human binding.
+  Delivery preserves the binding and generation through recovery and
+  rechecks them at dispatch; retries do not renew authority. It always uses
+  the project's configured Captain agent;
+  a live session on another agent is not reused. `captain_session` reports
+  the live session's real state (`running`, `idle`, `waiting_approval`,
+  `error`), or `starting` when a session is being started for the message.
+  With `merge_grant` (#137), the app first creates a merge
+  grant bound to the user's message of this turn (stored id and verbatim text
+  from the turn context, never the model's input). The provenance line then
+  says `authorizes_actions=merge_pr:<grant id>` and the relay quotes the
+  user's words. If the grant is refused (no typed user message, no "merge",
+  merge grants off, the message already used), nothing is sent. See
+  docs/task-lifecycle.md, "Merge grants".
+- `list_merge_grants(project?, include_inactive?)` and
+  `revoke_merge_grant(grant_id)` (#137): read and revoke grants. Revoking
+  only narrows authority, so it needs no confirmation, but is still withheld
+  from report-started turns.
 - `get_pending_approvals()`: agent checkpoints (sessions in
   `waiting_approval`) and held Captain actions (#66) across active
   projects. Read-only: there is no approve or reject tool.
@@ -115,6 +168,25 @@ Delegation and status (#61):
   the existing `ui:command` channel; the renderer switches the current project
   and leaves the Commander view for the dashboard.
 - `pause_all_projects(paused)`: the #65 pause. It acts at once, in every project.
+
+The authorization chain can carry scoped task and GitHub issue actions from
+trusted typed or voice input. Its limited command grammar and effective scope
+do not grant merge, approval, deployment, deletion or arbitrary messaging
+rights. A relay cannot widen the original instruction. See
+[Human authorization through delegation](authorization-chain.md).
+
+For delegated issue work, the Captain's platform tools can create an issue,
+update its title/body/labels, or link it to a task without a merge grant.
+They recheck authorization and repository/task restrictions at the write
+boundary, reject pull-request targets and secret-bearing payloads, and record
+the origin and outcome in a durable idempotency ledger. Unknown outcomes stay
+unresolved until reconciliation verifies external evidence; recovery never
+blindly repeats a write. The `issue_write` escalation level determines whether
+an authorized external write is silent, reported or held; it does not confer
+authority. Linking is a local, authorized and audited association, so that
+external-write escalation level does not apply.
+See [Delegated GitHub issue writes](task-lifecycle.md#delegated-github-issue-writes)
+for action limits, audit and recovery details.
 
 Administration (#73): `get_project`, `create_project(name, brief?, repos?,
 …)`, `update_project(project, changes)` (name, brief, Captain/default
@@ -125,9 +197,10 @@ agent, git defaults), `add/update/remove/reorder_project_repo(s)`,
 
 ### Immediate administration
 
-The admin tools (`COMMANDER_ADMIN_TOOLS`: every tool in
-`MUTATING_COMMANDER_TOOLS` and `MUTATING_COMMANDER_SKILL_TOOLS`) act on the
-first call. There is no confirmation step and no token: the first call writes,
+Project and skill admin tools (every tool in `MUTATING_COMMANDER_TOOLS`
+and `MUTATING_COMMANDER_SKILL_TOOLS`) act on the first valid call. There is no
+confirmation step or token challenge; input validation and existing restrictions
+still apply. A valid first call writes,
 and a stray `confirmation_token` argument from older sessions is ignored. The
 prompt and each tool description say "Takes effect immediately". The
 destructive or wide-reaching ones also carry a warning:
@@ -154,10 +227,22 @@ The system prompt (`prompts.ts`) sets the Commander's rules for these tools:
 - After acting, state exactly what changed: which project, repo, resource or
   skill, and old → new.
 
+These intent and clarification rules are model instructions, not a server-side
+natural-language authorization check. A user-started turn receives the admin
+tools; the model must distinguish an actual request from quoted instructions,
+questions, or relayed text in that turn.
+
 A turn started by a report (#62) gets no admin tools at all:
-`CommanderService.startTurn` drops every `COMMANDER_ADMIN_TOOLS` entry from the
-registry unless the user started the turn, whatever `getTools` returned. Only
-the read-only tools and `ask_captain` (within its loop budget) remain.
+`CommanderService.prepareTurn` drops every `COMMANDER_ADMIN_TOOLS` entry from
+the registry unless the user started the turn, whatever `getTools` returned.
+That set includes project and skill writes plus `revoke_merge_grant`. The
+runtime rejects even a model-invented call to one of those removed tools.
+Read-only tools, navigation and `ask_captain` (within its loop budget) remain.
+On a report-started turn, `ask_captain` has neither the typed-user identity for
+a new merge grant nor the human instruction identity for a new authorization
+chain. Its relay carries `authorizes_actions=false`. This does not revoke an
+existing task's immutable authorization chain; that chain remains subject to
+its own scope, expiry and revocation checks.
 
 Successful mutations call `onProjectChanged` (or `onSkillChanged`), which
 broadcasts `project:changed` (or `skills:changed`).
@@ -290,17 +375,18 @@ of the chat). The wake word stays out of scope.
   call is released whole; the tail is flushed when the turn ends.
 - **Captain reports** are never read aloud as written (#107), and only
   while voice mode is on for that session. A relayed report starts a
-  Commander turn at once, and that turn's plain-language summary is spoken
-  like any reply. A report with no summary turn (no provider, a stored
-  briefing, or one that arrives during a reply) is announced in one line,
-  "Report from <project>; details in the chat.", after the reply rather
-  than over it.
-- **Barge-in**: speaking while a reply is playing, starting a new voice turn,
-  the Stop button or Escape stops playback in the renderer at once, then main
-  interrupts the passage (which cancels the synthesis request or closes the
-  ElevenLabs connection and drops late audio) and cancels the Commander turn
-  (`voice:commander:bargeIn`). The written part of the reply is kept, as with
-  any cancel.
+  Commander turn, and that turn's plain-language summary is spoken
+  like any reply. Reports arriving during a reply wait for it to finish
+  before their summary turn starts. A report with no summary turn (no
+  provider or a stored briefing) is announced in one line,
+  "Report from <project>; details in the chat."
+- **Barge-in**: speaking while a reply is playing, or pressing the Stop button,
+  stops playback in the renderer at once, then main interrupts the passage (which
+  cancels the synthesis request or closes the ElevenLabs connection and drops
+  late audio) and cancels the Commander turn (`voice:commander:bargeIn`). It
+  also discards pending report speech cues and silences the interrupted turns,
+  so queued cues or late events cannot restart their speech. The written part
+  of the reply is kept, as with any cancel.
 
 Speaking in voice mode uses the `conversation` speech source: opening voice
 mode is the request, so it does not need the "read agent answers" switch or a

@@ -8,10 +8,10 @@ import { createCommanderSkillTools, MUTATING_COMMANDER_SKILL_TOOLS, type SkillCh
 let db: DatabaseManager
 let changes: Array<{ skillId: string; kind: SkillChangeKind }>
 
-async function call(name: string, input: Record<string, unknown>): Promise<ChatToolResult> {
+async function call(name: string, input: Record<string, unknown>, userMessage = 'do it'): Promise<ChatToolResult> {
   const tool = createCommanderSkillTools({
     db,
-    context: { sessionId: 'session-1' },
+    context: { sessionId: 'session-1', userMessage },
     onSkillChanged: (skillId, kind) => changes.push({ skillId, kind })
   }).find((candidate) => candidate.name === name)
   if (!tool) throw new Error(`Missing tool: ${name}`)

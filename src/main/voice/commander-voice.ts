@@ -33,7 +33,7 @@ export interface CommanderVoiceCommander {
   onEvent(listener: (event: CommanderEvent) => void): () => void
   cancel(sessionId: string): boolean
   activeTurnId(sessionId: string): string | null
-  sendUserMessage(sessionId: string, text: string): { turnId: string; message: CommanderMessage }
+  sendUserMessage(sessionId: string, text: string, origin?: 'typed' | 'voice'): { turnId: string; message: CommanderMessage }
 }
 
 /** The part of the speech service this bridge uses. */
@@ -137,6 +137,7 @@ export class CommanderVoice {
    * be read again by a later push.
    */
   bargeIn(sessionId: string): { cancelled: boolean } {
+    this.pendingCues.delete(sessionId)
     const key = commanderVoiceKey(sessionId)
     for (const turn of this.turns.values()) {
       if (turn.sessionId === sessionId) turn.dead = true
@@ -165,7 +166,8 @@ export class CommanderVoice {
       this.bargeIn(sessionId)
       await this.awaitTurnEnd(sessionId, running)
     }
-    return this.options.commander.sendUserMessage(sessionId, content)
+    // A transcript is not typed text: it cannot back a merge grant (#137).
+    return this.options.commander.sendUserMessage(sessionId, content, 'voice')
   }
 
   // ── Events ────────────────────────────────────────────────
@@ -280,8 +282,8 @@ export class CommanderVoice {
 
     const open = [...this.turns.values()].find((t) => t.sessionId === sessionId && !t.dead)
     if (open) {
-      // A reply is still being written, so no summary turn can start now. The
-      // cue becomes one more message of the passage, read once the reply is done.
+      // An append-only report can arrive during a reply without a relay turn.
+      // Normal deliverReport calls defer this event until the reply ends.
       open.parts.push({ partId: `report:${message.id}`, content: text })
       open.textPart = null
       this.push(open, true)

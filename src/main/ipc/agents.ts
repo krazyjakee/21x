@@ -1,3 +1,6 @@
+import { assertTrustedSender } from '../ipc-sender'
+import { recordHumanAuthorization, revokeAuthorization, taskAuthorization } from '../authorization'
+import { takeUserTypedMessage } from './merge-grants'
 import { guardedIpcSend } from '../guarded-ipc-send'
 import { MAX_IPC_REPLY_BYTES, MAX_IPC_REPLY_VALUES, measureIpcMessage } from '../ipc-message-size'
 import { transcriptDisplayPart } from '../transcript-display'
@@ -9,6 +12,17 @@ import { flattenProviderModels, rememberBackendModels } from '../agent-manager/s
 type MessageAttachment = { id: string; filename: string; size: number; mime_type: string }
 
 export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
+  ipcMain.handle('authorization:inspectTask', (event, taskId: string) => {
+    assertTrustedSender(event, 'authorization')
+    if (typeof taskId !== 'string') throw new Error('taskId is required')
+    return taskAuthorization(db, taskId)
+  })
+  ipcMain.handle('authorization:revoke', (event, nodeId: string) => {
+    assertTrustedSender(event, 'authorization')
+    if (typeof nodeId !== 'string' || !nodeId) throw new Error('nodeId is required')
+    revokeAuthorization(db, nodeId, 'Revoked by the user')
+    return { ok: true }
+  })
   ipcMain.handle('agent:getAll', () => db.getAgents())
   ipcMain.handle('agent:create', (_, data: CreateAgentData) => db.createAgent(data))
   ipcMain.handle('agent:update', (_, id: string, data: UpdateAgentData) => {
@@ -19,8 +33,8 @@ export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
   })
   ipcMain.handle('agent:delete', (_, id: string) => db.deleteAgent(id))
 
-  // Over a concurrency limit the start is queued in the main process: the
-  // reply carries an empty sessionId plus the queue position.
+  // A deferred start is committed to the durable queue before this reply;
+  // empty sessionId means there is no live session yet.
   ipcMain.handle('agentSession:start', async (_, agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean) => {
     const outcome = await agentManager.requestSession(agentId, taskId, workspaceDir, skipInitialPrompt)
     if (outcome.status === 'queued') return { sessionId: '', queued: true, queuePosition: outcome.position, queueReason: outcome.reason }
@@ -35,6 +49,7 @@ export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
   })
 
   ipcMain.handle('agent:getStartQueue', () => agentManager.getStartQueue())
+  ipcMain.handle('agent:getStartRecoveryState', (_, taskId: string) => agentManager.getStartRecoveryState(taskId))
 
   ipcMain.handle('agentSession:resume', async (_, agentId: string, taskId: string, ocSessionId: string) => {
     const sessionId = await agentManager.resumeSession(agentId, taskId, ocSessionId)
@@ -64,15 +79,43 @@ export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
     return { sessionId }
   })
 
-  ipcMain.handle('agentSession:sendByTaskId', async (_, taskId: string, message: string, attachments?: MessageAttachment[]) => {
-    const result = await agentManager.sendByTaskId(taskId, message, attachments)
+  ipcMain.handle('captainRuntime:get', (_, projectId: string) => agentManager.getCaptainRuntime(projectId))
+  ipcMain.handle('captainRuntime:switch', async (_, projectId: string, agentId: string) =>
+    agentManager.switchCaptainAgent(projectId, agentId))
+  ipcMain.handle('captainRuntime:retry', async (_, projectId: string) =>
+    agentManager.retryCaptainSwitch(projectId))
+  ipcMain.handle('captainRuntime:rollback', (_, projectId: string) =>
+    agentManager.rollbackCaptainSwitch(projectId))
+
+  const takeHumanMessage = (event: Parameters<typeof takeUserTypedMessage>[0], taskId: string | undefined, text: string) => {
+    const typed = takeUserTypedMessage(event, taskId, text)
+    if (typed) recordHumanAuthorization(db, { messageId: typed.id, text: typed.text, at: typed.at, source: 'project-chat', taskId: typed.taskId, projectId: typed.projectId })
+    return typed
+  }
+
+  ipcMain.handle('agentSession:sendByTaskId', async (event, taskId: string, message: string, attachments?: MessageAttachment[], deliveryId?: string) => {
+    const result = await agentManager.sendByTaskId(
+      taskId,
+      message,
+      attachments,
+      takeHumanMessage(event, taskId, message),
+      deliveryId
+    )
     return { success: true, ...result }
   })
 
   ipcMain.handle(
     'agentSession:send',
-    async (_, sessionId: string, message: string, taskId?: string, agentId?: string, attachments?: MessageAttachment[]) => {
-      const result = await agentManager.sendMessage(sessionId, message, taskId, agentId, attachments)
+    async (event, sessionId: string, message: string, taskId?: string, agentId?: string, attachments?: MessageAttachment[], deliveryId?: string) => {
+      const result = await agentManager.sendMessage(
+        sessionId,
+        message,
+        taskId,
+        agentId,
+        attachments,
+        takeHumanMessage(event, taskId, message),
+        deliveryId
+      )
       return { success: true, ...result }
     }
   )

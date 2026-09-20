@@ -244,7 +244,13 @@ export function deriveActivity(evidence: ActivityEvidence, now: number): Activit
   }
 
   // 9. Nothing current and trustworthy: unknown, with the last known state as history.
-  const lastKnown: ActivityState | undefined = live ? phaseState(live.phase) : outcomeCurrent?.kind === 'failed' ? 'failed' : undefined
+  const lastKnown: ActivityState | undefined = live
+    ? phaseState(live.phase)
+    : queue
+      ? 'queued'
+      : outcomeCurrent?.kind === 'failed'
+        ? 'failed'
+        : undefined
   let detail: string | undefined
   if (voice?.state === 'unknown') detail = 'Voice state unavailable'
   if (lastKnown === 'failed') detail = 'Last result: Failed'

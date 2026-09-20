@@ -1,6 +1,7 @@
 import type { TranscriptPartRecord } from '@shared/transcript/types'
 import type { BrowserRecordingManifest } from '@shared/browser-recording'
 import type { UiCommand } from '@shared/ui-commands'
+import type { CaptainRuntimeState } from '@shared/captain-runtime'
 import type {
   Task,
   CreateTaskDTO,
@@ -57,6 +58,7 @@ import type {
   VoiceTtsSnapshot
 } from '@shared/voice-tts'
 import type { ChatIpcEvent, ChatStartRequest } from '@shared/chat'
+import type { ChatImageInput } from '@shared/chat-images'
 import type { CommanderEvent, CommanderListSessionsRequest, CommanderMessage, CommanderSession } from '@shared/commander'
 import type { CliMcpMutationResult, CliMcpProbeResult, CliMcpServerRef, CliMcpSnapshot, CliMcpUpsertRequest } from '@shared/cli-mcp-config'
 import type {
@@ -66,16 +68,20 @@ import type {
   ProjectChangedEvent
 } from '@shared/projects'
 import type { HeldAction, ProjectLimitState } from '@shared/project-limit-types'
+import type { MergeGrant, MergeGrantAuditEntry } from '@shared/merge-grants'
+import type { ProjectConcurrencyState } from '@shared/concurrency'
 import type { ProjectStatus, ProjectStatusHistoryPage } from '@shared/project-status'
 import type { ProjectOverviewEntry } from '@shared/project-overview'
 import type { CaptainMemory } from '@shared/captain-memory'
+
+export type AgentQueueReason = 'agent_limit' | 'global_limit' | 'global_pause' | 'project_paused' | 'project_daily_cap' | 'project_limit' | 'concurrency_level' | 'file_overlap' | 'recovery' | 'dependency' | 'agent_unavailable'
 
 export interface AgentSessionStartResult {
   sessionId: string
   /** True when the main process queued the start behind a concurrency limit; sessionId is then ''. */
   queued?: boolean
   queuePosition?: number
-  queueReason?: 'agent_limit' | 'global_limit'
+  queueReason?: AgentQueueReason
 }
 
 export interface AgentTaskStartResult {
@@ -84,17 +90,29 @@ export interface AgentTaskStartResult {
   startedTaskId?: string
   agentId?: string
   queuePosition?: number
-  queueReason?: 'agent_limit' | 'global_limit'
+  queueReason?: AgentQueueReason
 }
 
-/** A session start waiting in the main-process queue for a free slot. */
+/** A session start or recovery outcome in the durable shared queue. */
 export interface QueuedAgentStart {
+  id: string
   taskId: string
+  projectId: string
   agentId: string
-  reason: 'agent_limit' | 'global_limit'
+  reason: AgentQueueReason
   queuedAt: string
   /** 1-based. */
   position: number
+  priority: string | null
+  state: 'queued' | 'retrying' | 'claimed' | 'starting' | 'started' | 'recovered' | 'failed' | 'cancelled'
+  retryCount: number
+  nextRetryAt: string | null
+  generation: number
+  dependencyReason: string | null
+  recoveryCause: string | null
+  recoveryAction: string | null
+  recoveryResult: string | null
+  lastError: string | null
 }
 
 export interface AgentStartQueueChangedEvent {
@@ -273,6 +291,7 @@ interface ElectronAPI {
     update: (id: string, data: UpdateAgentDTO) => Promise<Agent | undefined>
     delete: (id: string) => Promise<boolean>
     getStartQueue: () => Promise<QueuedAgentStart[]>
+    getStartRecoveryState?: (taskId: string) => Promise<QueuedAgentStart | null>
   }
   agentSession: {
     start: (agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean) => Promise<AgentSessionStartResult>
@@ -282,12 +301,18 @@ interface ElectronAPI {
     stop: (sessionId: string) => Promise<AgentSessionSuccessResult>
     stopByTaskId: (taskId: string) => Promise<AgentSessionSuccessResult & { sessionId: string | null }>
     switchAgent: (taskId: string, newAgentId: string) => Promise<AgentSessionStartResult>
-    send: (sessionId: string, message: string, taskId?: string, agentId?: string, attachments?: AgentMessageAttachment[]) => Promise<AgentSessionSuccessResult & { newSessionId?: string }>
-    sendByTaskId: (taskId: string, message: string, attachments?: AgentMessageAttachment[]) => Promise<AgentSessionSuccessResult & { sessionId: string | null; newSessionId?: string }>
+    send: (sessionId: string, message: string, taskId?: string, agentId?: string, attachments?: AgentMessageAttachment[], deliveryId?: string) => Promise<AgentSessionSuccessResult & { newSessionId?: string }>
+    sendByTaskId: (taskId: string, message: string, attachments?: AgentMessageAttachment[], deliveryId?: string) => Promise<AgentSessionSuccessResult & { sessionId: string | null; newSessionId?: string }>
     approve: (sessionId: string, approved: boolean, message?: string, responseType?: 'permission' | 'question', requestId?: string) => Promise<AgentSessionSuccessResult>
     getRawTranscript: (taskId: string) => Promise<Array<{ role: string; parts: Array<{ type: string; content?: string; tool?: { name: string; status?: string; input?: string; output?: string; error?: string } }> }>>
     getTranscriptSnapshot: (taskId: string, sinceSeq?: number) => Promise<TranscriptPartRecord[]>
     getTranscriptDelta: (taskId: string, sinceRev: number) => Promise<{ parts: TranscriptPartRecord[]; maxRev: number }>
+  }
+  captainRuntime: {
+    get: (projectId: string) => Promise<CaptainRuntimeState | null>
+    switch: (projectId: string, agentId: string) => Promise<CaptainRuntimeState>
+    retry: (projectId: string) => Promise<CaptainRuntimeState>
+    rollback: (projectId: string) => Promise<CaptainRuntimeState>
   }
   agentConfig: {
     getProviders: (serverUrl?: string, backendType?: string) => Promise<{ providers: { id: string; name: string; models: unknown }[]; default: Record<string, string> } | null>
@@ -298,6 +323,13 @@ interface ElectronAPI {
     remove: (taskId: string, attachmentId: string) => Promise<void>
     open: (taskId: string, attachmentId: string) => Promise<void>
     download: (taskId: string, attachmentId: string) => Promise<void>
+  }
+  /** Chat image attachments (#144). */
+  chatImages: {
+    /** Main-process clipboard fallback for a paste whose event carried no image. */
+    readClipboard: () => Promise<{ images: ChatImageInput[]; errors: string[] }>
+    /** Stores pasted images as task attachments; resolves with the new attachments. */
+    saveToTask: (taskId: string, images: ChatImageInput[]) => Promise<FileAttachment[]>
   }
   shell: {
     openPath: (filePath: string) => Promise<void>
@@ -401,12 +433,27 @@ interface ElectronAPI {
     isAllPaused: () => Promise<boolean>
     pauseAll: (paused: boolean) => Promise<boolean>
   }
+  /** Captain-managed concurrency under the user-set hard cap (#150). */
+  concurrency: {
+    getState: (projectId: string) => Promise<ProjectConcurrencyState>
+    setCaptainControl: (projectId: string, enabled: boolean) => Promise<{ success: true } | { error: string }>
+    pin: (projectId: string, agentId: string, level: number | null) => Promise<{ success: true } | { error: string }>
+    onChanged: (callback: (event: { projectId: string }) => void) => () => void
+  }
   /** Captain tool calls held by the escalation policy (#66). */
   escalation: {
     listHeld: (projectId?: string) => Promise<HeldAction[]>
     approve: (id: string) => Promise<{ ok: boolean; result?: unknown; error?: string }>
     reject: (id: string, note?: string) => Promise<boolean>
     onHeldChanged: (callback: (event: { held: HeldAction[] }) => void) => () => void
+  }
+  /** Merge grants the user gave Captains (#137). */
+  mergeGrants: {
+    noteTyped: (taskId: string, text: string) => Promise<void>
+    listActive: (projectId?: string) => Promise<MergeGrant[]>
+    audit: (projectId: string) => Promise<MergeGrantAuditEntry[]>
+    revoke: (id: string) => Promise<{ ok: boolean; error?: string }>
+    onChanged: (callback: (event: { projectId: string }) => void) => () => void
   }
   /** The all-projects overview (#63). */
   overview: {
@@ -638,7 +685,9 @@ interface ElectronAPI {
     markRead: (sessionId: string) => Promise<CommanderSession | null>
     /** The session the view shows, or null when the view is closed (#62 report relay). */
     setActiveSession: (sessionId: string | null) => Promise<void>
-    send: (sessionId: string, text: string) => Promise<{ turnId: string; message: CommanderMessage }>
+    send: (sessionId: string, text: string, images?: ChatImageInput[]) => Promise<{ turnId: string; message: CommanderMessage }>
+    /** One stored image's bytes (#144), or null. */
+    getImage: (id: string) => Promise<(ChatImageInput & { id: string }) | null>
     cancel: (sessionId: string) => Promise<{ cancelled: boolean }>
     onEvent: (callback: (event: CommanderEvent) => void) => () => void
   }

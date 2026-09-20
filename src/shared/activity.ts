@@ -103,7 +103,7 @@ export function readAgentStatusActivityMeta(event: unknown): AgentStatusActivity
   if (!event || typeof event !== 'object') return null
   const e = event as Record<string, unknown>
   if (typeof e.epoch !== 'string' || !e.epoch) return null
-  if (typeof e.seq !== 'number' || !Number.isFinite(e.seq)) return null
+  if (typeof e.seq !== 'number' || !Number.isSafeInteger(e.seq) || e.seq <= 0) return null
   return { epoch: e.epoch, seq: e.seq, ...(e.heartbeat === true ? { heartbeat: true } : {}) }
 }
 
