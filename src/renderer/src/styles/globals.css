@@ -71,7 +71,7 @@
   --spacing-icon: 16px;     /* default control icon */
   --spacing-icon-lg: 20px;  /* primary navigation */
   --spacing-hit: 32px;      /* minimum icon-only control on desktop */
-  --spacing-hit-lg: 36px;   /* nav rail buttons */
+  --spacing-hit-lg: 44px;   /* nav rail buttons */
 }
 
 /* ── Light theme (default) — true-gray neutrals, azure brand ──────────────── */
