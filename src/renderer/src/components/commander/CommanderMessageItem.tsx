@@ -1,10 +1,11 @@
-import { AlertCircle, Check, Inbox, Loader2 } from 'lucide-react'
+import { useId, useState } from 'react'
+import { AlertCircle, Check, ChevronDown, ChevronRight, Inbox, Loader2 } from 'lucide-react'
 import type { CommanderMessage } from '@shared/commander'
 import { Markdown } from '@/components/ui/Markdown'
 import { ChatMessageImages } from '@/components/chat/ChatMessageImages'
 import { cachedCommanderImage, loadCommanderImage } from '@/lib/commander-images'
 import { cn } from '@/lib/utils'
-import { toolCallLabel } from './tool-call-label'
+import { formatToolResult, toolCallLabel } from './tool-call-label'
 
 export interface ToolChipProps {
   name: string
@@ -14,21 +15,62 @@ export interface ToolChipProps {
   isError?: boolean
 }
 
-/** One tool call, e.g. "Asked Project X…", with its state. */
+/**
+ * One tool call, e.g. "Asked Project X…", with its state. The chip stays
+ * compact; when the call has a result, the chip is a button that expands the
+ * result inline (click, Enter or Space), so it is not hover-only.
+ */
 export function ToolChip({ name, input, result, isError }: ToolChipProps) {
+  const [expanded, setExpanded] = useState(false)
+  const regionId = useId()
   const pending = result === undefined
   const Icon = pending ? Loader2 : isError ? AlertCircle : Check
-  return (
-    <span
-      title={result ?? undefined}
-      data-testid="commander-tool-chip"
-      className={cn(
-        'inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs',
-        isError ? 'border-destructive/30 bg-destructive/10 text-destructive' : 'border-border bg-muted text-muted-foreground'
-      )}
-    >
+  const detail = formatToolResult(result)
+  const label = toolCallLabel(name, input)
+  const chipClass = cn(
+    'inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs',
+    isError ? 'border-destructive/30 bg-destructive/10 text-destructive' : 'border-border bg-muted text-muted-foreground'
+  )
+  const content = (
+    <>
       <Icon className={cn('size-3 shrink-0', pending && 'animate-spin')} aria-hidden="true" />
-      <span className="truncate">{toolCallLabel(name, input)}</span>
+      <span className="truncate">{label}</span>
+    </>
+  )
+
+  if (!detail) {
+    return <span data-testid="commander-tool-chip" className={chipClass}>{content}</span>
+  }
+
+  const Chevron = expanded ? ChevronDown : ChevronRight
+  return (
+    <span className={cn('flex max-w-full flex-col gap-1', expanded && 'basis-full')}>
+      <button
+        type="button"
+        data-testid="commander-tool-chip"
+        aria-expanded={expanded}
+        aria-controls={regionId}
+        title={expanded ? 'Hide result' : 'Show result'}
+        onClick={() => setExpanded((value) => !value)}
+        className={cn(chipClass, 'cursor-pointer self-start text-left hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring')}
+      >
+        {content}
+        <Chevron className="size-3 shrink-0" aria-hidden="true" />
+      </button>
+      {expanded && (
+        <pre
+          id={regionId}
+          role="region"
+          aria-label={`Result: ${label}`}
+          data-testid="commander-tool-result"
+          className={cn(
+            'max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border px-2.5 py-1.5 font-mono text-[11px] leading-relaxed',
+            isError ? 'border-destructive/30 bg-destructive/5 text-destructive' : 'border-border bg-muted/40 text-foreground'
+          )}
+        >
+          {detail}
+        </pre>
+      )}
     </span>
   )
 }
@@ -84,7 +126,7 @@ export function CommanderMessageItem({ message, toolResults }: MessageItemProps)
             {calls.map((call) => {
               const result = toolResults.get(call.id)
               return (
-                <ToolChip key={call.id} name={call.name} input={call.input} result={result?.content ?? ''} isError={result?.is_error} />
+                <ToolChip key={call.id} name={call.name} input={call.input} result={result?.content} isError={result?.is_error} />
               )
             })}
           </div>
