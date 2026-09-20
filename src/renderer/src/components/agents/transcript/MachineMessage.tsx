@@ -1,45 +1,40 @@
-import { useState } from 'react'
-import { Bot, ChevronRight, Megaphone, ShieldCheck } from 'lucide-react'
-import { Markdown } from '@/components/ui/Markdown'
+import { useId, useState } from 'react'
 import type { AgentMessage } from '@shared/transcript/types'
-import type { MachineMessageView } from '@shared/transcript/machine-message'
+import { MAX_MACHINE_MESSAGE_CHARS, parseMachineMessage } from '@shared/transcript/machine-message'
+import { HighlightedText } from './HighlightedText'
 
-/**
- * A relayed or automated prompt. The chip says where it came from and the
- * body is the request itself; the provenance header, the fence and the
- * standing authority notice the agent was sent are behind the chevron.
- */
-export function MachineMessage({
-  message,
-  view,
-  searchQuery
-}: {
-  message: AgentMessage
-  view: MachineMessageView
-  searchQuery?: string
-}) {
+/** Shared by desktop and mobile. Text is quoted literally, never trusted Markdown. */
+export function MachineMessage({ message, searchQuery }: { message: AgentMessage; searchQuery?: string }) {
   const [showRaw, setShowRaw] = useState(false)
-  const Icon = view.kind === 'commander-relay' ? Megaphone : Bot
-
+  const rawId = useId()
+  const view = message.role === 'assistant' ? null : parseMachineMessage(message.content)
+  const highlightQuery = message.content.length <= MAX_MACHINE_MESSAGE_CHARS ? searchQuery : undefined
+  const literalClass = 'whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm font-sans'
   return (
-    <div className="flex justify-end">
-      <div className="max-w-[90%] min-w-0 overflow-hidden rounded-md bg-secondary text-foreground px-3 py-2">
-        <button
-          onClick={() => setShowRaw(!showRaw)}
-          className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-          title={showRaw ? 'Show the request only' : 'Show the full relayed prompt'}
-        >
-          <Icon className="h-3 w-3 shrink-0" />
-          <span>{view.label}</span>
-          {view.authorizes && (
-            <span className="flex items-center gap-1 text-emerald-400">
-              <ShieldCheck className="h-3 w-3" /> merge grant
-            </span>
-          )}
-          <ChevronRight className={`h-3 w-3 transition-transform ${showRaw ? 'rotate-90' : ''}`} />
-        </button>
-        <Markdown size="sm" highlightQuery={searchQuery}>{showRaw ? message.content : view.body}</Markdown>
-        <span className="text-[10px] text-muted-foreground">{message.timestamp.toLocaleTimeString()}</span>
+    <div className={`flex min-w-0 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+      <div className="max-w-[90%] min-w-0 rounded-md bg-secondary text-foreground px-3 py-2">
+        <p className="text-xs">
+          {view?.label ?? 'Unformatted message'} · Source and authority unverified
+        </p>
+        {view && <>
+          <section aria-label="Quoted message content" className="border-l-2 border-muted-foreground pl-2 my-2">
+            <pre className={literalClass} style={{ unicodeBidi: 'plaintext' }}><HighlightedText text={view.body} query={highlightQuery} /></pre>
+          </section>
+          <section aria-label="Message instructions and authority boundary">
+            <pre className={literalClass} style={{ unicodeBidi: 'plaintext' }}><HighlightedText text={view.notice} query={highlightQuery} /></pre>
+          </section>
+          <button
+            type="button"
+            aria-expanded={showRaw}
+            aria-controls={rawId}
+            onClick={() => setShowRaw(value => !value)}
+            className="min-h-[44px] py-2 text-xs underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+          >
+            {showRaw ? 'Hide full message and provenance' : 'Show full message and provenance'}
+          </button>
+        </>}
+        <pre id={rawId} hidden={!!view && !showRaw} aria-label="Full message and provenance" className={literalClass} style={{ unicodeBidi: 'plaintext' }}><HighlightedText text={message.content} query={highlightQuery} /></pre>
+        <span className="text-xs">{message.timestamp.toLocaleTimeString()}</span>
       </div>
     </div>
   )

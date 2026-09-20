@@ -2,8 +2,8 @@
  * Markers of the message a Captain receives from the Commander's `ask_captain`.
  *
  * They live in shared code because both ends need them: the main process
- * builds the relay (`buildCommanderRelayMessage`), and the transcript shows a
- * reader only the request inside the fence — see
+ * builds the relay (`buildCommanderRelayMessage`), and the transcript recognizes a
+ * conservative display envelope with its authority boundary still visible — see
  * `shared/transcript/machine-message.ts`.
  */
 

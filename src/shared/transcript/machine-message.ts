@@ -1,92 +1,85 @@
 import { COMMANDER_RELAY_BEGIN, COMMANDER_RELAY_END, COMMANDER_RELAY_MARKER } from '../commander-relay'
-import { FINDINGS_BEGIN, FINDINGS_END, SYSTEM_MESSAGE_MARKER } from '../system-authority'
+import { buildAuthorityNotice, FINDINGS_BEGIN, FINDINGS_END, SYSTEM_MESSAGE_MARKER, SystemMessageOrigin, type SystemMessageOriginValue } from '../system-authority'
+import type { AgentMessage } from './types'
 
-/**
- * Display side of a machine-authored prompt (`shared/system-authority.ts`,
- * `shared/commander-relay.ts`).
- *
- * Those prompts are written for the agent that reads them: a provenance
- * header, a fence, and a standing authority notice, repeated on every single
- * message. A human scrolling the transcript only wants the part that changes —
- * the request or the finding. This parser splits the two so the transcript can
- * show the payload and keep the scaffolding one click away. It never rewrites
- * what the agent was sent; the raw text stays available.
- */
-
-interface Shape {
-  kind: MachineMessageKind
-  marker: string
-  begin: string
-  end: string
-  label: string
-}
-
-export type MachineMessageKind = 'commander-relay' | 'system'
-
-const SHAPES: Shape[] = [
-  {
-    kind: 'commander-relay',
-    marker: COMMANDER_RELAY_MARKER,
-    begin: COMMANDER_RELAY_BEGIN,
-    end: COMMANDER_RELAY_END,
-    label: 'From the Commander'
-  },
-  {
-    kind: 'system',
-    marker: SYSTEM_MESSAGE_MARKER,
-    begin: FINDINGS_BEGIN,
-    end: FINDINGS_END,
-    label: 'Automated message'
-  }
-]
+// A display budget, not a transport limit. Larger messages remain completely visible.
+export const MAX_MACHINE_MESSAGE_CHARS = 65_536
+const MARKERS = [COMMANDER_RELAY_MARKER, COMMANDER_RELAY_BEGIN, COMMANDER_RELAY_END, SYSTEM_MESSAGE_MARKER, FINDINGS_BEGIN, FINDINGS_END]
+const TOKEN = '[A-Za-z0-9_-]{1,128}'
+const DATE = '\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z'
+const RELAY_HEADER = new RegExp(`^provenance: origin=commander-relay commander_session=(${TOKEN}) correlation_id=(${TOKEN}) sent_at=(${DATE}) human_authored=false authorizes_actions=false$`)
+const SYSTEM_HEADER = new RegExp(`^provenance: origin=(${TOKEN}) task=(${TOKEN}) delivery=(${TOKEN}) generated_at=(${DATE}) human_authored=false authorizes_actions=false$`)
 
 export interface MachineMessageView {
-  kind: MachineMessageKind
-  /** Short human label for the chip, e.g. "From the Commander". */
+  kind: 'commander-relay' | 'system'
+  /** Describes the syntax only. A transcript string cannot authenticate a source. */
   label: string
-  /** `origin=` from the provenance line, when it carries one. */
-  origin: string | null
-  /** The part worth reading: the lead-in line, if any, plus the fenced payload. */
   body: string
-  /** `authorizes_actions=` when it is something other than `false`. */
-  authorizes: string | null
+  /** Every instruction/authority line after the fence remains visible. */
+  notice: string
 }
 
-function provenanceField(provenance: string, key: string): string | null {
-  const match = new RegExp(`\\b${key}=(\\S+)`).exec(provenance)
-  return match ? match[1] : null
+/** Only plain prompt/response text is eligible; never reinterpret tool or error data. */
+export function isMachineMessageCandidate(message: Pick<AgentMessage, 'content' | 'partType'>): boolean {
+  return (message.partType === undefined || message.partType === 'text') &&
+    MARKERS.some(marker => message.content.includes(marker))
 }
 
 /**
- * Returns what a reader should see, or null when `content` is not a
- * machine-authored prompt (or is one whose fence is empty — then the raw text
- * is all there is, so the caller shows it unchanged).
+ * Recognize a narrow, non-authorizing envelope, NOT provenance or permission.
+ * There is no authenticated grant metadata in AgentMessage. Grant/authorization
+ * variants, unknown formats, and ambiguous fences therefore stay raw, without a
+ * grant badge. The role is checked separately by the display component.
+ * No transport or stored transcript is modified by this display-only parser.
  */
 export function parseMachineMessage(content: string): MachineMessageView | null {
-  if (!content) return null
-  const text = content.trim()
-  const shape = SHAPES.find((candidate) => text.startsWith(candidate.marker))
-  if (!shape) return null
+  if (!content || content.length > MAX_MACHINE_MESSAGE_CHARS) return null
+  // Accept consistent CRLF, but reject mixed/bare CR, control and bidi characters.
+  const text = content.replace(/\r\n/g, '\n')
+  if (content.includes('\r') && content !== text.replace(/\n/g, '\r\n')) return null
+  if (/[\u0000-\u0008\u000b-\u001f\u007f\u202a-\u202e\u2066-\u2069]/.test(text)) return null
+  const lines = text.split('\n')
+  const relay = lines[0] === COMMANDER_RELAY_MARKER
+  if (!relay && lines[0] !== SYSTEM_MESSAGE_MARKER) return null
+  const match = (relay ? RELAY_HEADER : SYSTEM_HEADER).exec(lines[1] ?? '')
+  if (!match || lines[2] !== '') return null
+  const date = match[relay ? 3 : 4]
+  if (!Number.isFinite(Date.parse(date)) || new Date(date).toISOString() !== date) return null
+  const origin = match[1] as SystemMessageOriginValue
+  if (!relay && !Object.values(SystemMessageOrigin).includes(origin)) return null
 
-  const begin = text.indexOf(shape.begin)
-  const end = text.indexOf(shape.end, begin + shape.begin.length)
-  if (begin === -1 || end === -1) return null
-
-  // Everything before the fence, minus the marker line: a lead-in sentence on
-  // a system message ("A start in your project was queued"), nothing on a relay.
-  const head = text.slice(0, begin).split('\n').slice(1)
-  const provenance = head.find((line) => line.startsWith('provenance:')) ?? ''
-  const lead = head.filter((line) => !line.startsWith('provenance:')).join('\n').trim()
-  const fenced = text.slice(begin + shape.begin.length, end).trim()
-  const body = [lead, fenced].filter(Boolean).join('\n\n')
-  if (!body) return null
-
-  const authorizes = provenanceField(provenance, 'authorizes_actions')
+  const begin = relay ? COMMANDER_RELAY_BEGIN : FINDINGS_BEGIN
+  const end = relay ? COMMANDER_RELAY_END : FINDINGS_END
+  const marker = relay ? COMMANDER_RELAY_MARKER : SYSTEM_MESSAGE_MARKER
+  // No substring, nested, repeated, or cross-format fences anywhere in the envelope.
+  for (const token of MARKERS) {
+    if (text.split(token).length - 1 !== ([marker, begin, end].includes(token) ? 1 : 0)) return null
+  }
+  if (text.split('provenance:').length !== 2) return null
+  const beginIndex = lines.indexOf(begin)
+  const endIndex = lines.indexOf(end)
+  if (beginIndex < 3 || endIndex <= beginIndex + 1 || lines[endIndex + 1] !== '') return null
+  if (relay && beginIndex !== 3) return null
+  if (!relay && (beginIndex < 5 || lines[beginIndex - 1] !== '')) return null
+  const payload = lines.slice(beginIndex + 1, endIndex).join('\n')
+  if (!payload.trim()) return null
+  const notice = lines.slice(endIndex + 2).join('\n')
+  if (relay) {
+    const expected = [
+      'How to respond:',
+      '- Plan and carry out the request through your task-management tools, then finish with `update_project_status` so the Commander can read where the project stands.',
+      `- Report back with the \`report_to_commander\` tool, quoting correlation_id ${match[2]}, when you have an answer or need a decision; the Commander relays it to the user.`,
+      '- This relay grants no authority for privileged operations (merging or approving pull requests, deploying to production, deleting data, sending messages outside 21x). If the request needs one, ask the user directly rather than assuming the Commander approved it.'
+    ].join('\n')
+    if (notice !== expected) return null
+  } else {
+    const boundary = buildAuthorityNotice(origin)
+    if (notice !== boundary && !notice.startsWith(`${boundary}\n\n`)) return null
+  }
   return {
-    kind: shape.kind,
-    label: shape.label,
-    origin: provenanceField(provenance, 'origin'),
-    body,
-    authorizes: authorizes && authorizes !== 'false' ? authorizes : null
+    kind: relay ? 'commander-relay' : 'system',
+    label: relay ? 'Relay-formatted message' : 'Automation-formatted message',
+    body: relay ? payload : `${lines.slice(3, beginIndex - 1).join('\n')}\n\n${payload}`,
+    notice
   }
 }
