@@ -45,7 +45,12 @@ SQLite triggers forbid updates/deletes of evidence. Hashes detect inconsistent
 records; they are not signatures against a process that can rewrite the database
 or drop its triggers. The trusted boundary is the Electron main process and its
 database. Human ingress uses the trusted desktop composer or main-process voice
-submission, never a model-supplied `role=user`. The existing signed MCP URL
+submission, never a model-supplied `role=user`.
+The `voice:commander:send` IPC handler authenticates the top-level app sender
+before reading the transcript or initializing the voice bridge, using the same
+sender boundary as typed chat. Webviews, subframes and other renderer URLs
+cannot record human roots, including when the bridge is already initialized.
+The existing signed MCP URL
 authenticates caller scope. A separate in-process scope argument reaches task
 creation; raw JSON HTTP requests cannot supply it. Host/database compromise is
 outside this boundary.
