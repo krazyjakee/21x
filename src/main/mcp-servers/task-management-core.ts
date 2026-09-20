@@ -42,6 +42,8 @@ export type TaskMcpScope = {
   projectId?: string | null
   /** Agent bound into the signed session URL. Never accepted from tool arguments. */
   agentId?: string | null
+  /** Rotated whenever the task session is created or resumed. */
+  sessionNonce?: string | null
 }
 
 /** Calls one Task API route. In process this is handleRoute; over stdio it is fetch. */

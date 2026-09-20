@@ -47,7 +47,8 @@ describe('buildTaskMcpUrl and parseScopeFromUrl', () => {
       taskId: null,
       artifactTaskId: null,
       projectId: null,
-      agentId: null
+      agentId: null,
+      sessionNonce: null
     })
   })
 
@@ -59,18 +60,22 @@ describe('buildTaskMcpUrl and parseScopeFromUrl', () => {
       // Artifact writes fall back to the session's own task.
       artifactTaskId: 'task-child',
       projectId: null,
-      agentId: null
+      agentId: null,
+      sessionNonce: null
     })
   })
 
   it('round-trips a project-scoped session', () => {
-    const url = buildTaskMcpUrl(1234, 'tok', { projectId: 'proj-1', taskId: 'task-1', artifactTaskId: 'task-1', agentId: 'agent-1' })
+    const url = buildTaskMcpUrl(1234, 'tok', {
+      projectId: 'proj-1', taskId: 'task-1', artifactTaskId: 'task-1', agentId: 'agent-1', sessionNonce: 'nonce-1'
+    })
     expect(parseScopeFromUrl(new URL(url))).toEqual({
       parentTaskId: null,
       taskId: 'task-1',
       artifactTaskId: 'task-1',
       projectId: 'proj-1',
-      agentId: 'agent-1'
+      agentId: 'agent-1',
+      sessionNonce: 'nonce-1'
     })
   })
 
@@ -389,20 +394,22 @@ describe('merge-grant scope credential over real HTTP', () => {
     const gh = vi.fn(async () => { throw new Error('No GitHub call is permitted for the worker') })
     setGhRunner(gh)
     const issued = buildTaskMcpUrl(port, getTaskApiToken(), {
-      projectId: project.id, taskId: worker.id, artifactTaskId: worker.id, agentId: workerAgent.id
+      projectId: project.id, taskId: worker.id, artifactTaskId: worker.id,
+      agentId: workerAgent.id, sessionNonce: 'worker-session'
     })
     const client = await connect(issued)
     const denied = await client.callTool({ name: 'merge_pull_request', arguments: { pr_url: 'https://github.com/acme/app/pull/12' } })
     expect(textOf(denied)).toContain('only the project')
     await client.close()
-    for (const change of ['artifact', 'project', 'agent', 'signature', 'unsigned', 'all-pins']) {
+    for (const change of ['artifact', 'project', 'agent', 'session', 'signature', 'unsigned', 'all-pins']) {
       const forged = new URL(issued)
       if (change === 'artifact') forged.searchParams.set('artifact', 'other-task')
       if (change === 'project') forged.searchParams.set('project', 'other')
       if (change === 'agent') forged.searchParams.set('agent', 'other-agent')
+      if (change === 'session') forged.searchParams.set('session', 'other-session')
       if (change === 'signature') forged.searchParams.set('scope_signature', '0'.repeat(64))
       if (change === 'unsigned') forged.searchParams.delete('scope_signature')
-      if (change === 'all-pins') for (const key of ['artifact', 'task', 'parent', 'project', 'agent']) forged.searchParams.delete(key)
+      if (change === 'all-pins') for (const key of ['artifact', 'task', 'parent', 'project', 'agent', 'session']) forged.searchParams.delete(key)
       const response = await fetch(forged, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'merge_pull_request', arguments: { pr_url: 'https://github.com/acme/app/pull/12' } } })

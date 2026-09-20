@@ -74,7 +74,7 @@ export type MergeGrantDb = Pick<
   | 'listPendingMergeGrantReservations'
   | 'listMergeGrantUses'
   | 'appendProjectStatusJournal'
-  | 'getCleanPullRequestReviewAttestation'
+  | 'getLatestPullRequestReviewAttestation'
   | 'getCurrentPullRequestReadinessSnapshot'
   | 'recordPullRequestReadinessSnapshot'
 >
@@ -723,11 +723,11 @@ export function reconcilePullRequestReadiness(
   const baseSha = state.baseRefOid ?? ''
   const repo = `${pr.owner}/${pr.repo}`
   const attestation = /^[0-9a-f]{40}$/i.test(state.headRefOid) && /^[0-9a-f]{40}$/i.test(baseSha)
-    ? db.getCleanPullRequestReviewAttestation({
+    ? db.getLatestPullRequestReviewAttestation({
         projectId, repo, prNumber: pr.number, headSha: state.headRefOid.toLowerCase(), baseSha: baseSha.toLowerCase()
       })
     : undefined
-  const independentlyReviewed = (state.independentApprovals ?? []).length > 0 || !!attestation
+  const independentlyReviewed = (state.independentApprovals ?? []).length > 0 || attestation?.verdict === 'CLEAN'
   let classification: PullRequestReadinessClassification
   let reasons = [...verdict.reasons]
   if (!verdict.ok) {
@@ -736,6 +736,9 @@ export function reconcilePullRequestReadiness(
       : verdict.pending
         ? 'pending'
         : 'blocked'
+  } else if (attestation?.verdict === 'CHANGES_REQUIRED') {
+    classification = 'blocked'
+    reasons = [`the latest verified 21x review requires changes${attestation.summary ? `: ${attestation.summary}` : ''}`]
   } else if (!independentlyReviewed) {
     classification = 'independent_review_required'
     reasons = [`head ${state.headRefOid} has neither an exact-head GitHub approval nor a verified 21x independent-review attestation`]
@@ -1015,6 +1018,9 @@ export function missingIndependentReview(
   state: PullRequestGateState,
   attestation?: PullRequestReviewAttestation
 ): string | null {
+  if (attestation?.verdict === 'CHANGES_REQUIRED') {
+    return `head ${state.headRefOid} has unresolved changes from its latest verified 21x independent review${attestation.summary ? `: ${attestation.summary}` : ''}`
+  }
   if ((state.independentApprovals ?? []).length > 0) return null
   // This is product-level review evidence only. It is consulted after the
   // GitHub gate, so it can never satisfy a formal protected-branch approval.

@@ -17,6 +17,7 @@ export interface McpServerOptions {
   /** Real task identity and running agent, carried in the signed MCP URL. */
   taskId?: string
   agentId?: string
+  sessionNonce?: string
   taskScope?: { taskId: string; parentTaskId: string }
   /** Project scope for a non-subtask session (task-management-core.ts). */
   projectId?: string
@@ -57,7 +58,13 @@ export function coordinatorProjectScope(task: TaskRecord): string {
  *  another project's tasks. Only a session with no task row behind it stays
  *  unscoped. The Captain's artifact calls stay unpinned, because it is not
  *  a workpiece of its own. */
-export function mcpOptionsForTask(taskId: string, task?: TaskRecord | null, scopeTask?: TaskRecord | null, agentId?: string): McpServerOptions {
+export function mcpOptionsForTask(
+  taskId: string,
+  task?: TaskRecord | null,
+  scopeTask?: TaskRecord | null,
+  agentId?: string,
+  sessionNonce?: string | null
+): McpServerOptions {
   // A pseudo-task session (heartbeat-<id>) has no row of its own, but an agent
   // that lists task-management explicitly must still be confined to the
   // checked task's project, never given full access.
@@ -72,6 +79,7 @@ export function mcpOptionsForTask(taskId: string, task?: TaskRecord | null, scop
     ensureTaskManagement: !!task,
     taskId: realTask ? taskId : undefined,
     agentId: realTask ? agentId : undefined,
+    sessionNonce: realTask ? sessionNonce ?? undefined : undefined,
     taskScope,
     projectId: task && !taskScope
       ? (isCoordinatorTask(task) ? coordinatorProjectScope(task) : taskProjectId(task))
@@ -98,7 +106,8 @@ function buildTaskManagementMcpConfig(opts?: McpServerOptions): McpServerConfig 
       parentTaskId: opts?.taskScope?.parentTaskId,
       projectId: opts?.taskScope ? undefined : opts?.projectId,
       artifactTaskId: opts?.artifactTaskId,
-      agentId: opts?.agentId
+      agentId: opts?.agentId,
+      sessionNonce: opts?.sessionNonce
     })
   }
 }

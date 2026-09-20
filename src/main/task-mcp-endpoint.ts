@@ -13,8 +13,8 @@
  *
  * The scope travels in the URL as plain query parameters:
  *   /mcp                                        full access, every project (internal/debug only)
- *   /mcp?project=<id>&task=<id>&agent=<id>      task tools, project-limited with signed identity
- *   /mcp?task=<id>&parent=<id>&agent=<id>       subtask set, parent + siblings only
+ *   /mcp?project=<id>&task=<id>&agent=<id>&session=<nonce>  project-limited task tools
+ *   /mcp?task=<id>&parent=<id>&agent=<id>&session=<nonce>   subtask tools
  *   /mcp?...&artifact=<id>                      pins artifact writes to one task
  *
  * The API token authenticates the caller; a separate main-process HMAC binds
@@ -66,7 +66,8 @@ export function parseScopeFromUrl(url: URL): TaskMcpScope {
     taskId: taskId || null,
     artifactTaskId: url.searchParams.get('artifact') || taskId || null,
     projectId: url.searchParams.get('project') || null,
-    agentId: url.searchParams.get('agent') || null
+    agentId: url.searchParams.get('agent') || null,
+    sessionNonce: url.searchParams.get('session') || null
   }
 }
 
@@ -77,7 +78,10 @@ export function parseScopeFromUrl(url: URL): TaskMcpScope {
 export function buildTaskMcpUrl(
   port: number,
   token: string,
-  scope: { taskId?: string | null; parentTaskId?: string | null; artifactTaskId?: string | null; projectId?: string | null; agentId?: string | null } = {}
+  scope: {
+    taskId?: string | null; parentTaskId?: string | null; artifactTaskId?: string | null
+    projectId?: string | null; agentId?: string | null; sessionNonce?: string | null
+  } = {}
 ): string {
   // The token rides in the URL because it is the one part of an MCP server
   // config that every agent backend passes through unchanged.
@@ -86,6 +90,7 @@ export function buildTaskMcpUrl(
   if (scope.parentTaskId) params.set('parent', scope.parentTaskId)
   if (scope.projectId) params.set('project', scope.projectId)
   if (scope.agentId) params.set('agent', scope.agentId)
+  if (scope.sessionNonce) params.set('session', scope.sessionNonce)
   // Only needed when it differs from `task`, which already implies it.
   if (scope.artifactTaskId && scope.artifactTaskId !== scope.taskId) {
     params.set('artifact', scope.artifactTaskId)

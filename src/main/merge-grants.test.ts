@@ -598,7 +598,7 @@ describe('escalation policy: open_pr and merge_pr', () => {
     expect(JSON.parse(read('p-ask'))).toEqual({ escalation: { merge_pr: 'ask_user', open_pr: 'tell_commander' } })
     expect(JSON.parse(read('p-none'))).toEqual({ limits: { paused: false } })
     expect(read('p-bad')).toBe('not json')
-    expect((raw.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('28')
+    expect((raw.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('29')
     const before = read('p-auto')
     splitPullRequestEscalation(raw)
     expect(read('p-auto')).toBe(before)
@@ -1494,7 +1494,10 @@ describe('explicit project-wide grants (#155)', () => {
     const result = wideGrant(h)
     if (!result.ok) throw new Error(result.error)
     expect(attestExactHead(h)).toMatchObject({ ok: true })
-    h.setPr({ reviewDecision: '', latestReviews: reviewConnection([]) })
+    h.setPr({
+      reviewDecision: 'APPROVED',
+      latestReviews: reviewConnection([{ author: { login: 'github-reviewer' }, state: 'APPROVED', commit: { oid: SHA } }])
+    })
     const first = await readPullRequestReadiness(h.db, h.projectId, parseGitHubPullRequestUrl(PR_URL)!)
     expect(first.snapshot.classification).toBe('ready')
 
@@ -1508,6 +1511,17 @@ describe('explicit project-wide grants (#155)', () => {
       readiness: first
     })
     expect(outcome).toMatchObject({ status: 'blocked', reason_code: 'PR_CHANGED' })
+    const freshOutcome = await performMerge(h.db, {
+      projectId: h.projectId,
+      pr: parseGitHubPullRequestUrl(PR_URL)!,
+      method: 'squash',
+      authority: { kind: 'grant', grantId: result.grant.id }
+    })
+    expect(freshOutcome).toMatchObject({
+      status: 'blocked',
+      reason_code: 'INDEPENDENT_REVIEW_REQUIRED',
+      reasons: [expect.stringContaining('unresolved changes')]
+    })
     expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
     expect(h.merges).toHaveLength(0)
   })

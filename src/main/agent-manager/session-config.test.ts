@@ -97,13 +97,13 @@ describe('assembleSessionConfig system prompt', () => {
 
 describe('mcpOptionsForTask scopes (#56)', () => {
   it('gives a top-level task the project scope of its project', () => {
-    const opts = mcpOptionsForTask('t1', { id: 't1', project_id: 'proj-a', parent_task_id: null } as unknown as TaskRecord, null, 'agent-a')
-    expect(opts).toMatchObject({ projectId: 'proj-a', taskId: 't1', agentId: 'agent-a', taskScope: undefined, artifactTaskId: 't1' })
+    const opts = mcpOptionsForTask('t1', { id: 't1', project_id: 'proj-a', parent_task_id: null } as unknown as TaskRecord, null, 'agent-a', 'nonce-a')
+    expect(opts).toMatchObject({ projectId: 'proj-a', taskId: 't1', agentId: 'agent-a', sessionNonce: 'nonce-a', taskScope: undefined, artifactTaskId: 't1' })
   })
 
   it('keeps the subtask scope for a subtask, with no project scope', () => {
-    const opts = mcpOptionsForTask('c1', { id: 'c1', project_id: 'proj-a', parent_task_id: 'p1' } as unknown as TaskRecord, null, 'agent-a')
-    expect(opts).toMatchObject({ taskId: 'c1', agentId: 'agent-a', taskScope: { taskId: 'c1', parentTaskId: 'p1' }, projectId: undefined })
+    const opts = mcpOptionsForTask('c1', { id: 'c1', project_id: 'proj-a', parent_task_id: 'p1' } as unknown as TaskRecord, null, 'agent-a', 'nonce-a')
+    expect(opts).toMatchObject({ taskId: 'c1', agentId: 'agent-a', sessionNonce: 'nonce-a', taskScope: { taskId: 'c1', parentTaskId: 'p1' }, projectId: undefined })
   })
 
   it("gives the Captain the project scope of its row's project", () => {

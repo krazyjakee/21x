@@ -1450,6 +1450,21 @@ export class DatabaseManager {
 
   // ── Exact-head pull-request readiness ───────────────────────────────────
 
+  /** Rotates the signed MCP credential for a real task session. */
+  rotateTaskMcpScopeNonce(taskId: string): string {
+    if (!this.ensureDbOpen()) throw new Error('Database is closed')
+    const nonce = createId()
+    const updated = this.prepare('UPDATE tasks SET mcp_scope_nonce = ? WHERE id = ?').run(nonce, taskId)
+    if (updated.changes !== 1) throw new Error(`Task not found: ${taskId}`)
+    return nonce
+  }
+
+  getTaskMcpScopeNonce(taskId: string): string | null {
+    if (!this.ensureDbOpen()) return null
+    const row = this.prepare('SELECT mcp_scope_nonce FROM tasks WHERE id = ?').get(taskId) as { mcp_scope_nonce: string | null } | undefined
+    return row?.mcp_scope_nonce ?? null
+  }
+
   createPullRequestReviewHandoff(data: CreatePullRequestReviewHandoff): PullRequestReviewHandoff | undefined {
     if (!this.ensureDbOpen()) return undefined
     const existing = this.prepare(`
@@ -1511,8 +1526,15 @@ export class DatabaseManager {
   getCleanPullRequestReviewAttestation(input: {
     projectId: string; repo: string; prNumber: number; headSha: string; baseSha: string
   }): PullRequestReviewAttestation | undefined {
+    const latest = this.getLatestPullRequestReviewAttestation(input)
+    return latest?.verdict === 'CLEAN' ? latest : undefined
+  }
+
+  getLatestPullRequestReviewAttestation(input: {
+    projectId: string; repo: string; prNumber: number; headSha: string; baseSha: string
+  }): PullRequestReviewAttestation | undefined {
     if (!this.ensureDbOpen()) return undefined
-    const latest = this.prepare(`
+    return this.prepare(`
       SELECT * FROM pr_review_attestations
       WHERE project_id = ? AND lower(repo) = lower(?) AND pr_number = ?
         AND head_sha = ? AND base_sha = ?
@@ -1520,7 +1542,6 @@ export class DatabaseManager {
         AND implementation_agent_id <> reviewer_agent_id
       ORDER BY rowid DESC LIMIT 1
     `).get(input.projectId, input.repo, input.prNumber, input.headSha, input.baseSha) as PullRequestReviewAttestation | undefined
-    return latest?.verdict === 'CLEAN' ? latest : undefined
   }
 
   getCurrentPullRequestReadinessSnapshot(projectId: string, repo: string, prNumber: number): PullRequestReadinessSnapshot | undefined {

@@ -12,9 +12,13 @@ export function handleReviewAttestationRoute(
   if (!['/create_pull_request_review_handoff', '/record_pull_request_review_attestation'].includes(route)) return undefined
   const taskId = trustedScope?.taskId
   const agentId = trustedScope?.agentId
+  const sessionNonce = trustedScope?.sessionNonce
   const task = taskId ? db.getTask(taskId) : undefined
-  if (!taskId || !agentId || !task?.project_id) {
-    return { error: 'A signed task- and agent-scoped session is required' }
+  if (!taskId || !agentId || !sessionNonce || !task?.project_id) {
+    return { error: 'A signed task-, agent-, and session-scoped caller is required' }
+  }
+  if (db.getTaskMcpScopeNonce(taskId) !== sessionNonce) {
+    return { error: 'The signed task session is stale or has been replaced' }
   }
   if (route === '/create_pull_request_review_handoff') {
     const result = createPullRequestReviewHandoff(db, {

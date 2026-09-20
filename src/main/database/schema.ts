@@ -61,8 +61,10 @@ import { createIssueWriteTables, migrateIssueWrites } from './issue-writes-migra
  * 26 → 27: exact-head PR review attestations and durable readiness snapshots.
  * 27 → 28: signed implementation-to-review handoffs bind attestation task and
  *          agent provenance; legacy unbound attestations fail closed.
+ * 28 → 29: per-session MCP scope nonces invalidate stale signed task/agent
+ *          credentials when a task session is replaced or resumed.
  */
-const SCHEMA_VERSION = 28
+const SCHEMA_VERSION = 29
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -146,6 +148,7 @@ export function createTables(db: Database.Database): void {
       checklist TEXT NOT NULL DEFAULT '[]',
       source TEXT NOT NULL DEFAULT 'local',
       resolution TEXT,
+      mcp_scope_nonce TEXT DEFAULT NULL,
       is_recurring INTEGER NOT NULL DEFAULT 0,
       recurrence_pattern TEXT DEFAULT NULL,
       recurrence_parent_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
@@ -621,6 +624,7 @@ function rebuildTasksTable(db: Database.Database, columnNames: Set<string>): voi
       source_id TEXT REFERENCES task_sources(id) ON DELETE CASCADE,
       skill_ids TEXT DEFAULT NULL,
       session_id TEXT DEFAULT NULL,
+      mcp_scope_nonce TEXT DEFAULT NULL,
       snoozed_until TEXT DEFAULT NULL,
       feedback_rating INTEGER DEFAULT NULL,
       feedback_comment TEXT DEFAULT NULL,
@@ -723,6 +727,9 @@ export function runMigrations(db: Database.Database): void {
     // It will be unused going forward
   } else if (!columnNames.has('session_id')) {
     db.exec(`ALTER TABLE tasks ADD COLUMN session_id TEXT DEFAULT NULL`)
+  }
+  if (!columnNames.has('mcp_scope_nonce')) {
+    db.exec(`ALTER TABLE tasks ADD COLUMN mcp_scope_nonce TEXT DEFAULT NULL`)
   }
 
   if (!columnNames.has('snoozed_until')) {
