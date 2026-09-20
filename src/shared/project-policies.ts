@@ -17,7 +17,8 @@
  *     "respond_to_checkpoint": "ask_user",
  *     "change_priority": "autonomous",
  *     "open_pr": "tell_commander",
- *     "merge_pr": "ask_user"
+ *     "merge_pr": "ask_user",
+ *     "issue_write": "tell_commander"
  *   },
  *   "merge_grants": { "enabled": false }   // #137, shared/merge-grants.ts
  * }
@@ -96,6 +97,15 @@ export type EscalationAction =
    * an active merge grant the user gave covers it.
    */
   | 'merge_pr'
+  /**
+   * Creating, updating and linking GitHub issues in the project's own
+   * repositories: the Captain's issue tools, enforced by the escalation gate
+   * (main/issue-write-gate.ts). This is *delegated* work, so it needs an
+   * originating human instruction but never a per-issue grant — unlike
+   * `merge_pr`, which needs its own authority however this policy is set. The
+   * level here decides only whether such a write is silent, reported or held.
+   */
+  | 'issue_write'
 
 export type EscalationLevel = 'autonomous' | 'tell_commander' | 'ask_user'
 
@@ -108,15 +118,21 @@ export const ESCALATION_ACTIONS: readonly EscalationAction[] = [
   'respond_to_checkpoint',
   'change_priority',
   'open_pr',
-  'merge_pr'
+  'merge_pr',
+  'issue_write'
 ]
 
 export const ESCALATION_LEVELS: readonly EscalationLevel[] = ['autonomous', 'tell_commander', 'ask_user']
 
 /**
- * Defaults: routine planning is free; stopping an agent (work is lost) and
- * opening a pull request are reported; answering an agent's checkpoint and
- * merging a pull request wait for the user (or, for merges, a merge grant).
+ * Defaults: routine planning is free; stopping an agent (work is lost),
+ * opening a pull request and writing a GitHub issue are reported; answering an
+ * agent's checkpoint and merging a pull request wait for the user (or, for
+ * merges, a merge grant).
+ *
+ * `issue_write` defaults to `tell_commander` for the reason `open_pr` does: it
+ * is ordinary delegated work that leaves a mark outside 21x, so the person
+ * hears about it without being asked to approve each one.
  */
 export const DEFAULT_ESCALATION_POLICY: EscalationPolicy = {
   create_task: 'autonomous',
@@ -125,7 +141,8 @@ export const DEFAULT_ESCALATION_POLICY: EscalationPolicy = {
   respond_to_checkpoint: 'ask_user',
   change_priority: 'autonomous',
   open_pr: 'tell_commander',
-  merge_pr: 'ask_user'
+  merge_pr: 'ask_user',
+  issue_write: 'tell_commander'
 }
 
 export const ESCALATION_ACTION_LABELS: Record<EscalationAction, string> = {
@@ -135,7 +152,8 @@ export const ESCALATION_ACTION_LABELS: Record<EscalationAction, string> = {
   respond_to_checkpoint: 'Answering agent checkpoints',
   change_priority: 'Changing task priority',
   open_pr: 'Opening pull requests',
-  merge_pr: 'Merging pull requests'
+  merge_pr: 'Merging pull requests',
+  issue_write: 'Writing GitHub issues'
 }
 
 export const ESCALATION_LEVEL_LABELS: Record<EscalationLevel, string> = {
