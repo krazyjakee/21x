@@ -183,6 +183,9 @@ is the durable commit marker for an atomic task-attachment + journal
 transaction; startup reconciliation replays any successful external row whose
 local effects were interrupted, exactly once. New table only, so
 `CREATE TABLE IF NOT EXISTS` covers fresh and existing databases alike.
+Create reconciliation accepts a marker only from a complete GitHub search
+response: missing/invalid counts, `incomplete_results`, pagination truncation,
+or more than one exact marker all remain unresolved.
 
 ## Adding a column to other tables
 

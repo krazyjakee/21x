@@ -433,6 +433,16 @@ export class AmbiguousIssueMarkerError extends Error {
   }
 }
 
+export class IncompleteIssueMarkerSearchError extends Error {
+  constructor(readonly totalCount: number | null, readonly returnedCount: number, readonly incomplete: boolean) {
+    super(
+      `GitHub did not return a complete marker search result set ` +
+      `(total=${totalCount ?? 'unknown'}, returned=${returnedCount}, incomplete=${incomplete}).`
+    )
+    this.name = 'IncompleteIssueMarkerSearchError'
+  }
+}
+
 /**
  * Looks for an issue this project already created under `key`, by the hidden
  * marker in its body. This is how an external success that 21x never saw the
@@ -440,11 +450,23 @@ export class AmbiguousIssueMarkerError extends Error {
  */
 export async function findIssueByIdempotencyKey(slug: string, key: string): Promise<{ number: number; url: string } | null> {
   const query = `repo:${slug} in:body "21x-issue-write:${key}"`
-  const response = await ghJson(['api', '-X', 'GET', '/search/issues', '-f', `q=${query}`, '-f', 'per_page=10']) as unknown as {
+  const response = await ghJson(['api', '-X', 'GET', '/search/issues', '-f', `q=${query}`, '-f', 'per_page=100']) as unknown as {
+    total_count?: number
+    incomplete_results?: boolean
     items?: Array<{ number?: number; html_url?: string; body?: string | null; pull_request?: unknown }>
   }
+  const items = Array.isArray(response.items) ? response.items : []
+  const totalCount = typeof response.total_count === 'number' && Number.isSafeInteger(response.total_count) && response.total_count >= 0
+    ? response.total_count
+    : null
+  // Search is evidence only when GitHub says this response is complete. A
+  // copied marker outside the returned page must not turn an apparently unique
+  // hit into arbitrary success. Missing metadata is likewise not proof.
+  if (response.incomplete_results !== false || totalCount === null || totalCount !== items.length) {
+    throw new IncompleteIssueMarkerSearchError(totalCount, items.length, response.incomplete_results !== false)
+  }
   const matches = new Map<string, { number: number; url: string }>()
-  for (const item of response.items ?? []) {
+  for (const item of items) {
     if (item.pull_request) continue
     if (findIdempotencyMarker(item.body) !== key) continue
     if (typeof item.number !== 'number' || !item.html_url) continue

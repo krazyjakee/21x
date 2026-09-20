@@ -115,7 +115,7 @@ function setup(options: { issuePolicy?: string; repos?: Array<[string, string]> 
       const items = created
         .filter((issue) => findIdempotencyMarker(issue.body) === key)
         .map((issue) => ({ number: issue.number, html_url: `https://github.com/${issue.repo}/issues/${issue.number}`, body: issue.body }))
-      return JSON.stringify({ items })
+      return JSON.stringify({ total_count: items.length, incomplete_results: false, items })
     }
 
     if (behaviour === 'timeout') { behaviour = null; throw new Error('spawn gh ETIMEDOUT') }
@@ -694,6 +694,38 @@ describe('an interrupted write is reconciled, never repeated', () => {
       status: 'unresolved',
       external_url: null,
       effects_applied_at: null
+    })
+  })
+
+  it.each([
+    { name: 'truncated', totalCount: 11, incomplete: false },
+    { name: 'incomplete', totalCount: 10, incomplete: true },
+    { name: 'metadata-omitting', totalCount: 10, incomplete: undefined }
+  ])('keeps a $name marker search unresolved even when its returned page has one exact hit', async ({ totalCount, incomplete }) => {
+    const h = setup()
+    userAsked(h)
+    h.failNext('timeout')
+    expect(await captainCall(h, 'create_github_issue', { repo: 'krazyjakee/21x', title: 'Incomplete marker evidence' }))
+      .toMatchObject({ status: 'unresolved' })
+    const row = h.db.listIssueWrites({ projectId: h.projectId })[0]
+    const exact = `<!-- 21x-issue-write:${row.idempotency_key} -->`
+    const items = [
+      { number: 301, html_url: 'https://github.com/krazyjakee/21x/issues/301', body: exact },
+      ...Array.from({ length: 9 }, (_, index) => ({
+        number: 400 + index,
+        html_url: `https://github.com/krazyjakee/21x/issues/${400 + index}`,
+        body: `Phrase-only search hit ${index}`
+      }))
+    ]
+    h.gh.mockImplementationOnce(async () => JSON.stringify({
+      total_count: totalCount,
+      incomplete_results: incomplete,
+      items
+    }))
+
+    expect(await reconcileIssueWrites(h.db, h.projectId)).toBe(0)
+    expect(h.db.listIssueWrites({ projectId: h.projectId })[0]).toMatchObject({
+      status: 'unresolved', external_url: null, effects_applied_at: null
     })
   })
 
