@@ -203,7 +203,7 @@ export async function handleTaskMcpRequest(
     // request/response only, and no tool sends server-initiated notifications.
     enableJsonResponse: true
   })
-  const server = createScopedServer(scope, invoke)
+  const server = createScopedServer(scope, (route, params) => invoke(route, params, scope))
 
   try {
     await server.connect(transport)

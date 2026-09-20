@@ -158,9 +158,13 @@ admission and fairness), then v22 (#148 reconciliation and durable starts).
 All three migrations are idempotent and fresh databases create the same final
 tables directly.
 
-### Delegated GitHub issue-write ledger (v23)
+Migration 23 adds the immutable human-authorization chain and durable dispatch
+bindings described in `docs/authorization-chain.md`. Issue writes consume that
+resolver; they do not create a parallel provenance store.
 
-Migration 23 (`migrateIssueWrites()` in
+### Delegated GitHub issue-write ledger (v24)
+
+Migration 24 (`migrateIssueWrites()` in
 `src/main/database/issue-writes-migration.ts`) adds `issue_writes`: one row per
 external GitHub issue write, claimed before the call and settled after it. The
 row is both the audit record and the idempotency claim, so the two cannot
@@ -171,8 +175,10 @@ recompute the same key across a restart instead of filing a second issue. The
 provenance columns record the originating human instruction, the Commander
 correlation and the Captain task/session; `status` moves `reserved` →
 `succeeded` | `failed` | `unresolved`, and an expired lease becomes
-`unresolved` rather than free. New table only, so `CREATE TABLE IF NOT EXISTS`
-covers fresh and existing databases alike.
+`unresolved` rather than free. Attempt epochs fence late external answers from
+newer reconciliation passes, and `payload_fields` lets interrupted partial
+updates be compared in the same shape that was requested. New table only, so
+`CREATE TABLE IF NOT EXISTS` covers fresh and existing databases alike.
 
 ## Adding a column to other tables
 

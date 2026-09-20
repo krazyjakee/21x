@@ -111,9 +111,10 @@ export const ISSUE_ACTIONS: readonly IssueAction[] = ['create_issue', 'update_is
 /**
  * The same three actions in the durable authorization chain's vocabulary
  * (`AuthorizationAction` in src/main/authorization.ts). The two names for one
- * action are reconciled here, once, so the adapter that feeds the chain into
- * {@link setIssueWriteOriginResolver} is mechanical and neither side has to
- * learn the other's spelling.
+ * action are reconciled here, once, so the issue-write gate can query the
+ * durable resolver without either side learning the other's spelling.
+ * `resolveTaskAuthorization` accepts an action string and validates it against
+ * its closed permission set.
  */
 export const AUTHORIZATION_ACTION_FOR_ISSUE_ACTION: Record<IssueAction, string> = {
   create_issue: 'github.issue.create',
@@ -374,6 +375,13 @@ export function validateIssuePayload(payload: IssuePayload, options: { requireTi
     if (typeof payload.body !== 'string') return { code: 'payload_rejected', actionClass: DELEGATED_ACTION_CLASS, message: 'body must be text.' }
     if (payload.body.length > MAX_ISSUE_BODY) {
       return { code: 'payload_rejected', actionClass: DELEGATED_ACTION_CLASS, message: `The body is longer than ${MAX_ISSUE_BODY} characters.` }
+    }
+    if (findIdempotencyMarker(payload.body)) {
+      return {
+        code: 'payload_rejected',
+        actionClass: DELEGATED_ACTION_CLASS,
+        message: 'The body contains a reserved 21x idempotency marker. Remove it; 21x adds its own marker after claiming the write.'
+      }
     }
   }
   if (payload.labels !== undefined) {

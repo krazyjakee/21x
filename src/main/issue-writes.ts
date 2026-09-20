@@ -20,17 +20,17 @@
  * `unresolved` rather than free: the write may well have landed, so
  * {@link reconcileIssueWrites} asks GitHub before anything retries.
  *
- * Nothing here trusts its caller for provenance. The origin is resolved from
- * platform records ({@link resolveIssueWriteOrigin}); a tool argument claiming
- * one is ignored, and {@link setIssueWriteOriginResolver} is the seam a richer
- * authorization chain plugs into without changing the gate.
+ * Nothing here trusts its caller for provenance. {@link resolveTaskAuthorization}
+ * reads the immutable platform chain bound to the Captain's server-derived
+ * task identity; a tool argument claiming an origin is ignored.
  */
 import * as childProcess from 'child_process'
 import { createHash, randomUUID } from 'crypto'
 import { promisify } from 'util'
 import type { DatabaseManager } from './database'
-import { latestUserTypedProjectMessage } from './merge-grants'
+import { resolveTaskAuthorization } from './authorization'
 import {
+  AUTHORIZATION_ACTION_FOR_ISSUE_ACTION,
   DELEGATED_ACTION_CLASS,
   ISSUE_ACTIONS,
   checkForbiddenIssueArgs,
@@ -62,7 +62,7 @@ export type IssueWriteDb = Pick<
   | 'listIssueWrites'
   | 'listUnresolvedIssueWrites'
   | 'appendProjectStatusJournal'
->
+> & Pick<DatabaseManager, 'db'>
 
 // ── gh ────────────────────────────────────────────────────────
 
@@ -102,75 +102,6 @@ export function confirmedIssueWriteFailure(error: unknown): boolean {
 
 // ── Originating human authorization ───────────────────────────
 
-/**
- * How long a human instruction keeps authorizing delegated bookkeeping. Long
- * enough for a Captain to plan and file the tickets the person just asked for;
- * short enough that yesterday's conversation cannot be replayed into new
- * external writes.
- */
-export const ORIGIN_WINDOW_MS = 60 * 60 * 1000
-
-/**
- * A Commander delegation 21x knows a human typed. Recorded by the relay path
- * (commander/project-tools.ts) at the moment `ask_captain` runs inside a turn
- * the person themselves started — never from a report-triggered turn, a
- * wake-up, or anything a model wrote. This is the platform record that makes a
- * relay trustworthy; the relay *text* proves nothing.
- */
-export interface DelegatedAuthorization {
-  projectId: string
-  correlationId: string
-  /** The Commander chat session the human typed in. */
-  sessionId: string
-  /** The stored id of the human's own message. */
-  messageId: string
-  text: string
-  at: number
-}
-
-const delegationsByProject = new Map<string, DelegatedAuthorization>()
-
-/**
- * Records that a human's own Commander message delegated work to a project.
- * Ignored unless the caller can name the stored human message: a turn with no
- * `userMessageId` was not typed by the person.
- */
-export function recordDelegatedAuthorization(input: {
-  projectId: string
-  correlationId: string
-  sessionId: string
-  messageId?: string | null
-  text: string
-  at?: number
-}): DelegatedAuthorization | null {
-  if (!input.projectId || !input.correlationId || !input.messageId || !input.text.trim()) return null
-  const entry: DelegatedAuthorization = {
-    projectId: input.projectId,
-    correlationId: input.correlationId,
-    sessionId: input.sessionId,
-    messageId: input.messageId,
-    text: input.text,
-    at: input.at ?? Date.now()
-  }
-  delegationsByProject.set(input.projectId, entry)
-  return entry
-}
-
-export function clearDelegatedAuthorizations(): void {
-  delegationsByProject.clear()
-}
-
-/** The newest delegation for a project, while it is still inside the window. */
-export function latestDelegatedAuthorization(projectId: string, now = Date.now()): DelegatedAuthorization | null {
-  const entry = delegationsByProject.get(projectId)
-  if (!entry) return null
-  if (now - entry.at > ORIGIN_WINDOW_MS) {
-    delegationsByProject.delete(projectId)
-    return null
-  }
-  return entry
-}
-
 export function hashText(text: string): string {
   return createHash('sha256').update(text).digest('hex')
 }
@@ -194,110 +125,40 @@ export interface IssueWriteAuthorizationQuery {
   now: number
 }
 
-/**
- * What a resolver answers with: the originating human instruction, and any
- * narrowing it imposes. `actions` and `repos` can only ever *narrow* — they
- * are intersected with the project's configured set, so a resolver cannot
- * widen a capability even if it wanted to.
- */
+/** The durable resolver's answer, translated into issue-write vocabulary. */
 export interface IssueWriteAuthorizationResult {
   origin: IssueWriteOrigin
   actions?: readonly IssueAction[]
   repos?: readonly string[]
 }
 
-export type OriginResolver = (query: IssueWriteAuthorizationQuery) => IssueWriteAuthorizationResult | null
-
-let originResolver: OriginResolver | null = null
-
-/**
- * Replaces how the originating human instruction is found.
- *
- * The seam exists so the durable, cryptographically chained authorization
- * record (src/main/authorization.ts, PR #158) can take over from the default
- * below without this module or the gate changing. Once that lands the adapter
- * is mechanical, because {@link AUTHORIZATION_ACTION_FOR_ISSUE_ACTION} already
- * reconciles the two vocabularies:
- *
- * ```ts
- * setIssueWriteOriginResolver((query) => {
- *   if (!query.captainTaskId) return null
- *   const evidence = resolveTaskAuthorization({ db: raw }, {
- *     taskId: query.captainTaskId,
- *     projectId: query.projectId,
- *     action: AUTHORIZATION_ACTION_FOR_ISSUE_ACTION[query.action],
- *     repo: query.repo
- *   }, query.now)
- *   if (!evidence.allowed || !evidence.origin) return null
- *   return {
- *     origin: {
- *       kind: evidence.origin.source === 'project-chat' ? 'project_chat' : 'commander_relay',
- *       messageId: evidence.origin.messageId,
- *       sessionId: evidence.origin.sessionId,
- *       textHash: evidence.origin.textHash,
- *       excerpt: excerpt(evidence.origin.text),
- *       authoredAt: new Date(evidence.origin.at).toISOString(),
- *       correlationId: evidence.origin.correlationId
- *     },
- *     repos: evidence.scope.find((s) => s.projectId === query.projectId)?.repos
- *   }
- * })
- * ```
- *
- * A resolver may only return records the platform itself stored; nothing a
- * model can write may reach one.
- */
-export function setIssueWriteOriginResolver(resolver: OriginResolver | null): void {
-  originResolver = resolver
-}
-
-/**
- * The originating human instruction for delegated work in a project, or null.
- *
- * The interim default, until the durable chain above replaces it: two trusted
- * sources, newest first — a Commander relay the person started, and a message
- * the person typed in this project's own chat. Both are in-memory platform
- * records with a lifetime, which is why the ledger persists a snapshot of the
- * origin rather than a pointer to one.
- */
-export function resolveIssueWriteAuthorization(query: IssueWriteAuthorizationQuery): IssueWriteAuthorizationResult | null {
-  if (originResolver) return originResolver(query)
-  const origin = defaultOrigin(query.projectId, query.now)
-  return origin ? { origin } : null
-}
-
-/** The interim default, also exported so a test can assert it directly. */
-export function resolveIssueWriteOrigin(projectId: string, now = Date.now()): IssueWriteOrigin | null {
-  return defaultOrigin(projectId, now)
-}
-
-function defaultOrigin(projectId: string, now: number): IssueWriteOrigin | null {
-  const delegation = latestDelegatedAuthorization(projectId, now)
-  const typed = latestUserTypedProjectMessage(projectId, now)
-  const useDelegation = delegation && (!typed || delegation.at >= typed.at)
-  if (useDelegation && delegation) {
-    return {
-      kind: 'commander_relay',
-      messageId: delegation.messageId,
-      sessionId: delegation.sessionId,
-      textHash: hashText(delegation.text),
-      excerpt: excerpt(delegation.text),
-      authoredAt: new Date(delegation.at).toISOString(),
-      correlationId: delegation.correlationId
-    }
+export function resolveIssueWriteAuthorization(db: IssueWriteDb, query: IssueWriteAuthorizationQuery): IssueWriteAuthorizationResult | null {
+  if (!query.captainTaskId) return null
+  const evidence = resolveTaskAuthorization(db, {
+    taskId: query.captainTaskId,
+    projectId: query.projectId,
+    action: AUTHORIZATION_ACTION_FOR_ISSUE_ACTION[query.action],
+    repo: query.repo
+  }, query.now)
+  // An active chain that denies this particular action/repository still
+  // returns its narrowed capability, so the ordinary capability checker can
+  // explain the least-privilege boundary. Expired, revoked, invalid and
+  // missing chains provide no capability at all.
+  if (!evidence.origin || (evidence.status !== 'active' && evidence.status !== 'out_of_scope')) return null
+  const correlation = [...evidence.chain].reverse().find((node) => node.correlationId)?.correlationId ?? null
+  return {
+    origin: {
+      kind: evidence.origin.source === 'project-chat' ? 'project_chat' : 'commander_relay',
+      messageId: evidence.origin.messageId,
+      sessionId: evidence.origin.sessionId,
+      textHash: evidence.origin.textHash,
+      excerpt: excerpt(evidence.origin.text),
+      authoredAt: new Date(evidence.origin.at).toISOString(),
+      correlationId: correlation
+    },
+    actions: ISSUE_ACTIONS.filter((action) => evidence.effectivePermissions.some((permission) => permission === AUTHORIZATION_ACTION_FOR_ISSUE_ACTION[action])),
+    repos: evidence.scope.find((scope) => scope.projectId === query.projectId)?.repos ?? []
   }
-  if (typed) {
-    return {
-      kind: 'project_chat',
-      messageId: typed.id,
-      sessionId: typed.taskId,
-      textHash: hashText(typed.text),
-      excerpt: excerpt(typed.text),
-      authoredAt: new Date(typed.at).toISOString(),
-      correlationId: null
-    }
-  }
-  return null
 }
 
 // ── Capability ────────────────────────────────────────────────
@@ -329,7 +190,7 @@ export function issueWriteCapability(
   if (project.archived) {
     return { capability: null, denial: { code: 'capability_unavailable', message: `Project "${project.name}" is archived; 21x does not write to its repositories.` } }
   }
-  const authorization = resolveIssueWriteAuthorization(query)
+  const authorization = resolveIssueWriteAuthorization(db, query)
   if (!authorization) {
     return {
       capability: null,
@@ -363,11 +224,15 @@ export function issueWriteCapability(
 // ── Idempotency ───────────────────────────────────────────────
 
 export function hashPayload(payload: IssuePayload): string {
-  return hashText(JSON.stringify({
-    title: payload.title ?? null,
-    body: stripIdempotencyMarker(payload.body ?? '') || null,
-    labels: [...(payload.labels ?? [])].sort()
-  }))
+  // Presence is part of an update's meaning: omitting `body` means "leave it
+  // alone", while `body: ''` means "clear it". The same distinction applies
+  // to labels. Encoding only present fields prevents those requests from
+  // colliding on one idempotency key.
+  const canonical: Record<string, unknown> = {}
+  if (payload.title !== undefined) canonical.title = payload.title
+  if (payload.body !== undefined) canonical.body = stripIdempotencyMarker(payload.body)
+  if (payload.labels !== undefined) canonical.labels = [...payload.labels].sort()
+  return hashText(JSON.stringify(canonical))
 }
 
 export interface IdempotencyInput {
@@ -612,6 +477,9 @@ export async function performIssueWrite(
   // 5. The payload itself.
   const payloadDenial = validateIssuePayload(request.payload, { requireTitle: request.action === 'create_issue' })
   if (payloadDenial) return denial(payloadDenial)
+  if (request.clientKey && (request.clientKey.length > 200 || /[\u0000-\u001f\u007f]/.test(request.clientKey))) {
+    return denial({ code: 'payload_rejected', actionClass: DELEGATED_ACTION_CLASS, message: 'idempotency_key must be at most 200 printable characters.' })
+  }
   if (request.action === 'update_issue' && request.payload.title === undefined && request.payload.body === undefined && request.payload.labels === undefined) {
     return denial({ code: 'payload_rejected', actionClass: DELEGATED_ACTION_CLASS, message: 'Give a title, a body or labels to change.' })
   }

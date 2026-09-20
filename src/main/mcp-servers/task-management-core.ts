@@ -42,7 +42,7 @@ export type TaskMcpScope = {
 }
 
 /** Calls one Task API route. In process this is handleRoute; over stdio it is fetch. */
-export type TaskApiInvoke = (route: string, params: Record<string, unknown>) => Promise<unknown>
+export type TaskApiInvoke = (route: string, params: Record<string, unknown>, trustedScope?: TaskMcpScope) => Promise<unknown>
 
 /** Result shape of an MCP tools/call. */
 export type ToolCallResult = {

@@ -4,7 +4,6 @@ import type { IpcDeps } from './deps'
 import { guardedIpcSend } from '../guarded-ipc-send'
 import { isTrustedSender } from '../ipc-sender'
 import { mergeGrantAudit, makeUserTypedProjectMessage, type TypedMessage, revokeMergeGrant, setMergeGrantChangeListener } from '../merge-grants'
-import { isCoordinatorTask } from '../../shared/task-roles'
 import type { MergeGrant, MergeGrantAuditEntry } from '../../shared/merge-grants'
 
 // Staging is tied to the exact window, task and text, and consumed by the send IPC.
@@ -24,7 +23,8 @@ export const MERGE_GRANTS_CHANGED_CHANNEL = 'mergeGrants:changed'
  * The chat composer reports text the user typed and sent with Enter or the
  * Send button (never dictated or app-generated text such as the canvas
  * terminal notice, which share the generic send channel). When it went to a
- * project's Captain, from the main window, it is recorded as the message a
+ * project chat, from the main window, it is staged as a human message. Only
+ * a Captain dispatch can use it for the message a
  * `grant_merge_authority` call may bind to (#137). Nothing else records:
  * wake-ups, Commander relays, `send_message` and reports never pass here.
  */
@@ -32,7 +32,7 @@ export function noteUserTypedMessage(db: Pick<DatabaseManager, 'getTask'>, event
   if (!taskId || typeof message !== 'string' || !message.trim()) return
   if (!isTrustedSender(event)) return
   const task = db.getTask(taskId)
-  if (!task || !isCoordinatorTask(task) || !task.project_id) return
+  if (!task || !task.project_id) return
   pendingTyped.set(task.id, { sender: event.sender, typed: makeUserTypedProjectMessage(task.project_id, task.id, message) })
 }
 

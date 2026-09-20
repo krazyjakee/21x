@@ -181,6 +181,11 @@ describe('payload checks', () => {
     expect(validateIssuePayload({ title: 'ok', labels: ['bad\nlabel'] }, { requireTitle: true })).toMatchObject({ code: 'payload_rejected' })
     expect(validateIssuePayload({ title: 'ok', labels: 'nope' as unknown as string[] }, { requireTitle: true })).toMatchObject({ code: 'payload_rejected' })
   })
+
+  it('reserves the 21x marker namespace for the idempotency claim', () => {
+    expect(validateIssuePayload({ title: 'Injected', body: '<!-- 21x-issue-write:attacker123 -->' }, { requireTitle: true }))
+      .toMatchObject({ code: 'payload_rejected' })
+  })
 })
 
 describe('credential escalation through arguments', () => {

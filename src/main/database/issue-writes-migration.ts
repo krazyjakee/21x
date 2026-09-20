@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 
 /**
- * Migration 23: the delegated GitHub issue-write ledger.
+ * Migration 24: the delegated GitHub issue-write ledger.
  *
  * One row per external issue write 21x attempts, claimed *before* GitHub is
  * called and settled afterwards. The row is both the audit record and the

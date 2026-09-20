@@ -27,19 +27,23 @@ import {
   type EscalationEvent
 } from './escalation'
 import {
-  clearDelegatedAuthorizations,
   computeIdempotencyKey,
   confirmedIssueWriteFailure,
   hashPayload,
-  ORIGIN_WINDOW_MS,
-  recordDelegatedAuthorization,
   reconcileIssueWrites,
-  resolveIssueWriteOrigin,
   setIssueGhRunner,
-  setIssueWriteOriginResolver,
-  type IssueWriteAuthorizationQuery
 } from './issue-writes'
-import { clearUserTypedProjectMessages, recordUserTypedProjectMessage } from './merge-grants'
+import {
+  AUTHORIZATION_TTL_MS,
+  activateAuthorizationDispatch,
+  bindAuthorizationTransport,
+  commanderAuthorization,
+  delegateAuthorization,
+  prepareAuthorizationDispatch,
+  recordHumanAuthorization,
+  revokeAuthorization,
+  type AuthorizationNode
+} from './authorization'
 import { findIdempotencyMarker } from '../shared/issue-actions'
 import { buildCaptainSystemPrompt } from './prompts/captain'
 import { listToolsForScope } from './mcp-servers/task-management-core'
@@ -60,6 +64,7 @@ interface Harness {
   db: DatabaseManager
   projectId: string
   otherProjectId: string
+  captainTaskId: string
   taskIds: Record<string, string>
   scope: TaskMcpScope
   taskAgentScope: TaskMcpScope
@@ -84,6 +89,7 @@ function setup(options: { issuePolicy?: string; repos?: Array<[string, string]> 
   }
   db.addProjectRepo(otherProjectId, { provider: 'github', org: 'krazyjakee', name: 'other' })
   const agentId = db.createAgent(makeAgent({ name: 'Worker' }))!.id
+  const captainTaskId = db.ensureCoordinatorTask(projectId)!.id
 
   const taskIds: Record<string, string> = {}
   for (const [key, title] of [[VOICE_INPUT_TASK, 'Commander voice input reliability'], [VOICE_TTS_TASK, 'Commander TTS reliability and cost controls']] as const) {
@@ -158,6 +164,7 @@ function setup(options: { issuePolicy?: string; repos?: Array<[string, string]> 
     db,
     projectId,
     otherProjectId,
+    captainTaskId,
     taskIds,
     scope: { parentTaskId: null, taskId: null, artifactTaskId: null, projectId },
     taskAgentScope: { parentTaskId: null, taskId: taskIds[VOICE_INPUT_TASK], artifactTaskId: taskIds[VOICE_INPUT_TASK], projectId },
@@ -176,18 +183,62 @@ async function captainCall(h: Harness, tool: string, args: Record<string, unknow
   return JSON.parse(result.content[0].text) as Record<string, unknown>
 }
 
-/** The user typed something in this project's chat: the platform recorded it. */
-function userAsked(h: Harness, text = 'Please open GitHub issues for the two voice reliability tickets.'): void {
-  recordUserTypedProjectMessage(h.projectId, 'captain-task', text)
+let authorizationSequence = 0
+
+function activateNode(h: Harness, node: AuthorizationNode, payload: string): void {
+  const key = `test-auth:${++authorizationSequence}`
+  bindAuthorizationTransport(h.db, key, node.id, h.captainTaskId, payload)
+  activateAuthorizationDispatch(h.db, prepareAuthorizationDispatch(h.db, { key, taskId: h.captainTaskId, text: payload }))
+}
+
+/** The user typed a project-work instruction; the platform captured and bound it. */
+function userAsked(h: Harness, text = 'Please open GitHub issues and update GitHub issues and link GitHub issues.'): AuthorizationNode {
+  const messageId = `project-human-${++authorizationSequence}`
+  const node = recordHumanAuthorization(h.db, {
+    messageId,
+    text,
+    at: Date.now(),
+    source: 'project-chat',
+    sessionId: `project-session-${authorizationSequence}`,
+    taskId: h.captainTaskId,
+    projectId: h.projectId
+  })
+  activateAuthorizationDispatch(h.db, prepareAuthorizationDispatch(h.db, {
+    key: `project-dispatch:${messageId}`,
+    taskId: h.captainTaskId,
+    text,
+    messageId
+  }))
+  return node
+}
+
+/** A real Commander root + relay + transport binding, as production records it. */
+function commanderAsked(h: Harness, options: { correlationId?: string; messageId?: string; text?: string; relay?: string } = {}): AuthorizationNode {
+  const correlationId = options.correlationId ?? `cmd-${++authorizationSequence}`
+  const messageId = options.messageId ?? `commander-human-${authorizationSequence}`
+  const text = options.text ?? 'Please open Voice GitHub issues.'
+  const relay = options.relay ?? 'Open the matching GitHub issues for the voice tasks.'
+  const sessionId = `commander-session-${authorizationSequence}`
+  recordHumanAuthorization(h.db, { messageId, text, at: Date.now(), source: 'commander-chat', sessionId })
+  const node = commanderAuthorization(h.db, {
+    sessionId,
+    userMessageId: messageId,
+    userMessage: text,
+    trigger: 'user',
+    projectId: h.projectId,
+    taskId: h.captainTaskId,
+    correlationId,
+    message: relay
+  })
+  if (!node) throw new Error('Commander authorization fixture was not created')
+  activateNode(h, node, relay)
+  return node
 }
 
 const creates = (h: Harness): GhRequest[] => h.requests.filter((r) => r.args.includes('POST'))
 
 beforeEach(() => {
   clearHeldActions()
-  clearUserTypedProjectMessages()
-  clearDelegatedAuthorizations()
-  setIssueWriteOriginResolver(null)
 })
 
 afterEach(() => {
@@ -195,9 +246,6 @@ afterEach(() => {
   setCoordinatorCallGate(null)
   configureEscalation(null)
   setCommanderEscalationHandler(null)
-  setIssueWriteOriginResolver(null)
-  clearDelegatedAuthorizations()
-  clearUserTypedProjectMessages()
   vi.useRealTimers()
 })
 
@@ -236,27 +284,32 @@ describe('a delegated issue write needs a human instruction, not a grant', () =>
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-20T10:00:00Z'))
     userAsked(h)
-    expect(resolveIssueWriteOrigin(h.projectId)).toMatchObject({ kind: 'project_chat' })
-    vi.setSystemTime(new Date(Date.now() + ORIGIN_WINDOW_MS + 1000))
-    expect(resolveIssueWriteOrigin(h.projectId)).toBeNull()
+    vi.setSystemTime(new Date(Date.now() + AUTHORIZATION_TTL_MS + 1000))
     const result = await captainCall(h, 'create_github_issue', { repo: 'krazyjakee/21x', title: 'Stale' })
     expect(result).toMatchObject({ status: 'refused', code: 'no_human_origin' })
   })
 
   it('takes a Commander relay the user started, and refuses one they did not', async () => {
     const h = setup()
-    // A relay the Commander generated answering a report: no stored human message.
-    expect(recordDelegatedAuthorization({ projectId: h.projectId, correlationId: 'cmd-aaa', sessionId: 's1', messageId: null, text: 'file the tickets' })).toBeNull()
+    // A relay the Commander generated answering a report cannot produce a
+    // human authorization node or an active Captain binding.
+    expect(commanderAuthorization(h.db, {
+      sessionId: 's1',
+      userMessage: 'Please open Voice GitHub issues.',
+      trigger: 'report',
+      projectId: h.projectId,
+      taskId: h.captainTaskId,
+      correlationId: 'cmd-aaa',
+      message: 'file the tickets'
+    })).toBeNull()
     expect(await captainCall(h, 'create_github_issue', { repo: 'krazyjakee/21x', title: 'From a bare relay' }))
       .toMatchObject({ status: 'refused', code: 'no_human_origin' })
 
     // A relay inside a turn the person themselves started.
-    recordDelegatedAuthorization({
-      projectId: h.projectId,
+    commanderAsked(h, {
       correlationId: 'cmd-fcf90bbd68342b0b',
-      sessionId: 'commander-session',
       messageId: 'msg-human-1',
-      text: 'Create 21x tasks and matching GitHub issues for the voice work.'
+      text: 'Please open Voice GitHub issues.'
     })
     const ok = await captainCall(h, 'create_github_issue', { repo: 'krazyjakee/21x', title: 'From the user, via the Commander', task_id: h.taskIds[VOICE_TTS_TASK] })
     expect(ok.status).toBe('created')
@@ -410,18 +463,13 @@ describe('idempotency', () => {
     const first = await captainCall(h, 'create_github_issue', args)
     expect(first.status).toBe('created')
 
-    // Restart: the process is gone, the in-memory origin registry with it, and
-    // the database is reopened from its own bytes.
+    // Restart: the process is gone and the database is reopened from its own
+    // bytes. Both the authorization binding and the idempotency claim survive.
     const bytes = (h.db as unknown as { db: InstanceType<typeof Database> }).db.serialize()
-    clearUserTypedProjectMessages()
-    clearDelegatedAuthorizations()
     const { db: reopened } = createTestDb()
     ;(reopened as unknown as { db: InstanceType<typeof Database> }).db.close()
     ;(reopened as unknown as { db: InstanceType<typeof Database> }).db = new Database(bytes)
     configureEscalation({ db: reopened, mergeDb: reopened, issueDb: reopened, notifyUser: vi.fn(), notifyRenderer: vi.fn(), tellCaptain: vi.fn(async () => undefined) })
-    // The user asks again after the restart: a different message, same ticket.
-    recordUserTypedProjectMessage(h.projectId, 'captain-task', 'Did the voice issues get filed? Please make sure they exist.')
-
     const retry = await captainCall({ ...h, db: reopened }, 'create_github_issue', args)
     expect(retry).toMatchObject({ status: 'already_done', issue_url: first.issue_url })
     expect(creates(h)).toHaveLength(1)
@@ -440,6 +488,17 @@ describe('idempotency', () => {
     expect(creates(h)).toHaveLength(2)
   })
 
+  it('bounds caller-supplied idempotency material before hashing it', async () => {
+    const h = setup()
+    userAsked(h)
+    expect(await captainCall(h, 'create_github_issue', {
+      repo: 'krazyjakee/21x',
+      title: 'Bounded',
+      idempotency_key: 'x'.repeat(201)
+    })).toMatchObject({ status: 'refused', code: 'payload_rejected' })
+    expect(creates(h)).toHaveLength(0)
+  })
+
   it('computes a key from durable inputs only, never from who authorized it', () => {
     const base = { projectId: 'p', repo: 'o/r', action: 'create_issue' as const, taskId: 't', payloadHash: hashPayload({ title: 'a' }) }
     expect(computeIdempotencyKey(base)).toBe(computeIdempotencyKey({ ...base }))
@@ -447,6 +506,8 @@ describe('idempotency', () => {
     expect(computeIdempotencyKey(base)).not.toBe(computeIdempotencyKey({ ...base, repo: 'o/other' }))
     expect(computeIdempotencyKey(base)).not.toBe(computeIdempotencyKey({ ...base, payloadHash: hashPayload({ title: 'b' }) }))
     expect(computeIdempotencyKey({ ...base, clientKey: 'k' })).not.toBe(computeIdempotencyKey(base))
+    expect(hashPayload({ title: 'same' })).not.toBe(hashPayload({ title: 'same', body: '' }))
+    expect(hashPayload({ title: 'same' })).not.toBe(hashPayload({ title: 'same', labels: [] }))
   })
 })
 
@@ -517,6 +578,55 @@ describe('an interrupted write is reconciled, never repeated', () => {
     expect(h.db.listIssueWrites({ projectId: h.projectId }).filter((row) => row.status === 'succeeded')).toHaveLength(1)
   })
 
+  it('rejects a late answer after its lease epoch was taken away', async () => {
+    const h = setup()
+    userAsked(h)
+    let finish!: () => void
+    h.gh.mockImplementationOnce((callArgs: string[]) => new Promise<string>((resolve) => {
+      const body = callArgs.find((arg) => arg.startsWith('body='))!.slice(5)
+      h.created.push({ repo: 'krazyjakee/21x', number: 654, title: 'Slow success', body })
+      finish = () => resolve(JSON.stringify({ number: 654, html_url: 'https://github.com/krazyjakee/21x/issues/654' }))
+    }))
+
+    const pending = captainCall(h, 'create_github_issue', { repo: 'krazyjakee/21x', title: 'Slow success' })
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    const claimed = h.db.listIssueWrites({ projectId: h.projectId })[0]
+    h.db.db.prepare('UPDATE issue_writes SET lease_expires_at = ? WHERE id = ?').run(Date.now() - 1, claimed.id)
+    const [reconcilerOwned] = h.db.listUnresolvedIssueWrites(h.projectId)
+    expect(reconcilerOwned.attempt_epoch).toBe(claimed.attempt_epoch + 1)
+
+    finish()
+    expect(await pending).toMatchObject({ status: 'unresolved' })
+    expect(h.db.getIssueWrite(claimed.id)?.status).toBe('unresolved')
+    expect(await reconcileIssueWrites(h.db, h.projectId)).toBe(1)
+    expect(h.db.getIssueWrite(claimed.id)).toMatchObject({ status: 'succeeded', external_number: 654 })
+  })
+
+  it('reconciles only the fields that an interrupted update actually changed', async () => {
+    const h = setup()
+    userAsked(h)
+    h.created.push({ repo: 'krazyjakee/21x', number: 88, title: 'Keep this title', body: 'Before' })
+    h.gh.mockImplementationOnce(async () => {
+      h.created[0].body = 'After'
+      throw new Error('socket hang up')
+    })
+
+    expect(await captainCall(h, 'update_github_issue', { repo: 'krazyjakee/21x', issue_number: 88, body: 'After' }))
+      .toMatchObject({ status: 'unresolved' })
+    expect(h.db.listIssueWrites({ projectId: h.projectId })[0].payload_fields).toBe('["body"]')
+    expect(await reconcileIssueWrites(h.db, h.projectId)).toBe(1)
+    expect(h.db.listIssueWrites({ projectId: h.projectId })[0].status).toBe('succeeded')
+  })
+
+  it('keeps a successful but malformed GitHub response unresolved', async () => {
+    const h = setup()
+    userAsked(h)
+    h.gh.mockImplementationOnce(async () => JSON.stringify({ state: 'open' }))
+    expect(await captainCall(h, 'create_github_issue', { repo: 'krazyjakee/21x', title: 'No identity' }))
+      .toMatchObject({ status: 'unresolved' })
+    expect(h.db.listIssueWrites({ projectId: h.projectId })[0]).toMatchObject({ status: 'unresolved', settled_at: null })
+  })
+
   it('treats a refusal GitHub certainly made as a failure a retry may follow', async () => {
     const h = setup()
     userAsked(h)
@@ -551,12 +661,10 @@ describe('an interrupted write is reconciled, never repeated', () => {
 describe('the audit ledger', () => {
   it('records the whole chain: who authorized it, who carried it out, and what GitHub said', async () => {
     const h = setup()
-    recordDelegatedAuthorization({
-      projectId: h.projectId,
+    commanderAsked(h, {
       correlationId: 'cmd-6f41cf85aa4e9f1a',
-      sessionId: 'commander-session-7',
       messageId: 'msg-human-42',
-      text: 'Open GitHub issues for the two voice reliability tasks, please.'
+      text: 'Please open Voice GitHub issues.'
     })
     const before = new Date().toISOString()
     const result = await captainCall(h, 'create_github_issue', {
@@ -577,7 +685,6 @@ describe('the audit ledger', () => {
       action: 'create_issue',
       origin_kind: 'commander_relay',
       origin_message_id: 'msg-human-42',
-      origin_session_id: 'commander-session-7',
       correlation_id: 'cmd-6f41cf85aa4e9f1a',
       status: 'succeeded',
       external_url: 'https://github.com/krazyjakee/21x/issues/200',
@@ -586,7 +693,7 @@ describe('the audit ledger', () => {
     })
     expect(row.payload_hash).toMatch(/^[0-9a-f]{64}$/)
     expect(row.origin_text_hash).toMatch(/^[0-9a-f]{64}$/)
-    expect(row.origin_excerpt).toContain('Open GitHub issues')
+    expect(row.origin_excerpt).toBe('Please open Voice GitHub issues.')
     expect(row.external_result).toContain('"number":200')
     expect(row.created_at >= before).toBe(true)
     expect(row.settled_at).not.toBeNull()
@@ -595,12 +702,13 @@ describe('the audit ledger', () => {
 
   it('never copies the user\'s words to GitHub, only their hash into the ledger', async () => {
     const h = setup()
-    const secretish = 'Open issues for the voice work; the staging password is hunter2.'
-    recordUserTypedProjectMessage(h.projectId, 'captain-task', secretish)
+    const instruction = 'Please open GitHub issues and update GitHub issues and link GitHub issues.'
+    userAsked(h, instruction)
     await captainCall(h, 'create_github_issue', { repo: 'krazyjakee/21x', title: 'Voice work', body: 'Scope only.' })
-    expect(h.created[0].body).not.toContain('hunter2')
+    expect(h.created[0].body).not.toContain(instruction)
     const [row] = h.db.listIssueWrites({ projectId: h.projectId })
-    expect(row.origin_text_hash).not.toContain('hunter2')
+    expect(row.origin_text_hash).toMatch(/^[0-9a-f]{64}$/)
+    expect(row.origin_excerpt).toBe(instruction)
   })
 
   it('shows the ledger through the Captain\'s tool, scoped to the project', async () => {
@@ -719,12 +827,10 @@ describe('linking and updating', () => {
 describe('the blocked voice tasks, as the user asked for them', () => {
   it('turns one instruction into exactly two issues, and a duplicate delivery changes nothing', async () => {
     const h = setup()
-    recordDelegatedAuthorization({
-      projectId: h.projectId,
+    commanderAsked(h, {
       correlationId: 'cmd-9a4a4a2656f4fdef',
-      sessionId: 'commander-session',
       messageId: 'msg-human-one-ask',
-      text: 'Make 21x tasks for the voice input and TTS reliability work, and open the matching GitHub issues.'
+      text: 'Please open Voice GitHub issues.'
     })
 
     const asks = [
@@ -768,77 +874,65 @@ describe('the blocked voice tasks, as the user asked for them', () => {
   })
 })
 
-// ── The seam for a richer provenance chain ────────────────────
+// ── Durable authorization-chain integration ──────────────────
 
-describe('the origin resolver seam', () => {
-  it('lets a durable authorization chain replace the default without touching the gate', async () => {
+describe('the durable authorization chain', () => {
+  it('uses the bound human root and the platform-derived Captain identity', async () => {
     const h = setup()
-    const queries: IssueWriteAuthorizationQuery[] = []
-    setIssueWriteOriginResolver((query) => {
-      queries.push(query)
-      return {
-        origin: {
-          kind: 'user_task_instruction',
-          messageId: 'chain-msg-1',
-          sessionId: 'chain-session',
-          textHash: 'f'.repeat(64),
-          excerpt: 'from a verified chain',
-          authoredAt: '2026-09-20T00:00:00.000Z',
-          correlationId: 'cmd-chained'
-        }
-      }
+    const root = userAsked(h)
+    const result = await captainCall(h, 'create_github_issue', {
+      repo: 'krazyjakee/21x',
+      title: 'Chained',
+      task_id: h.taskIds[VOICE_INPUT_TASK]
     })
-    const result = await captainCall(h, 'create_github_issue', { repo: 'krazyjakee/21x', title: 'Chained', task_id: h.taskIds[VOICE_INPUT_TASK] })
     expect(result.status).toBe('created')
     expect(h.db.listIssueWrites({ projectId: h.projectId })[0]).toMatchObject({
-      origin_kind: 'user_task_instruction',
-      origin_message_id: 'chain-msg-1',
-      correlation_id: 'cmd-chained'
-    })
-    // The resolver is asked about a specific action in a specific repository,
-    // and told who is calling from the server's own scope — never an argument.
-    expect(queries[0]).toMatchObject({
-      projectId: h.projectId,
-      captainTaskId: h.db.getCoordinatorTask(h.projectId)!.id,
-      action: 'create_issue',
-      repo: 'krazyjakee/21x'
+      captain_task_id: h.captainTaskId,
+      origin_kind: 'project_chat',
+      origin_message_id: root.messageId
     })
   })
 
-  it('honours a narrowing the chain imposes, and discards a widening', async () => {
+  it('honours a chain narrowing and cannot widen beyond configured repositories', async () => {
     const h = setup({ repos: [['krazyjakee', '21x'], ['krazyjakee', 'docs']] })
-    const origin = {
-      kind: 'user_task_instruction' as const,
-      messageId: 'chain-msg-2',
-      sessionId: null,
-      textHash: 'a'.repeat(64),
-      excerpt: 'narrowed',
-      authoredAt: '2026-09-20T00:00:00.000Z',
-      correlationId: null
-    }
-    // The chain says: only this one repo, and only updates. It also names a
-    // repository the project does not have, which must simply be ignored.
-    setIssueWriteOriginResolver(() => ({ origin, actions: ['update_issue'], repos: ['krazyjakee/docs', 'someone/elsewhere'] }))
+    const root = userAsked(h)
+    const narrowed = delegateAuthorization(h.db, {
+      parentId: root.id,
+      author: 'captain',
+      text: 'Only update issues in the docs repository.',
+      taskId: h.captainTaskId,
+      projectId: h.projectId,
+      actions: ['github.issue.update'],
+      repos: ['krazyjakee/docs', 'someone/elsewhere']
+    })
+    expect(narrowed).not.toBeNull()
+    activateNode(h, narrowed!, narrowed!.text)
 
     expect(await captainCall(h, 'create_github_issue', { repo: 'krazyjakee/docs', title: 'Not permitted' }))
       .toMatchObject({ status: 'refused', code: 'action_not_in_capability' })
-    expect(await captainCall(h, 'update_github_issue', { repo: 'krazyjakee/21x', issue_number: 5, body: 'Out of the narrowed scope' }))
+    expect(await captainCall(h, 'update_github_issue', { repo: 'krazyjakee/21x', issue_number: 5, body: 'Out of scope' }))
       .toMatchObject({ status: 'refused', code: 'repo_not_in_project' })
     expect(await captainCall(h, 'update_github_issue', { repo: 'someone/elsewhere', issue_number: 5, body: 'Never configured' }))
       .toMatchObject({ status: 'refused', code: 'repo_not_in_project' })
-    expect(creates(h)).toHaveLength(0)
 
-    // The one thing the narrowed capability does allow still works.
     h.created.push({ repo: 'krazyjakee/docs', number: 7, title: 'Existing', body: '' })
     expect(await captainCall(h, 'update_github_issue', { repo: 'krazyjakee/docs', issue_number: 7, body: 'In scope' }))
       .toMatchObject({ status: 'updated' })
   })
 
-  it('a resolver that finds nothing refuses every write', async () => {
-    const h = setup()
-    userAsked(h)
-    setIssueWriteOriginResolver(() => null)
-    expect(await captainCall(h, 'create_github_issue', { repo: 'krazyjakee/21x', title: 'Nope' }))
+  it('rechecks revocation and expiry at the write boundary', async () => {
+    const revoked = setup()
+    const root = userAsked(revoked)
+    revokeAuthorization(revoked.db, root.id, 'user withdrew the instruction')
+    expect(await captainCall(revoked, 'create_github_issue', { repo: 'krazyjakee/21x', title: 'Revoked' }))
+      .toMatchObject({ status: 'refused', code: 'no_human_origin' })
+
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-20T10:00:00Z'))
+    const expired = setup()
+    userAsked(expired)
+    vi.setSystemTime(new Date(Date.now() + AUTHORIZATION_TTL_MS + 1))
+    expect(await captainCall(expired, 'create_github_issue', { repo: 'krazyjakee/21x', title: 'Expired' }))
       .toMatchObject({ status: 'refused', code: 'no_human_origin' })
   })
 })
