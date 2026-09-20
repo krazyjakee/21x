@@ -448,11 +448,11 @@ export class AgentManager extends EventEmitter {
       }
       const previousRecovery = this.startQueue.get(stale.id)
       if (previousRecovery?.state === 'failed' || previousRecovery?.state === 'cancelled') {
-        this.updateTaskFromLocalAgent(stale.id, { status: TaskStatus.NotStarted, session_id: null })
+        this.updateTaskFromLocalAgent(stale.id, { status: TaskStatus.NotStarted, session_id: null }, 'system')
         continue
       }
       if (!stale.agent_id) {
-        this.updateTaskFromLocalAgent(stale.id, { status: TaskStatus.NotStarted, session_id: null })
+        this.updateTaskFromLocalAgent(stale.id, { status: TaskStatus.NotStarted, session_id: null }, 'system')
         this.startQueue.enqueue({
           taskId: stale.id,
           projectId: taskProjectId(task),
@@ -467,7 +467,7 @@ export class AgentManager extends EventEmitter {
         continue
       }
       if (!stale.session_id) {
-        this.updateTaskFromLocalAgent(stale.id, { status: TaskStatus.NotStarted, session_id: null })
+        this.updateTaskFromLocalAgent(stale.id, { status: TaskStatus.NotStarted, session_id: null }, 'system')
         const exclusion = this.retryExclusion(task)
         const queued = this.startQueue.enqueue({
           taskId: stale.id,
@@ -520,7 +520,7 @@ export class AgentManager extends EventEmitter {
         if (!currentTask || currentTask.status === TaskStatus.Completed
           || currentRecovery?.state === 'cancelled' || currentRecovery?.state === 'failed'
           || (currentTask.session_id && currentTask.session_id !== stale.session_id)) continue
-        this.updateTaskFromLocalAgent(stale.id, { status: TaskStatus.NotStarted, session_id: null })
+        this.updateTaskFromLocalAgent(stale.id, { status: TaskStatus.NotStarted, session_id: null }, 'system')
         const exclusion = this.retryExclusion(currentTask)
         const queued = this.startQueue.enqueue({
           taskId: stale.id,
@@ -1299,7 +1299,7 @@ export class AgentManager extends EventEmitter {
         await this.stopSession(adapterSessionId, false)
         const currentTask = this.db.getTask(taskId)
         if (currentTask?.session_id === adapterSessionId && currentTask.status !== TaskStatus.Completed) {
-          this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.NotStarted, session_id: null })
+          this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.NotStarted, session_id: null }, 'system')
         }
         throw sendError
       }
@@ -2353,7 +2353,7 @@ export class AgentManager extends EventEmitter {
    * coordinator row has no lifecycle at all: it is never working, in review or
    * done, only resumable. Its session_id still persists like any task's.
    */
-  private updateTaskFromLocalAgent(taskId: string, updates: Parameters<DatabaseManager['updateTask']>[1]): TaskRecord | undefined {
+  private updateTaskFromLocalAgent(taskId: string, updates: Parameters<DatabaseManager['updateTask']>[1], origin?: 'system'): TaskRecord | undefined {
     const fields = { ...updates }
     if (fields.status !== undefined) {
       const current = this.db.getTask(taskId)
@@ -2362,7 +2362,7 @@ export class AgentManager extends EventEmitter {
     }
     if (Object.keys(fields).length === 0) return this.db.getTask(taskId)
     const before = fields.status !== undefined ? this.db.getTask(taskId)?.status : undefined
-    const updated = this.db.updateTask(taskId, fields)
+    const updated = origin ? this.db.updateTask(taskId, fields, origin) : this.db.updateTask(taskId, fields)
     // Project event (#57): an agent's own work reaching review bypasses
     // afterTaskUpdated (task-updates.ts), so the event is raised here.
     if (fields.status === TaskStatus.ReadyForReview && updated?.status === TaskStatus.ReadyForReview && before !== TaskStatus.ReadyForReview) {
@@ -2519,7 +2519,7 @@ export class AgentManager extends EventEmitter {
             this.startQueue.cancel(taskId, exclusion, 'excluded_failure_not_retried', message)
             this.recordRecoveryAudit(task, exclusion, 'exclude_from_retry', 'excluded_failure_not_retried', message)
           } else {
-            this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.NotStarted, session_id: null })
+            this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.NotStarted, session_id: null }, 'system')
             const retried = this.startQueue.failOrRetry(startClaim.id, startClaim.generation, message)
             if (retried) this.recordRecoveryAudit(task, 'recoverable_start_failure', 'retry', retried.record.recoveryResult ?? 'retry_scheduled', message)
           }
@@ -3445,7 +3445,7 @@ export class AgentManager extends EventEmitter {
     if (session.isTriageSession) {
       session.status = 'idle'
       console.log(`[AgentManager] Triage session completed for task ${session.taskId}, reverting to NotStarted`)
-      this.updateTaskFromLocalAgent(session.taskId, { status: TaskStatus.NotStarted, session_id: null })
+      this.updateTaskFromLocalAgent(session.taskId, { status: TaskStatus.NotStarted, session_id: null }, 'system')
       await yieldEventLoop()
 
       this.sendToRenderer('task:updated', {
@@ -4186,7 +4186,7 @@ export class AgentManager extends EventEmitter {
             if (latestTask) this.recordRecoveryAudit(latestTask, exclusion, 'exclude_from_retry', 'excluded_failure_not_retried', detail)
           } else {
             if (latestTask?.status !== TaskStatus.Completed) {
-              this.updateTaskFromLocalAgent(entry.taskId, { status: TaskStatus.NotStarted, session_id: null })
+              this.updateTaskFromLocalAgent(entry.taskId, { status: TaskStatus.NotStarted, session_id: null }, 'system')
             }
             const retried = this.startQueue.failOrRetry(claim.id, claim.generation, detail)
             if (retried && latestTask) {
@@ -4948,7 +4948,7 @@ export class AgentManager extends EventEmitter {
   private persistTranscriptEvent(channel: string, data: unknown): void {
     const event = transcriptPartsFromEvent(channel, data)
     if (!event || event.parts.length === 0) return
-    const result = this.db.upsertTranscriptParts(event.taskId, event.parts)
+    const result = this.db.upsertTranscriptParts(event.taskId, event.parts, 'live')
     if (!result) return
     const { maxRev, changedPartIds } = result
     // Event-sourced push: notify clients of the delta (the parts just written),

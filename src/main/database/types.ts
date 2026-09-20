@@ -303,6 +303,8 @@ export interface TaskRow {
   project_id: string | null
   created_at: string
   updated_at: string
+  /** Meaningful work only; older clients may omit this field. */
+  last_activity_at?: string | null
 }
 
 export interface HeartbeatLogRecord {
@@ -392,6 +394,8 @@ export interface TaskRecord {
   project_id: string
   created_at: string
   updated_at: string
+  /** Meaningful work only; older clients may omit this field. */
+  last_activity_at?: string | null
 }
 
 export interface FileAttachmentRecord {

@@ -39,6 +39,6 @@ export function saveTaskAttachment(
   // Re-read so records saved earlier in the same sync (or concurrently) are kept.
   let current = (ctx.db.getTask(taskId)?.attachments ?? []) as SourceAttachment[]
   if (file.replaces) current = current.filter((a) => !file.replaces!(a))
-  ctx.db.updateTask(taskId, { attachments: [...current, attachment] })
+  ctx.db.updateTask(taskId, { attachments: [...current, attachment] }, 'task-source')
   return attachment
 }

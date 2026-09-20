@@ -121,7 +121,7 @@ describe('DatabaseManager migrations on an existing install', () => {
    * min(existing max_parallel_sessions, 5); an explicit cap is kept, the old
    * field is left as it was, and the concurrency tables appear.
    */
-  it('gives existing agents a hard cap and the unified recovery schema on upgrade to 24', () => {
+  it('gives existing agents a hard cap and the unified recovery schema on upgrade to 25', () => {
     const first = new DatabaseManager()
     first.initialize()
     first.close?.()
@@ -154,7 +154,7 @@ describe('DatabaseManager migrations on an existing install', () => {
       'concurrency_audit', 'task_touches',
       'agent_start_queue', 'agent_start_queue_fairness'
     ]))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('24')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('25')
     after.close()
   })
 
@@ -163,14 +163,20 @@ describe('DatabaseManager migrations on an existing install', () => {
     { name: '#151-only v20', version: '20', drop: ['concurrency_audit', 'task_touches', 'agent_start_queue', 'agent_start_queue_fairness'] },
     { name: '#152-only v20', version: '20', drop: ['managed_agent_runtimes', 'delivery_outbox', 'agent_start_queue', 'agent_start_queue_fairness'] },
     { name: 'integrated v21', version: '21', drop: ['agent_start_queue', 'agent_start_queue_fairness'] },
-    { name: 'authorization-chain v23', version: '23', drop: ['issue_writes'] }
-  ])('produces schema-equivalent v24 from $name', ({ version, drop }) => {
+    { name: 'authorization-chain v23', version: '23', drop: ['issue_writes'] },
+    { name: 'live main v24', version: '24', drop: [] }
+  ])('produces schema-equivalent v25 from $name', ({ version, drop }) => {
     const fresh = new DatabaseManager()
     fresh.initialize()
     fresh.close?.()
 
     const raw = openRaw()
     const canonicalSchema = integratedSchema(raw)
+    const taskShape = (handle: InstanceType<typeof RawDatabase>) =>
+      (handle.pragma('table_info(tasks)') as Array<{ cid: number; name: string }>)
+        .map(({ cid: _cid, ...column }) => column).sort((a, b) => a.name.localeCompare(b.name))
+    const canonicalTasks = taskShape(raw)
+    raw.exec('DROP TRIGGER tasks_initial_activity; ALTER TABLE tasks DROP COLUMN last_activity_at')
     for (const table of drop) raw.exec(`DROP TABLE IF EXISTS ${table}`)
     raw.prepare("UPDATE settings SET value = ? WHERE key = '__schema_version'").run(version)
     raw.close()
@@ -181,6 +187,7 @@ describe('DatabaseManager migrations on an existing install', () => {
 
     const after = openRaw()
     expect(integratedSchema(after)).toEqual(canonicalSchema)
+    expect(taskShape(after)).toEqual(canonicalTasks)
     const columns = (table: string) => (after.pragma(`table_info(${table})`) as Array<{ name: string }>).map((column) => column.name)
     expect(columns('managed_agent_runtimes')).toEqual(expect.arrayContaining(['owner_id', 'generation', 'session_id', 'phase']))
     expect(columns('delivery_outbox')).toEqual(expect.arrayContaining(['idempotency_key', 'state', 'claim_owner', 'acknowledged_at']))
@@ -194,7 +201,7 @@ describe('DatabaseManager migrations on an existing install', () => {
       'generation', 'lease_owner', 'lease_expires_at', 'recovery_cause',
       'recovery_action', 'recovery_result', 'queued_at', 'acknowledged_at'
     ]))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('24')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('25')
     after.close()
   })
 

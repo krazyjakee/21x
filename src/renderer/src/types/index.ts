@@ -336,6 +336,8 @@ export interface Task {
   project_id?: string
   created_at: string
   updated_at: string
+  /** Meaningful work only; older clients may omit this field. */
+  last_activity_at?: string | null
 }
 
 export interface CreateTaskDTO {

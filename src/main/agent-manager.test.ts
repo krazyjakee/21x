@@ -3761,8 +3761,8 @@ describe('AgentManager durable transcript write-through', () => {
     return { mgr, mockDb, upserted }
   }
 
-  it('persists agent:output parts before delivery', () => {
-    const { mgr, upserted } = buildManager()
+  it('persists agent:output parts as live activity before delivery', () => {
+    const { mgr, mockDb, upserted } = buildManager()
     ;(mgr as any).sendToRenderer('agent:output', {
       sessionId: 's1',
       taskId: 'task-1',
@@ -3773,6 +3773,7 @@ describe('AgentManager durable transcript write-through', () => {
     expect(upserted).toHaveLength(1)
     expect(upserted[0].taskId).toBe('task-1')
     expect(upserted[0].parts[0]).toMatchObject({ id: 'p1', role: 'assistant', content: 'ACK — woke up on completion' })
+    expect(mockDb.upsertTranscriptParts).toHaveBeenCalledWith('task-1', expect.any(Array), 'live')
   })
 
   it('persists agent:output-batch parts and skips ephemeral part types', () => {

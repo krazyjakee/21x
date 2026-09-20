@@ -231,3 +231,32 @@ When adding a new column:
 - [ ] Added to `rebuildTasksTable()` (`CREATE TABLE tasks_new`)
 - [ ] Added guarded `ALTER TABLE` in `runMigrations()`
 - [ ] Bumped `SCHEMA_VERSION`
+
+### Meaningful task activity
+
+Migration 25 (#142) follows the v24 issue-write ledger and adds
+`tasks.last_activity_at` to the canonical schema, rebuild schema and guarded
+upgrade path. Existing rows start with
+the later of creation and recorded user/assistant transcript timestamps, then
+roll descendant activity into ancestors. `updated_at` is deliberately not a
+backfill source: it includes heartbeat, session and tracking housekeeping.
+An insert trigger initializes the timestamp for all new rows, including raw
+recurrence and seed inserts.
+
+`DatabaseManager.recordTaskActivity()` advances a task and its ancestors
+monotonically and publishes their timestamps to desktop and mobile clients.
+Explicit status/title/description/priority changes, resolution results,
+feedback comments and added attachments count. Changed live user/assistant
+transcript parts (including tool results) and agent progress count; identical
+upserts and history imports do not. Background source sync, system resets,
+session IDs, heartbeat schedules, labels and output-field metadata do not.
+Source actions explicitly requested by the user count when they change one of
+the meaningful fields. Successful Add Comment source actions record activity even
+without returned task fields. Automatic startup recovery, failed prompt delivery
+and queued/start-failure resets use the `system` origin; explicit user Stop
+continues to count as activity. Subtask `sort_order` remains independent of activity.
+
+Board manual ordering is a local presentation preference, persisted by project
+and status in `board-order-store.ts`, not another use of subtask `sort_order`.
+`setColumnOrder` is the integration point for future in-column drag ordering;
+the existing status-drop UI and PR #124 do not yet supply that interaction.
