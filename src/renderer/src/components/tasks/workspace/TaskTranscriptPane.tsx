@@ -7,7 +7,7 @@ const EMPTY_MESSAGES: AgentMessage[] = []
 
 type TranscriptHandlers = Pick<
   ComponentProps<typeof AgentTranscriptPanel>,
-  'onStop' | 'onRestart' | 'onSend' | 'onPickAttachments' | 'onAddAttachmentPaths'
+  'onStop' | 'onRestart' | 'onSend' | 'onPickAttachments' | 'onAddAttachmentPaths' | 'onSaveImages'
 >
 
 interface TaskTranscriptPaneProps extends TranscriptHandlers {

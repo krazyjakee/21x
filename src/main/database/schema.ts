@@ -557,6 +557,23 @@ export function createTables(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_commander_messages_correlation
       ON commander_messages(correlation_id) WHERE correlation_id IS NOT NULL;
   `)
+
+  // Images attached to a Commander user message (#144). The bytes live in
+  // their own table so message rows, events and searches stay small; they go
+  // with their message. New table, so CREATE IF NOT EXISTS covers fresh and
+  // existing DBs alike.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS commander_images (
+      id TEXT PRIMARY KEY,
+      message_id TEXT NOT NULL REFERENCES commander_messages(id) ON DELETE CASCADE,
+      position INTEGER NOT NULL DEFAULT 0,
+      name TEXT NOT NULL DEFAULT '',
+      mime_type TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      data BLOB NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_commander_images_message ON commander_images(message_id, position);
+  `)
 }
 
 /**

@@ -32,7 +32,7 @@ import {
   type PullRequestGateState
 } from './merge-grants'
 import { GRANT_MERGE_AUTHORITY_TOOL, LIST_MERGE_GRANTS_TOOL, MERGE_PULL_REQUEST_TOOL } from './mcp-servers/merge-grant-tools'
-import { describeMergeGrant, parseGitHubPullRequestUrl, type MergeGrantScopeInput } from '../shared/merge-grants'
+import { describeMergeGrant, mergeGrantScopeFrom, parseGitHubPullRequestUrl } from '../shared/merge-grants'
 import type { EscalationLevel } from '../shared/project-policies'
 
 export interface MergeGateContext {
@@ -46,16 +46,6 @@ export interface MergeGateContext {
   hold: (summary: string, run: (heldId: string) => Promise<unknown>) => unknown
   /** After a merge made under `tell_commander`: the usual report. */
   reportPerformed: (summary: string) => void
-}
-
-function scopeFrom(args: Record<string, unknown>): MergeGrantScopeInput {
-  return {
-    repo: typeof args.repo === 'string' ? args.repo : undefined,
-    base_branch: typeof args.base_branch === 'string' ? args.base_branch : undefined,
-    pr_numbers: Array.isArray(args.pr_numbers) ? (args.pr_numbers as number[]) : undefined,
-    expires_in_hours: typeof args.expires_in_hours === 'number' ? args.expires_in_hours : undefined,
-    max_merges: typeof args.max_merges === 'number' ? args.max_merges : undefined
-  }
 }
 
 async function mergeCall(ctx: MergeGateContext): Promise<unknown> {
@@ -107,20 +97,13 @@ async function mergeCall(ctx: MergeGateContext): Promise<unknown> {
 function grantCall(ctx: MergeGateContext): unknown {
   const { db, projectId, args } = ctx
   const typed = latestUserTypedProjectMessage(projectId)
-  if (!typed) {
-    return {
-      error:
-        'There is no message the user typed in this project chat in the last 30 minutes. A merge grant can only come from the user\'s own words: ' +
-        'ask the user, or have them tell the Commander.'
-    }
-  }
   const result = createMergeGrantFromUserMessage(db, projectId, {
     source: 'project_chat',
-    sessionId: typed.taskId,
-    messageId: typed.id,
-    text: typed.text
-  }, scopeFrom(args))
-  if (!result.ok) return { error: result.error }
+    sessionId: typed?.taskId ?? null,
+    messageId: typed?.id ?? '',
+    text: typed?.text ?? ''
+  }, mergeGrantScopeFrom(args))
+  if (!result.ok) return result
   return {
     status: 'granted',
     grant_id: result.grant.id,
