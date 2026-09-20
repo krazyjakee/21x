@@ -5,7 +5,7 @@ import type { ChatProvider, ChatProviderEvent, ChatProviderRequest } from '../ch
 import type { DatabaseManager } from '../database'
 import { COMMANDER_ADMIN_TOOLS, CommanderService, cleanGeneratedTitle, fallbackTitle, toolResultTags } from './commander-service'
 import { CommanderStore } from './commander-store'
-import { buildContext, planFold, splitTurns } from './context'
+import { buildContext, MAX_SUMMARY_TRANSCRIPT_CHARS, planFold, splitTurns } from './context'
 import { createCommanderProjectTools, MUTATING_COMMANDER_TOOLS, type CommanderAgents } from './project-tools'
 import { createCommanderSkillTools, MUTATING_COMMANDER_SKILL_TOOLS } from './skill-tools'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_TITLE_PROMPT } from './prompts'
@@ -161,8 +161,8 @@ describe('CommanderService turns', () => {
 
     // #137: the stored id of that message rides along, so a merge grant can bind to it.
     expect(seen).toEqual([
-      { sessionId: session.id, userMessage: 'propose a rename', userMessageId: first.message.id, trigger: 'user' },
-      { sessionId: session.id, userMessage: 'yes, rename it', userMessageId: second.message.id, trigger: 'user' }
+      { sessionId: session.id, userMessage: 'propose a rename', userMessageId: first.message.id, authorizationMessageId: first.message.id, trigger: 'user' },
+      { sessionId: session.id, userMessage: 'yes, rename it', userMessageId: second.message.id, authorizationMessageId: second.message.id, trigger: 'user' }
     ])
   })
 
@@ -380,23 +380,149 @@ describe('CommanderService context budget', () => {
     await service.sendUserMessage(session.id, 'fourth').done
     const lastChat = chatRequests(provider).at(-1)!
     expect(lastChat.system).toContain('SUMMARY(fresh)')
-    // keepTurns = 2: turn one is in the summary, turn two is trimmed, the newest two are verbatim.
-    expect(lastChat.messages.map((m) => m.content)).toEqual(['third', 'reply 3', 'fourth'])
+    // keepTurns = 2: turn one is in the summary; turn two is past the budget
+    // but not folded yet (that happens after this turn), so it stays verbatim.
+    expect(lastChat.messages.map((m) => m.content)).toEqual(['second', 'reply 2', 'third', 'reply 3', 'fourth'])
+    expect(lastChat.messages[0].content).not.toContain('omitted')
 
     // The rolling summary merges the previous one.
     const latest = store.listMessages(session.id).filter((m) => m.role === 'summary').at(-1)!
     expect(latest.content).toBe('SUMMARY(merged)')
   })
 
-  it('keeps nothing folded when the summary call fails; the next turn just trims', async () => {
-    const provider = fakeProvider({ summary: () => new Error('down') })
+  it('keeps the turns verbatim when the summary call fails and records the failed fold', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const provider = fakeProvider({ chat: () => 'ok', summary: () => new Error('down') })
     const service = makeService(provider, { keepTurns: 1 })
+    const session = store.createSession()
+    for (const text of ['a', 'b', 'c']) await service.sendUserMessage(session.id, text).done
+
+    expect(store.listMessages(session.id).some((m) => m.role === 'summary')).toBe(false)
+    // Nothing was folded, so nothing is dropped: every turn is still in the context.
+    const last = chatRequests(provider).at(-1)!
+    expect(last.messages.map((m) => m.content)).toEqual(['a', 'ok', 'b', 'ok', 'c'])
+    expect(service.foldFailure(session.id)).toMatchObject({ error: 'summary request failed', attempts: 2 })
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`Fold failed for session ${session.id}`))
+    warn.mockRestore()
+  })
+
+  it('marks turns left out without a summary, and a later successful fold clears the marker and the flag', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    let summaryDown = true
+    const provider = fakeProvider({
+      chat: () => 'ok',
+      title: () => 'Marker test',
+      summary: () => (summaryDown ? new Error('down') : 'SUMMARY')
+    })
+    // Each turn is 17 chars; while folds fail, at most 2 × 40 = 80 chars (4 turns) stay verbatim.
+    const service = makeService(provider, { keepTurns: 1, maxChars: 40 })
+    const session = store.createSession()
+    const texts = ['1', '2', '3', '4', '5', '6'].map((n) => n.repeat(15))
+    for (const text of texts) await service.sendUserMessage(session.id, text).done
+
+    let last = chatRequests(provider).at(-1)!
+    expect(last.messages.filter((m) => m.role === 'user')).toHaveLength(4)
+    expect(last.messages[0].content).toBe(`[2 earlier turns omitted (summary pending)]\n\n${texts[2]}`)
+    expect(service.foldFailure(session.id)?.attempts).toBe(5)
+
+    // The summariser recovers: the fold after the next turn succeeds.
+    summaryDown = false
+    await service.sendUserMessage(session.id, '7'.repeat(15)).done
+    expect(service.foldFailure(session.id)).toBeNull()
+    expect(store.listMessages(session.id).filter((m) => m.role === 'summary')).toHaveLength(1)
+
+    await service.sendUserMessage(session.id, '8'.repeat(15)).done
+    last = chatRequests(provider).at(-1)!
+    expect(last.system).toContain('SUMMARY')
+    expect(last.messages.map((m) => m.content)).toEqual(['7'.repeat(15), 'ok', '8'.repeat(15)])
+    expect(last.messages.some((m) => m.content.includes('omitted'))).toBe(false)
+    warn.mockRestore()
+  })
+
+  it('recovers a large failed-fold backlog in bounded batches after restart without advancing past unseen turns', async () => {
+    const session = store.createSession('Existing conversation')
+    const replies: CommanderMessage[] = []
+    for (let n = 0; n < 12; n++) {
+      store.appendMessage(session.id, { role: 'user', content: `turn-${n}: ${'x'.repeat(7_000)}` })
+      replies.push(store.appendMessage(session.id, { role: 'assistant', content: `reply-${n}` }))
+    }
+    const failing = makeService(fakeProvider({ summary: () => new Error('secret request body') }), { keepTurns: 1 })
+    await failing.foldHistory(session.id)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await failing.foldHistory(session.id)
+    expect(JSON.stringify(failing.foldFailure(session.id))).not.toContain('secret request body')
+    expect(warn.mock.calls.flat().join('')).not.toContain('secret request body')
+    warn.mockRestore()
+
+    const provider = fakeProvider({ summary: () => 'bounded summary' })
+    const restarted = makeService(provider, { keepTurns: 1 })
+    let folds = 0
+    while (planFold(store.listMessages(session.id), { keepTurns: 1, maxChars: 24_000 })) {
+      const before = planFold(store.listMessages(session.id), { keepTurns: 1, maxChars: 24_000 })!
+      const summary = await restarted.foldHistory(session.id)
+      expect(summary?.correlation_id).toBe(before.toFold.at(-1)?.id)
+      expect(provider.requests.at(-1)!.messages[0].content.length).toBeLessThan(MAX_SUMMARY_TRANSCRIPT_CHARS + 8_100)
+      expect(++folds).toBeLessThan(12)
+    }
+    expect(folds).toBeGreaterThan(1)
+    expect(store.listMessages(session.id).filter((m) => m.role === 'user')).toHaveLength(12)
+    expect(store.listMessages(session.id).filter((m) => m.role === 'summary').at(-1)?.correlation_id).toBe(replies[10].id)
+  })
+
+  it('chunks a long turn atomically and retries the whole turn after a partial summary failure', async () => {
+    const session = store.createSession('Long turn')
+    store.appendMessage(session.id, { role: 'user', content: `begin ${'x'.repeat(90_000)} end` })
+    const last = store.appendMessage(session.id, { role: 'assistant', content: 'Finished long work.' })
+    store.appendMessage(session.id, { role: 'user', content: 'Next turn' })
+    let attempts = 0
+    const failing = fakeProvider({ summary: () => ++attempts === 2 ? new Error('private error') : 'partial summary' })
+    const first = makeService(failing, { keepTurns: 1 })
+    expect(await first.foldHistory(session.id)).toBeNull()
+    expect(store.listMessages(session.id).some((m) => m.role === 'summary')).toBe(false)
+    expect(attempts).toBe(2)
+
+    const provider = fakeProvider({ summary: () => 'rolling summary' })
+    const restarted = makeService(provider, { keepTurns: 1 })
+    const summary = await restarted.foldHistory(session.id)
+    expect(summary?.correlation_id).toBe(last.id)
+    expect(provider.requests).toHaveLength(3)
+    expect(provider.requests[0].messages[0].content).toContain('User: begin')
+    expect(provider.requests[2].messages[0].content).toContain('Finished long work.')
+    for (const request of provider.requests) {
+      expect(request.messages[0].content.length).toBeLessThan(MAX_SUMMARY_TRANSCRIPT_CHARS + 8_100)
+      expect(request.maxTokens).toBe(800)
+    }
+    expect(store.listMessages(session.id).filter((m) => m.role === 'summary')).toHaveLength(1)
+  })
+
+  it('retains an oversized turn and refuses an oversized model result without committing a false fold cursor', async () => {
+    const session = store.createSession('Large turn')
+    const oversized = store.appendMessage(session.id, { role: 'user', content: 'x'.repeat(MAX_SUMMARY_TRANSCRIPT_CHARS * 8 + 1) })
+    store.appendMessage(session.id, { role: 'user', content: 'next' })
+    const provider = fakeProvider({ summary: () => 'x'.repeat(8_001) })
+    const service = makeService(provider, { keepTurns: 1 })
+    expect(await service.foldHistory(session.id)).toBeNull()
+    expect(provider.requests).toHaveLength(0)
+    expect(service.foldFailure(session.id)?.error).toContain('input exceeds')
+    expect(store.listMessages(session.id)).toContainEqual(oversized)
+
+    const small = store.createSession('Small turn')
+    store.appendMessage(small.id, { role: 'user', content: 'first' })
+    store.appendMessage(small.id, { role: 'user', content: 'second' })
+    expect(await service.foldHistory(small.id)).toBeNull()
+    expect(store.listMessages(small.id).some((m) => m.role === 'summary')).toBe(false)
+    expect(service.foldFailure(small.id)?.error).toBe('summary request failed')
+  })
+
+  it('treats an empty summary as a failed fold', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const service = makeService(fakeProvider({ summary: () => '   ' }), { keepTurns: 1 })
     const session = store.createSession()
     await service.sendUserMessage(session.id, 'a').done
     await service.sendUserMessage(session.id, 'b').done
     expect(store.listMessages(session.id).some((m) => m.role === 'summary')).toBe(false)
-    const last = chatRequests(provider).at(-1)!
-    expect(last.messages.map((m) => m.content)).toEqual(['b'])
+    expect(service.foldFailure(session.id)?.error).toMatch(/empty/)
+    warn.mockRestore()
   })
 })
 
@@ -440,6 +566,24 @@ describe('context helpers', () => {
     const ctx = buildContext(history, { keepTurns: 5, maxChars: 10 })
     expect(ctx.messages).toHaveLength(2)
     expect(ctx.droppedTurns).toBe(0)
+  })
+
+  it('keeps unsummarised turns past the budget verbatim and marks any left out', () => {
+    const history = [
+      msg('user', 'a'.repeat(20)), msg('assistant', 'ok'),
+      msg('user', 'b'.repeat(20)), msg('assistant', 'ok'),
+      msg('user', 'c'.repeat(20)), msg('assistant', 'ok')
+    ]
+    // Only the newest turn (22 chars) fits the budget; the 2 × 25 = 50-char ceiling holds one more.
+    const ctx = buildContext(history, { keepTurns: 1, maxChars: 25 })
+    expect(ctx.pendingFoldTurns).toBe(1)
+    expect(ctx.droppedTurns).toBe(1)
+    expect(ctx.messages[0].content).toBe(`[1 earlier turn omitted (summary pending)]\n\n${'b'.repeat(20)}`)
+
+    const roomy = buildContext(history, { keepTurns: 1, maxChars: 100 })
+    expect(roomy.droppedTurns).toBe(0)
+    expect(roomy.pendingFoldTurns).toBe(2)
+    expect(roomy.messages[0].content).toBe('a'.repeat(20))
   })
 
   it('cleans model titles and builds fallbacks', () => {

@@ -1106,6 +1106,7 @@ describe('AgentManager implicit resume behavior', () => {
       getSecretsByIds: vi.fn(() => []),
       getSecretsWithValues: vi.fn(() => []),
       getSetting: vi.fn(() => null),
+      getTranscriptParts: vi.fn(() => []),
     } as unknown as ConstructorParameters<typeof AgentManager>[0]
 
     const manager = new AgentManager(mockDb)
@@ -1153,6 +1154,7 @@ describe('AgentManager implicit resume behavior', () => {
       getSecretsByIds: vi.fn(() => []),
       getSecretsWithValues: vi.fn(() => []),
       getSetting: vi.fn(() => null),
+      getTranscriptParts: vi.fn(() => []),
     } as unknown as ConstructorParameters<typeof AgentManager>[0]
 
     const manager = new AgentManager(mockDb)
