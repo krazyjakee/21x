@@ -235,6 +235,19 @@ describe('reports', () => {
     expect(said).not.toContain('details in the chat')
   })
 
+  it('cancels a queued report cue when the user barges in before speech starts', async () => {
+    const { worker, speech, commander, voice } = setup()
+    await speech.prepare()
+    voice.setActiveSession('s1')
+
+    commander.emit({ type: 'messages_appended', sessionId: 's1', messages: [report('s1', 'Build passed.')] })
+    voice.bargeIn('s1')
+    await flush()
+
+    expect(worker.spoken).toEqual([])
+    expect(worker.appended).toEqual([])
+  })
+
   it('names a report whose project is unknown plainly', () => {
     expect(spokenReport(null)).toBe('A report arrived; details in the chat.')
     expect(spokenReport(' Web ')).toBe('Report from Web; details in the chat.')
