@@ -425,7 +425,7 @@ const PR_VIEW_FIELDS = 'url,number,title,state,isDraft,mergeable,mergeStateStatu
 // Read the latest review per reviewer here as well because gh pr view omits
 // the commit each review covered. A standing grant needs exact-head evidence,
 // not an approval that may have survived a later push on an unprotected repo.
-const PR_REFS_QUERY = 'query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { headRefOid baseRefName baseRefOid latestReviews(first: 100) { nodes { author { login } state commit { oid } } pageInfo { hasNextPage } } } } }'
+const PR_REFS_QUERY = 'query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { headRefOid baseRefName baseRefOid author { login } latestReviews(first: 100) { nodes { author { login } state commit { oid } } pageInfo { hasNextPage } } } } }'
 
 function loginOf(value: unknown): string {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return ''
@@ -494,7 +494,12 @@ export async function readPullRequestGate(pr: PullRequestRef): Promise<PullReque
   }
   const rollup = raw.statusCheckRollup as RawCheck[]
   const headRefOid = typeof raw.headRefOid === 'string' ? raw.headRefOid : ''
-  const authorLogin = loginOf(raw.author)
+  const rawAuthorLogin = loginOf(raw.author)
+  const authorLogin = loginOf(refs.author)
+  if (!rawAuthorLogin || !authorLogin || rawAuthorLogin.trim() !== rawAuthorLogin ||
+      authorLogin.trim() !== authorLogin || rawAuthorLogin.toLowerCase() !== authorLogin.toLowerCase()) {
+    throw new Error('GitHub returned missing, malformed or changed PR author data; reevaluate before retrying')
+  }
   return {
     url: typeof raw.url === 'string' ? raw.url : pr.url,
     number: typeof raw.number === 'number' ? raw.number : pr.number,
