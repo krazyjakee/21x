@@ -107,7 +107,14 @@ export class DeliveryStore {
       ts,
       ts
     )
-    return { record: this.getByKey(input.idempotencyKey)!, inserted: result.changes === 1 }
+    const record = this.getByKey(input.idempotencyKey)!
+    // The first payload wins on retry, but a key can never change its owner.
+    if (record.kind !== input.kind || record.projectId !== (input.projectId ?? null)
+      || record.taskId !== (input.taskId ?? null) || (input.kind !== 'captain_report' && record.sourceSessionId !== (input.sourceSessionId ?? null))
+      || record.correlationId !== (input.correlationId ?? null)) {
+      throw new Error('Delivery idempotency key belongs to a different destination or request.')
+    }
+    return { record, inserted: result.changes === 1 }
   }
 
   get(id: string): DeliveryRecord | null {
@@ -142,6 +149,17 @@ export class DeliveryStore {
       ORDER BY created_at ASC
     `).all(...params) as DeliveryRow[]
     return rows.map(delivery)
+  }
+
+  bindReport(id: string, sessionId: string, content: string): void {
+    this.source.db.prepare(`UPDATE delivery_outbox SET source_session_id = ?, payload = ?,
+      destination_id = ?, updated_at = ? WHERE id = ? AND kind = 'captain_report'
+      AND state = 'pending' AND destination_id IS NULL`).run(sessionId, content, sessionId, this.now(), id)
+  }
+
+  listTerminalRequests(): DeliveryRecord[] {
+    return (this.source.db.prepare(`SELECT * FROM delivery_outbox
+      WHERE kind = 'captain_request' AND state IN ('failed', 'timed_out')`).all() as DeliveryRow[]).map(delivery)
   }
 
   claim(id: string, owner: string, leaseMs: number): DeliveryRecord | null {

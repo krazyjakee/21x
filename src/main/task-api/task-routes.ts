@@ -431,6 +431,8 @@ function reportToCommander(db: DatabaseManager, params: Record<string, unknown>)
   const message = typeof params.message === 'string' ? params.message.trim() : ''
   if (!message) return { error: 'message is required' }
   if (message.length > MAX_REPORT_CHARS) return { error: `message must be at most ${MAX_REPORT_CHARS} characters` }
+  if (typeof params.correlation_id === 'string' && params.correlation_id.trim().length > 100) return { error: 'correlation_id must be at most 100 characters' }
+  if (typeof params.delivery_id === 'string' && params.delivery_id.trim().length > 200) return { error: 'delivery_id must be at most 200 characters' }
   const correlationId = typeof params.correlation_id === 'string' && params.correlation_id.trim() ? params.correlation_id.trim().slice(0, 100) : null
   const deliveryId = typeof params.delivery_id === 'string' && params.delivery_id.trim()
     ? params.delivery_id.trim().slice(0, 200)

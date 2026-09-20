@@ -80,13 +80,16 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
       if (!commanderRef || !request.sourceSessionId || !request.projectId) return
       const project = deps.db.getProject(request.projectId)
       const key = `captain-request:${request.id}:${timedOut ? 'timeout' : 'failure'}`
+      const content = timedOut
+        ? `The Captain of "${project?.name ?? request.projectId}" did not report back before the deadline. Retry the request when ready.`
+        : `Your request could not be delivered to the Captain of "${project?.name ?? request.projectId}": ${reason}. Retry the request when ready.`
       const { record } = delivery.store.enqueue({
         idempotencyKey: key,
         kind: 'captain_report',
         sourceSessionId: request.sourceSessionId,
         projectId: request.projectId,
         correlationId: request.correlationId,
-        payload: reason
+        payload: content
       })
       try {
         commanderRef.appendReport({

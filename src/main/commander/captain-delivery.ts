@@ -23,13 +23,14 @@ export interface CaptainDeliveryOptions {
 }
 
 export function correlationForDeliveryKey(key: string): string {
-  return `cmd-${createHash('sha256').update(key).digest('hex').slice(0, 16)}`
+  return `cmd-${createHash('sha256').update(key).digest('hex')}`
 }
 
 export class CaptainDeliveryService {
   readonly store: DeliveryStore
   private readonly owner = `captain-delivery:${process.pid}:${randomUUID()}`
   private readonly now: () => number
+  private readonly inFlight = new Map<string, Promise<void>>()
   private sweepTimer: ReturnType<typeof setInterval> | null = null
 
   constructor(private readonly options: CaptainDeliveryOptions) {
@@ -51,12 +52,20 @@ export class CaptainDeliveryService {
       deadlineAt: this.now() + CAPTAIN_REPORT_DEADLINE_MS
     })
     if (record.state === 'pending' || (record.state === 'claimed' && (record.claimExpiresAt ?? 0) <= this.now())) {
-      void this.dispatch(record)
+      void this.dispatch(record).catch((error) => console.error('[CaptainDelivery] Dispatch failed:', error))
     }
     return record
   }
 
-  async dispatch(record: DeliveryRecord): Promise<void> {
+  dispatch(record: DeliveryRecord): Promise<void> {
+    const existing = this.inFlight.get(record.id)
+    if (existing) return existing
+    const work = this.dispatchNow(record).finally(() => this.inFlight.delete(record.id))
+    this.inFlight.set(record.id, work)
+    return work
+  }
+
+  private async dispatchNow(record: DeliveryRecord): Promise<void> {
     if (record.state === 'accepted' || record.state === 'acknowledged') return
     const claimed = this.store.claim(record.id, this.owner, CLAIM_MS)
     if (!claimed) return
@@ -76,26 +85,39 @@ export class CaptainDeliveryService {
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
       const failed = this.store.terminal(claimed.id, 'failed', detail)
-      if (failed) this.options.onTerminalFailure(failed, detail, false)
+      if (failed?.state === 'failed') {
+        const message = this.store.getByKey(`captain-request-message:${claimed.id}`)
+        if (message?.state === 'pending') this.store.terminal(message.id, 'cancelled', 'The originating Captain request failed.')
+        this.options.onTerminalFailure(failed, detail, false)
+      }
     }
   }
 
   async reconcile(): Promise<void> {
-    for (const record of this.store.listRecoverable('captain_request')) {
-      if (record.state !== 'accepted') await this.dispatch(record)
-    }
-    this.sweepDeadlines()
     if (!this.sweepTimer) {
-      this.sweepTimer = setInterval(() => this.sweepDeadlines(), 30_000)
+      this.sweepTimer = setInterval(() => { void this.reconcile().catch((error) => console.error('[CaptainDelivery] Recovery failed:', error)) }, 30_000)
       this.sweepTimer.unref?.()
     }
+    this.sweepDeadlines()
+    const dispatches: Promise<void>[] = []
+    for (const record of this.store.listRecoverable('captain_request')) {
+      if (record.state !== 'accepted') dispatches.push(this.dispatch(record))
+    }
+    // Replaying is safe: the terminal callback uses a stable outbox/inbox key.
+    for (const record of this.store.listTerminalRequests()) {
+      this.options.onTerminalFailure(record, record.lastError ?? 'Captain request failed.', record.state === 'timed_out')
+    }
+    await Promise.all(dispatches)
+  }
+
+  dispose(): void {
+    if (this.sweepTimer) clearInterval(this.sweepTimer)
+    this.sweepTimer = null
   }
 
   private sweepDeadlines(): void {
-    for (const record of this.store.expireDeadlines(this.now())) {
-      if (record.kind === 'captain_request') {
-        this.options.onTerminalFailure(record, record.lastError ?? 'The Captain did not report back before the deadline.', true)
-      }
-    }
+    // Terminal requests are replayed below with stable report keys, including
+    // failures persisted by a process that died before publishing the report.
+    this.store.expireDeadlines(this.now())
   }
 }

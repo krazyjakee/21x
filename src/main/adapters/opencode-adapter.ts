@@ -446,6 +446,7 @@ export class OpencodeAdapter implements CodingAgentAdapter {
       }
 
       const health = result.data as { healthy: boolean; version: string }
+      if (health?.healthy !== true) return { available: false, reason: 'Server protocol health check is unhealthy' }
       console.log('[OpencodeAdapter] Health check OK, version:', health.version)
       return { available: true }
     } catch (error: unknown) {

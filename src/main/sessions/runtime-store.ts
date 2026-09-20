@@ -181,11 +181,10 @@ export class CaptainRuntimeStore {
     return result.changes ? this.get(ownerId) : null
   }
 
-  expireStale(now = this.now()): CaptainRuntimeState[] {
+  expireStale(now = this.now(), interrupted = false): CaptainRuntimeState[] {
     const stale = this.list().filter((row) =>
       ['starting_server', 'starting_session', 'verifying', 'retrying', 'recovering'].includes(row.phase)
-      && row.deadlineAt !== null
-      && row.deadlineAt <= now
+      && (interrupted || (row.deadlineAt !== null && row.deadlineAt <= now))
     )
     for (const row of stale) {
       this.transition(row.ownerId, row.generation, 'timed_out', {

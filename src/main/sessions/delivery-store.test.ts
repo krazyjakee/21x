@@ -59,4 +59,17 @@ describe('DeliveryStore', () => {
     expect(store.acknowledge(row.id)).toBeNull()
     expect(store.get(row.id)).toMatchObject({ state: 'timed_out' })
   })
+  it('refuses reusing a delivery key across projects, tasks, kinds, or source sessions', () => {
+    const { db } = createTestDb()
+    const store = new DeliveryStore(db)
+    const a = db.createProject({ name: 'A' })!
+    const b = db.createProject({ name: 'B' })!
+    const input = { idempotencyKey: 'collision', kind: 'agent_message' as const, payload: 'first', taskId: db.getCoordinatorTask(a.id)!.id, sourceSessionId: 'origin-a', projectId: a.id }
+    store.enqueue(input)
+    for (const changed of [{ taskId: db.getCoordinatorTask(b.id)!.id }, { projectId: b.id }, { sourceSessionId: 'origin-b' }, { kind: 'captain_request' as const }]) {
+      expect(() => store.enqueue({ ...input, ...changed })).toThrow('different destination')
+    }
+    expect(store.getByKey('collision')?.payload).toBe('first')
+  })
+
 })

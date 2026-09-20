@@ -141,7 +141,7 @@ describe('CommanderService turns', () => {
   })
 
   it('binds each turn tool registry to the immediately preceding user message', async () => {
-    const seen: Array<{ sessionId: string; userMessage: string }> = []
+    const seen: Array<{ sessionId: string; userMessage: string; deliveryScope?: string }> = []
     const service = new CommanderService({
       store,
       emit: (event) => events.push(event),
@@ -159,9 +159,10 @@ describe('CommanderService turns', () => {
 
     // #137: the stored id of that message rides along, so a merge grant can bind to it.
     expect(seen).toEqual([
-      { sessionId: session.id, userMessage: 'propose a rename', userMessageId: first.message.id, trigger: 'user' },
-      { sessionId: session.id, userMessage: 'Confirm abc123', userMessageId: second.message.id, trigger: 'user' }
+      { sessionId: session.id, userMessage: 'propose a rename', userMessageId: first.message.id, trigger: 'user', deliveryScope: expect.any(String) },
+      { sessionId: session.id, userMessage: 'Confirm abc123', userMessageId: second.message.id, trigger: 'user', deliveryScope: expect.any(String) }
     ])
+    expect(seen[0].deliveryScope).not.toBe(seen[1].deliveryScope)
   })
 
   it('hands no message id to the tools for a voice transcript, so it cannot back a merge grant (#137)', async () => {

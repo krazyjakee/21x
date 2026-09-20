@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import type { ChatMessage } from '../../shared/chat'
 import type { CommanderEvent, CommanderMessage, CommanderSession } from '../../shared/commander'
 import { ChatRuntime, type ChatTurnHandle, type ChatTurnResult } from '../chat/chat-runtime'
@@ -31,6 +32,8 @@ import { guardReportAsks, MAX_REPORT_ASKS_WITHOUT_USER_TURN } from './report-too
  */
 
 export interface CommanderToolContext {
+  /** Unique per prepared turn, independent of typed-message grant authority. */
+  deliveryScope?: string
   sessionId: string
   /** The user message that immediately precedes this turn's tool calls; empty for a report-triggered turn. */
   userMessage: string
@@ -266,7 +269,7 @@ export class CommanderService {
       provider.supportsImages === true ? (id) => this.store.getMessageImages(id) : undefined)
     let system = withSummary(this.options.systemPrompt ?? COMMANDER_SYSTEM_PROMPT, context.summary)
     if (start.systemNote) system = `${system}\n\n${start.systemNote}`
-    let tools = this.options.getTools?.({ sessionId, userMessage: start.userMessage, userMessageId: start.userMessageId, trigger: start.trigger }) ?? []
+    let tools = this.options.getTools?.({ sessionId, deliveryScope: randomUUID(), userMessage: start.userMessage, userMessageId: start.userMessageId, trigger: start.trigger }) ?? []
     if (start.trigger === 'report') {
       const max = this.options.maxReportAsks ?? MAX_REPORT_ASKS_WITHOUT_USER_TURN
       tools = guardReportAsks(tools, {
