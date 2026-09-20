@@ -289,7 +289,11 @@ describe('a turn always closes', () => {
 
   it('leaves a final from an older turn alone', async () => {
     await useVoiceStore.getState().startTurn('dictation')
+    useVoiceStore.setState({ partial: 'current words', final: 'current final' })
     onFinal({ turnId: 'an-older-turn', text: 'stale' })
-    expect(useVoiceStore.getState().turnId).toBe('turn-1')
+    expect(useVoiceStore.getState()).toMatchObject({
+      turnId: 'turn-1', partial: 'current words', final: 'current final'
+    })
+    expect(voiceCapture.stop).not.toHaveBeenCalled()
   })
 })

@@ -54,7 +54,7 @@ describe('Commander call lifetime', () => {
     useCommanderCallStore.getState().end()
 
     expect(useCommanderCallStore.getState()).toMatchObject({ status: 'off', sessionId: null, turnId: null, error: null })
-    expect(driver.closeMicrophone).toHaveBeenCalledWith('mic-1')
+    expect(driver.closeMicrophone).toHaveBeenCalledWith('mic-1', expect.any(AbortSignal))
     expect(driver.stopPlayback).toHaveBeenCalled()
     expect(driver.bargeIn).toHaveBeenCalledWith('session-1')
     expect(driver.setActive).toHaveBeenLastCalledWith(null)
@@ -78,7 +78,7 @@ describe('Commander call lifetime', () => {
     await starting
 
     expect(useCommanderCallStore.getState().status).toBe('off')
-    expect(driver.closeMicrophone).toHaveBeenCalledWith('late-mic')
+    expect(driver.closeMicrophone).toHaveBeenCalledWith('late-mic', signal)
   })
 
   it('ignores failure from an old send after the same session is restarted', async () => {

@@ -665,14 +665,15 @@ if (hasVoiceBridge()) {
   })
 
   voiceApi.onFinal((event) => {
+    // A provider can deliver the final packet after its turn was cancelled or
+    // replaced. It owns neither the current caption nor the current partial.
+    if (useVoiceStore.getState().turnId !== event.turnId) return
     useVoiceStore.setState({ final: event.text, partial: '' })
     // A turn also ends by itself: the worker closes it when the speaker pauses.
     // Release the microphone here too, or it would stay open with no way to
     // stop it from the user interface.
-    if (useVoiceStore.getState().turnId === event.turnId) {
-      voiceCapture.stop()
-      useVoiceStore.setState({ turnId: null, level: 0 })
-    }
+    voiceCapture.stop()
+    useVoiceStore.setState({ turnId: null, level: 0 })
   })
 
   voiceApi.onOutcome((outcome: VoiceActionOutcome) => {

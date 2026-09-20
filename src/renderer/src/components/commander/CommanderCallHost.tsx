@@ -37,6 +37,31 @@ import {
 export const MICROPHONE_BUSY_MESSAGE =
   'Another microphone is already listening. Stop it before starting Commander voice mode.'
 
+// Main applies routing asynchronously. These values deliberately outlive a
+// host instance so a late completion from an unmounted host can only reassert
+// the newest host's intent, never its own retired session or null cleanup.
+let routingEpoch = 0
+let desiredActiveSessionId: string | null = null
+
+async function setActiveSession(nextSessionId: string | null, signal?: AbortSignal): Promise<unknown> {
+  desiredActiveSessionId = nextSessionId
+  const mine = ++routingEpoch
+  const result = await commanderVoiceApi.setActive(nextSessionId)
+  if (mine !== routingEpoch || signal?.aborted) await reconcileActiveSession()
+  return result
+}
+
+async function reconcileActiveSession(): Promise<void> {
+  const observedEpoch = routingEpoch
+  const desired = desiredActiveSessionId
+  await commanderVoiceApi.setActive(desired)
+  if (observedEpoch !== routingEpoch) await reconcileActiveSession()
+}
+
+// Composer and caption ownership use the AbortSignal as an opaque call lease.
+// Session and provider turn ids may both be reused; object identity may not.
+let activeMicrophoneLease: AbortSignal | null = null
+
 function ownedMicrophone() {
   const call = useCommanderCallStore.getState()
   const voice = useVoiceStore.getState()
@@ -135,8 +160,6 @@ export function CommanderCallHost() {
   }), [sendTranscript])
 
   useLayoutEffect(() => {
-    let activeEpoch = 0
-    let desiredSessionId: string | null = null
     return bindCommanderCallDriver({
       setActive: async (nextSessionId, signal) => {
         // Refuse before main changes reply routing. Preparing TTS can take
@@ -144,15 +167,7 @@ export function CommanderCallHost() {
         if (nextSessionId && useVoiceStore.getState().turnId) {
           throw new Error(MICROPHONE_BUSY_MESSAGE)
         }
-        desiredSessionId = nextSessionId
-        const mine = ++activeEpoch
-        const result = await commanderVoiceApi.setActive(nextSessionId)
-        // A superseded IPC completion must not leave main routed to the old
-        // session. Reassert the newest intent without clearing a replacement.
-        if (mine !== activeEpoch || signal?.aborted) {
-          await commanderVoiceApi.setActive(desiredSessionId)
-        }
-        return result
+        return setActiveSession(nextSessionId, signal)
       },
       openMicrophone: async (signal) => {
         const ensureCurrent = (): void => {
@@ -196,6 +211,7 @@ export function CommanderCallHost() {
         }
 
         refuseForeignTurn()
+        activeMicrophoneLease = signal
         setActiveComposer(COMMANDER_VOICE_COMPOSER_KEY)
         current.setCaptionOwner(COMMANDER_VOICE_COMPOSER_KEY)
         try {
@@ -207,14 +223,19 @@ export function CommanderCallHost() {
           }
           return opened
         } catch (err) {
-          if (getActiveComposer() === COMMANDER_VOICE_COMPOSER_KEY) clearActiveComposer()
-          if (useVoiceStore.getState().captionOwner === COMMANDER_VOICE_COMPOSER_KEY) {
-            useVoiceStore.getState().setCaptionOwner(null)
+          if (activeMicrophoneLease === signal) {
+            activeMicrophoneLease = null
+            if (getActiveComposer() === COMMANDER_VOICE_COMPOSER_KEY) clearActiveComposer()
+            if (useVoiceStore.getState().captionOwner === COMMANDER_VOICE_COMPOSER_KEY) {
+              useVoiceStore.getState().setCaptionOwner(null)
+            }
           }
           throw err
         }
       },
-      closeMicrophone: (ownedTurnId) => {
+      closeMicrophone: (ownedTurnId, signal) => {
+        if (!signal || activeMicrophoneLease !== signal) return
+        activeMicrophoneLease = null
         const voiceState = useVoiceStore.getState()
         if (ownedTurnId && voiceState.turnId === ownedTurnId) void voiceState.cancel()
         if (getActiveComposer() === COMMANDER_VOICE_COMPOSER_KEY) clearActiveComposer()

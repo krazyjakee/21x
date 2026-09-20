@@ -36,7 +36,8 @@ export interface CommanderCallDriver {
    */
   openMicrophone(signal: AbortSignal): Promise<string>
   /** Closes the microphone turn if `turnId` is still the open one. */
-  closeMicrophone(turnId: string | null): void
+  /** Closes only the microphone lease opened with this exact call signal. */
+  closeMicrophone(turnId: string | null, signal: AbortSignal | null): void
   /** Silences playback in this tick. */
   stopPlayback(): void
   /** Cancels synthesis and the running Commander turn in main. */
@@ -82,6 +83,8 @@ let driver: CommanderCallDriver | null = null
 /** Bumped by every start and end, so a slow start cannot revive an ended call. */
 let generation = 0
 let startController: AbortController | null = null
+/** Signal for the starting or live call whose media the store currently owns. */
+let mediaSignal: AbortSignal | null = null
 const listeners = new Map<CallMediaEvent, Set<() => void>>()
 
 /** Binds the media driver. Returns an unbind. Only the host calls this. */
@@ -134,7 +137,9 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
   const teardown = (): void => {
     const { sessionId, turnId, status } = get()
     if (status === 'off' || !driver) return
-    driver.closeMicrophone(turnId)
+    const ownedSignal = mediaSignal
+    mediaSignal = null
+    driver.closeMicrophone(turnId, ownedSignal)
     driver.stopPlayback()
     if (sessionId) {
       // End owns the complete call lifetime: stop any synthesis and cancel the
@@ -164,6 +169,7 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
       startController?.abort()
       const controller = new AbortController()
       startController = controller
+      mediaSignal = controller.signal
       const media = driver
       let activated = false
       set({ ...OFF, status: 'starting', sessionId, error: null, retrySessionId: null, dismissedTurnErrorId: null, lastEvent: null })
@@ -173,7 +179,7 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
         if (mine !== generation) return
         const turnId = await media.openMicrophone(controller.signal)
         if (mine !== generation) {
-          media.closeMicrophone(turnId)
+          media.closeMicrophone(turnId, controller.signal)
           return
         }
         if (startController === controller) startController = null
@@ -183,6 +189,7 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
         // A preflight refusal (another microphone owns capture) changed no
         // media and must not silence or clear that other turn.
         if (activated) teardown()
+        else if (mediaSignal === controller.signal) mediaSignal = null
         generation++
         set({ ...OFF, error: messageOf(err), retrySessionId: sessionId })
       }
@@ -193,6 +200,7 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
       startController?.abort()
       startController = null
       teardown()
+      mediaSignal = null
       set({ ...OFF, error: null, retrySessionId: null, dismissedTurnErrorId: null, lastEvent: null })
     },
 
@@ -265,6 +273,7 @@ export function __resetCommanderCall(): void {
   generation++
   startController?.abort()
   startController = null
+  mediaSignal = null
   listeners.clear()
   useCommanderCallStore.setState({ ...OFF, error: null, retrySessionId: null, dismissedTurnErrorId: null, lastEvent: null })
 }
