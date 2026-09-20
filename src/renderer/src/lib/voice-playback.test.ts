@@ -181,6 +181,25 @@ describe('VoicePlayback', () => {
     expect(drained).toHaveBeenCalledTimes(1)
   })
 
+  it('notifies activity observers when audio starts, drains and stops', () => {
+    const playback = new VoicePlayback()
+    const changed = vi.fn()
+    const off = playback.subscribeActivity(changed)
+    playback.start('s1')
+    const opened = changed.mock.calls.length
+    playback.play('s1', pcm(1), 24000)
+    expect(changed.mock.calls.length).toBe(opened + 1)
+    expect(playback.hasQueuedAudio).toBe(true)
+    sources[0].onended?.()
+    expect(changed.mock.calls.length).toBe(opened + 2)
+    expect(playback.hasQueuedAudio).toBe(false)
+    playback.stop()
+    expect(changed.mock.calls.length).toBe(opened + 3)
+    off()
+    playback.start('s2')
+    expect(changed.mock.calls.length).toBe(opened + 3)
+  })
+
   /**
    * The queue empties between one sentence and the next whenever the voice
    * produces the next sentence more slowly than the last one takes to play.

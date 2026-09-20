@@ -42,6 +42,7 @@ import { STUCK_SESSION_TIMEOUT_MS, findStuckTool, hasGarbledOutput, isDelegation
 import { MAX_CONCURRENT_AGENT_SESSIONS_SETTING, checkAdmission, isExemptFromAdmission, isGlobalAdmissionReason, parseGlobalSessionLimit, type AdmissionDecision, type AdmissionLimits, type AdmissionReason, type CountedSession } from './agent-manager/admission'
 import { buildProjectLimitState, describeQueueReason, isAllProjectsPaused, projectAdmissionLimits, recordProjectSessionStart, setAllProjectsPaused, type ProjectLimitState } from './project-limits'
 import { FINDINGS_BEGIN, FINDINGS_END, SYSTEM_MESSAGE_MARKER } from '../shared/system-authority'
+import { ActivityObservations, shouldPublishHeartbeat } from './agent-manager/activity-observations'
 import { BranchDiffCache, ResourceMonitor, agentCap, autoLowerForPressure, findFileOverlap, projectAgentLevel, readProjectConcurrency, setConcurrencyLevel, setUserConcurrency, type LevelChangeResult, type OverlapCandidate } from './concurrency-control'
 import { effectiveLevel, recommendLevel, type ProjectConcurrencyState, type ResourcePressure } from '../shared/concurrency'
 import { collectMissedParts, debugTranscript, emitArtifactUpdatesFromParts, textTranscript, type DebugTranscriptMessage, notifyStatusTransition, transcriptPartsFromEvent, transcriptPartsFromMessages, type OutputMessage } from './agent-manager/transcript-events'
@@ -281,6 +282,8 @@ export class AgentManager extends EventEmitter {
 
   // Track last sent status per session to detect transitions for OS notifications
   private lastSentStatus: Map<string, string> = new Map()
+  /** Epoch/sequence stamps and heartbeat rate limits for agent:status (#95). */
+  private readonly activityObservations = new ActivityObservations()
 
   // ── Admission control (see agent-manager/admission.ts) ──
   /** Starts waiting for a free slot, one per task, priority-ordered per project (#150). */
@@ -900,7 +903,13 @@ export class AgentManager extends EventEmitter {
   private emitStatus(sessionId: string, owner: { agentId: string; taskId: string }, status: AgentSession['status']): void {
     const task = this.db.getTask(owner.taskId)
     if (sessionId && isCoordinatorTask(task) && task?.session_id && task.session_id !== sessionId) return
-    this.sendToRenderer('agent:status', { sessionId, agentId: owner.agentId, taskId: owner.taskId, status })
+    this.sendToRenderer('agent:status', {
+      sessionId,
+      agentId: owner.agentId,
+      taskId: owner.taskId,
+      status,
+      ...this.activityObservations.stamp()
+    })
     // Every idle transition and every stop ends here: a slot may have freed.
     if (status === 'idle' || status === 'error') this.scheduleStartQueueDrain()
     // Project events (#57): an agent waiting on the user, or one that failed,
@@ -1427,6 +1436,7 @@ export class AgentManager extends EventEmitter {
 
   private stopAdapterPolling(sessionId: string): void {
     this.pollingEntries.delete(sessionId)
+    this.activityObservations.forget(sessionId)
     console.log(`[AgentManager] Unregistered session ${sessionId} from polling (${this.pollingEntries.size} remaining)`)
 
     if (this.pollingEntries.size === 0) {
@@ -1618,9 +1628,34 @@ export class AgentManager extends EventEmitter {
       } else if (status.type === SessionStatusType.IDLE && session) {
         this.handleIdleStatus(sessionId, session)
       }
+
+      // Both reads succeeded: the backend answered just now. Only this path
+      // may renew the renderer's freshness deadline; a failed or hung poll
+      // never reaches it (#95).
+      this.publishActivityHeartbeat(sessionId)
     } catch (error: unknown) {
       console.error('[AgentManager] Adapter polling error:', error)
     }
+  }
+
+  /**
+   * Freshness heartbeat for an active session (#95): its current, unchanged
+   * status, at most once per revalidation interval. Sent to the window only,
+   * straight past sendToRenderer, so transition consumers (notifications,
+   * lastSentStatus, the voice bridge, mobile clients) never see it.
+   */
+  private publishActivityHeartbeat(sessionId: string): void {
+    const session = this.sessions.get(sessionId)
+    if (!session || !shouldPublishHeartbeat(session.status)) return
+    if (!this.activityObservations.takeHeartbeat(sessionId)) return
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+    guardedIpcSend(this.mainWindow.webContents, 'agent:status', {
+      sessionId,
+      agentId: session.agentId,
+      taskId: session.taskId,
+      status: session.status,
+      ...this.activityObservations.stamp(true)
+    })
   }
 
   /** Follows a re-key (temp -> real id) by task id and moves the polling entry with it. */
