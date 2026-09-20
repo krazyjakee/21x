@@ -26,3 +26,14 @@ screenshots show 17px scrollbars and are review evidence, not snapshot baselines
 Text preferences are emulated with root/chrome text sizing; the fixture does
 not certify native OS text preferences, external screen readers or the full
 application/sidebar integration.
+
+At the minimum window size and 200% zoom, the expected measurements are:
+
+| Classic scrollbar | 64px rail client width | Old 56px rail client width | Old horizontal overflow |
+| --- | --- | --- | --- |
+| 15px | 49px | 41px | 2px |
+| 17px | 47px | 39px | 3px |
+
+The corrected rail must have `scrollWidth === clientWidth` in both cases.
+These values are CSS pixels; Electron zoom changes the physical pixel size,
+not the required 44×44 CSS-pixel target.
