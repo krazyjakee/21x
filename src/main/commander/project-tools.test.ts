@@ -267,7 +267,7 @@ describe('ask_captain', () => {
 
     const output = body(await call('ask_captain', { project: 'Web', message: 'Ship the landing page' }))
     expect(output).toMatchObject({ status: 'queued', project_id: project.id, project_name: 'Web', captain_session: 'starting' })
-    expect(output.correlation_id).toMatch(/^cmd-[0-9a-f]{16}$/)
+    expect(output.correlation_id).toMatch(/^cmd-[0-9a-f]{64}$/)
 
     expect(sendMessage).toHaveBeenCalledTimes(1)
     const [sessionId, text, taskId, agentId, attachments, typedMessage, deliveryId] = sendMessage.mock.calls[0] as unknown as [string, string, string, string, undefined, undefined, string]
@@ -297,6 +297,20 @@ describe('ask_captain', () => {
     expect(duplicate.delivery_id).toBe(first.delivery_id)
     expect(duplicate.correlation_id).toBe(first.correlation_id)
     expect(sendMessage).toHaveBeenCalledTimes(1)
+  })
+
+
+  it('keeps a repeated provider tool ID separate across Commander turns', async () => {
+    db.createAgent({ name: 'Claude' })
+    const project = db.createProject({ name: 'Repeat calls' })!
+    const sendMessage = vi.fn(async () => ({}))
+    extra = { agents: fakeAgents({ sendMessage }), context: { sessionId: 'session-1', userMessage: 'first', deliveryScope: 'turn-one' } }
+    const first = body(await call('ask_captain', { project: project.id, message: 'First' }, 'first', 'call-0'))
+    extra.context = { sessionId: 'session-1', userMessage: 'second', deliveryScope: 'turn-two' }
+    const second = body(await call('ask_captain', { project: project.id, message: 'Second' }, 'second', 'call-0'))
+    expect(second.delivery_id).not.toBe(first.delivery_id)
+    expect(second.correlation_id).not.toBe(first.correlation_id)
+    expect(sendMessage).toHaveBeenCalledTimes(2)
   })
 
   it('rejoins a live Captain session and reports a delivery failure after returning', async () => {

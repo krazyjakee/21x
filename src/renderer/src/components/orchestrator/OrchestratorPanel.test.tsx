@@ -253,6 +253,8 @@ describe('OrchestratorPanel — warming the session', () => {
     // candidate selection; the renderer never tears down the good session.
     await waitFor(() => expect(captainRuntimeApi.switch).toHaveBeenCalledWith(DEFAULT_PROJECT_ID, 'other-agent'))
     expect(screen.getByTestId('captain-runtime-state')).toHaveTextContent('Captain is starting server on Codex')
+    expect(combobox.value).toBe('default-agent')
+    expect(agentSessionApi.start.mock.calls.every((call) => call[0] !== 'other-agent')).toBe(true)
     expect(agentSessionApi.stop).not.toHaveBeenCalled()
     expect(projectApi.update).not.toHaveBeenCalled()
     await act(async () => finishSwitch())

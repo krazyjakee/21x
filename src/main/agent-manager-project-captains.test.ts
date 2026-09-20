@@ -106,6 +106,7 @@ describe('per-project Captain conversations', () => {
   })
 
   afterEach(async () => {
+    vi.useRealTimers()
     for (const manager of managers.splice(0)) await manager.stopAllSessions()
     ;(ClaudeCodeAdapter as unknown as Mock).mockReset()
     rmSync(root, { recursive: true, force: true })
@@ -472,7 +473,284 @@ describe('per-project Captain conversations', () => {
       attemptCount: 3
     })
     expect(db.getProject(alphaId)?.captain_agent_id).toBe(candidate.id)
-    expect(fake.destroySession).toHaveBeenCalledWith('good-session', expect.any(Object))
+    await vi.waitFor(() => expect(fake.destroySession).toHaveBeenCalledWith('good-session', expect.any(Object)))
+  })
+
+
+  it('bounds workspace preparation and never starts a candidate after the timeout', async () => {
+    const candidate = db.createAgent({ name: 'Candidate' })!
+    const fake = new FakeAdapter({ sessionIds: ['good'] })
+    const manager = newManager(fake)
+    await manager.startSession(agentId, alphaCaptain, undefined, true)
+    let release!: (path: string) => void
+    vi.spyOn(manager as any, 'setupWorktreeIfNeeded').mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    const switching = manager.switchCaptainAgent(alphaId, candidate.id)
+    await vi.advanceTimersByTimeAsync(90_001)
+    expect(await switching).toMatchObject({ phase: 'rolled_back', agentId, errorCode: 'STARTUP_TIMEOUT' })
+    release(db.getWorkspaceDir(alphaCaptain))
+    await Promise.resolve()
+    expect(fake.createSession).toHaveBeenCalledTimes(1)
+    expect(db.getProject(alphaId)?.captain_agent_id).toBeNull()
+  })
+
+  it('manual rollback invalidates an in-flight candidate before it can commit', async () => {
+    const candidate = db.createAgent({ name: 'Candidate', config: { coding_agent: 'claude-code' } as any })!
+    const fake = new FakeAdapter({ sessionIds: ['good'] })
+    const manager = newManager(fake)
+    await manager.startSession(agentId, alphaCaptain, undefined, true)
+    let release!: (path: string) => void
+    vi.spyOn(manager as any, 'setupWorktreeIfNeeded').mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
+    const switching = manager.switchCaptainAgent(alphaId, candidate.id)
+    const rollback = manager.rollbackCaptainSwitch(alphaId)
+    release(db.getWorkspaceDir(alphaCaptain))
+    expect(await switching).toMatchObject({ generation: rollback.generation, phase: 'rolled_back', agentId })
+    expect(db.getProject(alphaId)?.captain_agent_id).toBe(agentId)
+    expect(fake.createSession).toHaveBeenCalledTimes(1)
+    expect(manager.findSessionByTaskId(alphaCaptain)?.sessionId).toBe('good')
+  })
+
+  it('coalesces duplicate switches and keeps a healthy shared adapter alive on probe failure', async () => {
+    const candidate = db.createAgent({ name: 'Candidate', config: { coding_agent: 'claude-code' } as any })!
+    const fake = new FakeAdapter({ sessionIds: ['good'] })
+    const stopServer = vi.fn(async () => {})
+    Object.assign(fake, { stopServer })
+    const manager = newManager(fake)
+    await manager.startSession(agentId, alphaCaptain, undefined, true)
+    fake.checkHealth.mockResolvedValueOnce({ available: false, reason: 'protocol unhealthy' })
+    const first = manager.switchCaptainAgent(alphaId, candidate.id)
+    const duplicate = manager.switchCaptainAgent(alphaId, candidate.id)
+    expect(first).toBe(duplicate)
+    expect(await first).toMatchObject({ phase: 'rolled_back' })
+    expect(stopServer).not.toHaveBeenCalled()
+  })
+
+  it('repairs a crashed switch even before its old process deadline expires', async () => {
+    const candidate = db.createAgent({ name: 'Candidate' })!
+    new CaptainRuntimeStore(db).begin({ ownerId: alphaCaptain, projectId: alphaId,
+      agentId: candidate.id, lastGoodAgentId: agentId, deadlineAt: Date.now() + 90_000 })
+    const fake = new FakeAdapter({ sessionIds: ['recovered'] })
+    const manager = newManager(fake)
+    await manager.reconcileStartup()
+    expect(manager.getCaptainRuntime(alphaId)).toMatchObject({ phase: 'rolled_back', agentId, probeOk: true })
+    expect(manager.findSessionByTaskId(alphaCaptain)?.sessionId).toBe('recovered')
+  })
+
+
+
+
+
+  it('persists inferred ownership when a caller supplies only a session ID', async () => {
+    const first = newManager(new FakeAdapter({ sessionIds: ['saved-session'] }))
+    await first.startSession(agentId, alphaCaptain, undefined, true)
+    vi.spyOn(first as any, 'sendMessageNow').mockRejectedValueOnce(new Error('interrupted'))
+    await expect(first.sendMessage('saved-session', 'Keep me', undefined, undefined, undefined, undefined, 'session-only')).rejects.toThrow('interrupted')
+    const row = new DeliveryStore(db).getByKey('session-only')!
+    expect(JSON.parse(row.payload)).toMatchObject({ taskId: alphaCaptain, agentId })
+    await first.stopAllSessions()
+    const fake = new FakeAdapter()
+    const second = newManager(fake)
+    await second.reconcileStartup()
+    expect(fake.sendPrompt).toHaveBeenCalledTimes(1)
+    expect(new DeliveryStore(db).get(row.id)?.state).toBe('acknowledged')
+  })
+
+  it('terminates a hung handoff visibly without replaying uncertain backend acceptance', async () => {
+    const manager = newManager(new FakeAdapter())
+    let finish!: (result: object) => void
+    const send = vi.spyOn(manager as any, 'sendMessageNow').mockImplementation(() => new Promise((resolve) => { finish = resolve }))
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    const pending = manager.sendMessage('', 'retained', alphaCaptain, agentId, undefined, undefined, 'hung-handoff')
+    const failed = expect(pending).rejects.toThrow('Message handoff timed out')
+    await vi.advanceTimersByTimeAsync(180_001)
+    await failed
+    expect(new DeliveryStore(db).getByKey('hung-handoff')).toMatchObject({ state: 'timed_out' })
+    finish({})
+    await Promise.resolve()
+    await expect(manager.sendMessage('', 'retained', alphaCaptain, agentId, undefined, undefined, 'hung-handoff')).rejects.toThrow('acceptance is unknown')
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it('makes repeated message delivery failures terminal after five attempts', async () => {
+    const manager = newManager(new FakeAdapter())
+    const send = vi.spyOn(manager as any, 'sendMessageNow').mockRejectedValue(new Error('backend unavailable'))
+    for (let attempt = 0; attempt < 6; attempt++) {
+      await expect(manager.sendMessage('', 'retained', alphaCaptain, agentId, undefined, undefined, 'bounded-retry')).rejects.toThrow('backend unavailable')
+    }
+    expect(send).toHaveBeenCalledTimes(5)
+    expect(new DeliveryStore(db).getByKey('bounded-retry')).toMatchObject({ state: 'failed', attemptCount: 5 })
+  })
+
+  it('starts one Captain for concurrent durable messages without a prewarm owner', async () => {
+    const fake = new FakeAdapter({ sessionIds: ['one-start'] })
+    const manager = newManager(fake)
+    await Promise.all([
+      manager.sendMessage('', 'first', alphaCaptain, agentId, undefined, undefined, 'first-delivery'),
+      manager.sendMessage('', 'second', alphaCaptain, agentId, undefined, undefined, 'second-delivery')
+    ])
+    expect(fake.createSession).toHaveBeenCalledTimes(1)
+    expect(fake.sendPrompt).toHaveBeenCalledTimes(2)
+    expect(fake.sendPrompt.mock.calls.map((call) => call[0])).toEqual(['one-start', 'one-start'])
+    expect(['first-delivery', 'second-delivery'].map((key) => new DeliveryStore(db).getByKey(key)?.state)).toEqual(['acknowledged', 'acknowledged'])
+    expect(db.db.prepare('SELECT delivery_key FROM authorization_dispatches WHERE task_id = ? ORDER BY seq').all(alphaCaptain))
+      .toEqual([{ delivery_key: 'first-delivery' }, { delivery_key: 'second-delivery' }])
+  })
+
+  it('cancels messages queued before Stop without reviving the task, but permits a new post-Stop send', async () => {
+    const task = db.createTask(makeTask({ title: 'Queued message stop' }))!
+    db.updateTask(task.id, { agent_id: agentId })
+    const fake = new FakeAdapter({ sessionIds: ['live'], status: SessionStatusType.IDLE })
+    const manager = newManager(fake)
+    await manager.startSession(agentId, task.id, undefined, true)
+    let finish!: () => void
+    let backendAlive = true
+    let accepted = 0
+    fake.destroySession.mockImplementation(async () => { backendAlive = false })
+    fake.resumeSession.mockImplementation(async () => { backendAlive = true; return [] })
+    fake.sendPrompt.mockImplementation(async () => {
+      if (!backendAlive) throw new Error('Backend session was stopped')
+      accepted++
+      if (accepted === 1) await new Promise<void>((resolve) => { finish = resolve })
+    })
+
+    const first = manager.sendMessage('live', 'first', task.id, agentId, undefined, undefined, 'stop-first')
+    await vi.waitFor(() => expect(fake.sendPrompt).toHaveBeenCalledTimes(1))
+    const second = manager.sendMessage('live', 'queued before Stop', task.id, agentId, undefined, undefined, 'stop-second')
+    const secondRejected = expect(second).rejects.toThrow('user stopped this task')
+    await manager.stopByTaskId(task.id)
+    finish()
+    await first
+    await secondRejected
+
+    const deliveries = new DeliveryStore(db)
+    expect(deliveries.getByKey('stop-second')).toMatchObject({
+      state: 'cancelled',
+      lastError: expect.stringContaining('user stopped this task')
+    })
+    expect(manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'cancelled', recoveryCause: 'manual_stop' })
+    expect(manager.findSessionByTaskId(task.id)).toBeUndefined()
+    expect((manager as any).pollingEntries.size).toBe(0)
+    expect(db.getTask(task.id)?.status).toBe('not_started')
+    expect(fake.resumeSession).not.toHaveBeenCalled()
+    expect(fake.sendPrompt).toHaveBeenCalledTimes(1)
+    expect(accepted).toBe(1)
+
+    await manager.sendMessage('', 'explicitly sent after Stop', task.id, agentId, undefined, undefined, 'after-stop')
+    expect(fake.resumeSession).toHaveBeenCalledTimes(1)
+    expect(deliveries.getByKey('after-stop')?.state).toBe('acknowledged')
+  })
+
+  it('fences a claimed typed handoff awaiting idle before authority activation or adapter submission', async () => {
+    const fake = new FakeAdapter({ sessionIds: ['live'], status: SessionStatusType.IDLE })
+    const manager = newManager(fake)
+    await manager.startSession(agentId, alphaCaptain, undefined, true)
+    const typed = {
+      id: 'stop-await-idle', taskId: alphaCaptain, projectId: alphaId,
+      at: Date.now(), text: 'Create GitHub issues for Alpha'
+    }
+    const node = recordHumanAuthorization(db, {
+      at: typed.at, messageId: typed.id, source: 'project-chat', text: typed.text,
+      taskId: alphaCaptain, projectId: alphaId
+    })
+    let idle!: (status: { type: SessionStatusType }) => void
+    let finishDestroy!: () => void
+    let acceptedAfterStop = 0
+    fake.destroySession.mockImplementationOnce(() => new Promise<void>((resolve) => { finishDestroy = resolve }))
+    fake.sendPrompt.mockImplementation(async () => { acceptedAfterStop++ })
+    fake.getStatus.mockImplementationOnce(() => new Promise(resolve => { idle = resolve }))
+
+    const sending = manager.sendMessage(
+      'live', typed.text, alphaCaptain, agentId, undefined, typed, 'stop-await-idle'
+    )
+    const settled = Promise.allSettled([sending])
+    await vi.waitFor(() => expect(idle).toBeTypeOf('function'))
+    const stopping = manager.stopByTaskId(alphaCaptain)
+    await vi.waitFor(() => expect(finishDestroy).toBeTypeOf('function'))
+    expect(new DeliveryStore(db).getByKey('stop-await-idle')?.state).toBe('cancelled')
+    idle({ type: SessionStatusType.IDLE })
+    await settled
+
+    expect(acceptedAfterStop).toBe(0)
+    expect(taskAuthorization(db, alphaCaptain).status).not.toBe('active')
+    expect(taskAuthorization(db, alphaCaptain).nodeId).toBeNull()
+    expect(taskAuthorization(db, alphaCaptain).nodeId).not.toBe(node.id)
+    expect((manager as any).pollingEntries.size).toBe(0)
+    finishDestroy()
+    await stopping
+    expect(manager.findSessionByTaskId(alphaCaptain)).toBeUndefined()
+    expect((manager as any).pollingEntries.size).toBe(0)
+  })
+
+  it('does not restore polling when an accepted send completes during slow Stop teardown', async () => {
+    const task = db.createTask(makeTask({ title: 'Stop with pending teardown' }))!
+    db.updateTask(task.id, { agent_id: agentId })
+    const fake = new FakeAdapter({ sessionIds: ['live'], status: SessionStatusType.IDLE })
+    const manager = newManager(fake)
+    await manager.startSession(agentId, task.id, undefined, true)
+    let finishSend!: () => void
+    let finishDestroy!: () => void
+    fake.sendPrompt.mockImplementationOnce(() => new Promise<void>((resolve) => { finishSend = resolve }))
+    fake.destroySession.mockImplementationOnce(() => new Promise<void>((resolve) => { finishDestroy = resolve }))
+
+    const sending = manager.sendMessage('live', 'sent before stop', task.id, agentId, undefined, undefined, 'stop-finishing')
+    await vi.waitFor(() => expect(finishSend).toBeTypeOf('function'))
+    const stopping = manager.stopByTaskId(task.id)
+    await vi.waitFor(() => expect(finishDestroy).toBeTypeOf('function'))
+    expect((manager as any).pollingEntries.size).toBe(0)
+    finishSend()
+    await sending
+    expect((manager as any).pollingEntries.size).toBe(0)
+    expect(manager.findSessionByTaskId(task.id)).toBeUndefined()
+    finishDestroy()
+    await stopping
+    expect((manager as any).pollingEntries.size).toBe(0)
+    expect(manager.findSessionByTaskId(task.id)).toBeUndefined()
+    expect(db.getTask(task.id)?.status).toBe('not_started')
+  })
+
+  it('re-reserves exact authorization when an earlier failed delivery is replayed after its successor', async () => {
+    const before = new FakeAdapter({ sessionIds: ['live'], status: SessionStatusType.IDLE })
+    const firstManager = newManager(before)
+    await firstManager.startSession(agentId, alphaCaptain, undefined, true)
+    before.sendPrompt.mockRejectedValueOnce(new Error('temporary unavailable'))
+    const result = await Promise.allSettled([
+      firstManager.sendMessage('live', 'first', alphaCaptain, agentId, undefined, undefined, 'retry-first'),
+      firstManager.sendMessage('live', 'second', alphaCaptain, agentId, undefined, undefined, 'retry-second')
+    ])
+    expect(result.map((entry) => entry.status)).toEqual(['rejected', 'fulfilled'])
+    expect(new DeliveryStore(db).getByKey('retry-first')).toMatchObject({ state: 'pending', attemptCount: 1 })
+    expect(new DeliveryStore(db).getByKey('retry-second')?.state).toBe('acknowledged')
+    await firstManager.stopAllSessions()
+
+    const after = new FakeAdapter({ status: SessionStatusType.IDLE })
+    const recovery = newManager(after)
+    await recovery.reconcileStartup()
+    expect(after.resumeSession).toHaveBeenCalledWith('live', expect.any(Object))
+    expect(after.sendPrompt).toHaveBeenCalledTimes(1)
+    expect(after.sendPrompt.mock.calls[0][1]).toEqual([expect.objectContaining({ text: 'first' })])
+    expect(new DeliveryStore(db).getByKey('retry-first')).toMatchObject({ state: 'acknowledged', attemptCount: 2 })
+  })
+
+  it('ignores status from the old Captain after committing its replacement', async () => {
+    const candidate = db.createAgent({ name: 'Candidate', config: { coding_agent: 'claude-code' } as any })!
+    const fake = new FakeAdapter({ sessionIds: ['old', 'new'] })
+    const manager = newManager(fake)
+    await manager.startSession(agentId, alphaCaptain, undefined, true)
+    const emitted = vi.spyOn(manager as any, 'sendToRenderer')
+    await manager.switchCaptainAgent(alphaId, candidate.id)
+    await vi.waitFor(() => expect(fake.destroySession).toHaveBeenCalledWith('old', expect.any(Object)))
+    expect(manager.findSessionByTaskId(alphaCaptain)?.sessionId).toBe('new')
+    const statuses = emitted.mock.calls.filter((call) => call[0] === 'agent:status')
+    expect(statuses.length).toBeGreaterThan(0)
+    expect(statuses.every((call) => (call[1] as { sessionId: string }).sessionId === 'new')).toBe(true)
+  })
+
+  it('rejects sending through another project session without leaking the message', async () => {
+    const fake = new FakeAdapter({ sessionIds: ['alpha'] })
+    const manager = newManager(fake)
+    await manager.startSession(agentId, alphaCaptain, undefined, true)
+    await expect(manager.sendMessage('alpha', 'Private beta message', betaCaptain, agentId)).rejects.toThrow('different task')
+    expect(fake.sendPrompt).not.toHaveBeenCalled()
   })
 
   it('rolls back without changing selection when the candidate process exits during session startup', async () => {
@@ -508,7 +786,7 @@ describe('per-project Captain conversations', () => {
       agentId,
       candidateAgentId: candidate.id,
       errorDetail: 'backend protocol is not ready',
-      probeOk: true
+      probeOk: null
     })
     expect(fake.destroySession).toHaveBeenCalledWith('unhealthy-session', expect.any(Object))
     expect(manager.findSessionByTaskId(alphaCaptain)?.sessionId).toBe('good-session')
