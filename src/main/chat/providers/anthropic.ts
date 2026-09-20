@@ -32,7 +32,16 @@ function toAnthropicMessages(messages: ChatMessage[]): Anthropic.MessageParam[] 
   const out: Anthropic.MessageParam[] = []
   for (const message of messages) {
     if (message.role === 'user') {
-      out.push({ role: 'user', content: message.content })
+      if (message.images?.length) {
+        const content: Anthropic.ContentBlockParam[] = message.images.map((image) => ({
+          type: 'image',
+          source: { type: 'base64', media_type: image.mimeType, data: image.data }
+        }))
+        if (message.content) content.push({ type: 'text', text: message.content })
+        out.push({ role: 'user', content })
+      } else {
+        out.push({ role: 'user', content: message.content })
+      }
     } else if (message.role === 'assistant') {
       const content: Anthropic.ContentBlockParam[] = []
       if (message.content) content.push({ type: 'text', text: message.content })
@@ -78,6 +87,7 @@ function toStopReason(reason: Anthropic.Message['stop_reason']): ChatProviderSto
 
 export class AnthropicChatProvider implements ChatProvider {
   readonly id = 'anthropic'
+  readonly supportsImages = true
   readonly model: string
   private readonly modelId: string
   private readonly client: Anthropic

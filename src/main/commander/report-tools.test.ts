@@ -15,6 +15,7 @@ import { handleTaskRoute } from '../task-api/task-routes'
 import { CommanderService } from './commander-service'
 import { CommanderStore } from './commander-store'
 import { createCommanderProjectTools, type CommanderAgents } from './project-tools'
+import { CaptainDeliveryService } from './captain-delivery'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_TITLE_PROMPT } from './prompts'
 import { deliverCaptainReport, setCaptainReportHandler } from './report-inbox'
 import {
@@ -69,19 +70,20 @@ let events: CommanderEvent[]
 let sendMessage: ReturnType<typeof vi.fn>
 let agents: CommanderAgents
 let uninstall: (() => void) | null
+let captainDelivery: CaptainDeliveryService
 
 function makeService(provider: ChatProvider, over: { maxReportAsks?: number } = {}): CommanderService {
   return new CommanderService({
     store,
     emit: (e) => events.push(e),
     createProvider: () => provider,
-    getTools: (context) => createCommanderProjectTools({ db, context, agents }),
+    getTools: (context) => createCommanderProjectTools({ db, context, agents, delivery: captainDelivery }),
     ...over
   })
 }
 
 function install(service: CommanderService): void {
-  uninstall = installCommanderReportBridge({ service, store, getProject: (id) => db.getProject(id) })
+  uninstall = installCommanderReportBridge({ service, store, deliveries: captainDelivery.store, getProject: (id) => db.getProject(id) })
 }
 
 /** The correlation id inside the relay text a Captain received. */
@@ -112,6 +114,11 @@ beforeEach(() => {
     pauseAllProjects: vi.fn(),
     isAllProjectsPaused: () => false
   } as unknown as CommanderAgents
+  captainDelivery = new CaptainDeliveryService({
+    db,
+    agents,
+    onTerminalFailure: () => {}
+  })
   uninstall = null
 })
 
@@ -180,6 +187,75 @@ describe('report routing', () => {
 })
 
 describe('report delivery', () => {
+  it('routes by durable request ownership and stores duplicate delivery/ack once', async () => {
+    const alpha = db.createProject({ name: 'Alpha' })!
+    const service = makeService(fakeProvider())
+    install(service)
+    const origin = store.createSession('Origin')
+    store.createSession('Newer')
+    const request = captainDelivery.store.enqueue({
+      idempotencyKey: 'request:owned',
+      kind: 'captain_request',
+      sourceSessionId: origin.id,
+      projectId: alpha.id,
+      correlationId: 'cmd-owned',
+      payload: 'ask'
+    }).record
+    captainDelivery.store.claim(request.id, 'test', 1_000)
+    captainDelivery.store.accept(request.id, 'test', 'captain-session')
+
+    const first = await handleTaskRoute(db, '/report_to_commander', {
+      project_id: alpha.id,
+      message: 'Done once.',
+      correlation_id: 'cmd-owned',
+      delivery_id: 'provider-attempt-1'
+    })
+    const duplicate = await handleTaskRoute(db, '/report_to_commander', {
+      project_id: alpha.id,
+      message: 'Done once.',
+      correlation_id: 'cmd-owned',
+      delivery_id: 'provider-attempt-2'
+    })
+
+    expect(first).toMatchObject({ success: true, session_id: origin.id, routed_by: 'correlation' })
+    expect(duplicate).toMatchObject({ success: true, session_id: origin.id, routed_by: 'correlation' })
+    expect(store.listMessages(origin.id).filter((message) => message.role === 'report')).toHaveLength(1)
+    expect(captainDelivery.store.get(request.id)).toMatchObject({ state: 'acknowledged' })
+    expect(events.filter((event) => event.type === 'messages_appended' && event.sessionId === origin.id)).toHaveLength(1)
+  })
+
+  it('keeps timeout terminal while accepting one visibly late correlated report', async () => {
+    const alpha = db.createProject({ name: 'Alpha' })!
+    const service = makeService(fakeProvider())
+    install(service)
+    const origin = store.createSession('Origin')
+    const request = captainDelivery.store.enqueue({
+      idempotencyKey: 'request:late',
+      kind: 'captain_request',
+      sourceSessionId: origin.id,
+      projectId: alpha.id,
+      correlationId: 'cmd-late',
+      payload: 'ask'
+    }).record
+    captainDelivery.store.terminal(request.id, 'timed_out', 'deadline')
+
+    await handleTaskRoute(db, '/report_to_commander', {
+      project_id: alpha.id,
+      message: 'Eventually done.',
+      correlation_id: 'cmd-late'
+    })
+    await handleTaskRoute(db, '/report_to_commander', {
+      project_id: alpha.id,
+      message: 'Eventually done.',
+      correlation_id: 'cmd-late'
+    })
+
+    expect(store.listMessages(origin.id).filter((message) => message.role === 'report')).toMatchObject([
+      { content: 'Late report after the request timed out: Eventually done.', correlation_id: 'cmd-late' }
+    ])
+    expect(captainDelivery.store.get(request.id)).toMatchObject({ state: 'timed_out' })
+  })
+
   it('relays a report in the open session with a Commander turn, and only queues it unread elsewhere', async () => {
     const alpha = db.createProject({ name: 'Alpha' })!
     const provider = fakeProvider((request) => (startedByReport(request) ? 'Alpha says the site shipped.' : 'ok'))
