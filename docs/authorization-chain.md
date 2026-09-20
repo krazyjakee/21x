@@ -89,8 +89,10 @@ it never renews expiry or assigns a new generation to an old delivery.
 
 Reservation clears the current active binding before asynchronous session resume
 or configuration work. An authorized message waits for confirmed backend `idle`
-before activating its binding and sending. Per-task serialization covers adapters
-that await before marking a prompt busy. Activation rechecks the latest sequence,
+before activating its binding and sending. Per-task serialization covers every adapter send, including startup and
+worker nudges, and adapters that await before marking a prompt busy. A worker
+continuation captures both generation and active node before asynchronous
+preparation, and refuses to borrow a newer human instruction. Activation rechecks the latest sequence,
 expiry and revocation after asynchronous waits. Error, approval-wait, unknown
 status, or a 60-second idle timeout leave authority inactive. Machine Captain
 nudges clear earlier turn authority. Normal worker continuation retains the fixed

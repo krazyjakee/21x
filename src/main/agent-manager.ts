@@ -1,4 +1,4 @@
-import { sendWithAuthorization } from './authorization-dispatch'
+import { captureAuthorizationSnapshot, sendPreservingAuthorization, sendWithAuthorization } from './authorization-dispatch'
 import { prepareAuthorizationDispatch, failAuthorizationDispatch } from './authorization'
 import { prepareProjectMessageDispatch, activateProjectMessageDispatch, failProjectMessageDispatch, type ProjectMessageDispatch, type TypedMessage } from './merge-grants'
 import { DEFAULT_SERVER_URL } from './adapters/opencode-server'
@@ -1005,6 +1005,10 @@ export class AgentManager extends EventEmitter {
     workspaceDir ||= this.db.getWorkspaceDir(taskId)
 
     const task = this.db.getTask(taskId)
+    if (!skipInitialPrompt && task && isCoordinatorTask(task) && this.db.db && typeof this.db.db.prepare === 'function') {
+      prepareAuthorizationDispatch(this.db, { key: `captain-start:${randomUUID()}`, taskId: task.id, text: 'Platform Captain startup' })
+    }
+    const authorizationSnapshot = this.db.db && typeof this.db.db.prepare === 'function' ? captureAuthorizationSnapshot(this.db, taskId) : null
     const isTriageSession = isTriageSessionTask(taskId, task)
     await yieldEventLoop()
 
@@ -1129,9 +1133,6 @@ export class AgentManager extends EventEmitter {
     if (!skipInitialPrompt) {
       if (task && isCoordinatorTask(task) && task.project_id) {
         prepareProjectMessageDispatch(task.project_id)
-        if (this.db.db && typeof this.db.db.prepare === 'function') {
-          prepareAuthorizationDispatch(this.db, { key: `captain-start:${randomUUID()}`, taskId: task.id, text: 'Platform Captain startup' })
-        }
       }
       let promptText: string
       if (isTriageSession && task) {
@@ -1172,7 +1173,12 @@ export class AgentManager extends EventEmitter {
       })
 
       try {
-        await adapter.sendPrompt(adapterSessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
+        const send = () => adapter.sendPrompt(adapterSessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
+        if (this.db.db && typeof this.db.db.prepare === 'function') {
+          await sendPreservingAuthorization(this.db, taskId, authorizationSnapshot, send)
+        } else {
+          await send()
+        }
       } catch (sendError) {
         console.error(`[AgentManager] sendPrompt FAILED:`, sendError)
         const message = sendError instanceof Error ? sendError.message : String(sendError)
@@ -4233,6 +4239,7 @@ export class AgentManager extends EventEmitter {
     authorizationDispatch?: number
   ): Promise<void> {
     const task = this.db.getTask(session.taskId)
+    const authorizationSnapshot = this.db.db && typeof this.db.db.prepare === 'function' ? captureAuthorizationSnapshot(this.db, session.taskId) : null
     // Nudges use this method directly, and must invalidate earlier typed authority too.
     dispatch ??= task && isCoordinatorTask(task) && task.project_id ? prepareProjectMessageDispatch(task.project_id) : undefined
     // Captain wake-ups and continuation nudges are new machine turns, not
@@ -4297,6 +4304,8 @@ export class AgentManager extends EventEmitter {
       }
       if (authorizationDispatch !== undefined) {
         await sendWithAuthorization(this.db, authorizationDispatch, () => adapter.getStatus(sessionId, sessionConfig), send)
+      } else if (this.db.db && typeof this.db.db.prepare === 'function') {
+        await sendPreservingAuthorization(this.db, session.taskId, authorizationSnapshot, send)
       } else {
         await send()
       }

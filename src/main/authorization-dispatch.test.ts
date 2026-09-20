@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTestDb } from '../../test/helpers/db-test-helper'
 import { prepareAuthorizationDispatch, recordHumanAuthorization, revokeAuthorization, taskAuthorization } from './authorization'
-import { sendWithAuthorization } from './authorization-dispatch'
+import { captureAuthorizationSnapshot, sendPreservingAuthorization, sendWithAuthorization } from './authorization-dispatch'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -81,6 +81,51 @@ describe('adapter authorization boundary', () => {
     idle.resolve(undefined)
     await two
     expect(sendSecond).toHaveBeenCalledOnce()
+  })
+
+  it('serializes startup/nudge sends and rejects an older captured continuation', async () => {
+    const first = dispatch()
+    await sendWithAuthorization(db, first.seq, async () => ({ type: 'idle' }), async () => {})
+    const snapshot = captureAuthorizationSnapshot(db, taskId)
+    const accepted = deferred<void>()
+    const oldSend = vi.fn(() => accepted.promise)
+    const continuation = sendPreservingAuthorization(db, taskId, snapshot, oldSend)
+    await vi.waitFor(() => expect(oldSend).toHaveBeenCalledOnce())
+    const next = dispatch()
+    const status = vi.fn(async () => ({ type: 'idle' }))
+    const send = vi.fn(async () => {})
+    const newTurn = sendWithAuthorization(db, next.seq, status, send)
+    await Promise.resolve()
+    expect(status).not.toHaveBeenCalled()
+    accepted.resolve(undefined)
+    await continuation
+    await newTurn
+    await expect(sendPreservingAuthorization(db, taskId, snapshot, oldSend)).rejects.toThrow('Stale authorization continuation')
+  })
+
+  it('rejects nudges captured during an inactive reservation after it becomes active', async () => {
+    const next = dispatch()
+    const snapshot = captureAuthorizationSnapshot(db, taskId)
+    const status = deferred<{ type: string }>()
+    const send = vi.fn(async () => {})
+    const newTurn = sendWithAuthorization(db, next.seq, () => status.promise, send)
+    const nudge = vi.fn(async () => {})
+    const continuation = sendPreservingAuthorization(db, taskId, snapshot, nudge)
+    const rejected = expect(continuation).rejects.toThrow('Stale authorization continuation')
+    expect(nudge).not.toHaveBeenCalled()
+    status.resolve({ type: 'idle' })
+    await newTurn
+    await rejected
+    expect(nudge).not.toHaveBeenCalled()
+  })
+
+  it('clears authority when adapter acceptance fails and releases the send lock', async () => {
+    const first = dispatch()
+    await expect(sendWithAuthorization(db, first.seq, async () => ({ type: 'idle' }), async () => { throw new Error('send failed') })).rejects.toThrow('send failed')
+    expect(taskAuthorization(db, taskId).effectivePermissions).toEqual([])
+    const next = dispatch()
+    await sendWithAuthorization(db, next.seq, async () => ({ type: 'idle' }), async () => {})
+    expect(taskAuthorization(db, taskId).origin!.id).toBe(next.root.id)
   })
 
   it.each(['revoked', 'expired'])('rechecks %s authorization after the final await', async reason => {

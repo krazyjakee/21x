@@ -119,6 +119,23 @@ describe('immutable human authorization chain', () => {
     expect(resolveAuthorization(db, published.id).effectivePermissions).toEqual(['github.issue.create', 'github.issue.link'])
   })
 
+  it('conversational scope cannot widen earlier repository narrowing or ignore ambiguity', () => {
+    db.addProjectRepo(projectId, { org: 'other', name: 'repo', provider: 'github' })
+    db.createProject({ name: 'Beta' })
+    const store = new CommanderStore(db, { now: () => now })
+    const session = store.createSession()
+    store.appendHumanMessage(session.id, 'Use 21x repository krazyjakee/21x')
+    const message = store.appendHumanMessage(session.id, 'Create GitHub issues')
+    vi.spyOn(Date, 'now').mockReturnValue(message.created_at + 1)
+    const node = commanderAuthorization(db, { sessionId: session.id, userMessageId: message.id, userMessage: message.content, trigger: 'user', projectId, taskId: captainId, correlationId: 'scope-narrow', message: 'Publish issues' })!
+    expect(resolveAuthorization(db, node.id).scope).toEqual([{ projectId, repos: ['krazyjakee/21x'] }])
+    store.appendHumanMessage(session.id, 'Use 21x and Beta')
+    const ambiguous = store.appendHumanMessage(session.id, 'Create GitHub issues')
+    vi.spyOn(Date, 'now').mockReturnValue(ambiguous.created_at + 1)
+    const unscoped = commanderAuthorization(db, { sessionId: session.id, userMessageId: ambiguous.id, userMessage: ambiguous.content, trigger: 'user', projectId, taskId: captainId, correlationId: 'scope-ambiguous', message: 'Publish issues' })!
+    expect(resolveAuthorization(db, unscoped.id).effectivePermissions).toEqual([])
+  })
+
   it('keeps human evidence with no effective permissions when the scope is unresolved', () => {
     const origin = recordHumanAuthorization(db, { messageId: 'unknown-project', text: 'Create GitHub issues', at: now, source: 'commander-chat', sessionId: 'unknown' })
     const node = delegateAuthorization(db, { parentId: origin.id, author: 'commander', text: 'The model picked 21x', taskId: captainId, projectId })!

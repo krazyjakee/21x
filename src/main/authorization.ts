@@ -108,6 +108,8 @@ export function recordHumanAuthorization(source: Source, input: {
   }
   let projectIds: string[] = []
   let scopeOriginMessageId: string | undefined
+  let inheritedScope: AuthorizationScope[] | undefined
+  let allowContext = true
   const projects = source.db.prepare('SELECT id, name FROM projects WHERE archived = 0').all() as { id: string; name: string }[]
   if (input.source === 'project-chat' && input.projectId) projectIds = [input.projectId]
   else {
@@ -115,18 +117,24 @@ export function recordHumanAuthorization(source: Source, input: {
     // product name is normalized; model-selected project names never do this.
     const named = projects.filter(p => new RegExp(`(?:^|[^a-z0-9])${p.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^a-z0-9])`, 'i').test(input.text.replace(/twenty[ -]one\s*x/gi, '21x')))
     if (named.length === 1) projectIds = [named[0].id]
+    else if (named.length > 1) allowContext = false
   }
-  if (!projectIds.length && input.source === 'commander-chat' && input.sessionId) {
+  if (allowContext && !projectIds.length && input.source === 'commander-chat' && input.sessionId) {
     // Conversational scope comes only from earlier platform-captured HUMAN
     // turns, never assistant summaries or the relay's choice of project.
     const previous = source.db.prepare("SELECT id FROM authorization_nodes WHERE parent_id IS NULL AND json_extract(body, '$.sessionId') = ? ORDER BY rowid DESC LIMIT 1").get(input.sessionId) as { id: string } | undefined
     const node = previous && read(source, previous.id)?.node
     if (node && node.scope.length === 1 && node.expiresAt > input.at) {
       projectIds = node.scope.map(s => s.projectId)
+      inheritedScope = node.scope
       scopeOriginMessageId = node.scopeOriginMessageId ?? node.messageId
     }
   }
   const scope = projectIds.map(id => configuredScope(source, id)).filter((s): s is AuthorizationScope => !!s)
+  if (inheritedScope) for (const s of scope) {
+    const inherited = inheritedScope.find(p => p.projectId === s.projectId)
+    s.repos = s.repos.filter(repo => inherited?.repos.includes(repo))
+  }
   // An explicitly named repository further narrows the configured snapshot.
   const namedRepos = input.text.match(/\b[a-z0-9_.-]+\/[a-z0-9_.-]+\b/gi)?.map(r => r.toLowerCase())
   if (namedRepos?.length) for (const s of scope) s.repos = s.repos.filter(r => namedRepos.includes(r))
