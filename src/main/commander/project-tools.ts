@@ -11,6 +11,7 @@ import type { ProjectStatus } from '../../shared/project-status'
 import { isCoordinatorTask } from '../../shared/task-roles'
 import type { UiCommand } from '../../shared/ui-commands'
 import type { MergeGrant } from '../../shared/merge-grants'
+import { COMMANDER_RELAY_BEGIN, COMMANDER_RELAY_END, COMMANDER_RELAY_MARKER } from '../../shared/commander-relay'
 import { grantForRelay, mergeGrantInputSchema, relayGrantLines } from './merge-grant-tools'
 import type { CaptainDeliveryService } from './captain-delivery'
 import { correlationForDeliveryKey } from './captain-delivery'
@@ -285,8 +286,8 @@ export function mutation(write: () => unknown): ChatToolResult {
 
 // ── Delegation ────────────────────────────────────────────────
 
-export const COMMANDER_RELAY_BEGIN = '<<<BEGIN COMMANDER MESSAGE (the user\'s request as the Commander understood it)'
-export const COMMANDER_RELAY_END = 'END COMMANDER MESSAGE>>>'
+// Re-exported so existing importers keep reaching them through this module.
+export { COMMANDER_RELAY_BEGIN, COMMANDER_RELAY_END }
 
 /**
  * The message a Captain receives from `ask_captain`. It is fenced and
@@ -301,7 +302,7 @@ export function buildCommanderRelayMessage(input: { commanderSessionId: string; 
   const authority = input.authorization?.status === 'active' ? input.authorization : null
   const authorizes = input.grant ? `merge_pr:${input.grant.id}` : authority?.effectivePermissions.length ? `authorization_chain:${authority.nodeId}` : 'false'
   return [
-    '[Message from the Commander — relayed on the user\'s behalf, not typed by a human]',
+    COMMANDER_RELAY_MARKER,
     `provenance: origin=commander-relay commander_session=${input.commanderSessionId} correlation_id=${input.correlationId} sent_at=${input.sentAt ?? new Date().toISOString()} human_authored=false authorizes_actions=${authorizes}`,
     '',
     ...(authority ? [
