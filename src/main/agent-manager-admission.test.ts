@@ -7,6 +7,7 @@ import { AgentManager } from './agent-manager'
 import { handleSessionRoute } from './task-api/session-routes'
 import { setTaskApiAgentController } from './task-api/state'
 import { TaskAutomationScheduler } from './task-automation-scheduler'
+import { prepareUserTaskUpdate } from './task-updates'
 import { startMobileApiServer, stopMobileApiServer } from './mobile-api-server'
 import { MAX_CONCURRENT_AGENT_SESSIONS_SETTING } from './agent-manager/admission'
 import { TaskStatus } from '../shared/constants'
@@ -127,6 +128,48 @@ afterEach(async () => {
 })
 
 describe('admission control — AgentManager.startTask', () => {
+  it('does not acknowledge a move until an in-flight start is stopped', async () => {
+    const { db, manager, createTasks } = setup(1)
+    const [task] = createTasks(1)
+    const spawn = vi.mocked((manager as any).startSessionNow)
+    const original = spawn.getMockImplementation()!
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    spawn.mockImplementationOnce(async (...args: unknown[]) => { await gate; return original(...args) })
+    const start = manager.startTask(task.id).catch(() => undefined)
+    let stopped = false
+    const stop = manager.stopByTaskId(task.id).then(() => { stopped = true })
+    await settle()
+    expect(stopped).toBe(false)
+    release()
+    await Promise.all([start, stop])
+    expect(manager.hasTaskStartOwnership(task.id)).toBe(false)
+    expect(db.getTask(task.id)?.status).toBe(TaskStatus.NotStarted)
+  })
+
+  it('refuses a move and keeps live ownership when the backend cannot stop', async () => {
+    const { db, manager, createTasks } = setup(1)
+    const [task] = createTasks(1)
+    await manager.startTask(task.id)
+    vi.spyOn(manager as any, 'buildSessionConfig').mockResolvedValue({})
+    vi.mocked((manager as any).getAdapter).mockReturnValue({ destroySession: vi.fn().mockRejectedValue(new Error('stop refused')) })
+    await expect(prepareUserTaskUpdate(manager, db.getTask(task.id)!, { status: TaskStatus.ReadyForReview })).rejects.toThrow('stop refused')
+    expect(manager.hasTaskStartOwnership(task.id)).toBe(true)
+    expect(db.getTask(task.id)?.status).toBe(TaskStatus.AgentWorking)
+  })
+
+  it('preserves the retained session for explicit feedback learning', async () => {
+    const { db, manager, createTasks } = setup(1)
+    const [task] = createTasks(1)
+    await manager.startTask(task.id)
+    goIdle(manager, task.id)
+    db.updateTask(task.id, { status: TaskStatus.ReadyForReview })
+    const stop = vi.spyOn(manager, 'stopByTaskId')
+    await prepareUserTaskUpdate(manager, db.getTask(task.id)!, { status: TaskStatus.AgentLearning, feedback_rating: 4 })
+    expect(stop).not.toHaveBeenCalled()
+    expect(manager.findSessionByTaskId(task.id)).toBeDefined()
+  })
+
   it('runs exactly N of N+1 tasks and queues one, which starts when a slot frees', async () => {
     const { manager, started, createTasks } = setup()
     const tasks = createTasks(LIMIT + 1)
@@ -183,6 +226,18 @@ describe('admission control — AgentManager.startTask', () => {
     await settle()
     expect(started).toEqual([task.id, task.id])
     expect(manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'started', recoveryResult: 'session_acknowledged' })
+  })
+
+  it('restarts only the selected child, leaving a manually stopped parent excluded', async () => {
+    const { manager, createTasks, started } = setup(2)
+    const [parent] = createTasks(1)
+    const [child] = createTasks(1, { parent_task_id: parent.id })
+    await manager.stopByTaskId(parent.id)
+    await manager.stopByTaskId(child.id)
+    expect(await manager.startTask(parent.id, { resumeManualStop: true })).toMatchObject({ action: 'queued', startedTaskId: child.id })
+    await settle()
+    expect(started).toEqual([child.id])
+    expect(manager.getStartRecoveryState(parent.id)).toMatchObject({ state: 'cancelled', recoveryCause: 'manual_stop' })
   })
 })
 
@@ -644,10 +699,11 @@ describe('recovery ownership adversarial regressions', () => {
     ;(manager as any).startSessionNow.mockImplementation(() => new Promise((_resolve, fail) => { reject = fail }))
     const starting = manager.requestSession(agentId, task.id)
     const rejected = expect(starting).rejects.toThrow('late error')
-    await manager.stopByTaskId(task.id)
+    const stopping = manager.stopByTaskId(task.id)
     db.updateTask(task.id, { status: TaskStatus.Completed })
     reject(new Error('late error'))
     await rejected
+    await stopping
     expect(db.getTask(task.id)?.status).toBe(TaskStatus.Completed)
     expect(manager.getStartRecoveryState(task.id)?.state).toBe('cancelled')
     await manager.stopAllSessions()
@@ -779,12 +835,13 @@ describe('adapter start fencing before effects', () => {
     const starting = manager.requestSession(agentId, task.id)
     const rejected = expect(starting).rejects.toThrow('Start ownership was withdrawn')
     await vi.waitFor(() => expect(adapter.createSession).toHaveBeenCalledTimes(1))
-    if (action === 'stop') await manager.stopByTaskId(task.id)
+    const stopping = action === 'stop' ? manager.stopByTaskId(task.id) : undefined
     if (action === 'complete') db.updateTask(task.id, { status: TaskStatus.Completed })
     if (action === 'delete') db.deleteTask(task.id)
     if (action === 'shutdown') await manager.stopAllSessions()
     finish('late-session')
     await rejected
+    await stopping
     expect(adapter.sendPrompt).not.toHaveBeenCalled()
     expect(adapter.destroySession).toHaveBeenCalledTimes(1)
     expect(manager.findSessionByTaskId(task.id)).toBeUndefined()

@@ -427,6 +427,7 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
   const snoozeTick = useSnoozeTick(tasks)
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null)
   const [transitionStates, setTransitionStates] = useState<Record<string, TaskBoardTransitionPhase>>({})
+  const [durableStates, setDurableStates] = useState<Record<string, TaskBoardTransitionPhase>>({})
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor)
@@ -447,14 +448,16 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
     [tasks, snoozeTick]
   )
 
+  const visibleTaskIds = topLevelTasks.map(task => task.id).sort().join(',')
   // The durable queue is authoritative across reloads. Rehydrate it on mount
   // and follow main-process state changes so Queued/Starting never depend on
   // an optimistic drag that existed only in this renderer lifetime.
   useEffect(() => {
     let disposed = false
-    const applyQueue = (queue: Awaited<ReturnType<typeof agentApi.getStartQueue>>, failedTaskId?: string): void => {
+    let revision = 0
+    const applyQueue = (queue: Awaited<ReturnType<typeof agentApi.getStartQueue>>): void => {
       if (disposed) return
-      setTransitionStates((current) => {
+      setDurableStates((current) => {
         const next = { ...current }
         for (const [taskId, phase] of Object.entries(next)) {
           if (phase === 'queued' || phase === 'starting') delete next[taskId]
@@ -462,19 +465,48 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
         for (const entry of queue) {
           next[entry.taskId] = entry.state === 'claimed' || entry.state === 'starting' ? 'starting' : 'queued'
         }
-        if (failedTaskId) next[failedTaskId] = 'failed'
         return next
       })
     }
-    void agentApi.getStartQueue().then((queue) => applyQueue(queue)).catch((error) => {
-      console.error('[TaskBoard] Could not load durable start queue:', error)
+    const hydrate = async (): Promise<void> => {
+      const requestedRevision = ++revision
+      const ids = visibleTaskIds ? visibleTaskIds.split(',') : []
+      try {
+        // The active queue deliberately excludes terminal rows. Read the
+        // existing per-task recovery endpoint to retain Failed across reloads.
+        const states = await Promise.all(ids.map(id => agentApi.getStartRecoveryState(id)))
+        if (disposed || revision !== requestedRevision) return
+        const next: Record<string, TaskBoardTransitionPhase> = {}
+        for (const entry of states) {
+          if (!entry) continue
+          if (entry.state === 'failed') next[entry.taskId] = 'failed'
+          else if (entry.state === 'claimed' || entry.state === 'starting') next[entry.taskId] = 'starting'
+          else if (entry.state === 'queued' || entry.state === 'retrying') next[entry.taskId] = 'queued'
+        }
+        setDurableStates(next)
+        setTransitionStates(current => {
+          const cleared = { ...current }
+          for (const entry of states) {
+            if (entry && (entry.state === 'started' || entry.state === 'recovered')) delete cleared[entry.taskId]
+          }
+          return cleared
+        })
+      } catch (error) {
+        console.error('[TaskBoard] Could not load durable start recovery:', error)
+      }
+    }
+    void hydrate()
+    const unsubscribe = onAgentStartQueueChanged((event) => {
+      applyQueue(event.queue)
+      void hydrate()
     })
-    const unsubscribe = onAgentStartQueueChanged((event) => applyQueue(event.queue, event.failed?.taskId))
     return () => {
       disposed = true
       unsubscribe()
     }
-  }, [])
+  }, [visibleTaskIds])
+
+  const displayedTransitions = useMemo(() => ({ ...transitionStates, ...durableStates }), [transitionStates, durableStates])
 
   // Open task preview modal (rendered by AppLayout with full TaskWorkspace)
   const handleSelectTask = useCallback((taskId: string) => {
@@ -561,7 +593,7 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
         : await useTaskStore.getState().updateTask(task.id, { status })
       if (result && typeof result === 'object' && 'phase' in result) {
         const phase = result.phase
-        if (phase === 'moved') {
+        if (phase === 'moved' || phase === 'working') {
           setTransitionStates((current) => {
             if (!(task.id in current)) return current
             const next = { ...current }
@@ -636,7 +668,7 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
                 onSelect={handleSelectTask}
                 agentMap={agentMap}
                 isDraggingTask={!!draggedTask}
-                transitionStates={transitionStates}
+                transitionStates={displayedTransitions}
               />
             ))}
           </div>

@@ -288,6 +288,7 @@ export class AgentManager extends EventEmitter {
   /** In-flight admitted starts, so a durable message accepted during warm-up
    * joins that start instead of opening a competing Captain session. */
   private sessionStarts: Map<string, Promise<string>> = new Map()
+  private sessionStops: Map<string, Promise<void>> = new Map()
   private startupReconciliation: Promise<void> | null = null
   private startQueueDrainScheduled = false
   private startQueueRetryTimer: ReturnType<typeof setTimeout> | null = null
@@ -1168,11 +1169,6 @@ export class AgentManager extends EventEmitter {
       await writeSkillFiles(this.db, taskId, agentId, workspaceDir, attached)
     }
 
-    if (!mayStart()) {
-      await adapter.destroySession(adapterSessionId, sessionConfig).catch(() => {})
-      throw new Error('Start ownership was withdrawn before session registration.')
-    }
-
     this.schedulePowerSaveBlockerUpdate()
     // Keep one shared set across nested startup fallbacks. If a replacement
     // itself exhausts credits before startAdapterSession returns, the outer
@@ -1204,6 +1200,13 @@ export class AgentManager extends EventEmitter {
       attemptedAgentIds
     })
 
+    if (!mayStart()) {
+      // Retain ownership if the backend refuses cleanup, so a pending user
+      // stop cannot report success while an untracked session survives.
+      await this.stopSession(adapterSessionId, false, true)
+      throw new Error('Start ownership was withdrawn before session registration.')
+    }
+
     if (!deferCoordinatorBinding) {
       this.updateTaskFromLocalAgent(taskId, { session_id: adapterSessionId })
       this.recordCoordinatorSessionAgent(taskId, agentId)
@@ -1221,7 +1224,7 @@ export class AgentManager extends EventEmitter {
     await yieldEventLoop()
 
     if (!mayStart()) {
-      await this.stopSession(adapterSessionId, false)
+      await this.stopSession(adapterSessionId, false, true)
       throw new Error('Start ownership was withdrawn before prompt delivery.')
     }
 
@@ -2401,6 +2404,7 @@ export class AgentManager extends EventEmitter {
         if (!startClaim || !this.startQueue.markStarting(startClaim.id, startClaim.generation)) {
           throw new Error('Start ownership could not be acquired.')
         }
+        this.emitStartQueueChanged()
       }
       this.recordCountedStart(task)
       this.startQueue.markServed(task ? taskProjectId(task) : undefined)
@@ -2417,9 +2421,10 @@ export class AgentManager extends EventEmitter {
       this.sessionStarts.set(taskId, boundedStart)
       const sessionId = await boundedStart
       if (startClaim && !this.startQueue.acknowledgeStarted(startClaim.id, startClaim.generation, sessionId)) {
-        await this.stopSession(sessionId, false)
+        await this.stopSession(sessionId, false, true)
         throw new Error('Start ownership was withdrawn.')
       }
+      if (startClaim) this.emitStartQueueChanged()
       return { status: 'started', sessionId }
     } catch (error) {
       // The reserved slot is free again (released in finally, before the
@@ -2811,25 +2816,23 @@ export class AgentManager extends EventEmitter {
     // An explicit UI/API start may reverse an earlier explicit stop. Automatic
     // schedulers omit this flag, so a manual-stop exclusion remains terminal
     // until the user actually asks to run the task again.
-    const recovery = this.startQueue.get(taskId)
-    if (
-      opts?.resumeManualStop &&
-      recovery?.state === 'cancelled' &&
-      recovery.recoveryCause === 'manual_stop' &&
-      task.agent_id
-    ) {
-      const queued = this.startQueue.enqueue({
-        taskId,
-        projectId: taskProjectId(task),
-        agentId: task.agent_id,
-        reason: 'recovery',
-        queuedAt: new Date().toISOString(),
-        priority: task.priority,
-        dependencyReason: this.isSerialChainStart(taskId) ? 'predecessor_active' : null
-      })
-      this.recordRecoveryAudit(task, 'explicit_user_restart', 'requeue', `queued_at_position_${queued.position}`)
-      this.emitStartQueueChanged()
-      this.scheduleStartQueueDrain()
+    const requestSelectedTask = (selected: TaskRecord): Promise<SessionStartOutcome> => {
+      const recovery = this.startQueue.get(selected.id)
+      if (opts?.resumeManualStop && recovery?.state === 'cancelled' && recovery.recoveryCause === 'manual_stop') {
+        const queued = this.startQueue.enqueue({
+          taskId: selected.id,
+          projectId: taskProjectId(selected),
+          agentId: selected.agent_id!,
+          reason: 'recovery',
+          queuedAt: new Date().toISOString(),
+          priority: selected.priority,
+          dependencyReason: this.isSerialChainStart(selected.id) ? 'predecessor_active' : null
+        })
+        this.recordRecoveryAudit(selected, 'explicit_user_restart', 'requeue', `queued_at_position_${queued.position}`)
+        this.emitStartQueueChanged()
+        this.scheduleStartQueueDrain()
+      }
+      return this.requestSession(selected.agent_id!, selected.id)
     }
 
     const preferSubtasks = opts?.preferSubtasks !== false
@@ -2855,7 +2858,7 @@ export class AgentManager extends EventEmitter {
         ? undefined
         : subtasks.find((subtask) => subtask.status === TaskStatus.NotStarted && !!subtask.agent_id)
       if (nextSubtask?.agent_id) {
-        const outcome = await this.requestSession(nextSubtask.agent_id, nextSubtask.id)
+        const outcome = await requestSelectedTask(nextSubtask)
         if (outcome.status === 'queued') {
           return { action: 'queued', startedTaskId: nextSubtask.id, agentId: nextSubtask.agent_id, queuePosition: outcome.position, queueReason: outcome.reason }
         }
@@ -2904,7 +2907,7 @@ export class AgentManager extends EventEmitter {
       }
     }
 
-    const outcome = await this.requestSession(task.agent_id, taskId)
+    const outcome = await requestSelectedTask(task)
     if (outcome.status === 'queued') {
       return { action: 'queued', startedTaskId: taskId, agentId: task.agent_id, queuePosition: outcome.position, queueReason: outcome.reason }
     }
@@ -3556,7 +3559,15 @@ export class AgentManager extends EventEmitter {
    * Fully destroys the session — stops polling, removes from map.
    * @param resetTaskStatus - If true, resets task status to NotStarted (default: true)
    */
-  async stopSession(sessionId: string, resetTaskStatus: boolean = true): Promise<void> {
+  async stopSession(sessionId: string, resetTaskStatus: boolean = true, requireAcknowledgement = false): Promise<void> {
+    const pending = this.sessionStops.get(sessionId)
+    if (pending) return pending
+    const stopping = this.stopSessionNow(sessionId, resetTaskStatus, requireAcknowledgement)
+    this.sessionStops.set(sessionId, stopping)
+    try { await stopping } finally { this.sessionStops.delete(sessionId) }
+  }
+
+  private async stopSessionNow(sessionId: string, resetTaskStatus: boolean, requireAcknowledgement: boolean): Promise<void> {
     const session = this.sessions.get(sessionId)
     if (!session) {
       console.log(`[AgentManager] Session ${sessionId} not found`)
@@ -3567,7 +3578,7 @@ export class AgentManager extends EventEmitter {
 
     console.log(`[AgentManager] Destroying session ${sessionId} (resetTaskStatus=${resetTaskStatus})`)
 
-    this.stopAdapterPolling(sessionId)
+    if (!requireAcknowledgement) this.stopAdapterPolling(sessionId)
 
     const adapter = this.getAdapter(session.agentId)
     if (adapter) {
@@ -3576,8 +3587,12 @@ export class AgentManager extends EventEmitter {
         await adapter.destroySession(sessionId, sessionConfig)
       } catch (error) {
         console.error(`[AgentManager] Error destroying adapter session:`, error)
+        // A user move must fail while the backend still owns work. Keep its
+        // session and polling intact so the user can observe it and retry.
+        if (requireAcknowledgement) throw error
       }
     }
+    if (requireAcknowledgement) this.stopAdapterPolling(sessionId)
 
     if (session.secretSessionToken) {
       unregisterSecretSession(session.secretSessionToken)
@@ -3618,17 +3633,29 @@ export class AgentManager extends EventEmitter {
   async stopByTaskId(taskId: string): Promise<{ sessionId: string | null }> {
     // Stopping a task also withdraws a start still waiting for a slot.
     this.cancelQueuedStart(taskId)
+    // A cancelled lease fences the late start, but acknowledgement must also
+    // wait for that start's backend cleanup before callers write a new status.
+    const starting = this.sessionStarts.get(taskId)
+    if (starting) {
+      try { await starting } catch { /* The start path reports its own failure. */ }
+    }
     const found = this.findSessionByTaskId(taskId)
     if (!found) {
       const task = this.db.getTask(taskId)
-      if (task?.status === TaskStatus.AgentWorking) {
+      if (task?.status === TaskStatus.AgentWorking || task?.status === TaskStatus.Triaging) {
         this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.NotStarted, session_id: null })
       }
       console.log(`[AgentManager] stopByTaskId: no active session found for task ${taskId}`)
       return { sessionId: null }
     }
     console.log(`[AgentManager] stopByTaskId: found session ${found.sessionId} for task ${taskId}, stopping`)
-    await this.stopSession(found.sessionId)
+    await this.stopSession(found.sessionId, true, true)
+    // A fenced start may have already initiated cleanup without resetting the
+    // task. The explicit stop still owns the final rollback after it settles.
+    const task = this.db.getTask(taskId)
+    if (task?.status === TaskStatus.AgentWorking || task?.status === TaskStatus.Triaging) {
+      this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.NotStarted, session_id: null })
+    }
     return { sessionId: found.sessionId }
   }
 
@@ -4082,7 +4109,7 @@ export class AgentManager extends EventEmitter {
         .then(async (sessionId) => {
           if (!this.startQueue.acknowledgeStarted(claim.id, claim.generation, sessionId)) {
             console.warn(`[AgentManager] Fenced late/duplicate start ${sessionId} for queue ${claim.id} generation ${claim.generation}`)
-            await this.stopSession(sessionId, false)
+            await this.stopSession(sessionId, false, true)
             return
           }
           this.recordRecoveryAudit(task!, claim.recoveryCause ?? 'capacity_available', 'start', 'session_acknowledged')

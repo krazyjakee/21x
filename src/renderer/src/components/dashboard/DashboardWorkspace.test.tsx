@@ -7,6 +7,7 @@ import { useTaskStore } from '@/stores/task-store'
 import { useUIStore } from '@/stores/ui-store'
 import { TaskStatus } from '@/types'
 import type { Task } from '@/types'
+import { agentApi } from '@/lib/ipc-client'
 
 // Mock use-snooze-tick to avoid IPC dependency in tests
 vi.mock('@/hooks/use-snooze-tick', () => ({
@@ -66,6 +67,7 @@ vi.mock('@/lib/ipc-client', () => ({
   agentApi: {
     getAll: vi.fn().mockResolvedValue([]),
     getStartQueue: vi.fn().mockResolvedValue([]),
+    getStartRecoveryState: vi.fn().mockResolvedValue(null),
     create: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
@@ -135,6 +137,13 @@ beforeEach(() => {
 })
 
 describe('DashboardWorkspace', () => {
+  it('rehydrates a durable terminal start failure after reopening the board', async () => {
+    useTaskStore.setState({ tasks: [makeTask()] })
+    vi.mocked(agentApi.getStartRecoveryState).mockResolvedValueOnce({ taskId: 'task-1', state: 'failed' } as never)
+    render(<DashboardWorkspace />)
+    await waitFor(() => expect(screen.getByTestId('task-transition-task-1')).toHaveTextContent('failed'))
+  })
+
   it('shows no hosted-service prompts', () => {
     render(<DashboardWorkspace />)
     expect(screen.queryByText(/20x Cloud/)).toBeNull()

@@ -54,9 +54,19 @@ describe('transitionTaskFromBoard', () => {
     const order: string[] = []
     const d = deps({
       stopByTaskId: vi.fn(async () => { order.push('stop') }),
-      completeTask: vi.fn(async () => { order.push('complete') })
+      completeTask: vi.fn(async (_id: string, options?: { beforeComplete: () => Promise<void> }) => {
+        await options?.beforeComplete()
+        order.push('complete')
+      })
     })
     await transitionTaskFromBoard(task({ status: TaskStatus.AgentWorking }), TaskStatus.Completed, d)
     expect(order).toEqual(['stop', 'complete'])
+  })
+
+  it('keeps live work running while completion waits for the user choice', async () => {
+    const d = deps()
+    await transitionTaskFromBoard(task({ status: TaskStatus.AgentWorking }), TaskStatus.Completed, d)
+    expect(d.completeTask).toHaveBeenCalledWith('task-1', { beforeComplete: expect.any(Function) })
+    expect(d.stopByTaskId).not.toHaveBeenCalled()
   })
 })

@@ -39,6 +39,12 @@ export async function prepareUserTaskUpdate(
 ): Promise<PreparedUserTaskUpdate> {
   if (requested.status === undefined) return { data: requested, startAfterWrite: false }
 
+  // Feedback is a command to reuse the retained conversation for learning.
+  // The user-write route validates the rating and records its completion marker.
+  if (requested.status === TaskStatus.AgentLearning && requested.feedback_rating !== undefined) {
+    return { data: requested, startAfterWrite: false }
+  }
+
   if (isExecutionTaskStatus(requested.status)) {
     if (!agents) throw new Error('Agent runtime is unavailable; the task was not started.')
     const data = { ...requested }

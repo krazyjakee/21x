@@ -14,7 +14,7 @@ interface TransitionDependencies {
   stopByTaskId: (taskId: string) => Promise<unknown>
   getStartRecoveryState: (taskId: string) => Promise<QueuedAgentStart | null>
   updateTask: (taskId: string, data: UpdateTaskDTO) => Promise<unknown>
-  completeTask: (taskId: string) => Promise<unknown>
+  completeTask: (taskId: string, options?: { beforeComplete: () => Promise<void> }) => Promise<unknown>
 }
 
 const ACTIVE_QUEUE_STATES = new Set(['queued', 'retrying', 'claimed', 'starting'])
@@ -35,16 +35,21 @@ export async function transitionTaskFromBoard(
     return { phase: 'working' }
   }
 
-  const recovery = await deps.getStartRecoveryState(task.id)
-  if (
-    task.status === TaskStatus.Triaging ||
-    task.status === TaskStatus.AgentWorking ||
-    (recovery !== null && ACTIVE_QUEUE_STATES.has(recovery.state))
-  ) {
-    await deps.stopByTaskId(task.id)
+  const stopOwnedWork = async (): Promise<void> => {
+    const recovery = await deps.getStartRecoveryState(task.id)
+    if (
+      task.status === TaskStatus.Triaging ||
+      task.status === TaskStatus.AgentWorking ||
+      (recovery !== null && ACTIVE_QUEUE_STATES.has(recovery.state))
+    ) {
+      await deps.stopByTaskId(task.id)
+    }
   }
 
-  if (status === TaskStatus.Completed) await deps.completeTask(task.id)
-  else await deps.updateTask(task.id, { status })
+  if (status === TaskStatus.Completed) await deps.completeTask(task.id, { beforeComplete: stopOwnedWork })
+  else {
+    await stopOwnedWork()
+    await deps.updateTask(task.id, { status })
+  }
   return { phase: 'moved' }
 }
