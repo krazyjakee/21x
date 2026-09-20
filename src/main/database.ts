@@ -148,6 +148,7 @@ export interface BeginIssueWriteInput {
   action: IssueAction
   target_number: number | null
   payload_hash: string
+  payload_fields: string
   /** Resolved from platform records, never from the caller's arguments. */
   origin: IssueWriteOrigin
   /** How long this attempt may hold the claim before it counts as unresolved. */
@@ -163,6 +164,8 @@ export interface BeginIssueWriteResult {
 /** The outcome of one attempt, written once. */
 export interface SettleIssueWriteInput {
   status: Exclude<IssueWriteStatus, 'reserved'>
+  /** Must match the attempt that received the external answer. */
+  attempt_epoch: number
   external_url?: string | null
   external_number?: number | null
   external_result?: string | null
@@ -1387,11 +1390,12 @@ export class DatabaseManager {
       id: '', idempotency_key: input.idempotency_key, project_id: input.project_id,
       captain_task_id: input.captain_task_id ?? null, captain_session_id: input.captain_session_id ?? null,
       task_id: input.task_id ?? null, repo: input.repo, action: input.action, target_number: input.target_number ?? null,
-      payload_hash: input.payload_hash, origin_kind: input.origin.kind, origin_message_id: input.origin.messageId,
+      payload_hash: input.payload_hash, payload_fields: input.payload_fields, origin_kind: input.origin.kind, origin_message_id: input.origin.messageId,
       origin_session_id: input.origin.sessionId, origin_text_hash: input.origin.textHash, origin_excerpt: input.origin.excerpt,
       origin_authored_at: input.origin.authoredAt, correlation_id: input.origin.correlationId, status: 'unresolved',
       external_url: null, external_number: null, external_result: null, error: 'The database is not open.',
-      attempts: 0, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), settled_at: null
+      attempts: 1, attempt_epoch: 1, lease_expires_at: null,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(), settled_at: null
     }
     if (!this.ensureDbOpen()) return { state: 'needs_reconcile', record: fallback }
     return this.db.transaction((): BeginIssueWriteResult => {
@@ -1403,13 +1407,15 @@ export class DatabaseManager {
         this.prepare(`
           INSERT INTO issue_writes
             (id, idempotency_key, project_id, captain_task_id, captain_session_id, task_id, repo, action, target_number,
-             payload_hash, origin_kind, origin_message_id, origin_session_id, origin_text_hash, origin_excerpt,
-             origin_authored_at, correlation_id, status, attempts, lease_expires_at, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', 1, ?, ?, ?)
+             payload_hash, payload_fields, origin_kind, origin_message_id, origin_session_id, origin_text_hash,
+             origin_excerpt, origin_authored_at, correlation_id, status, attempts, attempt_epoch, lease_expires_at,
+             created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', 1, 1, ?, ?, ?)
         `).run(
           id, input.idempotency_key, input.project_id, input.captain_task_id ?? null, input.captain_session_id ?? null,
           input.task_id ?? null, input.repo, input.action, input.target_number ?? null, input.payload_hash,
-          input.origin.kind, input.origin.messageId, input.origin.sessionId, input.origin.textHash, input.origin.excerpt,
+          input.payload_fields, input.origin.kind, input.origin.messageId, input.origin.sessionId,
+          input.origin.textHash, input.origin.excerpt,
           input.origin.authoredAt, input.origin.correlationId, now + input.lease_ms, nowIso, nowIso
         )
         return { state: 'reserved', record: this.getIssueWrite(id)! }
@@ -1421,12 +1427,12 @@ export class DatabaseManager {
         if (lease?.lease && lease.lease > now) return { state: 'in_flight', record: existing }
         // The attempt that held this claim never came back. Its write may have
         // landed, so the claim becomes a question, not a free slot.
-        this.prepare("UPDATE issue_writes SET status = 'unresolved', lease_expires_at = NULL, error = ?, updated_at = ? WHERE id = ?")
+        this.prepare("UPDATE issue_writes SET status = 'unresolved', attempt_epoch = attempt_epoch + 1, lease_expires_at = NULL, error = ?, updated_at = ? WHERE id = ? AND status = 'reserved'")
           .run('The attempt holding this claim ended without an answer from GitHub.', nowIso, existing.id)
         return { state: 'needs_reconcile', record: this.getIssueWrite(existing.id)! }
       }
       // failed: GitHub certainly refused, so a fresh attempt is safe.
-      this.prepare("UPDATE issue_writes SET status = 'reserved', attempts = attempts + 1, error = NULL, settled_at = NULL, lease_expires_at = ?, updated_at = ? WHERE id = ?")
+      this.prepare("UPDATE issue_writes SET status = 'reserved', attempts = attempts + 1, attempt_epoch = attempt_epoch + 1, error = NULL, settled_at = NULL, lease_expires_at = ?, updated_at = ? WHERE id = ? AND status = 'failed'")
         .run(now + input.lease_ms, nowIso, existing.id)
       return { state: 'reserved', record: this.getIssueWrite(existing.id)! }
     }).immediate()
@@ -1441,17 +1447,20 @@ export class DatabaseManager {
   settleIssueWrite(id: string, outcome: SettleIssueWriteInput): IssueWriteRecord | undefined {
     if (!this.ensureDbOpen()) return undefined
     return this.db.transaction((): IssueWriteRecord | undefined => {
-      const row = this.prepare("SELECT id FROM issue_writes WHERE id = ? AND status IN ('reserved', 'unresolved')").get(id) as { id: string } | undefined
+      const row = this.prepare("SELECT id FROM issue_writes WHERE id = ? AND attempt_epoch = ? AND status IN ('reserved', 'unresolved')")
+        .get(id, outcome.attempt_epoch) as { id: string } | undefined
       if (!row) return undefined
       const nowIso = new Date().toISOString()
+      const settledAt = outcome.status === 'unresolved' ? null : nowIso
+      const nextEpoch = outcome.status === 'unresolved' ? outcome.attempt_epoch + 1 : outcome.attempt_epoch
       this.prepare(`
         UPDATE issue_writes
            SET status = ?, external_url = ?, external_number = ?, external_result = ?, error = ?,
-               lease_expires_at = NULL, settled_at = ?, updated_at = ?
-         WHERE id = ?
+               attempt_epoch = ?, lease_expires_at = NULL, settled_at = ?, updated_at = ?
+         WHERE id = ? AND attempt_epoch = ? AND status IN ('reserved', 'unresolved')
       `).run(
         outcome.status, outcome.external_url ?? null, outcome.external_number ?? null,
-        outcome.external_result ?? null, outcome.error ?? null, nowIso, nowIso, id
+        outcome.external_result ?? null, outcome.error ?? null, nextEpoch, settledAt, nowIso, id, outcome.attempt_epoch
       )
       return this.getIssueWrite(id)
     }).immediate()
@@ -1488,17 +1497,20 @@ export class DatabaseManager {
    */
   listUnresolvedIssueWrites(projectId?: string): IssueWriteRecord[] {
     if (!this.ensureDbOpen()) return []
-    const now = Date.now()
-    const rows = (projectId
-      ? this.prepare("SELECT * FROM issue_writes WHERE project_id = ? AND (status = 'unresolved' OR (status = 'reserved' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?)) ORDER BY created_at ASC").all(projectId, now)
-      : this.prepare("SELECT * FROM issue_writes WHERE status = 'unresolved' OR (status = 'reserved' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?) ORDER BY created_at ASC").all(now)) as IssueWriteRecord[]
-    for (const row of rows) {
-      if (row.status !== 'reserved') continue
-      this.prepare("UPDATE issue_writes SET status = 'unresolved', lease_expires_at = NULL, updated_at = ? WHERE id = ? AND status = 'reserved'")
-        .run(new Date().toISOString(), row.id)
-      row.status = 'unresolved'
-    }
-    return rows
+    return this.db.transaction((): IssueWriteRecord[] => {
+      const now = Date.now()
+      const nowIso = new Date(now).toISOString()
+      const projectClause = projectId ? ' AND project_id = ?' : ''
+      this.prepare(`
+        UPDATE issue_writes
+           SET status = 'unresolved', attempt_epoch = attempt_epoch + 1,
+               lease_expires_at = NULL, error = ?, updated_at = ?
+         WHERE status = 'reserved' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?${projectClause}
+      `).run('The attempt holding this claim ended without an answer from GitHub.', nowIso, now, ...(projectId ? [projectId] : []))
+      return (projectId
+        ? this.prepare("SELECT * FROM issue_writes WHERE project_id = ? AND status = 'unresolved' ORDER BY created_at ASC").all(projectId)
+        : this.prepare("SELECT * FROM issue_writes WHERE status = 'unresolved' ORDER BY created_at ASC").all()) as IssueWriteRecord[]
+    }).immediate()
   }
 
   getProjectStatusJournalEntry(id: string): ProjectStatusJournalEntry | undefined {

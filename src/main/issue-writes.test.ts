@@ -36,7 +36,8 @@ import {
   reconcileIssueWrites,
   resolveIssueWriteOrigin,
   setIssueGhRunner,
-  setIssueWriteOriginResolver
+  setIssueWriteOriginResolver,
+  type IssueWriteAuthorizationQuery
 } from './issue-writes'
 import { clearUserTypedProjectMessages, recordUserTypedProjectMessage } from './merge-grants'
 import { findIdempotencyMarker } from '../shared/issue-actions'
@@ -462,11 +463,12 @@ describe('an interrupted write is reconciled, never repeated', () => {
     expect(first).toMatchObject({ status: 'unresolved' })
     expect(String(first.error)).toContain('may have landed')
 
-    // The retry asks GitHub instead of writing: nothing carries the key, so the
-    // claim is released and the issue is filed exactly once overall.
+    // A negative search result is not proof of absence: GitHub may index a
+    // successful create later. The retry therefore remains held instead of
+    // risking a duplicate.
     const retry = await captainCall(h, 'create_github_issue', args)
-    expect(retry.status).toBe('created')
-    expect(h.created).toHaveLength(1)
+    expect(retry.status).toBe('unresolved')
+    expect(h.created).toHaveLength(0)
   })
 
   it('recovers an external success the app never saw the answer to', async () => {
@@ -771,15 +773,21 @@ describe('the blocked voice tasks, as the user asked for them', () => {
 describe('the origin resolver seam', () => {
   it('lets a durable authorization chain replace the default without touching the gate', async () => {
     const h = setup()
-    setIssueWriteOriginResolver(() => ({
-      kind: 'user_task_instruction',
-      messageId: 'chain-msg-1',
-      sessionId: 'chain-session',
-      textHash: 'f'.repeat(64),
-      excerpt: 'from a verified chain',
-      authoredAt: '2026-09-20T00:00:00.000Z',
-      correlationId: 'cmd-chained'
-    }))
+    const queries: IssueWriteAuthorizationQuery[] = []
+    setIssueWriteOriginResolver((query) => {
+      queries.push(query)
+      return {
+        origin: {
+          kind: 'user_task_instruction',
+          messageId: 'chain-msg-1',
+          sessionId: 'chain-session',
+          textHash: 'f'.repeat(64),
+          excerpt: 'from a verified chain',
+          authoredAt: '2026-09-20T00:00:00.000Z',
+          correlationId: 'cmd-chained'
+        }
+      }
+    })
     const result = await captainCall(h, 'create_github_issue', { repo: 'krazyjakee/21x', title: 'Chained', task_id: h.taskIds[VOICE_INPUT_TASK] })
     expect(result.status).toBe('created')
     expect(h.db.listIssueWrites({ projectId: h.projectId })[0]).toMatchObject({
@@ -787,6 +795,43 @@ describe('the origin resolver seam', () => {
       origin_message_id: 'chain-msg-1',
       correlation_id: 'cmd-chained'
     })
+    // The resolver is asked about a specific action in a specific repository,
+    // and told who is calling from the server's own scope — never an argument.
+    expect(queries[0]).toMatchObject({
+      projectId: h.projectId,
+      captainTaskId: h.db.getCoordinatorTask(h.projectId)!.id,
+      action: 'create_issue',
+      repo: 'krazyjakee/21x'
+    })
+  })
+
+  it('honours a narrowing the chain imposes, and discards a widening', async () => {
+    const h = setup({ repos: [['krazyjakee', '21x'], ['krazyjakee', 'docs']] })
+    const origin = {
+      kind: 'user_task_instruction' as const,
+      messageId: 'chain-msg-2',
+      sessionId: null,
+      textHash: 'a'.repeat(64),
+      excerpt: 'narrowed',
+      authoredAt: '2026-09-20T00:00:00.000Z',
+      correlationId: null
+    }
+    // The chain says: only this one repo, and only updates. It also names a
+    // repository the project does not have, which must simply be ignored.
+    setIssueWriteOriginResolver(() => ({ origin, actions: ['update_issue'], repos: ['krazyjakee/docs', 'someone/elsewhere'] }))
+
+    expect(await captainCall(h, 'create_github_issue', { repo: 'krazyjakee/docs', title: 'Not permitted' }))
+      .toMatchObject({ status: 'refused', code: 'action_not_in_capability' })
+    expect(await captainCall(h, 'update_github_issue', { repo: 'krazyjakee/21x', issue_number: 5, body: 'Out of the narrowed scope' }))
+      .toMatchObject({ status: 'refused', code: 'repo_not_in_project' })
+    expect(await captainCall(h, 'update_github_issue', { repo: 'someone/elsewhere', issue_number: 5, body: 'Never configured' }))
+      .toMatchObject({ status: 'refused', code: 'repo_not_in_project' })
+    expect(creates(h)).toHaveLength(0)
+
+    // The one thing the narrowed capability does allow still works.
+    h.created.push({ repo: 'krazyjakee/docs', number: 7, title: 'Existing', body: '' })
+    expect(await captainCall(h, 'update_github_issue', { repo: 'krazyjakee/docs', issue_number: 7, body: 'In scope' }))
+      .toMatchObject({ status: 'updated' })
   })
 
   it('a resolver that finds nothing refuses every write', async () => {

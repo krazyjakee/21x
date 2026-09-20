@@ -180,15 +180,72 @@ function excerpt(text: string, max = 240): string {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat
 }
 
-export type OriginResolver = (projectId: string, now: number) => IssueWriteOrigin | null
+/**
+ * What the gate asks the resolver about. The caller identity comes from the
+ * server-side scope (the project's Captain row), never from a tool argument.
+ */
+export interface IssueWriteAuthorizationQuery {
+  projectId: string
+  /** The Captain's coordinator task: the caller, as the platform knows it. */
+  captainTaskId: string | null
+  action: IssueAction
+  /** The canonical `owner/name` this call targets. */
+  repo: string
+  now: number
+}
+
+/**
+ * What a resolver answers with: the originating human instruction, and any
+ * narrowing it imposes. `actions` and `repos` can only ever *narrow* — they
+ * are intersected with the project's configured set, so a resolver cannot
+ * widen a capability even if it wanted to.
+ */
+export interface IssueWriteAuthorizationResult {
+  origin: IssueWriteOrigin
+  actions?: readonly IssueAction[]
+  repos?: readonly string[]
+}
+
+export type OriginResolver = (query: IssueWriteAuthorizationQuery) => IssueWriteAuthorizationResult | null
 
 let originResolver: OriginResolver | null = null
 
 /**
- * Replaces how the originating human instruction is found. The seam exists so
- * a durable, cryptographically chained provenance record can take over from
- * the default below without this module or the gate changing. A resolver may
- * only return records the platform itself stored.
+ * Replaces how the originating human instruction is found.
+ *
+ * The seam exists so the durable, cryptographically chained authorization
+ * record (src/main/authorization.ts, PR #158) can take over from the default
+ * below without this module or the gate changing. Once that lands the adapter
+ * is mechanical, because {@link AUTHORIZATION_ACTION_FOR_ISSUE_ACTION} already
+ * reconciles the two vocabularies:
+ *
+ * ```ts
+ * setIssueWriteOriginResolver((query) => {
+ *   if (!query.captainTaskId) return null
+ *   const evidence = resolveTaskAuthorization({ db: raw }, {
+ *     taskId: query.captainTaskId,
+ *     projectId: query.projectId,
+ *     action: AUTHORIZATION_ACTION_FOR_ISSUE_ACTION[query.action],
+ *     repo: query.repo
+ *   }, query.now)
+ *   if (!evidence.allowed || !evidence.origin) return null
+ *   return {
+ *     origin: {
+ *       kind: evidence.origin.source === 'project-chat' ? 'project_chat' : 'commander_relay',
+ *       messageId: evidence.origin.messageId,
+ *       sessionId: evidence.origin.sessionId,
+ *       textHash: evidence.origin.textHash,
+ *       excerpt: excerpt(evidence.origin.text),
+ *       authoredAt: new Date(evidence.origin.at).toISOString(),
+ *       correlationId: evidence.origin.correlationId
+ *     },
+ *     repos: evidence.scope.find((s) => s.projectId === query.projectId)?.repos
+ *   }
+ * })
+ * ```
+ *
+ * A resolver may only return records the platform itself stored; nothing a
+ * model can write may reach one.
  */
 export function setIssueWriteOriginResolver(resolver: OriginResolver | null): void {
   originResolver = resolver
@@ -196,11 +253,25 @@ export function setIssueWriteOriginResolver(resolver: OriginResolver | null): vo
 
 /**
  * The originating human instruction for delegated work in a project, or null.
- * Two trusted sources, newest first: a Commander relay the person started, and
- * a message the person typed in this project's own chat.
+ *
+ * The interim default, until the durable chain above replaces it: two trusted
+ * sources, newest first — a Commander relay the person started, and a message
+ * the person typed in this project's own chat. Both are in-memory platform
+ * records with a lifetime, which is why the ledger persists a snapshot of the
+ * origin rather than a pointer to one.
  */
+export function resolveIssueWriteAuthorization(query: IssueWriteAuthorizationQuery): IssueWriteAuthorizationResult | null {
+  if (originResolver) return originResolver(query)
+  const origin = defaultOrigin(query.projectId, query.now)
+  return origin ? { origin } : null
+}
+
+/** The interim default, also exported so a test can assert it directly. */
 export function resolveIssueWriteOrigin(projectId: string, now = Date.now()): IssueWriteOrigin | null {
-  if (originResolver) return originResolver(projectId, now)
+  return defaultOrigin(projectId, now)
+}
+
+function defaultOrigin(projectId: string, now: number): IssueWriteOrigin | null {
   const delegation = latestDelegatedAuthorization(projectId, now)
   const typed = latestUserTypedProjectMessage(projectId, now)
   const useDelegation = delegation && (!typed || delegation.at >= typed.at)
@@ -242,14 +313,15 @@ export function projectIssueRepos(db: IssueWriteDb, projectId: string): string[]
 
 /**
  * What one project's Captain may do right now, or null when no originating
- * human instruction backs it. The capability is built from the project, never
- * from the call: least privilege is the default and the caller cannot widen it.
+ * human instruction backs it. The capability is built from the project and
+ * then narrowed by the authorization: least privilege is the default, the
+ * caller cannot widen it, and neither can the resolver.
  */
 export function issueWriteCapability(
   db: IssueWriteDb,
-  projectId: string,
-  now = Date.now()
+  query: IssueWriteAuthorizationQuery
 ): { capability: IssueWriteCapability; origin: IssueWriteOrigin } | { capability: null; denial: IssueWriteDenial } {
+  const { projectId } = query
   const project = db.getProject(projectId)
   if (!project) {
     return { capability: null, denial: { code: 'capability_unavailable', message: 'That project no longer exists.' } }
@@ -257,8 +329,8 @@ export function issueWriteCapability(
   if (project.archived) {
     return { capability: null, denial: { code: 'capability_unavailable', message: `Project "${project.name}" is archived; 21x does not write to its repositories.` } }
   }
-  const origin = resolveIssueWriteOrigin(projectId, now)
-  if (!origin) {
+  const authorization = resolveIssueWriteAuthorization(query)
+  if (!authorization) {
     return {
       capability: null,
       denial: {
@@ -270,14 +342,22 @@ export function issueWriteCapability(
       }
     }
   }
-  const repos = projectIssueRepos(db, projectId)
-  if (repos.length === 0) {
+  const configured = projectIssueRepos(db, projectId)
+  if (configured.length === 0) {
     return {
       capability: null,
       denial: { code: 'repo_not_in_project', actionClass: DELEGATED_ACTION_CLASS, message: `Project "${project.name}" has no configured GitHub repositories, so there is nowhere to file an issue.` }
     }
   }
-  return { capability: { projectId, actions: ISSUE_ACTIONS, repos }, origin }
+  // Intersection, never union: a narrowing the authorization asks for is
+  // honoured, a widening it attempts is discarded.
+  const narrowedRepos = authorization.repos
+    ? configured.filter((slug) => authorization.repos!.some((allowed) => normalizeRepoSlug(allowed) === slug))
+    : configured
+  const narrowedActions = authorization.actions
+    ? ISSUE_ACTIONS.filter((action) => authorization.actions!.includes(action))
+    : ISSUE_ACTIONS
+  return { capability: { projectId, actions: narrowedActions, repos: narrowedRepos }, origin: authorization.origin }
 }
 
 // ── Idempotency ───────────────────────────────────────────────
@@ -369,6 +449,20 @@ function ledgerView(record: IssueWriteRecord): Record<string, unknown> {
   }
 }
 
+/** A lease/epoch changed while an external call was in flight. Never report
+ * the stale answer as if this attempt still owned the audit row. */
+function staleAttemptResult(db: IssueWriteDb, key: string): Record<string, unknown> {
+  const current = db.getIssueWriteByKey(key)
+  if (current?.status === 'succeeded') {
+    return { status: 'already_done', message: 'A newer reconciliation pass already recorded this write.', ...ledgerView(current) }
+  }
+  return {
+    status: 'unresolved',
+    error: 'This attempt lost its claim before its answer arrived. 21x kept the write unresolved and will reconcile it instead of trusting a stale result.',
+    ...(current ? ledgerView(current) : {})
+  }
+}
+
 /** Resolves the repository and issue number a request targets, or says why not. */
 function resolveTarget(request: IssueWriteRequest): { slug: string; number: number | null } | IssueWriteDenial {
   if (request.action === 'create_issue') {
@@ -396,6 +490,35 @@ interface GhIssueResponse {
   title?: string
   state?: string
   body?: string | null
+  labels?: Array<string | { name?: string }> | null
+}
+
+const ISSUE_PAYLOAD_FIELDS = ['title', 'body', 'labels'] as const
+
+/** The exact payload shape is durable reconciliation evidence, not caller input. */
+function payloadFields(payload: IssuePayload): Array<typeof ISSUE_PAYLOAD_FIELDS[number]> {
+  return ISSUE_PAYLOAD_FIELDS.filter((field) => payload[field] !== undefined)
+}
+
+function payloadForFields(current: GhIssueResponse, fieldsJson: string): IssuePayload | null {
+  let fields: unknown
+  try { fields = JSON.parse(fieldsJson) } catch { return null }
+  if (!Array.isArray(fields) || fields.some((field) => !(ISSUE_PAYLOAD_FIELDS as readonly unknown[]).includes(field))) return null
+  const payload: IssuePayload = {}
+  for (const field of fields as Array<typeof ISSUE_PAYLOAD_FIELDS[number]>) {
+    if (field === 'title') {
+      if (typeof current.title !== 'string') return null
+      payload.title = current.title
+    } else if (field === 'body') {
+      payload.body = current.body ?? ''
+    } else {
+      if (!Array.isArray(current.labels)) return null
+      const labels = current.labels.map((label) => typeof label === 'string' ? label : label.name)
+      if (labels.some((label) => typeof label !== 'string')) return null
+      payload.labels = (labels as string[]).sort()
+    }
+  }
+  return payload
 }
 
 async function ghJson(args: string[]): Promise<GhIssueResponse> {
@@ -469,7 +592,14 @@ export async function performIssueWrite(
   }
 
   // 4. The capability, from the project and a trusted human origin.
-  const resolved = issueWriteCapability(db, request.projectId)
+  const captain = db.getCoordinatorTask(request.projectId)
+  const resolved = issueWriteCapability(db, {
+    projectId: request.projectId,
+    captainTaskId: captain?.id ?? null,
+    action: request.action,
+    repo: target.slug,
+    now: Date.now()
+  })
   if (!resolved.capability) return denial(resolved.denial)
   const { capability, origin } = resolved
 
@@ -497,6 +627,7 @@ export async function performIssueWrite(
 
   // 6. Claim the key.
   const payloadHash = hashPayload(request.payload)
+  const fields = JSON.stringify(payloadFields(request.payload))
   const key = computeIdempotencyKey({
     projectId: request.projectId,
     repo: target.slug,
@@ -506,7 +637,6 @@ export async function performIssueWrite(
     payloadHash,
     clientKey: request.clientKey ?? null
   })
-  const captain = db.getCoordinatorTask(request.projectId)
   const claim = db.beginIssueWrite({
     idempotency_key: key,
     project_id: request.projectId,
@@ -517,6 +647,7 @@ export async function performIssueWrite(
     action: request.action,
     target_number: target.number,
     payload_hash: payloadHash,
+    payload_fields: fields,
     origin,
     lease_ms: CLAIM_LEASE_MS
   })
@@ -559,6 +690,7 @@ export async function performIssueWrite(
       action: request.action,
       target_number: target.number,
       payload_hash: payloadHash,
+      payload_fields: fields,
       origin,
       lease_ms: CLAIM_LEASE_MS
     })
@@ -584,14 +716,16 @@ async function runClaimedWrite(
     const url = `https://github.com/${target.slug}/issues/${target.number}`
     const settled = db.settleIssueWrite(record.id, {
       status: 'succeeded',
+      attempt_epoch: record.attempt_epoch,
       external_url: url,
       external_number: target.number,
       external_result: 'linked locally'
     })
+    if (!settled) return staleAttemptResult(db, key)
     if (request.taskId) linkIssueToTask(db, request.taskId, url)
-    journal(db, settled ?? record, 'linked')
+    journal(db, settled, 'linked')
     hooks.pushToRenderer?.('issueWrites:changed', { projectId: record.project_id })
-    return { status: 'linked', ...ledgerView(settled ?? record) }
+    return { status: 'linked', ...ledgerView(settled) }
   }
 
   let response: GhIssueResponse
@@ -602,35 +736,52 @@ async function runClaimedWrite(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (confirmedIssueWriteFailure(error)) {
-      const settled = db.settleIssueWrite(record.id, { status: 'failed', error: message.slice(0, 2000) })
+      const settled = db.settleIssueWrite(record.id, { status: 'failed', attempt_epoch: record.attempt_epoch, error: message.slice(0, 2000) })
+      if (!settled) return staleAttemptResult(db, key)
       hooks.pushToRenderer?.('issueWrites:changed', { projectId: record.project_id })
-      return { status: 'failed', error: `GitHub refused the write: ${message}`, ...ledgerView(settled ?? record) }
+      return { status: 'failed', error: `GitHub refused the write: ${message}`, ...ledgerView(settled) }
     }
     // The outcome is unknown: the issue may exist. Never retry blindly.
-    const settled = db.settleIssueWrite(record.id, { status: 'unresolved', error: message.slice(0, 2000) })
-    hooks.report?.(record.project_id, 'unresolved', `An issue write in ${target.slug} was interrupted and is awaiting reconciliation`, settled ?? record)
+    const settled = db.settleIssueWrite(record.id, { status: 'unresolved', attempt_epoch: record.attempt_epoch, error: message.slice(0, 2000) })
+    if (!settled) return staleAttemptResult(db, key)
+    hooks.report?.(record.project_id, 'unresolved', `An issue write in ${target.slug} was interrupted and is awaiting reconciliation`, settled)
     hooks.pushToRenderer?.('issueWrites:changed', { projectId: record.project_id })
     return {
       status: 'unresolved',
       error:
         `21x did not see GitHub's answer (${message}). The write may have landed, so it will not be repeated: ` +
         'reconciliation checks the repository and records the outcome.',
-      ...ledgerView(settled ?? record)
+      ...ledgerView(settled)
     }
   }
 
   const number = typeof response.number === 'number' ? response.number : target.number
   const url = response.html_url ?? (number ? `https://github.com/${target.slug}/issues/${number}` : null)
+  if (!url || !number) {
+    const reason = 'GitHub accepted the request but returned no issue identity; the outcome must be reconciled.'
+    const unsettled = db.settleIssueWrite(record.id, {
+      status: 'unresolved',
+      attempt_epoch: record.attempt_epoch,
+      external_result: JSON.stringify(response).slice(0, 10_000),
+      error: reason
+    })
+    if (!unsettled) return staleAttemptResult(db, key)
+    hooks.report?.(record.project_id, 'unresolved', reason, unsettled)
+    hooks.pushToRenderer?.('issueWrites:changed', { projectId: record.project_id })
+    return { status: 'unresolved', error: reason, ...ledgerView(unsettled) }
+  }
   const settled = db.settleIssueWrite(record.id, {
     status: 'succeeded',
+    attempt_epoch: record.attempt_epoch,
     external_url: url,
     external_number: number,
     external_result: JSON.stringify({ number, state: response.state ?? null, title: response.title ?? null })
   })
+  if (!settled) return staleAttemptResult(db, key)
   if (request.taskId && url) linkIssueToTask(db, request.taskId, url)
-  journal(db, settled ?? record, request.action === 'create_issue' ? 'created' : 'updated')
+  journal(db, settled, request.action === 'create_issue' ? 'created' : 'updated')
   hooks.pushToRenderer?.('issueWrites:changed', { projectId: record.project_id })
-  return { status: request.action === 'create_issue' ? 'created' : 'updated', ...ledgerView(settled ?? record) }
+  return { status: request.action === 'create_issue' ? 'created' : 'updated', ...ledgerView(settled) }
 }
 
 /** The mime type that marks an attachment row as a GitHub issue link. */
@@ -685,13 +836,14 @@ export async function reconcileIssueWrites(db: IssueWriteDb, projectId?: string,
       if (record.action === 'create_issue') {
         const found = await findIssueByIdempotencyKey(record.repo, record.idempotency_key)
         if (!found) {
-          // Nothing carries the key, so nothing was created: the claim is free.
-          const settled = db.settleIssueWrite(record.id, { status: 'failed', error: 'Interrupted; GitHub holds no issue with this idempotency key.' })
-          if (settled) settledCount++
+          // Search is not a linearizable negative answer: GitHub may index a
+          // create after this query returns. Keep the claim unresolved rather
+          // than risk turning a delayed success into a duplicate issue.
           continue
         }
         const settled = db.settleIssueWrite(record.id, {
           status: 'succeeded',
+          attempt_epoch: record.attempt_epoch,
           external_url: found.url,
           external_number: found.number,
           external_result: 'recovered by idempotency marker'
@@ -704,16 +856,11 @@ export async function reconcileIssueWrites(db: IssueWriteDb, projectId?: string,
         hooks.pushToRenderer?.('issueWrites:changed', { projectId: settled.project_id })
       } else if (record.action === 'update_issue' && record.target_number) {
         const current = await ghJson(['api', '-X', 'GET', `/repos/${record.repo}/issues/${record.target_number}`])
-        const applied = hashPayload({
-          title: current.title ?? undefined,
-          body: current.body ?? undefined,
-          labels: undefined
-        })
-        // Only a body+title match proves the patch landed; labels are not compared
-        // because another actor may legitimately have changed them since.
-        if (applied !== record.payload_hash) continue
+        const currentPayload = payloadForFields(current, record.payload_fields)
+        if (!currentPayload || hashPayload(currentPayload) !== record.payload_hash) continue
         const settled = db.settleIssueWrite(record.id, {
           status: 'succeeded',
+          attempt_epoch: record.attempt_epoch,
           external_url: `https://github.com/${record.repo}/issues/${record.target_number}`,
           external_number: record.target_number,
           external_result: 'recovered: the issue already carries the requested content'
