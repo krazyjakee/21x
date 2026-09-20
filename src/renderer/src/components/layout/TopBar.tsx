@@ -20,7 +20,6 @@ import { useCaptainTaskId } from '@/stores/coordinator-store'
 export function TopBar({ onOpenCommandPalette }: { onOpenCommandPalette: () => void }) {
   const sidebarView = useUIStore((s) => s.sidebarView)
   const activeModal = useUIStore((s) => s.activeModal)
-  const openSettings = useUIStore((s) => s.openSettings)
   const showOrchestrator = useUIStore((s) => s.showOrchestrator)
   const toggleOrchestrator = useUIStore((s) => s.toggleOrchestrator)
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)
@@ -125,14 +124,6 @@ export function TopBar({ onOpenCommandPalette }: { onOpenCommandPalette: () => v
         {/* Offset past the native window controls on Windows/Linux. */}
         <div className="no-drag absolute flex items-center gap-1 windows-titlebar-actions">
           <ThemeToggle />
-          <button
-            onClick={openSettings}
-            title="Settings"
-            aria-label="Settings"
-            className="grid size-hit place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
-          >
-            <Settings className="size-icon" />
-          </button>
           <div className="mx-1 h-5 w-px bg-border/70" />
           {/* Start talking to Captain from any view. Hidden until voice is on. */}
           <TopBarVoiceButton />

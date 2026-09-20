@@ -1,0 +1,3 @@
+@import '../../src/renderer/src/styles/globals.css';
+@source '../../src/renderer/src';
+@source './fixture.tsx';
