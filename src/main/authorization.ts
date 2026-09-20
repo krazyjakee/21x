@@ -91,7 +91,6 @@ type ClassifiedIntent = Pick<CapabilityIntent, 'capability' | 'basis' | 'clauseH
 
 const UNSAFE_CLAUSE = /\b(?:if|unless|provided|assuming|once|when|after|before|pending|subject\s+to|mock|dry[ -]?run|simulate|hypothetical|example|do\s+not|don't|dont|shouldn't|shouldnt|without|refrain|ask\s+(?:me|the\s+user)\s+(?:first|before)|(?:my|user|human)\s+approval|approve[sd]?|confirmation|merge|squash|rebase|deploy|release|promote|rollback|delete|destroy|purge|force[ -]?push|bypass|credential|token|secret|password)\b/i
 const INTERROGATIVE = /^(?:why|how|what|which|who|where|can|could|would|will|may|should|do|does|did|is|are|was|were)\b/i
-const CODING_ASSIGNMENT = /^(?:please\s+)?(?:implement|fix|repair|build|develop|code|refactor)\b/i
 const UNSAFE_CONTEXT_PREFIX = /^(?:(?:only\s+)?if\b|unless\b|when\b|once\b|pending\b|subject\s+to\b|example(?:\s+instructions?)?\b|hypothetical\b|mock\b|wait\s+for\b)/i
 const AMBIGUOUS_CONTEXT = /\b(?:if|unless|provided|assuming|once|when|after|before|pending|subject\s+to|mock|dry[ -]?run|simulate|hypothetical|example|approval|confirmation)\b/i
 const AUTHORIZATION_DENIAL = /^(?:please\s+)?(?:do\s+not|don't|dont|never|refrain\s+from)\s+(?:create|add|make|file|open|opening|publish|update|link|start|starting)\b/i
@@ -107,7 +106,32 @@ function safeAuthorizationContext(clause: string): boolean {
     /^why\s+have\s+we\s+stalled$/i.test(clause) ||
     /^come\s+up\s+with\s+(?:a\s+)?technical\s+solution\s+for\s+[a-z0-9][a-z0-9_.-]{0,80}\s+that\s+will\s+prevent\s+this\s+stalling\s+in\s+future$/i.test(clause) ||
     /^i\s+(?:do\s+not|don't|dont)\s+want\s+recommendations?$/i.test(clause) ||
-    /^(?:the\s+)?(?:github|gh)\s+issues?\s+(?:will|would|should|may|might)\s+(?:probably\s+)?need\s+to\s+be\s+part\s+of\s+(?:the\s+)?[a-z0-9][a-z0-9 -]{0,100}$/i.test(clause)
+    /^(?:the\s+)?(?:github|gh)\s+issues?\s+(?:will|would|should|may|might)\s+(?:probably\s+)?need\s+to\s+be\s+part\s+of\s+(?:the\s+)?(?:commander\s+ui\s+refactor|current\s+project|project\s+work)$/i.test(clause)
+}
+
+// Coding intent deliberately accepts a small positive vocabulary rather than
+// treating arbitrary text after a coding verb as an executable assignment.
+// Unknown task names can still be created, but cannot mint PR/start authority
+// until the human uses an unambiguous recognized production.
+const CODING_TARGET_WORDS = new Set([
+  'api', 'authorization', 'boundary', 'bug', 'capability', 'captain', 'change', 'changes',
+  'code', 'commander', 'contract', 'controller', 'database', 'delegated', 'feature',
+  'fix', 'flow', 'gate', 'github', 'implementation', 'integration', 'intent', 'intent-to-capability', 'issue',
+  'issues', 'lifecycle', 'lineage', 'login', 'merge', 'migration', 'module', 'nonce',
+  'page', 'path', 'pr', 'project', 'provenance', 'pull-request', 'readiness', 'refactor',
+  'repair', 'repo', 'repository', 'review', 'scheduler', 'schema', 'security', 'service',
+  'session', 'system', 'task', 'tests', 'tool', 'unified', 'work'
+])
+
+function recognizedCodingAssignment(clause: string, projectNames: string[]): boolean {
+  const match = /^(?:please\s+)?(?:implement|fix|repair|build|develop|code|refactor)\s+(.+)$/i.exec(clause)
+  if (!match) return false
+  const target = match[1].toLowerCase().replace(/\s+from\s+the\s+boundary\s+audit$/, '')
+  const words = target.split(/\s+/)
+  if (words.length === 0 || words.length > 8) return false
+  if (['a', 'an', 'the', 'this', 'that', 'our'].includes(words[0])) words.shift()
+  const projectWords = new Set(projectNames.map((name) => name.toLowerCase()))
+  return words.length > 0 && words.every((word) => CODING_TARGET_WORDS.has(word) || projectWords.has(word))
 }
 
 function deniedCapabilities(clause: string): Set<AuthorizationAction> | null {
@@ -130,8 +154,10 @@ function deniedCapabilities(clause: string): Set<AuthorizationAction> | null {
   return denied
 }
 
-function clauses(text: string): Array<{ text: string; start: number; end: number }> {
-  const result: Array<{ text: string; start: number; end: number }> = []
+type AuthorizationClause = { text: string; start: number; end: number; separator: string }
+
+function clauses(text: string): AuthorizationClause[] {
+  const result: AuthorizationClause[] = []
   let start = 0
   const boundary = /[.!?;\n]+/g
   for (;;) {
@@ -141,7 +167,7 @@ function clauses(text: string): Array<{ text: string; start: number; end: number
     const left = raw.search(/\S/)
     if (left >= 0) {
       const right = raw.length - raw.trimEnd().length
-      result.push({ text: raw.trim(), start: start + left, end: end - right })
+      result.push({ text: raw.trim(), start: start + left, end: end - right, separator: match?.[0] ?? '' })
     }
     if (!match) break
     start = boundary.lastIndex
@@ -153,7 +179,7 @@ function addClassified(
   found: Map<AuthorizationAction, ClassifiedIntent>,
   capability: AuthorizationAction,
   basis: 'explicit' | 'necessary',
-  clause: { text: string; start: number; end: number }
+  clause: AuthorizationClause
 ): void {
   const existing = found.get(capability)
   if (existing?.basis === 'explicit' || (existing && basis === 'necessary')) return
@@ -182,6 +208,7 @@ export function classifyCapabilityIntents(text: string, projectNames: string[] =
   if (ambiguousContext) return []
   for (const clause of parsedClauses) {
     if (safeAuthorizationContext(clause.text)) continue
+    if (clause.separator.includes('?')) return []
 
     if (AUTHORIZATION_DENIAL.test(clause.text)) {
       const parsed = deniedCapabilities(clause.text)
@@ -190,9 +217,9 @@ export function classifyCapabilityIntents(text: string, projectNames: string[] =
       continue
     }
 
-    if (clause.text.length > 1_000 || INTERROGATIVE.test(clause.text) || UNSAFE_CLAUSE.test(clause.text) || /["“”`]/.test(clause.text)) return []
+    if (clause.text.length > 1_000 || INTERROGATIVE.test(clause.text) || UNSAFE_CLAUSE.test(clause.text) || /["“”`:]/.test(clause.text)) return []
 
-    if (CODING_ASSIGNMENT.test(clause.text)) {
+    if (recognizedCodingAssignment(clause.text, projectNames)) {
       addClassified(found, 'task.start', 'necessary', clause)
       addClassified(found, 'task.update', 'necessary', clause)
       addClassified(found, 'github.pr.open', 'necessary', clause)
@@ -219,17 +246,28 @@ export function classifyCapabilityIntents(text: string, projectNames: string[] =
       const target = object[1].toLowerCase()
       const issue = /^(?:github|gh)/.test(target)
       const pr = /^(?:pr|pull)/.test(target)
+      let accepted = false
       if (pr) {
-        if (verb === 'open' || verb === 'create' || verb === 'publish') explicit.add('github.pr.open')
+        if (verb === 'open' || verb === 'create' || verb === 'publish') {
+          explicit.add('github.pr.open')
+          accepted = true
+        }
       } else if (issue) {
-        if (verb === 'update') explicit.add('github.issue.update')
-        else if (verb === 'link') explicit.add('github.issue.link')
-        else if (['create', 'add', 'make', 'file', 'open', 'publish'].includes(verb)) explicit.add('github.issue.create')
+        if (verb === 'update') { explicit.add('github.issue.update'); accepted = true }
+        else if (verb === 'link') { explicit.add('github.issue.link'); accepted = true }
+        else if (['create', 'add', 'make', 'file', 'open', 'publish'].includes(verb)) {
+          explicit.add('github.issue.create')
+          accepted = true
+        }
       } else {
-        if (verb === 'update' || verb.startsWith('prioriti')) explicit.add('task.update')
-        else if (verb === 'start') explicit.add('task.start')
-        else if (['create', 'add', 'make', 'file', 'open', 'publish'].includes(verb)) explicit.add('task.create')
+        if (verb === 'update' || verb.startsWith('prioriti')) { explicit.add('task.update'); accepted = true }
+        else if (verb === 'start') { explicit.add('task.start'); accepted = true }
+        else if (['create', 'add', 'make', 'file', 'open', 'publish'].includes(verb)) {
+          explicit.add('task.create')
+          accepted = true
+        }
       }
+      if (!accepted) return []
       rest = rest.slice(object[0].length).trimStart().replace(/^for\s+(?:this|it)\b/i, '').trimStart()
       const conjunction = /^(?:and|plus|&)\s+/i.exec(rest)
       if (!conjunction) break

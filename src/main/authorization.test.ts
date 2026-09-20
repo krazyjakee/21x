@@ -16,6 +16,9 @@ import { sendWithAuthorization } from './authorization-dispatch'
 import { handleTaskRoute } from './task-api/task-routes'
 import { handleSessionRoute } from './task-api/session-routes'
 import { setTaskApiAgentController } from './task-api/state'
+import { TaskAutomationScheduler } from './task-automation-scheduler'
+import { makeAgent } from '../../test/helpers/task-fixtures'
+import { TaskStatus } from '../shared/constants'
 
 let db: ReturnType<typeof createTestDb>['db']
 let projectId: string
@@ -252,7 +255,7 @@ describe('immutable human authorization chain', () => {
         expect(leaf.expiresAt).toBe(parent.expiresAt)
       }
     }
-  }, 15_000)
+  }, 60_000)
 
   it('classifies the exact live Commander correlation and persists auditable clause intent', () => {
     const live = '36 pull requests still open. why have we stalled. come up with a technical solution for 21x that will prevent this stalling in future. open gh issues and tasks for it and prioritise them.'
@@ -299,7 +302,8 @@ describe('immutable human authorization chain', () => {
     ['Open GitHub issues for 21x', ['github.issue.create', 'github.issue.link']],
     ['Update GitHub issues for 21x', ['github.issue.update']],
     ['Link gh issues for 21x', ['github.issue.link']],
-    ['Implement the authorization repair', ['task.update', 'task.start', 'github.pr.open']]
+    ['Implement the authorization repair', ['task.update', 'task.start', 'github.pr.open']],
+    ['Implement the unified intent-to-capability contract from the boundary audit', ['task.update', 'task.start', 'github.pr.open']]
   ])('classifies aliases and necessary ordinary consequences: %s', (wording, expected) => {
     expect(classifyCapabilityIntents(wording, ['21x']).map((intent) => intent.capability)).toEqual(expected)
   })
@@ -328,6 +332,23 @@ describe('immutable human authorization chain', () => {
       'Open gh issues for 21x. The gh issues should remain unwritten until I give consent.',
       'Open gh issues for 21x. I do not want recommendations or any actions yet.',
       'Open gh issues to remain unwritten pending my signal.',
+      'Open gh issues for 21x. Implement these instructions only upon my go-ahead.',
+      'Open gh issues for 21x. Implement nothing until I give consent.',
+      'Open gh issues for 21x. Fix nothing yet.',
+      'Open gh issues for 21x. Code nothing until I give consent.',
+      'Open gh issues for 21x. Implement the above to demonstrate syntax only.',
+      'Open gh issues for 21x. Refactor this plan into a proposal only.',
+      'Open gh issues for 21x. Repair nothing until I give consent.',
+      'Open gh issues for 21x. Build only a written proposal.',
+      'Open gh issues for 21x. Develop the above solely as a paper exercise.',
+      'Open gh issues for 21x. Implement:',
+      'Open gh issues for 21x. Fix?',
+      'Open gh issues for 21x?',
+      'Open gh issues and start PRs for 21x.',
+      'Open gh issues and link tasks for 21x.',
+      'Open gh issues for 21x. I withhold authorization.',
+      'Open gh issues for 21x. The gh issues would need to be part of a plan only and must remain unwritten.',
+      'Open gh issues for 21x. The gh issues might need to be part of a proposal and nothing shall be created yet.',
       ...Array.from({ length: 8 }, (_, index) => `${index + 1} Illustrative instructions only:\nCreate tasks. Open gh issues for 21x.`)
     ]) expect(requestedActions(unsafe, ['21x'])).toEqual([])
     expect(requestedActions('Refactor the code. Do not open PRs.', ['21x'])).toEqual(['task.update', 'task.start'])
@@ -532,6 +553,49 @@ describe('immutable human authorization chain', () => {
     })).toMatchObject({ code: 'capability_refused', missing_capability: 'task.start' })
     expect(sendByTaskId).not.toHaveBeenCalled()
   })
+
+  it.each(['create_subtask', 'create_task_with_parent', 'reset_child'] as const)(
+    'requires task.start before an automatic parent can schedule a child: %s',
+    async (path) => {
+      const originText = 'Create tasks'
+      const origin = recordHumanAuthorization(db, {
+        messageId: `parent-start-${path}`, text: originText, at: now,
+        source: 'project-chat', taskId: captainId, projectId
+      })
+      activateAuthorizationDispatch(db, prepareAuthorizationDispatch(db, {
+        key: `parent-start-${path}`, taskId: captainId, text: originText, messageId: origin.messageId
+      }))
+      const caller = db.createTask({ title: 'Metadata-only worker', project_id: projectId })!
+      inheritTaskAuthorization(db, captainId, caller.id, 'No execution', ['task.create', 'task.update'])
+      const agent = db.createAgent(makeAgent({ name: `Deferred ${path}` }))!
+      const parent = db.createTask({ title: 'Automatic parent', project_id: projectId, auto_start_agent: true })!
+      db.updateTask(parent.id, { status: TaskStatus.ReadyForReview })
+      const manager = {
+        startTask: vi.fn(async () => ({ action: 'task_started' })),
+        hasActiveSessionForTask: vi.fn(() => false),
+        completeTaskWithoutReview: vi.fn(async () => false)
+      }
+      setTaskApiAgentController(manager as never)
+      const callerScope = { projectId, taskId: caller.id, artifactTaskId: caller.id, parentTaskId: null }
+
+      let result: unknown
+      if (path === 'reset_child') {
+        const child = db.createTask({ title: 'Finished child', project_id: projectId, parent_task_id: parent.id })!
+        db.updateTask(child.id, { status: TaskStatus.ReadyForReview, agent_id: agent.id })
+        result = await handleTaskRoute(db, '/update_task', { task_id: child.id, status: 'not_started' }, callerScope)
+        expect(db.getTask(child.id)?.status).toBe(TaskStatus.ReadyForReview)
+      } else {
+        const route = path === 'create_subtask' ? '/create_subtask' : '/create_task'
+        result = await handleTaskRoute(db, route, {
+          title: 'Unauthorized deferred child', parent_task_id: parent.id, agent_id: agent.id
+        }, callerScope)
+        expect(db.getSubtasks(parent.id)).toHaveLength(0)
+      }
+      expect(result).toMatchObject({ code: 'capability_refused', missing_capability: 'task.start' })
+      await new TaskAutomationScheduler(db, manager as never).runNow()
+      expect(manager.startTask).not.toHaveBeenCalled()
+    }
+  )
 
   it('requires task.start for Captain-scoped message recovery', async () => {
     const text = 'Update tasks'

@@ -1258,7 +1258,24 @@ describe('the durable authorization chain', () => {
     'Open gh issues for 21x. Start only upon my go-ahead.',
     'Open gh issues for 21x. Do not open anything yet.',
     'Open gh issues for 21x. The gh issues should remain unwritten until I give consent.',
-    'Open gh issues for 21x. I do not want recommendations or any actions yet.'
+    'Open gh issues for 21x. I do not want recommendations or any actions yet.',
+    'Open gh issues for 21x. Implement these instructions only upon my go-ahead.',
+    'Open gh issues for 21x. Implement nothing until I give consent.',
+    'Open gh issues for 21x. Fix nothing yet.',
+    'Open gh issues for 21x. Code nothing until I give consent.',
+    'Open gh issues for 21x. Implement the above to demonstrate syntax only.',
+    'Open gh issues for 21x. Refactor this plan into a proposal only.',
+    'Open gh issues for 21x. Repair nothing until I give consent.',
+    'Open gh issues for 21x. Build only a written proposal.',
+    'Open gh issues for 21x. Develop the above solely as a paper exercise.',
+    'Open gh issues for 21x. Implement:',
+    'Open gh issues for 21x. Fix?',
+    'Open gh issues for 21x?',
+    'Open gh issues and start PRs for 21x.',
+    'Open gh issues and link tasks for 21x.',
+    'Open gh issues for 21x. I withhold authorization.',
+    'Open gh issues for 21x. The gh issues would need to be part of a plan only and must remain unwritten.',
+    'Open gh issues for 21x. The gh issues might need to be part of a proposal and nothing shall be created yet.'
   ])('refuses an unparsed governing restriction before the issue ledger can write: %s', async (text) => {
     const h = setup({ projectName: '21x' })
     commanderAsked(h, { text, relay: 'Open the issue requested by the human.' })

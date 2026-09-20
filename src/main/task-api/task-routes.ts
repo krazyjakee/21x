@@ -94,6 +94,19 @@ function authorizeScopedTaskAction(
   return decision.allowed ? null : authorizationRefusal(decision)
 }
 
+/** Mirrors the scheduler's parent-driven start boundary for a child mutation. */
+function parentWillAutomaticallyStartChild(
+  db: DatabaseManager,
+  parentTaskId: string | null | undefined,
+  status: string,
+  agentId: string | null | undefined
+): boolean {
+  if (!parentTaskId || status !== TaskStatus.NotStarted || !agentId) return false
+  const parent = db.getTask(parentTaskId)
+  return !!parent?.auto_start_agent && !parent.parent_task_id &&
+    !(parent.is_recurring && parent.recurrence_parent_id == null)
+}
+
 function capabilityNarrowing(value: unknown): { actions?: AuthorizationAction[]; error?: string } {
   if (value === undefined) return {}
   if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || !AUTHORIZATION_ACTIONS.includes(item as AuthorizationAction))) {
@@ -298,9 +311,13 @@ async function updateTask(db: DatabaseManager, params: Record<string, unknown>, 
     if (updateRefused) return updateRefused
     const resultingAutoStart = prepared.data.auto_start_agent ?? current.auto_start_agent
     const resultingStatus = prepared.data.status ?? current.status
+    const resultingAgent = prepared.data.agent_id === undefined ? current.agent_id : prepared.data.agent_id
     const enablesAutomaticStart = resultingAutoStart && resultingStatus === TaskStatus.NotStarted &&
       (current.status !== TaskStatus.NotStarted || !current.auto_start_agent)
-    if (prepared.startAfterWrite || prepared.data.auto_start_agent === true || enablesAutomaticStart) {
+    const parentDrivenAutomaticStart = parentWillAutomaticallyStartChild(
+      db, current.parent_task_id, resultingStatus, resultingAgent
+    )
+    if (prepared.startAfterWrite || prepared.data.auto_start_agent === true || enablesAutomaticStart || parentDrivenAutomaticStart) {
       const startRefused = authorizeScopedTaskAction(db, trustedScope, taskProjectId(current), 'task.start')
       if (startRefused) return startRefused
     }
@@ -335,6 +352,10 @@ function createSubtask(db: DatabaseManager, params: Record<string, unknown>, tru
   if (!parent) return { error: 'Parent task not found' }
   const refused = authorizeScopedTaskAction(db, trustedScope, taskProjectId(parent), 'task.create')
   if (refused) return refused
+  if (parentWillAutomaticallyStartChild(db, parent.id, TaskStatus.NotStarted, params.agent_id as string | undefined)) {
+    const startRefused = authorizeScopedTaskAction(db, trustedScope, taskProjectId(parent), 'task.start')
+    if (startRefused) return startRefused
+  }
   const narrowing = capabilityNarrowing(params.permissions)
   if (narrowing.error) return { error: narrowing.error }
   if (params.next_subtask_ids !== undefined && !Array.isArray(params.next_subtask_ids)) {
@@ -430,7 +451,8 @@ function createTopLevelTask(db: DatabaseManager, params: Record<string, unknown>
   if (!db.getProject(projectId)) return { error: `Project not found: ${projectId}` }
   const refused = authorizeScopedTaskAction(db, trustedScope, projectId, 'task.create')
   if (refused) return refused
-  if (params.auto_start_agent === true) {
+  if (params.auto_start_agent === true ||
+    parentWillAutomaticallyStartChild(db, parent?.id, TaskStatus.NotStarted, params.agent_id as string | undefined)) {
     const startRefused = authorizeScopedTaskAction(db, trustedScope, projectId, 'task.start')
     if (startRefused) return startRefused
   }
