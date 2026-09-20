@@ -194,6 +194,29 @@ describe('registerIpcHandlers', () => {
     expect(cancelTurn).toHaveBeenCalledExactlyOnceWith('shared-turn', 'old-start-epoch')
   })
 
+  it('passes confirmation ownership through confirm and dismiss boundaries', async () => {
+    const confirm = vi.fn()
+    const dismiss = vi.fn()
+    register({ voiceSessionManager: { confirm, dismiss } })
+    const handleCalls = (ipcMain.handle as ReturnType<typeof vi.fn>).mock.calls as [string, (...args: unknown[]) => unknown][]
+    const confirmHandler = handleCalls.filter((call) => call[0] === 'voice:confirm').pop()?.[1]
+    const dismissHandler = handleCalls.filter((call) => call[0] === 'voice:dismiss').pop()?.[1]
+
+    await confirmHandler!({}, {
+      turnId: 'shared-turn',
+      turnEpoch: 'confirmation-epoch',
+      choice: { taskId: 'task-1' },
+    })
+    await dismissHandler!({}, { turnId: 'shared-turn', turnEpoch: 'confirmation-epoch' })
+
+    expect(confirm).toHaveBeenCalledExactlyOnceWith(
+      'shared-turn',
+      { taskId: 'task-1' },
+      'confirmation-epoch'
+    )
+    expect(dismiss).toHaveBeenCalledExactlyOnceWith('shared-turn', 'confirmation-epoch')
+  })
+
   it('terminal:kill ignores stale expectedPid and only kills matching process', async () => {
     register()
 

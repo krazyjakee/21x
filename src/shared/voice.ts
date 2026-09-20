@@ -42,10 +42,13 @@ export const VOICE_TRANSITIONS: Record<VoiceState, readonly VoiceState[]> = {
   // sample in settings: both start speech with no turn open.
   idle: ['listening', 'permission_needed', 'model_needed', 'disabled', 'speaking'],
   listening: ['transcribing', 'idle'],
-  transcribing: ['awaiting_confirmation', 'executing', 'waiting_for_agent', 'speaking', 'idle'],
-  awaiting_confirmation: ['executing', 'idle'],
-  executing: ['waiting_for_agent', 'speaking', 'idle'],
-  waiting_for_agent: ['speaking', 'idle'],
+  transcribing: ['awaiting_confirmation', 'executing', 'waiting_for_agent', 'speaking', 'listening', 'idle'],
+  // A confirmation may remain visible while the user starts a new Commander
+  // call. The new microphone turn owns the lifecycle even though the older
+  // card remains independently actionable.
+  awaiting_confirmation: ['executing', 'listening', 'idle'],
+  executing: ['waiting_for_agent', 'speaking', 'listening', 'idle'],
+  waiting_for_agent: ['speaking', 'listening', 'idle'],
   speaking: ['idle'],
   error: ['idle', 'disabled'],
 } as const
@@ -144,7 +147,7 @@ export const VOICE_CONFIRM_CONFIDENCE = 0.8
 // ── Actions ─────────────────────────────────────────────────
 
 /** Main -> renderer answer to one command turn. */
-export type VoiceActionOutcome =
+export type VoiceActionOutcome = (
   /** Nothing ran. The renderer must show a confirmation card. */
   | {
       status: 'needs_confirmation'
@@ -163,7 +166,11 @@ export type VoiceActionOutcome =
    * must not be shown as one.
    */
   | { status: 'completed'; turnId: string; segments: number }
-  | { status: 'cancelled'; turnId: string; turnEpoch?: string }
+  | { status: 'cancelled'; turnId: string }
+) & {
+  /** Exact start lease that produced this outcome, when supported by main. */
+  turnEpoch?: string
+}
 
 export interface VoiceCandidate {
   id: string
@@ -365,6 +372,8 @@ export const VOICE_EVENTS = {
 export interface VoiceStateEvent {
   state: VoiceState
   turnId?: string | null
+  /** Exact start lease that owns this lifecycle transition. */
+  turnEpoch?: string | null
   detail?: string
 }
 

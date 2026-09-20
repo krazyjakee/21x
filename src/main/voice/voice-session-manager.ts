@@ -77,8 +77,14 @@ const RUNTIME_ABSENT: VoiceRuntimeStatus = {
 }
 
 interface PendingConfirmation {
+  turnId: string
   proposal: VoiceIntentProposal
   context: VoiceUiContext
+  turnEpoch: string | null
+}
+
+interface VoiceLifecycleOwner {
+  turnId: string
   turnEpoch: string | null
 }
 
@@ -110,6 +116,12 @@ export class VoiceSessionManager {
   private segmentsSent = 0
   private engine: VoiceEngineStatus = { state: 'model_missing', message: 'No speech model is installed yet.' }
   private pending = new Map<string, PendingConfirmation>()
+  /**
+   * Owns state-machine transitions after recognition has released `turnId`.
+   * Confirmations and actions outlive their microphone turn, so `turnId`
+   * alone cannot prevent an older completion from changing a replacement.
+   */
+  private lifecycleOwner: VoiceLifecycleOwner | null = null
   private registeredShortcut: string | null = null
   private runtime: VoiceRuntimeStatus = RUNTIME_ABSENT
   private setupPhase: 'model' | null = null
@@ -319,13 +331,14 @@ export class VoiceSessionManager {
     const turnEpoch = createId()
     this.turnId = turnId
     this.turnEpoch = turnEpoch
+    this.lifecycleOwner = { turnId, turnEpoch }
     this.turnMode = mode
     this.turnContext = context ?? {}
     this.partial = ''
     this.final = ''
     this.segmentsSent = 0
     this.worker.startTurn(turnId, mode)
-    this.setState('listening')
+    this.setOwnedState('listening', turnId, turnEpoch)
     return { turnId, turnEpoch }
   }
 
@@ -342,7 +355,7 @@ export class VoiceSessionManager {
     // listening: an answer read to a closed microphone talks over whatever the
     // user turned to next.
     this.stopSpeaking()
-    this.setState('transcribing')
+    this.setOwnedState('transcribing', turnId, this.turnEpoch)
     this.worker.endTurn(turnId)
   }
 
@@ -357,10 +370,10 @@ export class VoiceSessionManager {
       this.partial = ''
       this.segmentsSent = 0
       this.stopSpeaking()
-      this.setState('idle')
+      this.setOwnedState('idle', id, currentEpoch)
     }
-    const pending = this.pending.get(id)
-    if (pending && (!turnEpoch || pending.turnEpoch === turnEpoch)) this.pending.delete(id)
+    const pending = this.findPending(id, turnEpoch)
+    if (pending) this.pending.delete(this.confirmationKey(id, pending.turnEpoch))
     // A leased stale request is only an acknowledgement. The worker has one
     // active turn, so forwarding it could cancel a replacement that reused the
     // provider ID. Legacy unleased callers retain their previous behaviour.
@@ -414,7 +427,7 @@ export class VoiceSessionManager {
     this.segmentsSent = 0
 
     if (!text.trim()) {
-      this.setState('idle')
+      this.setOwnedState('idle', turnId, turnEpoch)
       if (delivered > 0) {
         // Ending a conversation is not a failure. Every sentence already left
         // as a segment, and the recogniser was reset after each one, so this
@@ -423,6 +436,7 @@ export class VoiceSessionManager {
           status: 'completed',
           turnId,
           segments: delivered,
+          ...(turnEpoch ? { turnEpoch } : {}),
         } satisfies VoiceActionOutcome)
         return
       }
@@ -431,23 +445,25 @@ export class VoiceSessionManager {
         turnId,
         reason: 'unrecognized',
         message: 'Nothing was heard.',
+        ...(turnEpoch ? { turnEpoch } : {}),
       } satisfies VoiceActionOutcome)
       return
     }
 
     const interpretation = interpretTranscript(text, mode)
     if (interpretation.kind === 'dictation') {
-      this.setState('idle')
+      this.setOwnedState('idle', turnId, turnEpoch)
       this.options.notify(VOICE_EVENTS.dictate, { turnId, text: interpretation.text })
       this.options.notify(VOICE_EVENTS.outcome, {
         status: 'dictation',
         turnId,
         text: interpretation.text,
+        ...(turnEpoch ? { turnEpoch } : {}),
       } satisfies VoiceActionOutcome)
       return
     }
     if (interpretation.kind === 'unrecognized') {
-      this.setState('idle')
+      this.setOwnedState('idle', turnId, turnEpoch)
       this.options.notify(VOICE_EVENTS.outcome, {
         status: 'rejected',
         turnId,
@@ -455,6 +471,7 @@ export class VoiceSessionManager {
         // Naming the mode is the missing half: this only happens on the
         // global shortcut, and the user has no way to know that.
         message: `“${interpretation.transcript}” is not one of the spoken commands. To dictate it instead, use the microphone beside a message box.`,
+        ...(turnEpoch ? { turnEpoch } : {}),
       } satisfies VoiceActionOutcome)
       return
     }
@@ -478,20 +495,37 @@ export class VoiceSessionManager {
 
   private onWorkerError(message: string, code?: string): void {
     if (this.turnId) {
+      const turnId = this.turnId
+      const turnEpoch = this.turnEpoch
       this.options.notify(VOICE_EVENTS.outcome, {
         status: 'rejected',
-        turnId: this.turnId,
+        turnId,
         reason: 'failed',
         message,
+        ...(turnEpoch ? { turnEpoch } : {}),
       } satisfies VoiceActionOutcome)
       this.turnId = null
       this.turnEpoch = null
+      this.setOwnedState('idle', turnId, turnEpoch)
     }
     this.options.notify(VOICE_EVENTS.error, { message, code })
-    this.setState('idle')
+    if (this.turnId === null && this.lifecycleOwner === null) this.setState('idle')
   }
 
   // ── Confirmation queue ────────────────────────────────────
+
+  private confirmationKey(turnId: string, turnEpoch: string | null): string {
+    return `${turnId}\u0000${turnEpoch ?? ''}`
+  }
+
+  private findPending(turnId: string, turnEpoch?: string): PendingConfirmation | undefined {
+    if (turnEpoch !== undefined) {
+      return this.pending.get(this.confirmationKey(turnId, turnEpoch))
+    }
+    // Legacy renderers did not send an epoch. Preserve their prior behavior by
+    // choosing the newest retained confirmation with this provider ID.
+    return [...this.pending.values()].reverse().find((entry) => entry.turnId === turnId)
+  }
 
   private async runProposal(
     turnId: string,
@@ -500,20 +534,35 @@ export class VoiceSessionManager {
     confirmed: boolean,
     turnEpoch: string | null = null
   ): Promise<void> {
-    this.setState(confirmed ? 'executing' : 'transcribing')
+    // Some internal callers finish recognition before passing the proposal on.
+    // Recover the still-owned lease instead of treating that continuation as
+    // unowned; production callers normally pass it explicitly.
+    if (turnEpoch === null && this.lifecycleOwner?.turnId === turnId) {
+      turnEpoch = this.lifecycleOwner.turnEpoch
+    }
+    this.setOwnedState(confirmed ? 'executing' : 'transcribing', turnId, turnEpoch)
     const outcome = await this.actions.apply(turnId, proposal, context, confirmed)
+    const ownedOutcome = {
+      ...outcome,
+      ...(turnEpoch ? { turnEpoch } : {}),
+    } satisfies VoiceActionOutcome
 
     if (outcome.status === 'needs_confirmation') {
-      this.pending.set(turnId, { proposal: outcome.proposal, context, turnEpoch })
-      this.setState('awaiting_confirmation')
-      this.options.notify(VOICE_EVENTS.outcome, outcome)
+      this.pending.set(this.confirmationKey(turnId, turnEpoch), {
+        turnId,
+        proposal: outcome.proposal,
+        context,
+        turnEpoch,
+      })
+      this.setOwnedState('awaiting_confirmation', turnId, turnEpoch)
+      this.options.notify(VOICE_EVENTS.outcome, ownedOutcome)
       return
     }
-    this.pending.delete(turnId)
+    this.pending.delete(this.confirmationKey(turnId, turnEpoch))
     // The card is shown before the speech starts, so the user reads the result
     // even when nothing is spoken.
-    this.options.notify(VOICE_EVENTS.outcome, outcome)
-    await this.afterExecuted(turnId, outcome)
+    this.options.notify(VOICE_EVENTS.outcome, ownedOutcome)
+    await this.afterExecuted(turnId, ownedOutcome, turnEpoch)
   }
 
   /**
@@ -522,9 +571,16 @@ export class VoiceSessionManager {
    * A question to the agent has no answer yet, so the turn waits. Everything
    * else has its short result spoken, if the user asked for that.
    */
-  private async afterExecuted(turnId: string, outcome: VoiceActionOutcome): Promise<void> {
+  private async afterExecuted(
+    turnId: string,
+    outcome: VoiceActionOutcome,
+    turnEpoch: string | null
+  ): Promise<void> {
+    // The action result still reaches the UI, but an older action must not
+    // change or speak over a replacement microphone turn.
+    if (!this.ownsLifecycle(turnId, turnEpoch)) return
     if (outcome.status !== 'executed') {
-      this.setState('idle')
+      this.setOwnedState('idle', turnId, turnEpoch)
       return
     }
 
@@ -532,7 +588,7 @@ export class VoiceSessionManager {
       // Remember which turn asked, so the answer that arrives minutes later is
       // matched to this turn and no other agent answer is read out.
       this.speech.expectAnswer(outcome.taskId, turnId)
-      this.setState('waiting_for_agent')
+      this.setOwnedState('waiting_for_agent', turnId, turnEpoch)
       this.armAnswerTimer(outcome.taskId)
       return
     }
@@ -545,7 +601,7 @@ export class VoiceSessionManager {
       ...(outcome.taskId ? { taskId: outcome.taskId } : {}),
     })
     // `speak` moves the state to `speaking` itself when it starts.
-    if (!spoken) this.setState('idle')
+    if (!spoken) this.setOwnedState('idle', turnId, turnEpoch)
   }
 
   /**
@@ -653,27 +709,41 @@ export class VoiceSessionManager {
    * Runs a proposal the user confirmed on screen. `choice` carries the record
    * the user picked when the spoken reference matched more than one.
    */
-  async confirm(turnId: string, choice?: { taskId?: string; agentName?: string }): Promise<void> {
-    const entry = this.pending.get(turnId)
+  async confirm(
+    turnId: string,
+    choice?: { taskId?: string; agentName?: string },
+    turnEpoch?: string
+  ): Promise<void> {
+    const entry = this.findPending(turnId, turnEpoch)
     if (!entry) {
       this.options.notify(VOICE_EVENTS.outcome, {
         status: 'rejected',
         turnId,
         reason: 'stale_turn',
         message: 'That request is no longer active.',
+        ...(turnEpoch ? { turnEpoch } : {}),
       } satisfies VoiceActionOutcome)
       return
     }
-    this.pending.delete(turnId)
+    this.pending.delete(this.confirmationKey(turnId, entry.turnEpoch))
     const proposal = choice ? applyChoice(entry.proposal, choice) : entry.proposal
     await this.runProposal(turnId, proposal, entry.context, true, entry.turnEpoch)
   }
 
   /** The user dismissed the confirmation card. Nothing runs. */
-  dismiss(turnId: string): void {
-    const turnEpoch = this.pending.get(turnId)?.turnEpoch ?? undefined
-    this.pending.delete(turnId)
-    this.setState('idle')
+  dismiss(turnId: string, requestedEpoch?: string): void {
+    const entry = this.findPending(turnId, requestedEpoch)
+    if (!entry) {
+      this.options.notify(VOICE_EVENTS.outcome, {
+        status: 'cancelled',
+        turnId,
+        ...(requestedEpoch ? { turnEpoch: requestedEpoch } : {}),
+      } satisfies VoiceActionOutcome)
+      return
+    }
+    const turnEpoch = entry.turnEpoch
+    this.pending.delete(this.confirmationKey(turnId, turnEpoch))
+    this.setOwnedState('idle', turnId, turnEpoch)
     this.options.notify(VOICE_EVENTS.outcome, {
       status: 'cancelled',
       turnId,
@@ -927,14 +997,41 @@ export class VoiceSessionManager {
 
   // ── State and snapshots ───────────────────────────────────
 
-  private setState(next: VoiceState, detail?: string): void {
+  private ownsLifecycle(turnId: string, turnEpoch: string | null): boolean {
+    const owner = this.lifecycleOwner
+    return owner?.turnId === turnId && owner.turnEpoch === turnEpoch
+  }
+
+  /**
+   * Applies a turn lifecycle transition only while that exact start lease
+   * still owns the state machine. The owner deliberately survives the final
+   * transcript because confirmation and action completion happen afterwards.
+   */
+  private setOwnedState(
+    next: VoiceState,
+    turnId: string,
+    turnEpoch: string | null,
+    detail?: string
+  ): boolean {
+    if (!this.ownsLifecycle(turnId, turnEpoch)) return false
+    this.setState(next, detail, { turnId, turnEpoch })
+    if (next === 'idle' || next === 'disabled' || next === 'error') this.lifecycleOwner = null
+    return true
+  }
+
+  private setState(next: VoiceState, detail?: string, owner?: VoiceLifecycleOwner): void {
     if (!canTransition(this.state, next)) {
       console.warn(`[voice] blocked transition ${this.state} -> ${next}`)
       return
     }
     if (this.state === next) return
     this.state = next
-    this.options.notify(VOICE_EVENTS.state, { state: next, turnId: this.turnId, detail })
+    this.options.notify(VOICE_EVENTS.state, {
+      state: next,
+      turnId: owner?.turnId ?? this.turnId,
+      turnEpoch: owner?.turnEpoch ?? this.turnEpoch,
+      detail,
+    })
   }
 
   getState(): VoiceState {

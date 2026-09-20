@@ -782,9 +782,14 @@ export const voiceApi = {
   endTurn: (turnId: string): Promise<void> => window.electronAPI.voice.endTurn(turnId),
   cancelTurn: (turnId?: string, turnEpoch?: string): Promise<void> =>
     window.electronAPI.voice.cancelTurn(turnId, turnEpoch),
-  confirm: (turnId: string, choice?: { taskId?: string; agentName?: string }): Promise<{ success: boolean }> =>
-    window.electronAPI.voice.confirm(turnId, choice),
-  dismiss: (turnId: string): Promise<void> => window.electronAPI.voice.dismiss(turnId),
+  confirm: (turnId: string, choice?: { taskId?: string; agentName?: string }, turnEpoch?: string): Promise<{ success: boolean }> =>
+    turnEpoch
+      ? window.electronAPI.voice.confirm(turnId, choice, turnEpoch)
+      : window.electronAPI.voice.confirm(turnId, choice),
+  dismiss: (turnId: string, turnEpoch?: string): Promise<void> =>
+    turnEpoch
+      ? window.electronAPI.voice.dismiss(turnId, turnEpoch)
+      : window.electronAPI.voice.dismiss(turnId),
   getRuntime: (): Promise<VoiceRuntimeStatus> => window.electronAPI.voice.getRuntime(),
   installRuntime: (): Promise<VoiceRuntimeStatus> => window.electronAPI.voice.installRuntime(),
   removeRuntime: (): Promise<VoiceRuntimeStatus> => window.electronAPI.voice.removeRuntime(),

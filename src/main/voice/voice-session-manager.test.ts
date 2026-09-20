@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { EventEmitter } from 'events'
 import { VoiceSessionManager, VOICE_ENGINE_READY_TIMEOUT_MS } from './voice-session-manager'
 import type { VoiceWorkerClient } from './voice-worker-client'
-import type { VoiceActionOutcome } from '../../shared/voice'
+import { VOICE_EVENTS, type VoiceActionOutcome, type VoiceTurnHandle } from '../../shared/voice'
+
+const ids = vi.hoisted(() => ({ queue: [] as string[], next: 0 }))
+vi.mock('@paralleldrive/cuid2', () => ({
+  createId: () => ids.queue.shift() ?? `voice-session-test-${++ids.next}`,
+}))
 
 /** A worker stand-in. Nothing here decodes audio; the tests drive it directly. */
 class FakeWorker extends EventEmitter {
@@ -80,6 +85,12 @@ function makeReadyManager(settings?: Record<string, string>) {
 
 function outcomes(notify: ReturnType<typeof vi.fn>): VoiceActionOutcome[] {
   return notify.mock.calls.filter(([channel]) => channel === 'voice:outcome').map(([, data]) => data)
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((yes) => { resolve = yes })
+  return { promise, resolve }
 }
 
 describe('VoiceSessionManager — turns', () => {
@@ -324,6 +335,106 @@ describe('VoiceSessionManager — dictation and commands', () => {
     await ctx.manager.confirm(turn.turnId)
     expect(ctx.db.createTask).not.toHaveBeenCalled()
   })
+
+  it.each([false, true])(
+    'keeps a replacement turn live when an older confirmation is dismissed (reused id: %s)',
+    async (reused) => {
+      ids.queue = ['command-turn', 'command-epoch', reused ? 'command-turn' : 'call-turn', 'call-epoch']
+      const ctx = makeReadyManager()
+      const command = await ctx.manager.startTurn('command', {}) as VoiceTurnHandle
+      ctx.worker.emit('final', command.turnId, 'create a task to fix login')
+      await vi.waitFor(() => expect(outcomes(ctx.notify)).toHaveLength(1))
+      const replacement = await ctx.manager.startTurn('conversation', {}) as VoiceTurnHandle
+      ctx.notify.mockClear()
+      ctx.worker.cancelTurn.mockClear()
+
+      ctx.manager.dismiss(command.turnId, command.turnEpoch)
+
+      expect(ctx.manager.getState()).toBe('listening')
+      expect(ctx.notify.mock.calls.filter(([channel]) => channel === VOICE_EVENTS.state)).toEqual([])
+      expect(ctx.worker.cancelTurn).not.toHaveBeenCalled()
+      ctx.manager.pushAudio(replacement.turnId, Buffer.alloc(4))
+      expect(ctx.worker.pushAudio).toHaveBeenCalledOnce()
+      expect(outcomes(ctx.notify)).toEqual([{
+        status: 'cancelled', turnId: command.turnId, turnEpoch: command.turnEpoch,
+      }])
+    }
+  )
+
+  it.each([false, true])(
+    'does not let an older confirmation dismiss the newest confirmation (reused id: %s)',
+    async (reused) => {
+      ids.queue = ['old-turn', 'old-epoch', reused ? 'old-turn' : 'new-turn', 'new-epoch']
+      const ctx = makeReadyManager()
+      const old = await ctx.manager.startTurn('command', {}) as VoiceTurnHandle
+      ctx.worker.emit('final', old.turnId, 'create a task to fix the old flow')
+      await vi.waitFor(() => expect(outcomes(ctx.notify)).toHaveLength(1))
+      const current = await ctx.manager.startTurn('command', {}) as VoiceTurnHandle
+      ctx.worker.emit('final', current.turnId, 'create a task to fix the new flow')
+      await vi.waitFor(() => expect(outcomes(ctx.notify)).toHaveLength(2))
+
+      ctx.manager.dismiss(old.turnId, old.turnEpoch)
+      expect(ctx.manager.getState()).toBe('awaiting_confirmation')
+
+      ctx.manager.dismiss(current.turnId, current.turnEpoch)
+      expect(ctx.manager.getState()).toBe('idle')
+    }
+  )
+
+  it.each([false, true])(
+    'executes an older owned confirmation without taking lifecycle state from a replacement (reused id: %s)',
+    async (reused) => {
+      ids.queue = ['command-turn', 'command-epoch', reused ? 'command-turn' : 'call-turn', 'call-epoch']
+      const ctx = makeReadyManager()
+      const command = await ctx.manager.startTurn('command', {}) as VoiceTurnHandle
+      ctx.worker.emit('final', command.turnId, 'create a task to fix login')
+      await vi.waitFor(() => expect(outcomes(ctx.notify)).toHaveLength(1))
+      const replacement = await ctx.manager.startTurn('conversation', {}) as VoiceTurnHandle
+      ctx.notify.mockClear()
+
+      await ctx.manager.confirm(command.turnId, undefined, command.turnEpoch)
+
+      expect(ctx.db.createTask).toHaveBeenCalledOnce()
+      expect(ctx.manager.getState()).toBe('listening')
+      expect(ctx.notify.mock.calls.filter(([channel]) => channel === VOICE_EVENTS.state)).toEqual([])
+      ctx.manager.pushAudio(replacement.turnId, Buffer.alloc(4))
+      expect(ctx.worker.pushAudio).toHaveBeenCalledOnce()
+    }
+  )
+
+  it.each([false, true])(
+    'ignores late state and speech from a confirmed action after replacement (reused id: %s)',
+    async (reused) => {
+      ids.queue = ['command-turn', 'command-epoch', reused ? 'command-turn' : 'call-turn', 'call-epoch']
+      const ctx = makeReadyManager()
+      const command = await ctx.manager.startTurn('command', {}) as VoiceTurnHandle
+      ctx.worker.emit('final', command.turnId, 'create a task to fix login')
+      await vi.waitFor(() => expect(outcomes(ctx.notify)).toHaveLength(1))
+      const execution = deferred<VoiceActionOutcome>()
+      const internals = ctx.manager as unknown as {
+        actions: { apply: () => Promise<VoiceActionOutcome> }
+      }
+      internals.actions.apply = () => execution.promise
+      const speak = vi.spyOn(ctx.manager.speech, 'speak')
+
+      const confirmation = ctx.manager.confirm(command.turnId, undefined, command.turnEpoch)
+      const replacement = await ctx.manager.startTurn('conversation', {}) as VoiceTurnHandle
+      ctx.notify.mockClear()
+      execution.resolve({
+        status: 'executed',
+        turnId: command.turnId,
+        intent: 'create_task',
+        message: 'Created the old request.',
+      })
+      await confirmation
+
+      expect(ctx.manager.getState()).toBe('listening')
+      expect(ctx.notify.mock.calls.filter(([channel]) => channel === VOICE_EVENTS.state)).toEqual([])
+      expect(speak).not.toHaveBeenCalled()
+      ctx.manager.pushAudio(replacement.turnId, Buffer.alloc(4))
+      expect(ctx.worker.pushAudio).toHaveBeenCalledOnce()
+    }
+  )
 })
 
 describe('VoiceSessionManager — optional runtime', () => {
@@ -398,7 +509,7 @@ describe('VoiceSessionManager — the conversational loop', () => {
 
   it('sends each sentence and stays listening', async () => {
     const ctx = makeReadyManager()
-    const turn = (await ctx.manager.startTurn('conversation', {})) as { turnId: string }
+    const turn = (await ctx.manager.startTurn('conversation', {})) as VoiceTurnHandle
 
     ctx.worker.emit('segment', turn.turnId, 'what broke the build', 1)
     ctx.worker.emit('segment', turn.turnId, 'show me the failing test', 2)
@@ -413,7 +524,7 @@ describe('VoiceSessionManager — the conversational loop', () => {
 
   it('never runs a task action from a spoken sentence', async () => {
     const ctx = makeReadyManager()
-    const turn = (await ctx.manager.startTurn('conversation', {})) as { turnId: string }
+    const turn = (await ctx.manager.startTurn('conversation', {})) as VoiceTurnHandle
 
     ctx.worker.emit('segment', turn.turnId, 'approve this checkpoint', 1)
 
@@ -429,14 +540,19 @@ describe('VoiceSessionManager — the conversational loop', () => {
    */
   it('dictates the tail of a conversation, and never runs an action from it', async () => {
     const ctx = makeReadyManager()
-    const turn = (await ctx.manager.startTurn('conversation', {})) as { turnId: string }
+    const turn = (await ctx.manager.startTurn('conversation', {})) as VoiceTurnHandle
 
     ctx.worker.emit('final', turn.turnId, 'approve this checkpoint')
     await Promise.resolve()
 
     expect(ctx.agents.respondToPermission).not.toHaveBeenCalled()
     expect(outcomes(ctx.notify)).toEqual([
-      { status: 'dictation', turnId: turn.turnId, text: 'approve this checkpoint' },
+      {
+        status: 'dictation',
+        turnId: turn.turnId,
+        turnEpoch: turn.turnEpoch,
+        text: 'approve this checkpoint',
+      },
     ])
   })
 
@@ -478,7 +594,7 @@ describe('VoiceSessionManager — the conversational loop', () => {
    */
   it('ends quietly after the sentences it delivered', async () => {
     const ctx = makeReadyManager()
-    const turn = (await ctx.manager.startTurn('conversation', {})) as { turnId: string }
+    const turn = (await ctx.manager.startTurn('conversation', {})) as VoiceTurnHandle
 
     ctx.worker.emit('segment', turn.turnId, 'what broke the build', 1)
     ctx.worker.emit('segment', turn.turnId, 'show me the failing test', 2)
@@ -486,7 +602,9 @@ describe('VoiceSessionManager — the conversational loop', () => {
     ctx.worker.emit('final', turn.turnId, '')
     await Promise.resolve()
 
-    expect(outcomes(ctx.notify)).toEqual([{ status: 'completed', turnId: turn.turnId, segments: 2 }])
+    expect(outcomes(ctx.notify)).toEqual([{
+      status: 'completed', turnId: turn.turnId, turnEpoch: turn.turnEpoch, segments: 2,
+    }])
     expect(ctx.manager.getState()).toBe('idle')
   })
 

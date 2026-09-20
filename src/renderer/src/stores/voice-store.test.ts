@@ -223,6 +223,7 @@ describe('voice store — events from main', () => {
     onOutcome({
       status: 'needs_confirmation',
       turnId: 'turn-1',
+      turnEpoch: 'confirmation-epoch',
       reason: 'destructive',
       proposal: {
         intent: { type: 'approve_checkpoint', taskRef: { kind: 'current' } },
@@ -232,7 +233,9 @@ describe('voice store — events from main', () => {
         summary: 'Approve the pending checkpoint',
       },
     })
-    expect(useVoiceStore.getState().confirmation).toMatchObject({ turnId: 'turn-1', reason: 'destructive' })
+    expect(useVoiceStore.getState().confirmation).toMatchObject({
+      turnId: 'turn-1', turnEpoch: 'confirmation-epoch', reason: 'destructive',
+    })
   })
 
   it('shows the result of a finished action', () => {
@@ -260,6 +263,7 @@ describe('voice store — events from main', () => {
     useVoiceStore.setState({
       confirmation: {
         turnId: 'turn-4',
+        turnEpoch: 'turn-4-epoch',
         reason: 'ambiguous_task',
         proposal: {
           intent: { type: 'start_task', taskRef: { kind: 'title', text: 'login' } },
@@ -271,9 +275,61 @@ describe('voice store — events from main', () => {
       },
     })
     await useVoiceStore.getState().confirm({ taskId: 't2' })
-    expect(window.electronAPI.voice.confirm).toHaveBeenCalledWith('turn-4', { taskId: 't2' })
+    expect(window.electronAPI.voice.confirm).toHaveBeenCalledWith(
+      'turn-4',
+      { taskId: 't2' },
+      'turn-4-epoch'
+    )
     expect(useVoiceStore.getState().confirmation).toBeNull()
   })
+
+  it.each([
+    { turnId: 'old-turn', turnEpoch: 'active-epoch' },
+    { turnId: 'shared-turn', turnEpoch: 'old-epoch' },
+  ])('ignores an idle lifecycle event not owned by the active start %#', (event) => {
+    useVoiceStore.setState({
+      state: 'listening', turnId: 'shared-turn', turnEpoch: 'active-epoch', partial: 'live words', level: 0.5,
+    })
+
+    onState({ state: 'idle', ...event })
+
+    expect(voiceCapture.stop).not.toHaveBeenCalled()
+    expect(useVoiceStore.getState()).toMatchObject({
+      state: 'listening', turnId: 'shared-turn', turnEpoch: 'active-epoch', partial: 'live words', level: 0.5,
+    })
+  })
+
+  it.each(['needs_confirmation', 'executed', 'rejected'] as const)(
+    'does not release a replacement turn for a stale %s outcome',
+    (status) => {
+      useVoiceStore.setState({
+        state: 'listening', turnId: 'shared-turn', turnEpoch: 'active-epoch', partial: 'live words',
+      })
+      const common = { turnId: 'shared-turn', turnEpoch: 'old-epoch' }
+      if (status === 'needs_confirmation') {
+        onOutcome({
+          ...common,
+          status,
+          reason: 'policy',
+          proposal: {
+            intent: { type: 'create_task', title: 'Old request' },
+            confidence: 1,
+            transcript: 'create old request',
+            source: 'deterministic',
+            summary: 'Create old request',
+          },
+        })
+      } else if (status === 'executed') {
+        onOutcome({ ...common, status, intent: 'create_task', message: 'Created old request.' })
+      } else {
+        onOutcome({ ...common, status, reason: 'failed', message: 'Old request failed.' })
+      }
+
+      expect(useVoiceStore.getState()).toMatchObject({
+        turnId: 'shared-turn', turnEpoch: 'active-epoch', partial: 'live words',
+      })
+    }
+  )
 })
 
 describe('a turn always closes', () => {

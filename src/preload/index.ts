@@ -642,9 +642,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     endTurn: (turnId: string): Promise<void> => ipcRenderer.invoke('voice:endTurn', { turnId }),
     cancelTurn: (turnId?: string, turnEpoch?: string): Promise<void> =>
       ipcRenderer.invoke('voice:cancelTurn', { turnId, turnEpoch }),
-    confirm: (turnId: string, choice?: { taskId?: string; agentName?: string }): Promise<unknown> =>
-      ipcRenderer.invoke('voice:confirm', { turnId, choice }),
-    dismiss: (turnId: string): Promise<void> => ipcRenderer.invoke('voice:dismiss', { turnId }),
+    confirm: (turnId: string, choice?: { taskId?: string; agentName?: string }, turnEpoch?: string): Promise<unknown> =>
+      ipcRenderer.invoke('voice:confirm', { turnId, choice, turnEpoch }),
+    dismiss: (turnId: string, turnEpoch?: string): Promise<void> =>
+      ipcRenderer.invoke('voice:dismiss', { turnId, turnEpoch }),
     getRuntime: (): Promise<unknown> => ipcRenderer.invoke('voice:getRuntime'),
     installRuntime: (): Promise<unknown> => ipcRenderer.invoke('voice:installRuntime'),
     removeRuntime: (): Promise<unknown> => ipcRenderer.invoke('voice:removeRuntime'),

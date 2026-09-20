@@ -30,6 +30,7 @@ import type {
 
 export interface VoiceConfirmation {
   turnId: string
+  turnEpoch?: string
   proposal: VoiceIntentProposal
   reason: VoiceConfirmReason
   candidates?: VoiceCandidate[]
@@ -497,14 +498,22 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
     const confirmation = get().confirmation
     if (!confirmation) return
     set({ confirmation: null })
-    await voiceApi.confirm(confirmation.turnId, choice)
+    if (confirmation.turnEpoch) {
+      await voiceApi.confirm(confirmation.turnId, choice, confirmation.turnEpoch)
+    } else {
+      await voiceApi.confirm(confirmation.turnId, choice)
+    }
   },
 
   dismiss: async () => {
     const confirmation = get().confirmation
     if (!confirmation) return
     set({ confirmation: null })
-    await voiceApi.dismiss(confirmation.turnId)
+    if (confirmation.turnEpoch) {
+      await voiceApi.dismiss(confirmation.turnId, confirmation.turnEpoch)
+    } else {
+      await voiceApi.dismiss(confirmation.turnId)
+    }
   },
 
   clearResult: () => set({ result: null }),
@@ -646,11 +655,20 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
 
 if (hasVoiceBridge()) {
   voiceApi.onState((event) => {
+    const current = useVoiceStore.getState()
+    // Owned lifecycle events are allowed to affect only the exact start that
+    // produced them. Unowned events remain compatible with older main builds
+    // and with engine-wide state changes.
+    if (current.turnId && (event.turnId || event.turnEpoch)) {
+      const ownsCurrent = (!event.turnId || current.turnId === event.turnId)
+        && (!event.turnEpoch || current.turnEpoch === event.turnEpoch)
+      if (!ownsCurrent) return
+    }
     // Main owns the state machine, so it is the authority on whether a turn is
     // open. When it reports idle, any turn the renderer still holds is gone —
     // release the microphone and clear it. Without this, one stranded turn
     // disables every microphone button in the app for ever.
-    if (event.state === 'idle' && useVoiceStore.getState().turnId) {
+    if (event.state === 'idle' && current.turnId) {
       voiceCapture.stop()
       useVoiceStore.setState({ state: event.state, turnId: null, turnEpoch: null, level: 0, partial: '' })
       return
@@ -691,32 +709,35 @@ if (hasVoiceBridge()) {
   })
 
   voiceApi.onOutcome((outcome: VoiceActionOutcome) => {
+    const current = useVoiceStore.getState()
+    const ownsCurrent = !current.turnId || (
+      current.turnId === outcome.turnId
+      && (!outcome.turnEpoch || current.turnEpoch === outcome.turnEpoch)
+    )
     if (outcome.status === 'needs_confirmation') {
       useVoiceStore.setState({
         confirmation: {
           turnId: outcome.turnId,
+          ...(outcome.turnEpoch ? { turnEpoch: outcome.turnEpoch } : {}),
           proposal: outcome.proposal,
           reason: outcome.reason,
           ...(outcome.candidates ? { candidates: outcome.candidates } : {}),
         },
-        turnId: null,
-        turnEpoch: null,
+        ...(ownsCurrent ? { turnId: null, turnEpoch: null } : {}),
       })
       return
     }
     if (outcome.status === 'executed') {
       useVoiceStore.setState({
         result: { kind: 'ok', message: outcome.message, at: Date.now() },
-        turnId: null,
-        turnEpoch: null,
+        ...(ownsCurrent ? { turnId: null, turnEpoch: null } : {}),
       })
       return
     }
     if (outcome.status === 'rejected') {
       useVoiceStore.setState({
         result: { kind: 'error', message: outcome.message, at: Date.now() },
-        turnId: null,
-        turnEpoch: null,
+        ...(ownsCurrent ? { turnId: null, turnEpoch: null } : {}),
       })
       return
     }
@@ -725,16 +746,14 @@ if (hasVoiceBridge()) {
     if (outcome.status === 'cancelled') {
       const current = useVoiceStore.getState()
       // New main versions echo the exact start epoch. The turn ID fallback is
-      // retained for old bridges, but an epoch always wins so reused IDs are
-      // safe too.
-      if (outcome.turnEpoch
-        ? current.turnEpoch !== outcome.turnEpoch
-        : current.turnId !== outcome.turnId) return
+      // retained for old bridges, while leased outcomes must own both fields.
+      if (current.turnId !== outcome.turnId
+        || (outcome.turnEpoch && current.turnEpoch !== outcome.turnEpoch)) return
       useVoiceStore.setState({ turnId: null, turnEpoch: null, partial: '' })
       return
     }
     if (outcome.status === 'dictation' || outcome.status === 'completed') {
-      useVoiceStore.setState({ turnId: null, turnEpoch: null, partial: '' })
+      if (ownsCurrent) useVoiceStore.setState({ turnId: null, turnEpoch: null, partial: '' })
     }
   })
 
