@@ -42,6 +42,7 @@ interface AppServerAdapterPrivate {
   buildConfigOverrides(config: {
     workspaceDir: string
     reasoningEffort?: string
+    permissionMode?: 'ask' | 'allow'
     sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access'
     mcpServers?: Record<string, {
       type: 'stdio' | 'http' | 'sse'
@@ -1182,6 +1183,53 @@ describe('CodexAppServerAdapter', () => {
     })
   })
 
+  it('approves MCP tools up front for an allow agent, so approvalPolicy never does not refuse them', () => {
+    const adapter = adapterPrivate(new CodexAppServerAdapter())
+    const mcpServers = {
+      'task-management': { type: 'stdio' as const, command: 'node', args: ['task-management-mcp.js'] },
+      remote: { type: 'http' as const, url: 'https://example.com/mcp' }
+    }
+
+    const allow = adapter.buildConfigOverrides({ workspaceDir: '/tmp/workspace', permissionMode: 'allow', mcpServers })
+    expect(allow.mcp_servers).toEqual({
+      'task-management': { command: 'node', args: ['task-management-mcp.js'], env: {}, default_tools_approval_mode: 'approve' },
+      remote: { url: 'https://example.com/mcp', default_tools_approval_mode: 'approve' }
+    })
+
+    // An ask agent keeps Codex's default and prompts through the approval flow.
+    const ask = adapter.buildConfigOverrides({ workspaceDir: '/tmp/workspace', permissionMode: 'ask', mcpServers })
+    expect(JSON.stringify(ask.mcp_servers)).not.toContain('default_tools_approval_mode')
+  })
+
+  it('reports a refused MCP tool call as an error with its message, not as completed', () => {
+    const adapter = adapterPrivate(new CodexAppServerAdapter())
+    const session = createSession()
+    const parts = adapter.convertEventToMessageParts({
+      method: 'item/completed',
+      params: {
+        item: {
+          type: 'mcpToolCall',
+          id: 'mcp-1',
+          server: 'task-management',
+          tool: 'report_to_commander',
+          status: 'failed',
+          error: { message: 'MCP tool call requires approval, but approval policy is never' }
+        },
+        threadId: 'thread-1',
+        turnId: 'turn-1'
+      }
+    }, new Set<string>(), new Set<string>(), new Map<string, string>(), session)
+
+    expect(parts[0]).toMatchObject({
+      id: 'tool-mcp-1',
+      tool: {
+        name: 'task-management.report_to_commander',
+        status: 'error',
+        output: 'MCP tool call requires approval, but approval policy is never'
+      }
+    })
+  })
+
   it('clears stale live buffer before sending a new prompt', async () => {
     const adapterInstance = new CodexAppServerAdapter()
     const adapter = adapterPrivate(adapterInstance)
@@ -1446,6 +1494,15 @@ describe('CodexAppServerAdapter app-server lifecycle', () => {
       vi.fn().mockResolvedValue([])
     return { adapterInstance, adapter }
   }
+
+  it('refreshes developer instructions when resuming a persisted thread', async () => {
+    const session = fakeSession('thread-1', 4000)
+    const { adapterInstance, adapter } = harness([session])
+    await adapterInstance.resumeSession('thread-1', { ...config, systemPrompt: 'You are the Captain.' })
+    expect(adapter.sendRpcRequest).toHaveBeenCalledWith(session, 'thread/resume', expect.objectContaining({
+      threadId: 'thread-1', developerInstructions: 'You are the Captain.'
+    }))
+  })
 
   it('stops the previous app-server when a session is resumed again', async () => {
     // THE LARGER HALF OF THE LEAK. `resumeSession` spawned a new child and

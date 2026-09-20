@@ -9,7 +9,7 @@ vi.mock('os', async (importOriginal) => ({
   homedir: () => home.dir
 }))
 
-import { cleanSessionFile, loadSessionHistory } from './claude-code-history'
+import { cleanSessionFile, isValidClaudeSessionId, loadSessionHistory } from './claude-code-history'
 
 const SESSION_ID = '0b5e2d3c-1111-4222-8333-944445555666'
 const WORKSPACE = '/work/space'
@@ -55,5 +55,14 @@ describe('claude-code-history', () => {
 
     const uuids = readFileSync(file, 'utf-8').trim().split('\n').map((line) => JSON.parse(line).uuid)
     expect(uuids).toEqual(['u1', 'a1'])
+  })
+})
+
+describe('isValidClaudeSessionId', () => {
+  it('accepts Claude Code session ids and refuses other backends\' ids', () => {
+    expect(isValidClaudeSessionId('0b5e2d3c-1111-4222-8333-944445555666')).toBe(true)
+    // A Codex thread id (UUID v7): a Captain switched from Sol must not "resume" it.
+    expect(isValidClaudeSessionId('01a0bb2a-f091-7b21-8086-0b0af0c0184b')).toBe(false)
+    expect(isValidClaudeSessionId('ses_3f2a9c')).toBe(false)
   })
 })

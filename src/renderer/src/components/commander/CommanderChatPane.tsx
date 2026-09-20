@@ -12,6 +12,8 @@ import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Markdown } from '@/components/ui/Markdown'
 import { settingsApi } from '@/lib/ipc-client'
+import { AttachmentTray } from '@/components/chat/AttachmentTray'
+import { useChatAttachments } from '@/hooks/use-chat-attachments'
 import { useAgentStore } from '@/stores/agent-store'
 import { useCommanderStore } from '@/stores/commander-store'
 import type { Agent } from '@/types'
@@ -68,6 +70,10 @@ export function CommanderChatPane() {
   const cancel = useCommanderStore((s) => s.cancel)
   const createSession = useCommanderStore((s) => s.createSession)
   const [draft, setDraft] = useState('')
+  const images = useChatAttachments({ draftKey: sessionId })
+  const submitting = useRef(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   // Read agents from the shared store so the dropdown tracks agent edits made
   // elsewhere in the app (e.g. Agents settings) — never a stale one-time fetch.
   const agents = useAgentStore((s) => s.agents)
@@ -116,7 +122,8 @@ export function CommanderChatPane() {
       option.provider === settings[CHAT_SETTING_KEYS.provider] &&
       option.model === settings[CHAT_SETTING_KEYS.model]
     )
-    const selected = matchingModels.find((option) => option.reasoningEffort === savedEffort)
+    const selected = matchingModels.find((option) => option.agentId === settings[CHAT_SETTING_KEYS.agentId])
+      ?? matchingModels.find((option) => option.reasoningEffort === savedEffort)
       ?? matchingModels[0]
       ?? configuredModels[0]
     const effort = selected
@@ -127,11 +134,13 @@ export function CommanderChatPane() {
     setSelectedAgentId(selected?.agentId ?? '')
     setReasoningEffort(effort)
     if (selected && (
+      settings[CHAT_SETTING_KEYS.agentId] !== selected.agentId ||
       settings[CHAT_SETTING_KEYS.provider] !== selected.provider ||
       settings[CHAT_SETTING_KEYS.model] !== selected.model ||
       settings[CHAT_SETTING_KEYS.reasoningEffort] !== effort
     )) {
       queueConfigWrite([
+        [CHAT_SETTING_KEYS.agentId, selected.agentId],
         [CHAT_SETTING_KEYS.provider, selected.provider],
         [CHAT_SETTING_KEYS.model, selected.model],
         [CHAT_SETTING_KEYS.reasoningEffort, effort]
@@ -153,6 +162,7 @@ export function CommanderChatPane() {
     setReasoningEffort(nextEffort)
     if (next) {
       queueConfigWrite([
+        [CHAT_SETTING_KEYS.agentId, next.agentId],
         [CHAT_SETTING_KEYS.provider, next.provider],
         [CHAT_SETTING_KEYS.model, next.model],
         [CHAT_SETTING_KEYS.reasoningEffort, nextEffort]
@@ -186,14 +196,27 @@ export function CommanderChatPane() {
     )
   }
 
-  const busy = !!streaming
+  const busy = !!streaming || isSubmitting
+  const canSend = (!!draft.trim() || images.attachments.length > 0) && !images.isReading
   const submit = async () => {
+    if (!canSend || busy || !selectedModel || submitting.current) return
+    submitting.current = true
+    setIsSubmitting(true)
     const text = draft.trim()
-    if (!text || busy || !selectedModel) return
-    await configWrite.current.catch(() => undefined)
-    setDraft('')
-    const ok = await send(text)
-    if (!ok) setDraft(text)
+    try {
+      await configWrite.current.catch(() => undefined)
+      // A session change during a settings write must not send this draft to
+      // whichever session happens to be selected when the promise resolves.
+      if (useCommanderStore.getState().selectedSessionId !== sessionId) return
+      const ok = await send(text, images.toInputs())
+      if (ok) {
+        setDraft('')
+        images.clear()
+      }
+    } finally {
+      submitting.current = false
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -241,11 +264,15 @@ export function CommanderChatPane() {
 
       <div className="shrink-0 border-t border-border p-3">
         <div className="rounded-xl border border-input bg-card shadow-xs focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
+          <AttachmentTray controller={images} composerRef={inputRef} className="px-3 pt-2" />
           <div className="flex items-end gap-2 px-3 py-2">
             <textarea
+              ref={inputRef}
+              disabled={isSubmitting}
               aria-label="Message the Commander"
               rows={1}
               value={draft}
+              onPaste={images.handlePaste}
               placeholder="Ask the Commander…"
               className="max-h-40 min-h-[24px] flex-1 resize-none bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
               onChange={(e) => setDraft(e.target.value)}
@@ -261,7 +288,7 @@ export function CommanderChatPane() {
                 <Square className="size-3.5" aria-hidden="true" />
               </Button>
             ) : (
-              <Button size="icon" aria-label="Send" disabled={!draft.trim() || !selectedModel} onClick={() => void submit()}>
+              <Button size="icon" aria-label="Send" disabled={!canSend || !selectedModel} onClick={() => void submit()}>
                 <Send className="size-3.5" aria-hidden="true" />
               </Button>
             )}
@@ -279,6 +306,7 @@ export function CommanderChatPane() {
                 setSelectedAgentId(next.agentId)
                 setReasoningEffort(nextEffort)
                 queueConfigWrite([
+                  [CHAT_SETTING_KEYS.agentId, next.agentId],
                   [CHAT_SETTING_KEYS.provider, next.provider],
                   [CHAT_SETTING_KEYS.model, next.model],
                   [CHAT_SETTING_KEYS.reasoningEffort, nextEffort]
