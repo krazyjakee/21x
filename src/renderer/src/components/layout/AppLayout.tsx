@@ -30,6 +30,7 @@ import { ProjectEditorDialog } from '@/components/projects/ProjectEditorDialog'
 import { useActiveTaskActions } from './hooks/use-active-task-actions'
 import { useGlobalShortcuts } from './hooks/use-global-shortcuts'
 import { CommanderCallHost } from '@/components/commander/CommanderCallHost'
+import { CommanderPictureInPicture } from '@/components/commander/CommanderPictureInPicture'
 
 // Lazy-load heavy workspaces so they are only imported when their view is active;
 // this keeps the initial bundle small and first render fast.
@@ -343,6 +344,7 @@ export function AppLayout() {
 
       {/* Voice transcript bubble, audio state, and confirmation cards */}
       <CommanderCallHost />
+      <CommanderPictureInPicture />
       <VoiceOverlay />
     </>
   )

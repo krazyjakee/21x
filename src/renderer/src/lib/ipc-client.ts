@@ -759,7 +759,7 @@ export const voiceApi = {
     window.electronAPI.voice.onOutcome(callback),
   onStatus: (callback: (event: Partial<VoiceSnapshot> & { model?: VoiceModelState }) => void): (() => void) =>
     window.electronAPI.voice.onStatus(callback),
-  onError: (callback: (event: { message: string; code?: string }) => void): (() => void) =>
+  onError: (callback: (event: { message: string; code?: string; turnId?: string }) => void): (() => void) =>
     window.electronAPI.voice.onError(callback),
   onNavigate: (callback: (event: { destination: VoiceViewName; taskId: string | null }) => void): (() => void) =>
     window.electronAPI.voice.onNavigate(callback),

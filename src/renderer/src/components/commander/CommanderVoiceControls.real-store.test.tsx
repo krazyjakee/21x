@@ -253,7 +253,7 @@ describe('app-level call ownership', () => {
     await waitFor(() => expect(mocks.send).toHaveBeenCalledWith('session-1', 'still connected'))
 
     view.rerender(<><CommanderCallHost /><CommanderVoiceControls /><VoiceOverlay /></>)
-    expect(await screen.findByLabelText('Turn voice mode off')).toBeTruthy()
+    expect(await screen.findByLabelText('Mute microphone')).toBeTruthy()
     expect(useVoiceStore.getState().startTurn).toHaveBeenCalledTimes(1)
   })
 

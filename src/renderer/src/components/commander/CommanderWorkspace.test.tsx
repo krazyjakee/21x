@@ -37,6 +37,7 @@ const api = mocks.commanderApi
 import { useAgentStore } from '@/stores/agent-store'
 import { useCommanderCallStore } from '@/stores/commander-call-store'
 import { useCommanderStore } from '@/stores/commander-store'
+import { useUIStore } from '@/stores/ui-store'
 import { CommanderWorkspace } from './CommanderWorkspace'
 import { toolCallLabel } from './tool-call-label'
 
@@ -75,6 +76,7 @@ async function openSession(title = 'Launch'): Promise<void> {
 }
 
 beforeEach(() => {
+  useUIStore.setState({ commanderCaptionsEnabled: true, commanderPanelOpen: true, commanderPanelTab: 'chat' })
   useCommanderCallStore.setState({
     status: 'off',
     sessionId: null,
@@ -95,6 +97,7 @@ beforeEach(() => {
     messages: {},
     streaming: {},
     turnErrors: {},
+    drafts: {},
     isLoading: false,
     error: null
   })

@@ -97,7 +97,11 @@ export function CommanderChatPane() {
   const send = useCommanderStore((s) => s.send)
   const cancel = useCommanderStore((s) => s.cancel)
   const createSession = useCommanderStore((s) => s.createSession)
-  const [draft, setDraft] = useState('')
+  const draft = useCommanderStore((s) => (s.selectedSessionId ? s.drafts[s.selectedSessionId] ?? '' : ''))
+  const setStoredDraft = useCommanderStore((s) => s.setDraft)
+  const setDraft = (value: string): void => {
+    if (sessionId) setStoredDraft(sessionId, value)
+  }
   // Read agents from the shared store so the dropdown tracks agent edits made
   // elsewhere in the app (e.g. Agents settings) — never a stale one-time fetch.
   const agents = useAgentStore((s) => s.agents)

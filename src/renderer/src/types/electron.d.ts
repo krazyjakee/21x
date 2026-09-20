@@ -594,7 +594,7 @@ interface ElectronAPI {
     onSegment: (callback: (event: { turnId: string; text: string; index: number }) => void) => () => void
     onOutcome: (callback: (event: VoiceActionOutcome) => void) => () => void
     onStatus: (callback: (event: Partial<VoiceSnapshot> & { model?: VoiceModelState }) => void) => () => void
-    onError: (callback: (event: { message: string; code?: string }) => void) => () => void
+    onError: (callback: (event: { message: string; code?: string; turnId?: string }) => void) => () => void
     onNavigate: (callback: (event: { destination: VoiceViewName; taskId: string | null }) => void) => () => void
     onDictate: (callback: (event: { turnId: string; text: string }) => void) => () => void
     onRuntimeProgress: (callback: (event: VoiceRuntimeProgressEvent) => void) => () => void

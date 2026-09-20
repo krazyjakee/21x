@@ -649,8 +649,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('voice:status', handler)
       return () => ipcRenderer.removeListener('voice:status', handler)
     },
-    onError: (callback: (data: { message: string; code?: string }) => void): (() => void) => {
-      const handler = (_: unknown, d: { message: string; code?: string }): void => callback(d)
+    onError: (callback: (data: { message: string; code?: string; turnId?: string }) => void): (() => void) => {
+      const handler = (_: unknown, d: { message: string; code?: string; turnId?: string }): void => callback(d)
       ipcRenderer.on('voice:error', handler)
       return () => ipcRenderer.removeListener('voice:error', handler)
     },

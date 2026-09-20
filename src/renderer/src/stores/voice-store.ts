@@ -30,6 +30,8 @@ import type {
 
 export interface VoiceConfirmation {
   turnId: string
+  /** Commander session that owns this notice. Absent means Captain/task voice. */
+  ownerSessionId?: string
   proposal: VoiceIntentProposal
   reason: VoiceConfirmReason
   candidates?: VoiceCandidate[]
@@ -39,6 +41,8 @@ export interface VoiceResultNotice {
   kind: 'ok' | 'error'
   message: string
   at: number
+  /** Commander session that owns this notice. Absent means Captain/task voice. */
+  ownerSessionId?: string
 }
 
 export interface VoiceRuntimeInstall {
@@ -61,6 +65,8 @@ interface VoiceStoreState {
   shortcut: string
   permission: MicrophonePermission
   turnId: string | null
+  /** Commander session that owns the active microphone turn, when there is one. */
+  turnOwnerSessionId: string | null
   mode: VoiceTurnMode
   partial: string
   final: string
@@ -99,13 +105,13 @@ interface VoiceStoreState {
   setEnabled: (enabled: boolean) => Promise<void>
   setContextProvider: (provider: (() => VoiceUiContext) | null) => void
   setCaptionOwner: (owner: string | null) => void
-  startTurn: (mode: VoiceTurnMode) => Promise<void>
+  startTurn: (mode: VoiceTurnMode, ownerSessionId?: string) => Promise<void>
   /** Records one turn and shows the words in settings, changing nothing else. */
   startTest: () => Promise<void>
   clearTest: () => void
   setConversation: (on: boolean) => Promise<void>
   endTurn: () => Promise<void>
-  toggleTurn: (mode: VoiceTurnMode) => Promise<void>
+  toggleTurn: (mode: VoiceTurnMode, ownerSessionId?: string) => Promise<void>
   cancel: () => Promise<void>
   confirm: (choice?: { taskId?: string; agentName?: string }) => Promise<void>
   dismiss: () => Promise<void>
@@ -230,6 +236,16 @@ let stoppedSpeechId: string | null = null
  * just a pause.
  */
 let openPassageId: string | null = null
+/** Ownership survives the renderer clearing its current turn before main's final outcome arrives. */
+const turnOwnerSessions = new Map<string, string | undefined>()
+const MAX_TURN_OWNERS = 100
+
+function rememberTurnOwner(turnId: string, ownerSessionId: string | undefined): void {
+  turnOwnerSessions.set(turnId, ownerSessionId)
+  if (turnOwnerSessions.size > MAX_TURN_OWNERS) {
+    turnOwnerSessions.delete(turnOwnerSessions.keys().next().value as string)
+  }
+}
 
 /**
  * Everything the renderer does when speech is stopped by the user: barge-in,
@@ -277,6 +293,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
   shortcut: '',
   permission: 'not-determined',
   turnId: null,
+  turnOwnerSessionId: null,
   mode: 'dictation',
   partial: '',
   final: '',
@@ -377,7 +394,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
   setContextProvider: (contextProvider) => set({ contextProvider }),
   setCaptionOwner: (captionOwner) => set({ captionOwner }),
 
-  startTurn: async (mode) => {
+  startTurn: async (mode, ownerSessionId) => {
     const { enabled, turnId, contextProvider } = get()
     if (!enabled || turnId) return
     // Barge-in. Playback stops here, in the same tick as the press, instead of
@@ -385,10 +402,11 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
     stopPlaybackForUser()
     const started = await voiceApi.startTurn(mode, contextProvider?.() ?? {})
     if ('error' in started) {
-      set({ result: { kind: 'error', message: started.error, at: Date.now() } })
+      set({ result: { kind: 'error', message: started.error, at: Date.now(), ...(ownerSessionId ? { ownerSessionId } : {}) } })
       return
     }
-    set({ turnId: started.turnId, mode, partial: '', final: '', result: null, sentSentences: [] })
+    rememberTurnOwner(started.turnId, ownerSessionId)
+    set({ turnId: started.turnId, turnOwnerSessionId: ownerSessionId ?? null, mode, partial: '', final: '', result: null, sentSentences: [] })
 
     bargeInGate.reset()
     const ok = await voiceCapture.start({
@@ -401,13 +419,14 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       },
       onLevel: (level) => set({ level }),
       onError: (message) => {
-        set({ result: { kind: 'error', message, at: Date.now() } })
+        const owner = get().turnOwnerSessionId
+        set({ result: { kind: 'error', message, at: Date.now(), ...(owner ? { ownerSessionId: owner } : {}) } })
         void get().cancel()
       },
     })
     if (!ok) {
       await voiceApi.cancelTurn(started.turnId)
-      set({ turnId: null })
+      set({ turnId: null, turnOwnerSessionId: null })
     }
   },
 
@@ -434,23 +453,23 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
     // The turn is closed here and now. Waiting for an answer from main would
     // leave the control stuck on "Stop" whenever main has already dropped the
     // turn — for example after the worker ended it at a pause.
-    set({ turnId: null, level: 0, partial: '' })
+    set({ turnId: null, turnOwnerSessionId: null, level: 0, partial: '' })
     await voiceApi.endTurn(turnId)
   },
 
-  toggleTurn: async (mode) => {
+  toggleTurn: async (mode, ownerSessionId) => {
     if (get().turnId) {
       await get().endTurn()
       return
     }
-    await get().startTurn(mode)
+    await get().startTurn(mode, ownerSessionId)
   },
 
   cancel: async () => {
     const { turnId } = get()
     voiceCapture.stop()
     bargeInGate.reset()
-    set({ turnId: null, partial: '', level: 0 })
+    set({ turnId: null, turnOwnerSessionId: null, partial: '', level: 0 })
     if (turnId) await voiceApi.cancelTurn(turnId)
   },
 
@@ -613,7 +632,7 @@ if (hasVoiceBridge()) {
     // disables every microphone button in the app for ever.
     if (event.state === 'idle' && useVoiceStore.getState().turnId) {
       voiceCapture.stop()
-      useVoiceStore.setState({ state: event.state, turnId: null, level: 0, partial: '' })
+      useVoiceStore.setState({ state: event.state, turnId: null, turnOwnerSessionId: null, level: 0, partial: '' })
       return
     }
     useVoiceStore.setState({ state: event.state })
@@ -651,29 +670,35 @@ if (hasVoiceBridge()) {
   })
 
   voiceApi.onOutcome((outcome: VoiceActionOutcome) => {
+    const ownerSessionId = turnOwnerSessions.get(outcome.turnId)
+    const owner = ownerSessionId ? { ownerSessionId } : {}
     if (outcome.status === 'needs_confirmation') {
       useVoiceStore.setState({
         confirmation: {
           turnId: outcome.turnId,
+          ...owner,
           proposal: outcome.proposal,
           reason: outcome.reason,
           ...(outcome.candidates ? { candidates: outcome.candidates } : {}),
         },
         turnId: null,
+        turnOwnerSessionId: null,
       })
       return
     }
     if (outcome.status === 'executed') {
       useVoiceStore.setState({
-        result: { kind: 'ok', message: outcome.message, at: Date.now() },
+        result: { kind: 'ok', message: outcome.message, at: Date.now(), ...owner },
         turnId: null,
+        turnOwnerSessionId: null,
       })
       return
     }
     if (outcome.status === 'rejected') {
       useVoiceStore.setState({
-        result: { kind: 'error', message: outcome.message, at: Date.now() },
+        result: { kind: 'error', message: outcome.message, at: Date.now(), ...owner },
         turnId: null,
+        turnOwnerSessionId: null,
       })
       return
     }
@@ -684,7 +709,7 @@ if (hasVoiceBridge()) {
       outcome.status === 'cancelled' ||
       outcome.status === 'completed'
     ) {
-      useVoiceStore.setState({ turnId: null, partial: '' })
+      useVoiceStore.setState({ turnId: null, turnOwnerSessionId: null, partial: '' })
     }
   })
 
@@ -716,7 +741,12 @@ if (hasVoiceBridge()) {
   })
 
   voiceApi.onError((event) => {
-    useVoiceStore.setState({ result: { kind: 'error', message: event.message, at: Date.now() } })
+    const ownerSessionId = event.turnId
+      ? turnOwnerSessions.get(event.turnId)
+      : useVoiceStore.getState().turnOwnerSessionId
+    useVoiceStore.setState({
+      result: { kind: 'error', message: event.message, at: Date.now(), ...(ownerSessionId ? { ownerSessionId } : {}) }
+    })
   })
 }
 

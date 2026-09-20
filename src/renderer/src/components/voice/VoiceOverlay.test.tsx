@@ -3,6 +3,7 @@ import { cleanup, render, screen, act } from '@testing-library/react'
 import { VoiceOverlay } from './VoiceOverlay'
 import { useVoiceStore } from '@/stores/voice-store'
 import type { VoiceIntentProposal } from '@shared/voice'
+import { __resetCommanderCall, useCommanderCallStore } from '@/stores/commander-call-store'
 
 const CREATE_PROPOSAL: VoiceIntentProposal = {
   intent: { type: 'create_task', title: 'Fix login' },
@@ -34,6 +35,7 @@ describe('VoiceOverlay', () => {
   beforeEach(() => {
     cleanup()
     vi.clearAllMocks()
+    __resetCommanderCall()
     reset()
   })
 
@@ -195,5 +197,29 @@ describe('VoiceOverlay', () => {
     render(<VoiceOverlay />)
     expect(screen.getByTestId('voice-result').textContent).toBe('Done')
     expect(screen.queryByTestId('voice-transcript')).toBeNull()
+  })
+
+  it('leaves every pill and result to the Commander surface during its call', () => {
+    useCommanderCallStore.setState({ status: 'live', sessionId: 's1', turnId: 't1' })
+    reset({
+      state: 'listening',
+      turnId: 't1',
+      partial: 'change the project',
+      result: { kind: 'ok', message: 'Done', at: Date.now(), ownerSessionId: 's1' }
+    })
+    const { container } = render(<VoiceOverlay />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('keeps a recoverable Commander error scoped to its retry session', () => {
+    useCommanderCallStore.setState({
+      status: 'off', sessionId: null, turnId: null, error: 'Microphone failed', retrySessionId: 's1'
+    })
+    reset({ result: { kind: 'error', message: 'Microphone failed', at: Date.now(), ownerSessionId: 's1' } })
+    const { container } = render(<VoiceOverlay />)
+    expect(container).toBeEmptyDOMElement()
+
+    act(() => reset({ result: { kind: 'error', message: 'Captain failed', at: Date.now(), ownerSessionId: 'foreign' } }))
+    expect(screen.getByTestId('voice-result')).toHaveTextContent('Captain failed')
   })
 })

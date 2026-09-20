@@ -71,7 +71,15 @@ export const KEYBOARD_SHORTCUT_GROUPS = [
     label: 'Audio',
     shortcuts: [
       { keys: ['V', 'T'], label: 'Toggle task audio' },
-      { keys: ['V', 'M'], label: 'Toggle Captain audio' }
+      { keys: ['V', 'M'], label: 'Toggle Captain audio' },
+      { keys: ['Cmd/Ctrl', 'D'], label: 'Toggle Commander microphone' },
+      { keys: ['Esc'], label: 'Stop the current Commander reply' },
+      { keys: ['Cmd/Ctrl', 'Shift', 'C'], label: 'Toggle Commander captions' },
+      { keys: ['Cmd/Ctrl', '\\'], label: 'Toggle Commander side panel' },
+      { keys: ['Cmd/Ctrl', 'Shift', 'M'], label: 'Toggle Commander picture in picture' },
+      { keys: ['Cmd/Ctrl', 'Shift', 'E'], label: 'End Commander call' },
+      { keys: ['Cmd/Ctrl', 'Z'], label: 'Undo latest reversible Commander action' },
+      { keys: ['Cmd/Ctrl', 'Shift', 'Space'], label: 'Commander during a call; Captain otherwise' }
     ]
   }
 ] as const

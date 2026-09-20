@@ -312,8 +312,9 @@ right place. The pieces:
 ## Voice mode (#64)
 
 The Commander has a hands-free call owned by `CommanderCallHost`, mounted once
-from `AppLayout`. `CommanderVoiceControls` is only the narrow strip beside the
-chat; unmounting that view does not own or end media. The wake word stays out
+from `AppLayout`. `CommanderVoiceControls` and the app-level
+`CommanderPictureInPicture` only observe and control that shared call;
+unmounting either surface does not own or end media. The wake word stays out
 of scope.
 
 - **Turning it on** tells main which session to speak for
@@ -329,9 +330,10 @@ of scope.
   deleting chat. Leaving the view does none of those things. Escape and Stop
   interrupt the current reply, briefly show "Stopped", and leave the call open.
 - **Half-heard words appear once** (#83). While its own conversation turn
-  runs, the strip's status pill shows them and sets the voice store's
-  `captionOwner`, so the global `VoiceOverlay` leaves its listening bubble out.
-  Confirmations and results still appear in the overlay. Ownership follows the
+  runs, the full-view caption strip or PiP shows them and sets the voice store's
+  `captionOwner`. During a Commander call the global `VoiceOverlay` is replaced
+  completely by those call surfaces; Captain and task voice keep the overlay.
+  Ownership follows the
   turn the strip actually opened, never the fact that it is starting: a
   microphone opened anywhere else keeps the overlay and its words. If another
   microphone is already listening, clicking the voice button is refused at once
@@ -368,6 +370,19 @@ of scope.
   words and tones come from the shared activity vocabulary. A successful
   mutating tool result is presented briefly as "action taken" and an incoming
   report as "report arrived"; neither invents another running state.
+- **PiP is in-app.** Leaving Commander during a call, or choosing PiP, shows a
+  280 px draggable tile which snaps to a window corner. It keeps Commander
+  identity/state, the current caption, mic, Stop, Expand and End available.
+  Expand returns to the full view, and the PiP/full-view counterpart control
+  receives focus. The latest validated action is shown for eight seconds with
+  direct exact-reversal Undo when that tool is reversible.
+- **Call shortcuts** use the shared call from any in-app view: Mod+D toggles
+  its microphone, Escape interrupts, Mod+Shift+C toggles captions, Mod+\\
+  toggles the side panel, Mod+Shift+M toggles full/PiP, Mod+Shift+E ends, and
+  Mod+Z undoes the still-visible latest reversible action outside text fields.
+  The system-wide Mod+Shift+Space routes to Commander while its call exists
+  and to Captain otherwise. Hold-Space PTT remains owned by batch 6 (#90),
+  alongside selectable push-to-talk/open-mic modes.
 - **Media is provider-neutral.** `commanderCallMedia` exposes capability flags,
   on-demand input/output levels, partial and final user captions, assistant
   `speechText`, and speech/interruption events. `wordTimings` is false and no
