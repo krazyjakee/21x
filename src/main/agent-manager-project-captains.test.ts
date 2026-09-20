@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { AgentManager } from './agent-manager'
@@ -162,6 +162,20 @@ describe('per-project Captain conversations', () => {
     const second = newManager(after)
     // A project edit made while the app was closed reaches the resumed conversation.
     db.updateProject(alphaId, { description: 'The alpha brief, revised.' })
+    const legacy = ['Master', 'mind'].join('')
+    const workspace = db.getWorkspaceDir(alphaCaptain)
+    for (const name of ['AGENTS.md', 'CLAUDE.md']) {
+      writeFileSync(join(workspace, name), `Only the project ${legacy} may call report_to_commander.`)
+    }
+    const memory = `# Alpha — ${legacy} memory`
+    writeFileSync(join(workspace, CAPTAIN_MEMORY_FILE), memory)
+    after.resumeSession.mockImplementation(async (sessionId: string) => {
+      if (sessionId !== 'alpha-session') return []
+      for (const name of ['AGENTS.md', 'CLAUDE.md']) {
+        expect(readFileSync(join(workspace, name), 'utf-8')).not.toContain(legacy)
+      }
+      return []
+    })
 
     expect(await second.startSession(agentId, betaCaptain, undefined, true)).toBe('beta-session')
     expect(await second.startSession(agentId, alphaCaptain, undefined, true)).toBe('alpha-session')
@@ -175,6 +189,9 @@ describe('per-project Captain conversations', () => {
     expect(alphaResume[0]).toBe('alpha-session')
     expect(configOf(alphaResume, 1).systemPrompt).toContain('The alpha brief, revised.')
     expect(configOf(alphaResume, 1).systemPrompt).not.toContain('Beta')
+    expect(configOf(alphaResume, 1).systemPrompt).toContain('# Alpha — Captain memory')
+    expect(configOf(alphaResume, 1).systemPrompt).not.toContain(legacy)
+    expect(readFileSync(join(workspace, CAPTAIN_MEMORY_FILE), 'utf-8')).toBe(memory)
 
     // The same conversation is rejoined, not started twice.
     expect(await second.startSession(agentId, alphaCaptain, undefined, true)).toBe('alpha-session')

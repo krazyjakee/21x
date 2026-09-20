@@ -83,22 +83,32 @@ scopes (`idx_skills_name`). See docs/skills.md, *Scope*.
 
 Migration 17 (`migrateCoordinatorToCaptain()` in
 `src/main/database/captain-migration.ts`, #71) renames the coordinator's
-persisted identifiers from its former name, Mastermind, in place:
+persisted identifiers in place. The exact legacy identifiers are isolated in
+that compatibility module and its schema-16 fixture.
 
-| Before (≤ 16) | After (17) |
+| Stored field | Current value (17) |
 | --- | --- |
-| `tasks.role = 'mastermind'`, title `Mastermind` | `tasks.role = 'captain'`, title `Captain` (same row, id, session and transcript) |
-| `projects.mastermind_agent_id` | `projects.captain_agent_id` (`RENAME COLUMN`, values kept) |
-| setting `mastermind_prewarm` | setting `captain_prewarm` |
-| `projects.settings.mastermind_wakeups` | `projects.settings.captain_wakeups` |
-| `project_status_journal.source = 'mastermind'` (and column default) | `'captain'` (table rebuilt by named columns when the old default is present) |
+| Coordinator task role, title and seeded description | `captain`, `Captain`, current description (same row, id and session) |
+| Project agent column | `projects.captain_agent_id` (values kept) |
+| App prewarm setting | `captain_prewarm` |
+| Project wakeup settings | `projects.settings.captain_wakeups` |
+| Status journal source and column default | `captain` |
 
 No row is inserted, so `seedCaptainTasks()` finds the renamed row and never
 adds a second coordinator. A value already stored under a new key wins over the
 old key. Every step only matches old values, so re-runs are no-ops. The same
-file keeps the retirement of the legacy seeded "Mastermind" skill. It is the
-only place in `src/` (with its test and one commented compatibility alias) that
-may spell the old name; `src/shared/captain-terminology.test.ts` enforces that.
+file retires the untouched legacy seeded skill; edited user skills are preserved.
+
+The #136 follow-up uses read compatibility for persisted prose and delegation
+labels (`src/shared/captain-compat.ts`), retaining original history and routing
+IDs. No schema change or new migration is needed: version 17 already migrates
+roles, agent columns and settings. Version 18 remains reserved for the concurrent
+sessions/redesign work. See [Captain terminology](captain-terminology.md) for
+resume behavior and the stale-context investigation.
+
+The repository terminology guard covers source, docs, prompts and tests. Only
+migration fixtures and exact shared compatibility declarations may spell the
+retired name.
 
 ### Merge grants and the pull-request policy split (v19)
 

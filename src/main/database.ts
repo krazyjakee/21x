@@ -1,3 +1,4 @@
+import { captainTerminology } from '../shared/captain-compat'
 import Database from 'better-sqlite3'
 import { app } from 'electron'
 import { join } from 'path'
@@ -160,11 +161,11 @@ function toJournalEntry(row: ProjectStatusJournalRow): ProjectStatusJournalEntry
   return {
     id: row.id,
     project_id: row.project_id,
-    summary: row.summary,
-    completed: journalStringList(row.completed),
-    blockers: journalStringList(row.blockers),
-    decisions: journalStringList(row.decisions),
-    next_steps: journalStringList(row.next_steps),
+    summary: captainTerminology(row.summary),
+    completed: journalStringList(row.completed).map(captainTerminology),
+    blockers: journalStringList(row.blockers).map(captainTerminology),
+    decisions: journalStringList(row.decisions).map(captainTerminology),
+    next_steps: journalStringList(row.next_steps).map(captainTerminology),
     source: row.source === 'compaction' ? 'compaction' : row.source === 'system_recovery' ? 'system_recovery' : 'captain',
     correlation_id: row.correlation_id ?? null,
     created_at: row.created_at
@@ -1116,8 +1117,8 @@ export class DatabaseManager {
     return {
       project_id: projectId,
       counts,
-      summary: stored?.summary ?? '',
-      top_blockers: topBlockers,
+      summary: captainTerminology(stored?.summary ?? ''),
+      top_blockers: topBlockers.map(captainTerminology),
       updated_at: stored?.updated_at ?? null
     }
   }

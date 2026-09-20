@@ -446,7 +446,7 @@ Secrets (encrypted API keys, database URLs, etc.) are injected into agent sessio
 
 ### Dashboard Workspace
 
-- Command input for the current project's Mastermind (one per project, see `docs/task-lifecycle.md` → Coordinator rows) and task creation, with quick-start chips
+- Command input for the current project's Captain (one per project, see `docs/task-lifecycle.md` → Coordinator rows) and task creation, with quick-start chips
 - Kanban task board grouped by status with drag-and-drop support
 
 ## Auto-Triage System
