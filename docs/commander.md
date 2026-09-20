@@ -182,7 +182,9 @@ boundary, reject pull-request targets and secret-bearing payloads, and record
 the origin and outcome in a durable idempotency ledger. Unknown outcomes stay
 unresolved until reconciliation verifies external evidence; recovery never
 blindly repeats a write. The `issue_write` escalation level determines whether
-an authorized write is silent, reported or held; it does not confer authority.
+an authorized external write is silent, reported or held; it does not confer
+authority. Linking is a local, authorized and audited association, so that
+external-write escalation level does not apply.
 See [Delegated GitHub issue writes](task-lifecycle.md#delegated-github-issue-writes)
 for action limits, audit and recovery details.
 
