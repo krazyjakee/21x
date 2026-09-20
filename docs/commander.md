@@ -231,12 +231,25 @@ right place. The pieces:
   store's `selectSession` and cleared when the view unmounts or the window
   closes). If the report's session is that one and idle, a turn starts at
   once with a relay note appended to the system prompt, so the Commander
-  relays it conversationally ("Project X says …"); the stored history ends
+  answers it with a short plain-language summary (#107, below); the stored history ends
   with the report, which the context builder already renders as a user-side
   note. If that session is mid-turn, the relay runs when the turn ends. Any
   other session only gets the unread report and its badge; opening it later
   shows the report as a card without a relay turn. With no provider (no API
   key) the report is still stored.
+- **Plain-language summaries** (#107, `REPORT_SUMMARY_RULES` in
+  `prompts.ts`). The Commander never relays or quotes a report as written.
+  It leads with the outcome, then gives progress, blockers (and who or what
+  they wait on) and any decision the user must make, with the options, in 2 to 5
+  sentences (short bullets only when there are several decisions). It leaves
+  out issue and PR numbers, branch names, commit SHAs, file paths, batch
+  labels and implementation order unless the user must act on one ("approve
+  PR #12"). The full report stays stored and shown as a card in the chat; if
+  the user asks for details, the Commander gives them from the report.
+  Example: a report "Batch B2 merged in PR #104 on sessions-b2-no-silent-drop
+  (630894c); B3 next, blocked on #99 review" becomes "Web finished the chat
+  history fix and is moving to the next step, which waits on your review of
+  the pending change."
 - **Loop protection.** A turn started by a report may call `ask_captain`
   only while the session's budget lasts: 3 calls
   (`MAX_REPORT_ASKS_WITHOUT_USER_TURN`) across report-triggered turns since
@@ -269,9 +282,13 @@ of the chat). The wake word stays out of scope.
   selected in Settings → Voice (system, downloaded, or ElevenLabs). Each
   finished sentence is handed over as it arrives; a text run closed by a tool
   call is released whole; the tail is flushed when the turn ends.
-- **Captain reports** that land in the session are spoken, introduced as
-  "Report from <project>.", only while voice mode is on for that session. A
-  report that arrives during a reply is read after it, not over it.
+- **Captain reports** are never read aloud as written (#107), and only
+  while voice mode is on for that session. A relayed report starts a
+  Commander turn, and that turn's plain-language summary is spoken
+  like any reply. Reports arriving during a reply wait for it to finish
+  before their summary turn starts. A report with no summary turn (no
+  provider or a stored briefing) is announced in one line,
+  "Report from <project>; details in the chat."
 - **Barge-in**: speaking while a reply is playing, or pressing the Stop button,
   stops playback in the renderer at once, then main interrupts the passage (which
   cancels the synthesis request or closes the ElevenLabs connection and drops
