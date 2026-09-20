@@ -303,11 +303,116 @@ export class AgentManager extends EventEmitter {
     this.deliveries = new DeliveryStore(db)
     this.startQueue = new DurableStartQueueStore(db)
     this.startIdleSessionReaper()
-    this.resourceMonitor.start(30_000, () => this.refreshBranchDiffs())
+    this.resourceMonitor.start(30_000, () => {
+      this.refreshBranchDiffs()
+      this.reconcileRuntimeDivergence()
+    })
   }
 
   getCaptainRuntime(projectId: string): CaptainRuntimeState | null {
     return this.captainRuntimes.getByProject(projectId)
+  }
+
+  /** True when stopping/moving a task must first withdraw runtime ownership. */
+  hasTaskStartOwnership(taskId: string): boolean {
+    if (this.sessionStarts.has(taskId) || this.admittedStarts.has(taskId)) return true
+    const live = this.findSessionByTaskId(taskId)
+    if (live && live.session.status !== 'error') return true
+    const recovery = this.startQueue.get(taskId)
+    return recovery !== null && ['queued', 'retrying', 'claimed', 'starting'].includes(recovery.state)
+  }
+
+  /**
+   * Repair one manufactured execution status without waiting for a restart.
+   * The durable queue remains the sole admission owner; this method only
+   * restores the same row/start path used by normal starts and boot recovery.
+   */
+  reconcileTaskRuntime(taskId: string, cause = 'status_runtime_divergence'): boolean {
+    const task = this.db.getTask(taskId)
+    if (!task || (task.status !== TaskStatus.AgentWorking && task.status !== TaskStatus.Triaging)) return false
+    if (this.sessionStarts.has(taskId) || this.admittedStarts.has(taskId)) return false
+
+    const live = this.findSessionByTaskId(taskId)
+    if (live && live.session.status !== 'error') {
+      if (task.status === TaskStatus.AgentWorking && live.session.status === 'idle') {
+        this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.ReadyForReview, session_id: live.sessionId })
+        this.startQueue.markRecovered(taskId, live.sessionId, 'live_session_present', 'idle_session_moved_to_review')
+        this.recordRecoveryAudit(task, cause, 'reclaim', 'idle_session_moved_to_review')
+        this.sendToRenderer('task:updated', {
+          taskId,
+          updates: { status: TaskStatus.ReadyForReview, session_id: live.sessionId }
+        })
+        return true
+      }
+      return false
+    }
+
+    const existing = this.startQueue.get(taskId)
+    if (existing && ['queued', 'retrying', 'claimed', 'starting'].includes(existing.state)) return false
+
+    this.updateTaskFromLocalAgent(taskId, { status: TaskStatus.NotStarted, session_id: null })
+    this.sendToRenderer('task:updated', {
+      taskId,
+      updates: { status: TaskStatus.NotStarted, session_id: null }
+    })
+
+    // A terminal safety decision is not silently reset by a cosmetic status
+    // write. Explicit user continuation remains the only way past it.
+    if (existing?.state === 'failed' || existing?.state === 'cancelled') {
+      this.recordRecoveryAudit(task, cause, 'rollback_status', `preserved_${existing.state}_recovery`)
+      return true
+    }
+
+    if (task.status === TaskStatus.Triaging) {
+      this.recordRecoveryAudit(task, cause, 'rollback_status', 'orphaned_triage_reset')
+      this.emitSystemError('', taskId, `triage-divergence-${Date.now()}`, 'A triage status had no live session and was reset. Start triage again to continue.')
+      return true
+    }
+
+    if (!task.agent_id) {
+      this.startQueue.enqueue({
+        taskId,
+        projectId: taskProjectId(task),
+        agentId: 'unassigned',
+        reason: 'agent_unavailable',
+        queuedAt: new Date().toISOString(),
+        priority: task.priority
+      })
+      this.startQueue.fail(taskId, 'agent_missing', 'visible_terminal_failure', 'The task has no assigned agent.')
+      this.recordRecoveryAudit(task, 'agent_missing', 'terminal_failure', 'visible_terminal_failure', 'Assign an agent before retrying.')
+      this.emitStartQueueChanged()
+      return true
+    }
+
+    const exclusion = this.retryExclusion(task)
+    const queued = this.startQueue.enqueue({
+      taskId,
+      projectId: taskProjectId(task),
+      agentId: task.agent_id,
+      reason: 'recovery',
+      queuedAt: new Date().toISOString(),
+      priority: task.priority,
+      dependencyReason: this.isSerialChainStart(taskId) ? 'predecessor_active' : null
+    })
+    if (exclusion) {
+      this.startQueue.cancel(taskId, exclusion, 'excluded_orphan_not_retried')
+      this.recordRecoveryAudit(task, exclusion, 'exclude_from_retry', 'excluded_orphan_not_retried')
+    } else {
+      this.recordRecoveryAudit(task, cause, 'requeue', `queued_at_position_${queued.position}`)
+    }
+    this.emitStartQueueChanged()
+    this.scheduleStartQueueDrain()
+    return true
+  }
+
+  /** Periodic defense for source/legacy writes that bypass command routes. */
+  private reconcileRuntimeDivergence(): void {
+    if (this.shuttingDown || this.startupReconciliation) return
+    const rows = this.db.db.prepare(`
+      SELECT id FROM tasks
+      WHERE role = 'task' AND status IN (?, ?)
+    `).all(TaskStatus.AgentWorking, TaskStatus.Triaging) as Array<{ id: string }>
+    for (const row of rows) this.reconcileTaskRuntime(row.id, 'periodic_runtime_reconciliation')
   }
 
   /** Repairs process-owned state after a crash before schedulers accept work. */
@@ -2688,7 +2793,7 @@ export class AgentManager extends EventEmitter {
     )
   }
 
-  async startTask(taskId: string, opts?: { preferSubtasks?: boolean; allowTriage?: boolean }): Promise<{
+  async startTask(taskId: string, opts?: { preferSubtasks?: boolean; allowTriage?: boolean; resumeManualStop?: boolean }): Promise<{
     /** `queued`: over a concurrency limit; it starts on its own when a slot frees. */
     action: 'task_started' | 'subtask_started' | 'triage_started' | 'already_running' | 'queued' | 'no_action'
     sessionId?: string
@@ -2701,6 +2806,30 @@ export class AgentManager extends EventEmitter {
     const task = this.db.getTask(taskId)
     if (!task) {
       throw new Error(`Task not found: ${taskId}`)
+    }
+
+    // An explicit UI/API start may reverse an earlier explicit stop. Automatic
+    // schedulers omit this flag, so a manual-stop exclusion remains terminal
+    // until the user actually asks to run the task again.
+    const recovery = this.startQueue.get(taskId)
+    if (
+      opts?.resumeManualStop &&
+      recovery?.state === 'cancelled' &&
+      recovery.recoveryCause === 'manual_stop' &&
+      task.agent_id
+    ) {
+      const queued = this.startQueue.enqueue({
+        taskId,
+        projectId: taskProjectId(task),
+        agentId: task.agent_id,
+        reason: 'recovery',
+        queuedAt: new Date().toISOString(),
+        priority: task.priority,
+        dependencyReason: this.isSerialChainStart(taskId) ? 'predecessor_active' : null
+      })
+      this.recordRecoveryAudit(task, 'explicit_user_restart', 'requeue', `queued_at_position_${queued.position}`)
+      this.emitStartQueueChanged()
+      this.scheduleStartQueueDrain()
     }
 
     const preferSubtasks = opts?.preferSubtasks !== false

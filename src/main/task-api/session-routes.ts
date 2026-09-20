@@ -180,7 +180,8 @@ export async function handleSessionRoute(db: DatabaseManager, route: string, par
       if (!agentController) return { error: 'Agent controller not available' }
       const result = await agentController.startTask(String(params.task_id), {
         preferSubtasks: params.prefer_subtasks !== false,
-        allowTriage: params.allow_triage !== false
+        allowTriage: params.allow_triage !== false,
+        resumeManualStop: true
       })
       const startedTask = result.startedTaskId ? db.getTask(result.startedTaskId) : null
       if (result.action === 'queued') {

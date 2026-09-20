@@ -9,7 +9,7 @@ import type { CreateTaskData, UpdateTaskData, FileAttachmentRecord } from '../da
 import { listTaskArtifactEntries, readTaskArtifact, resolveTaskArtifactFilePath } from '../artifacts'
 import { writeArtifactFileToClipboard } from '../artifact-clipboard'
 import { ArtifactClipboardMode, type ArtifactCopyFileResult } from '../../shared/artifacts'
-import { afterTaskCreated, afterTaskUpdated } from '../task-updates'
+import { afterTaskCreated, afterTaskUpdated, prepareUserTaskUpdate, startPreparedTask } from '../task-updates'
 import { mimeTypeForPath } from '../mime'
 import { required, type IpcDeps } from './deps'
 import { DEFAULT_PROJECT_ID } from '../../shared/projects'
@@ -38,11 +38,18 @@ export function registerTaskHandlers(deps: IpcDeps): void {
     return task
   })
 
-  ipcMain.handle('db:updateTask', (_, id: string, data: UpdateTaskData) => {
+  ipcMain.handle('db:updateTask', async (_, id: string, requested: UpdateTaskData) => {
     const previous = db.getTask(id)
-    const updated = updateTaskFromUser(db, id, data)
-    if (previous && updated) afterTaskUpdated(db, deps.agentManager, previous, data, updated)
-    return updated
+    if (!previous) return undefined
+    const prepared = await prepareUserTaskUpdate(deps.agentManager, previous, requested)
+    const updated = Object.keys(prepared.data).length > 0
+      ? updateTaskFromUser(db, id, prepared.data)
+      : db.getTask(id)
+    if (updated && Object.keys(prepared.data).length > 0) {
+      afterTaskUpdated(db, deps.agentManager, previous, prepared.data, updated)
+    }
+    if (prepared.startAfterWrite) await startPreparedTask(deps.agentManager, id)
+    return db.getTask(id)
   })
 
   ipcMain.handle('db:deleteTask', (event, id: string) => {

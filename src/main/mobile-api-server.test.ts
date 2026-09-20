@@ -230,9 +230,16 @@ describe('mobile-api-server: POST /api/tasks/:id coordinator wake-up', () => {
   function startServer(agentManager: unknown) {
     const { db } = createTestDb()
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const runtime = {
+      startTask: vi.fn().mockResolvedValue({ action: 'task_started', sessionId: 'session-1' }),
+      stopByTaskId: vi.fn().mockResolvedValue({ sessionId: null }),
+      hasTaskStartOwnership: vi.fn().mockReturnValue(false),
+      reconcileTaskRuntime: vi.fn(),
+      ...(agentManager as Record<string, unknown>)
+    }
     // The server resolves the requested port, so pick a free-ish high port
     // instead of 0 (which would make the caller resolve port 0).
-    return { db, logSpy, portPromise: startMobileApiServer(db, agentManager as never, {} as never, 0) }
+    return { db, logSpy, runtime, portPromise: startMobileApiServer(db, runtime as never, {} as never, 0) }
   }
 
   function pairToken(db: DatabaseManager): string {
@@ -789,7 +796,7 @@ describe('mobile-api-server: POST /api/sessions/start admission', () => {
 
     const body = await (await post({ taskId: task.id })).json()
 
-    expect(startTask).toHaveBeenCalledWith(task.id)
+    expect(startTask).toHaveBeenCalledWith(task.id, { resumeManualStop: true })
     expect(requestSession).not.toHaveBeenCalled()
     expect(body).toMatchObject({ sessionId: '', action: 'queued', startedTaskId: 'sub-1', queued: true, queuePosition: 1, queueReason: 'agent_limit' })
   })

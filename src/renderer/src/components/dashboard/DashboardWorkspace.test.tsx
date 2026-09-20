@@ -60,10 +60,12 @@ vi.mock('@/lib/ipc-client', () => ({
   onTaskDeleted: vi.fn(() => () => {}),
   onTasksRefresh: vi.fn(() => () => {}),
   onAgentStatus: vi.fn(() => () => {}),
+  onAgentStartQueueChanged: vi.fn(() => () => {}),
   onTranscriptChanged: vi.fn(() => () => {}),
   onAgentIncompatibleSession: vi.fn(() => () => {}),
   agentApi: {
     getAll: vi.fn().mockResolvedValue([]),
+    getStartQueue: vi.fn().mockResolvedValue([]),
     create: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
@@ -290,7 +292,7 @@ describe('DashboardWorkspace', () => {
     rectSpy.mockRestore()
   })
 
-  it('uses the pointer position and anchors the card in its destination while the move saves', async () => {
+  it('uses the pointer position and keeps the card truthful while the start command is pending', async () => {
     const task = makeTask({ id: 'task-pointer', title: 'Pointer task', status: TaskStatus.NotStarted })
     let finishStatusChange: (() => void) | undefined
     const onTaskStatusChange = vi.fn(() => new Promise<void>((resolve) => {
@@ -324,12 +326,14 @@ describe('DashboardWorkspace', () => {
 
     await waitFor(() => expect(onTaskStatusChange).toHaveBeenCalledWith(task, TaskStatus.Triaging))
     expect(onTaskStatusChange).not.toHaveBeenCalledWith(task, TaskStatus.Completed)
-    expect(screen.getByTestId('task-column-triaging').contains(screen.getByTestId('task-card-task-pointer'))).toBe(true)
+    expect(screen.getByTestId('task-column-not_started').contains(screen.getByTestId('task-card-task-pointer'))).toBe(true)
+    expect(screen.getByTestId('task-transition-task-pointer')).toHaveTextContent('starting')
     await waitFor(() => expect(screen.queryByText('Drop to complete')).toBeNull())
     await act(async () => {
       useTaskStore.setState({ tasks: [{ ...task, status: TaskStatus.Triaging }] })
       finishStatusChange?.()
     })
+    expect(screen.getByTestId('task-column-triaging').contains(screen.getByTestId('task-card-task-pointer'))).toBe(true)
     // PointerSensor intentionally retains its click suppressor for 50 ms so
     // the release cannot accidentally open the dragged card.
     await new Promise((resolve) => window.setTimeout(resolve, 60))

@@ -148,7 +148,8 @@ describe('/update_task - triage status guard', () => {
     const task = db.createTask(makeTask({ title: 'Closed here', source_id: source.id, external_id: 'page-2', source: 'Notion' }))!
     db.updateTask(task.id, { status: TaskStatus.Completed, complete_at_source: false })
 
-    await handleRoute(db, '/update_task', { task_id: task.id, status: TaskStatus.AgentWorking })
+    await expect(handleRoute(db, '/update_task', { task_id: task.id, status: TaskStatus.AgentWorking }))
+      .resolves.toMatchObject({ error: expect.stringContaining('runtime is unavailable') })
 
     expect(db.getTask(task.id)!.status).toBe(TaskStatus.Completed)
   })
@@ -470,7 +471,8 @@ describe('/start_task', () => {
 
     expect(controller.startTask).toHaveBeenCalledWith(task.id, {
       preferSubtasks: true,
-      allowTriage: true
+      allowTriage: true,
+      resumeManualStop: true
     })
     expect(result.success).toBe(true)
     expect(result.action).toBe('task_started')

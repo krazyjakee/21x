@@ -27,7 +27,7 @@ import { buildProjectOverview } from './project-overview'
 import { guardStream } from './child-stream-guards'
 import { bearerToken, readJsonBody } from './http-utils'
 import { completeTaskAtSource, updateTaskFromUser } from './session-feedback'
-import { afterTaskCreated, afterTaskUpdated } from './task-updates'
+import { afterTaskCreated, afterTaskUpdated, prepareUserTaskUpdate, startPreparedTask } from './task-updates'
 import { mimeTypeForPath } from './mime'
 
 // ── State ────────────────────────────────────────────────────
@@ -895,14 +895,17 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
     const taskId = taskUpdateMatch[1]
     const existing = db.getTask(taskId)
     if (!existing) throw Object.assign(new Error('Task not found'), { status: 404 })
-    const data = params as UpdateTaskData
-    const updated = updateTaskFromUser(db, taskId, data)
-    if (updated) {
+    const prepared = await prepareUserTaskUpdate(agent, existing, params as UpdateTaskData)
+    const updated = Object.keys(prepared.data).length > 0
+      ? updateTaskFromUser(db, taskId, prepared.data)
+      : db.getTask(taskId)
+    if (updated && Object.keys(prepared.data).length > 0) {
       broadcastToMobileClients('task:updated', { taskId, updates: updated })
       if (notifyDesktop) notifyDesktop('task:updated', { taskId, updates: updated })
-      afterTaskUpdated(db, agent, existing, data, updated)
+      afterTaskUpdated(db, agent, existing, prepared.data, updated)
     }
-    return updated
+    if (prepared.startAfterWrite) await startPreparedTask(agent, taskId)
+    return db.getTask(taskId) ?? updated
   }
 
   // POST /api/sessions/start
@@ -914,7 +917,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
       // the scheduler (next subtask, triage, the task's own agent), which is
       // admission-controlled too.
       if (!db.getTask(taskId)) throw Object.assign(new Error('Task not found'), { status: 404 })
-      const result = await agent.startTask(taskId)
+      const result = await agent.startTask(taskId, { resumeManualStop: true })
       return {
         sessionId: result.sessionId ?? '',
         action: result.action,

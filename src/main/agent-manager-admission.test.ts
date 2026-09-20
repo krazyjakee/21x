@@ -169,6 +169,21 @@ describe('admission control — AgentManager.startTask', () => {
     expect(manager.getStartQueue()).toEqual([])
     expect(started).not.toContain(tasks[LIMIT].id)
   })
+
+  it('keeps manual stop terminal for automation but lets an explicit board start resume once', async () => {
+    const { manager, started, createTasks } = setup(1)
+    const [task] = createTasks(1)
+    await manager.startTask(task.id)
+
+    await manager.stopByTaskId(task.id)
+    expect(manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'cancelled', recoveryCause: 'manual_stop' })
+    await expect(manager.startTask(task.id)).rejects.toThrow(/Automatic start stopped/)
+
+    expect(await manager.startTask(task.id, { resumeManualStop: true })).toMatchObject({ action: 'queued' })
+    await settle()
+    expect(started).toEqual([task.id, task.id])
+    expect(manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'started', recoveryResult: 'session_acknowledged' })
+  })
 })
 
 describe('admission control — AgentManager.startSession', () => {
@@ -396,6 +411,26 @@ describe('admission control — exempt sessions', () => {
 })
 
 describe('startup self-healing (#148)', () => {
+  it('immediately repairs a direct agent_working write through one stable durable row', async () => {
+    const { db, manager, started, createTasks } = setup(1)
+    const [task] = createTasks(1)
+    db.updateTask(task.id, { status: TaskStatus.AgentWorking, session_id: null })
+
+    expect(manager.reconcileTaskRuntime(task.id, 'uncommanded_status_write')).toBe(true)
+    const first = manager.getStartQueue()
+    expect(db.getTask(task.id)).toMatchObject({ status: TaskStatus.NotStarted, session_id: null })
+    expect(first).toEqual([expect.objectContaining({ taskId: task.id, state: 'queued', position: 1 })])
+
+    // A duplicate observer cannot create another row or reset FIFO/generation.
+    expect(manager.reconcileTaskRuntime(task.id, 'periodic_runtime_reconciliation')).toBe(false)
+    expect(manager.getStartQueue()).toEqual(first)
+
+    await settle()
+    expect(started).toEqual([task.id])
+    expect(db.getTask(task.id)).toMatchObject({ status: TaskStatus.AgentWorking, session_id: 'session-1' })
+    expect(manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'started', recoveryResult: 'session_acknowledged' })
+  })
+
   it('makes an orphan with no assigned agent a visible terminal recovery', async () => {
     const { db, manager } = setup(1)
     const task = db.createTask(makeTask({ title: 'Unassigned orphan', status: TaskStatus.AgentWorking }))!

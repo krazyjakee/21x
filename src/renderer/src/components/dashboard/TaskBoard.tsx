@@ -1,5 +1,4 @@
 import { useMemo, useCallback, useEffect, useRef, useState, memo } from 'react'
-import { flushSync } from 'react-dom'
 import { Clock, AlertCircle, CheckCircle2, ExternalLink, Bot, Terminal } from 'lucide-react'
 import {
   DndContext,
@@ -24,9 +23,11 @@ import { useAgentStore } from '@/stores/agent-store'
 import { useUIStore } from '@/stores/ui-store'
 import { useSnoozeTick } from '@/hooks/use-snooze-tick'
 import { isSnoozed, isOverdue, formatDueDistance } from '@/lib/utils'
+import { agentApi, onAgentStartQueueChanged } from '@/lib/ipc-client'
 import { TASK_STATUS_STYLES, type TaskStatusStyle } from '@shared/task-status-styles'
 import { TaskStatus, CodingAgentType } from '@/types'
 import type { Task, Agent } from '@/types'
+import type { TaskBoardTransitionPhase, TaskBoardTransitionResult } from './task-board-transition'
 
 // ── Status column definitions ─────────────────────────────────
 // Styling comes from the shared status map so the board, the task lists and
@@ -175,7 +176,7 @@ function getAgentDisplay(agent: Agent | undefined): { name: string; Logo: React.
 
 // ── Task Card ──────────────────────────────────────────────
 
-function TaskCardContent({ task, agent }: { task: Task; agent?: Agent }) {
+function TaskCardContent({ task, agent, transitionPhase }: { task: Task; agent?: Agent; transitionPhase?: TaskBoardTransitionPhase }) {
   const overdue = task.due_date && task.status !== TaskStatus.Completed && isOverdue(task.due_date)
   const sourceConfig = task.source && task.source !== 'local' ? getSourceConfig(task.source) : null
 
@@ -192,6 +193,22 @@ function TaskCardContent({ task, agent }: { task: Task; agent?: Agent }) {
           </Badge>
         )}
       </div>
+
+      {transitionPhase && (
+        <div
+          role="status"
+          data-testid={`task-transition-${task.id}`}
+          className={`mb-2 inline-flex rounded-full border px-2 py-0.5 text-2xs font-semibold uppercase tracking-wide ${
+            transitionPhase === 'failed'
+              ? 'border-red-500/30 bg-red-500/10 text-red-400'
+              : transitionPhase === 'queued'
+                ? 'border-amber-500/30 bg-amber-500/10 text-amber-400'
+                : 'border-blue-500/30 bg-blue-500/10 text-blue-400'
+          }`}
+        >
+          {transitionPhase}
+        </div>
+      )}
 
       {/* Description */}
       {task.description && (
@@ -254,7 +271,7 @@ function TaskCardContent({ task, agent }: { task: Task; agent?: Agent }) {
   )
 }
 
-const TaskCard = memo(function TaskCard({ task, onSelect, agent }: { task: Task; onSelect: (id: string) => void; agent?: Agent }) {
+const TaskCard = memo(function TaskCard({ task, onSelect, agent, transitionPhase }: { task: Task; onSelect: (id: string) => void; agent?: Agent; transitionPhase?: TaskBoardTransitionPhase }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: task.id,
     data: { taskId: task.id, status: task.status }
@@ -292,7 +309,7 @@ const TaskCard = memo(function TaskCard({ task, onSelect, agent }: { task: Task;
       }}
       aria-label={`${task.title}. Drag to change status, or press Enter to open.`}
     >
-      <TaskCardContent task={task} agent={agent} />
+      <TaskCardContent task={task} agent={agent} transitionPhase={transitionPhase} />
     </div>
   )
 })
@@ -323,7 +340,7 @@ const ColumnHeader = memo(function ColumnHeader({ column, count }: { column: Sta
 
 // ── Column wrapper ───────────────────────────────────────────
 
-const BoardColumn = memo(function BoardColumn({ column, tasks, onSelect, agentMap, isDraggingTask }: { column: StatusColumn; tasks: Task[]; onSelect: (id: string) => void; agentMap: Map<string, Agent>; isDraggingTask: boolean }) {
+const BoardColumn = memo(function BoardColumn({ column, tasks, onSelect, agentMap, isDraggingTask, transitionStates }: { column: StatusColumn; tasks: Task[]; onSelect: (id: string) => void; agentMap: Map<string, Agent>; isDraggingTask: boolean; transitionStates: Record<string, TaskBoardTransitionPhase> }) {
   const { isOver, setNodeRef } = useDroppable({
     id: `status:${column.key}`,
     data: { status: column.key }
@@ -351,7 +368,7 @@ const BoardColumn = memo(function BoardColumn({ column, tasks, onSelect, agentMa
             No tasks
           </div>
         ) : (
-          tasks.map((task) => <TaskCard key={task.id} task={task} onSelect={onSelect} agent={task.agent_id ? agentMap.get(task.agent_id) : undefined} />)
+          tasks.map((task) => <TaskCard key={task.id} task={task} onSelect={onSelect} agent={task.agent_id ? agentMap.get(task.agent_id) : undefined} transitionPhase={transitionStates[task.id]} />)
         )}
       </div>
 
@@ -395,7 +412,7 @@ function CompletedDropTarget({ count, isDraggingTask }: { count: number; isDragg
 }
 
 export interface TaskBoardProps {
-  onStatusChange?: (task: Task, status: TaskStatus) => void | Promise<void>
+  onStatusChange?: (task: Task, status: TaskStatus) => void | TaskBoardTransitionResult | Promise<void | TaskBoardTransitionResult>
 }
 
 // ── TaskBoard ──────────────────────────────────────────────
@@ -409,10 +426,7 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
   const openDashboardPreview = useUIStore((s) => s.openDashboardPreview)
   const snoozeTick = useSnoozeTick(tasks)
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null)
-  // Move the real card before dnd-kit measures the drop destination. Without
-  // this optimistic position, DragOverlay can only find the card at its old
-  // location and animates back to the source column.
-  const [optimisticStatuses, setOptimisticStatuses] = useState<Record<string, TaskStatus>>({})
+  const [transitionStates, setTransitionStates] = useState<Record<string, TaskBoardTransitionPhase>>({})
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor)
@@ -433,6 +447,35 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
     [tasks, snoozeTick]
   )
 
+  // The durable queue is authoritative across reloads. Rehydrate it on mount
+  // and follow main-process state changes so Queued/Starting never depend on
+  // an optimistic drag that existed only in this renderer lifetime.
+  useEffect(() => {
+    let disposed = false
+    const applyQueue = (queue: Awaited<ReturnType<typeof agentApi.getStartQueue>>, failedTaskId?: string): void => {
+      if (disposed) return
+      setTransitionStates((current) => {
+        const next = { ...current }
+        for (const [taskId, phase] of Object.entries(next)) {
+          if (phase === 'queued' || phase === 'starting') delete next[taskId]
+        }
+        for (const entry of queue) {
+          next[entry.taskId] = entry.state === 'claimed' || entry.state === 'starting' ? 'starting' : 'queued'
+        }
+        if (failedTaskId) next[failedTaskId] = 'failed'
+        return next
+      })
+    }
+    void agentApi.getStartQueue().then((queue) => applyQueue(queue)).catch((error) => {
+      console.error('[TaskBoard] Could not load durable start queue:', error)
+    })
+    const unsubscribe = onAgentStartQueueChanged((event) => applyQueue(event.queue, event.failed?.taskId))
+    return () => {
+      disposed = true
+      unsubscribe()
+    }
+  }, [])
+
   // Open task preview modal (rendered by AppLayout with full TaskWorkspace)
   const handleSelectTask = useCallback((taskId: string) => {
     openDashboardPreview(taskId)
@@ -445,7 +488,7 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
     }
     let completedCount = 0
     for (const task of topLevelTasks) {
-      const status = optimisticStatuses[task.id] || task.status || TaskStatus.NotStarted
+      const status = task.status || TaskStatus.NotStarted
       if (status === TaskStatus.Completed) {
         completedCount++
       } else if (grouped[status]) {
@@ -460,7 +503,27 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
       grouped[col.key] = sortByPriority(grouped[col.key])
     }
     return { grouped, completedCount }
-  }, [optimisticStatuses, topLevelTasks])
+  }, [topLevelTasks])
+
+  // Once the acknowledged task status reaches an execution column, that
+  // column itself is the truthful Working signal and the transient badge can
+  // disappear. Failed remains until the user retries the drag.
+  useEffect(() => {
+    setTransitionStates((current) => {
+      let changed = false
+      const next = { ...current }
+      for (const task of topLevelTasks) {
+        if (
+          next[task.id] !== 'failed' &&
+          (task.status === TaskStatus.Triaging || task.status === TaskStatus.AgentWorking)
+        ) {
+          delete next[task.id]
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+  }, [topLevelTasks])
 
   const activeTasks = topLevelTasks.length - tasksByStatus.completedCount
   const draggedTask = draggedTaskId
@@ -468,7 +531,14 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
     : null
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
-    setDraggedTaskId(String(event.active.id))
+    const taskId = String(event.active.id)
+    setTransitionStates((current) => {
+      if (!(taskId in current)) return current
+      const next = { ...current }
+      delete next[taskId]
+      return next
+    })
+    setDraggedTaskId(taskId)
   }, [])
 
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {
@@ -480,25 +550,31 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
       return
     }
 
-    // Commit the destination card synchronously so DragOverlay's drop
-    // animation measures that node instead of the card in its source column.
-    flushSync(() => {
-      setOptimisticStatuses((current) => ({ ...current, [task.id]: status }))
-      setDraggedTaskId(null)
-    })
+    setDraggedTaskId(null)
+    if (status === TaskStatus.Triaging || status === TaskStatus.AgentWorking) {
+      setTransitionStates((current) => ({ ...current, [task.id]: 'starting' }))
+    }
 
     try {
-      if (onStatusChange) await onStatusChange(task, status)
-      else await useTaskStore.getState().updateTask(task.id, { status })
+      const result = onStatusChange
+        ? await onStatusChange(task, status)
+        : await useTaskStore.getState().updateTask(task.id, { status })
+      if (result && typeof result === 'object' && 'phase' in result) {
+        const phase = result.phase
+        if (phase === 'moved') {
+          setTransitionStates((current) => {
+            if (!(task.id in current)) return current
+            const next = { ...current }
+            delete next[task.id]
+            return next
+          })
+        } else {
+          setTransitionStates((current) => ({ ...current, [task.id]: phase }))
+        }
+      }
     } catch (error) {
+      setTransitionStates((current) => ({ ...current, [task.id]: 'failed' }))
       console.error(`[TaskBoard] Failed to move task ${task.id} to ${status}:`, error)
-    } finally {
-      setOptimisticStatuses((current) => {
-        if (!(task.id in current)) return current
-        const next = { ...current }
-        delete next[task.id]
-        return next
-      })
     }
   }, [onStatusChange, topLevelTasks])
 
@@ -560,6 +636,7 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
                 onSelect={handleSelectTask}
                 agentMap={agentMap}
                 isDraggingTask={!!draggedTask}
+                transitionStates={transitionStates}
               />
             ))}
           </div>

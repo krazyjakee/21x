@@ -5,7 +5,7 @@ import { deserializeTask } from '../database/serializers'
 import { userTaskRoleFilter } from '../database/task-roles'
 import { TaskStatus } from '../../shared/constants'
 import { buildSimilarTasksQuery } from '../task-search'
-import { afterTaskCreated, afterTaskUpdated, triggerTaskAutomation } from '../task-updates'
+import { afterTaskCreated, afterTaskUpdated, prepareUserTaskUpdate, startPreparedTask, triggerTaskAutomation } from '../task-updates'
 import { DEFAULT_PROJECT_ID } from '../../shared/projects'
 import { listProjectRepos, projectGitDefaults, taskProjectId, validateProjectRepos } from '../agent-manager/project-repos'
 import { deliverCaptainReport } from '../commander/report-inbox'
@@ -173,7 +173,7 @@ function getTaskStatistics(db: DatabaseManager, metric: unknown, projectId?: str
   }
 }
 
-function updateTask(db: DatabaseManager, params: Record<string, unknown>): unknown {
+async function updateTask(db: DatabaseManager, params: Record<string, unknown>): Promise<unknown> {
   const taskId = params.task_id as string
   const current = db.getTask(taskId)
   if (!current) return { error: 'Task not found' }
@@ -225,16 +225,29 @@ function updateTask(db: DatabaseManager, params: Record<string, unknown>): unkno
   // One write through DatabaseManager so its status rules (source-confirmed
   // completion, agent-learning hold, locally closed tasks) always apply.
   let updated: TaskRecord | undefined
+  let prepared: Awaited<ReturnType<typeof prepareUserTaskUpdate>>
   try {
-    updated = db.updateTask(taskId, data)
+    prepared = await prepareUserTaskUpdate(agentController, current, data)
+    updated = Object.keys(prepared.data).length > 0
+      ? db.updateTask(taskId, prepared.data)
+      : db.getTask(taskId)
   } catch (error) {
     return { error: error instanceof Error ? error.message : 'Task update refused' }
   }
   if (!updated) return { error: 'Task not found' }
 
-  notifyRenderer?.('task:updated', { taskId, updates: updated })
-  afterTaskUpdated(db, agentController, current, data, updated)
-  return { success: true, task: toApiTask(updated) }
+  if (Object.keys(prepared.data).length > 0) {
+    notifyRenderer?.('task:updated', { taskId, updates: updated })
+    afterTaskUpdated(db, agentController, current, prepared.data, updated)
+  }
+  if (prepared.startAfterWrite) {
+    try {
+      await startPreparedTask(agentController!, taskId)
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : 'Task start refused' }
+    }
+  }
+  return { success: true, task: toApiTask(db.getTask(taskId) ?? updated) }
 }
 
 function createSubtask(db: DatabaseManager, params: Record<string, unknown>): unknown {
