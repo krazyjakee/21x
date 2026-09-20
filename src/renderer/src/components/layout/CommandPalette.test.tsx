@@ -42,8 +42,28 @@ async function openCall(): Promise<CommanderCallDriver> {
   let microphone = 0
   const driver: CommanderCallDriver = {
     setActive: vi.fn(async () => undefined),
+    prepare: vi.fn(async () => undefined),
     openMicrophone: vi.fn(async () => `mic-${++microphone}`),
     closeMicrophone: vi.fn(),
+    finishMicrophone: vi.fn(),
+    stopPlayback: vi.fn(),
+    bargeIn: vi.fn(async () => undefined),
+    send: vi.fn(async () => undefined)
+  }
+  bindCommanderCallDriver(driver)
+  await useCommanderCallStore.getState().setMicrophoneMode('open-mic')
+  await useCommanderCallStore.getState().start('session-1')
+  return driver
+}
+
+async function openPttCall(): Promise<CommanderCallDriver> {
+  let microphone = 0
+  const driver: CommanderCallDriver = {
+    setActive: vi.fn(async () => undefined),
+    prepare: vi.fn(async () => undefined),
+    openMicrophone: vi.fn(async () => `ptt-${++microphone}`),
+    closeMicrophone: vi.fn(),
+    finishMicrophone: vi.fn(),
     stopPlayback: vi.fn(),
     bargeIn: vi.fn(async () => undefined),
     send: vi.fn(async () => undefined)
@@ -127,5 +147,38 @@ describe('Commander navigation', () => {
     fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
     await vi.waitFor(() => expect(useCommanderCallStore.getState().lastEvent).toBeNull())
     input.remove()
+  })
+
+  it('holds Space for PTT, ignores repeats and text fields, and releases after focus changes', async () => {
+    const driver = await openPttCall()
+    renderHook(() => useGlobalShortcuts(actions, vi.fn()))
+
+    const input = document.createElement('input')
+    document.body.appendChild(input)
+    fireEvent.keyDown(input, { key: ' ', code: 'Space' })
+    expect(driver.openMicrophone).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(window, { key: ' ', code: 'Space' })
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', repeat: true })
+    await vi.waitFor(() => expect(useCommanderCallStore.getState().turnId).toBe('ptt-1'))
+    expect(driver.openMicrophone).toHaveBeenCalledTimes(1)
+
+    input.focus()
+    fireEvent.keyUp(input, { key: ' ', code: 'Space' })
+    expect(driver.finishMicrophone).toHaveBeenCalledWith('ptt-1')
+    expect(useCommanderCallStore.getState()).toMatchObject({ turnId: null, pushToTalkHeld: false })
+    input.remove()
+  })
+
+  it('releases PTT when the window loses focus', async () => {
+    const driver = await openPttCall()
+    renderHook(() => useGlobalShortcuts(actions, vi.fn()))
+    fireEvent.keyDown(window, { key: ' ', code: 'Space' })
+    await vi.waitFor(() => expect(useCommanderCallStore.getState().turnId).toBe('ptt-1'))
+
+    fireEvent.blur(window)
+
+    expect(driver.finishMicrophone).toHaveBeenCalledWith('ptt-1')
+    expect(useCommanderCallStore.getState().pushToTalkHeld).toBe(false)
   })
 })

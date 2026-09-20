@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
     engine: { state: 'ready', modelId: 'parakeet', engine: 'sherpa' },
     state: 'idle',
     permission: 'granted',
+    inputDeviceId: '',
     turnId: null as string | null,
     partial: '',
     speaking: false,
@@ -18,15 +19,20 @@ const mocks = vi.hoisted(() => {
     setCaptionOwner: vi.fn((owner: string | null) => {
       voiceState.captionOwner = owner
     }),
+    setInputDevice: vi.fn(async (deviceId: string) => {
+      voiceState.inputDeviceId = deviceId
+    }),
     setEnabled: vi.fn(async (enabled: boolean) => {
       voiceState.enabled = enabled
       voiceState.permission = enabled ? 'granted' : voiceState.permission
     }),
-    startTurn: vi.fn(async (mode: string) => {
-      if (mode === 'conversation') {
-        voiceState.turnId = 'voice-turn-1'
-        voiceState.state = 'listening'
-      }
+    startTurn: vi.fn(async () => {
+      voiceState.turnId = 'voice-turn-1'
+      voiceState.state = 'listening'
+    }),
+    endTurn: vi.fn(async () => {
+      voiceState.turnId = null
+      voiceState.state = 'transcribing'
     }),
     cancel: vi.fn(async () => {
       voiceState.turnId = null
@@ -82,7 +88,9 @@ import { useUIStore } from '@/stores/ui-store'
 import { SettingsTab } from '@/types'
 import { CommanderVoiceControls } from './CommanderVoiceControls'
 import { CommanderCallHost } from './CommanderCallHost'
-import { __resetCommanderCall } from '@/stores/commander-call-store'
+import { __resetCommanderCall, useCommanderCallStore } from '@/stores/commander-call-store'
+
+const originalMediaDevices = navigator.mediaDevices
 
 function renderVoice() {
   return render(<><CommanderCallHost /><CommanderVoiceControls /></>)
@@ -108,15 +116,61 @@ beforeEach(() => {
   vi.clearAllMocks()
   clearDictationTarget()
   __resetCommanderCall()
+  useCommanderCallStore.setState({ microphoneMode: 'open-mic' })
 })
 
 afterEach(() => {
   cleanup()
   clearDictationTarget()
   __resetCommanderCall()
+  Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: originalMediaDevices })
 })
 
 describe('Commander voice conversation', () => {
+  it('defaults to PTT and offers a working open-mic choice', async () => {
+    useCommanderCallStore.setState({ microphoneMode: 'push-to-talk' })
+    renderVoice()
+    fireEvent.click(await screen.findByLabelText('Microphone options'))
+    expect(screen.getByTestId('commander-mic-mode-label')).toHaveTextContent('Selected: Push to talk')
+
+    fireEvent.click(screen.getByLabelText('Open mic'))
+    fireEvent.click(screen.getByLabelText('Turn voice mode on'))
+
+    await waitFor(() => expect(mocks.voiceState.startTurn).toHaveBeenCalledWith('conversation'))
+    expect(screen.getByTestId('commander-mic-mode-label')).toHaveTextContent('Selected: Open mic')
+  })
+
+  it('keeps a PTT call ready until a deliberate press and uses dictation', async () => {
+    useCommanderCallStore.setState({ microphoneMode: 'push-to-talk' })
+    renderVoice()
+    fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
+
+    expect(await screen.findByText('Hold Space to talk')).toBeTruthy()
+    expect(mocks.voiceState.startTurn).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByLabelText('Start push-to-talk'))
+    await waitFor(() => expect(mocks.voiceState.startTurn).toHaveBeenCalledWith('dictation'))
+  })
+
+  it('lists local input devices and saves the selected microphone', async () => {
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        enumerateDevices: vi.fn(async () => [
+          { kind: 'audioinput', deviceId: 'usb-mic', label: 'USB microphone', groupId: '', toJSON: () => ({}) }
+        ]),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn()
+      }
+    })
+    renderVoice()
+    fireEvent.click(await screen.findByLabelText('Microphone options'))
+    const device = await screen.findByLabelText('Input device')
+
+    fireEvent.change(device, { target: { value: 'usb-mic' } })
+
+    await waitFor(() => expect(mocks.voiceState.setInputDevice).toHaveBeenCalledWith('usb-mic'))
+  })
+
   it('starts listening immediately and sends every pause-delimited utterance', async () => {
     const view = renderVoice()
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))

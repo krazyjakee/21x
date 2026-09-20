@@ -16,7 +16,7 @@ import {
   taskIdOfComposer
 } from '@/lib/voice-dictation-target'
 import type { VoiceUiContext } from '@shared/voice'
-import { useCommanderCallStore } from '@/stores/commander-call-store'
+import { COMMANDER_VOICE_COMPOSER_KEY, useCommanderCallStore } from '@/stores/commander-call-store'
 
 /**
  * Connects voice control to the application shell. Mount it once.
@@ -99,8 +99,16 @@ export function useVoiceControl(): void {
     // Exactly one subscriber writes dictated words, into the one field the
     // microphone button claimed. Without this, every mounted transcript panel
     // would receive the same sentence.
-    const offDictate = voiceApi.onDictate(({ text }) => {
-      const inserted = insertDictation(text)
+    const offDictate = voiceApi.onDictate(({ turnId, text }) => {
+      const composer = getActiveComposer()
+      const voice = useVoiceStore.getState()
+      if (turnId !== voice.turnId && turnId !== voice.finalizingTurnId) return
+      // PTT uses one dictation turn. Main emits this event only after the
+      // recogniser's final transcript, so the Commander may submit it here;
+      // partial text remains display-only and can never trigger an action.
+      const inserted = composer === COMMANDER_VOICE_COMPOSER_KEY
+        ? insertAndSubmit(text)
+        : insertDictation(text)
       clearActiveComposer()
       if (!inserted) useVoiceStore.setState({ testTranscript: text.trim() })
     })
@@ -108,6 +116,8 @@ export function useVoiceControl(): void {
     // A conversation stays open: each pause finishes one sentence, the sentence
     // is sent, and the microphone keeps listening for the next one.
     const offSegment = voiceApi.onSegment(({ turnId, text }) => {
+      const voice = useVoiceStore.getState()
+      if (turnId !== voice.turnId || voice.mode !== 'conversation') return
       const composer = getActiveComposer()
       const sent = insertAndSubmit(text)
       if (sent) {

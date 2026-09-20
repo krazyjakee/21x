@@ -50,7 +50,17 @@ export function useGlobalShortcuts(actions: CommandPaletteActions, setCmdOpen: D
       const inCommanderContext = call.status !== 'off' || ui.sidebarView === 'commander'
       let handled = false
 
-      if (e.key === 'Escape' && call.status !== 'off') {
+      if (
+        (e.code === 'Space' || e.key === ' ') &&
+        !mod &&
+        !e.shiftKey &&
+        call.status === 'live' &&
+        call.microphoneMode === 'push-to-talk' &&
+        !isKeyboardInput(e.target)
+      ) {
+        void call.beginPushToTalk()
+        handled = true
+      } else if (e.key === 'Escape' && call.status !== 'off') {
         call.interrupt('stop')
         handled = true
       } else if (mod && !e.shiftKey && key === 'd' && inCommanderContext) {
@@ -83,6 +93,20 @@ export function useGlobalShortcuts(actions: CommandPaletteActions, setCmdOpen: D
       // the same Escape/chord after the call has claimed it.
       e.stopImmediatePropagation()
     }
+
+    const releasePushToTalk = (e?: KeyboardEvent): void => {
+      if (e && e.code !== 'Space' && e.key !== ' ') return
+      const call = useCommanderCallStore.getState()
+      if (!call.pushToTalkHeld) return
+      call.endPushToTalk()
+      e?.preventDefault()
+      e?.stopImmediatePropagation()
+    }
+
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState === 'hidden') releasePushToTalk()
+    }
+    const releasePushToTalkOnBlur = (): void => releasePushToTalk()
 
     const onKey = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase()
@@ -170,9 +194,16 @@ export function useGlobalShortcuts(actions: CommandPaletteActions, setCmdOpen: D
       else if (e.key === '/') { e.preventDefault(); actions.focusSearch() }
     }
     window.addEventListener('keydown', onCommanderKey, true)
+    window.addEventListener('keyup', releasePushToTalk, true)
+    window.addEventListener('blur', releasePushToTalkOnBlur)
+    document.addEventListener('visibilitychange', onVisibilityChange)
     window.addEventListener('keydown', onKey)
     return () => {
       window.removeEventListener('keydown', onCommanderKey, true)
+      window.removeEventListener('keyup', releasePushToTalk, true)
+      window.removeEventListener('blur', releasePushToTalkOnBlur)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      releasePushToTalk()
       window.removeEventListener('keydown', onKey)
       if (chordRef.current) window.clearTimeout(chordRef.current.timer)
     }

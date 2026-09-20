@@ -1,5 +1,10 @@
 import { create } from 'zustand'
-import type { CallEvent, CallMediaEvent } from '@shared/commander-call'
+import {
+  DEFAULT_COMMANDER_MICROPHONE_MODE,
+  type CallEvent,
+  type CallMediaEvent,
+  type CommanderMicrophoneMode
+} from '@shared/commander-call'
 import { activityNow } from '@/lib/activity/activity-clock'
 
 /**
@@ -30,15 +35,21 @@ export const COMMANDER_VOICE_COMPOSER_KEY = 'commander-voice'
 export interface CommanderCallDriver {
   /** Tells main which session to speak for; null closes voice mode. */
   setActive(sessionId: string | null): Promise<unknown>
+  /** Prepares local speech input and reply audio without opening capture. */
+  prepare(): Promise<void>
   /**
-   * Prepares the reply voice and the microphone and opens one conversation
-   * turn. Resolves with its turn id; rejects with a message for the user.
+   * Opens one local recognition turn. Open mic uses a pause-delimited
+   * conversation; push-to-talk uses one final dictation on release.
    */
-  openMicrophone(): Promise<string>
-  /** Closes the microphone turn if `turnId` is still the open one. */
+  openMicrophone(mode: CommanderMicrophoneMode): Promise<string>
+  /** Cancels the microphone turn if `turnId` is still the open one. */
   closeMicrophone(turnId: string | null): void
+  /** Ends a PTT turn and asks the recogniser for its final transcript. */
+  finishMicrophone(turnId: string): void
   /** Silences playback in this tick. */
   stopPlayback(): void
+  /** Whether this session has reply work/audio that a PTT press interrupts. */
+  hasActiveReply?(sessionId: string): boolean
   /** Cancels synthesis and the running Commander turn in main. */
   bargeIn(sessionId: string): Promise<unknown>
   /** Sends a heard sentence as a user turn. */
@@ -51,6 +62,10 @@ interface CommanderCallState {
   sessionId: string | null
   /** The microphone turn this call opened. */
   turnId: string | null
+  /** Push-to-talk is the default; open mic keeps one conversation turn open. */
+  microphoneMode: CommanderMicrophoneMode
+  /** True from the first PTT key/button press until its matching release. */
+  pushToTalkHeld: boolean
   /** A call-level failure. Cleared by Retry, a new call, or End. */
   error: string | null
   /** The session a failed call was on, so Retry can reopen it. */
@@ -67,6 +82,11 @@ interface CommanderCallState {
   end: () => void
   /** Mutes or reopens capture without ending the shared call. */
   toggleMicrophone: () => Promise<void>
+  setMicrophoneMode: (mode: CommanderMicrophoneMode) => Promise<void>
+  beginPushToTalk: () => Promise<void>
+  endPushToTalk: () => void
+  /** Main ended a PTT turn itself after producing its final transcript. */
+  microphoneFinished: (turnId: string) => void
   /** Stop, Esc or talking over a reply. */
   interrupt: (cause?: 'stop' | 'barge_in') => void
   retry: () => Promise<void>
@@ -124,6 +144,7 @@ const OFF = {
   status: 'off' as CallStatus,
   sessionId: null,
   turnId: null,
+  pushToTalkHeld: false,
   interruptedAt: null,
   replyInterrupted: false,
   startedAt: null
@@ -150,6 +171,7 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
     error: null,
     retrySessionId: null,
     lastEvent: null,
+    microphoneMode: DEFAULT_COMMANDER_MICROPHONE_MODE,
 
     start: async (sessionId) => {
       const current = get()
@@ -167,12 +189,18 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
         await media.setActive(sessionId)
         activated = true
         if (mine !== generation) return
-        const turnId = await media.openMicrophone()
-        if (mine !== generation) {
-          media.closeMicrophone(turnId)
-          return
+        await media.prepare()
+        if (mine !== generation) return
+        if (get().microphoneMode === 'open-mic') {
+          const turnId = await media.openMicrophone('open-mic')
+          if (mine !== generation) {
+            media.closeMicrophone(turnId)
+            return
+          }
+          set({ status: 'live', turnId, startedAt: Date.now() })
+        } else {
+          set({ status: 'live', turnId: null, startedAt: Date.now() })
         }
-        set({ status: 'live', turnId, startedAt: Date.now() })
       } catch (err) {
         if (mine !== generation) return
         // A preflight refusal (another microphone owns capture) changed no
@@ -192,6 +220,11 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
     toggleMicrophone: async () => {
       const current = get()
       if (current.status !== 'live' || !current.sessionId || !driver) return
+      if (current.microphoneMode === 'push-to-talk') {
+        if (current.turnId || current.pushToTalkHeld) get().endPushToTalk()
+        else await get().beginPushToTalk()
+        return
+      }
       if (current.turnId) {
         generation++
         driver.closeMicrophone(current.turnId)
@@ -202,7 +235,7 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
       const mine = ++generation
       const activeSessionId = current.sessionId
       try {
-        const turnId = await driver.openMicrophone()
+        const turnId = await driver.openMicrophone('open-mic')
         const latest = get()
         if (mine !== generation || latest.status !== 'live' || latest.sessionId !== activeSessionId) {
           driver.closeMicrophone(turnId)
@@ -212,6 +245,94 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
       } catch (err) {
         if (mine === generation && get().sessionId === activeSessionId) set({ error: messageOf(err) })
       }
+    },
+
+    setMicrophoneMode: async (mode) => {
+      const current = get()
+      if (current.microphoneMode === mode) return
+      generation++
+      if (current.turnId && driver) driver.closeMicrophone(current.turnId)
+      set({ microphoneMode: mode, turnId: null, pushToTalkHeld: false, error: null })
+      if (mode !== 'open-mic' || current.status !== 'live' || !current.sessionId || !driver) return
+
+      const mine = ++generation
+      const activeSessionId = current.sessionId
+      try {
+        const turnId = await driver.openMicrophone('open-mic')
+        const latest = get()
+        if (
+          mine !== generation ||
+          latest.status !== 'live' ||
+          latest.sessionId !== activeSessionId ||
+          latest.microphoneMode !== 'open-mic'
+        ) {
+          driver.closeMicrophone(turnId)
+          return
+        }
+        set({ turnId, error: null })
+      } catch (err) {
+        if (mine === generation && get().sessionId === activeSessionId) set({ error: messageOf(err) })
+      }
+    },
+
+    beginPushToTalk: async () => {
+      const current = get()
+      if (
+        current.status !== 'live' ||
+        current.microphoneMode !== 'push-to-talk' ||
+        current.pushToTalkHeld ||
+        !current.sessionId ||
+        !driver
+      ) return
+
+      set({ pushToTalkHeld: true, error: null })
+      // A PTT press is an explicit interruption. Silence speaker output and
+      // cancel the active reply before capture opens, so speaker audio can
+      // never become the new request.
+      if (driver.hasActiveReply?.(current.sessionId)) get().interrupt('barge_in')
+      else driver.stopPlayback()
+      const mine = ++generation
+      const activeSessionId = current.sessionId
+      try {
+        const turnId = await driver.openMicrophone('push-to-talk')
+        const latest = get()
+        if (
+          mine !== generation ||
+          latest.status !== 'live' ||
+          latest.sessionId !== activeSessionId ||
+          latest.microphoneMode !== 'push-to-talk' ||
+          !latest.pushToTalkHeld
+        ) {
+          if (
+            latest.status === 'live' &&
+            latest.sessionId === activeSessionId &&
+            latest.microphoneMode === 'push-to-talk' &&
+            !latest.pushToTalkHeld
+          ) driver.finishMicrophone(turnId)
+          else driver.closeMicrophone(turnId)
+          return
+        }
+        set({ turnId })
+      } catch (err) {
+        if (mine === generation && get().sessionId === activeSessionId) {
+          set({ pushToTalkHeld: false, error: messageOf(err) })
+        }
+      }
+    },
+
+    endPushToTalk: () => {
+      const current = get()
+      if (current.microphoneMode !== 'push-to-talk' || (!current.pushToTalkHeld && !current.turnId)) return
+      generation++
+      set({ pushToTalkHeld: false, turnId: null })
+      if (current.turnId && driver) driver.finishMicrophone(current.turnId)
+    },
+
+    microphoneFinished: (turnId) => {
+      const current = get()
+      if (current.microphoneMode !== 'push-to-talk' || current.turnId !== turnId) return
+      generation++
+      set({ turnId: null, pushToTalkHeld: false })
     },
 
     interrupt: (cause = 'stop') => {
@@ -229,7 +350,10 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
       if (status !== 'off') {
         // A failed send keeps its microphone; a failed unmute reopens it.
         set({ error: null })
-        if (!turnId) await get().toggleMicrophone()
+        if (!turnId) {
+          if (get().microphoneMode === 'open-mic') await get().toggleMicrophone()
+          else await get().beginPushToTalk()
+        }
         return
       }
       const target = retrySessionId ?? sessionId
@@ -284,5 +408,11 @@ export function __resetCommanderCall(): void {
   driver = null
   generation++
   listeners.clear()
-  useCommanderCallStore.setState({ ...OFF, error: null, retrySessionId: null, lastEvent: null })
+  useCommanderCallStore.setState({
+    ...OFF,
+    error: null,
+    retrySessionId: null,
+    lastEvent: null,
+    microphoneMode: DEFAULT_COMMANDER_MICROPHONE_MODE
+  })
 }

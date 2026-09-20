@@ -27,8 +27,10 @@ const TTS_READY = { enabled: true, status: { state: 'ready' } } as unknown as Vo
 function driver(): CommanderCallDriver {
   return {
     setActive: vi.fn(async () => undefined),
+    prepare: vi.fn(async () => undefined),
     openMicrophone: vi.fn(async () => 'mic-1'),
     closeMicrophone: vi.fn(),
+    finishMicrophone: vi.fn(),
     stopPlayback: vi.fn(),
     bargeIn: vi.fn(async () => undefined),
     send: vi.fn(async () => undefined)
@@ -74,6 +76,7 @@ beforeEach(async () => {
     speaking: false
   }, true)
   bindCommanderCallDriver(driver())
+  await useCommanderCallStore.getState().setMicrophoneMode('open-mic')
   await useCommanderCallStore.getState().start('session-1')
 })
 

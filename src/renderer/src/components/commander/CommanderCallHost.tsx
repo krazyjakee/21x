@@ -9,7 +9,9 @@ import {
   useCommanderActivityStore
 } from '@/lib/activity/commander-activity-adapter'
 import {
+  deriveVoiceActivity,
   ensureVoiceAttribution,
+  readVoiceActivitySnapshot,
   useVoiceActivity
 } from '@/lib/activity/voice-activity-adapter'
 import {
@@ -84,6 +86,7 @@ export function CommanderCallHost() {
   const status = useCommanderCallStore((s) => s.status)
   const sessionId = useCommanderCallStore((s) => s.sessionId)
   const callTurnId = useCommanderCallStore((s) => s.turnId)
+  const microphoneMode = useCommanderCallStore((s) => s.microphoneMode)
   const replyInterrupted = useCommanderCallStore((s) => s.replyInterrupted)
   const interrupt = useCommanderCallStore((s) => s.interrupt)
   const mediaLost = useCommanderCallStore((s) => s.mediaLost)
@@ -124,7 +127,7 @@ export function CommanderCallHost() {
         }
         return commanderVoiceApi.setActive(nextSessionId)
       },
-      openMicrophone: async () => {
+      prepare: async () => {
         const refuseForeignTurn = (): void => {
           const existing = useVoiceStore.getState().turnId
           if (existing) throw new Error(MICROPHONE_BUSY_MESSAGE)
@@ -159,10 +162,15 @@ export function CommanderCallHost() {
         }
 
         refuseForeignTurn()
+      },
+      openMicrophone: async (mode) => {
+        const existing = useVoiceStore.getState().turnId
+        if (existing) throw new Error(MICROPHONE_BUSY_MESSAGE)
         setActiveComposer(COMMANDER_VOICE_COMPOSER_KEY)
+        const current = useVoiceStore.getState()
         current.setCaptionOwner(COMMANDER_VOICE_COMPOSER_KEY)
         try {
-          await current.startTurn('conversation')
+          await current.startTurn(mode === 'open-mic' ? 'conversation' : 'dictation')
           const opened = useVoiceStore.getState().turnId
           if (!opened) {
             throw new Error(captureAdvice(useVoiceStore.getState().result?.message || 'The microphone could not be started.'))
@@ -182,7 +190,20 @@ export function CommanderCallHost() {
         if (getActiveComposer() === COMMANDER_VOICE_COMPOSER_KEY) clearActiveComposer()
         if (voiceState.captionOwner === COMMANDER_VOICE_COMPOSER_KEY) voiceState.setCaptionOwner(null)
       },
+      finishMicrophone: (ownedTurnId) => {
+        const voiceState = useVoiceStore.getState()
+        if (voiceState.turnId === ownedTurnId) void voiceState.endTurn()
+      },
       stopPlayback: () => useVoiceStore.getState().stopPlaybackNow(),
+      hasActiveReply: (activeSessionId) => {
+        const observation = useCommanderActivityStore.getState().sessions[activeSessionId]
+        const replyWorking = observation?.phase === 'thinking' || observation?.phase === 'working' || observation?.phase === 'tool'
+        const replySpeaking = deriveVoiceActivity(
+          readVoiceActivitySnapshot(),
+          { kind: 'commander', id: activeSessionId }
+        ).state === 'speaking'
+        return replyWorking || replySpeaking
+      },
       bargeIn: (activeSessionId) => commanderVoiceApi.bargeIn(activeSessionId),
       send: (activeSessionId, text) => commanderVoiceApi.send(activeSessionId, text)
     })
@@ -263,12 +284,16 @@ export function CommanderCallHost() {
   // error and clean up the remaining media exactly once.
   useEffect(() => {
     if (status !== 'live' || !callTurnId || voiceTurnId === callTurnId) return
+    if (microphoneMode === 'push-to-talk') {
+      useCommanderCallStore.getState().microphoneFinished(callTurnId)
+      return
+    }
     mediaLost(
       voiceResult?.message
         ? captureAdvice(voiceResult.message)
         : 'The voice conversation ended. Retry to reconnect.'
     )
-  }, [status, callTurnId, voiceTurnId, voiceResult?.message, mediaLost])
+  }, [status, callTurnId, voiceTurnId, microphoneMode, voiceResult?.message, mediaLost])
 
   // Escape is Stop, not End. The call remains available after the short
   // interrupted presentation and survives navigation as before.

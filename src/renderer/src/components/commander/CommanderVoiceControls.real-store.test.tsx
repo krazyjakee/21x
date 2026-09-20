@@ -118,6 +118,7 @@ beforeEach(() => {
   mocks.commanderState.streaming = {}
   clearDictationTarget()
   __resetCommanderCall()
+  useCommanderCallStore.setState({ microphoneMode: 'open-mic' })
   useUIStore.setState({ activeModal: null, settingsTab: SettingsTab.GENERAL })
   reset()
 })

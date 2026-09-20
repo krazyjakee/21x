@@ -318,12 +318,16 @@ unmounting either surface does not own or end media. The wake word stays out
 of scope.
 
 - **Turning it on** tells main which session to speak for
-  (`voice:commander:setActive`) and immediately opens one `conversation` speech
-  turn. It first refreshes and prepares the persisted reply voice, so a saved
+  (`voice:commander:setActive`) and prepares local recognition plus the persisted
+  reply voice, so a saved
   ElevenLabs configuration is reused even when the renderer still has its
-  initial loading snapshot or the general read-aloud switch was off. There is
-  no second Talk button. The microphone remains open; each pause
-  finishes an utterance and sends it through `voice:commander:send`, which is
+  initial loading snapshot or the general read-aloud switch was off. The mic ▾
+  menu chooses between two local modes and selects a persisted input device:
+  **Push to talk** is the default and keeps the call Ready until Space or the mic
+  button is held/toggled; release ends one `dictation` turn. **Open mic** opens
+  one `conversation` turn immediately and keeps it open; each pause finishes an
+  utterance. Only the recogniser's final dictation/segment event is submitted
+  through `voice:commander:send`; partial text is captions only. That send is
   `CommanderService.sendUserMessage` after cancelling any reply still running.
   Ending the call closes the microphone, stops playback and synthesis, cancels
   the active Commander turn, and closes any ElevenLabs connection without
@@ -377,12 +381,15 @@ of scope.
   receives focus. The latest validated action is shown for eight seconds with
   direct exact-reversal Undo when that tool is reversible.
 - **Call shortcuts** use the shared call from any in-app view: Mod+D toggles
-  its microphone, Escape interrupts, Mod+Shift+C toggles captions, Mod+\\
+  its microphone; in PTT mode, holding Space outside input, textarea,
+  contenteditable and terminal controls records one turn and release submits
+  its final transcript. Key repeat cannot open another turn, and keyup, window
+  blur, visibility loss and hook cleanup all release a held turn. Escape
+  interrupts, Mod+Shift+C toggles captions, Mod+\\
   toggles the side panel, Mod+Shift+M toggles full/PiP, Mod+Shift+E ends, and
   Mod+Z undoes the still-visible latest reversible action outside text fields.
   The system-wide Mod+Shift+Space routes to Commander while its call exists
-  and to Captain otherwise. Hold-Space PTT remains owned by batch 6 (#90),
-  alongside selectable push-to-talk/open-mic modes.
+  and to Captain otherwise.
 - **Media is provider-neutral.** `commanderCallMedia` exposes capability flags,
   on-demand input/output levels, partial and final user captions, assistant
   `speechText`, and speech/interruption events. `wordTimings` is false and no
@@ -405,6 +412,11 @@ of scope.
   ElevenLabs connection and drops late audio) and cancels the Commander turn
   (`voice:commander:bargeIn`). The written part of the reply is kept, as with
   any cancel.
+  Open mic continues to use `BargeInGate`: speaker output is held out of local
+  recognition, a sustained human voice releases the pre-roll and stops playback,
+  and the first partial then cancels the active Commander reply. A PTT press is
+  already an explicit interruption, so it stops an active reply before capture
+  opens. Speaker audio is never forwarded as microphone input in either mode.
 
 Speaking in voice mode uses the `conversation` speech source: opening voice
 mode is the request, so it does not need the "read agent answers" switch or a

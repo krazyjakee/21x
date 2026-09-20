@@ -61,6 +61,8 @@ interface VoiceStoreState {
   shortcut: string
   permission: MicrophonePermission
   turnId: string | null
+  /** A turn ended locally and may still deliver its one final transcript. */
+  finalizingTurnId: string | null
   mode: VoiceTurnMode
   partial: string
   final: string
@@ -71,6 +73,8 @@ interface VoiceStoreState {
   testTranscript: string
   /** Keep the microphone open and send each sentence after a pause. */
   conversation: boolean
+  /** Empty means the operating-system default input device. */
+  inputDeviceId: string
   /** Sentences already sent in the open conversation, newest last. */
   sentSentences: string[]
   /** Set by the component that should receive dictated text. */
@@ -104,6 +108,7 @@ interface VoiceStoreState {
   startTest: () => Promise<void>
   clearTest: () => void
   setConversation: (on: boolean) => Promise<void>
+  setInputDevice: (deviceId: string) => Promise<void>
   endTurn: () => Promise<void>
   toggleTurn: (mode: VoiceTurnMode) => Promise<void>
   cancel: () => Promise<void>
@@ -277,6 +282,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
   shortcut: '',
   permission: 'not-determined',
   turnId: null,
+  finalizingTurnId: null,
   mode: 'dictation',
   partial: '',
   final: '',
@@ -285,6 +291,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
   result: null,
   testTranscript: '',
   conversation: true,
+  inputDeviceId: '',
   sentSentences: [],
   contextProvider: null,
   captionOwner: null,
@@ -297,14 +304,16 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       set({ available: false })
       return
     }
-    const [snapshot, permission, conversation] = await Promise.all([
+    const [snapshot, permission, conversation, inputDeviceId] = await Promise.all([
       voiceApi.getSnapshot(),
       voiceApi.getPermission(),
       settingsApi.get(VOICE_SETTING_KEYS.conversation),
+      settingsApi.get(VOICE_SETTING_KEYS.inputDeviceId),
     ])
     set({
       // Conversational is the default; only an explicit 'false' turns it off.
       conversation: conversation !== 'false',
+      inputDeviceId: inputDeviceId ?? '',
       available: true,
       enabled: snapshot.enabled,
       runtime: snapshot.runtime ?? RUNTIME_ABSENT,
@@ -378,7 +387,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
   setCaptionOwner: (captionOwner) => set({ captionOwner }),
 
   startTurn: async (mode) => {
-    const { enabled, turnId, contextProvider } = get()
+    const { enabled, turnId, contextProvider, inputDeviceId } = get()
     if (!enabled || turnId) return
     // Barge-in. Playback stops here, in the same tick as the press, instead of
     // waiting for main to answer. Main stops producing the rest.
@@ -388,7 +397,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       set({ result: { kind: 'error', message: started.error, at: Date.now() } })
       return
     }
-    set({ turnId: started.turnId, mode, partial: '', final: '', result: null, sentSentences: [] })
+    set({ turnId: started.turnId, finalizingTurnId: null, mode, partial: '', final: '', result: null, sentSentences: [] })
 
     bargeInGate.reset()
     const ok = await voiceCapture.start({
@@ -404,7 +413,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
         set({ result: { kind: 'error', message, at: Date.now() } })
         void get().cancel()
       },
-    })
+    }, inputDeviceId || undefined)
     if (!ok) {
       await voiceApi.cancelTurn(started.turnId)
       set({ turnId: null })
@@ -426,6 +435,11 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
     await settingsApi.set(VOICE_SETTING_KEYS.conversation, on ? 'true' : 'false')
   },
 
+  setInputDevice: async (inputDeviceId) => {
+    set({ inputDeviceId })
+    await settingsApi.set(VOICE_SETTING_KEYS.inputDeviceId, inputDeviceId)
+  },
+
   endTurn: async () => {
     const { turnId } = get()
     if (!turnId) return
@@ -434,7 +448,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
     // The turn is closed here and now. Waiting for an answer from main would
     // leave the control stuck on "Stop" whenever main has already dropped the
     // turn — for example after the worker ended it at a pause.
-    set({ turnId: null, level: 0, partial: '' })
+    set({ turnId: null, finalizingTurnId: turnId, level: 0, partial: '' })
     await voiceApi.endTurn(turnId)
   },
 
@@ -450,7 +464,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
     const { turnId } = get()
     voiceCapture.stop()
     bargeInGate.reset()
-    set({ turnId: null, partial: '', level: 0 })
+    set({ turnId: null, finalizingTurnId: null, partial: '', level: 0 })
     if (turnId) await voiceApi.cancelTurn(turnId)
   },
 
@@ -640,6 +654,11 @@ if (hasVoiceBridge()) {
   })
 
   voiceApi.onFinal((event) => {
+    const current = useVoiceStore.getState()
+    if (event.turnId !== current.turnId && event.turnId !== current.finalizingTurnId) return
+    // Keep a locally-ended turn attributable through the immediately-following
+    // dictate/outcome events. A newer turn clears this id in startTurn, so a
+    // late result can never submit into that newer capture.
     useVoiceStore.setState({ final: event.text, partial: '' })
     // A turn also ends by itself: the worker closes it when the speaker pauses.
     // Release the microphone here too, or it would stay open with no way to
@@ -660,6 +679,7 @@ if (hasVoiceBridge()) {
           ...(outcome.candidates ? { candidates: outcome.candidates } : {}),
         },
         turnId: null,
+        finalizingTurnId: null,
       })
       return
     }
@@ -667,6 +687,7 @@ if (hasVoiceBridge()) {
       useVoiceStore.setState({
         result: { kind: 'ok', message: outcome.message, at: Date.now() },
         turnId: null,
+        finalizingTurnId: null,
       })
       return
     }
@@ -674,6 +695,7 @@ if (hasVoiceBridge()) {
       useVoiceStore.setState({
         result: { kind: 'error', message: outcome.message, at: Date.now() },
         turnId: null,
+        finalizingTurnId: null,
       })
       return
     }
@@ -684,7 +706,7 @@ if (hasVoiceBridge()) {
       outcome.status === 'cancelled' ||
       outcome.status === 'completed'
     ) {
-      useVoiceStore.setState({ turnId: null, partial: '' })
+      useVoiceStore.setState({ turnId: null, finalizingTurnId: null, partial: '' })
     }
   })
 

@@ -73,6 +73,7 @@ export const KEYBOARD_SHORTCUT_GROUPS = [
       { keys: ['V', 'T'], label: 'Toggle task audio' },
       { keys: ['V', 'M'], label: 'Toggle Captain audio' },
       { keys: ['Cmd/Ctrl', 'D'], label: 'Toggle Commander microphone' },
+      { keys: ['Hold', 'Space'], label: 'Push to talk in a Commander call' },
       { keys: ['Esc'], label: 'Stop the current Commander reply' },
       { keys: ['Cmd/Ctrl', 'Shift', 'C'], label: 'Toggle Commander captions' },
       { keys: ['Cmd/Ctrl', '\\'], label: 'Toggle Commander side panel' },

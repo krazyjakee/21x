@@ -29,6 +29,7 @@ import { useUIStore } from '@/stores/ui-store'
 import { SettingsTab } from '@/types'
 import { MICROPHONE_BUSY_MESSAGE } from './CommanderCallHost'
 import { enterCommanderPictureInPicture } from '@/lib/commander-call/commander-call-ui'
+import type { CommanderMicrophoneMode } from '@shared/commander-call'
 
 export { COMMANDER_VOICE_COMPOSER_KEY } from '@/stores/commander-call-store'
 export { MICROPHONE_BUSY_MESSAGE }
@@ -209,6 +210,8 @@ export function CommanderVoiceControls({
   const setupComplete = useVoiceStore(selectVoiceSetupComplete)
   const speechOutput = useVoiceStore(selectSpeechReady)
   const voiceTurnId = useVoiceStore((s) => s.turnId)
+  const inputDeviceId = useVoiceStore((s) => s.inputDeviceId)
+  const setInputDevice = useVoiceStore((s) => s.setInputDevice)
   const voiceState = useVoiceStore((s) => s.state)
   const partial = useVoiceStore((s) => s.partial ?? '')
   const final = useVoiceStore((s) => s.final ?? '')
@@ -220,7 +223,38 @@ export function CommanderVoiceControls({
   const setSettingsTab = useUIStore((s) => s.setSettingsTab)
   const tick = useActivityClock((s) => s.tick)
   const [localProblem, setLocalProblem] = useState<string | null>(null)
+  const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([])
+  const [deviceListError, setDeviceListError] = useState<string | null>(null)
   const setupLabelId = useId()
+
+  useEffect(() => {
+    const mediaDevices = navigator.mediaDevices
+    if (!available || !mediaDevices?.enumerateDevices) return undefined
+    let current = true
+    const refresh = async (): Promise<void> => {
+      try {
+        const devices = await mediaDevices.enumerateDevices()
+        if (!current) return
+        const seen = new Set<string>()
+        setInputDevices(devices.filter((device) => {
+          if (device.kind !== 'audioinput' || !device.deviceId || device.deviceId === 'default' || seen.has(device.deviceId)) return false
+          seen.add(device.deviceId)
+          return true
+        }))
+        setDeviceListError(null)
+      } catch (error) {
+        if (!current) return
+        setInputDevices([])
+        setDeviceListError(error instanceof Error ? error.message : 'Input devices could not be listed.')
+      }
+    }
+    void refresh()
+    mediaDevices.addEventListener?.('devicechange', refresh)
+    return () => {
+      current = false
+      mediaDevices.removeEventListener?.('devicechange', refresh)
+    }
+  }, [available, permission])
 
   const readiness = commanderVoiceReadiness({
     available,
@@ -306,6 +340,27 @@ export function CommanderVoiceControls({
     if (selectedSessionId) void call.start(selectedSessionId)
   }, [call.status, call.sessionId, call.toggleMicrophone, call.start, selectedSessionId, readiness?.blocking, readiness?.problem])
 
+  const selectMicrophoneMode = useCallback(async (mode: CommanderMicrophoneMode) => {
+    setLocalProblem(null)
+    await call.setMicrophoneMode(mode)
+  }, [call.setMicrophoneMode])
+
+  const selectInputDevice = useCallback(async (deviceId: string) => {
+    setLocalProblem(null)
+    const before = useCommanderCallStore.getState()
+    const reopen = before.status === 'live' && before.microphoneMode === 'open-mic' && Boolean(before.turnId)
+    if (before.microphoneMode === 'push-to-talk' && (before.pushToTalkHeld || before.turnId)) {
+      before.endPushToTalk()
+    } else if (reopen) {
+      await before.toggleMicrophone()
+    }
+    await setInputDevice(deviceId)
+    const after = useCommanderCallStore.getState()
+    if (reopen && after.status === 'live' && after.microphoneMode === 'open-mic' && !after.turnId) {
+      await after.toggleMicrophone()
+    }
+  }, [setInputDevice])
+
   const sameCall = call.status !== 'off' && call.sessionId === selectedSessionId
   const ownMicrophone = sameCall && Boolean(call.turnId) && voiceTurnId === call.turnId
   const busy = call.status === 'starting' || presentation.state === 'transcribing'
@@ -321,6 +376,8 @@ export function CommanderVoiceControls({
   // Half-heard words have one visual owner: the captions strip. The presence
   // status keeps the stable state word so a partial is never repeated.
   const statusText = call.status === 'starting' ? 'Starting voice conversation…' : null
+  const modeLabel = call.microphoneMode === 'push-to-talk' ? 'Push to talk' : 'Open mic'
+  const selectedDeviceMissing = Boolean(inputDeviceId) && !inputDevices.some((device) => device.deviceId === inputDeviceId)
 
   const toolbarKeys = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
@@ -398,6 +455,9 @@ export function CommanderVoiceControls({
             {!sameCall && !readiness && selectedSessionId && (
               <p className="mt-3 text-xs text-muted-foreground">Start talking when you’re ready.</p>
             )}
+            {sameCall && call.microphoneMode === 'push-to-talk' && !ownMicrophone && (
+              <p className="mt-3 text-xs text-muted-foreground">Hold Space to talk</p>
+            )}
           </div>
 
           <div className="justify-self-end rounded-2xl border border-border/70 bg-card p-3 shadow-sm sm:w-40">
@@ -460,14 +520,22 @@ export function CommanderVoiceControls({
           size="sm"
           variant={ownMicrophone ? 'secondary' : 'default'}
           aria-pressed={ownMicrophone}
-          aria-label={sameCall ? (ownMicrophone ? 'Mute microphone' : 'Unmute microphone') : 'Turn voice mode on'}
+          aria-label={sameCall
+            ? call.microphoneMode === 'push-to-talk'
+              ? ownMicrophone ? 'Finish push-to-talk' : 'Start push-to-talk'
+              : ownMicrophone ? 'Mute microphone' : 'Unmute microphone'
+            : 'Turn voice mode on'}
           aria-describedby={!sameCall && setupLabel ? setupLabelId : undefined}
-          title={sameCall ? (ownMicrophone ? 'Mute microphone' : 'Unmute microphone') : 'Start talking to the Commander'}
+          title={sameCall
+            ? call.microphoneMode === 'push-to-talk'
+              ? ownMicrophone ? 'Finish this push-to-talk turn' : 'Hold Space to talk'
+              : ownMicrophone ? 'Mute microphone' : 'Unmute microphone'
+            : 'Start talking to the Commander'}
           onClick={toggle}
           data-testid="commander-voice-mode"
         >
           {busy ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : ownMicrophone ? <Mic className="size-4" aria-hidden="true" /> : <MicOff className="size-4" aria-hidden="true" />}
-          <span>{sameCall ? (ownMicrophone ? 'Mic on' : 'Mic off') : 'Start talking'}</span>
+          <span>{sameCall ? (call.microphoneMode === 'push-to-talk' ? (ownMicrophone ? 'Listening' : 'Push to talk') : (ownMicrophone ? 'Open mic' : 'Mic off')) : 'Start talking'}</span>
         </Button>
 
         <details className="relative">
@@ -481,15 +549,42 @@ export function CommanderVoiceControls({
           </summary>
           <div className="absolute bottom-full left-0 z-30 mb-2 w-56 rounded-xl border border-border bg-popover p-2 text-xs text-popover-foreground shadow-lg">
             <p className="px-2 py-1 font-semibold">Microphone mode</p>
-            <label className="flex items-center gap-2 rounded-md px-2 py-1.5">
-              <input type="radio" name="commander-mic-mode" checked readOnly /> Push to talk
+            <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent">
+              <input
+                type="radio"
+                name="commander-mic-mode"
+                checked={call.microphoneMode === 'push-to-talk'}
+                onChange={() => void selectMicrophoneMode('push-to-talk')}
+              />
+              Push to talk
             </label>
-            <label className="flex items-center gap-2 rounded-md px-2 py-1.5 text-muted-foreground">
-              <input type="radio" name="commander-mic-mode" disabled /> Open mic (coming next)
+            <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent">
+              <input
+                type="radio"
+                name="commander-mic-mode"
+                checked={call.microphoneMode === 'open-mic'}
+                onChange={() => void selectMicrophoneMode('open-mic')}
+              />
+              Open mic
             </label>
+            <p className="px-2 py-1 text-muted-foreground" data-testid="commander-mic-mode-label">Selected: {modeLabel}</p>
             <div className="my-1 border-t border-border" />
-            <p className="px-2 py-1 font-semibold">Input device</p>
-            <p className="px-2 py-1 text-muted-foreground">System default</p>
+            <label className="block px-2 py-1 font-semibold" htmlFor="commander-input-device">Input device</label>
+            <select
+              id="commander-input-device"
+              value={inputDeviceId}
+              onChange={(event) => void selectInputDevice(event.target.value)}
+              className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="">System default</option>
+              {selectedDeviceMissing && <option value={inputDeviceId}>Selected microphone unavailable</option>}
+              {inputDevices.map((device, index) => (
+                <option key={device.deviceId} value={device.deviceId}>
+                  {device.label || `Microphone ${index + 1}`}
+                </option>
+              ))}
+            </select>
+            {deviceListError && <p role="status" className="px-2 py-1 text-muted-foreground">{deviceListError}</p>}
           </div>
         </details>
 
