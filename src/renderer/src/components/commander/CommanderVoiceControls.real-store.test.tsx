@@ -34,6 +34,9 @@ vi.mock('@/stores/commander-store', () => ({
 import { selectVoiceReady, selectVoiceSetupComplete, useVoiceStore } from '@/stores/voice-store'
 import { useUIStore } from '@/stores/ui-store'
 import { clearDictationTarget, insertAndSubmit } from '@/lib/voice-dictation-target'
+import { useCommanderActivityStore } from '@/lib/activity/commander-activity-adapter'
+import { __resetVoiceAttribution, useVoiceAttributionStore } from '@/lib/activity/voice-activity-adapter'
+import { voicePlayback } from '@/lib/voice-playback'
 import { SettingsTab } from '@/types'
 import { VoiceOverlay } from '@/components/voice/VoiceOverlay'
 import { CommanderCallHost, commanderCallMedia } from './CommanderCallHost'
@@ -88,8 +91,9 @@ function reset(partial: Partial<VoiceState> = {}): void {
     setTtsEnabled: vi.fn(async () => undefined),
     setEnabled: vi.fn(async (enabled: boolean) => useVoiceStore.setState({ enabled })),
     startTurn: vi.fn(async () => {
-      if (useVoiceStore.getState().turnId) return
+      if (useVoiceStore.getState().turnId) return null
       useVoiceStore.setState({ turnId: 'commander-turn', mode: 'conversation', state: 'listening', partial: '' })
+      return 'commander-turn'
     }),
     cancel: vi.fn(async () => useVoiceStore.setState({ turnId: null, state: 'idle', partial: '' })),
     stopPlaybackNow: vi.fn(),
@@ -118,6 +122,8 @@ beforeEach(() => {
   mocks.commanderState.streaming = {}
   clearDictationTarget()
   __resetCommanderCall()
+  __resetVoiceAttribution()
+  useCommanderActivityStore.setState({ sessions: {}, subscribed: false })
   useUIStore.setState({ activeModal: null, settingsTab: SettingsTab.GENERAL })
   reset()
 })
@@ -126,6 +132,8 @@ afterEach(() => {
   cleanup()
   clearDictationTarget()
   __resetCommanderCall()
+  __resetVoiceAttribution()
+  voicePlayback.stop()
 })
 
 describe('another microphone keeps its captions (#83 blocker 2)', () => {
@@ -197,6 +205,7 @@ describe('another microphone keeps its captions (#83 blocker 2)', () => {
       startTurn: vi.fn(async () => {
         useVoiceStore.setState({ turnId: 'commander-turn', mode: 'conversation', state: 'listening', partial: '' })
         await capture.promise
+        return 'commander-turn'
       }),
     })
     renderBoth()
@@ -256,7 +265,7 @@ describe('app-level call ownership', () => {
     expect(useVoiceStore.getState().startTurn).toHaveBeenCalledTimes(1)
   })
 
-  it('exposes real levels and captions without inventing word timings', () => {
+  it('exposes only levels and captions owned by the live Commander call', async () => {
     useVoiceStore.setState({ level: 0.4, partial: 'half heard', final: 'heard', speaking: true, speechText: 'answer' })
     expect(commanderCallMedia.capabilities).toEqual({
       partialCaptions: true,
@@ -264,10 +273,221 @@ describe('app-level call ownership', () => {
       speechBargeIn: true,
       streamingTts: true
     })
+    // Retained globals and another surface's microphone are neutral while the
+    // Commander call is off.
+    expect(commanderCallMedia.inputLevel()).toBe(0)
+    expect(commanderCallMedia.outputLevel()).toBe(0)
+    expect(commanderCallMedia.userCaption).toEqual({ partial: '', final: '' })
+    expect(commanderCallMedia.assistantCaption).toEqual({ text: '', speaking: false })
+
+    renderBoth()
+    fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
+    expect(await screen.findByText('Listening…')).toBeTruthy()
+    act(() => useVoiceStore.setState({ level: 0.4, partial: 'half heard', final: 'heard', speaking: true, speechText: 'answer' }))
     expect(commanderCallMedia.inputLevel()).toBe(0.4)
     expect(commanderCallMedia.userCaption).toEqual({ partial: 'half heard', final: 'heard' })
+
+    act(() => {
+      voicePlayback.start('speech-1')
+      useVoiceAttributionStore.setState({
+        passage: { speechId: 'speech-1', taskId: 'commander:session-1' },
+        version: 1
+      })
+    })
+    const queued = vi.spyOn(voicePlayback, 'hasQueuedAudio', 'get').mockReturnValue(true)
+    const level = vi.spyOn(voicePlayback, 'outputLevel', 'get').mockReturnValue(0.6)
+    expect(commanderCallMedia.outputLevel()).toBe(0.6)
     expect(commanderCallMedia.assistantCaption).toEqual({ text: 'answer', speaking: true })
+
+    act(() => useVoiceAttributionStore.setState({
+      passage: { speechId: 'speech-1', taskId: 'task-1' },
+      version: 2
+    }))
+    expect(commanderCallMedia.outputLevel()).toBe(0)
+    expect(commanderCallMedia.assistantCaption).toEqual({ text: '', speaking: false })
+
+    fireEvent.click(screen.getByLabelText('Turn voice mode off'))
+    expect(commanderCallMedia.inputLevel()).toBe(0)
+    expect(commanderCallMedia.userCaption).toEqual({ partial: '', final: '' })
     expect(commanderCallMedia.assistantCaption).not.toHaveProperty('wordIndex')
+    queued.mockRestore()
+    level.mockRestore()
+  })
+
+  it('gives Escape to the Commander call once, without cancelling its microphone or reporting media loss', async () => {
+    renderBoth()
+    fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
+    expect(await screen.findByText('Listening…')).toBeTruthy()
+    const cancel = useVoiceStore.getState().cancel
+
+    const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true })
+    act(() => window.dispatchEvent(event))
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(cancel).not.toHaveBeenCalled()
+    expect(mocks.bargeIn).toHaveBeenCalledWith('session-1')
+    expect(useCommanderCallStore.getState()).toMatchObject({ status: 'live', turnId: 'commander-turn', error: null })
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('emits speech lifecycle from the first PCM, across a pause, and on cancellation', async () => {
+    const sources: Array<{ onended: (() => void) | null; stop: () => void }> = []
+    class FakePlaybackContext {
+      state = 'running'
+      currentTime = 0
+      destination = {}
+      createAnalyser() {
+        return {
+          fftSize: 0,
+          frequencyBinCount: 8,
+          connect: () => undefined,
+          disconnect: () => undefined,
+          getByteTimeDomainData: (data: Uint8Array) => data.fill(128)
+        }
+      }
+      createBuffer(_channels: number, length: number, sampleRate: number) {
+        const samples = new Float32Array(length)
+        return { duration: length / sampleRate, getChannelData: () => samples }
+      }
+      createBufferSource() {
+        const source = {
+          buffer: null,
+          onended: null as (() => void) | null,
+          connect: () => undefined,
+          start: () => undefined,
+          stop: vi.fn()
+        }
+        sources.push(source)
+        return source
+      }
+      resume = vi.fn(async () => undefined)
+      close = vi.fn(async () => undefined)
+    }
+    vi.stubGlobal('AudioContext', FakePlaybackContext)
+    const speechStart = vi.fn()
+    const speechEnd = vi.fn()
+    const offStart = commanderCallMedia.on('speech_start', speechStart)
+    const offEnd = commanderCallMedia.on('speech_end', speechEnd)
+    renderBoth()
+    fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
+    expect(await screen.findByText('Listening…')).toBeTruthy()
+    act(() => {
+      useVoiceStore.setState({ speaking: true, speechText: 'First sentence' })
+      useVoiceAttributionStore.setState({
+        passage: { speechId: 'speech-1', taskId: 'commander:session-1' },
+        version: 1
+      })
+      voicePlayback.start('speech-1')
+    })
+    expect(speechStart).not.toHaveBeenCalled()
+
+    act(() => voicePlayback.play('speech-1', new Uint8Array([0, 0, 0, 0]), 24_000))
+    await waitFor(() => expect(speechStart).toHaveBeenCalledTimes(1))
+    act(() => sources[0].onended?.())
+    await waitFor(() => expect(speechEnd).toHaveBeenCalledTimes(1))
+
+    act(() => voicePlayback.play('speech-1', new Uint8Array([0, 0, 0, 0]), 24_000))
+    await waitFor(() => expect(speechStart).toHaveBeenCalledTimes(2))
+    act(() => voicePlayback.stop())
+    await waitFor(() => expect(speechEnd).toHaveBeenCalledTimes(2))
+
+    offStart()
+    offEnd()
+    await voicePlayback.release()
+    vi.unstubAllGlobals()
+  })
+
+  it('End aborts slow TTS setup before it can open a microphone', async () => {
+    const tts = deferred()
+    reset({ initializeTts: vi.fn(() => tts.promise) })
+    renderBoth()
+    fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
+    expect(await screen.findByText('Starting voice conversation…')).toBeTruthy()
+
+    fireEvent.click(screen.getByLabelText('Turn voice mode off'))
+    expect(useCommanderCallStore.getState().status).toBe('off')
+    tts.resolve()
+    await act(async () => tts.promise)
+
+    expect(useVoiceStore.getState().startTurn).not.toHaveBeenCalled()
+    expect(useVoiceStore.getState().captionOwner).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('reasserts End when an older active-session request resolves late', async () => {
+    const activation = deferred()
+    mocks.setActive.mockImplementationOnce(async (sessionId) => {
+      await activation.promise
+      return { active: sessionId }
+    })
+    renderBoth()
+    fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
+    expect(await screen.findByText('Starting voice conversation…')).toBeTruthy()
+
+    fireEvent.click(screen.getByLabelText('Turn voice mode off'))
+    expect(mocks.setActive).toHaveBeenCalledWith(null)
+    activation.resolve()
+    await act(async () => activation.promise)
+    await waitFor(() => expect(mocks.setActive).toHaveBeenLastCalledWith(null))
+
+    expect(useVoiceStore.getState().startTurn).not.toHaveBeenCalled()
+    expect(useCommanderCallStore.getState()).toMatchObject({ status: 'off', error: null })
+  })
+
+  it('End aborts a published turn while its microphone is still opening', async () => {
+    const capture = deferred()
+    let startSignal: AbortSignal | undefined
+    reset({
+      startTurn: vi.fn(async (_mode, options) => {
+        startSignal = options?.signal
+        useVoiceStore.setState({ turnId: 'pending-turn', mode: 'conversation', state: 'listening' })
+        const cancelPending = (): void => useVoiceStore.setState({ turnId: null, state: 'idle', partial: '', level: 0 })
+        startSignal?.addEventListener('abort', cancelPending, { once: true })
+        await capture.promise
+        return startSignal?.aborted ? null : 'pending-turn'
+      })
+    })
+    renderBoth()
+    fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
+    await waitFor(() => expect(useVoiceStore.getState().turnId).toBe('pending-turn'))
+
+    fireEvent.click(screen.getByLabelText('Turn voice mode off'))
+
+    expect(startSignal?.aborted).toBe(true)
+    expect(useVoiceStore.getState().turnId).toBeNull()
+    capture.resolve()
+    await act(async () => capture.promise)
+    expect(useCommanderCallStore.getState()).toMatchObject({ status: 'off', error: null })
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('keeps a provider turn error visible until Retry and shows a new turn failure', async () => {
+    renderBoth()
+    fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
+    expect(await screen.findByText('Listening…')).toBeTruthy()
+
+    act(() => useCommanderActivityStore.setState({
+      subscribed: true,
+      sessions: {
+        'session-1': {
+          sessionId: 'session-1', turnId: 'reply-1', phase: 'error', openTools: [], hasText: false,
+          observedAt: 1, error: 'Provider quota exceeded'
+        }
+      }
+    }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Provider quota exceeded')
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    act(() => useCommanderActivityStore.setState({
+      sessions: {
+        'session-1': {
+          sessionId: 'session-1', turnId: 'reply-2', phase: 'error', openTools: [], hasText: false,
+          observedAt: 2, error: 'Provider still unavailable'
+        }
+      }
+    }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Provider still unavailable')
   })
 })
 
@@ -326,7 +546,10 @@ describe('broken voice and missing devices have a way out (#83 blocker 3)', () =
   ])('offers the fix when the microphone does not open: %s', async (message, advice) => {
     reset({
       // What the real startTurn leaves behind when capture fails: an error result and no turn.
-      startTurn: vi.fn(async () => useVoiceStore.setState({ turnId: null, result: { kind: 'error', message, at: Date.now() } })),
+      startTurn: vi.fn(async () => {
+        useVoiceStore.setState({ turnId: null, result: { kind: 'error', message, at: Date.now() } })
+        return null
+      }),
     })
     renderBoth()
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))

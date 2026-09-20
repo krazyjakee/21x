@@ -376,7 +376,10 @@ of scope.
   `CommanderService.sendUserMessage` after cancelling any reply still running.
   Ending the call closes the microphone, stops playback and synthesis, cancels
   the active Commander turn, and closes any ElevenLabs connection without
-  deleting chat. Leaving the view does none of those things. Escape and Stop
+  deleting chat. It also aborts setup in progress: a late TTS, turn or
+  `getUserMedia` completion is cancelled and cannot reclaim the microphone or
+  active session. Leaving the view does none of those things. Escape belongs to
+  the call while it is live (the global voice overlay defers); Escape and Stop
   interrupt the current reply, briefly show "Stopped", and leave the call open.
 - **Half-heard words appear once** (#83). While its own conversation turn
   runs, the strip's status pill shows them and sets the voice store's
@@ -409,7 +412,9 @@ of scope.
   **Open voice settings** and says what to do, as does a conversation that ends
   on a reported failure. "Another microphone is already listening" and errors
   sending a message have no settings button, because Settings cannot fix them.
-  Typed chat is unaffected throughout.
+  A current Commander provider error remains visible with Retry and **Type
+  instead** until the user recovers; an old failure does not return after End
+  or contaminate a later turn. Typed chat is unaffected throughout.
 - **The call state is derived, not independently advanced.**
   `deriveCallState()` combines the app-level call lifetime, the microphone
   snapshot, the Commander turn observation and verified speech attribution.
@@ -421,8 +426,12 @@ of scope.
 - **Media is provider-neutral.** `commanderCallMedia` exposes capability flags,
   on-demand input/output levels, partial and final user captions, assistant
   `speechText`, and speech/interruption events. `wordTimings` is false and no
-  word index is fabricated. A future cloud provider can implement the same
-  `CallMedia` contract without changing the call store.
+  word index is fabricated. Every value is scoped to the live call's owned
+  microphone turn or its verified `commander:<sessionId>` playback passage;
+  foreign and retained global voice data reads as neutral. Queue boundaries
+  drive `speech_start`/`speech_end`, including the first PCM after synthesis
+  starts and pauses between sentences. A future cloud provider can implement
+  the same `CallMedia` contract without changing the call store.
 - **The reply is spoken as it is written**, through whichever engine is
   selected in Settings → Voice (system, downloaded, or ElevenLabs). Each
   finished sentence is handed over as it arrives; a text run closed by a tool

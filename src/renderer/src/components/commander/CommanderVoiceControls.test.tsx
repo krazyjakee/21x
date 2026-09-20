@@ -120,7 +120,10 @@ describe('Commander voice conversation', () => {
     const view = renderVoice()
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
 
-    await waitFor(() => expect(mocks.voiceState.startTurn).toHaveBeenCalledWith('conversation'))
+    await waitFor(() => expect(mocks.voiceState.startTurn).toHaveBeenCalledWith(
+      'conversation',
+      { signal: expect.any(AbortSignal) }
+    ))
     expect(mocks.setActive).toHaveBeenCalledWith('session-1')
     expect(screen.queryByTestId('commander-voice-talk')).toBeNull()
     expect(await screen.findByText('Listening…')).toBeTruthy()
@@ -155,7 +158,7 @@ describe('Commander voice conversation', () => {
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
 
     await waitFor(() => expect(mocks.voiceState.setEnabled).toHaveBeenCalledWith(true))
-    expect(mocks.voiceState.startTurn).toHaveBeenCalledWith('conversation')
+    expect(mocks.voiceState.startTurn).toHaveBeenCalledWith('conversation', { signal: expect.any(AbortSignal) })
   })
 
   it('refreshes and enables a saved reply voice from the same click', async () => {
@@ -167,7 +170,7 @@ describe('Commander voice conversation', () => {
 
     await waitFor(() => expect(mocks.voiceState.initializeTts).toHaveBeenCalled())
     expect(mocks.voiceState.setTtsEnabled).toHaveBeenCalledWith(true)
-    expect(mocks.voiceState.startTurn).toHaveBeenCalledWith('conversation')
+    expect(mocks.voiceState.startTurn).toHaveBeenCalledWith('conversation', { signal: expect.any(AbortSignal) })
   })
 
   it('shows the saved engine failure after trying to prepare it', async () => {

@@ -112,13 +112,16 @@ export class VoicePlayback {
 
     const startAt = Math.max(context.currentTime + SCHEDULING_LEAD_SECONDS, this.nextStartTime)
     this.nextStartTime = startAt + buffer.duration
+    const queueWasEmpty = this.pending === 0
     this.pending += 1
-    this.notifyActivity()
+    if (queueWasEmpty) this.notifyActivity()
     source.onended = () => {
       this.sources.delete(source)
       this.pending -= 1
-      this.notifyActivity()
-      if (this.pending <= 0 && this.speechId === speechId) this.handlers.onDrained?.()
+      if (this.pending <= 0 && this.speechId === speechId) {
+        this.notifyActivity()
+        this.handlers.onDrained?.()
+      }
     }
     this.sources.add(source)
     source.start(startAt)

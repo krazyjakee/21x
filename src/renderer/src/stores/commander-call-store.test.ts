@@ -8,7 +8,7 @@ import {
   type CommanderCallDriver
 } from './commander-call-store'
 
-function fakeDriver(openMicrophone: () => Promise<string> = async () => 'mic-1'): CommanderCallDriver {
+function fakeDriver(openMicrophone: (signal: AbortSignal) => Promise<string> = async () => 'mic-1'): CommanderCallDriver {
   return {
     setActive: vi.fn(async () => undefined),
     openMicrophone: vi.fn(openMicrophone),
@@ -39,7 +39,7 @@ describe('Commander call lifetime', () => {
     expect(useCommanderCallStore.getState()).toMatchObject({
       status: 'live', sessionId: 'session-1', turnId: 'mic-1', error: null
     })
-    expect(driver.setActive).toHaveBeenCalledWith('session-1')
+    expect(driver.setActive).toHaveBeenCalledWith('session-1', expect.any(AbortSignal))
     expect(driver.openMicrophone).toHaveBeenCalledTimes(1)
 
     await useCommanderCallStore.getState().start('session-1')
@@ -62,18 +62,58 @@ describe('Commander call lifetime', () => {
 
   it('End during start prevents a slow microphone from reviving the call', async () => {
     let resolve!: (turnId: string) => void
+    let signal!: AbortSignal
     const opened = new Promise<string>((done) => { resolve = done })
-    const driver = fakeDriver(() => opened)
+    const driver = fakeDriver((nextSignal) => {
+      signal = nextSignal
+      return opened
+    })
     bindCommanderCallDriver(driver)
 
     const starting = useCommanderCallStore.getState().start('session-1')
     await vi.waitFor(() => expect(useCommanderCallStore.getState().status).toBe('starting'))
     useCommanderCallStore.getState().end()
+    expect(signal.aborted).toBe(true)
     resolve('late-mic')
     await starting
 
     expect(useCommanderCallStore.getState().status).toBe('off')
     expect(driver.closeMicrophone).toHaveBeenCalledWith('late-mic')
+  })
+
+  it('ignores failure from an old send after the same session is restarted', async () => {
+    let rejectOld!: (reason: Error) => void
+    const oldSend = new Promise<never>((_resolve, reject) => { rejectOld = reject })
+    const driver = fakeDriver()
+    driver.send = vi.fn(() => oldSend)
+    bindCommanderCallDriver(driver)
+    await useCommanderCallStore.getState().start('session-1')
+    useCommanderCallStore.getState().sendTranscript('old request')
+
+    useCommanderCallStore.getState().end()
+    await useCommanderCallStore.getState().start('session-1')
+    rejectOld(new Error('old call failure'))
+    await Promise.resolve()
+
+    expect(useCommanderCallStore.getState()).toMatchObject({ status: 'live', sessionId: 'session-1', error: null })
+  })
+
+  it('ignores success from an old send after the same session is restarted', async () => {
+    let resolveOld!: (value: unknown) => void
+    const oldSend = new Promise<unknown>((resolve) => { resolveOld = resolve })
+    const driver = fakeDriver()
+    driver.send = vi.fn(() => oldSend)
+    bindCommanderCallDriver(driver)
+    await useCommanderCallStore.getState().start('session-1')
+    useCommanderCallStore.getState().sendTranscript('old request')
+
+    useCommanderCallStore.getState().end()
+    await useCommanderCallStore.getState().start('session-1')
+    useCommanderCallStore.getState().interrupt('stop')
+    resolveOld(undefined)
+    await Promise.resolve()
+
+    expect(useCommanderCallStore.getState()).toMatchObject({ status: 'live', replyInterrupted: true })
   })
 
   it('interrupts without ending, emits media events, and can accept another reply', async () => {

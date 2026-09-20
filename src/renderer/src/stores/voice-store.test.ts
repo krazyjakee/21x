@@ -114,6 +114,57 @@ describe('voice store — turns', () => {
     expect(voiceCapture.stop).toHaveBeenCalled()
     expect(useVoiceStore.getState().turnId).toBeNull()
   })
+
+  it('aborts a published turn immediately while microphone acquisition is pending', async () => {
+    let finishCapture!: (opened: boolean) => void
+    vi.mocked(voiceCapture.start).mockImplementationOnce(async () => new Promise<boolean>((resolve) => {
+      finishCapture = resolve
+    }))
+    const controller = new AbortController()
+    const starting = useVoiceStore.getState().startTurn('conversation', { signal: controller.signal })
+    await vi.waitFor(() => expect(useVoiceStore.getState().turnId).toBe('turn-1'))
+
+    controller.abort()
+
+    expect(voiceCapture.stop).toHaveBeenCalled()
+    expect(useVoiceStore.getState().turnId).toBeNull()
+    expect(window.electronAPI.voice.cancelTurn).toHaveBeenCalledWith('turn-1')
+    expect(useVoiceStore.getState().result).toBeNull()
+    finishCapture(false)
+    await expect(starting).resolves.toBeNull()
+  })
+
+  it('cancels a turn that main publishes after its caller already ended', async () => {
+    let publish!: (value: { turnId: string }) => void
+    vi.mocked(window.electronAPI.voice.startTurn).mockImplementationOnce(async () => new Promise((resolve) => {
+      publish = resolve
+    }))
+    const controller = new AbortController()
+    const starting = useVoiceStore.getState().startTurn('conversation', { signal: controller.signal })
+
+    controller.abort()
+    publish({ turnId: 'late-turn' })
+
+    await expect(starting).resolves.toBeNull()
+    expect(window.electronAPI.voice.cancelTurn).toHaveBeenCalledWith('late-turn')
+    expect(voiceCapture.start).not.toHaveBeenCalled()
+    expect(useVoiceStore.getState()).toMatchObject({ turnId: null, result: null })
+  })
+
+  it('does not report a late start refusal after ordinary cancellation', async () => {
+    let refuse!: (value: { error: string }) => void
+    vi.mocked(window.electronAPI.voice.startTurn).mockImplementationOnce(async () => new Promise((resolve) => {
+      refuse = resolve
+    }))
+    const controller = new AbortController()
+    const starting = useVoiceStore.getState().startTurn('conversation', { signal: controller.signal })
+
+    controller.abort()
+    refuse({ error: 'Voice is switched off.' })
+
+    await expect(starting).resolves.toBeNull()
+    expect(useVoiceStore.getState()).toMatchObject({ turnId: null, result: null })
+  })
 })
 
 describe('voice store — events from main', () => {

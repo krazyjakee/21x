@@ -66,6 +66,9 @@ All evidence is stamped with monotonic time (`performance.now()`, via `activityN
 
 - The store's `speaking` flag is set when synthesis *starts*, before any audio, and it names no speaker. On its own it never counts as speaking.
 - `speaking` needs three things: the passage attributed by its `speechStart` event (`taskId`) belongs to this entity, the same passage is open in `voicePlayback`, and `hasQueuedAudio` is true.
+- Playback publishes only queue/passage boundary changes (never analyser
+  frames), so the first PCM, a drain, a later sentence and cancellation all
+  re-derive the claim immediately.
 - Unattributed passages give `unknown` for everyone. Commander passages use
   the shared `commander:<sessionId>` key, so only that Commander session may
   claim them.

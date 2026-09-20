@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   onTranscriptChanged: vi.fn()
 }))
 vi.mock('@/lib/ipc-client', () => mocks)
+vi.mock('./CommanderVoiceControls', () => ({ CommanderVoiceControls: () => null }))
 
 const api = mocks.commanderApi
 

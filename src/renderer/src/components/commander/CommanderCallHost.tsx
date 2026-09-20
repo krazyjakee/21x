@@ -10,6 +10,8 @@ import {
 } from '@/lib/activity/commander-activity-adapter'
 import {
   ensureVoiceAttribution,
+  hasVerifiedPlaybackOwnership,
+  readVoiceActivitySnapshot,
   useVoiceActivity
 } from '@/lib/activity/voice-activity-adapter'
 import {
@@ -35,6 +37,22 @@ import {
 export const MICROPHONE_BUSY_MESSAGE =
   'Another microphone is already listening. Stop it before starting Commander voice mode.'
 
+function ownedMicrophone() {
+  const call = useCommanderCallStore.getState()
+  const voice = useVoiceStore.getState()
+  if (call.status !== 'live' || !call.sessionId || !call.turnId || voice.turnId !== call.turnId) return null
+  return { call, voice }
+}
+
+function ownedPlayback() {
+  const call = useCommanderCallStore.getState()
+  if (call.status !== 'live' || !call.sessionId) return null
+  const target = { kind: 'commander' as const, id: call.sessionId }
+  const snapshot = readVoiceActivitySnapshot()
+  if (!hasVerifiedPlaybackOwnership(snapshot, target)) return null
+  return { snapshot, voice: useVoiceStore.getState() }
+}
+
 /** The live provider-neutral media surface promised by the call contract. */
 export const commanderCallMedia: CallMedia = {
   capabilities: {
@@ -43,15 +61,17 @@ export const commanderCallMedia: CallMedia = {
     speechBargeIn: true,
     streamingTts: true
   },
-  inputLevel: () => useVoiceStore.getState().level,
-  outputLevel: () => voicePlayback.outputLevel,
+  inputLevel: () => ownedMicrophone()?.voice.level ?? 0,
+  outputLevel: () => (ownedPlayback()?.snapshot.hasQueuedAudio ? voicePlayback.outputLevel : 0),
   get userCaption() {
-    const { partial, final } = useVoiceStore.getState()
-    return { partial, final }
+    const owned = ownedMicrophone()
+    return owned ? { partial: owned.voice.partial, final: owned.voice.final } : { partial: '', final: '' }
   },
   get assistantCaption() {
-    const { speaking, speechText } = useVoiceStore.getState()
-    return { text: speechText, speaking }
+    const owned = ownedPlayback()
+    return owned
+      ? { text: owned.voice.speechText, speaking: owned.snapshot.hasQueuedAudio }
+      : { text: '', speaking: false }
   },
   on: onCallMediaEvent
 }
@@ -115,17 +135,31 @@ export function CommanderCallHost() {
   }), [sendTranscript])
 
   useLayoutEffect(() => {
+    let activeEpoch = 0
+    let desiredSessionId: string | null = null
     return bindCommanderCallDriver({
-      setActive: (nextSessionId) => {
+      setActive: async (nextSessionId, signal) => {
         // Refuse before main changes reply routing. Preparing TTS can take
         // seconds; another microphone keeps its turn and captions throughout.
         if (nextSessionId && useVoiceStore.getState().turnId) {
-          return Promise.reject(new Error(MICROPHONE_BUSY_MESSAGE))
+          throw new Error(MICROPHONE_BUSY_MESSAGE)
         }
-        return commanderVoiceApi.setActive(nextSessionId)
+        desiredSessionId = nextSessionId
+        const mine = ++activeEpoch
+        const result = await commanderVoiceApi.setActive(nextSessionId)
+        // A superseded IPC completion must not leave main routed to the old
+        // session. Reassert the newest intent without clearing a replacement.
+        if (mine !== activeEpoch || signal?.aborted) {
+          await commanderVoiceApi.setActive(desiredSessionId)
+        }
+        return result
       },
-      openMicrophone: async () => {
+      openMicrophone: async (signal) => {
+        const ensureCurrent = (): void => {
+          if (signal.aborted) throw new Error('The voice conversation was cancelled.')
+        }
         const refuseForeignTurn = (): void => {
+          ensureCurrent()
           const existing = useVoiceStore.getState().turnId
           if (existing) throw new Error(MICROPHONE_BUSY_MESSAGE)
         }
@@ -133,9 +167,11 @@ export function CommanderCallHost() {
         refuseForeignTurn()
         const actions = useVoiceStore.getState()
         await actions.initializeTts()
+        ensureCurrent()
         let current = useVoiceStore.getState()
         if (!current.tts?.enabled || !selectSpeechReady(current)) {
           await current.setTtsEnabled(true)
+          ensureCurrent()
           current = useVoiceStore.getState()
         }
         if (!selectSpeechReady(current)) {
@@ -151,6 +187,7 @@ export function CommanderCallHost() {
 
         if (!selectVoiceReady(current)) {
           await current.setEnabled(true)
+          ensureCurrent()
           current = useVoiceStore.getState()
           if (!selectVoiceReady(current)) {
             const engineMessage = current.engine.state === 'error' ? current.engine.message : ''
@@ -162,8 +199,9 @@ export function CommanderCallHost() {
         setActiveComposer(COMMANDER_VOICE_COMPOSER_KEY)
         current.setCaptionOwner(COMMANDER_VOICE_COMPOSER_KEY)
         try {
-          await current.startTurn('conversation')
-          const opened = useVoiceStore.getState().turnId
+          const started = await current.startTurn('conversation', { signal })
+          ensureCurrent()
+          const opened = started ?? useVoiceStore.getState().turnId
           if (!opened) {
             throw new Error(captureAdvice(useVoiceStore.getState().result?.message || 'The microphone could not be started.'))
           }
@@ -275,7 +313,10 @@ export function CommanderCallHost() {
   useEffect(() => {
     if (status !== 'live') return undefined
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') interrupt('stop')
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      interrupt('stop')
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)

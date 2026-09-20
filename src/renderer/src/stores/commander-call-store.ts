@@ -29,12 +29,12 @@ export const COMMANDER_VOICE_COMPOSER_KEY = 'commander-voice'
  */
 export interface CommanderCallDriver {
   /** Tells main which session to speak for; null closes voice mode. */
-  setActive(sessionId: string | null): Promise<unknown>
+  setActive(sessionId: string | null, signal?: AbortSignal): Promise<unknown>
   /**
    * Prepares the reply voice and the microphone and opens one conversation
    * turn. Resolves with its turn id; rejects with a message for the user.
    */
-  openMicrophone(): Promise<string>
+  openMicrophone(signal: AbortSignal): Promise<string>
   /** Closes the microphone turn if `turnId` is still the open one. */
   closeMicrophone(turnId: string | null): void
   /** Silences playback in this tick. */
@@ -55,6 +55,8 @@ interface CommanderCallState {
   error: string | null
   /** The session a failed call was on, so Retry can reopen it. */
   retrySessionId: string | null
+  /** A live turn error the user has acknowledged; a new turn has a new id. */
+  dismissedTurnErrorId: string | null
   /** Monotonic time of the last interruption. */
   interruptedAt: number | null
   /** The current reply was already interrupted; talking again does not re-cancel it. */
@@ -67,7 +69,7 @@ interface CommanderCallState {
   end: () => void
   /** Stop, Esc or talking over a reply. */
   interrupt: (cause?: 'stop' | 'barge_in') => void
-  retry: () => Promise<void>
+  retry: (turnErrorId?: string) => Promise<void>
   dismissError: () => void
   /** A pause-delimited sentence the microphone heard. */
   sendTranscript: (text: string) => void
@@ -79,6 +81,7 @@ interface CommanderCallState {
 let driver: CommanderCallDriver | null = null
 /** Bumped by every start and end, so a slow start cannot revive an ended call. */
 let generation = 0
+let startController: AbortController | null = null
 const listeners = new Map<CallMediaEvent, Set<() => void>>()
 
 /** Binds the media driver. Returns an unbind. Only the host calls this. */
@@ -146,6 +149,7 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
     ...OFF,
     error: null,
     retrySessionId: null,
+    dismissedTurnErrorId: null,
     lastEvent: null,
 
     start: async (sessionId) => {
@@ -157,18 +161,22 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
         return
       }
       const mine = ++generation
+      startController?.abort()
+      const controller = new AbortController()
+      startController = controller
       const media = driver
       let activated = false
-      set({ ...OFF, status: 'starting', sessionId, error: null, retrySessionId: null, lastEvent: null })
+      set({ ...OFF, status: 'starting', sessionId, error: null, retrySessionId: null, dismissedTurnErrorId: null, lastEvent: null })
       try {
-        await media.setActive(sessionId)
+        await media.setActive(sessionId, controller.signal)
         activated = true
         if (mine !== generation) return
-        const turnId = await media.openMicrophone()
+        const turnId = await media.openMicrophone(controller.signal)
         if (mine !== generation) {
           media.closeMicrophone(turnId)
           return
         }
+        if (startController === controller) startController = null
         set({ status: 'live', turnId, startedAt: Date.now() })
       } catch (err) {
         if (mine !== generation) return
@@ -182,8 +190,10 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
 
     end: () => {
       generation++
+      startController?.abort()
+      startController = null
       teardown()
-      set({ ...OFF, error: null, retrySessionId: null, lastEvent: null })
+      set({ ...OFF, error: null, retrySessionId: null, dismissedTurnErrorId: null, lastEvent: null })
     },
 
     interrupt: (cause = 'stop') => {
@@ -196,11 +206,11 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
       emitCallMediaEvent('interrupted')
     },
 
-    retry: async () => {
+    retry: async (turnErrorId) => {
       const { status, retrySessionId, sessionId } = get()
       if (status !== 'off') {
         // A failed send in a live call: the microphone is still open.
-        set({ error: null })
+        set({ error: null, ...(turnErrorId ? { dismissedTurnErrorId: turnErrorId } : {}) })
         return
       }
       const target = retrySessionId ?? sessionId
@@ -214,15 +224,20 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
       const { status, sessionId } = get()
       const words = text.trim()
       if (status !== 'live' || !sessionId || !words || !driver) return
+      const mine = generation
       set({ error: null })
       void driver
         .send(sessionId, words)
         .then(() => {
           // The next reply may be interrupted independently of this one.
-          if (get().sessionId === sessionId) set({ replyInterrupted: false })
+          if (mine === generation && get().status === 'live' && get().sessionId === sessionId) {
+            set({ replyInterrupted: false })
+          }
         })
         .catch((err) => {
-          if (get().sessionId === sessionId) set({ error: messageOf(err) })
+          if (mine === generation && get().status === 'live' && get().sessionId === sessionId) {
+            set({ error: messageOf(err) })
+          }
         })
     },
 
@@ -248,6 +263,8 @@ export const useCommanderCallStore = create<CommanderCallState>((set, get) => {
 export function __resetCommanderCall(): void {
   driver = null
   generation++
+  startController?.abort()
+  startController = null
   listeners.clear()
-  useCommanderCallStore.setState({ ...OFF, error: null, retrySessionId: null, lastEvent: null })
+  useCommanderCallStore.setState({ ...OFF, error: null, retrySessionId: null, dismissedTurnErrorId: null, lastEvent: null })
 }

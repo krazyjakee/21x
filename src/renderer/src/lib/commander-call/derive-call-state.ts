@@ -30,6 +30,8 @@ export interface CallLifetime {
   status: 'off' | 'starting' | 'live'
   /** A call-level failure (the call could not start, or its microphone was lost). */
   error: string | null
+  /** The live failed turn the user already chose to recover from. */
+  dismissedTurnErrorId: string | null
   /** Monotonic time of the last interruption. */
   interruptedAt: number | null
   lastEvent: CallEvent | null
@@ -43,7 +45,9 @@ export interface CallUnavailability {
 
 /** The Commander turn of the call's session (commander activity adapter). */
 export interface CallTurn {
+  turnId: string
   phase: 'thinking' | 'working' | 'tool' | 'idle' | 'error'
+  error?: string
   /** The newest unresolved tool. */
   toolName?: string
 }
@@ -193,6 +197,14 @@ export function deriveCallState(input: CallStateInput): CallPresentation {
   }
 
   if (call.status === 'starting') return present('ready', input, { label: 'Joining…' })
+
+  if (turn?.phase === 'error' && turn.error && turn.turnId !== call.dismissedTurnErrorId) {
+    return present('error', input, {
+      label: 'Reply error',
+      detail: turn.error,
+      controls: { retry: true, typeInstead: true }
+    })
+  }
 
   const turnActive = turn !== null && (turn.phase === 'thinking' || turn.phase === 'working' || turn.phase === 'tool')
   const canStop = turnActive || input.speech === 'speaking'

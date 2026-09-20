@@ -99,7 +99,7 @@ interface VoiceStoreState {
   setEnabled: (enabled: boolean) => Promise<void>
   setContextProvider: (provider: (() => VoiceUiContext) | null) => void
   setCaptionOwner: (owner: string | null) => void
-  startTurn: (mode: VoiceTurnMode) => Promise<void>
+  startTurn: (mode: VoiceTurnMode, options?: { signal?: AbortSignal }) => Promise<string | null>
   /** Records one turn and shows the words in settings, changing nothing else. */
   startTest: () => Promise<void>
   clearTest: () => void
@@ -377,38 +377,63 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
   setContextProvider: (contextProvider) => set({ contextProvider }),
   setCaptionOwner: (captionOwner) => set({ captionOwner }),
 
-  startTurn: async (mode) => {
+  startTurn: async (mode, options) => {
     const { enabled, turnId, contextProvider } = get()
-    if (!enabled || turnId) return
+    if (!enabled || turnId || options?.signal?.aborted) return null
+    const signal = options?.signal
     // Barge-in. Playback stops here, in the same tick as the press, instead of
     // waiting for main to answer. Main stops producing the rest.
     stopPlaybackForUser()
     const started = await voiceApi.startTurn(mode, contextProvider?.() ?? {})
     if ('error' in started) {
-      set({ result: { kind: 'error', message: started.error, at: Date.now() } })
-      return
+      if (!signal?.aborted) set({ result: { kind: 'error', message: started.error, at: Date.now() } })
+      return null
+    }
+    let cancelled = false
+    const cancelStartedTurn = (): void => {
+      if (cancelled) return
+      cancelled = true
+      if (get().turnId === started.turnId) {
+        voiceCapture.stop()
+        bargeInGate.reset()
+        set({ turnId: null, partial: '', level: 0 })
+      }
+      void voiceApi.cancelTurn(started.turnId)
+    }
+    if (signal?.aborted) {
+      cancelStartedTurn()
+      return null
     }
     set({ turnId: started.turnId, mode, partial: '', final: '', result: null, sentSentences: [] })
+    signal?.addEventListener('abort', cancelStartedTurn, { once: true })
 
     bargeInGate.reset()
     const ok = await voiceCapture.start({
       onAudio: (chunk) => {
-        const id = get().turnId
-        if (!id) return
+        if (get().turnId !== started.turnId) return
         // Nothing reaches the recogniser while 20x is talking, so an answer can
         // never be transcribed as if the user had said it.
-        for (const frame of bargeInGate.push(chunk)) void voiceApi.pushAudio(id, frame)
+        for (const frame of bargeInGate.push(chunk)) void voiceApi.pushAudio(started.turnId, frame)
       },
-      onLevel: (level) => set({ level }),
+      onLevel: (level) => {
+        if (get().turnId === started.turnId) set({ level })
+      },
       onError: (message) => {
+        if (get().turnId !== started.turnId) return
         set({ result: { kind: 'error', message, at: Date.now() } })
-        void get().cancel()
+        cancelStartedTurn()
       },
-    })
-    if (!ok) {
-      await voiceApi.cancelTurn(started.turnId)
-      set({ turnId: null })
+    }, undefined, signal)
+    signal?.removeEventListener('abort', cancelStartedTurn)
+    if (signal?.aborted) {
+      cancelStartedTurn()
+      return null
     }
+    if (!ok) {
+      cancelStartedTurn()
+      return null
+    }
+    return started.turnId
   },
 
   startTest: async () => {

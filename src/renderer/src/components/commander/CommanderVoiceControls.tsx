@@ -71,7 +71,9 @@ function asCallTurn(
 ): CallTurn | null {
   if (!observation) return null
   return {
+    turnId: observation.turnId,
     phase: observation.phase,
+    ...(observation.error ? { error: observation.error } : {}),
     ...(observation.openTools.length > 0
       ? { toolName: observation.openTools[observation.openTools.length - 1].name }
       : {})
@@ -124,6 +126,7 @@ export function CommanderVoiceControls() {
       call: {
         status: call.status,
         error: call.error,
+        dismissedTurnErrorId: call.dismissedTurnErrorId,
         interruptedAt: call.interruptedAt,
         lastEvent: call.lastEvent
       },
@@ -142,6 +145,7 @@ export function CommanderVoiceControls() {
     tick,
     call.status,
     call.error,
+    call.dismissedTurnErrorId,
     call.interruptedAt,
     call.lastEvent,
     call.turnId,
@@ -277,7 +281,12 @@ export function CommanderVoiceControls() {
           <p>{visibleProblem}</p>
           <div className="mt-2 flex gap-2">
             {presentation.controls.retry && (
-              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void call.retry()}>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                onClick={() => void call.retry(observation?.phase === 'error' ? observation.turnId : undefined)}
+              >
                 Retry
               </Button>
             )}

@@ -70,6 +70,16 @@ function sameTarget(a: VoiceTarget, b: VoiceTarget): boolean {
   return a.kind === b.kind && (a.id ?? null) === (b.id ?? null)
 }
 
+/** True only when the playback passage belongs to this exact entity. */
+export function hasVerifiedPlaybackOwnership(snapshot: VoiceActivitySnapshot, target: VoiceTarget): boolean {
+  const passage = snapshot.passage
+  return Boolean(
+    passage &&
+    snapshot.playbackSpeechId === passage.speechId &&
+    ownsPassage(passage, target) === true
+  )
+}
+
 /** Pure: the voice claim for one entity. */
 export function deriveVoiceActivity(snapshot: VoiceActivitySnapshot, target: VoiceTarget): VoiceObservation {
   const micOpen = snapshot.capture.open && snapshot.capture.voiceState === 'listening' && Boolean(snapshot.capture.turnId)

@@ -18,7 +18,11 @@ export const MUTATING_COMMANDER_TOOLS = [
 export const MUTATING_COMMANDER_SKILL_TOOLS = ['create_skill', 'update_skill', 'remove_skill', 'promote_skill', 'move_skill'] as const
 
 /** Every Commander tool that changes something. */
-export const COMMANDER_ADMIN_TOOLS: ReadonlySet<string> = new Set<string>([...MUTATING_COMMANDER_TOOLS, ...MUTATING_COMMANDER_SKILL_TOOLS])
+export const COMMANDER_ADMIN_TOOLS: ReadonlySet<string> = new Set<string>([
+  ...MUTATING_COMMANDER_TOOLS,
+  ...MUTATING_COMMANDER_SKILL_TOOLS,
+  'revoke_merge_grant'
+])
 
 /** True when a Commander tool call changes something (an "action taken"). */
 export function isCommanderAdminTool(name: string): boolean {
