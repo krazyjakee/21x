@@ -7,7 +7,7 @@ import { OPEN_DRAFT_PR_TOOL } from './mcp-servers/pr-write-tools'
 import { authorizationRefusal, resolveTaskAuthorization } from './authorization'
 import { normalizeRepoSlug, validateIssuePayload } from '../shared/issue-actions'
 
-type PrWriteDb = Pick<DatabaseManager, 'db' | 'getTask' | 'getProjectRepos' | 'getWorkspaceDir'>
+type PrWriteDb = Pick<DatabaseManager, 'db' | 'getTask' | 'getProjectRepos' | 'getWorkspaceDir' | 'getTaskMcpScopeNonce'>
 type CommandRunner = (command: 'git' | 'gh', args: string[], cwd: string) => Promise<string>
 
 const defaultRunner: CommandRunner = (command, args, cwd) => new Promise((resolve, reject) => {
@@ -24,6 +24,26 @@ export function setPrWriteRunner(next: CommandRunner | null): void {
 
 function refusal(code: string, error: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return { status: 'refused', code, error, ...extra }
+}
+
+function currentTaskBoundary(
+  db: PrWriteDb,
+  taskId: string,
+  projectId: string,
+  repo: string,
+  scope: TaskMcpScope
+): Record<string, unknown> | null {
+  if (!scope.sessionNonce || db.getTaskMcpScopeNonce(taskId) !== scope.sessionNonce) {
+    return refusal('stale_task_session', 'The signed task session is stale or has been replaced. Reconnect the current task session before retrying.')
+  }
+  const task = db.getTask(taskId)
+  if (!task || task.project_id !== projectId) return refusal('task_scope_required', 'The signed coding task no longer exists in this project.')
+  const repoName = repo.slice(repo.indexOf('/') + 1)
+  if (!(task.repos ?? []).some((entry) => {
+    const normalized = entry.toLowerCase()
+    return normalized === repo || normalized === repoName
+  })) return refusal('repo_not_in_task', `The coding task is no longer assigned to ${repo}.`)
+  return null
 }
 
 function remoteMatches(remote: string, repo: string): boolean {
@@ -76,10 +96,8 @@ export async function handlePrWriteRoute(
   if (!repo) return refusal('repo_missing', 'repo must be a GitHub owner/name.')
   const projectRepo = db.getProjectRepos(projectId).find((entry) => entry.provider === 'github' && `${entry.org}/${entry.name}`.toLowerCase() === repo)
   if (!projectRepo) return refusal('repo_not_in_project', `${repo} is not a configured GitHub repository in this project.`)
-  const assigned = task.repos ?? []
-  if (!assigned.some((entry) => entry.toLowerCase() === repo || entry.toLowerCase() === projectRepo.name.toLowerCase())) {
-    return refusal('repo_not_in_task', `The coding task is not assigned to ${repo}.`)
-  }
+  const initialBoundary = currentTaskBoundary(db, taskId, projectId, repo, trustedScope!)
+  if (initialBoundary) return initialBoundary
 
   const initial = resolveTaskAuthorization(db, { taskId, projectId, action: 'github.pr.open', repo })
   if (!initial.allowed) return { status: 'refused', ...authorizationRefusal(initial) }
@@ -152,6 +170,8 @@ export async function handlePrWriteRoute(
     const pushState = await inspect()
     if (pushState.denial) return pushState.denial
     if (pushState.headSha !== headSha || pushState.branchName !== branchName) return refusal('worktree_changed', 'The branch or immutable head changed during pull-request inspection.')
+    const pushBoundary = currentTaskBoundary(db, taskId, projectId, repo, trustedScope!)
+    if (pushBoundary) return pushBoundary
     const beforePush = resolveTaskAuthorization(db, { taskId, projectId, action: 'github.pr.open', repo })
     if (!beforePush.allowed) return { status: 'refused', ...authorizationRefusal(beforePush) }
     await runner('git', ['push', pushState.pushUrl, `${headSha}:refs/heads/${branchName}`], cwd)
@@ -170,6 +190,8 @@ export async function handlePrWriteRoute(
     if (createState.headSha !== headSha || createState.branchName !== branchName || createState.pushUrl !== pushState.pushUrl) {
       return refusal('worktree_changed', 'The branch, immutable head or push destination changed before pull-request creation.')
     }
+    const createBoundary = currentTaskBoundary(db, taskId, projectId, repo, trustedScope!)
+    if (createBoundary) return createBoundary
     const beforeCreate = resolveTaskAuthorization(db, { taskId, projectId, action: 'github.pr.open', repo })
     if (!beforeCreate.allowed) return { status: 'refused', ...authorizationRefusal(beforeCreate) }
 

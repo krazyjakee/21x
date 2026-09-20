@@ -149,6 +149,30 @@ describe('MCP endpoint over HTTP', () => {
     await captain.close()
   })
 
+  it('refuses the PR write tool when its signed task session has been replaced', async () => {
+    const project = db.createProject({ name: 'PR session project' })!
+    db.addProjectRepo(project.id, { provider: 'github', org: 'krazyjakee', name: '21x', default_branch: 'main' })
+    const task = db.createTask(makeTask({
+      title: 'PR task', type: 'coding', project_id: project.id, repos: ['krazyjakee/21x']
+    }))!
+    authorizeTask(task.id, project.id, 'Implement the PR repair')
+    const oldNonce = db.rotateTaskMcpScopeNonce(task.id)
+    const port = await startTaskApiServer(db)
+    const signedUrl = buildTaskMcpUrl(port, getTaskApiToken(), {
+      projectId: project.id, taskId: task.id, artifactTaskId: task.id,
+      agentId: 'agent-1', sessionNonce: oldNonce
+    })
+    db.rotateTaskMcpScopeNonce(task.id)
+    const client = await connect(signedUrl)
+
+    const result = await client.callTool({
+      name: 'open_draft_pull_request', arguments: { repo: 'krazyjakee/21x', title: 'Stale session' }
+    })
+
+    expect(textOf(result)).toContain('stale_task_session')
+    await client.close()
+  })
+
   it('reads real data from the database through tools/call', async () => {
     const task = db.createTask(makeTask({ title: 'Findable task' }))!
     const port = await startTaskApiServer(db)

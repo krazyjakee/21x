@@ -48,6 +48,19 @@ function projectOf(params: Record<string, unknown>): string | undefined {
   return typeof params.project_id === 'string' && params.project_id ? params.project_id : undefined
 }
 
+/** Message delivery may recover or create a stopped session, so task-scoped
+ * callers must carry the same start capability as an explicit start call. */
+function authorizeMessageRecovery(
+  db: DatabaseManager,
+  scope: TaskMcpScope | undefined,
+  projectId: string
+): Record<string, unknown> | null {
+  const caller = scope?.taskId ?? scope?.artifactTaskId
+  if (!caller) return null
+  const decision = resolveTaskAuthorization(db, { taskId: caller, projectId, action: 'task.start' })
+  return decision.allowed ? null : authorizationRefusal(decision)
+}
+
 export async function handleSessionRoute(db: DatabaseManager, route: string, params: Record<string, unknown>, trustedScope?: TaskMcpScope): Promise<unknown> {
   switch (route) {
     case '/get_messages':
@@ -125,6 +138,8 @@ export async function handleSessionRoute(db: DatabaseManager, route: string, par
       const taskId = String(params.task_id)
       const target = db.getTask(taskId)
       if (!target) return { error: 'Task not found' }
+      const startRefused = authorizeMessageRecovery(db, trustedScope, target.project_id)
+      if (startRefused) return startRefused
 
       // Waking a stopped agent needs an agent to wake. Without one the send
       // fails deep inside with "Session not found:", which names neither the

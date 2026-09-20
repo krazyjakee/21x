@@ -21,6 +21,7 @@ describe('narrow draft pull-request capability gate', () => {
   let db: ReturnType<typeof createTestDb>['db']
   let projectId: string
   let taskId: string
+  let sessionNonce: string
   let rootId: string
   let workspace: string
   const head = 'a'.repeat(40)
@@ -31,6 +32,7 @@ describe('narrow draft pull-request capability gate', () => {
     projectId = db.createProject({ name: '21x' })!.id
     db.addProjectRepo(projectId, { provider: 'github', org: 'krazyjakee', name: '21x', default_branch: 'main' })
     taskId = db.createTask(makeTask({ title: 'Implement capability repair', type: 'coding', project_id: projectId, repos: ['krazyjakee/21x'] }))!.id
+    sessionNonce = db.rotateTaskMcpScopeNonce(taskId)
     workspace = mkdtempSync(join(tmpdir(), '21x-pr-gate-'))
     mkdirSync(join(workspace, '21x', '.git'), { recursive: true })
     vi.spyOn(db, 'getWorkspaceDir').mockReturnValue(workspace)
@@ -53,7 +55,7 @@ describe('narrow draft pull-request capability gate', () => {
     vi.restoreAllMocks()
   })
 
-  const scope = () => ({ parentTaskId: null, taskId, artifactTaskId: taskId, projectId })
+  const scope = () => ({ parentTaskId: null, taskId, artifactTaskId: taskId, projectId, agentId: 'test-agent', sessionNonce })
   const gitState = (command: string, args: string[], options: { dirty?: boolean; pushUrl?: string } = {}): string | null => {
     if (command !== 'git') return null
     if (args[0] === 'rev-parse') return `${head}\n`
@@ -115,7 +117,7 @@ describe('narrow draft pull-request capability gate', () => {
     expect(calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false)
   })
 
-  it.each(['revoked', 'expired', 'repository_removed'] as const)('rechecks %s after the final remote lookup and before creating', async (change) => {
+  it.each(['revoked', 'expired', 'repository_removed', 'task_repo_removed', 'stale_session'] as const)('rechecks %s after the final remote lookup and before creating', async (change) => {
     let lookups = 0
     let created = false
     setPrWriteRunner(async (command, args) => {
@@ -126,6 +128,8 @@ describe('narrow draft pull-request capability gate', () => {
         if (lookups === 2) {
           if (change === 'revoked') revokeAuthorization(db, rootId, 'withdrawn during final lookup')
           if (change === 'repository_removed') db.removeProjectRepo(db.getProjectRepos(projectId)[0].id)
+          if (change === 'task_repo_removed') db.updateTask(taskId, { repos: [] })
+          if (change === 'stale_session') db.rotateTaskMcpScopeNonce(taskId)
           if (change === 'expired') vi.useFakeTimers({ now: Date.now() + AUTHORIZATION_TTL_MS + 1 })
         }
         return '[]'
@@ -137,9 +141,22 @@ describe('narrow draft pull-request capability gate', () => {
       throw new Error(`unexpected command: ${command} ${args.join(' ')}`)
     })
 
-    expect(await handlePrWriteRoute(db, `/${OPEN_DRAFT_PR_TOOL}`, { repo: 'krazyjakee/21x', title: 'Final boundary' }, scope()))
-      .toMatchObject({ status: 'refused', code: 'capability_refused' })
+    const result = await handlePrWriteRoute(db, `/${OPEN_DRAFT_PR_TOOL}`, { repo: 'krazyjakee/21x', title: 'Final boundary' }, scope())
+    expect(result).toMatchObject({
+      status: 'refused',
+      code: change === 'task_repo_removed' ? 'repo_not_in_task' : change === 'stale_session' ? 'stale_task_session' : 'capability_refused'
+    })
     expect(created).toBe(false)
+  })
+
+  it('refuses a replaced signed session before inspecting or mutating the repository', async () => {
+    const oldScope = scope()
+    db.rotateTaskMcpScopeNonce(taskId)
+    const run = vi.fn()
+    setPrWriteRunner(run)
+    expect(await handlePrWriteRoute(db, `/${OPEN_DRAFT_PR_TOOL}`, { repo: 'krazyjakee/21x', title: 'Stale session' }, oldScope))
+      .toMatchObject({ status: 'refused', code: 'stale_task_session' })
+    expect(run).not.toHaveBeenCalled()
   })
 
   it('refuses a real Git worktree whose authorized fetch URL has a different pushurl', async () => {

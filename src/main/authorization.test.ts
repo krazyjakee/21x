@@ -304,8 +304,12 @@ describe('immutable human authorization chain', () => {
 
   it('carries cross-clause restrictions and explicit denials into the classified result', () => {
     expect(requestedActions('Only if I approve:\nOpen gh issues for 21x', ['21x'])).toEqual([])
+    expect(requestedActions('Only if I approve:\nCreate tasks. Open gh issues for 21x.', ['21x'])).toEqual([])
     expect(requestedActions('Example instructions:\nOpen gh issues for 21x', ['21x'])).toEqual([])
+    expect(requestedActions('Example instructions:\nCreate tasks. Open gh issues for 21x.', ['21x'])).toEqual([])
+    expect(requestedActions('Open gh issues for 21x. Only if I approve.', ['21x'])).toEqual([])
     expect(requestedActions('Refactor the code. Do not open PRs.', ['21x'])).toEqual(['task.update', 'task.start'])
+    expect(requestedActions('Refactor the code. Do not open GitHub pull requests.', ['21x'])).toEqual(['task.update', 'task.start'])
   })
 
   it('distinguishes omitted inheritance from an explicit empty or narrowed subset', () => {
@@ -337,6 +341,44 @@ describe('immutable human authorization chain', () => {
     reopened.close()
     expect(() => db.db.prepare('UPDATE authorization_task_bindings SET assignment_node_id = NULL WHERE task_id = ?').run(child.id))
       .toThrow('immutable')
+  })
+
+  it('keeps a newer human narrowing across machine follow-up, retry, failure and restart', () => {
+    const assignmentText = 'Implement the delegated repair'
+    const assignment = recordHumanAuthorization(db, {
+      messageId: 'assignment-root', text: assignmentText, at: now,
+      source: 'project-chat', taskId: captainId, projectId
+    })
+    activateAuthorizationDispatch(db, prepareAuthorizationDispatch(db, {
+      key: 'assignment-root', taskId: captainId, text: assignmentText, messageId: assignment.messageId
+    }))
+    const child = db.createTask({ title: 'Restricted worker', project_id: projectId, repos: ['krazyjakee/21x'] })!
+    inheritTaskAuthorization(db, captainId, child.id, 'Implement the delegated repair')
+    expect(taskAuthorization(db, child.id).effectivePermissions).toContain('github.pr.open')
+
+    const restrictionText = 'Refactor the code. Do not open PRs.'
+    const restriction = recordHumanAuthorization(db, {
+      messageId: 'restriction', text: restrictionText, at: now,
+      source: 'project-chat', taskId: child.id, projectId
+    })
+    const restrictionSeq = prepareAuthorizationDispatch(db, {
+      key: 'restriction', taskId: child.id, text: restrictionText, messageId: restriction.messageId
+    })
+    activateAuthorizationDispatch(db, restrictionSeq)
+    expect(taskAuthorization(db, child.id).effectivePermissions).not.toContain('github.pr.open')
+    failAuthorizationDispatch(db, restrictionSeq)
+    expect(taskAuthorization(db, child.id).effectivePermissions).not.toContain('github.pr.open')
+
+    const machine = prepareAuthorizationDispatch(db, { key: 'machine-follow-up', taskId: child.id, text: 'Progress update please' })
+    activateAuthorizationDispatch(db, machine)
+    expect(taskAuthorization(db, child.id).effectivePermissions).not.toContain('github.pr.open')
+    prepareAuthorizationRetry(db, { key: 'machine-follow-up', taskId: child.id, text: 'Progress update please' })
+    failAuthorizationDispatch(db, machine)
+    expect(taskAuthorization(db, child.id).effectivePermissions).not.toContain('github.pr.open')
+
+    const reopened = new Database(db.db.serialize())
+    expect(taskAuthorization({ db: reopened }, child.id).effectivePermissions).not.toContain('github.pr.open')
+    reopened.close()
   })
 
   it('audits create/update/start through lineage while preserving admission outcomes', async () => {
@@ -384,8 +426,38 @@ describe('immutable human authorization chain', () => {
       .toMatchObject({ code: 'capability_refused', missing_capability: 'task.start' })
     expect(await handleTaskRoute(db, '/update_task', { task_id: child.id, auto_start_agent: true }, childScope))
       .toMatchObject({ code: 'capability_refused', missing_capability: 'task.start' })
+    db.updateTask(child.id, { status: 'ready_for_review', auto_start_agent: true })
+    expect(await handleTaskRoute(db, '/update_task', { task_id: child.id, status: 'not_started' }, childScope))
+      .toMatchObject({ code: 'capability_refused', missing_capability: 'task.start' })
     expect(startTask).not.toHaveBeenCalled()
-    expect(db.getTask(child.id)).toMatchObject({ status: 'not_started', auto_start_agent: false })
+    expect(db.getTask(child.id)).toMatchObject({ status: 'ready_for_review', auto_start_agent: true })
+  })
+
+  it('requires task.start for create-time automation and message-driven recovery', async () => {
+    const originText = 'Create tasks'
+    const origin = recordHumanAuthorization(db, {
+      messageId: 'create-only-root', text: originText, at: now,
+      source: 'project-chat', taskId: captainId, projectId
+    })
+    activateAuthorizationDispatch(db, prepareAuthorizationDispatch(db, {
+      key: 'create-only-root', taskId: captainId, text: originText, messageId: origin.messageId
+    }))
+    const worker = db.createTask({ title: 'Create-only worker', project_id: projectId })!
+    inheritTaskAuthorization(db, captainId, worker.id, 'Create only', ['task.create'])
+    const workerScope = { projectId, taskId: worker.id, artifactTaskId: worker.id, parentTaskId: null }
+    expect(await handleTaskRoute(db, '/create_task', {
+      title: 'Unauthorized automatic child', project_id: projectId, auto_start_agent: true
+    }, workerScope)).toMatchObject({ code: 'capability_refused', missing_capability: 'task.start' })
+
+    const inert = db.createTask({ title: 'Inert worker', project_id: projectId })!
+    inheritTaskAuthorization(db, captainId, inert.id, 'No execution', [])
+    const target = db.createTask({ title: 'Stopped target', project_id: projectId })!
+    const sendByTaskId = vi.fn(async () => ({ sessionId: 'resumed' }))
+    setTaskApiAgentController({ sendByTaskId, findSessionByTaskId: vi.fn(() => ({ sessionId: 'stopped' })) } as never)
+    expect(await handleSessionRoute(db, '/send_message', { task_id: target.id, text: 'Resume work' }, {
+      projectId, taskId: inert.id, artifactTaskId: inert.id, parentTaskId: null
+    })).toMatchObject({ code: 'capability_refused', missing_capability: 'task.start' })
+    expect(sendByTaskId).not.toHaveBeenCalled()
   })
 
   it('returns one structured adjacent-to-execution refusal with origin and remediation', () => {

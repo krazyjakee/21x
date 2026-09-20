@@ -296,7 +296,11 @@ async function updateTask(db: DatabaseManager, params: Record<string, unknown>, 
     prepared = await prepareUserTaskUpdate(agentController, current, data)
     const updateRefused = authorizeScopedTaskAction(db, trustedScope, taskProjectId(current), 'task.update')
     if (updateRefused) return updateRefused
-    if (prepared.startAfterWrite || prepared.data.auto_start_agent === true) {
+    const resultingAutoStart = prepared.data.auto_start_agent ?? current.auto_start_agent
+    const resultingStatus = prepared.data.status ?? current.status
+    const enablesAutomaticStart = resultingAutoStart && resultingStatus === TaskStatus.NotStarted &&
+      (current.status !== TaskStatus.NotStarted || !current.auto_start_agent)
+    if (prepared.startAfterWrite || prepared.data.auto_start_agent === true || enablesAutomaticStart) {
       const startRefused = authorizeScopedTaskAction(db, trustedScope, taskProjectId(current), 'task.start')
       if (startRefused) return startRefused
     }
@@ -426,6 +430,10 @@ function createTopLevelTask(db: DatabaseManager, params: Record<string, unknown>
   if (!db.getProject(projectId)) return { error: `Project not found: ${projectId}` }
   const refused = authorizeScopedTaskAction(db, trustedScope, projectId, 'task.create')
   if (refused) return refused
+  if (params.auto_start_agent === true) {
+    const startRefused = authorizeScopedTaskAction(db, trustedScope, projectId, 'task.start')
+    if (startRefused) return startRefused
+  }
   const narrowing = capabilityNarrowing(params.permissions)
   if (narrowing.error) return { error: narrowing.error }
   const checked = validateProjectRepos(db, projectId, reposParam(params.repos))

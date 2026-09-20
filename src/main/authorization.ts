@@ -138,14 +138,18 @@ function addClassified(
 export function classifyCapabilityIntents(text: string, projectNames: string[] = []): ClassifiedIntent[] {
   const found = new Map<AuthorizationAction, ClassifiedIntent>()
   const denied = new Set<AuthorizationAction>()
-  let unsafeNextClause = false
-  for (const clause of clauses(text)) {
-    const denial = /\b(?:do\s+not|don't|dont|never|refrain\s+from)\s+(create|add|make|file|open|opening|publish|update|link|start|starting)\s+(?:(?:the|a|an|any|all|draft)\s+)*(tasks?|(?:github|gh)\s+issues?|prs?|pull\s+requests?)\b/ig
+  const parsedClauses = clauses(text)
+  // A conditional/example heading can govern every following imperative, and
+  // a trailing condition can qualify commands that came before it. This small
+  // grammar cannot safely determine that scope, so the message grants nothing.
+  const ambiguousContext = parsedClauses.some((clause) => UNSAFE_CONTEXT_PREFIX.test(clause.text))
+  for (const clause of parsedClauses) {
+    const denial = /\b(?:do\s+not|don't|dont|never|refrain\s+from)\s+(create|add|make|file|open|opening|publish|update|link|start|starting)\s+(?:(?:the|a|an|any|all|draft)\s+)*(tasks?|(?:github|gh)\s+issues?|(?:(?:github|gh)\s+)?(?:prs?|pull\s+requests?))\b/ig
     for (const match of clause.text.matchAll(denial)) {
       const verb = match[1].replace(/ing$/, '').toLowerCase()
       const target = match[2].toLowerCase()
-      if (/^(?:pr|pull)/.test(target)) denied.add('github.pr.open')
-      else if (/^(?:github|gh)/.test(target)) {
+      if (/\b(?:pr|pull\s+request)/.test(target)) denied.add('github.pr.open')
+      else if (/\bissues?\b/.test(target)) {
         if (verb === 'update') denied.add('github.issue.update')
         else if (verb === 'link') denied.add('github.issue.link')
         else {
@@ -156,16 +160,7 @@ export function classifyCapabilityIntents(text: string, projectNames: string[] =
       else if (verb === 'start') denied.add('task.start')
       else denied.add('task.create')
     }
-    if (unsafeNextClause) {
-      if (CODING_ASSIGNMENT.test(clause.text) || /^(?:please\s+)?(?:create|add|make|file|open|publish|update|link|start|prioriti[sz]e)\b/i.test(clause.text)) {
-        unsafeNextClause = false
-      }
-      continue
-    }
-    if (UNSAFE_CONTEXT_PREFIX.test(clause.text)) {
-      unsafeNextClause = /:\s*$/.test(clause.text) || !/\b(?:tasks?|(?:github|gh)\s+issues?|prs?|pull\s+requests?)\b/i.test(clause.text)
-      continue
-    }
+    if (ambiguousContext) continue
     if (clause.text.length > 1_000 || INTERROGATIVE.test(clause.text) || UNSAFE_CLAUSE.test(clause.text) || /["“”`]/.test(clause.text)) continue
 
     if (CODING_ASSIGNMENT.test(clause.text)) {
@@ -459,8 +454,16 @@ export function prepareAuthorizationDispatch(source: Source, input: { key: strin
     source.db.prepare(`
       INSERT INTO authorization_task_bindings (task_id, dispatch_seq, node_id, assignment_node_id)
       VALUES (?, ?, NULL, NULL)
-      ON CONFLICT(task_id) DO UPDATE SET dispatch_seq = excluded.dispatch_seq, node_id = NULL
-    `).run(input.taskId, seq)
+      ON CONFLICT(task_id) DO UPDATE SET
+        dispatch_seq = excluded.dispatch_seq,
+        node_id = CASE
+          WHEN ? IS NULL
+            AND authorization_task_bindings.assignment_node_id IS NOT NULL
+            AND authorization_task_bindings.node_id IS NOT authorization_task_bindings.assignment_node_id
+          THEN authorization_task_bindings.node_id
+          ELSE NULL
+        END
+    `).run(input.taskId, seq, nodeId)
     return seq
   })()
 }
@@ -476,11 +479,20 @@ export function prepareAuthorizationDispatch(source: Source, input: { key: strin
 export function prepareAuthorizationRetry(source: Source, input: { key: string; taskId: string; text: string; messageId?: string }): number {
   return source.db.transaction(() => {
     const seq = prepareAuthorizationDispatch(source, input)
+    const dispatch = source.db.prepare('SELECT node_id FROM authorization_dispatches WHERE seq = ?').get(seq) as { node_id: string | null }
     source.db.prepare(`
       INSERT INTO authorization_task_bindings (task_id, dispatch_seq, node_id)
       VALUES (?, ?, NULL)
-      ON CONFLICT(task_id) DO UPDATE SET dispatch_seq = excluded.dispatch_seq, node_id = NULL
-    `).run(input.taskId, seq)
+      ON CONFLICT(task_id) DO UPDATE SET
+        dispatch_seq = excluded.dispatch_seq,
+        node_id = CASE
+          WHEN ? IS NULL
+            AND authorization_task_bindings.assignment_node_id IS NOT NULL
+            AND authorization_task_bindings.node_id IS NOT authorization_task_bindings.assignment_node_id
+          THEN authorization_task_bindings.node_id
+          ELSE NULL
+        END
+    `).run(input.taskId, seq, dispatch.node_id)
     return seq
   })()
 }
@@ -491,15 +503,44 @@ export function activateAuthorizationDispatch(source: Source, seq: number): void
   if (row.node_id && resolveAuthorization(source, row.node_id).status !== 'active') throw new Error('Authorization expired or was revoked before dispatch')
   const binding = source.db.prepare('SELECT dispatch_seq FROM authorization_task_bindings WHERE task_id = ?').get(row.task_id) as { dispatch_seq: number } | undefined
   if (binding?.dispatch_seq !== seq) throw new Error('Stale authorization dispatch')
-  source.db.prepare('UPDATE authorization_task_bindings SET node_id = ? WHERE task_id = ? AND dispatch_seq = ?').run(row.node_id, row.task_id, seq)
+  if (row.node_id) {
+    source.db.prepare('UPDATE authorization_task_bindings SET node_id = ? WHERE task_id = ? AND dispatch_seq = ?').run(row.node_id, row.task_id, seq)
+  }
 }
 export function failAuthorizationDispatch(source: Source, seq: number): void {
+  const row = source.db.prepare(`
+    SELECT d.node_id, b.node_id AS active_node_id, b.assignment_node_id
+    FROM authorization_dispatches d
+    LEFT JOIN authorization_task_bindings b ON b.task_id = d.task_id AND b.dispatch_seq = d.seq
+    WHERE d.seq = ?
+  `).get(seq) as { node_id: string | null; active_node_id: string | null; assignment_node_id: string | null } | undefined
+  // A machine-only dispatch carries no authority and cannot erase a newer
+  // human narrowing. If a narrower human node reached activation before the
+  // adapter failed, retain that fail-closed supersession instead of falling
+  // back to a wider immutable assignment.
+  if (!row?.node_id) return
+  if (row.active_node_id === row.node_id && row.assignment_node_id) {
+    const active = read(source, row.node_id)?.node
+    const assignment = read(source, row.assignment_node_id)?.node
+    const narrowsAssignment = !!active && !!assignment &&
+      active.actions.every((action) => assignment.actions.includes(action)) &&
+      active.scope.every((scope) => assignment.scope.some((parent) =>
+        parent.projectId === scope.projectId && scope.repos.every((repo) => parent.repos.includes(repo))))
+    if (narrowsAssignment) return
+  }
   source.db.prepare('UPDATE authorization_task_bindings SET node_id = NULL WHERE dispatch_seq = ?').run(seq)
 }
 
 export function taskAuthorization(source: Source, taskId: string, now = Date.now()): AuthorizationEvidence {
-  const row = source.db.prepare('SELECT node_id, assignment_node_id FROM authorization_task_bindings WHERE task_id = ?')
-    .get(taskId) as { node_id: string | null; assignment_node_id: string | null } | undefined
+  const row = source.db.prepare(`
+    SELECT b.node_id, b.assignment_node_id, d.node_id AS pending_node_id
+    FROM authorization_task_bindings b
+    JOIN authorization_dispatches d ON d.seq = b.dispatch_seq
+    WHERE b.task_id = ?
+  `).get(taskId) as { node_id: string | null; assignment_node_id: string | null; pending_node_id: string | null } | undefined
+  // An evidence-bearing turn stays inactive until the adapter accepts this
+  // exact generation. Machine generations keep the latest accepted human node.
+  if (row?.pending_node_id && row.node_id !== row.pending_node_id) return resolveAuthorization(source, null, now)
   return resolveAuthorization(source, row?.node_id ?? row?.assignment_node_id ?? null, now)
 }
 
