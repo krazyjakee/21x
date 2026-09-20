@@ -212,6 +212,24 @@ export class DeliveryStore {
     return this.get(id)
   }
 
+  /** A user Stop is a durable boundary: work not yet accepted by the backend
+   * stays recorded for audit, but can never be claimed or replayed later. */
+  cancelUnacceptedForTask(taskId: string, error: string): DeliveryRecord[] {
+    const rows = this.source.db.prepare(`
+      SELECT * FROM delivery_outbox
+      WHERE task_id = ? AND kind = 'agent_message' AND state IN ('pending', 'claimed')
+      ORDER BY created_at ASC
+    `).all(taskId) as DeliveryRow[]
+    if (rows.length === 0) return []
+    const ts = this.now()
+    this.source.db.prepare(`
+      UPDATE delivery_outbox SET state = 'cancelled', claim_owner = NULL,
+        claim_expires_at = NULL, last_error = ?, updated_at = ?
+      WHERE task_id = ? AND kind = 'agent_message' AND state IN ('pending', 'claimed')
+    `).run(error, ts, taskId)
+    return rows.map((row) => this.get(row.id)!).filter(Boolean)
+  }
+
   expireDeadlines(now = this.now()): DeliveryRecord[] {
     const rows = this.source.db.prepare(`
       SELECT * FROM delivery_outbox

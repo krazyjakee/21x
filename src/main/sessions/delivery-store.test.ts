@@ -72,4 +72,18 @@ describe('DeliveryStore', () => {
     expect(store.getByKey('collision')?.payload).toBe('first')
   })
 
+  it('retains pre-Stop rows as cancelled while leaving later rows enqueueable', () => {
+    const { db } = createTestDb()
+    const store = new DeliveryStore(db)
+    const task = db.createTask({ title: 'Stopped task' })!
+    const before = store.enqueue({ idempotencyKey: 'before-stop', kind: 'agent_message', taskId: task.id, payload: '{}' }).record
+    store.claim(before.id, 'owner', 1_000)
+    const cancelled = store.cancelUnacceptedForTask(task.id, 'stopped by user')
+    expect(cancelled.map((row) => row.id)).toEqual([before.id])
+    expect(store.get(before.id)).toMatchObject({ state: 'cancelled', lastError: 'stopped by user', claimOwner: null })
+
+    const after = store.enqueue({ idempotencyKey: 'after-stop', kind: 'agent_message', taskId: task.id, payload: '{}' }).record
+    expect(store.claim(after.id, 'owner', 1_000)).toMatchObject({ state: 'claimed' })
+  })
+
 })

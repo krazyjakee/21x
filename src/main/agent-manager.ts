@@ -1,5 +1,5 @@
 import { captureAuthorizationSnapshot, sendPreservingAuthorization, sendWithAuthorization } from './authorization-dispatch'
-import { prepareAuthorizationDispatch, failAuthorizationDispatch } from './authorization'
+import { prepareAuthorizationDispatch, prepareAuthorizationRetry, failAuthorizationDispatch } from './authorization'
 import { prepareProjectMessageDispatch, activateProjectMessageDispatch, failProjectMessageDispatch, type ProjectMessageDispatch, type TypedMessage } from './merge-grants'
 import { DEFAULT_SERVER_URL } from './adapters/opencode-server'
 import { guardedIpcSend } from './guarded-ipc-send'
@@ -3669,6 +3669,7 @@ export class AgentManager extends EventEmitter {
   /** Withdraws a queued start; true when one was waiting. */
   cancelQueuedStart(taskId: string): boolean {
     const task = this.db.getTask(taskId)
+    this.deliveries.cancelUnacceptedForTask(taskId, 'Delivery cancelled because the user stopped this task before backend acceptance.')
     if (!this.startQueue.get(taskId) && task?.agent_id) {
       this.startQueue.enqueue({ taskId, agentId: task.agent_id, projectId: taskProjectId(task),
         priority: task.priority, reason: 'recovery', queuedAt: new Date().toISOString() })
@@ -4246,7 +4247,13 @@ export class AgentManager extends EventEmitter {
       return record.destinationId ? { newSessionId: record.destinationId } : {}
     }
     const claimed = this.deliveries.claim(record.id, this.deliveryOwner, DELIVERY_CLAIM_MS)
-    if (!claimed) return {}
+    if (!claimed) {
+      const current = this.deliveries.get(record.id)
+      if (current && ['failed', 'timed_out', 'cancelled'].includes(current.state)) {
+        throw new Error(current.lastError ?? 'Delivery ended without acknowledgement.')
+      }
+      return {}
+    }
     let payload: {
       sessionId: string
       message: string
@@ -4257,7 +4264,10 @@ export class AgentManager extends EventEmitter {
     }
     try {
       payload = JSON.parse(claimed.payload) as typeof payload
-      const authorizationDispatch = prepareAuthorizationDispatch(this.db, { key: claimed.idempotencyKey, taskId: claimed.taskId ?? '', text: payload.message, messageId: payload.typedMessage?.id })
+      const authorizationInput = { key: claimed.idempotencyKey, taskId: claimed.taskId ?? '', text: payload.message, messageId: payload.typedMessage?.id }
+      const authorizationDispatch = claimed.attemptCount > 1
+        ? prepareAuthorizationRetry(this.db, authorizationInput)
+        : prepareAuthorizationDispatch(this.db, authorizationInput)
       const result = await withStartupDeadline(this.sendMessageNow(
         payload.sessionId,
         payload.message,
@@ -4500,6 +4510,10 @@ export class AgentManager extends EventEmitter {
       if (dispatch) failProjectMessageDispatch(dispatch)
       throw error
     }
+    // Stop may destroy the session while adapter acceptance is in flight.
+    // The accepted call may finish, but it must not re-register polling or
+    // otherwise revive the runtime after the explicit Stop boundary.
+    if (this.sessions.get(sessionId) !== session) return
     // Retry the recap until the adapter accepts a prompt.
     this.acknowledgeSessionRecap(session, pendingLossId)
 

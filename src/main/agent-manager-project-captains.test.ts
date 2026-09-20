@@ -596,6 +596,73 @@ describe('per-project Captain conversations', () => {
       .toEqual([{ delivery_key: 'first-delivery' }, { delivery_key: 'second-delivery' }])
   })
 
+  it('cancels messages queued before Stop without reviving the task, but permits a new post-Stop send', async () => {
+    const task = db.createTask(makeTask({ title: 'Queued message stop' }))!
+    db.updateTask(task.id, { agent_id: agentId })
+    const fake = new FakeAdapter({ sessionIds: ['live'], status: SessionStatusType.IDLE })
+    const manager = newManager(fake)
+    await manager.startSession(agentId, task.id, undefined, true)
+    let finish!: () => void
+    let backendAlive = true
+    let accepted = 0
+    fake.destroySession.mockImplementation(async () => { backendAlive = false })
+    fake.resumeSession.mockImplementation(async () => { backendAlive = true; return [] })
+    fake.sendPrompt.mockImplementation(async () => {
+      if (!backendAlive) throw new Error('Backend session was stopped')
+      accepted++
+      if (accepted === 1) await new Promise<void>((resolve) => { finish = resolve })
+    })
+
+    const first = manager.sendMessage('live', 'first', task.id, agentId, undefined, undefined, 'stop-first')
+    await vi.waitFor(() => expect(fake.sendPrompt).toHaveBeenCalledTimes(1))
+    const second = manager.sendMessage('live', 'queued before Stop', task.id, agentId, undefined, undefined, 'stop-second')
+    const secondRejected = expect(second).rejects.toThrow('user stopped this task')
+    await manager.stopByTaskId(task.id)
+    finish()
+    await first
+    await secondRejected
+
+    const deliveries = new DeliveryStore(db)
+    expect(deliveries.getByKey('stop-second')).toMatchObject({
+      state: 'cancelled',
+      lastError: expect.stringContaining('user stopped this task')
+    })
+    expect(manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'cancelled', recoveryCause: 'manual_stop' })
+    expect(manager.findSessionByTaskId(task.id)).toBeUndefined()
+    expect((manager as any).pollingEntries.size).toBe(0)
+    expect(db.getTask(task.id)?.status).toBe('not_started')
+    expect(fake.resumeSession).not.toHaveBeenCalled()
+    expect(fake.sendPrompt).toHaveBeenCalledTimes(1)
+    expect(accepted).toBe(1)
+
+    await manager.sendMessage('', 'explicitly sent after Stop', task.id, agentId, undefined, undefined, 'after-stop')
+    expect(fake.resumeSession).toHaveBeenCalledTimes(1)
+    expect(deliveries.getByKey('after-stop')?.state).toBe('acknowledged')
+  })
+
+  it('re-reserves exact authorization when an earlier failed delivery is replayed after its successor', async () => {
+    const before = new FakeAdapter({ sessionIds: ['live'], status: SessionStatusType.IDLE })
+    const firstManager = newManager(before)
+    await firstManager.startSession(agentId, alphaCaptain, undefined, true)
+    before.sendPrompt.mockRejectedValueOnce(new Error('temporary unavailable'))
+    const result = await Promise.allSettled([
+      firstManager.sendMessage('live', 'first', alphaCaptain, agentId, undefined, undefined, 'retry-first'),
+      firstManager.sendMessage('live', 'second', alphaCaptain, agentId, undefined, undefined, 'retry-second')
+    ])
+    expect(result.map((entry) => entry.status)).toEqual(['rejected', 'fulfilled'])
+    expect(new DeliveryStore(db).getByKey('retry-first')).toMatchObject({ state: 'pending', attemptCount: 1 })
+    expect(new DeliveryStore(db).getByKey('retry-second')?.state).toBe('acknowledged')
+    await firstManager.stopAllSessions()
+
+    const after = new FakeAdapter({ status: SessionStatusType.IDLE })
+    const recovery = newManager(after)
+    await recovery.reconcileStartup()
+    expect(after.resumeSession).toHaveBeenCalledWith('live', expect.any(Object))
+    expect(after.sendPrompt).toHaveBeenCalledTimes(1)
+    expect(after.sendPrompt.mock.calls[0][1]).toEqual([expect.objectContaining({ text: 'first' })])
+    expect(new DeliveryStore(db).getByKey('retry-first')).toMatchObject({ state: 'acknowledged', attemptCount: 2 })
+  })
+
   it('ignores status from the old Captain after committing its replacement', async () => {
     const candidate = db.createAgent({ name: 'Candidate', config: { coding_agent: 'claude-code' } as any })!
     const fake = new FakeAdapter({ sessionIds: ['old', 'new'] })
