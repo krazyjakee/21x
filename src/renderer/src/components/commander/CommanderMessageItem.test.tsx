@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { ToolChip } from './CommanderMessageItem'
+import type { CommanderMessage } from '@shared/commander'
+import { CommanderMessageItem, ToolChip } from './CommanderMessageItem'
 import { formatToolResult } from './tool-call-label'
 
 afterEach(cleanup)
@@ -32,6 +33,27 @@ describe('ToolChip', () => {
     render(<ToolChip name="list_projects" input={{}} result="" />)
     expect(screen.queryByRole('button')).toBeNull()
     expect(screen.getByTestId('commander-tool-chip').textContent).toBe('List projects')
+  })
+
+  it('keeps persisted calls pending until their tool result arrives', () => {
+    const message: CommanderMessage = {
+      id: 'message-1',
+      session_id: 'session-1',
+      role: 'assistant',
+      content: '',
+      tool_calls: [{ id: 'call-1', name: 'list_projects', input: {} }],
+      tool_call_id: null,
+      tool_name: null,
+      is_error: false,
+      project_id: null,
+      correlation_id: null,
+      created_at: 1
+    }
+
+    const { container } = render(<CommanderMessageItem message={message} toolResults={new Map()} />)
+
+    expect(screen.queryByRole('button')).toBeNull()
+    expect(container.querySelector('.animate-spin')).not.toBeNull()
   })
 })
 
