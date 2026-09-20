@@ -81,8 +81,8 @@ export function registerVoiceHandlers({ voiceSessionManager, db }: IpcDeps): voi
     voiceSessionManager?.endTurn(payload?.turnId)
   })
 
-  ipcMain.handle('voice:cancelTurn', (_, payload: { turnId?: string }) => {
-    voiceSessionManager?.cancelTurn(payload?.turnId)
+  ipcMain.handle('voice:cancelTurn', (_, payload: { turnId?: string; turnEpoch?: string }) => {
+    voiceSessionManager?.cancelTurn(payload?.turnId, payload?.turnEpoch)
   })
 
   ipcMain.handle('voice:confirm', async (_, payload: { turnId: string; choice?: { taskId?: string; agentName?: string } }) => {

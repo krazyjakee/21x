@@ -620,10 +620,10 @@ interface ElectronAPI {
     startTurn: (
       mode: VoiceTurnMode,
       context: VoiceUiContext
-    ) => Promise<{ turnId: string } | { error: string }>
+    ) => Promise<{ turnId: string; turnEpoch?: string } | { error: string }>
     pushAudio: (turnId: string, chunk: Uint8Array) => Promise<void>
     endTurn: (turnId: string) => Promise<void>
-    cancelTurn: (turnId?: string) => Promise<void>
+    cancelTurn: (turnId?: string, turnEpoch?: string) => Promise<void>
     confirm: (turnId: string, choice?: { taskId?: string; agentName?: string }) => Promise<{ success: boolean }>
     dismiss: (turnId: string) => Promise<void>
     getRuntime: () => Promise<VoiceRuntimeStatus>

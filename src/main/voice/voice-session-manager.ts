@@ -23,6 +23,7 @@ import {
   type VoiceModelState,
   type VoiceSnapshot,
   type VoiceState,
+  type VoiceTurnHandle,
   type VoiceTurnMode,
   type VoiceUiContext,
   type MicrophonePermission,
@@ -78,6 +79,7 @@ const RUNTIME_ABSENT: VoiceRuntimeStatus = {
 interface PendingConfirmation {
   proposal: VoiceIntentProposal
   context: VoiceUiContext
+  turnEpoch: string | null
 }
 
 /**
@@ -98,6 +100,8 @@ export const VOICE_ANSWER_WAIT_MS = 3 * 60 * 1000
 export class VoiceSessionManager {
   private state: VoiceState = 'disabled'
   private turnId: string | null = null
+  /** Distinguishes consecutive starts even if their provider IDs collide. */
+  private turnEpoch: string | null = null
   private turnMode: VoiceTurnMode = 'dictation'
   private turnContext: VoiceUiContext = {}
   private partial = ''
@@ -292,7 +296,7 @@ export class VoiceSessionManager {
   async startTurn(
     mode: VoiceTurnMode,
     context: VoiceUiContext
-  ): Promise<{ turnId: string } | { error: string }> {
+  ): Promise<VoiceTurnHandle | { error: string }> {
     if (!this.isEnabled()) return { error: 'Voice is switched off.' }
     // Barge-in (design §5.7). The moment the user speaks, 20x stops speaking.
     this.speech.stop('cancelled')
@@ -309,10 +313,12 @@ export class VoiceSessionManager {
     if (this.engine.state !== 'ready') {
       return { error: engineMessage(this.engine) }
     }
-    if (this.turnId) this.cancelTurn(this.turnId)
+    if (this.turnId) this.cancelTurn(this.turnId, this.turnEpoch ?? undefined)
 
     const turnId = createId()
+    const turnEpoch = createId()
     this.turnId = turnId
+    this.turnEpoch = turnEpoch
     this.turnMode = mode
     this.turnContext = context ?? {}
     this.partial = ''
@@ -320,7 +326,7 @@ export class VoiceSessionManager {
     this.segmentsSent = 0
     this.worker.startTurn(turnId, mode)
     this.setState('listening')
-    return { turnId }
+    return { turnId, turnEpoch }
   }
 
   pushAudio(turnId: string, frame: Buffer): void {
@@ -340,19 +346,31 @@ export class VoiceSessionManager {
     this.worker.endTurn(turnId)
   }
 
-  cancelTurn(turnId?: string): void {
+  cancelTurn(turnId?: string, turnEpoch?: string): void {
     const id = turnId ?? this.turnId
     if (!id) return
-    if (this.turnId === id) {
+    const currentEpoch = this.turnId === id ? this.turnEpoch : null
+    const ownsCurrent = this.turnId === id && (!turnEpoch || turnEpoch === currentEpoch)
+    if (ownsCurrent) {
       this.turnId = null
+      this.turnEpoch = null
       this.partial = ''
       this.segmentsSent = 0
       this.stopSpeaking()
       this.setState('idle')
     }
-    this.pending.delete(id)
-    this.worker.cancelTurn(id)
-    this.options.notify(VOICE_EVENTS.outcome, { status: 'cancelled', turnId: id } satisfies VoiceActionOutcome)
+    const pending = this.pending.get(id)
+    if (pending && (!turnEpoch || pending.turnEpoch === turnEpoch)) this.pending.delete(id)
+    // A leased stale request is only an acknowledgement. The worker has one
+    // active turn, so forwarding it could cancel a replacement that reused the
+    // provider ID. Legacy unleased callers retain their previous behaviour.
+    if (ownsCurrent || !turnEpoch) this.worker.cancelTurn(id)
+    const ownedEpoch = turnEpoch ?? currentEpoch ?? pending?.turnEpoch ?? undefined
+    this.options.notify(VOICE_EVENTS.outcome, {
+      status: 'cancelled',
+      turnId: id,
+      ...(ownedEpoch ? { turnEpoch: ownedEpoch } : {}),
+    } satisfies VoiceActionOutcome)
   }
 
   // ── Worker events ─────────────────────────────────────────
@@ -390,7 +408,9 @@ export class VoiceSessionManager {
     const mode = this.turnMode
     const context = this.turnContext
     const delivered = this.segmentsSent
+    const turnEpoch = this.turnEpoch
     this.turnId = null
+    this.turnEpoch = null
     this.segmentsSent = 0
 
     if (!text.trim()) {
@@ -439,7 +459,7 @@ export class VoiceSessionManager {
       return
     }
 
-    await this.runProposal(turnId, interpretation.proposal, context, false)
+    await this.runProposal(turnId, interpretation.proposal, context, false, turnEpoch)
   }
 
   private onEngineStatus(status: VoiceEngineStatus): void {
@@ -465,6 +485,7 @@ export class VoiceSessionManager {
         message,
       } satisfies VoiceActionOutcome)
       this.turnId = null
+      this.turnEpoch = null
     }
     this.options.notify(VOICE_EVENTS.error, { message, code })
     this.setState('idle')
@@ -476,13 +497,14 @@ export class VoiceSessionManager {
     turnId: string,
     proposal: VoiceIntentProposal,
     context: VoiceUiContext,
-    confirmed: boolean
+    confirmed: boolean,
+    turnEpoch: string | null = null
   ): Promise<void> {
     this.setState(confirmed ? 'executing' : 'transcribing')
     const outcome = await this.actions.apply(turnId, proposal, context, confirmed)
 
     if (outcome.status === 'needs_confirmation') {
-      this.pending.set(turnId, { proposal: outcome.proposal, context })
+      this.pending.set(turnId, { proposal: outcome.proposal, context, turnEpoch })
       this.setState('awaiting_confirmation')
       this.options.notify(VOICE_EVENTS.outcome, outcome)
       return
@@ -644,14 +666,19 @@ export class VoiceSessionManager {
     }
     this.pending.delete(turnId)
     const proposal = choice ? applyChoice(entry.proposal, choice) : entry.proposal
-    await this.runProposal(turnId, proposal, entry.context, true)
+    await this.runProposal(turnId, proposal, entry.context, true, entry.turnEpoch)
   }
 
   /** The user dismissed the confirmation card. Nothing runs. */
   dismiss(turnId: string): void {
+    const turnEpoch = this.pending.get(turnId)?.turnEpoch ?? undefined
     this.pending.delete(turnId)
     this.setState('idle')
-    this.options.notify(VOICE_EVENTS.outcome, { status: 'cancelled', turnId } satisfies VoiceActionOutcome)
+    this.options.notify(VOICE_EVENTS.outcome, {
+      status: 'cancelled',
+      turnId,
+      ...(turnEpoch ? { turnEpoch } : {}),
+    } satisfies VoiceActionOutcome)
   }
 
   // ── Optional runtime ──────────────────────────────────────

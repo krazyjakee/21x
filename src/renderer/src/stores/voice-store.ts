@@ -61,6 +61,8 @@ interface VoiceStoreState {
   shortcut: string
   permission: MicrophonePermission
   turnId: string | null
+  /** Ownership of the exact start that published `turnId`. */
+  turnEpoch: string | null
   mode: VoiceTurnMode
   partial: string
   final: string
@@ -159,6 +161,12 @@ const RUNTIME_ABSENT: VoiceRuntimeStatus = {
 }
 
 const NO_INSTALL: VoiceRuntimeInstall = { running: false, percent: 0, log: '', error: null }
+
+let rendererTurnEpoch = 0
+function fallbackTurnEpoch(): string {
+  rendererTurnEpoch += 1
+  return `renderer-turn-${rendererTurnEpoch}`
+}
 
 /**
  * Voice is usable only when the optional runtime is installed, a speech model
@@ -277,6 +285,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
   shortcut: '',
   permission: 'not-determined',
   turnId: null,
+  turnEpoch: null,
   mode: 'dictation',
   partial: '',
   final: '',
@@ -389,37 +398,42 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
       if (!signal?.aborted) set({ result: { kind: 'error', message: started.error, at: Date.now() } })
       return null
     }
+    const turnEpoch = started.turnEpoch ?? fallbackTurnEpoch()
     let cancelled = false
     const cancelStartedTurn = (): void => {
       if (cancelled) return
       cancelled = true
-      if (get().turnId === started.turnId) {
+      const current = get()
+      if (current.turnId === started.turnId && current.turnEpoch === turnEpoch) {
         voiceCapture.stop()
         bargeInGate.reset()
-        set({ turnId: null, partial: '', level: 0 })
+        set({ turnId: null, turnEpoch: null, partial: '', level: 0 })
       }
-      void voiceApi.cancelTurn(started.turnId)
+      void voiceApi.cancelTurn(started.turnId, turnEpoch)
     }
     if (signal?.aborted) {
       cancelStartedTurn()
       return null
     }
-    set({ turnId: started.turnId, mode, partial: '', final: '', result: null, sentSentences: [] })
+    set({ turnId: started.turnId, turnEpoch, mode, partial: '', final: '', result: null, sentSentences: [] })
     signal?.addEventListener('abort', cancelStartedTurn, { once: true })
 
     bargeInGate.reset()
     const ok = await voiceCapture.start({
       onAudio: (chunk) => {
-        if (get().turnId !== started.turnId) return
+        const current = get()
+        if (current.turnId !== started.turnId || current.turnEpoch !== turnEpoch) return
         // Nothing reaches the recogniser while 20x is talking, so an answer can
         // never be transcribed as if the user had said it.
         for (const frame of bargeInGate.push(chunk)) void voiceApi.pushAudio(started.turnId, frame)
       },
       onLevel: (level) => {
-        if (get().turnId === started.turnId) set({ level })
+        const current = get()
+        if (current.turnId === started.turnId && current.turnEpoch === turnEpoch) set({ level })
       },
       onError: (message) => {
-        if (get().turnId !== started.turnId) return
+        const current = get()
+        if (current.turnId !== started.turnId || current.turnEpoch !== turnEpoch) return
         set({ result: { kind: 'error', message, at: Date.now() } })
         cancelStartedTurn()
       },
@@ -459,7 +473,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
     // The turn is closed here and now. Waiting for an answer from main would
     // leave the control stuck on "Stop" whenever main has already dropped the
     // turn — for example after the worker ended it at a pause.
-    set({ turnId: null, level: 0, partial: '' })
+    set({ turnId: null, turnEpoch: null, level: 0, partial: '' })
     await voiceApi.endTurn(turnId)
   },
 
@@ -472,11 +486,11 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
   },
 
   cancel: async () => {
-    const { turnId } = get()
+    const { turnId, turnEpoch } = get()
     voiceCapture.stop()
     bargeInGate.reset()
-    set({ turnId: null, partial: '', level: 0 })
-    if (turnId) await voiceApi.cancelTurn(turnId)
+    set({ turnId: null, turnEpoch: null, partial: '', level: 0 })
+    if (turnId) await voiceApi.cancelTurn(turnId, turnEpoch ?? undefined)
   },
 
   confirm: async (choice) => {
@@ -638,7 +652,7 @@ if (hasVoiceBridge()) {
     // disables every microphone button in the app for ever.
     if (event.state === 'idle' && useVoiceStore.getState().turnId) {
       voiceCapture.stop()
-      useVoiceStore.setState({ state: event.state, turnId: null, level: 0, partial: '' })
+      useVoiceStore.setState({ state: event.state, turnId: null, turnEpoch: null, level: 0, partial: '' })
       return
     }
     useVoiceStore.setState({ state: event.state })
@@ -673,7 +687,7 @@ if (hasVoiceBridge()) {
     // Release the microphone here too, or it would stay open with no way to
     // stop it from the user interface.
     voiceCapture.stop()
-    useVoiceStore.setState({ turnId: null, level: 0 })
+    useVoiceStore.setState({ turnId: null, turnEpoch: null, level: 0 })
   })
 
   voiceApi.onOutcome((outcome: VoiceActionOutcome) => {
@@ -686,6 +700,7 @@ if (hasVoiceBridge()) {
           ...(outcome.candidates ? { candidates: outcome.candidates } : {}),
         },
         turnId: null,
+        turnEpoch: null,
       })
       return
     }
@@ -693,6 +708,7 @@ if (hasVoiceBridge()) {
       useVoiceStore.setState({
         result: { kind: 'ok', message: outcome.message, at: Date.now() },
         turnId: null,
+        turnEpoch: null,
       })
       return
     }
@@ -700,17 +716,25 @@ if (hasVoiceBridge()) {
       useVoiceStore.setState({
         result: { kind: 'error', message: outcome.message, at: Date.now() },
         turnId: null,
+        turnEpoch: null,
       })
       return
     }
     // `completed` closes a conversation whose sentences were already sent. It
     // is a normal ending, so it shows nothing.
-    if (
-      outcome.status === 'dictation' ||
-      outcome.status === 'cancelled' ||
-      outcome.status === 'completed'
-    ) {
-      useVoiceStore.setState({ turnId: null, partial: '' })
+    if (outcome.status === 'cancelled') {
+      const current = useVoiceStore.getState()
+      // New main versions echo the exact start epoch. The turn ID fallback is
+      // retained for old bridges, but an epoch always wins so reused IDs are
+      // safe too.
+      if (outcome.turnEpoch
+        ? current.turnEpoch !== outcome.turnEpoch
+        : current.turnId !== outcome.turnId) return
+      useVoiceStore.setState({ turnId: null, turnEpoch: null, partial: '' })
+      return
+    }
+    if (outcome.status === 'dictation' || outcome.status === 'completed') {
+      useVoiceStore.setState({ turnId: null, turnEpoch: null, partial: '' })
     }
   })
 

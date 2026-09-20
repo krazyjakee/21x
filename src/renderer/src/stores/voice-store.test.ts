@@ -25,6 +25,7 @@ function reset(): void {
     enabled: true,
     state: 'idle',
     turnId: null,
+    turnEpoch: null,
     partial: '',
     final: '',
     level: 0,
@@ -128,7 +129,7 @@ describe('voice store — turns', () => {
 
     expect(voiceCapture.stop).toHaveBeenCalled()
     expect(useVoiceStore.getState().turnId).toBeNull()
-    expect(window.electronAPI.voice.cancelTurn).toHaveBeenCalledWith('turn-1')
+    expect(window.electronAPI.voice.cancelTurn).toHaveBeenCalledWith('turn-1', expect.any(String))
     expect(useVoiceStore.getState().result).toBeNull()
     finishCapture(false)
     await expect(starting).resolves.toBeNull()
@@ -146,7 +147,7 @@ describe('voice store — turns', () => {
     publish({ turnId: 'late-turn' })
 
     await expect(starting).resolves.toBeNull()
-    expect(window.electronAPI.voice.cancelTurn).toHaveBeenCalledWith('late-turn')
+    expect(window.electronAPI.voice.cancelTurn).toHaveBeenCalledWith('late-turn', expect.any(String))
     expect(voiceCapture.start).not.toHaveBeenCalled()
     expect(useVoiceStore.getState()).toMatchObject({ turnId: null, result: null })
   })
@@ -180,6 +181,42 @@ describe('voice store — events from main', () => {
 
     onPartial({ turnId: 'turn-9', text: 'live words' })
     expect(useVoiceStore.getState().partial).toBe('live words')
+  })
+
+  it.each([
+    { label: 'different turn', activeTurn: 'new-turn', staleTurn: 'old-turn' },
+    { label: 'reused turn id', activeTurn: 'shared-turn', staleTurn: 'shared-turn' },
+  ])('ignores a stale leased cancellation from a $label', ({ activeTurn, staleTurn }) => {
+    useVoiceStore.setState({
+      turnId: activeTurn,
+      turnEpoch: 'replacement-epoch',
+      partial: 'replacement words',
+    })
+
+    onOutcome({ status: 'cancelled', turnId: staleTurn, turnEpoch: 'old-epoch' })
+
+    expect(useVoiceStore.getState()).toMatchObject({
+      turnId: activeTurn,
+      turnEpoch: 'replacement-epoch',
+      partial: 'replacement words',
+    })
+  })
+
+  it('accepts the cancellation owned by the active epoch', () => {
+    useVoiceStore.setState({ turnId: 'shared-turn', turnEpoch: 'active-epoch', partial: 'words' })
+
+    onOutcome({ status: 'cancelled', turnId: 'shared-turn', turnEpoch: 'active-epoch' })
+
+    expect(useVoiceStore.getState()).toMatchObject({ turnId: null, turnEpoch: null, partial: '' })
+  })
+
+  it('keeps compatible unleased cancellation ownership by turn id', () => {
+    useVoiceStore.setState({ turnId: 'active-turn', turnEpoch: 'active-epoch', partial: 'words' })
+    onOutcome({ status: 'cancelled', turnId: 'old-turn' })
+    expect(useVoiceStore.getState().turnId).toBe('active-turn')
+
+    onOutcome({ status: 'cancelled', turnId: 'active-turn' })
+    expect(useVoiceStore.getState()).toMatchObject({ turnId: null, turnEpoch: null, partial: '' })
   })
 
   it('shows a confirmation card instead of running the action', () => {

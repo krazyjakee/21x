@@ -208,6 +208,55 @@ describe('VoiceSessionManager — turns', () => {
     expect(second.turnId).not.toBe(first.turnId)
     expect(ctx.worker.cancelTurn).toHaveBeenCalledWith(first.turnId)
   })
+
+  it('acknowledges a stale leased cancellation without touching its replacement', async () => {
+    const first = await ctx.manager.startTurn('command', {}) as { turnId: string; turnEpoch: string }
+    const second = await ctx.manager.startTurn('command', {}) as { turnId: string; turnEpoch: string }
+    ctx.worker.cancelTurn.mockClear()
+    ctx.notify.mockClear()
+
+    ctx.manager.cancelTurn(first.turnId, first.turnEpoch)
+
+    expect(ctx.manager.getState()).toBe('listening')
+    expect(ctx.worker.cancelTurn).not.toHaveBeenCalled()
+    expect(outcomes(ctx.notify)).toEqual([{
+      status: 'cancelled', turnId: first.turnId, turnEpoch: first.turnEpoch,
+    }])
+    ctx.manager.pushAudio(second.turnId, Buffer.alloc(4))
+    expect(ctx.worker.pushAudio).toHaveBeenCalled()
+  })
+
+  it('uses the start epoch when a replacement reuses the same turn id', async () => {
+    const first = await ctx.manager.startTurn('command', {}) as { turnId: string; turnEpoch: string }
+    const second = await ctx.manager.startTurn('command', {}) as { turnId: string; turnEpoch: string }
+    const internals = ctx.manager as unknown as { turnId: string; turnEpoch: string }
+    internals.turnId = first.turnId
+    expect(second.turnEpoch).not.toBe(first.turnEpoch)
+    ctx.worker.cancelTurn.mockClear()
+    ctx.notify.mockClear()
+
+    ctx.manager.cancelTurn(first.turnId, first.turnEpoch)
+
+    expect(ctx.manager.getState()).toBe('listening')
+    expect(internals.turnId).toBe(first.turnId)
+    expect(internals.turnEpoch).toBe(second.turnEpoch)
+    expect(ctx.worker.cancelTurn).not.toHaveBeenCalled()
+    expect(outcomes(ctx.notify)).toEqual([{
+      status: 'cancelled', turnId: first.turnId, turnEpoch: first.turnEpoch,
+    }])
+  })
+
+  it('still cancels the active leased turn and reports its exact owner', async () => {
+    const active = await ctx.manager.startTurn('command', {}) as { turnId: string; turnEpoch: string }
+
+    ctx.manager.cancelTurn(active.turnId, active.turnEpoch)
+
+    expect(ctx.manager.getState()).toBe('idle')
+    expect(ctx.worker.cancelTurn).toHaveBeenCalledWith(active.turnId)
+    expect(outcomes(ctx.notify).at(-1)).toEqual({
+      status: 'cancelled', turnId: active.turnId, turnEpoch: active.turnEpoch,
+    })
+  })
 })
 
 describe('VoiceSessionManager — dictation and commands', () => {

@@ -775,12 +775,13 @@ export const voiceApi = {
   getPermission: (): Promise<{ status: MicrophonePermission }> => window.electronAPI.voice.getPermission(),
   requestPermission: (): Promise<{ status: MicrophonePermission }> =>
     window.electronAPI.voice.requestPermission(),
-  startTurn: (mode: VoiceTurnMode, context: VoiceUiContext): Promise<{ turnId: string } | { error: string }> =>
+  startTurn: (mode: VoiceTurnMode, context: VoiceUiContext): Promise<{ turnId: string; turnEpoch?: string } | { error: string }> =>
     window.electronAPI.voice.startTurn(mode, context),
   pushAudio: (turnId: string, chunk: Uint8Array): Promise<void> =>
     window.electronAPI.voice.pushAudio(turnId, chunk),
   endTurn: (turnId: string): Promise<void> => window.electronAPI.voice.endTurn(turnId),
-  cancelTurn: (turnId?: string): Promise<void> => window.electronAPI.voice.cancelTurn(turnId),
+  cancelTurn: (turnId?: string, turnEpoch?: string): Promise<void> =>
+    window.electronAPI.voice.cancelTurn(turnId, turnEpoch),
   confirm: (turnId: string, choice?: { taskId?: string; agentName?: string }): Promise<{ success: boolean }> =>
     window.electronAPI.voice.confirm(turnId, choice),
   dismiss: (turnId: string): Promise<void> => window.electronAPI.voice.dismiss(turnId),

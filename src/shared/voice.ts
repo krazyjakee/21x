@@ -72,6 +72,18 @@ export function canTransition(from: VoiceState, to: VoiceState): boolean {
  */
 export type VoiceTurnMode = 'dictation' | 'command' | 'conversation'
 
+/**
+ * Main-process ownership for one microphone turn.
+ *
+ * `turnId` identifies provider traffic. `turnEpoch` identifies the particular
+ * start that published it, so a late cancellation cannot target a replacement
+ * start even if a provider or test double reuses the same turn ID.
+ */
+export interface VoiceTurnHandle {
+  turnId: string
+  turnEpoch?: string
+}
+
 /** What the renderer is showing when the turn starts. Main trusts nothing here. */
 export interface VoiceUiContext {
   selectedTaskId?: string | null
@@ -151,7 +163,7 @@ export type VoiceActionOutcome =
    * must not be shown as one.
    */
   | { status: 'completed'; turnId: string; segments: number }
-  | { status: 'cancelled'; turnId: string }
+  | { status: 'cancelled'; turnId: string; turnEpoch?: string }
 
 export interface VoiceCandidate {
   id: string
@@ -397,4 +409,3 @@ export const MOBILE_VOICE_CAPABILITIES: VoiceCapabilities = {
   tts: false,
   wakeWord: false,
 }
-

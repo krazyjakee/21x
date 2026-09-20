@@ -640,7 +640,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     pushAudio: (turnId: string, chunk: Uint8Array): Promise<void> =>
       ipcRenderer.invoke('voice:pushAudio', { turnId, chunk }),
     endTurn: (turnId: string): Promise<void> => ipcRenderer.invoke('voice:endTurn', { turnId }),
-    cancelTurn: (turnId?: string): Promise<void> => ipcRenderer.invoke('voice:cancelTurn', { turnId }),
+    cancelTurn: (turnId?: string, turnEpoch?: string): Promise<void> =>
+      ipcRenderer.invoke('voice:cancelTurn', { turnId, turnEpoch }),
     confirm: (turnId: string, choice?: { taskId?: string; agentName?: string }): Promise<unknown> =>
       ipcRenderer.invoke('voice:confirm', { turnId, choice }),
     dismiss: (turnId: string): Promise<void> => ipcRenderer.invoke('voice:dismiss', { turnId }),

@@ -183,6 +183,17 @@ describe('registerIpcHandlers', () => {
     ])
   })
 
+  it('passes the exact turn epoch through the cancellation boundary', async () => {
+    const cancelTurn = vi.fn()
+    register({ voiceSessionManager: { cancelTurn } })
+    const handleCalls = (ipcMain.handle as ReturnType<typeof vi.fn>).mock.calls as [string, (...args: unknown[]) => unknown][]
+    const cancel = handleCalls.filter((call) => call[0] === 'voice:cancelTurn').pop()?.[1]
+
+    await cancel!({}, { turnId: 'shared-turn', turnEpoch: 'old-start-epoch' })
+
+    expect(cancelTurn).toHaveBeenCalledExactlyOnceWith('shared-turn', 'old-start-epoch')
+  })
+
   it('terminal:kill ignores stale expectedPid and only kills matching process', async () => {
     register()
 

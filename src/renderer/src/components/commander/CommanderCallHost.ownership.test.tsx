@@ -30,6 +30,7 @@ import { voicePlayback } from '@/lib/voice-playback'
 import { onCallMediaEvent } from '@/stores/commander-call-store'
 
 const onVoiceFinal = vi.mocked(window.electronAPI.voice.onFinal).mock.calls[0][0]
+const onVoiceOutcome = vi.mocked(window.electronAPI.voice.onOutcome).mock.calls[0][0]
 const initial = useVoiceStore.getState()
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -236,6 +237,38 @@ describe('Independent PR 164 adversarial review', () => {
 })
 
 describe('Independent repair-boundary regressions', () => {
+  it.each([
+    { label: 'same session, new turn id', nextSession: 'session-1', oldTurn: 'old-mic', newTurn: 'new-mic' },
+    { label: 'different session, new turn id', nextSession: 'session-2', oldTurn: 'old-mic', newTurn: 'new-mic' },
+    { label: 'same session, reused turn id', nextSession: 'session-1', oldTurn: 'shared-mic', newTurn: 'shared-mic' },
+    { label: 'different session, reused turn id', nextSession: 'session-2', oldTurn: 'shared-mic', newTurn: 'shared-mic' }
+  ])('late aborted-start cancellation cannot end the replacement call ($label)', async ({ nextSession, oldTurn, newTurn }) => {
+    const oldReply = deferred<{ turnId: string }>()
+    vi.spyOn(voiceCapture, 'start').mockResolvedValue(true)
+    const startTurnApi = vi.mocked(window.electronAPI.voice.startTurn)
+    startTurnApi.mockImplementationOnce(() => oldReply.promise).mockResolvedValueOnce({ turnId: newTurn })
+    vi.mocked(window.electronAPI.voice.cancelTurn).mockImplementation((async (...args: unknown[]) => {
+      onVoiceOutcome({ status: 'cancelled', turnId: args[0], turnEpoch: args[1] } as never)
+    }) as never)
+    useVoiceStore.setState({ startTurn: initial.startTurn, cancel: initial.cancel })
+    view()
+
+    let oldStart!: Promise<void>
+    await act(async () => { oldStart = useCommanderCallStore.getState().start('session-1') })
+    act(() => useCommanderCallStore.getState().end())
+    await act(async () => { await useCommanderCallStore.getState().start(nextSession) })
+    expect(useCommanderCallStore.getState()).toMatchObject({ status: 'live', sessionId: nextSession, turnId: newTurn })
+
+    await act(async () => { oldReply.resolve({ turnId: oldTurn }); await oldStart })
+
+    expect.soft(useVoiceStore.getState().turnId).toBe(newTurn)
+    expect.soft(useCommanderCallStore.getState()).toMatchObject({
+      status: 'live', sessionId: nextSession, turnId: newTurn, error: null
+    })
+    expect.soft(getActiveComposer()).toBe('commander-voice')
+    expect(useVoiceStore.getState().captionOwner).toBe('commander-voice')
+  })
+
   it.each([
     { label: 'same session, new turn id', nextSession: 'session-1', oldTurn: 'old-mic', newTurn: 'new-mic' },
     { label: 'different session, new turn id', nextSession: 'session-2', oldTurn: 'old-mic', newTurn: 'new-mic' },
