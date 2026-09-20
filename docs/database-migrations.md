@@ -201,6 +201,14 @@ canonical repository/issue identity and the payload reconstructed in the
 stored `payload_fields` shape must also reproduce `payload_hash`; a copied
 marker with different title, body or labels is not success evidence.
 
+### Effective merge-grant attribution (#159, v26)
+
+Migration 26 adds `merge_grant_uses.authorization_context`. The effective
+grant remains the merge authority and owns the reservation/use; the policy
+level and verified Commander or project-chat provenance are retained as
+separate audit context across retries and reconciliation. The migration is
+idempotent and fresh databases create the same final table directly.
+
 ## Adding a column to other tables
 
 Same pattern: update `createTables()`, add a guarded `ALTER TABLE` in `runMigrations()`, and bump `SCHEMA_VERSION`.

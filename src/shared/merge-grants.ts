@@ -69,6 +69,23 @@ export interface MergeCheckRecord {
   state: 'passed' | 'skipped' | 'failed' | 'pending'
 }
 
+/**
+ * Context that explains how a merge request reached the authoritative merge
+ * executor. This is deliberately separate from the effective authority: a
+ * policy or Commander relay may explain why the Captain called the tool, but
+ * an explicit covering grant remains the authority that was actually spent.
+ */
+export interface MergeAuthorizationContext {
+  /** The project's merge policy at dispatch time, when the policy gate supplied it. */
+  policy_level: 'autonomous' | 'tell_commander' | 'ask_user' | null
+  /** The grant named by the caller, before the executor revalidated it. */
+  requested_grant_id: string | null
+  /** Where the effective grant originated; `commander` identifies a verified relay. */
+  grant_source: MergeGrantSource | null
+  source_session_id: string | null
+  source_message_id: string | null
+}
+
 /** The audit row of one merge made under a grant. */
 export interface MergeGrantUse {
   id: string
@@ -83,10 +100,14 @@ export interface MergeGrantUse {
   merge_state: string
   review_decision: string
   checks: MergeCheckRecord[]
+  authorization_context: MergeAuthorizationContext
   merged_at: string
 }
 
-export type MergeGrantUseInput = Omit<MergeGrantUse, 'id' | 'grant_id' | 'project_id' | 'merged_at'>
+export type MergeGrantUseInput = Omit<MergeGrantUse, 'id' | 'grant_id' | 'project_id' | 'merged_at' | 'authorization_context'> & {
+  /** Optional only for reservations written by builds before #159. */
+  authorization_context?: MergeAuthorizationContext
+}
 
 export interface MergeGrantReservation {
   id: string

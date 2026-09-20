@@ -58,9 +58,17 @@ async function mergeCall(ctx: MergeGateContext): Promise<unknown> {
     .some((repo) => repo.provider === 'github' && `${repo.org}/${repo.name}`.toLowerCase() === `${pr.owner}/${pr.repo}`.toLowerCase())
   if (!inProject) return { error: `${pr.owner}/${pr.repo} is not one of this project's GitHub repositories.` }
 
+  const requestedGrantId = typeof args.grant_id === 'string' && args.grant_id ? args.grant_id : null
+
   if (level === 'autonomous' || level === 'tell_commander') {
-    const result = await performMerge(db, { projectId, pr, method, authority: { kind: 'policy', level } }, hooks)
-    if (level === 'tell_commander' && result.status === 'merged') ctx.reportPerformed(`merge ${pr.url}`)
+    const result = await performMerge(db, {
+      projectId, pr, method, authority: { kind: 'policy', level },
+      requestedGrantId, policyLevel: level
+    }, hooks)
+    const effective = result.authorized_by as { kind?: string } | undefined
+    if (level === 'tell_commander' && result.status === 'merged' && effective?.kind !== 'grant') {
+      ctx.reportPerformed(`merge ${pr.url}`)
+    }
     return result
   }
 
@@ -76,10 +84,13 @@ async function mergeCall(ctx: MergeGateContext): Promise<unknown> {
   const blocked = refuseUnmergeable(projectId, pr, state, hooks)
   if (blocked) return blocked
 
-  const grantId = typeof args.grant_id === 'string' && args.grant_id ? args.grant_id : null
+  const grantId = requestedGrantId
   const grant = findCoveringGrant(db, projectId, { ...pr, baseRefName: state.baseRefName }, grantId)
   if (grant) {
-    return performMerge(db, { projectId, pr, method, authority: { kind: 'grant', grantId: grant.id }, state }, hooks)
+    return performMerge(db, {
+      projectId, pr, method, authority: { kind: 'grant', grantId: grant.id },
+      requestedGrantId: grantId, policyLevel: level, state
+    }, hooks)
   }
 
   const note = grantId
@@ -89,7 +100,10 @@ async function mergeCall(ctx: MergeGateContext): Promise<unknown> {
       : ''
   const held = ctx.hold(`merge ${pr.url}${state.title ? ` "${state.title.slice(0, 80)}"` : ''} (${method})`, (heldId) =>
     // Re-read at approval time: the PR may have changed while it waited.
-    performMerge(db, { projectId, pr, method, authority: { kind: 'user_approval', heldId } }, hooks))
+    performMerge(db, {
+      projectId, pr, method, authority: { kind: 'user_approval', heldId },
+      policyLevel: level
+    }, hooks))
   if (note && held && typeof held === 'object') return { ...(held as Record<string, unknown>), note: note.trim() }
   return held
 }
