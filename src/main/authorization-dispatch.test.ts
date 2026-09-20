@@ -144,7 +144,7 @@ describe('adapter authorization boundary', () => {
     expect(taskAuthorization(db, taskId).effectivePermissions).toEqual([])
   })
 
-  it.each(['after-status', 'before-activation', 'before-send'] as const)(
+  it.each(['before-status', 'after-status', 'before-activation', 'before-send'] as const)(
     'fails closed when ownership is withdrawn at the %s boundary',
     async blockedStage => {
       const { seq } = dispatch()
