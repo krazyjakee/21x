@@ -426,7 +426,7 @@ describe('per-project Captain conversations', () => {
       agentId,
       candidateAgentId: candidate.id,
       errorDetail: 'backend protocol is not ready',
-      probeOk: true
+      probeOk: null
     })
     expect(fake.destroySession).toHaveBeenCalledWith('unhealthy-session', expect.any(Object))
     expect(manager.findSessionByTaskId(alphaCaptain)?.sessionId).toBe('good-session')

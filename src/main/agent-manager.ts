@@ -2633,7 +2633,8 @@ export class AgentManager extends EventEmitter {
           sessionId: oldLive?.[0] ?? coordinator.session_id ?? null,
           errorCode: timedOut ? 'STARTUP_TIMEOUT' : 'STARTUP_FAILED',
           errorDetail: detail,
-          probeOk: oldLive ? true : null
+          // Keeping the previous session is not a fresh readiness probe.
+          probeOk: oldLive?.[1].status === 'error' ? false : null
         })
         if (rolledBack) return rolledBack
       }
