@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { EventEmitter } from 'events'
-import { VOICE_TTS_EVENTS, VOICE_TTS_SETTING_KEYS, type VoiceTtsVoice } from '../../shared/voice-tts'
+import { VOICE_TTS_EVENTS, VOICE_TTS_SETTING_KEYS, type VoiceTtsStatus, type VoiceTtsVoice } from '../../shared/voice-tts'
 import { VoiceSpeechService, localVoicesForModel } from './voice-speech-service'
 import type { VoiceTtsWorkerClient } from './voice-tts-worker-client'
 import type { VoiceTtsModelManager } from './voice-tts-model-manager'
@@ -84,6 +84,24 @@ function makeService(settings: Record<string, string> = {}) {
     listVoices: async () => SYSTEM_VOICES,
   })
   return { service, worker, events, store }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: Error) => void
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
+}
+
+interface SpeechServiceHarness {
+  listVoices: () => Promise<VoiceTtsVoice[]>
+  systemVoices: VoiceTtsVoice[]
+  status: VoiceTtsStatus
+  models: Pick<VoiceTtsModelManager, 'resolve'>
+}
+
+function speechHarness(service: VoiceSpeechService): SpeechServiceHarness {
+  return service as unknown as SpeechServiceHarness
 }
 
 let clock = 0
@@ -271,6 +289,117 @@ describe('answer correlation', () => {
 })
 
 describe('one voice at a time', () => {
+  it('makes a stopped speak inert at the system-voice await boundary', async () => {
+    const ready = deferred<VoiceTtsVoice[]>()
+    const ctx = makeService({ [VOICE_TTS_SETTING_KEYS.enabled]: 'true' })
+    const harness = speechHarness(ctx.service)
+    vi.spyOn(harness, 'listVoices').mockReturnValueOnce(ready.promise)
+
+    const stale = ctx.service.speak({ text: 'Old action result.', source: 'action_result' })
+    await Promise.resolve()
+    ctx.service.stop('cancelled')
+    harness.systemVoices = SYSTEM_VOICES
+    harness.status = { state: 'ready', engine: 'system', modelId: '', voiceId: 'system:Samantha', sampleRate: 24000 }
+    expect(await ctx.service.speak({ text: 'Replacement passage.', source: 'manual', taskId: 'commander:new' })).toBe(true)
+    const replacementId = ctx.worker.spoken[0].speechId
+
+    ready.resolve(SYSTEM_VOICES)
+    expect(await stale).toBe(false)
+    expect(ctx.service.currentTaskId).toBe('commander:new')
+    expect(ctx.worker.spoken).toHaveLength(1)
+    expect(ctx.worker.cancelled).not.toContain(replacementId)
+  })
+
+  it('makes a stopped streaming open inert at the prepare await boundary', async () => {
+    const ready = deferred<VoiceTtsVoice[]>()
+    const ctx = makeService({ [VOICE_TTS_SETTING_KEYS.enabled]: 'true' })
+    const harness = speechHarness(ctx.service)
+    vi.spyOn(harness, 'listVoices').mockReturnValueOnce(ready.promise)
+
+    const stale = ctx.service.beginStreamingAnswer('commander:old', undefined, 'conversation')
+    await Promise.resolve()
+    ctx.service.stop('cancelled')
+    harness.systemVoices = SYSTEM_VOICES
+    harness.status = { state: 'ready', engine: 'system', modelId: '', voiceId: 'system:Samantha', sampleRate: 24000 }
+    expect(await ctx.service.beginStreamingAnswer('commander:new', undefined, 'conversation')).toBe(true)
+
+    ready.resolve(SYSTEM_VOICES)
+    expect(await stale).toBe(false)
+    expect(ctx.service.currentTaskId).toBe('commander:new')
+    expect(ctx.worker.spoken).toHaveLength(1)
+  })
+
+  it('does not let a rejected retired prepare report an error or stop current speech', async () => {
+    const ready = deferred<VoiceTtsVoice[]>()
+    const ctx = makeService({ [VOICE_TTS_SETTING_KEYS.enabled]: 'true' })
+    const harness = speechHarness(ctx.service)
+    vi.spyOn(harness, 'listVoices').mockReturnValueOnce(ready.promise)
+    const stale = ctx.service.speak({ text: 'Old action result.', source: 'action_result' })
+    await Promise.resolve()
+    ctx.service.stop('cancelled')
+    harness.systemVoices = SYSTEM_VOICES
+    harness.status = { state: 'ready', engine: 'system', modelId: '', voiceId: 'system:Samantha', sampleRate: 24000 }
+    await ctx.service.speak({ text: 'Replacement passage.', source: 'manual' })
+
+    ready.reject(new Error('retired enumeration failed'))
+    expect(await stale).toBe(false)
+    expect(ctx.service.speaking).toBe(true)
+    expect(ctx.events.filter((event) =>
+      event.channel === VOICE_TTS_EVENTS.speechEnd &&
+      (event.data as { reason: string }).reason === 'error')).toEqual([])
+  })
+
+  it('makes a retired local-model resolution inert at its await boundary', async () => {
+    const model = deferred<Awaited<ReturnType<VoiceTtsModelManager['resolve']>>>()
+    const ctx = makeService({
+      [VOICE_TTS_SETTING_KEYS.enabled]: 'true',
+      [VOICE_TTS_SETTING_KEYS.engine]: 'local',
+      [VOICE_TTS_SETTING_KEYS.modelId]: 'kitten-nano-en-v0_2',
+    })
+    const harness = speechHarness(ctx.service)
+    harness.systemVoices = SYSTEM_VOICES
+    vi.spyOn(harness.models, 'resolve').mockReturnValueOnce(model.promise)
+    const stale = ctx.service.speak({ text: 'Old local result.', source: 'action_result' })
+    await Promise.resolve()
+
+    ctx.service.stop('cancelled')
+    harness.status = { state: 'ready', engine: 'local', modelId: 'kitten-nano-en-v0_2', voiceId: '', sampleRate: 24000 }
+    expect(await ctx.service.speak({ text: 'Replacement passage.', source: 'manual', taskId: 'commander:new' })).toBe(true)
+    const replacementId = ctx.worker.spoken[0].speechId
+    model.resolve({ id: 'kitten-nano-en-v0_2' } as Awaited<ReturnType<VoiceTtsModelManager['resolve']>>)
+
+    expect(await stale).toBe(false)
+    expect(ctx.worker.loads).toEqual([])
+    expect(ctx.worker.cancelled).not.toContain(replacementId)
+    expect(ctx.service.currentTaskId).toBe('commander:new')
+  })
+
+  it('makes a retired hosted-engine load inert at its await boundary', async () => {
+    const hosted = deferred<void>()
+    const ctx = makeService({
+      [VOICE_TTS_SETTING_KEYS.enabled]: 'true',
+      [VOICE_TTS_SETTING_KEYS.engine]: 'elevenlabs',
+      [VOICE_TTS_SETTING_KEYS.elevenlabsDisclosure]: 'true',
+      [VOICE_TTS_SETTING_KEYS.elevenlabsApiKey]: 'test-key',
+    })
+    const harness = speechHarness(ctx.service)
+    harness.systemVoices = SYSTEM_VOICES
+    vi.spyOn(ctx.service.elevenlabs, 'ensureLoaded').mockReturnValueOnce(hosted.promise)
+    const stale = ctx.service.speak({ text: 'Old hosted result.', source: 'action_result' })
+    await Promise.resolve()
+
+    ctx.service.stop('cancelled')
+    ctx.store.set(VOICE_TTS_SETTING_KEYS.engine, 'system')
+    harness.status = { state: 'ready', engine: 'system', modelId: '', voiceId: 'system:Samantha', sampleRate: 24000 }
+    expect(await ctx.service.speak({ text: 'Replacement passage.', source: 'manual', taskId: 'commander:new' })).toBe(true)
+    const replacementId = ctx.worker.spoken[0].speechId
+    hosted.resolve()
+
+    expect(await stale).toBe(false)
+    expect(ctx.worker.cancelled).not.toContain(replacementId)
+    expect(ctx.service.currentTaskId).toBe('commander:new')
+  })
+
   it('stops the passage being read before it starts the next one', async () => {
     const { service, worker } = makeService({ [VOICE_TTS_SETTING_KEYS.enabled]: 'true' })
     await service.prepare()

@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { CommanderEvent } from '@shared/commander'
+import type {
+  VoiceSpeechChunkEvent,
+  VoiceSpeechEndEvent,
+  VoiceSpeechStartEvent,
+  VoiceTtsStatus,
+  VoiceTtsVoice,
+} from '@shared/voice-tts'
 const mocks = vi.hoisted(() => ({
   selected: 'session-1',
   setActive: vi.fn(async (_id: string | null) => ({})),
@@ -16,6 +23,24 @@ vi.mock('@/lib/ipc-client', async (original) => ({
 vi.mock('@/stores/commander-store', () => ({
   useCommanderStore: (selector: (s: { selectedSessionId: string }) => unknown) => selector({ selectedSessionId: mocks.selected })
 }))
+
+const ttsCallbacks = vi.hoisted(() => {
+  const callbacks = {
+    start: new Set<(event: VoiceSpeechStartEvent) => void>(),
+    end: new Set<(event: VoiceSpeechEndEvent) => void>(),
+    chunk: new Set<(event: VoiceSpeechChunkEvent) => void>(),
+  }
+  window.electronAPI.voice.tts = {
+    getSnapshot: vi.fn(async () => ({})),
+    onSpeechStart: vi.fn((cb: (event: VoiceSpeechStartEvent) => void) => { callbacks.start.add(cb); return () => callbacks.start.delete(cb) }),
+    onSpeechEnd: vi.fn((cb: (event: VoiceSpeechEndEvent) => void) => { callbacks.end.add(cb); return () => callbacks.end.delete(cb) }),
+    onSpeechChunk: vi.fn((cb: (event: VoiceSpeechChunkEvent) => void) => { callbacks.chunk.add(cb); return () => callbacks.chunk.delete(cb) }),
+    onStatus: vi.fn(() => () => {}),
+    onModelProgress: vi.fn(() => () => {}),
+    stop: vi.fn(async () => {}),
+  } as unknown as typeof window.electronAPI.voice.tts
+  return callbacks
+})
 import { CommanderCallHost, commanderCallMedia } from './CommanderCallHost'
 import { CommanderVoiceControls } from './CommanderVoiceControls'
 import { VoiceOverlay } from '@/components/voice/VoiceOverlay'
@@ -145,6 +170,23 @@ class FakeWorker extends EventEmitter {
   isLoaded = true
 }
 
+interface TtsWorkerHarness extends EventEmitter {
+  load: (request?: unknown) => void
+  speak: (request?: unknown) => void
+  cancel: (speechId?: string) => void
+}
+
+interface SpeechServiceHarness {
+  listVoices: () => Promise<VoiceTtsVoice[]>
+  worker: TtsWorkerHarness
+  status: VoiceTtsStatus
+  startPassage: (...args: unknown[]) => unknown
+}
+
+function speechHarness(speech: unknown): SpeechServiceHarness {
+  return speech as unknown as SpeechServiceHarness
+}
+
 function makeManager(settings: Record<string, string> = { voice_enabled: 'true' }) {
   const store = { ...settings }
   const notify = vi.fn()
@@ -221,6 +263,9 @@ function bridge() {
   let holdOutcomes = false
   ctx.notify.mockImplementation((channel, payload) => {
     if (channel === 'voice:state') savedState(payload)
+    if (channel === 'voice:speech:start') for (const cb of ttsCallbacks.start) cb(payload)
+    if (channel === 'voice:speech:end') for (const cb of ttsCallbacks.end) cb(payload)
+    if (channel === 'voice:speech:chunk') for (const cb of ttsCallbacks.chunk) cb(payload)
     if (channel === 'voice:outcome') {
       if (holdOutcomes) held.push(() => savedOutcome(payload))
       else savedOutcome(payload)
@@ -238,6 +283,27 @@ const matrix = ['session-1', 'session-2'].flatMap(session =>
   [false, true].flatMap(reused =>
     [false, true].flatMap(remount =>
       [false, true].map(delayed => ({session, reused, remount, delayed})))))
+
+const audioSources: Array<{ stop: ReturnType<typeof vi.fn> }> = []
+class OwnershipAudioContext {
+  state = 'running'
+  currentTime = 0
+  destination = {}
+  createAnalyser() {
+    return { fftSize: 256, frequencyBinCount: 128, connect() {}, disconnect() {}, getByteTimeDomainData(a: Uint8Array) { a.fill(128) } }
+  }
+  createBuffer(_channels: number, length: number, rate: number) {
+    const data = new Float32Array(length)
+    return { duration: length / rate, getChannelData: () => data }
+  }
+  createBufferSource() {
+    const source = { buffer: null, onended: null, connect() {}, start: vi.fn(), stop: vi.fn() }
+    audioSources.push(source)
+    return source
+  }
+  resume() { return Promise.resolve() }
+  close() { return Promise.resolve() }
+}
 
 describe('Connected main-to-renderer cancellation ownership', () => {
   it.each(matrix)('late aborted reply: session=$session reuse=$reused remount=$remount delayedOutcome=$delayed', async ({session,reused,remount,delayed}) => {
@@ -349,6 +415,129 @@ describe('Connected retained confirmation ownership', () => {
       expect(useCommanderCallStore.getState()).toMatchObject({status:'live',sessionId:session,turnId:activeId,error:null})
     }
   )
+})
+
+describe('Connected confirmed-action speech ownership', () => {
+  it.each(['session-1', 'session-2'].flatMap(session =>
+    [false, true].map(reused => ({ session, reused }))))(
+    'a late action-result prepare cannot replace call speech ($session reuse=$reused)',
+    async ({ session, reused }) => {
+      const ctx = bridge()
+      ids.queue = ['command-turn', 'command-epoch', reused ? 'command-turn' : 'call-turn', 'call-epoch']
+      ctx.store.voice_tts_enabled = 'true'
+      ctx.store.voice_tts_speak_results = 'true'
+      ctx.db.createTask.mockReturnValue({ id: 'created-task', title: 'Review the report' } as never)
+      const voices: VoiceTtsVoice[] = [{ id: 'system:review', label: 'Review', engine: 'system', speakerId: 0, modelId: '', language: 'en', description: '' }]
+      const ready = deferred<typeof voices>()
+      const speech = ctx.manager.speech
+      const harness = speechHarness(speech)
+      vi.spyOn(harness, 'listVoices').mockImplementationOnce(() => ready.promise).mockResolvedValue(voices)
+      const ttsWorker = harness.worker
+      vi.spyOn(ttsWorker, 'load').mockImplementation(() => {
+        ttsWorker.emit('status', { state: 'ready', engine: 'system', modelId: '', voiceId: 'system:review', sampleRate: 24000 })
+      })
+      vi.spyOn(ttsWorker, 'speak').mockImplementation(() => {})
+      vi.spyOn(ttsWorker, 'cancel').mockImplementation(() => {})
+
+      const command = await ctx.manager.startTurn('command', {})
+      if ('error' in command) throw Error(command.error)
+      await act(async () => {
+        ctx.worker.emit('final', command.turnId, 'create a task called Review the report')
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      vi.mocked(window.electronAPI.voice.confirm).mockImplementation(async (id, choice, epoch) => {
+        await ctx.invoke('voice:confirm', { turnId: id, choice, turnEpoch: epoch })
+        return { success: true }
+      })
+      let confirming!: Promise<void>
+      await act(async () => {
+        confirming = useVoiceStore.getState().confirm()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      vi.mocked(window.electronAPI.voice.startTurn).mockImplementation((mode, context) =>
+        ctx.manager.startTurn(mode, context))
+      view()
+      await act(async () => { await useCommanderCallStore.getState().start(session) })
+      const activeTurnId = reused ? 'command-turn' : 'call-turn'
+
+      await act(async () => {
+        expect(await speech.beginStreamingAnswer(`commander:${session}`, undefined, 'conversation')).toBe(true)
+      })
+      const currentSpeechId = voicePlayback.currentSpeechId
+      const currentGeneration = voicePlayback.currentSpeechGeneration
+      expect(currentSpeechId).toBeTruthy()
+      vi.stubGlobal('AudioContext', OwnershipAudioContext)
+      await act(async () => voicePlayback.play(
+        currentSpeechId!, new Uint8Array(4800), 24000, currentGeneration ?? undefined))
+      const currentAudio = audioSources.at(-1)!
+      const staleGeneration = (currentGeneration ?? 1) - 1
+      act(() => {
+        for (const cb of ttsCallbacks.start) cb({
+          speechId: 'retired-speech',
+          speechGeneration: staleGeneration,
+          source: 'action_result',
+          text: 'Retired result.',
+          sampleRate: 24000,
+          truncated: false,
+        })
+        for (const cb of ttsCallbacks.chunk) cb({
+          speechId: currentSpeechId!,
+          speechGeneration: staleGeneration,
+          index: 0,
+          pcm: new Uint8Array(4800),
+          sampleRate: 24000,
+          text: 'Retired chunk.',
+        })
+        for (const cb of ttsCallbacks.end) cb({
+          speechId: currentSpeechId!,
+          speechGeneration: staleGeneration,
+          reason: 'cancelled',
+        })
+      })
+      expect(voicePlayback.currentSpeechId).toBe(currentSpeechId)
+      expect(audioSources.at(-1)).toBe(currentAudio)
+      expect(currentAudio.stop).not.toHaveBeenCalled()
+      ctx.notify.mockClear()
+
+      await act(async () => { ready.resolve(voices); await confirming })
+
+      expect(currentAudio.stop).not.toHaveBeenCalled()
+      expect(speech.currentTaskId).toBe(`commander:${session}`)
+      expect(voicePlayback.currentSpeechId).toBe(currentSpeechId)
+      expect(voicePlayback.currentSpeechGeneration).toBe(currentGeneration)
+      expect(useVoiceStore.getState().speechText).not.toContain('Created')
+      expect(ctx.notify.mock.calls.filter(([channel]) => channel === 'voice:speech:start')).toEqual([])
+      expect(ctx.manager.getState()).toBe('listening')
+      expect(useVoiceStore.getState()).toMatchObject({ turnId: activeTurnId, turnEpoch: 'call-epoch' })
+      expect(useCommanderCallStore.getState()).toMatchObject({ status: 'live', sessionId: session, error: null })
+    }
+  )
+
+  it('keeps a legitimate current-call action result audible', async () => {
+    const ctx = bridge()
+    ctx.store.voice_tts_enabled = 'true'
+    ctx.store.voice_tts_speak_results = 'true'
+    ctx.db.createTask.mockReturnValue({ id: 'created-task', title: 'Owned result' } as never)
+    const speech = ctx.manager.speech
+    const harness = speechHarness(speech)
+    harness.status = { state: 'ready', engine: 'system', modelId: '', voiceId: '', sampleRate: 22050 }
+    vi.spyOn(harness, 'startPassage').mockImplementation(() => undefined)
+    const handle = await ctx.manager.startTurn('command', {})
+    if ('error' in handle) throw Error(handle.error)
+    await act(async () => {
+      ctx.worker.emit('final', handle.turnId, 'create a task called Owned result')
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await act(async () => { await ctx.invoke('voice:confirm', handle) })
+    expect(ctx.db.createTask).toHaveBeenCalledOnce()
+    expect(speech.currentTaskId).toBe('created-task')
+    expect(voicePlayback.currentSpeechId).toBeTruthy()
+    expect(useVoiceStore.getState().speechText).toContain('Created')
+  })
 })
 
 

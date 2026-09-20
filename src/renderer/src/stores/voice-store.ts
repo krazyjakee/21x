@@ -223,7 +223,22 @@ function hasTtsBridge(): boolean {
  * is another `speechStart` and more audio for the same passage. Naming what was
  * stopped is what makes the silence hold.
  */
-let stoppedSpeechId: string | null = null
+interface RendererSpeechOwner {
+  speechId: string
+  speechGeneration?: number
+}
+
+function sameSpeechOwner(a: RendererSpeechOwner | null, b: RendererSpeechOwner): boolean {
+  return Boolean(
+    a && a.speechId === b.speechId &&
+    (a.speechGeneration === undefined || b.speechGeneration === undefined ||
+      a.speechGeneration === b.speechGeneration)
+  )
+}
+
+let stoppedSpeech: RendererSpeechOwner | null = null
+/** Passage main has ended; delayed start/chunk events for it stay inert. */
+let closedSpeech: RendererSpeechOwner | null = null
 
 /**
  * The passage main is still filling.
@@ -238,7 +253,7 @@ let stoppedSpeechId: string | null = null
  * Main says when a passage is really finished. Until then the queue draining is
  * just a pause.
  */
-let openPassageId: string | null = null
+let openPassage: RendererSpeechOwner | null = null
 
 /**
  * Everything the renderer does when speech is stopped by the user: barge-in,
@@ -247,8 +262,16 @@ let openPassageId: string | null = null
  * on talking.
  */
 function stopPlaybackForUser(): void {
-  stoppedSpeechId = voicePlayback.currentSpeechId ?? stoppedSpeechId
-  openPassageId = null
+  const currentSpeechId = voicePlayback.currentSpeechId
+  stoppedSpeech = currentSpeechId
+    ? {
+        speechId: currentSpeechId,
+        ...(voicePlayback.currentSpeechGeneration !== null
+          ? { speechGeneration: voicePlayback.currentSpeechGeneration }
+          : {}),
+      }
+    : stoppedSpeech
+  openPassage = null
   voicePlayback.stop()
   // The gate is opened here as well. The `speechEnd` that follows names a
   // passage that is already gone and is dropped, so nothing else would open it,
@@ -798,15 +821,40 @@ if (hasTtsBridge()) {
     // next push arrives as another `speechStart`. Re-opening the passage here
     // let that sentence play out in full, which is 20x finishing its sentence
     // after being told to stop.
-    if (event.speechId === stoppedSpeechId) return
+    const owner = {
+      speechId: event.speechId,
+      ...(event.speechGeneration !== undefined
+        ? { speechGeneration: event.speechGeneration }
+        : {}),
+    }
+    if (sameSpeechOwner(stoppedSpeech, owner) || sameSpeechOwner(closedSpeech, owner)) return
 
-    if (voicePlayback.currentSpeechId !== event.speechId) {
+    // Playback retains the highest generation even after stop. This is the
+    // renderer-side backstop against delayed IPC or a reused speech ID.
+    const wasCurrent = voicePlayback.currentSpeechId === event.speechId &&
+      (event.speechGeneration === undefined ||
+        voicePlayback.currentSpeechGeneration === event.speechGeneration)
+    const accepted = voicePlayback.start(event.speechId, {
+      // The worker finishes producing before the last sentence finishes
+      // playing, so the speaking state ends here and not on the end event.
+      // The microphone stays held until this point.
+      onDrained: () => {
+        // A pause between sentences, not the end. The gate must keep holding,
+        // or the rest of the answer is read with the microphone wide open.
+        if (sameSpeechOwner(openPassage, owner)) return
+        bargeInGate.setSpeaking(false)
+        useVoiceStore.setState({ speaking: false, speechText: '' })
+      },
+    }, event.speechGeneration)
+    if (!accepted) return
+
+    if (!wasCurrent) {
       console.info('[voice] reading aloud', {
         speechId: event.speechId,
         microphoneOpen: Boolean(useVoiceStore.getState().turnId),
       })
     }
-    openPassageId = event.speechId
+    openPassage = owner
     useVoiceStore.setState({ speaking: true, speechText: event.text })
     bargeInGate.setSpeaking(true)
 
@@ -817,23 +865,12 @@ if (hasTtsBridge()) {
     // No `onLevel` handler is passed. Nothing draws the loudness of the
     // playback any more, and reporting it ran an analyser read and a store
     // write sixteen times a second for the whole of every answer.
-    voicePlayback.start(event.speechId, {
-      // The worker finishes producing before the last sentence finishes
-      // playing, so the speaking state ends here and not on the end event.
-      // The microphone stays held until this point.
-      onDrained: () => {
-        // A pause between sentences, not the end. The gate must keep holding,
-        // or the rest of the answer is read with the microphone wide open.
-        if (openPassageId === event.speechId) return
-        bargeInGate.setSpeaking(false)
-        useVoiceStore.setState({ speaking: false, speechText: '' })
-      },
-    })
   })
 
   voiceTtsApi.onSpeechChunk((event) => {
-    if (event.speechId === stoppedSpeechId) return
-    voicePlayback.play(event.speechId, event.pcm, event.sampleRate)
+    const owner = { speechId: event.speechId, speechGeneration: event.speechGeneration }
+    if (sameSpeechOwner(stoppedSpeech, owner) || sameSpeechOwner(closedSpeech, owner)) return
+    voicePlayback.play(event.speechId, event.pcm, event.sampleRate, event.speechGeneration)
   })
 
   voiceTtsApi.onSpeechEnd((event) => {
@@ -845,15 +882,21 @@ if (hasTtsBridge()) {
     // microphone.
     // Main will send nothing more for this passage, so the next drain is the
     // real end of it.
-    if (event.speechId === openPassageId) openPassageId = null
+    const owner = { speechId: event.speechId, speechGeneration: event.speechGeneration }
+    closedSpeech = owner
+    if (sameSpeechOwner(openPassage, owner)) openPassage = null
     if (event.reason === 'complete' && voicePlayback.hasQueuedAudio) return
-    if (voicePlayback.currentSpeechId !== event.speechId) {
+    if (
+      voicePlayback.currentSpeechId !== event.speechId ||
+      (event.speechGeneration !== undefined &&
+        voicePlayback.currentSpeechGeneration !== event.speechGeneration)
+    ) {
       // The event names a passage that is already gone. Nothing is sounding,
       // so nothing may still be held back from the recogniser.
       if (!voicePlayback.isPlaying) bargeInGate.setSpeaking(false)
       return
     }
-    voicePlayback.stop()
+    voicePlayback.stop(event.speechGeneration)
     bargeInGate.setSpeaking(false)
     useVoiceStore.setState({ speaking: false, speechText: '' })
     if (event.reason === 'error' && event.message) {

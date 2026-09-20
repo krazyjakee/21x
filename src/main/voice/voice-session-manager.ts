@@ -594,12 +594,18 @@ export class VoiceSessionManager {
     }
 
     const source = outcome.intent === 'read_last_answer' ? 'read_last_answer' : 'action_result'
-    const spoken = await this.speech.speak({
-      text: outcome.message,
-      source,
-      voiceTurnId: turnId,
-      ...(outcome.taskId ? { taskId: outcome.taskId } : {}),
-    })
+    const spoken = await this.speech.speak(
+      {
+        text: outcome.message,
+        source,
+        voiceTurnId: turnId,
+        ...(outcome.taskId ? { taskId: outcome.taskId } : {}),
+      },
+      () => this.ownsLifecycle(turnId, turnEpoch)
+    )
+    // Ownership may change at any await inside preparation. A stale action is
+    // not allowed to settle the replacement call even when no speech started.
+    if (!this.ownsLifecycle(turnId, turnEpoch)) return
     // `speak` moves the state to `speaking` itself when it starts.
     if (!spoken) this.setOwnedState('idle', turnId, turnEpoch)
   }

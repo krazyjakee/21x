@@ -29,6 +29,9 @@ export class VoicePlayback {
   private analyser: AnalyserNode | null = null
   private sources = new Set<AudioBufferSourceNode>()
   private speechId: string | null = null
+  private speechGeneration: number | null = null
+  /** Highest main-process lease observed, retained after playback stops. */
+  private latestSpeechGeneration = 0
   private nextStartTime = 0
   private pending = 0
   private levelTimer: number | null = null
@@ -62,6 +65,10 @@ export class VoicePlayback {
     return this.speechId
   }
 
+  get currentSpeechGeneration(): number | null {
+    return this.speechGeneration
+  }
+
   /**
    * True while sentences are queued or sounding.
    *
@@ -81,14 +88,30 @@ export class VoicePlayback {
    * used to drop what was queued — so every new sentence cut off the sentence
    * before it whenever the voice produced faster than it played.
    */
-  start(speechId: string, handlers: VoicePlaybackHandlers = {}): void {
-    if (this.speechId === speechId) return
+  start(
+    speechId: string,
+    handlers: VoicePlaybackHandlers = {},
+    speechGeneration?: number
+  ): boolean {
+    if (speechGeneration !== undefined) {
+      if (speechGeneration < this.latestSpeechGeneration) return false
+      if (speechGeneration === this.latestSpeechGeneration) {
+        if (this.speechGeneration !== speechGeneration || this.speechId !== speechId) return false
+      }
+    }
+    if (
+      this.speechId === speechId &&
+      (speechGeneration === undefined || this.speechGeneration === speechGeneration)
+    ) return true
     this.stop()
+    if (speechGeneration !== undefined) this.latestSpeechGeneration = speechGeneration
     this.handlers = handlers
     this.speechId = speechId
+    this.speechGeneration = speechGeneration ?? null
     this.pending = 0
     this.nextStartTime = 0
     this.notifyActivity()
+    return true
   }
 
   /**
@@ -97,8 +120,14 @@ export class VoicePlayback {
    * A chunk from an older passage is dropped, so a cancelled answer cannot be
    * heard after the user has moved on.
    */
-  play(speechId: string, pcm: Uint8Array, sampleRate: number): void {
+  play(
+    speechId: string,
+    pcm: Uint8Array,
+    sampleRate: number,
+    speechGeneration?: number
+  ): void {
     if (speechId !== this.speechId) return
+    if (speechGeneration !== undefined && speechGeneration !== this.speechGeneration) return
     if (!pcm || pcm.length < 2 || sampleRate <= 0) return
 
     const context = this.ensureContext()
@@ -129,7 +158,8 @@ export class VoicePlayback {
   }
 
   /** Stops at once and forgets everything queued. This is barge-in. */
-  stop(): void {
+  stop(speechGeneration?: number): boolean {
+    if (speechGeneration !== undefined && speechGeneration !== this.speechGeneration) return false
     const changed = this.speechId !== null || this.pending > 0
     for (const source of this.sources) {
       try {
@@ -141,11 +171,13 @@ export class VoicePlayback {
     }
     this.sources.clear()
     this.speechId = null
+    this.speechGeneration = null
     this.pending = 0
     this.nextStartTime = 0
     this.stopLevelReporting()
     this.handlers.onLevel?.(0)
     if (changed) this.notifyActivity()
+    return true
   }
 
   /** Releases the audio graph. Used when spoken answers are switched off. */
