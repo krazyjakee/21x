@@ -34,6 +34,7 @@ vi.mock('@/lib/ipc-client', async (importOriginal) => ({
 const api = mocks.commanderApi
 
 import { useAgentStore } from '@/stores/agent-store'
+import { useCommanderCallStore } from '@/stores/commander-call-store'
 import { useCommanderStore } from '@/stores/commander-store'
 import { CommanderWorkspace } from './CommanderWorkspace'
 import { toolCallLabel } from './tool-call-label'
@@ -61,7 +62,29 @@ function message(over: Partial<CommanderMessage> = {}): CommanderMessage {
 
 let emit: (event: CommanderEvent) => void = () => {}
 
+async function openSessions(): Promise<HTMLElement> {
+  fireEvent.click(screen.getByRole('button', { name: /Sessions/ }))
+  return screen.findByRole('dialog', { name: 'Sessions' })
+}
+
+async function openSession(title = 'Launch'): Promise<void> {
+  const drawer = await openSessions()
+  fireEvent.click(await within(drawer).findByText(title))
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Sessions' })).toBeNull())
+}
+
 beforeEach(() => {
+  useCommanderCallStore.setState({
+    status: 'off',
+    sessionId: null,
+    turnId: null,
+    error: null,
+    retrySessionId: null,
+    interruptedAt: null,
+    replyInterrupted: false,
+    lastEvent: null,
+    startedAt: null
+  })
   useAgentStore.setState({ agents: [], isLoading: false, error: null, sessions: new Map() })
   useCommanderStore.setState({
     sessions: [],
@@ -103,7 +126,68 @@ describe('CommanderWorkspace', () => {
     api.listSessions.mockResolvedValue([])
     render(<CommanderWorkspace />)
     expect(await screen.findByText('Talk to the Commander')).toBeTruthy()
-    expect(screen.getByText('No sessions yet.')).toBeTruthy()
+    const drawer = await openSessions()
+    expect(within(drawer).getByText('No sessions yet.')).toBeTruthy()
+  })
+
+  it('renders the stage-first layout, state word, tabs and accessible toolbar toggles', async () => {
+    api.listSessions.mockResolvedValue([])
+    render(<CommanderWorkspace />)
+    await screen.findByText('Talk to the Commander')
+
+    expect(screen.getByLabelText('Commander call stage')).toHaveAttribute('data-call-state', 'unavailable')
+    expect(screen.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: 'Actions' })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('toolbar', { name: 'Commander call controls' })).toBeTruthy()
+
+    const captions = screen.getByLabelText('Turn captions off')
+    expect(captions).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(captions)
+    expect(screen.getByLabelText('Turn captions on')).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.queryByTestId('commander-captions')).toBeNull()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Actions' }))
+    expect(screen.getByText('No recent actions')).toBeTruthy()
+  })
+
+  it('retains a typed draft when the side panel closes and supports toolbar arrow keys', async () => {
+    api.listSessions.mockResolvedValue([session()])
+    render(<CommanderWorkspace />)
+    await openSession()
+
+    const composer = screen.getByLabelText('Message the Commander')
+    fireEvent.change(composer, { target: { value: 'Keep this draft' } })
+    const captions = screen.getByLabelText('Turn captions off')
+    captions.focus()
+    fireEvent.keyDown(captions, { key: 'ArrowRight' })
+    expect(screen.getAllByLabelText('Close side panel')).toContain(document.activeElement)
+
+    fireEvent.click(screen.getAllByLabelText('Close side panel')[0])
+    fireEvent.click(screen.getByLabelText('Open side panel'))
+    expect(screen.getByLabelText('Message the Commander')).toHaveValue('Keep this draft')
+  })
+
+  it('shows a report arrival as a plain project chip without relaying raw report text', async () => {
+    api.listSessions.mockResolvedValue([session()])
+    render(<CommanderWorkspace />)
+    await openSession()
+
+    act(() => useCommanderCallStore.setState({
+      status: 'live',
+      sessionId: 's1',
+      turnId: 'voice-1',
+      startedAt: Date.now(),
+      lastEvent: {
+        kind: 'report',
+        at: performance.now(),
+        sessionId: 's1',
+        messageId: 'report-1',
+        projectId: 'Web'
+      }
+    }))
+
+    expect(screen.getByTestId('commander-call-event')).toHaveTextContent('Report from Web')
+    expect(screen.getByTestId('commander-call-event')).not.toHaveTextContent('implementation details')
   })
 
   it('lists sessions with unread badges and clears them on open', async () => {
@@ -112,26 +196,29 @@ describe('CommanderWorkspace', () => {
       session({ id: 'b', title: '', updated_at: 1 })
     ])
     render(<CommanderWorkspace />)
-    expect(await screen.findByText('Alpha')).toBeTruthy()
+    const drawer = await openSessions()
+    expect(await within(drawer).findByText('Alpha')).toBeTruthy()
     // An untitled session reads "New session" until it is named.
-    expect(within(screen.getByLabelText('Commander sessions')).getByText('New session')).toBeTruthy()
-    expect(screen.getByLabelText('2 unread')).toBeTruthy()
+    expect(within(drawer).getByText('New session')).toBeTruthy()
+    expect(within(drawer).getByLabelText('2 unread')).toBeTruthy()
 
     api.markRead.mockResolvedValue(session({ id: 'a', title: 'Alpha', updated_at: 2, unread_count: 0 }))
-    fireEvent.click(screen.getByText('Alpha'))
+    fireEvent.click(within(drawer).getByText('Alpha'))
     await waitFor(() => expect(screen.queryByLabelText('2 unread')).toBeNull())
     expect(api.markRead).toHaveBeenCalledWith('a')
+    await waitFor(() => expect(screen.getByRole('button', { name: /Sessions/ })).toHaveFocus())
   })
 
   it('counts a report for a session that is not open as unread', async () => {
     api.listSessions.mockResolvedValue([session({ id: 'a', title: 'Alpha' }), session({ id: 'b', title: 'Beta' })])
     render(<CommanderWorkspace />)
-    await screen.findByText('Beta')
+    const drawer = await openSessions()
+    await within(drawer).findByText('Beta')
     act(() => {
       emit({ type: 'messages_appended', sessionId: 'b', messages: [message({ session_id: 'b', role: 'report', content: 'done' })] })
       emit({ type: 'session_updated', session: session({ id: 'b', title: 'Beta', unread_count: 1, updated_at: 5 }) })
     })
-    expect(screen.getByLabelText('1 unread')).toBeTruthy()
+    expect(within(drawer).getByLabelText('1 unread')).toBeTruthy()
     expect(api.markRead).not.toHaveBeenCalled()
   })
 
@@ -147,7 +234,7 @@ describe('CommanderWorkspace', () => {
       activeTurnId: null
     })
     render(<CommanderWorkspace />)
-    fireEvent.click(await screen.findByText('Launch'))
+    await openSession()
 
     expect(await screen.findByText('Asked web: deploy')).toBeTruthy()
     const report = screen.getByTestId('commander-report')
@@ -185,7 +272,7 @@ describe('CommanderWorkspace', () => {
       activeTurnId: null
     })
     render(<CommanderWorkspace />)
-    fireEvent.click(await screen.findByText('Launch'))
+    await openSession()
     expect(await screen.findByText('Hi there')).toBeTruthy()
 
     // A stored reply arrives while the session is open...
@@ -202,7 +289,8 @@ describe('CommanderWorkspace', () => {
       ],
       activeTurnId: null
     })
-    fireEvent.click(within(screen.getByLabelText('Commander sessions')).getByText('Launch'))
+    const drawer = await openSessions()
+    fireEvent.click(within(drawer).getByText('Launch'))
     await waitFor(async () => expect(api.listMessages).toHaveBeenCalledTimes(2))
     expect(screen.getAllByText('Hi there')).toHaveLength(1)
     expect(screen.getAllByText('Hello!')).toHaveLength(1)
@@ -224,7 +312,7 @@ describe('CommanderWorkspace', () => {
       }
     ])
     render(<CommanderWorkspace />)
-    fireEvent.click(await screen.findByText('Launch'))
+    await openSession()
 
     await waitFor(() => expect(screen.getByLabelText('Commander model')).not.toBeDisabled())
     fireEvent.change(screen.getByLabelText('Commander model'), {
@@ -247,7 +335,7 @@ describe('CommanderWorkspace', () => {
     api.listSessions.mockResolvedValue([session()])
     mocks.agentApi.getAll.mockResolvedValue([])
     render(<CommanderWorkspace />)
-    fireEvent.click(await screen.findByText('Launch'))
+    await openSession()
 
     expect(await screen.findByText('No configured Commander model')).toBeTruthy()
     fireEvent.change(screen.getByLabelText('Message the Commander'), { target: { value: 'Hello' } })
@@ -290,7 +378,7 @@ describe('CommanderChatPane: a stored tool call spins only while it can still fi
     api.listSessions.mockResolvedValue([session()])
     api.listMessages.mockResolvedValue({ messages, activeTurnId })
     render(<CommanderWorkspace />)
-    fireEvent.click(await screen.findByText('Launch'))
+    await openSession()
     expect(await screen.findByText('Asked web: deploy')).toBeTruthy()
   }
 

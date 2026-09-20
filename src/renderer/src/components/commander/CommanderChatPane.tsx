@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { AlertCircle, Radio, Send, Square } from 'lucide-react'
 import type { CommanderMessage } from '@shared/commander'
 import {
@@ -16,7 +16,6 @@ import { useAgentStore } from '@/stores/agent-store'
 import { useCommanderStore } from '@/stores/commander-store'
 import type { Agent } from '@/types'
 import { CommanderMessageItem, ToolChip } from './CommanderMessageItem'
-import { UNTITLED_SESSION } from './CommanderSessionList'
 
 const EMPTY: CommanderMessage[] = []
 
@@ -57,10 +56,39 @@ function thinkingOptions(provider: ChatProviderId): ChatReasoningEffort[] {
 export const COMMANDER_EMPTY_DESCRIPTION =
   'The Commander is a fast chat that coordinates your projects. It hands work to each project’s Captain and relays their reports back here — it never does the work itself.'
 
+/** Scrollable history. Kept separate from the composer so either can resize in the side panel. */
+export function CommanderTranscript({
+  scrollRef,
+  children
+}: {
+  scrollRef: RefObject<HTMLDivElement | null>
+  children: ReactNode
+}) {
+  return (
+    <div
+      ref={scrollRef}
+      role="log"
+      aria-label="Commander transcript"
+      className="flex-1 space-y-4 overflow-y-auto px-4 py-4"
+      data-testid="commander-messages"
+    >
+      {children}
+    </div>
+  )
+}
+
+/** Typed-chat controls remain available independently of the call controls. */
+export function CommanderComposer({ children }: { children: ReactNode }) {
+  return (
+    <div className="shrink-0 border-t border-border p-3" aria-label="Commander composer">
+      {children}
+    </div>
+  )
+}
+
 /** The open session: history, the streaming turn, and the composer. */
 export function CommanderChatPane() {
   const sessionId = useCommanderStore((s) => s.selectedSessionId)
-  const session = useCommanderStore((s) => s.sessions.find((x) => x.id === s.selectedSessionId))
   const messages = useCommanderStore((s) => (s.selectedSessionId ? s.messages[s.selectedSessionId] : undefined)) ?? EMPTY
   const streaming = useCommanderStore((s) => (s.selectedSessionId ? s.streaming[s.selectedSessionId] : undefined))
   const turnError = useCommanderStore((s) => (s.selectedSessionId ? s.turnErrors[s.selectedSessionId] : undefined))
@@ -201,12 +229,8 @@ export function CommanderChatPane() {
   }
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col" aria-label="Commander chat">
-      <header className="flex h-12 shrink-0 items-center border-b border-border px-4">
-        <h2 className="truncate text-sm font-medium">{session?.title || UNTITLED_SESSION}</h2>
-      </header>
-
-      <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-5 py-4" data-testid="commander-messages">
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label="Commander chat">
+      <CommanderTranscript scrollRef={scrollRef}>
         {visible.length === 0 && !streaming && (
           <p className="mx-auto max-w-md pt-10 text-center text-xs leading-relaxed text-muted-foreground/70">{COMMANDER_EMPTY_DESCRIPTION}</p>
         )}
@@ -246,9 +270,9 @@ export function CommanderChatPane() {
             <span>{turnError}</span>
           </div>
         )}
-      </div>
+      </CommanderTranscript>
 
-      <div className="shrink-0 border-t border-border p-3">
+      <CommanderComposer>
         <div className="rounded-xl border border-input bg-card shadow-xs focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
           <div className="flex items-end gap-2 px-3 py-2">
             <textarea
@@ -321,7 +345,7 @@ export function CommanderChatPane() {
             </select>
           </div>
         </div>
-      </div>
+      </CommanderComposer>
     </section>
   )
 }
