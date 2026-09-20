@@ -169,6 +169,38 @@ admission and fairness), then v22 (#148 reconciliation and durable starts).
 All three migrations are idempotent and fresh databases create the same final
 tables directly.
 
+Migration 23 adds the immutable human-authorization chain and durable dispatch
+bindings described in `docs/authorization-chain.md`. Issue writes consume that
+resolver; they do not create a parallel provenance store.
+
+### Delegated GitHub issue-write ledger (v24)
+
+Migration 24 (`migrateIssueWrites()` in
+`src/main/database/issue-writes-migration.ts`) adds `issue_writes`: one row per
+external GitHub issue write, claimed before the call and settled after it. The
+row is both the audit record and the idempotency claim, so the two cannot
+disagree — `idempotency_key` is UNIQUE and a claimed key is immutably bound to
+the project, repository, action, target, task, exact payload shape/hash and
+trusted authorization origin. Any mismatch is refused even after a confirmed
+failed attempt, leaving the original audit row unchanged. An exact retry
+recomputes the same key across a restart instead of filing a second issue. The
+provenance columns record the originating human instruction, the Commander
+correlation and the Captain task/session; `status` moves `reserved` →
+`succeeded` | `failed` | `unresolved`, and an expired lease becomes
+`unresolved` rather than free. Attempt epochs fence late external answers from
+newer reconciliation passes, and `payload_fields` lets interrupted partial
+updates be compared in the same shape that was requested. `effects_applied_at`
+is the durable commit marker for an atomic task-attachment + journal
+transaction; startup reconciliation replays any successful external row whose
+local effects were interrupted, exactly once. New table only, so
+`CREATE TABLE IF NOT EXISTS` covers fresh and existing databases alike.
+Create reconciliation accepts a marker only from a complete GitHub search
+response: missing/invalid counts, `incomplete_results`, pagination truncation,
+or more than one exact marker all remain unresolved. The surviving candidate's
+canonical repository/issue identity and the payload reconstructed in the
+stored `payload_fields` shape must also reproduce `payload_hash`; a copied
+marker with different title, body or labels is not success evidence.
+
 ## Adding a column to other tables
 
 Same pattern: update `createTables()`, add a guarded `ALTER TABLE` in `runMigrations()`, and bump `SCHEMA_VERSION`.

@@ -6,13 +6,13 @@ import type { ChatProvider } from '../chat/providers/types'
 import type { ChatToolDefinition } from '../chat/tools'
 import { CommanderService, type CommanderToolContext } from '../commander/commander-service'
 import { CommanderStore } from '../commander/commander-store'
-import { createCommanderProjectTools, ProjectMutationConfirmations } from '../commander/project-tools'
+import { createCommanderProjectTools } from '../commander/project-tools'
 import { CaptainDeliveryService } from '../commander/captain-delivery'
 import { createCommanderSkillTools } from '../commander/skill-tools'
 import { createCommanderMergeGrantTools } from '../commander/merge-grant-tools'
 import { installCommanderReportBridge } from '../commander/report-tools'
 import { broadcastSkillsChanged } from './settings'
-import { listHeldActions, recoverMergeGrantOutcomes } from '../escalation'
+import { listHeldActions, recoverMergeGrantOutcomes, recoverIssueWriteOutcomes } from '../escalation'
 import { guardedIpcSend } from '../guarded-ipc-send'
 import { assertTrustedSender } from '../ipc-sender'
 import { notifyRenderer, uiState } from '../task-api/state'
@@ -67,9 +67,6 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
     }
   }
   const createProvider = options.createProvider ?? ((d: IpcDeps) => createChatProviderFromSettings(d.db))
-  // One challenge table for the app: a token issued in a session is only
-  // valid for that session's next confirmed call.
-  const confirmations = new ProjectMutationConfirmations()
   // The connection is read on use, so registering never touches the database.
   const store = new CommanderStore({ get db() { return deps.db.db } })
   let commanderRef: CommanderService | null = null
@@ -114,7 +111,6 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
       ...createCommanderProjectTools({
         db: deps.db,
         context,
-        confirmations,
         agents: deps.agentManager,
         delivery,
         listHeldActions,
@@ -123,12 +119,10 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
       }),
       // Merge grants (#137): list and revoke; creating one goes through ask_captain.
       ...createCommanderMergeGrantTools({ db: deps.db, context }),
-      // Skill administration (#74): same confirmation table, so a token is
-      // bound to exactly one change whichever registry issued it.
+      // Skill administration (#74): writes act on the first call.
       ...createCommanderSkillTools({
         db: deps.db,
         context,
-        confirmations,
         onSkillChanged: (skillId, kind) => broadcastSkillsChanged({ skillId, kind })
       })
     ])
@@ -146,6 +140,7 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
   })
   void delivery.reconcile().catch((error) => console.error('[Commander] Durable Captain delivery recovery failed:', error))
   void recoverMergeGrantOutcomes(deps.db).catch((error) => console.error('[MergeGrants] Recovery failed:', error))
+  void recoverIssueWriteOutcomes(deps.db).catch((error) => console.error('[IssueWrites] Recovery failed:', error))
 
   /** Every Commander call is from the main window; the caller then receives events. */
   const trusted = (event: IpcMainInvokeEvent, channel: string): void => {

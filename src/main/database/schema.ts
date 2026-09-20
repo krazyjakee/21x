@@ -7,7 +7,9 @@ import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
 import { migrateCoordinatorToCaptain } from './captain-migration'
 import { splitLegacyPullRequestEscalation } from '../../shared/project-policies'
 import { createConcurrencyTables, migrateConcurrencyControl } from './concurrency-migration'
+import { createAuthorizationTables } from './authorization-schema'
 import { createDurableStartQueueTables, migrateDurableStartQueue } from './start-queue-migration'
+import { createIssueWriteTables, migrateIssueWrites } from './issue-writes-migration'
 
 /**
  * Bump this whenever new migrations are added so returning users skip
@@ -47,8 +49,13 @@ import { createDurableStartQueueTables, migrateDurableStartQueue } from './start
  *          where unset (migrateConcurrencyControl in concurrency-migration.ts).
  * 21 → 22: durable agent start queue, leases, generations, retry state and
  *          cross-project fairness (#148, migrateDurableStartQueue).
+ * 22 → 23: immutable human authorization chains and durable dispatch bindings.
+ * 23 → 24: the delegated GitHub issue-write ledger: issue_writes, one row per
+ *          external issue write, carrying both its audit provenance and its
+ *          unique idempotency claim (migrateIssueWrites in
+ *          issue-writes-migration.ts).
  */
-const SCHEMA_VERSION = 22
+const SCHEMA_VERSION = 24
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -542,6 +549,9 @@ export function createTables(db: Database.Database): void {
 
   // Captain self-healing (#148): the one durable admission/start queue.
   createDurableStartQueueTables(db)
+
+  // Delegated GitHub issue writes: the audit ledger and idempotency claims.
+  createIssueWriteTables(db)
 
   // Report routing (#62): a Captain report quotes the correlation id of
   // the `ask_captain` tool row it answers; this serves that lookup.
@@ -1056,6 +1066,11 @@ export function runMigrations(db: Database.Database): void {
   // Migration v22: durable start claims and recovery (#148). This extends the
   // v20 runtime and v21 admission model rather than introducing a second one.
   migrateDurableStartQueue(db)
+  createAuthorizationTables(db)
+
+  // Migration v24: the delegated GitHub issue-write ledger. New table only;
+  // runs after migrateToProjects so the projects table it references exists.
+  migrateIssueWrites(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)

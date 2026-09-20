@@ -263,7 +263,10 @@ describe('the policy in settings and in the prompt', () => {
     const section = prompt.slice(prompt.indexOf('## Escalation policy'))
     const referenced = [...section.matchAll(/`([a-z_]+)`/g)].map((m) => m[1])
     for (const name of referenced) {
-      expect(['create_task', 'create_subtask', 'start_task', 'stop_task', 'respond_to_checkpoint', 'update_task', 'merge_pull_request']).toContain(name)
+      expect([
+        'create_task', 'create_subtask', 'start_task', 'stop_task', 'respond_to_checkpoint', 'update_task', 'merge_pull_request',
+        'create_github_issue', 'update_github_issue', 'link_github_issue'
+      ]).toContain(name)
     }
     // Nothing waits for the user: the section says so instead of explaining held calls.
     const free = buildCaptainSystemPrompt({ escalationPolicy: { ...DEFAULT_ESCALATION_POLICY, respond_to_checkpoint: 'autonomous', merge_pr: 'autonomous' } })

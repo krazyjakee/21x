@@ -1,3 +1,4 @@
+import { recordHumanAuthorization } from '../authorization'
 import { captainTerminology } from '../../shared/captain-compat'
 import type Database from 'better-sqlite3'
 import { createId } from '@paralleldrive/cuid2'
@@ -185,6 +186,28 @@ export class CommanderStore {
   }
 
   // ── Messages ──────────────────────────────────────────────
+
+  /** Only CommanderService's authenticated human submission path calls this. */
+  appendHumanMessage(sessionId: string, content: string, inputMode: 'typed' | 'voice' = 'typed', images?: ChatImageInput[], beforeCommit?: (message: CommanderMessage) => void): CommanderMessage {
+    return this.appendMessage(sessionId, { role: 'user', content, images }, message => {
+      recordHumanAuthorization(this.source, { messageId: message.id, text: content, at: message.created_at, source: 'commander-chat', sessionId, inputMode })
+      beforeCommit?.(message)
+    })
+  }
+
+  /** Backchannels cannot replace the instruction they acknowledge. */
+  authorizationMessageId(message: CommanderMessage): string {
+    if (!/^(?:um|uh|mm)[.!]?$/i.test(message.content.trim())) return message.id
+    const rows = this.db.prepare(`SELECT message_id, body FROM authorization_nodes
+      WHERE parent_id IS NULL AND json_extract(body, '$.sessionId') = ?
+      ORDER BY rowid DESC`).all(message.session_id) as { message_id: string; body: string }[]
+    for (const row of rows) {
+      const node = JSON.parse(row.body) as { text: string; actions: string[] }
+      if (/^(?:um|uh|mm)[.!]?$/i.test(node.text.trim())) continue
+      return node.actions.length ? row.message_id : message.id
+    }
+    return message.id
+  }
 
   /** beforeCommit prepares a turn against the inserted message; a failure rolls back its images too. */
   appendMessage(sessionId: string, input: AppendCommanderMessageInput, beforeCommit?: (message: CommanderMessage) => void): CommanderMessage {

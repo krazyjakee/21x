@@ -35,11 +35,12 @@ describe('noteUserTypedMessage (#137)', () => {
     expect(takeUserTypedMessage(mainWindow, captain.id, 'merge the PRs')).toBeUndefined()
   })
 
-  it('ignores messages to ordinary tasks, and messages from webviews or sub-frames', () => {
+  it('stages ordinary task chat too, but ignores webviews and sub-frames', () => {
     const { db } = createTestDb()
     const project = db.createProject({ name: 'P' })!
     const task = db.createTask({ title: 'Work', project_id: project.id })!
     noteUserTypedMessage(db, mainWindow, task.id, 'merge the PRs')
+    expect(takeUserTypedMessage(mainWindow, task.id, 'merge the PRs')?.taskId).toBe(task.id)
     expect(latestUserTypedProjectMessage(project.id)).toBeNull()
 
     const captain = db.getCoordinatorTask(project.id)!

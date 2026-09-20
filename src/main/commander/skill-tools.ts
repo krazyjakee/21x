@@ -3,14 +3,12 @@ import { SkillVersionConflictError, type SkillRecord, type UpdateSkillData } fro
 import type { ChatToolDefinition, ChatToolResult } from '../chat/tools'
 import {
   clip,
-  confirmationSchema,
   mutation,
   optionalNullableString,
   projectLocatorSchema,
   requiredString,
   resolveProject,
   result,
-  type ProjectMutationConfirmations,
   type ProjectToolContext
 } from './project-tools'
 import { isGlobalSkill } from '../../shared/skill-scope'
@@ -19,10 +17,11 @@ import { isGlobalSkill } from '../../shared/skill-scope'
  * The Commander's skill tools (#74; docs/skills.md, docs/commander.md).
  *
  * Skill administration, not task work: the Commander lists and reads skills
- * across every scope, creates global skills (or a named project's), and —
- * after the same server-enforced confirmation as a project change
- * ({@link ProjectMutationConfirmations}) — updates, soft-deletes, promotes a
- * project skill to global or moves a skill into a project. There is no tool
+ * across every scope, creates global skills (or a named project's), updates,
+ * soft-deletes, promotes a project skill to global or moves a skill into a
+ * project. Like the project tools, every write takes effect on the first call
+ * with no confirmation step; the descriptions say so and flag the
+ * wide-reaching ones (promote, move, remove). There is no tool
  * here that assigns a skill to a task; that stays with the project's
  * Captain, and the registry test proves it.
  *
@@ -48,11 +47,10 @@ export type SkillChangeKind = 'created' | 'updated' | 'removed' | 'scope'
 export interface SkillToolOptions {
   db: DatabaseManager
   context: ProjectToolContext
-  confirmations: ProjectMutationConfirmations
   onSkillChanged?: (skillId: string, kind: SkillChangeKind) => void
 }
 
-/** The tools that write. Every one of them declares and checks the confirmation token. */
+/** The tools that write. Each acts on the first call and its description says so; the registry tests prove both. */
 export const MUTATING_COMMANDER_SKILL_TOOLS = ['create_skill', 'update_skill', 'remove_skill', 'promote_skill', 'move_skill'] as const
 
 /** A skill by id, else by exact name (names are unique across scopes). */
@@ -239,7 +237,7 @@ export function createCommanderSkillTools(options: SkillToolOptions): ChatToolDe
     },
     {
       name: 'create_skill',
-      description: 'Create a skill. Global (visible to every project) unless a project is named, in which case only that project sees it. The first call only requests confirmation; retry with the token after the user explicitly confirms.',
+      description: 'Create a skill. Global (visible to every project) unless a project is named, in which case only that project sees it. Takes effect immediately. A global skill is offered to agents in every project at once.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -248,8 +246,7 @@ export function createCommanderSkillTools(options: SkillToolOptions): ChatToolDe
           content: { type: 'string', maxLength: MAX_CONTENT_INPUT_CHARS, description: 'The SKILL.md body (markdown).' },
           project: { type: 'string', description: 'Owning project (ID or exact name). Omit for a global skill.' },
           tags: { type: 'array', items: { type: 'string' }, maxItems: MAX_TAGS },
-          preferred_model: { type: ['string', 'null'], description: 'Model id the skill runs best with; omit for none.' },
-          ...confirmationSchema
+          preferred_model: { type: ['string', 'null'], description: 'Model id the skill runs best with; omit for none.' }
         },
         required: ['name', 'description', 'content'],
         additionalProperties: false
@@ -267,7 +264,7 @@ export function createCommanderSkillTools(options: SkillToolOptions): ChatToolDe
           project_id: project?.id ?? null
         }
         assertNameFree(db, name)
-        return mutation(options, 'create_skill', input, data, () => {
+        return mutation(() => {
           assertNameFree(db, name)
           const created = db.createSkill(data)
           if (!created) throw new Error('Skill could not be created')
@@ -278,7 +275,7 @@ export function createCommanderSkillTools(options: SkillToolOptions): ChatToolDe
     },
     {
       name: 'update_skill',
-      description: 'Change a skill\'s name, description, content, tags or preferred model. Scope is not a field here: use promote_skill or move_skill. Requires a one-time explicit confirmation. Pass expected_version from get_skill so a concurrent edit is refused instead of overwritten.',
+      description: 'Change a skill\'s name, description, content, tags or preferred model. Scope is not a field here: use promote_skill or move_skill. Takes effect immediately; the old text is overwritten, and a global skill changes for every project. Pass expected_version from get_skill so a concurrent edit is refused instead of overwritten.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -294,8 +291,7 @@ export function createCommanderSkillTools(options: SkillToolOptions): ChatToolDe
             },
             additionalProperties: false
           },
-          expected_version: { type: 'integer', description: 'The version you last read.' },
-          ...confirmationSchema
+          expected_version: { type: 'integer', description: 'The version you last read.' }
         },
         required: ['skill', 'changes'],
         additionalProperties: false
@@ -316,8 +312,7 @@ export function createCommanderSkillTools(options: SkillToolOptions): ChatToolDe
         if (Object.keys(changes).length === 0) throw new Error('changes must include at least one supported field')
         if (changes.name !== undefined) assertNameFree(db, changes.name, skill.id)
         const version = expectedVersion(input.expected_version)
-        const action = { skill_id: skill.id, changes, ...(version !== undefined ? { expected_version: version } : {}) }
-        return mutation(options, 'update_skill', input, action, () => {
+        return mutation(() => {
           if (changes.name !== undefined) assertNameFree(db, changes.name, skill.id)
           const updated = updateSkillOrConflict(db, skill, { ...changes, ...(version !== undefined ? { expected_version: version } : {}) })
           notify(skill.id, 'updated')
@@ -327,11 +322,11 @@ export function createCommanderSkillTools(options: SkillToolOptions): ChatToolDe
     },
     {
       name: 'remove_skill',
-      description: 'Soft-delete a skill: agents stop receiving it, history keeps it. Requires a one-time explicit confirmation.',
-      inputSchema: { type: 'object', properties: { ...skillLocatorSchema, ...confirmationSchema }, required: ['skill'], additionalProperties: false },
+      description: 'Soft-delete a skill. Takes effect immediately. Destructive: agents stop receiving it at once (in every project, for a global skill); history keeps it.',
+      inputSchema: { type: 'object', properties: { ...skillLocatorSchema }, required: ['skill'], additionalProperties: false },
       handler: async (input) => {
         const skill = resolveSkill(db, input.skill)
-        return mutation(options, 'remove_skill', input, { skill_id: skill.id }, () => {
+        return mutation(() => {
           if (!db.deleteSkill(skill.id)) throw new Error('Skill no longer exists')
           notify(skill.id, 'removed')
           return { removed_skill_id: skill.id, name: skill.name, ...scopeOf(db, skill) }
@@ -340,12 +335,12 @@ export function createCommanderSkillTools(options: SkillToolOptions): ChatToolDe
     },
     {
       name: 'promote_skill',
-      description: 'Make a project skill global, so every project can discover and use it. Requires a one-time explicit confirmation because it changes every project\'s visible skills.',
-      inputSchema: { type: 'object', properties: { ...skillLocatorSchema, ...confirmationSchema }, required: ['skill'], additionalProperties: false },
+      description: 'Make a project skill global. Takes effect immediately. Wide-reaching: the skill becomes visible to, and usable by, every project.',
+      inputSchema: { type: 'object', properties: { ...skillLocatorSchema }, required: ['skill'], additionalProperties: false },
       handler: async (input) => {
         const skill = resolveSkill(db, input.skill)
         if (isGlobalSkill(skill)) throw new Error(`Skill "${skill.name}" is already global.`)
-        return mutation(options, 'promote_skill', input, { skill_id: skill.id, project_id: null }, () => {
+        return mutation(() => {
           const updated = db.setSkillProject(skill.id, null)
           if (!updated) throw new Error('Skill no longer exists')
           notify(skill.id, 'scope')
@@ -355,8 +350,8 @@ export function createCommanderSkillTools(options: SkillToolOptions): ChatToolDe
     },
     {
       name: 'move_skill',
-      description: 'Give a skill to one project (from global or from another project), so only that project sees it. Refused while tasks in other projects or agent-level defaults still use it. Requires a one-time explicit confirmation.',
-      inputSchema: { type: 'object', properties: { ...skillLocatorSchema, ...projectLocatorSchema, ...confirmationSchema }, required: ['skill', 'project'], additionalProperties: false },
+      description: 'Give a skill to one project (from global or from another project), so only that project sees it. Refused while tasks in other projects or agent-level defaults still use it. Takes effect immediately. Wide-reaching: every other project loses access to the skill.',
+      inputSchema: { type: 'object', properties: { ...skillLocatorSchema, ...projectLocatorSchema }, required: ['skill', 'project'], additionalProperties: false },
       handler: async (input) => {
         const skill = resolveSkill(db, input.skill)
         const project = resolveProject(db, input.project)
@@ -364,7 +359,7 @@ export function createCommanderSkillTools(options: SkillToolOptions): ChatToolDe
         if (skill.project_id === project.id) throw new Error(`Skill "${skill.name}" already belongs to "${project.name}".`)
         const blockers = moveBlockers(db, skill, project.id)
         if (blockers.length > 0) throw new Error(`Skill "${skill.name}" cannot be moved to "${project.name}": it is ${blockers.join('; and ')}. Remove those uses first, or keep it global.`)
-        return mutation(options, 'move_skill', input, { skill_id: skill.id, project_id: project.id }, () => {
+        return mutation(() => {
           const stillBlocked = moveBlockers(db, skill, project.id)
           if (stillBlocked.length > 0) throw new Error(`Skill "${skill.name}" cannot be moved: it is ${stillBlocked.join('; and ')}.`)
           const updated = db.setSkillProject(skill.id, project.id)
