@@ -79,11 +79,23 @@ export function HeldActionsNotice() {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
       read()
     }, ACTIVITY_REVALIDATE_MS)
+    const onVisibility = (): void => {
+      if (document.visibilityState !== 'visible') return
+      const since = lastOkAt ?? startedAt
+      if (activityNow() - since >= ACTIVITY_STALE_MS) setUnavailable(true)
+      read()
+    }
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisibility)
     const off = escalationApi.onHeldChanged((event) => {
       generation += 1
       ok(event?.held)
     })
-    return () => { cancelled = true; clearInterval(timer); off() }
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility)
+      off()
+    }
   }, [])
 
   useEffect(() => { if (held.length === 0 && grants.length === 0) setOpen(false) }, [held.length, grants.length])

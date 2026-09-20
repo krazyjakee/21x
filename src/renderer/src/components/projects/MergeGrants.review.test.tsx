@@ -29,7 +29,7 @@ beforeEach(() => {
   vi.mocked(mergeGrantsApi.audit).mockResolvedValue([{ grant, status: 'active', uses: [] }])
   vi.mocked(escalationApi.listHeld).mockResolvedValue([])
 })
-afterEach(() => { cleanup(); vi.useRealTimers(); __setActivityTimeSource(null); vi.clearAllMocks() })
+afterEach(() => { cleanup(); vi.useRealTimers(); __setActivityTimeSource(null); vi.restoreAllMocks(); vi.clearAllMocks() })
 
 describe('merge-grant controls', () => {
   it('focuses the approvals dialog, returns focus on Escape, and retains grants when revoke fails', async () => {
@@ -73,13 +73,17 @@ describe('merge-grant controls', () => {
     let now = 0
     __setActivityTimeSource(() => now)
     vi.useFakeTimers()
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
     vi.mocked(escalationApi.listHeld).mockResolvedValueOnce([held]).mockRejectedValue(new Error('offline'))
     render(<HeldActionsNotice />)
     await act(async () => { await Promise.resolve() })
     expect(screen.getByRole('button', { name: /1 Captain action/ })).toBeInTheDocument()
 
     now = 15_000
-    await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+      await Promise.resolve()
+    })
     const trigger = screen.getByRole('button', { name: /Held Captain actions unavailable, 1 active merge grant/ })
     fireEvent.click(trigger)
     expect(screen.queryByRole('button', { name: /^Approve:/ })).not.toBeInTheDocument()

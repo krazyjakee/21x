@@ -79,6 +79,12 @@ describe('recordAgentStatus', () => {
     expect(useSessionActivityStore.getState().sessions.t).toMatchObject({ sessionId: 's-new', observedAt: 10 })
   })
 
+  it('accepts a resumed replacement whose first observed phase needs approval', () => {
+    recordAgentStatus(status('t', 'working', 1), 0)
+    expect(recordAgentStatus({ ...status('t', 'waiting_approval', 2), sessionId: 's-resumed' }, 10)).toBe(true)
+    expect(useSessionActivityStore.getState().sessions.t).toMatchObject({ sessionId: 's-resumed', status: 'waiting_approval' })
+  })
+
   it('records an authoritative task-scoped startup failure without inventing a backend session', () => {
     expect(recordAgentStatus({ ...status('t', 'error', 1), sessionId: '' }, 10)).toBe(true)
     expect(useSessionActivityStore.getState().sessions.t).toMatchObject({ sessionId: 'start-error:t', status: 'error' })

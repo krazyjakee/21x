@@ -114,11 +114,11 @@ export function recordAgentStatus(event: unknown, now: number = activityNow()): 
   const retiredForTask = retiredSessions.get(taskId)
   if (retiredForTask?.has(sessionId)) return false
   if (previous && previous.sessionId !== sessionId) {
-    // A genuine replacement always begins with a transition to working. A
-    // heartbeat or terminal event from another id is delayed evidence from a
-    // session that no longer owns this task.
-    const startsReplacement = status === 'working' || (!e.sessionId && status === 'error')
-    if (meta.heartbeat || !startsReplacement) return false
+    // A heartbeat can only renew the session generation already observed for
+    // this task. A transition may introduce a resumed generation in any phase
+    // (including waiting approval or verified idle); once introduced, the old
+    // id is retired and can never switch ownership back.
+    if (meta.heartbeat) return false
     const retired = retiredForTask ?? new Set<string>()
     if (previous.sessionId) retired.add(previous.sessionId)
     retiredSessions.set(taskId, retired)
