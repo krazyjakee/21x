@@ -100,7 +100,8 @@ describe('deriveActivity: freshness boundaries', () => {
 
   it('stale queue membership is unknown, not queued', () => {
     const r = deriveActivity({ entity: 'task', queue: { reason: 'global_limit', observedAt: NOW - ACTIVITY_STALE_MS } }, NOW)
-    expect(r.state).toBe('unknown')
+    expect(r).toMatchObject({ state: 'unknown', lastKnown: 'queued', detail: 'Last seen queued' })
+    expect(isQuietActivity(r)).toBe(false)
   })
 
   it('a stale failure stays visible as the last result', () => {

@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from 'react'
 import { create } from 'zustand'
 import { voicePlayback } from '@/lib/voice-playback'
 import { voiceCapture } from '@/lib/voice-capture'
@@ -159,6 +160,7 @@ export function useVoiceActivity(target: VoiceTarget | null): VoiceObservation |
   useVoiceStore((s) => s.state)
   useVoiceStore((s) => s.turnId)
   useVoiceAttributionStore((s) => s.version)
+  useSyncExternalStore(voicePlayback.subscribeActivity, () => voicePlayback.activitySnapshot, () => voicePlayback.activitySnapshot)
   if (!target) return null
   return deriveVoiceActivity(readVoiceActivitySnapshot(), target)
 }

@@ -88,6 +88,11 @@ export function HeldActionsNotice() {
 
   useEffect(() => { if (held.length === 0 && grants.length === 0) setOpen(false) }, [held.length, grants.length])
 
+  // A stale cached action is useful only as evidence that the source is
+  // unavailable. It must not remain approvable/rejectable after freshness is
+  // lost. Merge grants have their own live source and remain usable.
+  const visibleHeld = unavailable ? [] : held
+
   if (unavailable && grants.length === 0) {
     return (
       <span
@@ -103,7 +108,7 @@ export function HeldActionsNotice() {
     )
   }
 
-  if (held.length === 0 && grants.length === 0) return null
+  if (visibleHeld.length === 0 && grants.length === 0) return null
 
   const projectName = (id: string): string => projects.find((p) => p.id === id)?.name ?? 'Project'
 
@@ -141,20 +146,20 @@ export function HeldActionsNotice() {
         aria-controls={open ? dialogId : undefined}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium cursor-pointer ${held.length > 0 ? 'text-amber-700 hover:bg-amber-500/10 dark:text-amber-400' : 'text-muted-foreground hover:bg-muted'}`}
-        title={unavailable ? 'Held Captain actions unavailable; active merge grants shown' : held.length > 0 ? 'Captain actions waiting for your approval' : 'Active merge grants'}
+        className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium cursor-pointer ${visibleHeld.length > 0 ? 'text-amber-700 hover:bg-amber-500/10 dark:text-amber-400' : 'text-muted-foreground hover:bg-muted'}`}
+        title={unavailable ? 'Held Captain actions unavailable; active merge grants shown' : visibleHeld.length > 0 ? 'Captain actions waiting for your approval' : 'Active merge grants'}
         aria-label={[
           unavailable ? 'Held Captain actions unavailable' : '',
-          held.length > 0 ? `${held.length} Captain action${held.length !== 1 ? 's' : ''} waiting for approval` : '',
+          visibleHeld.length > 0 ? `${visibleHeld.length} Captain action${visibleHeld.length !== 1 ? 's' : ''} waiting for approval` : '',
           grants.length > 0 ? `${grants.length} active merge grant${grants.length !== 1 ? 's' : ''}` : ''
         ].filter(Boolean).join(', ')}
         aria-expanded={open}
       >
-        {unavailable ? <ShieldQuestion className="h-3 w-3" /> : held.length > 0 ? <ShieldAlert className="h-3 w-3" /> : <ShieldCheck className="h-3 w-3" />}
+        {unavailable ? <ShieldQuestion className="h-3 w-3" /> : visibleHeld.length > 0 ? <ShieldAlert className="h-3 w-3" /> : <ShieldCheck className="h-3 w-3" />}
         {unavailable && 'held actions unavailable'}
         {unavailable && grants.length > 0 && ' · '}
-        {held.length > 0 && `${held.length} waiting for approval`}
-        {held.length > 0 && grants.length > 0 && ' · '}
+        {visibleHeld.length > 0 && `${visibleHeld.length} waiting for approval`}
+        {visibleHeld.length > 0 && grants.length > 0 && ' · '}
         {grants.length > 0 && `${grants.length} merge grant${grants.length !== 1 ? 's' : ''}`}
       </button>
       {open && (
@@ -172,13 +177,13 @@ export function HeldActionsNotice() {
               Held Captain actions could not be read. Active merge grants remain available below.
             </p>
           )}
-          {held.length > 0 && (
+          {visibleHeld.length > 0 && (
             <p className="mb-2 px-1 text-[11px] text-muted-foreground">
               The project’s escalation policy asks you before these run. Approve runs the call; Reject drops it and tells the Captain.
             </p>
           )}
           <ul className="space-y-1.5">
-            {held.map((action) => (
+            {visibleHeld.map((action) => (
               <li key={action.id} className="flex items-start gap-2 rounded-md border border-border/60 bg-background px-2 py-1.5">
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-medium" title={action.summary}>{action.summary}</div>
