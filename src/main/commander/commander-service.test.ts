@@ -8,6 +8,7 @@ import { CommanderStore } from './commander-store'
 import { buildContext, planFold, splitTurns } from './context'
 import { createCommanderProjectTools, ProjectMutationConfirmations, type CommanderAgents } from './project-tools'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_TITLE_PROMPT } from './prompts'
+import { CaptainDeliveryService } from './captain-delivery'
 
 /** A model answer: text, a failure, or text plus tool calls (the turn then continues with their results). */
 type ModelAnswer = string | Error | { text?: string; toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> }
@@ -151,13 +152,33 @@ describe('CommanderService turns', () => {
       }
     })
     const session = store.createSession('Confirmation context')
-    await service.sendUserMessage(session.id, 'propose a rename').done
-    await service.sendUserMessage(session.id, 'Confirm abc123').done
+    const first = service.sendUserMessage(session.id, 'propose a rename')
+    await first.done
+    const second = service.sendUserMessage(session.id, 'Confirm abc123')
+    await second.done
 
+    // #137: the stored id of that message rides along, so a merge grant can bind to it.
     expect(seen).toEqual([
-      { sessionId: session.id, userMessage: 'propose a rename', trigger: 'user' },
-      { sessionId: session.id, userMessage: 'Confirm abc123', trigger: 'user' }
+      { sessionId: session.id, userMessage: 'propose a rename', userMessageId: first.message.id, authorizationMessageId: first.message.id, trigger: 'user' },
+      { sessionId: session.id, userMessage: 'Confirm abc123', userMessageId: second.message.id, authorizationMessageId: second.message.id, trigger: 'user' }
     ])
+  })
+
+  it('hands no message id to the tools for a voice transcript, so it cannot back a merge grant (#137)', async () => {
+    const seen: Array<{ userMessageId?: string }> = []
+    const service = new CommanderService({
+      store,
+      emit: (event) => events.push(event),
+      createProvider: () => fakeProvider(),
+      getTools: (context) => {
+        seen.push(context)
+        return []
+      }
+    })
+    const session = store.createSession('Voice')
+    await service.sendUserMessage(session.id, 'merge the ready PRs', 'voice').done
+    expect(seen).toHaveLength(1)
+    expect(seen[0].userMessageId).toBeUndefined()
   })
 
   it('delegates to each project the user names and replies at once, without waiting for the Captains', async () => {
@@ -188,11 +209,12 @@ describe('CommanderService turns', () => {
       title: () => 'Two projects'
     })
     const confirmations = new ProjectMutationConfirmations()
+    const delivery = new CaptainDeliveryService({ db, agents, onTerminalFailure: vi.fn() })
     const service = new CommanderService({
       store,
       emit: (e) => events.push(e),
       createProvider: () => provider,
-      getTools: (context) => createCommanderProjectTools({ db, context, confirmations, agents })
+      getTools: (context) => createCommanderProjectTools({ db, context, confirmations, agents, delivery })
     })
     const session = store.createSession()
 

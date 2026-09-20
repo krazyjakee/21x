@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { applySchema } from '../database/schema'
 import { createTestDb } from '../../../test/helpers/db-test-helper'
@@ -84,6 +84,16 @@ describe('ConnectorStore', () => {
       const b = store.createInstance({ pieceName: '@activepieces/piece-github', pieceVersion: '1.0.0' })
       expect(store.listInstances().map((i) => i.id)).toEqual([a.id, b.id])
       expect(store.updateInstance('missing', { enabled: true })).toBeUndefined()
+    })
+
+    it('lists instances created in the same millisecond in insertion order', () => {
+      const now = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
+      try {
+        const ids = Array.from({ length: 20 }, (_, i) => store.createInstance({ pieceName: `p${i}`, pieceVersion: '1' }).id)
+        expect(store.listInstances().map((i) => i.id)).toEqual(ids)
+      } finally {
+        now.mockRestore()
+      }
     })
 
     it('never exposes the auth ciphertext on the record', () => {

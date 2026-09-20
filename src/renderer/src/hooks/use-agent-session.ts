@@ -15,6 +15,8 @@ export interface AgentSessionState {
 }
 
 export interface SendMessageOptions {
+  /** Stable across renderer retries; main persists it before claiming delivery. */
+  deliveryId?: string
   attachments?: Array<{
     id: string
     filename: string
@@ -85,7 +87,14 @@ export function useAgentSessionActions(taskId: string | undefined) {
       // Pre-register so events arriving during start() are captured via taskId fallback
       initSession(tId, '', agentId)
       try {
-        const { sessionId } = await agentSessionApi.start(agentId, tId, workspaceDir, skipInitialPrompt)
+        const result = await agentSessionApi.start(agentId, tId, workspaceDir, skipInitialPrompt)
+        if (result.queued) {
+          // A durable queue row is not a live session. Leave the task idle;
+          // TaskWorkspace renders queue/retry state separately.
+          endSession(tId)
+          return ''
+        }
+        const { sessionId } = result
         // Update with the real sessionId (preserves any messages that arrived early)
         initSession(tId, sessionId, agentId)
         return sessionId
@@ -183,10 +192,11 @@ export function useAgentSessionActions(taskId: string | undefined) {
       // completes). Show "starting" immediately so the UI isn't stuck on "Idle"
       // with an open input. Cleared by the first non-idle status or on failure.
       const store = useAgentStore.getState()
+      const deliveryId = options?.deliveryId ?? `renderer:${crypto.randomUUID()}`
       store.beginSend(taskId)
       try {
         if (currentSession?.sessionId) {
-          const result = await agentSessionApi.send(currentSession.sessionId, message, taskId, currentSession.agentId, options?.attachments)
+          const result = await agentSessionApi.send(currentSession.sessionId, message, taskId, currentSession.agentId, options?.attachments, deliveryId)
           // Session was recreated on the main process — update renderer store
           if (result.newSessionId && taskId) {
             initSession(taskId, result.newSessionId, currentSession.agentId)
@@ -195,7 +205,7 @@ export function useAgentSessionActions(taskId: string | undefined) {
           // Fallback: session mapping lost in renderer — ask the backend
           // to find (or resume/create) the session by taskId directly.
           console.log('[use-agent-session] sendMessage() no sessionId, falling back to sendByTaskId:', taskId)
-          const result = await agentSessionApi.sendByTaskId(taskId, message, options?.attachments)
+          const result = await agentSessionApi.sendByTaskId(taskId, message, options?.attachments, deliveryId)
           // Update renderer store with the recovered/new sessionId
           const resolvedSessionId = result.newSessionId || result.sessionId
           if (resolvedSessionId) {

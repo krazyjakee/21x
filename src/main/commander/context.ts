@@ -1,4 +1,5 @@
 import type { ChatMessage } from '../../shared/chat'
+import { MAX_CHAT_IMAGE_TOTAL_BYTES, type ChatImageInput } from '../../shared/chat-images'
 import type { CommanderMessage } from '../../shared/commander'
 
 /**
@@ -37,6 +38,36 @@ export const PENDING_FOLD_CHAR_FACTOR = 2
 /** The marker standing in for turns left out of the context without a summary. */
 export function omittedTurnsMarker(count: number): string {
   return `${count} earlier ${count === 1 ? 'turn' : 'turns'} omitted (summary pending)`
+}
+
+/**
+ * Image bytes resent with the history, newest first (#144). The newest
+ * message's images always fit (it is capped at the same total); older images
+ * past the budget are named in text instead, so one request stays well below
+ * the providers' request-size limits.
+ */
+export const MAX_CONTEXT_IMAGE_BYTES = MAX_CHAT_IMAGE_TOTAL_BYTES
+
+/** Loads a stored message's image bytes. */
+export type CommanderImageLoader = (messageId: string) => ChatImageInput[]
+
+function imageNote(names: string[]): string {
+  return `[Earlier image${names.length === 1 ? '' : 's'} no longer attached: ${names.join(', ')}]`
+}
+
+/** Ids of the user messages whose images are resent, newest first within the budget. */
+function messagesWithImagesInBudget(messages: CommanderMessage[]): Set<string> {
+  const kept = new Set<string>()
+  let bytes = 0
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const images = messages[i].images
+    if (messages[i].role !== 'user' || !images?.length) continue
+    const size = images.reduce((sum, image) => sum + image.size, 0)
+    if (bytes + size > MAX_CONTEXT_IMAGE_BYTES) break
+    bytes += size
+    kept.add(messages[i].id)
+  }
+  return kept
 }
 
 function startsTurn(message: CommanderMessage): boolean {
@@ -99,15 +130,25 @@ function reportText(message: CommanderMessage): string {
  * cancelled before any text) are dropped; the history never starts with an
  * assistant or tool message.
  */
-export function toChatMessages(messages: CommanderMessage[]): ChatMessage[] {
+export function toChatMessages(messages: CommanderMessage[], loadImages?: CommanderImageLoader): ChatMessage[] {
   const out: ChatMessage[] = []
+  const withImages = loadImages ? messagesWithImagesInBudget(messages) : new Set<string>()
   for (const message of messages) {
     if (message.role === 'summary') continue
     if (message.role === 'user' || message.role === 'report') {
-      const text = message.role === 'report' ? reportText(message) : message.content
+      let text = message.role === 'report' ? reportText(message) : message.content
+      let images: ChatImageInput[] = []
+      if (message.role === 'user' && message.images?.length) {
+        if (withImages.has(message.id)) images = loadImages?.(message.id) ?? []
+        if (images.length === 0) text = [text, imageNote(message.images.map((image) => image.name))].filter(Boolean).join('\n')
+      }
       const previous = out[out.length - 1]
-      if (previous && previous.role === 'user') previous.content = `${previous.content}\n\n${text}`
-      else out.push({ role: 'user', content: text })
+      if (previous && previous.role === 'user') {
+        previous.content = [previous.content, text].filter(Boolean).join('\n\n')
+        if (images.length > 0) previous.images = [...(previous.images ?? []), ...images]
+      } else {
+        out.push({ role: 'user', content: text, ...(images.length > 0 ? { images } : {}) })
+      }
       continue
     }
     if (out.length === 0) continue
@@ -144,7 +185,11 @@ export interface BuiltContext {
  * PENDING_FOLD_CHAR_FACTOR). Turns still left out are named by a marker at the
  * start of the history.
  */
-export function buildContext(messages: CommanderMessage[], budget: ContextBudget = DEFAULT_CONTEXT_BUDGET): BuiltContext {
+export function buildContext(
+  messages: CommanderMessage[],
+  budget: ContextBudget = DEFAULT_CONTEXT_BUDGET,
+  loadImages?: CommanderImageLoader
+): BuiltContext {
   const { summary, rest } = unfoldedMessages(messages)
   const turns = splitTurns(rest)
   const withinBudget = keptTurnCount(turns, budget)
@@ -153,7 +198,7 @@ export function buildContext(messages: CommanderMessage[], budget: ContextBudget
     keptTurnCount(turns, { keepTurns: Number.POSITIVE_INFINITY, maxChars: budget.maxChars * PENDING_FOLD_CHAR_FACTOR })
   )
   const droppedTurns = turns.length - kept
-  const history = toChatMessages(turns.slice(turns.length - kept).flat())
+  const history = toChatMessages(turns.slice(turns.length - kept).flat(), loadImages)
   if (droppedTurns > 0 && history[0]?.role === 'user') {
     history[0] = { ...history[0], content: `[${omittedTurnsMarker(droppedTurns)}]\n\n${history[0].content}` }
   }
@@ -191,7 +236,10 @@ function clip(text: string, max: number): string {
 export function transcriptForSummary(messages: CommanderMessage[]): string {
   const lines: string[] = []
   for (const m of messages) {
-    if (m.role === 'user') lines.push(`User: ${m.content}`)
+    if (m.role === 'user') {
+      const images = m.images?.length ? ` [attached image${m.images.length === 1 ? '' : 's'}: ${m.images.map((i) => i.name).join(', ')}]` : ''
+      lines.push(`User: ${m.content}${images}`)
+    }
     else if (m.role === 'report') lines.push(`Report from ${m.project_id ? `project ${m.project_id}` : 'a project'}: ${m.content}`)
     else if (m.role === 'assistant') {
       if (m.content) lines.push(`Commander: ${m.content}`)

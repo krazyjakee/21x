@@ -50,6 +50,16 @@ through that registry.
 
 - `anthropic.ts`: `@anthropic-ai/sdk` `messages.stream` with `tool_use` blocks.
   Default model `claude-haiku-4-5-20251001`.
+- `claude-code-subscription.ts`: uses the authenticated Claude Code runtime
+  when the selected Claude agent uses subscription auth. It requests a
+  structured text/tool-call step, then leaves validation, confirmation and
+  tool execution to the same `ChatRuntime` loop as every other provider. A
+  separate Anthropic API key is not required.
+- `codex-subscription.ts`: uses the authenticated Codex CLI for a Codex agent
+  configured with ChatGPT subscription auth. It runs an ephemeral, read-only,
+  schema-constrained model step; Commander still validates and executes its
+  own tools. Ambient API keys are removed so they cannot silently replace the
+  selected subscription flow.
 - `openai-compatible.ts`: the `chat/completions` streaming format over plain
   `fetch`, no SDK. Works with OpenAI and local servers (Ollama, LM Studio,
   vLLM) via a configurable base URL. A key is optional off the hosted default.
@@ -77,10 +87,18 @@ chosen level as `output_config.effort`;
 OpenAI-compatible endpoints receive `reasoning_effort`. Leaving thinking at
 Default omits the provider parameter.
 
-API keys are not chat settings. `provider-factory.ts` reads the existing
+The selected agent id is stored with the model/provider pair, so two agents
+using the same model can still retain different authentication methods. API
+keys are not chat settings. `provider-factory.ts` reads the existing
 `anthropic_api_key` / `openai_api_key` rows (encrypted at rest;
 `DatabaseManager.getSetting` returns plaintext only in main) and falls back to
-an agent's `config.api_keys`. The renderer never sees a key.
+an agent's `config.api_keys`. The renderer never sees a key. For Claude Code
+and Codex agents whose auth method is `subscription`, chat uses the backend's
+existing login instead of requiring a separate API key. Older records use a
+previously configured API key when one resolves and otherwise follow the
+backend's subscription path. This factory is shared by `chat:start`, Commander
+text, and Commander voice, so they cannot choose different authentication
+flows.
 
 ## IPC
 

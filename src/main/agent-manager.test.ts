@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest'
-import { AgentManager } from './agent-manager'
+import { AgentManager, withStartupDeadline } from './agent-manager'
 import { FakeAdapter } from '../../test/helpers/fake-adapter'
 import { shouldEnableTillDone } from './agent-manager/session-config'
 import { isDelegationTool } from './agent-manager/watchdogs'
@@ -124,6 +124,9 @@ function createMockDb(agentConfig: Record<string, unknown> = {}) {
     })),
     getTasks: vi.fn(() => []),
     getSubtasks: vi.fn(() => []),
+    // Concurrency control (#150): declared touches and the audit feed.
+    getTaskTouches: vi.fn(() => []),
+    listConcurrencyAudit: vi.fn(() => []),
     getAgent: vi.fn(() => ({
       id: 'agent-1',
       name: 'Test Agent',
@@ -173,6 +176,26 @@ async function flushEventLoop(turns = 3): Promise<void> {
 afterEach(() => {
   // A fake installed by one test must not leak into the next one's factory.
   ;(ClaudeCodeAdapter as unknown as Mock).mockReset()
+})
+
+describe('bounded agent startup', () => {
+  it('rejects a never-ready agent at its deadline', async () => {
+    const neverReady = new Promise<string>(() => {})
+    await expect(withStartupDeadline(neverReady, 5, 'Never-ready agent')).rejects.toThrow(
+      'Never-ready agent timed out after 5ms'
+    )
+  })
+
+  it('fences and cleans up a session that resolves after its caller timed out', async () => {
+    let resolve!: (sessionId: string) => void
+    const starting = new Promise<string>((done) => { resolve = done })
+    const late = vi.fn()
+    const bounded = withStartupDeadline(starting, 5, 'Slow session', late)
+    await expect(bounded).rejects.toThrow('Slow session timed out after 5ms')
+
+    resolve('late-session')
+    await vi.waitFor(() => expect(late).toHaveBeenCalledWith('late-session'))
+  })
 })
 
 describe('AgentManager skill file paths', () => {
@@ -658,12 +681,13 @@ describe('AgentManager skill file paths', () => {
       const db = makeMcpDb()
 
       const md: string = generateAgentsMd(db, [], [], '/tmp/ws', 'agent-1', {
-        'task-management': { type: 'http', url: 'http://127.0.0.1:5555/mcp?token=session-secret&task=t1&parent=p1' }
+        'task-management': { type: 'http', url: 'http://127.0.0.1:5555/mcp?token=session-secret&scope_signature=captain-secret&task=t1&parent=p1' }
       })
 
       expect(md).toContain('**Type:** Local (HTTP, in-process)')
       expect(md).toContain('http://127.0.0.1:5555/mcp?task=t1&parent=p1')
       expect(md).not.toContain('session-secret')
+      expect(md).not.toContain('captain-secret')
       expect(md).not.toContain('/bin/Electron')
       expect(md).not.toContain('**Command:**')
     })
@@ -1886,6 +1910,7 @@ describe('AgentManager permission and question routing', () => {
       getTask: vi.fn(() => ({ id: 'task-1', title: 'Test', agent_id: 'agent-1' })),
       getAgent: vi.fn(() => ({ id: 'agent-1', name: 'Agent', config: {} })),
       getWorkspaceDir: vi.fn(() => '/tmp/ws'),
+      getAttachmentsDir: vi.fn(() => '/tmp/task-attachments/task-1'),
       updateTask: vi.fn(),
       getMcpServer: vi.fn(() => null),
       getSecretsByIds: vi.fn(() => []),
@@ -1900,6 +1925,7 @@ describe('AgentManager permission and question routing', () => {
     const session = {
       agentId: 'agent-1',
       taskId: 'task-1',
+      workspaceDir: '/tmp/ws',
       status: 'working',
       adapter: {
         respondToQuestion: vi.fn(async () => undefined),
@@ -1915,7 +1941,7 @@ describe('AgentManager permission and question routing', () => {
     }
     ;(mgr as any).sessions.set('temp-id', session)
 
-    return { mgr, session }
+    return { mgr, session, mockDb }
   }
 
   it('routes an explicit question response to the question method when the adapter also handles permissions', async () => {
@@ -1937,6 +1963,39 @@ describe('AgentManager permission and question routing', () => {
       { workspaceDir: '/tmp/ws' }
     )
     expect(dualAdapter.respondToApproval).not.toHaveBeenCalled()
+  })
+
+  it('preserves a multiline image answer and copies its task attachment before resuming the question', async () => {
+    const { mgr, session, mockDb } = createManagerWithSession()
+    const image = { id: 'pasted', filename: 'shot.png', mime_type: 'image/png', size: 64, added_at: 'now' }
+    vi.mocked(mockDb.getTask).mockReturnValue({ id: 'task-1', attachments: [image] } as TaskRecord)
+    mockedExistsSync.mockReturnValue(true)
+    mockedCopyFileSync.mockClear()
+    vi.spyOn(mgr as any, 'getAdapter').mockReturnValue(session.adapter)
+    vi.spyOn(mgr as any, 'buildSessionConfig').mockResolvedValue({ workspaceDir: '/tmp/ws' })
+    session.adapter.respondToQuestion.mockImplementation(async () => {
+      expect(mockedCopyFileSync).toHaveBeenCalledWith('/tmp/task-attachments/task-1/pasted-shot.png', '/tmp/ws/attachments/shot.png')
+    })
+    const answer = 'Use this layout.\nKeep both columns.\n\nMessage attachments (already available in your workspace):\n- attachments/shot.png'
+    try {
+      await mgr.respondToPermission('temp-id', true, answer, undefined, 'question')
+      expect(session.adapter.respondToQuestion).toHaveBeenCalledWith('temp-id', { answer }, { workspaceDir: '/tmp/ws' })
+    } finally {
+      mockedExistsSync.mockReturnValue(false)
+    }
+  })
+
+  it('preserves labelled multi-question replies and does not copy attachments for a rejected question', async () => {
+    const { mgr, session } = createManagerWithSession()
+    vi.spyOn(mgr as any, 'getAdapter').mockReturnValue(session.adapter)
+    vi.spyOn(mgr as any, 'buildSessionConfig').mockResolvedValue({ workspaceDir: '/tmp/ws' })
+    await mgr.respondToPermission('temp-id', true, 'Deployment: Staging\nRegion: EU', undefined, 'question')
+    expect(session.adapter.respondToQuestion).toHaveBeenCalledWith('temp-id', { Deployment: 'Staging', Region: 'EU' }, { workspaceDir: '/tmp/ws' })
+    mockedCopyFileSync.mockClear()
+    session.adapter.respondToQuestion.mockClear()
+    await mgr.respondToPermission('temp-id', false, 'Do not send\nattachments/shot.png', undefined, 'question')
+    expect(mockedCopyFileSync).not.toHaveBeenCalled()
+    expect(session.adapter.respondToQuestion).not.toHaveBeenCalled()
   })
 
   it('keeps an untyped response on the permission method for a dual-purpose adapter', async () => {
@@ -3744,6 +3803,30 @@ describe('AgentManager durable transcript write-through', () => {
     })
     expect(upserted).toHaveLength(1)
     expect(upserted[0].parts[0].id).toBe('p1')
+  })
+
+  it('persists raw output events without broadcasting them to the window or external listeners', () => {
+    const { mgr, upserted } = buildManager()
+    const send = vi.fn()
+    ;(mgr as any).mainWindow = { isDestroyed: () => false, webContents: { send } }
+    const external = vi.fn()
+    mgr.addExternalListener(external)
+
+    ;(mgr as any).sendToRenderer('agent:output-batch', {
+      sessionId: 's1',
+      taskId: 'task-1',
+      messages: [{ id: 'p1', role: 'tool', content: 'x'.repeat(1_000_000), partType: 'text' }]
+    })
+    ;(mgr as any).sendToRenderer('agent:output', {
+      sessionId: 's1',
+      taskId: 'task-1',
+      type: 'message',
+      data: { id: 'p2', role: 'assistant', content: 'done', partType: 'text' }
+    })
+
+    expect(upserted).toHaveLength(2)
+    expect(send).not.toHaveBeenCalled()
+    expect(external).not.toHaveBeenCalled()
   })
 
   it('exposes snapshots via getTranscriptSnapshot', async () => {

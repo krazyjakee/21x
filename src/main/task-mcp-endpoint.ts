@@ -17,8 +17,9 @@
  *   /mcp?task=<id>&parent=<id>                  subtask set, parent + siblings only
  *   /mcp?...&artifact=<id>                      pins artifact writes to one task
  *
- * The parameters are an address, not a credential. The Task API server they
- * reach has no authentication either, and it listens only on 127.0.0.1.
+ * The API token authenticates the caller; a separate main-process HMAC binds
+ * that token to the scope. A worker cannot remove its pins or change project
+ * to gain Captain tools. Unsigned URLs are refused, including debug access.
  *
  * Each request is handled statelessly: one transport and one Server per request.
  * That needs no session table, so a resumed agent keeps working with the same
@@ -28,6 +29,7 @@
  * server-initiated messages, and these tools never send one, so the GET is
  * refused with 405 before a transport exists. See handleTaskMcpRequest.
  */
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Server, WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/server'
 import {
@@ -39,6 +41,22 @@ import {
 
 /** Path that serves MCP on the Task API server. */
 export const TASK_MCP_PATH = '/mcp'
+
+// Independent of the shared API token, which every worker knows. Never sent
+// to agents or persisted. Issued URLs survive resumes within this app launch.
+const scopeSigningKey = randomBytes(32)
+
+function scopeSignature(url: URL): Buffer {
+  return createHmac('sha256', scopeSigningKey)
+    .update(JSON.stringify([url.searchParams.get('token'), parseScopeFromUrl(url)]))
+    .digest()
+}
+
+function hasValidScopeSignature(url: URL): boolean {
+  const value = url.searchParams.get('scope_signature') ?? ''
+  if (!/^[0-9a-f]{64}$/.test(value)) return false
+  return timingSafeEqual(Buffer.from(value, 'hex'), scopeSignature(url))
+}
 
 /** Reads the scope of a session from the request URL. */
 export function parseScopeFromUrl(url: URL): TaskMcpScope {
@@ -70,7 +88,9 @@ export function buildTaskMcpUrl(
   if (scope.artifactTaskId && scope.artifactTaskId !== scope.taskId) {
     params.set('artifact', scope.artifactTaskId)
   }
-  return `http://127.0.0.1:${port}${TASK_MCP_PATH}?${params.toString()}`
+  const url = new URL(`http://127.0.0.1:${port}${TASK_MCP_PATH}?${params.toString()}`)
+  url.searchParams.set('scope_signature', scopeSignature(url).toString('hex'))
+  return url.toString()
 }
 
 /** A fresh MCP server bound to one scope. */
@@ -170,6 +190,11 @@ export async function handleTaskMcpRequest(
     return
   }
 
+  if (!hasValidScopeSignature(url)) {
+    res.writeHead(403, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Invalid MCP scope credential. Reconnect using the app-issued session URL.' }))
+    return
+  }
   const scope = parseScopeFromUrl(url)
   const transport = new WebStandardStreamableHTTPServerTransport({
     // Stateless: no session table, so a resumed agent keeps the same URL.
@@ -178,7 +203,7 @@ export async function handleTaskMcpRequest(
     // request/response only, and no tool sends server-initiated notifications.
     enableJsonResponse: true
   })
-  const server = createScopedServer(scope, invoke)
+  const server = createScopedServer(scope, (route, params) => invoke(route, params, scope))
 
   try {
     await server.connect(transport)
