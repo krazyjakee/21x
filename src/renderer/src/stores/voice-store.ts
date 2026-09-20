@@ -75,6 +75,12 @@ interface VoiceStoreState {
   sentSentences: string[]
   /** Set by the component that should receive dictated text. */
   contextProvider: (() => VoiceUiContext) | null
+  /**
+   * A surface that draws the half-heard words itself (Commander voice mode).
+   * While it is set, the global overlay leaves them out, so the words appear
+   * once. Null means the overlay owns them.
+   */
+  captionOwner: string | null
 
   // ── Spoken answers ──────────────────────────────────────
   /** Null until the first snapshot arrives. */
@@ -92,6 +98,7 @@ interface VoiceStoreState {
   removeRuntime: () => Promise<void>
   setEnabled: (enabled: boolean) => Promise<void>
   setContextProvider: (provider: (() => VoiceUiContext) | null) => void
+  setCaptionOwner: (owner: string | null) => void
   startTurn: (mode: VoiceTurnMode) => Promise<void>
   /** Records one turn and shows the words in settings, changing nothing else. */
   startTest: () => Promise<void>
@@ -280,6 +287,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
   conversation: true,
   sentSentences: [],
   contextProvider: null,
+  captionOwner: null,
   tts: null,
   speaking: false,
   speechText: '',
@@ -367,6 +375,7 @@ export const useVoiceStore = create<VoiceStoreState>((set, get) => ({
   },
 
   setContextProvider: (contextProvider) => set({ contextProvider }),
+  setCaptionOwner: (captionOwner) => set({ captionOwner }),
 
   startTurn: async (mode) => {
     const { enabled, turnId, contextProvider } = get()

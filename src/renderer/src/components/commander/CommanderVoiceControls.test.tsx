@@ -14,6 +14,10 @@ const mocks = vi.hoisted(() => {
     speaking: false,
     tts: { enabled: true, status: { state: 'ready' as string, message: '' } },
     result: null as { message: string } | null,
+    captionOwner: null as string | null,
+    setCaptionOwner: vi.fn((owner: string | null) => {
+      voiceState.captionOwner = owner
+    }),
     setEnabled: vi.fn(async (enabled: boolean) => {
       voiceState.enabled = enabled
       voiceState.permission = enabled ? 'granted' : voiceState.permission
@@ -68,6 +72,8 @@ vi.mock('@/stores/voice-store', () => {
 })
 
 import { insertAndSubmit, clearDictationTarget } from '@/lib/voice-dictation-target'
+import { useUIStore } from '@/stores/ui-store'
+import { SettingsTab } from '@/types'
 import { CommanderVoiceControls } from './CommanderVoiceControls'
 
 beforeEach(() => {
@@ -83,6 +89,7 @@ beforeEach(() => {
   mocks.voiceState.tts.status.state = 'ready'
   mocks.voiceState.tts.status.message = ''
   mocks.voiceState.result = null
+  mocks.voiceState.captionOwner = null
   mocks.commanderState.selectedSessionId = 'session-1'
   mocks.commanderState.streaming = {}
   vi.clearAllMocks()
@@ -162,5 +169,63 @@ describe('Commander voice conversation', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('ElevenLabs is temporarily unavailable')
     expect(mocks.voiceState.startTurn).not.toHaveBeenCalled()
+  })
+
+  it('owns the half-heard words while its conversation runs, so they show once', async () => {
+    render(<CommanderVoiceControls />)
+    fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
+    await waitFor(() => expect(mocks.voiceState.startTurn).toHaveBeenCalled())
+    expect(mocks.voiceState.captionOwner).toBe('commander-voice')
+
+    fireEvent.click(screen.getByLabelText('Turn voice mode off'))
+    await waitFor(() => expect(mocks.voiceState.captionOwner).toBeNull())
+  })
+
+  it('does not show words from another microphone as its own', async () => {
+    mocks.voiceState.turnId = 'someone-else'
+    mocks.voiceState.partial = 'dictating a task'
+    render(<CommanderVoiceControls />)
+    fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Another microphone is already listening')
+    expect(screen.queryByText('dictating a task')).toBeNull()
+    expect(mocks.voiceState.captionOwner).toBeNull()
+  })
+})
+
+describe('Commander voice not ready', () => {
+  it('names the reason in visible text before any click', async () => {
+    mocks.voiceState.runtime.installed = false
+    render(<CommanderVoiceControls />)
+
+    const label = await screen.findByTestId('commander-voice-setup')
+    expect(label).toHaveTextContent('Voice not installed')
+    expect(screen.getByLabelText('Turn voice mode on').getAttribute('aria-describedby')).toBe(label.id)
+  })
+
+  it('says the microphone is blocked', async () => {
+    mocks.voiceState.permission = 'denied'
+    render(<CommanderVoiceControls />)
+    expect(await screen.findByTestId('commander-voice-setup')).toHaveTextContent('Mic blocked')
+  })
+
+  it('shows nothing extra when voice is ready', async () => {
+    render(<CommanderVoiceControls />)
+    await screen.findByLabelText('Turn voice mode on')
+    expect(screen.queryByTestId('commander-voice-setup')).toBeNull()
+  })
+
+  it('offers a fix that opens Settings → Voice', async () => {
+    mocks.voiceState.runtime.installed = false
+    useUIStore.setState({ activeModal: null, settingsTab: SettingsTab.GENERAL })
+    render(<CommanderVoiceControls />)
+
+    fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Install the local speech runtime')
+    fireEvent.click(screen.getByTestId('commander-voice-fix'))
+
+    expect(useUIStore.getState().activeModal).toBe('settings')
+    expect(useUIStore.getState().settingsTab).toBe(SettingsTab.VOICE)
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 })

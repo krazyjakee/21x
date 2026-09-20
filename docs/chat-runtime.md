@@ -28,6 +28,14 @@ get an error result and the model is asked once more with `toolChoice: 'none'`
 so it answers in text. A `max_tokens` stop with a pending tool call never runs
 the tool; a truncated input looks valid.
 
+Unanswered tool calls: whenever a turn ends while calls of its last assistant
+message have no result (cancelled mid-tools, cut off by `max_tokens`, the model
+still calling tools after `toolChoice: 'none'`, or a failure between two
+tools), the runtime appends a failed "not run" `tool` message for each, worded
+by stop reason. The returned history is therefore always valid to send again,
+and a consumer never has to read "no result" as "still running". These results
+are `isError: true`; they are never empty or successful.
+
 Cancellation: every turn has its own `AbortController`. The signal reaches the
 provider (which aborts the HTTP request) and every tool handler. Partial text
 is kept in the returned history.

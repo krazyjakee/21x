@@ -25,6 +25,7 @@ function reset(partial: Partial<ReturnType<typeof useVoiceStore.getState>> = {})
     level: 0,
     confirmation: null,
     result: null,
+    captionOwner: null,
     ...partial,
   })
 }
@@ -180,5 +181,19 @@ describe('VoiceOverlay', () => {
     reset({ result: { kind: 'ok', message: 'Created “Fix login”.', at: Date.now() } })
     render(<VoiceOverlay />)
     expect(screen.getByTestId('voice-result')).toHaveTextContent('Created “Fix login”.')
+  })
+
+  it('leaves the half-heard words to Commander voice mode, which shows them itself', () => {
+    reset({ state: 'listening', turnId: 't1', partial: 'open the web project', captionOwner: 'commander-voice' })
+    render(<VoiceOverlay />)
+    expect(screen.queryByTestId('voice-transcript')).toBeNull()
+    expect(screen.queryByText('open the web project')).toBeNull()
+  })
+
+  it('still shows a result while Commander owns the words', () => {
+    reset({ captionOwner: 'commander-voice', result: { kind: 'ok', message: 'Done', at: Date.now() } })
+    render(<VoiceOverlay />)
+    expect(screen.getByTestId('voice-result').textContent).toBe('Done')
+    expect(screen.queryByTestId('voice-transcript')).toBeNull()
   })
 })

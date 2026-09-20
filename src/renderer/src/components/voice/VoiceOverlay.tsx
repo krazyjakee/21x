@@ -24,6 +24,9 @@ export function VoiceOverlay() {
   const ready = useVoiceStore(selectVoiceReady)
   const state = useVoiceStore((s) => s.state)
   const partial = useVoiceStore((s) => s.partial)
+  // Commander voice mode draws its own listening pill with the half-heard
+  // words. Showing them here as well would print every word twice (#83).
+  const captionsElsewhere = useVoiceStore((s) => s.captionOwner !== null)
   const level = useVoiceStore((s) => s.level)
   const confirmation = useVoiceStore((s) => s.confirmation)
   const result = useVoiceStore((s) => s.result)
@@ -61,7 +64,7 @@ export function VoiceOverlay() {
   const listening = state === 'listening'
   const transcribing = state === 'transcribing'
   const loudness = Math.min(Math.max(level, 0), 1)
-  const showBubble = listening || transcribing || Boolean(partial)
+  const showBubble = !captionsElsewhere && (listening || transcribing || Boolean(partial))
   if (!showBubble && !confirmation && !result) return null
 
   return (

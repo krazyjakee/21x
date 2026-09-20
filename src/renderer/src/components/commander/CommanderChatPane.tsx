@@ -210,8 +210,13 @@ export function CommanderChatPane() {
         {visible.length === 0 && !streaming && (
           <p className="mx-auto max-w-md pt-10 text-center text-xs leading-relaxed text-muted-foreground/70">{COMMANDER_EMPTY_DESCRIPTION}</p>
         )}
-        {visible.map((m) => (
-          <CommanderMessageItem key={m.id} message={m} toolResults={toolResults} />
+        {visible.map((m, index) => (
+          <CommanderMessageItem
+            key={m.id}
+            message={m}
+            toolResults={toolResults}
+            turnActive={Boolean(streaming) && index === visible.length - 1}
+          />
         ))}
         {streaming && (
           <div className="flex flex-col gap-1.5" data-testid="commander-streaming">
