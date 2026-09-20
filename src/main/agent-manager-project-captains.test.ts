@@ -13,6 +13,7 @@ import type { DatabaseManager } from './database'
 import type { SessionConfig } from './adapters/coding-agent-adapter'
 import { CaptainRuntimeStore } from './sessions/runtime-store'
 import { DeliveryStore } from './sessions/delivery-store'
+import { recordHumanAuthorization, prepareAuthorizationDispatch, activateAuthorizationDispatch, taskAuthorization } from './authorization'
 
 // Mock heavy dependencies to avoid loading electron/native modules. The
 // filesystem is real: sessions get workspaces under a temp dir, so the
@@ -145,6 +146,18 @@ describe('per-project Captain conversations', () => {
     expect(db.getTask(alphaCaptain)?.session_id).toBe('alpha-session')
     expect(db.getTask(betaCaptain)?.session_id).toBe('beta-session')
     expect(db.getTask(alphaCaptain)?.status).toBe('not_started')
+  })
+
+  it('sends a normal Captain startup prompt after clearing old authority without invalidating its own snapshot', async () => {
+    const text = 'Create tasks'
+    recordHumanAuthorization(db, { messageId: 'startup-human', text, at: Date.now(), source: 'project-chat', projectId: alphaId, taskId: alphaCaptain })
+    activateAuthorizationDispatch(db, prepareAuthorizationDispatch(db, { key: 'startup-old', taskId: alphaCaptain, text, messageId: 'startup-human' }))
+    expect(taskAuthorization(db, alphaCaptain).status).toBe('active')
+    const fake = new FakeAdapter({ sessionIds: ['startup-session'] })
+    const manager = newManager(fake)
+    await manager.startSession(agentId, alphaCaptain, undefined, false)
+    expect(fake.sendPrompt).toHaveBeenCalledOnce()
+    expect(taskAuthorization(db, alphaCaptain).effectivePermissions).toEqual([])
   })
 
   it('resumes both conversations after a restart, each by its own session id', async () => {
