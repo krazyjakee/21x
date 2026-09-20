@@ -155,10 +155,14 @@ describe('per-project Captain conversations', () => {
     recordHumanAuthorization(db, { messageId: 'startup-human', text, at: Date.now(), source: 'project-chat', projectId: alphaId, taskId: alphaCaptain })
     activateAuthorizationDispatch(db, prepareAuthorizationDispatch(db, { key: 'startup-old', taskId: alphaCaptain, text, messageId: 'startup-human' }))
     expect(taskAuthorization(db, alphaCaptain).status).toBe('active')
+    seedTranscript(alphaCaptain, 'Create tasks', 'Old instructions are historical only.')
     const fake = new FakeAdapter({ sessionIds: ['startup-session'] })
+    fake.resumeSession.mockRejectedValueOnce(new Error('No conversation found'))
+    db.updateTask(alphaCaptain, { session_id: 'lost-authorized-session' })
     const manager = newManager(fake)
     await manager.startSession(agentId, alphaCaptain, undefined, false)
     expect(fake.sendPrompt).toHaveBeenCalledOnce()
+    expect(promptTexts(fake)[0]).toContain('Old instructions are historical only.')
     expect(taskAuthorization(db, alphaCaptain).effectivePermissions).toEqual([])
   })
 
@@ -267,7 +271,7 @@ describe('per-project Captain conversations', () => {
 
   it.each([
     ['the backend no longer has it', new Error('No conversation found'), 'No conversation found'],
-    ['resuming it fails outright', new Error('backend crashed'), 'backend crashed']
+    ['resuming it fails outright', new Error('backend crashed'), 'Backend session unavailable']
   ])('replaces a lost Captain session with a notice and a recap when %s', async (_label, failure, reason) => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     await captainBeforeRestart()
@@ -303,6 +307,52 @@ describe('per-project Captain conversations', () => {
     warn.mockRestore()
   })
 
+  it('retains recovery intent across a failed replacement start and a process restart', async () => {
+    await captainBeforeRestart()
+    const failed = new FakeAdapter()
+    failed.resumeSession.mockRejectedValue(new Error('SESSION_FILE_NOT_FOUND token=private-provider-secret'))
+    failed.createSession.mockRejectedValue(new Error('temporary startup failure'))
+    const first = newManager(failed)
+    await expect(first.startSession(agentId, alphaCaptain, undefined, true)).rejects.toThrow()
+    await first.stopAllSessions()
+
+    const after = new FakeAdapter({ sessionIds: ['restarted-replacement'] })
+    const second = newManager(after)
+    await second.startSession(agentId, alphaCaptain, undefined, true)
+    await second.sendMessage('restarted-replacement', 'Continue.', alphaCaptain)
+    await vi.waitFor(() => expect(after.sendPrompt).toHaveBeenCalledTimes(1))
+    expect(promptTexts(after)[0]).toContain('Release plan drafted: three tasks created.')
+    expect(lostNotices(alphaCaptain).join('')).not.toContain('private-provider-secret')
+    expect(db.getTranscriptParts(alphaCaptain).filter((p) => p.partId.startsWith('session-loss-')).map((p) => p.content).join(''))
+      .not.toContain('private-provider-secret')
+  })
+
+  it('restores an unsent recap on reconnect and retains it after a rejected first send', async () => {
+    await captainBeforeRestart()
+    const before = new FakeAdapter({ sessionIds: ['replacement'] })
+    before.resumeSession.mockRejectedValue(new Error('No conversation found'))
+    const first = newManager(before)
+    await first.startSession(agentId, alphaCaptain, undefined, true)
+    await first.stopAllSessions()
+
+    const after = new FakeAdapter()
+    const second = newManager(after)
+    expect(await second.startSession(agentId, alphaCaptain, undefined, true)).toBe('replacement')
+    after.sendPrompt.mockRejectedValueOnce(new Error('temporarily unavailable'))
+    await expect(second.sendMessage('replacement', 'Continue.', alphaCaptain)).rejects.toThrow('temporarily unavailable')
+    await second.sendMessage('replacement', 'Try again.', alphaCaptain)
+    expect(promptTexts(after)).toHaveLength(2)
+    for (const prompt of promptTexts(after)) expect(prompt).toContain('Release plan drafted: three tasks created.')
+    expect(lostNotices(alphaCaptain)).toHaveLength(1)
+    await second.stopAllSessions()
+
+    const final = new FakeAdapter()
+    const third = newManager(final)
+    await third.startSession(agentId, alphaCaptain, undefined, true)
+    await third.sendMessage('replacement', 'Next.', alphaCaptain)
+    expect(promptTexts(final)[0]).toBe('Next.')
+  })
+
   describe('task sessions', () => {
     let taskId: string
 
@@ -326,7 +376,7 @@ describe('per-project Captain conversations', () => {
       // The user chooses to start a new session.
       fake.setStatus(SessionStatusType.BUSY)
       expect(await manager.startSession(agentId, taskId)).toBe('task-session-2')
-      expect(lostNotices(taskId)).toEqual([expect.stringContaining('session expired')])
+      expect(lostNotices(taskId)).toEqual([expect.stringContaining('INCOMPATIBLE_SESSION_ID')])
       const prompts = promptTexts(fake)
       expect(prompts).toHaveLength(2)
       expect(prompts[0]).not.toContain('Continuing after a lost session')
@@ -335,6 +385,36 @@ describe('per-project Captain conversations', () => {
       // The recap leaves out the generated first prompt of the lost session.
       expect(prompts[1].split('## Continuing after a lost session')[1].split('---')[0]).not.toContain('IMPORTANT: First, read')
       warn.mockRestore()
+    })
+
+    it('keeps the recap after a generated initial prompt fails, including across restart', async () => {
+      seedTranscript(taskId, 'Fix login.', 'The handler still needs binding.')
+      db.updateTask(taskId, { session_id: 'old-task-session' })
+      const before = new FakeAdapter({ sessionIds: ['failed-replacement'] })
+      before.resumeSession.mockRejectedValue(new Error('SESSION_FILE_NOT_FOUND'))
+      const first = newManager(before)
+      await expect(first.resumeSession(agentId, taskId, 'old-task-session')).rejects.toThrow('SESSION_INCOMPATIBLE')
+      before.sendPrompt.mockRejectedValueOnce(new Error('first prompt failed'))
+      await expect(first.startSession(agentId, taskId)).rejects.toThrow('first prompt failed')
+      expect(promptTexts(before)[0]).toContain('The handler still needs binding.')
+      await first.stopAllSessions()
+
+      const after = new FakeAdapter({ sessionIds: ['retry-replacement'] })
+      const second = newManager(after)
+      await second.sendMessage('', 'Please continue.', taskId, agentId)
+      expect(promptTexts(after)[0]).toContain('The handler still needs binding.')
+      expect(db.getTranscriptParts(taskId).filter((p) => p.partId.startsWith('session-loss-ack-'))).toHaveLength(1)
+    })
+
+    it('ignores an incompatible poll from a session whose durable binding has already changed', async () => {
+      const fake = new FakeAdapter({ sessionIds: ['old-session'] })
+      const manager = newManager(fake)
+      await manager.startSession(agentId, taskId, undefined, true)
+      db.updateTask(taskId, { session_id: 'new-owner-session' })
+      await (manager as any).handleErrorStatus('old-session', manager.findSessionByTaskId(taskId)?.session,
+        { taskId, agentId }, { type: SessionStatusType.ERROR, message: 'INCOMPATIBLE_SESSION_ID' }, [])
+      expect(db.getTask(taskId)?.session_id).toBe('new-owner-session')
+      expect(db.getTranscriptParts(taskId).some((p) => p.partId.startsWith('session-loss-pending-'))).toBe(false)
     })
 
     it('seeds the replacement when a message finds the persisted session gone', async () => {

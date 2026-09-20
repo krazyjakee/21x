@@ -5,7 +5,7 @@ import { imagesUnsupportedMessage, type ChatProvider, type ChatProviderRequest }
 import { validateChatImageInputs } from '../../shared/chat-images'
 import type { ChatToolDefinition } from '../chat/tools'
 import { normalizeTitle, type CommanderStore } from './commander-store'
-import { buildContext, DEFAULT_CONTEXT_BUDGET, planFold, transcriptForSummary, type ContextBudget } from './context'
+import { buildContext, DEFAULT_CONTEXT_BUDGET, MAX_SUMMARY_TRANSCRIPT_CHARS, planFold, transcriptForSummary, type ContextBudget } from './context'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_SYSTEM_PROMPT, COMMANDER_TITLE_PROMPT, reportRelayNote, withSummary } from './prompts'
 import { guardReportAsks, MAX_REPORT_ASKS_WITHOUT_USER_TURN } from './report-tools'
 
@@ -112,6 +112,7 @@ const MAX_USER_MESSAGE_CHARS = 100_000
 const FALLBACK_TITLE_WORDS = 6
 const MAX_TITLE_CHARS = 60
 const DEFAULT_ONE_SHOT_TIMEOUT_MS = 20_000
+const MAX_SUMMARY_CHUNKS = 8
 
 /** First words of the user's message, used when the model cannot name the session. */
 export function fallbackTitle(text: string): string {
@@ -159,7 +160,10 @@ export function toolResultTags(content: string, isError: boolean): { projectId?:
 export async function completeText(provider: ChatProvider, request: Omit<ChatProviderRequest, 'tools' | 'toolChoice'>, signal: AbortSignal): Promise<string> {
   let text = ''
   for await (const event of provider.stream({ ...request, tools: [], toolChoice: 'none' }, signal)) {
-    if (event.type === 'text_delta') text += event.text
+    if (event.type === 'text_delta') {
+      if (text.length + event.text.length > 8_000) throw new Error('One-shot response exceeded the size limit')
+      text += event.text
+    }
   }
   return text
 }
@@ -447,23 +451,38 @@ export class CommanderService {
         return null
       }
       const excerpt = transcriptForSummary(plan.toFold)
-      const prompt = plan.previousSummary
-        ? `Previous summary:\n${plan.previousSummary}\n\nNew conversation to fold in:\n${excerpt}`
-        : `Conversation to summarise:\n${excerpt}`
-      let summary: string
-      try {
-        const model = provider ?? this.options.createProvider()
-        summary = (await completeText(
-          model,
-          { system: COMMANDER_SUMMARY_PROMPT, messages: [{ role: 'user', content: prompt }], maxTokens: 800 },
-          AbortSignal.timeout(this.options.oneShotTimeoutMs ?? DEFAULT_ONE_SHOT_TIMEOUT_MS)
-        )).trim()
-      } catch (err) {
-        this.recordFoldFailure(sessionId, err instanceof Error ? err.message : String(err))
+      // Never send unbounded retained history or an oversized legacy summary.
+      // Leave the fold cursor unchanged so stored turns remain recoverable.
+      if (excerpt.length > MAX_SUMMARY_TRANSCRIPT_CHARS * MAX_SUMMARY_CHUNKS || (plan.previousSummary?.length ?? 0) > 8_000) {
+        this.recordFoldFailure(sessionId, 'summary input exceeds the size limit; stored history retained')
         return null
       }
-      if (!summary) {
-        this.recordFoldFailure(sessionId, 'the summary came back empty')
+      let summary = plan.previousSummary ?? ''
+      try {
+        const model = provider ?? this.options.createProvider()
+        const signal = AbortSignal.timeout(this.options.oneShotTimeoutMs ?? DEFAULT_ONE_SHOT_TIMEOUT_MS)
+        // A large single turn is folded in bounded requests. Intermediate
+        // summaries remain local: any failed/empty chunk leaves the durable
+        // summary and its cursor untouched, ready for a complete retry.
+        for (let offset = 0; offset < excerpt.length; offset += MAX_SUMMARY_TRANSCRIPT_CHARS) {
+          signal.throwIfAborted()
+          const chunk = excerpt.slice(offset, offset + MAX_SUMMARY_TRANSCRIPT_CHARS)
+          const prompt = summary
+            ? `Previous summary:\n${summary}\n\nNew conversation to fold in:\n${chunk}`
+            : `Conversation to summarise:\n${chunk}`
+          summary = (await completeText(
+            model,
+            { system: COMMANDER_SUMMARY_PROMPT, messages: [{ role: 'user', content: prompt }], maxTokens: 800 },
+            signal
+          )).trim()
+          if (!summary) {
+            this.recordFoldFailure(sessionId, 'the summary came back empty')
+            return null
+          }
+        }
+      } catch {
+        // Provider errors can include credentials, request text or private URLs.
+        this.recordFoldFailure(sessionId, 'summary request failed')
         return null
       }
       if (!this.store.getSession(sessionId)) return null

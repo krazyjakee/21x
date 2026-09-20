@@ -27,6 +27,7 @@ export interface ContextBudget {
 export const DEFAULT_CONTEXT_BUDGET: ContextBudget = { keepTurns: 8, maxChars: 24_000 }
 
 const TOOL_TEXT_IN_SUMMARY = 600
+export const MAX_SUMMARY_TRANSCRIPT_CHARS = 32_000
 
 /**
  * While turns wait to be folded, the verbatim part may grow to this multiple
@@ -224,7 +225,16 @@ export function planFold(messages: CommanderMessage[], budget: ContextBudget = D
   const turns = splitTurns(rest)
   const kept = keptTurnCount(turns, budget)
   if (kept >= turns.length) return null
-  const toFold = turns.slice(0, turns.length - kept).flat()
+  // Catch up a failed fold in bounded oldest-first batches. Never advance
+  // correlation_id past turns that were not included in this request.
+  const toFold: CommanderMessage[] = []
+  let chars = 0
+  for (const turn of turns.slice(0, turns.length - kept)) {
+    const size = transcriptForSummary(turn).length + 1
+    if (toFold.length > 0 && chars + size > MAX_SUMMARY_TRANSCRIPT_CHARS) break
+    toFold.push(...turn)
+    chars += size
+  }
   return { previousSummary: summary?.content ?? null, toFold, lastFoldedId: toFold[toFold.length - 1].id }
 }
 

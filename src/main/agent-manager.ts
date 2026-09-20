@@ -144,6 +144,7 @@ interface AgentSession {
   fallbackInProgress?: boolean
   /** Recap of a lost predecessor session, prepended (adapter-side only) to the next prompt sent. */
   pendingRecap?: string
+  pendingLossId?: string
 }
 
 interface AgentFallbackState {
@@ -289,9 +290,6 @@ export class AgentManager extends EventEmitter {
   /** taskId → agentId of admitted starts whose session is not registered yet.
    *  They hold their slot so concurrent requests cannot all slip past. */
   private admittedStarts: Map<string, string> = new Map()
-  /** taskId → why its backend session was lost. The next session started for
-   *  the task shows a notice and is seeded with a recap instead of starting blank. */
-  private lostSessions: Map<string, { previousSessionId: string; reason: string }> = new Map()
   /** In-flight admitted starts, so a durable message accepted during warm-up
    * joins that start instead of opening a competing Captain session. */
   private sessionStarts: Map<string, Promise<string>> = new Map()
@@ -891,39 +889,47 @@ export class AgentManager extends EventEmitter {
     })
   }
 
-  /**
-   * Records that a task's backend session is gone, so the next session started
-   * for the task says so in the transcript and starts from a recap instead of
-   * blank (see startAdapterSession). Kept in memory only: after a restart the
-   * row has no session id and starts like any other.
-   */
+  /** Persist recovery intent before clearing the binding, using the existing
+   * transcript projection so restart/reconnect cannot consume an unsent recap. */
   private markSessionLost(taskId: string, previousSessionId: string, reason: string | undefined): void {
-    const why = (reason || 'unknown reason').replace(/\s+/g, ' ').trim().slice(0, 300)
+    // Backend errors may contain request bodies, credentials or local paths.
+    // Only fixed classifications enter recovery notices and logs.
+    const why = ['INCOMPATIBLE_SESSION_ID', 'SESSION_FILE_NOT_FOUND', 'No conversation found', 'Session no longer exists on server']
+      .find((code) => reason?.includes(code)) ?? 'Backend session unavailable'
     console.warn(`[AgentManager] Session ${previousSessionId} of task ${taskId} was lost (${why}); the next session starts with a recap`)
-    this.lostSessions.set(taskId, { previousSessionId, reason: why })
+    this.emitSystemNotice(previousSessionId, taskId, `session-loss-pending-${randomUUID()}`, why)
   }
 
-  /**
-   * The start of a session replacing a lost one: the transcript notice, a log
-   * line, and the recap to seed it with ('' when there is nothing to recap).
-   * The recap is read before anything new lands in the transcript.
-   */
+  private pendingSessionLoss(taskId: string): { id: string; reason: string } | undefined {
+    const parts = this.db.getTranscriptParts(taskId)
+    const latest = parts.filter((part) => part.role === 'system' && part.partId.startsWith('session-loss-pending-')).at(-1)
+    if (!latest || parts.some((part) => part.role === 'system' && part.partId === `session-loss-ack-${latest.partId}`)) return undefined
+    return { id: latest.partId, reason: latest.content }
+  }
+
   private announceLostSessionReplacement(taskId: string, newSessionId: string): string {
-    const lost = this.lostSessions.get(taskId)
+    const lost = this.pendingSessionLoss(taskId)
     if (!lost) return ''
-    this.lostSessions.delete(taskId)
     const recap = buildLostSessionRecap(this.db.getTranscriptParts(taskId))
-    console.warn(
-      `[AgentManager] Replacing lost session ${lost.previousSessionId} of task ${taskId} with ${newSessionId} ` +
-      `(${lost.reason}); ${recap ? `seeded with a ${recap.length}-char recap` : 'no transcript to recap'}`
-    )
+    const session = this.sessions.get(newSessionId)
+    if (session) {
+      session.pendingRecap = recap
+      session.pendingLossId = lost.id
+    }
     this.emitSystemNotice(
-      newSessionId,
-      taskId,
-      `session-lost-${Date.now()}`,
-      `${LOST_SESSION_NOTICE}${recap ? ', seeded with a recap of the latest conversation.' : '.'}\n\nReason: ${lost.reason}`
+      newSessionId, taskId, `session-lost-replacement-${lost.id}`,
+      `${LOST_SESSION_NOTICE}${recap ? ', with a recap of the latest conversation pending delivery.' : '.'}\n\nReason: ${lost.reason}`
     )
     return recap
+  }
+
+  private acknowledgeSessionRecap(session: AgentSession, lossId: string | undefined): void {
+    if (!lossId) return
+    this.emitSystemNotice(session.id, session.taskId, `session-loss-ack-${lossId}`, 'Recovery context delivered to the replacement session.')
+    if (session.pendingLossId === lossId) {
+      session.pendingRecap = undefined
+      session.pendingLossId = undefined
+    }
   }
 
   async stopServer(): Promise<void> {
@@ -1155,11 +1161,6 @@ export class AgentManager extends EventEmitter {
     // A handoff already carries the full recap, so it only gets the notice.
     const lostSessionRecap = this.announceLostSessionReplacement(taskId, adapterSessionId)
     const seedRecap = handoffFromAgentName ? '' : lostSessionRecap
-    if (seedRecap && skipInitialPrompt) {
-      // No generated first prompt: the recap rides on the first message sent.
-      const created = this.sessions.get(adapterSessionId)
-      if (created) created.pendingRecap = seedRecap
-    }
 
     // Triage sessions keep the Triaging status; coordinator rows have none.
     if (!isTriageSession && !isCoordinatorTask(task)) {
@@ -1224,6 +1225,8 @@ export class AgentManager extends EventEmitter {
         }
       })
 
+      const startingSession = this.sessions.get(adapterSessionId)!
+      const pendingLossId = startingSession.pendingLossId
       try {
         const send = () => adapter.sendPrompt(adapterSessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
         if (this.db.db && typeof this.db.db.prepare === 'function') {
@@ -1231,6 +1234,7 @@ export class AgentManager extends EventEmitter {
         } else {
           await send()
         }
+        this.acknowledgeSessionRecap(startingSession, pendingLossId)
       } catch (sendError) {
         console.error(`[AgentManager] sendPrompt FAILED:`, sendError)
         const message = sendError instanceof Error ? sendError.message : String(sendError)
@@ -1749,12 +1753,18 @@ export class AgentManager extends EventEmitter {
   ): Promise<void> {
     if (status.message?.includes('INCOMPATIBLE_SESSION_ID')) {
       console.warn('[AgentManager] Incompatible session detected during polling:', sessionId)
+      if (this.db.getTask(config.taskId)?.session_id !== sessionId) {
+        this.stopAdapterPolling(sessionId)
+        return
+      }
       this.markSessionLost(config.taskId, sessionId, status.message)
+      await this.stopSession(sessionId, false)
+      if (this.db.getTask(config.taskId)?.session_id !== sessionId) return
       this.updateTaskFromLocalAgent(config.taskId, { session_id: null })
       this.sendToRenderer('agent:incompatible-session', {
         taskId: config.taskId,
         agentId: config.agentId,
-        error: status.message.replace('INCOMPATIBLE_SESSION_ID: ', '')
+        error: 'The backend session is no longer available. Start a new session to continue with a recap.'
       })
       this.stopAdapterPolling(sessionId)
       return
@@ -2141,7 +2151,7 @@ export class AgentManager extends EventEmitter {
       console.log('[AgentManager] adapter.resumeSession completed successfully')
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error)
-      console.log('[AgentManager] adapter.resumeSession threw error:', errorMessage)
+      console.log('[AgentManager] adapter.resumeSession failed')
 
       if (
         errorMessage.includes('INCOMPATIBLE_SESSION_ID') ||
@@ -2183,7 +2193,7 @@ export class AgentManager extends EventEmitter {
         } else if (errorMessage.includes('No conversation found')) {
           userMessage = 'Session not found on server. Would you like to start a new session?'
         } else {
-          userMessage = errorMessage.replace('INCOMPATIBLE_SESSION_ID: ', '')
+          userMessage = 'The backend session is incompatible. Start a new session to continue with a recap.'
         }
 
         // The renderer asks the user whether to start fresh.
@@ -2232,6 +2242,9 @@ export class AgentManager extends EventEmitter {
         .filter((id) => id !== agentId),
       attemptedAgentIds: new Set([agentId])
     })
+
+    // A replacement may have restarted before its first prompt was accepted.
+    this.announceLostSessionReplacement(taskId, adapterSessionId)
 
     // Persist the resumed session binding and tell the renderer BEFORE any
     // follow-up prompt starts. Without this, a silent main-process resume
@@ -2684,8 +2697,8 @@ export class AgentManager extends EventEmitter {
     } catch (error) {
       // Backend restarted, files gone, or a different backend than the one
       // that made it. The next session starts fresh; nothing to ask the user.
-      console.warn(`[AgentManager] Could not resume coordinator session ${sessionId} for ${taskId}; starting a new one:`, error)
-      if (!this.lostSessions.has(taskId)) {
+      console.warn(`[AgentManager] Could not resume coordinator session ${sessionId} for ${taskId}; starting a new one`)
+      if (!this.pendingSessionLoss(taskId)) {
         this.markSessionLost(taskId, sessionId, error instanceof Error ? error.message : String(error))
       }
       this.updateTaskFromLocalAgent(taskId, { session_id: null })
@@ -4364,6 +4377,7 @@ export class AgentManager extends EventEmitter {
     // A session replacing a lost one starts from a recap, not blank. Only the
     // backend sees it: the transcript keeps the user's own words.
     const recap = session.pendingRecap
+    const pendingLossId = session.pendingLossId
     if (recap) promptText = `${recap}\n\n${promptText}`
     try {
       const adapter = session.adapter
@@ -4384,7 +4398,7 @@ export class AgentManager extends EventEmitter {
       throw error
     }
     // Retry the recap until the adapter accepts a prompt.
-    if (recap && session.pendingRecap === recap) session.pendingRecap = undefined
+    this.acknowledgeSessionRecap(session, pendingLossId)
 
     if (!session.pollingStarted) {
       console.log(`[AgentManager] Starting polling for session ${sessionId} (preserving dedup state)`)
