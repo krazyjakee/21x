@@ -210,6 +210,10 @@ export interface ToolStatus {
   version: string | null
   supported?: boolean
   reason?: string | null
+  /** RTK only: every installed coding backend has its native integration. */
+  configured?: boolean
+  /** RTK only: integration state keyed by coding backend detection key. */
+  integrations?: Record<string, boolean>
 }
 
 export interface GlabCliStatus {

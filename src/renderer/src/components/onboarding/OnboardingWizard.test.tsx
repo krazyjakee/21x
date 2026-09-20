@@ -43,6 +43,7 @@ function detection(installed: Record<string, ToolStatus> = {}): Record<string, T
     nodejs: { installed: true, version: '20.0.0' },
     npm: { installed: true, version: '10.0.0' },
     git: { installed: true, version: '2.40.0' },
+    rtk: { installed: false, version: null, configured: false },
     claudeCode: NOT_INSTALLED,
     opencode: NOT_INSTALLED,
     codex: NOT_INSTALLED,
@@ -323,6 +324,27 @@ describe('OnboardingWizard', () => {
       expect(backendCard(CodingAgentType.PI)).toHaveAttribute('data-available', 'true')
     })
     expect(mockAgents.create).not.toHaveBeenCalled()
+  })
+
+  it('offers optional RTK installation and backend configuration', async () => {
+    mockAgentInstaller.install.mockResolvedValueOnce({
+      success: true,
+      error: null,
+      newStatus: detection({
+        claudeCode: { installed: true, version: '1.0.0' },
+        rtk: { installed: true, version: '0.49.0', configured: true }
+      })
+    })
+    render(<OnboardingWizard open={true} onOpenChange={vi.fn()} />)
+
+    const rows = await screen.findAllByTestId('rtk-setup')
+    expect(rows[rows.length - 1]).toHaveTextContent('RTK output compression')
+    fireEvent.click(screen.getAllByRole('button', { name: /set up rtk/i })[0])
+
+    await waitFor(() => {
+      expect(mockAgentInstaller.install).toHaveBeenCalledWith('rtk')
+      expect(screen.getAllByTestId('rtk-setup').at(-1)).toHaveTextContent('Configured')
+    })
   })
 
   it('re-running detection reflects newly installed and removed backends', async () => {

@@ -8,7 +8,8 @@ import {
   Info,
   MousePointer2,
   RefreshCw,
-  Sparkles
+  Sparkles,
+  Zap
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import {
@@ -37,7 +38,8 @@ enum DetectKey {
   PI = 'pi',
   GH = 'gh',
   GLAB = 'glab',
-  TEA = 'tea'
+  TEA = 'tea',
+  RTK = 'rtk'
 }
 
 enum ProviderChoiceValue {
@@ -371,6 +373,65 @@ function DefaultBackendRow({
   )
 }
 
+function RtkSetupRow({
+  status,
+  busy,
+  disabled,
+  onSetup
+}: {
+  status: ToolStatus | undefined
+  busy: boolean
+  disabled: boolean
+  onSetup: () => void
+}) {
+  const installed = status?.installed === true
+  const configured = status?.configured === true
+
+  return (
+    <div
+      className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-3 py-2.5"
+      data-testid="rtk-setup"
+    >
+      <Zap className="size-5 shrink-0 text-amber-400" />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className="text-xs font-semibold text-foreground">RTK output compression</p>
+          {configured ? (
+            <span className="text-[10px] text-emerald-400 flex items-center gap-0.5">
+              <Check className="size-2.5" /> Configured
+            </span>
+          ) : installed ? (
+            <span className="text-[10px] text-muted-foreground">
+              {status?.version ? `v${status.version}` : 'Installed'}
+            </span>
+          ) : null}
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          Reduce noisy shell output before it reaches agent context.
+        </p>
+      </div>
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-7 px-2.5 text-[11px]"
+        disabled={disabled}
+        onClick={onSetup}
+        aria-label="Set up RTK"
+      >
+        {busy ? (
+          <Loader2 className="size-3 animate-spin" />
+        ) : configured ? (
+          'Reconfigure'
+        ) : installed ? (
+          'Configure'
+        ) : (
+          <><Download className="size-3 mr-1" />Install</>
+        )}
+      </Button>
+    </div>
+  )
+}
+
 /* ─── Main OnboardingWizard ─── */
 
 interface OnboardingWizardProps {
@@ -673,6 +734,16 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
                 </span>
               </div>
             )
+          )}
+
+          {/* ── Optional output compression ── */}
+          {toolStatus && (
+            <RtkSetupRow
+              status={toolStatus[DetectKey.RTK]}
+              busy={installing === DetectKey.RTK}
+              disabled={detecting || !!installing}
+              onSetup={() => void handleInstall(DetectKey.RTK)}
+            />
           )}
 
           {/* ── Default backend (separate from discovery, optional) ── */}
