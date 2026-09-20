@@ -144,6 +144,30 @@ describe('adapter authorization boundary', () => {
     expect(taskAuthorization(db, taskId).effectivePermissions).toEqual([])
   })
 
+  it.each(['after-status', 'before-activation', 'before-send'] as const)(
+    'fails closed when ownership is withdrawn at the %s boundary',
+    async blockedStage => {
+      const { seq } = dispatch()
+      const send = vi.fn(async () => {})
+      const seen: string[] = []
+      await expect(sendWithAuthorization(
+        db,
+        seq,
+        async () => ({ type: 'idle' }),
+        send,
+        undefined,
+        undefined,
+        stage => {
+          seen.push(stage)
+          if (stage === blockedStage) throw new Error('Stop owns this session generation')
+        }
+      )).rejects.toThrow('Stop owns this session generation')
+      expect(seen).toContain(blockedStage)
+      expect(send).not.toHaveBeenCalled()
+      expect(taskAuthorization(db, taskId).effectivePermissions).toEqual([])
+    }
+  )
+
   it.each(['error', 'waiting_approval', 'unknown'])('does not treat backend %s as confirmed idle', async type => {
     const { seq } = dispatch()
     const send = vi.fn(async () => {})

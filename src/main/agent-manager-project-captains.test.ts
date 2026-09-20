@@ -640,6 +640,74 @@ describe('per-project Captain conversations', () => {
     expect(deliveries.getByKey('after-stop')?.state).toBe('acknowledged')
   })
 
+  it('fences a claimed typed handoff awaiting idle before authority activation or adapter submission', async () => {
+    const fake = new FakeAdapter({ sessionIds: ['live'], status: SessionStatusType.IDLE })
+    const manager = newManager(fake)
+    await manager.startSession(agentId, alphaCaptain, undefined, true)
+    const typed = {
+      id: 'stop-await-idle', taskId: alphaCaptain, projectId: alphaId,
+      at: Date.now(), text: 'Create GitHub issues for Alpha'
+    }
+    const node = recordHumanAuthorization(db, {
+      at: typed.at, messageId: typed.id, source: 'project-chat', text: typed.text,
+      taskId: alphaCaptain, projectId: alphaId
+    })
+    let idle!: (status: { type: SessionStatusType }) => void
+    let finishDestroy!: () => void
+    let acceptedAfterStop = 0
+    fake.destroySession.mockImplementationOnce(() => new Promise<void>((resolve) => { finishDestroy = resolve }))
+    fake.sendPrompt.mockImplementation(async () => { acceptedAfterStop++ })
+    fake.getStatus.mockImplementationOnce(() => new Promise(resolve => { idle = resolve }))
+
+    const sending = manager.sendMessage(
+      'live', typed.text, alphaCaptain, agentId, undefined, typed, 'stop-await-idle'
+    )
+    const settled = Promise.allSettled([sending])
+    await vi.waitFor(() => expect(idle).toBeTypeOf('function'))
+    const stopping = manager.stopByTaskId(alphaCaptain)
+    await vi.waitFor(() => expect(finishDestroy).toBeTypeOf('function'))
+    expect(new DeliveryStore(db).getByKey('stop-await-idle')?.state).toBe('cancelled')
+    idle({ type: SessionStatusType.IDLE })
+    await settled
+
+    expect(acceptedAfterStop).toBe(0)
+    expect(taskAuthorization(db, alphaCaptain).status).not.toBe('active')
+    expect(taskAuthorization(db, alphaCaptain).nodeId).toBeNull()
+    expect(taskAuthorization(db, alphaCaptain).nodeId).not.toBe(node.id)
+    expect((manager as any).pollingEntries.size).toBe(0)
+    finishDestroy()
+    await stopping
+    expect(manager.findSessionByTaskId(alphaCaptain)).toBeUndefined()
+    expect((manager as any).pollingEntries.size).toBe(0)
+  })
+
+  it('does not restore polling when an accepted send completes during slow Stop teardown', async () => {
+    const task = db.createTask(makeTask({ title: 'Stop with pending teardown' }))!
+    db.updateTask(task.id, { agent_id: agentId })
+    const fake = new FakeAdapter({ sessionIds: ['live'], status: SessionStatusType.IDLE })
+    const manager = newManager(fake)
+    await manager.startSession(agentId, task.id, undefined, true)
+    let finishSend!: () => void
+    let finishDestroy!: () => void
+    fake.sendPrompt.mockImplementationOnce(() => new Promise<void>((resolve) => { finishSend = resolve }))
+    fake.destroySession.mockImplementationOnce(() => new Promise<void>((resolve) => { finishDestroy = resolve }))
+
+    const sending = manager.sendMessage('live', 'sent before stop', task.id, agentId, undefined, undefined, 'stop-finishing')
+    await vi.waitFor(() => expect(finishSend).toBeTypeOf('function'))
+    const stopping = manager.stopByTaskId(task.id)
+    await vi.waitFor(() => expect(finishDestroy).toBeTypeOf('function'))
+    expect((manager as any).pollingEntries.size).toBe(0)
+    finishSend()
+    await sending
+    expect((manager as any).pollingEntries.size).toBe(0)
+    expect(manager.findSessionByTaskId(task.id)).toBeUndefined()
+    finishDestroy()
+    await stopping
+    expect((manager as any).pollingEntries.size).toBe(0)
+    expect(manager.findSessionByTaskId(task.id)).toBeUndefined()
+    expect(db.getTask(task.id)?.status).toBe('not_started')
+  })
+
   it('re-reserves exact authorization when an earlier failed delivery is replayed after its successor', async () => {
     const before = new FakeAdapter({ sessionIds: ['live'], status: SessionStatusType.IDLE })
     const firstManager = newManager(before)

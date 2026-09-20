@@ -204,6 +204,8 @@ export class AgentManager extends EventEmitter {
   private readonly deliveryFlights = new Map<string, Promise<{ newSessionId?: string }>>()
   /** Durable sends to one task reserve and activate authorization in outbox order. */
   private readonly deliveryTaskTails = new Map<string, Promise<void>>()
+  /** A Stop owns its exact session generation before teardown awaits anything. */
+  private readonly stoppingSessions = new WeakSet<AgentSession>()
   private deliveryRecoveryTimer: ReturnType<typeof setInterval> | null = null
   private readonly captainSwitches = new Map<string, { agentId: string; promise: Promise<CaptainRuntimeState> }>()
   private readonly deliveryOwner = `agent-manager:${process.pid}:${randomUUID()}`
@@ -879,6 +881,22 @@ export class AgentManager extends EventEmitter {
     return { sessionId: redirectedId, session: redirected }
   }
 
+  private ownsSessionGeneration(sessionId: string, session: AgentSession): boolean {
+    return !this.stoppingSessions.has(session) && this.sessions.get(sessionId) === session
+  }
+
+  /** Polling tests use structural session copies; the synchronous Stop marker
+   * is the authoritative guard for every runtime generation being torn down. */
+  private mayPollSessionGeneration(session: AgentSession): boolean {
+    return !this.stoppingSessions.has(session)
+  }
+
+  private assertSessionGeneration(sessionId: string, session: AgentSession): void {
+    if (!this.ownsSessionGeneration(sessionId, session)) {
+      throw new Error('Message delivery was cancelled because the user stopped this task.')
+    }
+  }
+
   private emitStatus(sessionId: string, owner: { agentId: string; taskId: string }, status: AgentSession['status']): void {
     const task = this.db.getTask(owner.taskId)
     if (sessionId && isCoordinatorTask(task) && task?.session_id && task.session_id !== sessionId) return
@@ -1297,6 +1315,8 @@ export class AgentManager extends EventEmitter {
     config: SessionConfig,
     existingSession?: AgentSession
   ): void {
+    const owner = existingSession ?? this.sessions.get(initialSessionId)
+    if (owner && !this.mayPollSessionGeneration(owner)) return
     const entry: PollingEntry = {
       sessionId: initialSessionId,
       adapter,
@@ -1374,6 +1394,7 @@ export class AgentManager extends EventEmitter {
       try {
         if (this.pollingEntries.has(targetId)) return
         const status = await adapter.getStatus(targetId, this.sessionConfigFor(session))
+        if (!this.ownsSessionGeneration(targetId, session)) return
         if (status.type !== SessionStatusType.BUSY && status.type !== SessionStatusType.WAITING_APPROVAL) {
           return
         }
@@ -3347,7 +3368,7 @@ export class AgentManager extends EventEmitter {
   }
 
   private resumeAdapterPollingAfterPrematureIdle(sessionId: string, session: AgentSession): void {
-    if (!session.adapter) return
+    if (!session.adapter || !this.mayPollSessionGeneration(session)) return
 
     session.status = 'working'
     session.pollingStarted = true
@@ -3585,6 +3606,11 @@ export class AgentManager extends EventEmitter {
       return
     }
 
+    // Fence this exact runtime synchronously. Adapter teardown can be slow and
+    // in-flight sends retain a reference to the session object while it awaits.
+    this.stoppingSessions.add(session)
+    if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId)
+
     if (resetTaskStatus) this.cancelQueuedStart(session.taskId)
 
     console.log(`[AgentManager] Destroying session ${sessionId} (resetTaskStatus=${resetTaskStatus})`)
@@ -3611,26 +3637,26 @@ export class AgentManager extends EventEmitter {
     session.seenPartIds.clear()
     session.partContentLengths.clear()
 
-    this.sessions.delete(sessionId)
-    this.lastSentStatus.delete(sessionId)
+    const replacement = this.findSessionByTaskId(session.taskId)
+    if (!this.sessions.has(sessionId)) this.lastSentStatus.delete(sessionId)
     this.schedulePowerSaveBlockerUpdate()
     console.log(`[SessionTracker] DESTROYED session=${sessionId} task=${session.taskId} resetStatus=${resetTaskStatus} reason=stop_session`)
 
     for (const [oldId, newId] of this.sessionIdRedirects.entries()) {
-      if (newId === sessionId) {
+      if (!this.sessions.has(sessionId) && newId === sessionId) {
         this.sessionIdRedirects.delete(oldId)
       }
     }
 
     // Reset only on an explicit user stop (not app shutdown), and never a Completed task.
-    if (resetTaskStatus) {
+    if (resetTaskStatus && !replacement) {
       const task = this.db.getTask(session.taskId)
       if (task?.status !== TaskStatus.Completed) {
         this.updateTaskFromLocalAgent(session.taskId, { status: TaskStatus.NotStarted })
       }
     }
 
-    this.emitStatus(sessionId, session, 'idle')
+    if (!replacement) this.emitStatus(sessionId, session, 'idle')
   }
 
   /**
@@ -4407,6 +4433,7 @@ export class AgentManager extends EventEmitter {
    * the next send clears the error state (see doSendAdapterMessage).
    */
   private async handleSessionError(sessionId: string, session: AgentSession, err: unknown): Promise<void> {
+    if (!this.ownsSessionGeneration(sessionId, session)) return
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[AgentManager] Session ${sessionId} error:`, message)
     if (findCreditExhaustionMessage([message]) && await this.tryAutomaticFallback(sessionId, session, message)) {
@@ -4431,6 +4458,7 @@ export class AgentManager extends EventEmitter {
     transcriptPartId?: string,
     authorizationDispatch?: number
   ): Promise<void> {
+    this.assertSessionGeneration(sessionId, session)
     const task = this.db.getTask(session.taskId)
     const authorizationSnapshot = this.db.db && typeof this.db.db.prepare === 'function' ? captureAuthorizationSnapshot(this.db, session.taskId) : null
     // Nudges use this method directly, and must invalidate earlier typed authority too.
@@ -4487,6 +4515,7 @@ export class AgentManager extends EventEmitter {
       session.taskId,
       session.workspaceDir || process.cwd()
     )
+    this.assertSessionGeneration(sessionId, session)
 
     let promptText = buildMessageWithAttachmentContext(session.workspaceDir, message, attachments)
     // A session replacing a lost one starts from a recap, not blank. Only the
@@ -4497,11 +4526,20 @@ export class AgentManager extends EventEmitter {
     try {
       const adapter = session.adapter
       const send = (): Promise<void> => {
+        this.assertSessionGeneration(sessionId, session)
         if (dispatch) activateProjectMessageDispatch(dispatch)
         return adapter.sendPrompt(sessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
       }
       if (authorizationDispatch !== undefined) {
-        await sendWithAuthorization(this.db, authorizationDispatch, () => adapter.getStatus(sessionId, sessionConfig), send)
+        await sendWithAuthorization(
+          this.db,
+          authorizationDispatch,
+          () => adapter.getStatus(sessionId, sessionConfig),
+          send,
+          undefined,
+          undefined,
+          () => this.assertSessionGeneration(sessionId, session)
+        )
       } else if (this.db.db && typeof this.db.db.prepare === 'function') {
         await sendPreservingAuthorization(this.db, session.taskId, authorizationSnapshot, send)
       } else {
@@ -4515,7 +4553,7 @@ export class AgentManager extends EventEmitter {
     // Stop may destroy the session while adapter acceptance is in flight.
     // The accepted call may finish, but it must not re-register polling or
     // otherwise revive the runtime after the explicit Stop boundary.
-    if (this.sessions.get(sessionId) !== session) return
+    if (!this.ownsSessionGeneration(sessionId, session)) return
     // Retry the recap until the adapter accepts a prompt.
     this.acknowledgeSessionRecap(session, pendingLossId)
 
