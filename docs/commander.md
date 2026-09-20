@@ -64,8 +64,31 @@ does the following:
      rename made meanwhile is never overwritten.
    - Folds turns that no longer fit the budget into a new rolling `summary`.
      The previous summary is merged in. The summary's `correlation_id` is the
-     id of the last message it covers. If the summary call fails, nothing is
-     stored and the next turn just trims.
+     id of the last message it covers. If the summary call fails (or comes
+     back empty), nothing is stored, the failure is logged and recorded
+     (`CommanderService.foldFailure`), and the fold is retried after the next
+     turn. Turns never drop silently: unsummarised turns past the budget stay
+     verbatim up to twice `maxChars`, and any left out beyond that are replaced
+     by a "N earlier turns omitted (summary pending)" marker at the start of
+     the history. The newest turn is always kept, so this is a soft ceiling
+     rather than a token limit. Stored messages are never deleted by folding.
+     Retries process oldest-first batches of at most 32,000 transcript characters,
+     plus at most 8,000 characters of previous summary. A larger individual turn
+     uses up to eight bounded requests under one timeout; its summary cursor is
+     committed only after all chunks succeed. A turn beyond 256,000 transcript
+     characters remains pending with its stored history intact. Empty, failed, or oversized model responses do not
+     create a summary. Provider error details are not copied to fold diagnostics.
+
+Lost task and Captain sessions record recovery intent in the durable transcript
+before their binding is cleared. Replacement creation or reconnect emits a
+notice and seeds the next prompt with up to 6,000 characters total of recent
+user/assistant text. Tool output, reasoning, backend errors and generated initial
+prompts are excluded. The seed is historical context, not authorization. Recovery
+intent is acknowledged only after the adapter accepts a prompt, so failed starts,
+failed sends and restarts retain it. A crash between provider acceptance and the
+local acknowledgement can replay this context; durable delivery rules still
+control whether the message itself may be retried. Notices use fixed error
+categories rather than raw backend errors. No schema migration is needed.
 
 Only one turn runs per session. Cancel aborts it, and whatever text arrived is
 kept.
