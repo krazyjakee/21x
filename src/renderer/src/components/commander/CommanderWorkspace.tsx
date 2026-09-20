@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { History, ListChecks, Menu, MessageSquare, X } from 'lucide-react'
+import { ListChecks, Menu, MessageSquare, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { commanderApi } from '@/lib/ipc-client'
 import { useCommanderCallStore } from '@/stores/commander-call-store'
 import { useCommanderStore } from '@/stores/commander-store'
 import { CommanderChatPane } from './CommanderChatPane'
+import { CommanderActionsPane } from './CommanderActionsPane'
 import { CommanderSessionDrawer } from './CommanderSessionDrawer'
 import { UNTITLED_SESSION } from './CommanderSessionList'
 import { CommanderVoiceControls } from './CommanderVoiceControls'
@@ -137,12 +138,8 @@ export function CommanderWorkspace() {
                 <CommanderChatPane />
               </div>
             ) : (
-              <div id="commander-actions-panel" role="tabpanel" className="flex flex-1 items-center justify-center p-6 text-center">
-                <div className="max-w-56 text-muted-foreground">
-                  <History className="mx-auto mb-3 size-6" aria-hidden="true" />
-                  <p className="text-sm font-medium text-foreground">No recent actions</p>
-                  <p className="mt-1 text-xs leading-relaxed">Changes the Commander makes will appear here.</p>
-                </div>
+              <div id="commander-actions-panel" role="tabpanel" className="flex min-h-0 flex-1">
+                <CommanderActionsPane />
               </div>
             )}
         </aside>

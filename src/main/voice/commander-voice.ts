@@ -34,7 +34,7 @@ export interface CommanderVoiceCommander {
   onEvent(listener: (event: CommanderEvent) => void): () => void
   cancel(sessionId: string): boolean
   activeTurnId(sessionId: string): string | null
-  sendUserMessage(sessionId: string, text: string): { turnId: string; message: CommanderMessage }
+  sendUserMessage(sessionId: string, text: string, inputMode?: 'voice' | 'typed'): { turnId: string; message: CommanderMessage }
 }
 
 /** The part of the speech service this bridge uses. */
@@ -164,7 +164,7 @@ export class CommanderVoice {
       this.bargeIn(sessionId)
       await this.awaitTurnEnd(sessionId, running)
     }
-    return this.options.commander.sendUserMessage(sessionId, content)
+    return this.options.commander.sendUserMessage(sessionId, content, 'voice')
   }
 
   // ── Events ────────────────────────────────────────────────

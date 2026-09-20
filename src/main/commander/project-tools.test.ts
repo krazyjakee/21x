@@ -5,6 +5,7 @@ import type { ChatToolDefinition, ChatToolResult } from '../chat/tools'
 import { DEFAULT_PROJECT_ID } from '../../shared/projects'
 import type { HeldAction } from '../../shared/project-limit-types'
 import type { UiCommand } from '../../shared/ui-commands'
+import { COMMANDER_TOOL_SEVERITY, commanderToolSeverity, parseCommanderActionResult } from '../../shared/commander-tools'
 import {
   buildCommanderRelayMessage,
   COMMANDER_RELAY_BEGIN,
@@ -115,6 +116,10 @@ describe('Commander tool registry', () => {
     const output = await call(name, input)
     expect(output.isError, name).toBeUndefined()
     expect(body(output).status, name).toBe('ok')
+    const action = parseCommanderActionResult(output.content)
+    expect(action, name).not.toBeNull()
+    expect(action!.changes.length, name).toBeGreaterThan(0)
+    expect(action!.target.id, name).toBeTruthy()
     if (name === 'pause_all_projects') expect(extra.agents!.isAllProjectsPaused(), name).toBe(true)
     else expect(changes, name).toHaveLength(1)
   }
@@ -129,6 +134,17 @@ describe('Commander tool registry', () => {
     const project = db.createProject({ name: 'Before' })!
     await call('update_project', { project: project.id, changes: { name: 'After' }, confirmation_token: 'made-up' })
     expect(db.getProject(project.id)?.name).toBe('After')
+  })
+
+  it('shares the complete severity vocabulary with the renderer', () => {
+    const destructive = ['archive_project', 'remove_project_repo', 'remove_project_resource']
+    const wide = ['pause_all_projects']
+    for (const name of MUTATING_COMMANDER_TOOLS) {
+      expect(commanderToolSeverity(name), name).toBe(destructive.includes(name) ? 'destructive' : wide.includes(name) ? 'wide-reaching' : 'neutral')
+    }
+    expect(Object.keys(COMMANDER_TOOL_SEVERITY).sort()).toEqual(
+      [...MUTATING_COMMANDER_TOOLS, ...MUTATING_COMMANDER_SKILL_TOOLS].sort()
+    )
   })
 
   it('caps every read result and rejects ambiguous exact-name lookup', async () => {
@@ -370,9 +386,9 @@ describe('get_pending_approvals, navigate_to_project and pause_all_projects', ()
   it('pauses and resumes every project on the first call', async () => {
     const agents = fakeAgents()
     extra = { agents }
-    expect(body(await call('pause_all_projects', { paused: true }))).toEqual({ status: 'ok', result: { all_projects_paused: true } })
+    expect(body(await call('pause_all_projects', { paused: true }))).toMatchObject({ status: 'ok', result: { all_projects_paused: true } })
     expect(agents.pauseAllProjects).toHaveBeenCalledWith(true)
-    expect(body(await call('pause_all_projects', { paused: false }))).toEqual({ status: 'ok', result: { all_projects_paused: false } })
+    expect(body(await call('pause_all_projects', { paused: false }))).toMatchObject({ status: 'ok', result: { all_projects_paused: false } })
     expect(agents.isAllProjectsPaused()).toBe(false)
     await expect(call('pause_all_projects', { paused: 'yes' })).rejects.toThrow(/true or false/)
   })
@@ -414,9 +430,13 @@ describe('Commander project administration', () => {
     const resourceId = resource.id as string
 
     await call('update_project_repo', { project: project.id, repo_id: repoId, changes: { default_branch: 'develop' } })
-    await call('update_project_resource', { project: project.id, resource_id: resourceId, changes: { notes: 'Updated' } })
+    const longNotes = 'Updated details. '.repeat(100).trim()
+    const resourceUpdate = await call('update_project_resource', { project: project.id, resource_id: resourceId, changes: { notes: longNotes } })
     expect(db.getProjectRepo(repoId)?.default_branch).toBe('develop')
-    expect(db.getProjectResource(resourceId)?.notes).toBe('Updated')
+    expect(db.getProjectResource(resourceId)?.notes).toBe(longNotes)
+    expect(parseCommanderActionResult(resourceUpdate.content)?.changes).toContainEqual({
+      field: 'notes', before: 'Ask ops', after: longNotes
+    })
 
     // A repo belongs to its project: another project cannot edit it.
     const other = db.createProject({ name: 'Other' })!

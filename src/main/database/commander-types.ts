@@ -25,5 +25,6 @@ export interface CommanderMessageRow {
   is_error: number
   project_id: string | null
   correlation_id: string | null
+  input_mode: string | null
   created_at: number
 }

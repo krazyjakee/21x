@@ -4,6 +4,8 @@ import type { CommanderMessage } from '@shared/commander'
 import { Markdown } from '@/components/ui/Markdown'
 import { cn } from '@/lib/utils'
 import { formatToolResult, toolCallLabel } from './tool-call-label'
+import { ActionCard } from './ActionCard'
+import type { CommanderActionItem } from './commander-actions'
 
 export interface ToolChipProps {
   name: string
@@ -99,9 +101,11 @@ interface MessageItemProps {
    * not spin for ever (#83).
    */
   turnActive?: boolean
+  /** Validated mutating calls render as cards instead of generic chips. */
+  actions?: Map<string, CommanderActionItem>
 }
 
-export function CommanderMessageItem({ message, toolResults, turnActive = false }: MessageItemProps) {
+export function CommanderMessageItem({ message, toolResults, turnActive = false, actions }: MessageItemProps) {
   if (message.role === 'user') {
     return (
       <div className="flex justify-end">
@@ -139,6 +143,8 @@ export function CommanderMessageItem({ message, toolResults, turnActive = false 
         {calls.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {calls.map((call) => {
+              const action = actions?.get(call.id)
+              if (action) return <ActionCard key={call.id} item={action} />
               const result = toolResults.get(call.id)
               return (
                 <ToolChip

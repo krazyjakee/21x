@@ -84,6 +84,14 @@ file keeps the retirement of the legacy seeded "Mastermind" skill. It is the
 only place in `src/` (with its test and one commented compatibility alias) that
 may spell the old name; `src/shared/captain-terminology.test.ts` enforces that.
 
+### Commander input attribution
+
+Migration 25 (#86) adds nullable `commander_messages.input_mode`, constrained
+to `voice` or `typed`. New user messages always set it; legacy rows remain null
+and stay readable. Migration numbers 18–24 were already allocated by main or
+concurrent branches when this stacked change was created, so this branch
+intentionally advances from its version-17 base to 25.
+
 ## Adding a column to other tables
 
 Same pattern: update `createTables()`, add a guarded `ALTER TABLE` in `runMigrations()`, and bump `SCHEMA_VERSION`.

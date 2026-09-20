@@ -37,6 +37,10 @@ describe('DatabaseManager migrations on an existing install', () => {
     return (raw.pragma('table_info(tasks)') as { name: string }[]).map((c) => c.name)
   }
 
+  function commanderMessageColumns(raw: InstanceType<typeof RawDatabase>): string[] {
+    return (raw.pragma('table_info(commander_messages)') as { name: string }[]).map((c) => c.name)
+  }
+
   it('creates a fresh database that already has every task column', () => {
     const db = new DatabaseManager()
     db.initialize()
@@ -98,6 +102,27 @@ describe('DatabaseManager migrations on an existing install', () => {
 
     const after = openRaw()
     expect(taskColumns(after)).toContain('next_subtask_ids')
+    after.close()
+  })
+
+  it('migration 25 adds Commander input_mode without changing legacy messages', () => {
+    const first = new DatabaseManager()
+    first.initialize()
+    first.close?.()
+
+    const raw = openRaw()
+    raw.exec('ALTER TABLE commander_messages DROP COLUMN input_mode')
+    raw.prepare("UPDATE settings SET value = ? WHERE key = '__schema_version'").run('24')
+    expect(commanderMessageColumns(raw)).not.toContain('input_mode')
+    raw.close()
+
+    const second = new DatabaseManager()
+    second.initialize()
+    second.close?.()
+
+    const after = openRaw()
+    expect(commanderMessageColumns(after)).toContain('input_mode')
+    expect(after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get()).toEqual({ value: '25' })
     after.close()
   })
 

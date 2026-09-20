@@ -15,8 +15,9 @@ docs/database-migrations.md, *The coordinator is the Captain*).
 
 ## Storage
 
-Both tables are created in `createTables()` with `CREATE TABLE IF NOT EXISTS`,
-so they need no schema-version bump. Timestamps are epoch ms.
+Both tables are created in `createTables()` with `CREATE TABLE IF NOT EXISTS`.
+Additions to an existing table still use the numbered migration sequence (see
+docs/database-migrations.md). Timestamps are epoch ms.
 
 - `commander_sessions`: `id`, `title` (empty until named), `created_at`,
   `updated_at` (bumped by every message), `archived`, `last_read_at`.
@@ -24,7 +25,9 @@ so they need no schema-version bump. Timestamps are epoch ms.
   (`user | assistant | tool | report | summary`), `content`, `tool_calls` (JSON
   array of `ChatToolCall` on assistant rows), `tool_call_id`, `tool_name`,
   `is_error` (tool rows), `project_id` (delegations and reports; references projects, set null on delete),
-  `correlation_id`, `created_at`. Indexed on `(session_id, created_at)`.
+  `correlation_id`, `input_mode` (`voice | typed`, on user rows), `created_at`.
+  Indexed on `(session_id, created_at)`. Rows created before input mode was
+  recorded keep `NULL`.
 
 `CommanderStore` (`src/main/commander/commander-store.ts`) handles sessions
 (list, search over titles and message text, create, rename, archive) and
@@ -79,6 +82,10 @@ kept.
 the two into one registry per turn. Every result is a
 small JSON object with fixed item and character caps (50 projects, 20 repos,
 20 resources, 30 approvals, 12k characters), never raw tasks or transcripts.
+A successful mutating result is instead a durable audit record with `target`
+and `changes[]` (`field`, `before`, `after`). Those results are not
+display-capped, because exact field values are required to validate and
+perform Undo.
 A project is addressed by its stable id, or by its exact name when that name
 is unique; an ambiguous name is an error. The test
 `project-tools.test.ts` pins the exact tool list and asserts that no tool is
@@ -162,13 +169,37 @@ the read-only tools and `ask_captain` (within its loop budget) remain.
 Successful mutations call `onProjectChanged` (or `onSkillChanged`), which
 broadcasts `project:changed` (or `skills:changed`).
 
+### Action records and Undo
+
+The shared mutating-tool vocabulary and severity map live in
+`src/shared/commander-tools.ts`. Archiving and removals are destructive;
+pausing every project and promoting or moving a skill are wide-reaching; the
+remaining mutations are neutral. The renderer creates an action only by
+joining a persisted assistant tool call to its matching successful tool
+result. Assistant prose alone can never create an action record.
+
+Actions appear inline as cards and in the side panel's Actions tab.
+Destructive cards use an assertive live-region announcement. A
+voice-originated action also shows the originating user text as `Heard: …`;
+typed actions omit it. The card can open its project or skill target and
+expand the underlying tool details.
+
+Undo has no grace delay and only performs exact reversals. It supports
+archive/restore, pause/resume all projects, and project, repository, resource,
+or skill field updates. Before writing, main verifies that every affected
+field still equals the recorded `after` value. Concurrent changes therefore
+fail instead of being overwritten. Successful Undo appends one hidden
+`undo:<tool-call-id>` note to the session for future model context, making the
+operation idempotent without starting another model turn. Removals and skill
+promotion/moves show “Can’t be undone here”.
+
 ## IPC
 
 `src/main/ipc/commander.ts` registers these handlers: `commander:listSessions`,
 `createSession`, `renameSession`, `archiveSession` (which also cancels a running
 turn), `listMessages` (returns `{ messages, activeTurnId }`), `markRead`,
 `setActiveSession` (the session the view shows, or null when it closes; see
-Reports), `send` and `cancel`. Every handler checks the sender with
+Reports), `send`, `cancel`, and `undoAction`. Every handler checks the sender with
 `assertTrustedSender`. It also installs the report bridge (`installCommanderReportBridge`).
 Callers are subscribed to `commander:event`, which carries these events:
 `turn_started`, `turn_event` (runtime events, where `done` carries only the stop
@@ -204,6 +235,10 @@ The Commander view is in the NavRail (`sidebarView === 'commander'`) and lives i
     unanswered call) reads "Not run" as a failure; it never spins and never
     shows a success tick (#83). The state is also text for screen readers, and
     the spinner honours reduced motion.
+  - Replaces a successful mutating-tool chip with an Action card. Cards show
+    the target, exact before → after changes, time, severity, Open and (where
+    supported) Undo. The Actions tab collects the same validated records,
+    newest first.
   - Shows reports as bordered, project-tagged cards.
   - Has a Stop button and an empty state.
   - The composer includes persistent model and thinking-level selectors. It

@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 import { createId } from '@paralleldrive/cuid2'
 import type { ChatToolCall } from '../../shared/chat'
-import { COMMANDER_MESSAGE_ROLES } from '../../shared/commander'
+import { COMMANDER_MESSAGE_ROLES, type CommanderInputMode } from '../../shared/commander'
 import type {
   CommanderMessage,
   CommanderMessageRole,
@@ -27,6 +27,7 @@ export interface AppendCommanderMessageInput {
   isError?: boolean
   projectId?: string | null
   correlationId?: string | null
+  inputMode?: CommanderInputMode | null
 }
 
 export interface CommanderStoreOptions {
@@ -77,6 +78,7 @@ function toMessage(row: CommanderMessageRow): CommanderMessage {
     is_error: row.is_error === 1,
     project_id: row.project_id ?? null,
     correlation_id: row.correlation_id ?? null,
+    input_mode: row.input_mode === 'voice' || row.input_mode === 'typed' ? row.input_mode : null,
     created_at: row.created_at
   }
 }
@@ -173,8 +175,8 @@ export class CommanderStore {
       if (changes === 0) throw new Error(`Commander session not found: ${sessionId}`)
       this.db
         .prepare(`INSERT INTO commander_messages
-          (id, session_id, role, content, tool_calls, tool_call_id, tool_name, is_error, project_id, correlation_id, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          (id, session_id, role, content, tool_calls, tool_call_id, tool_name, is_error, project_id, correlation_id, input_mode, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(
           id,
           sessionId,
@@ -186,6 +188,7 @@ export class CommanderStore {
           input.isError ? 1 : 0,
           input.projectId ?? null,
           input.correlationId ?? null,
+          input.inputMode ?? null,
           ts
         )
     })

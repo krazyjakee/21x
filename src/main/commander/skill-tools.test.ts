@@ -3,6 +3,7 @@ import { createTestDb } from '../../../test/helpers/db-test-helper'
 import type { DatabaseManager } from '../database'
 import type { ChatToolResult } from '../chat/tools'
 import { createCommanderSkillTools, MUTATING_COMMANDER_SKILL_TOOLS, type SkillChangeKind } from './skill-tools'
+import { commanderToolSeverity, parseCommanderActionResult } from '../../shared/commander-tools'
 
 /** The Commander's skill administration (#74). */
 let db: DatabaseManager
@@ -99,9 +100,21 @@ describe('Commander skill mutations', () => {
       const before = snapshot()
       const output = await call(name, input)
       expect(body(output).status, name).toBe('ok')
+      const action = parseCommanderActionResult(output.content)
+      expect(action, name).not.toBeNull()
+      expect(action!.changes.length, name).toBeGreaterThan(0)
+      expect(action!.target.kind, name).toBe('skill')
       expect(changes, name).toHaveLength(1)
       expect(snapshot(), name).not.toBe(before)
     }
+  })
+
+  it('marks remove as destructive, scope changes as wide-reaching, and edits as neutral', () => {
+    expect(commanderToolSeverity('remove_skill')).toBe('destructive')
+    expect(commanderToolSeverity('promote_skill')).toBe('wide-reaching')
+    expect(commanderToolSeverity('move_skill')).toBe('wide-reaching')
+    expect(commanderToolSeverity('create_skill')).toBe('neutral')
+    expect(commanderToolSeverity('update_skill')).toBe('neutral')
   })
 
   it('ignores a stray confirmation_token from the old two-step flow', async () => {

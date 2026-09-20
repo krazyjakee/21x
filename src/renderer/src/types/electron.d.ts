@@ -640,6 +640,7 @@ interface ElectronAPI {
     setActiveSession: (sessionId: string | null) => Promise<void>
     send: (sessionId: string, text: string) => Promise<{ turnId: string; message: CommanderMessage }>
     cancel: (sessionId: string) => Promise<{ cancelled: boolean }>
+    undoAction: (sessionId: string, toolCallId: string) => Promise<{ status: 'undone'; toolCallId: string; toolName: string; note: CommanderMessage }>
     onEvent: (callback: (event: CommanderEvent) => void) => () => void
   }
   /** ElevenLabs speech engine (#64). Answers with the speech snapshot; the key never comes back. */

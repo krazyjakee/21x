@@ -86,6 +86,7 @@ describe('CommanderService turns', () => {
       ['user', 'Plan the website launch'],
       ['assistant', 'I will ask the web project.']
     ])
+    expect(messages[0].input_mode).toBe('typed')
     expect(store.getSession(session.id)?.title).toBe('Website launch plan')
     expect(service.activeTurnId(session.id)).toBeNull()
 

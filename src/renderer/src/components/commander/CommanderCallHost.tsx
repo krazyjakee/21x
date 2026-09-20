@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { CallMedia } from '@shared/commander-call'
 import type { CommanderEvent } from '@shared/commander'
-import { isCommanderAdminTool } from '@shared/commander-tools'
+import { isCommanderAdminTool, parseCommanderActionResult } from '@shared/commander-tools'
 import { commanderApi, commanderVoiceApi } from '@/lib/ipc-client'
 import { activityNow } from '@/lib/activity/activity-clock'
 import {
@@ -203,7 +203,7 @@ export function CommanderCallHost() {
           const key = keyOf(event, inner.id)
           const toolName = tools.get(key)
           tools.delete(key)
-          if (toolName && !inner.isError && isCommanderAdminTool(toolName)) {
+          if (toolName && !inner.isError && isCommanderAdminTool(toolName) && parseCommanderActionResult(inner.content)) {
             recordEvent({
               kind: 'action',
               at: activityNow(),

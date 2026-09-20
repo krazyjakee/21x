@@ -12,6 +12,7 @@ import {
   type ProjectToolContext
 } from './project-tools'
 import { isGlobalSkill } from '../../shared/skill-scope'
+import type { CommanderActionChange, CommanderActionTarget } from '../../shared/commander-tools'
 
 /**
  * The Commander's skill tools (#74; docs/skills.md, docs/commander.md).
@@ -74,6 +75,15 @@ function scopeOf(db: DatabaseManager, skill: SkillRecord): Record<string, unknow
     project_id: skill.project_id,
     project_name: projectName(db, skill.project_id)
   }
+}
+
+function skillTarget(skill: Pick<SkillRecord, 'id' | 'name'>): CommanderActionTarget {
+  return { kind: 'skill', id: skill.id, name: skill.name }
+}
+
+function skillChanges(skill: SkillRecord, updated: Record<string, unknown>, fields: string[]): CommanderActionChange[] {
+  const before = skill as unknown as Record<string, unknown>
+  return fields.map((field) => ({ field, before: before[field], after: updated[field] }))
 }
 
 /** One list entry: identity, scope, a one-line description and the usage stats. */
@@ -270,7 +280,10 @@ export function createCommanderSkillTools(options: SkillToolOptions): ChatToolDe
           if (!created) throw new Error('Skill could not be created')
           notify(created.id, 'created')
           return detailEntry(db, created)
-        })
+        }, (value) => ({
+          target: { kind: 'skill', id: String(value.id), name: String(value.name) },
+          changes: [{ field: 'exists', before: false, after: true }]
+        }))
       }
     },
     {
@@ -317,6 +330,12 @@ export function createCommanderSkillTools(options: SkillToolOptions): ChatToolDe
           const updated = updateSkillOrConflict(db, skill, { ...changes, ...(version !== undefined ? { expected_version: version } : {}) })
           notify(skill.id, 'updated')
           return detailEntry(db, updated)
+        }, () => {
+          const updated = db.getSkill(skill.id)!
+          return {
+            target: skillTarget(updated),
+            changes: skillChanges(skill, updated as unknown as Record<string, unknown>, Object.keys(changes))
+          }
         })
       }
     },
@@ -330,7 +349,7 @@ export function createCommanderSkillTools(options: SkillToolOptions): ChatToolDe
           if (!db.deleteSkill(skill.id)) throw new Error('Skill no longer exists')
           notify(skill.id, 'removed')
           return { removed_skill_id: skill.id, name: skill.name, ...scopeOf(db, skill) }
-        })
+        }, () => ({ target: skillTarget(skill), changes: [{ field: 'exists', before: true, after: false }] }))
       }
     },
     {
@@ -345,7 +364,7 @@ export function createCommanderSkillTools(options: SkillToolOptions): ChatToolDe
           if (!updated) throw new Error('Skill no longer exists')
           notify(skill.id, 'scope')
           return { ...listEntry(db, updated), previous_project_id: skill.project_id, previous_project_name: projectName(db, skill.project_id) }
-        })
+        }, () => ({ target: skillTarget(skill), changes: [{ field: 'scope', before: skill.project_id, after: null }] }))
       }
     },
     {
@@ -366,7 +385,7 @@ export function createCommanderSkillTools(options: SkillToolOptions): ChatToolDe
           if (!updated) throw new Error('Skill no longer exists')
           notify(skill.id, 'scope')
           return { ...listEntry(db, updated), previous_project_id: skill.project_id, previous_project_name: projectName(db, skill.project_id) }
-        })
+        }, () => ({ target: skillTarget(skill), changes: [{ field: 'scope', before: skill.project_id, after: project.id }] }))
       }
     }
   ]

@@ -10,6 +10,7 @@ import type { HeldAction } from '../../shared/project-limit-types'
 import type { ProjectStatus } from '../../shared/project-status'
 import { isCoordinatorTask } from '../../shared/task-roles'
 import type { UiCommand } from '../../shared/ui-commands'
+import type { CommanderActionChange, CommanderActionTarget } from '../../shared/commander-tools'
 
 /**
  * The Commander's tools (#61, #73; docs/commander.md).
@@ -266,8 +267,37 @@ export const projectLocatorSchema = {
  * handler reads it and nothing validates tool input against the schema, so
  * `additionalProperties: false` never refuses it.
  */
-export function mutation(write: () => unknown): ChatToolResult {
-  return result({ status: 'ok', result: write() })
+export function mutation<T>(
+  write: () => T,
+  describe: (value: T) => { changes: CommanderActionChange[]; target: CommanderActionTarget }
+): ChatToolResult {
+  const value = write()
+  // Exact Undo needs the complete before/after values, including long skill
+  // content. Read results stay capped; mutation results are durable audit data.
+  return { content: JSON.stringify({ status: 'ok', result: value, ...describe(value) }) }
+}
+
+function projectTarget(project: Pick<ProjectRecord, 'id' | 'name'>): CommanderActionTarget {
+  return { kind: 'project', id: project.id, name: project.name }
+}
+
+function collectionTarget(
+  kind: 'repo' | 'resource',
+  item: { id: string; name?: string; label?: string },
+  projectId: string
+): CommanderActionTarget {
+  return { kind, id: item.id, name: item.name ?? item.label ?? item.id, project_id: projectId }
+}
+
+function changedFields(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+  fields: Array<string | [string, string]>
+): CommanderActionChange[] {
+  return fields.map((field) => {
+    const [label, key] = Array.isArray(field) ? field : [field, field]
+    return { field: label, before: before[key], after: after[key] }
+  })
 }
 
 // ── Delegation ────────────────────────────────────────────────
@@ -480,10 +510,14 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
         const paused = input.paused
         const { agents } = options
         if (!agents) throw new Error('Agents are not available right now.')
+        const before = agents.isAllProjectsPaused()
         return mutation(() => {
           agents.pauseAllProjects(paused)
           return { all_projects_paused: agents.isAllProjectsPaused() }
-        })
+        }, (value) => ({
+          target: { kind: 'all_projects', id: 'all', name: 'All projects' },
+          changes: [{ field: 'paused', before, after: value.all_projects_paused }]
+        }))
       }
     },
     {
@@ -536,7 +570,10 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
           for (const repo of repos) db.addProjectRepo(created.id, repo)
           notify(created.id, 'created')
           return compactProject(db, created, true)
-        })
+        }, (value) => ({
+          target: { kind: 'project', id: String(value.id), name: String(value.name) },
+          changes: [{ field: 'exists', before: false, after: true }]
+        }))
       }
     },
     {
@@ -583,6 +620,21 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
           if (!updated) throw new Error('Project no longer exists')
           notify(project.id, 'updated')
           return compactProject(db, updated, true)
+        }, () => {
+          const updated = db.getProject(project.id)!
+          return {
+            target: projectTarget(updated),
+            changes: changedFields(
+              project as unknown as Record<string, unknown>,
+              updated as unknown as Record<string, unknown>,
+              Object.keys(raw).map((field) => {
+                const keys: Record<string, string> = {
+                  brief: 'description', captain_agent: 'captain_agent_id', default_agent: 'default_agent_id'
+                }
+                return [field, keys[field] ?? field] as [string, string]
+              })
+            )
+          }
         })
       }
     },
@@ -603,7 +655,10 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
           if (!updated) throw new Error('Project no longer exists')
           notify(project.id, archived ? 'archived' : 'restored')
           return compactProject(db, updated, false)
-        })
+        }, (value) => ({
+          target: { kind: 'project', id: project.id, name: String(value.name) },
+          changes: [{ field: 'status', before: project.archived ? 'archived' : 'active', after: archived ? 'archived' : 'active' }]
+        }))
       }
     }))
   ]
@@ -658,7 +713,10 @@ function repoTools(
           if (!repo) throw new Error('Repository could not be added')
           notify(project.id, 'repos')
           return repoSummary(repo)
-        })
+        }, (value) => ({
+          target: { kind: 'repo', id: String(value.id), name: String(value.name), project_id: project.id },
+          changes: [{ field: 'exists', before: false, after: true }]
+        }))
       }
     },
     {
@@ -687,7 +745,10 @@ function repoTools(
           if (!repo) throw new Error('Repository no longer exists')
           notify(project.id, 'repos')
           return repoSummary(repo)
-        })
+        }, (value) => ({
+          target: { kind: 'repo', id: repoId, name: String(value.name), project_id: project.id },
+          changes: changedFields(existing as unknown as Record<string, unknown>, value, Object.keys(changes))
+        }))
       }
     },
     {
@@ -703,7 +764,10 @@ function repoTools(
           if (!db.removeProjectRepo(repoId)) throw new Error('Repository no longer exists')
           notify(project.id, 'repos')
           return { removed_repo_id: repoId }
-        })
+        }, () => ({
+          target: collectionTarget('repo', existing, project.id),
+          changes: [{ field: 'exists', before: true, after: false }]
+        }))
       }
     },
     {
@@ -712,12 +776,13 @@ function repoTools(
       inputSchema: { type: 'object', properties: { ...baseProperties, ordered_ids: { type: 'array', items: { type: 'string' }, maxItems: MAX_REPOS } }, required: ['project', 'ordered_ids'], additionalProperties: false },
       handler: async (input) => {
         const project = resolveProject(db, input.project)
-        const ids = validateCompleteOrder(input.ordered_ids, db.getProjectRepos(project.id).map((repo) => repo.id), 'repository')
+        const before = db.getProjectRepos(project.id).map((repo) => repo.id)
+        const ids = validateCompleteOrder(input.ordered_ids, before, 'repository')
         return mutation(() => {
           db.reorderProjectRepos(project.id, ids)
           notify(project.id, 'repos')
           return { ordered_ids: ids }
-        })
+        }, () => ({ target: projectTarget(project), changes: [{ field: 'repository order', before, after: ids }] }))
       }
     }
   ]
@@ -746,7 +811,10 @@ function resourceTools(
           if (!resource) throw new Error('Resource could not be added')
           notify(project.id, 'resources')
           return resourceSummary(resource)
-        })
+        }, (value) => ({
+          target: { kind: 'resource', id: String(value.id), name: String(value.label), project_id: project.id },
+          changes: [{ field: 'exists', before: false, after: true }]
+        }))
       }
     },
     {
@@ -773,6 +841,16 @@ function resourceTools(
           if (!resource) throw new Error('Resource no longer exists')
           notify(project.id, 'resources')
           return resourceSummary(resource)
+        }, (value) => {
+          const updated = db.getProjectResource(resourceId)!
+          return {
+            target: { kind: 'resource', id: resourceId, name: String(value.label), project_id: project.id },
+            changes: changedFields(
+              existing as unknown as Record<string, unknown>,
+              updated as unknown as Record<string, unknown>,
+              Object.keys(changes)
+            )
+          }
         })
       }
     },
@@ -789,7 +867,10 @@ function resourceTools(
           if (!db.removeProjectResource(resourceId)) throw new Error('Resource no longer exists')
           notify(project.id, 'resources')
           return { removed_resource_id: resourceId }
-        })
+        }, () => ({
+          target: collectionTarget('resource', existing, project.id),
+          changes: [{ field: 'exists', before: true, after: false }]
+        }))
       }
     },
     {
@@ -798,12 +879,13 @@ function resourceTools(
       inputSchema: { type: 'object', properties: { ...baseProperties, ordered_ids: { type: 'array', items: { type: 'string' }, maxItems: MAX_RESOURCES } }, required: ['project', 'ordered_ids'], additionalProperties: false },
       handler: async (input) => {
         const project = resolveProject(db, input.project)
-        const ids = validateCompleteOrder(input.ordered_ids, db.getProjectResources(project.id).map((resource) => resource.id), 'resource')
+        const before = db.getProjectResources(project.id).map((resource) => resource.id)
+        const ids = validateCompleteOrder(input.ordered_ids, before, 'resource')
         return mutation(() => {
           db.reorderProjectResources(project.id, ids)
           notify(project.id, 'resources')
           return { ordered_ids: ids }
-        })
+        }, () => ({ target: projectTarget(project), changes: [{ field: 'resource order', before, after: ids }] }))
       }
     }
   ]
