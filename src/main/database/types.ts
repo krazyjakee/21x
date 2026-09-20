@@ -61,6 +61,12 @@ export interface AgentConfigRecord {
   /** Ordered agents to try when this agent exhausts its credits or usage quota. */
   fallback_agent_ids?: string[]
   max_parallel_sessions?: number
+  /**
+   * The user-set hard cap on this agent's concurrent jobs across every
+   * project (#150, shared/concurrency.ts). Unset reads as
+   * min(max_parallel_sessions, 5).
+   */
+  concurrency_cap?: number
   api_keys?: {
     openai?: string
     anthropic?: string
@@ -297,6 +303,8 @@ export interface TaskRow {
   project_id: string | null
   created_at: string
   updated_at: string
+  /** Meaningful work only; older clients may omit this field. */
+  last_activity_at?: string | null
 }
 
 export interface HeartbeatLogRecord {
@@ -386,6 +394,8 @@ export interface TaskRecord {
   project_id: string
   created_at: string
   updated_at: string
+  /** Meaningful work only; older clients may omit this field. */
+  last_activity_at?: string | null
 }
 
 export interface FileAttachmentRecord {

@@ -5,7 +5,12 @@ import { DEFAULT_PROJECT_ID, DEFAULT_PROJECT_NAME } from '../../shared/projects'
 import { getRepoProviders, isGitProvider } from '../repo-providers'
 import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
 import { migrateCoordinatorToCaptain } from './captain-migration'
+import { migrateTaskActivity } from './task-activity-migration'
 import { splitLegacyPullRequestEscalation } from '../../shared/project-policies'
+import { createConcurrencyTables, migrateConcurrencyControl } from './concurrency-migration'
+import { createAuthorizationTables } from './authorization-schema'
+import { createDurableStartQueueTables, migrateDurableStartQueue } from './start-queue-migration'
+import { createIssueWriteTables, migrateIssueWrites } from './issue-writes-migration'
 
 /**
  * Bump this whenever new migrations are added so returning users skip
@@ -36,11 +41,23 @@ import { splitLegacyPullRequestEscalation } from '../../shared/project-policies'
  *          (migrateMergeGrants), and the escalation policy's combined `pr`
  *          item split into `open_pr` / `merge_pr` in projects.settings
  *          (splitPullRequestEscalation: the old level goes to merge_pr,
- *          open_pr gets its default "tell_commander"). 18 is skipped on purpose: it is claimed by
- *          an open branch (feat/commander-on-agent-sessions); whichever lands
- *          second renumbers.
+ *          open_pr gets its default "tell_commander"). 18 was skipped for a
+ *          contemporaneous feature branch.
+ * 19 → 20: managed Captain runtime generations and the durable delivery
+ *          outbox used by task messages, Commander requests and reports.
+ * 20 → 21: Captain-managed concurrency (#150): concurrency_audit, task_touches,
+ *          and agents.config.concurrency_cap = min(max_parallel_sessions, 5)
+ *          where unset (migrateConcurrencyControl in concurrency-migration.ts).
+ * 21 → 22: durable agent start queue, leases, generations, retry state and
+ *          cross-project fairness (#148, migrateDurableStartQueue).
+ * 22 → 23: immutable human authorization chains and durable dispatch bindings.
+ * 23 → 24: the delegated GitHub issue-write ledger: issue_writes, one row per
+ *          external issue write, carrying both its audit provenance and its
+ *          unique idempotency claim (migrateIssueWrites in
+ *          issue-writes-migration.ts).
+ * 24 → 25: meaningful task activity timestamps (#142).
  */
-const SCHEMA_VERSION = 19
+const SCHEMA_VERSION = 25
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -141,6 +158,7 @@ export function createTables(db: Database.Database): void {
       sort_order INTEGER NOT NULL DEFAULT 0,
       role TEXT NOT NULL DEFAULT 'task',
       project_id TEXT REFERENCES projects(id),
+      last_activity_at TEXT DEFAULT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -391,6 +409,56 @@ export function createTables(db: Database.Database): void {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_commander_messages_session_created ON commander_messages(session_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS managed_agent_runtimes (
+      owner_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      generation INTEGER NOT NULL DEFAULT 0,
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      candidate_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+      last_good_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+      session_id TEXT,
+      phase TEXT NOT NULL,
+      deadline_at INTEGER,
+      last_probe_at INTEGER,
+      probe_ok INTEGER,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      error_code TEXT,
+      error_detail TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_managed_agent_runtimes_project
+      ON managed_agent_runtimes(project_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_managed_agent_runtimes_phase_deadline
+      ON managed_agent_runtimes(phase, deadline_at);
+
+    CREATE TABLE IF NOT EXISTS delivery_outbox (
+      id TEXT PRIMARY KEY,
+      idempotency_key TEXT NOT NULL UNIQUE,
+      kind TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'pending',
+      source_session_id TEXT,
+      project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+      task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+      agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+      correlation_id TEXT,
+      payload TEXT NOT NULL,
+      destination_id TEXT,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      claim_owner TEXT,
+      claim_expires_at INTEGER,
+      deadline_at INTEGER,
+      last_error TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      acknowledged_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_delivery_outbox_recovery
+      ON delivery_outbox(kind, state, claim_expires_at, created_at);
+    CREATE INDEX IF NOT EXISTS idx_delivery_outbox_correlation
+      ON delivery_outbox(correlation_id, kind, created_at DESC)
+      WHERE correlation_id IS NOT NULL;
   `)
 
   // Embedded connector pieces (docs/connectors.md). Timestamps are epoch ms.
@@ -479,12 +547,37 @@ export function createTables(db: Database.Database): void {
   `)
 
   createMergeGrantTables(db)
+  // Concurrency control (#150): audit feed and declared touches.
+  createConcurrencyTables(db)
+
+  // Captain self-healing (#148): the one durable admission/start queue.
+  createDurableStartQueueTables(db)
+
+  // Delegated GitHub issue writes: the audit ledger and idempotency claims.
+  createIssueWriteTables(db)
 
   // Report routing (#62): a Captain report quotes the correlation id of
   // the `ask_captain` tool row it answers; this serves that lookup.
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_commander_messages_correlation
       ON commander_messages(correlation_id) WHERE correlation_id IS NOT NULL;
+  `)
+
+  // Images attached to a Commander user message (#144). The bytes live in
+  // their own table so message rows, events and searches stay small; they go
+  // with their message. New table, so CREATE IF NOT EXISTS covers fresh and
+  // existing DBs alike.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS commander_images (
+      id TEXT PRIMARY KEY,
+      message_id TEXT NOT NULL REFERENCES commander_messages(id) ON DELETE CASCADE,
+      position INTEGER NOT NULL DEFAULT 0,
+      name TEXT NOT NULL DEFAULT '',
+      mime_type TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      data BLOB NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_commander_images_message ON commander_images(message_id, position);
   `)
 }
 
@@ -542,6 +635,7 @@ function rebuildTasksTable(db: Database.Database, columnNames: Set<string>): voi
       sort_order INTEGER NOT NULL DEFAULT 0,
       role TEXT NOT NULL DEFAULT 'task',
       project_id TEXT REFERENCES projects(id),
+      last_activity_at TEXT DEFAULT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
@@ -969,6 +1063,21 @@ export function runMigrations(db: Database.Database): void {
   // Migration v19: merge grants (#137). New tables only; runs after
   // migrateToProjects so the projects table they reference exists.
   migrateMergeGrants(db)
+  // Migration v21: concurrency control (#150). After migrateToProjects so the
+  // projects table the audit references exists.
+  migrateConcurrencyControl(db)
+
+  // Migration v22: durable start claims and recovery (#148). This extends the
+  // v20 runtime and v21 admission model rather than introducing a second one.
+  migrateDurableStartQueue(db)
+  createAuthorizationTables(db)
+
+  // Migration v24: the delegated GitHub issue-write ledger. New table only;
+  // runs after migrateToProjects so the projects table it references exists.
+  migrateIssueWrites(db)
+
+  // Migration v25: meaningful activity, including ancestor backfill.
+  migrateTaskActivity(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)

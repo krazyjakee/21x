@@ -3,6 +3,8 @@ import { setCommanderEscalationHandler, type EscalationEvent } from '../escalati
 import type { CommanderService } from './commander-service'
 import type { CommanderStore } from './commander-store'
 import { setCaptainReportHandler, type CaptainReportHandler, type ReportRoutedBy } from './report-inbox'
+import { createHash } from 'crypto'
+import type { DeliveryRecord, DeliveryStore } from '../sessions/delivery-store'
 
 /**
  * Captain reports into Commander sessions (#62; docs/commander.md).
@@ -36,7 +38,11 @@ export interface ReportRoute {
   routedBy: ReportRoutedBy
 }
 
-export function resolveReportSession(store: ReportRoutingStore, correlationId?: string | null): ReportRoute {
+export function resolveReportSession(store: ReportRoutingStore, correlationId?: string | null, preferredSessionId?: string | null): ReportRoute {
+  if (preferredSessionId) {
+    const preferred = store.getSession(preferredSessionId)
+    if (preferred) return { sessionId: preferred.id, routedBy: 'correlation' }
+  }
   const id = correlationId?.trim()
   if (id) {
     const delegation = store.findDelegation(id)
@@ -105,6 +111,7 @@ export interface CommanderReportBridgeOptions {
   store: ReportRoutingStore
   /** The project a report names; unknown projects are refused. */
   getProject: (projectId: string) => { id: string; name: string } | null | undefined
+  deliveries: DeliveryStore
 }
 
 /** The handler behind `report_to_commander`: routes, stores and relays one report. */
@@ -112,13 +119,39 @@ export function createCaptainReportHandler(options: CommanderReportBridgeOptions
   return (report) => {
     const project = options.getProject(report.projectId)
     if (!project) return { delivered: false, detail: `Project not found: ${report.projectId}` }
-    const route = resolveReportSession(options.store, report.correlationId)
+    const correlationId = report.correlationId?.trim() || null
+    const request = correlationId ? options.deliveries.getCaptainRequest(correlationId) : null
+    if (request && request.projectId !== project.id) {
+      return { delivered: false, detail: 'The correlation belongs to another project.' }
+    }
+    const late = request?.state === 'timed_out' || request?.state === 'failed'
+    // A correlated request has one terminal application-visible report even
+    // if a reconnect gives the transport attempt a different delivery id.
+    const baseKey = correlationId
+      ? `captain-report:${project.id}:${correlationId}:${late ? 'late' : 'terminal'}`
+      : report.deliveryId?.trim()
+        || `captain-report:${project.id}:${createHash('sha256').update(report.message).digest('hex')}`
+    const initialRoute = resolveReportSession(options.store, correlationId, request?.sourceSessionId)
+    const { record } = options.deliveries.enqueue({
+      idempotencyKey: baseKey,
+      kind: 'captain_report',
+      sourceSessionId: initialRoute.sessionId,
+      projectId: project.id,
+      correlationId,
+      payload: late ? `Late report after the request ${request?.state === 'failed' ? 'failed' : 'timed out'}: ${report.message}` : report.message
+    })
+    const route = resolveReportSession(options.store, correlationId, record.sourceSessionId)
+    // Persist the chosen destination and final content before inserting the inbox
+    // effect, so a crash cannot reroute the retry to a newer conversation.
+    options.deliveries.bindReport(record.id, route.sessionId, record.payload)
+    const durable = options.deliveries.get(record.id)!
     const { relayed } = options.service.deliverReport({
       sessionId: route.sessionId,
-      content: report.message,
+      content: durable.payload,
       projectId: project.id,
       projectName: project.name,
-      correlationId: report.correlationId?.trim() || null
+      correlationId,
+      deliveryId: record.id
     })
     return { delivered: true, sessionId: route.sessionId, routedBy: route.routedBy, relayed }
   }
@@ -129,9 +162,34 @@ export function createCaptainReportHandler(options: CommanderReportBridgeOptions
  * `tell_commander` escalations (#66) into unprompted, project-tagged
  * reports. Returns the uninstaller.
  */
+export function recoverCaptainReports(options: CommanderReportBridgeOptions): void {
+  let records: DeliveryRecord[]
+  try { records = options.deliveries.listRecoverable('captain_report') }
+  catch (error) {
+    console.warn('[Commander] Report recovery will retry when storage is available:', error)
+    return
+  }
+  for (const record of records) {
+    try {
+      if (!record.projectId) continue
+      const project = options.getProject(record.projectId)
+      if (!project) continue
+      const route = resolveReportSession(options.store, record.correlationId, record.sourceSessionId)
+      options.deliveries.bindReport(record.id, route.sessionId, record.payload)
+      options.service.deliverReport({ sessionId: route.sessionId, content: record.payload,
+        projectId: project.id, projectName: project.name, correlationId: record.correlationId, deliveryId: record.id })
+    } catch (error) {
+      console.warn('[Commander] Report remains durable for retry:', error)
+    }
+  }
+}
+
 export function installCommanderReportBridge(options: CommanderReportBridgeOptions): () => void {
   const handler = createCaptainReportHandler(options)
   setCaptainReportHandler(handler)
+  recoverCaptainReports(options)
+  const timer = setInterval(() => recoverCaptainReports(options), 30_000)
+  timer.unref?.()
   setCommanderEscalationHandler((event) => {
     const text = escalationReportText(event)
     if (!text) return
@@ -139,6 +197,7 @@ export function installCommanderReportBridge(options: CommanderReportBridgeOptio
     if (!delivery.delivered) console.warn(`[Commander] Escalation for project ${event.projectId} not delivered: ${delivery.detail}`)
   })
   return () => {
+    clearInterval(timer)
     setCaptainReportHandler(null)
     setCommanderEscalationHandler(null)
   }

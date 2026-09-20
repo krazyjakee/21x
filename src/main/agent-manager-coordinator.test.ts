@@ -267,19 +267,22 @@ describe('Captain agent switch', () => {
       const db = makeDb({ session_id: null })
       const adapter = makeAdapter()
       let finish!: (id: string) => void
-      adapter.createSession.mockImplementationOnce(() => new Promise<string>((resolve) => { finish = resolve }))
       const manager = makeManager(db, adapter)
+      vi.spyOn(manager as any, 'startSessionNow').mockImplementationOnce(
+        () => new Promise<string>((resolve) => { finish = resolve })
+      )
+      const stop = vi.spyOn(manager, 'stopSession').mockResolvedValue(undefined)
       const emitSystemError = vi.spyOn(manager as any, 'emitSystemError')
 
       const starting = manager.startSession('agent-2', CAPTAIN_ID, undefined, true)
-      const failed = expect(starting).rejects.toThrow('Sol did not come up within 90 seconds')
+      const failed = expect(starting).rejects.toThrow('Sol startup timed out after 90 seconds')
       await vi.advanceTimersByTimeAsync(90_000)
       await failed
-      expect(emitSystemError).toHaveBeenCalledWith('', CAPTAIN_ID, expect.any(String), expect.stringContaining('Sol did not come up'))
+      expect(emitSystemError).toHaveBeenCalledWith('', CAPTAIN_ID, expect.any(String), expect.stringContaining('Sol startup timed out'))
 
       finish('late-session')
       await vi.advanceTimersByTimeAsync(0)
-      expect(adapter.destroySession).toHaveBeenCalledWith('late-session', expect.anything())
+      expect(stop).toHaveBeenCalledWith('late-session', false)
     } finally {
       vi.useRealTimers()
     }
@@ -309,7 +312,8 @@ describe('Captain typed-message dispatch provenance', () => {
     await vi.waitFor(() => expect(adapter.sendPrompt).toHaveBeenCalledTimes(2))
     adapter.sendPrompt.mockRejectedValueOnce(new Error('Transport refused the send'))
     const failed = makeUserTypedProjectMessage('p', CAPTAIN_ID, 'merge PR #12')
-    await manager.sendMessage('live', failed.text, CAPTAIN_ID, 'agent-1', undefined, failed)
+    await expect(manager.sendMessage('live', failed.text, CAPTAIN_ID, 'agent-1', undefined, failed))
+      .rejects.toThrow('Transport refused the send')
     await vi.waitFor(() => expect((manager as any).handleSessionError).toHaveBeenCalled())
     expect(latestUserTypedProjectMessage('p')).toBeNull()
     clearUserTypedProjectMessages()

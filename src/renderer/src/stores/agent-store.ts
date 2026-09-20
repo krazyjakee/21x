@@ -6,6 +6,8 @@ import { SessionStatus } from '@shared/constants'
 import type { AgentMessage, TranscriptPartRecord } from '@shared/transcript/types'
 import { applyPartsToProjection, createProjection, projectMessages, type TranscriptProjection } from '@shared/transcript/projection'
 import { useArtifactStore } from './artifact-store'
+import { isAgentStatusHeartbeat } from '@shared/activity'
+import { recordAgentStatus } from '@/lib/activity/session-activity-adapter'
 
 export { SessionStatus }
 export type { AgentMessage }
@@ -212,6 +214,11 @@ export const useAgentStore = create<AgentState>((set, get) => {
 
   // Session state only (status / sessionId) — never messages.
   onAgentStatus((event: AgentStatusEvent) => {
+    // Activity indicators (#95) keep their own freshness record. A heartbeat
+    // only renews that record: it is not a transition and must not touch the
+    // session, turn bookkeeping or the end-of-turn reconcile below.
+    recordAgentStatus(event)
+    if (isAgentStatusHeartbeat(event)) return
     const state = get()
     const session = findBySessionId(state.sessions, event.sessionId) || state.sessions.get(event.taskId)
 
@@ -231,7 +238,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
     }
 
     const previousStatus = session.status
-    const updated = { ...session, status: event.status }
+    const updated = { ...session, status: event.status, agentId: event.agentId || session.agentId }
     if (event.sessionId && session.sessionId !== event.sessionId) updated.sessionId = event.sessionId
     // Turn confirmed running (or errored/awaiting input) — stop showing
     // "starting". Interim `idle` events during resume must NOT clear it.

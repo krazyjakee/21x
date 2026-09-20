@@ -1,6 +1,9 @@
 import { useUIStore } from '@/stores/ui-store'
 import { NAV_ITEMS } from './nav-items'
 import { modKey } from '@/lib/platform'
+import { ActivityBadge, activityAccessibleName } from '@/components/activity/ActivityBadge'
+import { useCommanderActivity } from '@/lib/activity/use-activity'
+import { isQuietActivity } from '@/lib/activity/derive-activity'
 
 /** Primary navigation — slim vertical icon rail. */
 export function NavRail() {
@@ -8,11 +11,17 @@ export function NavRail() {
   const setSidebarView = useUIStore((s) => s.setSidebarView)
   const activeModal = useUIStore((s) => s.activeModal)
   const closeModal = useUIStore((s) => s.closeModal)
+  // A compact, static Commander state glyph (#95). The rail never animates
+  // and never mirrors another surface's motion.
+  const commander = useCommanderActivity()
+  const showCommanderState = !isQuietActivity(commander)
 
   return (
     <nav className="ui-scale app-chrome no-drag flex w-11 flex-shrink-0 flex-col items-center gap-1 bg-background py-1.5">
       {NAV_ITEMS.map(({ key, label, icon: Icon }, i) => {
         const active = sidebarView === key && activeModal !== 'settings'
+        const stateHere = key === 'commander' && showCommanderState
+        const name = stateHere ? activityAccessibleName(label, commander) : label
         return (
           <button
             key={key}
@@ -20,7 +29,7 @@ export function NavRail() {
               if (activeModal === 'settings') closeModal()
               setSidebarView(key)
             }}
-            aria-label={label}
+            aria-label={name}
             className={`group relative grid size-hit-lg place-items-center rounded-lg transition-colors duration-150 cursor-pointer ${
               active
                 ? 'bg-primary/12 text-primary'
@@ -31,8 +40,21 @@ export function NavRail() {
               <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-primary" />
             )}
             <Icon className="size-icon-lg" aria-hidden="true" />
-            <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-2 flex -translate-y-1/2 translate-x-[-4px] items-center gap-2 whitespace-nowrap rounded-lg border border-border bg-popover px-2 py-1 text-xs font-medium text-foreground opacity-0 shadow-pop transition-all duration-150 group-hover:translate-x-0 group-hover:opacity-100">
-              {label}
+            {stateHere && (
+              <ActivityBadge
+                result={commander}
+                entityName={label}
+                entityKey="commander"
+                region="nav-rail"
+                variant="dot"
+                size="chrome"
+                allowMotion={false}
+                decorative
+                className="absolute -bottom-0.5 -right-0.5 rounded-full bg-background px-0.5"
+              />
+            )}
+            <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-2 flex -translate-y-1/2 translate-x-[-4px] items-center gap-2 whitespace-nowrap rounded-lg border border-border bg-popover px-2 py-1 text-xs font-medium text-foreground opacity-0 shadow-pop transition-all duration-150 group-hover:translate-x-0 group-hover:opacity-100 group-focus-visible:translate-x-0 group-focus-visible:opacity-100">
+              {name}
               <kbd className="rounded border border-border bg-muted px-1 text-2xs text-muted-foreground">{modKey}{i + 1}</kbd>
             </span>
           </button>

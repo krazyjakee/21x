@@ -261,6 +261,12 @@ describe('useAgentStore', () => {
   })
 
   describe('Session status via onAgentStatus (state only, not messages)', () => {
+    it('updates the agent binding together with the committed replacement session', () => {
+      statusCallback!({ sessionId: 'old', agentId: 'agent-old', taskId: 'captain', status: SessionStatus.WORKING })
+      statusCallback!({ sessionId: 'new', agentId: 'agent-new', taskId: 'captain', status: SessionStatus.WORKING })
+      expect(useAgentStore.getState().sessions.get('captain')).toMatchObject({ sessionId: 'new', agentId: 'agent-new' })
+    })
+
     it('updates status and sessionId (re-key)', () => {
       useAgentStore.getState().initSession('task-1', 'temp', 'agent-1')
       statusCallback!({ sessionId: 'temp', agentId: 'agent-1', taskId: 'task-1', status: SessionStatus.WORKING })

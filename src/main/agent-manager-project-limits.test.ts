@@ -72,8 +72,10 @@ function setup(): Harness {
   // A roomy agent, so only the project limits decide.
   const agentId = db.createAgent(makeAgent({ name: 'Roomy', config: { max_parallel_sessions: 10 } as any }))!.id
 
+  // Captain control off (#150): the level is the agent's cap, so only the
+  // project limits decide. Levels are covered by agent-manager-concurrency.test.ts.
   const createProject = (name: string, limits?: Record<string, unknown>): string =>
-    db.createProject({ name, settings: limits ? { limits } : {} })!.id
+    db.createProject({ name, settings: { ...(limits ? { limits } : {}), concurrency: { captain_control: false } } })!.id
 
   const createTask = (projectId: string, title = 'Task'): TaskRecord => {
     const task = db.createTask(makeTask({ title, project_id: projectId }))!

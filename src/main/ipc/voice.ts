@@ -1,6 +1,7 @@
 import { ipcMain, dialog } from 'electron'
 import { VOICE_TTS_ELEVENLABS_EMPTY_STATE, isVoiceTtsEngineId } from '../../shared/voice-tts'
 import { CommanderVoice } from '../voice/commander-voice'
+import { assertTrustedSender } from '../ipc-sender'
 import type { VoiceSessionManager } from '../voice/voice-session-manager'
 import { getCommanderService } from './commander'
 import type { IpcDeps } from './deps'
@@ -220,7 +221,10 @@ export function registerVoiceHandlers({ voiceSessionManager, db }: IpcDeps): voi
     return requireCommanderVoice().bargeIn(payload.sessionId)
   })
 
-  ipcMain.handle('voice:commander:send', async (_, payload: { sessionId: string; text: string }) => {
+  ipcMain.handle('voice:commander:send', async (event, payload: { sessionId: string; text: string }) => {
+    // This path records a human authorization root, just like typed chat.
+    // Authenticate before reading payloads or initializing the voice bridge.
+    assertTrustedSender(event, 'voice:commander:send')
     if (typeof payload?.sessionId !== 'string' || !payload.sessionId) throw new Error('sessionId is required')
     return requireCommanderVoice().send(payload.sessionId, String(payload?.text ?? ''))
   })

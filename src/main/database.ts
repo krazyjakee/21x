@@ -1,3 +1,4 @@
+import { captainTerminology } from '../shared/captain-compat'
 import Database from 'better-sqlite3'
 import { app } from 'electron'
 import { join } from 'path'
@@ -12,6 +13,8 @@ import { userTaskRoleFilter } from './database/task-roles'
 import { TASK_ROLE_CAPTAIN, type TaskRole } from '../shared/task-roles'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import { mergeGrantStatus, type MergeCheckRecord, type MergeGrant, type MergeGrantSource, type MergeGrantReservation, type MergeGrantUse, type MergeGrantUseInput } from '../shared/merge-grants'
+import { defaultHardCap, normalizeTouchPath, type ConcurrencyAuditEntry } from '../shared/concurrency'
+import type { IssueAction, IssueWriteOrigin, IssueWriteRecord, IssueWriteStatus } from '../shared/issue-actions'
 import {
   PROJECT_STATUS_BLOCKER_MAX_CHARS,
   PROJECT_STATUS_JOURNAL_COMPACT_AFTER_DAYS,
@@ -67,6 +70,20 @@ export type * from './database/types'
 export { SkillVersionConflictError } from './database/types'
 export type { ProjectStatus, ProjectStatusJournalEntry, ProjectStatusJournalInput } from '../shared/project-status'
 
+/**
+ * A new agent's config with its hard cap (#150): an explicit cap is kept,
+ * otherwise min(max_parallel_sessions, 5), as migration 20 gives existing agents.
+ */
+function withDefaultHardCap(config: CreateAgentData['config']): NonNullable<CreateAgentData['config']> {
+  const next = { ...(config ?? {}) }
+  const explicit = Number(next.concurrency_cap)
+  if (!(Number.isFinite(explicit) && explicit >= 1)) next.concurrency_cap = defaultHardCap(next.max_parallel_sessions)
+  return next
+}
+
+/** Most paths one task may declare it touches (#150). */
+const MAX_TASK_TOUCHES = 200
+
 /** A `project_status_journal` row (#72); the list columns hold JSON arrays. */
 interface ProjectStatusJournalRow {
   id: string
@@ -120,6 +137,46 @@ export interface CreateMergeGrantData {
   max_uses: number | null
 }
 
+/** What the app (never the model) supplies to claim one delegated issue write. */
+export interface BeginIssueWriteInput {
+  idempotency_key: string
+  project_id: string
+  captain_task_id: string | null
+  captain_session_id: string | null
+  task_id: string | null
+  repo: string
+  action: IssueAction
+  target_number: number | null
+  payload_hash: string
+  payload_fields: string
+  /** Resolved from platform records, never from the caller's arguments. */
+  origin: IssueWriteOrigin
+  /** How long this attempt may hold the claim before it counts as unresolved. */
+  lease_ms: number
+}
+
+/** What a claim attempt is allowed to do next. */
+export interface BeginIssueWriteResult {
+  state: 'reserved' | 'duplicate' | 'in_flight' | 'needs_reconcile' | 'conflict'
+  record: IssueWriteRecord
+}
+
+export interface ApplyIssueWriteEffectsInput {
+  attachment?: { taskId: string; url: string; id: string; addedAt: string }
+  journal: ProjectStatusJournalInput
+}
+
+/** The outcome of one attempt, written once. */
+export interface SettleIssueWriteInput {
+  status: Exclude<IssueWriteStatus, 'reserved'>
+  /** Must match the attempt that received the external answer. */
+  attempt_epoch: number
+  external_url?: string | null
+  external_number?: number | null
+  external_result?: string | null
+  error?: string | null
+}
+
 /** What `recordProjectStatus` writes: the snapshot fields plus the journal highlights. */
 export interface ProjectStatusUpdateInput extends ProjectStatusJournalInput {
   /** The snapshot's top blockers; also the journal entry's `blockers` unless those are given. */
@@ -145,12 +202,12 @@ function toJournalEntry(row: ProjectStatusJournalRow): ProjectStatusJournalEntry
   return {
     id: row.id,
     project_id: row.project_id,
-    summary: row.summary,
-    completed: journalStringList(row.completed),
-    blockers: journalStringList(row.blockers),
-    decisions: journalStringList(row.decisions),
-    next_steps: journalStringList(row.next_steps),
-    source: row.source === 'compaction' ? 'compaction' : 'captain',
+    summary: captainTerminology(row.summary),
+    completed: journalStringList(row.completed).map(captainTerminology),
+    blockers: journalStringList(row.blockers).map(captainTerminology),
+    decisions: journalStringList(row.decisions).map(captainTerminology),
+    next_steps: journalStringList(row.next_steps).map(captainTerminology),
+    source: row.source === 'compaction' ? 'compaction' : row.source === 'system_recovery' ? 'system_recovery' : 'captain',
     correlation_id: row.correlation_id ?? null,
     created_at: row.created_at
   }
@@ -205,6 +262,24 @@ function toTranscriptPartRecord(r: TranscriptPartRow): TranscriptPartRecord {
 
 export class DatabaseManager {
   public db!: Database.Database
+
+  /** Push activity for both the changed task and its ancestors to connected clients. */
+  onTaskActivity?: (taskId: string, lastActivityAt: string) => void
+
+  recordTaskActivity(taskId: string, at = new Date().toISOString()): void {
+    const changed = this.prepare(`
+      WITH RECURSIVE ancestors(id) AS (
+        SELECT id FROM tasks WHERE id = ?
+        UNION
+        SELECT tasks.parent_task_id FROM tasks JOIN ancestors ON tasks.id = ancestors.id
+        WHERE tasks.parent_task_id IS NOT NULL
+      )
+      UPDATE tasks SET last_activity_at = ? WHERE id IN (SELECT id FROM ancestors)
+        AND (last_activity_at IS NULL OR last_activity_at < ?)
+      RETURNING id
+    `).all(taskId, at, at) as { id: string }[]
+    for (const { id } of changed) this.onTaskActivity?.(id, at)
+  }
 
   private statements = new Map<string, Database.Statement>()
   private statementsDb?: Database.Database
@@ -370,7 +445,7 @@ export class DatabaseManager {
    * returned revs stay contiguous (maxRev - changedPartIds.length is the
    * cursor before this batch).
    */
-  upsertTranscriptParts(taskId: string, parts: TranscriptPartInput[]): { maxRev: number; changedPartIds: string[] } {
+  upsertTranscriptParts(taskId: string, parts: TranscriptPartInput[], origin: 'history' | 'live' = 'history'): { maxRev: number; changedPartIds: string[] } {
     if (!this.ensureDbOpen() || parts.length === 0) return { maxRev: this.getTranscriptMaxRev(taskId), changedPartIds: [] }
 
     const nextSeqStmt = this.prepare(
@@ -434,6 +509,10 @@ export class DatabaseManager {
     // that stale snapshot. BEGIN IMMEDIATE lets busy_timeout wait for the
     // writer and only calculates the counters after the lock is acquired.
     txn.immediate()
+    if (origin === 'live' && parts.some((part) => changedPartIds.includes(part.id) &&
+      (part.role === 'user' || part.role === 'assistant' || part.partType === 'task_progress'))) {
+      this.recordTaskActivity(taskId)
+    }
     return { maxRev, changedPartIds }
   }
 
@@ -632,18 +711,19 @@ export class DatabaseManager {
       }
     }
 
+    if (data.parent_task_id) this.recordTaskActivity(data.parent_task_id, now)
     return this.getTask(id)
   }
 
-  updateTask(id: string, data: UpdateTaskData, origin?: 'session-feedback' | 'task-source'): TaskRecord | undefined {
-    if (origin !== 'task-source' && ('external_id' in data || 'source_id' in data || 'source' in data)) {
+  updateTask(id: string, data: UpdateTaskData, origin?: 'session-feedback' | 'task-source' | 'system' | 'task-source-action'): TaskRecord | undefined {
+    if (origin !== 'task-source' && origin !== 'task-source-action' && ('external_id' in data || 'source_id' in data || 'source' in data)) {
       throw new Error('Only the sync service can change a task source link.')
     }
     if (data.next_subtask_ids !== undefined) {
       this.validateNextSubtaskIds(id, data.next_subtask_ids)
     }
     const currentTask = this.getTask(id)
-    const approvedStatusWrite = origin === 'session-feedback' || origin === 'task-source'
+    const approvedStatusWrite = origin === 'session-feedback' || origin === 'task-source' || origin === 'task-source-action'
     if (!approvedStatusWrite && currentTask?.status === TaskStatus.AgentLearning && this.getSetting(`session-feedback-completion:${id}`) && !(data.status === TaskStatus.Completed && data.complete_at_source === false)) {
       data = { ...data, status: TaskStatus.AgentLearning }
     }
@@ -701,6 +781,19 @@ export class DatabaseManager {
       `UPDATE tasks SET ${setClauses.join(', ')} WHERE id = ?`
     ).run(...values)
 
+    if (currentTask && origin !== 'task-source' && origin !== 'system') {
+      const meaningfulFields = ['status', 'title', 'description', 'priority', 'resolution', 'feedback_comment'] as const
+      const fieldChanged = meaningfulFields.some((key) => data[key] !== undefined && data[key] !== currentTask[key])
+      const attachmentAdded = data.attachments?.some((attachment) =>
+        !currentTask.attachments.some((existing) => existing.id === attachment.id))
+      if (fieldChanged || attachmentAdded) this.recordTaskActivity(id)
+    }
+    // Re-parenting must carry the child's existing activity into its new
+    // ancestors, without inventing a fresh event for metadata housekeeping.
+    if (data.parent_task_id && data.parent_task_id !== currentTask?.parent_task_id) {
+      const activity = this.getTask(id)?.last_activity_at
+      if (activity) this.recordTaskActivity(data.parent_task_id, activity)
+    }
     return this.getTask(id)
   }
 
@@ -837,7 +930,7 @@ export class DatabaseManager {
       id,
       data.name,
       data.server_url ?? 'http://localhost:4096',
-      JSON.stringify(data.config ?? {}),
+      JSON.stringify(withDefaultHardCap(data.config)),
       data.is_default ? 1 : 0,
       now,
       now
@@ -1101,8 +1194,8 @@ export class DatabaseManager {
     return {
       project_id: projectId,
       counts,
-      summary: stored?.summary ?? '',
-      top_blockers: topBlockers,
+      summary: captainTerminology(stored?.summary ?? ''),
+      top_blockers: topBlockers.map(captainTerminology),
       updated_at: stored?.updated_at ?? null
     }
   }
@@ -1314,6 +1407,228 @@ export class DatabaseManager {
     })
   }
 
+  // ── Delegated GitHub issue writes ───────────────────────────
+  // The ledger is both the audit record and the idempotency claim (see
+  // database/issue-writes-migration.ts). Created, checked and settled only
+  // through src/main/issue-writes.ts, which resolves the human origin first.
+
+  /**
+   * Claims `idempotency_key` for one attempt, or says why the caller may not
+   * proceed. One immediate transaction, so two attempts racing on the same key
+   * cannot both reserve it:
+   *
+   * - no row            → `reserved`, the caller calls GitHub;
+   * - `succeeded`       → `duplicate`, the write already happened;
+   * - `reserved` in lease → `in_flight`, another attempt owns it;
+   * - `reserved` expired  → flipped to `unresolved` and returned as
+   *                         `needs_reconcile`: the write may have landed, so
+   *                         GitHub must be asked before anything retries;
+   * - `unresolved`      → `needs_reconcile`, same reason;
+   * - `failed`          → `reserved` again, with `attempts` incremented.
+   */
+  beginIssueWrite(input: BeginIssueWriteInput): BeginIssueWriteResult {
+    const fallback: IssueWriteRecord = {
+      id: '', idempotency_key: input.idempotency_key, project_id: input.project_id,
+      captain_task_id: input.captain_task_id ?? null, captain_session_id: input.captain_session_id ?? null,
+      task_id: input.task_id ?? null, repo: input.repo, action: input.action, target_number: input.target_number ?? null,
+      payload_hash: input.payload_hash, payload_fields: input.payload_fields, origin_kind: input.origin.kind, origin_message_id: input.origin.messageId,
+      origin_session_id: input.origin.sessionId, origin_text_hash: input.origin.textHash, origin_excerpt: input.origin.excerpt,
+      origin_authored_at: input.origin.authoredAt, correlation_id: input.origin.correlationId, status: 'unresolved',
+      external_url: null, external_number: null, external_result: null, error: 'The database is not open.',
+      attempts: 1, attempt_epoch: 1, lease_expires_at: null,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(), settled_at: null,
+      effects_applied_at: null
+    }
+    if (!this.ensureDbOpen()) return { state: 'needs_reconcile', record: fallback }
+    return this.db.transaction((): BeginIssueWriteResult => {
+      const now = Date.now()
+      const nowIso = new Date(now).toISOString()
+      const existing = this.getIssueWriteByKey(input.idempotency_key)
+      if (!existing) {
+        const id = createId()
+        this.prepare(`
+          INSERT INTO issue_writes
+            (id, idempotency_key, project_id, captain_task_id, captain_session_id, task_id, repo, action, target_number,
+             payload_hash, payload_fields, origin_kind, origin_message_id, origin_session_id, origin_text_hash,
+             origin_excerpt, origin_authored_at, correlation_id, status, attempts, attempt_epoch, lease_expires_at,
+             created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', 1, 1, ?, ?, ?)
+        `).run(
+          id, input.idempotency_key, input.project_id, input.captain_task_id ?? null, input.captain_session_id ?? null,
+          input.task_id ?? null, input.repo, input.action, input.target_number ?? null, input.payload_hash,
+          input.payload_fields, input.origin.kind, input.origin.messageId, input.origin.sessionId,
+          input.origin.textHash, input.origin.excerpt,
+          input.origin.authoredAt, input.origin.correlationId, now + input.lease_ms, nowIso, nowIso
+        )
+        return { state: 'reserved', record: this.getIssueWrite(id)! }
+      }
+      // An idempotency key is a durable binding, not a mutable slot. Check the
+      // complete operation and trusted human origin before *any* status-based
+      // retry logic, including failed rows. A mismatch leaves the original
+      // audit row byte-for-byte attributable to the operation it recorded.
+      const sameNullable = (left: string | number | null, right: string | number | null): boolean => left === right
+      const sameBinding =
+        existing.project_id === input.project_id &&
+        sameNullable(existing.captain_task_id, input.captain_task_id ?? null) &&
+        sameNullable(existing.captain_session_id, input.captain_session_id ?? null) &&
+        existing.repo === input.repo &&
+        existing.action === input.action &&
+        sameNullable(existing.target_number, input.target_number ?? null) &&
+        sameNullable(existing.task_id, input.task_id ?? null) &&
+        existing.payload_hash === input.payload_hash &&
+        existing.payload_fields === input.payload_fields &&
+        existing.origin_kind === input.origin.kind &&
+        existing.origin_message_id === input.origin.messageId &&
+        sameNullable(existing.origin_session_id, input.origin.sessionId) &&
+        existing.origin_text_hash === input.origin.textHash &&
+        existing.origin_excerpt === input.origin.excerpt &&
+        existing.origin_authored_at === input.origin.authoredAt &&
+        sameNullable(existing.correlation_id, input.origin.correlationId)
+      if (!sameBinding) return { state: 'conflict', record: existing }
+      if (existing.status === 'succeeded') return { state: 'duplicate', record: existing }
+      if (existing.status === 'unresolved') return { state: 'needs_reconcile', record: existing }
+      if (existing.status === 'reserved') {
+        const lease = this.prepare('SELECT lease_expires_at AS lease FROM issue_writes WHERE id = ?').get(existing.id) as { lease: number | null } | undefined
+        if (lease?.lease && lease.lease > now) return { state: 'in_flight', record: existing }
+        // The attempt that held this claim never came back. Its write may have
+        // landed, so the claim becomes a question, not a free slot.
+        this.prepare("UPDATE issue_writes SET status = 'unresolved', attempt_epoch = attempt_epoch + 1, lease_expires_at = NULL, error = ?, updated_at = ? WHERE id = ? AND status = 'reserved'")
+          .run('The attempt holding this claim ended without an answer from GitHub.', nowIso, existing.id)
+        return { state: 'needs_reconcile', record: this.getIssueWrite(existing.id)! }
+      }
+      // failed: GitHub certainly refused, so a fresh attempt is safe.
+      this.prepare("UPDATE issue_writes SET status = 'reserved', attempts = attempts + 1, attempt_epoch = attempt_epoch + 1, error = NULL, settled_at = NULL, lease_expires_at = ?, updated_at = ? WHERE id = ? AND status = 'failed'")
+        .run(now + input.lease_ms, nowIso, existing.id)
+      return { state: 'reserved', record: this.getIssueWrite(existing.id)! }
+    }).immediate()
+  }
+
+  /**
+   * Settles one open attempt exactly once. `reserved` is the live attempt and
+   * `unresolved` is the one reconciliation is answering; a row that already
+   * reached `succeeded` or `failed` is left alone and undefined is returned,
+   * so a late answer can never overwrite what was recorded first.
+   */
+  settleIssueWrite(id: string, outcome: SettleIssueWriteInput): IssueWriteRecord | undefined {
+    if (!this.ensureDbOpen()) return undefined
+    return this.db.transaction((): IssueWriteRecord | undefined => {
+      const row = this.prepare("SELECT id FROM issue_writes WHERE id = ? AND attempt_epoch = ? AND status IN ('reserved', 'unresolved')")
+        .get(id, outcome.attempt_epoch) as { id: string } | undefined
+      if (!row) return undefined
+      const nowIso = new Date().toISOString()
+      const settledAt = outcome.status === 'unresolved' ? null : nowIso
+      const nextEpoch = outcome.status === 'unresolved' ? outcome.attempt_epoch + 1 : outcome.attempt_epoch
+      this.prepare(`
+        UPDATE issue_writes
+           SET status = ?, external_url = ?, external_number = ?, external_result = ?, error = ?,
+               attempt_epoch = ?, lease_expires_at = NULL, settled_at = ?, updated_at = ?
+         WHERE id = ? AND attempt_epoch = ? AND status IN ('reserved', 'unresolved')
+      `).run(
+        outcome.status, outcome.external_url ?? null, outcome.external_number ?? null,
+        outcome.external_result ?? null, outcome.error ?? null, nextEpoch, settledAt, nowIso, id, outcome.attempt_epoch
+      )
+      return this.getIssueWrite(id)
+    }).immediate()
+  }
+
+  /**
+   * Commits the recoverable local half of a successful issue write exactly
+   * once. The task attachment, status-journal entry and durable marker share
+   * one SQLite transaction, so a crash can leave either all three or none.
+   */
+  applyIssueWriteEffects(id: string, input: ApplyIssueWriteEffectsInput): IssueWriteRecord | undefined {
+    if (!this.ensureDbOpen()) return undefined
+    return this.db.transaction((): IssueWriteRecord | undefined => {
+      const record = this.getIssueWrite(id)
+      if (!record || record.status !== 'succeeded') return undefined
+      if (record.effects_applied_at) return record
+
+      if (input.attachment) {
+        if (record.task_id !== input.attachment.taskId || record.external_url !== input.attachment.url) return undefined
+        const task = this.getTask(input.attachment.taskId)
+        if (!task) return undefined
+        if (!task.attachments.some((item) => item.filename === input.attachment!.url)) {
+          this.updateTask(task.id, {
+            attachments: [...task.attachments, {
+              id: input.attachment.id,
+              filename: input.attachment.url,
+              size: 0,
+              mime_type: 'text/x-github-issue',
+              added_at: input.attachment.addedAt
+            }]
+          })
+        }
+      }
+
+      const entry = this.appendProjectStatusJournal(record.project_id, input.journal)
+      if (!entry) throw new Error('Could not write the delegated issue journal entry')
+      const now = new Date().toISOString()
+      const changed = this.prepare(
+        "UPDATE issue_writes SET effects_applied_at = ?, updated_at = ? WHERE id = ? AND status = 'succeeded' AND effects_applied_at IS NULL"
+      ).run(now, now, id).changes
+      if (changed !== 1) throw new Error('Could not mark delegated issue effects as applied')
+      return this.getIssueWrite(id)
+    }).immediate()
+  }
+
+  getIssueWrite(id: string): IssueWriteRecord | undefined {
+    if (!this.ensureDbOpen()) return undefined
+    const row = this.prepare('SELECT * FROM issue_writes WHERE id = ?').get(id) as IssueWriteRecord | undefined
+    return row
+  }
+
+  getIssueWriteByKey(key: string): IssueWriteRecord | undefined {
+    if (!this.ensureDbOpen()) return undefined
+    return this.prepare('SELECT * FROM issue_writes WHERE idempotency_key = ?').get(key) as IssueWriteRecord | undefined
+  }
+
+  /** The ledger, newest first. */
+  listIssueWrites(options: { projectId?: string; taskId?: string; limit?: number } = {}): IssueWriteRecord[] {
+    if (!this.ensureDbOpen()) return []
+    const where: string[] = []
+    const params: unknown[] = []
+    if (options.projectId) { where.push('project_id = ?'); params.push(options.projectId) }
+    if (options.taskId) { where.push('task_id = ?'); params.push(options.taskId) }
+    const limit = Math.min(Math.max(options.limit ?? 50, 1), 500)
+    params.push(limit)
+    return this.prepare(
+      `SELECT * FROM issue_writes ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY created_at DESC, id DESC LIMIT ?`
+    ).all(...params) as IssueWriteRecord[]
+  }
+
+  /**
+   * Writes whose outcome is unknown, plus reserved claims whose lease has run
+   * out (they are the same question). Reconciliation asks GitHub about these.
+   */
+  listUnresolvedIssueWrites(projectId?: string): IssueWriteRecord[] {
+    if (!this.ensureDbOpen()) return []
+    return this.db.transaction((): IssueWriteRecord[] => {
+      const now = Date.now()
+      const nowIso = new Date(now).toISOString()
+      const projectClause = projectId ? ' AND project_id = ?' : ''
+      this.prepare(`
+        UPDATE issue_writes
+           SET status = 'unresolved', attempt_epoch = attempt_epoch + 1,
+               lease_expires_at = NULL, error = ?, updated_at = ?
+         WHERE status = 'reserved' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?${projectClause}
+      `).run('The attempt holding this claim ended without an answer from GitHub.', nowIso, now, ...(projectId ? [projectId] : []))
+      return (projectId
+        ? this.prepare("SELECT * FROM issue_writes WHERE project_id = ? AND status = 'unresolved' ORDER BY created_at ASC").all(projectId)
+        : this.prepare("SELECT * FROM issue_writes WHERE status = 'unresolved' ORDER BY created_at ASC").all()) as IssueWriteRecord[]
+    }).immediate()
+  }
+
+  /** Successful external writes whose atomic local task/journal effects have
+   * not committed yet. Unbounded on purpose: startup recovery must not strand
+   * an older row behind a display-oriented page limit. */
+  listIssueWritesPendingEffects(projectId?: string): IssueWriteRecord[] {
+    if (!this.ensureDbOpen()) return []
+    return (projectId
+      ? this.prepare("SELECT * FROM issue_writes WHERE project_id = ? AND status = 'succeeded' AND effects_applied_at IS NULL ORDER BY created_at ASC, id ASC").all(projectId)
+      : this.prepare("SELECT * FROM issue_writes WHERE status = 'succeeded' AND effects_applied_at IS NULL ORDER BY created_at ASC, id ASC").all()
+    ) as IssueWriteRecord[]
+  }
+
   getProjectStatusJournalEntry(id: string): ProjectStatusJournalEntry | undefined {
     if (!this.ensureDbOpen()) return undefined
     const row = this.prepare('SELECT * FROM project_status_journal WHERE id = ?').get(id) as ProjectStatusJournalRow | undefined
@@ -1451,6 +1766,62 @@ export class DatabaseManager {
       return { folded: stale.length, written }
     })
     return run()
+  }
+
+  // ── Concurrency control (#150) ───────────────────────────────
+
+  /** Appends one row to the project's concurrency audit feed. */
+  appendConcurrencyAudit(entry: Omit<ConcurrencyAuditEntry, 'id' | 'created_at'> & { created_at?: string }): ConcurrencyAuditEntry | undefined {
+    if (!this.ensureDbOpen() || !this.getProject(entry.project_id)) return undefined
+    const row: ConcurrencyAuditEntry = {
+      id: createId(),
+      project_id: entry.project_id,
+      agent_id: entry.agent_id,
+      kind: entry.kind,
+      previous_level: entry.previous_level,
+      level: entry.level,
+      cap: entry.cap,
+      actor: entry.actor,
+      reason: entry.reason.trim().slice(0, 500),
+      created_at: entry.created_at ?? new Date().toISOString()
+    }
+    this.prepare(`
+      INSERT INTO concurrency_audit (id, project_id, agent_id, kind, previous_level, level, cap, actor, reason, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(row.id, row.project_id, row.agent_id, row.kind, row.previous_level, row.level, row.cap, row.actor, row.reason, row.created_at)
+    return row
+  }
+
+  /** The project's concurrency changes, newest first. */
+  listConcurrencyAudit(projectId: string, limit = 20): ConcurrencyAuditEntry[] {
+    if (!this.ensureDbOpen()) return []
+    return this.prepare(`
+      SELECT id, project_id, agent_id, kind, previous_level, level, cap, actor, reason, created_at
+      FROM concurrency_audit WHERE project_id = ?
+      ORDER BY created_at DESC, rowid DESC LIMIT ?
+    `).all(projectId, Math.max(1, Math.min(200, Math.floor(limit)))) as ConcurrencyAuditEntry[]
+  }
+
+  /** The files a task declared it will change; [] when it declared none. */
+  getTaskTouches(taskId: string): string[] {
+    if (!this.ensureDbOpen()) return []
+    const row = this.prepare('SELECT paths FROM task_touches WHERE task_id = ?').get(taskId) as { paths: string } | undefined
+    return row ? parseJsonArray(row.paths) : []
+  }
+
+  /** Replaces a task's declared touches; an empty list clears them. Returns what is stored. */
+  setTaskTouches(taskId: string, paths: string[]): string[] {
+    if (!this.ensureDbOpen() || !this.getTask(taskId)) return []
+    const cleaned = [...new Set(paths.map((p) => normalizeTouchPath(String(p))).filter(Boolean))].slice(0, MAX_TASK_TOUCHES)
+    if (cleaned.length === 0) {
+      this.prepare('DELETE FROM task_touches WHERE task_id = ?').run(taskId)
+      return []
+    }
+    this.prepare(`
+      INSERT INTO task_touches (task_id, paths, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(task_id) DO UPDATE SET paths = excluded.paths, updated_at = excluded.updated_at
+    `).run(taskId, JSON.stringify(cleaned), new Date().toISOString())
+    return cleaned
   }
 
   getProjectRepos(projectId: string): ProjectRepoRecord[] {

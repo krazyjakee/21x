@@ -39,7 +39,7 @@ Per-scope names with an explicit shadowing rule can come later.
 | Caller | Sees | May create | May change / delete | May change scope |
 |---|---|---|---|---|
 | Skills view (the user) | everything | any scope | anything | promote / move, confirmed in the dialog |
-| Commander (`commander/skill-tools.ts`) | everything (archived projects' skills on request) | global, or a named project's | anything, after the confirmation challenge | `promote_skill`, `move_skill`, after confirmation |
+| Commander (`commander/skill-tools.ts`) | everything (archived projects' skills on request) | global, or a named project's | anything, on the first call | `promote_skill`, `move_skill`, on the first call |
 | Captain (project scope) | global + its project's | its project's | its project's own | no |
 | Task agent / subtask agent | global + its project's | its project's | its project's own | no |
 | Feedback learning (`syncSkillsFromDirectory`) | — | in the task's project | the task's project's own | no |
@@ -83,7 +83,9 @@ Changing scope is never part of a field update (`UpdateSkillData` has no
 
 - the editor's Scope section (Promote / Move button, confirmation dialog);
 - the Commander's `promote_skill` (project → global) and `move_skill`
-  (→ a project), both behind the one-time confirmation challenge.
+  (→ a project). Both act on the first call, with no confirmation step, and
+  only on a turn the user started (see docs/commander.md, *Immediate
+  administration*).
 
 Promotion never breaks anything. A move into a project is refused while tasks
 in other projects or agent-level defaults still reference the skill; the

@@ -8,8 +8,10 @@
  * - speaks each reply as it streams — every finished sentence is handed to
  *   the selected engine the moment it exists, and the tail is flushed when the
  *   turn ends, so a short reply is never left in a buffer;
- * - speaks every Captain report that lands in that session, after the reply
- *   that is being read rather than over it;
+ * - never reads a Captain report aloud as written (#107). A report that is
+ *   relayed starts a Commander turn, and that turn's plain-language summary
+ *   is what is spoken. A report that gets no turn (no provider, or a stored
+ *   briefing) is announced in one line that points to the chat;
  * - on barge-in stops playback, cancels the synthesis request or connection,
  *   and cancels the Commander turn, so the cancelled reply is neither heard
  *   later nor written further.
@@ -60,10 +62,13 @@ export function commanderVoiceKey(sessionId: string): string {
   return `commander:${sessionId}`
 }
 
-/** How a report is introduced when read aloud. */
-export function spokenReport(content: string, projectName: string | null | undefined): string {
-  const from = projectName?.trim() ? `Report from ${projectName.trim()}.` : 'A report arrived.'
-  return `${from} ${content.trim()}`
+/**
+ * What is said for a report that no summary turn will speak for. The report
+ * itself is never read out: it is technical, and it is in the chat.
+ */
+export function spokenReport(projectName: string | null | undefined): string {
+  const from = projectName?.trim() ? `Report from ${projectName.trim()}` : 'A report arrived'
+  return `${from}; details in the chat.`
 }
 
 interface TurnState {
@@ -86,6 +91,8 @@ const DEFAULT_CANCEL_TIMEOUT_MS = 4000
 export class CommanderVoice {
   private activeSessionId: string | null = null
   private readonly turns = new Map<string, TurnState>()
+  /** Report cues waiting to see whether a summary turn starts for them, per session. */
+  private readonly pendingCues = new Map<string, string[]>()
   private readonly unsubscribe: () => void
 
   constructor(private readonly options: CommanderVoiceOptions) {
@@ -130,6 +137,7 @@ export class CommanderVoice {
    * be read again by a later push.
    */
   bargeIn(sessionId: string): { cancelled: boolean } {
+    this.pendingCues.delete(sessionId)
     const key = commanderVoiceKey(sessionId)
     for (const turn of this.turns.values()) {
       if (turn.sessionId === sessionId) turn.dead = true
@@ -183,6 +191,9 @@ export class CommanderVoice {
   }
 
   private onTurnStarted(sessionId: string, turnId: string): void {
+    // A turn that starts right after a report is its summary: that is spoken
+    // in place of the cue.
+    this.pendingCues.delete(sessionId)
     if (sessionId !== this.activeSessionId) return
     const key = commanderVoiceKey(sessionId)
     // A passage still reading the previous reply or a report is replaced: a
@@ -258,31 +269,47 @@ export class CommanderVoice {
     })
   }
 
-  /** A Captain report in the active session is read — after the reply, not over it. */
+  /**
+   * A Captain report in the active session. Its content is not spoken: when
+   * the Commander relays it, the relay turn starts in the same tick (see
+   * CommanderService.deliverReport) and its summary is read like any reply.
+   * The one-line cue is spoken only when no such turn follows.
+   */
   private onReport(sessionId: string, message: CommanderMessage): void {
     if (sessionId !== this.activeSessionId) return
-    const text = spokenReport(message.content, message.project_id ? this.options.resolveProjectName?.(message.project_id) : null)
+    const text = spokenReport(message.project_id ? this.options.resolveProjectName?.(message.project_id) : null)
     const key = commanderVoiceKey(sessionId)
 
     const open = [...this.turns.values()].find((t) => t.sessionId === sessionId && !t.dead)
     if (open) {
-      // The reply is still being written. The report becomes one more message
-      // of the passage, read once the reply is done.
+      // An append-only report can arrive during a reply without a relay turn.
+      // Normal deliverReport calls defer this event until the reply ends.
       open.parts.push({ partId: `report:${message.id}`, content: text })
       open.textPart = null
-      // The report is whole, so all of it is released at once.
       this.push(open, true)
       return
     }
-    void this.options.speech
-      .speak({ text, source: 'conversation', taskId: key })
-      .catch((err) => console.error('[voice] speaking the report failed:', err))
+    const cues = this.pendingCues.get(sessionId)
+    if (cues) {
+      cues.push(text)
+      return
+    }
+    this.pendingCues.set(sessionId, [text])
+    queueMicrotask(() => {
+      const waiting = this.pendingCues.get(sessionId)
+      this.pendingCues.delete(sessionId)
+      if (!waiting || sessionId !== this.activeSessionId) return
+      void this.options.speech
+        .speak({ text: waiting.join(' '), source: 'conversation', taskId: key })
+        .catch((err) => console.error('[voice] speaking the report cue failed:', err))
+    })
   }
 
   // ── Internals ─────────────────────────────────────────────
 
   private silenceSession(sessionId: string): void {
     const key = commanderVoiceKey(sessionId)
+    this.pendingCues.delete(sessionId)
     for (const [turnId, turn] of this.turns) {
       if (turn.sessionId === sessionId) {
         turn.dead = true

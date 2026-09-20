@@ -113,6 +113,12 @@ export interface MergeGrantScopeInput {
   max_merges?: number | null
 }
 
+/** Preserve invalid model arguments so creation can reject them, never drop a restriction. */
+export function mergeGrantScopeFrom(input: Record<string, unknown>): MergeGrantScopeInput {
+  return Object.fromEntries(['repo', 'base_branch', 'pr_numbers', 'expires_in_hours', 'max_merges']
+    .filter((key) => input[key] !== undefined).map((key) => [key, input[key]])) as MergeGrantScopeInput
+}
+
 export type MergeGrantStatus = 'active' | 'expired' | 'revoked' | 'used_up'
 
 export function mergeGrantStatus(grant: MergeGrant, now: number = Date.now()): MergeGrantStatus {
@@ -143,10 +149,51 @@ export function mergeGrantSettingsFrom(settings: Record<string, unknown> | null 
 export interface MergeIntentResult {
   ok: boolean
   reason?: string
+  reasonCode?: MergeGrantReasonCode
+  offendingScope?: string
+  scopeKind?: 'project_wide'
   /** Restrictions read from the instruction itself, never from model arguments. */
   repo?: string
   baseBranch?: string
   projectName?: string
+}
+
+export type MergeGrantReasonCode =
+  | 'FEATURE_DISABLED' | 'INELIGIBLE_PROVENANCE' | 'PROJECT_MISSING'
+  | 'PROJECT_AMBIGUOUS' | 'PROJECT_MISMATCH' | 'PROJECT_ARCHIVED'
+  | 'MULTIPLE_PROJECTS_UNSUPPORTED' | 'PR_SCOPE_UNSUPPORTED' | 'AMBIGUOUS_COMMAND'
+  | 'INVALID_EXPIRY' | 'INVALID_USE_LIMIT' | 'MESSAGE_ALREADY_USED'
+
+export interface MergeGrantProblem {
+  reason_code: MergeGrantReasonCode
+  message: string
+  offending_scope: string
+}
+
+export interface MergeGrantFailure {
+  ok: false
+  error: string
+  reason_code: MergeGrantReasonCode
+  offending_scope: string
+  accepted_examples: string[]
+  blockers: MergeGrantProblem[]
+}
+
+/** Shared by both tool transports, including failures before grant creation. */
+export function mergeGrantFailure(blockers: MergeGrantProblem[], project = '<project>'): MergeGrantFailure {
+  const examples = [
+    `Merge every safe ${project} pull request after required reviews and checks pass`,
+    `Merge all open PRs in ${project} when required reviews and checks pass`,
+    `Merge PR #12 in ${project} after required reviews and checks pass`
+  ]
+  return {
+    ok: false,
+    reason_code: blockers[0].reason_code,
+    offending_scope: blockers[0].offending_scope,
+    blockers,
+    accepted_examples: examples,
+    error: `No merge grant was created. ${blockers.map((b) => `[${b.reason_code}] ${b.message} (scope: ${b.offending_scope})`).join(' ')} Accepted wording (with eligible typed provenance and opt-in enabled): ${examples.map((e) => `"${e}"`).join('; ')}.`
+  }
 }
 
 /**
@@ -154,17 +201,45 @@ export interface MergeIntentResult {
  * Quoted material, reports, questions about merging, negations and unrecognized
  * conditions fail closed. The model cannot decide that ambiguous text consents.
  */
+/** Words that mean the "project" slot is carrying extra meaning, not a name. */
+const SCOPE_STOPWORDS = /\b(?:in|into|without|skip|skipping|skipped|ignore|ignoring|bypass|bypassing|except|excluding|unless|even|regardless|review|reviews|reviewed|check|checks|approval|approvals|approve|approved|required|protection|merge|merging|pr|prs|pull|request|requests)\b/i
+
 export function checkMergeIntent(text: string): MergeIntentResult {
-  const refused = { ok: false, reason: 'No explicit merge instruction was recognized. Type a separate command, for example "Merge PR #12 when checks pass". Quoted text, reports and ambiguous instructions cannot grant authority.' }
+  const refused: MergeIntentResult = { ok: false, reasonCode: 'AMBIGUOUS_COMMAND', offendingScope: text, reason: 'No explicit merge instruction was recognized. Quoted text, reports, questions and ambiguous instructions cannot grant authority.' }
   let value = (text ?? '').trim().replace(/[.!]$/, '')
-  if (!value || /[\n\r"“”`]/.test(value)) return refused
+  if (!value || /[\n\r"“”`?'‘’]/.test(value)) return refused
+  // The all/every form requires an explicit single scope and both gates.
+  // It never falls through to the older, project-chat command grammar.
+  if (/^(?:please\s+)?merge\s+(?:all|every)\b/i.test(value)) {
+    const wide = value.match(/^(?:please\s+)?merge (?:all|every) (?:open|safe) (.+) (?:after|when|once) required reviews and checks pass$/i)
+    if (!wide) return { ...refused, reasonCode: 'PR_SCOPE_UNSUPPORTED', reason: 'All/every PR commands must name one project or repository and require reviews and checks to pass.' }
+    const before = wide[1].match(/^(.+?) (?:PRs?|pull requests?)$/i)
+    const after = wide[1].match(/^(?:PRs?|pull requests?) in (.+)$/i)
+    const name = (after?.[1] ?? before?.[1])?.trim()
+    if (!name) return { ...refused, reasonCode: 'PROJECT_MISSING', reason: 'Name exactly one project or owner/repository in the command.' }
+    if (/\b(?:and|or|all projects|every project)\b|[,;&+]/i.test(name)) {
+      return { ...refused, reasonCode: 'MULTIPLE_PROJECTS_UNSUPPORTED', offendingScope: name, reason: 'One grant covers one project; cross-project grants are unsupported.' }
+    }
+    if (!/^[\w.-]+(?:[ /][\w.-]+)*$/.test(name)) return { ...refused, reasonCode: 'PR_SCOPE_UNSUPPORTED', offendingScope: name }
+    // The scope slot is a project or owner/repo, never a place to tack on
+    // extra conditions. "21x skipping required reviews" must not parse as a
+    // command naming a project; authority never comes from a substring (#155).
+    if (SCOPE_STOPWORDS.test(name)) {
+      return { ...refused, reasonCode: 'PR_SCOPE_UNSUPPORTED', offendingScope: name, reason: 'Name only the project or owner/repository in the scope; extra words and conditions are not part of the accepted command.' }
+    }
+    if (name.includes('/')) {
+      if (!/^[\w.-]+\/[\w.-]+$/.test(name)) return { ...refused, reasonCode: 'PR_SCOPE_UNSUPPORTED', offendingScope: name }
+      return { ok: true, scopeKind: 'project_wide', repo: name }
+    }
+    return { ok: true, scopeKind: 'project_wide', projectName: name }
+  }
   let projectName: string | undefined
   const project = value.match(/^in ([\w .-]+),\s*/i)
   if (project) {
     projectName = project[1]
     value = value.slice(project[0].length)
   }
-  const command = value.match(/^(?:please\s+|go ahead and\s+|(?:can|could|would|will) you (?:please )?|I (?:want|instruct|authorize) you to )?merge\s+/i)
+  const command = value.match(/^(?:please\s+|go ahead and\s+|I (?:want|instruct|authorize) you to )?merge\s+/i)
   if (!command) return refused
   value = value.slice(command[0].length)
   const target = value.match(/^(?:(?:the )?(?:ready |open |approved )?(?:PRs?|pull requests?)(?:\s+#?\d+)?|#\d+|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+)(?=$|[ ,])/i)
@@ -190,9 +265,10 @@ export function checkMergeIntent(text: string): MergeIntentResult {
   let baseBranch: string | undefined
   let conditionSeen = false
   while (value) {
-    const condition = value.match(/^ (?:when|once|after) (?:green|(?:checks|tests|CI)(?: pass(?:es)?| (?:are |is )?green))(?=$| )/i)
+    const condition = value.match(/^ (?:when|once|after) (?:required reviews and checks pass|green|(?:checks|tests|CI)(?: pass(?:es)?| (?:are |is )?green))(?=$| )/i)
     const into = value.match(/^ into ([\w./-]+)(?=$| )/i)
     const inRepo = value.match(/^ in ([\w.-]+\/[\w.-]+)(?=$| )/i)
+    const inProject = value.match(/^ in ([\w.-]+(?: [\w.-]+)*?)(?= (?:when|once|after) |$)/i)
     if (condition && !conditionSeen) {
       conditionSeen = true
       value = value.slice(condition[0].length)
@@ -202,6 +278,10 @@ export function checkMergeIntent(text: string): MergeIntentResult {
     } else if (inRepo && (!repo || repo.toLowerCase() === inRepo[1].toLowerCase())) {
       repo = inRepo[1]
       value = value.slice(inRepo[0].length)
+    } else if (inProject && !projectName) {
+      projectName = inProject[1]
+      if (/\b(?:and|or|every|all)\b/i.test(projectName)) return { ...refused, reasonCode: 'MULTIPLE_PROJECTS_UNSUPPORTED', offendingScope: projectName }
+      value = value.slice(inProject[0].length)
     } else return refused
   }
   return { ok: true, repo, baseBranch, projectName }
@@ -252,7 +332,7 @@ export function grantCoversPullRequest(grant: Pick<MergeGrant, 'repo' | 'base_br
 /** One line a person can read: what the grant allows. */
 export function describeMergeGrant(grant: Pick<MergeGrant, 'repo' | 'base_branch' | 'pr_numbers' | 'max_uses' | 'expires_at'>): string {
   const what = grant.pr_numbers.length > 0 ? `PR${grant.pr_numbers.length > 1 ? 's' : ''} ${grant.pr_numbers.map((n) => `#${n}`).join(', ')}` : 'ready PRs'
-  const where = grant.repo ? ` in ${grant.repo}` : ''
+  const where = grant.repo ? ` in ${grant.repo}` : ' in this project only'
   const into = grant.base_branch ? ` into ${grant.base_branch}` : ''
   const count = grant.max_uses !== null ? `, at most ${grant.max_uses}` : ''
   return `Merge ${what}${where}${into} when checks are green and branch protection is satisfied${count}; until ${grant.expires_at}`
