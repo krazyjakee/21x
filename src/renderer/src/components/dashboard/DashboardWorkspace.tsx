@@ -2,7 +2,6 @@ import { useCallback } from 'react'
 import { useUIStore } from '@/stores/ui-store'
 import { HeroSection } from './HeroSection'
 import { CommandInput } from './CommandInput'
-import { QuickChips } from './QuickChips'
 import { TaskBoard } from './TaskBoard'
 import type { Task, TaskStatus } from '@/types'
 
@@ -48,17 +47,11 @@ export function DashboardWorkspace({ onTaskStatusChange }: DashboardWorkspacePro
           onSendToCaptain={handleSendToCaptain}
           onCreateTask={handleCreateTask}
         />
-
-        {/* 3. Quick Task Chips */}
-        <QuickChips
-          onAskCaptain={handleSendToCaptain}
-          onCreateTask={(text) => openCreateWithPrefill(text)}
-        />
       </div>
 
       {/* Full-width sections below — constrained + centered to align with kanban */}
       <div className="max-w-[1600px] mx-auto px-6 space-y-6 pb-8">
-        {/* 4. Task Board (Kanban) — full width */}
+        {/* 3. Task Board (Kanban) — full width */}
         <TaskBoard onStatusChange={onTaskStatusChange} />
       </div>
     </div>

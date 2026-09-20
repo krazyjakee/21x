@@ -47,7 +47,7 @@ interface UIState {
   dashboardPreviewTaskId: string | null
   /** Task ID to add to canvas when switching to canvas view */
   canvasPendingTaskId: string | null
-  /** Pre-fill text for the create task modal (from dashboard command input / quick chips) */
+  /** Pre-fill text for the create task modal (from the dashboard command input) */
   createTaskPrefill: { title: string; description: string } | null
   /** Whether the Captain drawer is open (global) */
   showOrchestrator: boolean
