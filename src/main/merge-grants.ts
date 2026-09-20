@@ -420,9 +420,12 @@ function checkState(check: RawCheck): 'passed' | 'skipped' | 'failed' | 'pending
   return 'pending'
 }
 
-const PR_VIEW_FIELDS = 'url,number,title,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefOid,baseRefName,statusCheckRollup,author,latestReviews'
+const PR_VIEW_FIELDS = 'url,number,title,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefOid,baseRefName,statusCheckRollup,author'
 // gh pr view does not expose baseRefOid on supported CLI versions.
-const PR_REFS_QUERY = 'query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { headRefOid baseRefName baseRefOid } } }'
+// Read the latest review per reviewer here as well because gh pr view omits
+// the commit each review covered. A standing grant needs exact-head evidence,
+// not an approval that may have survived a later push on an unprotected repo.
+const PR_REFS_QUERY = 'query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { headRefOid baseRefName baseRefOid latestReviews(first: 100) { nodes { author { login } state commit { oid } } pageInfo { hasNextPage } } } } }'
 
 function loginOf(value: unknown): string {
   if (!value || typeof value !== 'object') return ''
@@ -435,12 +438,27 @@ function loginOf(value: unknown): string {
  * repository without required reviews even when people have approved, so it
  * cannot stand in for "someone independent looked at this" (#155).
  */
-function independentApprovalsFrom(raw: Record<string, unknown>): string[] {
-  const author = loginOf(raw.author).toLowerCase()
-  const reviews = Array.isArray(raw.latestReviews) ? raw.latestReviews : []
+function independentApprovalsFrom(raw: Record<string, unknown>, headRefOid: string, authorLogin: string): string[] {
+  const connection = raw.latestReviews
+  if (!connection || typeof connection !== 'object' || Array.isArray(connection)) {
+    throw new Error('GitHub returned missing exact-head review data')
+  }
+  const reviews = (connection as { nodes?: unknown }).nodes
+  const pageInfo = (connection as { pageInfo?: unknown }).pageInfo
+  if (!Array.isArray(reviews) || !pageInfo || typeof pageInfo !== 'object' ||
+      typeof (pageInfo as { hasNextPage?: unknown }).hasNextPage !== 'boolean' ||
+      (pageInfo as { hasNextPage: boolean }).hasNextPage) {
+    throw new Error('GitHub returned incomplete exact-head review data')
+  }
+  const author = authorLogin.toLowerCase()
   const logins = reviews
     .filter((review): review is Record<string, unknown> => !!review && typeof review === 'object')
     .filter((review) => String(review.state ?? '').toUpperCase() === 'APPROVED')
+    .filter((review) => {
+      const commit = review.commit
+      return !!commit && typeof commit === 'object' &&
+        (commit as { oid?: unknown }).oid === headRefOid
+    })
     .map((review) => loginOf(review.author))
     .filter((login) => login && login.toLowerCase() !== author)
   return [...new Set(logins)]
@@ -463,6 +481,8 @@ export async function readPullRequestGate(pr: PullRequestRef): Promise<PullReque
     throw new Error('GitHub returned missing or changed PR head/base data; reevaluate before retrying')
   }
   const rollup = raw.statusCheckRollup as RawCheck[]
+  const headRefOid = typeof raw.headRefOid === 'string' ? raw.headRefOid : ''
+  const authorLogin = loginOf(raw.author)
   return {
     url: typeof raw.url === 'string' ? raw.url : pr.url,
     number: typeof raw.number === 'number' ? raw.number : pr.number,
@@ -472,11 +492,11 @@ export async function readPullRequestGate(pr: PullRequestRef): Promise<PullReque
     mergeable: String(raw.mergeable ?? '').toUpperCase(),
     mergeStateStatus: String(raw.mergeStateStatus ?? '').toUpperCase(),
     reviewDecision: String(raw.reviewDecision ?? '').toUpperCase(),
-    headRefOid: typeof raw.headRefOid === 'string' ? raw.headRefOid : '',
+    headRefOid,
     baseRefName: typeof raw.baseRefName === 'string' ? raw.baseRefName : '',
     baseRefOid: refs.baseRefOid,
-    authorLogin: loginOf(raw.author),
-    independentApprovals: independentApprovalsFrom(raw),
+    authorLogin,
+    independentApprovals: independentApprovalsFrom(refs, headRefOid, authorLogin),
     checks: rollup.map((check) => ({ name: check.name || check.context || 'check', state: checkState(check) }))
   }
 }
@@ -676,11 +696,10 @@ export function refuseUnmergeable(projectId: string, pr: PullRequestRef, state: 
  * so an explicit approval by someone other than the author is what counts.
  */
 export function missingIndependentReview(state: PullRequestGateState): string | null {
-  if (state.reviewDecision === 'APPROVED') return null
   if ((state.independentApprovals ?? []).length > 0) return null
   return state.authorLogin
-    ? `no one other than ${state.authorLogin} has approved it (the base branch does not require reviews, so GitHub reports no review decision)`
-    : 'it has no independent approving review (the base branch does not require reviews, so GitHub reports no review decision)'
+    ? `no one other than ${state.authorLogin} has approved its current head ${state.headRefOid}`
+    : `its current head ${state.headRefOid} has no independent approving review`
 }
 
 /**

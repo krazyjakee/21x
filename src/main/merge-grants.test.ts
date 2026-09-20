@@ -61,6 +61,10 @@ vi.mock('electron', () => ({
 const SHA = 'a'.repeat(40)
 const PR_URL = 'https://github.com/acme/app/pull/12'
 
+function reviewConnection(nodes: Array<Record<string, unknown>>, hasNextPage = false): Record<string, unknown> {
+  return { nodes, pageInfo: { hasNextPage } }
+}
+
 function prState(over: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
   return {
     url: PR_URL,
@@ -75,7 +79,7 @@ function prState(over: Partial<Record<string, unknown>> = {}): Record<string, un
     baseRefName: 'main',
     baseRefOid: 'd'.repeat(40),
     author: { login: 'author-dev' },
-    latestReviews: [{ author: { login: 'reviewer-dev' }, state: 'APPROVED' }],
+    latestReviews: reviewConnection([{ author: { login: 'reviewer-dev' }, state: 'APPROVED', commit: { oid: SHA } }]),
     statusCheckRollup: [{ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }],
     ...over
   }
@@ -1090,7 +1094,7 @@ describe('explicit project-wide grants (#155)', () => {
     const h = setupWide()
     const result = wideGrant(h)
     if (!result.ok) throw new Error(result.error)
-    h.setPr({ reviewDecision: '', latestReviews: [] })
+    h.setPr({ reviewDecision: '', latestReviews: reviewConnection([]) })
     expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({
       status: 'blocked',
       reason_code: 'INDEPENDENT_REVIEW_REQUIRED',
@@ -1104,7 +1108,7 @@ describe('explicit project-wide grants (#155)', () => {
     const h = setupWide()
     const result = wideGrant(h)
     if (!result.ok) throw new Error(result.error)
-    h.setPr({ reviewDecision: '', author: { login: 'astra' }, latestReviews: [{ author: { login: 'astra' }, state: 'APPROVED' }] })
+    h.setPr({ reviewDecision: '', author: { login: 'astra' }, latestReviews: reviewConnection([{ author: { login: 'astra' }, state: 'APPROVED', commit: { oid: SHA } }]) })
     expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({ status: 'blocked', reason_code: 'INDEPENDENT_REVIEW_REQUIRED' })
     expect(h.merges).toHaveLength(0)
     expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
@@ -1113,8 +1117,38 @@ describe('explicit project-wide grants (#155)', () => {
   it('accepts an independent approval on a branch that requires no reviews', async () => {
     const h = setupWide()
     wideGrant(h)
-    h.setPr({ reviewDecision: '', author: { login: 'astra' }, latestReviews: [{ author: { login: 'someone-else' }, state: 'APPROVED' }] })
+    h.setPr({ reviewDecision: '', author: { login: 'astra' }, latestReviews: reviewConnection([{ author: { login: 'someone-else' }, state: 'APPROVED', commit: { oid: SHA } }]) })
     expect((await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).status).toBe('merged')
+  })
+
+  it('rejects an independent approval of an older head even when GitHub reports APPROVED', async () => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.setPr({
+      reviewDecision: 'APPROVED',
+      author: { login: 'astra' },
+      latestReviews: reviewConnection([{ author: { login: 'someone-else' }, state: 'APPROVED', commit: { oid: 'b'.repeat(40) } }])
+    })
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({
+      status: 'blocked', reason_code: 'INDEPENDENT_REVIEW_REQUIRED'
+    })
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+  })
+
+  it('fails closed when exact-head review data is truncated', async () => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.setPr({ latestReviews: reviewConnection([
+      { author: { login: 'someone-else' }, state: 'APPROVED', commit: { oid: SHA } }
+    ], true) })
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({
+      error: expect.stringContaining('incomplete exact-head review data')
+    })
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
   })
 
   it.each([
