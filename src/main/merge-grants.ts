@@ -1152,11 +1152,13 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
   // obsolete or duplicate PR under a project-wide grant. Require a real
   // independent approval instead, and spend no grant use without one (#155).
   const review = missingIndependentReview(state, readiness.attestation)
-  if (authority.kind === 'grant' && review) {
+  const verifiedChangesRequired = readiness.attestation?.verdict === 'CHANGES_REQUIRED'
+  if (review && (authority.kind === 'grant' || verifiedChangesRequired)) {
     const key = `independent-review:${pr.url}@${state.headRefOid}`
     if (request.readiness?.changed || readiness.changed) {
       reportedBlocks.add(key)
-      hooks.report?.(projectId, 'needs_user', `${pr.url} was not merged under the merge grant: ${review}. The blocker is owned by a different 21x review agent, not GitHub branch protection.`, grant?.id, context)
+      const authorityLabel = authority.kind === 'grant' ? ' under the merge grant' : ''
+      hooks.report?.(projectId, 'needs_user', `${pr.url} was not merged${authorityLabel}: ${review}. The blocker is owned by a different 21x review agent, not GitHub branch protection.`, grant?.id, context)
     }
     return {
       status: 'blocked',
@@ -1169,7 +1171,9 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
       readiness_snapshot_id: readiness.snapshot.id,
       authorized_by: authorizedBy(authority, grant),
       authorization_context: context,
-      message: `Not merged and no grant use was spent. ${review} A merge grant authorises merging; it is not evidence that this PR is safe, current or not superseded. Hand this exact head/base to a different 21x review agent. A GitHub approval is only required when branch protection says so.`
+      message: verifiedChangesRequired
+        ? `Not merged. ${review} No authority path can override verified unresolved review findings. Hand this exact head/base to a different 21x review agent after the findings are fixed.`
+        : `Not merged and no grant use was spent. ${review} A merge grant authorises merging; it is not evidence that this PR is safe, current or not superseded. Hand this exact head/base to a different 21x review agent. A GitHub approval is only required when branch protection says so.`
     }
   }
 

@@ -1527,6 +1527,32 @@ describe('explicit project-wide grants (#155)', () => {
   })
 
   it.each([
+    ['policy', { kind: 'policy', level: 'autonomous' }],
+    ['held user approval', { kind: 'user_approval', heldId: 'held-review-race' }]
+  ] as const)('never lets %s authority override a latest verified CHANGES_REQUIRED', async (_label, authority) => {
+    const h = setupWide()
+    expect(attestExactHead(h)).toMatchObject({ ok: true })
+    expect(attestExactHead(h, { verdict: 'CHANGES_REQUIRED' })).toMatchObject({ ok: true })
+
+    const outcome = await performMerge(h.db, {
+      projectId: h.projectId,
+      pr: parseGitHubPullRequestUrl(PR_URL)!,
+      method: 'squash',
+      authority
+    })
+
+    expect(outcome).toMatchObject({
+      status: 'blocked',
+      reason_code: 'INDEPENDENT_REVIEW_REQUIRED',
+      reasons: [expect.stringContaining('unresolved changes')],
+      authorized_by: authority
+    })
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.listMergeGrants()).toHaveLength(0)
+    expect(h.db.listPendingMergeGrantReservations()).toHaveLength(0)
+  })
+
+  it.each([
     [{ isDraft: true }, 'draft_changed'],
     [{ mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN' }, 'mergeability_changed']
   ] as const)('invalidates durable readiness when live draft/mergeability changes: %j', async (changed, reason) => {
