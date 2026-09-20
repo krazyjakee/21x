@@ -3798,16 +3798,26 @@ export class AgentManager extends EventEmitter {
       return
     }
 
+    const restorePollingOnRefusal = session.pollingStarted || this.pollingEntries.has(sessionId)
+
     // Fence this exact runtime synchronously. Adapter teardown can be slow and
     // in-flight sends retain a reference to the session object while it awaits.
     this.stoppingSessions.add(session)
     if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId)
 
+    // Stop is the authority boundary for typed deliveries even when backend
+    // teardown is slow (or later refuses). The durable start row is cancelled
+    // only after an acknowledged teardown below, so the same live owner remains
+    // retryable on refusal.
+    if (resetTaskStatus && this.db.db && typeof this.db.db.prepare === 'function') {
+      this.deliveries.cancelUnacceptedForTask(session.taskId, 'Delivery cancelled because the user stopped this task before backend acceptance.')
+    }
+
     console.log(`[AgentManager] Destroying session ${sessionId} (resetTaskStatus=${resetTaskStatus})`)
 
     if (resetTaskStatus && !requireAcknowledgement) this.cancelQueuedStart(session.taskId)
 
-    if (!requireAcknowledgement) this.stopAdapterPolling(sessionId)
+    this.stopAdapterPolling(sessionId)
 
     const adapter = session.adapter ?? this.getAdapter(session.agentId)
     if (adapter) {
@@ -3821,7 +3831,8 @@ export class AgentManager extends EventEmitter {
         if (requireAcknowledgement) {
           this.stoppingSessions.delete(session)
           if (!this.sessions.has(sessionId)) this.sessions.set(sessionId, session)
-          if (session.pollingStarted && adapter) {
+          if (restorePollingOnRefusal && adapter) {
+            session.pollingStarted = true
             this.startAdapterPolling(sessionId, adapter, this.sessionConfigFor(session), session)
           }
           throw error
@@ -3833,7 +3844,6 @@ export class AgentManager extends EventEmitter {
       // A failed stop leaves both the live handle and its acknowledged start row
       // intact so a caller can retry without manufacturing a stopped state.
       if (resetTaskStatus) this.cancelQueuedStart(session.taskId)
-      this.stopAdapterPolling(sessionId)
     }
 
     if (session.secretSessionToken) {
