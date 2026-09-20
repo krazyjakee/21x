@@ -12,7 +12,7 @@ import { seedOrchestratorSkill } from './database/captain-migration'
 import { userTaskRoleFilter } from './database/task-roles'
 import { TASK_ROLE_CAPTAIN, type TaskRole } from '../shared/task-roles'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
-import { mergeGrantStatus, type MergeCheckRecord, type MergeGrant, type MergeGrantSource, type MergeGrantReservation, type MergeGrantUse, type MergeGrantUseInput } from '../shared/merge-grants'
+import { mergeGrantStatus, type MergeAuthorizationContext, type MergeCheckRecord, type MergeGrant, type MergeGrantSource, type MergeGrantReservation, type MergeGrantUse, type MergeGrantUseInput } from '../shared/merge-grants'
 import { defaultHardCap, normalizeTouchPath, type ConcurrencyAuditEntry } from '../shared/concurrency'
 import type { IssueAction, IssueWriteOrigin, IssueWriteRecord, IssueWriteStatus } from '../shared/issue-actions'
 import {
@@ -120,6 +120,21 @@ function toMergeGrant(row: MergeGrantRow): MergeGrant {
     condition: 'checks_green_and_protection_satisfied',
     source: row.source === 'project_chat' ? 'project_chat' : 'commander',
     pr_numbers: prNumbers
+  }
+}
+
+function normalizeMergeAuthorizationContext(
+  value: Partial<MergeAuthorizationContext> | null | undefined,
+  requestedGrantId: string | null = null
+): MergeAuthorizationContext {
+  const policy = value?.policy_level
+  const source = value?.grant_source
+  return {
+    policy_level: policy === 'autonomous' || policy === 'tell_commander' || policy === 'ask_user' ? policy : null,
+    requested_grant_id: typeof value?.requested_grant_id === 'string' ? value.requested_grant_id : requestedGrantId,
+    grant_source: source === 'commander' || source === 'project_chat' ? source : null,
+    source_session_id: typeof value?.source_session_id === 'string' ? value.source_session_id : null,
+    source_message_id: typeof value?.source_message_id === 'string' ? value.source_message_id : null
   }
 }
 
@@ -1374,36 +1389,54 @@ export class DatabaseManager {
       const row = this.prepare("SELECT * FROM merge_grant_reservations WHERE id = ? AND state = 'pending'").get(reservationId) as { grant_id: string; project_id: string; snapshot: string } | undefined
       if (!row) return undefined
       const use = JSON.parse(row.snapshot) as MergeGrantUseInput
+      const authorizationContext = normalizeMergeAuthorizationContext(use.authorization_context, row.grant_id)
       const now = new Date().toISOString()
       this.prepare("UPDATE merge_grant_reservations SET state = 'merged' WHERE id = ?").run(reservationId)
       this.prepare('UPDATE merge_grants SET last_used_at = ? WHERE id = ?').run(now, row.grant_id)
       this.prepare(`
         INSERT INTO merge_grant_uses
-          (id, grant_id, project_id, pr_url, pr_title, base_branch, head_sha, method, merge_state, review_decision, checks, merged_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(reservationId, row.grant_id, row.project_id, use.pr_url, use.pr_title, use.base_branch, use.head_sha, use.method, use.merge_state, use.review_decision, JSON.stringify(use.checks), now)
+          (id, grant_id, project_id, pr_url, pr_title, base_branch, head_sha, method, merge_state, review_decision, checks, authorization_context, merged_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(reservationId, row.grant_id, row.project_id, use.pr_url, use.pr_title, use.base_branch, use.head_sha, use.method, use.merge_state, use.review_decision, JSON.stringify(use.checks), JSON.stringify(authorizationContext), now)
+      const contextDecisions = [
+        authorizationContext.policy_level
+          ? `Escalation policy context: ${authorizationContext.policy_level}`
+          : null,
+        authorizationContext.grant_source === 'commander'
+          ? `Grant relayed from the Commander (source message ${authorizationContext.source_message_id ?? 'unknown'})`
+          : authorizationContext.grant_source === 'project_chat'
+            ? `Grant originated in project chat (source message ${authorizationContext.source_message_id ?? 'unknown'})`
+            : null
+      ].filter((line): line is string => !!line)
       const entry = this.appendProjectStatusJournal(row.project_id, {
         summary: `Merged ${use.pr_url} (${use.method}, ${use.head_sha.slice(0, 7)}) under the user's merge grant ${row.grant_id}.`,
         completed: [`Merged ${use.pr_url}${use.pr_title ? ` "${use.pr_title.slice(0, 120)}"` : ''}`],
-        decisions: [`Merge authorised by merge grant ${row.grant_id}`]
+        decisions: [`Merge authorised by merge grant ${row.grant_id}`, ...contextDecisions]
       })
       if (!entry) throw new Error('Could not write the merge grant journal entry')
-      return { ...use, id: reservationId, grant_id: row.grant_id, project_id: row.project_id, merged_at: now }
+      return { ...use, authorization_context: authorizationContext, id: reservationId, grant_id: row.grant_id, project_id: row.project_id, merged_at: now }
     }).immediate()
   }
 
   listMergeGrantUses(grantId: string): MergeGrantUse[] {
     if (!this.ensureDbOpen()) return []
-    const rows = this.prepare('SELECT * FROM merge_grant_uses WHERE grant_id = ? ORDER BY merged_at DESC, id DESC').all(grantId) as Array<Omit<MergeGrantUse, 'checks'> & { checks: string }>
+    const rows = this.prepare('SELECT * FROM merge_grant_uses WHERE grant_id = ? ORDER BY merged_at DESC, id DESC').all(grantId) as Array<Omit<MergeGrantUse, 'checks' | 'authorization_context'> & { checks: string; authorization_context: string }>
     return rows.map((row) => {
       let checks: MergeCheckRecord[] = []
+      let authorizationContext = normalizeMergeAuthorizationContext(null)
       try {
         const parsed = JSON.parse(row.checks) as unknown
         if (Array.isArray(parsed)) checks = parsed as MergeCheckRecord[]
       } catch {
         checks = []
       }
-      return { ...row, checks }
+      try {
+        const parsed = JSON.parse(row.authorization_context) as Partial<MergeAuthorizationContext>
+        if (parsed && typeof parsed === 'object') authorizationContext = normalizeMergeAuthorizationContext(parsed)
+      } catch {
+        // Uses created before v26 intentionally retain an empty context.
+      }
+      return { ...row, checks, authorization_context: authorizationContext }
     })
   }
 

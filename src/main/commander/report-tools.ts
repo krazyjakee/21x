@@ -95,7 +95,12 @@ export function guardReportAsks(tools: ChatToolDefinition[], budget: ReportAskBu
 export function escalationReportText(event: EscalationEvent): string | null {
   // #137: a merge made under the user's merge grant, and a merge blocked on a person outside 21x.
   if (event.outcome === 'merged_under_grant') {
-    return `Merge notice: the Captain merged under the user's merge grant${event.grantId ? ` ${event.grantId}` : ''} — ${event.summary}. The user can revoke the grant in 20x.`
+    const source = event.authorizationContext?.grant_source === 'commander'
+      ? ' The grant came from the user’s verified Commander relay.'
+      : event.authorizationContext?.grant_source === 'project_chat'
+        ? ' The grant came from the user’s verified project-chat instruction.'
+        : ''
+    return `Merge notice: the Captain merged under the user's merge grant${event.grantId ? ` ${event.grantId}` : ''} (policy context: ${event.level}) — ${event.summary}.${source} The user can revoke the grant in 20x.`
   }
   if (event.outcome === 'needs_user') {
     return `Blocked on an external approval: ${event.summary}`

@@ -119,7 +119,7 @@ describe('activity migration 25', () => {
     db.db.prepare('UPDATE tasks SET updated_at = ?').run('2099-01-01T00:00:00.000Z')
     db.setSetting('__schema_version', '24')
     expect(applySchema(db.db)).toBe(true)
-    expect(db.getSetting('__schema_version')).toBe('25')
+    expect(db.getSetting('__schema_version')).toBe('26')
     expect(db.getTask(parent.id)?.last_activity_at).toBe(later)
     expect(db.getTask(child.id)?.last_activity_at).toBe(later)
     expect(db.getTask(quiet.id)?.last_activity_at).toBe(start)
