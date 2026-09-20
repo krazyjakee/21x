@@ -7,7 +7,9 @@ import type { ChatToolDefinition } from '../chat/tools'
 import { normalizeTitle, type CommanderStore } from './commander-store'
 import { buildContext, DEFAULT_CONTEXT_BUDGET, MAX_SUMMARY_TRANSCRIPT_CHARS, planFold, transcriptForSummary, type ContextBudget } from './context'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_SYSTEM_PROMPT, COMMANDER_TITLE_PROMPT, reportRelayNote, withSummary } from './prompts'
+import { MUTATING_COMMANDER_TOOLS } from './project-tools'
 import { guardReportAsks, MAX_REPORT_ASKS_WITHOUT_USER_TURN } from './report-tools'
+import { MUTATING_COMMANDER_SKILL_TOOLS } from './skill-tools'
 
 /**
  * Runs Commander chat turns over persisted sessions (docs/commander.md).
@@ -28,7 +30,14 @@ import { guardReportAsks, MAX_REPORT_ASKS_WITHOUT_USER_TURN } from './report-too
  *   the Commander relays it. A turn started by a report can only call
  *   `ask_captain` within the session's report-ask budget until the user
  *   speaks again (report-tools.ts).
+ * - Only a turn the user started gets the admin tools (the ones that write
+ *   projects, skills or merge grants, {@link COMMANDER_ADMIN_TOOLS}). A report-started turn
+ *   runs on text a Captain wrote, which may carry instructions from untrusted
+ *   sources, so it gets the read-only tools and `ask_captain` only.
  */
+
+/** Tools that change projects, skills or merge grants: never offered to a turn the user did not start. */
+export const COMMANDER_ADMIN_TOOLS: ReadonlySet<string> = new Set<string>([...MUTATING_COMMANDER_TOOLS, ...MUTATING_COMMANDER_SKILL_TOOLS, 'revoke_merge_grant'])
 
 export interface CommanderToolContext {
   sessionId: string
@@ -282,6 +291,8 @@ export class CommanderService {
     let system = withSummary(this.options.systemPrompt ?? COMMANDER_SYSTEM_PROMPT, context.summary)
     if (start.systemNote) system = `${system}\n\n${start.systemNote}`
     let tools = this.options.getTools?.({ sessionId, userMessage: start.userMessage, userMessageId: start.userMessageId, authorizationMessageId: start.authorizationMessageId, trigger: start.trigger }) ?? []
+    // Admin tools act only on turns the user started, whatever getTools returned.
+    if (start.trigger !== 'user') tools = tools.filter((tool) => !COMMANDER_ADMIN_TOOLS.has(tool.name))
     if (start.trigger === 'report') {
       const max = this.options.maxReportAsks ?? MAX_REPORT_ASKS_WITHOUT_USER_TURN
       tools = guardReportAsks(tools, {
