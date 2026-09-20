@@ -16,6 +16,8 @@ type TaskApiAgentController = Pick<
   | 'getSessionStatus'
   | 'getActiveSessionsForTask'
   | 'cancelQueuedStart'
+  | 'hasTaskStartOwnership'
+  | 'reconcileTaskRuntime'
   | 'getConcurrencyState'
   | 'setConcurrencyLevel'
   | 'setTaskTouches'

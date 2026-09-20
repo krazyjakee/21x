@@ -11,6 +11,7 @@ export interface UseTaskCompletionOptions {
 }
 export interface CompleteTaskRequestOptions {
   completeAtSource?: boolean
+  beforeComplete?: () => Promise<void>
   onCompleted?: (task: Task) => void
 }
 
@@ -30,6 +31,9 @@ export function useTaskCompletion({ onToast }: UseTaskCompletionOptions = {}) {
     }
     setIsBusy(true)
     try {
+      // A board move withdraws execution only after the source choice is made.
+      // Cancelling that choice must leave the running task untouched.
+      await options?.beforeComplete?.()
       // Completing again while feedback learning is pending is an explicit
       // request to stop learning. Moving back to review clears the durable
       // feedback marker before the normal completion path runs; otherwise the

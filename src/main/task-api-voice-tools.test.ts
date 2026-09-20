@@ -97,12 +97,13 @@ function makeAgents(overrides: Record<string, unknown> = {}) {
     notifyParentOfSubtaskCompletion: vi.fn(),
     sendByTaskId: vi.fn(async () => ({ sessionId: 's1' })),
     respondToPermission: vi.fn(async () => undefined),
-    stopByTaskId: vi.fn(async () => ({ sessionId: 's1' })),
+    stopByTaskId: vi.fn(async (): Promise<{ sessionId: string | null }> => ({ sessionId: 's1' })),
     findSessionByTaskId: vi.fn((id: string) =>
       id === 't1' ? { sessionId: 's1', session: {} } : undefined
     ),
     getSessionStatus: vi.fn(() => ({ status: 'waiting_approval', agentId: 'a1', taskId: 't1' })),
     getActiveSessionsForTask: vi.fn(() => ['s1']),
+    hasTaskStartOwnership: vi.fn(() => false),
     cancelQueuedStart: vi.fn(() => false),
     ...overrides,
   }
@@ -322,6 +323,20 @@ describe('stop_task', () => {
     expect(result.success).toBe(false)
     expect(result.reason).toBe('nothing_running')
     expect(agents.stopByTaskId).not.toHaveBeenCalled()
+  })
+
+  it('fences an owned start even before its session is registered', async () => {
+    agents.getActiveSessionsForTask.mockReturnValue([])
+    agents.hasTaskStartOwnership.mockReturnValue(true)
+    agents.stopByTaskId.mockResolvedValue({ sessionId: null })
+
+    const result = (await handleTaskApiRoute('/stop_task', { task_id: 't1' }, makeDb())) as {
+      success: boolean
+      cancelled_queued_start?: boolean
+    }
+
+    expect(result).toMatchObject({ success: true, cancelled_queued_start: true })
+    expect(agents.stopByTaskId).toHaveBeenCalledWith('t1')
   })
 })
 

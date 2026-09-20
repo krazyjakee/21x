@@ -73,12 +73,12 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 const onToast = vi.fn()
 const onCompleted = vi.fn()
 
-function Harness({ taskId = 'task-1' }: { taskId?: string }) {
+function Harness({ taskId = 'task-1', beforeComplete }: { taskId?: string; beforeComplete?: () => Promise<void> }) {
   const { requestComplete, completionDialog } = useTaskCompletion({ onToast })
   return (
     <>
       {completionDialog}
-      <button type="button" onClick={() => void requestComplete(taskId, { onCompleted })}>
+      <button type="button" onClick={() => void requestComplete(taskId, { onCompleted, beforeComplete })}>
         Complete
       </button>
     </>
@@ -144,9 +144,23 @@ describe('server completion', () => {
 
   it('cancels without a local write or a source request', () => {
     storeState.tasks = [makeTask({source_id: 'src-1'})]
-    render(<Harness />)
+    const stop = vi.fn(async () => undefined)
+    render(<Harness beforeComplete={stop} />)
     fireEvent.click(screen.getByText('Complete'))
     fireEvent.click(screen.getByRole('button', {name: 'Cancel'}))
+    expect(updateTaskMock).not.toHaveBeenCalled()
+    expect(executeActionMock).not.toHaveBeenCalled()
+    expect(stop).not.toHaveBeenCalled()
+  })
+
+  it('waits for stop acknowledgement after the completion choice before writing to the source', async () => {
+    storeState.tasks = [makeTask({source_id: 'src-1', status: TaskStatus.AgentWorking})]
+    const stop = vi.fn(async () => { throw new Error('backend still owns work') })
+    render(<Harness beforeComplete={stop} />)
+    fireEvent.click(screen.getByText('Complete'))
+    expect(stop).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('complete-at-source'))
+    await waitFor(() => expect(onToast).toHaveBeenCalledWith('backend still owns work', true))
     expect(updateTaskMock).not.toHaveBeenCalled()
     expect(executeActionMock).not.toHaveBeenCalled()
   })

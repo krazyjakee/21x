@@ -5,9 +5,10 @@ import { CommandInput } from './CommandInput'
 import { QuickChips } from './QuickChips'
 import { TaskBoard } from './TaskBoard'
 import type { Task, TaskStatus } from '@/types'
+import type { TaskBoardTransitionResult } from './task-board-transition'
 
 interface DashboardWorkspaceProps {
-  onTaskStatusChange?: (task: Task, status: TaskStatus) => void | Promise<void>
+  onTaskStatusChange?: (task: Task, status: TaskStatus) => void | TaskBoardTransitionResult | Promise<void | TaskBoardTransitionResult>
 }
 
 export function DashboardWorkspace({ onTaskStatusChange }: DashboardWorkspaceProps = {}) {
