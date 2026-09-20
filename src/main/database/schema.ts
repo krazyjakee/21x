@@ -56,8 +56,10 @@ import { createIssueWriteTables, migrateIssueWrites } from './issue-writes-migra
  *          unique idempotency claim (migrateIssueWrites in
  *          issue-writes-migration.ts).
  * 24 → 25: meaningful task activity timestamps (#142).
+ * 25 → 26: merge-grant uses retain policy/relay context separately from the
+ *          effective grant authority (#159, migrateMergeGrantAttribution).
  */
-const SCHEMA_VERSION = 25
+const SCHEMA_VERSION = 26
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -1079,6 +1081,9 @@ export function runMigrations(db: Database.Database): void {
   // Migration v25: meaningful activity, including ancestor backfill.
   migrateTaskActivity(db)
 
+  // Migration v26: durable context for effective merge-grant attribution.
+  migrateMergeGrantAttribution(db)
+
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)
 
@@ -1137,6 +1142,7 @@ function createMergeGrantTables(db: Database.Database): void {
       merge_state TEXT NOT NULL DEFAULT '',
       review_decision TEXT NOT NULL DEFAULT '',
       checks TEXT NOT NULL DEFAULT '[]',
+      authorization_context TEXT NOT NULL DEFAULT '{}',
       merged_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_merge_grant_uses_grant ON merge_grant_uses(grant_id, merged_at DESC);
@@ -1157,6 +1163,15 @@ function createMergeGrantTables(db: Database.Database): void {
 function migrateMergeGrants(db: Database.Database): void {
   createMergeGrantTables(db)
   splitPullRequestEscalation(db)
+}
+
+/** Migration v26 (#159). Existing uses predate separate policy/relay context. */
+function migrateMergeGrantAttribution(db: Database.Database): void {
+  createMergeGrantTables(db)
+  const columns = new Set((db.pragma('table_info(merge_grant_uses)') as { name: string }[]).map((column) => column.name))
+  if (!columns.has('authorization_context')) {
+    db.exec("ALTER TABLE merge_grant_uses ADD COLUMN authorization_context TEXT NOT NULL DEFAULT '{}'")
+  }
 }
 
 /**

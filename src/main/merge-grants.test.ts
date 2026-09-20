@@ -245,6 +245,11 @@ describe('a grant from a user-typed message', () => {
     // The Captain then merges under it without a held call.
     const merged = await captainCall(h, 'merge_pull_request', { pr_url: PR_URL, grant_id: grantId })
     expect(merged.status).toBe('merged')
+    expect(merged.authorized_by).toMatchObject({ kind: 'grant', grant_id: grantId })
+    expect(merged.authorization_context).toMatchObject({
+      policy_level: 'ask_user', requested_grant_id: grantId,
+      grant_source: 'commander', source_session_id: 's1', source_message_id: 'msg-1'
+    })
   })
 
   it('narrows the grant to the PRs the user named, and refuses to widen it', () => {
@@ -591,7 +596,7 @@ describe('escalation policy: open_pr and merge_pr', () => {
     expect(JSON.parse(read('p-ask'))).toEqual({ escalation: { merge_pr: 'ask_user', open_pr: 'tell_commander' } })
     expect(JSON.parse(read('p-none'))).toEqual({ limits: { paused: false } })
     expect(read('p-bad')).toBe('not json')
-    expect((raw.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('25')
+    expect((raw.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('26')
     const before = read('p-auto')
     splitPullRequestEscalation(raw)
     expect(read('p-auto')).toBe(before)
@@ -604,7 +609,62 @@ describe('escalation policy: open_pr and merge_pr', () => {
     const h = setup({ enabled: false, mergePolicy: 'tell_commander' })
     const out = await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })
     expect(out.status).toBe('merged')
+    expect(out.authorized_by).toEqual({ kind: 'policy', level: 'tell_commander' })
+    expect(out.authorization_context).toMatchObject({ policy_level: 'tell_commander', requested_grant_id: null, grant_source: null })
+    expect(h.db.listPendingMergeGrantReservations()).toEqual([])
     expect(h.events.some((e) => e.outcome === 'performed' && e.action === 'merge_pr')).toBe(true)
+  })
+
+  it.each([
+    { scope: 'project-wide', policy: 'tell_commander', text: 'Merge every safe App pull request after required reviews and checks pass' },
+    { scope: 'single-PR', policy: 'autonomous', text: 'Merge PR #12 in App after required reviews and checks pass' }
+  ] as const)('records an explicit covered $scope grant as effective under $policy policy (#159)', async ({ policy, text }) => {
+    const h = setup({ mergePolicy: policy })
+    const created = createMergeGrantFromUserMessage(h.db, h.projectId, {
+      source: 'commander', sessionId: 'commander-session', messageId: `relay-${policy}`, text
+    })
+    if (!created.ok) throw new Error(created.error)
+
+    const out = await captainCall(h, 'merge_pull_request', { pr_url: PR_URL, grant_id: created.grant.id })
+
+    expect(out).toMatchObject({
+      status: 'merged',
+      authorized_by: { kind: 'grant', grant_id: created.grant.id },
+      authorization_context: {
+        policy_level: policy, requested_grant_id: created.grant.id,
+        grant_source: 'commander', source_session_id: 'commander-session',
+        source_message_id: `relay-${policy}`
+      }
+    })
+    expect(h.db.getMergeGrant(created.grant.id)?.uses).toBe(1)
+    expect(h.db.listPendingMergeGrantReservations()).toEqual([])
+    expect(h.db.listMergeGrantUses(created.grant.id)).toMatchObject([{
+      grant_id: created.grant.id,
+      authorization_context: { policy_level: policy, requested_grant_id: created.grant.id, grant_source: 'commander' }
+    }])
+    expect(journal(h)[0].decisions).toEqual(expect.arrayContaining([
+      `Merge authorised by merge grant ${created.grant.id}`,
+      `Escalation policy context: ${policy}`,
+      'Grant relayed from the Commander (source message ' + `relay-${policy}` + ')'
+    ]))
+    expect(h.events.filter((event) => event.outcome === 'performed')).toEqual([])
+    const report = h.events.find((event) => event.outcome === 'merged_under_grant')!
+    expect(report).toMatchObject({ grantId: created.grant.id, level: policy,
+      authorizationContext: { grant_source: 'commander', policy_level: policy } })
+    expect(escalationReportText(report)).toMatch(/policy context: (tell_commander|autonomous).*verified Commander relay/)
+  })
+
+  it('fails closed instead of falling back to policy when an explicit grant does not cover the PR', async () => {
+    const h = setup({ mergePolicy: 'tell_commander' })
+    const created = createMergeGrantFromUserMessage(h.db, h.projectId, {
+      source: 'commander', sessionId: 's', messageId: 'only-99', text: 'Merge PR #99'
+    })
+    if (!created.ok) throw new Error(created.error)
+    const out = await captainCall(h, 'merge_pull_request', { pr_url: PR_URL, grant_id: created.grant.id })
+    expect(out.error).toMatch(/requested merge grant/i)
+    expect(h.merges).toEqual([])
+    expect(h.db.getMergeGrant(created.grant.id)?.uses).toBe(0)
+    expect(h.events).toEqual([])
   })
 
   it('the Captain prompt describes the split and the merge tool', () => {
@@ -699,7 +759,7 @@ describe('independent review: fail-closed authority boundaries', () => {
   })
 
   it('reserves the last use before the merge request, even with concurrent calls', async () => {
-    const h = setup()
+    const h = setup({ mergePolicy: 'tell_commander' })
     const grant = createMergeGrantFromUserMessage(h.db, h.projectId, { source: 'commander', sessionId: 's', messageId: 'race', text: 'merge PRs' }, { max_merges: 1 })
     if (!grant.ok) throw new Error(grant.error)
     let release!: () => void
@@ -711,14 +771,37 @@ describe('independent review: fail-closed authority boundaries', () => {
       await pending
       return JSON.stringify({ merged: true, sha: SHA })
     })
-    const one = captainCall(h, 'merge_pull_request', { pr_url: PR_URL })
+    const one = captainCall(h, 'merge_pull_request', { pr_url: PR_URL, grant_id: grant.grant.id })
     await vi.waitFor(() => expect(h.merges).toHaveLength(1))
-    const two = await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })
-    expect(two.status).toBe('held')
+    const two = await captainCall(h, 'merge_pull_request', { pr_url: PR_URL, grant_id: grant.grant.id })
+    expect(two).toMatchObject({ status: 'unknown', authorized_by: { kind: 'grant', grant_id: grant.grant.id },
+      authorization_context: { policy_level: 'tell_commander' } })
     release()
-    expect((await one).status).toBe('merged')
+    expect(await one).toMatchObject({ status: 'merged', authorized_by: { kind: 'grant', grant_id: grant.grant.id } })
     expect(h.merges).toHaveLength(1)
     expect(h.db.getMergeGrant(grant.grant.id)?.uses).toBe(1)
+    expect(h.events.filter((event) => event.outcome === 'merged_under_grant')).toHaveLength(1)
+    expect(h.events.filter((event) => event.outcome === 'performed')).toHaveLength(0)
+  })
+
+  it('returns the original grant attribution on an idempotent retry without a second merge or use', async () => {
+    const h = setup({ mergePolicy: 'tell_commander' })
+    const grant = createMergeGrantFromUserMessage(h.db, h.projectId, {
+      source: 'commander', sessionId: 's', messageId: 'idempotent', text: 'merge PRs'
+    }, { max_merges: 1 })
+    if (!grant.ok) throw new Error(grant.error)
+    const args = { pr_url: PR_URL, grant_id: grant.grant.id }
+    expect(await captainCall(h, 'merge_pull_request', args)).toMatchObject({ status: 'merged', authorized_by: { kind: 'grant' } })
+    expect(await captainCall(h, 'merge_pull_request', args)).toMatchObject({
+      status: 'merged', already_recorded: true,
+      authorized_by: { kind: 'grant', grant_id: grant.grant.id },
+      authorization_context: { policy_level: 'tell_commander', grant_source: 'commander' }
+    })
+    expect(h.merges).toHaveLength(1)
+    expect(h.db.getMergeGrant(grant.grant.id)?.uses).toBe(1)
+    expect(h.db.listMergeGrantUses(grant.grant.id)).toHaveLength(1)
+    expect(journal(h)).toHaveLength(1)
+    expect(h.events.filter((event) => event.outcome === 'merged_under_grant')).toHaveLength(1)
   })
 
   it('records every reported check, including checks after the hundredth', async () => {
@@ -821,18 +904,28 @@ describe('independent review: fail-closed authority boundaries', () => {
   })
 
   it('reports a recovered merge to the Commander exactly once', async () => {
-    const h = setup()
-    createMergeGrantFromUserMessage(h.db, h.projectId, { source: 'commander', sessionId: 's', messageId: 'recover-report', text: 'Merge PRs' })
+    const h = setup({ mergePolicy: 'tell_commander' })
+    const created = createMergeGrantFromUserMessage(h.db, h.projectId, { source: 'commander', sessionId: 's', messageId: 'recover-report', text: 'Merge PRs' })
+    if (!created.ok) throw new Error(created.error)
     h.gh.mockImplementation(async (args: string[]) => {
       if (args[0] === 'pr' || args[1] === 'graphql') return JSON.stringify(prState())
       throw new Error('Lost response')
     })
-    await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })
+    const unknown = await captainCall(h, 'merge_pull_request', { pr_url: PR_URL, grant_id: created.grant.id })
+    expect(unknown).toMatchObject({ status: 'unknown', authorized_by: { kind: 'grant', grant_id: created.grant.id },
+      authorization_context: { policy_level: 'tell_commander', grant_source: 'commander' } })
+    expect(h.db.listPendingMergeGrantReservations()[0].snapshot.authorization_context).toMatchObject({
+      policy_level: 'tell_commander', requested_grant_id: created.grant.id, grant_source: 'commander'
+    })
     h.setPr({ state: 'MERGED' })
     h.gh.mockImplementation(async () => JSON.stringify(prState({ state: 'MERGED' })))
     await captainCall(h, 'list_merge_grants', {})
     await captainCall(h, 'list_merge_grants', {})
     expect(h.events.filter((event) => event.outcome === 'merged_under_grant')).toHaveLength(1)
+    expect(h.events.filter((event) => event.outcome === 'performed')).toHaveLength(0)
+    expect(h.db.listMergeGrantUses(created.grant.id)[0].authorization_context).toMatchObject({
+      policy_level: 'tell_commander', requested_grant_id: created.grant.id, grant_source: 'commander'
+    })
     expect(journal(h)).toHaveLength(1)
   })
 
