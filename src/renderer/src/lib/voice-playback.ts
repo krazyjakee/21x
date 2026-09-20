@@ -31,9 +31,12 @@ export class VoicePlayback {
   private speechId: string | null = null
   private nextStartTime = 0
   private pending = 0
-  private levelTimer: number | null = null
+  private levelFrame: number | null = null
   private handlers: VoicePlaybackHandlers = {}
   private levelData: Uint8Array<ArrayBuffer> | null = null
+  private levelListeners = new Set<(level: number) => void>()
+  private activityListeners = new Set<() => void>()
+  private activityVersion = 0
 
   get isPlaying(): boolean {
     return this.speechId !== null
@@ -53,6 +56,14 @@ export class VoicePlayback {
   get hasQueuedAudio(): boolean {
     return this.pending > 0
   }
+
+  /** Queue lifecycle for React consumers; this never fires per audio frame. */
+  readonly subscribeActivity = (listener: () => void): (() => void) => {
+    this.activityListeners.add(listener)
+    return () => this.activityListeners.delete(listener)
+  }
+
+  readonly getActivityVersion = (): number => this.activityVersion
 
   /**
    * Opens a new passage. Any passage still playing is dropped.
@@ -92,11 +103,18 @@ export class VoicePlayback {
 
     const startAt = Math.max(context.currentTime + SCHEDULING_LEAD_SECONDS, this.nextStartTime)
     this.nextStartTime = startAt + buffer.duration
+    const queueWasEmpty = this.pending === 0
     this.pending += 1
+    if (queueWasEmpty) this.notifyActivity()
     source.onended = () => {
       this.sources.delete(source)
       this.pending -= 1
-      if (this.pending <= 0 && this.speechId === speechId) this.handlers.onDrained?.()
+      if (this.pending <= 0 && this.speechId === speechId) {
+        this.stopLevelReporting()
+        this.reportLevel(0)
+        this.notifyActivity()
+        this.handlers.onDrained?.()
+      }
     }
     this.sources.add(source)
     source.start(startAt)
@@ -105,6 +123,7 @@ export class VoicePlayback {
 
   /** Stops at once and forgets everything queued. This is barge-in. */
   stop(): void {
+    const hadQueuedAudio = this.pending > 0
     for (const source of this.sources) {
       try {
         source.onended = null
@@ -118,7 +137,8 @@ export class VoicePlayback {
     this.pending = 0
     this.nextStartTime = 0
     this.stopLevelReporting()
-    this.handlers.onLevel?.(0)
+    this.reportLevel(0)
+    if (hadQueuedAudio) this.notifyActivity()
   }
 
   /** Releases the audio graph. Used when spoken answers are switched off. */
@@ -161,21 +181,48 @@ export class VoicePlayback {
     return readLevel(analyser, this.levelData)
   }
 
-  private startLevelReporting(): void {
-    if (this.levelTimer !== null || !this.handlers.onLevel || !this.analyser) return
-    const data = new Uint8Array(this.analyser.frequencyBinCount)
-    const tick = (): void => {
-      const analyser = this.analyser
-      if (!analyser || !this.speechId) return
-      this.handlers.onLevel?.(readLevel(analyser, data))
-      this.levelTimer = window.setTimeout(tick, 60)
+  /**
+   * Observes real output loudness once per animation frame while audio is
+   * queued. Visible indicators subscribe while mounted; no listener means no
+   * analyser loop. The callback is intentionally outside React and stores.
+   */
+  subscribeLevel(listener: (level: number) => void): () => void {
+    this.levelListeners.add(listener)
+    this.startLevelReporting()
+    return () => {
+      this.levelListeners.delete(listener)
+      if (!this.hasLevelObservers) this.stopLevelReporting()
     }
-    tick()
+  }
+
+  private get hasLevelObservers(): boolean {
+    return Boolean(this.handlers.onLevel) || this.levelListeners.size > 0
+  }
+
+  private notifyActivity(): void {
+    this.activityVersion += 1
+    for (const listener of this.activityListeners) listener()
+  }
+
+  private reportLevel(level: number): void {
+    this.handlers.onLevel?.(level)
+    for (const listener of this.levelListeners) listener(level)
+  }
+
+  private startLevelReporting(): void {
+    if (this.levelFrame !== null || !this.hasLevelObservers || !this.analyser || !this.hasQueuedAudio) return
+    const tick = (): void => {
+      this.levelFrame = null
+      if (!this.hasLevelObservers || !this.analyser || !this.speechId || !this.hasQueuedAudio) return
+      this.reportLevel(this.outputLevel)
+      this.levelFrame = window.requestAnimationFrame(tick)
+    }
+    this.levelFrame = window.requestAnimationFrame(tick)
   }
 
   private stopLevelReporting(): void {
-    if (this.levelTimer !== null) window.clearTimeout(this.levelTimer)
-    this.levelTimer = null
+    if (this.levelFrame !== null) window.cancelAnimationFrame(this.levelFrame)
+    this.levelFrame = null
   }
 }
 

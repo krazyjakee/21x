@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { deriveVoiceActivity, type VoiceActivitySnapshot } from './voice-activity-adapter'
+import {
+  deriveVoiceActivity,
+  hasVerifiedPlaybackOwnership,
+  type VoiceActivitySnapshot
+} from './voice-activity-adapter'
 
 const captain = { kind: 'captain' as const, id: 'cap' }
 
@@ -48,6 +52,14 @@ describe('deriveVoiceActivity', () => {
     expect(deriveVoiceActivity(s, { kind: 'commander', id: 's2' }).state).toBe('none')
     expect(deriveVoiceActivity(s, captain).state).toBe('none')
     expect(deriveVoiceActivity(s, { kind: 'task', id: 'commander:s1' }).state).toBe('none')
+  })
+
+  it('verifies playback ownership before a level ring subscribes', () => {
+    const passage = { speechId: 'p1', taskId: 'commander:s1' }
+    const s = snap({ passage, playbackSpeechId: 'p1' })
+    expect(hasVerifiedPlaybackOwnership(s, { kind: 'commander', id: 's1' })).toBe(true)
+    expect(hasVerifiedPlaybackOwnership(s, { kind: 'commander', id: 's2' })).toBe(false)
+    expect(hasVerifiedPlaybackOwnership({ ...s, playbackSpeechId: 'p2' }, { kind: 'commander', id: 's1' })).toBe(false)
   })
 
   it('a Commander passage still being synthesised is not yet speech', () => {

@@ -19,6 +19,9 @@ interface FakeSource {
 
 const sources: FakeSource[] = []
 let currentTime = 0
+let analyserByte = 128
+let nextFrameId = 1
+const frames = new Map<number, FrameRequestCallback>()
 
 class FakeAudioContext {
   state = 'running'
@@ -32,7 +35,7 @@ class FakeAudioContext {
       frequencyBinCount: 128,
       connect: () => {},
       disconnect: () => {},
-      getByteTimeDomainData: (data: Uint8Array) => data.fill(128),
+      getByteTimeDomainData: (data: Uint8Array) => data.fill(analyserByte),
     }
   }
   createBuffer(_channels: number, length: number, sampleRate: number) {
@@ -77,8 +80,19 @@ function pcm(seconds: number, sampleRate = 24000): Uint8Array {
 beforeEach(() => {
   sources.length = 0
   currentTime = 0
+  analyserByte = 128
+  nextFrameId = 1
+  frames.clear()
   vi.stubGlobal('AudioContext', FakeAudioContext)
-  vi.stubGlobal('window', { ...globalThis.window, setTimeout, clearTimeout })
+  vi.stubGlobal('window', {
+    ...globalThis.window,
+    requestAnimationFrame: (callback: FrameRequestCallback) => {
+      const id = nextFrameId++
+      frames.set(id, callback)
+      return id
+    },
+    cancelAnimationFrame: (id: number) => frames.delete(id),
+  })
 })
 
 afterEach(() => {
@@ -209,6 +223,36 @@ describe('VoicePlayback', () => {
     playback.play('s1', pcm(1), 24000)
     playback.stop()
     expect(onLevel).toHaveBeenLastCalledWith(0)
+  })
+
+  it('reports real levels once per animation frame only while subscribed audio is queued', () => {
+    const playback = new VoicePlayback()
+    const onLevel = vi.fn()
+    const onActivity = vi.fn()
+    const unsubscribeActivity = playback.subscribeActivity(onActivity)
+    playback.start('s1')
+    const unsubscribeLevel = playback.subscribeLevel(onLevel)
+    analyserByte = 255
+    playback.play('s1', pcm(1), 24000)
+
+    expect(onActivity).toHaveBeenCalledTimes(1)
+    expect(onLevel).not.toHaveBeenCalled()
+    expect(frames.size).toBe(1)
+
+    const [frameId, frame] = [...frames.entries()][0]
+    frames.delete(frameId)
+    frame(16)
+    expect(onLevel).toHaveBeenCalledTimes(1)
+    expect(onLevel.mock.calls[0][0]).toBeGreaterThan(0.9)
+    expect(frames.size).toBe(1)
+
+    sources[0].onended?.()
+    expect(onLevel).toHaveBeenLastCalledWith(0)
+    expect(onActivity).toHaveBeenCalledTimes(2)
+    expect(frames.size).toBe(0)
+
+    unsubscribeLevel()
+    unsubscribeActivity()
   })
 })
 
