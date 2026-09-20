@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { X, FolderKanban } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { AgentTranscriptPanel } from '@/components/agents/AgentTranscriptPanel'
@@ -9,6 +9,8 @@ import { agentApi, captainRuntimeApi, mergeGrantsApi, settingsApi } from '@/lib/
 import { captainAgentIdFor, useCaptainTaskId } from '@/stores/coordinator-store'
 import { useProjectStore } from '@/stores/project-store'
 import type { Agent } from '@/types'
+import type { ComposerAttachment } from '@/components/agents/transcript/TranscriptComposer'
+import { taskImageSaver, withAttachmentNote } from '@/lib/chat-image-attachments'
 import type { CaptainRuntimeState } from '@shared/captain-runtime'
 
 /** Start the agent at app start, so the first sentence does not wait for it. */
@@ -31,6 +33,7 @@ interface QueuedCaptainMessage {
   message: string
   deliveryId: string
   typed: boolean
+  options?: { attachments?: ComposerAttachment[] }
 }
 
 /** The reason without Electron's "Error invoking remote method '…': Error: " wrapper. */
@@ -222,6 +225,8 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
     }
   }, [captainTaskId, start, resetSession])
 
+  const handleSaveImages = useMemo(() => (captainTaskId ? taskImageSaver(captainTaskId) : undefined), [captainTaskId])
+
   const deliver = useCallback(
     async (message: QueuedCaptainMessage) => {
       // Question answers should use approve() instead of sendMessage()
@@ -229,12 +234,12 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
       const messages = live?.messages || []
       const lastMessage = messages[messages.length - 1]
       if (lastMessage?.partType === 'question' && lastMessage?.tool?.questions) {
-        await approve(true, message.message)
+        await approve(true, withAttachmentNote(message.message, message.options?.attachments))
       } else {
         // Stage provenance at delivery, after session warm-up and queueing;
         // IPC consumes this exact text once, then main tracks actual dispatch.
         if (message.typed && captainTaskId) mergeGrantsApi.noteTyped(captainTaskId, message.message)
-        await sendMessage(message.message, { deliveryId: message.deliveryId })
+        await sendMessage(message.message, { ...message.options, deliveryId: message.deliveryId })
       }
     },
     [captainTaskId, sendMessage, approve]
@@ -269,11 +274,12 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
   // When the Captain cannot be started the message is held, not dropped, and
   // goes out after a successful retry or switch.
   const handleSendMessage = useCallback(
-    async (message: string) => {
+    async (message: string, options?: { attachments?: ComposerAttachment[] }) => {
       const outgoing: QueuedCaptainMessage = {
         message,
         typed: typedMessageRef.current === message,
-        deliveryId: `captain-drawer:${crypto.randomUUID()}`
+        deliveryId: `captain-drawer:${crypto.randomUUID()}`,
+        options
       }
       typedMessageRef.current = null
       const taskId = captainTaskId
@@ -449,6 +455,7 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
           systemStatus={currentSession?.systemStatus}
           onStop={stop}
           onSend={handleSendMessage}
+          onSaveImages={handleSaveImages}
           onTypedMessage={(text) => { typedMessageRef.current = text }}
           className="flex-1 min-h-0"
           sessionId={currentSession?.sessionId}

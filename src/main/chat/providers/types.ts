@@ -43,6 +43,12 @@ export type ChatProviderEvent =
 export interface ChatProvider {
   readonly id: string
   readonly model: string
+  /**
+   * Whether user messages may carry images (#144). A provider that leaves
+   * this unset is treated as text-only: images are refused before anything
+   * is stored, so the user keeps the message and can pick another model.
+   */
+  readonly supportsImages?: boolean
   /** One model call. Ends after `message_end`; throws on transport failure or abort. */
   stream(request: ChatProviderRequest, signal: AbortSignal): AsyncIterable<ChatProviderEvent>
 }
@@ -62,4 +68,14 @@ export function isAbortError(err: unknown, signal?: AbortSignal): boolean {
   if (signal?.aborted) return true
   if (err instanceof ChatAbortError) return true
   return err instanceof Error && err.name === 'AbortError'
+}
+
+/** Whether a history carries any image. */
+export function hasChatImages(messages: ChatMessage[]): boolean {
+  return messages.some((m) => m.role === 'user' && (m.images?.length ?? 0) > 0)
+}
+
+/** The message shown when the selected model cannot take images. */
+export function imagesUnsupportedMessage(provider: Pick<ChatProvider, 'model'>): string {
+  return `The selected model (${provider.model}) can't read images. Your message was not sent: remove the images or choose another model.`
 }

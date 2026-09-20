@@ -61,6 +61,21 @@ describe('CommanderStore sessions', () => {
 })
 
 describe('CommanderStore messages', () => {
+  it('projects old reports and summaries as Captain while preserving stored evidence and routing', () => {
+    const { db, rawDb } = createTestDb()
+    const history = new CommanderStore(db)
+    const session = history.createSession()
+    const legacy = ['Master', 'mind'].join('')
+    const content = `Open the Daccord ${legacy} chat.`
+    for (const role of ['report', 'summary', 'assistant', 'user', 'tool'] as const) {
+      const row = history.appendMessage(session.id, { role, content, correlationId: 'original-correlation' })
+      expect(row.content).toBe(role === 'report' || role === 'summary' || role === 'assistant' ? 'Open the Daccord Captain chat.' : content)
+      expect(row.correlation_id).toBe('original-correlation')
+      expect(rawDb.prepare('SELECT content FROM commander_messages WHERE id = ?').get(row.id)).toEqual({ content })
+      expect(history.listMessages(session.id).find((m) => m.id === row.id)).toEqual(row)
+    }
+  })
+
   it('appends and lists messages in order with tool calls and delegation fields', () => {
     const s = store.createSession()
     store.appendMessage(s.id, { role: 'user', content: 'ask alpha' })

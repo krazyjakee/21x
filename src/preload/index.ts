@@ -49,6 +49,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     download: (taskId: string, attachmentId: string): Promise<void> =>
       ipcRenderer.invoke('attachments:download', taskId, attachmentId)
   },
+  // Chat image attachments (#144).
+  chatImages: {
+    readClipboard: (): Promise<unknown> => ipcRenderer.invoke('chatImages:readClipboard'),
+    saveToTask: (taskId: string, images: unknown[]): Promise<unknown> =>
+      ipcRenderer.invoke('chatImages:saveToTask', { taskId, images })
+  },
   shell: {
     openPath: (filePath: string): Promise<void> =>
       ipcRenderer.invoke('shell:openPath', filePath),
@@ -792,7 +798,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     markRead: (sessionId: string): Promise<unknown> => ipcRenderer.invoke('commander:markRead', { sessionId }),
     // Which session the Commander view shows (#62): a report for it is relayed at once; others only queue.
     setActiveSession: (sessionId: string | null): Promise<void> => ipcRenderer.invoke('commander:setActiveSession', { sessionId }),
-    send: (sessionId: string, text: string): Promise<unknown> => ipcRenderer.invoke('commander:send', { sessionId, text }),
+    send: (sessionId: string, text: string, images?: unknown[]): Promise<unknown> =>
+      ipcRenderer.invoke('commander:send', images?.length ? { sessionId, text, images } : { sessionId, text }),
+    getImage: (id: string): Promise<unknown> => ipcRenderer.invoke('commander:getImage', { id }),
     cancel: (sessionId: string): Promise<{ cancelled: boolean }> => ipcRenderer.invoke('commander:cancel', { sessionId }),
     onEvent: (callback: (data: unknown) => void): (() => void) => {
       const handler = (_: unknown, d: unknown): void => callback(d)
