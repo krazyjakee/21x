@@ -1114,6 +1114,43 @@ describe('explicit project-wide grants (#155)', () => {
     expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
   })
 
+  it.each([
+    ['missing', undefined],
+    ['null', null],
+    ['empty', {}],
+    ['blank', { login: '' }],
+    ['non-string', { login: 7 }]
+  ] as const)('fails closed when PR author data is %s', async (_label, author) => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.setPr({
+      author,
+      reviewDecision: 'APPROVED',
+      latestReviews: reviewConnection([
+        { author: { login: 'author-dev' }, state: 'APPROVED', commit: { oid: SHA } }
+      ])
+    })
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({
+      error: expect.stringContaining('author')
+    })
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+  })
+
+  it('fails closed when the pinned reread disagrees about the PR author', async () => {
+    const h = setupWide()
+    const result = wideGrant(h)
+    if (!result.ok) throw new Error(result.error)
+    h.gh.mockResolvedValueOnce(JSON.stringify(prState({ author: { login: 'author-dev' } })))
+      .mockResolvedValueOnce(JSON.stringify(prState({ author: { login: 'someone-else' } })))
+    expect(await captainCall(h, 'merge_pull_request', { pr_url: PR_URL })).toMatchObject({
+      error: expect.stringContaining('author')
+    })
+    expect(h.merges).toHaveLength(0)
+    expect(h.db.getMergeGrant(result.grant.id)?.uses).toBe(0)
+  })
+
   it('accepts an independent approval on a branch that requires no reviews', async () => {
     const h = setupWide()
     wideGrant(h)
