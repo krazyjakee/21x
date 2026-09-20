@@ -397,13 +397,15 @@ export async function changedFiles(repoDir: string): Promise<string[]> {
     }
   }
   const outputs = await Promise.allSettled([
-    base ? git(repoDir, ['diff', '--name-only', base]) : Promise.resolve(''),
-    git(repoDir, ['diff', '--name-only', 'HEAD']),
-    git(repoDir, ['ls-files', '--others', '--exclude-standard'])
+    base ? git(repoDir, ['diff', '--no-renames', '--name-only', '-z', base]) : Promise.resolve(''),
+    git(repoDir, ['diff', '--no-renames', '--name-only', '-z', 'HEAD']),
+    git(repoDir, ['ls-files', '-z', '--others', '--exclude-standard'])
   ])
   for (const out of outputs) {
     if (out.status !== 'fulfilled') continue
-    for (const line of out.value.split('\n')) if (line.trim()) files.add(line.trim())
+    // NUL records preserve Git-quoted Unicode and whitespace in filenames.
+    // --no-renames includes the old path too: renaming it conflicts with edits.
+    for (const path of out.value.split('\0')) if (path) files.add(path)
   }
   return [...files]
 }

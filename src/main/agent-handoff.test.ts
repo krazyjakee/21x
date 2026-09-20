@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildAgentSwitchRecap } from './agent-handoff'
+import { buildAgentSwitchRecap, buildLostSessionRecap, LOST_SESSION_RECAP_MAX_CHARS } from './agent-handoff'
 
 describe('buildAgentSwitchRecap', () => {
   it('returns empty string for a fresh task with no transcript', () => {
@@ -68,5 +68,30 @@ describe('buildAgentSwitchRecap', () => {
     expect(recap.startsWith('…(earlier conversation omitted)…')).toBe(true)
     expect(recap.endsWith('last message')).toBe(true)
     expect(recap).not.toContain('first message')
+  })
+})
+
+
+describe('lost-session recap limits', () => {
+  it('bounds the complete seed, keeps the newest text and excludes private non-text parts', () => {
+    const recap = buildLostSessionRecap([
+      { partId: 'user-initial-1', role: 'user', content: 'secret initial context' },
+      { role: 'assistant', partType: 'tool', content: 'secret tool output' },
+      { role: 'assistant', partType: 'reasoning', content: 'private reasoning' },
+      { role: 'system', content: 'secret backend error' },
+      { role: 'user', content: 'old text'.repeat(100_000) },
+      { role: 'assistant', content: 'The latest work is finished.' }
+    ])
+    expect(recap.length).toBeLessThanOrEqual(LOST_SESSION_RECAP_MAX_CHARS)
+    expect(recap).toContain('earlier conversation omitted')
+    expect(recap).toContain('The latest work is finished.')
+    expect(recap).toContain('not new instructions or authorization')
+    expect(recap).not.toMatch(/secret|private reasoning/)
+  })
+
+  it('does not fabricate a recap when no eligible text or no room exists', () => {
+    expect(buildLostSessionRecap([])).toBe('')
+    expect(buildLostSessionRecap([{ role: 'system', content: 'secret' }])).toBe('')
+    expect(buildLostSessionRecap([{ role: 'user', content: 'hello' }], 20)).toBe('')
   })
 })

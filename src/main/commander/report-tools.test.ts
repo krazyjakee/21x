@@ -14,6 +14,7 @@ import { callToolForScope } from '../mcp-servers/task-management-core'
 import { handleTaskRoute } from '../task-api/task-routes'
 import { CommanderService } from './commander-service'
 import { CommanderStore } from './commander-store'
+import { CommanderVoice, type CommanderVoiceSpeech } from '../voice/commander-voice'
 import { createCommanderProjectTools, ProjectMutationConfirmations, type CommanderAgents } from './project-tools'
 import { CaptainDeliveryService } from './captain-delivery'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_TITLE_PROMPT } from './prompts'
@@ -282,6 +283,10 @@ describe('report delivery', () => {
     expect(messages[1].content).toBe('Alpha says the site shipped.')
     const [request] = chatRequests(provider)
     expect(request.system).toContain('A report from project "Alpha" has just arrived')
+    // The turn is told to summarise in plain language, not to relay (#107).
+    expect(request.system).toContain('Summarise it for the user now in plain language')
+    expect(request.system).toContain('Leave out issue and PR numbers, branch names')
+    expect(request.system).not.toContain('Relay it to the user now')
     expect(request.messages.at(-1)?.content).toContain(`[Report from project ${alpha.id}]\nSite shipped.`)
   })
 
@@ -313,6 +318,56 @@ describe('report delivery', () => {
     await vi.waitFor(() => expect(chatRequests(provider)).toHaveLength(2))
     await settled(service, session.id)
     expect(store.listMessages(session.id).map((m) => m.role)).toEqual(['user', 'assistant', 'report', 'assistant'])
+  })
+
+  it.each([false, true])('speaks only the summary and retains the report (mid-turn: %s)', async (midTurn) => {
+    const alpha = db.createProject({ name: 'Alpha' })!
+    const raw = 'PR #104 merged on sessions-b2 (630894c); waiting for #99.'
+    const summary = 'Alpha finished the history fix and is waiting for your review.'
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const provider = fakeProvider((request) => startedByReport(request) ? summary : 'Checking now.')
+    const service = makeService({
+      ...provider,
+      stream(request, signal) {
+        const inner = provider.stream(request, signal)
+        return (async function* () {
+          if (midTurn && !startedByReport(request)) await gate
+          yield* inner
+        })()
+      }
+    })
+    const spoken: string[] = []
+    const speech: CommanderVoiceSpeech = {
+      beginStreamingAnswer: vi.fn(async () => true),
+      pushStreamingAnswer: (_key, parts) => { spoken.push(...parts.map((part) => part.content)) },
+      endStreamingAnswer: vi.fn(),
+      speak: vi.fn(async () => true),
+      interrupt: vi.fn(),
+      stop: vi.fn(),
+      streamingTaskId: null,
+      currentTaskId: null,
+    }
+    const voice = new CommanderVoice({ commander: service, speech })
+    const session = store.createSession()
+    service.setActiveSession(session.id)
+    voice.setActiveSession(session.id)
+    try {
+      const turn = midTurn ? service.sendUserMessage(session.id, 'hello') : null
+      expect(service.deliverReport({ sessionId: session.id, content: raw, projectId: alpha.id, projectName: 'Alpha' }).relayed).toBe(true)
+      release()
+      await turn?.done
+      await vi.waitFor(() => expect(spoken).toContain(summary))
+      await settled(service, session.id)
+      expect(spoken.join(' ')).not.toContain(raw)
+      expect(speech.speak).not.toHaveBeenCalled()
+      expect(store.listMessages(session.id).filter((message) => message.role === 'report')).toEqual([
+        expect.objectContaining({ content: raw, project_id: alpha.id })
+      ])
+    } finally {
+      release()
+      voice.dispose()
+    }
   })
 
   it('stores the report unread even when no provider can be built', () => {

@@ -14,6 +14,7 @@ import { TASK_ROLE_CAPTAIN, type TaskRole } from '../shared/task-roles'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import { mergeGrantStatus, type MergeCheckRecord, type MergeGrant, type MergeGrantSource, type MergeGrantReservation, type MergeGrantUse, type MergeGrantUseInput } from '../shared/merge-grants'
 import { defaultHardCap, normalizeTouchPath, type ConcurrencyAuditEntry } from '../shared/concurrency'
+import type { IssueAction, IssueWriteOrigin, IssueWriteRecord, IssueWriteStatus } from '../shared/issue-actions'
 import {
   PROJECT_STATUS_BLOCKER_MAX_CHARS,
   PROJECT_STATUS_JOURNAL_COMPACT_AFTER_DAYS,
@@ -134,6 +135,46 @@ export interface CreateMergeGrantData {
   user_text: string
   expires_at: string
   max_uses: number | null
+}
+
+/** What the app (never the model) supplies to claim one delegated issue write. */
+export interface BeginIssueWriteInput {
+  idempotency_key: string
+  project_id: string
+  captain_task_id: string | null
+  captain_session_id: string | null
+  task_id: string | null
+  repo: string
+  action: IssueAction
+  target_number: number | null
+  payload_hash: string
+  payload_fields: string
+  /** Resolved from platform records, never from the caller's arguments. */
+  origin: IssueWriteOrigin
+  /** How long this attempt may hold the claim before it counts as unresolved. */
+  lease_ms: number
+}
+
+/** What a claim attempt is allowed to do next. */
+export interface BeginIssueWriteResult {
+  state: 'reserved' | 'duplicate' | 'in_flight' | 'needs_reconcile' | 'conflict'
+  record: IssueWriteRecord
+}
+
+export interface ApplyIssueWriteEffectsInput {
+  attachment?: { taskId: string; url: string; id: string; addedAt: string }
+  journal: ProjectStatusJournalInput
+}
+
+/** The outcome of one attempt, written once. */
+export interface SettleIssueWriteInput {
+  status: Exclude<IssueWriteStatus, 'reserved'>
+  /** Must match the attempt that received the external answer. */
+  attempt_epoch: number
+  external_url?: string | null
+  external_number?: number | null
+  external_result?: string | null
+  error?: string | null
 }
 
 /** What `recordProjectStatus` writes: the snapshot fields plus the journal highlights. */
@@ -1328,6 +1369,228 @@ export class DatabaseManager {
       }
       return { ...row, checks }
     })
+  }
+
+  // ── Delegated GitHub issue writes ───────────────────────────
+  // The ledger is both the audit record and the idempotency claim (see
+  // database/issue-writes-migration.ts). Created, checked and settled only
+  // through src/main/issue-writes.ts, which resolves the human origin first.
+
+  /**
+   * Claims `idempotency_key` for one attempt, or says why the caller may not
+   * proceed. One immediate transaction, so two attempts racing on the same key
+   * cannot both reserve it:
+   *
+   * - no row            → `reserved`, the caller calls GitHub;
+   * - `succeeded`       → `duplicate`, the write already happened;
+   * - `reserved` in lease → `in_flight`, another attempt owns it;
+   * - `reserved` expired  → flipped to `unresolved` and returned as
+   *                         `needs_reconcile`: the write may have landed, so
+   *                         GitHub must be asked before anything retries;
+   * - `unresolved`      → `needs_reconcile`, same reason;
+   * - `failed`          → `reserved` again, with `attempts` incremented.
+   */
+  beginIssueWrite(input: BeginIssueWriteInput): BeginIssueWriteResult {
+    const fallback: IssueWriteRecord = {
+      id: '', idempotency_key: input.idempotency_key, project_id: input.project_id,
+      captain_task_id: input.captain_task_id ?? null, captain_session_id: input.captain_session_id ?? null,
+      task_id: input.task_id ?? null, repo: input.repo, action: input.action, target_number: input.target_number ?? null,
+      payload_hash: input.payload_hash, payload_fields: input.payload_fields, origin_kind: input.origin.kind, origin_message_id: input.origin.messageId,
+      origin_session_id: input.origin.sessionId, origin_text_hash: input.origin.textHash, origin_excerpt: input.origin.excerpt,
+      origin_authored_at: input.origin.authoredAt, correlation_id: input.origin.correlationId, status: 'unresolved',
+      external_url: null, external_number: null, external_result: null, error: 'The database is not open.',
+      attempts: 1, attempt_epoch: 1, lease_expires_at: null,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(), settled_at: null,
+      effects_applied_at: null
+    }
+    if (!this.ensureDbOpen()) return { state: 'needs_reconcile', record: fallback }
+    return this.db.transaction((): BeginIssueWriteResult => {
+      const now = Date.now()
+      const nowIso = new Date(now).toISOString()
+      const existing = this.getIssueWriteByKey(input.idempotency_key)
+      if (!existing) {
+        const id = createId()
+        this.prepare(`
+          INSERT INTO issue_writes
+            (id, idempotency_key, project_id, captain_task_id, captain_session_id, task_id, repo, action, target_number,
+             payload_hash, payload_fields, origin_kind, origin_message_id, origin_session_id, origin_text_hash,
+             origin_excerpt, origin_authored_at, correlation_id, status, attempts, attempt_epoch, lease_expires_at,
+             created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', 1, 1, ?, ?, ?)
+        `).run(
+          id, input.idempotency_key, input.project_id, input.captain_task_id ?? null, input.captain_session_id ?? null,
+          input.task_id ?? null, input.repo, input.action, input.target_number ?? null, input.payload_hash,
+          input.payload_fields, input.origin.kind, input.origin.messageId, input.origin.sessionId,
+          input.origin.textHash, input.origin.excerpt,
+          input.origin.authoredAt, input.origin.correlationId, now + input.lease_ms, nowIso, nowIso
+        )
+        return { state: 'reserved', record: this.getIssueWrite(id)! }
+      }
+      // An idempotency key is a durable binding, not a mutable slot. Check the
+      // complete operation and trusted human origin before *any* status-based
+      // retry logic, including failed rows. A mismatch leaves the original
+      // audit row byte-for-byte attributable to the operation it recorded.
+      const sameNullable = (left: string | number | null, right: string | number | null): boolean => left === right
+      const sameBinding =
+        existing.project_id === input.project_id &&
+        sameNullable(existing.captain_task_id, input.captain_task_id ?? null) &&
+        sameNullable(existing.captain_session_id, input.captain_session_id ?? null) &&
+        existing.repo === input.repo &&
+        existing.action === input.action &&
+        sameNullable(existing.target_number, input.target_number ?? null) &&
+        sameNullable(existing.task_id, input.task_id ?? null) &&
+        existing.payload_hash === input.payload_hash &&
+        existing.payload_fields === input.payload_fields &&
+        existing.origin_kind === input.origin.kind &&
+        existing.origin_message_id === input.origin.messageId &&
+        sameNullable(existing.origin_session_id, input.origin.sessionId) &&
+        existing.origin_text_hash === input.origin.textHash &&
+        existing.origin_excerpt === input.origin.excerpt &&
+        existing.origin_authored_at === input.origin.authoredAt &&
+        sameNullable(existing.correlation_id, input.origin.correlationId)
+      if (!sameBinding) return { state: 'conflict', record: existing }
+      if (existing.status === 'succeeded') return { state: 'duplicate', record: existing }
+      if (existing.status === 'unresolved') return { state: 'needs_reconcile', record: existing }
+      if (existing.status === 'reserved') {
+        const lease = this.prepare('SELECT lease_expires_at AS lease FROM issue_writes WHERE id = ?').get(existing.id) as { lease: number | null } | undefined
+        if (lease?.lease && lease.lease > now) return { state: 'in_flight', record: existing }
+        // The attempt that held this claim never came back. Its write may have
+        // landed, so the claim becomes a question, not a free slot.
+        this.prepare("UPDATE issue_writes SET status = 'unresolved', attempt_epoch = attempt_epoch + 1, lease_expires_at = NULL, error = ?, updated_at = ? WHERE id = ? AND status = 'reserved'")
+          .run('The attempt holding this claim ended without an answer from GitHub.', nowIso, existing.id)
+        return { state: 'needs_reconcile', record: this.getIssueWrite(existing.id)! }
+      }
+      // failed: GitHub certainly refused, so a fresh attempt is safe.
+      this.prepare("UPDATE issue_writes SET status = 'reserved', attempts = attempts + 1, attempt_epoch = attempt_epoch + 1, error = NULL, settled_at = NULL, lease_expires_at = ?, updated_at = ? WHERE id = ? AND status = 'failed'")
+        .run(now + input.lease_ms, nowIso, existing.id)
+      return { state: 'reserved', record: this.getIssueWrite(existing.id)! }
+    }).immediate()
+  }
+
+  /**
+   * Settles one open attempt exactly once. `reserved` is the live attempt and
+   * `unresolved` is the one reconciliation is answering; a row that already
+   * reached `succeeded` or `failed` is left alone and undefined is returned,
+   * so a late answer can never overwrite what was recorded first.
+   */
+  settleIssueWrite(id: string, outcome: SettleIssueWriteInput): IssueWriteRecord | undefined {
+    if (!this.ensureDbOpen()) return undefined
+    return this.db.transaction((): IssueWriteRecord | undefined => {
+      const row = this.prepare("SELECT id FROM issue_writes WHERE id = ? AND attempt_epoch = ? AND status IN ('reserved', 'unresolved')")
+        .get(id, outcome.attempt_epoch) as { id: string } | undefined
+      if (!row) return undefined
+      const nowIso = new Date().toISOString()
+      const settledAt = outcome.status === 'unresolved' ? null : nowIso
+      const nextEpoch = outcome.status === 'unresolved' ? outcome.attempt_epoch + 1 : outcome.attempt_epoch
+      this.prepare(`
+        UPDATE issue_writes
+           SET status = ?, external_url = ?, external_number = ?, external_result = ?, error = ?,
+               attempt_epoch = ?, lease_expires_at = NULL, settled_at = ?, updated_at = ?
+         WHERE id = ? AND attempt_epoch = ? AND status IN ('reserved', 'unresolved')
+      `).run(
+        outcome.status, outcome.external_url ?? null, outcome.external_number ?? null,
+        outcome.external_result ?? null, outcome.error ?? null, nextEpoch, settledAt, nowIso, id, outcome.attempt_epoch
+      )
+      return this.getIssueWrite(id)
+    }).immediate()
+  }
+
+  /**
+   * Commits the recoverable local half of a successful issue write exactly
+   * once. The task attachment, status-journal entry and durable marker share
+   * one SQLite transaction, so a crash can leave either all three or none.
+   */
+  applyIssueWriteEffects(id: string, input: ApplyIssueWriteEffectsInput): IssueWriteRecord | undefined {
+    if (!this.ensureDbOpen()) return undefined
+    return this.db.transaction((): IssueWriteRecord | undefined => {
+      const record = this.getIssueWrite(id)
+      if (!record || record.status !== 'succeeded') return undefined
+      if (record.effects_applied_at) return record
+
+      if (input.attachment) {
+        if (record.task_id !== input.attachment.taskId || record.external_url !== input.attachment.url) return undefined
+        const task = this.getTask(input.attachment.taskId)
+        if (!task) return undefined
+        if (!task.attachments.some((item) => item.filename === input.attachment!.url)) {
+          this.updateTask(task.id, {
+            attachments: [...task.attachments, {
+              id: input.attachment.id,
+              filename: input.attachment.url,
+              size: 0,
+              mime_type: 'text/x-github-issue',
+              added_at: input.attachment.addedAt
+            }]
+          })
+        }
+      }
+
+      const entry = this.appendProjectStatusJournal(record.project_id, input.journal)
+      if (!entry) throw new Error('Could not write the delegated issue journal entry')
+      const now = new Date().toISOString()
+      const changed = this.prepare(
+        "UPDATE issue_writes SET effects_applied_at = ?, updated_at = ? WHERE id = ? AND status = 'succeeded' AND effects_applied_at IS NULL"
+      ).run(now, now, id).changes
+      if (changed !== 1) throw new Error('Could not mark delegated issue effects as applied')
+      return this.getIssueWrite(id)
+    }).immediate()
+  }
+
+  getIssueWrite(id: string): IssueWriteRecord | undefined {
+    if (!this.ensureDbOpen()) return undefined
+    const row = this.prepare('SELECT * FROM issue_writes WHERE id = ?').get(id) as IssueWriteRecord | undefined
+    return row
+  }
+
+  getIssueWriteByKey(key: string): IssueWriteRecord | undefined {
+    if (!this.ensureDbOpen()) return undefined
+    return this.prepare('SELECT * FROM issue_writes WHERE idempotency_key = ?').get(key) as IssueWriteRecord | undefined
+  }
+
+  /** The ledger, newest first. */
+  listIssueWrites(options: { projectId?: string; taskId?: string; limit?: number } = {}): IssueWriteRecord[] {
+    if (!this.ensureDbOpen()) return []
+    const where: string[] = []
+    const params: unknown[] = []
+    if (options.projectId) { where.push('project_id = ?'); params.push(options.projectId) }
+    if (options.taskId) { where.push('task_id = ?'); params.push(options.taskId) }
+    const limit = Math.min(Math.max(options.limit ?? 50, 1), 500)
+    params.push(limit)
+    return this.prepare(
+      `SELECT * FROM issue_writes ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY created_at DESC, id DESC LIMIT ?`
+    ).all(...params) as IssueWriteRecord[]
+  }
+
+  /**
+   * Writes whose outcome is unknown, plus reserved claims whose lease has run
+   * out (they are the same question). Reconciliation asks GitHub about these.
+   */
+  listUnresolvedIssueWrites(projectId?: string): IssueWriteRecord[] {
+    if (!this.ensureDbOpen()) return []
+    return this.db.transaction((): IssueWriteRecord[] => {
+      const now = Date.now()
+      const nowIso = new Date(now).toISOString()
+      const projectClause = projectId ? ' AND project_id = ?' : ''
+      this.prepare(`
+        UPDATE issue_writes
+           SET status = 'unresolved', attempt_epoch = attempt_epoch + 1,
+               lease_expires_at = NULL, error = ?, updated_at = ?
+         WHERE status = 'reserved' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?${projectClause}
+      `).run('The attempt holding this claim ended without an answer from GitHub.', nowIso, now, ...(projectId ? [projectId] : []))
+      return (projectId
+        ? this.prepare("SELECT * FROM issue_writes WHERE project_id = ? AND status = 'unresolved' ORDER BY created_at ASC").all(projectId)
+        : this.prepare("SELECT * FROM issue_writes WHERE status = 'unresolved' ORDER BY created_at ASC").all()) as IssueWriteRecord[]
+    }).immediate()
+  }
+
+  /** Successful external writes whose atomic local task/journal effects have
+   * not committed yet. Unbounded on purpose: startup recovery must not strand
+   * an older row behind a display-oriented page limit. */
+  listIssueWritesPendingEffects(projectId?: string): IssueWriteRecord[] {
+    if (!this.ensureDbOpen()) return []
+    return (projectId
+      ? this.prepare("SELECT * FROM issue_writes WHERE project_id = ? AND status = 'succeeded' AND effects_applied_at IS NULL ORDER BY created_at ASC, id ASC").all(projectId)
+      : this.prepare("SELECT * FROM issue_writes WHERE status = 'succeeded' AND effects_applied_at IS NULL ORDER BY created_at ASC, id ASC").all()
+    ) as IssueWriteRecord[]
   }
 
   getProjectStatusJournalEntry(id: string): ProjectStatusJournalEntry | undefined {

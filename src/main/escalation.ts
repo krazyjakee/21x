@@ -43,7 +43,10 @@ import { FINDINGS_BEGIN, FINDINGS_END, SYSTEM_MESSAGE_MARKER } from '../shared/s
 import { escalationPolicyFromSettings, type EscalationAction, type EscalationLevel } from '../shared/project-policies'
 import type { HeldAction } from '../shared/project-limit-types'
 import { handleMergeGrantTool } from './merge-grant-gate'
+import { handleIssueWriteTool } from './issue-write-gate'
+import { reconcileIssueWrites, type IssueWriteDb, type IssueWriteHooks } from './issue-writes'
 import { MERGE_GRANT_TOOL_NAMES, MERGE_PULL_REQUEST_TOOL } from './mcp-servers/merge-grant-tools'
+import { ISSUE_WRITE_TOOL_NAMES } from './mcp-servers/issue-write-tools'
 import { reconcileMergeGrantReservations, type MergeGrantDb, type MergeHooks } from './merge-grants'
 
 export type { HeldAction }
@@ -101,6 +104,8 @@ export interface EscalationDeps {
   db: Pick<DatabaseManager, 'getProject' | 'getTask' | 'getCoordinatorTask'>
   /** Merge grants and merges (#137); without it the merge tools answer "not available". */
   mergeDb?: MergeGrantDb
+  /** The delegated issue-write ledger; without it the issue tools answer "not available". */
+  issueDb?: IssueWriteDb
   /** Shows the person a notice. Default: an OS notification when supported. */
   notifyUser?: (title: string, body: string) => void
   /** Pushes to the window. Default: the Task API notifier (index.ts sets it). */
@@ -208,6 +213,10 @@ function summarizeCall(action: EscalationAction, tool: string, args: Record<stri
       return `set the priority of ${target} to ${String(args.priority)}`
     case 'merge_pr':
       return `merge ${String(args.pr_url ?? '')}`
+    case 'issue_write':
+      return args.issue_url
+        ? `write to the GitHub issue ${String(args.issue_url)}`
+        : `file a GitHub issue "${String(args.title ?? '')}" in ${String(args.repo ?? 'a project repository')}`
     default:
       return `${tool} ${target}`.trim()
   }
@@ -374,6 +383,31 @@ function mergeHooks(): MergeHooks {
   }
 }
 
+/** What a delegated issue write tells the person and the Commander. */
+function issueWriteHooks(): IssueWriteHooks {
+  return {
+    notifyUser,
+    pushToRenderer,
+    report: (projectId, kind, summary, record) => {
+      const event: EscalationEvent = {
+        projectId,
+        action: 'issue_write',
+        // An `autonomous` write still produces an event when it needs a
+        // person (an unresolved outcome); the feed has no silent level.
+        level: (deps && policyLevelFor(deps.db, projectId, 'issue_write') === 'ask_user') ? 'ask_user' : 'tell_commander',
+        tool: record.action,
+        args: { repo: record.repo, issue_url: record.external_url },
+        summary,
+        outcome: kind === 'unresolved' ? 'needs_user' : 'performed',
+        at: new Date().toISOString()
+      }
+      escalateToCommander(event)
+      pushToRenderer('escalation:event', event)
+      if (kind !== 'written') notifyUser(`Issue write in ${deps?.db.getProject(projectId)?.name ?? projectId}`, summary)
+    }
+  }
+}
+
 export function createCoordinatorEscalationGate(): CoordinatorCallGate {
   return async ({ projectId, tool, args, run }) => {
     if (!deps) return run()
@@ -392,6 +426,28 @@ export function createCoordinatorEscalationGate(): CoordinatorCallGate {
         reportPerformed: (summary) => {
           const event: EscalationEvent = {
             projectId, action: 'merge_pr', level: 'tell_commander', tool, args, summary, outcome: 'performed', at: new Date().toISOString()
+          }
+          escalateToCommander(event)
+          notifyUser(`Captain of ${projectName}`, `Did: ${summary}`)
+          pushToRenderer('escalation:event', event)
+        }
+      })
+    }
+
+    // The delegated issue tools have no route either; they are answered here.
+    if (ISSUE_WRITE_TOOL_NAMES.has(tool)) {
+      if (!deps.issueDb) return { error: 'Writing GitHub issues through 21x is not available right now.' }
+      const projectName = deps.db.getProject(projectId)?.name ?? projectId
+      return handleIssueWriteTool(tool, {
+        db: deps.issueDb,
+        projectId,
+        args,
+        level: policyLevelFor(deps.db, projectId, 'issue_write'),
+        hooks: issueWriteHooks(),
+        hold: (summary, runHeld) => holdCall(projectId, 'issue_write', tool, args, summary, runHeld),
+        reportPerformed: (summary) => {
+          const event: EscalationEvent = {
+            projectId, action: 'issue_write', level: 'tell_commander', tool, args, summary, outcome: 'performed', at: new Date().toISOString()
           }
           escalateToCommander(event)
           notifyUser(`Captain of ${projectName}`, `Did: ${summary}`)
@@ -432,11 +488,20 @@ export function createCoordinatorEscalationGate(): CoordinatorCallGate {
 
 /** Main-process wiring: reads the policy from `db` and gates the Captain's tool calls. */
 export function installEscalation(db: DatabaseManager): void {
-  configureEscalation({ db, mergeDb: db })
+  configureEscalation({ db, mergeDb: db, issueDb: db })
   setCoordinatorCallGate(createCoordinatorEscalationGate())
 }
 
 /** Run after the Commander report bridge is ready so recovered outcomes reach it. */
 export function recoverMergeGrantOutcomes(db: DatabaseManager): Promise<void> {
   return reconcileMergeGrantReservations(db, undefined, mergeHooks())
+}
+
+/**
+ * Settles issue writes this process never saw the answer to, at startup and
+ * whenever the ledger is read. An issue created just before a crash is
+ * recovered from its idempotency marker instead of being filed a second time.
+ */
+export async function recoverIssueWriteOutcomes(db: DatabaseManager): Promise<void> {
+  await reconcileIssueWrites(db, undefined, issueWriteHooks())
 }
