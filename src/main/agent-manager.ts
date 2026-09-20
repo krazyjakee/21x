@@ -4060,7 +4060,12 @@ export class AgentManager extends EventEmitter {
         agentId: agentId ?? this.resolveSession(sessionId)?.session.agentId ?? null,
         payload: JSON.stringify({ sessionId, message, taskId, agentId, attachments: attachments ?? [], typedMessage })
       })
-      prepareAuthorizationDispatch(this.db, { key: deliveryId, taskId: record.taskId ?? '', text: message, messageId: typedMessage?.id })
+      // A completed delivery is an idempotent acknowledgement, never a new
+      // dispatch. Renderer retries may carry stale options (#147); retain the
+      // original bytes and authority without reactivating or replacing them.
+      if (record.state !== 'accepted' && record.state !== 'acknowledged') {
+        prepareAuthorizationDispatch(this.db, { key: deliveryId, taskId: record.taskId ?? '', text: message, messageId: typedMessage?.id })
+      }
       return record
     })()
     return this.dispatchAgentMessage(record)
