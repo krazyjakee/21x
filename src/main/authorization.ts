@@ -241,8 +241,10 @@ export function classifyCapabilityIntents(text: string, projectNames: string[] =
         verb = repeatedVerb[1].toLowerCase()
         rest = rest.slice(repeatedVerb[0].length)
       }
+      const numericDeterminer = /^(\d+)\s+/.exec(rest)
+      if (numericDeterminer && Number(numericDeterminer[1]) === 0) return []
       const object = /^(?:(?:the|a|an|one|two|both|staged|draft|\d+)\s+)*(tasks?|(?:github|gh)\s+issues?|prs?|pull\s+requests?)\b/i.exec(rest)
-      if (!object) break
+      if (!object) return []
       const target = object[1].toLowerCase()
       const issue = /^(?:github|gh)/.test(target)
       const pr = /^(?:pr|pull)/.test(target)

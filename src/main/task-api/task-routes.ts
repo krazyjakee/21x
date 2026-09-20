@@ -107,6 +107,22 @@ function parentWillAutomaticallyStartChild(
     !(parent.is_recurring && parent.recurrence_parent_id == null)
 }
 
+function automaticParentHasRunnableChild(
+  db: DatabaseManager,
+  parentTaskId: string | null | undefined,
+  prospective?: { taskId: string; status: string; agentId: string | null | undefined }
+): boolean {
+  if (!parentTaskId) return false
+  const parent = db.getTask(parentTaskId)
+  if (!parent?.auto_start_agent || parent.parent_task_id ||
+      (parent.is_recurring && parent.recurrence_parent_id == null)) return false
+  return db.getSubtasks(parentTaskId).some((child) => {
+    const status = child.id === prospective?.taskId ? prospective.status : child.status
+    const agentId = child.id === prospective?.taskId ? prospective.agentId : child.agent_id
+    return status === TaskStatus.NotStarted && !!agentId
+  })
+}
+
 function capabilityNarrowing(value: unknown): { actions?: AuthorizationAction[]; error?: string } {
   if (value === undefined) return {}
   if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || !AUTHORIZATION_ACTIONS.includes(item as AuthorizationAction))) {
@@ -314,9 +330,9 @@ async function updateTask(db: DatabaseManager, params: Record<string, unknown>, 
     const resultingAgent = prepared.data.agent_id === undefined ? current.agent_id : prepared.data.agent_id
     const enablesAutomaticStart = resultingAutoStart && resultingStatus === TaskStatus.NotStarted &&
       (current.status !== TaskStatus.NotStarted || !current.auto_start_agent)
-    const parentDrivenAutomaticStart = parentWillAutomaticallyStartChild(
-      db, current.parent_task_id, resultingStatus, resultingAgent
-    )
+    const parentDrivenAutomaticStart = automaticParentHasRunnableChild(db, current.parent_task_id, {
+      taskId: current.id, status: resultingStatus, agentId: resultingAgent
+    })
     if (prepared.startAfterWrite || prepared.data.auto_start_agent === true || enablesAutomaticStart || parentDrivenAutomaticStart) {
       const startRefused = authorizeScopedTaskAction(db, trustedScope, taskProjectId(current), 'task.start')
       if (startRefused) return startRefused

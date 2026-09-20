@@ -302,6 +302,9 @@ describe('immutable human authorization chain', () => {
     ['Open GitHub issues for 21x', ['github.issue.create', 'github.issue.link']],
     ['Update GitHub issues for 21x', ['github.issue.update']],
     ['Link gh issues for 21x', ['github.issue.link']],
+    ['Open 1 gh issue for 21x', ['github.issue.create', 'github.issue.link']],
+    ['Create 2 gh issues for 21x', ['github.issue.create', 'github.issue.link']],
+    ['Open gh issues and create tasks for 21x', ['task.create', 'task.update', 'task.start', 'github.issue.create', 'github.issue.link']],
     ['Implement the authorization repair', ['task.update', 'task.start', 'github.pr.open']],
     ['Implement the unified intent-to-capability contract from the boundary audit', ['task.update', 'task.start', 'github.pr.open']]
   ])('classifies aliases and necessary ordinary consequences: %s', (wording, expected) => {
@@ -346,6 +349,12 @@ describe('immutable human authorization chain', () => {
       'Open gh issues for 21x?',
       'Open gh issues and start PRs for 21x.',
       'Open gh issues and link tasks for 21x.',
+      'Open gh issues and start for 21x.',
+      'Open gh issues and link for 21x.',
+      'Open gh issues and create for 21x.',
+      'Open gh issues and for 21x.',
+      'Open 0 gh issues for 21x.',
+      'Create 00 gh issues for 21x.',
       'Open gh issues for 21x. I withhold authorization.',
       'Open gh issues for 21x. The gh issues would need to be part of a plan only and must remain unwritten.',
       'Open gh issues for 21x. The gh issues might need to be part of a proposal and nothing shall be created yet.',
@@ -596,6 +605,45 @@ describe('immutable human authorization chain', () => {
       expect(manager.startTask).not.toHaveBeenCalled()
     }
   )
+
+  it('requires task.start before clearing successor edges can release an automatic sibling', async () => {
+    const originText = 'Create tasks'
+    const origin = recordHumanAuthorization(db, {
+      messageId: 'successor-release-root', text: originText, at: now,
+      source: 'project-chat', taskId: captainId, projectId
+    })
+    activateAuthorizationDispatch(db, prepareAuthorizationDispatch(db, {
+      key: 'successor-release-root', taskId: captainId, text: originText, messageId: origin.messageId
+    }))
+    const caller = db.createTask({ title: 'Metadata-only worker', project_id: projectId })!
+    inheritTaskAuthorization(db, captainId, caller.id, 'No execution', ['task.create', 'task.update'])
+    const agent = db.createAgent(makeAgent({ name: 'Successor worker' }))!
+    const parent = db.createTask({ title: 'Automatic parent', project_id: projectId, auto_start_agent: true })!
+    db.updateTask(parent.id, { status: TaskStatus.ReadyForReview })
+    const previous = db.createTask({ title: 'Reviewed predecessor', project_id: projectId, parent_task_id: parent.id })!
+    const pending = db.createTask({ title: 'Pending sibling', project_id: projectId, parent_task_id: parent.id })!
+    db.updateTask(previous.id, {
+      status: TaskStatus.ReadyForReview, agent_id: agent.id, next_subtask_ids: [pending.id]
+    })
+    db.updateTask(pending.id, { agent_id: agent.id })
+    const manager = {
+      startTask: vi.fn(async () => ({ action: 'task_started' })),
+      hasActiveSessionForTask: vi.fn(() => false),
+      completeTaskWithoutReview: vi.fn(async () => false)
+    }
+    setTaskApiAgentController(manager as never)
+    const scheduler = new TaskAutomationScheduler(db, manager as never)
+    await scheduler.runNow()
+    expect(manager.startTask).not.toHaveBeenCalled()
+
+    const result = await handleTaskRoute(db, '/update_task', {
+      task_id: previous.id, next_subtask_ids: []
+    }, { projectId, taskId: caller.id, artifactTaskId: caller.id, parentTaskId: null })
+    expect(result).toMatchObject({ code: 'capability_refused', missing_capability: 'task.start' })
+    expect(db.getTask(previous.id)?.next_subtask_ids).toEqual([pending.id])
+    await scheduler.runNow()
+    expect(manager.startTask).not.toHaveBeenCalled()
+  })
 
   it('requires task.start for Captain-scoped message recovery', async () => {
     const text = 'Update tasks'

@@ -1273,6 +1273,12 @@ describe('the durable authorization chain', () => {
     'Open gh issues for 21x?',
     'Open gh issues and start PRs for 21x.',
     'Open gh issues and link tasks for 21x.',
+    'Open gh issues and start for 21x.',
+    'Open gh issues and link for 21x.',
+    'Open gh issues and create for 21x.',
+    'Open gh issues and for 21x.',
+    'Open 0 gh issues for 21x.',
+    'Create 00 gh issues for 21x.',
     'Open gh issues for 21x. I withhold authorization.',
     'Open gh issues for 21x. The gh issues would need to be part of a plan only and must remain unwritten.',
     'Open gh issues for 21x. The gh issues might need to be part of a proposal and nothing shall be created yet.'
