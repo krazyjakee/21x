@@ -1138,6 +1138,7 @@ describe('AgentManager implicit resume behavior', () => {
   })
 
   it('does NOT push a transcript replay during explicit resume', async () => {
+    const rotateTaskMcpScopeNonce = vi.fn(() => 'fresh-session-nonce')
     const mockDb = {
       getTask: vi.fn(() => ({
         id: 'task-1',
@@ -1155,6 +1156,7 @@ describe('AgentManager implicit resume behavior', () => {
       getSecretsWithValues: vi.fn(() => []),
       getSetting: vi.fn(() => null),
       getTranscriptParts: vi.fn(() => []),
+      rotateTaskMcpScopeNonce,
     } as unknown as ConstructorParameters<typeof AgentManager>[0]
 
     const manager = new AgentManager(mockDb)
@@ -1168,12 +1170,17 @@ describe('AgentManager implicit resume behavior', () => {
     }
 
     vi.spyOn(manager as any, 'getAdapter').mockReturnValue(adapter)
-    vi.spyOn(manager as any, 'buildMcpServersForAdapter').mockResolvedValue({})
+    const buildMcpServers = vi.spyOn(manager as any, 'buildMcpServersForAdapter').mockResolvedValue({})
     vi.spyOn(manager as any, 'setupSecretSession').mockReturnValue(null)
 
     const sendToRendererSpy = vi.spyOn(manager as any, 'sendToRenderer').mockImplementation(() => undefined)
 
     await manager.resumeSession('agent-1', 'task-1', 'persisted-session-id')
+
+    expect(rotateTaskMcpScopeNonce).toHaveBeenCalledWith('task-1')
+    expect(buildMcpServers).toHaveBeenCalledWith('agent-1', expect.objectContaining({
+      sessionNonce: 'fresh-session-nonce'
+    }))
 
     // Resume seeds only the in-memory dedup state; it never streams historical
     // messages to clients. The projection (snapshot + deltas) is the render source.

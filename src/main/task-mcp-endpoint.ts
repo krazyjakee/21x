@@ -13,13 +13,13 @@
  *
  * The scope travels in the URL as plain query parameters:
  *   /mcp                                        full access, every project (internal/debug only)
- *   /mcp?project=<id>                           orchestration set, limited to one project
- *   /mcp?task=<id>&parent=<id>                  subtask set, parent + siblings only
+ *   /mcp?project=<id>&task=<id>&agent=<id>&session=<nonce>  project-limited task tools
+ *   /mcp?task=<id>&parent=<id>&agent=<id>&session=<nonce>   subtask tools
  *   /mcp?...&artifact=<id>                      pins artifact writes to one task
  *
  * The API token authenticates the caller; a separate main-process HMAC binds
  * that token to the scope. A worker cannot remove its pins or change project
- * to gain Captain tools. Unsigned URLs are refused, including debug access.
+ * or agent identity to gain authority. Unsigned URLs are refused, including debug access.
  *
  * Each request is handled statelessly: one transport and one Server per request.
  * That needs no session table, so a resumed agent keeps working with the same
@@ -65,7 +65,9 @@ export function parseScopeFromUrl(url: URL): TaskMcpScope {
     parentTaskId: url.searchParams.get('parent') || null,
     taskId: taskId || null,
     artifactTaskId: url.searchParams.get('artifact') || taskId || null,
-    projectId: url.searchParams.get('project') || null
+    projectId: url.searchParams.get('project') || null,
+    agentId: url.searchParams.get('agent') || null,
+    sessionNonce: url.searchParams.get('session') || null
   }
 }
 
@@ -76,7 +78,10 @@ export function parseScopeFromUrl(url: URL): TaskMcpScope {
 export function buildTaskMcpUrl(
   port: number,
   token: string,
-  scope: { taskId?: string | null; parentTaskId?: string | null; artifactTaskId?: string | null; projectId?: string | null } = {}
+  scope: {
+    taskId?: string | null; parentTaskId?: string | null; artifactTaskId?: string | null
+    projectId?: string | null; agentId?: string | null; sessionNonce?: string | null
+  } = {}
 ): string {
   // The token rides in the URL because it is the one part of an MCP server
   // config that every agent backend passes through unchanged.
@@ -84,6 +89,8 @@ export function buildTaskMcpUrl(
   if (scope.taskId) params.set('task', scope.taskId)
   if (scope.parentTaskId) params.set('parent', scope.parentTaskId)
   if (scope.projectId) params.set('project', scope.projectId)
+  if (scope.agentId) params.set('agent', scope.agentId)
+  if (scope.sessionNonce) params.set('session', scope.sessionNonce)
   // Only needed when it differs from `task`, which already implies it.
   if (scope.artifactTaskId && scope.artifactTaskId !== scope.taskId) {
     params.set('artifact', scope.artifactTaskId)

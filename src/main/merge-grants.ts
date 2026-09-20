@@ -74,7 +74,7 @@ export type MergeGrantDb = Pick<
   | 'listPendingMergeGrantReservations'
   | 'listMergeGrantUses'
   | 'appendProjectStatusJournal'
-  | 'getCleanPullRequestReviewAttestation'
+  | 'getLatestPullRequestReviewAttestation'
   | 'getCurrentPullRequestReadinessSnapshot'
   | 'recordPullRequestReadinessSnapshot'
 >
@@ -723,11 +723,11 @@ export function reconcilePullRequestReadiness(
   const baseSha = state.baseRefOid ?? ''
   const repo = `${pr.owner}/${pr.repo}`
   const attestation = /^[0-9a-f]{40}$/i.test(state.headRefOid) && /^[0-9a-f]{40}$/i.test(baseSha)
-    ? db.getCleanPullRequestReviewAttestation({
+    ? db.getLatestPullRequestReviewAttestation({
         projectId, repo, prNumber: pr.number, headSha: state.headRefOid.toLowerCase(), baseSha: baseSha.toLowerCase()
       })
     : undefined
-  const independentlyReviewed = (state.independentApprovals ?? []).length > 0 || !!attestation
+  const independentlyReviewed = (state.independentApprovals ?? []).length > 0 || attestation?.verdict === 'CLEAN'
   let classification: PullRequestReadinessClassification
   let reasons = [...verdict.reasons]
   if (!verdict.ok) {
@@ -736,6 +736,9 @@ export function reconcilePullRequestReadiness(
       : verdict.pending
         ? 'pending'
         : 'blocked'
+  } else if (attestation?.verdict === 'CHANGES_REQUIRED') {
+    classification = 'blocked'
+    reasons = [`the latest verified 21x review requires changes${attestation.summary ? `: ${attestation.summary}` : ''}`]
   } else if (!independentlyReviewed) {
     classification = 'independent_review_required'
     reasons = [`head ${state.headRefOid} has neither an exact-head GitHub approval nor a verified 21x independent-review attestation`]
@@ -744,7 +747,22 @@ export function reconcilePullRequestReadiness(
   }
   const observed = observedReadinessState(state)
   const fingerprint = createHash('sha256').update(JSON.stringify({
-    repo: repo.toLowerCase(), pr: pr.number, head: state.headRefOid, base: baseSha, observed
+    repo: repo.toLowerCase(), pr: pr.number, head: state.headRefOid, base: baseSha, observed,
+    // An attestation is mutable evidence about an immutable revision. Bind
+    // its exact audit row into the fingerprint so CLEAN -> CHANGES_REQUIRED,
+    // replacement, or provenance changes invalidate an already-read gate.
+    attestation: attestation
+      ? {
+          id: attestation.id,
+          handoff: attestation.handoff_id,
+          implementation_task: attestation.implementation_task_id,
+          review_task: attestation.review_task_id,
+          implementation_agent: attestation.implementation_agent_id,
+          reviewer_agent: attestation.reviewer_agent_id,
+          verdict: attestation.verdict,
+          created_at: attestation.created_at
+        }
+      : null
   })).digest('hex')
   const current = db.getCurrentPullRequestReadinessSnapshot(projectId, repo, pr.number)
   const saved = db.recordPullRequestReadinessSnapshot({
@@ -1000,6 +1018,9 @@ export function missingIndependentReview(
   state: PullRequestGateState,
   attestation?: PullRequestReviewAttestation
 ): string | null {
+  if (attestation?.verdict === 'CHANGES_REQUIRED') {
+    return `head ${state.headRefOid} has unresolved changes from its latest verified 21x independent review${attestation.summary ? `: ${attestation.summary}` : ''}`
+  }
   if ((state.independentApprovals ?? []).length > 0) return null
   // This is product-level review evidence only. It is consulted after the
   // GitHub gate, so it can never satisfy a formal protected-branch approval.
@@ -1131,11 +1152,13 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
   // obsolete or duplicate PR under a project-wide grant. Require a real
   // independent approval instead, and spend no grant use without one (#155).
   const review = missingIndependentReview(state, readiness.attestation)
-  if (authority.kind === 'grant' && review) {
+  const verifiedChangesRequired = readiness.attestation?.verdict === 'CHANGES_REQUIRED'
+  if (review && (authority.kind === 'grant' || verifiedChangesRequired)) {
     const key = `independent-review:${pr.url}@${state.headRefOid}`
     if (request.readiness?.changed || readiness.changed) {
       reportedBlocks.add(key)
-      hooks.report?.(projectId, 'needs_user', `${pr.url} was not merged under the merge grant: ${review}. The blocker is owned by a different 21x review agent, not GitHub branch protection.`, grant?.id, context)
+      const authorityLabel = authority.kind === 'grant' ? ' under the merge grant' : ''
+      hooks.report?.(projectId, 'needs_user', `${pr.url} was not merged${authorityLabel}: ${review}. The blocker is owned by a different 21x review agent, not GitHub branch protection.`, grant?.id, context)
     }
     return {
       status: 'blocked',
@@ -1148,7 +1171,9 @@ export async function performMerge(db: MergeGrantDb, request: MergeRequest, hook
       readiness_snapshot_id: readiness.snapshot.id,
       authorized_by: authorizedBy(authority, grant),
       authorization_context: context,
-      message: `Not merged and no grant use was spent. ${review} A merge grant authorises merging; it is not evidence that this PR is safe, current or not superseded. Hand this exact head/base to a different 21x review agent. A GitHub approval is only required when branch protection says so.`
+      message: verifiedChangesRequired
+        ? `Not merged. ${review} No authority path can override verified unresolved review findings. Hand this exact head/base to a different 21x review agent after the findings are fixed.`
+        : `Not merged and no grant use was spent. ${review} A merge grant authorises merging; it is not evidence that this PR is safe, current or not superseded. Hand this exact head/base to a different 21x review agent. A GitHub approval is only required when branch protection says so.`
     }
   }
 
