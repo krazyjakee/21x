@@ -165,10 +165,10 @@ describe('DashboardWorkspace', () => {
     expect(screen.getByPlaceholderText('Ask Captain or describe a task...')).toBeDefined()
   })
 
-  it('renders quick chips', () => {
+  it('does not render canned quick actions', () => {
     render(<DashboardWorkspace />)
-    expect(screen.getByText('Summarize this week')).toBeDefined()
-    expect(screen.getByText('Draft outreach email')).toBeDefined()
+    expect(screen.queryByText('Summarize this week')).toBeNull()
+    expect(screen.queryByText('Draft outreach email')).toBeNull()
   })
 
   it('renders task board with status columns', () => {
@@ -395,16 +395,6 @@ describe('DashboardWorkspace', () => {
     recovery = { ...queued, state: 'started' }
     act(() => listener?.({ queue: [] } as AgentStartQueueChangedEvent))
     await waitFor(() => expect(screen.queryByTestId(`task-transition-${task.id}`)).toBeNull())
-  })
-
-  it('quick chip click for task opens create modal with prefill', () => {
-    render(<DashboardWorkspace />)
-    fireEvent.click(screen.getByText('Draft outreach email'))
-
-    const state = useUIStore.getState()
-    expect(state.activeModal).toBe('create')
-    expect(state.createTaskPrefill).toBeDefined()
-    expect(state.createTaskPrefill?.title).toBe('Draft outreach email')
   })
 })
 
