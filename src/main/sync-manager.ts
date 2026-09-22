@@ -114,7 +114,7 @@ export class SyncManager {
     const result = await plugin.executeAction(actionId, task, input, config, ctx)
 
     if (result.success && result.taskUpdate && Object.keys(result.taskUpdate).length > 0) {
-      this.db.updateTask(task.id, result.taskUpdate, 'task-source')
+      this.db.updateTask(task.id, result.taskUpdate, 'task-source-action')
     }
 
     return result

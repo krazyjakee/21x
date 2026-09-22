@@ -708,6 +708,11 @@ app.whenReady().then(async () => {
 
   db = new DatabaseManager()
   db.initialize()
+  db.onTaskActivity = (taskId, last_activity_at) => {
+    const data = { taskId, updates: { last_activity_at } }
+    if (mainWindow && !mainWindow.isDestroyed()) guardedIpcSend(mainWindow.webContents, 'task:updated', data)
+    broadcastToMobileClients('task:updated', data)
+  }
   // The task-management MCP server script calls back into this HTTP API.
   startTaskApiServer(db).catch(err =>
     console.error('[Main] Failed to start task API server:', err)
