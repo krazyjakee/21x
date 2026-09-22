@@ -1,3 +1,5 @@
+import { inheritTaskAuthorization } from '../authorization'
+import type { TaskMcpScope } from '../mcp-servers/task-management-core'
 import { setTimeout as sleep } from 'timers/promises'
 import type { CreateTaskData, DatabaseManager, TaskRecord, UpdateTaskData } from '../database'
 import type { TaskRow } from '../database/types'
@@ -54,13 +56,23 @@ function rowToApiTask(row: TaskRow): ApiTask {
 }
 
 /** db.createTask has no agent/skill columns, so those are applied as a follow-up write. */
-function createTask(db: DatabaseManager, data: CreateTaskData, params: Record<string, unknown>): TaskRecord | undefined {
-  const created = db.createTask(data)
+function createTask(db: DatabaseManager, data: CreateTaskData, params: Record<string, unknown>, trustedScope?: TaskMcpScope): TaskRecord | undefined {
+  const created = db.db.transaction(() => {
+    const created = db.createTask(data)
+    if (!created) return undefined
+    const assignment: UpdateTaskData = {}
+    if (params.agent_id) assignment.agent_id = params.agent_id as string
+    if (params.skill_ids) assignment.skill_ids = params.skill_ids as string[]
+    if (Object.keys(assignment).length > 0) db.updateTask(created.id, assignment)
+    if (trustedScope) {
+      const caller = trustedScope.taskId ?? trustedScope.artifactTaskId ?? (db.db.prepare("SELECT id FROM tasks WHERE project_id = ? AND role = 'captain'").get(trustedScope.projectId ?? '') as { id: string } | undefined)?.id
+      if (caller && db.getTask(caller)?.project_id === created.project_id) {
+        inheritTaskAuthorization(db, caller, created.id, JSON.stringify({ title: created.title, description: created.description, repos: created.repos }))
+      }
+    }
+    return created
+  })()
   if (!created) return undefined
-  const assignment: UpdateTaskData = {}
-  if (params.agent_id) assignment.agent_id = params.agent_id as string
-  if (params.skill_ids) assignment.skill_ids = params.skill_ids as string[]
-  if (Object.keys(assignment).length > 0) db.updateTask(created.id, assignment)
   afterTaskCreated(created)
   const task = db.getTask(created.id)
   if (task) notifyRenderer?.('task:created', { task })
@@ -237,7 +249,7 @@ function updateTask(db: DatabaseManager, params: Record<string, unknown>): unkno
   return { success: true, task: toApiTask(updated) }
 }
 
-function createSubtask(db: DatabaseManager, params: Record<string, unknown>): unknown {
+function createSubtask(db: DatabaseManager, params: Record<string, unknown>, trustedScope?: TaskMcpScope): unknown {
   if (!params.parent_task_id) return { error: 'parent_task_id is required' }
   if (!params.title) return { error: 'title is required' }
   const parent = db.getTask(String(params.parent_task_id))
@@ -274,7 +286,7 @@ function createSubtask(db: DatabaseManager, params: Record<string, unknown>): un
       auto_complete_without_review: params.auto_complete_without_review === undefined
         ? parent.auto_complete_without_review
         : params.auto_complete_without_review === true
-    }, params)
+    }, params, trustedScope)
   } catch (error) {
     // db.createTask removes the row when its successor links are invalid.
     return { error: error instanceof Error ? error.message : String(error) }
@@ -324,7 +336,7 @@ async function waitForSubtasks(db: DatabaseManager, params: Record<string, unkno
   return result(true, readSubtasks())
 }
 
-function createTopLevelTask(db: DatabaseManager, params: Record<string, unknown>): unknown {
+function createTopLevelTask(db: DatabaseManager, params: Record<string, unknown>, trustedScope?: TaskMcpScope): unknown {
   if (!params.title) return { error: 'Title is required' }
   const parentId = (params.parent_task_id as string) || null
   const parent = parentId ? db.getTask(parentId) : undefined
@@ -356,7 +368,7 @@ function createTopLevelTask(db: DatabaseManager, params: Record<string, unknown>
     project_id: projectId,
     auto_start_agent: params.auto_start_agent === true,
     auto_complete_without_review: params.auto_complete_without_review === true
-  }, params)
+  }, params, trustedScope)
   if (!task) return { error: 'Failed to create task' }
   return { success: true, task: toApiTask(task) }
 }
@@ -447,13 +459,13 @@ function reportToCommander(db: DatabaseManager, params: Record<string, unknown>)
   }
 }
 
-export async function handleTaskRoute(db: DatabaseManager, route: string, params: Record<string, unknown>): Promise<unknown> {
+export async function handleTaskRoute(db: DatabaseManager, route: string, params: Record<string, unknown>, trustedScope?: TaskMcpScope): Promise<unknown> {
   switch (route) {
     case '/list_tasks':
       return listTasks(db, params)
 
     case '/create_task':
-      return createTopLevelTask(db, params)
+      return createTopLevelTask(db, params, trustedScope)
 
     case '/get_task': {
       const task = db.getTask(String(params.task_id))
@@ -480,7 +492,7 @@ export async function handleTaskRoute(db: DatabaseManager, route: string, params
       return db.getSubtasks(String(params.parent_task_id)).map(toApiTask)
 
     case '/create_subtask':
-      return createSubtask(db, params)
+      return createSubtask(db, params, trustedScope)
 
     case '/wait_for_subtasks':
       return waitForSubtasks(db, params)

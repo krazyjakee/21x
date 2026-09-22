@@ -16,6 +16,7 @@ import { registerExternalAuthHandlers } from './ipc/external-auth'
 import { registerVoiceHandlers } from './ipc/voice'
 import { registerChatHandlers } from './ipc/chat'
 import { registerCommanderHandlers } from './ipc/commander'
+import { registerChatImageHandlers } from './ipc/chat-images'
 import { registerConnectorHandlers } from './ipc/connectors'
 import { registerOverviewHandlers } from './ipc/overview'
 import { registerMergeGrantHandlers } from './ipc/merge-grants'
@@ -39,6 +40,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   registerVoiceHandlers(deps)
   registerChatHandlers(deps)
   registerCommanderHandlers(deps)
+  registerChatImageHandlers(deps)
   registerConnectorHandlers(deps)
   registerOverviewHandlers(deps)
 }

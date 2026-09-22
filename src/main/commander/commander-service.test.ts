@@ -159,8 +159,8 @@ describe('CommanderService turns', () => {
 
     // #137: the stored id of that message rides along, so a merge grant can bind to it.
     expect(seen).toEqual([
-      { sessionId: session.id, userMessage: 'propose a rename', userMessageId: first.message.id, trigger: 'user' },
-      { sessionId: session.id, userMessage: 'Confirm abc123', userMessageId: second.message.id, trigger: 'user' }
+      { sessionId: session.id, userMessage: 'propose a rename', userMessageId: first.message.id, authorizationMessageId: first.message.id, trigger: 'user' },
+      { sessionId: session.id, userMessage: 'Confirm abc123', userMessageId: second.message.id, authorizationMessageId: second.message.id, trigger: 'user' }
     ])
   })
 

@@ -1,3 +1,4 @@
+import type { TaskMcpScope } from './mcp-servers/task-management-core'
 /**
  * Lightweight HTTP API server for task-management tools.
  * Runs inside the Electron main process so it can use better-sqlite3.
@@ -97,7 +98,7 @@ export function startTaskApiServer(db: DatabaseManager): Promise<number> {
         // The MCP endpoint speaks JSON-RPC and sets its own headers, so it
         // must be served before anything below assumes a plain JSON route.
         if (route === TASK_MCP_PATH) {
-          await handleTaskMcpRequest(req, res, url, body, (mcpRoute, params) => handleRoute(db, mcpRoute, params))
+          await handleTaskMcpRequest(req, res, url, body, (mcpRoute, params, trustedScope) => handleRoute(db, mcpRoute, params, trustedScope))
           return
         }
 
@@ -155,9 +156,9 @@ export function stopTaskApiServer(): void {
 const ROUTE_HANDLERS = [handleTaskRoute, handleSkillRoute, handleSessionRoute, handleUiRoute, handleArtifactRoute, handleBrowserRoute, handleConcurrencyRoute]
 
 /** Exported so the routes can be tested without starting an HTTP server. */
-export async function handleRoute(db: DatabaseManager, route: string, params: Record<string, unknown>): Promise<unknown> {
+export async function handleRoute(db: DatabaseManager, route: string, params: Record<string, unknown>, trustedScope?: TaskMcpScope): Promise<unknown> {
   for (const handle of ROUTE_HANDLERS) {
-    const result = await handle(db, route, params)
+    const result = await handle(db, route, params, trustedScope)
     if (result !== undefined) return result
   }
   return { error: 'Unknown route' }
