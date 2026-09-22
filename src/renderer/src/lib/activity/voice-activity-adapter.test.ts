@@ -40,6 +40,21 @@ describe('deriveVoiceActivity', () => {
     expect(deriveVoiceActivity(snap({ passage, playbackSpeechId: 'p1', hasQueuedAudio: true, storeSpeaking: true }), captain).state).toBe('none')
   })
 
+  it('a commander:<session> passage is the Commander speaking, and nobody else', () => {
+    const passage = { speechId: 'p1', taskId: 'commander:s1', source: 'conversation' }
+    const s = snap({ passage, playbackSpeechId: 'p1', hasQueuedAudio: true, storeSpeaking: true })
+    expect(deriveVoiceActivity(s, { kind: 'commander' }).state).toBe('speaking')
+    expect(deriveVoiceActivity(s, { kind: 'commander', id: 's1' }).state).toBe('speaking')
+    expect(deriveVoiceActivity(s, { kind: 'commander', id: 's2' }).state).toBe('none')
+    expect(deriveVoiceActivity(s, captain).state).toBe('none')
+    expect(deriveVoiceActivity(s, { kind: 'task', id: 'commander:s1' }).state).toBe('none')
+  })
+
+  it('a Commander passage still being synthesised is not yet speech', () => {
+    const passage = { speechId: 'p1', taskId: 'commander:s1' }
+    expect(deriveVoiceActivity(snap({ passage, storeSpeaking: true }), { kind: 'commander', id: 's1' }).state).toBe('unknown')
+  })
+
   it('an unattributed passage is unknown for everyone, including the Commander', () => {
     const passage = { speechId: 'p1', source: 'read_last_answer' }
     const s = snap({ passage, playbackSpeechId: 'p1', hasQueuedAudio: true, storeSpeaking: true })

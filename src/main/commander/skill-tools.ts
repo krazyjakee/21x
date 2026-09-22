@@ -50,8 +50,8 @@ export interface SkillToolOptions {
   onSkillChanged?: (skillId: string, kind: SkillChangeKind) => void
 }
 
-/** The tools that write. Each acts on the first call and its description says so; the registry tests prove both. */
-export const MUTATING_COMMANDER_SKILL_TOOLS = ['create_skill', 'update_skill', 'remove_skill', 'promote_skill', 'move_skill'] as const
+/** The tools that write (listed in src/shared). Each acts on the first call and its description says so; the registry tests prove both. */
+export { MUTATING_COMMANDER_SKILL_TOOLS } from '../../shared/commander-tools'
 
 /** A skill by id, else by exact name (names are unique across scopes). */
 export function resolveSkill(db: DatabaseManager, locator: unknown): SkillRecord {

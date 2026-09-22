@@ -25,6 +25,7 @@
  */
 
 import type { CommanderEvent, CommanderMessage } from '../../shared/commander'
+import { commanderVoiceKey } from '../../shared/commander-call'
 import type { VoiceSpeechRequest } from '../../shared/voice-tts'
 import type { VoiceAnswerPart } from './voice-speech-service'
 
@@ -57,10 +58,8 @@ export interface CommanderVoiceOptions {
   cancelTimeoutMs?: number
 }
 
-/** The passage key for a session, in place of a task id. */
-export function commanderVoiceKey(sessionId: string): string {
-  return `commander:${sessionId}`
-}
+/** The passage key for a session, in place of a task id (shared with the renderer's call store). */
+export { commanderVoiceKey }
 
 /**
  * What is said for a report that no summary turn will speak for. The report

@@ -135,6 +135,11 @@ const STATE_TONES: Record<ActivityState, ActivityTone> = {
   unknown: 'muted'
 }
 
+/** The tone a state is drawn in, independent of entity. */
+export function activityStateTone(state: ActivityState): ActivityTone {
+  return STATE_TONES[state]
+}
+
 /** The plain word for a state, independent of entity. */
 export function activityStateWord(state: ActivityState): string {
   return STATE_WORDS[state]

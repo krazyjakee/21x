@@ -6,9 +6,8 @@ import type { ChatToolDefinition } from '../chat/tools'
 import { normalizeTitle, type CommanderStore } from './commander-store'
 import { buildContext, DEFAULT_CONTEXT_BUDGET, planFold, transcriptForSummary, type ContextBudget } from './context'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_SYSTEM_PROMPT, COMMANDER_TITLE_PROMPT, reportRelayNote, withSummary } from './prompts'
-import { MUTATING_COMMANDER_TOOLS } from './project-tools'
 import { guardReportAsks, MAX_REPORT_ASKS_WITHOUT_USER_TURN } from './report-tools'
-import { MUTATING_COMMANDER_SKILL_TOOLS } from './skill-tools'
+import { COMMANDER_ADMIN_TOOLS } from '../../shared/commander-tools'
 
 /**
  * Runs Commander chat turns over persisted sessions (docs/commander.md).
@@ -36,7 +35,7 @@ import { MUTATING_COMMANDER_SKILL_TOOLS } from './skill-tools'
  */
 
 /** Tools that change projects or skills: never offered to a turn the user did not start. */
-export const COMMANDER_ADMIN_TOOLS: ReadonlySet<string> = new Set<string>([...MUTATING_COMMANDER_TOOLS, ...MUTATING_COMMANDER_SKILL_TOOLS])
+export { COMMANDER_ADMIN_TOOLS }
 
 export interface CommanderToolContext {
   sessionId: string
