@@ -155,7 +155,14 @@ the logical item.
 
 Landing order is v20 (#151 runtime and delivery outbox), v21 (#152 priority,
 admission and fairness), then v22 (#148 reconciliation and durable starts).
-All three migrations are idempotent and fresh databases create the same final
+
+### Effective merge-grant attribution (#159, v23)
+
+Migration 23 adds `merge_grant_uses.authorization_context`. The effective
+grant remains the merge authority and owns the reservation/use; the policy
+level and verified Commander or project-chat provenance are retained as
+separate audit context across retries and reconciliation.
+All four migrations are idempotent and fresh databases create the same final
 tables directly.
 
 ## Adding a column to other tables
