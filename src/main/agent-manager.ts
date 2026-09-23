@@ -3046,7 +3046,13 @@ export class AgentManager extends EventEmitter {
     )
   }
 
-  async startTask(taskId: string, opts?: { preferSubtasks?: boolean; allowTriage?: boolean; resumeManualStop?: boolean }): Promise<{
+  /**
+   * `resumeManualStop` lets an explicit start reverse an earlier explicit stop.
+   * `explicitUserStart` is for a person's own start (desktop, mobile): it also
+   * lifts an automatic start that recovery stopped, e.g. after a failure with
+   * an unfinished tool call. The agent task API never sets it.
+   */
+  async startTask(taskId: string, opts?: { preferSubtasks?: boolean; allowTriage?: boolean; resumeManualStop?: boolean; explicitUserStart?: boolean }): Promise<{
     /** `queued`: over a concurrency limit; it starts on its own when a slot frees. */
     action: 'task_started' | 'subtask_started' | 'triage_started' | 'already_running' | 'queued' | 'no_action'
     sessionId?: string
@@ -3071,12 +3077,17 @@ export class AgentManager extends EventEmitter {
       }
     }
 
-    // An explicit UI/API start may reverse an earlier explicit stop. Automatic
-    // schedulers omit this flag, so a manual-stop exclusion remains terminal
-    // until the user actually asks to run the task again.
+    // An explicit UI/API start may reverse an earlier explicit stop, and a
+    // person's own start may also lift any stopped automatic start. Automatic
+    // schedulers omit both flags, so those exclusions remain terminal until
+    // the user actually asks to run the task again.
     const requestSelectedTask = (selected: TaskRecord, selectedAgentId = selected.agent_id!): Promise<SessionStartOutcome> => {
       const recovery = this.startQueue.get(selected.id)
-      if (opts?.resumeManualStop && recovery?.state === 'cancelled' && recovery.recoveryCause === 'manual_stop') {
+      const stopped = recovery?.state === 'cancelled' || recovery?.state === 'failed'
+      const lifted = opts?.explicitUserStart
+        ? stopped
+        : opts?.resumeManualStop && recovery?.state === 'cancelled' && recovery.recoveryCause === 'manual_stop'
+      if (lifted) {
         const queued = this.startQueue.enqueue({
           taskId: selected.id,
           projectId: taskProjectId(selected),

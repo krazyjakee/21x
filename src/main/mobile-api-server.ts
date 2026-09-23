@@ -904,7 +904,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
       if (notifyDesktop) notifyDesktop('task:updated', { taskId, updates: updated })
       afterTaskUpdated(db, agent, existing, prepared.data, updated)
     }
-    if (prepared.startAfterWrite) await startPreparedTask(agent, taskId)
+    if (prepared.startAfterWrite) await startPreparedTask(agent, taskId, true)
     return db.getTask(taskId) ?? updated
   }
 
@@ -917,7 +917,7 @@ async function routePost(pathname: string, params: Record<string, unknown>, req?
       // the scheduler (next subtask, triage, the task's own agent), which is
       // admission-controlled too.
       if (!db.getTask(taskId)) throw Object.assign(new Error('Task not found'), { status: 404 })
-      const result = await agent.startTask(taskId, { resumeManualStop: true })
+      const result = await agent.startTask(taskId, { resumeManualStop: true, explicitUserStart: true })
       return {
         sessionId: result.sessionId ?? '',
         action: result.action,

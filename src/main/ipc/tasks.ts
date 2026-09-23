@@ -48,7 +48,7 @@ export function registerTaskHandlers(deps: IpcDeps): void {
     if (updated && Object.keys(prepared.data).length > 0) {
       afterTaskUpdated(db, deps.agentManager, previous, prepared.data, updated)
     }
-    if (prepared.startAfterWrite) await startPreparedTask(deps.agentManager, id)
+    if (prepared.startAfterWrite) await startPreparedTask(deps.agentManager, id, true)
     return db.getTask(id)
   })
 

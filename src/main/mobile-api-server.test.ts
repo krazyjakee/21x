@@ -796,7 +796,7 @@ describe('mobile-api-server: POST /api/sessions/start admission', () => {
 
     const body = await (await post({ taskId: task.id })).json()
 
-    expect(startTask).toHaveBeenCalledWith(task.id, { resumeManualStop: true })
+    expect(startTask).toHaveBeenCalledWith(task.id, { resumeManualStop: true, explicitUserStart: true })
     expect(requestSession).not.toHaveBeenCalled()
     expect(body).toMatchObject({ sessionId: '', action: 'queued', startedTaskId: 'sub-1', queued: true, queuePosition: 1, queueReason: 'agent_limit' })
   })

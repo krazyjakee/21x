@@ -60,11 +60,13 @@ export async function prepareUserTaskUpdate(
   return { data: requested, startAfterWrite: false }
 }
 
+/** `byUser` marks a person's own status change (see AgentManager.startTask). */
 export async function startPreparedTask(
   agents: TaskLifecycleController,
-  taskId: string
+  taskId: string,
+  byUser = false
 ): Promise<Awaited<ReturnType<AgentManager['startTask']>>> {
-  const result = await agents.startTask(taskId, { resumeManualStop: true })
+  const result = await agents.startTask(taskId, { resumeManualStop: true, ...(byUser ? { explicitUserStart: true } : {}) })
   if (result.action === 'no_action') {
     throw new Error('No configured agent is available to start this task.')
   }
