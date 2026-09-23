@@ -45,6 +45,7 @@ Constants in `src/shared/activity.ts`:
 - **Every push is stamped.** `emitStatus` adds `epoch` (one main-process lifetime) and `seq` (increases with every push) to each `agent:status` push (`src/main/agent-manager/activity-observations.ts`). The renderer rejects a push whose sequence is not newer within the same epoch. A new epoch (main restarted) is accepted.
 - **Successful polls send heartbeats.** After an adapter poll where both `pollMessages` and `getStatus` succeed, a session that is `working` or `waiting_approval` publishes a heartbeat, at most once every 5 s: `{ sessionId, agentId, taskId, status, epoch, seq, heartbeat: true }`. Heartbeats go straight to the window with `guardedIpcSend`. They skip `sendToRenderer`, `lastSentStatus`, notifications, the voice bridge and mobile clients, so none of the transition side effects (Captain wakes, queue drains, notifications) can fire.
 - **Silence becomes unknown.** A failed or hung poll sends nothing, so the claim expires to `unknown` within 15 s. A long, quiet tool stays fresh because every successful poll renews it. Replaying the renderer's cached status never renews anything.
+- **A dead process renews nothing.** An adapter can answer `getStatus` from memory after its child has gone, so a successful read is not by itself proof of life. Adapters that own a subprocess implement `isSessionAlive(sessionId)`; when it returns `false` the poll publishes no heartbeat. The Codex app-server adapter also ends the turn when its child exits on its own (a signal such as SIGKILL, or code 0 mid-turn): a busy or approval-waiting session becomes `ERROR`, pending RPCs fail at once, and the manager reports the failure once and stops polling. A stop the adapter asked for is not reported as an error.
 - **Idle is not heartbeated.** A verified idle stays fresh for 15 s after the transition and then becomes `unknown`. The badges treat "unknown with no active history" as quiet (see below), so this does not clutter the UI.
 - **Separate observation store.** The renderer keeps these observations in `useSessionActivityStore` (`lib/activity/session-activity-adapter.ts`), apart from the agent store: that store's `initSession` and transcript hydration make up statuses that are not evidence. `agent-store` hands every push to `recordAgentStatus()` and then ignores heartbeats, so its existing behaviour is unchanged. `overview-store` also ignores heartbeats.
 
@@ -58,7 +59,7 @@ Constants in `src/shared/activity.ts`:
 
 ### Time and deadlines
 
-All evidence is stamped with monotonic time (`performance.now()`, via `activityNow()`). `lib/activity/activity-clock.ts` is the only deadline scheduler: indicators register the moment their state stops being true, one timeout is armed for the earliest moment, and a `tick` makes subscribers re-derive. When the window becomes visible again it ticks at once, so ages are checked before any motion resumes.
+All evidence is stamped with monotonic time (`performance.now()`, via `activityNow()`). `lib/activity/activity-clock.ts` is the only deadline scheduler: indicators register the moment their state stops being true, one timeout is armed for the earliest moment, and a `tick` makes subscribers re-derive. When the window becomes visible again it ticks at once, so ages are checked before any motion resumes. A deadline at or before the latest tick has already been observed as passed and is ignored, so a subscriber that re-registers an expired deadline cannot re-arm the clock; expired evidence settles with one tick and the clock then goes quiet.
 
 ## Voice
 
@@ -151,6 +152,7 @@ The Commander's `listening` state stays `unknown` until a caller supplies a prov
 
 - `src/shared/activity.test.ts`: vocabulary and runtime validation of the metadata.
 - `src/main/agent-manager/activity-observations.test.ts` and `src/main/agent-manager-activity.test.ts`: stamping, heartbeat rate limit, heartbeats only after a successful poll and only for active sessions, never through `sendToRenderer`.
+- `src/main/agent-manager-dead-process.test.ts`: the real Codex adapter and the real polling path — after SIGKILL (or a clean exit mid-turn) no working heartbeat is published through +20 s, the failure is reported once and polling stops; an adapter that reports its backend dead never renews freshness.
 - `src/renderer/src/lib/activity/*.test.ts`:
   - table tests for all eleven states;
   - 15 s boundaries, late/replayed pushes and epoch replacement;
@@ -158,4 +160,5 @@ The Commander's `listening` state stays `unknown` until a caller supplies a prov
   - reduced motion and motion ownership;
   - voice ownership, the announcer's coalescing, limits and deduplication, and the single deadline timer.
 - `src/renderer/src/components/activity/*.test.tsx`: accessible names, no live regions per badge, reduced motion, no `progressbar` semantics, theme contrast, agent-store heartbeat handling, `StatusBar` counts, and `TaskActivityBadge` expiring to unknown.
+- `src/renderer/src/components/activity/liveness-expiry.test.tsx`: board, header and announcer mounted together on fake timers, with no manual revalidation — Running turns into "Status unavailable · Last seen running" 15 s after the last heartbeat, the loss is announced once, the shared clock then stays quiet, hidden and reduced-motion windows do not move, and a fresh heartbeat restores Running.
 - `src/renderer/src/components/activity/task-surfaces.test.tsx`: the board and the task header bar — a lifecycle status alone never claims running, expired evidence reads as "Status unavailable · Last seen running", three running cards produce exactly one breathing badge and three worded ones, nothing moves under reduced motion, and a canvas-embedded header renders no second badge.
