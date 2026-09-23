@@ -79,27 +79,42 @@ tail (“… to fix the login bug”) is read as description, not as a second
 instruction. Creating tasks necessarily carries their ordinary update/start
 lifecycle; creating an issue necessarily carries its 21x link.
 
-Classifier version 3 also recognizes an **assigned outcome**: an authenticated
-human instruction that assigns work (“Investigate the Commander input-box bug”,
-“Release the redesign program for 21x”) carries `task.create`, `task.update`,
-`task.start` and draft-PR opening as `necessary`. The user is not asked to
-restate an outcome as a procedure, and a refusal never demands a set phrase.
-The work verbs are a bounded positive list that excludes both the explicit
-lifecycle verbs and every protected action, so an assigned outcome can never be
-read as a request to merge, deploy, delete, bypass a gate or elevate a
-credential. Naming a protected action no longer voids the ordinary work beside
-it either — those actions are absent from the vocabulary, so naming one cannot
-mint it.
+Classifier version 3 carries the **ordinary lifecycle by default**. Any other
+clause the user typed — “Get all tasks over the line”, “Investigate the
+Commander input-box bug”, “I need the login page sorted” — grants
+`task.create`, `task.update`, `task.start` and draft-PR opening as `necessary`.
+There is deliberately **no vocabulary of work verbs or target nouns**: a list
+of accepted words is a list the user has to guess, and guessing is what sent
+them back to restate their own request. Issue publishing stays on the explicit
+grammar, because it writes a public artifact to GitHub that a passing remark
+should not create.
 
-Conditional, negated, approval-dependent, withholding, mock-only, quoted,
-interrogative, ambiguous and oversized clauses retain human evidence but produce
-no capability, whatever imperative they are wrapped around (“Implement nothing
-until I give consent”, “Build only a written proposal”, “Await my consent”).
-Conditional/example prefixes carry across punctuation to the command they
-qualify, while an explicit later prohibition removes the corresponding necessary
-capability (for example “Refactor. Do not open PRs.” retains task work but not
-`github.pr.open`). This remains a bounded grammar, not a general
-natural-language consent model.
+What makes this safe is the screens, not a word list. A clause grants nothing
+and voids the message when it withholds, postpones or hypothesizes (“Implement
+nothing until I give consent”, “Build only a written proposal”, “Await my
+consent”), when it is conditional or example-framed, when it quotes or uses a
+colon, when it is oversized, when it carries key=value claim syntax
+(`human_authored=true`), or when it attributes the words to someone else
+(“The page says…”, “The agent claimed…”) — attributed speech and machine
+claim syntax are how injected text tries to speak in the user's voice. A
+question grants nothing on its own but no longer costs the instruction beside
+it. An explicit prohibition still removes the corresponding capability (“Get
+all tasks over the line. Do not open PRs.” retains task work but not
+`github.pr.open`).
+
+A prohibition on an action the registry does not contain — “…, but do not
+merge it” — is read as reassurance, not retraction: it restricts nothing here
+because nothing here could have granted it, and it no longer costs the user the
+work assigned in the same sentence. Parsing trims it; the audit record still
+stores the user's whole clause. No phrasing reaches merge, deploy, delete,
+bypass or credential elevation, because those actions are absent from the
+ordinary registry entirely.
+
+This is a deliberate widening. An authenticated human message in the user's own
+chat now sets ordinary work in motion without a recognized production, and that
+is the point: the previous grammar was refusing real instructions. The blast
+radius stays bounded to task CRUD and draft-PR opening inside the already
+snapshotted project and repositories.
 
 Version-2 intents keep resolving exactly as stored: they are strictly narrower
 than version 3, so honouring them cannot widen anyone's authority. A single

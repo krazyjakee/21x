@@ -110,6 +110,30 @@ const WITHHOLDING = /\b(?:nothing|only|solely|merely|purely|consent|go[ -]?ahead
 const INTERROGATIVE = /^(?:why|how|what|which|who|where|can|could|would|will|may|should|do|does|did|is|are|was|were)\b/i
 const UNSAFE_CONTEXT_PREFIX = /^(?:(?:only\s+)?if\b|unless\b|when\b|once\b|pending\b|subject\s+to\b|example(?:\s+instructions?)?\b|hypothetical\b|mock\b|wait\s+for\b)/i
 const AMBIGUOUS_CONTEXT = /\b(?:if|unless|provided|assuming|once|when|after|before|pending|subject\s+to|mock|dry[ -]?run|simulate|hypothetical|example|approval|confirmation)\b/i
+/**
+ * Content the user is reporting rather than saying. Attributed speech and
+ * key=value claim syntax are how injected text tries to speak with the user's
+ * voice, so a clause carrying either authorizes nothing.
+ */
+const ATTRIBUTED = /^[^.]{0,60}\b(?:says?|said|claims?|claimed|states?|stated|writes?|wrote|reports?\s+that|told\s+\S+)\s/i
+const MACHINE_CLAIM = /\b[a-z_][a-z0-9_]*\s*=\s*(?:true|false|\d|[a-z])/i
+/**
+ * A prohibition on an action the ordinary registry does not contain. It
+ * restricts nothing here because nothing here could have granted it, and it
+ * must not void the work the same message does assign: "…; do not merge" is a
+ * reassurance, not a retraction.
+ */
+const PROTECTED_PROHIBITION = /[,;]?\s*(?:but\s+|and\s+|then\s+|though\s+|however,?\s+)?(?:please\s+)?(?:do\s+not|don't|dont|never)\s+(?:merge|squash|rebase|deploy|promote|rollback|delete|destroy|purge|force[ -]?push|bypass|approve)\b.*$/i
+
+/**
+ * Removes a protected prohibition so the instruction beside it survives.
+ * Returns the remaining words, or an empty string when the clause was nothing
+ * but the prohibition. The audit record keeps the user's whole clause either
+ * way: this trims what is parsed, never what is stored.
+ */
+function withoutProtectedProhibition(clause: string): string {
+  return clause.replace(PROTECTED_PROHIBITION, '').trim()
+}
 const AUTHORIZATION_DENIAL = /^(?:please\s+)?(?:do\s+not|don't|dont|never|refrain\s+from)\s+(?:create|add|make|file|open|opening|publish|update|link|start|starting)\b/i
 
 /**
@@ -124,37 +148,6 @@ function safeAuthorizationContext(clause: string): boolean {
     /^come\s+up\s+with\s+(?:a\s+)?technical\s+solution\s+for\s+[a-z0-9][a-z0-9_.-]{0,80}\s+that\s+will\s+prevent\s+this\s+stalling\s+in\s+future$/i.test(clause) ||
     /^i\s+(?:do\s+not|don't|dont)\s+want\s+recommendations?$/i.test(clause) ||
     /^(?:the\s+)?(?:github|gh)\s+issues?\s+(?:will|would|should|may|might)\s+(?:probably\s+)?need\s+to\s+be\s+part\s+of\s+(?:the\s+)?(?:commander\s+ui\s+refactor|current\s+project|project\s+work)$/i.test(clause)
-}
-
-/**
- * Verbs that assign product work. The list is positive and bounded, and it
- * deliberately excludes both the explicit lifecycle verbs parsed below and
- * every protected action (merge, deploy, delete, bypass, credentials), so a
- * work directive can never be read as a request for one of those.
- */
-const WORK_VERB = new RegExp(
-  '^(?:please\\s+|now\\s+|then\\s+|also\\s+|and\\s+|go\\s+ahead\\s+and\\s+)*' +
-  '(?:address|apply|authori[sz]e|build|carry\\s+on\\s+with|clean\\s+up|code|complete|configure|continue' +
-  '|debug|design|develop|diagnose|disable|document|enable|finish|fix|handle|implement|improve|integrate' +
-  '|investigate|land|log|look\\s+into|migrate|proceed\\s+with|redesign|refactor|release|repair|replace' +
-  '|reproduce|resolve|restore|resume|retarget|rework|rewrite|ship|sort\\s+out|take\\s+care\\s+of|test' +
-  '|tidy\\s+up|triage|unblock|upgrade|wire\\s+up|work\\s+on|write)\\s+(\\S.*)$',
-  'i'
-)
-
-/**
- * An authenticated human instruction that assigns work. The outcome the user
- * asked for carries its own ordinary lifecycle: they need not also recite
- * "create and start a task" for the Captain to do the work they just
- * described. Safety comes from the screens applied before this — questions,
- * conditionals, quotations and withholding language never reach here — not
- * from a vocabulary of nouns the user is expected to guess.
- */
-function recognizedWorkDirective(clause: string): boolean {
-  const match = WORK_VERB.exec(clause)
-  if (!match) return false
-  const target = match[1].trim()
-  return target.length > 0 && target.split(/\s+/).length <= 60
 }
 
 function deniedCapabilities(clause: string): Set<AuthorizationAction> | null {
@@ -233,21 +226,33 @@ export function classifyCapabilityIntents(text: string, projectNames: string[] =
     if (safeAuthorizationContext(clause.text)) continue
     if (clause.separator.includes('?')) return []
 
-    if (AUTHORIZATION_DENIAL.test(clause.text)) {
-      const parsed = deniedCapabilities(clause.text)
+    // "…, but do not merge it" restricts nothing the ordinary registry holds,
+    // so it neither grants nor retracts. It must not cost the user the work
+    // they assigned in the same breath.
+    const body = withoutProtectedProhibition(clause.text)
+    if (!body) continue
+
+    if (AUTHORIZATION_DENIAL.test(body)) {
+      const parsed = deniedCapabilities(body)
       if (!parsed) return []
       for (const capability of parsed) denied.add(capability)
       continue
     }
 
-    if (clause.text.length > 1_000 || INTERROGATIVE.test(clause.text) || WITHHOLDING.test(clause.text) || /["“”`:]/.test(clause.text)) return []
+    if (body.length > 1_000 || WITHHOLDING.test(body) || ATTRIBUTED.test(body)
+      || MACHINE_CLAIM.test(body) || /["“”`:]/.test(body)) return []
 
-    const command = /^(?:please\s+)?(create|add|make|file|open|publish|update|link|start|prioriti[sz]e)\s+(.+)$/i.exec(clause.text)
+    // A question asks; it does not assign. It grants nothing on its own, and
+    // no longer costs the instruction standing beside it.
+    if (INTERROGATIVE.test(body)) continue
+
+    const command = /^(?:please\s+)?(create|add|make|file|open|publish|update|link|start|prioriti[sz]e)\s+(.+)$/i.exec(body)
     if (!command) {
-      // Not an explicit lifecycle command. An authenticated human instruction
-      // that assigns work carries the lifecycle that work needs, so the user
-      // is never asked to restate the outcome as a procedure.
-      if (!recognizedWorkDirective(clause.text)) return []
+      // Any other instruction the user typed. It carries the ordinary
+      // lifecycle the work needs — there is no vocabulary of verbs or nouns
+      // to guess, because guessing is what sent them back to restate it.
+      // Issue publishing stays on the explicit grammar below: it writes a
+      // public artifact to GitHub, which a passing remark should not do.
       addClassified(found, 'task.create', 'necessary', clause)
       addClassified(found, 'task.update', 'necessary', clause)
       addClassified(found, 'task.start', 'necessary', clause)
