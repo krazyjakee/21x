@@ -6,6 +6,7 @@ import type { Tool } from '@modelcontextprotocol/server'
 import { mergeGrantTools } from './merge-grant-tools'
 import { issueWriteTools } from './issue-write-tools'
 import { reviewAttestationTools } from './review-attestation-tools'
+import { prWriteTools } from './pr-write-tools'
 
 // Tools available in both modes
 const artifactTools: Tool[] = [
@@ -77,6 +78,9 @@ const artifactTools: Tool[] = [
 ]
 
 export const artifactToolNames = new Set(artifactTools.map((tool) => tool.name))
+
+/** Mutations available only to a signed ordinary task, nested or top-level. */
+export const taskAgentTools: Tool[] = [...prWriteTools]
 
 export const sharedTools: Tool[] = [
   ...artifactTools,
@@ -190,6 +194,11 @@ export const captainTools: Tool[] = [
         agent_id: { type: 'string', description: 'Assign to an agent by ID (use list_agents to find IDs)' },
         skill_ids: { type: 'array', items: { type: 'string' }, description: 'Skill IDs to assign (use list_skills to find IDs)' },
         repos: { type: 'array', items: { type: 'string' }, description: 'Repositories for this task, from list_repos. A repo that is not in the project is rejected.' },
+        permissions: {
+          type: 'array',
+          items: { type: 'string', enum: ['task.create', 'task.update', 'task.start', 'github.pr.open', 'github.issue.create', 'github.issue.update', 'github.issue.link'] },
+          description: 'Optional narrowing-only capability subset for this task. Omit to inherit the caller lineage; [] deliberately gives the child no ordinary write authority.'
+        },
         cron: { type: 'string', description: 'Cron expression for recurring tasks (e.g. "0 9 * * 1-5" for weekdays at 9am). Standard 5-field cron syntax: minute hour day-of-month month day-of-week.' },
         auto_start_agent: { type: 'boolean', description: 'Hand the task to its assigned agent automatically as soon as it is created or becomes due, instead of waiting for someone to press start. Set this on a recurring task so every occurrence runs by itself.' },
         auto_complete_without_review: { type: 'boolean', description: 'Complete the task automatically when its agent finishes, instead of leaving it for review. Needed for a task that must finish with no 21x window open.' },
@@ -299,6 +308,11 @@ export const captainTools: Tool[] = [
         agent_id: { type: 'string', description: 'Assign to an agent by ID' },
         skill_ids: { type: 'array', items: { type: 'string' }, description: 'Skill IDs to assign' },
         repos: { type: 'array', items: { type: 'string' }, description: 'Repositories from list_repos (inherits from parent if not set). A repo that is not in the project is rejected.' },
+        permissions: {
+          type: 'array',
+          items: { type: 'string', enum: ['task.create', 'task.update', 'task.start', 'github.pr.open', 'github.issue.create', 'github.issue.update', 'github.issue.link'] },
+          description: 'Optional narrowing-only capability subset for this subtask. Omit to inherit; [] deliberately denies ordinary writes in this branch.'
+        },
         output_fields: {
           type: 'array',
           description: 'Define expected output fields for this subtask. Each field describes a piece of structured data the agent should produce.',
@@ -901,6 +915,11 @@ export const subtaskTools: Tool[] = [
         agent_id: { type: 'string', description: 'Agent ID to assign (use list_agents to find available agents)' },
         skill_ids: { type: 'array', items: { type: 'string' }, description: 'Skill IDs to assign' },
         labels: { type: 'array', items: { type: 'string' }, description: 'Labels for the subtask' },
+        permissions: {
+          type: 'array',
+          items: { type: 'string', enum: ['task.create', 'task.update', 'task.start', 'github.pr.open', 'github.issue.create', 'github.issue.update', 'github.issue.link'] },
+          description: 'Optional narrowing-only capability subset. Omit to inherit; [] deliberately denies ordinary writes in this branch.'
+        },
         next_subtask_ids: { type: 'array', items: { type: 'string' }, description: 'Existing sibling subtask IDs to start automatically after this new subtask completes.' }
       },
       required: ['title']

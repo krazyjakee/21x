@@ -598,7 +598,7 @@ describe('escalation policy: open_pr and merge_pr', () => {
     expect(JSON.parse(read('p-ask'))).toEqual({ escalation: { merge_pr: 'ask_user', open_pr: 'tell_commander' } })
     expect(JSON.parse(read('p-none'))).toEqual({ limits: { paused: false } })
     expect(read('p-bad')).toBe('not json')
-    expect((raw.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('29')
+    expect((raw.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('30')
     const before = read('p-auto')
     splitPullRequestEscalation(raw)
     expect(read('p-auto')).toBe(before)

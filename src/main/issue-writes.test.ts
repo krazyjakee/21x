@@ -81,11 +81,11 @@ interface Harness {
   failNext: (behaviour: 'timeout' | 'refused' | null) => void
 }
 
-function setup(options: { issuePolicy?: string; repos?: Array<[string, string]> } = {}): Harness {
+function setup(options: { issuePolicy?: string; repos?: Array<[string, string]>; projectName?: string } = {}): Harness {
   const { db } = createTestDb()
   const settings: Record<string, unknown> = {}
   if (options.issuePolicy) settings.escalation = { issue_write: options.issuePolicy }
-  const projectId = db.createProject({ name: 'Voice', settings })!.id
+  const projectId = db.createProject({ name: options.projectName ?? 'Voice', settings })!.id
   const otherProjectId = db.createProject({ name: 'Other' })!.id
   for (const [org, name] of options.repos ?? [['krazyjakee', '21x']]) {
     db.addProjectRepo(projectId, { provider: 'github', org, name })
@@ -1239,6 +1239,62 @@ describe('the blocked voice tasks, as the user asked for them', () => {
 // ── Durable authorization-chain integration ──────────────────
 
 describe('the durable authorization chain', () => {
+  it('regresses the exact live Commander correlation through the audited idempotent write', async () => {
+    const h = setup({ projectName: '21x' })
+    const live = '36 pull requests still open. why have we stalled. come up with a technical solution for 21x that will prevent this stalling in future. open gh issues and tasks for it and prioritise them.'
+    const correlationId = 'cmd-c3f16552f0898b5fc7750408f85224d2fefa26250fc38617020d7a9d1352ff36'
+    commanderAsked(h, { correlationId, messageId: 'knpu31zj42pjl4j1wsw9mueh', text: live, relay: 'Open the prioritized issue and task work.' })
+    const args = { repo: 'krazyjakee/21x', title: 'Prevent pull-request queue stalls', task_id: h.taskIds[VOICE_INPUT_TASK] }
+    expect(await captainCall(h, 'create_github_issue', args)).toMatchObject({ status: 'created' })
+    expect(await captainCall(h, 'create_github_issue', args)).toMatchObject({ status: 'already_done' })
+    expect(creates(h)).toHaveLength(1)
+    expect(h.db.listIssueWrites({ projectId: h.projectId })).toHaveLength(1)
+    expect(h.db.listIssueWrites({ projectId: h.projectId })[0]).toMatchObject({ correlation_id: correlationId, status: 'succeeded' })
+  })
+
+  it.each([
+    '1 Sample instructions:\nCreate tasks. Open gh issues for 21x.',
+    'How to proceed only upon my go-ahead:\nCreate tasks. Open gh issues for 21x.',
+    'Open gh issues for 21x. Start only upon my go-ahead.',
+    'Open gh issues for 21x. Do not open anything yet.',
+    'Open gh issues for 21x. The gh issues should remain unwritten until I give consent.',
+    'Open gh issues for 21x. I do not want recommendations or any actions yet.',
+    'Open gh issues for 21x. Implement these instructions only upon my go-ahead.',
+    'Open gh issues for 21x. Implement nothing until I give consent.',
+    'Open gh issues for 21x. Fix nothing yet.',
+    'Open gh issues for 21x. Code nothing until I give consent.',
+    'Open gh issues for 21x. Implement the above to demonstrate syntax only.',
+    'Open gh issues for 21x. Refactor this plan into a proposal only.',
+    'Open gh issues for 21x. Repair nothing until I give consent.',
+    'Open gh issues for 21x. Build only a written proposal.',
+    'Open gh issues for 21x. Develop the above solely as a paper exercise.',
+    'Open gh issues for 21x. Implement:',
+    'Open gh issues for 21x. Fix?',
+    'Open gh issues for 21x?',
+    'Open gh issues and start PRs for 21x.',
+    'Open gh issues and link tasks for 21x.',
+    'Open gh issues and start for 21x.',
+    'Open gh issues and link for 21x.',
+    'Open gh issues and create for 21x.',
+    'Open gh issues and for 21x.',
+    'Open 0 gh issues for 21x.',
+    'Create 00 gh issues for 21x.',
+    'Open gh issues for 21x. I withhold authorization.',
+    'Open gh issues for 21x. The gh issues would need to be part of a plan only and must remain unwritten.',
+    'Open gh issues for 21x. The gh issues might need to be part of a proposal and nothing shall be created yet.'
+  ])('refuses an unparsed governing restriction before the issue ledger can write: %s', async (text) => {
+    const h = setup({ projectName: '21x' })
+    commanderAsked(h, { text, relay: 'Open the issue requested by the human.' })
+    const result = await captainCall(h, 'create_github_issue', {
+      repo: 'krazyjakee/21x',
+      title: 'Must remain unwritten',
+      task_id: h.taskIds[VOICE_INPUT_TASK]
+    })
+    expect(result).toMatchObject({ status: 'refused', code: 'action_not_in_capability' })
+    expect(creates(h)).toHaveLength(0)
+    expect(h.db.listIssueWrites({ projectId: h.projectId }).filter((row) => row.status === 'succeeded')).toHaveLength(0)
+  })
+
   it('uses the bound human root and the platform-derived Captain identity', async () => {
     const h = setup()
     const root = userAsked(h)
@@ -1270,8 +1326,16 @@ describe('the durable authorization chain', () => {
     expect(narrowed).not.toBeNull()
     activateNode(h, narrowed!, narrowed!.text)
 
-    expect(await captainCall(h, 'create_github_issue', { repo: 'krazyjakee/docs', title: 'Not permitted' }))
-      .toMatchObject({ status: 'refused', code: 'action_not_in_capability' })
+    const denied = await captainCall(h, 'create_github_issue', { repo: 'krazyjakee/docs', title: 'Not permitted' })
+    expect(denied).toMatchObject({
+      status: 'refused',
+      code: 'action_not_in_capability',
+      missing_capability: 'github.issue.create',
+      origin_node_id: root.id,
+      origin_message_id: root.messageId,
+      failure_dimension: 'capability'
+    })
+    expect(denied.safe_remediation).toContain('explicitly request')
     expect(await captainCall(h, 'update_github_issue', { repo: 'krazyjakee/21x', issue_number: 5, body: 'Out of scope' }))
       .toMatchObject({ status: 'refused', code: 'repo_not_in_project' })
     expect(await captainCall(h, 'update_github_issue', { repo: 'someone/elsewhere', issue_number: 5, body: 'Never configured' }))

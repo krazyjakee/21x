@@ -4,6 +4,8 @@
  * record, so a task blocked on the user looks exactly like one that is running.
  */
 import type { DatabaseManager } from '../database'
+import type { TaskMcpScope } from '../mcp-servers/task-management-core'
+import { authorizationRefusal, resolveTaskAuthorization } from '../authorization'
 import { describeQueueReason } from '../project-limits'
 import { agentController, notifyRenderer, transcriptProvider } from './state'
 
@@ -46,7 +48,34 @@ function projectOf(params: Record<string, unknown>): string | undefined {
   return typeof params.project_id === 'string' && params.project_id ? params.project_id : undefined
 }
 
-export async function handleSessionRoute(db: DatabaseManager, route: string, params: Record<string, unknown>): Promise<unknown> {
+/** Message delivery may recover or create a stopped session, so task-scoped
+ * callers must carry the same start capability as an explicit start call. */
+function authorizeMessageRecovery(
+  db: DatabaseManager,
+  scope: TaskMcpScope | undefined,
+  projectId: string
+): Record<string, unknown> | null {
+  if (!scope) return null
+  const caller = scope.taskId ?? scope.artifactTaskId ??
+    (scope.projectId === projectId ? db.getCoordinatorTask(projectId)?.id : null)
+  if (!caller) {
+    return {
+      error: 'The signed caller scope has no task authorization lineage.',
+      code: 'capability_refused',
+      requested_capability: 'task.start',
+      missing_capability: 'task.start',
+      origin_node_id: null,
+      origin_message_id: null,
+      effective_capabilities: [],
+      failure_dimension: 'task',
+      safe_remediation: 'Resume this work from an authenticated human project instruction; machine recovery text cannot grant authority.'
+    }
+  }
+  const decision = resolveTaskAuthorization(db, { taskId: caller, projectId, action: 'task.start' })
+  return decision.allowed ? null : authorizationRefusal(decision)
+}
+
+export async function handleSessionRoute(db: DatabaseManager, route: string, params: Record<string, unknown>, trustedScope?: TaskMcpScope): Promise<unknown> {
   switch (route) {
     case '/get_messages':
       return getMessages(db, params)
@@ -123,6 +152,8 @@ export async function handleSessionRoute(db: DatabaseManager, route: string, par
       const taskId = String(params.task_id)
       const target = db.getTask(taskId)
       if (!target) return { error: 'Task not found' }
+      const startRefused = authorizeMessageRecovery(db, trustedScope, target.project_id)
+      if (startRefused) return startRefused
 
       // Waking a stopped agent needs an agent to wake. Without one the send
       // fails deep inside with "Session not found:", which names neither the
@@ -182,7 +213,30 @@ export async function handleSessionRoute(db: DatabaseManager, route: string, par
     case '/start_task': {
       if (!params.task_id) return { error: 'task_id is required' }
       if (!agentController) return { error: 'Agent controller not available' }
-      const result = await agentController.startTask(String(params.task_id), {
+      const taskId = String(params.task_id)
+      const target = db.getTask(taskId)
+      if (!target) return { error: 'Task not found' }
+      if (trustedScope) {
+        const projectId = target.project_id
+        const caller = trustedScope.taskId ?? trustedScope.artifactTaskId ??
+          db.getCoordinatorTask(projectId)?.id ?? null
+        if (!caller) {
+          return {
+            error: 'The signed caller scope has no task authorization lineage.',
+            code: 'capability_refused',
+            requested_capability: 'task.start',
+            missing_capability: 'task.start',
+            origin_node_id: null,
+            origin_message_id: null,
+            effective_capabilities: [],
+            failure_dimension: 'task',
+            safe_remediation: 'Start this work from an authenticated human project instruction; machine recovery text cannot grant authority.'
+          }
+        }
+        const decision = resolveTaskAuthorization(db, { taskId: caller, projectId, action: 'task.start' })
+        if (!decision.allowed) return authorizationRefusal(decision)
+      }
+      const result = await agentController.startTask(taskId, {
         preferSubtasks: params.prefer_subtasks !== false,
         allowTriage: params.allow_triage !== false,
         resumeManualStop: true

@@ -2,12 +2,32 @@ import { createHash, randomUUID } from 'crypto'
 import type Database from 'better-sqlite3'
 
 export const AUTHORIZATION_TTL_MS = 24 * 60 * 60_000
-export const AUTHORIZATION_ACTIONS = ['task.create', 'task.update', 'github.issue.create', 'github.issue.update', 'github.issue.link'] as const
+export const AUTHORIZATION_CLASSIFIER_VERSION = 2
+export const AUTHORIZATION_ACTIONS = [
+  'task.create',
+  'task.update',
+  'task.start',
+  'github.pr.open',
+  'github.issue.create',
+  'github.issue.update',
+  'github.issue.link'
+] as const
 export type AuthorizationAction = typeof AUTHORIZATION_ACTIONS[number]
 type Source = { db: Database.Database }
 export type AuthorizationScope = { projectId: string; repos: string[] }
+export interface CapabilityIntent {
+  capability: AuthorizationAction
+  basis: 'explicit' | 'necessary'
+  classifierVersion: typeof AUTHORIZATION_CLASSIFIER_VERSION
+  sourceMessageId: string
+  clauseHash: string
+  sourceRange: { start: number; end: number }
+  scope: AuthorizationScope[]
+  createdAt: number
+  expiresAt: number
+}
 export interface AuthorizationNode {
-  version: 1
+  version: 1 | 2
   id: string
   rootId: string
   parentId: string | null
@@ -26,6 +46,8 @@ export interface AuthorizationNode {
   correlationId: string | null
   actions: AuthorizationAction[]
   scope: AuthorizationScope[]
+  /** Version 2 origins persist classified intent. Descendants narrow `actions`. */
+  intents?: CapabilityIntent[]
 }
 export interface AuthorizationEvidence {
   status: 'active' | 'missing' | 'invalid' | 'expired' | 'revoked' | 'out_of_scope'
@@ -33,45 +55,254 @@ export interface AuthorizationEvidence {
   origin: AuthorizationNode | null
   chain: AuthorizationNode[]
   effectivePermissions: AuthorizationAction[]
+  effectiveIntents: CapabilityIntent[]
   scope: AuthorizationScope[]
   revocations: Array<{ nodeId: string; at: number; reason: string }>
 }
+export type AuthorizationFailureDimension = 'chain' | 'task' | 'project' | 'capability' | 'repository' | null
+export interface AuthorizationDecision extends AuthorizationEvidence {
+  allowed: boolean
+  requestedCapability: string
+  missingCapability: string | null
+  originNodeId: string | null
+  originMessageId: string | null
+  failureDimension: AuthorizationFailureDimension
+  safeRemediation: string | null
+}
+
+/** Stable diagnostics shared by task, issue and PR execution boundaries. */
+export function authorizationRefusal(decision: AuthorizationDecision): Record<string, unknown> {
+  return {
+    error: decision.safeRemediation ?? `Authorization refused ${decision.requestedCapability}.`,
+    code: 'capability_refused',
+    authorization_status: decision.status,
+    requested_capability: decision.requestedCapability,
+    missing_capability: decision.missingCapability,
+    origin_node_id: decision.originNodeId,
+    origin_message_id: decision.originMessageId,
+    effective_capabilities: decision.effectivePermissions,
+    failure_dimension: decision.failureDimension,
+    safe_remediation: decision.safeRemediation
+  }
+}
 export const authorizationHash = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex')
 
-/** Conservative supported command grammar, not an LLM's interpretation of consent.
- * Ambiguous, conditional, quoted and negative instructions retain evidence but
- * grant no automatic capabilities. Protected actions are absent from the type.
+type ClassifiedIntent = Pick<CapabilityIntent, 'capability' | 'basis' | 'clauseHash' | 'sourceRange'>
+
+const UNSAFE_CLAUSE = /\b(?:if|unless|provided|assuming|once|when|after|before|pending|subject\s+to|mock|dry[ -]?run|simulate|hypothetical|example|do\s+not|don't|dont|shouldn't|shouldnt|without|refrain|ask\s+(?:me|the\s+user)\s+(?:first|before)|(?:my|user|human)\s+approval|approve[sd]?|confirmation|merge|squash|rebase|deploy|release|promote|rollback|delete|destroy|purge|force[ -]?push|bypass|credential|token|secret|password)\b/i
+const INTERROGATIVE = /^(?:why|how|what|which|who|where|can|could|would|will|may|should|do|does|did|is|are|was|were)\b/i
+const UNSAFE_CONTEXT_PREFIX = /^(?:(?:only\s+)?if\b|unless\b|when\b|once\b|pending\b|subject\s+to\b|example(?:\s+instructions?)?\b|hypothetical\b|mock\b|wait\s+for\b)/i
+const AMBIGUOUS_CONTEXT = /\b(?:if|unless|provided|assuming|once|when|after|before|pending|subject\s+to|mock|dry[ -]?run|simulate|hypothetical|example|approval|confirmation)\b/i
+const AUTHORIZATION_DENIAL = /^(?:please\s+)?(?:do\s+not|don't|dont|never|refrain\s+from)\s+(?:create|add|make|file|open|opening|publish|update|link|start|starting)\b/i
+
+/**
+ * Non-authorizing clauses allowed beside an explicit command. Everything else
+ * makes the complete message ambiguous and therefore non-authorizing. This is
+ * a positive grammar: unknown headings/restrictions never disappear merely
+ * because a later clause happens to look imperative.
  */
-export function requestedActions(text: string, projectNames: string[] = []): AuthorizationAction[] {
-  // Supported human command grammar. Consume the entire instruction: a
-  // purpose/condition suffix must never become permission by keyword matching.
-  let rest = text.trim()
-    .replace(/^I (?:don't|do not) want (?:recommendations|suggestions|advice)\.\s*/i, '')
-    .replace(/\.\s*The GitHub issues will probably need to be part of the commander UI refactor\.?$/i, '')
-    .replace(/^please\s+/i, '')
-  let verb = ''
-  const actions = new Set<AuthorizationAction>()
-  for (let count = 0; count < 8; count++) {
-    const command = /^(create|add|make|file|open|publish|update|link)\s+/i.exec(rest)
-    if (command) { verb = command[1].toLowerCase(); rest = rest.slice(command[0].length) }
-    else if (!verb) return []
-    for (const name of projectNames) if (rest.toLowerCase().startsWith(name.toLowerCase() + ' ')) rest = rest.slice(name.length + 1)
-    const object = /^(?:(?:the|a|an|two|both|staged|\d+)\s+)*(tasks?|github\s+issues?)\b/i.exec(rest)
-    if (!object) return []
-    const issue = /^github/i.test(object[1])
-    if (verb === 'update') actions.add(issue ? 'github.issue.update' : 'task.update')
-    else if (verb === 'link') { if (issue) actions.add('github.issue.link') }
-    else if (issue) { actions.add('github.issue.create'); actions.add('github.issue.link') }
-    else actions.add('task.create')
-    rest = rest.slice(object[0].length).replace(/^\s+for this\b/i, '')
-    const and = /^\s+(?:and|plus|&)\s+/i.exec(rest)
-    if (!and) break
-    rest = rest.slice(and[0].length)
+function safeAuthorizationContext(clause: string): boolean {
+  return /^\d+\s+(?:pull\s+requests?|prs?)\s+(?:are\s+)?(?:still\s+)?open$/i.test(clause) ||
+    /^why\s+have\s+we\s+stalled$/i.test(clause) ||
+    /^come\s+up\s+with\s+(?:a\s+)?technical\s+solution\s+for\s+[a-z0-9][a-z0-9_.-]{0,80}\s+that\s+will\s+prevent\s+this\s+stalling\s+in\s+future$/i.test(clause) ||
+    /^i\s+(?:do\s+not|don't|dont)\s+want\s+recommendations?$/i.test(clause) ||
+    /^(?:the\s+)?(?:github|gh)\s+issues?\s+(?:will|would|should|may|might)\s+(?:probably\s+)?need\s+to\s+be\s+part\s+of\s+(?:the\s+)?(?:commander\s+ui\s+refactor|current\s+project|project\s+work)$/i.test(clause)
+}
+
+// Coding intent deliberately accepts a small positive vocabulary rather than
+// treating arbitrary text after a coding verb as an executable assignment.
+// Unknown task names can still be created, but cannot mint PR/start authority
+// until the human uses an unambiguous recognized production.
+const CODING_TARGET_WORDS = new Set([
+  'api', 'authorization', 'boundary', 'bug', 'capability', 'captain', 'change', 'changes',
+  'code', 'commander', 'contract', 'controller', 'database', 'delegated', 'feature',
+  'fix', 'flow', 'gate', 'github', 'implementation', 'integration', 'intent', 'intent-to-capability', 'issue',
+  'issues', 'lifecycle', 'lineage', 'login', 'merge', 'migration', 'module', 'nonce',
+  'page', 'path', 'pr', 'project', 'provenance', 'pull-request', 'readiness', 'refactor',
+  'repair', 'repo', 'repository', 'review', 'scheduler', 'schema', 'security', 'service',
+  'session', 'system', 'task', 'tests', 'tool', 'unified', 'work'
+])
+
+function recognizedCodingAssignment(clause: string, projectNames: string[]): boolean {
+  const match = /^(?:please\s+)?(?:implement|fix|repair|build|develop|code|refactor)\s+(.+)$/i.exec(clause)
+  if (!match) return false
+  const target = match[1].toLowerCase().replace(/\s+from\s+the\s+boundary\s+audit$/, '')
+  const words = target.split(/\s+/)
+  if (words.length === 0 || words.length > 8) return false
+  if (['a', 'an', 'the', 'this', 'that', 'our'].includes(words[0])) words.shift()
+  const projectWords = new Set(projectNames.map((name) => name.toLowerCase()))
+  return words.length > 0 && words.every((word) => CODING_TARGET_WORDS.has(word) || projectWords.has(word))
+}
+
+function deniedCapabilities(clause: string): Set<AuthorizationAction> | null {
+  const match = /^(?:please\s+)?(?:do\s+not|don't|dont|never|refrain\s+from)\s+(create|add|make|file|open|opening|publish|update|link|start|starting)\s+(?:(?:the|a|an|any|all|draft)\s+)*(tasks?|(?:github|gh)\s+issues?|(?:(?:github|gh)\s+)?(?:prs?|pull\s+requests?))(?:\s+(?:yet|now))?$/i.exec(clause)
+  if (!match) return null
+  const denied = new Set<AuthorizationAction>()
+  const verb = match[1].replace(/ing$/, '').toLowerCase()
+  const target = match[2].toLowerCase()
+  if (/\b(?:pr|pull\s+request)/.test(target)) denied.add('github.pr.open')
+  else if (/\bissues?\b/.test(target)) {
+    if (verb === 'update') denied.add('github.issue.update')
+    else if (verb === 'link') denied.add('github.issue.link')
+    else {
+      denied.add('github.issue.create')
+      denied.add('github.issue.link')
+    }
+  } else if (verb === 'update') denied.add('task.update')
+  else if (verb === 'start') denied.add('task.start')
+  else denied.add('task.create')
+  return denied
+}
+
+type AuthorizationClause = { text: string; start: number; end: number; separator: string }
+
+function clauses(text: string): AuthorizationClause[] {
+  const result: AuthorizationClause[] = []
+  let start = 0
+  const boundary = /[.!?;\n]+/g
+  for (;;) {
+    const match = boundary.exec(text)
+    const end = match?.index ?? text.length
+    const raw = text.slice(start, end)
+    const left = raw.search(/\S/)
+    if (left >= 0) {
+      const right = raw.length - raw.trimEnd().length
+      result.push({ text: raw.trim(), start: start + left, end: end - right, separator: match?.[0] ?? '' })
+    }
+    if (!match) break
+    start = boundary.lastIndex
   }
-  rest = rest.trim().replace(/[.!]$/, '')
-  if (rest && !projectNames.some(name => rest.toLowerCase() === `for ${name.toLowerCase()}` || rest.toLowerCase() === `in ${name.toLowerCase()}`)
-    && !/^for tasks [a-z0-9]{24} and [a-z0-9]{24}$/.test(rest)) return []
-  return [...actions]
+  return result
+}
+
+function addClassified(
+  found: Map<AuthorizationAction, ClassifiedIntent>,
+  capability: AuthorizationAction,
+  basis: 'explicit' | 'necessary',
+  clause: AuthorizationClause
+): void {
+  const existing = found.get(capability)
+  if (existing?.basis === 'explicit' || (existing && basis === 'necessary')) return
+  found.set(capability, {
+    capability,
+    basis,
+    clauseHash: authorizationHash(clause.text),
+    sourceRange: { start: clause.start, end: clause.end }
+  })
+}
+
+/**
+ * Bounded, clause-aware trusted-ingress classifier. It is deliberately not a
+ * general natural-language permission model: unsafe, conditional, quoted and
+ * interrogative clauses grant nothing, and protected actions are not in the
+ * ordinary capability vocabulary at all.
+ */
+export function classifyCapabilityIntents(text: string, projectNames: string[] = []): ClassifiedIntent[] {
+  const found = new Map<AuthorizationAction, ClassifiedIntent>()
+  const denied = new Set<AuthorizationAction>()
+  const parsedClauses = clauses(text)
+  // A conditional/example heading can govern every following imperative, and
+  // a trailing condition can qualify commands that came before it. This small
+  // grammar cannot safely determine that scope, so the message grants nothing.
+  const ambiguousContext = parsedClauses.some((clause) => UNSAFE_CONTEXT_PREFIX.test(clause.text)) || AMBIGUOUS_CONTEXT.test(text)
+  if (ambiguousContext) return []
+  for (const clause of parsedClauses) {
+    if (safeAuthorizationContext(clause.text)) continue
+    if (clause.separator.includes('?')) return []
+
+    if (AUTHORIZATION_DENIAL.test(clause.text)) {
+      const parsed = deniedCapabilities(clause.text)
+      if (!parsed) return []
+      for (const capability of parsed) denied.add(capability)
+      continue
+    }
+
+    if (clause.text.length > 1_000 || INTERROGATIVE.test(clause.text) || UNSAFE_CLAUSE.test(clause.text) || /["“”`:]/.test(clause.text)) return []
+
+    if (recognizedCodingAssignment(clause.text, projectNames)) {
+      addClassified(found, 'task.start', 'necessary', clause)
+      addClassified(found, 'task.update', 'necessary', clause)
+      addClassified(found, 'github.pr.open', 'necessary', clause)
+      continue
+    }
+
+    const command = /^(?:please\s+)?(create|add|make|file|open|publish|update|link|start|prioriti[sz]e)\s+(.+)$/i.exec(clause.text)
+    if (!command) return []
+    let verb = command[1].toLowerCase()
+    let rest = command[2].trim()
+    for (const name of projectNames) {
+      if (rest.toLowerCase().startsWith(name.toLowerCase() + ' ')) rest = rest.slice(name.length).trimStart()
+    }
+
+    const explicit = new Set<AuthorizationAction>()
+    for (let count = 0; count < 8; count++) {
+      const repeatedVerb = /^(create|add|make|file|open|publish|update|link|start|prioriti[sz]e)\s+/i.exec(rest)
+      if (repeatedVerb) {
+        verb = repeatedVerb[1].toLowerCase()
+        rest = rest.slice(repeatedVerb[0].length)
+      }
+      const numericDeterminer = /^(\d+)\s+/.exec(rest)
+      if (numericDeterminer && Number(numericDeterminer[1]) === 0) return []
+      const object = /^(?:(?:the|a|an|one|two|both|staged|draft|\d+)\s+)*(tasks?|(?:github|gh)\s+issues?|prs?|pull\s+requests?)\b/i.exec(rest)
+      if (!object) return []
+      const target = object[1].toLowerCase()
+      const issue = /^(?:github|gh)/.test(target)
+      const pr = /^(?:pr|pull)/.test(target)
+      let accepted = false
+      if (pr) {
+        if (verb === 'open' || verb === 'create' || verb === 'publish') {
+          explicit.add('github.pr.open')
+          accepted = true
+        }
+      } else if (issue) {
+        if (verb === 'update') { explicit.add('github.issue.update'); accepted = true }
+        else if (verb === 'link') { explicit.add('github.issue.link'); accepted = true }
+        else if (['create', 'add', 'make', 'file', 'open', 'publish'].includes(verb)) {
+          explicit.add('github.issue.create')
+          accepted = true
+        }
+      } else {
+        if (verb === 'update' || verb.startsWith('prioriti')) { explicit.add('task.update'); accepted = true }
+        else if (verb === 'start') { explicit.add('task.start'); accepted = true }
+        else if (['create', 'add', 'make', 'file', 'open', 'publish'].includes(verb)) {
+          explicit.add('task.create')
+          accepted = true
+        }
+      }
+      if (!accepted) return []
+      rest = rest.slice(object[0].length).trimStart().replace(/^for\s+(?:this|it)\b/i, '').trimStart()
+      const conjunction = /^(?:and|plus|&)\s+/i.exec(rest)
+      if (!conjunction) break
+      rest = rest.slice(conjunction[0].length)
+      // "and prioritise them" is an explicit lifecycle update, not another object.
+      const prioritize = /^prioriti[sz]e\s+(?:them|the\s+tasks?)\b/i.exec(rest)
+      if (prioritize) {
+        explicit.add('task.update')
+        rest = rest.slice(prioritize[0].length).trimStart()
+        break
+      }
+    }
+
+    const tail = rest.replace(/[.!]$/, '').trim()
+    const namedScope = projectNames.some((name) => new RegExp(`^(?:for|in)\\s+${name.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}$`, 'i').test(tail))
+    const safeTail = !tail || namedScope || /^(?:for|in)\s+(?:this|it|the\s+project)\b(?:\s+and\s+prioriti[sz]e\s+(?:them|the\s+tasks?))?$/i.test(tail)
+      || /^for tasks [a-z0-9]{24} and [a-z0-9]{24}$/i.test(tail)
+    if (!safeTail || explicit.size === 0) return []
+
+    for (const capability of explicit) addClassified(found, capability, 'explicit', clause)
+    if (explicit.has('github.issue.create')) addClassified(found, 'github.issue.link', 'necessary', clause)
+    if (explicit.has('task.create')) {
+      addClassified(found, 'task.update', explicit.has('task.update') ? 'explicit' : 'necessary', clause)
+      addClassified(found, 'task.start', 'necessary', clause)
+    }
+  }
+  for (const capability of denied) found.delete(capability)
+  return AUTHORIZATION_ACTIONS.flatMap((capability) => found.has(capability) ? [found.get(capability)!] : [])
+}
+
+/** Compatibility view for existing callers and version-1 records. */
+export function requestedActions(text: string, projectNames: string[] = []): AuthorizationAction[] {
+  return classifyCapabilityIntents(text, projectNames).map((intent) => intent.capability)
 }
 
 function configuredScope(source: Source, projectId: string): AuthorizationScope | null {
@@ -89,8 +320,14 @@ function put(source: Source, node: AuthorizationNode): AuthorizationNode {
 function read(source: Source, id: string): { node: AuthorizationNode; hash: string } | null {
   const row = source.db.prepare('SELECT body, hash FROM authorization_nodes WHERE id = ?').get(id) as { body: string; hash: string } | undefined
   if (!row || authorizationHash(row.body) !== row.hash) return null
-  const node = JSON.parse(row.body) as AuthorizationNode
-  return node.id === id && node.textHash === authorizationHash(node.text) ? { node, hash: row.hash } : null
+  try {
+    const node = JSON.parse(row.body) as AuthorizationNode
+    if ((node.version !== 1 && node.version !== 2) || node.id !== id || node.textHash !== authorizationHash(node.text)) return null
+    if (!Array.isArray(node.actions) || node.actions.some((action) => !AUTHORIZATION_ACTIONS.includes(action))) return null
+    return { node, hash: row.hash }
+  } catch {
+    return null
+  }
 }
 
 /** MAIN PROCESS INGRESS ONLY. No tool/HTTP route accepts these fields.
@@ -138,19 +375,29 @@ export function recordHumanAuthorization(source: Source, input: {
   // An explicitly named repository further narrows the configured snapshot.
   const namedRepos = input.text.match(/\b[a-z0-9_.-]+\/[a-z0-9_.-]+\b/gi)?.map(r => r.toLowerCase())
   if (namedRepos?.length) for (const s of scope) s.repos = s.repos.filter(r => namedRepos.includes(r))
+  const expiresAt = input.at + AUTHORIZATION_TTL_MS
+  const classified = classifyCapabilityIntents(input.text, projects.filter(p => projectIds.includes(p.id)).map(p => p.name))
+  const intents: CapabilityIntent[] = classified.map((intent) => ({
+    ...intent,
+    classifierVersion: AUTHORIZATION_CLASSIFIER_VERSION,
+    sourceMessageId: input.messageId,
+    scope: scope.map((item) => ({ projectId: item.projectId, repos: [...item.repos] })),
+    createdAt: input.at,
+    expiresAt
+  }))
   const id = randomUUID()
   return put(source, {
-    version: 1, id, rootId: id, parentId: null, parentHash: null,
+    version: 2, id, rootId: id, parentId: null, parentHash: null,
     messageId: input.messageId, text: input.text, textHash: authorizationHash(input.text),
-    at: input.at, expiresAt: input.at + AUTHORIZATION_TTL_MS, author: 'human', source: input.source,
+    at: input.at, expiresAt, author: 'human', source: input.source,
     sessionId: input.sessionId ?? null, taskId: input.taskId ?? null, correlationId: null,
     inputMode: input.inputMode ?? 'typed', scopeOriginMessageId,
-    actions: requestedActions(input.text, projects.filter(p => projectIds.includes(p.id)).map(p => p.name)), scope
+    actions: intents.map((intent) => intent.capability), scope, intents
   })
 }
 
 export function resolveAuthorization(source: Source, nodeId: string | null, now = Date.now()): AuthorizationEvidence {
-  const result: AuthorizationEvidence = { status: 'missing', nodeId, origin: null, chain: [], effectivePermissions: [], scope: [], revocations: [] }
+  const result: AuthorizationEvidence = { status: 'missing', nodeId, origin: null, chain: [], effectivePermissions: [], effectiveIntents: [], scope: [], revocations: [] }
   if (!nodeId) return result
   let current = nodeId
   let child: AuthorizationNode | undefined
@@ -171,13 +418,33 @@ export function resolveAuthorization(source: Source, nodeId: string | null, now 
   }
   const origin = result.chain[0]
   if (origin.author !== 'human' || origin.rootId !== origin.id || origin.parentHash !== null) return { ...result, status: 'invalid' }
+  if (origin.version === 2) {
+    const intents = origin.intents
+    const actions = intents?.map((intent) => intent.capability)
+    if (!intents || JSON.stringify(actions) !== JSON.stringify(origin.actions) || intents.some((intent) => {
+      const clause = origin.text.slice(intent.sourceRange.start, intent.sourceRange.end)
+      return intent.classifierVersion !== AUTHORIZATION_CLASSIFIER_VERSION ||
+        intent.sourceMessageId !== origin.messageId ||
+        intent.createdAt !== origin.at ||
+        intent.expiresAt !== origin.expiresAt ||
+        !Number.isInteger(intent.sourceRange.start) || !Number.isInteger(intent.sourceRange.end) ||
+        intent.sourceRange.start < 0 || intent.sourceRange.end <= intent.sourceRange.start ||
+        intent.sourceRange.end > origin.text.length ||
+        intent.clauseHash !== authorizationHash(clause) ||
+        JSON.stringify(intent.scope) !== JSON.stringify(origin.scope)
+    })) return { ...result, status: 'invalid' }
+  }
   if (result.status === 'expired' || result.status === 'revoked') return { ...result, origin }
   const leaf = result.chain[result.chain.length - 1]
   const scope = leaf.scope.flatMap(s => {
     const live = configuredScope(source, s.projectId)
     return live ? [{ projectId: s.projectId, repos: s.repos.filter(r => live.repos.includes(r)) }] : []
   })
-  return { ...result, status: 'active', origin, scope, effectivePermissions: scope.length ? leaf.actions.filter(a => AUTHORIZATION_ACTIONS.includes(a)) : [] }
+  const effectivePermissions = scope.length ? leaf.actions.filter(a => AUTHORIZATION_ACTIONS.includes(a)) : []
+  const effectiveIntents = origin.version === 2
+    ? (origin.intents ?? []).filter((intent) => effectivePermissions.includes(intent.capability))
+    : []
+  return { ...result, status: 'active', origin, scope, effectivePermissions, effectiveIntents }
 }
 
 /** Delegate from a platform record, never from claims embedded in relay text. */
@@ -200,7 +467,7 @@ export function delegateAuthorization(source: Source, input: {
     }
   }
   return put(source, {
-    version: 1, id: randomUUID(), rootId: parent.rootId, parentId: parent.id,
+    version: parent.version, id: randomUUID(), rootId: parent.rootId, parentId: parent.id,
     parentHash: read(source, parent.id)!.hash, messageId: parent.messageId,
     text: input.text, textHash: authorizationHash(input.text), at: now, expiresAt: parent.expiresAt,
     author: input.author, source: 'delegation', sessionId: input.sessionId ?? null,
@@ -252,7 +519,13 @@ export function prepareAuthorizationDispatch(source: Source, input: { key: strin
       if (node?.source === 'project-chat' && node.taskId === input.taskId && node.textHash === hash) nodeId = node.id
     }
     const seq = Number(source.db.prepare('INSERT INTO authorization_dispatches (delivery_key, task_id, node_id, payload_hash) VALUES (?, ?, ?, ?)').run(input.key, input.taskId, nodeId, hash).lastInsertRowid)
-    source.db.prepare('INSERT INTO authorization_task_bindings VALUES (?, ?, NULL) ON CONFLICT(task_id) DO UPDATE SET dispatch_seq = excluded.dispatch_seq, node_id = NULL').run(input.taskId, seq)
+    source.db.prepare(`
+      INSERT INTO authorization_task_bindings (task_id, dispatch_seq, node_id, assignment_node_id, supersession_node_id)
+      VALUES (?, ?, NULL, NULL, NULL)
+      ON CONFLICT(task_id) DO UPDATE SET
+        dispatch_seq = excluded.dispatch_seq,
+        node_id = NULL
+    `).run(input.taskId, seq)
     return seq
   })()
 }
@@ -269,9 +542,11 @@ export function prepareAuthorizationRetry(source: Source, input: { key: string; 
   return source.db.transaction(() => {
     const seq = prepareAuthorizationDispatch(source, input)
     source.db.prepare(`
-      INSERT INTO authorization_task_bindings (task_id, dispatch_seq, node_id)
-      VALUES (?, ?, NULL)
-      ON CONFLICT(task_id) DO UPDATE SET dispatch_seq = excluded.dispatch_seq, node_id = NULL
+      INSERT INTO authorization_task_bindings (task_id, dispatch_seq, node_id, supersession_node_id)
+      VALUES (?, ?, NULL, NULL)
+      ON CONFLICT(task_id) DO UPDATE SET
+        dispatch_seq = excluded.dispatch_seq,
+        node_id = NULL
     `).run(input.taskId, seq)
     return seq
   })()
@@ -283,37 +558,94 @@ export function activateAuthorizationDispatch(source: Source, seq: number): void
   if (row.node_id && resolveAuthorization(source, row.node_id).status !== 'active') throw new Error('Authorization expired or was revoked before dispatch')
   const binding = source.db.prepare('SELECT dispatch_seq FROM authorization_task_bindings WHERE task_id = ?').get(row.task_id) as { dispatch_seq: number } | undefined
   if (binding?.dispatch_seq !== seq) throw new Error('Stale authorization dispatch')
-  source.db.prepare('UPDATE authorization_task_bindings SET node_id = ? WHERE task_id = ? AND dispatch_seq = ?').run(row.node_id, row.task_id, seq)
+  if (row.node_id) {
+    source.db.prepare(`
+      UPDATE authorization_task_bindings SET
+        node_id = ?,
+        supersession_node_id = CASE
+          WHEN assignment_node_id IS NOT NULL AND ? IS NOT assignment_node_id THEN ?
+          ELSE supersession_node_id
+        END
+      WHERE task_id = ? AND dispatch_seq = ?
+    `).run(row.node_id, row.node_id, row.node_id, row.task_id, seq)
+  }
 }
 export function failAuthorizationDispatch(source: Source, seq: number): void {
+  // Clearing an active/pending delivery never clears the last accepted human
+  // supersession. Recovery may become inactive, but cannot widen to assignment.
   source.db.prepare('UPDATE authorization_task_bindings SET node_id = NULL WHERE dispatch_seq = ?').run(seq)
 }
 
 export function taskAuthorization(source: Source, taskId: string, now = Date.now()): AuthorizationEvidence {
-  const row = source.db.prepare('SELECT node_id FROM authorization_task_bindings WHERE task_id = ?').get(taskId) as { node_id: string | null } | undefined
-  return resolveAuthorization(source, row?.node_id ?? null, now)
+  const row = source.db.prepare(`
+    SELECT b.node_id, b.assignment_node_id, b.supersession_node_id, d.node_id AS pending_node_id
+    FROM authorization_task_bindings b
+    JOIN authorization_dispatches d ON d.seq = b.dispatch_seq
+    WHERE b.task_id = ?
+  `).get(taskId) as { node_id: string | null; assignment_node_id: string | null; supersession_node_id: string | null; pending_node_id: string | null } | undefined
+  // An evidence-bearing turn stays inactive until the adapter accepts this
+  // exact generation. Machine generations keep the latest accepted human node.
+  if (row?.pending_node_id && row.node_id !== row.pending_node_id) return resolveAuthorization(source, null, now)
+  return resolveAuthorization(source, row?.node_id ?? row?.supersession_node_id ?? row?.assignment_node_id ?? null, now)
 }
 
 /** Policy integration: taskId must come from the server's caller scope. */
-export function resolveTaskAuthorization(source: Source, input: { taskId: string; projectId: string; action: string; repo?: string }, now = Date.now()): AuthorizationEvidence & { allowed: boolean } {
+export function resolveTaskAuthorization(source: Source, input: { taskId: string; projectId: string; action: string; repo?: string }, now = Date.now()): AuthorizationDecision {
   const evidence = taskAuthorization(source, input.taskId, now)
   const task = source.db.prepare('SELECT project_id FROM tasks WHERE id = ?').get(input.taskId) as { project_id: string } | undefined
   const scoped = evidence.scope.find(s => s.projectId === input.projectId)
-  const allowed = evidence.status === 'active' && task?.project_id === input.projectId && !!scoped && evidence.effectivePermissions.includes(input.action as AuthorizationAction) && (!input.action.startsWith('github.') || (!!input.repo && scoped.repos.includes(input.repo.toLowerCase())))
-  return { ...evidence, allowed, status: evidence.status === 'active' && !allowed ? 'out_of_scope' : evidence.status }
+  const knownCapability = AUTHORIZATION_ACTIONS.includes(input.action as AuthorizationAction)
+  const taskMatches = task?.project_id === input.projectId
+  const capabilityMatches = knownCapability && evidence.effectivePermissions.includes(input.action as AuthorizationAction)
+  const repositoryMatches = !input.action.startsWith('github.') || (!!input.repo && !!scoped?.repos.includes(input.repo.toLowerCase()))
+  const allowed = evidence.status === 'active' && taskMatches && !!scoped && capabilityMatches && repositoryMatches
+  let failureDimension: AuthorizationFailureDimension = null
+  if (evidence.status !== 'active') failureDimension = 'chain'
+  else if (!task) failureDimension = 'task'
+  else if (!taskMatches || !scoped) failureDimension = 'project'
+  else if (!capabilityMatches) failureDimension = 'capability'
+  else if (!repositoryMatches) failureDimension = 'repository'
+  const missingCapability = !allowed && failureDimension === 'capability' ? input.action : null
+  const safeRemediation = allowed ? null
+    : failureDimension === 'chain'
+      ? 'Send a new authenticated human instruction in this project chat, or relay the user\'s request through the Commander; machine text cannot grant authority.'
+      : failureDimension === 'capability'
+        ? `Ask the user to explicitly request ${input.action}; do not retry with altered relay text.`
+        : failureDimension === 'repository'
+          ? 'Use a repository present in both the project configuration and the immutable authorization scope; cross-repository writes require a new human instruction.'
+          : failureDimension === 'project'
+            ? 'Keep the operation in the authorization\'s project; cross-project writes require a separate human instruction.'
+            : 'Use the signed task scope that owns this authorization lineage.'
+  return {
+    ...evidence,
+    allowed,
+    status: evidence.status === 'active' && !allowed ? 'out_of_scope' : evidence.status,
+    requestedCapability: input.action,
+    missingCapability,
+    originNodeId: evidence.origin?.id ?? null,
+    originMessageId: evidence.origin?.messageId ?? null,
+    failureDimension,
+    safeRemediation
+  }
 }
 
 /** A newly created task gets a fixed child of its caller's CURRENT chain. */
-export function inheritTaskAuthorization(source: Source, callerTaskId: string, taskId: string, text: string): void {
-  const evidence = taskAuthorization(source, callerTaskId)
-  const task = source.db.prepare('SELECT project_id, repos FROM tasks WHERE id = ?').get(taskId) as { project_id: string; repos: string } | undefined
-  if (!task || evidence.status !== 'active' || !evidence.nodeId) return
-  const repos = JSON.parse(task.repos || '[]') as string[]
-  const node = delegateAuthorization(source, { parentId: evidence.nodeId, author: 'agent', text, taskId, projectId: task.project_id, repos: repos.length ? repos.map(r => r.toLowerCase()) : undefined })
-  if (!node) return
-  const key = `task-creation:${taskId}`
-  bindAuthorizationTransport(source, key, node.id, taskId, text)
-  activateAuthorizationDispatch(source, prepareAuthorizationDispatch(source, { key, taskId, text }))
+export function inheritTaskAuthorization(source: Source, callerTaskId: string, taskId: string, text: string, actions?: AuthorizationAction[]): void {
+  source.db.transaction(() => {
+    const evidence = taskAuthorization(source, callerTaskId)
+    const task = source.db.prepare('SELECT project_id, repos FROM tasks WHERE id = ?').get(taskId) as { project_id: string; repos: string } | undefined
+    if (!task || evidence.status !== 'active' || !evidence.nodeId) return
+    const repos = JSON.parse(task.repos || '[]') as string[]
+    const node = delegateAuthorization(source, { parentId: evidence.nodeId, author: 'agent', text, taskId, projectId: task.project_id, actions, repos: repos.length ? repos.map(r => r.toLowerCase()) : undefined })
+    if (!node) return
+    const key = `task-creation:${taskId}`
+    bindAuthorizationTransport(source, key, node.id, taskId, text)
+    activateAuthorizationDispatch(source, prepareAuthorizationDispatch(source, { key, taskId, text }))
+    source.db.prepare(`
+      UPDATE authorization_task_bindings SET assignment_node_id = ?
+      WHERE task_id = ? AND assignment_node_id IS NULL
+    `).run(node.id, taskId)
+  })()
 }
 
 /** Called only by trusted UI/main-process code. No model-facing revoke/grant API. */

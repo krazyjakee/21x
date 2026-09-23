@@ -95,7 +95,7 @@ describe('Commander voice authorization ingress', () => {
     const node = relay(first.message.id, instruction)!
     const evidence = resolveAuthorization(db, node.id)
     expect(evidence.origin).toMatchObject({ author: 'human', inputMode: 'voice', messageId: first.message.id, text: instruction })
-    expect(evidence.effectivePermissions).toEqual(['task.create', 'github.issue.create', 'github.issue.link'])
+    expect(evidence.effectivePermissions).toEqual(['task.create', 'task.update', 'task.start', 'github.issue.create', 'github.issue.link'])
     expect(getTools).toHaveBeenCalledWith(expect.objectContaining({ userMessageId: undefined, authorizationMessageId: first.message.id }))
 
     // The cached bridge must not let a later guest borrow a trusted voice turn.
