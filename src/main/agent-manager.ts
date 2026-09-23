@@ -1701,7 +1701,7 @@ export class AgentManager extends EventEmitter {
     }
     if (Object.keys(fields).length === 0) return this.db.getTask(taskId)
     const before = fields.status !== undefined ? this.db.getTask(taskId)?.status : undefined
-    const updated = this.db.updateTask(taskId, fields)
+    const updated = this.db.updateTask(taskId, fields, fields.status === TaskStatus.NotStarted ? 'system' : undefined)
     // Project event (#57): an agent's own work reaching review bypasses
     // afterTaskUpdated (task-updates.ts), so the event is raised here.
     if (fields.status === TaskStatus.ReadyForReview && updated?.status === TaskStatus.ReadyForReview && before !== TaskStatus.ReadyForReview) {
@@ -3413,7 +3413,7 @@ export class AgentManager extends EventEmitter {
   private persistTranscriptEvent(channel: string, data: unknown): void {
     const event = transcriptPartsFromEvent(channel, data)
     if (!event || event.parts.length === 0) return
-    const result = this.db.upsertTranscriptParts(event.taskId, event.parts)
+    const result = this.db.upsertTranscriptParts(event.taskId, event.parts, 'live')
     if (!result) return
     const { maxRev, changedPartIds } = result
     // Event-sourced push: notify clients of the delta (the parts just written),

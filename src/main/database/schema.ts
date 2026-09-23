@@ -5,6 +5,7 @@ import { DEFAULT_PROJECT_ID, DEFAULT_PROJECT_NAME } from '../../shared/projects'
 import { getRepoProviders, isGitProvider } from '../repo-providers'
 import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
 import { migrateCoordinatorToCaptain } from './captain-migration'
+import { migrateTaskActivity } from './task-activity-migration'
 
 /**
  * Bump this whenever new migrations are added so returning users skip
@@ -32,7 +33,7 @@ import { migrateCoordinatorToCaptain } from './captain-migration'
  *          projects.settings.captain_wakeups and project_status_journal.source
  *          (migrateCoordinatorToCaptain in captain-migration.ts)
  */
-const SCHEMA_VERSION = 17
+const SCHEMA_VERSION = 19
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -133,6 +134,7 @@ export function createTables(db: Database.Database): void {
       sort_order INTEGER NOT NULL DEFAULT 0,
       role TEXT NOT NULL DEFAULT 'task',
       project_id TEXT REFERENCES projects(id),
+      last_activity_at TEXT DEFAULT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -225,6 +227,7 @@ export function createTables(db: Database.Database): void {
       config TEXT NOT NULL DEFAULT '{}',
       enabled INTEGER NOT NULL DEFAULT 1,
       project_id TEXT REFERENCES projects(id),
+      last_activity_at TEXT DEFAULT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -532,6 +535,7 @@ function rebuildTasksTable(db: Database.Database, columnNames: Set<string>): voi
       sort_order INTEGER NOT NULL DEFAULT 0,
       role TEXT NOT NULL DEFAULT 'task',
       project_id TEXT REFERENCES projects(id),
+      last_activity_at TEXT DEFAULT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
@@ -955,6 +959,9 @@ export function runMigrations(db: Database.Database): void {
   // Migration v17: the coordinator is renamed to Captain (#71). Runs after migrateToProjects so
   // the projects table (and its renamed column) exists.
   migrateCoordinatorToCaptain(db)
+
+  // v19: v18 is reserved by concurrent migrations.
+  migrateTaskActivity(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)
