@@ -21,7 +21,7 @@ vi.mock('./claude-code-executable', () => ({
 // Same mocked `query` the adapter resolves through its dynamic import, so tests
 // can inspect exactly what the adapter handed the SDK.
 import { query } from '@anthropic-ai/claude-agent-sdk'
-import { ClaudeCodeAdapter } from './claude-code-adapter'
+import { ClaudeCodeAdapter, claudeModelsFromInfo } from './claude-code-adapter'
 import { ClaudeSystemSubtype } from './claude-code-message-converter'
 import { MessagePartType } from './coding-agent-adapter'
 
@@ -1619,5 +1619,38 @@ describe('ClaudeCodeAdapter MCP isolation and tool limits', () => {
     expect(cleaned.chat.enabledTools).toBeUndefined()
     expect(cleaned.chat.knownTools).toBeUndefined()
     expect(cleaned.chat.url).toBe('https://chat.example/mcp')
+  })
+})
+
+describe('model listing', () => {
+  it('offers each CLI model by the id it resolves to, without the default row', () => {
+    expect(claudeModelsFromInfo([
+      { value: 'default', resolvedModel: 'claude-opus-5-5[1m]', displayName: 'Default (recommended)', description: '' },
+      { value: 'opus[1m]', resolvedModel: 'claude-opus-5-5[1m]', displayName: 'Opus (1M context)', description: '' },
+      { value: 'claude-fable-5-1[1m]', resolvedModel: 'claude-fable-5-1', displayName: 'Fable', description: '' },
+      { value: 'sonnet', resolvedModel: 'claude-sonnet-5', displayName: 'Sonnet', description: '' },
+      { value: 'claude-custom', displayName: 'Custom', description: '' },
+    ])).toEqual([
+      { id: 'claude-opus-5-5[1m]', name: 'Opus (1M context) (claude-opus-5-5[1m])' },
+      { id: 'claude-fable-5-1[1m]', name: 'Fable (claude-fable-5-1[1m])' },
+      { id: 'claude-sonnet-5', name: 'Sonnet (claude-sonnet-5)' },
+      { id: 'claude-custom', name: 'Custom (claude-custom)' },
+    ])
+  })
+
+  it('asks the CLI without a prompt and closes the query', async () => {
+    const close = vi.fn()
+    const queryMock = vi.mocked(query) as any
+    queryMock.mockClear()
+    queryMock.mockImplementation(() => ({
+      supportedModels: async () => [{ value: 'haiku', resolvedModel: 'claude-haiku-4-5', displayName: 'Haiku', description: '' }],
+      close,
+    }))
+
+    const adapter = new ClaudeCodeAdapter()
+    await (adapter as any).ensureSDKLoaded()
+    await expect(adapter.listModels()).resolves.toEqual([{ id: 'claude-haiku-4-5', name: 'Haiku (claude-haiku-4-5)' }])
+    expect(queryMock.mock.calls[0][0].options.pathToClaudeCodeExecutable).toBe('/usr/local/bin/claude')
+    expect(close).toHaveBeenCalled()
   })
 })

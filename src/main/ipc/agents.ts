@@ -45,7 +45,7 @@ export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
   // preserves the same triage, subtask and admission-control rules as voice,
   // mobile and automation instead of duplicating them in the renderer.
   ipcMain.handle('agentSession:startTask', async (_, taskId: string) => {
-    return agentManager.startTask(taskId, { resumeManualStop: true })
+    return agentManager.startTask(taskId, { resumeManualStop: true, explicitUserStart: true })
   })
 
   ipcMain.handle('agent:getStartQueue', () => agentManager.getStartQueue())
@@ -155,6 +155,8 @@ export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
     if (backendType) rememberBackendModels(backendType, flattenProviderModels(result))
     return result
   })
+
+  ipcMain.handle('agentConfig:listModels', (_, backendType: string) => agentManager.listModels(backendType))
 
   ipcMain.handle('agent-installer:detect', async () => {
     const { detectInstalledAgents } = await import('../agent-installer/detect.js')

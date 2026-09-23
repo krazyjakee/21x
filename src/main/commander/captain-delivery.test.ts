@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createTestDb } from '../../../test/helpers/db-test-helper'
 import { CaptainDeliveryService, correlationForDeliveryKey } from './captain-delivery'
+import { TurnStillRunningError } from '../authorization-dispatch'
 
 describe('CaptainDeliveryService', () => {
   afterEach(() => vi.useRealTimers())
@@ -106,6 +107,44 @@ describe('CaptainDeliveryService', () => {
     service.store.terminal(row.id, 'failed', 'server exited')
     await service.reconcile()
     expect(terminal).toHaveBeenCalledWith(expect.objectContaining({ id: row.id }), 'server exited', false)
+    service.dispose()
+  })
+
+  it('keeps a request queued while the Captain is still on an earlier turn', async () => {
+    vi.useFakeTimers()
+    const { db } = createTestDb()
+    const terminal = vi.fn()
+    const sendMessage = vi.fn()
+      .mockRejectedValueOnce(new TurnStillRunningError())
+      .mockResolvedValueOnce({ newSessionId: 'captain-session' })
+    const service = new CaptainDeliveryService({ db, agents: { sendMessage }, onTerminalFailure: terminal })
+    const row = service.store.enqueue({ idempotencyKey: 'busy', kind: 'captain_request', payload: 'ask', deadlineAt: Date.now() + 900_000 }).record
+    const message = service.store.enqueue({ idempotencyKey: `captain-request-message:${row.id}`, kind: 'agent_message', payload: '{}' }).record
+
+    await service.dispatch(row)
+    expect(service.store.get(row.id)?.state).toBe('pending')
+    expect(service.store.get(message.id)?.state).toBe('pending')
+    expect(terminal).not.toHaveBeenCalled()
+
+    await service.reconcile()
+    expect(sendMessage).toHaveBeenCalledTimes(2)
+    expect(service.store.get(row.id)).toMatchObject({ state: 'accepted', destinationId: 'captain-session' })
+    service.dispose()
+  })
+
+  it('cancels the queued Captain message when its request passes the deadline', async () => {
+    vi.useFakeTimers()
+    const { db } = createTestDb()
+    const sendMessage = vi.fn()
+    const service = new CaptainDeliveryService({ db, agents: { sendMessage }, onTerminalFailure: vi.fn() })
+    const row = service.store.enqueue({ idempotencyKey: 'late', kind: 'captain_request', payload: 'ask', deadlineAt: Date.now() + 1_000 }).record
+    const message = service.store.enqueue({ idempotencyKey: `captain-request-message:${row.id}`, kind: 'agent_message', payload: '{}' }).record
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    await service.reconcile()
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(service.store.get(row.id)?.state).toBe('timed_out')
+    expect(service.store.get(message.id)).toMatchObject({ state: 'cancelled', lastError: 'The originating Captain request timed out.' })
     service.dispose()
   })
 

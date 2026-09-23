@@ -1,6 +1,6 @@
 # Activity indicators
 
-Status of GitHub [#95](https://github.com/krazyjakee/21x/issues/95): **first implementation plus Commander call integration**. This covers the shared vocabulary, freshness rules, indicator primitives, the voice adapter, and app-level call ownership. Board cards, the presence stage/PiP and remaining surfaces still come in follow-up work (see [Not wired yet](#not-wired-yet)).
+Status of GitHub [#95](https://github.com/krazyjakee/21x/issues/95): **task surfaces complete plus Commander call integration**. This covers the shared vocabulary, freshness rules, indicator primitives, the voice adapter, every task-session surface — canvas panels, the status bar, the nav rail, the Captain entry, the dashboard hero, board cards and the task header bar — and app-level Commander call ownership. The remaining Commander presence surfaces come in follow-up work (see [Not wired here](#not-wired-here)).
 
 The indicators answer one question, "is the Commander, a Captain or a task session doing something right now?", and they never claim activity without evidence. **Unknown is not idle, and idle is not running.**
 
@@ -89,7 +89,7 @@ The components live in `src/renderer/src/components/activity/`. The tokens are a
 | `ActivityRing` | 2 px ring around a 24–64 px identity | Thinking only: scale 1→1.03 over 2.4 s | Static ring |
 | `ProgressShimmer` | 2 × 32 px indeterminate line beside "Using [tool]". No `progressbar` role, no value | Clipped sweep every 2.4 s | Static line |
 | `FinishedTick` | 14 px check in the review (pink) or success tone | 150 ms fade-in; the accent settles after 3 s with a 250 ms fade | Static accent, removed after 3 s |
-| `TaskActivityBadge` | One task's badge (canvas header now, board cards next) | As `ActivityBadge` | As `ActivityBadge` |
+| `TaskActivityBadge` | One task's badge (canvas headers, board cards, the task header bar) | As `ActivityBadge` | As `ActivityBadge` |
 | `ActivityAnnouncer` | The single polite live region for task/Captain activity | — | — |
 
 Icons: play (running), speech bubble with dots (thinking), wrench (tool), hand (approval), question bubble (question), clock (queued), speaker (speaking), mic (listening), check (finished), alert (failed), minus (idle), slashed circle (unknown, drawn hollow and never animated).
@@ -101,6 +101,14 @@ Tones alias the system tokens (`--activity-active`, `-attention`, `-review`, `-s
 ### Motion ownership
 
 `lib/activity/motion-owner.ts` allows **one moving indicator per region and one per entity** across mirrored regions. The first claim that still wants motion owns it, and the next claimant takes over when it leaves. Nothing moves while the document is hidden. Mirrors (top bar, dashboard hero, nav rail, status bar) pass `allowMotion={false}`. On the canvas, only the frontmost task panel may animate. Offscreen (frozen) panels do not mount the badge at all.
+
+Dense lists share one region rather than one region per row, so the budget holds however long the list is:
+
+- every board card passes `region="task-board"`, so a board with twenty running tasks has exactly one breathing badge and nineteen static ones — each still stating its activity in words;
+- every task header bar passes `region="task-header"`;
+- a drag preview renders no badge at all: it mirrors a card that is still mounted.
+
+One entity is never indicated twice in the same chrome. A canvas task panel already carries the task's badge in its own header, so the `TaskWorkspace` it embeds is rendered with `showActivity={false}`; the same workspace opened full-screen or in a dialog shows it.
 
 ### Quiet states
 
@@ -126,21 +134,23 @@ Compact surfaces call `isQuietActivity(result)` and render nothing for a verifie
 | Nav rail | `components/layout/NavRail.tsx` | Static Commander state glyph on the Commander item. The state is in the item's accessible name and in its tooltip, which now also opens on keyboard focus. |
 | Captain entry | `components/layout/TopBar.tsx` | Static Captain state dot on the Captain button (in its accessible name and tooltip). Includes verified speech. |
 | Dashboard hero | `components/dashboard/HeroSection.tsx` | "Captain [badge]" beside the project name, static. |
+| Board task card | `components/dashboard/TaskBoard.tsx` | `TaskActivityBadge` in the card's title row. Quiet states render nothing, so a calm board stays calm. The card's durable lifecycle column and the live badge are separate: sitting in the "Agent working" column never makes the badge say "Running". |
+| Task header bar | `components/tasks/TaskHeaderBar.tsx` | `TaskActivityBadge` between the lifecycle status menu and the recovery pill, via `TaskWorkspace`'s `showActivity` prop. Suppressed inside canvas task panels, whose own header owns it. |
 | Held Captain actions | `components/projects/HeldActionsNotice.tsx` | Unchanged approve/reject pill (policy-held actions, separate from session approvals). It now re-reads every 5 s while visible, and when reads keep failing it shows a static "held actions unavailable" pill instead of silence. |
 
-## Not wired yet
+## Not wired here
 
-These files belonged to another session's uncommitted hands-free voice work when this was implemented. The follow-up task wires them:
+The Commander's own surfaces are **not** wired from this document. The Commander redesign rewrites those files, and it consumes the primitives here rather than the other way round:
 
-- Board task cards (`TaskBoard.tsx`): mount the prepared `TaskActivityBadge`.
-- The task workspace (`TaskWorkspace.tsx`).
-- Commander chat (`CommanderChatPane.tsx`): replace its thinking dots with the shared result.
-- The Commander presence stage and PiP (#85/#87): consume the same results; #89 supplies the speaking ring.
-- The Commander CallAnnouncer (#91).
-- An authoritative Commander idle snapshot, and a typed transport for the new `agent:status` fields in `electron.d.ts`/preload. The fields pass through today because preload forwards the payload unchanged, and the renderer validates them at runtime (`readAgentStatusActivityMeta`).
+- Commander chat and the presence stage — [#85](https://github.com/krazyjakee/21x/issues/85).
+- The speaking ring driven by the real output level — [#89](https://github.com/krazyjakee/21x/issues/89), which owns `ActivityRing`'s moving variant and supplies `lib/activity/voice-activity-adapter` with a provable playback owner.
+- Picture-in-picture and the action toast — [#87](https://github.com/krazyjakee/21x/issues/87). App-level call-lifetime mounting is already wired by the Commander call host.
+- The Commander `CallAnnouncer` — [#91](https://github.com/krazyjakee/21x/issues/91). The `ActivityAnnouncer` here deliberately says nothing about the Commander.
 
-A quiet Commander turn still becomes unknown after 15 s; the call's verified
-speaking and listening claims do not rely on that stale turn observation.
+Two pieces of plumbing remain outstanding and belong to whoever touches those files next:
+
+- An authoritative Commander idle snapshot. Until it exists, a quiet Commander turn becomes `unknown` after 15 s — correct, but coarse. The call's verified speaking and listening claims do not rely on that stale turn observation.
+- A typed transport for the new `agent:status` fields in `electron.d.ts`/preload. The fields pass through today because preload forwards the payload unchanged, and the renderer validates them at runtime (`readAgentStatusActivityMeta`).
 
 ## Tests
 
@@ -153,3 +163,4 @@ speaking and listening claims do not rely on that stale turn observation.
   - reduced motion and motion ownership;
   - voice ownership, the announcer's coalescing, limits and deduplication, and the single deadline timer.
 - `src/renderer/src/components/activity/*.test.tsx`: accessible names, no live regions per badge, reduced motion, no `progressbar` semantics, theme contrast, agent-store heartbeat handling, `StatusBar` counts, and `TaskActivityBadge` expiring to unknown.
+- `src/renderer/src/components/activity/task-surfaces.test.tsx`: the board and the task header bar — a lifecycle status alone never claims running, expired evidence reads as "Status unavailable · Last seen running", three running cards produce exactly one breathing badge and three worded ones, nothing moves under reduced motion, and a canvas-embedded header renders no second badge.

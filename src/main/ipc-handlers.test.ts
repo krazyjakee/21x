@@ -99,7 +99,7 @@ describe('registerIpcHandlers', () => {
     const handler = handlers.filter(([channel]) => channel === 'agentSession:startTask').pop()?.[1]
 
     await expect(handler!({}, 'task-1')).resolves.toEqual(outcome)
-    expect(startTask).toHaveBeenCalledWith('task-1', { resumeManualStop: true })
+    expect(startTask).toHaveBeenCalledWith('task-1', { resumeManualStop: true, explicitUserStart: true })
   })
 
   it('keeps a newly created source-less task local', async () => {
@@ -309,7 +309,7 @@ describe('db:updateTask coordinator wake-up', () => {
     await updateHandler({}, 'sub-3', { status: 'agent_working' })
 
     expect(notifyParent).not.toHaveBeenCalled()
-    expect(startTask).toHaveBeenCalledWith('sub-3', { resumeManualStop: true })
+    expect(startTask).toHaveBeenCalledWith('sub-3', { resumeManualStop: true, explicitUserStart: true })
     expect(updateTask).not.toHaveBeenCalled()
   })
 

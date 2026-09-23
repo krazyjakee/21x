@@ -40,6 +40,14 @@ it('moves a status-changed task to the top of its destination and ignores passiv
   expect(order(TaskStatus.AgentWorking)).toEqual(['moving', 'resident'])
 })
 
+it('shows learning tasks under Ready for Review instead of a Learning column', () => {
+  refresh([task('review', TaskStatus.ReadyForReview), task('learning', TaskStatus.AgentLearning, newer)])
+  render(<TaskBoard />)
+  expect(screen.queryByTestId(`task-column-${TaskStatus.AgentLearning}`)).toBeNull()
+  expect(order(TaskStatus.ReadyForReview)).toEqual(['learning', 'review'])
+  expect(order()).toEqual([])
+})
+
 it('honours manual order and lets the user return just that column to activity order', () => {
   refresh([task('older'), task('newer', TaskStatus.NotStarted, newer), task('working', TaskStatus.AgentWorking)])
   useBoardOrderStore.getState().setColumnOrder('project', TaskStatus.NotStarted, ['older', 'newer'])

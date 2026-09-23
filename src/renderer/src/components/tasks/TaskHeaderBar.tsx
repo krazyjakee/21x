@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { AnthropicLogo, OpenAILogo, OpenCodeLogo, PiLogo } from '@/components/icons/AgentLogos'
 import { TaskPriorityBadge } from './TaskPriorityBadge'
 import { TaskStatusBadge } from './TaskStatusBadge'
+import { TaskActivityBadge } from '@/components/activity/TaskActivityBadge'
 import { CodingAgentType, TASK_STATUSES, TaskStatus } from '@/types'
 import type { Agent, Task } from '@/types'
 import { MENU_ITEM_CLASS, MENU_PANEL_CLASS } from '@shared/menu-styles'
@@ -62,6 +63,12 @@ interface TaskHeaderBarProps {
   onOpenFullView?: () => void
   onDelete: () => void
   recoveryState?: string | null
+  /**
+   * Show the live session activity badge (#95). False when the surrounding
+   * chrome already owns it — a canvas task panel puts the same badge in its
+   * own header, and one entity must not be indicated twice.
+   */
+  showActivity?: boolean
 }
 
 export function TaskHeaderBar({
@@ -84,7 +91,8 @@ export function TaskHeaderBar({
   onOpenFolder,
   onOpenFullView,
   onDelete,
-  recoveryState
+  recoveryState,
+  showActivity = true
 }: TaskHeaderBarProps) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(task.title)
@@ -200,6 +208,16 @@ export function TaskHeaderBar({
           </div>
         )}
       </div>
+      {/* Live session activity (#95), beside the durable lifecycle status it
+          must never be confused with. One region: one task header animates. */}
+      {showActivity && (
+        <TaskActivityBadge
+          taskId={task.id}
+          title={task.title}
+          region="task-header"
+          className="shrink-0"
+        />
+      )}
       {recoveryState && (
         <span
           data-testid="task-recovery-state"

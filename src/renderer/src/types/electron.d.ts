@@ -321,6 +321,7 @@ interface ElectronAPI {
   }
   agentConfig: {
     getProviders: (serverUrl?: string, backendType?: string) => Promise<{ providers: { id: string; name: string; models: unknown }[]; default: Record<string, string> } | null>
+    listModels: (backendType: string) => Promise<{ id: string; name: string }[] | null>
   }
   attachments: {
     pick: () => Promise<string[]>

@@ -27,6 +27,7 @@ import { boardColumnKey, sortBoardColumn } from '@/lib/board-order'
 import { useSnoozeTick } from '@/hooks/use-snooze-tick'
 import { isSnoozed, isOverdue, formatDueDistance } from '@/lib/utils'
 import { agentApi, onAgentStartQueueChanged } from '@/lib/ipc-client'
+import { TaskActivityBadge } from '@/components/activity/TaskActivityBadge'
 import { TASK_STATUS_STYLES, type TaskStatusStyle } from '@shared/task-status-styles'
 import { TaskStatus, CodingAgentType } from '@/types'
 import type { Task, Agent } from '@/types'
@@ -36,6 +37,8 @@ import type { TaskBoardTransitionPhase, TaskBoardTransitionResult } from './task
 // Styling comes from the shared status map so the board, the task lists and
 // the mobile UI stay in step. Completed remains a compact drop target in the
 // header so a long task history does not take over the active board.
+// Learning has no column of its own: those tasks sit under Ready for Review,
+// the column they left, until the learning pass completes them.
 
 interface StatusColumn extends TaskStatusStyle {
   key: TaskStatus
@@ -45,9 +48,14 @@ const COLUMNS: StatusColumn[] = [
   TaskStatus.NotStarted,
   TaskStatus.Triaging,
   TaskStatus.AgentWorking,
-  TaskStatus.ReadyForReview,
-  TaskStatus.AgentLearning
+  TaskStatus.ReadyForReview
 ].map((key) => ({ key, ...TASK_STATUS_STYLES[key] }))
+
+/**
+ * The whole board is ONE motion region (#95): however many cards are running,
+ * at most one of them may animate. Everything else renders a static badge.
+ */
+const BOARD_ACTIVITY_REGION = 'task-board'
 
 // Pointer drops must land inside a target. Using closestCenter for pointer
 // input can select the Completed badge (or another nearby column) even when
@@ -164,7 +172,7 @@ function getAgentDisplay(agent: Agent | undefined): { name: string; Logo: React.
 
 // ── Task Card ──────────────────────────────────────────────
 
-function TaskCardContent({ task, agent, transitionPhase }: { task: Task; agent?: Agent; transitionPhase?: TaskBoardTransitionPhase }) {
+function TaskCardContent({ task, agent, transitionPhase, showActivity = true }: { task: Task; agent?: Agent; transitionPhase?: TaskBoardTransitionPhase; showActivity?: boolean }) {
   const overdue = task.due_date && task.status !== TaskStatus.Completed && isOverdue(task.due_date)
   const sourceConfig = task.source && task.source !== 'local' ? getSourceConfig(task.source) : null
 
@@ -175,6 +183,17 @@ function TaskCardContent({ task, agent, transitionPhase }: { task: Task; agent?:
         <h4 className="text-base font-medium leading-snug line-clamp-2 flex-1 text-foreground/90 group-hover:text-foreground transition-colors">
           {task.title}
         </h4>
+        {/* Live session activity (#95). Quiet states render nothing, so a calm
+            board stays calm; the board is one motion region, so only one card
+            can ever animate. The lifecycle status alone never says "Running". */}
+        {showActivity && (
+          <TaskActivityBadge
+            taskId={task.id}
+            title={task.title}
+            region={BOARD_ACTIVITY_REGION}
+            className="shrink-0 max-w-[55%]"
+          />
+        )}
         {task.priority && task.priority !== 'low' && (
           <Badge variant={getPriorityVariant(task.priority)} className="text-2xs px-1.5 py-0 shrink-0 uppercase tracking-wider font-semibold">
             {task.priority}
@@ -307,7 +326,9 @@ function TaskCardOverlay({ task, agent }: { task: Task; agent?: Agent }) {
     <div
       className={`w-[292px] rounded-lg border border-border/70 bg-card p-3.5 shadow-2xl cursor-grabbing border-l-2 ${getPriorityAccent(task.priority)}`}
     >
-      <TaskCardContent task={task} agent={agent} />
+      {/* The drag preview mirrors a card that is still mounted: no second
+          indicator, and nothing moves under the pointer. */}
+      <TaskCardContent task={task} agent={agent} showActivity={false} />
     </div>
   )
 }
@@ -524,6 +545,8 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
       const status = task.status || TaskStatus.NotStarted
       if (status === TaskStatus.Completed) {
         completedCount++
+      } else if (status === TaskStatus.AgentLearning) {
+        grouped[TaskStatus.ReadyForReview].push(task)
       } else if (grouped[status]) {
         grouped[status].push(task)
       } else {

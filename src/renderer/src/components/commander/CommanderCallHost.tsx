@@ -150,6 +150,7 @@ export function CommanderCallHost() {
   // same call even when the Commander workspace is not mounted.
   useEffect(() => registerComposer(COMMANDER_VOICE_COMPOSER_KEY, {
     getField: () => hiddenField.current,
+    focusOnInsert: false,
     submit: () => {
       const field = hiddenField.current
       const words = field?.value ?? ''

@@ -99,6 +99,35 @@ afterEach(() => {
 })
 
 describe('CommanderWorkspace', () => {
+  it('leaves Shift+Enter and IME Enter to the editor, and submits plain Enter once', async () => {
+    api.listSessions.mockResolvedValue([session()])
+    let finish: (value: unknown) => void = () => {}
+    api.send.mockReturnValue(new Promise((resolve) => { finish = resolve }))
+    render(<CommanderWorkspace />)
+    fireEvent.click(await screen.findByText('Launch'))
+    await waitFor(() => expect(screen.getByLabelText('Commander model')).not.toBeDisabled())
+    const input = screen.getByRole('textbox', { name: 'Message the Commander' })
+    input.focus()
+    fireEvent.change(input, { target: { value: 'Hello' } })
+    expect(fireEvent.keyDown(input, { key: 'Enter', shiftKey: true })).toBe(true)
+    expect(fireEvent.keyDown(input, { key: 'Enter', isComposing: true })).toBe(true)
+    expect(api.send).not.toHaveBeenCalled()
+    expect(fireEvent.keyDown(input, { key: 'Enter' })).toBe(false)
+    await waitFor(() => expect(api.send).toHaveBeenCalledTimes(1))
+    expect(input).not.toBeDisabled()
+    expect(input).toHaveAttribute('readonly')
+    expect(input).toHaveFocus()
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(api.send).toHaveBeenCalledTimes(1)
+    // Completing an asynchronous send must not steal focus back from another control.
+    const search = screen.getByRole('textbox', { name: 'Search sessions' })
+    search.focus()
+    await act(async () => { finish({ turnId: 'keyboard-turn', message: message({ content: 'Hello' }) }) })
+    expect(input).not.toHaveAttribute('readonly')
+    expect(input).toHaveValue('')
+    expect(search).toHaveFocus()
+  })
+
   it('shows the empty state when there is no session', async () => {
     api.listSessions.mockResolvedValue([])
     render(<CommanderWorkspace />)

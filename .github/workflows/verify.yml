@@ -48,3 +48,6 @@ jobs:
           sudo chown root:root "$electron_sandbox"
           sudo chmod 4755 "$electron_sandbox"
           xvfb-run --auto-servernum pnpm test:nav-rail
+
+      - name: Commander native keyboard and focus regression
+        run: xvfb-run --auto-servernum pnpm test:commander-input

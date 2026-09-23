@@ -624,7 +624,11 @@ export function bindAuthorizationTransport(source: Source, key: string, nodeId: 
   source.db.prepare('INSERT INTO authorization_transports VALUES (?, ?, ?, ?)').run(key, nodeId, taskId, hash)
 }
 
-/** Reserve before async resume; activate only this generation at send boundary. */
+/**
+ * Reserve before async resume; activate only this generation at send boundary.
+ * Reserving leaves the active node alone: a turn still running keeps the
+ * authority it was sent with until the next generation is handed over.
+ */
 export function prepareAuthorizationDispatch(source: Source, input: { key: string; taskId: string; text: string; messageId?: string }): number {
   return source.db.transaction(() => {
     const hash = authorizationHash(input.text)
@@ -647,9 +651,7 @@ export function prepareAuthorizationDispatch(source: Source, input: { key: strin
     source.db.prepare(`
       INSERT INTO authorization_task_bindings (task_id, dispatch_seq, node_id, assignment_node_id, supersession_node_id)
       VALUES (?, ?, NULL, NULL, NULL)
-      ON CONFLICT(task_id) DO UPDATE SET
-        dispatch_seq = excluded.dispatch_seq,
-        node_id = NULL
+      ON CONFLICT(task_id) DO UPDATE SET dispatch_seq = excluded.dispatch_seq
     `).run(input.taskId, seq)
     return seq
   })()
@@ -669,9 +671,7 @@ export function prepareAuthorizationRetry(source: Source, input: { key: string; 
     source.db.prepare(`
       INSERT INTO authorization_task_bindings (task_id, dispatch_seq, node_id, supersession_node_id)
       VALUES (?, ?, NULL, NULL)
-      ON CONFLICT(task_id) DO UPDATE SET
-        dispatch_seq = excluded.dispatch_seq,
-        node_id = NULL
+      ON CONFLICT(task_id) DO UPDATE SET dispatch_seq = excluded.dispatch_seq
     `).run(input.taskId, seq)
     return seq
   })()
@@ -683,18 +683,19 @@ export function activateAuthorizationDispatch(source: Source, seq: number): void
   if (row.node_id && resolveAuthorization(source, row.node_id).status !== 'active') throw new Error('Authorization expired or was revoked before dispatch')
   const binding = source.db.prepare('SELECT dispatch_seq FROM authorization_task_bindings WHERE task_id = ?').get(row.task_id) as { dispatch_seq: number } | undefined
   if (binding?.dispatch_seq !== seq) throw new Error('Stale authorization dispatch')
-  if (row.node_id) {
-    source.db.prepare(`
-      UPDATE authorization_task_bindings SET
-        node_id = ?,
-        supersession_node_id = CASE
-          WHEN assignment_node_id IS NOT NULL AND ? IS NOT assignment_node_id THEN ?
-          ELSE supersession_node_id
-        END
-      WHERE task_id = ? AND dispatch_seq = ?
-    `).run(row.node_id, row.node_id, row.node_id, row.task_id, seq)
-  }
+  // The previous turn's node ends here. A machine generation (no node) falls
+  // back to the latest accepted human supersession or the assignment.
+  source.db.prepare(`
+    UPDATE authorization_task_bindings SET
+      node_id = ?,
+      supersession_node_id = CASE
+        WHEN ? IS NOT NULL AND assignment_node_id IS NOT NULL AND ? IS NOT assignment_node_id THEN ?
+        ELSE supersession_node_id
+      END
+    WHERE task_id = ? AND dispatch_seq = ?
+  `).run(row.node_id, row.node_id, row.node_id, row.node_id, row.task_id, seq)
 }
+/** Only for a generation that was activated: one never activated took nothing over. */
 export function failAuthorizationDispatch(source: Source, seq: number): void {
   // Clearing an active/pending delivery never clears the last accepted human
   // supersession. Recovery may become inactive, but cannot widen to assignment.
@@ -703,14 +704,13 @@ export function failAuthorizationDispatch(source: Source, seq: number): void {
 
 export function taskAuthorization(source: Source, taskId: string, now = Date.now()): AuthorizationEvidence {
   const row = source.db.prepare(`
-    SELECT b.node_id, b.assignment_node_id, b.supersession_node_id, d.node_id AS pending_node_id
-    FROM authorization_task_bindings b
-    JOIN authorization_dispatches d ON d.seq = b.dispatch_seq
-    WHERE b.task_id = ?
-  `).get(taskId) as { node_id: string | null; assignment_node_id: string | null; supersession_node_id: string | null; pending_node_id: string | null } | undefined
-  // An evidence-bearing turn stays inactive until the adapter accepts this
-  // exact generation. Machine generations keep the latest accepted human node.
-  if (row?.pending_node_id && row.node_id !== row.pending_node_id) return resolveAuthorization(source, null, now)
+    SELECT node_id, assignment_node_id, supersession_node_id
+    FROM authorization_task_bindings
+    WHERE task_id = ?
+  `).get(taskId) as { node_id: string | null; assignment_node_id: string | null; supersession_node_id: string | null } | undefined
+  // The node of the last generation handed to the adapter. A reserved but not
+  // yet activated generation changes nothing, so a running turn keeps its
+  // authority. Machine generations keep the latest accepted human node.
   return resolveAuthorization(source, row?.node_id ?? row?.supersession_node_id ?? row?.assignment_node_id ?? null, now)
 }
 

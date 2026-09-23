@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { Loader2, ChevronRight, Plus, X, ArrowUp, ArrowDown } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Loader2, ChevronRight, Plus, X, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -113,22 +113,28 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
   const [availableModels, setAvailableModels] = useState<Model[]>([])
   const [isLoadingModels, setIsLoadingModels] = useState(false)
   const [modelError, setModelError] = useState<string | null>(null)
+  // The backend the form shows now, so a slow listing for another one is dropped.
+  const currentBackend = useRef(codingAgent)
+  currentBackend.current = codingAgent
+
+  const refreshModels = () => {
+    if (codingAgent === CodingAgentType.OPENCODE || codingAgent === CodingAgentType.PI) {
+      fetchModels()
+    } else if (codingAgent === CodingAgentType.CLAUDE_CODE) {
+      fetchCliModels(CLAUDE_MODELS)
+    } else if (codingAgent === CodingAgentType.CODEX) {
+      fetchCliModels(CODEX_MODELS)
+    }
+  }
 
   // Fetch models when coding agent is selected
   useEffect(() => {
-    if (codingAgent === CodingAgentType.OPENCODE) {
-      fetchModels()
-    } else if (codingAgent === CodingAgentType.CLAUDE_CODE) {
-      // For Claude Code, show predefined Claude models
-      setAvailableModels(CLAUDE_MODELS)
-    } else if (codingAgent === CodingAgentType.CODEX) {
-      // For Codex, fetch models dynamically from Codex CLI
-      fetchCodexModels()
-    } else if (codingAgent === CodingAgentType.CURSOR) {
+    setIsLoadingModels(false)
+    if (codingAgent === CodingAgentType.CURSOR) {
       setAvailableModels(CURSOR_MODELS)
       setModel(CURSOR_MODELS[0].id)
-    } else if (codingAgent === CodingAgentType.PI) {
-      fetchModels()
+    } else if (codingAgent) {
+      refreshModels()
     } else {
       setAvailableModels([])
       setModel('')
@@ -219,9 +225,29 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
     }
   }
 
-  const fetchCodexModels = () => {
-    // Use hardcoded models for Codex
-    setAvailableModels(CODEX_MODELS)
+  /**
+   * Asks the installed Claude Code or Codex CLI for its models, falling back
+   * to the built-in list when it cannot be asked. The agent's saved model
+   * stays selectable when the CLI no longer lists it.
+   */
+  const fetchCliModels = async (fallback: Model[]) => {
+    const backend = codingAgent
+    setIsLoadingModels(true)
+    setModelError(null)
+    let models: Model[] = fallback
+    try {
+      const listed = await agentConfigApi.listModels(backend)
+      if (listed && listed.length > 0) models = listed
+    } catch (error) {
+      console.error('[AgentForm] Error listing models:', error)
+    }
+    if (currentBackend.current !== backend) return
+    const saved = agent?.config.coding_agent === backend ? agent.config.model : undefined
+    if (saved && !models.some((m) => m.id === saved)) {
+      models = [...models, { id: saved, name: `${saved} (current)` }]
+    }
+    setAvailableModels(models)
+    setIsLoadingModels(false)
   }
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -423,7 +449,23 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
             </div>
           )}
           <div className="space-y-1.5">
-            <Label htmlFor="agent-model">Model</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="agent-model">Model</Label>
+              {codingAgent !== CodingAgentType.CURSOR && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={refreshModels}
+                  disabled={isLoadingModels}
+                  title="Refresh models"
+                  aria-label="Refresh models"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5${isLoadingModels ? ' animate-spin' : ''}`} />
+                </Button>
+              )}
+            </div>
           <div className="relative">
             {isLoadingModels ? (
               <div className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground border border-input rounded-md">

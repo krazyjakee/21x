@@ -1,5 +1,5 @@
-import { captureAuthorizationSnapshot, sendPreservingAuthorization, sendWithAuthorization } from './authorization-dispatch'
-import { prepareAuthorizationDispatch, prepareAuthorizationRetry, failAuthorizationDispatch } from './authorization'
+import { captureAuthorizationSnapshot, sendPreservingAuthorization, sendWithAuthorization, TurnStillRunningError } from './authorization-dispatch'
+import { prepareAuthorizationDispatch, prepareAuthorizationRetry, activateAuthorizationDispatch } from './authorization'
 import { prepareProjectMessageDispatch, activateProjectMessageDispatch, failProjectMessageDispatch, type ProjectMessageDispatch, type TypedMessage } from './merge-grants'
 import { DEFAULT_SERVER_URL } from './adapters/opencode-server'
 import { guardedIpcSend } from './guarded-ipc-send'
@@ -22,7 +22,7 @@ import type { GitHubManager } from './github-manager'
 import type { GitLabManager } from './gitlab-manager'
 import type { ForgejoManager } from './forgejo-manager'
 import type { AcpAdapter } from './adapters/acp-adapter'
-import type { CodingAgentAdapter, SessionConfig, SessionMessage, SessionStatus as AdapterSessionStatus } from './adapters/coding-agent-adapter'
+import type { BackendModel, CodingAgentAdapter, SessionConfig, SessionMessage, SessionStatus as AdapterSessionStatus } from './adapters/coding-agent-adapter'
 import { SessionStatusType, MessagePartType } from './adapters/coding-agent-adapter'
 import { randomUUID } from 'crypto'
 import { registerSecretSession, unregisterSecretSession, getSecretBrokerPort } from './secret-broker'
@@ -1228,7 +1228,9 @@ export class AgentManager extends EventEmitter {
     const task = this.db.getTask(taskId)
     const runtimeGeneration = this.captainRuntimes.get(taskId)?.generation
     if (!skipInitialPrompt && task && isCoordinatorTask(task) && this.db.db && typeof this.db.db.prepare === 'function') {
-      prepareAuthorizationDispatch(this.db, { key: `captain-start:${randomUUID()}`, taskId: task.id, text: 'Platform Captain startup' })
+      // A fresh Captain session starts without the previous session's human
+      // authority. No turn is running yet, so the switch happens now.
+      activateAuthorizationDispatch(this.db, prepareAuthorizationDispatch(this.db, { key: `captain-start:${randomUUID()}`, taskId: task.id, text: 'Platform Captain startup' }))
     }
     const authorizationSnapshot = this.db.db && typeof this.db.db.prepare === 'function' ? captureAuthorizationSnapshot(this.db, taskId) : null
     const isTriageSession = isTriageSessionTask(taskId, task)
@@ -3044,7 +3046,13 @@ export class AgentManager extends EventEmitter {
     )
   }
 
-  async startTask(taskId: string, opts?: { preferSubtasks?: boolean; allowTriage?: boolean; resumeManualStop?: boolean }): Promise<{
+  /**
+   * `resumeManualStop` lets an explicit start reverse an earlier explicit stop.
+   * `explicitUserStart` is for a person's own start (desktop, mobile): it also
+   * lifts an automatic start that recovery stopped, e.g. after a failure with
+   * an unfinished tool call. The agent task API never sets it.
+   */
+  async startTask(taskId: string, opts?: { preferSubtasks?: boolean; allowTriage?: boolean; resumeManualStop?: boolean; explicitUserStart?: boolean }): Promise<{
     /** `queued`: over a concurrency limit; it starts on its own when a slot frees. */
     action: 'task_started' | 'subtask_started' | 'triage_started' | 'already_running' | 'queued' | 'no_action'
     sessionId?: string
@@ -3069,12 +3077,17 @@ export class AgentManager extends EventEmitter {
       }
     }
 
-    // An explicit UI/API start may reverse an earlier explicit stop. Automatic
-    // schedulers omit this flag, so a manual-stop exclusion remains terminal
-    // until the user actually asks to run the task again.
+    // An explicit UI/API start may reverse an earlier explicit stop, and a
+    // person's own start may also lift any stopped automatic start. Automatic
+    // schedulers omit both flags, so those exclusions remain terminal until
+    // the user actually asks to run the task again.
     const requestSelectedTask = (selected: TaskRecord, selectedAgentId = selected.agent_id!): Promise<SessionStartOutcome> => {
       const recovery = this.startQueue.get(selected.id)
-      if (opts?.resumeManualStop && recovery?.state === 'cancelled' && recovery.recoveryCause === 'manual_stop') {
+      const stopped = recovery?.state === 'cancelled' || recovery?.state === 'failed'
+      const lifted = opts?.explicitUserStart
+        ? stopped
+        : opts?.resumeManualStop && recovery?.state === 'cancelled' && recovery.recoveryCause === 'manual_stop'
+      if (lifted) {
         const queued = this.startQueue.enqueue({
           taskId: selected.id,
           projectId: taskProjectId(selected),
@@ -4615,7 +4628,10 @@ export class AgentManager extends EventEmitter {
       return result
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
-      if (detail.startsWith('Message handoff timed out')) {
+      if (error instanceof TurnStillRunningError) {
+        // Nothing reached the backend. Recovery retries it once the turn ends.
+        this.deliveries.release(claimed.id, this.deliveryOwner, detail)
+      } else if (detail.startsWith('Message handoff timed out')) {
         this.deliveries.terminal(claimed.id, 'timed_out', `${detail}; backend acceptance is unknown. Inspect the conversation before retrying.`)
         if (claimed.taskId) this.emitSystemError('', claimed.taskId, `delivery-timeout-${claimed.id}`,
           `${detail}. Backend acceptance is unknown; inspect the conversation before retrying.`)
@@ -4855,7 +4871,7 @@ export class AgentManager extends EventEmitter {
         await send()
       }
     } catch (error) {
-      if (authorizationDispatch !== undefined) failAuthorizationDispatch(this.db, authorizationDispatch)
+      // sendWithAuthorization already cleared any authority this dispatch took over.
       if (dispatch) failProjectMessageDispatch(dispatch)
       throw error
     }
@@ -5126,6 +5142,21 @@ export class AgentManager extends EventEmitter {
       return await adapter.getProviders(baseUrl, directory)
     } catch (error: unknown) {
       console.log('[AgentManager] Could not get providers:', error instanceof Error ? error.message : error)
+      return null
+    }
+  }
+
+  /**
+   * Models the installed Claude Code or Codex CLI offers, or null when the
+   * backend has no such listing or the CLI could not be asked.
+   */
+  async listModels(backendType: string): Promise<BackendModel[] | null> {
+    const adapter = this.getAdapterByType(backendType)
+    if (!adapter?.listModels) return null
+    try {
+      return await adapter.listModels()
+    } catch (error: unknown) {
+      console.log(`[AgentManager] Could not list ${backendType} models:`, error instanceof Error ? error.message : error)
       return null
     }
   }
