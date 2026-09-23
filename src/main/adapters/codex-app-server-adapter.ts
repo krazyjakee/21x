@@ -9,6 +9,7 @@
 import { CLIENT_NAME } from '../app-identity'
 import { spawn, type ChildProcess } from 'child_process'
 import { existsSync, readFileSync } from 'fs'
+import { tmpdir } from 'os'
 import { guardChildStreams } from '../child-stream-guards'
 import { parseProcessTable } from '../mcp-process-cleanup'
 import { selectUntrackedAppServerPids } from '../codex-app-server-sweep'
@@ -20,7 +21,8 @@ import type {
   SessionMessage,
   MessagePart,
   McpServerConfig,
-  AdapterUsageReport
+  AdapterUsageReport,
+  BackendModel
 } from './coding-agent-adapter'
 import { MessagePartType, SessionStatusType } from './coding-agent-adapter'
 import { CodexUsageAccumulator } from './usage-reports'
@@ -508,6 +510,36 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     if (this.orphanSweepTimer) return
     this.orphanSweepTimer = setInterval(() => void this.sweepOrphanedAppServers(), ORPHAN_SWEEP_INTERVAL_MS)
     this.orphanSweepTimer.unref()
+  }
+
+  /**
+   * Asks a short-lived app-server which models the Codex CLI offers. It uses
+   * the CLI's own login, like `codex` in a terminal.
+   */
+  async listModels(): Promise<BackendModel[]> {
+    const session = await this.startAppServerProcess(
+      { agentId: '', taskId: '', workspaceDir: tmpdir() },
+      `model-list-${Date.now()}`
+    )
+    try {
+      await this.initializeAppServer(session)
+      const models: BackendModel[] = []
+      let cursor: string | null = null
+      do {
+        const page = await this.sendRpcRequest(session, 'model/list', cursor ? { cursor } : {}) as {
+          data?: { model?: string; id?: string; displayName?: string; hidden?: boolean }[]
+          nextCursor?: string | null
+        }
+        for (const row of page.data ?? []) {
+          const id = row.model || row.id
+          if (id && !row.hidden) models.push({ id, name: row.displayName || id })
+        }
+        cursor = page.nextCursor ?? null
+      } while (cursor)
+      return models
+    } finally {
+      this.terminateSession(session, 'model list done')
+    }
   }
 
   async checkHealth(): Promise<{ available: boolean; reason?: string }> {

@@ -90,6 +90,27 @@ describe('insertDictation', () => {
     setDictationTarget(a.field)
     insertDictation('hello')
     expect(events).toBe(1)
+    expect(document.activeElement).toBe(a.field)
+  })
+
+  it('routes a private composer without taking focus from a visible draft', () => {
+    const visible = composer('visible')
+    visible.field.value = 'unfinished draft'
+    visible.field.focus()
+    visible.field.setSelectionRange(3, 5)
+    const buffer = composer('buffer')
+    buffer.field.readOnly = true
+    buffer.field.tabIndex = -1
+    buffer.field.setAttribute('aria-hidden', 'true')
+    const submit = vi.fn(() => { buffer.field.value = '' })
+    registerComposer('private', { getField: () => buffer.field, submit, focusOnInsert: false })
+    setActiveComposer('private')
+
+    expect(insertAndSubmit('spoken words')).toBe(true)
+    expect(submit).toHaveBeenCalledOnce()
+    expect(document.activeElement).toBe(visible.field)
+    expect(visible.field.value).toBe('unfinished draft')
+    expect([visible.field.selectionStart, visible.field.selectionEnd]).toEqual([3, 5])
   })
 
   it('drops a field that left the page', () => {

@@ -1,4 +1,5 @@
 import { bindAuthorizationTransport, resolveAuthorization } from '../authorization'
+import { TurnStillRunningError } from '../authorization-dispatch'
 import { createHash, randomUUID } from 'crypto'
 import type { AgentManager } from '../agent-manager'
 import type { DatabaseManager } from '../database'
@@ -96,6 +97,12 @@ export class CaptainDeliveryService {
       // acknowledgement. The deadline sweep makes silence visible.
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
+      if (error instanceof TurnStillRunningError) {
+        // The Captain is still on an earlier turn. The request stays queued
+        // and the recovery sweep retries it, bounded by the report deadline.
+        this.store.release(claimed.id, this.owner, detail)
+        return
+      }
       const failed = this.store.terminal(claimed.id, 'failed', detail)
       if (failed?.state === 'failed') {
         const message = this.store.getByKey(`captain-request-message:${claimed.id}`)
@@ -130,6 +137,11 @@ export class CaptainDeliveryService {
   private sweepDeadlines(): void {
     // Terminal requests are replayed below with stable report keys, including
     // failures persisted by a process that died before publishing the report.
-    this.store.expireDeadlines(this.now())
+    // A request that expired while still queued must not reach the Captain later.
+    for (const expired of this.store.expireDeadlines(this.now())) {
+      if (expired.kind !== 'captain_request') continue
+      const message = this.store.getByKey(`captain-request-message:${expired.id}`)
+      if (message?.state === 'pending') this.store.terminal(message.id, 'cancelled', 'The originating Captain request timed out.')
+    }
   }
 }

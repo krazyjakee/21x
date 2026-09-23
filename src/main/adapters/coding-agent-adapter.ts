@@ -53,6 +53,12 @@ export interface McpServerConfig {
   knownTools?: string[]
 }
 
+/** A model a backend CLI offers; `id` is what the session config's `model` takes. */
+export interface BackendModel {
+  id: string
+  name: string
+}
+
 export interface SessionConfig {
   agentId: string
   taskId: string
@@ -256,6 +262,13 @@ export interface CodingAgentAdapter {
     providers: { id: string; name: string; models: unknown; [key: string]: unknown }[]
     default: Record<string, string>
   } | null>
+
+  /**
+   * List the models the installed backend CLI offers, for backends that pick
+   * a model without a provider (Claude Code, Codex). Throws when the CLI
+   * cannot be asked.
+   */
+  listModels?(): Promise<BackendModel[]>
 
   /**
    * Notify the adapter that provider/auth config has changed (e.g. user edited

@@ -95,6 +95,19 @@ afterEach(() => {
 })
 
 describe('Commander voice conversation', () => {
+  it('never focuses its aria-hidden routing buffer when a voice segment arrives', async () => {
+    render(<><textarea aria-label="Typed draft" defaultValue="keep this" /><CommanderVoiceControls /></>)
+    fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
+    await waitFor(() => expect(mocks.voiceState.startTurn).toHaveBeenCalled())
+    const draft = screen.getByRole('textbox', { name: 'Typed draft' })
+    draft.focus()
+    act(() => { expect(insertAndSubmit('spoken request')).toBe(true) })
+    await waitFor(() => expect(mocks.send).toHaveBeenCalledWith('session-1', 'spoken request'))
+    expect(draft).toHaveFocus()
+    expect(draft).toHaveValue('keep this')
+    expect(screen.getAllByRole('textbox')).toEqual([draft])
+  })
+
   it('starts listening immediately and sends every pause-delimited utterance', async () => {
     const view = render(<CommanderVoiceControls />)
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))

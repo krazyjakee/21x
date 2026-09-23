@@ -10,13 +10,15 @@
  */
 
 import { randomUUID } from 'crypto'
+import { tmpdir } from 'os'
 import type {
   CodingAgentAdapter,
   SessionConfig,
   SessionStatus,
   SessionMessage,
   MessagePart,
-  AdapterUsageReport
+  AdapterUsageReport,
+  BackendModel
 } from './coding-agent-adapter'
 import { SessionStatusType, MessagePartType, MessageRole } from './coding-agent-adapter'
 import { findClaudeExecutable } from './claude-code-executable'
@@ -37,6 +39,7 @@ type HookCallbackMatcher = import('@anthropic-ai/claude-agent-sdk').HookCallback
 type CanUseTool = import('@anthropic-ai/claude-agent-sdk').CanUseTool
 type PermissionResult = import('@anthropic-ai/claude-agent-sdk').PermissionResult
 type PermissionUpdate = import('@anthropic-ai/claude-agent-sdk').PermissionUpdate
+type ModelInfo = import('@anthropic-ai/claude-agent-sdk').ModelInfo
 
 let ClaudeAgentSDK: ClaudeSDK | null = null
 
@@ -942,6 +945,27 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     )
   }
 
+  /**
+   * Asks the installed Claude Code CLI which models it offers. The query never
+   * gets a prompt, so no turn runs; it is closed once the list arrives.
+   */
+  async listModels(): Promise<BackendModel[]> {
+    await this.ensureSDKLoaded()
+    const q = ClaudeAgentSDK!.query({
+      prompt: (async function* () { await new Promise<never>(() => {}) })(),
+      options: {
+        cwd: tmpdir(),
+        pathToClaudeCodeExecutable: await findClaudeExecutable(),
+        env: this.buildClaudeEnvironment()
+      }
+    })
+    try {
+      return claudeModelsFromInfo(await q.supportedModels())
+    } finally {
+      q.close()
+    }
+  }
+
   async checkHealth(): Promise<{ available: boolean; reason?: string }> {
     try {
       await this.ensureSDKLoaded()
@@ -1364,4 +1388,24 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     delete env.CLAUDECODE
     return env
   }
+}
+
+/**
+ * Turns the CLI's model rows into pinned ids. Aliases such as `opus` resolve
+ * to a new model when Claude Code updates, so an alias row is offered by the
+ * id it resolves to now. A row that already names a model keeps its value,
+ * which can carry a context suffix (`[1m]`) its resolved id drops. The
+ * `default` row repeats one of the others.
+ */
+export function claudeModelsFromInfo(rows: ModelInfo[]): BackendModel[] {
+  const models: BackendModel[] = []
+  const seen = new Set<string>()
+  for (const row of rows) {
+    if (row.value === 'default') continue
+    const id = row.value.startsWith('claude-') ? row.value : row.resolvedModel || row.value
+    if (seen.has(id)) continue
+    seen.add(id)
+    models.push({ id, name: `${row.displayName} (${id})` })
+  }
+  return models
 }

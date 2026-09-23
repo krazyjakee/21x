@@ -16,6 +16,7 @@ import { makeTask } from '../../test/helpers/task-fixtures'
 import { CaptainRuntimeStore } from './sessions/runtime-store'
 import { DeliveryStore } from './sessions/delivery-store'
 import { recordHumanAuthorization, prepareAuthorizationDispatch, activateAuthorizationDispatch, taskAuthorization } from './authorization'
+import { TurnStillRunningError } from './authorization-dispatch'
 
 // Mock heavy dependencies to avoid loading electron/native modules. The
 // filesystem is real: sessions get workspaces under a temp dir, so the
@@ -579,6 +580,16 @@ describe('per-project Captain conversations', () => {
     }
     expect(send).toHaveBeenCalledTimes(5)
     expect(new DeliveryStore(db).getByKey('bounded-retry')).toMatchObject({ state: 'failed', attemptCount: 5 })
+  })
+
+  it('keeps a message queued while the Captain is still on an earlier turn', async () => {
+    const manager = newManager(new FakeAdapter())
+    const send = vi.spyOn(manager as any, 'sendMessageNow').mockRejectedValue(new TurnStillRunningError())
+    for (let attempt = 0; attempt < 6; attempt++) {
+      await expect(manager.sendMessage('', 'queued', alphaCaptain, agentId, undefined, undefined, 'busy-captain')).rejects.toThrow(TurnStillRunningError)
+    }
+    expect(send).toHaveBeenCalledTimes(6)
+    expect(new DeliveryStore(db).getByKey('busy-captain')).toMatchObject({ state: 'pending', attemptCount: 6 })
   })
 
   it('starts one Captain for concurrent durable messages without a prewarm owner', async () => {

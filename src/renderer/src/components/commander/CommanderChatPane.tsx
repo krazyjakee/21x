@@ -268,11 +268,13 @@ export function CommanderChatPane() {
           <div className="flex items-end gap-2 px-3 py-2">
             <textarea
               ref={inputRef}
-              disabled={isSubmitting}
+              // Lock the submitted snapshot without blurring the keyboard user's
+              // field. Disabling it leaves focus on body after the IPC settles.
+              readOnly={isSubmitting}
               aria-label="Message the Commander"
               rows={1}
               value={draft}
-              onPaste={images.handlePaste}
+              onPaste={isSubmitting ? undefined : images.handlePaste}
               placeholder="Ask the Commander…"
               className="max-h-40 min-h-[24px] flex-1 resize-none bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
               onChange={(e) => setDraft(e.target.value)}
