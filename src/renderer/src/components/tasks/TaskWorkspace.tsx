@@ -53,6 +53,11 @@ interface TaskWorkspaceProps {
   onOpenFullView?: () => void
   /** Override the layout — which panels to show. Default: 'both' */
   panelLayout?: TaskWorkspaceLayout
+  /**
+   * Show the header's live activity badge (#95). Canvas task panels pass
+   * false: their own panel header already indicates the same session.
+   */
+  showActivity?: boolean
 }
 
 function TaskWorkspaceComponent({
@@ -69,7 +74,8 @@ function TaskWorkspaceComponent({
   onOpenSubtaskInWindow,
   onBack,
   onOpenFullView,
-  panelLayout = 'both'
+  panelLayout = 'both',
+  showActivity = true
 }: TaskWorkspaceProps) {
   const { start, resume, switchAgent, abort, stop, sendMessage, approve } = useAgentSessionActions(task?.id)
   // Narrow per-field selectors: the transcript (TaskTranscriptPane) owns the
@@ -750,6 +756,7 @@ function TaskWorkspaceComponent({
           onOpenFullView={onOpenFullView}
           onDelete={onDelete}
           recoveryState={recoveryLabel}
+          showActivity={showActivity}
         />
         <div ref={workspaceBodyRef} className="relative flex min-h-0 flex-1 overflow-hidden">
           {panelLayout === 'task-only' || (!hasSession && panelLayout === 'both') ? (
