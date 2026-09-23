@@ -22,7 +22,7 @@ import type { GitHubManager } from './github-manager'
 import type { GitLabManager } from './gitlab-manager'
 import type { ForgejoManager } from './forgejo-manager'
 import type { AcpAdapter } from './adapters/acp-adapter'
-import type { CodingAgentAdapter, SessionConfig, SessionMessage, SessionStatus as AdapterSessionStatus } from './adapters/coding-agent-adapter'
+import type { BackendModel, CodingAgentAdapter, SessionConfig, SessionMessage, SessionStatus as AdapterSessionStatus } from './adapters/coding-agent-adapter'
 import { SessionStatusType, MessagePartType } from './adapters/coding-agent-adapter'
 import { randomUUID } from 'crypto'
 import { registerSecretSession, unregisterSecretSession, getSecretBrokerPort } from './secret-broker'
@@ -5131,6 +5131,21 @@ export class AgentManager extends EventEmitter {
       return await adapter.getProviders(baseUrl, directory)
     } catch (error: unknown) {
       console.log('[AgentManager] Could not get providers:', error instanceof Error ? error.message : error)
+      return null
+    }
+  }
+
+  /**
+   * Models the installed Claude Code or Codex CLI offers, or null when the
+   * backend has no such listing or the CLI could not be asked.
+   */
+  async listModels(backendType: string): Promise<BackendModel[] | null> {
+    const adapter = this.getAdapterByType(backendType)
+    if (!adapter?.listModels) return null
+    try {
+      return await adapter.listModels()
+    } catch (error: unknown) {
+      console.log(`[AgentManager] Could not list ${backendType} models:`, error instanceof Error ? error.message : error)
       return null
     }
   }

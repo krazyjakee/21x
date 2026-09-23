@@ -229,6 +229,9 @@ export const captainRuntimeApi = {
 export const agentConfigApi = {
   getProviders: (serverUrl?: string, backendType?: string): Promise<{ providers: { id: string; name: string; models: unknown }[]; default: Record<string, string> } | null> => {
     return window.electronAPI.agentConfig.getProviders(serverUrl, backendType)
+  },
+  listModels: (backendType: string): Promise<{ id: string; name: string }[] | null> => {
+    return window.electronAPI.agentConfig.listModels(backendType)
   }
 }
 
