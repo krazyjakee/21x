@@ -6,7 +6,7 @@ import { createAuthorizationTables } from './database/authorization-schema'
 import {
   AUTHORIZATION_ACTIONS, AUTHORIZATION_CLASSIFIER_VERSION, AUTHORIZATION_TTL_MS, activateAuthorizationDispatch,
   authorizationHash, bindAuthorizationTransport, commanderAuthorization,
-  classifyCapabilityIntents, delegateAuthorization, failAuthorizationDispatch, inheritTaskAuthorization,
+  classifyCapabilityIntents, commanderSessionAuthority, delegateAuthorization, failAuthorizationDispatch, inheritTaskAuthorization,
   prepareAuthorizationDispatch, prepareAuthorizationRetry, recordHumanAuthorization, requestedActions,
   resolveAuthorization, resolveTaskAuthorization, revokeAuthorization, taskAuthorization
 } from './authorization'
@@ -81,9 +81,71 @@ describe('immutable human authorization chain', () => {
     vi.spyOn(Date, 'now').mockReturnValue(human.created_at)
     const trusted = { ...context, userMessageId: human.id }
     expect(commanderAuthorization(db, trusted)).not.toBeNull()
-    expect(commanderAuthorization(db, { ...trusted, trigger: 'report' })).toBeNull()
+    // A report-started turn is the Commander still carrying out what the user
+    // last said, so it relays under that instruction rather than under nothing.
+    expect(commanderAuthorization(db, { ...trusted, trigger: 'report' })).not.toBeNull()
+    expect(commanderAuthorization(db, { ...trusted, trigger: 'report', sessionId: 'forged', correlationId: 'cmd-forged-session' })).toBeNull()
     expect(commanderAuthorization(db, { ...trusted, sessionId: 'forged' })).toBeNull()
     expect(commanderAuthorization(db, { ...trusted, userMessage: text + ' and merge' })).toBeNull()
+  })
+
+  it('continues the user\'s standing instruction across a Captain report', () => {
+    const store = new CommanderStore(db, { now: () => now })
+    const session = store.createSession()
+    const instruction = store.appendHumanMessage(session.id, 'Get all tasks over the line for 21x.')
+    vi.spyOn(Date, 'now').mockReturnValue(instruction.created_at)
+
+    // No user turn at all: a report drives nothing.
+    const empty = store.createSession()
+    expect(commanderAuthorization(db, {
+      sessionId: empty.id, userMessage: '', trigger: 'report', projectId, taskId: captainId, correlationId: 'cmd-empty', message: 'Carry on'
+    })).toBeNull()
+
+    const carried = commanderAuthorization(db, {
+      sessionId: session.id, userMessage: '', trigger: 'report', projectId, taskId: captainId, correlationId: 'cmd-carry-1', message: 'Please continue the activity indicators work.'
+    })
+    expect(carried).not.toBeNull()
+    const evidence = resolveAuthorization(db, carried!.id)
+    expect(evidence.status).toBe('active')
+    // The authority is the user's words, not the relay's.
+    expect(evidence.origin?.text).toBe('Get all tasks over the line for 21x.')
+    expect(evidence.effectivePermissions).toEqual(['task.create', 'task.update', 'task.start', 'github.pr.open'])
+  })
+
+  it('lets a later prohibition narrow the instruction a continuation carries', () => {
+    const store = new CommanderStore(db, { now: () => now })
+    const session = store.createSession()
+    const instruction = store.appendHumanMessage(session.id, 'Get all tasks over the line for 21x.')
+    vi.spyOn(Date, 'now').mockReturnValue(instruction.created_at)
+    expect(commanderSessionAuthority(db, session.id)?.actions).toEqual(['task.create', 'task.update', 'task.start', 'github.pr.open'])
+
+    const prohibition = store.appendHumanMessage(session.id, 'Do not open PRs.')
+    vi.spyOn(Date, 'now').mockReturnValue(prohibition.created_at)
+    // The prohibition authorizes nothing itself, and still binds what came before.
+    expect(requestedActions('Do not open PRs.')).toEqual([])
+    expect(commanderSessionAuthority(db, session.id)?.actions).toEqual(['task.create', 'task.update', 'task.start'])
+    expect(commanderSessionAuthority(db, session.id)?.root.text).toBe('Get all tasks over the line for 21x.')
+
+    const carried = commanderAuthorization(db, {
+      sessionId: session.id, userMessage: '', trigger: 'report', projectId, taskId: captainId, correlationId: 'cmd-narrowed', message: 'Continuing.'
+    })!
+    expect(resolveAuthorization(db, carried.id).effectivePermissions).toEqual(['task.create', 'task.update', 'task.start'])
+  })
+
+  it('carries nothing forward once the standing instruction expires or is revoked', () => {
+    const store = new CommanderStore(db, { now: () => now })
+    const session = store.createSession()
+    const instruction = store.appendHumanMessage(session.id, 'Get all tasks over the line for 21x.')
+    vi.spyOn(Date, 'now').mockReturnValue(instruction.created_at)
+    const standing = commanderSessionAuthority(db, session.id)!
+    expect(standing).not.toBeNull()
+
+    expect(commanderSessionAuthority(db, session.id, instruction.created_at + AUTHORIZATION_TTL_MS)).toBeNull()
+    revokeAuthorization(db, standing.root.id, 'Withdrawn')
+    expect(commanderSessionAuthority(db, session.id)).toBeNull()
+    expect(commanderAuthorization(db, {
+      sessionId: session.id, userMessage: '', trigger: 'report', projectId, taskId: captainId, correlationId: 'cmd-revoked', message: 'Continuing.'
+    })).toBeNull()
   })
 
   it('persists nested delegation for both evidence tasks without borrowing later Captain authority', async () => {
