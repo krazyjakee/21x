@@ -1,6 +1,7 @@
 import { useEffect, useState, type RefObject } from 'react'
 import { useCanvasStore } from '@/stores/canvas-store'
 import { useDrawingStore } from '@/stores/drawing-store'
+import { useUIStore } from '@/stores/ui-store'
 import { getLiveViewport } from '@/stores/canvas-live-viewport'
 import type { DrawingTool } from '../drawing/types'
 import { pasteImageAt } from '../drawing/DrawingLayer'
@@ -41,8 +42,17 @@ export function useCanvasKeyboard({
   const [ctrlHeld, setCtrlHeld] = useState(false)
   // Tab-cycling position.
   const [focusedPanelIndex, setFocusedPanelIndex] = useState(-1)
+  // AppLayout keeps Canvas mounted across views. Its keys must only run while
+  // Canvas is the active workspace and no task/settings dialog is open.
+  const isCanvasActive = useUIStore((s) => s.sidebarView === 'canvas' && s.activeModal === null)
 
   useEffect(() => {
+    if (!isCanvasActive) {
+      setSpaceHeld(false)
+      setCtrlHeld(false)
+      return
+    }
+
     const focusPanelAt = (idx: number, panelId: string) => {
       const container = containerRef.current
       if (!container) return
@@ -171,7 +181,7 @@ export function useCanvasKeyboard({
       window.removeEventListener('keyup', handleKeyUp)
       window.removeEventListener('blur', handleBlur)
     }
-  }, [containerRef, zoomStep, resetViewport, focusedPanelIndex, commitViewport, onEscape])
+  }, [containerRef, zoomStep, resetViewport, focusedPanelIndex, commitViewport, onEscape, isCanvasActive])
 
   return { spaceHeld, ctrlHeld }
 }

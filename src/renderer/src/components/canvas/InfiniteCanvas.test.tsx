@@ -20,6 +20,7 @@ const taskStoreState = vi.hoisted(() => ({
   isLoading: false,
   error: null as string | null,
 }))
+const uiShortcutState = vi.hoisted(() => ({ sidebarView: 'canvas', activeModal: null as string | null }))
 
 const makeTask = (overrides: Partial<Task> = {}): Task => ({
   id: 'task-123',
@@ -81,7 +82,8 @@ vi.mock('@/stores/ui-store', () => ({
       canvasPendingTaskId: null,
       clearCanvasPendingTask: vi.fn(),
       clearCanvasPendingApp: vi.fn(),
-      sidebarView: 'canvas',
+      sidebarView: uiShortcutState.sidebarView,
+      activeModal: uiShortcutState.activeModal,
     }
     return selector ? selector(state) : state
   }),
@@ -89,6 +91,8 @@ vi.mock('@/stores/ui-store', () => ({
 
 describe('InfiniteCanvas', () => {
   beforeEach(() => {
+    uiShortcutState.sidebarView = 'canvas'
+    uiShortcutState.activeModal = null
     const api = window.electronAPI as typeof window.electronAPI & {
       onHeartbeatAlert?: typeof window.electronAPI.onHeartbeatAlert
       onHeartbeatDisabled?: typeof window.electronAPI.onHeartbeatDisabled
@@ -601,6 +605,22 @@ describe('InfiniteCanvas', () => {
       fireEvent.keyDown(window, { code: 'KeyT' })
       expect(useDrawingStore.getState().activeTool).toBe('text')
       fireEvent.keyDown(window, { code: 'KeyV' })
+      expect(useDrawingStore.getState().activeTool).toBe('select')
+    })
+
+    it.each([
+      ['dashboard', null],
+      ['canvas', 'settings'],
+      ['canvas', 'create'],
+    ])('leaves keyboard input alone while %s is visible with modal %s', (view, modal) => {
+      uiShortcutState.sidebarView = view
+      uiShortcutState.activeModal = modal
+      render(<InfiniteCanvas />)
+
+      const event = new KeyboardEvent('keydown', { key: 'r', code: 'KeyR', cancelable: true })
+      window.dispatchEvent(event)
+
+      expect(event.defaultPrevented).toBe(false)
       expect(useDrawingStore.getState().activeTool).toBe('select')
     })
 

@@ -121,9 +121,31 @@ describe('Commander voice conversation', () => {
 
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Install the local speech runtime')
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Install the local speech runtime')
+    expect(alert).toHaveClass('absolute', 'right-full', 'top-3')
+    expect(alert).not.toHaveClass('fixed')
     expect(mocks.voiceState.startTurn).not.toHaveBeenCalled()
     expect(mocks.setActive).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByLabelText('Dismiss voice error'))
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('quietly switches off when a voice conversation ends', async () => {
+    const view = render(<CommanderVoiceControls />)
+    fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
+
+    await waitFor(() => expect(mocks.voiceState.startTurn).toHaveBeenCalledWith('conversation'))
+    expect(await screen.findByLabelText('Turn voice mode off')).toBeTruthy()
+
+    act(() => {
+      mocks.voiceState.turnId = null
+      view.rerender(<CommanderVoiceControls />)
+    })
+
+    expect(await screen.findByLabelText('Turn voice mode on')).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('enables an installed microphone path from the same click', async () => {
