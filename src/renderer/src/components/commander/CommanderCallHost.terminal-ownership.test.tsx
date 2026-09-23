@@ -37,8 +37,8 @@ const ttsCallbacks = vi.hoisted(() => {
     end: new Set<(event: VoiceSpeechEndEvent) => void>(),
     chunk: new Set<(event: VoiceSpeechChunkEvent) => void>(),
   }
-  Object.assign(window.electronAPI.voice.tts, {
-    getSnapshot: vi.fn(async()=>({
+  window.electronAPI.voice.tts = {
+    getSnapshot: vi.fn(async () => ({
       enabled: false,
       engine: 'system' as const,
       status: { state: 'loading' as const },
@@ -60,11 +60,13 @@ const ttsCallbacks = vi.hoisted(() => {
         usage: null,
       },
     })),
-    onSpeechStart: vi.fn((cb: (event: VoiceSpeechStartEvent) => void)=>{callbacks.start.add(cb);return ()=>callbacks.start.delete(cb)}),
-    onSpeechEnd: vi.fn((cb: (event: VoiceSpeechEndEvent) => void)=>{callbacks.end.add(cb);return ()=>callbacks.end.delete(cb)}),
-    onSpeechChunk: vi.fn((cb: (event: VoiceSpeechChunkEvent) => void)=>{callbacks.chunk.add(cb);return ()=>callbacks.chunk.delete(cb)}),
-    onStatus: vi.fn(()=>()=>{}), onModelProgress: vi.fn(()=>()=>{}), stop:vi.fn(async()=>{})
-  })
+    onSpeechStart: vi.fn((cb: (event: VoiceSpeechStartEvent) => void) => { callbacks.start.add(cb); return () => callbacks.start.delete(cb) }),
+    onSpeechEnd: vi.fn((cb: (event: VoiceSpeechEndEvent) => void) => { callbacks.end.add(cb); return () => callbacks.end.delete(cb) }),
+    onSpeechChunk: vi.fn((cb: (event: VoiceSpeechChunkEvent) => void) => { callbacks.chunk.add(cb); return () => callbacks.chunk.delete(cb) }),
+    onStatus: vi.fn(() => () => {}),
+    onModelProgress: vi.fn(() => () => {}),
+    stop: vi.fn(async () => {})
+  } as unknown as typeof window.electronAPI.voice.tts
   return callbacks
 })
 

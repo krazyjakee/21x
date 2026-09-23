@@ -5,6 +5,11 @@ import type { VoiceWorkerClient } from './voice-worker-client'
 import type { VoiceSpeechLifecycleOwner, VoiceSpeechService } from './voice-speech-service'
 import type { VoiceActionOutcome, VoiceState } from '../../shared/voice'
 
+const ids = vi.hoisted(() => ({ queue: [] as string[], next: 0 }))
+vi.mock('@paralleldrive/cuid2', () => ({
+  createId: () => ids.queue.shift() ?? `voice-session-speech-test-${++ids.next}`,
+}))
+
 /**
  * How a spoken command turns into speech (design §5.3 and §5.7).
  *
@@ -35,6 +40,8 @@ class FakeSpeech {
   stops = 0
   /** What `speak` returns. Set to false to model "nothing was spoken". */
   willSpeak = true
+  /** Optional preparation boundary used to exercise lifecycle replacement races. */
+  speakGate: Promise<void> | null = null
   private listener: ((speaking: boolean, owner?: VoiceSpeechLifecycleOwner) => void) | null = null
   private activeOwner: VoiceSpeechLifecycleOwner | undefined
 
@@ -64,6 +71,7 @@ class FakeSpeech {
     owner?: VoiceSpeechLifecycleOwner
   ): Promise<boolean> {
     this.spoken.push(request)
+    if (this.speakGate) await this.speakGate
     if (this.willSpeak) {
       this.activeOwner = owner
       this.listener?.(true, owner)
@@ -202,6 +210,7 @@ function states(notify: ReturnType<typeof vi.fn>): VoiceState[] {
 
 let ctx: ReturnType<typeof makeManager>
 beforeEach(() => {
+  ids.queue = []
   ctx = makeManager()
 })
 
@@ -298,6 +307,44 @@ describe('the audio state', () => {
 
     expect(ctx.manager.getState()).toBe('idle')
   })
+
+  it.each([false, true])(
+    'does not let a stale false answer settle replacement waiting state (reused id: %s)',
+    async (reused) => {
+      ids.queue = [
+        'old-turn',
+        'old-epoch',
+        reused ? 'old-turn' : 'replacement-turn',
+        'replacement-epoch',
+      ]
+      const oldTurn = await ctx.manager.startTurn('conversation', {})
+      if ('error' in oldTurn) throw new Error(oldTurn.error)
+      ctx.manager.expectSpokenAnswer(oldTurn.turnId, 'old-task')
+
+      let release!: () => void
+      ctx.speech.speakGate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      ctx.speech.willSpeak = false
+      const staleAnswer = ctx.manager.speakAgentAnswer('old-task', 'The old answer.')
+      await vi.waitFor(() => expect(ctx.speech.spoken).toHaveLength(1))
+
+      await applyOutcome(ctx.manager, {
+        status: 'executed',
+        intent: 'reply_to_agent',
+        message: 'Sent replacement question.',
+        taskId: 'replacement-task',
+      } as never)
+      expect(ctx.manager.getState()).toBe('waiting_for_agent')
+      ctx.notify.mockClear()
+
+      release()
+      expect(await staleAnswer).toBe(false)
+
+      expect(ctx.manager.getState()).toBe('waiting_for_agent')
+      expect(states(ctx.notify)).not.toContain('idle')
+    }
+  )
 })
 
 /**
