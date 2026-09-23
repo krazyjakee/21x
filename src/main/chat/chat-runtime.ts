@@ -51,27 +51,12 @@ export interface ChatTurnHandle {
 export type ChatEventListener = (event: ChatRuntimeEvent) => void
 
 /**
- * The failed result an unanswered tool call gets when its turn ends, by stop
- * reason. Exported for the tests.
- */
-export const UNANSWERED_TOOL_CALL_RESULTS: Record<ChatStopReason, string> = {
-  cancelled: 'Cancelled before this tool ran.',
-  max_tokens: 'Not run: the reply was cut off before this tool call was complete.',
-  tool_limit: 'Not run: the tool-call limit for this turn was reached.',
-  error: 'Not run: the turn failed before this tool ran.',
-  end_turn: 'Not run: the turn ended before this tool ran.'
-}
-
-/**
  * Providers reject a history where an assistant tool call has no result, and
- * the chat shows a call without a result as still running. A turn can end with
- * such calls in four ways: cancelled while its tools run, cut off by
- * `max_tokens`, the model still calling tools after the limit, or a failure
- * between two tools. Adds a failed "not run" result for every call of the last
- * assistant message that lacks one, so the returned history can be sent again
- * and nothing keeps spinning. These are never successful or empty results.
+ * a turn cancelled while its tools run leaves exactly that. Adds a
+ * "cancelled" result for every call of the last assistant message that lacks
+ * one, so the returned history can be sent again.
  */
-function closeUnansweredToolCalls(messages: ChatMessage[], stopReason: ChatStopReason): void {
+function closeUnansweredToolCalls(messages: ChatMessage[]): void {
   let lastAssistant = -1
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === 'assistant') {
@@ -86,7 +71,7 @@ function closeUnansweredToolCalls(messages: ChatMessage[], stopReason: ChatStopR
   )
   for (const call of assistant.toolCalls) {
     if (answered.has(call.id)) continue
-    messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: UNANSWERED_TOOL_CALL_RESULTS[stopReason], isError: true })
+    messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: 'Cancelled before this tool ran.', isError: true })
   }
 }
 
@@ -156,8 +141,6 @@ export class ChatRuntime {
       }
     }
     const finish = (stopReason: ChatStopReason, error?: string): ChatTurnResult => {
-      // Every exit, not only cancellation: see closeUnansweredToolCalls.
-      closeUnansweredToolCalls(messages, stopReason)
       if (error !== undefined) emit({ type: 'error', message: error })
       emit({ type: 'done', stopReason, messages, usage })
       return { turnId, stopReason, messages, usage, ...(error !== undefined ? { error } : {}) }
@@ -254,6 +237,7 @@ export class ChatRuntime {
       if (isAbortError(err, signal)) {
         // Calls streamed before the abort never ran, so keep only the text.
         if (currentText) messages.push({ role: 'assistant', content: currentText })
+        closeUnansweredToolCalls(messages)
         return finish('cancelled')
       }
       console.error(`[ChatRuntime] turn ${turnId} failed:`, hasImages ? errorMessage(err) : err)

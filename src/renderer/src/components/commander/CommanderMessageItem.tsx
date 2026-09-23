@@ -1,5 +1,5 @@
 import { useId, useState } from 'react'
-import { AlertCircle, Ban, Check, ChevronDown, ChevronRight, Inbox, Loader2 } from 'lucide-react'
+import { AlertCircle, Check, ChevronDown, ChevronRight, Inbox, Loader2 } from 'lucide-react'
 import type { CommanderMessage } from '@shared/commander'
 import { Markdown } from '@/components/ui/Markdown'
 import { ChatMessageImages } from '@/components/chat/ChatMessageImages'
@@ -10,45 +10,31 @@ import { formatToolResult, toolCallLabel } from './tool-call-label'
 export interface ToolChipProps {
   name: string
   input: Record<string, unknown>
-  /** undefined while the tool runs, unless `notRun` says it never will. */
+  /** undefined while the tool runs. */
   result?: string
   isError?: boolean
-  /**
-   * The call has no result and none is coming: its turn is over. Shown as a
-   * failure, never as running and never as a success.
-   */
-  notRun?: boolean
 }
-
-/** Shown for a stored call whose turn ended without recording a result. */
-export const TOOL_NOT_RUN_DETAIL = 'Not run: the turn ended before this tool call started.'
 
 /**
  * One tool call, e.g. "Asked Project X…", with its state. The chip stays
  * compact; when the call has a result, the chip is a button that expands the
  * result inline (click, Enter or Space), so it is not hover-only.
  */
-export function ToolChip({ name, input, result, isError: resultIsError, notRun = false }: ToolChipProps) {
+export function ToolChip({ name, input, result, isError }: ToolChipProps) {
   const [expanded, setExpanded] = useState(false)
   const regionId = useId()
-  const unanswered = result === undefined
-  const pending = unanswered && !notRun
-  const stopped = unanswered && notRun
-  const isError = stopped || resultIsError
-  const Icon = pending ? Loader2 : stopped ? Ban : isError ? AlertCircle : Check
-  const detail = stopped ? TOOL_NOT_RUN_DETAIL : formatToolResult(result)
+  const pending = result === undefined
+  const Icon = pending ? Loader2 : isError ? AlertCircle : Check
+  const detail = formatToolResult(result)
   const label = toolCallLabel(name, input)
   const chipClass = cn(
     'inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs',
     isError ? 'border-destructive/30 bg-destructive/10 text-destructive' : 'border-border bg-muted text-muted-foreground'
   )
-  // The icon is decorative; the state is also text for screen readers.
-  const stateText = pending ? 'Running' : stopped ? 'Not run' : isError ? 'Failed' : null
   const content = (
     <>
-      <Icon className={cn('size-3 shrink-0', pending && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />
+      <Icon className={cn('size-3 shrink-0', pending && 'animate-spin')} aria-hidden="true" />
       <span className="truncate">{label}</span>
-      {stateText && <span className="sr-only" data-testid="commander-tool-state">{`(${stateText})`}</span>}
     </>
   )
 
@@ -93,17 +79,9 @@ interface MessageItemProps {
   message: CommanderMessage
   /** Tool results by call id, so an assistant message can show its calls' outcomes. */
   toolResults: Map<string, CommanderMessage>
-  /**
-   * True only for the newest message while its session's turn still runs: the
-   * one place a stored call can still be waiting for its result. Everywhere
-   * else a stored call without a result belongs to a turn that is over
-   * (cut off, tool limit, failure, or saved by an older build), and it must
-   * not spin for ever (#83).
-   */
-  turnActive?: boolean
 }
 
-export function CommanderMessageItem({ message, toolResults, turnActive = false }: MessageItemProps) {
+export function CommanderMessageItem({ message, toolResults }: MessageItemProps) {
   if (message.role === 'user') {
     return (
       <div className="flex flex-col items-end gap-1.5">
@@ -148,14 +126,7 @@ export function CommanderMessageItem({ message, toolResults, turnActive = false 
             {calls.map((call) => {
               const result = toolResults.get(call.id)
               return (
-                <ToolChip
-                  key={call.id}
-                  name={call.name}
-                  input={call.input}
-                  result={result?.content}
-                  isError={result?.is_error}
-                  notRun={!result && !turnActive}
-                />
+                <ToolChip key={call.id} name={call.name} input={call.input} result={result?.content} isError={result?.is_error} />
               )
             })}
           </div>
