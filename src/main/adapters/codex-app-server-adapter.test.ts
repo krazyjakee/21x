@@ -1719,3 +1719,44 @@ describe('CodexAppServerAdapter app-server lifecycle', () => {
     await expect(inFlight).rejects.toThrow('Codex app-server stopped')
   })
 })
+
+describe('CodexAppServerAdapter model listing', () => {
+  it('pages through model/list, skips hidden models and stops the app-server', async () => {
+    const adapter = new CodexAppServerAdapter()
+    const internals = adapter as unknown as Record<string, unknown>
+    const session = { sessionId: 'model-list' }
+    internals.startAppServerProcess = vi.fn(async () => session)
+    internals.initializeAppServer = vi.fn(async () => {})
+    const terminate = vi.fn()
+    internals.terminateSession = terminate
+    const request = vi.fn(async (_session: unknown, _method: string, params: { cursor?: string }) => params.cursor
+      ? { data: [{ model: 'gpt-6-luna', displayName: 'GPT-6-Luna', hidden: false }], nextCursor: null }
+      : {
+          data: [
+            { model: 'gpt-6-astra', displayName: 'GPT-6-Astra', hidden: false },
+            { model: 'gpt-internal', displayName: 'Internal', hidden: true }
+          ],
+          nextCursor: 'page-2'
+        })
+    internals.sendRpcRequest = request
+
+    await expect(adapter.listModels()).resolves.toEqual([
+      { id: 'gpt-6-astra', name: 'GPT-6-Astra' },
+      { id: 'gpt-6-luna', name: 'GPT-6-Luna' }
+    ])
+    expect(request.mock.calls.map((call) => call[1])).toEqual(['model/list', 'model/list'])
+    expect(terminate).toHaveBeenCalledWith(session, expect.any(String))
+  })
+
+  it('stops the app-server when the listing fails', async () => {
+    const adapter = new CodexAppServerAdapter()
+    const internals = adapter as unknown as Record<string, unknown>
+    internals.startAppServerProcess = vi.fn(async () => ({ sessionId: 'model-list' }))
+    internals.initializeAppServer = vi.fn(async () => { throw new Error('not logged in') })
+    const terminate = vi.fn()
+    internals.terminateSession = terminate
+
+    await expect(adapter.listModels()).rejects.toThrow('not logged in')
+    expect(terminate).toHaveBeenCalled()
+  })
+})

@@ -46,17 +46,23 @@ export function SkillModelPicker({ value, onChange }: { value: string; onChange:
 
   useEffect(() => {
     let cancelled = false
-    const fixed = backend === CodingAgentType.CLAUDE_CODE ? CLAUDE_MODELS
-      : backend === CodingAgentType.CODEX ? CODEX_MODELS
-        : backend === CodingAgentType.CURSOR ? CURSOR_MODELS
-          : null
-    if (fixed) {
-      setOptions(fixed.map((m) => ({ value: m.id, label: m.name })))
+    if (backend === CodingAgentType.CURSOR) {
+      setOptions(CURSOR_MODELS.map((m) => ({ value: m.id, label: m.name })))
+      setLoading(false)
       return
     }
+    const cliFallback = backend === CodingAgentType.CLAUDE_CODE ? CLAUDE_MODELS
+      : backend === CodingAgentType.CODEX ? CODEX_MODELS
+        : null
+    const toOptions = (models: { id: string; name: string }[]) => models.map((m) => ({ value: m.id, label: m.name }))
     setLoading(true)
-    agentConfigApi.getProviders(defaultAgent?.server_url, backend)
-      .then((result) => { if (!cancelled) setOptions(providerModelOptions(result)) })
+    const listing: Promise<ModelOption[]> = cliFallback
+      ? agentConfigApi.listModels(backend)
+        .then((listed) => toOptions(listed && listed.length > 0 ? listed : cliFallback))
+        .catch(() => toOptions(cliFallback))
+      : agentConfigApi.getProviders(defaultAgent?.server_url, backend).then(providerModelOptions)
+    listing
+      .then((result) => { if (!cancelled) setOptions(result) })
       .catch(() => { if (!cancelled) setOptions([]) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }

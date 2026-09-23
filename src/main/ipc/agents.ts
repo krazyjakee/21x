@@ -156,6 +156,8 @@ export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
     return result
   })
 
+  ipcMain.handle('agentConfig:listModels', (_, backendType: string) => agentManager.listModels(backendType))
+
   ipcMain.handle('agent-installer:detect', async () => {
     const { detectInstalledAgents } = await import('../agent-installer/detect.js')
     return detectInstalledAgents()
