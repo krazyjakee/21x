@@ -71,6 +71,13 @@ drains. Explicit manual stops and retry exhaustion remain terminal across
 scheduler sweeps and restarts; an explicit continuation message is needed to
 resume. Deferred outbox messages cannot bypass those recovery exclusions.
 
+A person's own start lifts any of these terminal states: the desktop board's
+start, a status change to a working status in the desktop or mobile app, and
+the mobile start action pass `explicitUserStart`, which re-queues the task with
+an `explicit_user_restart` audit entry. The agent task API only passes
+`resumeManualStop`, so an agent can reverse a manual stop but never lifts an
+exclusion that recovery made after a failure.
+
 A failed initial prompt transport can have accepted the prompt before reporting
 an error. Such an attempt stops with `prompt_delivery_unconfirmed`, preserving
 an auditable user decision instead of automatically replaying unknown effects.

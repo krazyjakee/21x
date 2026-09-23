@@ -229,6 +229,29 @@ describe('admission control — AgentManager.startTask', () => {
     expect(manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'started', recoveryResult: 'session_acknowledged' })
   })
 
+  it('lets only a person lift a start that recovery excluded after a failure', async () => {
+    const { manager, started, createTasks } = setup(1)
+    const [task] = createTasks(1)
+    await manager.startTask(task.id)
+    await manager.stopSession(sessionIdFor(manager, task.id))
+    await settle()
+    // The state recovery leaves after a failed start with an unfinished tool call.
+    ;(manager as any).db.db.prepare(`
+      UPDATE agent_start_queue SET state = 'cancelled', recovery_cause = 'unsafe_side_effect_unknown',
+        recovery_action = 'exclude_from_retry', recovery_result = 'excluded_failure_not_retried'
+      WHERE task_id = ?
+    `).run(task.id)
+
+    await expect(manager.startTask(task.id)).rejects.toThrow(/excluded_failure_not_retried/)
+    // The agent task API passes resumeManualStop only; it cannot lift this.
+    await expect(manager.startTask(task.id, { resumeManualStop: true })).rejects.toThrow(/excluded_failure_not_retried/)
+
+    expect(await manager.startTask(task.id, { resumeManualStop: true, explicitUserStart: true })).toMatchObject({ action: 'queued' })
+    await settle()
+    expect(started).toEqual([task.id, task.id])
+    expect(manager.getStartRecoveryState(task.id)).toMatchObject({ state: 'started', recoveryResult: 'session_acknowledged' })
+  })
+
   it('restarts only the selected child, leaving a manually stopped parent excluded', async () => {
     const { manager, createTasks, started } = setup(2)
     const [parent] = createTasks(1)
