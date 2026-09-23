@@ -107,6 +107,13 @@ export function isGlobalShortcutBlocked(event: KeyboardEvent): boolean {
 }
 
 export function findComposerElement(): HTMLTextAreaElement | null {
+  // Commander has a private, read-only voice buffer as well as the visible
+  // composer. Never send keyboard focus into that buffer or a hidden panel.
+  const commander = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message the Commander"]')
+  if (commander && !commander.disabled && !commander.readOnly
+    && !commander.closest('[aria-hidden="true"], [hidden], [inert]')
+    && commander.offsetParent !== null
+    && getComputedStyle(commander).visibility !== 'hidden') return commander
   const candidates = [
     '[data-testid="transcript-composer"] textarea',
     'textarea[aria-label="Kickoff instructions"]',

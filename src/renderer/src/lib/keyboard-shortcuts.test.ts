@@ -98,6 +98,40 @@ describe('keyboard shortcuts', () => {
     expect(isPrintableKey(new KeyboardEvent('keydown', { key: 'a', ctrlKey: true }))).toBe(false)
   })
 
+  it('finds the Commander draft but never its private voice buffer', () => {
+    const root = document.createElement('div')
+    const buffer = document.createElement('textarea')
+    buffer.readOnly = true
+    buffer.setAttribute('aria-hidden', 'true')
+    buffer.setAttribute('data-voice-composer', 'commander-voice')
+    const draft = document.createElement('textarea')
+    draft.setAttribute('aria-label', 'Message the Commander')
+    root.append(buffer, draft)
+    document.body.append(root)
+    Object.defineProperty(buffer, 'offsetParent', { get: () => root })
+    Object.defineProperty(draft, 'offsetParent', { get: () => root })
+    try {
+      expect(findComposerElement()).toBe(draft)
+      expect(focusComposerInput()).toBe(true)
+      expect(document.activeElement).toBe(draft)
+      for (const attribute of ['aria-hidden', 'hidden', 'inert']) {
+        root.setAttribute(attribute, 'true')
+        expect(findComposerElement()).toBeNull()
+        root.removeAttribute(attribute)
+      }
+      draft.readOnly = true
+      expect(findComposerElement()).toBeNull()
+      draft.readOnly = false
+      draft.disabled = true
+      expect(findComposerElement()).toBeNull()
+      draft.disabled = false
+      draft.style.visibility = 'hidden'
+      expect(findComposerElement()).toBeNull()
+    } finally {
+      root.remove()
+    }
+  })
+
   it('does not auto-focus on shortcut keys but does on other printable keys', () => {
     const textarea = document.createElement('textarea')
     textarea.setAttribute('placeholder', 'Write a message...')
