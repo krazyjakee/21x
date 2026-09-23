@@ -56,6 +56,12 @@ export interface AuthorizationNode {
   scope: AuthorizationScope[]
   /** Version 2 origins persist classified intent. Descendants narrow `actions`. */
   intents?: CapabilityIntent[]
+  /**
+   * Capabilities this message explicitly prohibited. Kept separately from
+   * `actions` because a prohibition outlives the message that carried it: a
+   * later instruction can only narrow what an earlier one authorized.
+   */
+  deniedActions?: AuthorizationAction[]
 }
 export interface AuthorizationEvidence {
   status: 'active' | 'missing' | 'invalid' | 'expired' | 'revoked' | 'out_of_scope'
@@ -356,6 +362,23 @@ export function requestedActions(text: string, projectNames: string[] = []): Aut
   return classifyCapabilityIntents(text, projectNames).map((intent) => intent.capability)
 }
 
+/**
+ * What this message forbade, independent of what it authorized.
+ *
+ * Read on its own pass because an ambiguous message still grants nothing but
+ * may still prohibit: "Do not open PRs" authorizes no work and must survive as
+ * a restriction on the instruction it follows.
+ */
+export function classifyDeniedCapabilities(text: string): AuthorizationAction[] {
+  const denied = new Set<AuthorizationAction>()
+  for (const clause of clauses(text)) {
+    const body = withoutProtectedProhibition(clause.text)
+    if (!body || !AUTHORIZATION_DENIAL.test(body)) continue
+    for (const capability of deniedCapabilities(body) ?? []) denied.add(capability)
+  }
+  return AUTHORIZATION_ACTIONS.filter((action) => denied.has(action))
+}
+
 function configuredScope(source: Source, projectId: string): AuthorizationScope | null {
   if (!source.db.prepare('SELECT 1 FROM projects WHERE id = ? AND archived = 0').get(projectId)) return null
   const repos = source.db.prepare("SELECT org, name FROM project_repos WHERE project_id = ? AND provider = 'github'").all(projectId) as { org: string; name: string }[]
@@ -375,6 +398,7 @@ function read(source: Source, id: string): { node: AuthorizationNode; hash: stri
     const node = JSON.parse(row.body) as AuthorizationNode
     if ((node.version !== 1 && node.version !== 2) || node.id !== id || node.textHash !== authorizationHash(node.text)) return null
     if (!Array.isArray(node.actions) || node.actions.some((action) => !AUTHORIZATION_ACTIONS.includes(action))) return null
+    if (node.deniedActions && (!Array.isArray(node.deniedActions) || node.deniedActions.some((action) => !AUTHORIZATION_ACTIONS.includes(action)))) return null
     return { node, hash: row.hash }
   } catch {
     return null
@@ -443,7 +467,8 @@ export function recordHumanAuthorization(source: Source, input: {
     at: input.at, expiresAt, author: 'human', source: input.source,
     sessionId: input.sessionId ?? null, taskId: input.taskId ?? null, correlationId: null,
     inputMode: input.inputMode ?? 'typed', scopeOriginMessageId,
-    actions: intents.map((intent) => intent.capability), scope, intents
+    actions: intents.map((intent) => intent.capability), scope, intents,
+    deniedActions: classifyDeniedCapabilities(input.text)
   })
 }
 
@@ -529,15 +554,63 @@ export function delegateAuthorization(source: Source, input: {
   })
 }
 
+/**
+ * What the user currently has the Commander doing in this session.
+ *
+ * The newest of their instructions that still carries capability and is still
+ * active, minus anything they have prohibited since. Walking newest-first is
+ * what makes a later prohibition bind an earlier instruction: the relay may
+ * narrow across time, never widen.
+ *
+ * This reads only platform-captured human roots. A relay's own prose, a report
+ * and an assistant summary are all invisible to it.
+ */
+export function commanderSessionAuthority(source: Source, sessionId: string, now = Date.now()): { root: AuthorizationNode; actions: AuthorizationAction[] } | null {
+  const rows = source.db.prepare(`SELECT id FROM authorization_nodes
+    WHERE parent_id IS NULL AND json_extract(body, '$.sessionId') = ?
+    ORDER BY rowid DESC LIMIT 32`).all(sessionId) as { id: string }[]
+  const denied = new Set<AuthorizationAction>()
+  for (const row of rows) {
+    const node = read(source, row.id)?.node
+    if (!node || node.source !== 'commander-chat' || node.sessionId !== sessionId) continue
+    for (const action of node.deniedActions ?? []) denied.add(action)
+    if (!node.actions.length) continue
+    if (resolveAuthorization(source, node.id, now).status !== 'active') continue
+    const actions = node.actions.filter((action) => !denied.has(action))
+    return actions.length ? { root: node, actions } : null
+  }
+  return null
+}
+
+/**
+ * The authority a Commander relay carries to a Captain.
+ *
+ * A turn the user started relays under that turn's own message. A turn a
+ * Captain report started is the Commander still carrying out what the user
+ * last asked for, so it relays under that instruction rather than under
+ * nothing — otherwise every follow-up would arrive unauthorized and the user
+ * would have to retype a request they already made. The relay text remains an
+ * interpretation either way: it cannot widen the instruction, and the number
+ * of times a report may drive delegation without the user speaking is already
+ * capped by the session's report-ask budget.
+ */
 export function commanderAuthorization(source: Source, input: {
   sessionId: string; userMessageId?: string; authorizationMessageId?: string; userMessage: string; trigger?: string;
   projectId: string; taskId: string; correlationId: string; message: string
 }): AuthorizationNode | null {
-  if (input.trigger !== 'user' || !(input.authorizationMessageId ?? input.userMessageId)) return null
+  const relay = {
+    author: 'commander' as const, text: input.message, taskId: input.taskId,
+    projectId: input.projectId, sessionId: input.sessionId, correlationId: input.correlationId
+  }
+  if (input.trigger !== 'user') {
+    const current = commanderSessionAuthority(source, input.sessionId)
+    return current ? delegateAuthorization(source, { parentId: current.root.id, ...relay, actions: current.actions }) : null
+  }
+  if (!(input.authorizationMessageId ?? input.userMessageId)) return null
   const row = source.db.prepare('SELECT id FROM authorization_nodes WHERE message_id = ? AND parent_id IS NULL').get(input.authorizationMessageId ?? input.userMessageId) as { id: string } | undefined
   const root = row && read(source, row.id)?.node
   if (!root || root.source !== 'commander-chat' || root.sessionId !== input.sessionId || (root.text !== input.userMessage && !/^(?:um|uh|mm)[.!]?$/i.test(input.userMessage.trim()))) return null
-  return delegateAuthorization(source, { parentId: root.id, author: 'commander', text: input.message, taskId: input.taskId, projectId: input.projectId, sessionId: input.sessionId, correlationId: input.correlationId })
+  return delegateAuthorization(source, { parentId: root.id, ...relay })
 }
 
 /** Associate a transport with exact bytes before enqueueing it. */

@@ -127,6 +127,24 @@ to project name “21x”. Ambiguous scope retains provenance with empty permiss
 Repos are snapshotted and intersected again with live configuration; new relays
 cannot widen them. Explicit repo names and child task repos narrow the snapshot.
 
+A Commander turn the user started relays under that turn's own message. A turn
+a Captain **report** started relays under the user's standing instruction: the
+newest human root in that session that still carries capability and is still
+active, minus anything a later human turn prohibited. Walking newest-first is
+what makes a later prohibition bind an earlier instruction, so the relay
+narrows across time and never widens. Human nodes therefore record
+`deniedActions` beside `actions`: a prohibition authorizes nothing itself and
+must still outlive the message that carried it.
+
+Without this, every Captain report ended the user's authority and the next
+sentence of the same piece of work arrived unauthorized — which meant asking
+the user to retype a request they had already made, exactly what the relay
+exists to avoid. The continuation reads only platform-captured human roots; a
+relay's own prose, a report and an assistant summary remain invisible to it,
+and the number of times reports may drive delegation before the user speaks
+again is capped by the session's report-ask budget
+(`MAX_REPORT_ASKS_WITHOUT_USER_TURN`).
+
 Delegations are immutable children. Effective rights are the intersection of
 every ancestor's rights, destination project, current configured repos, lifetime,
 and revocation state. The original human words remain the substantive instruction;
