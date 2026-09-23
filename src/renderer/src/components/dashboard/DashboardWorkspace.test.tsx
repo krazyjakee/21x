@@ -277,7 +277,6 @@ describe('DashboardWorkspace', () => {
       'task-column-triaging': [280, 100, 250, 500],
       'task-column-agent_working': [560, 100, 250, 500],
       'task-column-ready_for_review': [840, 100, 250, 500],
-      'task-column-agent_learning': [1120, 100, 250, 500],
       'task-column-completed': [1400, 20, 160, 32]
     }
     const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
@@ -290,7 +289,7 @@ describe('DashboardWorkspace', () => {
     card.focus()
     fireEvent.keyDown(card, { key: ' ', code: 'Space' })
     await screen.findByText('Drop to complete')
-    for (const status of [TaskStatus.NotStarted, TaskStatus.Triaging, TaskStatus.AgentWorking, TaskStatus.ReadyForReview, TaskStatus.AgentLearning]) {
+    for (const status of [TaskStatus.NotStarted, TaskStatus.Triaging, TaskStatus.AgentWorking, TaskStatus.ReadyForReview]) {
       const column = screen.getByTestId(`task-column-${status}`)
       expect(column.dataset.dropActive).toBe('true')
       expect(column.querySelector('.border-dashed')).not.toBeNull()
@@ -318,7 +317,6 @@ describe('DashboardWorkspace', () => {
       'task-column-triaging': [280, 100, 250, 500],
       'task-column-agent_working': [560, 100, 250, 500],
       'task-column-ready_for_review': [840, 100, 250, 500],
-      'task-column-agent_learning': [1120, 100, 250, 500],
       // Deliberately make Completed closer to the pointer than the center of
       // Triaging. A closest-center strategy would complete this task.
       'task-column-completed': [280, 20, 160, 32]
