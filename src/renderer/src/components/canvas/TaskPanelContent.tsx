@@ -149,6 +149,8 @@ export function TaskPanelContent({ panelId, taskId, panelLayout = 'both' }: Task
         onNavigateToTask={handleNavigateToTask}
         onOpenSubtaskInWindow={handleOpenSubtaskInWindow}
         panelLayout={panelLayout}
+        // The panel header already carries this task's activity badge (#95).
+        showActivity={false}
       />
     </div>
   )
