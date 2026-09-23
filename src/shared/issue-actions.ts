@@ -108,6 +108,19 @@ export type IssueAction = 'create_issue' | 'update_issue' | 'link_issue'
 
 export const ISSUE_ACTIONS: readonly IssueAction[] = ['create_issue', 'update_issue', 'link_issue']
 
+/**
+ * The same three actions in the durable authorization chain's vocabulary
+ * (`AuthorizationAction` in src/main/authorization.ts). The two names for one
+ * action are reconciled here, once, so the adapter that feeds the chain into
+ * {@link setIssueWriteOriginResolver} is mechanical and neither side has to
+ * learn the other's spelling.
+ */
+export const AUTHORIZATION_ACTION_FOR_ISSUE_ACTION: Record<IssueAction, string> = {
+  create_issue: 'github.issue.create',
+  update_issue: 'github.issue.update',
+  link_issue: 'github.issue.link'
+}
+
 export function isIssueAction(value: unknown): value is IssueAction {
   return typeof value === 'string' && (ISSUE_ACTIONS as readonly string[]).includes(value)
 }
@@ -145,7 +158,10 @@ export function classifyExternalAction(name: string): ExternalActionClass | null
 
 // ── Repositories ──────────────────────────────────────────────
 
-const OWNER_NAME = /^[A-Za-z0-9._-]{1,100}\/[A-Za-z0-9._-]{1,100}$/
+// A component of dots only (`.`, `..`) would traverse the API path if it ever
+// reached one. The project allowlist stops it long before that; this stops it
+// from existing at all.
+const OWNER_NAME = /^(?!\.+\/)[A-Za-z0-9._-]{1,100}\/(?!\.+$)[A-Za-z0-9._-]{1,100}$/
 const ISSUE_URL = /^https:\/\/github\.com\/([A-Za-z0-9._-]{1,100})\/([A-Za-z0-9._-]{1,100})\/issues\/(\d{1,12})(?:[/?#].*)?$/i
 
 export interface IssueRef {
@@ -489,6 +505,8 @@ export interface IssueWriteRecord {
   action: IssueAction
   target_number: number | null
   payload_hash: string
+  /** Sorted JSON array of the payload fields included in the request. */
+  payload_fields: string
   origin_kind: IssueWriteOriginKind
   origin_message_id: string
   origin_session_id: string | null
@@ -502,6 +520,9 @@ export interface IssueWriteRecord {
   external_result: string | null
   error: string | null
   attempts: number
+  /** Monotonic owner token for the current attempt/reconciliation pass. */
+  attempt_epoch: number
+  lease_expires_at: number | null
   created_at: string
   updated_at: string
   settled_at: string | null
