@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTestDb } from '../../test/helpers/db-test-helper'
-import { prepareAuthorizationDispatch, recordHumanAuthorization, revokeAuthorization, taskAuthorization } from './authorization'
-import { captureAuthorizationSnapshot, sendPreservingAuthorization, sendWithAuthorization } from './authorization-dispatch'
+import { prepareAuthorizationDispatch, prepareAuthorizationRetry, recordHumanAuthorization, revokeAuthorization, taskAuthorization } from './authorization'
+import { captureAuthorizationSnapshot, sendPreservingAuthorization, sendWithAuthorization, TurnStillRunningError } from './authorization-dispatch'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -73,7 +73,7 @@ describe('adapter authorization boundary', () => {
     const two = sendWithAuthorization(db, second.seq, status, sendSecond, wait)
     await Promise.resolve()
     expect(status).not.toHaveBeenCalled()
-    expect(taskAuthorization(db, taskId).effectivePermissions).toEqual([])
+    expect(taskAuthorization(db, taskId).origin!.id).toBe(first.root.id)
     accepted.resolve(undefined)
     await one
     await vi.waitFor(() => expect(wait).toHaveBeenCalledOnce())
@@ -178,8 +178,38 @@ describe('adapter authorization boundary', () => {
   it('times out busy backends without activating authority', async () => {
     const { seq } = dispatch()
     const send = vi.fn(async () => {})
-    await expect(sendWithAuthorization(db, seq, async () => ({ type: 'busy' }), send, async () => {}, 0)).rejects.toThrow('did not become idle')
+    await expect(sendWithAuthorization(db, seq, async () => ({ type: 'busy' }), send, async () => {}, 0)).rejects.toThrow(TurnStillRunningError)
     expect(send).not.toHaveBeenCalled()
+    expect(taskAuthorization(db, taskId).effectivePermissions).toEqual([])
+  })
+
+  it('lets a running turn keep its authority while a later request waits and times out', async () => {
+    const first = dispatch()
+    await sendWithAuthorization(db, first.seq, async () => ({ type: 'idle' }), async () => {})
+    const granted = taskAuthorization(db, taskId).effectivePermissions
+    expect(granted).toContain('task.update')
+
+    const second = dispatch()
+    expect(taskAuthorization(db, taskId)).toMatchObject({ status: 'active', effectivePermissions: granted })
+    expect(taskAuthorization(db, taskId).origin!.id).toBe(first.root.id)
+
+    await expect(sendWithAuthorization(db, second.seq, async () => ({ type: 'busy' }), async () => {}, async () => {}, 0))
+      .rejects.toThrow(TurnStillRunningError)
+    expect(taskAuthorization(db, taskId).origin!.id).toBe(first.root.id)
+
+    // The queued request is retried once the turn ends and takes over then.
+    const retry = prepareAuthorizationRetry(db, { key: 'human-2', taskId, text: 'Create tasks', messageId: 'human-2' })
+    expect(retry).toBe(second.seq)
+    await sendWithAuthorization(db, retry, async () => ({ type: 'idle' }), async () => {})
+    expect(taskAuthorization(db, taskId).origin!.id).toBe(second.root.id)
+  })
+
+  it('clears authority only when the failed generation had taken over', async () => {
+    const first = dispatch()
+    await sendWithAuthorization(db, first.seq, async () => ({ type: 'idle' }), async () => {})
+    const second = dispatch()
+    await expect(sendWithAuthorization(db, second.seq, async () => ({ type: 'idle' }), async () => { throw new Error('adapter refused') }))
+      .rejects.toThrow('adapter refused')
     expect(taskAuthorization(db, taskId).effectivePermissions).toEqual([])
   })
 })
