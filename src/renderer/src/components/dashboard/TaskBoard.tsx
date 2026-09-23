@@ -36,6 +36,8 @@ import type { TaskBoardTransitionPhase, TaskBoardTransitionResult } from './task
 // Styling comes from the shared status map so the board, the task lists and
 // the mobile UI stay in step. Completed remains a compact drop target in the
 // header so a long task history does not take over the active board.
+// Learning has no column of its own: those tasks sit under Ready for Review,
+// the column they left, until the learning pass completes them.
 
 interface StatusColumn extends TaskStatusStyle {
   key: TaskStatus
@@ -45,8 +47,7 @@ const COLUMNS: StatusColumn[] = [
   TaskStatus.NotStarted,
   TaskStatus.Triaging,
   TaskStatus.AgentWorking,
-  TaskStatus.ReadyForReview,
-  TaskStatus.AgentLearning
+  TaskStatus.ReadyForReview
 ].map((key) => ({ key, ...TASK_STATUS_STYLES[key] }))
 
 // Pointer drops must land inside a target. Using closestCenter for pointer
@@ -524,6 +525,8 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
       const status = task.status || TaskStatus.NotStarted
       if (status === TaskStatus.Completed) {
         completedCount++
+      } else if (status === TaskStatus.AgentLearning) {
+        grouped[TaskStatus.ReadyForReview].push(task)
       } else if (grouped[status]) {
         grouped[status].push(task)
       } else {
