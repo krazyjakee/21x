@@ -7,6 +7,7 @@ import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
 import { migrateCoordinatorToCaptain } from './captain-migration'
 import { splitLegacyPullRequestEscalation } from '../../shared/project-policies'
 import { createConcurrencyTables, migrateConcurrencyControl } from './concurrency-migration'
+import { createAuthorizationTables } from './authorization-schema'
 import { createDurableStartQueueTables, migrateDurableStartQueue } from './start-queue-migration'
 
 /**
@@ -45,10 +46,11 @@ import { createDurableStartQueueTables, migrateDurableStartQueue } from './start
  * 20 → 21: Captain-managed concurrency (#150): concurrency_audit, task_touches,
  *          and agents.config.concurrency_cap = min(max_parallel_sessions, 5)
  *          where unset (migrateConcurrencyControl in concurrency-migration.ts).
+ * 22 → 23: immutable human authorization chains and durable dispatch bindings.
  * 21 → 22: durable agent start queue, leases, generations, retry state and
  *          cross-project fairness (#148, migrateDurableStartQueue).
  */
-const SCHEMA_VERSION = 22
+const SCHEMA_VERSION = 23
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -549,6 +551,23 @@ export function createTables(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_commander_messages_correlation
       ON commander_messages(correlation_id) WHERE correlation_id IS NOT NULL;
   `)
+
+  // Images attached to a Commander user message (#144). The bytes live in
+  // their own table so message rows, events and searches stay small; they go
+  // with their message. New table, so CREATE IF NOT EXISTS covers fresh and
+  // existing DBs alike.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS commander_images (
+      id TEXT PRIMARY KEY,
+      message_id TEXT NOT NULL REFERENCES commander_messages(id) ON DELETE CASCADE,
+      position INTEGER NOT NULL DEFAULT 0,
+      name TEXT NOT NULL DEFAULT '',
+      mime_type TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      data BLOB NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_commander_images_message ON commander_images(message_id, position);
+  `)
 }
 
 /**
@@ -1039,6 +1058,7 @@ export function runMigrations(db: Database.Database): void {
   // Migration v22: durable start claims and recovery (#148). This extends the
   // v20 runtime and v21 admission model rather than introducing a second one.
   migrateDurableStartQueue(db)
+  createAuthorizationTables(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)

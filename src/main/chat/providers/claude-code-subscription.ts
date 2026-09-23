@@ -2,6 +2,8 @@ import { randomUUID } from 'crypto'
 import type { ChatUsage } from '../../../shared/chat'
 import { findClaudeExecutable } from '../../adapters/claude-code-executable'
 import { ChatAbortError, type ChatProvider, type ChatProviderEvent, type ChatProviderRequest } from './types'
+import { extractPromptImages, PROMPT_IMAGE_NOTE } from './prompt-images'
+import type { ChatImageInput } from '../../../shared/chat-images'
 
 /**
  * Commander transport for a Claude Code agent that authenticates with the
@@ -44,7 +46,16 @@ interface SdkQuery extends AsyncIterable<SdkResult> {
   close?: () => void
 }
 
-type SdkQueryFunction = (input: { prompt: string; options: Record<string, unknown> }) => SdkQuery
+/** One streamed user message: how the SDK takes images alongside the prompt text. */
+export interface SdkUserMessage {
+  type: 'user'
+  message: { role: 'user'; content: Array<Record<string, unknown>> }
+  parent_tool_use_id: null
+}
+
+type SdkPrompt = string | AsyncIterable<SdkUserMessage>
+
+type SdkQueryFunction = (input: { prompt: SdkPrompt; options: Record<string, unknown> }) => SdkQuery
 
 export interface ClaudeCodeSubscriptionProviderOptions {
   model: string
@@ -104,7 +115,7 @@ function usageOf(result: SdkResult): ChatUsage {
   }
 }
 
-function promptFor(request: ChatProviderRequest): string {
+function promptFor(request: ChatProviderRequest, conversation: unknown[], hasImages: boolean): string {
   const tools = request.toolChoice === 'none' ? [] : request.tools
   const instructions = tools.length > 0
     ? [
@@ -120,22 +131,45 @@ function promptFor(request: ChatProviderRequest): string {
   return [
     'Produce the next assistant step for this Commander conversation.',
     ...instructions,
+    ...(hasImages ? [PROMPT_IMAGE_NOTE] : []),
     '',
     'CONVERSATION_JSON',
-    JSON.stringify(request.messages),
+    JSON.stringify(conversation),
     '',
     'AVAILABLE_TOOLS_JSON',
     JSON.stringify(tools)
   ].join('\n')
 }
 
-async function defaultQuery(input: { prompt: string; options: Record<string, unknown> }): Promise<SdkQuery> {
+/**
+ * The prompt as the SDK takes it: a plain string, or, when images are
+ * attached, one streamed user message whose content blocks carry the text and
+ * the images (streaming input is the SDK's image path).
+ */
+export function sdkPrompt(text: string, images: ChatImageInput[]): SdkPrompt {
+  if (images.length === 0) return text
+  const message: SdkUserMessage = {
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [
+        { type: 'text', text },
+        ...images.map((image) => ({ type: 'image', source: { type: 'base64', media_type: image.mimeType, data: image.data } }))
+      ]
+    },
+    parent_tool_use_id: null
+  }
+  return (async function* () { yield message })()
+}
+
+async function defaultQuery(input: { prompt: SdkPrompt; options: Record<string, unknown> }): Promise<SdkQuery> {
   const sdk = await import('@anthropic-ai/claude-agent-sdk')
   return sdk.query(input as Parameters<typeof sdk.query>[0]) as unknown as SdkQuery
 }
 
 export class ClaudeCodeSubscriptionChatProvider implements ChatProvider {
   readonly id = 'claude-code-subscription'
+  readonly supportsImages = true
   readonly model: string
   private readonly reasoningEffort?: string
   private readonly query?: SdkQueryFunction
@@ -181,9 +215,11 @@ export class ClaudeCodeSubscriptionChatProvider implements ChatProvider {
         options.effort = this.reasoningEffort
       }
 
+      const { messages: conversation, images } = extractPromptImages(request.messages)
+      const prompt = sdkPrompt(promptFor(request, conversation, images.length > 0), images)
       iterator = this.query
-        ? this.query({ prompt: promptFor(request), options })
-        : await defaultQuery({ prompt: promptFor(request), options })
+        ? this.query({ prompt, options })
+        : await defaultQuery({ prompt, options })
 
       let terminal: SdkResult | null = null
       for await (const message of iterator) {

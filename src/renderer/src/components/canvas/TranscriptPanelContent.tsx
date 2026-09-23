@@ -1,9 +1,11 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import { AgentTranscriptPanel } from '@/components/agents/AgentTranscriptPanel'
 import { useAgentSession } from '@/hooks/use-agent-session'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useTaskStore } from '@/stores/task-store'
 import { Bot } from 'lucide-react'
+import type { ComposerAttachment } from '@/components/agents/transcript/TranscriptComposer'
+import { taskImageSaver, withAttachmentNote } from '@/lib/chat-image-attachments'
 import { mergeGrantsApi } from '@/lib/ipc-client'
 
 interface TranscriptPanelContentProps {
@@ -54,8 +56,10 @@ export function TranscriptPanelContent({ taskId }: TranscriptPanelContentProps) 
     return start(task.agent_id, taskId)
   }, [resume, start, task?.agent_id, task?.session_id, taskId])
 
+  const handleSaveImages = useMemo(() => taskImageSaver(taskId), [taskId])
+
   const handleSend = useCallback(
-    async (message: string) => {
+    async (message: string, options?: { attachments?: ComposerAttachment[] }) => {
       // Read messages from the store at call time instead of closing over the
       // render-time array: depending on `messages` gives this callback a new
       // identity on every streamed delta, which defeats React.memo on every
@@ -81,10 +85,10 @@ export function TranscriptPanelContent({ taskId }: TranscriptPanelContentProps) 
           const readySessionId = await ensureChatSession()
           if (!readySessionId) {
             submittedQuestionIdsRef.current.delete(questionKey)
-            return
+            throw new Error('The agent session did not start')
           }
           const responseType = question.tool?.name === 'permission' ? 'permission' : 'question'
-          await approve(true, message, responseType, question.tool?.requestId)
+          await approve(true, withAttachmentNote(message, options?.attachments), responseType, question.tool?.requestId)
         } catch (error) {
           submittedQuestionIdsRef.current.delete(questionKey)
           throw error
@@ -92,7 +96,7 @@ export function TranscriptPanelContent({ taskId }: TranscriptPanelContentProps) 
         return
       }
 
-      await sendMessage(message)
+      await sendMessage(message, options)
     },
     [taskId, approve, ensureChatSession, sendMessage]
   )
@@ -119,6 +123,7 @@ export function TranscriptPanelContent({ taskId }: TranscriptPanelContentProps) 
       onStop={handleStop}
       onRestart={handleRestart}
       onSend={handleSend}
+      onSaveImages={handleSaveImages}
       className="h-full select-text"
       sessionId={session?.sessionId ?? undefined}
       taskId={taskId}

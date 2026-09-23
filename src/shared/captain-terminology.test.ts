@@ -13,23 +13,32 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
  */
 const ALLOWED: Readonly<Record<string, string>> = {
   'src/main/database/captain-migration.ts': 'upgrade boundary: renames the persisted legacy identifiers and retires the legacy seeded skill',
-  'src/main/database/captain-migration.test.ts': 'schema-16 fixture for the upgrade boundary',
-  'src/renderer/src/components/commander/tool-call-label.ts': 'compatibility alias for the pre-#71 delegation tool name in stored Commander rows'
+  'src/main/database/captain-migration.test.ts': 'schema-16 fixture for the upgrade boundary'
 }
 
 describe('Captain terminology', () => {
   it('uses the retired coordinator name only in allowlisted legacy files', () => {
-    const legacy = new RegExp(['master', 'mind'].join(''), 'i')
+    const legacy = new RegExp(['master', 'mind'].join(' ?'), 'i')
     // Tracked plus not-yet-added files, so a new file cannot slip past.
-    const files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', 'src'], { cwd: repoRoot, encoding: 'utf-8' })
-      .split('\n')
+    const files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { cwd: repoRoot, encoding: 'utf-8' })
+      .split('\0')
       .filter(Boolean)
 
     const offenders = [...new Set(files)].filter((file) => {
       const path = join(repoRoot, file)
       // A tracked file deleted in the working tree is not part of the source.
       if (file in ALLOWED || !existsSync(path)) return false
-      return legacy.test(file) || legacy.test(readFileSync(path, 'utf-8'))
+      const bytes = readFileSync(path)
+      if (bytes.includes(0)) return false // binary assets
+      let content = bytes.toString('utf-8')
+      if (file === 'src/shared/captain-compat.ts') {
+        // Exempt declarations only, never the rest of a UI/prompt module.
+        content = content.split('\n').filter((line) =>
+          !line.startsWith('export const LEGACY_CAPTAIN_TOOL = ') &&
+          !line.startsWith('const LEGACY_CAPTAIN_NAME = ')
+        ).join('\n')
+      }
+      return legacy.test(file) || legacy.test(content)
     })
 
     expect(

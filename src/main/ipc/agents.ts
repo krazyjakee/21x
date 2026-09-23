@@ -1,3 +1,5 @@
+import { assertTrustedSender } from '../ipc-sender'
+import { recordHumanAuthorization, revokeAuthorization, taskAuthorization } from '../authorization'
 import { takeUserTypedMessage } from './merge-grants'
 import { guardedIpcSend } from '../guarded-ipc-send'
 import { MAX_IPC_REPLY_BYTES, MAX_IPC_REPLY_VALUES, measureIpcMessage } from '../ipc-message-size'
@@ -10,6 +12,17 @@ import { flattenProviderModels, rememberBackendModels } from '../agent-manager/s
 type MessageAttachment = { id: string; filename: string; size: number; mime_type: string }
 
 export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
+  ipcMain.handle('authorization:inspectTask', (event, taskId: string) => {
+    assertTrustedSender(event, 'authorization')
+    if (typeof taskId !== 'string') throw new Error('taskId is required')
+    return taskAuthorization(db, taskId)
+  })
+  ipcMain.handle('authorization:revoke', (event, nodeId: string) => {
+    assertTrustedSender(event, 'authorization')
+    if (typeof nodeId !== 'string' || !nodeId) throw new Error('nodeId is required')
+    revokeAuthorization(db, nodeId, 'Revoked by the user')
+    return { ok: true }
+  })
   ipcMain.handle('agent:getAll', () => db.getAgents())
   ipcMain.handle('agent:create', (_, data: CreateAgentData) => db.createAgent(data))
   ipcMain.handle('agent:update', (_, id: string, data: UpdateAgentData) => {
@@ -74,12 +87,18 @@ export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
   ipcMain.handle('captainRuntime:rollback', (_, projectId: string) =>
     agentManager.rollbackCaptainSwitch(projectId))
 
+  const takeHumanMessage = (event: Parameters<typeof takeUserTypedMessage>[0], taskId: string | undefined, text: string) => {
+    const typed = takeUserTypedMessage(event, taskId, text)
+    if (typed) recordHumanAuthorization(db, { messageId: typed.id, text: typed.text, at: typed.at, source: 'project-chat', taskId: typed.taskId, projectId: typed.projectId })
+    return typed
+  }
+
   ipcMain.handle('agentSession:sendByTaskId', async (event, taskId: string, message: string, attachments?: MessageAttachment[], deliveryId?: string) => {
     const result = await agentManager.sendByTaskId(
       taskId,
       message,
       attachments,
-      takeUserTypedMessage(event, taskId, message),
+      takeHumanMessage(event, taskId, message),
       deliveryId
     )
     return { success: true, ...result }
@@ -94,7 +113,7 @@ export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
         taskId,
         agentId,
         attachments,
-        takeUserTypedMessage(event, taskId, message),
+        takeHumanMessage(event, taskId, message),
         deliveryId
       )
       return { success: true, ...result }

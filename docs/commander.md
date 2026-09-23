@@ -10,7 +10,7 @@ back as reports routed to the right session (#62, below).
 The hierarchy is **Commander → Captain → task agent**: the Commander works
 across projects, each project's Captain coordinates the work inside one project
 (one persistent conversation per project), and task agents do the work. The
-Captain was called the Mastermind before #71; stored data is migrated (see
+Captain replaced the legacy coordinator name in #71; stored data is migrated (see
 docs/database-migrations.md, *The coordinator is the Captain*).
 
 ## Storage

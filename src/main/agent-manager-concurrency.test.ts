@@ -379,3 +379,20 @@ describe('Captain tools and audit (#150)', () => {
     expect(db.getTaskTouches(task.id)).toEqual(['src/a.ts', 'src/b.ts'])
   })
 })
+
+describe('concurrency shutdown', () => {
+  it('stops resource sampling and automatic writes after shutdown starts', async () => {
+    vi.useFakeTimers()
+    try {
+      const { manager } = setup()
+      const tick = vi.spyOn((manager as any).resourceMonitor, 'tick')
+
+      await manager.stopAllSessions()
+      await vi.advanceTimersByTimeAsync(60_000)
+
+      expect(tick).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
