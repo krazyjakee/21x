@@ -213,6 +213,18 @@ export interface CodingAgentAdapter {
   getPersistedMessages?(sessionId: string, config: SessionConfig): Promise<SessionMessage[]>
 
   /**
+   * Whether the process backing this session is still running.
+   *
+   * Optional. Adapters that own a subprocess implement it so the manager never
+   * treats a successful read of CACHED adapter state as proof that the backend
+   * answered: an adapter can keep returning BUSY from memory long after its
+   * child was killed, and the activity heartbeat (#95) must not renew a
+   * "working" claim for a process that no longer exists. `undefined` (not
+   * implemented) means the adapter cannot tell, and the read itself counts.
+   */
+  isSessionAlive?(sessionId: string): boolean
+
+  /**
    * Abort ongoing prompt
    */
   abortPrompt(sessionId: string, config: SessionConfig): Promise<void>

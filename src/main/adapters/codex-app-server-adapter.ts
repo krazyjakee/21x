@@ -113,6 +113,18 @@ interface AppServerSession extends CodexItemState, JsonRpcPeer {
    * — a user stop racing the idle reaper, say — signals once and reports once.
    */
   terminated: boolean
+  /**
+   * Set when the child's `exit` event fires, whatever the cause. Separate from
+   * `terminated`: a child killed from outside (OOM killer, `kill -9`, a crash)
+   * was never signalled by us, yet it is just as gone.
+   */
+  exited: boolean
+}
+
+/** How a child ended, for a status message: its exit code, else its signal. */
+function exitDescription(code: number | null, signal: NodeJS.Signals | null): string {
+  if (code !== null) return `code ${code}`
+  return signal ? `signal ${signal}` : 'no exit code'
 }
 
 /** The message of a thrown value, for a teardown log line. */
@@ -614,7 +626,8 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
       runningTools: new Map(),
       codexUseApiKey: authEnv.usesApiKey,
       codexAuthSummary: authEnv.summary,
-      terminated: false
+      terminated: false,
+      exited: false
     }
 
     // Recorded BEFORE anything can fail, and before the caller gets a chance to
@@ -636,13 +649,56 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     child.on('exit', (code, signal) => {
       console.log(`[CodexAppServerAdapter] process exited: code=${code}, signal=${signal}`)
       this.liveSessions.delete(session)
-      if (code !== 0 && code !== null) {
-        session.status = SessionStatusType.ERROR
-        session.lastError = `Codex app-server exited with code ${code}`
-      }
+      this.settleExitedSession(session, code, signal)
     })
 
     return session
+  }
+
+  /**
+   * Ends whatever the session was doing once its child has gone.
+   *
+   * A turn cannot outlive its process. Before this, a child that died by
+   * SIGKILL (exit code null) or exited 0 mid-turn left the session BUSY for
+   * good: `getStatus` answered from memory, every poll "succeeded", and the
+   * manager kept publishing fresh working heartbeats for a dead process — the
+   * board and task header claimed Running indefinitely (#95). An exit we did
+   * not ask for during a turn or an approval is now an ERROR, which the
+   * manager surfaces once and then stops polling.
+   */
+  private settleExitedSession(
+    session: AppServerSession,
+    code: number | null,
+    signal: NodeJS.Signals | null
+  ): void {
+    session.exited = true
+
+    // Nothing will ever answer these; do not hold their callers on the 30 s
+    // RPC timeout against a closed pipe.
+    for (const pending of session.pendingRequests.values()) {
+      pending.reject(new Error(`Codex app-server exited (${exitDescription(code, signal)})`))
+    }
+    session.pendingRequests.clear()
+    session.runningTools.clear()
+
+    // A stop we requested: the owner is already tearing the session down.
+    if (session.terminated) return
+
+    const midTurn =
+      session.status === SessionStatusType.BUSY || session.status === SessionStatusType.WAITING_APPROVAL
+    if ((code !== 0 && code !== null) || midTurn) {
+      session.status = SessionStatusType.ERROR
+      session.pendingApproval = null
+      session.lastError =
+        code !== 0 && code !== null
+          ? `Codex app-server exited with code ${code}`
+          : `Codex app-server exited during a turn (${exitDescription(code, signal)})`
+    }
+  }
+
+  isSessionAlive(sessionId: string): boolean {
+    const session = this.sessions.get(sessionId)
+    return !!session && !session.exited && !session.terminated
   }
 
   private async initializeAppServer(session: AppServerSession): Promise<void> {
@@ -1154,7 +1210,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     // Writing to a stopped child's stdin is silent — the guard swallows the
     // EPIPE — so the request would sit on its 30 s timeout instead of
     // failing. Say so at once.
-    if (session.terminated) {
+    if (session.terminated || session.exited) {
       return Promise.reject(new Error(`Codex app-server is stopped, cannot send ${method}`))
     }
     return sendJsonRpcRequest(session, method, params, LABEL)

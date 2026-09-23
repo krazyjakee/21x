@@ -100,6 +100,7 @@ interface AppServerSessionForTest {
   codexUseApiKey: boolean
   codexAuthSummary: string
   terminated?: boolean
+  exited?: boolean
 }
 
 function adapterPrivate(adapter: CodexAppServerAdapter): AppServerAdapterPrivate {
@@ -1717,6 +1718,84 @@ describe('CodexAppServerAdapter app-server lifecycle', () => {
     await adapterInstance.destroySession('thread-1', config as never)
 
     await expect(inFlight).rejects.toThrow('Codex app-server stopped')
+  })
+
+  describe('a child that dies on its own (#95)', () => {
+    /** A live session mid-turn, spawned for real against a child the test controls. */
+    async function busySession(pid: number) {
+      const child = fakeChild(pid)
+      const { adapterInstance, adapter } = spawningHarness(child)
+      await adapterInstance.createSession(config as never)
+      const session = adapter.sessions.get('thread-1')!
+      session.status = SessionStatusType.BUSY
+      session.activeTurnId = 'turn-1'
+      return { child, adapterInstance, adapter, session }
+    }
+
+    it('ends the turn when the child is killed by a signal mid-turn', async () => {
+      // THE DEFECT. SIGKILL exits with code null, which the old handler did not
+      // treat as an error, so getStatus kept answering BUSY from memory for a
+      // process that no longer existed, and the board said Running forever.
+      const { child, adapterInstance } = await busySession(4201)
+      expect(adapterInstance.isSessionAlive('thread-1')).toBe(true)
+
+      child.emit('exit', null, 'SIGKILL')
+
+      expect(adapterInstance.isSessionAlive('thread-1')).toBe(false)
+      expect(await adapterInstance.getStatus('thread-1', config as never)).toEqual({
+        type: SessionStatusType.ERROR,
+        message: 'Codex app-server exited during a turn (signal SIGKILL)'
+      })
+    })
+
+    it('ends the turn when the child exits cleanly mid-turn', async () => {
+      const { child, adapterInstance } = await busySession(4202)
+      child.emit('exit', 0, null)
+      expect((await adapterInstance.getStatus('thread-1', config as never)).type).toBe(SessionStatusType.ERROR)
+    })
+
+    it('ends a pending approval with the child and drops its running tools', async () => {
+      const { child, adapterInstance, session } = await busySession(4203)
+      session.status = SessionStatusType.WAITING_APPROVAL
+      session.pendingApproval = { requestId: 1 }
+      session.runningTools.set('tool-1', { partId: 'tool-1', toolName: 'shell' })
+
+      child.emit('exit', null, 'SIGTERM')
+
+      expect((await adapterInstance.getStatus('thread-1', config as never)).type).toBe(SessionStatusType.ERROR)
+      expect(adapterInstance.getPendingApproval('thread-1')).toBeNull()
+      expect(await adapterInstance.getRunningTools('thread-1', config as never)).toEqual([])
+    })
+
+    it('fails in-flight and later RPCs at once instead of on their 30 s timeout', async () => {
+      const { child, adapter, session } = await busySession(4204)
+      const inFlight = new Promise((resolve, reject) => session.pendingRequests.set(9, { resolve, reject }))
+
+      child.emit('exit', null, 'SIGKILL')
+
+      await expect(inFlight).rejects.toThrow('Codex app-server exited (signal SIGKILL)')
+      // The harness stubs sendRpcRequest; exercise the real one.
+      const realSend = (CodexAppServerAdapter.prototype as unknown as AppServerAdapterPrivate).sendRpcRequest
+      await expect(realSend.call(adapter, session, 'turn/start')).rejects.toThrow('Codex app-server is stopped')
+    })
+
+    it('leaves an idle session idle: a quiet exit claims nothing', async () => {
+      const { child, adapterInstance, session } = await busySession(4205)
+      session.status = SessionStatusType.IDLE
+      child.emit('exit', null, 'SIGKILL')
+      expect((await adapterInstance.getStatus('thread-1', config as never)).type).toBe(SessionStatusType.IDLE)
+      expect(adapterInstance.isSessionAlive('thread-1')).toBe(false)
+    })
+
+    it('does not report a stop it asked for as an error', async () => {
+      const { child, adapterInstance, session } = await busySession(4206)
+      const stopped = { ...session }
+      await adapterInstance.destroySession('thread-1', config as never)
+      child.emit('exit', null, 'SIGTERM')
+      expect(session.status).toBe(stopped.status)
+      expect(session.lastError).toBeNull()
+      expect(adapterInstance.isSessionAlive('thread-1')).toBe(false)
+    })
   })
 })
 
