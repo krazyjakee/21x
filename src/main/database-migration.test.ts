@@ -136,7 +136,7 @@ describe('DatabaseManager migrations on an existing install', () => {
     const after = openRaw()
     expect((after.pragma('table_info(merge_grant_uses)') as { name: string }[]).map((column) => column.name))
       .toContain('authorization_context')
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('31')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('32')
     after.close()
   })
 
@@ -182,7 +182,7 @@ describe('DatabaseManager migrations on an existing install', () => {
     const columns = (after.pragma('table_info(pr_review_attestations)') as { name: string }[]).map((column) => column.name)
     expect(tables).toContain('pr_review_handoffs')
     expect(columns).toContain('handoff_id')
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('31')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('32')
     after.close()
   })
 
@@ -202,7 +202,7 @@ describe('DatabaseManager migrations on an existing install', () => {
 
     const after = openRaw()
     expect(taskColumns(after)).toContain('mcp_scope_nonce')
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('31')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('32')
     after.close()
   })
 
@@ -223,7 +223,45 @@ describe('DatabaseManager migrations on an existing install', () => {
     const after = openRaw()
     const columns = (after.prepare('PRAGMA table_info(session_usage)').all() as { name: string }[]).map((c) => c.name)
     expect(columns).toEqual(expect.arrayContaining(['owner_kind', 'owner_id', 'turn_key', 'usage_source', 'context_tokens', 'context_window', 'estimated_prompt_tokens']))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('31')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('32')
+    after.close()
+  })
+
+  it('creates the managed-session ledger for a database from schema version 31 and keeps its rows on a re-run (#99)', () => {
+    const first = new DatabaseManager()
+    first.initialize()
+    first.close?.()
+
+    const raw = openRaw()
+    raw.exec('DROP TABLE session_summaries; DROP TABLE session_turns; DROP TABLE session_generations')
+    raw.prepare("UPDATE settings SET value = ? WHERE key = '__schema_version'").run('31')
+    raw.close()
+
+    const second = new DatabaseManager()
+    second.initialize()
+    second.close?.()
+
+    const upgraded = openRaw()
+    const columns = (table: string) => (upgraded.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name)
+    expect(columns('session_generations')).toEqual(expect.arrayContaining(['owner_kind', 'owner_id', 'n', 'engine', 'backend_session_id', 'end_reason', 'seed_handoff_id']))
+    expect(columns('session_turns')).toEqual(expect.arrayContaining(['generation_id', 'seq', 'trigger_kind', 'dedupe_key', 'status', 'runner_id', 'tool_calls', 'usage_source']))
+    expect(columns('session_summaries')).toEqual(expect.arrayContaining(['generation_id', 'kind', 'status', 'covers_through_ref', 'content_json']))
+    expect((upgraded.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('32')
+    upgraded.prepare(`INSERT INTO session_generations (id, owner_kind, owner_id, n, engine, started_at) VALUES ('g1', 'captain', 't1', 1, 'adapter', 1)`).run()
+    upgraded.prepare(`INSERT INTO session_turns (id, owner_kind, owner_id, generation_id, seq, trigger_kind, dedupe_key, status, queued_at, updated_at)
+      VALUES ('turn1', 'captain', 't1', 'g1', 1, 'wake', 'wake:1', 'done', 1, 1)`).run()
+    // The idempotency key is unique per owner.
+    expect(() => upgraded.prepare(`INSERT INTO session_turns (id, owner_kind, owner_id, generation_id, seq, trigger_kind, dedupe_key, status, queued_at, updated_at)
+      VALUES ('turn2', 'captain', 't1', 'g1', 2, 'wake', 'wake:1', 'done', 1, 1)`).run()).toThrow(/UNIQUE/)
+    upgraded.prepare("UPDATE settings SET value = ? WHERE key = '__schema_version'").run('31')
+    upgraded.close()
+
+    // A second upgrade pass leaves the recorded rows alone.
+    const third = new DatabaseManager()
+    third.initialize()
+    third.close?.()
+    const after = openRaw()
+    expect(after.prepare('SELECT id, status FROM session_turns').all()).toEqual([{ id: 'turn1', status: 'done' }])
     after.close()
   })
 
@@ -265,7 +303,7 @@ describe('DatabaseManager migrations on an existing install', () => {
       'concurrency_audit', 'task_touches',
       'agent_start_queue', 'agent_start_queue_fairness'
     ]))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('31')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('32')
     after.close()
   })
 
@@ -312,7 +350,7 @@ describe('DatabaseManager migrations on an existing install', () => {
       'generation', 'lease_owner', 'lease_expires_at', 'recovery_cause',
       'recovery_action', 'recovery_result', 'queued_at', 'acknowledged_at'
     ]))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('31')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('32')
     after.close()
   })
 

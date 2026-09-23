@@ -49,6 +49,8 @@ import { collectMissedParts, debugTranscript, emitArtifactUpdatesFromParts, text
 import { CaptainRuntimeStore } from './sessions/runtime-store'
 import { SessionUsageStore } from './sessions/usage-store'
 import { AdapterUsageTracker, type UsageOwner } from './sessions/adapter-usage'
+import { AdapterLedgerTracker, SessionLedgerRecorder, type TurnOutcomeInput } from './sessions/ledger-recorder'
+import type { TurnTrigger } from './sessions/ledger'
 import { DeliveryStore, type DeliveryRecord } from './sessions/delivery-store'
 import { DurableStartQueueStore, type DurableQueuedStartInfo } from './sessions/start-queue-store'
 import type { CaptainRuntimeState } from '../shared/captain-runtime'
@@ -211,6 +213,8 @@ export class AgentManager extends EventEmitter {
   private readonly captainRuntimes: CaptainRuntimeStore
   /** Per-turn token usage of Captains and task agents (#97); instrumentation only. */
   private readonly usageTracker: AdapterUsageTracker
+  /** The managed-session ledger of Captains and task agents (#99); record only, flag `sessions.ledger`. */
+  private readonly ledgerTracker: AdapterLedgerTracker
   private readonly deliveries: DeliveryStore
   private readonly deliveryFlights = new Map<string, Promise<{ newSessionId?: string }>>()
   /** Durable sends to one task reserve and activate authorization in outbox order. */
@@ -331,6 +335,7 @@ export class AgentManager extends EventEmitter {
     this.db = db
     this.captainRuntimes = new CaptainRuntimeStore(db)
     this.usageTracker = new AdapterUsageTracker(new SessionUsageStore(db))
+    this.ledgerTracker = new AdapterLedgerTracker(new SessionLedgerRecorder(db))
     this.deliveries = new DeliveryStore(db)
     this.startQueue = new DurableStartQueueStore(db)
     this.startIdleSessionReaper()
@@ -956,17 +961,47 @@ export class AgentManager extends EventEmitter {
         return
       }
       this.usageTracker.report(this.usageOwnerFor(resolved.session), report, resolved.sessionId)
+      this.ledgerTracker.usage(resolved.sessionId, report.turnKey)
     } catch (err) {
       console.warn('[SessionUsage] could not attribute adapter usage:', err instanceof Error ? err.message : err)
     }
   }
 
-  /** Ends the usage turn of a session, estimating it when the adapter reported nothing (#97). */
+  /**
+   * Ends the usage turn of a session, estimating it when the adapter reported
+   * nothing (#97), then its ledger turn (#99), linked to that estimate.
+   */
   private endUsageTurn(sessionId: string, session: AgentSession, stopReason: string): void {
+    let estimatedKey: string | null = null
     try {
-      this.usageTracker.endTurn(sessionId, this.usageOwnerFor(session), stopReason)
+      estimatedKey = this.usageTracker.endTurn(sessionId, this.usageOwnerFor(session), stopReason)
     } catch (err) {
       console.warn('[SessionUsage] could not end the usage turn:', err instanceof Error ? err.message : err)
+    }
+    this.endLedgerTurn(sessionId, stopReason === 'error'
+      ? { status: 'failed', stopReason, errorKind: 'session_error' }
+      : { status: 'done', stopReason }, estimatedKey)
+  }
+
+  /** A prompt is about to reach the session: its ledger turn starts (#99). Never throws. */
+  private beginLedgerTurn(sessionId: string, session: AgentSession, event: { dedupeKey?: string | null; trigger: TurnTrigger }): void {
+    try {
+      const owner = this.usageOwnerFor(session)
+      this.ledgerTracker.beginTurn(sessionId, { kind: owner.ownerKind, id: owner.ownerId }, {
+        dedupeKey: event.dedupeKey,
+        trigger: event.trigger,
+        generation: { engine: 'adapter', provider: owner.backend, model: owner.model ?? null, backendSessionId: sessionId }
+      })
+    } catch (err) {
+      console.warn('[ManagedSession] could not record the turn start:', err instanceof Error ? err.message : err)
+    }
+  }
+
+  private endLedgerTurn(sessionId: string, outcome: TurnOutcomeInput, usageTurnKey?: string | null): void {
+    try {
+      this.ledgerTracker.endTurn(sessionId, outcome, usageTurnKey)
+    } catch (err) {
+      console.warn('[ManagedSession] could not record the turn end:', err instanceof Error ? err.message : err)
     }
   }
 
@@ -1455,6 +1490,7 @@ export class AgentManager extends EventEmitter {
       try {
         const send = () => {
           this.usageTracker.beginTurn(adapterSessionId, promptText)
+          this.beginLedgerTurn(adapterSessionId, startingSession, { dedupeKey: `start:${adapterSessionId}`, trigger: 'start' })
           return adapter.sendPrompt(adapterSessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
         }
         if (this.db.db && typeof this.db.db.prepare === 'function') {
@@ -1786,6 +1822,7 @@ export class AgentManager extends EventEmitter {
       const currentSession = this.sessions.get(sessionId)
       if (currentSession) this.captureSessionProgress(currentSession, batchMessages)
       this.usageTracker.addOutput(sessionId, batchMessages)
+      this.ledgerTracker.addOutput(sessionId, batchMessages)
       if (batchMessages.length > 0) {
         this.sendToRenderer('agent:output-batch', {
           sessionId,
@@ -1872,6 +1909,12 @@ export class AgentManager extends EventEmitter {
     }
     this.sessionIdRedirects.set(sessionId, realSessionId)
     this.usageTracker.rekey(sessionId, realSessionId)
+    try {
+      const ledgerOwner = this.usageOwnerFor(session)
+      this.ledgerTracker.rekey(sessionId, realSessionId, { kind: ledgerOwner.ownerKind, id: ledgerOwner.ownerId })
+    } catch (err) {
+      console.warn('[ManagedSession] could not record the backend session id:', err instanceof Error ? err.message : err)
+    }
 
     this.pollingEntries.delete(sessionId)
     entry.sessionId = realSessionId
@@ -3909,6 +3952,7 @@ export class AgentManager extends EventEmitter {
     // in-flight sends retain a reference to the session object while it awaits.
     this.stoppingSessions.add(session)
     if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId)
+    this.endLedgerTurn(sessionId, { status: 'interrupted', stopReason: 'stopped', errorKind: 'stopped' })
 
     // Stop is the authority boundary for typed deliveries even when backend
     // teardown is slow (or later refuses). The durable start row is cancelled
@@ -4768,7 +4812,11 @@ export class AgentManager extends EventEmitter {
 
     if (!session) throw new Error(`Session not found: ${sessionId}`)
     try {
-      await this.doSendAdapterMessage(session, sessionId, message, attachments, dispatch, transcriptPartId, authorizationDispatch)
+      await this.doSendAdapterMessage(session, sessionId, message, attachments, dispatch, transcriptPartId, authorizationDispatch, {
+        // A durable delivery keeps its key across retries; the ledger records it once.
+        dedupeKey: transcriptPartId?.startsWith('delivery-') ? `delivery:${transcriptPartId.slice('delivery-'.length)}` : null,
+        trigger: typedMessage ? 'user' : 'system'
+      })
     } catch (error) {
       await this.handleSessionError(sessionId, session, error)
       throw error
@@ -4816,7 +4864,8 @@ export class AgentManager extends EventEmitter {
     attachments?: MessageAttachmentRef[],
     dispatch?: ProjectMessageDispatch,
     transcriptPartId?: string,
-    authorizationDispatch?: number
+    authorizationDispatch?: number,
+    ledgerEvent: { dedupeKey?: string | null; trigger: TurnTrigger } = { trigger: 'nudge' }
   ): Promise<void> {
     this.assertSessionGeneration(sessionId, session)
     const task = this.db.getTask(session.taskId)
@@ -4889,6 +4938,7 @@ export class AgentManager extends EventEmitter {
         this.assertSessionGeneration(sessionId, session)
         if (dispatch) activateProjectMessageDispatch(dispatch)
         this.usageTracker.beginTurn(sessionId, promptText)
+        this.beginLedgerTurn(sessionId, session, ledgerEvent)
         return adapter.sendPrompt(sessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
       }
       if (authorizationDispatch !== undefined) {

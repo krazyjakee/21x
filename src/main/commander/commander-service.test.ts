@@ -12,6 +12,7 @@ import { COMMANDER_SUMMARY_PROMPT, COMMANDER_TITLE_PROMPT } from './prompts'
 import { createCommanderMergeGrantTools } from './merge-grant-tools'
 import { CaptainDeliveryService } from './captain-delivery'
 import { SessionUsageStore } from '../sessions/usage-store'
+import { SessionLedgerRecorder } from '../sessions/ledger-recorder'
 
 /** A model answer: text, a failure, or text plus tool calls (the turn then continues with their results). */
 type ModelAnswer = string | Error | { text?: string; toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> }
@@ -419,6 +420,82 @@ describe('CommanderService token usage (#97)', () => {
     await broken.sendUserMessage(other.id, 'Go').done
     expect(store.listMessages(other.id).map((m) => m.role)).toEqual(['user', 'assistant'])
     expect(warn).toHaveBeenCalledWith('[Commander] could not record turn usage:', 'disk full')
+    vi.restoreAllMocks()
+  })
+})
+
+describe('CommanderService managed-session ledger (#99)', () => {
+  it('records each turn with its tool calls and usage, and a repeated report relay once', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    const ledger = new SessionLedgerRecorder(db, { enabled: () => true })
+    const usage = new SessionUsageStore(db)
+    const provider = fakeProvider({
+      chat: (request) => request.messages.some((message) => message.role === 'tool')
+        ? 'There is one.'
+        : { toolCalls: [{ id: 'call-1', name: 'list_projects', input: {} }] },
+      title: () => 'Projects'
+    })
+    const service = new CommanderService({
+      store,
+      createProvider: () => provider,
+      emit: (e) => events.push(e),
+      usage,
+      ledger,
+      getTools: () => [{ name: 'list_projects', description: 'Lists projects', inputSchema: { type: 'object' }, handler: async () => 'web' }]
+    })
+    const session = store.createSession()
+    const owner = { kind: 'commander' as const, id: session.id }
+
+    const sent = service.sendUserMessage(session.id, 'Which projects exist?')
+    await sent.done
+    const [turn] = ledger.ledger.listTurns(owner)
+    expect(turn).toMatchObject({ trigger: 'user', dedupeKey: `user:${sent.message.id}`, status: 'done', stopReason: 'end_turn', usageKeys: [sent.turnId], usageSource: 'estimated' })
+    expect(turn.toolCalls).toMatchObject([{ id: 'call-1', name: 'list_projects', status: 'done' }])
+    expect(turn.inputTokens).toBeGreaterThan(0)
+    expect(ledger.ledger.currentGeneration(owner)).toMatchObject({ n: 1, engine: 'chat', provider: 'fake', model: 'fake-1' })
+
+    service.setActiveSession(session.id)
+    const report = service.deliverReport({ sessionId: session.id, content: 'Build is green.', projectId: 'web', projectName: 'Web', deliveryId: 'delivery-1' })
+    expect(report.relayed).toBe(true)
+    await vi.waitFor(() => expect(ledger.ledger.getTurnByKey(owner, `report:${report.message.id}`)).toMatchObject({ trigger: 'report', status: 'done' }))
+    // The same delivery again stores nothing and starts no turn.
+    expect(service.deliverReport({ sessionId: session.id, content: 'Build is green.', projectId: 'web', projectName: 'Web', deliveryId: 'delivery-1' }).relayed).toBe(false)
+    expect(ledger.ledger.listTurns(owner)).toHaveLength(2)
+    vi.restoreAllMocks()
+  })
+
+  it('records a failed fold and never lets the ledger touch a turn', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const ledger = new SessionLedgerRecorder(db, { enabled: () => true })
+    const provider = fakeProvider({ chat: () => 'ok', summary: () => new Error('summary down') })
+    const service = new CommanderService({ store, createProvider: () => provider, emit: (e) => events.push(e), ledger, budget: { keepTurns: 1, maxChars: 10 } })
+    const session = store.createSession('Folds')
+    await service.sendUserMessage(session.id, 'one').done
+    await service.sendUserMessage(session.id, 'two').done
+    await vi.waitFor(() => expect(service.foldFailure(session.id)).not.toBeNull())
+    const gen = ledger.ledger.currentGeneration({ kind: 'commander', id: session.id })!
+    expect(ledger.ledger.listSummaries(gen.id)).toMatchObject([{ kind: 'failed', content: { error: 'summary request failed', attempts: 1 } }])
+
+    const broken = new CommanderService({
+      store,
+      createProvider: () => provider,
+      emit: (e) => events.push(e),
+      ledger: {
+        turnStarted: () => { throw new Error('ledger locked') },
+        toolCallStarted: () => {},
+        toolCallFinished: () => {},
+        turnEnded: () => { throw new Error('ledger locked') },
+        summary: () => {}
+      }
+    })
+    const other = store.createSession('Other')
+    await broken.sendUserMessage(other.id, 'Go').done
+    expect(store.listMessages(other.id).map((m) => m.role)).toEqual(['user', 'assistant'])
+    expect(warn).toHaveBeenCalledWith('[Commander] could not record the turn start:', 'ledger locked')
+    expect(warn).toHaveBeenCalledWith('[Commander] could not record the turn end:', 'ledger locked')
+    // No error reached the renderer.
+    expect(events.filter((e) => e.type === 'turn_event' && e.event.type === 'error')).toEqual([])
     vi.restoreAllMocks()
   })
 })

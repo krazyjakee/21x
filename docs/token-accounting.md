@@ -79,3 +79,5 @@ Add a row rather than special-casing a model at a call site.
 - Project daily token caps (`recordProjectTokenUsage`, #65) are not fed from
   this table: doing so would start enforcing a cap that is inert today.
 - Nothing shows the figures in the UI (B8).
+- The managed-session ledger (B3, [Managed sessions](managed-sessions.md))
+  links each turn to its `session_usage` rows by `turn_key` and sums them.

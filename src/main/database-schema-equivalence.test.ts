@@ -282,6 +282,8 @@ describe('schema equivalence: legacy database migrated vs fresh database', () =>
     const freshSnapshot = snapshotSchema(fresh)
     const legacySnapshot = snapshotSchema(legacy)
     expect(Object.keys(legacySnapshot.tables).sort()).toEqual(Object.keys(freshSnapshot.tables).sort())
+    // The managed-session ledger (v32, #99) is part of both paths.
+    expect(Object.keys(legacySnapshot.tables)).toEqual(expect.arrayContaining(['session_generations', 'session_turns', 'session_summaries']))
     expect(legacySnapshot).toEqual(freshSnapshot)
     expect(schemaVersion(legacy)).toBe(schemaVersion(fresh))
   })

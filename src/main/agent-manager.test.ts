@@ -11,6 +11,7 @@ import { SessionStatus, TaskStatus } from '../shared/constants'
 import { MessagePartType, MessageRole, SessionStatusType } from './adapters/coding-agent-adapter'
 import { unregisterSecretSession } from './secret-broker'
 import { SessionUsageStore } from './sessions/usage-store'
+import { AdapterLedgerTracker } from './sessions/ledger-recorder'
 
 // Mock filesystem operations
 vi.mock('fs', async (importOriginal) => {
@@ -4234,5 +4235,46 @@ describe('AgentManager token usage (#97)', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {})
     fake.onUsage!({ sessionId: 'unknown', turnKey: 'r', inputTokens: 1, outputTokens: 1 })
     expect(record).not.toHaveBeenCalled()
+  })
+})
+
+describe('AgentManager managed-session ledger (#99)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('reports each prompt, its usage, its end and a stop to the ledger tracker', async () => {
+    vi.spyOn(SessionUsageStore.prototype, 'record').mockImplementation((input) => input as never)
+    vi.spyOn(SessionUsageStore.prototype, 'latestReported').mockReturnValue(null)
+    vi.spyOn(SessionUsageStore.prototype, 'calibration').mockReturnValue(null)
+    const begin = vi.spyOn(AdapterLedgerTracker.prototype, 'beginTurn')
+    const usage = vi.spyOn(AdapterLedgerTracker.prototype, 'usage')
+    const end = vi.spyOn(AdapterLedgerTracker.prototype, 'endTurn')
+    const fake = new FakeAdapter({ sessionIds: ['s1'] })
+    installFakeAdapter(fake)
+    const mgr = new AgentManager(createMockDb({ coding_agent: 'claude-code', model: 'claude-opus-4-6' }))
+    const sessionId = await mgr.startSession('agent-1', 'task-1', '/tmp/ws', true)
+
+    await mgr.sendMessage(sessionId, 'Carry on', 'task-1')
+    expect(begin).toHaveBeenCalledWith(sessionId, { kind: 'task', id: 'task-1' }, expect.objectContaining({
+      trigger: 'system',
+      generation: { engine: 'adapter', provider: 'claude-code', model: 'claude-opus-4-6', backendSessionId: sessionId }
+    }))
+
+    fake.onUsage!({ sessionId, turnKey: 'result-1', inputTokens: 1, outputTokens: 1 })
+    expect(usage).toHaveBeenCalledWith(sessionId, 'result-1')
+
+    vi.spyOn(mgr as any, 'replayMissedTranscriptPartsBeforeIdle').mockResolvedValue(0)
+    fake.setStatus(SessionStatusType.IDLE)
+    await (mgr as any).transitionToIdle(sessionId, (mgr as any).sessions.get(sessionId))
+    expect(end).toHaveBeenCalledWith(sessionId, { status: 'done', stopReason: 'idle' }, null)
+
+    end.mockClear()
+    await mgr.stopSession(sessionId)
+    expect(end).toHaveBeenCalledWith(sessionId, { status: 'interrupted', stopReason: 'stopped', errorKind: 'stopped' }, undefined)
   })
 })

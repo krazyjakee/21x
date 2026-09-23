@@ -126,12 +126,13 @@ export class AdapterUsageTracker {
 
   /**
    * The session's turn is over (idle or failed). Records an estimated row when
-   * the adapter reported nothing for it, then forgets the turn.
+   * the adapter reported nothing for it, then forgets the turn. Returns the
+   * estimated row's turn key, or null when none was recorded.
    */
-  endTurn(sessionId: string, owner: UsageOwner, stopReason: string): void {
+  endTurn(sessionId: string, owner: UsageOwner, stopReason: string): string | null {
     const turn = this.turns.get(sessionId)
     this.turns.delete(sessionId)
-    if (!turn || turn.reported) return
+    if (!turn || turn.reported) return null
     try {
       const promptTokens = estimateCharTokens(turn.promptChars)
       let outputChars = 0
@@ -143,11 +144,12 @@ export class AdapterUsageTracker {
       const anchored = anchor && anchor.sessionId === sessionId && typeof anchor.contextTokens === 'number' ? anchor : null
       const contextTokens = anchored ? (anchored.contextTokens as number) + calibrate(promptTokens + outputTokens, ratio) : null
       const window = contextWindowFor(owner.model, { reported: anchored?.windowSource === 'reported' ? anchored.contextWindow : null })
+      const turnKey = `estimated:${turn.key}`
       this.sink.record({
         ownerKind: owner.ownerKind,
         ownerId: owner.ownerId,
         sessionId,
-        turnKey: `estimated:${turn.key}`,
+        turnKey,
         engine: 'adapter',
         backend: owner.backend,
         model: owner.model ?? null,
@@ -161,8 +163,10 @@ export class AdapterUsageTracker {
         windowSource: window.source,
         stopReason
       })
+      return turnKey
     } catch (err) {
       console.warn('[SessionUsage] could not record estimated usage:', err instanceof Error ? err.message : err)
+      return null
     }
   }
 }

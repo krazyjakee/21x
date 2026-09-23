@@ -12,6 +12,7 @@ import { createAuthorizationTables } from './authorization-schema'
 import { createDurableStartQueueTables, migrateDurableStartQueue } from './start-queue-migration'
 import { createIssueWriteTables, migrateIssueWrites } from './issue-writes-migration'
 import { createSessionUsageTables, migrateSessionUsage } from './session-usage-migration'
+import { createSessionLedgerTables, migrateSessionLedger } from './session-ledger-migration'
 
 /**
  * Bump this whenever new migrations are added so returning users skip
@@ -69,8 +70,12 @@ import { createSessionUsageTables, migrateSessionUsage } from './session-usage-m
  * 30 → 31: per-turn token usage for the Commander, Captains and task agents
  *          (managed sessions B1, #97): session_usage (migrateSessionUsage in
  *          session-usage-migration.ts). New table only.
+ * 31 → 32: the managed-session ledger (managed sessions B3, #99):
+ *          session_generations, session_turns and session_summaries
+ *          (migrateSessionLedger in session-ledger-migration.ts). New tables
+ *          only. The proposal called this migration 18; 18 stays skipped.
  */
-const SCHEMA_VERSION = 31
+const SCHEMA_VERSION = 32
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -573,6 +578,9 @@ export function createTables(db: Database.Database): void {
 
   // Managed sessions (#97): per-turn token usage, reported or estimated.
   createSessionUsageTables(db)
+
+  // Managed sessions (#99): generations, turns and summaries of the ledger.
+  createSessionLedgerTables(db)
 
   // Report routing (#62): a Captain report quotes the correlation id of
   // the `ask_captain` tool row it answers; this serves that lookup.
@@ -1112,6 +1120,9 @@ export function runMigrations(db: Database.Database): void {
 
   // Migration v31: per-turn token usage (#97). New table only.
   migrateSessionUsage(db)
+
+  // Migration v32: the managed-session ledger (#99). New tables only.
+  migrateSessionLedger(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)

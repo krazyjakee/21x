@@ -19,6 +19,7 @@ import { notifyRenderer, uiState } from '../task-api/state'
 import type { IpcDeps } from './deps'
 import { broadcastProjectChanged } from './projects'
 import { SessionUsageStore } from '../sessions/usage-store'
+import { SessionLedgerRecorder } from '../sessions/ledger-recorder'
 
 /**
  * Commander chat sessions (docs/commander.md): session CRUD, message history,
@@ -108,6 +109,7 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
     store,
     emit,
     usage: new SessionUsageStore({ get db() { return deps.db.db } }),
+    ledger: new SessionLedgerRecorder({ get db() { return deps.db.db } }),
     createProvider: () => createProvider(deps),
     getTools: options.getTools ?? ((context) => [
       ...createCommanderProjectTools({

@@ -23,6 +23,7 @@ import { YouTrackPlugin } from './plugins/youtrack-plugin'
 import { ConnectorBridgePlugin } from './plugins/connector-bridge-plugin'
 import { disposeConnectorRuntime } from './connectors/bridge/runtime'
 import { registerIpcHandlers } from './ipc-handlers'
+import { recoverSessionLedger } from './sessions/managed-session'
 import { panelBrowserBroker } from './panel-browser-broker'
 import { hardenWebviewPreferences } from './webview-hardening'
 import { VoiceSessionManager } from './voice/voice-session-manager'
@@ -719,6 +720,10 @@ app.whenReady().then(async () => {
 
   db = new DatabaseManager()
   db.initialize()
+  // Managed sessions (#99): turns the previous process left unfinished become
+  // `interrupted` and their open tool calls are closed, before any new turn
+  // can start. Ledger only; nothing is re-run.
+  recoverSessionLedger(db)
   db.onTaskActivity = (taskId, last_activity_at) => {
     const data = { taskId, updates: { last_activity_at } }
     if (mainWindow && !mainWindow.isDestroyed()) guardedIpcSend(mainWindow.webContents, 'task:updated', data)

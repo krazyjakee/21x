@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import type { ChatMessage } from '../../shared/chat'
+import type { ChatMessage, ChatStopReason } from '../../shared/chat'
 import type { CommanderEvent, CommanderMessage, CommanderSession } from '../../shared/commander'
 import { ChatRuntime, type ChatTurnHandle, type ChatTurnResult } from '../chat/chat-runtime'
 import { imagesUnsupportedMessage, type ChatProvider, type ChatProviderRequest } from '../chat/providers/types'
@@ -13,6 +13,8 @@ import { guardReportAsks, MAX_REPORT_ASKS_WITHOUT_USER_TURN } from './report-too
 import { MUTATING_COMMANDER_SKILL_TOOLS } from './skill-tools'
 import { chatTurnUsage } from '../sessions/chat-usage'
 import type { SessionUsageInput, UsageOwnerKind } from '../sessions/usage-store'
+import type { GenerationInfo, SessionOwner, SummaryKind, TurnTrigger } from '../sessions/ledger'
+import type { TurnOutcomeInput } from '../sessions/ledger-recorder'
 
 /**
  * Runs Commander chat turns over persisted sessions (docs/commander.md).
@@ -74,6 +76,20 @@ export interface CommanderServiceOptions {
    * failure to record is logged and never affects the turn.
    */
   usage?: CommanderUsageSink
+  /**
+   * The managed-session ledger, record only (#99, flag `sessions.ledger`).
+   * A failure to record is logged and never affects the turn.
+   */
+  ledger?: CommanderLedgerSink
+}
+
+/** The part of SessionLedgerRecorder the Commander needs. */
+export interface CommanderLedgerSink {
+  turnStarted(owner: SessionOwner, input: { dedupeKey: string; trigger: TurnTrigger; generation: GenerationInfo }): string | null
+  toolCallStarted(turnId: string | null, call: { id: string; name: string }): void
+  toolCallFinished(turnId: string | null, call: { id: string; name?: string; isError?: boolean }): void
+  turnEnded(turnId: string | null, outcome: TurnOutcomeInput, usageTurnKeys?: ReadonlyArray<string | null | undefined>): void
+  summary(owner: SessionOwner, generation: GenerationInfo, input: { kind: SummaryKind; dedupeKey: string; coversThroughRef?: string | null; content: unknown }): void
 }
 
 /** The part of SessionUsageStore the Commander needs. */
@@ -125,6 +141,8 @@ interface TurnStart {
   authorizationMessageId?: string
   /** Extra system text for the turn (the relay note of a report-triggered turn). */
   systemNote?: string
+  /** The event's ledger key (#99): `user:<message id>` or `report:<report ids>`. */
+  eventKey?: string
 }
 
 interface PreparedTurn {
@@ -296,7 +314,7 @@ export class CommanderService {
     // A user turn resets the report-ask budget (#62).
     this.reportAsks.delete(sessionId)
 
-    const { turnId, done } = this.startTurn(sessionId, provider, { trigger: 'user', userMessage: content, userMessageId: origin === 'typed' ? message.id : undefined, authorizationMessageId: this.store.authorizationMessageId(message) }, prepared)
+    const { turnId, done } = this.startTurn(sessionId, provider, { trigger: 'user', userMessage: content, userMessageId: origin === 'typed' ? message.id : undefined, authorizationMessageId: this.store.authorizationMessageId(message), eventKey: `user:${message.id}` }, prepared)
     return { turnId, message, done }
   }
 
@@ -324,11 +342,14 @@ export class CommanderService {
   private startTurn(sessionId: string, provider: ChatProvider, start: TurnStart, prepared?: PreparedTurn): { turnId: string; done: Promise<void> } {
     const { context, system, tools } = prepared ?? this.prepareTurn(sessionId, provider, start)
     let turnId = ''
+    const ledgerTurn = this.ledgerTurnStarted(sessionId, provider, start)
     const handle = this.runtime.startTurn(
       { provider, messages: context.messages, system, tools, maxToolCalls: this.options.maxToolCalls },
       (event) => {
         // `done` is re-emitted after the turn's messages are stored.
         if (event.type === 'done') return
+        if (event.type === 'tool_call_start') this.ledgerCall('a tool call', (l) => l.toolCallStarted(ledgerTurn, { id: event.id, name: event.name }))
+        else if (event.type === 'tool_call_result') this.ledgerCall('a tool result', (l) => l.toolCallFinished(ledgerTurn, { id: event.id, name: event.name, isError: event.isError }))
         this.emit({ type: 'turn_event', sessionId, turnId, event })
       }
     )
@@ -338,11 +359,13 @@ export class CommanderService {
 
     const done = handle.done
       .then((result) => {
-        this.recordUsage(sessionId, provider, system, tools, context.messages, result)
+        const usageKey = this.recordUsage(sessionId, provider, system, tools, context.messages, result)
         this.finishTurn(sessionId, context.messages.length, result)
+        this.ledgerCall('the turn end', (l) => l.turnEnded(ledgerTurn, ledgerOutcome(result.stopReason), [usageKey]))
       })
       .catch((err) => {
         console.error('[Commander] turn bookkeeping failed:', err)
+        this.ledgerCall('the turn end', (l) => l.turnEnded(ledgerTurn, { status: 'failed', stopReason: 'error', errorKind: 'bookkeeping' }))
         // The renderer must still leave its streaming state.
         const message = err instanceof Error ? err.message : String(err)
         this.emit({ type: 'turn_event', sessionId, turnId, event: { type: 'error', message: `Could not save the reply: ${message}` } })
@@ -359,10 +382,47 @@ export class CommanderService {
     return { turnId, done }
   }
 
-  /** Stores and logs the turn's token usage (#97); never throws. */
-  private recordUsage(sessionId: string, provider: ChatProvider, system: string, tools: ChatToolDefinition[], inputMessages: ChatMessage[], result: ChatTurnResult): void {
+  /** The session as a ledger owner, and its chat generation (#99). */
+  private ledgerOwner(sessionId: string): SessionOwner {
+    return { kind: 'commander', id: sessionId }
+  }
+
+  /** Records the start of a turn in the ledger (#99); null when nothing is recorded. Never throws. */
+  private ledgerTurnStarted(sessionId: string, provider: ChatProvider, start: TurnStart): string | null {
+    const ledger = this.options.ledger
+    if (!ledger) return null
+    try {
+      return ledger.turnStarted(this.ledgerOwner(sessionId), {
+        dedupeKey: start.eventKey ?? `${start.trigger}:${randomUUID()}`,
+        trigger: start.trigger,
+        generation: { engine: 'chat', provider: provider.id, model: provider.model }
+      })
+    } catch (err) {
+      console.warn('[Commander] could not record the turn start:', err instanceof Error ? err.message : err)
+      return null
+    }
+  }
+
+  /** Records a fold or a failed fold in the ledger (#99). Never throws. */
+  private ledgerSummary(sessionId: string, provider: ChatProvider | undefined, input: { kind: SummaryKind; dedupeKey: string; coversThroughRef?: string | null; content: unknown }): void {
+    this.ledgerCall('the summary', (l) => l.summary(this.ledgerOwner(sessionId), { engine: 'chat', provider: provider?.id ?? null, model: provider?.model ?? null }, input))
+  }
+
+  /** One ledger write (#99): skipped without a ledger, and a failure is only logged. */
+  private ledgerCall(what: string, write: (ledger: CommanderLedgerSink) => void): void {
+    const ledger = this.options.ledger
+    if (!ledger) return
+    try {
+      write(ledger)
+    } catch (err) {
+      console.warn(`[Commander] could not record ${what}:`, err instanceof Error ? err.message : err)
+    }
+  }
+
+  /** Stores and logs the turn's token usage (#97); never throws. Returns the usage row's turn key. */
+  private recordUsage(sessionId: string, provider: ChatProvider, system: string, tools: ChatToolDefinition[], inputMessages: ChatMessage[], result: ChatTurnResult): string | null {
     const sink = this.options.usage
-    if (!sink) return
+    if (!sink) return null
     try {
       sink.record(chatTurnUsage({
         ownerKind: 'commander',
@@ -375,8 +435,10 @@ export class CommanderService {
         result,
         calibration: sink.calibration('commander', sessionId)
       }))
+      return result.turnId
     } catch (err) {
       console.warn('[Commander] could not record turn usage:', err instanceof Error ? err.message : err)
+      return null
     }
   }
 
@@ -480,9 +542,11 @@ export class CommanderService {
     return this.foldFailures.get(sessionId) ?? null
   }
 
-  private recordFoldFailure(sessionId: string, error: string): void {
+  private recordFoldFailure(sessionId: string, error: string, provider?: ChatProvider, coversThroughRef?: string | null): void {
     const attempts = (this.foldFailures.get(sessionId)?.attempts ?? 0) + 1
-    this.foldFailures.set(sessionId, { at: new Date().toISOString(), error, attempts })
+    const at = new Date().toISOString()
+    this.foldFailures.set(sessionId, { at, error, attempts })
+    this.ledgerSummary(sessionId, provider, { kind: 'failed', dedupeKey: `failed:${coversThroughRef ?? 'none'}:${at}:${attempts}`, coversThroughRef, content: { error, attempts } })
     console.warn(`[Commander] Fold failed for session ${sessionId} (attempt ${attempts}): ${error}. Turns stay verbatim; retrying after the next turn.`)
   }
 
@@ -505,7 +569,7 @@ export class CommanderService {
       // Never send unbounded retained history or an oversized legacy summary.
       // Leave the fold cursor unchanged so stored turns remain recoverable.
       if (excerpt.length > MAX_SUMMARY_TRANSCRIPT_CHARS * MAX_SUMMARY_CHUNKS || (plan.previousSummary?.length ?? 0) > 8_000) {
-        this.recordFoldFailure(sessionId, 'summary input exceeds the size limit; stored history retained')
+        this.recordFoldFailure(sessionId, 'summary input exceeds the size limit; stored history retained', provider, plan.lastFoldedId)
         return null
       }
       let summary = plan.previousSummary ?? ''
@@ -527,18 +591,19 @@ export class CommanderService {
             signal
           )).trim()
           if (!summary) {
-            this.recordFoldFailure(sessionId, 'the summary came back empty')
+            this.recordFoldFailure(sessionId, 'the summary came back empty', provider, plan.lastFoldedId)
             return null
           }
         }
       } catch {
         // Provider errors can include credentials, request text or private URLs.
-        this.recordFoldFailure(sessionId, 'summary request failed')
+        this.recordFoldFailure(sessionId, 'summary request failed', provider, plan.lastFoldedId)
         return null
       }
       if (!this.store.getSession(sessionId)) return null
       const stored = this.store.appendMessage(sessionId, { role: 'summary', content: summary, correlationId: plan.lastFoldedId })
       this.foldFailures.delete(sessionId)
+      this.ledgerSummary(sessionId, provider, { kind: 'fold', dedupeKey: `fold:${stored.id}`, coversThroughRef: plan.lastFoldedId, content: { messageId: stored.id, chars: summary.length } })
       this.emit({ type: 'messages_appended', sessionId, messages: [stored] })
       return stored
     } finally {
@@ -598,10 +663,10 @@ export class CommanderService {
       }
       return { message, relayed: true }
     }
-    return { message, relayed: this.relayReport(input.sessionId, input.projectName ?? null) }
+    return { message, relayed: this.relayReport(input.sessionId, input.projectName ?? null, [message.id]) }
   }
 
-  private relayReport(sessionId: string, projectName: string | null): boolean {
+  private relayReport(sessionId: string, projectName: string | null, reportIds: string[]): boolean {
     let provider: ChatProvider
     try {
       provider = this.options.createProvider()
@@ -613,7 +678,8 @@ export class CommanderService {
     this.startTurn(sessionId, provider, {
       trigger: 'report',
       userMessage: '',
-      systemNote: reportRelayNote(projectName ? `"${projectName}"` : 'a project')
+      systemNote: reportRelayNote(projectName ? `"${projectName}"` : 'a project'),
+      eventKey: `report:${reportIds.join(',')}`
     })
     return true
   }
@@ -631,6 +697,13 @@ export class CommanderService {
       this.emitSession(sessionId)
     }
     if (!this.isSessionActive(sessionId) || this.active.has(sessionId)) return
-    this.relayReport(sessionId, pending.projectName)
+    this.relayReport(sessionId, pending.projectName, pending.messageIds)
   }
+}
+
+/** The ledger outcome of a finished chat turn (#99). */
+function ledgerOutcome(stopReason: ChatStopReason): TurnOutcomeInput {
+  return stopReason === 'error'
+    ? { status: 'failed', stopReason, errorKind: 'provider_error' }
+    : { status: 'done', stopReason }
 }

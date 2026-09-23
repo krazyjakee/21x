@@ -38,6 +38,23 @@ table, created idempotently by both `createTables()` and `runMigrations()`, so
 fresh and upgraded databases match. No existing row changes. See
 [Token accounting](token-accounting.md).
 
+## Version 32 — the managed-session ledger
+
+Version 32 adds `session_generations`, `session_turns` and `session_summaries`
+(`session-ledger-migration.ts`, managed sessions B3, #99). A turn's
+`dedupe_key` is unique per owner, so an event delivered twice is recorded
+once. At most one generation per owner is open (partial unique index). These
+are new tables only, created idempotently by both `createTables()` and
+`runMigrations()`, so fresh and upgraded databases match. The equivalence test
+checks for them by name. No existing row changes. See
+[Managed sessions](managed-sessions.md).
+
+The epic's proposal called this migration 18. 18 stays skipped: it was kept
+for the unlanded `feat/commander-on-agent-sessions` branch, which also used
+18. That branch has not landed, and decision D1 keeps the Commander on
+ChatRuntime, so it may never land. If it does, it takes the next free version,
+not 18.
+
 ## How it works
 
 1. `createTables()` defines the canonical schema for **new** databases (`CREATE TABLE IF NOT EXISTS`).
