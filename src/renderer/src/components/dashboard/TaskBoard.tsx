@@ -180,26 +180,30 @@ function TaskCardContent({ task, agent, transitionPhase, showActivity = true }: 
     <>
       {/* Title + Priority */}
       <div className="flex items-start justify-between gap-2 mb-1">
-        <h4 className="text-base font-medium leading-snug line-clamp-2 flex-1 text-foreground/90 group-hover:text-foreground transition-colors">
+        <h4 className="text-base font-medium leading-snug line-clamp-2 flex-1 min-w-0 text-foreground/90 group-hover:text-foreground transition-colors">
           {task.title}
         </h4>
-        {/* Live session activity (#95). Quiet states render nothing, so a calm
-            board stays calm; the board is one motion region, so only one card
-            can ever animate. The lifecycle status alone never says "Running". */}
-        {showActivity && (
-          <TaskActivityBadge
-            taskId={task.id}
-            title={task.title}
-            region={BOARD_ACTIVITY_REGION}
-            className="shrink-0 max-w-[55%]"
-          />
-        )}
         {task.priority && task.priority !== 'low' && (
           <Badge variant={getPriorityVariant(task.priority)} className="text-2xs px-1.5 py-0 shrink-0 uppercase tracking-wider font-semibold">
             {task.priority}
           </Badge>
         )}
       </div>
+
+      {/* Live session activity (#95), on its own line so it never squeezes
+          the title. Quiet states render nothing (the empty row collapses), so
+          a calm board stays calm; the board is one motion region, so only one
+          card can ever animate. The lifecycle status alone never says "Running". */}
+      {showActivity && (
+        <div className="mb-1.5 flex empty:hidden">
+          <TaskActivityBadge
+            taskId={task.id}
+            title={task.title}
+            region={BOARD_ACTIVITY_REGION}
+            className="max-w-full"
+          />
+        </div>
+      )}
 
       {transitionPhase && (
         <div
