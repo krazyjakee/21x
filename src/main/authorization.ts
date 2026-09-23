@@ -2,7 +2,15 @@ import { createHash, randomUUID } from 'crypto'
 import type Database from 'better-sqlite3'
 
 export const AUTHORIZATION_TTL_MS = 24 * 60 * 60_000
-export const AUTHORIZATION_CLASSIFIER_VERSION = 2
+export const AUTHORIZATION_CLASSIFIER_VERSION = 3
+/**
+ * Stored intents resolve under the classifier that produced them. Version 3
+ * reads an assigned outcome as its own ordinary lifecycle; version 2 required
+ * the user to recite the procedure. Version 2 records stay valid and are never
+ * reclassified — they are strictly narrower, so honouring them cannot widen
+ * anyone's authority.
+ */
+export const SUPPORTED_CLASSIFIER_VERSIONS: readonly number[] = [2, 3]
 export const AUTHORIZATION_ACTIONS = [
   'task.create',
   'task.update',
@@ -18,7 +26,7 @@ export type AuthorizationScope = { projectId: string; repos: string[] }
 export interface CapabilityIntent {
   capability: AuthorizationAction
   basis: 'explicit' | 'necessary'
-  classifierVersion: typeof AUTHORIZATION_CLASSIFIER_VERSION
+  classifierVersion: number
   sourceMessageId: string
   clauseHash: string
   sourceRange: { start: number; end: number }
@@ -89,7 +97,16 @@ export const authorizationHash = (text: string): string => createHash('sha256').
 
 type ClassifiedIntent = Pick<CapabilityIntent, 'capability' | 'basis' | 'clauseHash' | 'sourceRange'>
 
-const UNSAFE_CLAUSE = /\b(?:if|unless|provided|assuming|once|when|after|before|pending|subject\s+to|mock|dry[ -]?run|simulate|hypothetical|example|do\s+not|don't|dont|shouldn't|shouldnt|without|refrain|ask\s+(?:me|the\s+user)\s+(?:first|before)|(?:my|user|human)\s+approval|approve[sd]?|confirmation|merge|squash|rebase|deploy|release|promote|rollback|delete|destroy|purge|force[ -]?push|bypass|credential|token|secret|password)\b/i
+/**
+ * Language that withholds, postpones or hypothesizes the work. A clause
+ * carrying any of it authorizes nothing, whatever imperative it is wrapped
+ * around ("Implement nothing until I give consent", "Build only a written
+ * proposal"). Protected actions are deliberately absent: merge, deploy,
+ * deletion and credential elevation are not in the ordinary capability
+ * vocabulary at all, so naming one cannot mint it — and naming one no longer
+ * voids the ordinary work the same instruction does authorize.
+ */
+const WITHHOLDING = /\b(?:nothing|only|solely|merely|purely|consent|go[ -]?ahead|withholds?|withholding|awaits?|awaiting|illustrat\w+|sample|demonstrat\w+|proposals?|paper\s+exercise|not\s+yet|do\s+not|don't|dont|shouldn't|shouldnt|without|refrain|never|ask\s+(?:me|the\s+user)\s+(?:first|before)|(?:my|user|human)\s+approval|approve[sd]?)\b/i
 const INTERROGATIVE = /^(?:why|how|what|which|who|where|can|could|would|will|may|should|do|does|did|is|are|was|were)\b/i
 const UNSAFE_CONTEXT_PREFIX = /^(?:(?:only\s+)?if\b|unless\b|when\b|once\b|pending\b|subject\s+to\b|example(?:\s+instructions?)?\b|hypothetical\b|mock\b|wait\s+for\b)/i
 const AMBIGUOUS_CONTEXT = /\b(?:if|unless|provided|assuming|once|when|after|before|pending|subject\s+to|mock|dry[ -]?run|simulate|hypothetical|example|approval|confirmation)\b/i
@@ -109,29 +126,35 @@ function safeAuthorizationContext(clause: string): boolean {
     /^(?:the\s+)?(?:github|gh)\s+issues?\s+(?:will|would|should|may|might)\s+(?:probably\s+)?need\s+to\s+be\s+part\s+of\s+(?:the\s+)?(?:commander\s+ui\s+refactor|current\s+project|project\s+work)$/i.test(clause)
 }
 
-// Coding intent deliberately accepts a small positive vocabulary rather than
-// treating arbitrary text after a coding verb as an executable assignment.
-// Unknown task names can still be created, but cannot mint PR/start authority
-// until the human uses an unambiguous recognized production.
-const CODING_TARGET_WORDS = new Set([
-  'api', 'authorization', 'boundary', 'bug', 'capability', 'captain', 'change', 'changes',
-  'code', 'commander', 'contract', 'controller', 'database', 'delegated', 'feature',
-  'fix', 'flow', 'gate', 'github', 'implementation', 'integration', 'intent', 'intent-to-capability', 'issue',
-  'issues', 'lifecycle', 'lineage', 'login', 'merge', 'migration', 'module', 'nonce',
-  'page', 'path', 'pr', 'project', 'provenance', 'pull-request', 'readiness', 'refactor',
-  'repair', 'repo', 'repository', 'review', 'scheduler', 'schema', 'security', 'service',
-  'session', 'system', 'task', 'tests', 'tool', 'unified', 'work'
-])
+/**
+ * Verbs that assign product work. The list is positive and bounded, and it
+ * deliberately excludes both the explicit lifecycle verbs parsed below and
+ * every protected action (merge, deploy, delete, bypass, credentials), so a
+ * work directive can never be read as a request for one of those.
+ */
+const WORK_VERB = new RegExp(
+  '^(?:please\\s+|now\\s+|then\\s+|also\\s+|and\\s+|go\\s+ahead\\s+and\\s+)*' +
+  '(?:address|apply|authori[sz]e|build|carry\\s+on\\s+with|clean\\s+up|code|complete|configure|continue' +
+  '|debug|design|develop|diagnose|disable|document|enable|finish|fix|handle|implement|improve|integrate' +
+  '|investigate|land|log|look\\s+into|migrate|proceed\\s+with|redesign|refactor|release|repair|replace' +
+  '|reproduce|resolve|restore|resume|retarget|rework|rewrite|ship|sort\\s+out|take\\s+care\\s+of|test' +
+  '|tidy\\s+up|triage|unblock|upgrade|wire\\s+up|work\\s+on|write)\\s+(\\S.*)$',
+  'i'
+)
 
-function recognizedCodingAssignment(clause: string, projectNames: string[]): boolean {
-  const match = /^(?:please\s+)?(?:implement|fix|repair|build|develop|code|refactor)\s+(.+)$/i.exec(clause)
+/**
+ * An authenticated human instruction that assigns work. The outcome the user
+ * asked for carries its own ordinary lifecycle: they need not also recite
+ * "create and start a task" for the Captain to do the work they just
+ * described. Safety comes from the screens applied before this — questions,
+ * conditionals, quotations and withholding language never reach here — not
+ * from a vocabulary of nouns the user is expected to guess.
+ */
+function recognizedWorkDirective(clause: string): boolean {
+  const match = WORK_VERB.exec(clause)
   if (!match) return false
-  const target = match[1].toLowerCase().replace(/\s+from\s+the\s+boundary\s+audit$/, '')
-  const words = target.split(/\s+/)
-  if (words.length === 0 || words.length > 8) return false
-  if (['a', 'an', 'the', 'this', 'that', 'our'].includes(words[0])) words.shift()
-  const projectWords = new Set(projectNames.map((name) => name.toLowerCase()))
-  return words.length > 0 && words.every((word) => CODING_TARGET_WORDS.has(word) || projectWords.has(word))
+  const target = match[1].trim()
+  return target.length > 0 && target.split(/\s+/).length <= 60
 }
 
 function deniedCapabilities(clause: string): Set<AuthorizationAction> | null {
@@ -217,18 +240,21 @@ export function classifyCapabilityIntents(text: string, projectNames: string[] =
       continue
     }
 
-    if (clause.text.length > 1_000 || INTERROGATIVE.test(clause.text) || UNSAFE_CLAUSE.test(clause.text) || /["“”`:]/.test(clause.text)) return []
+    if (clause.text.length > 1_000 || INTERROGATIVE.test(clause.text) || WITHHOLDING.test(clause.text) || /["“”`:]/.test(clause.text)) return []
 
-    if (recognizedCodingAssignment(clause.text, projectNames)) {
-      addClassified(found, 'task.start', 'necessary', clause)
+    const command = /^(?:please\s+)?(create|add|make|file|open|publish|update|link|start|prioriti[sz]e)\s+(.+)$/i.exec(clause.text)
+    if (!command) {
+      // Not an explicit lifecycle command. An authenticated human instruction
+      // that assigns work carries the lifecycle that work needs, so the user
+      // is never asked to restate the outcome as a procedure.
+      if (!recognizedWorkDirective(clause.text)) return []
+      addClassified(found, 'task.create', 'necessary', clause)
       addClassified(found, 'task.update', 'necessary', clause)
+      addClassified(found, 'task.start', 'necessary', clause)
       addClassified(found, 'github.pr.open', 'necessary', clause)
       continue
     }
-
-    const command = /^(?:please\s+)?(create|add|make|file|open|publish|update|link|start|prioriti[sz]e)\s+(.+)$/i.exec(clause.text)
-    if (!command) return []
-    let verb = command[1].toLowerCase()
+    let verbs = [command[1].toLowerCase()]
     let rest = command[2].trim()
     for (const name of projectNames) {
       if (rest.toLowerCase().startsWith(name.toLowerCase() + ' ')) rest = rest.slice(name.length).trimStart()
@@ -238,38 +264,58 @@ export function classifyCapabilityIntents(text: string, projectNames: string[] =
     for (let count = 0; count < 8; count++) {
       const repeatedVerb = /^(create|add|make|file|open|publish|update|link|start|prioriti[sz]e)\s+/i.exec(rest)
       if (repeatedVerb) {
-        verb = repeatedVerb[1].toLowerCase()
+        verbs = [repeatedVerb[1].toLowerCase()]
         rest = rest.slice(repeatedVerb[0].length)
+      }
+      // "Create and start a task": one object, several lifecycle verbs. Every
+      // one of them must be a recognized production for that object.
+      for (let extra = 0; extra < 4; extra++) {
+        const alsoVerb = /^(?:and|,\s*and|,|plus|&)\s+(create|add|make|file|open|publish|update|link|start|prioriti[sz]e)\s+/i.exec(rest)
+        if (!alsoVerb) break
+        verbs.push(alsoVerb[1].toLowerCase())
+        rest = rest.slice(alsoVerb[0].length)
       }
       const numericDeterminer = /^(\d+)\s+/.exec(rest)
       if (numericDeterminer && Number(numericDeterminer[1]) === 0) return []
+      // A named project may sit between the determiner and the object
+      // ("a 21x task"); it names scope, not a different object.
+      const determiners = /^(?:(?:the|a|an|one|two|both|staged|draft|\d+)\s+)*/i.exec(rest)?.[0] ?? ''
+      for (const name of projectNames) {
+        const after = rest.slice(determiners.length)
+        if (after.toLowerCase().startsWith(name.toLowerCase() + ' ')) {
+          rest = determiners + after.slice(name.length).trimStart()
+          break
+        }
+      }
       const object = /^(?:(?:the|a|an|one|two|both|staged|draft|\d+)\s+)*(tasks?|(?:github|gh)\s+issues?|prs?|pull\s+requests?)\b/i.exec(rest)
       if (!object) return []
       const target = object[1].toLowerCase()
       const issue = /^(?:github|gh)/.test(target)
       const pr = /^(?:pr|pull)/.test(target)
-      let accepted = false
-      if (pr) {
-        if (verb === 'open' || verb === 'create' || verb === 'publish') {
-          explicit.add('github.pr.open')
-          accepted = true
+      for (const verb of verbs) {
+        let accepted = false
+        if (pr) {
+          if (verb === 'open' || verb === 'create' || verb === 'publish') {
+            explicit.add('github.pr.open')
+            accepted = true
+          }
+        } else if (issue) {
+          if (verb === 'update') { explicit.add('github.issue.update'); accepted = true }
+          else if (verb === 'link') { explicit.add('github.issue.link'); accepted = true }
+          else if (['create', 'add', 'make', 'file', 'open', 'publish'].includes(verb)) {
+            explicit.add('github.issue.create')
+            accepted = true
+          }
+        } else {
+          if (verb === 'update' || verb.startsWith('prioriti')) { explicit.add('task.update'); accepted = true }
+          else if (verb === 'start') { explicit.add('task.start'); accepted = true }
+          else if (['create', 'add', 'make', 'file', 'open', 'publish'].includes(verb)) {
+            explicit.add('task.create')
+            accepted = true
+          }
         }
-      } else if (issue) {
-        if (verb === 'update') { explicit.add('github.issue.update'); accepted = true }
-        else if (verb === 'link') { explicit.add('github.issue.link'); accepted = true }
-        else if (['create', 'add', 'make', 'file', 'open', 'publish'].includes(verb)) {
-          explicit.add('github.issue.create')
-          accepted = true
-        }
-      } else {
-        if (verb === 'update' || verb.startsWith('prioriti')) { explicit.add('task.update'); accepted = true }
-        else if (verb === 'start') { explicit.add('task.start'); accepted = true }
-        else if (['create', 'add', 'make', 'file', 'open', 'publish'].includes(verb)) {
-          explicit.add('task.create')
-          accepted = true
-        }
+        if (!accepted) return []
       }
-      if (!accepted) return []
       rest = rest.slice(object[0].length).trimStart().replace(/^for\s+(?:this|it)\b/i, '').trimStart()
       const conjunction = /^(?:and|plus|&)\s+/i.exec(rest)
       if (!conjunction) break
@@ -283,11 +329,11 @@ export function classifyCapabilityIntents(text: string, projectNames: string[] =
       }
     }
 
+    // A descriptive tail ("... to fix the login bug") is ordinary English, not
+    // a second instruction: anything that would qualify, postpone or negate
+    // the command was already rejected by the screens above.
     const tail = rest.replace(/[.!]$/, '').trim()
-    const namedScope = projectNames.some((name) => new RegExp(`^(?:for|in)\\s+${name.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}$`, 'i').test(tail))
-    const safeTail = !tail || namedScope || /^(?:for|in)\s+(?:this|it|the\s+project)\b(?:\s+and\s+prioriti[sz]e\s+(?:them|the\s+tasks?))?$/i.test(tail)
-      || /^for tasks [a-z0-9]{24} and [a-z0-9]{24}$/i.test(tail)
-    if (!safeTail || explicit.size === 0) return []
+    if (explicit.size === 0 || tail.split(/\s+/).filter(Boolean).length > 30) return []
 
     for (const capability of explicit) addClassified(found, capability, 'explicit', clause)
     if (explicit.has('github.issue.create')) addClassified(found, 'github.issue.link', 'necessary', clause)
@@ -423,7 +469,8 @@ export function resolveAuthorization(source: Source, nodeId: string | null, now 
     const actions = intents?.map((intent) => intent.capability)
     if (!intents || JSON.stringify(actions) !== JSON.stringify(origin.actions) || intents.some((intent) => {
       const clause = origin.text.slice(intent.sourceRange.start, intent.sourceRange.end)
-      return intent.classifierVersion !== AUTHORIZATION_CLASSIFIER_VERSION ||
+      return !SUPPORTED_CLASSIFIER_VERSIONS.includes(intent.classifierVersion) ||
+        intent.classifierVersion !== intents[0].classifierVersion ||
         intent.sourceMessageId !== origin.messageId ||
         intent.createdAt !== origin.at ||
         intent.expiresAt !== origin.expiresAt ||
@@ -610,7 +657,7 @@ export function resolveTaskAuthorization(source: Source, input: { taskId: string
     : failureDimension === 'chain'
       ? 'Send a new authenticated human instruction in this project chat, or relay the user\'s request through the Commander; machine text cannot grant authority.'
       : failureDimension === 'capability'
-        ? `Ask the user to explicitly request ${input.action}; do not retry with altered relay text.`
+        ? `Report that the instruction on record does not reach ${input.action} and ask the user what they want done; never demand a set phrase, and never retry with altered relay text.`
         : failureDimension === 'repository'
           ? 'Use a repository present in both the project configuration and the immutable authorization scope; cross-repository writes require a new human instruction.'
           : failureDimension === 'project'

@@ -72,17 +72,38 @@ view. Version-1 nodes continue to resolve exactly as stored and are never
 backfilled or reclassified.
 
 Direct imperative objects are supported, including “Create 21x tasks plus
-GitHub issues”, “Open gh issues and tasks”, and staged-issue commands naming
-task IDs. `gh` and `GitHub` normalize to the same issue object. Creating tasks
-necessarily carries their ordinary update/start lifecycle; creating an issue
-necessarily carries its 21x link; an authenticated coding assignment carries
-draft-PR opening. Conditional, negated, approval-dependent, mock-only, quoted,
-interrogative, ambiguous, oversized and protected-action clauses retain human
-evidence but produce no capability. Conditional/example prefixes carry across
-punctuation to the command they qualify, while an explicit later prohibition
-removes the corresponding necessary capability (for example “Refactor. Do not
-open PRs.” retains task work but not `github.pr.open`). This remains a bounded
-grammar, not a general natural-language consent model.
+GitHub issues”, “Open gh issues and tasks”, “Create and start a 21x task”, and
+staged-issue commands naming task IDs. `gh` and `GitHub` normalize to the same
+issue object. One object may carry several lifecycle verbs, and a descriptive
+tail (“… to fix the login bug”) is read as description, not as a second
+instruction. Creating tasks necessarily carries their ordinary update/start
+lifecycle; creating an issue necessarily carries its 21x link.
+
+Classifier version 3 also recognizes an **assigned outcome**: an authenticated
+human instruction that assigns work (“Investigate the Commander input-box bug”,
+“Release the redesign program for 21x”) carries `task.create`, `task.update`,
+`task.start` and draft-PR opening as `necessary`. The user is not asked to
+restate an outcome as a procedure, and a refusal never demands a set phrase.
+The work verbs are a bounded positive list that excludes both the explicit
+lifecycle verbs and every protected action, so an assigned outcome can never be
+read as a request to merge, deploy, delete, bypass a gate or elevate a
+credential. Naming a protected action no longer voids the ordinary work beside
+it either — those actions are absent from the vocabulary, so naming one cannot
+mint it.
+
+Conditional, negated, approval-dependent, withholding, mock-only, quoted,
+interrogative, ambiguous and oversized clauses retain human evidence but produce
+no capability, whatever imperative they are wrapped around (“Implement nothing
+until I give consent”, “Build only a written proposal”, “Await my consent”).
+Conditional/example prefixes carry across punctuation to the command they
+qualify, while an explicit later prohibition removes the corresponding necessary
+capability (for example “Refactor. Do not open PRs.” retains task work but not
+`github.pr.open`). This remains a bounded grammar, not a general
+natural-language consent model.
+
+Version-2 intents keep resolving exactly as stored: they are strictly narrower
+than version 3, so honouring them cannot widen anyone's authority. A single
+record must not mix classifier versions, and an unknown version is invalid.
 
 Project scope comes from a single named configured project, the trusted project
 chat destination, or the last platform-captured human conversational project
@@ -161,7 +182,7 @@ does not edit relay wording and retry.
 
 | Boundary | Contract |
 | --- | --- |
-| Human chat → Commander → Captain → task | One immutable origin; every hop can only narrow. Covered ordinary work needs no repeated grant. |
+| Human chat → Commander → Captain → task | One immutable origin; every hop can only narrow. An authenticated Commander request carries the same authority as the same words typed into the project chat. Covered ordinary work needs no repeated grant. |
 | Task create/update/start | Same lineage; signed caller scope and project membership remain mandatory. Admission/capacity still decides when a valid start runs. |
 | GitHub issue create/update/link | Same resolver plus the existing immutable issue-write claim/ledger and restart reconciliation. |
 | Draft PR opening | `open_draft_pull_request` only, available to signed nested and top-level task agents: configured task repo, clean named branch, one validated fetch/push destination with no URL rewrite, immutable source SHA/ref, post-push verification, draft creation and exact retry recovery. |

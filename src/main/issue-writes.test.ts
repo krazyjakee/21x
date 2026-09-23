@@ -1335,7 +1335,7 @@ describe('the durable authorization chain', () => {
       origin_message_id: root.messageId,
       failure_dimension: 'capability'
     })
-    expect(denied.safe_remediation).toContain('explicitly request')
+    expect(denied.safe_remediation).toContain('ask the user what they want done')
     expect(await captainCall(h, 'update_github_issue', { repo: 'krazyjakee/21x', issue_number: 5, body: 'Out of scope' }))
       .toMatchObject({ status: 'refused', code: 'repo_not_in_project' })
     expect(await captainCall(h, 'update_github_issue', { repo: 'someone/elsewhere', issue_number: 5, body: 'Never configured' }))
