@@ -1,5 +1,5 @@
-import { captureAuthorizationSnapshot, sendPreservingAuthorization, sendWithAuthorization } from './authorization-dispatch'
-import { prepareAuthorizationDispatch, prepareAuthorizationRetry, failAuthorizationDispatch } from './authorization'
+import { captureAuthorizationSnapshot, sendPreservingAuthorization, sendWithAuthorization, TurnStillRunningError } from './authorization-dispatch'
+import { prepareAuthorizationDispatch, prepareAuthorizationRetry, activateAuthorizationDispatch } from './authorization'
 import { prepareProjectMessageDispatch, activateProjectMessageDispatch, failProjectMessageDispatch, type ProjectMessageDispatch, type TypedMessage } from './merge-grants'
 import { DEFAULT_SERVER_URL } from './adapters/opencode-server'
 import { guardedIpcSend } from './guarded-ipc-send'
@@ -1228,7 +1228,9 @@ export class AgentManager extends EventEmitter {
     const task = this.db.getTask(taskId)
     const runtimeGeneration = this.captainRuntimes.get(taskId)?.generation
     if (!skipInitialPrompt && task && isCoordinatorTask(task) && this.db.db && typeof this.db.db.prepare === 'function') {
-      prepareAuthorizationDispatch(this.db, { key: `captain-start:${randomUUID()}`, taskId: task.id, text: 'Platform Captain startup' })
+      // A fresh Captain session starts without the previous session's human
+      // authority. No turn is running yet, so the switch happens now.
+      activateAuthorizationDispatch(this.db, prepareAuthorizationDispatch(this.db, { key: `captain-start:${randomUUID()}`, taskId: task.id, text: 'Platform Captain startup' }))
     }
     const authorizationSnapshot = this.db.db && typeof this.db.db.prepare === 'function' ? captureAuthorizationSnapshot(this.db, taskId) : null
     const isTriageSession = isTriageSessionTask(taskId, task)
@@ -4615,7 +4617,10 @@ export class AgentManager extends EventEmitter {
       return result
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
-      if (detail.startsWith('Message handoff timed out')) {
+      if (error instanceof TurnStillRunningError) {
+        // Nothing reached the backend. Recovery retries it once the turn ends.
+        this.deliveries.release(claimed.id, this.deliveryOwner, detail)
+      } else if (detail.startsWith('Message handoff timed out')) {
         this.deliveries.terminal(claimed.id, 'timed_out', `${detail}; backend acceptance is unknown. Inspect the conversation before retrying.`)
         if (claimed.taskId) this.emitSystemError('', claimed.taskId, `delivery-timeout-${claimed.id}`,
           `${detail}. Backend acceptance is unknown; inspect the conversation before retrying.`)
@@ -4855,7 +4860,7 @@ export class AgentManager extends EventEmitter {
         await send()
       }
     } catch (error) {
-      if (authorizationDispatch !== undefined) failAuthorizationDispatch(this.db, authorizationDispatch)
+      // sendWithAuthorization already cleared any authority this dispatch took over.
       if (dispatch) failProjectMessageDispatch(dispatch)
       throw error
     }

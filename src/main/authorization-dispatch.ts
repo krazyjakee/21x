@@ -11,6 +11,17 @@ export type AuthorizationDispatchFenceStage =
   | 'before-send'
 const pendingSends = new WeakMap<Database.Database, Map<string, Promise<void>>>()
 
+/**
+ * The previous turn was still running when the wait ended. Nothing was sent
+ * and no authority changed, so the delivery can be retried as it stands.
+ */
+export class TurnStillRunningError extends Error {
+  constructor() {
+    super('The previous turn is still running; the message stays queued until it finishes.')
+    this.name = 'TurnStillRunningError'
+  }
+}
+
 /** All adapter sends, including startup and worker nudges, share this lock. */
 async function serializeTaskSend(source: Source, taskId: string, send: () => Promise<void>): Promise<void> {
   let queue = pendingSends.get(source.db)
@@ -42,9 +53,10 @@ export function sendPreservingAuthorization(source: Source, taskId: string, snap
   })
 }
 
-/** A task-scoped MCP URL cannot distinguish overlapping backend turns.
- * Keep the binding empty until the backend confirms the old turn is idle.
- * The shared send lock covers idle observation through adapter acceptance.
+/** A task-scoped MCP URL cannot distinguish overlapping backend turns, so
+ * the new generation is activated only once the backend confirms the old turn
+ * is idle. Until then the old turn keeps its own authority. The shared send
+ * lock covers idle observation through adapter acceptance.
  */
 export async function sendWithAuthorization(
   source: Source,
@@ -58,10 +70,12 @@ export async function sendWithAuthorization(
   const row = source.db.prepare('SELECT task_id, node_id FROM authorization_dispatches WHERE seq = ?').get(seq) as { task_id: string; node_id: string | null } | undefined
   if (!row) throw new Error('Unknown authorization dispatch')
   return serializeTaskSend(source, row.task_id, async () => {
+    let activated = false
     try {
       if (!row.node_id) {
         assertFence('before-activation')
         activateAuthorizationDispatch(source, seq)
+        activated = true
         assertFence('before-send')
         await send()
         return
@@ -75,16 +89,17 @@ export async function sendWithAuthorization(
           // Rechecks generation, expiry and revocation AFTER every await.
           assertFence('before-activation')
           activateAuthorizationDispatch(source, seq)
+          activated = true
           assertFence('before-send')
           await send()
           return
         }
         if (current.type !== 'busy' && current.type !== 'retry') throw new Error(`Cannot authorize a turn while the backend is ${current.type}`)
-        if (Date.now() >= deadline) throw new Error('The previous turn did not become idle; authorization remains inactive. Retry delivery when idle.')
+        if (Date.now() >= deadline) throw new TurnStillRunningError()
         await wait()
       }
     } catch (error) {
-      failAuthorizationDispatch(source, seq)
+      if (activated) failAuthorizationDispatch(source, seq)
       throw error
     }
   })

@@ -166,14 +166,23 @@ Outbox insertion and reservation/binding commit together. Task creation and chil
 inheritance also commit together. Recovery reuses the same sequence and payload;
 it never renews expiry or assigns a new generation to an old delivery.
 
-Reservation clears the current active binding before asynchronous session resume
-or configuration work. An authorized message waits for confirmed backend `idle`
-before activating its binding and sending. Per-task serialization covers every adapter send, including startup and
+Reservation records the new generation but leaves the active node alone, so a
+turn that is still running keeps the authority it was sent with. Only the
+latest reserved generation can activate. An authorized message waits for
+confirmed backend `idle` before activating its binding and sending; activation
+is the moment the previous turn's node ends. Per-task serialization covers every adapter send, including startup and
 worker nudges, and adapters that await before marking a prompt busy. A worker
 continuation captures both generation and active node before asynchronous
 preparation, and refuses to borrow a newer human instruction. Activation rechecks the latest sequence,
-expiry and revocation after asynchronous waits. Error, approval-wait, unknown
-status, or a 60-second idle timeout leave turn authority inactive. Machine
+expiry and revocation after asynchronous waits. Error, approval-wait or unknown
+status refuse the send without activating. After 60 seconds of a busy backend
+the send ends with `TurnStillRunningError`: nothing was sent and no authority
+changed, so the message and its Captain request stay queued and the recovery
+sweeps retry them, bounded by the Captain request's 15-minute report deadline.
+A request that passes the deadline cancels its queued message. A send that
+fails after activation clears the node it had taken over. Captain startup
+activates a machine generation at once, so a new session never inherits the
+previous session's human node. Machine
 Captain nudges clear earlier turn authority but fall back to the write-once
 delegation assigned atomically at task creation. Normal worker continuation
 therefore retains the fixed instruction assigned at creation without treating
