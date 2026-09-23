@@ -237,7 +237,7 @@ export class VoiceSessionManager {
   async setEnabled(enabled: boolean): Promise<VoiceSnapshot> {
     this.options.db.setSetting(VOICE_SETTING_KEYS.enabled, enabled ? 'true' : 'false')
     if (!enabled) {
-      this.cancelTurn(this.turnId ?? undefined)
+      this.cancelTurn(this.turnId ?? undefined, this.turnEpoch ?? undefined)
       this.unregisterShortcut()
       this.worker.stop()
       const owner = this.copyLifecycleOwner()

@@ -392,6 +392,25 @@ describe('only while the microphone is open', () => {
 
     expect(ctx.speech.interrupts).toBe(1)
   })
+
+  it('cancels the owned turn and active speech when voice is disabled', async () => {
+    const started = await ctx.manager.startTurn('conversation', {})
+    if ('error' in started) throw new Error(started.error)
+    await ctx.manager.speakAgentAnswer('task-1', 'A long answer.')
+    const internals = ctx.manager as unknown as { turnId: string | null }
+    const frame = Buffer.alloc(4)
+    ctx.manager.pushAudio(started.turnId, frame)
+    expect(ctx.worker.pushAudio).toHaveBeenCalledOnce()
+    ctx.speech.interrupts = 0
+
+    await ctx.manager.setEnabled(false)
+
+    expect(ctx.worker.cancelTurn).toHaveBeenCalledWith(started.turnId)
+    expect(internals.turnId).toBeNull()
+    ctx.manager.pushAudio(started.turnId, frame)
+    expect(ctx.worker.pushAudio).toHaveBeenCalledOnce()
+    expect(ctx.speech.interrupts).toBe(1)
+  })
 })
 
 describe('barge-in', () => {
