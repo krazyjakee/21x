@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { voicePlayback } from '@/lib/voice-playback'
 import { voiceCapture } from '@/lib/voice-capture'
 import { useVoiceStore } from '@/stores/voice-store'
+import { commanderSessionOfVoiceKey } from '@shared/commander-call'
 import type { VoiceObservation } from './derive-activity'
 
 /**
@@ -16,16 +17,17 @@ import type { VoiceObservation } from './derive-activity'
  * - `voicePlayback.isPlaying` only means a passage is open. Speaking needs the
  *   open passage to be the one attributed to this entity *and* audio queued
  *   or sounding for it.
- * - Capture has no owner today (the hands-free Commander voice work will
- *   supply one), so listening is `unknown` for every entity unless an owner is
- *   passed in and matches.
+ * - Capture has no owner of its own, so listening is `unknown` for every
+ *   entity unless an owner is passed in and matches. The Commander call store
+ *   passes one for the microphone turn it opened (#84).
+ * - Commander speech is attributed by its `commander:<sessionId>` key.
  *
  * It owns no audio and no microphone, and adds no audio loop.
  */
 
 export interface VoiceTarget {
   kind: 'task' | 'captain' | 'commander'
-  /** Task id for task/Captain targets. */
+  /** Task id for task/Captain targets; the session id (optional) for the Commander. */
   id?: string
 }
 
@@ -56,7 +58,10 @@ export interface VoiceActivitySnapshot {
 function ownsPassage(passage: VoicePassageAttribution, target: VoiceTarget): boolean | null {
   // A passage without a task is unattributed: nobody can prove it is theirs.
   if (!passage.taskId) return null
-  if (target.kind === 'commander') return false
+  // Commander speech is keyed `commander:<sessionId>` (#84).
+  const commanderSession = commanderSessionOfVoiceKey(passage.taskId)
+  if (target.kind === 'commander') return commanderSession !== null && (!target.id || commanderSession === target.id)
+  if (commanderSession !== null) return false
   return passage.taskId === target.id
 }
 
