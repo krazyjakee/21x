@@ -19,9 +19,11 @@ import type {
   SessionStatus,
   SessionMessage,
   MessagePart,
-  McpServerConfig
+  McpServerConfig,
+  AdapterUsageReport
 } from './coding-agent-adapter'
 import { MessagePartType, SessionStatusType } from './coding-agent-adapter'
+import { CodexUsageAccumulator } from './usage-reports'
 import {
   asString,
   computeThreadItemKey,
@@ -104,6 +106,8 @@ interface AppServerSession extends CodexItemState, JsonRpcPeer {
   pendingApproval: PendingApproval | null
   lastError: string | null
   config: SessionConfig
+  /** Per-turn token usage from `thread/tokenUsage/updated` (#97). */
+  usage?: CodexUsageAccumulator
   codexUseApiKey: boolean
   codexAuthSummary: string
   /**
@@ -183,6 +187,8 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
   private codexExecutablePath: string | null = null
 
   onDataAvailable?: (sessionId: string) => void
+  /** Set by agent-manager: receives the token usage the backend reports (#97). */
+  onUsage?: (report: AdapterUsageReport) => void
 
   async initialize(): Promise<void> {
     const health = await this.checkHealth()
@@ -812,6 +818,17 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     this.sendRpcResponse(session, request.id, {})
   }
 
+  /** Reports the turn's token usage so far (#97). Never throws. */
+  private observeUsage(session: AppServerSession, params: Record<string, unknown>): void {
+    try {
+      session.usage ??= new CodexUsageAccumulator(session.config?.model || DEFAULT_CODEX_APP_SERVER_MODEL)
+      const body = session.usage.observe(params, session.activeTurnId)
+      if (body && this.onUsage) this.onUsage({ sessionId: session.threadId || session.sessionId, ...body })
+    } catch (err) {
+      console.warn('[CodexAppServerAdapter] Could not read turn usage:', err instanceof Error ? err.message : err)
+    }
+  }
+
   private handleNotification(session: AppServerSession, notification: JsonRpcNotification): void {
     const params = isObject(notification.params) ? notification.params : {}
 
@@ -826,7 +843,12 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
       session.pendingThreadIdle = false
     }
 
+    if (notification.method === 'thread/tokenUsage/updated') {
+      this.observeUsage(session, params)
+    }
+
     if (notification.method === 'turn/completed') {
+      session.usage?.turnCompleted()
       session.activeTurnId = null
       // A failed turn reports `turn.status === 'failed'` with a `TurnError`.
       // Codex normally sends a non-retryable `error` notification first, but

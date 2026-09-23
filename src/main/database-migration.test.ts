@@ -136,7 +136,7 @@ describe('DatabaseManager migrations on an existing install', () => {
     const after = openRaw()
     expect((after.pragma('table_info(merge_grant_uses)') as { name: string }[]).map((column) => column.name))
       .toContain('authorization_context')
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('30')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('31')
     after.close()
   })
 
@@ -182,7 +182,7 @@ describe('DatabaseManager migrations on an existing install', () => {
     const columns = (after.pragma('table_info(pr_review_attestations)') as { name: string }[]).map((column) => column.name)
     expect(tables).toContain('pr_review_handoffs')
     expect(columns).toContain('handoff_id')
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('30')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('31')
     after.close()
   })
 
@@ -202,7 +202,28 @@ describe('DatabaseManager migrations on an existing install', () => {
 
     const after = openRaw()
     expect(taskColumns(after)).toContain('mcp_scope_nonce')
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('30')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('31')
+    after.close()
+  })
+
+  it('creates the per-turn token usage table for a database from schema version 30 (#97)', () => {
+    const first = new DatabaseManager()
+    first.initialize()
+    first.close?.()
+
+    const raw = openRaw()
+    raw.exec('DROP TABLE session_usage')
+    raw.prepare("UPDATE settings SET value = ? WHERE key = '__schema_version'").run('30')
+    raw.close()
+
+    const second = new DatabaseManager()
+    second.initialize()
+    second.close?.()
+
+    const after = openRaw()
+    const columns = (after.prepare('PRAGMA table_info(session_usage)').all() as { name: string }[]).map((c) => c.name)
+    expect(columns).toEqual(expect.arrayContaining(['owner_kind', 'owner_id', 'turn_key', 'usage_source', 'context_tokens', 'context_window', 'estimated_prompt_tokens']))
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('31')
     after.close()
   })
 
@@ -244,7 +265,7 @@ describe('DatabaseManager migrations on an existing install', () => {
       'concurrency_audit', 'task_touches',
       'agent_start_queue', 'agent_start_queue_fairness'
     ]))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('30')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('31')
     after.close()
   })
 
@@ -291,7 +312,7 @@ describe('DatabaseManager migrations on an existing install', () => {
       'generation', 'lease_owner', 'lease_expires_at', 'recovery_cause',
       'recovery_action', 'recovery_result', 'queued_at', 'acknowledged_at'
     ]))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('30')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('31')
     after.close()
   })
 

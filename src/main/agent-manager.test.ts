@@ -10,6 +10,7 @@ import { buildMessageWithAttachmentContext, syncAttachmentsToWorkspace } from '.
 import { SessionStatus, TaskStatus } from '../shared/constants'
 import { MessagePartType, MessageRole, SessionStatusType } from './adapters/coding-agent-adapter'
 import { unregisterSecretSession } from './secret-broker'
+import { SessionUsageStore } from './sessions/usage-store'
 
 // Mock filesystem operations
 vi.mock('fs', async (importOriginal) => {
@@ -4188,5 +4189,50 @@ describe('AgentManager background subagent protection', () => {
 
       expect(resumeSpy).toHaveBeenCalledWith('real-id', expect.anything())
     })
+  })
+})
+
+describe('AgentManager token usage (#97)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('records what the adapter reports, and estimates a turn it reported nothing for', async () => {
+    const record = vi.spyOn(SessionUsageStore.prototype, 'record').mockImplementation((input) => input as never)
+    vi.spyOn(SessionUsageStore.prototype, 'latestReported').mockReturnValue(null)
+    vi.spyOn(SessionUsageStore.prototype, 'calibration').mockReturnValue(null)
+    const fake = new FakeAdapter({ sessionIds: ['s1'] })
+    installFakeAdapter(fake)
+    const mgr = new AgentManager(createMockDb({ coding_agent: 'claude-code', model: 'claude-opus-4-6' }))
+    const sessionId = await mgr.startSession('agent-1', 'task-1', '/tmp/ws', true)
+
+    // The adapter reports through the channel AgentManager installed on it.
+    expect(fake.onUsage).toBeTypeOf('function')
+    fake.onUsage!({ sessionId, turnKey: 'result-1', inputTokens: 12, outputTokens: 34, cacheReadTokens: 5_000, contextTokens: 5_012, contextWindow: 1_000_000 })
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({
+      ownerKind: 'task', ownerId: 'task-1', sessionId, turnKey: 'result-1', engine: 'adapter', backend: 'claude-code',
+      model: 'claude-opus-4-6', source: 'reported', contextTokens: 5_012, contextWindow: 1_000_000, windowSource: 'reported'
+    }))
+
+    // A turn that ends with no report is estimated from its text.
+    record.mockClear()
+    ;(mgr as any).usageTracker.beginTurn(sessionId, 'x'.repeat(350))
+    ;(mgr as any).usageTracker.addOutput(sessionId, [{ id: 'p1', role: 'assistant', content: 'y'.repeat(70) }])
+    vi.spyOn(mgr as any, 'replayMissedTranscriptPartsBeforeIdle').mockResolvedValue(0)
+    fake.setStatus(SessionStatusType.IDLE)
+    await (mgr as any).transitionToIdle(sessionId, (mgr as any).sessions.get(sessionId))
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({
+      ownerKind: 'task', ownerId: 'task-1', source: 'estimated', inputTokens: 100, outputTokens: 20, stopReason: 'idle'
+    }))
+
+    // A report for a session AgentManager does not know has no owner.
+    record.mockClear()
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    fake.onUsage!({ sessionId: 'unknown', turnKey: 'r', inputTokens: 1, outputTokens: 1 })
+    expect(record).not.toHaveBeenCalled()
   })
 })

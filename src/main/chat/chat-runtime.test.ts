@@ -81,7 +81,7 @@ describe('ChatRuntime', () => {
     const result = await handle.done
 
     expect(result.stopReason).toBe('end_turn')
-    expect(result.usage).toEqual({ inputTokens: 30, outputTokens: 12 })
+    expect(result.usage).toEqual({ inputTokens: 30, outputTokens: 12, cacheReadTokens: 0, cacheWriteTokens: 0, modelCalls: 2, reportedCalls: 2, lastPromptTokens: 20 })
     expect(weatherTool.handler).toHaveBeenCalledWith({ city: 'Paris' }, expect.objectContaining({ toolCallId: 'call_1' }))
     expect(events.map((e) => e.type)).toEqual([
       'text_delta', 'text_delta', 'tool_call_start', 'tool_call_result', 'text_delta', 'done'
@@ -309,5 +309,33 @@ describe('ChatRuntime', () => {
     expect(result.error).toMatch(/Duplicate chat tool name/)
     expect(provider.requests).toHaveLength(0)
     expect(events[0]).toMatchObject({ type: 'error' })
+  })
+
+  it('counts every model call but only sums the ones that reported usage', async () => {
+    const provider = scriptedProvider(async function* (request) {
+      const lastIsTool = request.messages[request.messages.length - 1].role === 'tool'
+      if (!lastIsTool) {
+        yield { type: 'tool_call', id: 'call_1', name: 'get_weather', input: { city: 'Paris' } }
+        // The Codex subscription reports zeros: that is no report at all.
+        yield { type: 'message_end', stopReason: 'tool_use', usage: { inputTokens: 0, outputTokens: 0 } }
+      } else {
+        yield { type: 'text_delta', text: 'Sunny.' }
+        yield { type: 'message_end', stopReason: 'end_turn', usage: { inputTokens: 40, outputTokens: 3, cacheReadTokens: 900, cacheWriteTokens: 60 } }
+      }
+    })
+    const result = await new ChatRuntime().startTurn({ provider, tools: [weatherTool], messages: [{ role: 'user', content: 'Weather?' }] }, () => {}).done
+    expect(result.usage).toEqual({
+      inputTokens: 40, outputTokens: 3, cacheReadTokens: 900, cacheWriteTokens: 60,
+      modelCalls: 2, reportedCalls: 1, lastPromptTokens: 1000
+    })
+  })
+
+  it('reports no usage when no call did', async () => {
+    const provider = scriptedProvider(async function* () {
+      yield { type: 'text_delta', text: 'Hi.' }
+      yield { type: 'message_end', stopReason: 'end_turn' }
+    })
+    const result = await new ChatRuntime().startTurn({ provider, messages: [{ role: 'user', content: 'Hi' }] }, () => {}).done
+    expect(result.usage).toEqual({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, modelCalls: 1, reportedCalls: 0 })
   })
 })

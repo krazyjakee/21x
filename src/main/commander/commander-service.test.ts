@@ -11,6 +11,7 @@ import { createCommanderSkillTools, MUTATING_COMMANDER_SKILL_TOOLS } from './ski
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_TITLE_PROMPT } from './prompts'
 import { createCommanderMergeGrantTools } from './merge-grant-tools'
 import { CaptainDeliveryService } from './captain-delivery'
+import { SessionUsageStore } from '../sessions/usage-store'
 
 /** A model answer: text, a failure, or text plus tool calls (the turn then continues with their results). */
 type ModelAnswer = string | Error | { text?: string; toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> }
@@ -362,6 +363,63 @@ describe('CommanderService turns', () => {
     expect(events.some((e) => e.type === 'session_updated' && e.session.unread_count === 1)).toBe(true)
     store.markRead(session.id)
     expect(store.getSession(session.id)?.unread_count).toBe(0)
+  })
+})
+
+describe('CommanderService token usage (#97)', () => {
+  it('records every turn, marking estimates when the provider reports nothing', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    const usage = new SessionUsageStore(db)
+    const provider = fakeProvider({ chat: () => 'All quiet.', title: () => 'Status' })
+    const service = new CommanderService({ store, createProvider: () => provider, emit: (e) => events.push(e), usage })
+    const session = store.createSession()
+
+    const { turnId, done } = service.sendUserMessage(session.id, 'Anything running?')
+    await done
+
+    const [row] = usage.list('commander', session.id)
+    expect(row).toMatchObject({
+      turnKey: turnId, engine: 'chat', backend: 'fake', model: 'fake-1', source: 'estimated',
+      contextSource: 'estimated', windowSource: 'default', modelCalls: 1, stopReason: 'end_turn'
+    })
+    expect(row.contextTokens).toBeGreaterThan(0)
+    expect(row.outputTokens).toBeGreaterThan(0)
+    // The one-shot title call is not a turn.
+    expect(usage.list('commander', session.id)).toHaveLength(1)
+    vi.restoreAllMocks()
+  })
+
+  it('records reported usage and never lets a recording failure touch the turn', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const reporting: ChatProvider = {
+      id: 'anthropic',
+      model: 'claude-sonnet-4-6',
+      async *stream() {
+        yield { type: 'text_delta', text: 'Done.' }
+        yield { type: 'message_end', stopReason: 'end_turn', usage: { inputTokens: 100, outputTokens: 3, cacheReadTokens: 2_000, cacheWriteTokens: 50 } }
+      }
+    }
+    const usage = new SessionUsageStore(db)
+    const service = new CommanderService({ store, createProvider: () => reporting, emit: (e) => events.push(e), usage })
+    const session = store.createSession()
+    await service.sendUserMessage(session.id, 'Go').done
+    expect(usage.list('commander', session.id)[0]).toMatchObject({
+      source: 'reported', inputTokens: 100, outputTokens: 3, cacheReadTokens: 2_000, cacheWriteTokens: 50,
+      contextTokens: 2_150, contextSource: 'reported', contextWindow: 1_000_000, windowSource: 'known'
+    })
+
+    const broken = new CommanderService({
+      store,
+      createProvider: () => reporting,
+      emit: (e) => events.push(e),
+      usage: { record: () => { throw new Error('disk full') }, calibration: () => null }
+    })
+    const other = store.createSession()
+    await broken.sendUserMessage(other.id, 'Go').done
+    expect(store.listMessages(other.id).map((m) => m.role)).toEqual(['user', 'assistant'])
+    expect(warn).toHaveBeenCalledWith('[Commander] could not record turn usage:', 'disk full')
+    vi.restoreAllMocks()
   })
 })
 

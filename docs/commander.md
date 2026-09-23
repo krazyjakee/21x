@@ -66,6 +66,10 @@ does the following:
    object carrying `project_id` / `correlation_id` (an `ask_captain`
    result) is tagged with them, so #62 can match the report to the
    delegation. Then it emits `messages_appended`, then `done`.
+   Before that it records the turn's token usage in `session_usage` and the
+   log, reported when every model call reported it and estimated otherwise
+   ([Token accounting](token-accounting.md)). A failure to record is logged
+   and never affects the turn.
 5. After the turn, it does two things:
    - Names an untitled session with a one-shot model call. If that fails, the
      title falls back to the first six words of the first user message. A

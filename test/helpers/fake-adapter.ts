@@ -1,6 +1,7 @@
 import { vi, type Mock } from 'vitest'
 import {
   SessionStatusType,
+  type AdapterUsageReport,
   type CodingAgentAdapter,
   type MessagePart,
   type SessionConfig,
@@ -40,6 +41,9 @@ export class FakeAdapter implements CodingAgentAdapter {
 
   /** Set by AgentManager when the session is registered for polling. */
   onDataAvailable?: (sessionId: string) => void
+
+  /** Set by AgentManager when the adapter is created: receives reported token usage (#97). */
+  onUsage?: (report: AdapterUsageReport) => void
 
   readonly initialize = vi.fn(async (): Promise<void> => undefined)
 

@@ -22,7 +22,7 @@ import type { GitHubManager } from './github-manager'
 import type { GitLabManager } from './gitlab-manager'
 import type { ForgejoManager } from './forgejo-manager'
 import type { AcpAdapter } from './adapters/acp-adapter'
-import type { CodingAgentAdapter, SessionConfig, SessionMessage, SessionStatus as AdapterSessionStatus } from './adapters/coding-agent-adapter'
+import type { AdapterUsageReport, CodingAgentAdapter, SessionConfig, SessionMessage, SessionStatus as AdapterSessionStatus } from './adapters/coding-agent-adapter'
 import { SessionStatusType, MessagePartType } from './adapters/coding-agent-adapter'
 import { randomUUID } from 'crypto'
 import { registerSecretSession, unregisterSecretSession, getSecretBrokerPort } from './secret-broker'
@@ -47,6 +47,8 @@ import { BranchDiffCache, ResourceMonitor, agentCap, autoLowerForPressure, findF
 import { effectiveLevel, recommendLevel, type ProjectConcurrencyState, type ResourcePressure } from '../shared/concurrency'
 import { collectMissedParts, debugTranscript, emitArtifactUpdatesFromParts, textTranscript, type DebugTranscriptMessage, notifyStatusTransition, transcriptPartsFromEvent, transcriptPartsFromMessages, type OutputMessage } from './agent-manager/transcript-events'
 import { CaptainRuntimeStore } from './sessions/runtime-store'
+import { SessionUsageStore } from './sessions/usage-store'
+import { AdapterUsageTracker, type UsageOwner } from './sessions/adapter-usage'
 import { DeliveryStore, type DeliveryRecord } from './sessions/delivery-store'
 import { DurableStartQueueStore, type DurableQueuedStartInfo } from './sessions/start-queue-store'
 import type { CaptainRuntimeState } from '../shared/captain-runtime'
@@ -207,6 +209,8 @@ export class AgentManager extends EventEmitter {
   private oauthManager: import('./oauth/oauth-manager').OAuthManager | null = null
   private externalListeners: Array<(channel: string, data: unknown) => void> = []
   private readonly captainRuntimes: CaptainRuntimeStore
+  /** Per-turn token usage of Captains and task agents (#97); instrumentation only. */
+  private readonly usageTracker: AdapterUsageTracker
   private readonly deliveries: DeliveryStore
   private readonly deliveryFlights = new Map<string, Promise<{ newSessionId?: string }>>()
   /** Durable sends to one task reserve and activate authorization in outbox order. */
@@ -326,6 +330,7 @@ export class AgentManager extends EventEmitter {
     super()
     this.db = db
     this.captainRuntimes = new CaptainRuntimeStore(db)
+    this.usageTracker = new AdapterUsageTracker(new SessionUsageStore(db))
     this.deliveries = new DeliveryStore(db)
     this.startQueue = new DurableStartQueueStore(db)
     this.startIdleSessionReaper()
@@ -923,8 +928,46 @@ export class AgentManager extends EventEmitter {
     const cached = this.adapters.get(backendType)
     if (cached) return cached
     const adapter = createAdapter(backendType, this.db)
-    if (adapter) this.adapters.set(backendType, adapter)
+    if (adapter) {
+      adapter.onUsage = (report) => this.recordAdapterUsage(report)
+      this.adapters.set(backendType, adapter)
+    }
     return adapter
+  }
+
+  /** Who a session's usage belongs to (#97). */
+  private usageOwnerFor(session: AgentSession): UsageOwner {
+    const task = this.db.getTask(session.taskId)
+    const agent = this.db.getAgent(session.agentId)
+    return {
+      ownerKind: task && isCoordinatorTask(task) ? 'captain' : 'task',
+      ownerId: session.taskId,
+      backend: agent ? getAgentProvider(agent) : 'unknown',
+      model: agent?.config?.model ?? null
+    }
+  }
+
+  /** Usage an adapter reported (#97). A report for a session no longer tracked has no owner and is dropped. */
+  private recordAdapterUsage(report: AdapterUsageReport): void {
+    try {
+      const resolved = this.resolveSession(report.sessionId)
+      if (!resolved) {
+        console.log(`[SessionUsage] dropped a usage report for untracked session ${report.sessionId} (turn ${report.turnKey})`)
+        return
+      }
+      this.usageTracker.report(this.usageOwnerFor(resolved.session), report, resolved.sessionId)
+    } catch (err) {
+      console.warn('[SessionUsage] could not attribute adapter usage:', err instanceof Error ? err.message : err)
+    }
+  }
+
+  /** Ends the usage turn of a session, estimating it when the adapter reported nothing (#97). */
+  private endUsageTurn(sessionId: string, session: AgentSession, stopReason: string): void {
+    try {
+      this.usageTracker.endTurn(sessionId, this.usageOwnerFor(session), stopReason)
+    } catch (err) {
+      console.warn('[SessionUsage] could not end the usage turn:', err instanceof Error ? err.message : err)
+    }
   }
 
   private buildMcpServersForAdapter(agentId: string, opts?: McpServerOptions): ReturnType<typeof buildMcpServers> {
@@ -1410,7 +1453,10 @@ export class AgentManager extends EventEmitter {
       const startingSession = this.sessions.get(adapterSessionId)!
       const pendingLossId = startingSession.pendingLossId
       try {
-        const send = () => adapter.sendPrompt(adapterSessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
+        const send = () => {
+          this.usageTracker.beginTurn(adapterSessionId, promptText)
+          return adapter.sendPrompt(adapterSessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
+        }
         if (this.db.db && typeof this.db.db.prepare === 'function') {
           await sendPreservingAuthorization(this.db, taskId, authorizationSnapshot, send)
         } else {
@@ -1739,6 +1785,7 @@ export class AgentManager extends EventEmitter {
       const batchMessages = this.collectOutputBatch(entry, sessionId, newParts)
       const currentSession = this.sessions.get(sessionId)
       if (currentSession) this.captureSessionProgress(currentSession, batchMessages)
+      this.usageTracker.addOutput(sessionId, batchMessages)
       if (batchMessages.length > 0) {
         this.sendToRenderer('agent:output-batch', {
           sessionId,
@@ -1824,6 +1871,7 @@ export class AgentManager extends EventEmitter {
       }
     }
     this.sessionIdRedirects.set(sessionId, realSessionId)
+    this.usageTracker.rekey(sessionId, realSessionId)
 
     this.pollingEntries.delete(sessionId)
     entry.sessionId = realSessionId
@@ -2006,6 +2054,7 @@ export class AgentManager extends EventEmitter {
     if (session) {
       session.status = 'error'
       session.pollingStarted = false
+      this.endUsageTurn(sessionId, session, 'error')
       this.emitStatus(sessionId, config, 'error')
     }
     this.stopAdapterPolling(sessionId)
@@ -3637,6 +3686,7 @@ export class AgentManager extends EventEmitter {
     // Triage done: back to NotStarted, now with agent_id assigned.
     if (session.isTriageSession) {
       session.status = 'idle'
+      this.endUsageTurn(sessionId, session, 'idle')
       console.log(`[AgentManager] Triage session completed for task ${session.taskId}, reverting to NotStarted`)
       this.updateTaskFromLocalAgent(session.taskId, { status: TaskStatus.NotStarted, session_id: null }, 'system')
       await yieldEventLoop()
@@ -3684,6 +3734,7 @@ export class AgentManager extends EventEmitter {
     session.status = 'idle'
     session.lastActivityAt = Date.now()
     console.log(`[AgentManager] Session ${sessionId} → idle`)
+    this.endUsageTurn(sessionId, session, 'idle')
 
     // Pseudo-tasks (heartbeat-*) have no DB row, and a coordinator row has no
     // lifecycle: neither goes to review, grows a heartbeat or wakes a parent.
@@ -4837,6 +4888,7 @@ export class AgentManager extends EventEmitter {
       const send = (): Promise<void> => {
         this.assertSessionGeneration(sessionId, session)
         if (dispatch) activateProjectMessageDispatch(dispatch)
+        this.usageTracker.beginTurn(sessionId, promptText)
         return adapter.sendPrompt(sessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
       }
       if (authorizationDispatch !== undefined) {

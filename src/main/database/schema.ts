@@ -11,6 +11,7 @@ import { createConcurrencyTables, migrateConcurrencyControl } from './concurrenc
 import { createAuthorizationTables } from './authorization-schema'
 import { createDurableStartQueueTables, migrateDurableStartQueue } from './start-queue-migration'
 import { createIssueWriteTables, migrateIssueWrites } from './issue-writes-migration'
+import { createSessionUsageTables, migrateSessionUsage } from './session-usage-migration'
 
 /**
  * Bump this whenever new migrations are added so returning users skip
@@ -65,8 +66,11 @@ import { createIssueWriteTables, migrateIssueWrites } from './issue-writes-migra
  *          credentials when a task session is replaced or resumed.
  * 29 → 30: durable last-accepted human capability supersession for task
  *          bindings, including backfill from an existing accepted turn node.
+ * 30 → 31: per-turn token usage for the Commander, Captains and task agents
+ *          (managed sessions B1, #97): session_usage (migrateSessionUsage in
+ *          session-usage-migration.ts). New table only.
  */
-const SCHEMA_VERSION = 30
+const SCHEMA_VERSION = 31
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -566,6 +570,9 @@ export function createTables(db: Database.Database): void {
 
   // Delegated GitHub issue writes: the audit ledger and idempotency claims.
   createIssueWriteTables(db)
+
+  // Managed sessions (#97): per-turn token usage, reported or estimated.
+  createSessionUsageTables(db)
 
   // Report routing (#62): a Captain report quotes the correlation id of
   // the `ask_captain` tool row it answers; this serves that lookup.
@@ -1102,6 +1109,9 @@ export function runMigrations(db: Database.Database): void {
 
   // Migration v28: immutable task/agent provenance for review handoffs.
   migratePullRequestAttestationSecurity(db)
+
+  // Migration v31: per-turn token usage (#97). New table only.
+  migrateSessionUsage(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)

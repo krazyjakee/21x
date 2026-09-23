@@ -23,6 +23,12 @@ The handle returned has `turnId`, `cancel()` and `done` (a promise that
 resolves with the final history and usage; it never rejects). Events are
 never emitted synchronously from `startTurn`.
 
+Usage sums every model call that reported it (input, output, cache reads and
+writes), counts the calls (`modelCalls`, `reportedCalls`) and keeps the prompt
+size of the last reporting call (`lastPromptTokens`). A call reporting only
+zeros counts as unreported. The Commander stores each turn's usage; see
+[Token accounting](token-accounting.md).
+
 Tool-call limit: default 8 per turn, hard cap 32. Once reached, extra calls
 get an error result and the model is asked once more with `toolChoice: 'none'`
 so it answers in text. A `max_tokens` stop with a pending tool call never runs

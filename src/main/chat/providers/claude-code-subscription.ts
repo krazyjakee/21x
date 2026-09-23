@@ -30,6 +30,8 @@ interface StructuredReply {
 interface SdkUsage {
   input_tokens?: number
   output_tokens?: number
+  cache_read_input_tokens?: number | null
+  cache_creation_input_tokens?: number | null
 }
 
 interface SdkResult {
@@ -111,7 +113,9 @@ function parseReply(result: SdkResult): StructuredReply {
 function usageOf(result: SdkResult): ChatUsage {
   return {
     inputTokens: Number(result.usage?.input_tokens) || 0,
-    outputTokens: Number(result.usage?.output_tokens) || 0
+    outputTokens: Number(result.usage?.output_tokens) || 0,
+    cacheReadTokens: Number(result.usage?.cache_read_input_tokens) || 0,
+    cacheWriteTokens: Number(result.usage?.cache_creation_input_tokens) || 0
   }
 }
 

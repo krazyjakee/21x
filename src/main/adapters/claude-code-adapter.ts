@@ -16,6 +16,7 @@ import type {
   SessionStatus,
   SessionMessage,
   MessagePart,
+  AdapterUsageReport
 } from './coding-agent-adapter'
 import { SessionStatusType, MessagePartType, MessageRole } from './coding-agent-adapter'
 import { findClaudeExecutable } from './claude-code-executable'
@@ -24,6 +25,7 @@ import { buildToolTitle, ClaudeSystemSubtype, convertSDKMessageToParts, resultEr
 import { claudeCodePermissionMode } from './permission-mode'
 import { claudeServerPrefix, claudeToolIds, resolveDisallowedToolNames } from '../mcp-tool-limits'
 import { buildShellExports } from './shared/shell-exports'
+import { ClaudeUsageAccumulator } from './usage-reports'
 
 type ClaudeSDK = typeof import('@anthropic-ai/claude-agent-sdk')
 type Query = import('@anthropic-ai/claude-agent-sdk').Query
@@ -122,6 +124,8 @@ interface ClaudeSession {
   releasePrompt: (() => void) | null
   /** Tool-permission requests awaiting the user, oldest first ('ask' mode only). */
   pendingApprovals: PendingClaudeApproval[]
+  /** Per-turn token usage read from the stream (#97); reset with each new query() process. */
+  usage?: ClaudeUsageAccumulator
 }
 
 type HookMap = Partial<Record<string, HookCallbackMatcher[]>>
@@ -169,6 +173,8 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
    * latency of the fixed-interval polling heartbeat.
    */
   onDataAvailable?: (sessionId: string) => void
+  /** Set by agent-manager: receives the token usage the backend reports (#97). */
+  onUsage?: (report: AdapterUsageReport) => void
 
   constructor() {
     this.sdkLoading = this.loadSDK()
@@ -631,6 +637,8 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     console.log('[ClaudeCodeAdapter] Query created, starting stream consumption')
 
     session.queryIterator = query
+    // Usage totals are per query() process: a new process starts them again.
+    session.usage?.reset()
     session.status = 'busy'
     session.lastError = null // Clear any previous error (e.g., rate limit) for recovery
     if (!isFirstPrompt) {
@@ -994,6 +1002,17 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
   /**
    * Consumes the query stream in the background and buffers messages
    */
+  /** Reports a turn's token usage when its `result` arrives (#97). Never throws. */
+  private observeUsage(sessionId: string, session: ClaudeSession, message: unknown): void {
+    try {
+      session.usage ??= new ClaudeUsageAccumulator()
+      const body = session.usage.observe(message)
+      if (body && this.onUsage) this.onUsage({ sessionId, ...body })
+    } catch (err) {
+      console.warn('[ClaudeCodeAdapter] Could not read turn usage:', err instanceof Error ? err.message : err)
+    }
+  }
+
   private async consumeStream(sessionId: string, session: ClaudeSession): Promise<void> {
     if (!session.queryIterator) return
 
@@ -1085,6 +1104,8 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
           session.status = 'error'
           session.lastError = text || 'Claude Code API error'
         }
+
+        this.observeUsage(sessionId, session, message)
 
         session.messageBuffer.push(message)
 

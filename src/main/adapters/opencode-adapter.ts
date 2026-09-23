@@ -8,9 +8,11 @@ import type {
   SessionConfig,
   SessionStatus,
   SessionMessage,
-  MessagePart
+  MessagePart,
+  AdapterUsageReport
 } from './coding-agent-adapter'
 import { SessionStatusType } from './coding-agent-adapter'
+import { opencodeMessageUsage } from './usage-reports'
 import { attachAndVerifyMcpServers, disconnectMcpServers, type McpAttachResult } from './opencode-mcp'
 import {
   removeRuntimePluginFiles,
@@ -74,6 +76,8 @@ function permissionReply(approved: boolean, optionId?: string): 'once' | 'always
 export class OpencodeAdapter implements CodingAgentAdapter {
   /** Callback set by agent-manager to trigger an immediate poll cycle */
   onDataAvailable?: (sessionId: string) => void
+  /** Set by agent-manager: receives the token usage the backend reports (#97). */
+  onUsage?: (report: AdapterUsageReport) => void
   private sdkLoading: Promise<void> | null = null
   private serverInstance: unknown = null
   private serverUrl: string | null = null
@@ -83,6 +87,12 @@ export class OpencodeAdapter implements CodingAgentAdapter {
   /** A separate V2 client with a reasonable timeout for quick operations (config, providers, health) */
   private quickClient: V2OpencodeClient | null = null
   private clients: Map<string, OpencodeClient> = new Map() // sessionId -> ocClient (default timeout, for polling/status/create)
+  /**
+   * Usage reporting per session (#97): assistant messages finished after the
+   * session was registered here, and the ones already reported. A resumed
+   * session's older messages are history, not turns of this run.
+   */
+  private usageSeen: Map<string, { since: number; reported: Set<string> }> = new Map()
   /** Separate clients with no timeout, used ONLY for session.prompt() which runs indefinitely */
   private promptClients: Map<string, OpencodeClient> = new Map()
   private v2Client: V2OpencodeClient | null = null
@@ -605,6 +615,7 @@ export class OpencodeAdapter implements CodingAgentAdapter {
   ): void {
     setTillDoneSession(this.tillDoneConfigPath, sessionId, config.tillDone !== false)
     this.clients.set(sessionId, connection.ocClient)
+    this.usageSeen.set(sessionId, { since: Date.now(), reported: new Set() })
     this.promptClients.set(sessionId, connection.promptClient)
     this.sessionPermissionModes.set(sessionId, config.permissionMode || 'ask')
     if (config.workspaceDir) this.sessionWorkspaceDirs.set(sessionId, config.workspaceDir)
@@ -1025,7 +1036,33 @@ export class OpencodeAdapter implements CodingAgentAdapter {
       return []
     }
     const messages = await this.fetchMessages(ocClient, sessionId, config.workspaceDir)
+    this.reportUsage(sessionId, messages)
     return convertPolledParts(messages, seenMessageIds, seenPartIds, partContentLengths)
+  }
+
+  /** Reports each assistant message's token usage once it has finished (#97). Never throws. */
+  private reportUsage(sessionId: string, messages: OpencodeMessage[]): void {
+    try {
+      let seen = this.usageSeen.get(sessionId)
+      if (!seen) {
+        seen = { since: Date.now(), reported: new Set() }
+        this.usageSeen.set(sessionId, seen)
+      }
+      for (const message of messages) {
+        const info = message.info as { id?: unknown; time?: { completed?: unknown } } | undefined
+        const id = typeof info?.id === 'string' ? info.id : null
+        if (!id || seen.reported.has(id)) continue
+        const completed = Number(info?.time?.completed)
+        if (!Number.isFinite(completed) || completed <= 0) continue
+        const body = opencodeMessageUsage(message)
+        if (!body) continue
+        seen.reported.add(id)
+        if (completed < seen.since) continue
+        this.onUsage?.({ sessionId, ...body })
+      }
+    } catch (err) {
+      console.warn('[OpencodeAdapter] Could not read turn usage:', err instanceof Error ? err.message : err)
+    }
   }
 
   async getRunningTools(sessionId: string, config: SessionConfig): Promise<Array<{
@@ -1080,6 +1117,7 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     // else would ever stop them.
     await this.disconnectSessionMcpServers(sessionId)
     this.clients.delete(sessionId)
+    this.usageSeen.delete(sessionId)
     this.promptClients.delete(sessionId)
     this.pendingPermissions.delete(sessionId)
     this.sessionPermissionModes.delete(sessionId)

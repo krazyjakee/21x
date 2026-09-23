@@ -29,6 +29,15 @@ Cross-project correlations and delivery-key ownership changes are refused.
 Provider tool-call IDs are scoped to a Commander turn, independently of the
 typed-message identity used by merge grants.
 
+## Version 31 — per-turn token usage
+
+Version 31 adds `session_usage` (`session-usage-migration.ts`, #97): one row
+per turn of the Commander, a Captain or a task agent, with its token counts,
+context size and window, each marked `reported` or `estimated`. It is a new
+table, created idempotently by both `createTables()` and `runMigrations()`, so
+fresh and upgraded databases match. No existing row changes. See
+[Token accounting](token-accounting.md).
+
 ## How it works
 
 1. `createTables()` defines the canonical schema for **new** databases (`CREATE TABLE IF NOT EXISTS`).

@@ -108,7 +108,7 @@ describe('AnthropicChatProvider', () => {
       { type: 'text_delta', text: 'Let me ' },
       { type: 'text_delta', text: 'check.' },
       { type: 'tool_call', id: 'toolu_1', name: 'get_weather', input: { city: 'Paris' } },
-      { type: 'message_end', stopReason: 'tool_use', usage: { inputTokens: 10, outputTokens: 20 } }
+      { type: 'message_end', stopReason: 'tool_use', usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 } }
     ])
     expect(urls[0]).toContain('/v1/messages')
     expect(apiKeys[0]).toBe('sk-test')
@@ -134,7 +134,7 @@ describe('AnthropicChatProvider', () => {
 
     expect(second).toEqual([
       { type: 'text_delta', text: 'Sunny in Paris.' },
-      { type: 'message_end', stopReason: 'end_turn', usage: { inputTokens: 30, outputTokens: 6 } }
+      { type: 'message_end', stopReason: 'end_turn', usage: { inputTokens: 30, outputTokens: 6, cacheReadTokens: 0, cacheWriteTokens: 0 } }
     ])
     // History is rebuilt as tool_use / tool_result blocks the API understands.
     expect(bodies[1].messages).toEqual([

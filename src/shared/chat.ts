@@ -35,8 +35,26 @@ export type ChatStopReason =
   | 'error'
 
 export interface ChatUsage {
+  /** Prompt tokens billed at the normal rate (for Anthropic, excluding cache reads and writes). */
   inputTokens: number
   outputTokens: number
+  /** Prompt tokens served from the provider's prompt cache (Anthropic `cache_read_input_tokens`). */
+  cacheReadTokens?: number
+  /** Prompt tokens written to the provider's prompt cache (Anthropic `cache_creation_input_tokens`). */
+  cacheWriteTokens?: number
+  /**
+   * Turn totals only (set by ChatRuntime): model calls made, and how many of
+   * them reported usage. A provider that reports nothing (or zeros) leaves
+   * `reportedCalls` at 0, and the figures above are then meaningless.
+   */
+  modelCalls?: number
+  reportedCalls?: number
+  /**
+   * Turn totals only: the full prompt size of the last model call that
+   * reported usage (input + cache reads + cache writes), i.e. what the model
+   * had in context. Absent when no call reported.
+   */
+  lastPromptTokens?: number
 }
 
 /** Events the runtime emits while a turn runs, in order. */

@@ -75,6 +75,27 @@ function closeUnansweredToolCalls(messages: ChatMessage[]): void {
   }
 }
 
+/**
+ * Adds one model call's usage to the turn's totals. A call whose figures are
+ * all zero reported nothing (the Codex subscription always sends zeros), so it
+ * only counts as a call; the turn's figures stay honest about what is known.
+ */
+function addCallUsage(total: ChatUsage, call: ChatUsage | undefined): void {
+  total.modelCalls = (total.modelCalls ?? 0) + 1
+  if (!call) return
+  const input = call.inputTokens || 0
+  const output = call.outputTokens || 0
+  const cacheRead = call.cacheReadTokens || 0
+  const cacheWrite = call.cacheWriteTokens || 0
+  if (input + output + cacheRead + cacheWrite <= 0) return
+  total.inputTokens += input
+  total.outputTokens += output
+  total.cacheReadTokens = (total.cacheReadTokens ?? 0) + cacheRead
+  total.cacheWriteTokens = (total.cacheWriteTokens ?? 0) + cacheWrite
+  total.reportedCalls = (total.reportedCalls ?? 0) + 1
+  total.lastPromptTokens = input + cacheRead + cacheWrite
+}
+
 function clampToolLimit(requested: number | undefined): number {
   const value = Number.isFinite(requested) ? Math.floor(requested as number) : DEFAULT_MAX_TOOL_CALLS_PER_TURN
   return Math.max(0, Math.min(MAX_TOOL_CALLS_PER_TURN_CAP, value))
@@ -132,7 +153,7 @@ export class ChatRuntime {
     const errorMessage = (error: unknown): string => hasImages
       ? 'The chat request with images failed. Check the selected model and try again.'
       : error instanceof Error ? error.message : String(error)
-    const usage: ChatUsage = { inputTokens: 0, outputTokens: 0 }
+    const usage: ChatUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, modelCalls: 0, reportedCalls: 0 }
     const emit = (event: ChatRuntimeEvent): void => {
       try {
         listener(event)
@@ -188,10 +209,7 @@ export class ChatRuntime {
             currentCalls.push({ id: event.id, name: event.name, input: event.input })
           } else {
             stopReason = event.stopReason
-            if (event.usage) {
-              usage.inputTokens += event.usage.inputTokens
-              usage.outputTokens += event.usage.outputTokens
-            }
+            addCallUsage(usage, event.usage)
           }
         }
 

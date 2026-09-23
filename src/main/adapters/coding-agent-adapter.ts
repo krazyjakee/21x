@@ -287,4 +287,39 @@ export interface CodingAgentAdapter {
    * continuous polling loop.
    */
   onDataAvailable?: (sessionId: string) => void
+
+  /**
+   * Optional callback for the token usage a backend reports (#97). Set by
+   * agent-manager, like `onDataAvailable`. Adapters call it with the figures
+   * exactly as the backend reported them, mapped to AdapterUsageReport; they
+   * never estimate. Reporting the same `turnKey` again replaces the earlier
+   * figure, so an adapter may report a turn as its usage grows.
+   */
+  onUsage?: (report: AdapterUsageReport) => void
+}
+
+/**
+ * One turn's token usage as a backend reported it (#97). Token fields follow
+ * the Anthropic convention: `inputTokens` excludes prompt-cache reads and
+ * writes, which are counted in their own fields.
+ */
+export interface AdapterUsageReport {
+  /** The adapter session id the usage belongs to (the one AgentManager polls). */
+  sessionId: string
+  /** Identifies the turn within the session: a Claude Code result, a Codex turn id, an opencode assistant message id. */
+  turnKey: string
+  model?: string | null
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
+  /** Reasoning tokens, already included in `outputTokens`. */
+  reasoningTokens?: number
+  /** Prompt size of the turn's last model call, including cached tokens: what the model had in context. */
+  contextTokens?: number | null
+  /** The model's context window, when the backend says. */
+  contextWindow?: number | null
+  costUsd?: number | null
+  modelCalls?: number | null
+  stopReason?: string | null
 }

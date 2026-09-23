@@ -11,6 +11,8 @@ import { COMMANDER_SUMMARY_PROMPT, COMMANDER_SYSTEM_PROMPT, COMMANDER_TITLE_PROM
 import { MUTATING_COMMANDER_TOOLS } from './project-tools'
 import { guardReportAsks, MAX_REPORT_ASKS_WITHOUT_USER_TURN } from './report-tools'
 import { MUTATING_COMMANDER_SKILL_TOOLS } from './skill-tools'
+import { chatTurnUsage } from '../sessions/chat-usage'
+import type { SessionUsageInput, UsageOwnerKind } from '../sessions/usage-store'
 
 /**
  * Runs Commander chat turns over persisted sessions (docs/commander.md).
@@ -67,6 +69,17 @@ export interface CommanderServiceOptions {
   oneShotTimeoutMs?: number
   /** `ask_captain` calls report-triggered turns may make per session before a user turn resets the count (#62). */
   maxReportAsks?: number
+  /**
+   * Where each turn's token usage is recorded (#97). Instrumentation only: a
+   * failure to record is logged and never affects the turn.
+   */
+  usage?: CommanderUsageSink
+}
+
+/** The part of SessionUsageStore the Commander needs. */
+export interface CommanderUsageSink {
+  record(input: SessionUsageInput): unknown
+  calibration(ownerKind: UsageOwnerKind, ownerId: string): number | null
 }
 
 /** A fold that could not write its summary; the turns stay verbatim until one succeeds. */
@@ -324,7 +337,10 @@ export class CommanderService {
     this.emit({ type: 'turn_started', sessionId, turnId })
 
     const done = handle.done
-      .then((result) => this.finishTurn(sessionId, context.messages.length, result))
+      .then((result) => {
+        this.recordUsage(sessionId, provider, system, tools, context.messages, result)
+        this.finishTurn(sessionId, context.messages.length, result)
+      })
       .catch((err) => {
         console.error('[Commander] turn bookkeeping failed:', err)
         // The renderer must still leave its streaming state.
@@ -341,6 +357,27 @@ export class CommanderService {
       .catch((err) => console.error('[Commander] report relay failed:', err))
 
     return { turnId, done }
+  }
+
+  /** Stores and logs the turn's token usage (#97); never throws. */
+  private recordUsage(sessionId: string, provider: ChatProvider, system: string, tools: ChatToolDefinition[], inputMessages: ChatMessage[], result: ChatTurnResult): void {
+    const sink = this.options.usage
+    if (!sink) return
+    try {
+      sink.record(chatTurnUsage({
+        ownerKind: 'commander',
+        ownerId: sessionId,
+        sessionId,
+        turnId: result.turnId,
+        provider: { id: provider.id, model: provider.model },
+        prompt: { system, tools: tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) },
+        inputMessages,
+        result,
+        calibration: sink.calibration('commander', sessionId)
+      }))
+    } catch (err) {
+      console.warn('[Commander] could not record turn usage:', err instanceof Error ? err.message : err)
+    }
   }
 
   private finishTurn(sessionId: string, inputCount: number, result: ChatTurnResult): void {

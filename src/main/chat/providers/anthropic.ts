@@ -147,7 +147,12 @@ export class AnthropicChatProvider implements ChatProvider {
       yield {
         type: 'message_end',
         stopReason: toStopReason(message.stop_reason),
-        usage: { inputTokens: message.usage.input_tokens, outputTokens: message.usage.output_tokens }
+        usage: {
+          inputTokens: message.usage.input_tokens,
+          outputTokens: message.usage.output_tokens,
+          cacheReadTokens: message.usage.cache_read_input_tokens ?? 0,
+          cacheWriteTokens: message.usage.cache_creation_input_tokens ?? 0
+        }
       }
     } catch (err) {
       if (signal.aborted || err instanceof Anthropic.APIUserAbortError) throw new ChatAbortError()
