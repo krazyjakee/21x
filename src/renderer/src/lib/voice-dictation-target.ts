@@ -62,6 +62,8 @@ export type DictationTarget = HTMLTextAreaElement | HTMLInputElement
 export interface ComposerRegistration {
   /** The live text field. Read at the moment a sentence arrives. */
   getField: () => DictationTarget | null
+  /** Private routing buffers must not take keyboard focus from the user's draft. */
+  focusOnInsert?: boolean
   /** Sends the composer. Present only where a conversation can send. */
   submit?: () => void
   /** Sends supplied text through the same live handler as the composer. */
@@ -163,14 +165,14 @@ export function clearActiveComposer(): void {
   looseSubmit = null
 }
 
-function current(): { field: DictationTarget | null; submit: (() => void) | null } {
+function current(): { field: DictationTarget | null; submit: (() => void) | null; focusOnInsert: boolean } {
   if (activeKey) {
     const registration = composers.get(activeKey)
     const field = registration?.getField() ?? null
-    return { field: field?.isConnected ? field : null, submit: registration?.submit ?? null }
+    return { field: field?.isConnected ? field : null, submit: registration?.submit ?? null, focusOnInsert: registration?.focusOnInsert !== false }
   }
   const field = looseTarget?.isConnected ? looseTarget : null
-  return { field, submit: looseSubmit }
+  return { field, submit: looseSubmit, focusOnInsert: true }
 }
 
 /**
@@ -199,7 +201,7 @@ export function findComposerKey(button: HTMLElement | null): string | null {
  * Returns false when there is nothing to write to.
  */
 export function insertDictation(text: string): boolean {
-  const { field } = current()
+  const { field, focusOnInsert } = current()
   const words = text.trim()
   if (!field || !words) return false
 
@@ -213,7 +215,7 @@ export function insertDictation(text: string): boolean {
 
   dictatedDrafts.add(field)
   field.dispatchEvent(new Event('input', { bubbles: true }))
-  field.focus()
+  if (focusOnInsert) field.focus()
   field.setSelectionRange(next.length, next.length)
   return true
 }

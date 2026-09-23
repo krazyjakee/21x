@@ -105,6 +105,7 @@ function VoiceControls({ store, dictation }: { store: VoiceStoreModule; dictatio
   useEffect(() => {
     return dictation.registerComposer(COMMANDER_VOICE_COMPOSER_KEY, {
       getField: () => hiddenField.current,
+      focusOnInsert: false,
       submit: () => {
         const field = hiddenField.current
         const words = field?.value ?? ''

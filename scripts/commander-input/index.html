@@ -1,0 +1,25 @@
+<!doctype html>
+<html><head><meta charset="UTF-8"><title>Commander keyboard regression</title></head>
+<body><div id="root"></div>
+<script>
+// No real sessions, microphone, provider calls or application services.
+window.fixture = { sends: [], voiceSends: [], resolveSend: null, rejectSend: null }
+const noop = async () => {}
+window.electronAPI = new Proxy({
+  settings: { getAll: async () => ({}), set: noop },
+  commander: {
+    listSessions: async () => [], listMessages: async () => ({ messages: [], activeTurnId: null }),
+    markRead: async () => null, setActiveSession: noop, onEvent: () => () => {},
+    cancel: noop,
+    send: (sessionId, text) => new Promise((resolve, reject) => {
+      window.fixture.sends.push({ sessionId, text })
+      window.fixture.resolveSend = () => resolve({ turnId: 'typed-turn', message: {
+        id: 'typed-message', session_id: sessionId, role: 'user', content: text, created_at: 1
+      } })
+      window.fixture.rejectSend = () => reject(new Error('Test send failed'))
+    })
+  },
+  commanderVoice: { setActive: noop, bargeIn: noop, send: async (sessionId, text) => { window.fixture.voiceSends.push({ sessionId, text }) } }
+}, { get: (target, key) => key in target ? target[key] : key.startsWith('on') ? () => () => {} : undefined })
+</script>
+<script type="module" src="/fixture.tsx"></script></body></html>
