@@ -59,6 +59,7 @@ describe('DatabaseManager migrations on an existing install', () => {
 
     const raw = openRaw()
     expect(taskColumns(raw)).toContain('complete_at_source')
+    expect(taskColumns(raw)).toContain('mcp_scope_nonce')
     // First-run seed: a default agent wired to the built-in MCP server. The
     // Captain persona is a built-in system prompt, so no skill is seeded.
     const agents = raw.prepare('SELECT config FROM agents WHERE is_default = 1').all() as { config: string }[]
@@ -135,7 +136,73 @@ describe('DatabaseManager migrations on an existing install', () => {
     const after = openRaw()
     expect((after.pragma('table_info(merge_grant_uses)') as { name: string }[]).map((column) => column.name))
       .toContain('authorization_context')
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('27')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('30')
+    after.close()
+  })
+
+  it('adds signed review handoffs and invalidates legacy unbound attestations from schema version 27', () => {
+    const first = new DatabaseManager()
+    first.initialize()
+    const project = first.createProject({ name: 'Review migration' })!
+    first.addProjectRepo(project.id, { provider: 'github', org: 'acme', name: 'app' })
+    const implementer = first.createAgent({ name: 'Legacy implementer' })!
+    const reviewer = first.createAgent({ name: 'Legacy reviewer' })!
+    const implementation = first.createTask({ title: 'Legacy implementation', project_id: project.id })!
+    const review = first.createTask({ title: 'Legacy review', type: 'review', project_id: project.id })!
+    first.close?.()
+
+    const raw = openRaw()
+    raw.exec('DROP INDEX IF EXISTS idx_pr_review_attestations_handoff')
+    raw.exec('ALTER TABLE pr_review_attestations DROP COLUMN handoff_id')
+    raw.exec('DROP TABLE pr_review_handoffs')
+    raw.prepare(`
+      INSERT INTO pr_review_attestations
+        (id, project_id, repo, pr_number, head_sha, base_sha,
+         implementation_task_id, review_task_id, implementation_agent_id,
+         reviewer_agent_id, verdict, summary, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('legacy-attestation', project.id, 'acme/app', 12, 'a'.repeat(40), 'b'.repeat(40),
+      implementation.id, review.id, implementer.id, reviewer.id, 'CLEAN', 'Legacy unbound row', new Date().toISOString())
+    raw.prepare("UPDATE settings SET value = ? WHERE key = '__schema_version'").run('27')
+    raw.close()
+
+    const second = new DatabaseManager()
+    second.initialize()
+    expect(second.getCleanPullRequestReviewAttestation({
+      projectId: project.id,
+      repo: 'acme/app',
+      prNumber: 12,
+      headSha: 'a'.repeat(40),
+      baseSha: 'b'.repeat(40)
+    })).toBeUndefined()
+    second.close?.()
+
+    const after = openRaw()
+    const tables = (after.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((row) => row.name)
+    const columns = (after.pragma('table_info(pr_review_attestations)') as { name: string }[]).map((column) => column.name)
+    expect(tables).toContain('pr_review_handoffs')
+    expect(columns).toContain('handoff_id')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('30')
+    after.close()
+  })
+
+  it('adds the task-session MCP scope nonce for a database from schema version 28', () => {
+    const first = new DatabaseManager()
+    first.initialize()
+    first.close?.()
+
+    const raw = openRaw()
+    raw.exec('ALTER TABLE tasks DROP COLUMN mcp_scope_nonce')
+    raw.prepare("UPDATE settings SET value = ? WHERE key = '__schema_version'").run('28')
+    raw.close()
+
+    const second = new DatabaseManager()
+    second.initialize()
+    second.close?.()
+
+    const after = openRaw()
+    expect(taskColumns(after)).toContain('mcp_scope_nonce')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('30')
     after.close()
   })
 
@@ -177,7 +244,7 @@ describe('DatabaseManager migrations on an existing install', () => {
       'concurrency_audit', 'task_touches',
       'agent_start_queue', 'agent_start_queue_fairness'
     ]))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('27')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('30')
     after.close()
   })
 
@@ -188,7 +255,7 @@ describe('DatabaseManager migrations on an existing install', () => {
     { name: 'integrated v21', version: '21', drop: ['agent_start_queue', 'agent_start_queue_fairness'] },
     { name: 'authorization-chain v23', version: '23', drop: ['issue_writes'] },
     { name: 'live main v24', version: '24', drop: [] }
-  ])('produces schema-equivalent v27 from $name', ({ version, drop }) => {
+  ])('produces schema-equivalent v30 from $name', ({ version, drop }) => {
     const fresh = new DatabaseManager()
     fresh.initialize()
     fresh.close?.()
@@ -224,7 +291,7 @@ describe('DatabaseManager migrations on an existing install', () => {
       'generation', 'lease_owner', 'lease_expires_at', 'recovery_cause',
       'recovery_action', 'recovery_result', 'queued_at', 'acknowledged_at'
     ]))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('27')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('30')
     after.close()
   })
 

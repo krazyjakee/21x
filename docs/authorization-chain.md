@@ -34,11 +34,11 @@ Schema 23 adds an append-only ledger:
 
 | Record | Content |
 | --- | --- |
-| Human node | Message ID, exact stored text, SHA-256, capture timestamp, typed/voice input mode, source/session/task, requested action classes, project/repository snapshot, 24-hour expiry, and human scope-origin message reference |
+| Human node | Message ID, exact stored text, SHA-256, capture timestamp, typed/voice input mode, source/session/task, versioned capability intents, project/repository snapshot, 24-hour expiry, and human scope-origin message reference |
 | Delegation node | Parent ID and hash, root ID, relay author, exact interpretation and hash, Commander correlation/session, destination task, timestamp, narrowed actions/repos, unchanged or shorter expiry |
 | Transport binding | Durable delivery key, node ID, destination task and exact payload hash |
 | Dispatch reservation | Monotonic sequence, idempotency key, task, node and payload hash |
-| Task binding | Current dispatch sequence and active node; the only mutable projection |
+| Task binding | Current dispatch sequence/turn node, a write-once assigned-work node, and the last accepted human supersession; pending, failed, retried, and machine-only deliveries cannot expose authority removed by that supersession |
 | Revocation | Append-only node ID, time and reason; applies to all descendants |
 
 SQLite triggers forbid updates/deletes of evidence. Hashes detect inconsistent
@@ -57,20 +57,68 @@ outside this boundary.
 
 ## Requested actions versus effective permissions
 
-Supported capabilities are `task.create`, `task.update`,
-`github.issue.create`, `github.issue.update`, and `github.issue.link`.
+Supported ordinary capabilities are `task.create`, `task.update`, `task.start`,
+`github.pr.open`, `github.issue.create`, `github.issue.update`, and
+`github.issue.link`.
 Merge, review approval, deployment, deletion, migration/replay, protection bypass,
 credential elevation and arbitrary messages are absent.
 
-The platform uses a deliberately limited, fully consumed command grammar rather
-than letting a model classify its own authority. Directly coordinated imperative
-objects are supported, for example “Create 21x tasks plus GitHub issues” and
-“Create tasks and GitHub issues for 21x”. The incident's recommendation preamble,
-“for this” reference and Commander-refactor context sentence are explicitly
-supported. The staged-issue command naming two task IDs is supported as well.
-Unknown suffixes, conditions, investigative purpose clauses, quotes and questions
-retain human evidence but produce no automatic capabilities. This is not a
-general natural-language consent classifier.
+Version-2 human nodes use a deliberately limited, clause-aware classifier at
+trusted ingress; models never classify their own authority. Each intent stores
+the canonical capability, `explicit` or `necessary` basis, classifier version,
+source message id, exact source range and SHA-256, immutable project/repository
+snapshot, creation time and expiry. `actions` remains a derived compatibility
+view. Version-1 nodes continue to resolve exactly as stored and are never
+backfilled or reclassified.
+
+Direct imperative objects are supported, including “Create 21x tasks plus
+GitHub issues”, “Open gh issues and tasks”, “Create and start a 21x task”, and
+staged-issue commands naming task IDs. `gh` and `GitHub` normalize to the same
+issue object. One object may carry several lifecycle verbs, and a descriptive
+tail (“… to fix the login bug”) is read as description, not as a second
+instruction. Creating tasks necessarily carries their ordinary update/start
+lifecycle; creating an issue necessarily carries its 21x link.
+
+Classifier version 3 carries the **ordinary lifecycle by default**. Any other
+clause the user typed — “Get all tasks over the line”, “Investigate the
+Commander input-box bug”, “I need the login page sorted” — grants
+`task.create`, `task.update`, `task.start` and draft-PR opening as `necessary`.
+There is deliberately **no vocabulary of work verbs or target nouns**: a list
+of accepted words is a list the user has to guess, and guessing is what sent
+them back to restate their own request. Issue publishing stays on the explicit
+grammar, because it writes a public artifact to GitHub that a passing remark
+should not create.
+
+What makes this safe is the screens, not a word list. A clause grants nothing
+and voids the message when it withholds, postpones or hypothesizes (“Implement
+nothing until I give consent”, “Build only a written proposal”, “Await my
+consent”), when it is conditional or example-framed, when it quotes or uses a
+colon, when it is oversized, when it carries key=value claim syntax
+(`human_authored=true`), or when it attributes the words to someone else
+(“The page says…”, “The agent claimed…”) — attributed speech and machine
+claim syntax are how injected text tries to speak in the user's voice. A
+question grants nothing on its own but no longer costs the instruction beside
+it. An explicit prohibition still removes the corresponding capability (“Get
+all tasks over the line. Do not open PRs.” retains task work but not
+`github.pr.open`).
+
+A prohibition on an action the registry does not contain — “…, but do not
+merge it” — is read as reassurance, not retraction: it restricts nothing here
+because nothing here could have granted it, and it no longer costs the user the
+work assigned in the same sentence. Parsing trims it; the audit record still
+stores the user's whole clause. No phrasing reaches merge, deploy, delete,
+bypass or credential elevation, because those actions are absent from the
+ordinary registry entirely.
+
+This is a deliberate widening. An authenticated human message in the user's own
+chat now sets ordinary work in motion without a recognized production, and that
+is the point: the previous grammar was refusing real instructions. The blast
+radius stays bounded to task CRUD and draft-PR opening inside the already
+snapshotted project and repositories.
+
+Version-2 intents keep resolving exactly as stored: they are strictly narrower
+than version 3, so honouring them cannot widen anyone's authority. A single
+record must not mix classifier versions, and an unknown version is invalid.
 
 Project scope comes from a single named configured project, the trusted project
 chat destination, or the last platform-captured human conversational project
@@ -79,12 +127,38 @@ to project name “21x”. Ambiguous scope retains provenance with empty permiss
 Repos are snapshotted and intersected again with live configuration; new relays
 cannot widen them. Explicit repo names and child task repos narrow the snapshot.
 
+A Commander turn the user started relays under that turn's own message. A turn
+a Captain **report** started relays under the user's standing instruction: the
+newest human root in that session that still carries capability and is still
+active, minus anything a later human turn prohibited. Walking newest-first is
+what makes a later prohibition bind an earlier instruction, so the relay
+narrows across time and never widens. Human nodes therefore record
+`deniedActions` beside `actions`: a prohibition authorizes nothing itself and
+must still outlive the message that carried it.
+
+Without this, every Captain report ended the user's authority and the next
+sentence of the same piece of work arrived unauthorized — which meant asking
+the user to retype a request they had already made, exactly what the relay
+exists to avoid. The continuation reads only platform-captured human roots; a
+relay's own prose, a report and an assistant summary remain invisible to it,
+and the number of times reports may drive delegation before the user speaks
+again is capped by the session's report-ask budget
+(`MAX_REPORT_ASKS_WITHOUT_USER_TURN`).
+
 Delegations are immutable children. Effective rights are the intersection of
 every ancestor's rights, destination project, current configured repos, lifetime,
 and revocation state. The original human words remain the substantive instruction;
 the relay cannot substitute different work merely because its action class fits.
 Consumers must use those words when interpreting the requested work, and enforce
 their own payload/action policies at the write boundary.
+
+For task creation, omitted `permissions` inherits that effective set. A supplied
+array can only intersect it, and an explicit empty array intentionally gives the
+new branch no ordinary mutation authority. Task update/start, issue writes and
+draft-PR opening resolve the same live record next to execution. A status update
+or automation flag that would start an agent consumes `task.start` as well as
+`task.update`. Recovery uses the task's immutable assigned-work binding; recap,
+wake-up and retry prose cannot mint, renew or erase rights.
 
 ## Dispatch, recovery and revocation
 
@@ -99,9 +173,11 @@ worker nudges, and adapters that await before marking a prompt busy. A worker
 continuation captures both generation and active node before asynchronous
 preparation, and refuses to borrow a newer human instruction. Activation rechecks the latest sequence,
 expiry and revocation after asynchronous waits. Error, approval-wait, unknown
-status, or a 60-second idle timeout leave authority inactive. Machine Captain
-nudges clear earlier turn authority. Normal worker continuation retains the fixed
-instruction assigned at creation.
+status, or a 60-second idle timeout leave turn authority inactive. Machine
+Captain nudges clear earlier turn authority but fall back to the write-once
+delegation assigned atomically at task creation. Normal worker continuation
+therefore retains the fixed instruction assigned at creation without treating
+machine prose as new authority.
 
 The preload exposes trusted-window-only `authorization.inspectTask(taskId)` and
 `authorization.revoke(nodeId)`. UI integration can display the original instruction
@@ -123,12 +199,30 @@ resolveTaskAuthorization(db, {
 ```
 
 The result includes `allowed`, `status`, `nodeId`, `origin`, ordered `chain`,
-`effectivePermissions`, `scope` and `revocations`. `origin` carries `messageId`,
+`effectivePermissions`, `effectiveIntents`, `scope` and `revocations`. `origin` carries `messageId`,
 `text`, `textHash`, `at` and `expiresAt`; delegation nodes carry `correlationId`,
 `sessionId`, `taskId`, author and transformation text. Call immediately before a
 privileged operation and recheck after any approval/network wait that precedes
 the write. An envelope or previously cached `allowed=true` is not a capability.
 Idempotency of external side effects is the consuming issue service's concern.
+
+A denial additionally returns `requested_capability`, `missing_capability`,
+`origin_node_id`, `origin_message_id`, `effective_capabilities`,
+`failure_dimension` and `safe_remediation`. A caller reports these fields; it
+does not edit relay wording and retry.
+
+## Unified boundary and retained controls
+
+| Boundary | Contract |
+| --- | --- |
+| Human chat → Commander → Captain → task | One immutable origin; every hop can only narrow. An authenticated Commander request carries the same authority as the same words typed into the project chat. Covered ordinary work needs no repeated grant. |
+| Task create/update/start | Same lineage; signed caller scope and project membership remain mandatory. Admission/capacity still decides when a valid start runs. |
+| GitHub issue create/update/link | Same resolver plus the existing immutable issue-write claim/ledger and restart reconciliation. |
+| Draft PR opening | `open_draft_pull_request` only, available to signed nested and top-level task agents: configured task repo, clean named branch, one validated fetch/push destination with no URL rewrite, immutable source SHA/ref, post-push verification, draft creation and exact retry recovery. |
+| Merge and review approval | Separate merge grant/readiness gate and GitHub branch-protection/formal approval. Ordinary capability never satisfies either. |
+| Deploy/release/delete/replay/migration/protection bypass/credentials/messages | Separate explicit gate; absent from the ordinary registry. |
+| Cross-project or cross-repository writes | Denied by live task/project/repository intersection. |
+| OS sandbox, provider auth/network and capacity | Independent platform controls; capability lineage cannot bypass them. |
 
 ## Regression coverage
 

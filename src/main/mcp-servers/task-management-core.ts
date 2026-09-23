@@ -25,12 +25,13 @@ import {
   browserTools,
   captainTools,
   sharedTools,
-  subtaskTools
+  subtaskTools,
+  taskAgentTools
 } from './task-management-tools'
 import { SKILL_SCOPE_PARAM, SKILL_TOOL_NAMES } from '../task-api/skill-routes'
 import { MERGE_GRANT_TOOL_NAMES } from './merge-grant-tools'
 import { ISSUE_WRITE_TOOL_NAMES } from './issue-write-tools'
-import { RECORD_REVIEW_ATTESTATION_TOOL } from './review-attestation-tools'
+import { CREATE_REVIEW_HANDOFF_TOOL, RECORD_REVIEW_ATTESTATION_TOOL } from './review-attestation-tools'
 
 /** Which task a session may act on. All fields null means full access. */
 export type TaskMcpScope = {
@@ -40,6 +41,10 @@ export type TaskMcpScope = {
   artifactTaskId: string | null
   /** The only project this session may see and act in (project scope). */
   projectId?: string | null
+  /** Agent bound into the signed session URL. Never accepted from tool arguments. */
+  agentId?: string | null
+  /** Rotated whenever the task session is created or resumed. */
+  sessionNonce?: string | null
 }
 
 /** Calls one Task API route. In process this is handleRoute; over stdio it is fetch. */
@@ -299,9 +304,10 @@ async function skillScopeFor(scope: TaskMcpScope, invoke: TaskApiInvoke): Promis
 
 /** The tools a session may see. This is the whole answer to "which tools to serve". */
 export function listToolsForScope(scope: TaskMcpScope) {
+  const taskOnly = scope.taskId && scope.artifactTaskId ? taskAgentTools : []
   return isScopedSession(scope)
-    ? [...subtaskTools, ...browserTools, ...sharedTools]
-    : [...captainTools, ...browserTools, ...sharedTools]
+    ? [...subtaskTools, ...taskOnly, ...browserTools, ...sharedTools]
+    : [...captainTools, ...taskOnly, ...browserTools, ...sharedTools]
 }
 
 /**
@@ -315,6 +321,9 @@ export async function callToolForScope(
   invoke: TaskApiInvoke
 ): Promise<ToolCallResult> {
   try {
+    const bindScope = isScopedSession(scope) || isProjectScopedSession(scope)
+    const scopedInvoke: TaskApiInvoke = (route, params, explicitScope) =>
+      invoke(route, params, explicitScope ?? (bindScope ? scope : undefined))
     // Serve only the tools this scope advertises.
     //
     // The scoped dispatch below ends in a pass-through for the shared tools. A
@@ -349,17 +358,17 @@ export async function callToolForScope(
     // anything the caller put under the key; full access carries no scope.
     delete normalizedArgs[SKILL_SCOPE_PARAM]
     if (SKILL_TOOL_NAMES.has(name)) {
-      const skillScope = await skillScopeFor(scope, invoke)
+      const skillScope = await skillScopeFor(scope, scopedInvoke)
       if (skillScope) normalizedArgs[SKILL_SCOPE_PARAM] = skillScope
     }
-    if (name === RECORD_REVIEW_ATTESTATION_TOOL) {
-      if (!scope.taskId) {
+    if (name === RECORD_REVIEW_ATTESTATION_TOOL || name === CREATE_REVIEW_HANDOFF_TOOL) {
+      if (!scope.taskId || !scope.agentId) {
         return {
-          content: [{ type: 'text', text: JSON.stringify({ error: 'A task-scoped reviewer session is required' }) }],
+          content: [{ type: 'text', text: JSON.stringify({ error: 'A task- and agent-scoped session is required' }) }],
           isError: true
         }
       }
-      const own = await invoke('/get_task', { task_id: scope.taskId }) as Record<string, unknown> | null
+      const own = await scopedInvoke('/get_task', { task_id: scope.taskId }) as Record<string, unknown> | null
       const projectId = own && !own.error && typeof own.project_id === 'string' ? own.project_id : ''
       if (!projectId) {
         return {
@@ -369,7 +378,7 @@ export async function callToolForScope(
       }
       // The route receives the signed MCP scope out of band. Never put task or
       // agent provenance in model-controlled arguments.
-      const result = await invoke(`/${name}`, normalizedArgs, scope) as Record<string, unknown> | null
+      const result = await scopedInvoke(`/${name}`, normalizedArgs, scope) as Record<string, unknown> | null
       if (result?.error) return { content: [{ type: 'text', text: JSON.stringify(result) }], isError: true }
       if (toolCallObserver) {
         try {
@@ -382,10 +391,10 @@ export async function callToolForScope(
     }
 
     const result = isScopedSession(scope)
-      ? await handleScopedCall(name, normalizedArgs, scope, invoke) as Record<string, unknown> | null
+      ? await handleScopedCall(name, normalizedArgs, scope, scopedInvoke) as Record<string, unknown> | null
       : isProjectScopedSession(scope)
-        ? await handleProjectCall(name, normalizedArgs, scope.projectId as string, invoke, isCoordinatorScope(scope)) as Record<string, unknown> | null
-        : await invoke(`/${name}`, normalizedArgs) as Record<string, unknown> | null
+        ? await handleProjectCall(name, normalizedArgs, scope.projectId as string, scopedInvoke, isCoordinatorScope(scope)) as Record<string, unknown> | null
+        : await scopedInvoke(`/${name}`, normalizedArgs) as Record<string, unknown> | null
 
     if (result?.error) {
       return { content: [{ type: 'text', text: JSON.stringify(result) }], isError: true }

@@ -15,6 +15,7 @@ import { getTaskApiToken, startTaskApiServer, stopTaskApiServer, setTaskApiNotif
 import { createMergeGrantFromUserMessage, setGhRunner } from './merge-grants'
 import { buildTaskMcpUrl, parseScopeFromUrl } from './task-mcp-endpoint'
 import { mcpOptionsForTask } from './agent-manager/session-config'
+import { activateAuthorizationDispatch, prepareAuthorizationDispatch, recordHumanAuthorization } from './authorization'
 
 let db: DatabaseManager
 
@@ -38,6 +39,12 @@ async function connect(url: string): Promise<Client> {
 const textOf = (result: unknown): string =>
   ((result as { content: Array<{ text: string }> }).content[0]?.text) ?? ''
 
+function authorizeTask(taskId: string, projectId: string, text: string): void {
+  const messageId = `authorization-${taskId}-${text}`
+  recordHumanAuthorization(db, { messageId, text, at: Date.now(), source: 'project-chat', projectId, taskId })
+  activateAuthorizationDispatch(db, prepareAuthorizationDispatch(db, { key: messageId, taskId, text, messageId }))
+}
+
 describe('buildTaskMcpUrl and parseScopeFromUrl', () => {
   it('round-trips a full-access session', () => {
     const url = buildTaskMcpUrl(1234, 'tok')
@@ -46,7 +53,9 @@ describe('buildTaskMcpUrl and parseScopeFromUrl', () => {
       parentTaskId: null,
       taskId: null,
       artifactTaskId: null,
-      projectId: null
+      projectId: null,
+      agentId: null,
+      sessionNonce: null
     })
   })
 
@@ -57,17 +66,23 @@ describe('buildTaskMcpUrl and parseScopeFromUrl', () => {
       taskId: 'task-child',
       // Artifact writes fall back to the session's own task.
       artifactTaskId: 'task-child',
-      projectId: null
+      projectId: null,
+      agentId: null,
+      sessionNonce: null
     })
   })
 
   it('round-trips a project-scoped session', () => {
-    const url = buildTaskMcpUrl(1234, 'tok', { projectId: 'proj-1', artifactTaskId: 'task-1' })
+    const url = buildTaskMcpUrl(1234, 'tok', {
+      projectId: 'proj-1', taskId: 'task-1', artifactTaskId: 'task-1', agentId: 'agent-1', sessionNonce: 'nonce-1'
+    })
     expect(parseScopeFromUrl(new URL(url))).toEqual({
       parentTaskId: null,
-      taskId: null,
+      taskId: 'task-1',
       artifactTaskId: 'task-1',
-      projectId: 'proj-1'
+      projectId: 'proj-1',
+      agentId: 'agent-1',
+      sessionNonce: 'nonce-1'
     })
   })
 
@@ -119,6 +134,45 @@ describe('MCP endpoint over HTTP', () => {
     await client.close()
   })
 
+  it('serves draft PR opening to a signed top-level task but not its Captain', async () => {
+    const project = db.createProject({ name: 'Top-level project' })!
+    const task = db.createTask(makeTask({ title: 'Top-level coding task', type: 'coding', project_id: project.id }))!
+    const port = await startTaskApiServer(db)
+    const worker = await connect(buildTaskMcpUrl(port, getTaskApiToken(), {
+      projectId: project.id, taskId: task.id, artifactTaskId: task.id
+    }))
+    const captain = await connect(buildTaskMcpUrl(port, getTaskApiToken(), { projectId: project.id }))
+
+    expect((await worker.listTools()).tools.map((tool) => tool.name)).toContain('open_draft_pull_request')
+    expect((await captain.listTools()).tools.map((tool) => tool.name)).not.toContain('open_draft_pull_request')
+    await worker.close()
+    await captain.close()
+  })
+
+  it('refuses the PR write tool when its signed task session has been replaced', async () => {
+    const project = db.createProject({ name: 'PR session project' })!
+    db.addProjectRepo(project.id, { provider: 'github', org: 'krazyjakee', name: '21x', default_branch: 'main' })
+    const task = db.createTask(makeTask({
+      title: 'PR task', type: 'coding', project_id: project.id, repos: ['krazyjakee/21x']
+    }))!
+    authorizeTask(task.id, project.id, 'Implement the PR repair')
+    const oldNonce = db.rotateTaskMcpScopeNonce(task.id)
+    const port = await startTaskApiServer(db)
+    const signedUrl = buildTaskMcpUrl(port, getTaskApiToken(), {
+      projectId: project.id, taskId: task.id, artifactTaskId: task.id,
+      agentId: 'agent-1', sessionNonce: oldNonce
+    })
+    db.rotateTaskMcpScopeNonce(task.id)
+    const client = await connect(signedUrl)
+
+    const result = await client.callTool({
+      name: 'open_draft_pull_request', arguments: { repo: 'krazyjakee/21x', title: 'Stale session' }
+    })
+
+    expect(textOf(result)).toContain('stale_task_session')
+    await client.close()
+  })
+
   it('reads real data from the database through tools/call', async () => {
     const task = db.createTask(makeTask({ title: 'Findable task' }))!
     const port = await startTaskApiServer(db)
@@ -134,6 +188,7 @@ describe('MCP endpoint over HTTP', () => {
     const parent = db.createTask(makeTask({ title: 'Parent' }))!
     const own = db.createTask(makeTask({ title: 'Own', parent_task_id: parent.id }))!
     const sibling = db.createTask(makeTask({ title: 'Sibling', parent_task_id: parent.id }))!
+    authorizeTask(own.id, own.project_id, 'Update tasks')
     const port = await startTaskApiServer(db)
     const client = await connect(buildTaskMcpUrl(port, getTaskApiToken(), { taskId: own.id, parentTaskId: parent.id }))
 
@@ -351,6 +406,8 @@ describe('project-scoped MCP session (#56)', () => {
 
   it('creates tasks in its own project, whatever project_id is passed', async () => {
     const { a, b } = twoProjects()
+    const captain = db.getCoordinatorTask(a.id)!
+    authorizeTask(captain.id, a.id, 'Create tasks')
     const port = await startTaskApiServer(db)
     const client = await connect(buildTaskMcpUrl(port, getTaskApiToken(), { projectId: a.id }))
 
@@ -379,22 +436,29 @@ describe('merge-grant scope credential over real HTTP', () => {
     const project = db.createProject({ name: 'App', settings: { merge_grants: { enabled: true } } })!
     db.addProjectRepo(project.id, { provider: 'github', org: 'acme', name: 'app' })
     const worker = db.createTask(makeTask({ title: 'Worker', project_id: project.id }))!
+    const workerAgent = db.createAgent({ name: 'Worker agent' })!
+    db.updateTask(worker.id, { agent_id: workerAgent.id })
     createMergeGrantFromUserMessage(db, project.id, { source: 'commander', sessionId: 's', messageId: 'typed', text: 'merge PRs' })
     const port = await startTaskApiServer(db)
     const gh = vi.fn(async () => { throw new Error('No GitHub call is permitted for the worker') })
     setGhRunner(gh)
-    const issued = buildTaskMcpUrl(port, getTaskApiToken(), { projectId: project.id, artifactTaskId: worker.id })
+    const issued = buildTaskMcpUrl(port, getTaskApiToken(), {
+      projectId: project.id, taskId: worker.id, artifactTaskId: worker.id,
+      agentId: workerAgent.id, sessionNonce: 'worker-session'
+    })
     const client = await connect(issued)
     const denied = await client.callTool({ name: 'merge_pull_request', arguments: { pr_url: 'https://github.com/acme/app/pull/12' } })
     expect(textOf(denied)).toContain('only the project')
     await client.close()
-    for (const change of ['artifact', 'project', 'signature', 'unsigned', 'all-pins']) {
+    for (const change of ['artifact', 'project', 'agent', 'session', 'signature', 'unsigned', 'all-pins']) {
       const forged = new URL(issued)
-      if (change === 'artifact') forged.searchParams.delete('artifact')
+      if (change === 'artifact') forged.searchParams.set('artifact', 'other-task')
       if (change === 'project') forged.searchParams.set('project', 'other')
+      if (change === 'agent') forged.searchParams.set('agent', 'other-agent')
+      if (change === 'session') forged.searchParams.set('session', 'other-session')
       if (change === 'signature') forged.searchParams.set('scope_signature', '0'.repeat(64))
       if (change === 'unsigned') forged.searchParams.delete('scope_signature')
-      if (change === 'all-pins') for (const key of ['artifact', 'task', 'parent', 'project']) forged.searchParams.delete(key)
+      if (change === 'all-pins') for (const key of ['artifact', 'task', 'parent', 'project', 'agent', 'session']) forged.searchParams.delete(key)
       const response = await fetch(forged, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'merge_pull_request', arguments: { pr_url: 'https://github.com/acme/app/pull/12' } } })

@@ -9,6 +9,22 @@ export type PullRequestReadinessClassification =
 
 export type PullRequestReviewVerdict = 'CLEAN' | 'CHANGES_REQUIRED'
 
+export interface PullRequestReviewHandoff {
+  id: string
+  project_id: string
+  repo: string
+  pr_number: number
+  head_sha: string
+  base_sha: string
+  implementation_task_id: string
+  review_task_id: string
+  implementation_agent_id: string
+  reviewer_agent_id: string
+  created_at: string
+}
+
+export type CreatePullRequestReviewHandoff = Omit<PullRequestReviewHandoff, 'id' | 'created_at'>
+
 export interface PullRequestReviewAttestation {
   id: string
   project_id: string
@@ -20,6 +36,7 @@ export interface PullRequestReviewAttestation {
   review_task_id: string
   implementation_agent_id: string
   reviewer_agent_id: string
+  handoff_id: string
   verdict: PullRequestReviewVerdict
   summary: string
   created_at: string

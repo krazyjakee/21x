@@ -104,7 +104,7 @@ describe('update_project_status tool (#58)', () => {
     const captain = { parentTaskId: null, taskId: null, artifactTaskId: null, projectId: 'p1' }
     const ok = await callToolForScope('update_project_status', { summary: 'S', project_id: 'other' }, captain, invoke)
     expect(ok.isError).toBeUndefined()
-    expect(invoke).toHaveBeenCalledWith('/update_project_status', { summary: 'S', project_id: 'p1' })
+    expect(invoke).toHaveBeenCalledWith('/update_project_status', { summary: 'S', project_id: 'p1' }, captain)
 
     invoke.mockClear()
     const taskAgent = { parentTaskId: null, taskId: null, artifactTaskId: 't1', projectId: 'p1' }

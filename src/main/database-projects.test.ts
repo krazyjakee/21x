@@ -73,7 +73,7 @@ describe('projects migration (14 → 15)', () => {
     const project = db.prepare('SELECT * FROM projects').all() as Array<Record<string, unknown>>
     expect(project).toHaveLength(1)
     expect(project[0]).toMatchObject({ id: DEFAULT_PROJECT_ID, name: 'Default', git_org: 'acme', git_provider: 'gitlab', archived: 0, settings: '{}' })
-    expect((db.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('27')
+    expect((db.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('30')
     // The global settings stay where they were.
     expect((db.prepare("SELECT value FROM settings WHERE key = 'github_org'").get() as { value: string }).value).toBe('acme')
   })
