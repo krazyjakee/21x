@@ -45,6 +45,7 @@ import type { HeldAction } from '../shared/project-limit-types'
 import { handleMergeGrantTool } from './merge-grant-gate'
 import { MERGE_GRANT_TOOL_NAMES, MERGE_PULL_REQUEST_TOOL } from './mcp-servers/merge-grant-tools'
 import { reconcileMergeGrantReservations, type MergeGrantDb, type MergeHooks } from './merge-grants'
+import type { MergeAuthorizationContext } from '../shared/merge-grants'
 
 export type { HeldAction }
 
@@ -53,7 +54,7 @@ export type { HeldAction }
 export interface EscalationEvent {
   projectId: string
   action: EscalationAction
-  level: Exclude<EscalationLevel, 'autonomous'>
+  level: EscalationLevel
   tool: string
   args: Record<string, unknown>
   /** One line a person can read: what the Captain did or wants to do. */
@@ -69,6 +70,8 @@ export interface EscalationEvent {
   heldId?: string
   /** The merge grant used, for `merged_under_grant`. */
   grantId?: string
+  /** Policy and verified grant provenance, kept separate from effective authority. */
+  authorizationContext?: MergeAuthorizationContext
   /** ISO time. */
   at: string
 }
@@ -355,16 +358,17 @@ function mergeHooks(): MergeHooks {
   return {
     notifyUser,
     pushToRenderer,
-    report: (id, kind, summary, grantId) => {
+    report: (id, kind, summary, grantId, authorizationContext) => {
       const event: EscalationEvent = {
         projectId: id,
         action: 'merge_pr',
-        level: 'ask_user',
+        level: authorizationContext?.policy_level ?? 'ask_user',
         tool: MERGE_PULL_REQUEST_TOOL,
         args: {},
         summary,
         outcome: kind === 'merged_under_grant' ? 'merged_under_grant' : 'needs_user',
         ...(grantId ? { grantId } : {}),
+        ...(authorizationContext ? { authorizationContext } : {}),
         at: new Date().toISOString()
       }
       escalateToCommander(event)
