@@ -241,8 +241,15 @@ function createWindow(): void {
     }
   })
 
-  mainWindow.on('ready-to-show', () => {
-    mainWindow?.show()
+  // `ready-to-show` waits for the hidden window's first paint, and on Linux
+  // (Electron 44, X11) that event is sometimes never sent: the page loads but
+  // the window stays unmapped for good. Show it once the load has finished
+  // anyway, and make sure the start-up work below runs only once.
+  let didShowWindow = false
+  const showWindowOnce = (): void => {
+    if (didShowWindow || !mainWindow || mainWindow.isDestroyed()) return
+    didShowWindow = true
+    mainWindow.show()
 
     if (!is.dev && mainWindow) {
       initAutoUpdater(mainWindow)
@@ -268,6 +275,10 @@ function createWindow(): void {
     setInterval(() => {
       guardedIpcSend(mainWindow?.webContents, 'overdue:check')
     }, 60_000)
+  }
+  mainWindow.once('ready-to-show', showWindowOnce)
+  mainWindow.webContents.once('did-finish-load', () => {
+    setTimeout(showWindowOnce, 1000)
   })
 
   // Force the main window to 100% zoom on first load. Chromium persists page

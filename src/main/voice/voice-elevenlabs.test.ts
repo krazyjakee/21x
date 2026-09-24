@@ -114,6 +114,8 @@ describe('listing voices and models', () => {
 describe('error mapping', () => {
   it('names auth, quota, rate-limit, model and network failures', () => {
     expect(mapElevenLabsFailure(401).kind).toBe('auth')
+    expect(mapElevenLabsFailure(401, { detail: { status: 'missing_permissions', message: 'The API key is missing the permission voices_read' } }).kind).toBe('permission')
+    expect(mapElevenLabsFailure(403, { detail: 'Insufficient permissions for this endpoint' }).kind).toBe('permission')
     expect(mapElevenLabsFailure(402).kind).toBe('quota')
     expect(mapElevenLabsFailure(400, { detail: { status: 'quota_exceeded', message: 'You have 0 credits remaining' } }).kind).toBe('quota')
     expect(mapElevenLabsFailure(429).kind).toBe('rate_limit')
@@ -124,7 +126,7 @@ describe('error mapping', () => {
   it('reports a refused key on the settings state without the key', async () => {
     const { transport } = makeTransport({
       '/v1/user/subscription': { status: 401, body: { detail: { status: 'invalid_api_key', message: 'Invalid API key' } } },
-      '/v2/voices': { body: { voices: [] } },
+      '/v2/voices': { status: 401, body: { detail: { status: 'invalid_api_key', message: 'Invalid API key' } } },
       '/v1/models': { body: [] },
     })
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -143,6 +145,47 @@ describe('error mapping', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     await engine.refresh()
     expect(engine.error?.kind).toBe('network')
+  })
+
+  it('accepts a speech key when only the optional subscription scope is denied', async () => {
+    const { transport } = makeTransport({
+      '/v1/user/subscription': {
+        status: 401,
+        body: { detail: { status: 'missing_permissions', message: 'The API key is missing the permission user_read' } },
+      },
+      '/v2/voices': { body: { voices: [{ voice_id: 'v1', name: 'Rachel' }], has_more: false } },
+      '/v1/models': { body: [{ model_id: 'eleven_flash_v2_5', name: 'Flash', can_do_text_to_speech: true }] },
+    })
+    const engine = new ElevenLabsEngine({ getKey: () => KEY, transport })
+
+    await engine.refresh()
+
+    expect(engine.loaded).toBe(true)
+    expect(engine.error).toBeNull()
+    expect(engine.usage).toBeNull()
+    expect(engine.voices.map((voice) => voice.id)).toEqual(['elevenlabs:v1'])
+    expect(engine.models.map((model) => model.id)).toEqual(['eleven_flash_v2_5'])
+  })
+
+  it('explains a missing voice-list permission without calling the key invalid', async () => {
+    const { transport } = makeTransport({
+      '/v1/user/subscription': { body: { character_count: 10, character_limit: 1000 } },
+      '/v2/voices': {
+        status: 401,
+        body: { detail: { status: 'missing_permissions', message: 'The API key is missing the permission voices_read' } },
+      },
+      '/v1/models': { body: [] },
+    })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const engine = new ElevenLabsEngine({ getKey: () => KEY, transport })
+
+    await engine.refresh()
+
+    expect(engine.loaded).toBe(false)
+    expect(engine.error).toEqual({
+      kind: 'permission',
+      message: 'The ElevenLabs API key is valid but does not have the permissions this voice needs.',
+    })
   })
 })
 

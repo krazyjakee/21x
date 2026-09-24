@@ -1,5 +1,21 @@
-import { useMemo, useCallback, memo } from 'react'
+import { useMemo, useCallback, useEffect, useRef, useState, memo } from 'react'
+import { flushSync } from 'react-dom'
 import { Clock, AlertCircle, CheckCircle2, ExternalLink, Bot, Terminal } from 'lucide-react'
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  pointerWithin,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+  type CollisionDetection
+} from '@dnd-kit/core'
 import { Badge } from '@/components/ui/Badge'
 import { OpenCodeLogo, AnthropicLogo, OpenAILogo, PiLogo } from '@/components/icons/AgentLogos'
 import { useTaskStore } from '@/stores/task-store'
@@ -14,8 +30,8 @@ import type { Task, Agent } from '@/types'
 
 // ── Status column definitions ─────────────────────────────────
 // Styling comes from the shared status map so the board, the task lists and
-// the mobile UI stay in step. Completed is excluded from columns — shown as a
-// count-only summary instead.
+// the mobile UI stay in step. Completed remains a compact drop target in the
+// header so a long task history does not take over the active board.
 
 interface StatusColumn extends TaskStatusStyle {
   key: TaskStatus
@@ -28,6 +44,16 @@ const COLUMNS: StatusColumn[] = [
   TaskStatus.ReadyForReview,
   TaskStatus.AgentLearning
 ].map((key) => ({ key, ...TASK_STATUS_STYLES[key] }))
+
+// Pointer drops must land inside a target. Using closestCenter for pointer
+// input can select the Completed badge (or another nearby column) even when
+// the cursor is not over it. Keyboard dragging has no pointer coordinates, so
+// it keeps the directional closest-target behaviour.
+const boardCollisionDetection: CollisionDetection = (args) => {
+  const pointerCollisions = pointerWithin(args)
+  if (pointerCollisions.length > 0) return pointerCollisions
+  return args.pointerCoordinates ? [] : closestCenter(args)
+}
 
 const PRIORITY_ORDER: Record<string, number> = {
   critical: 0,
@@ -149,18 +175,12 @@ function getAgentDisplay(agent: Agent | undefined): { name: string; Logo: React.
 
 // ── Task Card ──────────────────────────────────────────────
 
-const TaskCard = memo(function TaskCard({ task, onSelect, agent }: { task: Task; onSelect: (id: string) => void; agent?: Agent }) {
+function TaskCardContent({ task, agent }: { task: Task; agent?: Agent }) {
   const overdue = task.due_date && task.status !== TaskStatus.Completed && isOverdue(task.due_date)
   const sourceConfig = task.source && task.source !== 'local' ? getSourceConfig(task.source) : null
 
   return (
-    <div
-      className={`group rounded-lg border border-border/30 bg-card/80 p-3.5 hover:border-border/60 hover:bg-card hover:shadow-pop transition-colors duration-200 cursor-pointer border-l-2 ${getPriorityAccent(task.priority)}`}
-      onClick={() => onSelect(task.id)}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(task.id) } }}
-    >
+    <>
       {/* Title + Priority */}
       <div className="flex items-start justify-between gap-2 mb-1">
         <h4 className="text-base font-medium leading-snug line-clamp-2 flex-1 text-foreground/90 group-hover:text-foreground transition-colors">
@@ -230,9 +250,62 @@ const TaskCard = memo(function TaskCard({ task, onSelect, agent }: { task: Task;
           )}
         </div>
       </div>
+    </>
+  )
+}
+
+const TaskCard = memo(function TaskCard({ task, onSelect, agent }: { task: Task; onSelect: (id: string) => void; agent?: Agent }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: task.id,
+    data: { taskId: task.id, status: task.status }
+  })
+  // A pointer drag ends with a click in some browser/Electron versions. Keep
+  // that click from opening the task the user just moved.
+  const didDragRef = useRef(false)
+  if (isDragging) didDragRef.current = true
+  useEffect(() => {
+    if (isDragging || !didDragRef.current) return
+    const timer = window.setTimeout(() => { didDragRef.current = false }, 0)
+    return () => window.clearTimeout(timer)
+  }, [isDragging])
+
+  return (
+    <div
+      ref={setNodeRef}
+      data-testid={`task-card-${task.id}`}
+      className={`group touch-none rounded-lg border border-border/30 bg-card/80 p-3.5 hover:border-border/60 hover:bg-card hover:shadow-pop transition-[color,opacity,box-shadow] duration-200 cursor-grab active:cursor-grabbing border-l-2 ${getPriorityAccent(task.priority)} ${isDragging ? 'opacity-30' : ''}`}
+      {...attributes}
+      {...listeners}
+      onClick={(event) => {
+        if (didDragRef.current) {
+          event.preventDefault()
+          return
+        }
+        onSelect(task.id)
+      }}
+      onKeyDown={(event) => {
+        listeners?.onKeyDown?.(event)
+        if (!event.defaultPrevented && event.key === 'Enter') {
+          event.preventDefault()
+          onSelect(task.id)
+        }
+      }}
+      aria-label={`${task.title}. Drag to change status, or press Enter to open.`}
+    >
+      <TaskCardContent task={task} agent={agent} />
     </div>
   )
 })
+
+function TaskCardOverlay({ task, agent }: { task: Task; agent?: Agent }) {
+  return (
+    <div
+      className={`w-[292px] rounded-lg border border-border/70 bg-card p-3.5 shadow-2xl cursor-grabbing border-l-2 ${getPriorityAccent(task.priority)}`}
+    >
+      <TaskCardContent task={task} agent={agent} />
+    </div>
+  )
+}
 
 // ── Column header ────────────────────────────────────────────
 
@@ -250,9 +323,22 @@ const ColumnHeader = memo(function ColumnHeader({ column, count }: { column: Sta
 
 // ── Column wrapper ───────────────────────────────────────────
 
-const BoardColumn = memo(function BoardColumn({ column, tasks, onSelect, agentMap }: { column: StatusColumn; tasks: Task[]; onSelect: (id: string) => void; agentMap: Map<string, Agent> }) {
+const BoardColumn = memo(function BoardColumn({ column, tasks, onSelect, agentMap, isDraggingTask }: { column: StatusColumn; tasks: Task[]; onSelect: (id: string) => void; agentMap: Map<string, Agent>; isDraggingTask: boolean }) {
+  const { isOver, setNodeRef } = useDroppable({
+    id: `status:${column.key}`,
+    data: { status: column.key }
+  })
+
   return (
-    <div className={`min-w-[248px] max-w-[340px] flex-1 flex flex-col rounded-xl ${column.columnBg} border border-border/15`}>
+    <div
+      ref={setNodeRef}
+      role="group"
+      data-testid={`task-column-${column.key}`}
+      data-drop-active={isDraggingTask || undefined}
+      data-drop-over={isOver || undefined}
+      aria-label={`${column.label} column, ${tasks.length} task${tasks.length === 1 ? '' : 's'}`}
+      className={`relative min-w-[248px] max-w-[340px] flex-1 flex flex-col rounded-xl ${column.columnBg} border transition-[border-color,box-shadow,background-color] ${isOver ? `border-current ring-2 ring-current/50 ${column.text}` : isDraggingTask ? 'border-foreground/30' : 'border-border/15'}`}
+    >
       {/* Sticky header within column */}
       <div className={`sticky top-0 z-10 ${column.columnBg} backdrop-blur-md rounded-t-xl border-b border-border/15`}>
         <ColumnHeader column={column} count={tasks.length} />
@@ -268,13 +354,53 @@ const BoardColumn = memo(function BoardColumn({ column, tasks, onSelect, agentMa
           tasks.map((task) => <TaskCard key={task.id} task={task} onSelect={onSelect} agent={task.agent_id ? agentMap.get(task.agent_id) : undefined} />)
         )}
       </div>
+
+      {/* Full-column visual target. pointer-events-none keeps the underlying
+          droppable element as the only hit target. */}
+      {isDraggingTask && (
+        <div
+          aria-hidden="true"
+          className={`pointer-events-none absolute inset-1 z-20 flex items-start justify-center rounded-lg border-2 border-dashed pt-14 transition-colors ${isOver ? `border-current bg-background/25 ${column.text}` : 'border-foreground/25'}`}
+        >
+          <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold shadow-sm backdrop-blur-md ${isOver ? `${column.headerBg} border-current ${column.text}` : 'border-border bg-card/90 text-muted-foreground'}`}>
+            {isOver ? `Release in ${column.label}` : `Drop in ${column.label}`}
+          </span>
+        </div>
+      )}
     </div>
   )
 })
 
+function CompletedDropTarget({ count, isDraggingTask }: { count: number; isDraggingTask: boolean }) {
+  const completed = TASK_STATUS_STYLES[TaskStatus.Completed]
+  const { isOver, setNodeRef } = useDroppable({
+    id: `status:${TaskStatus.Completed}`,
+    data: { status: TaskStatus.Completed }
+  })
+
+  return (
+    <span
+      ref={setNodeRef}
+      role="group"
+      data-testid="task-column-completed"
+      data-drop-active={isDraggingTask || undefined}
+      data-drop-over={isOver || undefined}
+      aria-label={`Completed drop target, ${count} task${count === 1 ? '' : 's'}`}
+      className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-all ${completed.text} ${completed.headerBg} ${isOver ? 'border-emerald-400 ring-2 ring-emerald-400/30 scale-105' : isDraggingTask ? 'border-emerald-400/50' : 'border-transparent'}`}
+    >
+      <CheckCircle2 className="size-icon-sm" />
+      {isDraggingTask ? (isOver ? 'Release to complete' : 'Drop to complete') : `${count} completed`}
+    </span>
+  )
+}
+
+export interface TaskBoardProps {
+  onStatusChange?: (task: Task, status: TaskStatus) => void | Promise<void>
+}
+
 // ── TaskBoard ──────────────────────────────────────────────
 
-export function TaskBoard() {
+export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
   // Use individual selectors to prevent re-renders from unrelated store changes
   // The board shows the current project's tasks only.
   const tasks = useProjectTasks()
@@ -282,6 +408,15 @@ export function TaskBoard() {
   const agents = useAgentStore((s) => s.agents)
   const openDashboardPreview = useUIStore((s) => s.openDashboardPreview)
   const snoozeTick = useSnoozeTick(tasks)
+  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null)
+  // Move the real card before dnd-kit measures the drop destination. Without
+  // this optimistic position, DragOverlay can only find the card at its old
+  // location and animates back to the source column.
+  const [optimisticStatuses, setOptimisticStatuses] = useState<Record<string, TaskStatus>>({})
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor)
+  )
 
   // Build agent lookup map by id
   const agentMap = useMemo(() => {
@@ -310,7 +445,7 @@ export function TaskBoard() {
     }
     let completedCount = 0
     for (const task of topLevelTasks) {
-      const status = task.status || TaskStatus.NotStarted
+      const status = optimisticStatuses[task.id] || task.status || TaskStatus.NotStarted
       if (status === TaskStatus.Completed) {
         completedCount++
       } else if (grouped[status]) {
@@ -325,69 +460,119 @@ export function TaskBoard() {
       grouped[col.key] = sortByPriority(grouped[col.key])
     }
     return { grouped, completedCount }
-  }, [topLevelTasks])
+  }, [optimisticStatuses, topLevelTasks])
 
   const activeTasks = topLevelTasks.length - tasksByStatus.completedCount
+  const draggedTask = draggedTaskId
+    ? topLevelTasks.find((task) => task.id === draggedTaskId) ?? null
+    : null
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    setDraggedTaskId(String(event.active.id))
+  }, [])
+
+  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
+    const taskId = String(event.active.id)
+    const status = event.over?.data.current?.status as TaskStatus | undefined
+    const task = topLevelTasks.find((candidate) => candidate.id === taskId)
+    if (!task || !status || task.status === status) {
+      setDraggedTaskId(null)
+      return
+    }
+
+    // Commit the destination card synchronously so DragOverlay's drop
+    // animation measures that node instead of the card in its source column.
+    flushSync(() => {
+      setOptimisticStatuses((current) => ({ ...current, [task.id]: status }))
+      setDraggedTaskId(null)
+    })
+
+    try {
+      if (onStatusChange) await onStatusChange(task, status)
+      else await useTaskStore.getState().updateTask(task.id, { status })
+    } catch (error) {
+      console.error(`[TaskBoard] Failed to move task ${task.id} to ${status}:`, error)
+    } finally {
+      setOptimisticStatuses((current) => {
+        if (!(task.id in current)) return current
+        const next = { ...current }
+        delete next[task.id]
+        return next
+      })
+    }
+  }, [onStatusChange, topLevelTasks])
 
   return (
-    <section>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-base font-semibold tracking-wide">Task Board</h2>
-        <div className="flex items-center gap-3">
-          {tasksByStatus.completedCount > 0 && (
-            <span className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full">
-              <CheckCircle2 className="size-icon-sm" />
-              {tasksByStatus.completedCount} completed
+    <DndContext
+      sensors={sensors}
+      collisionDetection={boardCollisionDetection}
+      onDragStart={handleDragStart}
+      onDragCancel={() => setDraggedTaskId(null)}
+      onDragEnd={(event) => { void handleDragEnd(event) }}
+    >
+      <section>
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-semibold tracking-wide">Task Board</h2>
+          <div className="flex items-center gap-3">
+            <CompletedDropTarget count={tasksByStatus.completedCount} isDraggingTask={!!draggedTask} />
+            <span className="text-sm text-muted-foreground">
+              {activeTasks} active task{activeTasks !== 1 ? 's' : ''}
             </span>
-          )}
-          <span className="text-sm text-muted-foreground">
-            {activeTasks} active task{activeTasks !== 1 ? 's' : ''}
-          </span>
+          </div>
         </div>
-      </div>
 
-      {isLoading ? (
-        <div className="flex gap-3 pb-2 overflow-x-auto">
-          {COLUMNS.map((col) => (
-            <div key={col.key} className={`min-w-[248px] max-w-[340px] flex-1 rounded-xl ${col.columnBg} border border-border/15`}>
-              <div className="px-3 py-3 border-b border-border/15">
-                <div className="flex items-center gap-2">
-                  <div className={`h-2.5 w-2.5 rounded-full ${col.dot} opacity-40`} />
-                  <span className="text-sm font-semibold text-muted-foreground/50">{col.label}</span>
+        {isLoading ? (
+          <div className="flex gap-3 pb-2 overflow-x-auto">
+            {COLUMNS.map((col) => (
+              <div key={col.key} className={`min-w-[248px] max-w-[340px] flex-1 rounded-xl ${col.columnBg} border border-border/15`}>
+                <div className="px-3 py-3 border-b border-border/15">
+                  <div className="flex items-center gap-2">
+                    <div className={`h-2.5 w-2.5 rounded-full ${col.dot} opacity-40`} />
+                    <span className="text-sm font-semibold text-muted-foreground/50">{col.label}</span>
+                  </div>
+                </div>
+                <div className="p-2 space-y-2">
+                  {[1, 2].map((i) => (
+                    <div key={i} className="rounded-lg border border-border/20 bg-card/40 p-3.5 border-l-2 border-l-gray-500/30">
+                      <div className="h-3 w-24 rounded-md bg-muted/40 animate-pulse mb-2.5" />
+                      <div className="h-2.5 w-36 rounded-md bg-muted/25 animate-pulse mb-2" />
+                      <div className="h-2 w-20 rounded-md bg-muted/15 animate-pulse" />
+                    </div>
+                  ))}
                 </div>
               </div>
-              <div className="p-2 space-y-2">
-                {[1, 2].map((i) => (
-                  <div key={i} className="rounded-lg border border-border/20 bg-card/40 p-3.5 border-l-2 border-l-gray-500/30">
-                    <div className="h-3 w-24 rounded-md bg-muted/40 animate-pulse mb-2.5" />
-                    <div className="h-2.5 w-36 rounded-md bg-muted/25 animate-pulse mb-2" />
-                    <div className="h-2 w-20 rounded-md bg-muted/15 animate-pulse" />
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : topLevelTasks.length === 0 ? (
-        <div className="rounded-xl border border-border/30 bg-card/50 p-8 text-center">
-          <p className="text-sm text-muted-foreground">
-            No tasks yet. Create tasks or sync from an integration to see them here.
-          </p>
-        </div>
-      ) : (
-        <div className="flex gap-3 pb-2 overflow-x-auto">
-          {COLUMNS.map((col) => (
-            <BoardColumn
-              key={col.key}
-              column={col}
-              tasks={tasksByStatus.grouped[col.key] || []}
-              onSelect={handleSelectTask}
-              agentMap={agentMap}
-            />
-          ))}
-        </div>
-      )}
-    </section>
+            ))}
+          </div>
+        ) : topLevelTasks.length === 0 ? (
+          <div className="rounded-xl border border-border/30 bg-card/50 p-8 text-center">
+            <p className="text-sm text-muted-foreground">
+              No tasks yet. Create tasks or sync from an integration to see them here.
+            </p>
+          </div>
+        ) : (
+          <div className="flex gap-3 pb-2 overflow-x-auto">
+            {COLUMNS.map((col) => (
+              <BoardColumn
+                key={col.key}
+                column={col}
+                tasks={tasksByStatus.grouped[col.key] || []}
+                onSelect={handleSelectTask}
+                agentMap={agentMap}
+                isDraggingTask={!!draggedTask}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+      <DragOverlay dropAnimation={{ duration: 160, easing: 'ease-out' }}>
+        {draggedTask ? (
+          <TaskCardOverlay
+            task={draggedTask}
+            agent={draggedTask.agent_id ? agentMap.get(draggedTask.agent_id) : undefined}
+          />
+        ) : null}
+      </DragOverlay>
+    </DndContext>
   )
 }
