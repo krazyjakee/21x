@@ -125,8 +125,10 @@ export function ActivityAnnouncer() {
       }
 
       const expiresAt = session.observedAt + ACTIVITY_STALE_MS
-      scheduleActivityDeadline(expiresAt)
       const fresh = session.observedAt <= now && now < expiresAt
+      // Only a future expiry needs a wake-up. Re-registering one that has
+      // already passed re-armed the shared clock on every tick it caused.
+      if (now < expiresAt) scheduleActivityDeadline(expiresAt)
       if (!previous) {
         // Hydration/first sighting establishes the baseline without speaking.
         connectionRef.current.set(taskId, { lost: !fresh, announcedLost: false })

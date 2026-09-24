@@ -1762,10 +1762,11 @@ export class AgentManager extends EventEmitter {
         this.handleIdleStatus(sessionId, session)
       }
 
-      // Both reads succeeded: the backend answered just now. Only this path
-      // may renew the renderer's freshness deadline; a failed or hung poll
-      // never reaches it (#95).
-      this.publishActivityHeartbeat(sessionId)
+      // Both reads succeeded. Only this path may renew the renderer's
+      // freshness deadline; a failed or hung poll never reaches it (#95).
+      // A read can still succeed from the adapter's memory after its process
+      // has died, so an adapter that knows its backend is gone vetoes it.
+      if (adapter.isSessionAlive?.(sessionId) !== false) this.publishActivityHeartbeat(sessionId)
     } catch (error: unknown) {
       console.error('[AgentManager] Adapter polling error:', error)
     }

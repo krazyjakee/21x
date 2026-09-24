@@ -38,8 +38,18 @@ const deadlines = new Set<number>()
 let timer: ReturnType<typeof setTimeout> | null = null
 /** Small margin so the re-derive happens just after the boundary, not just before. */
 const FIRE_MARGIN_MS = 25
+/**
+ * The monotonic time of the latest tick. Every subscriber re-derives after a
+ * tick at a time no earlier than this, so any deadline at or before it has
+ * already been observed as passed and must not be armed again. Without this, a
+ * caller that re-registers an expired deadline on every tick (as the announcer
+ * once did) turns one stale observation into a self-sustaining 25 ms loop that
+ * wakes every subscribed indicator (#95).
+ */
+let observedThrough = -Infinity
 
 function bump(): void {
+  observedThrough = Math.max(observedThrough, activityNow())
   useActivityClock.setState((s) => ({ tick: s.tick + 1 }))
 }
 
@@ -63,9 +73,13 @@ function fire(): void {
   arm()
 }
 
-/** Re-derive indicators at `at` (monotonic ms). Null does nothing. */
+/**
+ * Re-derive indicators at `at` (monotonic ms). Null does nothing, and so does a
+ * moment the clock has already ticked past: that expiry has been observed.
+ */
 export function scheduleActivityDeadline(at: number | null | undefined): void {
   if (at == null || !Number.isFinite(at)) return
+  if (at <= observedThrough) return
   if (deadlines.has(at)) return
   deadlines.add(at)
   arm()
@@ -81,6 +95,7 @@ export function __resetActivityClock(): void {
   deadlines.clear()
   if (timer) clearTimeout(timer)
   timer = null
+  observedThrough = -Infinity
   useActivityClock.setState({ tick: 0 })
 }
 
