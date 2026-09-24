@@ -137,6 +137,31 @@ describe('VoicePlayback', () => {
     expect(playback.currentSpeechId).toBe('s2')
   })
 
+  it('rejects stale starts, chunks and stops by generation even when IDs are reused', () => {
+    const playback = new VoicePlayback()
+    expect(playback.start('reused', {}, 10)).toBe(true)
+    playback.play('reused', pcm(1), 24000, 10)
+    const current = sources[0]
+
+    expect(playback.start('reused', {}, 9)).toBe(false)
+    playback.play('reused', pcm(1), 24000, 9)
+    expect(playback.stop(9)).toBe(false)
+
+    expect(sources).toHaveLength(1)
+    expect(current.stopped).toBe(false)
+    expect(playback.currentSpeechId).toBe('reused')
+    expect(playback.currentSpeechGeneration).toBe(10)
+  })
+
+  it('does not reopen a generation after that owner was stopped', () => {
+    const playback = new VoicePlayback()
+    expect(playback.start('s1', {}, 20)).toBe(true)
+    expect(playback.stop(20)).toBe(true)
+
+    expect(playback.start('s1', {}, 20)).toBe(false)
+    expect(playback.isPlaying).toBe(false)
+  })
+
   /**
    * Main announces the start of a passage on every push, not once per passage.
    * Dropping the queue on each announcement cut off the sentence that was

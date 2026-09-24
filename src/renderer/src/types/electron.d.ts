@@ -39,6 +39,7 @@ import type { PullRequestDetails } from '@shared/artifacts'
 import type { ArtifactApi } from '@shared/artifacts'
 import type {
   VoiceActionOutcome,
+  VoiceErrorEvent,
   VoiceModelState,
   VoiceRuntimeProgressEvent,
   VoiceRuntimeStatus,
@@ -621,12 +622,12 @@ interface ElectronAPI {
     startTurn: (
       mode: VoiceTurnMode,
       context: VoiceUiContext
-    ) => Promise<{ turnId: string } | { error: string }>
+    ) => Promise<{ turnId: string; turnEpoch?: string } | { error: string }>
     pushAudio: (turnId: string, chunk: Uint8Array) => Promise<void>
     endTurn: (turnId: string) => Promise<void>
-    cancelTurn: (turnId?: string) => Promise<void>
-    confirm: (turnId: string, choice?: { taskId?: string; agentName?: string }) => Promise<{ success: boolean }>
-    dismiss: (turnId: string) => Promise<void>
+    cancelTurn: (turnId?: string, turnEpoch?: string) => Promise<void>
+    confirm: (turnId: string, choice?: { taskId?: string; agentName?: string }, turnEpoch?: string) => Promise<{ success: boolean }>
+    dismiss: (turnId: string, turnEpoch?: string) => Promise<void>
     getRuntime: () => Promise<VoiceRuntimeStatus>
     installRuntime: () => Promise<VoiceRuntimeStatus>
     removeRuntime: () => Promise<VoiceRuntimeStatus>
@@ -641,12 +642,12 @@ interface ElectronAPI {
     expectAnswer: (turnId: string, taskId?: string) => Promise<void>
     answerNotExpected: (taskId?: string) => Promise<void>
     onState: (callback: (event: VoiceStateEvent) => void) => () => void
-    onPartial: (callback: (event: { turnId: string; text: string }) => void) => () => void
-    onFinal: (callback: (event: { turnId: string; text: string }) => void) => () => void
-    onSegment: (callback: (event: { turnId: string; text: string; index: number }) => void) => () => void
+    onPartial: (callback: (event: { turnId: string; turnEpoch: string | null; text: string }) => void) => () => void
+    onFinal: (callback: (event: { turnId: string; turnEpoch: string | null; text: string }) => void) => () => void
+    onSegment: (callback: (event: { turnId: string; turnEpoch: string | null; text: string; index: number }) => void) => () => void
     onOutcome: (callback: (event: VoiceActionOutcome) => void) => () => void
     onStatus: (callback: (event: Partial<VoiceSnapshot> & { model?: VoiceModelState }) => void) => () => void
-    onError: (callback: (event: { message: string; code?: string }) => void) => () => void
+    onError: (callback: (event: VoiceErrorEvent) => void) => () => void
     onNavigate: (callback: (event: { destination: VoiceViewName; taskId: string | null }) => void) => () => void
     onDictate: (callback: (event: { turnId: string; text: string }) => void) => () => void
     onRuntimeProgress: (callback: (event: VoiceRuntimeProgressEvent) => void) => () => void

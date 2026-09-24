@@ -2,8 +2,13 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { EventEmitter } from 'events'
 import { VoiceSessionManager } from './voice-session-manager'
 import type { VoiceWorkerClient } from './voice-worker-client'
-import type { VoiceSpeechService } from './voice-speech-service'
+import type { VoiceSpeechLifecycleOwner, VoiceSpeechService } from './voice-speech-service'
 import type { VoiceActionOutcome, VoiceState } from '../../shared/voice'
+
+const ids = vi.hoisted(() => ({ queue: [] as string[], next: 0 }))
+vi.mock('@paralleldrive/cuid2', () => ({
+  createId: () => ids.queue.shift() ?? `voice-session-speech-test-${++ids.next}`,
+}))
 
 /**
  * How a spoken command turns into speech (design §5.3 and §5.7).
@@ -30,36 +35,61 @@ class FakeWorker extends EventEmitter {
 /** A speech service stand-in. Nothing here produces audio. */
 class FakeSpeech {
   spoken: Array<{ text: string; source: string; taskId?: string; voiceTurnId?: string }> = []
-  expectations: Array<{ taskId: string; voiceTurnId: string }> = []
+  expectations: Array<{ taskId: string; voiceTurnId: string; turnEpoch: string | null }> = []
   forgotten: string[] = []
   stops = 0
   /** What `speak` returns. Set to false to model "nothing was spoken". */
   willSpeak = true
-  private listener: ((speaking: boolean) => void) | null = null
+  /** Optional preparation boundary used to exercise lifecycle replacement races. */
+  speakGate: Promise<void> | null = null
+  private listener: ((speaking: boolean, owner?: VoiceSpeechLifecycleOwner) => void) | null = null
+  private activeOwner: VoiceSpeechLifecycleOwner | undefined
 
-  setSpeakingListener(listener: ((speaking: boolean) => void) | null): void {
+  setSpeakingListener(
+    listener: ((speaking: boolean, owner?: VoiceSpeechLifecycleOwner) => void) | null
+  ): void {
     this.listener = listener
   }
   setRuntimeModulePath = vi.fn()
   shutdown = vi.fn()
   prepare = vi.fn(async () => undefined)
-  expectAnswer(taskId: string, voiceTurnId: string): void {
-    this.expectations.push({ taskId, voiceTurnId })
+  expectAnswer(taskId: string, voiceTurnId: string, turnEpoch: string | null): void {
+    this.expectations.push({ taskId, voiceTurnId, turnEpoch })
+  }
+  answerLifecycleOwner(taskId: string): VoiceSpeechLifecycleOwner | null {
+    const expectation = [...this.expectations].reverse().find((entry) => entry.taskId === taskId)
+    return expectation
+      ? { turnId: expectation.voiceTurnId, turnEpoch: expectation.turnEpoch }
+      : null
   }
   forgetAnswer(taskId: string): void {
     this.forgotten.push(taskId)
   }
-  async speak(request: { text: string; source: string; taskId?: string; voiceTurnId?: string }): Promise<boolean> {
+  async speak(
+    request: { text: string; source: string; taskId?: string; voiceTurnId?: string },
+    _isOwnerCurrent?: () => boolean,
+    owner?: VoiceSpeechLifecycleOwner
+  ): Promise<boolean> {
     this.spoken.push(request)
-    if (this.willSpeak) this.listener?.(true)
+    if (this.speakGate) await this.speakGate
+    if (this.willSpeak) {
+      this.activeOwner = owner
+      this.listener?.(true, owner)
+    }
     return this.willSpeak
   }
-  async speakAgentAnswer(taskId: string, text: string): Promise<boolean> {
-    return this.speak({ text, source: 'agent_answer', taskId })
+  async speakAgentAnswer(
+    taskId: string,
+    text: string,
+    isOwnerCurrent?: () => boolean,
+    owner?: VoiceSpeechLifecycleOwner
+  ): Promise<boolean> {
+    return this.speak({ text, source: 'agent_answer', taskId }, isOwnerCurrent, owner)
   }
   stop(): void {
     this.stops += 1
-    this.listener?.(false)
+    this.listener?.(false, this.activeOwner)
+    this.activeOwner = undefined
   }
   interrupts = 0
   /** Barge-in. Silences the message being read, then stops. */
@@ -72,7 +102,8 @@ class FakeSpeech {
   }
   /** Ends the passage, as the worker would when the last sentence is produced. */
   finish(): void {
-    this.listener?.(false)
+    this.listener?.(false, this.activeOwner)
+    this.activeOwner = undefined
   }
 }
 
@@ -179,6 +210,7 @@ function states(notify: ReturnType<typeof vi.fn>): VoiceState[] {
 
 let ctx: ReturnType<typeof makeManager>
 beforeEach(() => {
+  ids.queue = []
   ctx = makeManager()
 })
 
@@ -193,7 +225,9 @@ describe('after a spoken command', () => {
 
     expect(ctx.manager.getState()).toBe('waiting_for_agent')
     expect(ctx.speech.spoken).toHaveLength(0)
-    expect(ctx.speech.expectations).toEqual([{ taskId: 'task-1', voiceTurnId: turnId }])
+    expect(ctx.speech.expectations).toEqual([
+      { taskId: 'task-1', voiceTurnId: turnId, turnEpoch: expect.any(String) },
+    ])
   })
 
   it('says the short result of every other command', async () => {
@@ -273,6 +307,44 @@ describe('the audio state', () => {
 
     expect(ctx.manager.getState()).toBe('idle')
   })
+
+  it.each([false, true])(
+    'does not let a stale false answer settle replacement waiting state (reused id: %s)',
+    async (reused) => {
+      ids.queue = [
+        'old-turn',
+        'old-epoch',
+        reused ? 'old-turn' : 'replacement-turn',
+        'replacement-epoch',
+      ]
+      const oldTurn = await ctx.manager.startTurn('conversation', {})
+      if ('error' in oldTurn) throw new Error(oldTurn.error)
+      ctx.manager.expectSpokenAnswer(oldTurn.turnId, 'old-task')
+
+      let release!: () => void
+      ctx.speech.speakGate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      ctx.speech.willSpeak = false
+      const staleAnswer = ctx.manager.speakAgentAnswer('old-task', 'The old answer.')
+      await vi.waitFor(() => expect(ctx.speech.spoken).toHaveLength(1))
+
+      await applyOutcome(ctx.manager, {
+        status: 'executed',
+        intent: 'reply_to_agent',
+        message: 'Sent replacement question.',
+        taskId: 'replacement-task',
+      } as never)
+      expect(ctx.manager.getState()).toBe('waiting_for_agent')
+      ctx.notify.mockClear()
+
+      release()
+      expect(await staleAnswer).toBe(false)
+
+      expect(ctx.manager.getState()).toBe('waiting_for_agent')
+      expect(states(ctx.notify)).not.toContain('idle')
+    }
+  )
 })
 
 /**
@@ -316,8 +388,27 @@ describe('only while the microphone is open', () => {
     if ('error' in started) throw new Error(started.error)
     await ctx.manager.speakAgentAnswer('task-1', 'A long answer.')
 
-    ctx.manager.cancelTurn(started.turnId)
+    ctx.manager.cancelTurn(started.turnId, started.turnEpoch)
 
+    expect(ctx.speech.interrupts).toBe(1)
+  })
+
+  it('cancels the owned turn and active speech when voice is disabled', async () => {
+    const started = await ctx.manager.startTurn('conversation', {})
+    if ('error' in started) throw new Error(started.error)
+    await ctx.manager.speakAgentAnswer('task-1', 'A long answer.')
+    const internals = ctx.manager as unknown as { turnId: string | null }
+    const frame = Buffer.alloc(4)
+    ctx.manager.pushAudio(started.turnId, frame)
+    expect(ctx.worker.pushAudio).toHaveBeenCalledOnce()
+    ctx.speech.interrupts = 0
+
+    await ctx.manager.setEnabled(false)
+
+    expect(ctx.worker.cancelTurn).toHaveBeenCalledWith(started.turnId)
+    expect(internals.turnId).toBeNull()
+    ctx.manager.pushAudio(started.turnId, frame)
+    expect(ctx.worker.pushAudio).toHaveBeenCalledOnce()
     expect(ctx.speech.interrupts).toBe(1)
   })
 })

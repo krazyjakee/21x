@@ -642,10 +642,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     pushAudio: (turnId: string, chunk: Uint8Array): Promise<void> =>
       ipcRenderer.invoke('voice:pushAudio', { turnId, chunk }),
     endTurn: (turnId: string): Promise<void> => ipcRenderer.invoke('voice:endTurn', { turnId }),
-    cancelTurn: (turnId?: string): Promise<void> => ipcRenderer.invoke('voice:cancelTurn', { turnId }),
-    confirm: (turnId: string, choice?: { taskId?: string; agentName?: string }): Promise<unknown> =>
-      ipcRenderer.invoke('voice:confirm', { turnId, choice }),
-    dismiss: (turnId: string): Promise<void> => ipcRenderer.invoke('voice:dismiss', { turnId }),
+    cancelTurn: (turnId?: string, turnEpoch?: string): Promise<void> =>
+      ipcRenderer.invoke('voice:cancelTurn', { turnId, turnEpoch }),
+    confirm: (turnId: string, choice?: { taskId?: string; agentName?: string }, turnEpoch?: string): Promise<unknown> =>
+      ipcRenderer.invoke('voice:confirm', { turnId, choice, turnEpoch }),
+    dismiss: (turnId: string, turnEpoch?: string): Promise<void> =>
+      ipcRenderer.invoke('voice:dismiss', { turnId, turnEpoch }),
     getRuntime: (): Promise<unknown> => ipcRenderer.invoke('voice:getRuntime'),
     installRuntime: (): Promise<unknown> => ipcRenderer.invoke('voice:installRuntime'),
     removeRuntime: (): Promise<unknown> => ipcRenderer.invoke('voice:removeRuntime'),
@@ -669,18 +671,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('voice:state', handler)
       return () => ipcRenderer.removeListener('voice:state', handler)
     },
-    onPartial: (callback: (data: { turnId: string; text: string }) => void): (() => void) => {
-      const handler = (_: unknown, d: { turnId: string; text: string }): void => callback(d)
+    onPartial: (callback: (data: { turnId: string; turnEpoch: string | null; text: string }) => void): (() => void) => {
+      const handler = (_: unknown, d: { turnId: string; turnEpoch: string | null; text: string }): void => callback(d)
       ipcRenderer.on('voice:partial', handler)
       return () => ipcRenderer.removeListener('voice:partial', handler)
     },
-    onFinal: (callback: (data: { turnId: string; text: string }) => void): (() => void) => {
-      const handler = (_: unknown, d: { turnId: string; text: string }): void => callback(d)
+    onFinal: (callback: (data: { turnId: string; turnEpoch: string | null; text: string }) => void): (() => void) => {
+      const handler = (_: unknown, d: { turnId: string; turnEpoch: string | null; text: string }): void => callback(d)
       ipcRenderer.on('voice:final', handler)
       return () => ipcRenderer.removeListener('voice:final', handler)
     },
-    onSegment: (callback: (data: { turnId: string; text: string; index: number }) => void): (() => void) => {
-      const handler = (_: unknown, d: { turnId: string; text: string; index: number }): void => callback(d)
+    onSegment: (callback: (data: { turnId: string; turnEpoch: string | null; text: string; index: number }) => void): (() => void) => {
+      const handler = (_: unknown, d: { turnId: string; turnEpoch: string | null; text: string; index: number }): void => callback(d)
       ipcRenderer.on('voice:segment', handler)
       return () => ipcRenderer.removeListener('voice:segment', handler)
     },
@@ -694,8 +696,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('voice:status', handler)
       return () => ipcRenderer.removeListener('voice:status', handler)
     },
-    onError: (callback: (data: { message: string; code?: string }) => void): (() => void) => {
-      const handler = (_: unknown, d: { message: string; code?: string }): void => callback(d)
+    onError: (callback: (data: { message: string; code?: string; turnId?: string; turnEpoch?: string | null }) => void): (() => void) => {
+      const handler = (_: unknown, d: { message: string; code?: string; turnId?: string; turnEpoch?: string | null }): void => callback(d)
       ipcRenderer.on('voice:error', handler)
       return () => ipcRenderer.removeListener('voice:error', handler)
     },

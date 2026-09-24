@@ -26,7 +26,10 @@ const mocks = vi.hoisted(() => ({
   onAgentStatus: vi.fn(),
   onTranscriptChanged: vi.fn()
 }))
-vi.mock('@/lib/ipc-client', () => mocks)
+vi.mock('@/lib/ipc-client', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/ipc-client')>(),
+  ...mocks
+}))
 
 const api = mocks.commanderApi
 

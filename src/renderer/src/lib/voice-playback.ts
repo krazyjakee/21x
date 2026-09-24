@@ -29,12 +29,16 @@ export class VoicePlayback {
   private analyser: AnalyserNode | null = null
   private sources = new Set<AudioBufferSourceNode>()
   private speechId: string | null = null
+  private speechGeneration: number | null = null
+  /** Highest main-process lease observed, retained after playback stops. */
+  private latestSpeechGeneration = 0
   private nextStartTime = 0
   private pending = 0
   private levelTimer: number | null = null
   private handlers: VoicePlaybackHandlers = {}
   private activityRevision = 0
   private readonly activityListeners = new Set<() => void>()
+  private levelData: Uint8Array<ArrayBuffer> | null = null
 
   /** A low-frequency lifecycle signal for truthful activity indicators. It is
    * emitted only when a passage opens/closes or queued audio starts/drains —
@@ -61,6 +65,10 @@ export class VoicePlayback {
     return this.speechId
   }
 
+  get currentSpeechGeneration(): number | null {
+    return this.speechGeneration
+  }
+
   /**
    * True while sentences are queued or sounding.
    *
@@ -80,14 +88,30 @@ export class VoicePlayback {
    * used to drop what was queued — so every new sentence cut off the sentence
    * before it whenever the voice produced faster than it played.
    */
-  start(speechId: string, handlers: VoicePlaybackHandlers = {}): void {
-    if (this.speechId === speechId) return
+  start(
+    speechId: string,
+    handlers: VoicePlaybackHandlers = {},
+    speechGeneration?: number
+  ): boolean {
+    if (speechGeneration !== undefined) {
+      if (speechGeneration < this.latestSpeechGeneration) return false
+      if (speechGeneration === this.latestSpeechGeneration) {
+        if (this.speechGeneration !== speechGeneration || this.speechId !== speechId) return false
+      }
+    }
+    if (
+      this.speechId === speechId &&
+      (speechGeneration === undefined || this.speechGeneration === speechGeneration)
+    ) return true
     this.stop()
+    if (speechGeneration !== undefined) this.latestSpeechGeneration = speechGeneration
     this.handlers = handlers
     this.speechId = speechId
+    this.speechGeneration = speechGeneration ?? null
     this.pending = 0
     this.nextStartTime = 0
     this.notifyActivity()
+    return true
   }
 
   /**
@@ -96,8 +120,14 @@ export class VoicePlayback {
    * A chunk from an older passage is dropped, so a cancelled answer cannot be
    * heard after the user has moved on.
    */
-  play(speechId: string, pcm: Uint8Array, sampleRate: number): void {
+  play(
+    speechId: string,
+    pcm: Uint8Array,
+    sampleRate: number,
+    speechGeneration?: number
+  ): void {
     if (speechId !== this.speechId) return
+    if (speechGeneration !== undefined && speechGeneration !== this.speechGeneration) return
     if (!pcm || pcm.length < 2 || sampleRate <= 0) return
 
     const context = this.ensureContext()
@@ -111,13 +141,16 @@ export class VoicePlayback {
 
     const startAt = Math.max(context.currentTime + SCHEDULING_LEAD_SECONDS, this.nextStartTime)
     this.nextStartTime = startAt + buffer.duration
+    const queueWasEmpty = this.pending === 0
     this.pending += 1
-    this.notifyActivity()
+    if (queueWasEmpty) this.notifyActivity()
     source.onended = () => {
       this.sources.delete(source)
       this.pending -= 1
-      this.notifyActivity()
-      if (this.pending <= 0 && this.speechId === speechId) this.handlers.onDrained?.()
+      if (this.pending <= 0 && this.speechId === speechId) {
+        this.notifyActivity()
+        this.handlers.onDrained?.()
+      }
     }
     this.sources.add(source)
     source.start(startAt)
@@ -125,7 +158,8 @@ export class VoicePlayback {
   }
 
   /** Stops at once and forgets everything queued. This is barge-in. */
-  stop(): void {
+  stop(speechGeneration?: number): boolean {
+    if (speechGeneration !== undefined && speechGeneration !== this.speechGeneration) return false
     const changed = this.speechId !== null || this.pending > 0
     for (const source of this.sources) {
       try {
@@ -137,11 +171,13 @@ export class VoicePlayback {
     }
     this.sources.clear()
     this.speechId = null
+    this.speechGeneration = null
     this.pending = 0
     this.nextStartTime = 0
     this.stopLevelReporting()
     this.handlers.onLevel?.(0)
     if (changed) this.notifyActivity()
+    return true
   }
 
   /** Releases the audio graph. Used when spoken answers are switched off. */
@@ -152,6 +188,12 @@ export class VoicePlayback {
     this.analyser = null
     this.context = null
     await context?.close().catch(() => undefined)
+  }
+
+  /** Restores the singleton lease counter between isolated tests. */
+  __resetForTests(): void {
+    this.stop()
+    this.latestSpeechGeneration = 0
   }
 
   // ── Internals ─────────────────────────────────────────────
@@ -170,19 +212,27 @@ export class VoicePlayback {
     return context
   }
 
+  /**
+   * The loudness of what is sounding now, 0..1, read on demand (#84). 0 when
+   * nothing is queued. No timer and no store write: a speaking ring polls it
+   * per animation frame, only while it is visible.
+   */
+  get outputLevel(): number {
+    const analyser = this.analyser
+    if (!analyser || !this.speechId || this.pending <= 0) return 0
+    if (!this.levelData || this.levelData.length !== analyser.frequencyBinCount) {
+      this.levelData = new Uint8Array(analyser.frequencyBinCount)
+    }
+    return readLevel(analyser, this.levelData)
+  }
+
   private startLevelReporting(): void {
     if (this.levelTimer !== null || !this.handlers.onLevel || !this.analyser) return
     const data = new Uint8Array(this.analyser.frequencyBinCount)
     const tick = (): void => {
       const analyser = this.analyser
       if (!analyser || !this.speechId) return
-      analyser.getByteTimeDomainData(data)
-      let sum = 0
-      for (let i = 0; i < data.length; i++) {
-        const centred = (data[i] - 128) / 128
-        sum += centred * centred
-      }
-      this.handlers.onLevel?.(Math.min(1, Math.sqrt(sum / data.length) * 2))
+      this.handlers.onLevel?.(readLevel(analyser, data))
       this.levelTimer = window.setTimeout(tick, 60)
     }
     tick()
@@ -192,6 +242,17 @@ export class VoicePlayback {
     if (this.levelTimer !== null) window.clearTimeout(this.levelTimer)
     this.levelTimer = null
   }
+}
+
+/** RMS loudness of the analyser's current window, scaled to 0..1. */
+function readLevel(analyser: AnalyserNode, data: Uint8Array<ArrayBuffer>): number {
+  analyser.getByteTimeDomainData(data)
+  let sum = 0
+  for (let i = 0; i < data.length; i++) {
+    const centred = (data[i] - 128) / 128
+    sum += centred * centred
+  }
+  return Math.min(1, Math.sqrt(sum / data.length) * 2)
 }
 
 /** Signed 16-bit little-endian PCM to one mono audio buffer. */

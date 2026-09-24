@@ -7,6 +7,7 @@ function snap(over: Partial<VoiceActivitySnapshot> = {}, capture: Partial<VoiceA
   return {
     passage: null,
     playbackSpeechId: null,
+    playbackSpeechGeneration: null,
     hasQueuedAudio: false,
     storeSpeaking: false,
     ...over,
@@ -20,36 +21,62 @@ describe('deriveVoiceActivity', () => {
   })
 
   it('speaking needs the attributed passage open in playback with audio queued or sounding', () => {
-    const passage = { speechId: 'p1', taskId: 'cap', source: 'agent_answer' }
-    expect(deriveVoiceActivity(snap({ passage, playbackSpeechId: 'p1', hasQueuedAudio: true, storeSpeaking: true }), captain).state).toBe('speaking')
+    const passage = { speechId: 'p1', speechGeneration: 1, taskId: 'cap', source: 'agent_answer' }
+    expect(deriveVoiceActivity(snap({ passage, playbackSpeechId: 'p1', playbackSpeechGeneration: 1, hasQueuedAudio: true, storeSpeaking: true }), captain).state).toBe('speaking')
   })
 
   it('the global speaking flag at synthesis start is not speech', () => {
-    const passage = { speechId: 'p1', taskId: 'cap' }
+    const passage = { speechId: 'p1', speechGeneration: 1, taskId: 'cap' }
     expect(deriveVoiceActivity(snap({ passage, storeSpeaking: true }), captain).state).toBe('unknown')
     expect(deriveVoiceActivity(snap({ storeSpeaking: true }), captain).state).toBe('unknown')
   })
 
   it('an open passage without audio is not speech', () => {
-    const passage = { speechId: 'p1', taskId: 'cap' }
-    expect(deriveVoiceActivity(snap({ passage, playbackSpeechId: 'p1', hasQueuedAudio: false }), captain).state).toBe('unknown')
+    const passage = { speechId: 'p1', speechGeneration: 1, taskId: 'cap' }
+    expect(deriveVoiceActivity(snap({ passage, playbackSpeechId: 'p1', playbackSpeechGeneration: 1, hasQueuedAudio: false }), captain).state).toBe('unknown')
   })
 
   it('another entity speaking is none for this one', () => {
-    const passage = { speechId: 'p1', taskId: 'other' }
-    expect(deriveVoiceActivity(snap({ passage, playbackSpeechId: 'p1', hasQueuedAudio: true, storeSpeaking: true }), captain).state).toBe('none')
+    const passage = { speechId: 'p1', speechGeneration: 1, taskId: 'other' }
+    expect(deriveVoiceActivity(snap({ passage, playbackSpeechId: 'p1', playbackSpeechGeneration: 1, hasQueuedAudio: true, storeSpeaking: true }), captain).state).toBe('none')
+  })
+
+  it('a commander:<session> passage is the Commander speaking, and nobody else', () => {
+    const passage = { speechId: 'p1', speechGeneration: 1, taskId: 'commander:s1', source: 'conversation' }
+    const s = snap({ passage, playbackSpeechId: 'p1', playbackSpeechGeneration: 1, hasQueuedAudio: true, storeSpeaking: true })
+    expect(deriveVoiceActivity(s, { kind: 'commander' }).state).toBe('speaking')
+    expect(deriveVoiceActivity(s, { kind: 'commander', id: 's1' }).state).toBe('speaking')
+    expect(deriveVoiceActivity(s, { kind: 'commander', id: 's2' }).state).toBe('none')
+    expect(deriveVoiceActivity(s, captain).state).toBe('none')
+    expect(deriveVoiceActivity(s, { kind: 'task', id: 'commander:s1' }).state).toBe('none')
+  })
+
+  it('a Commander passage still being synthesised is not yet speech', () => {
+    const passage = { speechId: 'p1', speechGeneration: 1, taskId: 'commander:s1' }
+    expect(deriveVoiceActivity(snap({ passage, storeSpeaking: true }), { kind: 'commander', id: 's1' }).state).toBe('unknown')
   })
 
   it('an unattributed passage is unknown for everyone, including the Commander', () => {
-    const passage = { speechId: 'p1', source: 'read_last_answer' }
-    const s = snap({ passage, playbackSpeechId: 'p1', hasQueuedAudio: true, storeSpeaking: true })
+    const passage = { speechId: 'p1', speechGeneration: 1, source: 'read_last_answer' }
+    const s = snap({ passage, playbackSpeechId: 'p1', playbackSpeechGeneration: 1, hasQueuedAudio: true, storeSpeaking: true })
     expect(deriveVoiceActivity(s, captain).state).toBe('unknown')
     expect(deriveVoiceActivity(s, { kind: 'commander' }).state).toBe('unknown')
   })
 
   it('a stale passage id (playback moved on) is not this passage', () => {
-    const passage = { speechId: 'p1', taskId: 'cap' }
-    expect(deriveVoiceActivity(snap({ passage, playbackSpeechId: 'p2', hasQueuedAudio: true }), captain).state).not.toBe('speaking')
+    const passage = { speechId: 'p1', speechGeneration: 1, taskId: 'cap' }
+    expect(deriveVoiceActivity(snap({ passage, playbackSpeechId: 'p2', playbackSpeechGeneration: 1, hasQueuedAudio: true }), captain).state).not.toBe('speaking')
+  })
+
+  it('a reused passage id with a stale generation is not current speech', () => {
+    const passage = { speechId: 'reused', speechGeneration: 4, taskId: 'cap' }
+    expect(deriveVoiceActivity(snap({
+      passage,
+      playbackSpeechId: 'reused',
+      playbackSpeechGeneration: 5,
+      hasQueuedAudio: true,
+      storeSpeaking: true,
+    }), captain).state).not.toBe('speaking')
   })
 
   it('an open microphone without an owner is unknown, never listening', () => {
@@ -62,9 +89,9 @@ describe('deriveVoiceActivity', () => {
   })
 
   it('speech wins over listening; the open mic is a detail', () => {
-    const passage = { speechId: 'p1', taskId: 'cap' }
+    const passage = { speechId: 'p1', speechGeneration: 1, taskId: 'cap' }
     const r = deriveVoiceActivity(
-      snap({ passage, playbackSpeechId: 'p1', hasQueuedAudio: true }, { open: true, voiceState: 'listening', turnId: 't', owner: captain }),
+      snap({ passage, playbackSpeechId: 'p1', playbackSpeechGeneration: 1, hasQueuedAudio: true }, { open: true, voiceState: 'listening', turnId: 't', owner: captain }),
       captain
     )
     expect(r).toEqual({ state: 'speaking', micOpen: true })

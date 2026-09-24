@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import { voicePlayback } from '@/lib/voice-playback'
 import { voiceCapture } from '@/lib/voice-capture'
 import { useVoiceStore } from '@/stores/voice-store'
+import { commanderSessionOfVoiceKey } from '@shared/commander-call'
 import type { VoiceObservation } from './derive-activity'
 
 /**
@@ -17,21 +18,23 @@ import type { VoiceObservation } from './derive-activity'
  * - `voicePlayback.isPlaying` only means a passage is open. Speaking needs the
  *   open passage to be the one attributed to this entity *and* audio queued
  *   or sounding for it.
- * - Capture has no owner today (the hands-free Commander voice work will
- *   supply one), so listening is `unknown` for every entity unless an owner is
- *   passed in and matches.
+ * - Capture has no owner of its own, so listening is `unknown` for every
+ *   entity unless an owner is passed in and matches. The Commander call store
+ *   passes one for the microphone turn it opened (#84).
+ * - Commander speech is attributed by its `commander:<sessionId>` key.
  *
  * It owns no audio and no microphone, and adds no audio loop.
  */
 
 export interface VoiceTarget {
   kind: 'task' | 'captain' | 'commander'
-  /** Task id for task/Captain targets. */
+  /** Task id for task/Captain targets; the session id (optional) for the Commander. */
   id?: string
 }
 
 export interface VoicePassageAttribution {
   speechId: string
+  speechGeneration: number
   source?: string
   taskId?: string
 }
@@ -41,6 +44,7 @@ export interface VoiceActivitySnapshot {
   passage: VoicePassageAttribution | null
   /** The passage the playback object has open. */
   playbackSpeechId: string | null
+  playbackSpeechGeneration: number | null
   /** Sentences queued or sounding for that passage. */
   hasQueuedAudio: boolean
   /** The store's global flag (synthesis started). Never sufficient on its own. */
@@ -57,12 +61,26 @@ export interface VoiceActivitySnapshot {
 function ownsPassage(passage: VoicePassageAttribution, target: VoiceTarget): boolean | null {
   // A passage without a task is unattributed: nobody can prove it is theirs.
   if (!passage.taskId) return null
-  if (target.kind === 'commander') return false
+  // Commander speech is keyed `commander:<sessionId>` (#84).
+  const commanderSession = commanderSessionOfVoiceKey(passage.taskId)
+  if (target.kind === 'commander') return commanderSession !== null && (!target.id || commanderSession === target.id)
+  if (commanderSession !== null) return false
   return passage.taskId === target.id
 }
 
 function sameTarget(a: VoiceTarget, b: VoiceTarget): boolean {
   return a.kind === b.kind && (a.id ?? null) === (b.id ?? null)
+}
+
+/** True only when the playback passage belongs to this exact entity. */
+export function hasVerifiedPlaybackOwnership(snapshot: VoiceActivitySnapshot, target: VoiceTarget): boolean {
+  const passage = snapshot.passage
+  return Boolean(
+    passage &&
+    snapshot.playbackSpeechId === passage.speechId &&
+    snapshot.playbackSpeechGeneration === passage.speechGeneration &&
+    ownsPassage(passage, target) === true
+  )
 }
 
 /** Pure: the voice claim for one entity. */
@@ -78,7 +96,12 @@ export function deriveVoiceActivity(snapshot: VoiceActivitySnapshot, target: Voi
 
   // Speaking: attributed passage, the same passage open in playback, audio queued/sounding.
   const passage = snapshot.passage
-  const playbackLive = Boolean(passage && snapshot.playbackSpeechId === passage.speechId && snapshot.hasQueuedAudio)
+  const playbackLive = Boolean(
+    passage &&
+    snapshot.playbackSpeechId === passage.speechId &&
+    snapshot.playbackSpeechGeneration === passage.speechGeneration &&
+    snapshot.hasQueuedAudio
+  )
   if (passage && playbackLive) {
     const owned = ownsPassage(passage, target)
     if (owned === true) return { state: 'speaking', ...(micOpen ? { micOpen: true } : {}) }
@@ -106,6 +129,7 @@ interface VoiceAttributionState {
 export const useVoiceAttributionStore = create<VoiceAttributionState>(() => ({ passage: null, version: 0 }))
 
 let attributionOff: (() => void) | null = null
+let latestAttributionGeneration = 0
 
 /** Starts recording which entity each spoken passage belongs to. Idempotent; safe without a bridge. */
 export function ensureVoiceAttribution(): void {
@@ -114,13 +138,26 @@ export function ensureVoiceAttribution(): void {
     const tts = typeof window !== 'undefined' ? window.electronAPI?.voice?.tts : undefined
     if (typeof tts?.onSpeechStart !== 'function' || typeof tts?.onSpeechEnd !== 'function') return
     const offStart = tts.onSpeechStart((event) => {
-      if (!event?.speechId) return
+      if (!event?.speechId || !Number.isSafeInteger(event.speechGeneration) || event.speechGeneration <= 0) return
+      if (event.speechGeneration < latestAttributionGeneration) return
+      if (event.speechGeneration === latestAttributionGeneration) {
+        const current = useVoiceAttributionStore.getState().passage
+        if (!current || current.speechId !== event.speechId) return
+      }
+      latestAttributionGeneration = event.speechGeneration
       useVoiceAttributionStore.setState((s) => ({
-        passage: { speechId: event.speechId, source: event.source, ...(event.taskId ? { taskId: event.taskId } : {}) },
+        passage: {
+          speechId: event.speechId,
+          speechGeneration: event.speechGeneration,
+          source: event.source,
+          ...(event.taskId ? { taskId: event.taskId } : {})
+        },
         version: s.version + 1
       }))
     })
-    const offEnd = tts.onSpeechEnd(() => {
+    const offEnd = tts.onSpeechEnd((event) => {
+      const passage = useVoiceAttributionStore.getState().passage
+      if (!passage || event.speechId !== passage.speechId || event.speechGeneration !== passage.speechGeneration) return
       // The passage may still be draining; the playback object decides. Only re-read.
       useVoiceAttributionStore.setState((s) => ({ version: s.version + 1 }))
     })
@@ -139,6 +176,7 @@ export function readVoiceActivitySnapshot(owner?: VoiceTarget | null): VoiceActi
   return {
     passage: useVoiceAttributionStore.getState().passage,
     playbackSpeechId: voicePlayback.currentSpeechId,
+    playbackSpeechGeneration: voicePlayback.currentSpeechGeneration,
     hasQueuedAudio: voicePlayback.hasQueuedAudio,
     storeSpeaking: voice.speaking,
     capture: {
@@ -169,5 +207,7 @@ export function useVoiceActivity(target: VoiceTarget | null): VoiceObservation |
 export function __resetVoiceAttribution(): void {
   attributionOff?.()
   attributionOff = null
+  latestAttributionGeneration = 0
+  voicePlayback.__resetForTests()
   useVoiceAttributionStore.setState({ passage: null, version: 0 })
 }

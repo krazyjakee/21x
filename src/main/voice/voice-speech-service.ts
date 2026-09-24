@@ -88,6 +88,7 @@ type SpeechBackend = 'worker' | 'elevenlabs'
 interface AnswerExpectation {
   taskId: string
   voiceTurnId: string
+  turnEpoch: string | null
   expiresAt: number
 }
 
@@ -109,11 +110,25 @@ const VOICE_SILENCED_TASKS = 32
 /** And how many messages of each. */
 const VOICE_SILENCED_PARTS_PER_TASK = 64
 
+/** Outlives service replacements so renderer leases remain monotonic. */
+let speechGenerationCounter = 0
+
+export type VoiceSpeechOwner = () => boolean
+
+/** Exact microphone/action lifecycle that owns a spoken passage. */
+export interface VoiceSpeechLifecycleOwner {
+  turnId: string
+  turnEpoch: string | null
+}
+
 interface ActiveSpeech {
   speechId: string
+  generation: number
   source: VoiceSpeechRequest['source']
   backend: SpeechBackend
   taskId?: string
+  /** Present when speech is part of an exact voice-command lifecycle. */
+  lifecycleOwner?: VoiceSpeechLifecycleOwner
   /** Set while the answer is still being written. */
   streaming?: {
     /**
@@ -159,10 +174,12 @@ export class VoiceSpeechService {
    */
   private silenced = new Map<string, Set<string>>()
   /** Set when a spoken sentence was sent but the task was not named. */
-  private anyExpectation: { voiceTurnId: string; expiresAt: number } | null = null
+  private anyExpectation: { voiceTurnId: string; turnEpoch: string | null; expiresAt: number } | null = null
   /** Sample rate of the loaded engine, learned when it reports ready. */
   private sampleRate = 0
-  private onSpeakingChange: ((speaking: boolean) => void) | null = null
+  private onSpeakingChange: ((speaking: boolean, owner?: VoiceSpeechLifecycleOwner) => void) | null = null
+  /** Invalidates engine preparation that is still across an await boundary. */
+  private preparationGeneration = 0
 
   constructor(private options: VoiceSpeechServiceOptions & { modelRootDir: string }) {
     this.models =
@@ -201,7 +218,9 @@ export class VoiceSpeechService {
   }
 
   /** Lets the session manager mirror `speaking` in its own state machine. */
-  setSpeakingListener(listener: ((speaking: boolean) => void) | null): void {
+  setSpeakingListener(
+    listener: ((speaking: boolean, owner?: VoiceSpeechLifecycleOwner) => void) | null
+  ): void {
     this.onSpeakingChange = listener
   }
 
@@ -211,6 +230,9 @@ export class VoiceSpeechService {
   }
 
   shutdown(): void {
+    // A service replacement can leave the renderer alive. Close the current
+    // owned passage before tearing its producer down so every consumer settles.
+    this.stop('cancelled')
     this.worker.stop()
     // Any open ElevenLabs connection is closed with the app, and its late
     // audio is discarded.
@@ -449,12 +471,21 @@ export class VoiceSpeechService {
   // ── Preparing the engine ──────────────────────────────────
 
   /** Loads the selected engine. Never throws: speech must not block the app. */
-  async prepare(): Promise<void> {
+  async prepare(isOwnerCurrent: VoiceSpeechOwner = () => true): Promise<void> {
+    const preparationGeneration = ++this.preparationGeneration
+    const isCurrent = (): boolean =>
+      preparationGeneration === this.preparationGeneration && isOwnerCurrent()
     try {
-      if (this.systemVoices.length === 0) this.systemVoices = await this.listVoices()
+      if (this.systemVoices.length === 0) {
+        const systemVoices = await this.listVoices()
+        if (!isCurrent()) return
+        this.systemVoices = systemVoices
+      }
+
+      if (!isCurrent()) return
 
       if (this.engine() === 'elevenlabs') {
-        await this.prepareElevenLabs()
+        await this.prepareElevenLabs(isCurrent)
         return
       }
 
@@ -472,6 +503,7 @@ export class VoiceSpeechService {
       }
 
       const model = await this.models.resolve(this.modelId())
+      if (!isCurrent()) return
       if (!model) {
         const entry = findTtsManifestEntry(this.modelId())
         this.status = {
@@ -482,6 +514,7 @@ export class VoiceSpeechService {
       }
       this.worker.load({ engine: 'local', model })
     } catch (err) {
+      if (!isCurrent()) return
       this.status = { state: 'error', message: err instanceof Error ? err.message : String(err) }
     }
   }
@@ -492,7 +525,7 @@ export class VoiceSpeechService {
    * listed. Every failure is stated on the settings page; nothing is spoken
    * and nothing else is affected.
    */
-  private async prepareElevenLabs(): Promise<void> {
+  private async prepareElevenLabs(isCurrent: VoiceSpeechOwner): Promise<void> {
     if (!this.elevenLabsDisclosureAccepted()) {
       this.status = { state: 'unavailable', message: 'Accept the ElevenLabs disclosure in Settings → Voice to use this engine.' }
       return
@@ -502,6 +535,7 @@ export class VoiceSpeechService {
       return
     }
     await this.elevenlabs.ensureLoaded()
+    if (!isCurrent()) return
     if (this.elevenlabs.error) {
       this.status = { state: 'error', message: this.elevenlabs.error.message }
       return
@@ -574,10 +608,18 @@ export class VoiceSpeechService {
    * The expectation is consumed by the first answer that arrives, so a second
    * background answer for the same task is not spoken.
    */
-  expectAnswer(taskId: string, voiceTurnId: string, now = Date.now()): void {
+  expectAnswer(
+    taskId: string,
+    voiceTurnId: string,
+    turnEpochOrNow: string | null | number = null,
+    now = Date.now()
+  ): void {
+    const turnEpoch = typeof turnEpochOrNow === 'number' ? null : turnEpochOrNow
+    if (typeof turnEpochOrNow === 'number') now = turnEpochOrNow
     this.expectations.set(taskId, {
       taskId,
       voiceTurnId,
+      turnEpoch,
       expiresAt: now + VOICE_ANSWER_EXPECTATION_MS,
     })
   }
@@ -598,8 +640,14 @@ export class VoiceSpeechService {
    * consumed once and it expires quickly, so a background task finishing later
    * is still not read out.
    */
-  expectAnyAnswer(voiceTurnId: string, now = Date.now()): void {
-    this.anyExpectation = { voiceTurnId, expiresAt: now + VOICE_ANY_ANSWER_EXPECTATION_MS }
+  expectAnyAnswer(
+    voiceTurnId: string,
+    turnEpochOrNow: string | null | number = null,
+    now = Date.now()
+  ): void {
+    const turnEpoch = typeof turnEpochOrNow === 'number' ? null : turnEpochOrNow
+    if (typeof turnEpochOrNow === 'number') now = turnEpochOrNow
+    this.anyExpectation = { voiceTurnId, turnEpoch, expiresAt: now + VOICE_ANY_ANSWER_EXPECTATION_MS }
   }
 
   /** Drops an expectation, for example when the user cancels the turn. */
@@ -630,7 +678,23 @@ export class VoiceSpeechService {
     if (!any) return null
     this.anyExpectation = null
     if (any.expiresAt < now) return null
-    return { taskId, voiceTurnId: any.voiceTurnId, expiresAt: any.expiresAt }
+    return {
+      taskId,
+      voiceTurnId: any.voiceTurnId,
+      turnEpoch: any.turnEpoch,
+      expiresAt: any.expiresAt,
+    }
+  }
+
+  /** Ownership of the answer that would be consumed next, without consuming it. */
+  answerLifecycleOwner(taskId: string, now = Date.now()): VoiceSpeechLifecycleOwner | null {
+    const expectation = this.expectations.get(taskId)
+    if (expectation && expectation.expiresAt >= now) {
+      return { turnId: expectation.voiceTurnId, turnEpoch: expectation.turnEpoch }
+    }
+    const any = this.anyExpectation
+    if (!any || any.expiresAt < now) return null
+    return { turnId: any.voiceTurnId, turnEpoch: any.turnEpoch }
   }
 
   // ── Speaking ──────────────────────────────────────────────
@@ -641,30 +705,49 @@ export class VoiceSpeechService {
    * Called from the `working -> idle` edge in main. It speaks only when the
    * user asked for the answer by voice, unless the user switched that rule off.
    */
-  async speakAgentAnswer(taskId: string, text: string): Promise<boolean> {
+  async speakAgentAnswer(
+    taskId: string,
+    text: string,
+    isOwnerCurrent: VoiceSpeechOwner = () => true,
+    lifecycleOwner?: VoiceSpeechLifecycleOwner
+  ): Promise<boolean> {
     const expectation = this.takeExpectation(taskId)
     if (!expectation && this.onlyVoiceTurns()) return false
+    if (
+      expectation &&
+      lifecycleOwner &&
+      (expectation.voiceTurnId !== lifecycleOwner.turnId ||
+        expectation.turnEpoch !== lifecycleOwner.turnEpoch)
+    ) return false
     return this.speak({
       text,
       source: 'agent_answer',
       taskId,
       ...(expectation ? { voiceTurnId: expectation.voiceTurnId } : {}),
-    })
+    }, isOwnerCurrent, lifecycleOwner)
   }
 
   /**
    * Speaks one passage. Returns false when the passage was not spoken, which
    * is a normal outcome and never an error.
    */
-  async speak(request: VoiceSpeechRequest): Promise<boolean> {
+  async speak(
+    request: VoiceSpeechRequest,
+    isOwnerCurrent: VoiceSpeechOwner = () => true,
+    lifecycleOwner?: VoiceSpeechLifecycleOwner
+  ): Promise<boolean> {
     if (!this.mayspeak(request)) return false
 
     const limit = request.source === 'preview' ? 300 : this.maxChars()
     const prepared = toSpokenText(request.text, limit)
     if (!prepared.text) return false
 
-    if (this.status.state !== 'ready') await this.prepare()
-    if (this.status.state !== 'ready') {
+    const generation = ++speechGenerationCounter
+    const isCurrent = (): boolean =>
+      generation === speechGenerationCounter && isOwnerCurrent()
+
+    if (this.status.state !== 'ready') await this.prepare(isCurrent)
+    if (!isCurrent() || this.status.state !== 'ready') {
       // Nothing is spoken and nothing is broken. The settings page already says
       // what is missing.
       return false
@@ -672,7 +755,12 @@ export class VoiceSpeechService {
 
     // A new passage always replaces the old one. Two voices at once is worse
     // than losing the first passage.
-    this.stop('cancelled')
+    // The replacement owns the same public speaking indicator only when its
+    // exact lifecycle lease matches. A different or unowned replacement must
+    // still settle the old owner; the manager will reject that old terminal
+    // event if a newer lifecycle has already taken over.
+    this.stopActive('cancelled', !this.sameLifecycleOwner(this.active?.lifecycleOwner, lifecycleOwner))
+    if (!isCurrent()) return false
 
     const speechId = createId()
     // The opening is shortened so the first sound arrives sooner. Everything
@@ -681,14 +769,17 @@ export class VoiceSpeechService {
     const voice = this.resolveVoice(request.voiceId)
     this.active = {
       speechId,
+      generation,
       source: request.source,
       backend: this.backend(),
       ...(request.taskId ? { taskId: request.taskId } : {}),
+      ...(lifecycleOwner ? { lifecycleOwner } : {}),
     }
-    this.onSpeakingChange?.(true)
+    this.onSpeakingChange?.(true, lifecycleOwner)
 
     this.options.notifyRenderer(VOICE_TTS_EVENTS.speechStart, {
       speechId,
+      speechGeneration: generation,
       source: request.source,
       text: prepared.text,
       sampleRate: this.sampleRate,
@@ -722,7 +813,9 @@ export class VoiceSpeechService {
   async beginStreamingAnswer(
     taskId: string,
     parts?: VoiceAnswerPart[],
-    source: Extract<VoiceSpeechSource, 'agent_answer' | 'conversation'> = 'agent_answer'
+    source: Extract<VoiceSpeechSource, 'agent_answer' | 'conversation'> = 'agent_answer',
+    isOwnerCurrent: VoiceSpeechOwner = () => true,
+    lifecycleOwner?: VoiceSpeechLifecycleOwner
   ): Promise<boolean> {
     if (this.active?.streaming && this.active.taskId === taskId) return true
 
@@ -734,26 +827,40 @@ export class VoiceSpeechService {
     if (source === 'agent_answer') {
       const expectation = this.takeExpectation(taskId)
       if (!expectation && this.onlyVoiceTurns()) return false
+      if (
+        expectation &&
+        lifecycleOwner &&
+        (expectation.voiceTurnId !== lifecycleOwner.turnId ||
+          expectation.turnEpoch !== lifecycleOwner.turnEpoch)
+      ) return false
       if (!this.isEnabled()) return false
     }
 
-    if (this.status.state !== 'ready') await this.prepare()
-    if (this.status.state !== 'ready') return false
+    const generation = ++speechGenerationCounter
+    const isCurrent = (): boolean =>
+      generation === speechGenerationCounter && isOwnerCurrent()
 
-    this.stop('cancelled')
+    if (this.status.state !== 'ready') await this.prepare(isCurrent)
+    if (!isCurrent() || this.status.state !== 'ready') return false
+
+    this.stopActive('cancelled', !this.sameLifecycleOwner(this.active?.lifecycleOwner, lifecycleOwner))
+    if (!isCurrent()) return false
     const speechId = createId()
     const voice = this.resolveVoice()
     this.active = {
       speechId,
+      generation,
       source,
       backend: this.backend(),
       taskId,
+      ...(lifecycleOwner ? { lifecycleOwner } : {}),
       streaming: { spoken: new Map(), charsSent: 0, truncated: false, started: false },
     }
-    this.onSpeakingChange?.(true)
+    this.onSpeakingChange?.(true, lifecycleOwner)
 
     this.options.notifyRenderer(VOICE_TTS_EVENTS.speechStart, {
       speechId,
+      speechGeneration: generation,
       source,
       text: '',
       taskId,
@@ -833,6 +940,7 @@ export class VoiceSpeechService {
     const active = this.active as ActiveSpeech
     this.options.notifyRenderer(VOICE_TTS_EVENTS.speechStart, {
       speechId,
+      speechGeneration: active.generation,
       source: active.source,
       text: prepared.text,
       taskId,
@@ -905,17 +1013,40 @@ export class VoiceSpeechService {
 
   /** Stops the current passage at once, without silencing anything. */
   stop(reason: VoiceSpeechEndEvent['reason'] = 'cancelled'): void {
+    this.invalidatePendingSpeech()
+    this.stopActive(reason)
+  }
+
+  /** Stops only the active passage, preserving the lease of its replacement. */
+  private stopActive(
+    reason: VoiceSpeechEndEvent['reason'],
+    settleLifecycle = true
+  ): void {
     const active = this.active
     if (!active) return
     this.active = null
     // The passage is stopped on the producer it was given to — which may not
     // be the selected engine any more, if the user changed engines mid-reply.
     this.cancelPassage(active)
-    this.onSpeakingChange?.(false)
+    if (settleLifecycle) this.onSpeakingChange?.(false, active.lifecycleOwner)
     this.options.notifyRenderer(VOICE_TTS_EVENTS.speechEnd, {
       speechId: active.speechId,
+      speechGeneration: active.generation,
       reason,
     } satisfies VoiceSpeechEndEvent)
+  }
+
+  /** True only for two complete, exact lifecycle leases. */
+  private sameLifecycleOwner(
+    left: VoiceSpeechLifecycleOwner | undefined,
+    right: VoiceSpeechLifecycleOwner | undefined
+  ): boolean {
+    return Boolean(
+      left &&
+      right &&
+      left.turnId === right.turnId &&
+      left.turnEpoch === right.turnEpoch
+    )
   }
 
   get speaking(): boolean {
@@ -1000,6 +1131,7 @@ export class VoiceSpeechService {
     if (chunk.sampleRate > 0) this.sampleRate = chunk.sampleRate
     this.options.notifyRenderer(VOICE_TTS_EVENTS.speechChunk, {
       speechId: chunk.speechId,
+      speechGeneration: this.active.generation,
       index: chunk.index,
       // A plain byte array crosses the Electron bridge as a structured clone.
       pcm: new Uint8Array(chunk.pcm),
@@ -1010,25 +1142,35 @@ export class VoiceSpeechService {
 
   private onDone(speechId: string, cancelled: boolean): void {
     if (!this.active || this.active.speechId !== speechId) return
+    const active = this.active
     this.active = null
-    this.onSpeakingChange?.(false)
+    this.onSpeakingChange?.(false, active?.lifecycleOwner)
     this.options.notifyRenderer(VOICE_TTS_EVENTS.speechEnd, {
       speechId,
+      speechGeneration: active.generation,
       reason: cancelled ? 'cancelled' : 'complete',
     } satisfies VoiceSpeechEndEvent)
   }
 
   private onError(message: string, speechId?: string): void {
-    if (speechId && this.active?.speechId !== speechId) return
-    const id = speechId ?? this.active?.speechId
+    const active = this.active
+    if (!speechId || !active || active.speechId !== speechId) return
+    // A backend load error without a passage ID may belong to preparation
+    // retired by a later stop/replacement. It must not cancel current audio.
+    const id = speechId
     this.active = null
-    this.onSpeakingChange?.(false)
-    if (!id) return
+    this.onSpeakingChange?.(false, active.lifecycleOwner)
     this.options.notifyRenderer(VOICE_TTS_EVENTS.speechEnd, {
       speechId: id,
+      speechGeneration: active.generation,
       reason: 'error',
       message,
     } satisfies VoiceSpeechEndEvent)
+  }
+
+  private invalidatePendingSpeech(): void {
+    speechGenerationCounter += 1
+    this.preparationGeneration += 1
   }
 
   // ── Snapshots ─────────────────────────────────────────────

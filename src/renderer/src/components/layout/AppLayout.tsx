@@ -31,6 +31,7 @@ import { useActiveTaskActions } from './hooks/use-active-task-actions'
 import { useGlobalShortcuts } from './hooks/use-global-shortcuts'
 import { transitionTaskFromBoard } from '@/components/dashboard/task-board-transition'
 import type { TaskBoardTransitionResult } from '@/components/dashboard/task-board-transition'
+import { CommanderCallHost } from '@/components/commander/CommanderCallHost'
 
 // Lazy-load heavy workspaces so they are only imported when their view is active;
 // this keeps the initial bundle small and first render fast.
@@ -336,6 +337,7 @@ export function AppLayout() {
       <ProgressToastStack />
 
       {/* Voice transcript bubble, audio state, and confirmation cards */}
+      <CommanderCallHost />
       <VoiceOverlay />
     </>
   )

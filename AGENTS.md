@@ -326,10 +326,10 @@ sent to the desktop window only, never to a mobile client.
 | `voice:setEnabled` | renderer -> main | `{ enabled }` | `VoiceSnapshot` |
 | `voice:getPermission` | renderer -> main | — | `{ status }` |
 | `voice:requestPermission` | renderer -> main | — | `{ status }` |
-| `voice:startTurn` | renderer -> main | `{ mode, context }` | `{ turnId }` or `{ error }` |
+| `voice:startTurn` | renderer -> main | `{ mode, context }` | `{ turnId, turnEpoch }` or `{ error }` |
 | `voice:pushAudio` | renderer -> main | `{ turnId, chunk }` — 16 kHz mono PCM | — |
 | `voice:endTurn` | renderer -> main | `{ turnId }` | — |
-| `voice:cancelTurn` | renderer -> main | `{ turnId? }` | — |
+| `voice:cancelTurn` | renderer -> main | `{ turnId?, turnEpoch? }` | — |
 | `voice:confirm` | renderer -> main | `{ turnId, choice? }` | `{ success }` |
 | `voice:dismiss` | renderer -> main | `{ turnId }` | — |
 | `voice:getRuntime` | renderer -> main | — | `VoiceRuntimeStatus` |

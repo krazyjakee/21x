@@ -1,6 +1,6 @@
 # Activity indicators
 
-Status of GitHub [#95](https://github.com/krazyjakee/21x/issues/95): **task surfaces complete**. This covers the shared vocabulary, freshness rules, indicator primitives, the voice adapter, and every task-session surface — canvas panels, the status bar, the nav rail, the Captain entry, the dashboard hero, board cards and the task header bar. The Commander's own surfaces are delivered by the Commander redesign instead of here (see [Not wired here](#not-wired-here)).
+Status of GitHub [#95](https://github.com/krazyjakee/21x/issues/95): **task surfaces complete plus Commander call integration**. This covers the shared vocabulary, freshness rules, indicator primitives, the voice adapter, every task-session surface — canvas panels, the status bar, the nav rail, the Captain entry, the dashboard hero, board cards and the task header bar — and app-level Commander call ownership. The remaining Commander presence surfaces come in follow-up work (see [Not wired here](#not-wired-here)).
 
 The indicators answer one question, "is the Commander, a Captain or a task session doing something right now?", and they never claim activity without evidence. **Unknown is not idle, and idle is not running.**
 
@@ -66,8 +66,15 @@ All evidence is stamped with monotonic time (`performance.now()`, via `activityN
 
 - The store's `speaking` flag is set when synthesis *starts*, before any audio, and it names no speaker. On its own it never counts as speaking.
 - `speaking` needs three things: the passage attributed by its `speechStart` event (`taskId`) belongs to this entity, the same passage is open in `voicePlayback`, and `hasQueuedAudio` is true.
-- Unattributed passages give `unknown` for everyone. Today the Commander has no attributed passages.
-- The microphone has no owner yet, so `listening` is `unknown` unless a caller passes a provable owner. The hands-free follow-up supplies one.
+- Playback publishes only queue/passage boundary changes (never analyser
+  frames), so the first PCM, a drain, a later sentence and cancellation all
+  re-derive the claim immediately.
+- Unattributed passages give `unknown` for everyone. Commander passages use
+  the shared `commander:<sessionId>` key, so only that Commander session may
+  claim them.
+- The microphone has no owner of its own, so `listening` is `unknown` unless a
+  caller passes a provable owner. The app-level Commander call host supplies
+  the session whose microphone turn it opened.
 
 The adapter controls no audio or microphone and adds no audio loop. #89 owns the real output-level speaking ring. Here speaking is a static speaker icon and ring.
 
@@ -137,15 +144,13 @@ The Commander's own surfaces are **not** wired from this document. The Commander
 
 - Commander chat and the presence stage — [#85](https://github.com/krazyjakee/21x/issues/85).
 - The speaking ring driven by the real output level — [#89](https://github.com/krazyjakee/21x/issues/89), which owns `ActivityRing`'s moving variant and supplies `lib/activity/voice-activity-adapter` with a provable playback owner.
-- Picture-in-picture, the action toast and the call-lifetime mounting — [#87](https://github.com/krazyjakee/21x/issues/87).
+- Picture-in-picture and the action toast — [#87](https://github.com/krazyjakee/21x/issues/87). App-level call-lifetime mounting is already wired by the Commander call host.
 - The Commander `CallAnnouncer` — [#91](https://github.com/krazyjakee/21x/issues/91). The `ActivityAnnouncer` here deliberately says nothing about the Commander.
 
 Two pieces of plumbing remain outstanding and belong to whoever touches those files next:
 
-- An authoritative Commander idle snapshot. Until it exists, a quiet Commander turn becomes `unknown` after 15 s — correct, but coarse.
+- An authoritative Commander idle snapshot. Until it exists, a quiet Commander turn becomes `unknown` after 15 s — correct, but coarse. The call's verified speaking and listening claims do not rely on that stale turn observation.
 - A typed transport for the new `agent:status` fields in `electron.d.ts`/preload. The fields pass through today because preload forwards the payload unchanged, and the renderer validates them at runtime (`readAgentStatusActivityMeta`).
-
-The Commander's `listening` state stays `unknown` until a caller supplies a provable microphone owner.
 
 ## Tests
 

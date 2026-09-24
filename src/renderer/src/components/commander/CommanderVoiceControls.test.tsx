@@ -14,15 +14,23 @@ const mocks = vi.hoisted(() => {
     speaking: false,
     tts: { enabled: true, status: { state: 'ready' as string, message: '' } },
     result: null as { message: string } | null,
+    captionOwner: null as string | null,
+    setCaptionOwner: vi.fn((owner: string | null) => {
+      voiceState.captionOwner = owner
+    }),
     setEnabled: vi.fn(async (enabled: boolean) => {
       voiceState.enabled = enabled
       voiceState.permission = enabled ? 'granted' : voiceState.permission
     }),
     startTurn: vi.fn(async (mode: string) => {
-      if (mode === 'conversation') voiceState.turnId = 'voice-turn-1'
+      if (mode === 'conversation') {
+        voiceState.turnId = 'voice-turn-1'
+        voiceState.state = 'listening'
+      }
     }),
     cancel: vi.fn(async () => {
       voiceState.turnId = null
+      voiceState.state = 'idle'
     }),
     stopPlaybackNow: vi.fn(),
     initializeTts: vi.fn(async () => undefined),
@@ -41,6 +49,7 @@ const mocks = vi.hoisted(() => {
 })
 
 vi.mock('@/lib/ipc-client', () => ({
+  commanderApi: { onEvent: vi.fn(() => () => {}) },
   commanderVoiceApi: {
     setActive: mocks.setActive,
     bargeIn: mocks.bargeIn,
@@ -68,7 +77,15 @@ vi.mock('@/stores/voice-store', () => {
 })
 
 import { insertAndSubmit, clearDictationTarget } from '@/lib/voice-dictation-target'
+import { useUIStore } from '@/stores/ui-store'
+import { SettingsTab } from '@/types'
 import { CommanderVoiceControls } from './CommanderVoiceControls'
+import { CommanderCallHost } from './CommanderCallHost'
+import { __resetCommanderCall } from '@/stores/commander-call-store'
+
+function renderVoice() {
+  return render(<><CommanderCallHost /><CommanderVoiceControls /></>)
+}
 
 beforeEach(() => {
   mocks.voiceState.available = true
@@ -77,26 +94,30 @@ beforeEach(() => {
   mocks.voiceState.engine.state = 'ready'
   mocks.voiceState.permission = 'granted'
   mocks.voiceState.turnId = null
+  mocks.voiceState.state = 'idle'
   mocks.voiceState.partial = ''
   mocks.voiceState.speaking = false
   mocks.voiceState.tts.enabled = true
   mocks.voiceState.tts.status.state = 'ready'
   mocks.voiceState.tts.status.message = ''
   mocks.voiceState.result = null
+  mocks.voiceState.captionOwner = null
   mocks.commanderState.selectedSessionId = 'session-1'
   mocks.commanderState.streaming = {}
   vi.clearAllMocks()
   clearDictationTarget()
+  __resetCommanderCall()
 })
 
 afterEach(() => {
   cleanup()
   clearDictationTarget()
+  __resetCommanderCall()
 })
 
 describe('Commander voice conversation', () => {
   it('never focuses its aria-hidden routing buffer when a voice segment arrives', async () => {
-    render(<><textarea aria-label="Typed draft" defaultValue="keep this" /><CommanderVoiceControls /></>)
+    render(<><textarea aria-label="Typed draft" defaultValue="keep this" /><CommanderCallHost /><CommanderVoiceControls /></>)
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
     await waitFor(() => expect(mocks.voiceState.startTurn).toHaveBeenCalled())
     const draft = screen.getByRole('textbox', { name: 'Typed draft' })
@@ -109,10 +130,13 @@ describe('Commander voice conversation', () => {
   })
 
   it('starts listening immediately and sends every pause-delimited utterance', async () => {
-    const view = render(<CommanderVoiceControls />)
+    const view = renderVoice()
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
 
-    await waitFor(() => expect(mocks.voiceState.startTurn).toHaveBeenCalledWith('conversation'))
+    await waitFor(() => expect(mocks.voiceState.startTurn).toHaveBeenCalledWith(
+      'conversation',
+      { signal: expect.any(AbortSignal) }
+    ))
     expect(mocks.setActive).toHaveBeenCalledWith('session-1')
     expect(screen.queryByTestId('commander-voice-talk')).toBeNull()
     expect(await screen.findByText('Listening…')).toBeTruthy()
@@ -130,7 +154,7 @@ describe('Commander voice conversation', () => {
   it('shows a useful setup error instead of silently doing nothing', async () => {
     mocks.voiceState.runtime.installed = false
     mocks.voiceState.engine.state = 'model_missing'
-    render(<CommanderVoiceControls />)
+    renderVoice()
 
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
 
@@ -142,24 +166,24 @@ describe('Commander voice conversation', () => {
   it('enables an installed microphone path from the same click', async () => {
     mocks.voiceState.enabled = false
     mocks.voiceState.permission = 'not-determined'
-    render(<CommanderVoiceControls />)
+    renderVoice()
 
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
 
     await waitFor(() => expect(mocks.voiceState.setEnabled).toHaveBeenCalledWith(true))
-    expect(mocks.voiceState.startTurn).toHaveBeenCalledWith('conversation')
+    expect(mocks.voiceState.startTurn).toHaveBeenCalledWith('conversation', { signal: expect.any(AbortSignal) })
   })
 
   it('refreshes and enables a saved reply voice from the same click', async () => {
     mocks.voiceState.tts.enabled = false
     mocks.voiceState.tts.status.state = 'loading'
-    render(<CommanderVoiceControls />)
+    renderVoice()
 
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
 
     await waitFor(() => expect(mocks.voiceState.initializeTts).toHaveBeenCalled())
     expect(mocks.voiceState.setTtsEnabled).toHaveBeenCalledWith(true)
-    expect(mocks.voiceState.startTurn).toHaveBeenCalledWith('conversation')
+    expect(mocks.voiceState.startTurn).toHaveBeenCalledWith('conversation', { signal: expect.any(AbortSignal) })
   })
 
   it('shows the saved engine failure after trying to prepare it', async () => {
@@ -169,11 +193,69 @@ describe('Commander voice conversation', () => {
     mocks.voiceState.setTtsEnabled.mockImplementationOnce(async () => {
       mocks.voiceState.tts.enabled = true
     })
-    render(<CommanderVoiceControls />)
+    renderVoice()
 
     fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('ElevenLabs is temporarily unavailable')
     expect(mocks.voiceState.startTurn).not.toHaveBeenCalled()
+  })
+
+  it('owns the half-heard words while its conversation runs, so they show once', async () => {
+    renderVoice()
+    fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
+    await waitFor(() => expect(mocks.voiceState.startTurn).toHaveBeenCalled())
+    expect(mocks.voiceState.captionOwner).toBe('commander-voice')
+
+    fireEvent.click(screen.getByLabelText('Turn voice mode off'))
+    await waitFor(() => expect(mocks.voiceState.captionOwner).toBeNull())
+  })
+
+  it('does not show words from another microphone as its own', async () => {
+    mocks.voiceState.turnId = 'someone-else'
+    mocks.voiceState.partial = 'dictating a task'
+    renderVoice()
+    fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Another microphone is already listening')
+    expect(screen.queryByText('dictating a task')).toBeNull()
+    expect(mocks.voiceState.captionOwner).toBeNull()
+  })
+})
+
+describe('Commander voice not ready', () => {
+  it('names the reason in visible text before any click', async () => {
+    mocks.voiceState.runtime.installed = false
+    renderVoice()
+
+    const label = await screen.findByTestId('commander-voice-setup')
+    expect(label).toHaveTextContent('Voice not installed')
+    expect(screen.getByLabelText('Turn voice mode on').getAttribute('aria-describedby')).toBe(label.id)
+  })
+
+  it('says the microphone is blocked', async () => {
+    mocks.voiceState.permission = 'denied'
+    renderVoice()
+    expect(await screen.findByTestId('commander-voice-setup')).toHaveTextContent('Mic blocked')
+  })
+
+  it('shows nothing extra when voice is ready', async () => {
+    renderVoice()
+    await screen.findByLabelText('Turn voice mode on')
+    expect(screen.queryByTestId('commander-voice-setup')).toBeNull()
+  })
+
+  it('offers a fix that opens Settings → Voice', async () => {
+    mocks.voiceState.runtime.installed = false
+    useUIStore.setState({ activeModal: null, settingsTab: SettingsTab.GENERAL })
+    renderVoice()
+
+    fireEvent.click(await screen.findByLabelText('Turn voice mode on'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Install the local speech runtime')
+    fireEvent.click(screen.getByTestId('commander-voice-fix'))
+
+    expect(useUIStore.getState().activeModal).toBe('settings')
+    expect(useUIStore.getState().settingsTab).toBe(SettingsTab.VOICE)
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 })

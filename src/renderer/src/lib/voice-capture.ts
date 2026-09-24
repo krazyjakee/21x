@@ -63,6 +63,8 @@ export class VoiceCapture {
   private source: MediaStreamAudioSourceNode | null = null
   private pending: number[] = []
   private handlers: VoiceCaptureHandlers | null = null
+  /** Invalidates a getUserMedia request whose result arrives after Stop/restart. */
+  private startGeneration = 0
 
   get isCapturing(): boolean {
     return this.stream !== null
@@ -97,15 +99,25 @@ export class VoiceCapture {
     return this.ready
   }
 
-  async start(handlers: VoiceCaptureHandlers, deviceId?: string): Promise<boolean> {
+  async start(handlers: VoiceCaptureHandlers, deviceId?: string, signal?: AbortSignal): Promise<boolean> {
     if (this.stream) return true
+    const mine = ++this.startGeneration
+    let stream: MediaStream | null = null
+    let streamStopped = false
+    const stopPendingStream = (): void => {
+      if (!stream || streamStopped) return
+      streamStopped = true
+      stream.getTracks().forEach((track) => track.stop())
+    }
+    signal?.addEventListener('abort', stopPendingStream, { once: true })
     try {
       await this.ensureGraph()
+      if (signal?.aborted || mine !== this.startGeneration) return false
       const context = this.context
       const node = this.node
       if (!context || !node) throw new Error('The audio graph is not available.')
 
-      this.stream = await navigator.mediaDevices.getUserMedia({
+      stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
           channelCount: 1,
@@ -114,9 +126,18 @@ export class VoiceCapture {
           autoGainControl: true,
         },
       })
+      if (signal?.aborted || mine !== this.startGeneration) {
+        stopPendingStream()
+        return false
+      }
       // A context can be suspended by the browser between turns.
       if (context.state === 'suspended') await context.resume()
+      if (signal?.aborted || mine !== this.startGeneration) {
+        stopPendingStream()
+        return false
+      }
 
+      this.stream = stream
       this.handlers = handlers
       this.source = context.createMediaStreamSource(this.stream)
       this.source.connect(node)
@@ -124,14 +145,21 @@ export class VoiceCapture {
       // the user never hears their own microphone.
       return true
     } catch (err) {
-      this.stop()
-      handlers.onError?.(describe(err))
+      stopPendingStream()
+      // Do not stop a newer capture that won the ownership race.
+      const current = mine === this.startGeneration
+      if (current) this.stop()
+      // End/replace is ordinary cancellation, not a microphone failure.
+      if (current && !signal?.aborted) handlers.onError?.(describe(err))
       return false
+    } finally {
+      signal?.removeEventListener('abort', stopPendingStream)
     }
   }
 
   /** Flushes whatever is buffered and releases the microphone. */
   stop(): void {
+    this.startGeneration += 1
     this.flush()
     this.source?.disconnect()
     this.stream?.getTracks().forEach((track) => track.stop())

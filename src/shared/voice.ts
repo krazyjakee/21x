@@ -31,8 +31,8 @@ export type VoiceState =
   | 'error'
 
 /**
- * Allowed transitions. `error` and `idle` are reachable from every active
- * state (cancellation and failure), so they are not repeated in each row.
+ * Allowed transitions. Terminal readiness and failure states are reachable
+ * from every active state, so they are not repeated in each row.
  */
 export const VOICE_TRANSITIONS: Record<VoiceState, readonly VoiceState[]> = {
   disabled: ['permission_needed', 'model_needed', 'idle'],
@@ -42,15 +42,24 @@ export const VOICE_TRANSITIONS: Record<VoiceState, readonly VoiceState[]> = {
   // sample in settings: both start speech with no turn open.
   idle: ['listening', 'permission_needed', 'model_needed', 'disabled', 'speaking'],
   listening: ['transcribing', 'idle'],
-  transcribing: ['awaiting_confirmation', 'executing', 'waiting_for_agent', 'speaking', 'idle'],
-  awaiting_confirmation: ['executing', 'idle'],
-  executing: ['waiting_for_agent', 'speaking', 'idle'],
-  waiting_for_agent: ['speaking', 'idle'],
+  transcribing: ['awaiting_confirmation', 'executing', 'waiting_for_agent', 'speaking', 'listening', 'idle'],
+  // A confirmation may remain visible while the user starts a new Commander
+  // call. The new microphone turn owns the lifecycle even though the older
+  // card remains independently actionable.
+  awaiting_confirmation: ['executing', 'listening', 'idle'],
+  executing: ['waiting_for_agent', 'speaking', 'listening', 'idle'],
+  waiting_for_agent: ['speaking', 'listening', 'idle'],
   speaking: ['idle'],
   error: ['idle', 'disabled'],
 } as const
 
-const ALWAYS_REACHABLE: readonly VoiceState[] = ['idle', 'error', 'disabled']
+const ALWAYS_REACHABLE: readonly VoiceState[] = [
+  'idle',
+  'error',
+  'disabled',
+  'model_needed',
+  'permission_needed',
+]
 
 /** True when `to` is a legal next state after `from`. */
 export function canTransition(from: VoiceState, to: VoiceState): boolean {
@@ -71,6 +80,18 @@ export function canTransition(from: VoiceState, to: VoiceState): boolean {
  * runs the parser either, so it cannot execute a task action.
  */
 export type VoiceTurnMode = 'dictation' | 'command' | 'conversation'
+
+/**
+ * Main-process ownership for one microphone turn.
+ *
+ * `turnId` identifies provider traffic. `turnEpoch` identifies the particular
+ * start that published it, so a late cancellation cannot target a replacement
+ * start even if a provider or test double reuses the same turn ID.
+ */
+export interface VoiceTurnHandle {
+  turnId: string
+  turnEpoch?: string
+}
 
 /** What the renderer is showing when the turn starts. Main trusts nothing here. */
 export interface VoiceUiContext {
@@ -132,7 +153,7 @@ export const VOICE_CONFIRM_CONFIDENCE = 0.8
 // ── Actions ─────────────────────────────────────────────────
 
 /** Main -> renderer answer to one command turn. */
-export type VoiceActionOutcome =
+export type VoiceActionOutcome = (
   /** Nothing ran. The renderer must show a confirmation card. */
   | {
       status: 'needs_confirmation'
@@ -152,6 +173,10 @@ export type VoiceActionOutcome =
    */
   | { status: 'completed'; turnId: string; segments: number }
   | { status: 'cancelled'; turnId: string }
+) & {
+  /** Exact start lease that produced this outcome, when supported by main. */
+  turnEpoch?: string
+}
 
 export interface VoiceCandidate {
   id: string
@@ -353,7 +378,17 @@ export const VOICE_EVENTS = {
 export interface VoiceStateEvent {
   state: VoiceState
   turnId?: string | null
+  /** Exact start lease that owns this lifecycle transition. */
+  turnEpoch?: string | null
   detail?: string
+}
+
+/** A runtime failure, optionally owned by the exact microphone start it ended. */
+export interface VoiceErrorEvent {
+  message: string
+  code?: string
+  turnId?: string
+  turnEpoch?: string | null
 }
 
 export interface VoiceStatusEvent {
@@ -397,4 +432,3 @@ export const MOBILE_VOICE_CAPABILITIES: VoiceCapabilities = {
   tts: false,
   wakeWord: false,
 }
-

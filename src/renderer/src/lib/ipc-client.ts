@@ -4,6 +4,7 @@ import type { ArtifactApi } from '@shared/artifacts'
 import type {
   MicrophonePermission,
   VoiceActionOutcome,
+  VoiceErrorEvent,
   VoiceModelState,
   VoiceRuntimeProgressEvent,
   VoiceRuntimeStatus,
@@ -778,15 +779,21 @@ export const voiceApi = {
   getPermission: (): Promise<{ status: MicrophonePermission }> => window.electronAPI.voice.getPermission(),
   requestPermission: (): Promise<{ status: MicrophonePermission }> =>
     window.electronAPI.voice.requestPermission(),
-  startTurn: (mode: VoiceTurnMode, context: VoiceUiContext): Promise<{ turnId: string } | { error: string }> =>
+  startTurn: (mode: VoiceTurnMode, context: VoiceUiContext): Promise<{ turnId: string; turnEpoch?: string } | { error: string }> =>
     window.electronAPI.voice.startTurn(mode, context),
   pushAudio: (turnId: string, chunk: Uint8Array): Promise<void> =>
     window.electronAPI.voice.pushAudio(turnId, chunk),
   endTurn: (turnId: string): Promise<void> => window.electronAPI.voice.endTurn(turnId),
-  cancelTurn: (turnId?: string): Promise<void> => window.electronAPI.voice.cancelTurn(turnId),
-  confirm: (turnId: string, choice?: { taskId?: string; agentName?: string }): Promise<{ success: boolean }> =>
-    window.electronAPI.voice.confirm(turnId, choice),
-  dismiss: (turnId: string): Promise<void> => window.electronAPI.voice.dismiss(turnId),
+  cancelTurn: (turnId?: string, turnEpoch?: string): Promise<void> =>
+    window.electronAPI.voice.cancelTurn(turnId, turnEpoch),
+  confirm: (turnId: string, choice?: { taskId?: string; agentName?: string }, turnEpoch?: string): Promise<{ success: boolean }> =>
+    turnEpoch
+      ? window.electronAPI.voice.confirm(turnId, choice, turnEpoch)
+      : window.electronAPI.voice.confirm(turnId, choice),
+  dismiss: (turnId: string, turnEpoch?: string): Promise<void> =>
+    turnEpoch
+      ? window.electronAPI.voice.dismiss(turnId, turnEpoch)
+      : window.electronAPI.voice.dismiss(turnId),
   getRuntime: (): Promise<VoiceRuntimeStatus> => window.electronAPI.voice.getRuntime(),
   installRuntime: (): Promise<VoiceRuntimeStatus> => window.electronAPI.voice.installRuntime(),
   removeRuntime: (): Promise<VoiceRuntimeStatus> => window.electronAPI.voice.removeRuntime(),
@@ -806,18 +813,18 @@ export const voiceApi = {
     window.electronAPI?.voice?.answerNotExpected?.(taskId) ?? Promise.resolve(),
   onState: (callback: (event: VoiceStateEvent) => void): (() => void) =>
     window.electronAPI.voice.onState(callback),
-  onPartial: (callback: (event: { turnId: string; text: string }) => void): (() => void) =>
+  onPartial: (callback: (event: { turnId: string; turnEpoch: string | null; text: string }) => void): (() => void) =>
     window.electronAPI.voice.onPartial(callback),
-  onFinal: (callback: (event: { turnId: string; text: string }) => void): (() => void) =>
+  onFinal: (callback: (event: { turnId: string; turnEpoch: string | null; text: string }) => void): (() => void) =>
     window.electronAPI.voice.onFinal(callback),
   onSegment: (
-    callback: (event: { turnId: string; text: string; index: number }) => void
+    callback: (event: { turnId: string; turnEpoch: string | null; text: string; index: number }) => void
   ): (() => void) => window.electronAPI.voice.onSegment(callback),
   onOutcome: (callback: (event: VoiceActionOutcome) => void): (() => void) =>
     window.electronAPI.voice.onOutcome(callback),
   onStatus: (callback: (event: Partial<VoiceSnapshot> & { model?: VoiceModelState }) => void): (() => void) =>
     window.electronAPI.voice.onStatus(callback),
-  onError: (callback: (event: { message: string; code?: string }) => void): (() => void) =>
+  onError: (callback: (event: VoiceErrorEvent) => void): (() => void) =>
     window.electronAPI.voice.onError(callback),
   onNavigate: (callback: (event: { destination: VoiceViewName; taskId: string | null }) => void): (() => void) =>
     window.electronAPI.voice.onNavigate(callback),

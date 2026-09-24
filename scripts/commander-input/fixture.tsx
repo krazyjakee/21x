@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { CommanderCallHost } from '../../src/renderer/src/components/commander/CommanderCallHost'
 import { CommanderWorkspace } from '../../src/renderer/src/components/commander/CommanderWorkspace'
 import { useGlobalShortcuts } from '../../src/renderer/src/components/layout/hooks/use-global-shortcuts'
 import { focusComposerInput } from '../../src/renderer/src/lib/keyboard-shortcuts'
@@ -31,6 +32,11 @@ const actions = new Proxy({ focusComposer: focusComposerInput }, { get: (target,
 function Fixture() {
   const [, setOpen] = useState(false)
   useGlobalShortcuts(actions, setOpen)
-  return <div className="h-screen bg-background text-foreground"><CommanderWorkspace /></div>
+  return (
+    <div className="h-screen bg-background text-foreground">
+      <CommanderCallHost />
+      <CommanderWorkspace />
+    </div>
+  )
 }
 createRoot(document.getElementById('root')!).render(<Fixture />)

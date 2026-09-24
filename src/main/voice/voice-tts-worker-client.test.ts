@@ -164,6 +164,40 @@ describe('the speech worker', () => {
     expect(result.speechId).toBe('s3')
   }, 20000)
 
+  it('labels only the current child crash with the passage it owns', async () => {
+    client = new VoiceTtsWorkerClient(SCRIPT)
+    client.load({ engine: 'local', model: MODEL })
+    await ready(client)
+    const failures: Array<{ message: string; speechId?: string }> = []
+    const failed = new Promise<void>((resolve) => {
+      client?.on('error', (message: string, speechId?: string) => {
+        failures.push({ message, speechId })
+        if (speechId === 'speech-crash') resolve()
+      })
+    })
+    client.speak({
+      speechId: 'speech-crash',
+      sentences: Array.from({ length: 100 }, (_, index) => `Sentence ${index}.`),
+      speakerId: 0,
+      speed: 1,
+    })
+    const oldChild = (client as unknown as {
+      child: { kill: (signal: NodeJS.Signals) => boolean; emit: (name: string, error: Error) => boolean }
+    }).child
+
+    oldChild.kill('SIGKILL')
+    await failed
+    expect(failures.at(-1)).toMatchObject({ speechId: 'speech-crash' })
+
+    // A replaced child's late process error is not allowed to borrow the
+    // current child's passage lease.
+    oldChild.emit('error', new Error('late retired child error'))
+    expect(failures.at(-1)).toEqual({
+      message: 'The speech worker could not be started.',
+      speechId: undefined,
+    })
+  }, 20000)
+
   it('refuses to speak before a voice is loaded', async () => {
     client = new VoiceTtsWorkerClient(SCRIPT)
     // `load` starts the process; the speak below arrives before any voice does.

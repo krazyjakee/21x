@@ -184,6 +184,38 @@ down all close the connection. A message that arrives on a closed passage is
 dropped, so audio from a cancelled reply is never heard later. Nothing is
 resent and no other provider is tried.
 
+### Terminal lifecycle ownership
+
+Voice has two independent, exact ownership envelopes:
+
+- A command lifecycle is `{turnId, turnEpoch}`. The provider ID alone is not a
+  lease because a replacement may reuse it. State, outcome and error events
+  that finish a live command must carry both values.
+- A playback passage is `{speechId, speechGeneration}`. The generation is
+  monotonic and required on start, chunk and end IPC, so a reused ID cannot
+  reopen or close replacement audio.
+
+The session manager captures the command owner before every asynchronous
+prepare, action and answer continuation. A `false` result, rejection, timeout,
+stop, cancellation, worker crash, preparation failure or teardown may settle
+main state only when that captured owner is still current. The speech service
+does the same for its passage generation; replacing a passage emits the old
+playback end but does not publish a transient lifecycle-idle callback for the
+replacement's owner.
+
+The local worker client associates the active passage ID with the child process
+that accepted it. An abnormal exit reports that ID before restart, allowing the
+speech service to emit one matching error end and the manager to settle the
+matching command. A load/preparation failure or a late event from a retired
+child has no passage owner and cannot stop current speech.
+
+IPC, the renderer store, Commander Host/Controls/Overlay, the activity adapter
+and playback all apply the same rule: exact current owners are accepted;
+stale, partial and unowned terminal events are inert while a replacement is
+live. Consequently a current terminal event closes main state, renderer state,
+the microphone gate and playback together, while no old continuation can
+close or relabel a replacement lifecycle.
+
 ### Errors
 
 Every failure is mapped to a kind with a fix, shown in Settings → Voice and on

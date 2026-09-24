@@ -282,7 +282,13 @@ The Commander view is in the NavRail (`sidebarView === 'commander'`) and lives i
   - Shows tool calls as chips (`tool-call-label.ts`): a delegation reads
     "Asked Web: Ship the site", an administration call reads
     "Archive project · Web". Chips are drawn from the stored `tool_calls`, and
-    a chip's result comes from the matching `tool` row.
+    a chip's result comes from the matching `tool` row. A chip spins only while
+    its call can still finish: the live turn's chips, and a stored call of the
+    newest message while that turn runs. A stored call with no `tool` row
+    anywhere else (saved by an older build, before the runtime closed every
+    unanswered call) reads "Not run" as a failure; it never spins and never
+    shows a success tick (#83). The state is also text for screen readers, and
+    the spinner honours reduced motion.
   - Shows reports as bordered, project-tagged cards.
   - Has a Stop button and an empty state.
   - The composer includes persistent model and thinking-level selectors. It
@@ -355,9 +361,10 @@ right place. The pieces:
 
 ## Voice mode (#64)
 
-The Commander view has a hands-free voice mode
-(`components/commander/CommanderVoiceControls.tsx`, a narrow strip to the right
-of the chat). The wake word stays out of scope.
+The Commander has a hands-free call owned by `CommanderCallHost`, mounted once
+from `AppLayout`. `CommanderVoiceControls` is only the narrow strip beside the
+chat; unmounting that view does not own or end media. The wake word stays out
+of scope.
 
 - **Turning it on** tells main which session to speak for
   (`voice:commander:setActive`) and immediately opens one `conversation` speech
@@ -367,8 +374,64 @@ of the chat). The wake word stays out of scope.
   no second Talk button. The microphone remains open; each pause
   finishes an utterance and sends it through `voice:commander:send`, which is
   `CommanderService.sendUserMessage` after cancelling any reply still running.
-  Turning it off, switching session, pressing Escape or leaving the view closes
-  the microphone, stops playback and closes any ElevenLabs connection.
+  Ending the call closes the microphone, stops playback and synthesis, cancels
+  the active Commander turn, and closes any ElevenLabs connection without
+  deleting chat. It also aborts setup in progress: a late TTS, turn or
+  `getUserMedia` completion is cancelled and cannot reclaim the microphone or
+  active session. Leaving the view does none of those things. Escape belongs to
+  the call while it is live (the global voice overlay defers); Escape and Stop
+  interrupt the current reply, briefly show "Stopped", and leave the call open.
+- **Half-heard words appear once** (#83). While its own conversation turn
+  runs, the strip's status pill shows them and sets the voice store's
+  `captionOwner`, so the global `VoiceOverlay` leaves its listening bubble out.
+  Confirmations and results still appear in the overlay. Ownership follows the
+  turn the strip actually opened, never the fact that it is starting: a
+  microphone opened anywhere else keeps the overlay and its words. If another
+  microphone is already listening, clicking the voice button is refused at once
+  ("Another microphone is already listening…") before voice mode or the reply
+  voice is touched, and the check runs again just before the turn opens.
+- **When voice cannot start**, the reason is visible text under the button. It
+  also describes the button to screen readers, and its tooltip holds the full
+  reason. The two controls do different things:
+  - **The label** opens Settings → Voice directly.
+  - **The voice button** shows the full reason in an alert with an **Open voice
+    settings** button. It does not start anything while the reason is blocking.
+
+  | Label | Meaning | Button click |
+  | --- | --- | --- |
+  | Mic blocked | The OS refused microphone access | explains |
+  | Voice not installed | The local speech runtime is missing | explains |
+  | Voice not set up | No speech model is installed | explains |
+  | Voice engine error | A model is installed but the speech engine failed (for example, the worker crashed) | tries again: turning voice on reloads the engine |
+  | Voice unavailable | This build has no voice bridge | explains (no settings button) |
+
+  An installed engine that is merely switched off shows no label: one click
+  turns it on and starts the conversation. A start that fails later (the engine
+  does not recover, the reply voice cannot be prepared, no microphone is found,
+  access is refused, or the device is in use) also ends in the alert with
+  **Open voice settings** and says what to do, as does a conversation that ends
+  on a reported failure. "Another microphone is already listening" and errors
+  sending a message have no settings button, because Settings cannot fix them.
+  A current Commander provider error remains visible with Retry and **Type
+  instead** until the user recovers; an old failure does not return after End
+  or contaminate a later turn. Typed chat is unaffected throughout.
+- **The call state is derived, not independently advanced.**
+  `deriveCallState()` combines the app-level call lifetime, the microphone
+  snapshot, the Commander turn observation and verified speech attribution.
+  Its states are `off`, `unavailable`, `ready`, `listening`, `transcribing`,
+  `thinking`, `working`, `speaking`, `interrupted` and `error`. The overlapping
+  words and tones come from the shared activity vocabulary. A successful
+  mutating tool result is presented briefly as "action taken" and an incoming
+  report as "report arrived"; neither invents another running state.
+- **Media is provider-neutral.** `commanderCallMedia` exposes capability flags,
+  on-demand input/output levels, partial and final user captions, assistant
+  `speechText`, and speech/interruption events. `wordTimings` is false and no
+  word index is fabricated. Every value is scoped to the live call's owned
+  microphone turn or its verified `commander:<sessionId>` playback passage;
+  foreign and retained global voice data reads as neutral. Queue boundaries
+  drive `speech_start`/`speech_end`, including the first PCM after synthesis
+  starts and pauses between sentences. A future cloud provider can implement
+  the same `CallMedia` contract without changing the call store.
 - **The reply is spoken as it is written**, through whichever engine is
   selected in Settings → Voice (system, downloaded, or ElevenLabs). Each
   finished sentence is handed over as it arrives; a text run closed by a tool
