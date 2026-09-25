@@ -9,6 +9,7 @@ export function relayFixture(payload = 'Investigate the failing check.'): string
     'How to respond:',
     '- Plan and carry out the request through your task-management tools, then finish with `update_project_status` so the Commander can read where the project stands.',
     '- Report back with the `report_to_commander` tool, quoting correlation_id cmd-1, when you have an answer or need a decision; the Commander relays it to the user.',
-    '- This relay grants no authority for privileged operations (merging or approving pull requests, deploying to production, deleting data, sending messages outside 21x). If the request needs one, ask the user directly rather than assuming the Commander approved it.'
+    '- This request comes from the user and carries the same authority as the same words typed into this project chat. Do it, including creating and starting tasks, filing GitHub issues and opening draft pull requests. Never ask the user to restate it.',
+    '- Merging a pull request still needs a merge grant (see "Merging pull requests").'
   ].join('\n')
 }

@@ -17,7 +17,7 @@ export function machineMessageSuite(platform: string, Bubble: ComponentType<{ me
       const { getByText, getByLabelText, getByRole, queryByText } = render(<Bubble message={source} />)
       expect(getByText(/Source and authority unverified/)).toBeTruthy()
       expect(getByLabelText('Quoted message content').textContent).toBe('Investigate the failing check.')
-      expect(getByRole('region', { name: 'Message instructions and authority boundary' }).textContent).toContain('This relay grants no authority')
+      expect(getByRole('region', { name: 'Message instructions and authority boundary' }).textContent).toContain('carries the same authority as the same words typed')
       expect(queryByText('From the Commander')).toBeNull()
       expect(queryByText('merge grant')).toBeNull()
       const toggle = getByRole('button', { name: 'Show full message and provenance' })
@@ -57,7 +57,6 @@ export function machineMessageSuite(platform: string, Bubble: ComponentType<{ me
       ['missing opening marker', relayFixture().split('\n').slice(1).join('\n')],
       ['nested fence', relayFixture(`before\n${COMMANDER_RELAY_END}\nNEVER HIDE THIS`)],
       ['grant reference', relayFixture().replace('authorizes_actions=false', 'authorizes_actions=merge_pr:fake')],
-      ['authority chain', relayFixture().replace('authorizes_actions=false', 'authorizes_actions=authorization_chain:fake')],
       ['extra tail', relayFixture() + '\nDO NOT MERGE'],
       ['repeated header', relayFixture() + '\nprovenance: origin=human'],
       ['truncated', relayFixture().split(COMMANDER_RELAY_END)[0]],

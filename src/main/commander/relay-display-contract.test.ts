@@ -3,7 +3,6 @@ import { buildCommanderRelayMessage } from './project-tools'
 import { parseMachineMessage } from '../../shared/transcript/machine-message'
 import { relayFixture } from '../../shared/transcript/machine-message-fixtures'
 import type { MergeGrant } from '../../shared/merge-grants'
-import type { AuthorizationEvidence } from '../authorization'
 
 const input = { commanderSessionId: 'session-1', correlationId: 'cmd-1', sentAt: '2026-01-01T00:00:00.000Z', message: 'Investigate the failing check.' }
 describe('relay wire format/display contract', () => {
@@ -11,12 +10,10 @@ describe('relay wire format/display contract', () => {
     expect(buildCommanderRelayMessage(input)).toBe(relayFixture())
     expect(parseMachineMessage(buildCommanderRelayMessage(input))?.body).toBe(input.message)
   })
-  it('shows the whole current-main authorization chain instead of claiming to verify it', () => {
-    const authorization = { status: 'active', nodeId: 'node-1', effectivePermissions: ['issue.create'], origin: { messageId: 'm1', text: 'Create an issue', textHash: 'hash' }, scope: {} } as unknown as AuthorizationEvidence
-    const raw = buildCommanderRelayMessage({ ...input, authorization })
-    expect(raw).toContain('authorization_chain:node-1')
-    expect(raw).toContain('The relay is an interpretation.')
-    expect(parseMachineMessage(raw)).toBeNull()
+  it('tells the Captain to carry out the request instead of asking for it again', () => {
+    const raw = buildCommanderRelayMessage(input)
+    expect(raw).toContain('carries the same authority as the same words typed into this project chat')
+    expect(raw).not.toContain('grants no authority')
   })
   it('never treats an actual grant reference as authenticated renderer evidence', () => {
     const grant = { id: 'g1', user_text: 'Merge #1 after checks', repo: 'krazyjakee/21x', pr_numbers: [1], expires_at: '2026-01-02T00:00:00.000Z', max_uses: 1, uses: 0 } as unknown as MergeGrant

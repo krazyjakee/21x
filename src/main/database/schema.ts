@@ -8,7 +8,7 @@ import { migrateCoordinatorToCaptain } from './captain-migration'
 import { migrateTaskActivity } from './task-activity-migration'
 import { splitLegacyPullRequestEscalation } from '../../shared/project-policies'
 import { createConcurrencyTables, migrateConcurrencyControl } from './concurrency-migration'
-import { createAuthorizationTables } from './authorization-schema'
+import { dropAuthorizationTables } from './authorization-schema'
 import { createDurableStartQueueTables, migrateDurableStartQueue } from './start-queue-migration'
 import { createIssueWriteTables, migrateIssueWrites } from './issue-writes-migration'
 
@@ -65,8 +65,10 @@ import { createIssueWriteTables, migrateIssueWrites } from './issue-writes-migra
  *          credentials when a task session is replaced or resumed.
  * 29 → 30: durable last-accepted human capability supersession for task
  *          bindings, including backfill from an existing accepted turn node.
+ * 30 → 31: the human authorization chain is removed; its tables are dropped
+ *          (dropAuthorizationTables in authorization-schema.ts).
  */
-const SCHEMA_VERSION = 30
+const SCHEMA_VERSION = 31
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -1085,7 +1087,6 @@ export function runMigrations(db: Database.Database): void {
   // Migration v22: durable start claims and recovery (#148). This extends the
   // v20 runtime and v21 admission model rather than introducing a second one.
   migrateDurableStartQueue(db)
-  createAuthorizationTables(db)
 
   // Migration v24: the delegated GitHub issue-write ledger. New table only;
   // runs after migrateToProjects so the projects table it references exists.
@@ -1102,6 +1103,9 @@ export function runMigrations(db: Database.Database): void {
 
   // Migration v28: immutable task/agent provenance for review handoffs.
   migratePullRequestAttestationSecurity(db)
+
+  // Migration v31: the authorization chain (v23–v30) is gone.
+  dropAuthorizationTables(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)

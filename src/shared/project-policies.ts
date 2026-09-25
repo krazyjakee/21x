@@ -100,8 +100,8 @@ export type EscalationAction =
   /**
    * Creating, updating and linking GitHub issues in the project's own
    * repositories: the Captain's issue tools, enforced by the escalation gate
-   * (main/issue-write-gate.ts). This is *delegated* work, so it needs an
-   * originating human instruction but never a per-issue grant — unlike
+   * (main/issue-write-gate.ts). This is *delegated* work, so it never needs a
+   * per-issue grant — unlike
    * `merge_pr`, which needs its own authority however this policy is set. The
    * level here decides only whether such a write is silent, reported or held.
    */

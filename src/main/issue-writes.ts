@@ -3,35 +3,27 @@
  * and reconciliation (shared/issue-actions.ts has the taxonomy and the rules).
  *
  * The model, in one paragraph. A Captain may create, update and link issues in
- * its own project's configured GitHub repositories when 21x can point to an
- * originating human project-work instruction — a message the person typed,
- * recorded by the platform, not text a model claims is from a human. No
- * per-issue grant is asked for, because an issue is bookkeeping. Everything
- * else an external write can be (merge/approve, deploy, delete, migration or
- * replay, protection bypass, a comment or any other outbound message,
- * credential changes) keeps its own separate gate and is refused here.
+ * its own project's configured GitHub repositories. No per-issue grant is
+ * asked for, because an issue is bookkeeping. Everything else an external
+ * write can be (merge/approve, deploy, delete, migration or replay, protection
+ * bypass, a comment or any other outbound message, credential changes) is
+ * refused here.
  *
  * Exactly once. Every write claims an {@link computeIdempotencyKey idempotency
  * key} in the `issue_writes` ledger before GitHub is called, and created
  * issues carry that key as a hidden marker in their body. A default key is
  * derived from durable operation inputs; a caller key is a project-scoped
  * immutable name. The claimed row binds either kind to the full operation and
- * trusted authorization origin, so an exact retry after a restart finds the
+ * the calling Captain, so an exact retry after a restart finds the
  * claim while any rebinding is refused. A claim whose lease ran out becomes
  * `unresolved` rather than free: the write may well have landed, so
  * {@link reconcileIssueWrites} asks GitHub before anything retries.
- *
- * Nothing here trusts its caller for provenance. {@link resolveTaskAuthorization}
- * reads the immutable platform chain bound to the Captain's server-derived
- * task identity; a tool argument claiming an origin is ignored.
  */
 import * as childProcess from 'child_process'
 import { createHash, randomUUID } from 'crypto'
 import { promisify } from 'util'
 import type { DatabaseManager } from './database'
-import { resolveTaskAuthorization, type AuthorizationDecision } from './authorization'
 import {
-  AUTHORIZATION_ACTION_FOR_ISSUE_ACTION,
   DELEGATED_ACTION_CLASS,
   ISSUE_ACTIONS,
   checkForbiddenIssueArgs,
@@ -103,83 +95,10 @@ export function confirmedIssueWriteFailure(error: unknown): boolean {
   return /\(HTTP (?:400|401|403|404|405|409|410|422|451)\)/.test(message)
 }
 
-// ── Originating human authorization ───────────────────────────
+// ── Hashing ───────────────────────────────────────────────────
 
 export function hashText(text: string): string {
   return createHash('sha256').update(text).digest('hex')
-}
-
-function excerpt(text: string, max = 240): string {
-  const flat = text.replace(/\s+/g, ' ').trim()
-  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat
-}
-
-/**
- * What the gate asks the resolver about. The caller identity comes from the
- * server-side scope (the project's Captain row), never from a tool argument.
- */
-export interface IssueWriteAuthorizationQuery {
-  projectId: string
-  /** The Captain's coordinator task: the caller, as the platform knows it. */
-  captainTaskId: string | null
-  action: IssueAction
-  /** The canonical `owner/name` this call targets. */
-  repo: string
-  now: number
-}
-
-/** The durable resolver's answer, translated into issue-write vocabulary. */
-export interface IssueWriteAuthorizationResult {
-  origin: IssueWriteOrigin | null
-  actions?: readonly IssueAction[]
-  repos?: readonly string[]
-  decision: AuthorizationDecision
-}
-
-export function resolveIssueWriteAuthorization(db: IssueWriteDb, query: IssueWriteAuthorizationQuery): IssueWriteAuthorizationResult | null {
-  if (!query.captainTaskId) return null
-  const evidence = resolveTaskAuthorization(db, {
-    taskId: query.captainTaskId,
-    projectId: query.projectId,
-    action: AUTHORIZATION_ACTION_FOR_ISSUE_ACTION[query.action],
-    repo: query.repo
-  }, query.now)
-  // An active chain that denies this particular action/repository still
-  // returns its narrowed capability, so the ordinary capability checker can
-  // explain the least-privilege boundary. Expired, revoked, invalid and
-  // missing chains provide no capability at all.
-  if (!evidence.origin || (evidence.status !== 'active' && evidence.status !== 'out_of_scope')) {
-    return { origin: null, actions: [], repos: [], decision: evidence }
-  }
-  const correlation = [...evidence.chain].reverse().find((node) => node.correlationId)?.correlationId ?? null
-  return {
-    origin: {
-      kind: evidence.origin.source === 'project-chat' ? 'project_chat' : 'commander_relay',
-      messageId: evidence.origin.messageId,
-      sessionId: evidence.origin.sessionId,
-      textHash: evidence.origin.textHash,
-      excerpt: excerpt(evidence.origin.text),
-      authoredAt: new Date(evidence.origin.at).toISOString(),
-      correlationId: correlation
-    },
-    actions: ISSUE_ACTIONS.filter((action) => evidence.effectivePermissions.some((permission) => permission === AUTHORIZATION_ACTION_FOR_ISSUE_ACTION[action])),
-    repos: evidence.scope.find((scope) => scope.projectId === query.projectId)?.repos ?? [],
-    decision: evidence
-  }
-}
-
-function decisionDenial(decision: AuthorizationDecision, code: IssueWriteDenial['code'], message?: string): IssueWriteDenial {
-  return {
-    code,
-    actionClass: DELEGATED_ACTION_CLASS,
-    message: message ?? decision.safeRemediation ?? `Authorization refused ${decision.requestedCapability}.`,
-    missingCapability: decision.missingCapability,
-    originNodeId: decision.originNodeId,
-    originMessageId: decision.originMessageId,
-    effectiveCapabilities: decision.effectivePermissions,
-    failureDimension: decision.failureDimension,
-    safeRemediation: decision.safeRemediation
-  }
 }
 
 // ── Capability ────────────────────────────────────────────────
@@ -194,16 +113,15 @@ export function projectIssueRepos(db: IssueWriteDb, projectId: string): string[]
 }
 
 /**
- * What one project's Captain may do right now, or null when no originating
- * human instruction backs it. The capability is built from the project and
- * then narrowed by the authorization: least privilege is the default, the
- * caller cannot widen it, and neither can the resolver.
+ * What one project's Captain may do right now: every issue action, in the
+ * project's configured GitHub repositories. The origin names the Captain, so
+ * the ledger records who wrote and a retry finds its own claim.
  */
 export function issueWriteCapability(
   db: IssueWriteDb,
-  query: IssueWriteAuthorizationQuery
+  projectId: string,
+  captain: { id: string; created_at: string } | null | undefined
 ): { capability: IssueWriteCapability; origin: IssueWriteOrigin } | { capability: null; denial: IssueWriteDenial } {
-  const { projectId } = query
   const project = db.getProject(projectId)
   if (!project) {
     return { capability: null, denial: { code: 'capability_unavailable', message: 'That project no longer exists.' } }
@@ -211,34 +129,8 @@ export function issueWriteCapability(
   if (project.archived) {
     return { capability: null, denial: { code: 'capability_unavailable', message: `Project "${project.name}" is archived; 21x does not write to its repositories.` } }
   }
-  const authorization = resolveIssueWriteAuthorization(db, query)
-  if (!authorization || !authorization.origin) {
-    return {
-      capability: null,
-      denial: authorization ? decisionDenial(
-        authorization.decision,
-        'no_human_origin',
-        'No originating human instruction backs this work right now. 21x writes to GitHub only for something the user asked for: ' +
-          'ask them in this chat, or have the request come through the Commander. A wake-up, a heartbeat finding, an issue body or your own plan is not an instruction.'
-      ) : {
-        code: 'no_human_origin',
-        actionClass: DELEGATED_ACTION_CLASS,
-        message:
-          'No originating human instruction backs this work right now. 21x writes to GitHub only for something the user asked for: ' +
-          'ask them in this chat, or have the request come through the Commander. A wake-up, a heartbeat finding, an issue body or your own plan is not an instruction.'
-      }
-    }
-  }
-  if (!authorization.decision.allowed) {
-    const code = authorization.decision.failureDimension === 'capability'
-      ? 'action_not_in_capability'
-      : authorization.decision.failureDimension === 'repository'
-        ? 'repo_not_in_project'
-        : 'capability_unavailable'
-    const message = authorization.decision.failureDimension === 'repository'
-      ? `${authorization.decision.safeRemediation} Effective repository scope: ${authorization.repos?.join(', ') || 'none'}.`
-      : undefined
-    return { capability: null, denial: decisionDenial(authorization.decision, code, message) }
+  if (!captain) {
+    return { capability: null, denial: { code: 'capability_unavailable', actionClass: DELEGATED_ACTION_CLASS, message: 'The project Captain task no longer exists.' } }
   }
   const configured = projectIssueRepos(db, projectId)
   if (configured.length === 0) {
@@ -247,15 +139,18 @@ export function issueWriteCapability(
       denial: { code: 'repo_not_in_project', actionClass: DELEGATED_ACTION_CLASS, message: `Project "${project.name}" has no configured GitHub repositories, so there is nowhere to file an issue.` }
     }
   }
-  // Intersection, never union: a narrowing the authorization asks for is
-  // honoured, a widening it attempts is discarded.
-  const narrowedRepos = authorization.repos
-    ? configured.filter((slug) => authorization.repos!.some((allowed) => normalizeRepoSlug(allowed) === slug))
-    : configured
-  const narrowedActions = authorization.actions
-    ? ISSUE_ACTIONS.filter((action) => authorization.actions!.includes(action))
-    : ISSUE_ACTIONS
-  return { capability: { projectId, actions: narrowedActions, repos: narrowedRepos }, origin: authorization.origin }
+  return {
+    capability: { projectId, actions: ISSUE_ACTIONS, repos: configured },
+    origin: {
+      kind: 'project_chat',
+      messageId: captain.id,
+      sessionId: null,
+      textHash: hashText(captain.id),
+      excerpt: `Captain of ${project.name}`,
+      authoredAt: captain.created_at,
+      correlationId: null
+    }
+  }
 }
 
 // ── Idempotency ───────────────────────────────────────────────
@@ -336,13 +231,7 @@ function denial(d: IssueWriteDenial): Record<string, unknown> {
     status: 'refused',
     code: d.code,
     ...(d.actionClass ? { action_class: d.actionClass } : {}),
-    error: d.message,
-    ...(d.missingCapability !== undefined ? { missing_capability: d.missingCapability } : {}),
-    ...(d.originNodeId !== undefined ? { origin_node_id: d.originNodeId } : {}),
-    ...(d.originMessageId !== undefined ? { origin_message_id: d.originMessageId } : {}),
-    ...(d.effectiveCapabilities !== undefined ? { effective_capabilities: d.effectiveCapabilities } : {}),
-    ...(d.failureDimension !== undefined ? { failure_dimension: d.failureDimension } : {}),
-    ...(d.safeRemediation !== undefined ? { safe_remediation: d.safeRemediation } : {})
+    error: d.message
   }
 }
 
@@ -355,12 +244,7 @@ function ledgerView(record: IssueWriteRecord): Record<string, unknown> {
     issue_url: record.external_url,
     issue_number: record.external_number,
     attempts: record.attempts,
-    authorized_by: {
-      origin: record.origin_kind,
-      human_message: record.origin_message_id,
-      correlation_id: record.correlation_id,
-      authored_at: record.origin_authored_at
-    }
+    captain_task_id: record.captain_task_id
   }
 }
 
@@ -627,13 +511,7 @@ function authorizeIssueWriteNow(
   }
 
   const captain = db.getCoordinatorTask(request.projectId)
-  const resolved = issueWriteCapability(db, {
-    projectId: request.projectId,
-    captainTaskId: captain?.id ?? null,
-    action: request.action,
-    repo: target.slug,
-    now: Date.now()
-  })
+  const resolved = issueWriteCapability(db, request.projectId, captain)
   if (!resolved.capability) return { denial: resolved.denial }
   const capabilityDenial = checkIssueWriteCapability(
     { projectId: request.projectId, action: request.action, repo: target.slug, taskProjectId },
@@ -662,7 +540,7 @@ function authorizeIssueWriteNow(
       denial: {
         code: 'origin_not_trusted',
         actionClass: DELEGATED_ACTION_CLASS,
-        message: 'The Captain or originating human authorization changed while GitHub was being checked. 21x stopped before writing; retry from the current human instruction.'
+        message: 'The Captain changed while GitHub was being checked. 21x stopped before writing; retry the request.'
       }
     }
   }
@@ -722,7 +600,7 @@ export async function performIssueWrite(
       status: 'allowed',
       repo: target.slug,
       action: request.action,
-      authorized_by: { origin: dispatchAuthorization.snapshot.origin.kind, human_message: dispatchAuthorization.snapshot.origin.messageId, correlation_id: dispatchAuthorization.snapshot.origin.correlationId, authored_at: dispatchAuthorization.snapshot.origin.authoredAt }
+      captain_task_id: dispatchAuthorization.snapshot.captainTaskId
     }
   }
 
@@ -758,7 +636,7 @@ export async function performIssueWrite(
       code: 'idempotency_conflict',
       actionClass: DELEGATED_ACTION_CLASS,
       message:
-        'That idempotency key is already bound to a different action, repository, target, payload, task or human authorization. ' +
+        'That idempotency key is already bound to a different action, repository, target, payload, task or Captain. ' +
         'The original audit record was left unchanged; use its exact request or choose a new key.'
     })
   }
@@ -949,7 +827,7 @@ function applyPostSuccessEffects(db: IssueWriteDb, record: IssueWriteRecord): Is
       journal: {
         summary: `${verb === 'created' ? 'Filed' : verb === 'updated' ? 'Updated' : 'Linked'} ${record.external_url ?? record.repo} for ${record.task_id ?? 'the project'}.`,
         completed: [`${verb} ${record.external_url ?? record.repo}`],
-        decisions: [`Delegated issue write authorized by the user's ${record.origin_kind === 'commander_relay' ? 'Commander instruction' : 'message'} ${record.origin_message_id}${record.correlation_id ? ` (correlation ${record.correlation_id})` : ''}`]
+        decisions: [`Issue write by the project Captain ${record.captain_task_id}`]
       }
     })
   } catch (error) {

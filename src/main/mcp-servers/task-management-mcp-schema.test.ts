@@ -60,14 +60,6 @@ describe('successor graph schemas', () => {
   })
 })
 
-describe('capability inheritance schemas', () => {
-  it('lets every task creation boundary omit inheritance or explicitly narrow it', () => {
-    expect(propertiesOf(FULL_ACCESS_SCOPE, 'create_task')).toHaveProperty('permissions')
-    expect(propertiesOf(FULL_ACCESS_SCOPE, 'create_subtask')).toHaveProperty('permissions')
-    expect(propertiesOf(SCOPED, 'create_sibling_subtask')).toHaveProperty('permissions')
-  })
-})
-
 describe('artifact workpiece tools', () => {
   const toolNames = [
     'create_artifact',

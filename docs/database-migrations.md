@@ -169,9 +169,9 @@ admission and fairness), then v22 (#148 reconciliation and durable starts).
 All three migrations are idempotent and fresh databases create the same final
 tables directly.
 
-Migration 23 adds the immutable human-authorization chain and durable dispatch
-bindings described in `docs/authorization-chain.md`. Issue writes consume that
-resolver; they do not create a parallel provenance store.
+Migrations 23 and 30 added a human-authorization chain and its dispatch
+bindings. Migration 31 removed that system and drops its tables
+(`dropAuthorizationTables()` in `src/main/database/authorization-schema.ts`).
 
 ### Delegated GitHub issue-write ledger (v24)
 
@@ -181,11 +181,11 @@ external GitHub issue write, claimed before the call and settled after it. The
 row is both the audit record and the idempotency claim, so the two cannot
 disagree — `idempotency_key` is UNIQUE and a claimed key is immutably bound to
 the project, repository, action, target, task, exact payload shape/hash and
-trusted authorization origin. Any mismatch is refused even after a confirmed
+calling Captain. Any mismatch is refused even after a confirmed
 failed attempt, leaving the original audit row unchanged. An exact retry
 recomputes the same key across a restart instead of filing a second issue. The
-provenance columns record the originating human instruction, the Commander
-correlation and the Captain task/session; `status` moves `reserved` →
+provenance columns record the calling Captain (rows written before migration 31
+record the originating human instruction and Commander correlation); `status` moves `reserved` →
 `succeeded` | `failed` | `unresolved`, and an expired lease becomes
 `unresolved` rather than free. Attempt epochs fence late external answers from
 newer reconciliation passes, and `payload_fields` lets interrupted partial

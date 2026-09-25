@@ -16,8 +16,8 @@
  * The distinction this module encodes:
  *
  * - {@link DELEGATED_ACTION_CLASS} — `delegated_issue_write`. Ordinary
- *   project-work bookkeeping in the project's own repositories. Allowed from a
- *   valid originating human project-work instruction, with no per-issue grant.
+ *   project-work bookkeeping in the project's own repositories. The Captain
+ *   may do it with no per-issue grant.
  * - {@link SPECIALLY_GATED_CLASSES} — merge/approve, deploy/release,
  *   destructive delete, migration/replay, protection bypass, outbound message
  *   and credential change. Each keeps its own separate authorization; nothing
@@ -76,8 +76,8 @@ export const EXTERNAL_ACTION_CLASS_LABELS: Record<ExternalActionClass, string> =
 }
 
 /**
- * How each class is authorized. `delegated` = an originating human
- * project-work instruction is enough; `separate_authorization` = the class
+ * How each class is authorized. `delegated` = the Captain may do it as
+ * ordinary project work; `separate_authorization` = the class
  * has its own gate (a merge grant, a held call, a human doing it themselves)
  * and this module never satisfies it.
  */
@@ -107,20 +107,6 @@ export const EXTERNAL_ACTION_AUTHORIZATION: Record<ExternalActionClass, 'delegat
 export type IssueAction = 'create_issue' | 'update_issue' | 'link_issue'
 
 export const ISSUE_ACTIONS: readonly IssueAction[] = ['create_issue', 'update_issue', 'link_issue']
-
-/**
- * The same three actions in the durable authorization chain's vocabulary
- * (`AuthorizationAction` in src/main/authorization.ts). The two names for one
- * action are reconciled here, once, so the issue-write gate can query the
- * durable resolver without either side learning the other's spelling.
- * `resolveTaskAuthorization` accepts an action string and validates it against
- * its closed permission set.
- */
-export const AUTHORIZATION_ACTION_FOR_ISSUE_ACTION: Record<IssueAction, string> = {
-  create_issue: 'github.issue.create',
-  update_issue: 'github.issue.update',
-  link_issue: 'github.issue.link'
-}
 
 export function isIssueAction(value: unknown): value is IssueAction {
   return typeof value === 'string' && (ISSUE_ACTIONS as readonly string[]).includes(value)
@@ -202,7 +188,7 @@ export function parseGitHubIssueUrl(value: unknown): IssueRef | null {
 // ── Capability ────────────────────────────────────────────────
 
 /**
- * What one originating human instruction lets the Captain of one project do.
+ * What the Captain of one project may do.
  * Least privilege: the repository list is the project's configured GitHub
  * repositories, never "whatever the caller named", and the action list is a
  * subset of {@link ISSUE_ACTIONS}.
@@ -216,9 +202,7 @@ export interface IssueWriteCapability {
 
 export type IssueWriteDenialCode =
   | 'capability_unavailable'
-  | 'no_human_origin'
   | 'origin_not_trusted'
-  | 'origin_expired'
   | 'action_unknown'
   | 'action_specially_gated'
   | 'action_not_in_capability'
@@ -235,12 +219,6 @@ export interface IssueWriteDenial {
   /** The class the caller reached for, when it is a known one. */
   actionClass?: ExternalActionClass
   message: string
-  missingCapability?: string | null
-  originNodeId?: string | null
-  originMessageId?: string | null
-  effectiveCapabilities?: readonly string[]
-  failureDimension?: string | null
-  safeRemediation?: string | null
 }
 
 export interface IssueWriteRequest {
@@ -492,7 +470,7 @@ export type IssueWriteStatus = 'reserved' | 'succeeded' | 'failed' | 'unresolved
 
 export const ISSUE_WRITE_STATUSES: readonly IssueWriteStatus[] = ['reserved', 'succeeded', 'failed', 'unresolved']
 
-/** Where the originating human instruction came from. Never self-asserted by a model. */
+/** The ledger's origin kind. New writes record the Captain as `project_chat`. */
 export type IssueWriteOriginKind = 'project_chat' | 'commander_relay' | 'user_task_instruction'
 
 export interface IssueWriteOrigin {

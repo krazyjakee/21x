@@ -15,7 +15,6 @@ import { getTaskApiToken, startTaskApiServer, stopTaskApiServer, setTaskApiNotif
 import { createMergeGrantFromUserMessage, setGhRunner } from './merge-grants'
 import { buildTaskMcpUrl, parseScopeFromUrl } from './task-mcp-endpoint'
 import { mcpOptionsForTask } from './agent-manager/session-config'
-import { activateAuthorizationDispatch, prepareAuthorizationDispatch, recordHumanAuthorization } from './authorization'
 
 let db: DatabaseManager
 
@@ -38,12 +37,6 @@ async function connect(url: string): Promise<Client> {
 
 const textOf = (result: unknown): string =>
   ((result as { content: Array<{ text: string }> }).content[0]?.text) ?? ''
-
-function authorizeTask(taskId: string, projectId: string, text: string): void {
-  const messageId = `authorization-${taskId}-${text}`
-  recordHumanAuthorization(db, { messageId, text, at: Date.now(), source: 'project-chat', projectId, taskId })
-  activateAuthorizationDispatch(db, prepareAuthorizationDispatch(db, { key: messageId, taskId, text, messageId }))
-}
 
 describe('buildTaskMcpUrl and parseScopeFromUrl', () => {
   it('round-trips a full-access session', () => {
@@ -155,7 +148,6 @@ describe('MCP endpoint over HTTP', () => {
     const task = db.createTask(makeTask({
       title: 'PR task', type: 'coding', project_id: project.id, repos: ['krazyjakee/21x']
     }))!
-    authorizeTask(task.id, project.id, 'Implement the PR repair')
     const oldNonce = db.rotateTaskMcpScopeNonce(task.id)
     const port = await startTaskApiServer(db)
     const signedUrl = buildTaskMcpUrl(port, getTaskApiToken(), {
@@ -188,7 +180,6 @@ describe('MCP endpoint over HTTP', () => {
     const parent = db.createTask(makeTask({ title: 'Parent' }))!
     const own = db.createTask(makeTask({ title: 'Own', parent_task_id: parent.id }))!
     const sibling = db.createTask(makeTask({ title: 'Sibling', parent_task_id: parent.id }))!
-    authorizeTask(own.id, own.project_id, 'Update tasks')
     const port = await startTaskApiServer(db)
     const client = await connect(buildTaskMcpUrl(port, getTaskApiToken(), { taskId: own.id, parentTaskId: parent.id }))
 
@@ -406,8 +397,6 @@ describe('project-scoped MCP session (#56)', () => {
 
   it('creates tasks in its own project, whatever project_id is passed', async () => {
     const { a, b } = twoProjects()
-    const captain = db.getCoordinatorTask(a.id)!
-    authorizeTask(captain.id, a.id, 'Create tasks')
     const port = await startTaskApiServer(db)
     const client = await connect(buildTaskMcpUrl(port, getTaskApiToken(), { projectId: a.id }))
 

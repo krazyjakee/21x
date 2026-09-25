@@ -1,5 +1,3 @@
-import { bindAuthorizationTransport, resolveAuthorization } from '../authorization'
-import { TurnStillRunningError } from '../authorization-dispatch'
 import { createHash, randomUUID } from 'crypto'
 import type { AgentManager } from '../agent-manager'
 import type { DatabaseManager } from '../database'
@@ -15,7 +13,6 @@ export interface CaptainRequestInput {
   taskId: string
   agentId: string
   payload: string
-  authorizationNodeId?: string
 }
 
 export interface CaptainDeliveryOptions {
@@ -55,13 +52,6 @@ export class CaptainDeliveryService {
         payload: input.payload,
         deadlineAt: this.now() + CAPTAIN_REPORT_DEADLINE_MS
       })
-      if (input.authorizationNodeId) {
-        if (record.payload !== input.payload || record.taskId !== input.taskId || record.projectId !== input.projectId) throw new Error('Captain delivery replay changed the payload or scope')
-        const evidence = resolveAuthorization(this.options.db, input.authorizationNodeId, this.now())
-        const leaf = evidence.chain.at(-1)
-        if (evidence.status !== 'active' || leaf?.taskId !== input.taskId || leaf.correlationId !== correlationId || leaf.sessionId !== input.sourceSessionId) throw new Error('Invalid Captain authorization binding')
-        bindAuthorizationTransport(this.options.db, `captain-request-message:${record.id}`, input.authorizationNodeId, input.taskId, input.payload)
-      }
       return record
     })()
     if (record.state === 'pending' || (record.state === 'claimed' && (record.claimExpiresAt ?? 0) <= this.now())) {
@@ -97,12 +87,6 @@ export class CaptainDeliveryService {
       // acknowledgement. The deadline sweep makes silence visible.
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
-      if (error instanceof TurnStillRunningError) {
-        // The Captain is still on an earlier turn. The request stays queued
-        // and the recovery sweep retries it, bounded by the report deadline.
-        this.store.release(claimed.id, this.owner, detail)
-        return
-      }
       const failed = this.store.terminal(claimed.id, 'failed', detail)
       if (failed?.state === 'failed') {
         const message = this.store.getByKey(`captain-request-message:${claimed.id}`)

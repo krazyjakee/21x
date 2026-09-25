@@ -147,7 +147,6 @@ describe('CommanderService turns', () => {
       sessionId: string
       userMessage: string
       userMessageId?: string
-      authorizationMessageId?: string
       trigger: 'user' | 'report'
       deliveryScope?: string
     }> = []
@@ -168,8 +167,8 @@ describe('CommanderService turns', () => {
 
     // #137: the stored id of that message rides along, so a merge grant can bind to it.
     expect(seen).toEqual([
-      { sessionId: session.id, userMessage: 'propose a rename', userMessageId: first.message.id, authorizationMessageId: first.message.id, trigger: 'user', deliveryScope: expect.any(String) },
-      { sessionId: session.id, userMessage: 'yes, rename it', userMessageId: second.message.id, authorizationMessageId: second.message.id, trigger: 'user', deliveryScope: expect.any(String) }
+      { sessionId: session.id, userMessage: 'propose a rename', userMessageId: first.message.id, trigger: 'user', deliveryScope: expect.any(String) },
+      { sessionId: session.id, userMessage: 'yes, rename it', userMessageId: second.message.id, trigger: 'user', deliveryScope: expect.any(String) }
     ])
     expect(seen[0].deliveryScope).not.toBe(seen[1].deliveryScope)
   })

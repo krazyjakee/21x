@@ -377,10 +377,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
   // Merge grants the user gave Captains (#137).
-  authorization: {
-    inspectTask: (taskId: string): Promise<unknown> => ipcRenderer.invoke('authorization:inspectTask', taskId),
-    revoke: (nodeId: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('authorization:revoke', nodeId)
-  },
   mergeGrants: {
     noteTyped: (taskId: string, text: string): Promise<void> => ipcRenderer.invoke('mergeGrants:noteTyped', taskId, text),
     listActive: (projectId?: string): Promise<unknown[]> => ipcRenderer.invoke('mergeGrants:listActive', projectId),

@@ -1,11 +1,3 @@
-import {
-  AUTHORIZATION_ACTIONS,
-  authorizationRefusal,
-  inheritTaskAuthorization,
-  resolveTaskAuthorization,
-  type AuthorizationAction
-} from '../authorization'
-import type { TaskMcpScope } from '../mcp-servers/task-management-core'
 import { setTimeout as sleep } from 'timers/promises'
 import type { CreateTaskData, DatabaseManager, TaskRecord, UpdateTaskData } from '../database'
 import type { TaskRow } from '../database/types'
@@ -62,81 +54,10 @@ function rowToApiTask(row: TaskRow): ApiTask {
 }
 
 /** db.createTask has no agent/skill columns, so those are applied as a follow-up write. */
-function callerTaskId(db: DatabaseManager, scope: TaskMcpScope | undefined, projectId: string): string | null {
-  if (!scope) return null
-  return scope.taskId ?? scope.artifactTaskId ??
-    (db.db.prepare("SELECT id FROM tasks WHERE project_id = ? AND role = 'captain'").get(projectId) as { id: string } | undefined)?.id ?? null
-}
-
-/** Raw internal/UI routes are already a human boundary. Signed agent scopes consume lineage. */
-function authorizeScopedTaskAction(
-  db: DatabaseManager,
-  scope: TaskMcpScope | undefined,
-  projectId: string,
-  action: 'task.create' | 'task.update' | 'task.start'
-): Record<string, unknown> | null {
-  if (!scope) return null
-  const caller = callerTaskId(db, scope, projectId)
-  if (!caller) {
-    return {
-      error: 'The signed caller scope has no task authorization lineage.',
-      code: 'capability_refused',
-      requested_capability: action,
-      missing_capability: action,
-      origin_node_id: null,
-      origin_message_id: null,
-      effective_capabilities: [],
-      failure_dimension: 'task',
-      safe_remediation: 'Start this work from an authenticated human project instruction; model text cannot grant authority.'
-    }
-  }
-  const decision = resolveTaskAuthorization(db, { taskId: caller, projectId, action })
-  return decision.allowed ? null : authorizationRefusal(decision)
-}
-
-/** Mirrors the scheduler's parent-driven start boundary for a child mutation. */
-function parentWillAutomaticallyStartChild(
-  db: DatabaseManager,
-  parentTaskId: string | null | undefined,
-  status: string,
-  agentId: string | null | undefined
-): boolean {
-  if (!parentTaskId || status !== TaskStatus.NotStarted || !agentId) return false
-  const parent = db.getTask(parentTaskId)
-  return !!parent?.auto_start_agent && !parent.parent_task_id &&
-    !(parent.is_recurring && parent.recurrence_parent_id == null)
-}
-
-function automaticParentHasRunnableChild(
-  db: DatabaseManager,
-  parentTaskId: string | null | undefined,
-  prospective?: { taskId: string; status: string; agentId: string | null | undefined }
-): boolean {
-  if (!parentTaskId) return false
-  const parent = db.getTask(parentTaskId)
-  if (!parent?.auto_start_agent || parent.parent_task_id ||
-      (parent.is_recurring && parent.recurrence_parent_id == null)) return false
-  return db.getSubtasks(parentTaskId).some((child) => {
-    const status = child.id === prospective?.taskId ? prospective.status : child.status
-    const agentId = child.id === prospective?.taskId ? prospective.agentId : child.agent_id
-    return status === TaskStatus.NotStarted && !!agentId
-  })
-}
-
-function capabilityNarrowing(value: unknown): { actions?: AuthorizationAction[]; error?: string } {
-  if (value === undefined) return {}
-  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || !AUTHORIZATION_ACTIONS.includes(item as AuthorizationAction))) {
-    return { error: `permissions must be an array containing only: ${AUTHORIZATION_ACTIONS.join(', ')}` }
-  }
-  return { actions: [...new Set(value as AuthorizationAction[])] }
-}
-
 function createTask(
   db: DatabaseManager,
   data: CreateTaskData,
-  params: Record<string, unknown>,
-  trustedScope?: TaskMcpScope,
-  inheritedActions?: AuthorizationAction[]
+  params: Record<string, unknown>
 ): TaskRecord | undefined {
   const created = db.db.transaction(() => {
     const created = db.createTask(data)
@@ -145,12 +66,6 @@ function createTask(
     if (params.agent_id) assignment.agent_id = params.agent_id as string
     if (params.skill_ids) assignment.skill_ids = params.skill_ids as string[]
     if (Object.keys(assignment).length > 0) db.updateTask(created.id, assignment)
-    if (trustedScope) {
-      const caller = trustedScope.taskId ?? trustedScope.artifactTaskId ?? (db.db.prepare("SELECT id FROM tasks WHERE project_id = ? AND role = 'captain'").get(trustedScope.projectId ?? '') as { id: string } | undefined)?.id
-      if (caller && db.getTask(caller)?.project_id === created.project_id) {
-        inheritTaskAuthorization(db, caller, created.id, JSON.stringify({ title: created.title, description: created.description, repos: created.repos }), inheritedActions)
-      }
-    }
     return created
   })()
   if (!created) return undefined
@@ -266,12 +181,10 @@ function getTaskStatistics(db: DatabaseManager, metric: unknown, projectId?: str
   }
 }
 
-async function updateTask(db: DatabaseManager, params: Record<string, unknown>, trustedScope?: TaskMcpScope): Promise<unknown> {
+async function updateTask(db: DatabaseManager, params: Record<string, unknown>): Promise<unknown> {
   const taskId = params.task_id as string
   const current = db.getTask(taskId)
   if (!current) return { error: 'Task not found' }
-  const refused = authorizeScopedTaskAction(db, trustedScope, taskProjectId(current), 'task.update')
-  if (refused) return refused
 
   const data: UpdateTaskData = {}
   // 'in_progress' is the legacy name for 'agent_working'
@@ -323,20 +236,6 @@ async function updateTask(db: DatabaseManager, params: Record<string, unknown>, 
   let prepared: Awaited<ReturnType<typeof prepareUserTaskUpdate>>
   try {
     prepared = await prepareUserTaskUpdate(agentController, current, data)
-    const updateRefused = authorizeScopedTaskAction(db, trustedScope, taskProjectId(current), 'task.update')
-    if (updateRefused) return updateRefused
-    const resultingAutoStart = prepared.data.auto_start_agent ?? current.auto_start_agent
-    const resultingStatus = prepared.data.status ?? current.status
-    const resultingAgent = prepared.data.agent_id === undefined ? current.agent_id : prepared.data.agent_id
-    const enablesAutomaticStart = resultingAutoStart && resultingStatus === TaskStatus.NotStarted &&
-      (current.status !== TaskStatus.NotStarted || !current.auto_start_agent)
-    const parentDrivenAutomaticStart = automaticParentHasRunnableChild(db, current.parent_task_id, {
-      taskId: current.id, status: resultingStatus, agentId: resultingAgent
-    })
-    if (prepared.startAfterWrite || prepared.data.auto_start_agent === true || enablesAutomaticStart || parentDrivenAutomaticStart) {
-      const startRefused = authorizeScopedTaskAction(db, trustedScope, taskProjectId(current), 'task.start')
-      if (startRefused) return startRefused
-    }
     updated = Object.keys(prepared.data).length > 0
       ? db.updateTask(taskId, prepared.data)
       : db.getTask(taskId)
@@ -350,8 +249,6 @@ async function updateTask(db: DatabaseManager, params: Record<string, unknown>, 
     afterTaskUpdated(db, agentController, current, prepared.data, updated)
   }
   if (prepared.startAfterWrite) {
-    const startRefused = authorizeScopedTaskAction(db, trustedScope, taskProjectId(current), 'task.start')
-    if (startRefused) return startRefused
     try {
       await startPreparedTask(agentController!, taskId)
     } catch (error) {
@@ -361,19 +258,11 @@ async function updateTask(db: DatabaseManager, params: Record<string, unknown>, 
   return { success: true, task: toApiTask(db.getTask(taskId) ?? updated) }
 }
 
-function createSubtask(db: DatabaseManager, params: Record<string, unknown>, trustedScope?: TaskMcpScope): unknown {
+function createSubtask(db: DatabaseManager, params: Record<string, unknown>): unknown {
   if (!params.parent_task_id) return { error: 'parent_task_id is required' }
   if (!params.title) return { error: 'title is required' }
   const parent = db.getTask(String(params.parent_task_id))
   if (!parent) return { error: 'Parent task not found' }
-  const refused = authorizeScopedTaskAction(db, trustedScope, taskProjectId(parent), 'task.create')
-  if (refused) return refused
-  if (parentWillAutomaticallyStartChild(db, parent.id, TaskStatus.NotStarted, params.agent_id as string | undefined)) {
-    const startRefused = authorizeScopedTaskAction(db, trustedScope, taskProjectId(parent), 'task.start')
-    if (startRefused) return startRefused
-  }
-  const narrowing = capabilityNarrowing(params.permissions)
-  if (narrowing.error) return { error: narrowing.error }
   if (params.next_subtask_ids !== undefined && !Array.isArray(params.next_subtask_ids)) {
     return { error: 'next_subtask_ids must be an array' }
   }
@@ -406,7 +295,7 @@ function createSubtask(db: DatabaseManager, params: Record<string, unknown>, tru
       auto_complete_without_review: params.auto_complete_without_review === undefined
         ? parent.auto_complete_without_review
         : params.auto_complete_without_review === true
-    }, params, trustedScope, narrowing.actions)
+    }, params)
   } catch (error) {
     // db.createTask removes the row when its successor links are invalid.
     return { error: error instanceof Error ? error.message : String(error) }
@@ -456,7 +345,7 @@ async function waitForSubtasks(db: DatabaseManager, params: Record<string, unkno
   return result(true, readSubtasks())
 }
 
-function createTopLevelTask(db: DatabaseManager, params: Record<string, unknown>, trustedScope?: TaskMcpScope): unknown {
+function createTopLevelTask(db: DatabaseManager, params: Record<string, unknown>): unknown {
   if (!params.title) return { error: 'Title is required' }
   const parentId = (params.parent_task_id as string) || null
   const parent = parentId ? db.getTask(parentId) : undefined
@@ -465,15 +354,6 @@ function createTopLevelTask(db: DatabaseManager, params: Record<string, unknown>
   // for, else the Default project.
   const projectId = parent ? taskProjectId(parent) : (projectFilter(params) ?? DEFAULT_PROJECT_ID)
   if (!db.getProject(projectId)) return { error: `Project not found: ${projectId}` }
-  const refused = authorizeScopedTaskAction(db, trustedScope, projectId, 'task.create')
-  if (refused) return refused
-  if (params.auto_start_agent === true ||
-    parentWillAutomaticallyStartChild(db, parent?.id, TaskStatus.NotStarted, params.agent_id as string | undefined)) {
-    const startRefused = authorizeScopedTaskAction(db, trustedScope, projectId, 'task.start')
-    if (startRefused) return startRefused
-  }
-  const narrowing = capabilityNarrowing(params.permissions)
-  if (narrowing.error) return { error: narrowing.error }
   const checked = validateProjectRepos(db, projectId, reposParam(params.repos))
   if ('error' in checked) return checked
   // #74: a task carries global skills and its own project's, never another project's.
@@ -497,7 +377,7 @@ function createTopLevelTask(db: DatabaseManager, params: Record<string, unknown>
     project_id: projectId,
     auto_start_agent: params.auto_start_agent === true,
     auto_complete_without_review: params.auto_complete_without_review === true
-  }, params, trustedScope, narrowing.actions)
+  }, params)
   if (!task) return { error: 'Failed to create task' }
   return { success: true, task: toApiTask(task) }
 }
@@ -590,13 +470,13 @@ function reportToCommander(db: DatabaseManager, params: Record<string, unknown>)
   }
 }
 
-export async function handleTaskRoute(db: DatabaseManager, route: string, params: Record<string, unknown>, trustedScope?: TaskMcpScope): Promise<unknown> {
+export async function handleTaskRoute(db: DatabaseManager, route: string, params: Record<string, unknown>): Promise<unknown> {
   switch (route) {
     case '/list_tasks':
       return listTasks(db, params)
 
     case '/create_task':
-      return createTopLevelTask(db, params, trustedScope)
+      return createTopLevelTask(db, params)
 
     case '/get_task': {
       const task = db.getTask(String(params.task_id))
@@ -604,7 +484,7 @@ export async function handleTaskRoute(db: DatabaseManager, route: string, params
     }
 
     case '/update_task':
-      return updateTask(db, params, trustedScope)
+      return updateTask(db, params)
 
     case '/list_agents':
       return db.getAgents()
@@ -623,7 +503,7 @@ export async function handleTaskRoute(db: DatabaseManager, route: string, params
       return db.getSubtasks(String(params.parent_task_id)).map(toApiTask)
 
     case '/create_subtask':
-      return createSubtask(db, params, trustedScope)
+      return createSubtask(db, params)
 
     case '/wait_for_subtasks':
       return waitForSubtasks(db, params)

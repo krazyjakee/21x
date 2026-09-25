@@ -5,13 +5,6 @@ import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTestDb } from '../../test/helpers/db-test-helper'
 import { makeTask } from '../../test/helpers/task-fixtures'
-import {
-  AUTHORIZATION_TTL_MS,
-  activateAuthorizationDispatch,
-  prepareAuthorizationDispatch,
-  recordHumanAuthorization,
-  revokeAuthorization
-} from './authorization'
 import { OPEN_DRAFT_PR_TOOL, prWriteTools } from './mcp-servers/pr-write-tools'
 import { handlePrWriteRoute, setPrWriteRunner } from './pr-write-gate'
 
@@ -22,7 +15,6 @@ describe('narrow draft pull-request capability gate', () => {
   let projectId: string
   let taskId: string
   let sessionNonce: string
-  let rootId: string
   let workspace: string
   const head = 'a'.repeat(40)
   const url = 'https://github.com/krazyjakee/21x/pull/999'
@@ -36,15 +28,6 @@ describe('narrow draft pull-request capability gate', () => {
     workspace = mkdtempSync(join(tmpdir(), '21x-pr-gate-'))
     mkdirSync(join(workspace, '21x', '.git'), { recursive: true })
     vi.spyOn(db, 'getWorkspaceDir').mockReturnValue(workspace)
-    const text = 'Implement the unified capability repair'
-    const origin = recordHumanAuthorization(db, {
-      messageId: 'human-coding-task', text, at: Date.now(), source: 'project-chat',
-      sessionId: 'coding-session', taskId, projectId
-    })
-    rootId = origin.id
-    activateAuthorizationDispatch(db, prepareAuthorizationDispatch(db, {
-      key: 'coding-task-dispatch', taskId, text, messageId: origin.messageId
-    }))
   })
 
   afterEach(() => {
@@ -99,25 +82,7 @@ describe('narrow draft pull-request capability gate', () => {
     expect(calls.flatMap((call) => call.args)).not.toContain('approve')
   })
 
-  it('rechecks revocation after asynchronous inspection and before pushing', async () => {
-    const calls: Array<{ command: string; args: string[] }> = []
-    setPrWriteRunner(async (command, args) => {
-      calls.push({ command, args })
-      const git = gitState(command, args)
-      if (git !== null && args[0] !== 'push') return git
-      if (command === 'gh' && args[0] === 'pr' && args[1] === 'list') {
-        revokeAuthorization(db, rootId, 'withdrawn during PR inspection')
-        return '[]'
-      }
-      if (command === 'git' && args[0] === 'push') throw new Error('push must not run')
-      throw new Error(`unexpected command: ${command} ${args.join(' ')}`)
-    })
-    expect(await handlePrWriteRoute(db, `/${OPEN_DRAFT_PR_TOOL}`, { repo: 'krazyjakee/21x', title: 'No longer authorized' }, scope()))
-      .toMatchObject({ status: 'refused', code: 'capability_refused', authorization_status: 'revoked', origin_node_id: rootId })
-    expect(calls.some((call) => call.command === 'git' && call.args[0] === 'push')).toBe(false)
-  })
-
-  it.each(['revoked', 'expired', 'repository_removed', 'task_repo_removed', 'stale_session'] as const)('rechecks %s after the final remote lookup and before creating', async (change) => {
+  it.each(['repository_removed', 'task_repo_removed', 'stale_session'] as const)('rechecks %s after the final remote lookup and before creating', async (change) => {
     let lookups = 0
     let created = false
     setPrWriteRunner(async (command, args) => {
@@ -126,11 +91,9 @@ describe('narrow draft pull-request capability gate', () => {
       if (command === 'gh' && args[0] === 'pr' && args[1] === 'list') {
         lookups++
         if (lookups === 2) {
-          if (change === 'revoked') revokeAuthorization(db, rootId, 'withdrawn during final lookup')
           if (change === 'repository_removed') db.removeProjectRepo(db.getProjectRepos(projectId)[0].id)
           if (change === 'task_repo_removed') db.updateTask(taskId, { repos: [] })
           if (change === 'stale_session') db.rotateTaskMcpScopeNonce(taskId)
-          if (change === 'expired') vi.useFakeTimers({ now: Date.now() + AUTHORIZATION_TTL_MS + 1 })
         }
         return '[]'
       }
@@ -144,7 +107,7 @@ describe('narrow draft pull-request capability gate', () => {
     const result = await handlePrWriteRoute(db, `/${OPEN_DRAFT_PR_TOOL}`, { repo: 'krazyjakee/21x', title: 'Final boundary' }, scope())
     expect(result).toMatchObject({
       status: 'refused',
-      code: change === 'task_repo_removed' ? 'repo_not_in_task' : change === 'stale_session' ? 'stale_task_session' : 'capability_refused'
+      code: change === 'task_repo_removed' ? 'repo_not_in_task' : change === 'stale_session' ? 'stale_task_session' : 'repo_not_in_project'
     })
     expect(created).toBe(false)
   })

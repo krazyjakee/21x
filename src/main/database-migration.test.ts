@@ -136,7 +136,7 @@ describe('DatabaseManager migrations on an existing install', () => {
     const after = openRaw()
     expect((after.pragma('table_info(merge_grant_uses)') as { name: string }[]).map((column) => column.name))
       .toContain('authorization_context')
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('30')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('31')
     after.close()
   })
 
@@ -182,7 +182,7 @@ describe('DatabaseManager migrations on an existing install', () => {
     const columns = (after.pragma('table_info(pr_review_attestations)') as { name: string }[]).map((column) => column.name)
     expect(tables).toContain('pr_review_handoffs')
     expect(columns).toContain('handoff_id')
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('30')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('31')
     after.close()
   })
 
@@ -202,7 +202,7 @@ describe('DatabaseManager migrations on an existing install', () => {
 
     const after = openRaw()
     expect(taskColumns(after)).toContain('mcp_scope_nonce')
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('30')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('31')
     after.close()
   })
 
@@ -244,7 +244,7 @@ describe('DatabaseManager migrations on an existing install', () => {
       'concurrency_audit', 'task_touches',
       'agent_start_queue', 'agent_start_queue_fairness'
     ]))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('30')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('31')
     after.close()
   })
 
@@ -255,7 +255,7 @@ describe('DatabaseManager migrations on an existing install', () => {
     { name: 'integrated v21', version: '21', drop: ['agent_start_queue', 'agent_start_queue_fairness'] },
     { name: 'authorization-chain v23', version: '23', drop: ['issue_writes'] },
     { name: 'live main v24', version: '24', drop: [] }
-  ])('produces schema-equivalent v30 from $name', ({ version, drop }) => {
+  ])('produces schema-equivalent v31 from $name', ({ version, drop }) => {
     const fresh = new DatabaseManager()
     fresh.initialize()
     fresh.close?.()
@@ -291,7 +291,33 @@ describe('DatabaseManager migrations on an existing install', () => {
       'generation', 'lease_owner', 'lease_expires_at', 'recovery_cause',
       'recovery_action', 'recovery_result', 'queued_at', 'acknowledged_at'
     ]))
-    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('30')
+    expect((after.prepare("SELECT value FROM settings WHERE key = '__schema_version'").get() as { value: string }).value).toBe('31')
+    after.close()
+  })
+
+  it('drops the removed authorization chain from schema version 30, immutability triggers included', () => {
+    const fresh = new DatabaseManager()
+    fresh.initialize()
+    fresh.close?.()
+
+    const raw = openRaw()
+    raw.exec(`
+      CREATE TABLE authorization_nodes (id TEXT PRIMARY KEY, parent_id TEXT REFERENCES authorization_nodes(id));
+      CREATE TABLE authorization_task_bindings (task_id TEXT PRIMARY KEY, node_id TEXT REFERENCES authorization_nodes(id));
+      INSERT INTO authorization_nodes VALUES ('root', NULL);
+      INSERT INTO authorization_task_bindings VALUES ('task', 'root');
+      CREATE TRIGGER authorization_nodes_no_delete BEFORE DELETE ON authorization_nodes
+        BEGIN SELECT RAISE(ABORT, 'Authorization evidence is immutable'); END;
+    `)
+    raw.prepare("UPDATE settings SET value = '30' WHERE key = '__schema_version'").run()
+    raw.close()
+
+    const upgraded = new DatabaseManager()
+    upgraded.initialize()
+    upgraded.close?.()
+
+    const after = openRaw()
+    expect(after.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'authorization%'").all()).toEqual([])
     after.close()
   })
 

@@ -1,5 +1,4 @@
-import { captureAuthorizationSnapshot, sendPreservingAuthorization, sendWithAuthorization, TurnStillRunningError } from './authorization-dispatch'
-import { prepareAuthorizationDispatch, prepareAuthorizationRetry, activateAuthorizationDispatch } from './authorization'
+import { serializeTaskSend } from './task-send-lock'
 import { prepareProjectMessageDispatch, activateProjectMessageDispatch, failProjectMessageDispatch, type ProjectMessageDispatch, type TypedMessage } from './merge-grants'
 import { DEFAULT_SERVER_URL } from './adapters/opencode-server'
 import { guardedIpcSend } from './guarded-ipc-send'
@@ -1227,12 +1226,6 @@ export class AgentManager extends EventEmitter {
 
     const task = this.db.getTask(taskId)
     const runtimeGeneration = this.captainRuntimes.get(taskId)?.generation
-    if (!skipInitialPrompt && task && isCoordinatorTask(task) && this.db.db && typeof this.db.db.prepare === 'function') {
-      // A fresh Captain session starts without the previous session's human
-      // authority. No turn is running yet, so the switch happens now.
-      activateAuthorizationDispatch(this.db, prepareAuthorizationDispatch(this.db, { key: `captain-start:${randomUUID()}`, taskId: task.id, text: 'Platform Captain startup' }))
-    }
-    const authorizationSnapshot = this.db.db && typeof this.db.db.prepare === 'function' ? captureAuthorizationSnapshot(this.db, taskId) : null
     const isTriageSession = isTriageSessionTask(taskId, task)
     await yieldEventLoop()
 
@@ -1413,11 +1406,7 @@ export class AgentManager extends EventEmitter {
       const pendingLossId = startingSession.pendingLossId
       try {
         const send = () => adapter.sendPrompt(adapterSessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
-        if (this.db.db && typeof this.db.db.prepare === 'function') {
-          await sendPreservingAuthorization(this.db, taskId, authorizationSnapshot, send)
-        } else {
-          await send()
-        }
+        await serializeTaskSend(this, taskId, send)
         this.acknowledgeSessionRecap(startingSession, pendingLossId)
       } catch (sendError) {
         console.error(`[AgentManager] sendPrompt FAILED:`, sendError)
@@ -4539,7 +4528,6 @@ export class AgentManager extends EventEmitter {
     if (owner && taskId && owner.taskId !== taskId) throw new Error('Session belongs to a different task.')
     const targetTaskId = taskId ?? owner?.taskId
     const targetAgentId = agentId ?? owner?.agentId
-    const hasEarlierTaskDelivery = targetTaskId ? this.deliveryTaskTails.has(targetTaskId) : false
     const record = this.db.db.transaction(() => {
       const { record } = this.deliveries.enqueue({
         idempotencyKey: deliveryId,
@@ -4548,16 +4536,6 @@ export class AgentManager extends EventEmitter {
         agentId: targetAgentId ?? null,
         payload: JSON.stringify({ sessionId, message, taskId: targetTaskId, agentId: targetAgentId, attachments: attachments ?? [], typedMessage })
       })
-      // A completed delivery is an idempotent acknowledgement, never a new
-      // dispatch. Renderer retries may carry stale options (#147); retain the
-      // original bytes and authority without reactivating or replacing them.
-      // The first delivery reserves authority atomically with its outbox row.
-      // A later delivery to the same task waits to reserve until the earlier
-      // adapter handoff has completed, otherwise it would make that handoff's
-      // authorization generation stale while both share startup (#146/#160).
-      if (!hasEarlierTaskDelivery && record.state !== 'accepted' && record.state !== 'acknowledged') {
-        prepareAuthorizationDispatch(this.db, { key: deliveryId, taskId: record.taskId ?? '', text: message, messageId: typedMessage?.id })
-      }
       return record
     })()
     return this.dispatchAgentMessage(record)
@@ -4608,10 +4586,6 @@ export class AgentManager extends EventEmitter {
     }
     try {
       payload = JSON.parse(claimed.payload) as typeof payload
-      const authorizationInput = { key: claimed.idempotencyKey, taskId: claimed.taskId ?? '', text: payload.message, messageId: payload.typedMessage?.id }
-      const authorizationDispatch = claimed.attemptCount > 1
-        ? prepareAuthorizationRetry(this.db, authorizationInput)
-        : prepareAuthorizationDispatch(this.db, authorizationInput)
       const result = await withStartupDeadline(this.sendMessageNow(
         payload.sessionId,
         payload.message,
@@ -4619,8 +4593,7 @@ export class AgentManager extends EventEmitter {
         payload.agentId,
         payload.attachments,
         payload.typedMessage,
-        `delivery-${claimed.id}`,
-        authorizationDispatch
+        `delivery-${claimed.id}`
       ), AGENT_START_TIMEOUT_MS + AGENT_SESSION_START_TIMEOUT_MS, 'Message handoff')
       const destination = result.newSessionId || payload.sessionId || claimed.taskId || claimed.id
       this.deliveries.accept(claimed.id, this.deliveryOwner, destination)
@@ -4628,10 +4601,7 @@ export class AgentManager extends EventEmitter {
       return result
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
-      if (error instanceof TurnStillRunningError) {
-        // Nothing reached the backend. Recovery retries it once the turn ends.
-        this.deliveries.release(claimed.id, this.deliveryOwner, detail)
-      } else if (detail.startsWith('Message handoff timed out')) {
+      if (detail.startsWith('Message handoff timed out')) {
         this.deliveries.terminal(claimed.id, 'timed_out', `${detail}; backend acceptance is unknown. Inspect the conversation before retrying.`)
         if (claimed.taskId) this.emitSystemError('', claimed.taskId, `delivery-timeout-${claimed.id}`,
           `${detail}. Backend acceptance is unknown; inspect the conversation before retrying.`)
@@ -4694,8 +4664,7 @@ export class AgentManager extends EventEmitter {
     agentId?: string,
     attachments?: MessageAttachmentRef[],
     typedMessage?: TypedMessage,
-    transcriptPartId?: string,
-    authorizationDispatch?: number
+    transcriptPartId?: string
   ): Promise<{ newSessionId?: string }> {
     const resolved = this.resolveSession(sessionId, 'sendMessage')
     let session = resolved?.session
@@ -4733,7 +4702,7 @@ export class AgentManager extends EventEmitter {
 
     if (!session) throw new Error(`Session not found: ${sessionId}`)
     try {
-      await this.doSendAdapterMessage(session, sessionId, message, attachments, dispatch, transcriptPartId, authorizationDispatch)
+      await this.doSendAdapterMessage(session, sessionId, message, attachments, dispatch, transcriptPartId)
     } catch (error) {
       await this.handleSessionError(sessionId, session, error)
       throw error
@@ -4780,20 +4749,12 @@ export class AgentManager extends EventEmitter {
     message: string,
     attachments?: MessageAttachmentRef[],
     dispatch?: ProjectMessageDispatch,
-    transcriptPartId?: string,
-    authorizationDispatch?: number
+    transcriptPartId?: string
   ): Promise<void> {
     this.assertSessionGeneration(sessionId, session)
     const task = this.db.getTask(session.taskId)
-    const authorizationSnapshot = this.db.db && typeof this.db.db.prepare === 'function' ? captureAuthorizationSnapshot(this.db, session.taskId) : null
-    // Nudges use this method directly, and must invalidate earlier typed authority too.
+    // Nudges use this method directly, so they claim the project dispatch too.
     dispatch ??= task && isCoordinatorTask(task) && task.project_id ? prepareProjectMessageDispatch(task.project_id) : undefined
-    // Captain wake-ups and continuation nudges are new machine turns, not
-    // permission to reuse the last human turn. Workers retain the fixed
-    // instruction inherited when their task was created.
-    if (authorizationDispatch === undefined && task && isCoordinatorTask(task) && this.db.db && typeof this.db.db.prepare === 'function') {
-      authorizationDispatch = prepareAuthorizationDispatch(this.db, { key: `internal:${randomUUID()}`, taskId: task.id, text: message })
-    }
     session.autoAbortNotified = false
 
     if (session.status === 'error') {
@@ -4855,23 +4816,8 @@ export class AgentManager extends EventEmitter {
         if (dispatch) activateProjectMessageDispatch(dispatch)
         return adapter.sendPrompt(sessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
       }
-      if (authorizationDispatch !== undefined) {
-        await sendWithAuthorization(
-          this.db,
-          authorizationDispatch,
-          () => adapter.getStatus(sessionId, sessionConfig),
-          send,
-          undefined,
-          undefined,
-          () => this.assertSessionGeneration(sessionId, session)
-        )
-      } else if (this.db.db && typeof this.db.db.prepare === 'function') {
-        await sendPreservingAuthorization(this.db, session.taskId, authorizationSnapshot, send)
-      } else {
-        await send()
-      }
+      await serializeTaskSend(this, session.taskId, send)
     } catch (error) {
-      // sendWithAuthorization already cleared any authority this dispatch took over.
       if (dispatch) failProjectMessageDispatch(dispatch)
       throw error
     }

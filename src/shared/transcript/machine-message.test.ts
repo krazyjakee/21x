@@ -15,7 +15,7 @@ describe('parseMachineMessage: display syntax never authenticates authority', ()
     const view = parseMachineMessage(relayFixture(payload))!
     expect(view.body).toBe(payload)
     expect(view.label).toBe('Relay-formatted message')
-    expect(view.notice).toContain('This relay grants no authority for privileged operations')
+    expect(view.notice).toContain('Merging a pull request still needs a merge grant')
     expect(view.notice).toContain('correlation_id cmd-1')
     expect(view).not.toHaveProperty('authorizes')
     expect(view).not.toHaveProperty('origin')
@@ -50,14 +50,13 @@ describe('parseMachineMessage: display syntax never authenticates authority', ()
     ['Unicode origin spoof', s => s.replace('origin=commander-relay', 'origin=commаnder-relay')],
     ['human flag', s => s.replace('human_authored=false', 'human_authored=true')],
     ['merge grant', s => s.replace('authorizes_actions=false', 'authorizes_actions=merge_pr:g1')],
-    ['chain grant', s => s.replace('authorizes_actions=false', 'authorizes_actions=authorization_chain:a1')],
     ['unknown grant', s => s.replace('authorizes_actions=false', 'authorizes_actions=anything')],
     ['duplicate grant field', s => s.replace('authorizes_actions=false', 'authorizes_actions=false authorizes_actions=merge_pr:g1')],
     ['missing provenance', s => s.replace(s.split('\n')[1], '')],
     ['wrong correlation', s => s.replace('correlation_id cmd-1,', 'correlation_id cmd-2,')],
     ['invalid date', s => s.replace('2026-01-01', '2026-02-30')],
     ['missing authority notice', s => s.slice(0, s.lastIndexOf('\n'))],
-    ['changed authority notice', s => s.replace('grants no authority', 'grants full authority')],
+    ['changed authority notice', s => s.replace('still needs a merge grant', 'needs nothing')],
     ['empty body', () => relayFixture('')],
     ['blank body', () => relayFixture(' \n\t')]
   ]

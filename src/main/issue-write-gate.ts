@@ -4,9 +4,8 @@
  * gate so the policy module gains one hook, exactly like merge-grant-gate.ts.
  *
  * The distinction this file exists to enforce: an issue write is *delegated*
- * work. It needs an originating human project-work instruction (issue-writes.ts
- * resolves one from platform records) but no per-issue grant, because filing a
- * ticket for what the person just asked for is bookkeeping. Merging, deploying,
+ * work. It needs no per-issue grant, because filing a ticket for what the
+ * person asked for is bookkeeping. Merging, deploying,
  * deleting, replaying, bypassing protection and messaging people are not, and
  * none of them can be reached through these tools.
  *

@@ -222,7 +222,7 @@ export function registerVoiceHandlers({ voiceSessionManager, db }: IpcDeps): voi
   })
 
   ipcMain.handle('voice:commander:send', async (event, payload: { sessionId: string; text: string }) => {
-    // This path records a human authorization root, just like typed chat.
+    // This path sends a human Commander message, just like typed chat.
     // Authenticate before reading payloads or initializing the voice bridge.
     assertTrustedSender(event, 'voice:commander:send')
     if (typeof payload?.sessionId !== 'string' || !payload.sessionId) throw new Error('sessionId is required')

@@ -15,8 +15,6 @@ import { LOST_SESSION_NOTICE } from './agent-handoff'
 import { makeTask } from '../../test/helpers/task-fixtures'
 import { CaptainRuntimeStore } from './sessions/runtime-store'
 import { DeliveryStore } from './sessions/delivery-store'
-import { recordHumanAuthorization, prepareAuthorizationDispatch, activateAuthorizationDispatch, taskAuthorization } from './authorization'
-import { TurnStillRunningError } from './authorization-dispatch'
 
 // Mock heavy dependencies to avoid loading electron/native modules. The
 // filesystem is real: sessions get workspaces under a temp dir, so the
@@ -152,11 +150,7 @@ describe('per-project Captain conversations', () => {
     expect(db.getTask(alphaCaptain)?.status).toBe('not_started')
   })
 
-  it('sends a normal Captain startup prompt after clearing old authority without invalidating its own snapshot', async () => {
-    const text = 'Create tasks'
-    recordHumanAuthorization(db, { messageId: 'startup-human', text, at: Date.now(), source: 'project-chat', projectId: alphaId, taskId: alphaCaptain })
-    activateAuthorizationDispatch(db, prepareAuthorizationDispatch(db, { key: 'startup-old', taskId: alphaCaptain, text, messageId: 'startup-human' }))
-    expect(taskAuthorization(db, alphaCaptain).status).toBe('active')
+  it('sends a normal Captain startup prompt that recaps the lost session', async () => {
     seedTranscript(alphaCaptain, 'Create tasks', 'Old instructions are historical only.')
     const fake = new FakeAdapter({ sessionIds: ['startup-session'] })
     fake.resumeSession.mockRejectedValueOnce(new Error('No conversation found'))
@@ -165,7 +159,6 @@ describe('per-project Captain conversations', () => {
     await manager.startSession(agentId, alphaCaptain, undefined, false)
     expect(fake.sendPrompt).toHaveBeenCalledOnce()
     expect(promptTexts(fake)[0]).toContain('Old instructions are historical only.')
-    expect(taskAuthorization(db, alphaCaptain).effectivePermissions).toEqual([])
   })
 
   it('resumes both conversations after a restart, each by its own session id', async () => {
@@ -582,16 +575,6 @@ describe('per-project Captain conversations', () => {
     expect(new DeliveryStore(db).getByKey('bounded-retry')).toMatchObject({ state: 'failed', attemptCount: 5 })
   })
 
-  it('keeps a message queued while the Captain is still on an earlier turn', async () => {
-    const manager = newManager(new FakeAdapter())
-    const send = vi.spyOn(manager as any, 'sendMessageNow').mockRejectedValue(new TurnStillRunningError())
-    for (let attempt = 0; attempt < 6; attempt++) {
-      await expect(manager.sendMessage('', 'queued', alphaCaptain, agentId, undefined, undefined, 'busy-captain')).rejects.toThrow(TurnStillRunningError)
-    }
-    expect(send).toHaveBeenCalledTimes(6)
-    expect(new DeliveryStore(db).getByKey('busy-captain')).toMatchObject({ state: 'pending', attemptCount: 6 })
-  })
-
   it('starts one Captain for concurrent durable messages without a prewarm owner', async () => {
     const fake = new FakeAdapter({ sessionIds: ['one-start'] })
     const manager = newManager(fake)
@@ -603,8 +586,6 @@ describe('per-project Captain conversations', () => {
     expect(fake.sendPrompt).toHaveBeenCalledTimes(2)
     expect(fake.sendPrompt.mock.calls.map((call) => call[0])).toEqual(['one-start', 'one-start'])
     expect(['first-delivery', 'second-delivery'].map((key) => new DeliveryStore(db).getByKey(key)?.state)).toEqual(['acknowledged', 'acknowledged'])
-    expect(db.db.prepare('SELECT delivery_key FROM authorization_dispatches WHERE task_id = ? ORDER BY seq').all(alphaCaptain))
-      .toEqual([{ delivery_key: 'first-delivery' }, { delivery_key: 'second-delivery' }])
   })
 
   it('cancels messages queued before Stop without reviving the task, but permits a new post-Stop send', async () => {
@@ -651,47 +632,6 @@ describe('per-project Captain conversations', () => {
     expect(deliveries.getByKey('after-stop')?.state).toBe('acknowledged')
   })
 
-  it('fences a claimed typed handoff awaiting idle before authority activation or adapter submission', async () => {
-    const fake = new FakeAdapter({ sessionIds: ['live'], status: SessionStatusType.IDLE })
-    const manager = newManager(fake)
-    await manager.startSession(agentId, alphaCaptain, undefined, true)
-    const typed = {
-      id: 'stop-await-idle', taskId: alphaCaptain, projectId: alphaId,
-      at: Date.now(), text: 'Create GitHub issues for Alpha'
-    }
-    const node = recordHumanAuthorization(db, {
-      at: typed.at, messageId: typed.id, source: 'project-chat', text: typed.text,
-      taskId: alphaCaptain, projectId: alphaId
-    })
-    let idle!: (status: { type: SessionStatusType }) => void
-    let finishDestroy!: () => void
-    let acceptedAfterStop = 0
-    fake.destroySession.mockImplementationOnce(() => new Promise<void>((resolve) => { finishDestroy = resolve }))
-    fake.sendPrompt.mockImplementation(async () => { acceptedAfterStop++ })
-    fake.getStatus.mockImplementationOnce(() => new Promise(resolve => { idle = resolve }))
-
-    const sending = manager.sendMessage(
-      'live', typed.text, alphaCaptain, agentId, undefined, typed, 'stop-await-idle'
-    )
-    const settled = Promise.allSettled([sending])
-    await vi.waitFor(() => expect(idle).toBeTypeOf('function'))
-    const stopping = manager.stopByTaskId(alphaCaptain)
-    await vi.waitFor(() => expect(finishDestroy).toBeTypeOf('function'))
-    expect(new DeliveryStore(db).getByKey('stop-await-idle')?.state).toBe('cancelled')
-    idle({ type: SessionStatusType.IDLE })
-    await settled
-
-    expect(acceptedAfterStop).toBe(0)
-    expect(taskAuthorization(db, alphaCaptain).status).not.toBe('active')
-    expect(taskAuthorization(db, alphaCaptain).nodeId).toBeNull()
-    expect(taskAuthorization(db, alphaCaptain).nodeId).not.toBe(node.id)
-    expect((manager as any).pollingEntries.size).toBe(0)
-    finishDestroy()
-    await stopping
-    expect(manager.findSessionByTaskId(alphaCaptain)).toBeUndefined()
-    expect((manager as any).pollingEntries.size).toBe(0)
-  })
-
   it('does not restore polling when an accepted send completes during slow Stop teardown', async () => {
     const task = db.createTask(makeTask({ title: 'Stop with pending teardown' }))!
     db.updateTask(task.id, { agent_id: agentId })
@@ -719,7 +659,7 @@ describe('per-project Captain conversations', () => {
     expect(db.getTask(task.id)?.status).toBe('not_started')
   })
 
-  it('re-reserves exact authorization when an earlier failed delivery is replayed after its successor', async () => {
+  it('replays an earlier failed delivery after its successor', async () => {
     const before = new FakeAdapter({ sessionIds: ['live'], status: SessionStatusType.IDLE })
     const firstManager = newManager(before)
     await firstManager.startSession(agentId, alphaCaptain, undefined, true)

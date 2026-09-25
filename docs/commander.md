@@ -43,8 +43,7 @@ does the following:
 
 1. Builds the provider first, so a missing API key rejects before anything is
    stored, and validates any images against the provider's capabilities.
-   `appendHumanMessage` stores the message, images and human authorization
-   record in one transaction. Turn preparation runs before commit; a failure
+   `appendHumanMessage` stores the message and images in one transaction. Turn preparation runs before commit; a failure
    rolls that transaction back.
 2. Builds the model context (`context.ts`). It splits the history into turns.
    A turn starts at a `user` or `report` message. The newest turns are sent
@@ -55,12 +54,9 @@ does the following:
    the model as user-side notes (`[Report from project X]`).
 3. Runs one `ChatRuntime` turn with the Commander system prompt (`prompts.ts`)
    and the tools from `getTools`, which is called per turn with the session id,
-   user message, `userMessageId`, `authorizationMessageId`, and trigger (`user`
-   or `report`). Only typed input supplies `userMessageId` for merge grants.
-   Both trusted typed and voice input can supply `authorizationMessageId` for
-   the separate authorization chain; a backchannel such as "um" can retain
-   the preceding instruction's identity without renewing its expiry.
-   Report turns supply neither identity and receive no admin tools (see
+   user message, `userMessageId`, and trigger (`user` or `report`). Only
+   typed input supplies `userMessageId` for merge grants.
+   Report turns supply no identity and receive no admin tools (see
    *Immediate administration*). Events stream on `commander:event`.
 4. Stores the assistant and tool messages. A tool row whose result is a JSON
    object carrying `project_id` / `correlation_id` (an `ask_captain`
@@ -137,15 +133,11 @@ Delegation and status (#61):
   The relay carries the Commander session and correlation ids, declares
   `human_authored=false`, and quotes the model's interpretation inside
   `<<<BEGIN COMMANDER MESSAGE … END COMMANDER MESSAGE>>>`.
-  A user-started turn can bind a delegation to its platform-recorded human
-  instruction. An active chain with effective permissions produces
-  `authorizes_actions=authorization_chain:<node id>` and includes the original
-  instruction and resolved scope. Without such authority or a merge grant,
-  it says `authorizes_actions=false`. These text fields are informational:
-  consumers recheck the immutable platform record, live scope, expiry and
-  revocation. A report-started turn cannot create that human binding.
-  Delivery preserves the binding and generation through recovery and
-  rechecks them at dispatch; retries do not renew authority. It always uses
+  The relay tells the Captain that the request carries the same authority as
+  the same words typed into the project chat, so it creates and starts tasks,
+  files issues and opens draft pull requests without asking the user to
+  restate anything. Without a merge grant it says `authorizes_actions=false`,
+  which concerns merging only. It always uses
   the project's configured Captain agent;
   a live session on another agent is not reused. `captain_session` reports
   the live session's real state (`running`, `idle`, `waiting_approval`,
@@ -169,17 +161,11 @@ Delegation and status (#61):
   and leaves the Commander view for the dashboard.
 - `pause_all_projects(paused)`: the #65 pause. It acts at once, in every project.
 
-The authorization chain can carry scoped task and GitHub issue actions from
-trusted typed or voice input. Its limited command grammar and effective scope
-do not grant merge, approval, deployment, deletion or arbitrary messaging
-rights. A relay cannot widen the original instruction. See
-[Human authorization through delegation](authorization-chain.md).
-
 For delegated issue work, the Captain's platform tools can create an issue,
 update its title/body/labels, or link it to a task without a merge grant.
-They recheck authorization and repository/task restrictions at the write
-boundary, reject pull-request targets and secret-bearing payloads, and record
-the origin and outcome in a durable idempotency ledger. Unknown outcomes stay
+They recheck repository/task restrictions at the write boundary, reject
+pull-request targets and secret-bearing payloads, and record the calling
+Captain and outcome in a durable idempotency ledger. Unknown outcomes stay
 unresolved until reconciliation verifies external evidence; recovery never
 blindly repeats a write. The `issue_write` escalation level determines whether
 an authorized external write is silent, reported or held; it does not confer
@@ -238,11 +224,8 @@ the registry unless the user started the turn, whatever `getTools` returned.
 That set includes project and skill writes plus `revoke_merge_grant`. The
 runtime rejects even a model-invented call to one of those removed tools.
 Read-only tools, navigation and `ask_captain` (within its loop budget) remain.
-On a report-started turn, `ask_captain` has neither the typed-user identity for
-a new merge grant nor the human instruction identity for a new authorization
-chain. Its relay carries `authorizes_actions=false`. This does not revoke an
-existing task's immutable authorization chain; that chain remains subject to
-its own scope, expiry and revocation checks.
+On a report-started turn, `ask_captain` has no typed-user identity for a new
+merge grant, so its relay carries `authorizes_actions=false`.
 
 Successful mutations call `onProjectChanged` (or `onSkillChanged`), which
 broadcasts `project:changed` (or `skills:changed`).
