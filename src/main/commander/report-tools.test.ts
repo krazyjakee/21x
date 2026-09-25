@@ -1,7 +1,7 @@
 /**
  * Captain reports back into Commander sessions (#62): routing by
  * correlation id, the open-session relay turn, the unread-only path, the
- * report-ask loop cap, escalations as reports, and the `report_to_commander`
+ * report-ask loop cap, Captain actions as reports, and the `report_to_commander`
  * route with its coordinator-only guard.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -9,7 +9,7 @@ import { createTestDb } from '../../../test/helpers/db-test-helper'
 import type { CommanderEvent } from '../../shared/commander'
 import type { ChatProvider, ChatProviderEvent, ChatProviderRequest } from '../chat/providers/types'
 import type { DatabaseManager } from '../database'
-import { escalateToCommander, type EscalationEvent } from '../escalation'
+import { reportCaptainAction, type CaptainActionEvent } from '../captain-github-tools'
 import { callToolForScope } from '../mcp-servers/task-management-core'
 import { handleTaskRoute } from '../task-api/task-routes'
 import { CommanderService } from './commander-service'
@@ -20,7 +20,7 @@ import { CaptainDeliveryService } from './captain-delivery'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_TITLE_PROMPT } from './prompts'
 import { deliverCaptainReport, setCaptainReportHandler } from './report-inbox'
 import {
-  escalationReportText,
+  captainActionReportText,
   guardReportAsks,
   installCommanderReportBridge,
   MAX_REPORT_ASKS_WITHOUT_USER_TURN,
@@ -488,27 +488,26 @@ describe('loop protection', () => {
   })
 })
 
-describe('escalations as reports', () => {
-  const event = (over: Partial<EscalationEvent>): EscalationEvent => ({
-    projectId: 'p', action: 'start_task', level: 'tell_commander', tool: 'start_task', args: {}, summary: 'start "Ship it"', outcome: 'performed', at: '2026-01-01T00:00:00.000Z', ...over
+describe('Captain actions as reports', () => {
+  const event = (over: Partial<CaptainActionEvent>): CaptainActionEvent => ({
+    projectId: 'p', tool: 'merge_pull_request', summary: 'Merged https://github.com/acme/app/pull/1', outcome: 'performed', at: '2026-01-01T00:00:00.000Z', ...over
   })
 
-  it('turns a tell_commander escalation into an unprompted project-tagged report (#62 acceptance)', () => {
+  it('turns a merge into an unprompted project-tagged report (#62 acceptance)', () => {
     const alpha = db.createProject({ name: 'Alpha' })!
     const service = makeService(fakeProvider())
     install(service)
     const session = store.createSession()
 
-    escalateToCommander(event({ projectId: alpha.id }))
+    reportCaptainAction(event({ projectId: alpha.id }))
     const report = store.listMessages(session.id).at(-1)
     expect(report).toMatchObject({ role: 'report', project_id: alpha.id, correlation_id: null })
-    expect(report?.content).toContain('start "Ship it"')
+    expect(report?.content).toContain('Merged https://github.com/acme/app/pull/1')
     expect(store.getSession(session.id)?.unread_count).toBe(1)
+  })
 
-    // Held and decided ask_user calls are the user's business, not reports.
-    escalateToCommander(event({ projectId: alpha.id, level: 'ask_user', outcome: 'held', heldId: 'h1' }))
-    expect(store.listMessages(session.id)).toHaveLength(1)
-    expect(escalationReportText(event({ level: 'ask_user', outcome: 'approved' }))).toBeNull()
+  it('words a blocked merge as a blocker', () => {
+    expect(captainActionReportText(event({ outcome: 'needs_user', summary: 'PR #1 needs a reviewer' }))).toBe('Blocked on an external approval: PR #1 needs a reviewer')
   })
 })
 

@@ -2,9 +2,9 @@
  * The Captain's delegated GitHub issue tools. Kept in their own module so
  * other Captain tool work touches task-management-tools.ts by one spread only.
  *
- * Like the merge tools, none of them has a Task API route: the escalation gate
- * in the main process answers them (issue-write-gate.ts). A raw HTTP call to
- * the Task API, or a session without the gate, gets "Unknown route". Only the
+ * Like the merge tool, none of them has a Task API route: the main process
+ * answers them (issue-write-gate.ts). A raw HTTP call to the Task API, or a
+ * session without that handler, gets "Unknown route". Only the
  * project's Captain may call them (COORDINATOR_ONLY_TOOLS).
  *
  * What is deliberately absent: commenting, closing, reopening, assigning,

@@ -3,7 +3,6 @@ import { isAgentStatusHeartbeat } from '@shared/activity'
 import {
   overviewApi,
   projectApi,
-  escalationApi,
   onTaskUpdated,
   onTaskCreated,
   onTaskDeleted,
@@ -20,8 +19,7 @@ export const OVERVIEW_FALLBACK_POLL_MS = 30_000
 /**
  * The all-projects overview (#63). One main-process call returns every
  * active project's status; the store refetches it, debounced, whenever a
- * task, session, queue, status snapshot, project or held escalation changes
- * in any project. No LLM output is read here.
+ * task, session, queue, status snapshot or project changes in any project. No LLM output is read here.
  */
 interface OverviewState {
   entries: ProjectOverviewEntry[]
@@ -98,8 +96,7 @@ export const useOverviewStore = create<OverviewState>((set, get) => ({
         onAgentStatus((event) => { if (!isAgentStatusHeartbeat(event)) refresh() }),
         onAgentStartQueueChanged(refresh),
         projectApi.onStatusChanged(refresh),
-        projectApi.onChanged(refresh),
-        escalationApi.onHeldChanged(refresh)
+        projectApi.onChanged(refresh)
       ]
       pollTimer = setInterval(() => { void get().fetchAll() }, OVERVIEW_FALLBACK_POLL_MS)
       unsubscribeAll = () => {

@@ -6,9 +6,8 @@ import { getRepoProviders, isGitProvider } from '../repo-providers'
 import type { AgentMcpServerEntry, McpServerConfigRecord } from './types'
 import { migrateCoordinatorToCaptain } from './captain-migration'
 import { migrateTaskActivity } from './task-activity-migration'
-import { splitLegacyPullRequestEscalation } from '../../shared/project-policies'
 import { createConcurrencyTables, migrateConcurrencyControl } from './concurrency-migration'
-import { dropAuthorizationTables } from './authorization-schema'
+import { dropAuthorizationTables, dropMergeGrantTables, removeProjectPermissionSettings } from './authorization-schema'
 import { createDurableStartQueueTables, migrateDurableStartQueue } from './start-queue-migration'
 import { createIssueWriteTables, migrateIssueWrites } from './issue-writes-migration'
 
@@ -67,8 +66,11 @@ import { createIssueWriteTables, migrateIssueWrites } from './issue-writes-migra
  *          bindings, including backfill from an existing accepted turn node.
  * 30 → 31: the human authorization chain is removed; its tables are dropped
  *          (dropAuthorizationTables in authorization-schema.ts).
+ * 31 → 32: merge grants and the escalation policy are removed: the
+ *          merge_grant* tables are dropped and projects.settings loses its
+ *          `escalation` and `merge_grants` blocks (authorization-schema.ts).
  */
-const SCHEMA_VERSION = 31
+const SCHEMA_VERSION = 32
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -558,7 +560,6 @@ export function createTables(db: Database.Database): void {
       ON project_status_journal(project_id, created_at DESC, id DESC);
   `)
 
-  createMergeGrantTables(db)
   createPullRequestReadinessTables(db)
   // Concurrency control (#150): audit feed and declared touches.
   createConcurrencyTables(db)
@@ -1077,9 +1078,6 @@ export function runMigrations(db: Database.Database): void {
   // the projects table (and its renamed column) exists.
   migrateCoordinatorToCaptain(db)
 
-  // Migration v19: merge grants (#137). New tables only; runs after
-  // migrateToProjects so the projects table they reference exists.
-  migrateMergeGrants(db)
   // Migration v21: concurrency control (#150). After migrateToProjects so the
   // projects table the audit references exists.
   migrateConcurrencyControl(db)
@@ -1095,9 +1093,6 @@ export function runMigrations(db: Database.Database): void {
   // Migration v25: meaningful activity, including ancestor backfill.
   migrateTaskActivity(db)
 
-  // Migration v26: durable context for effective merge-grant attribution.
-  migrateMergeGrantAttribution(db)
-
   // Migration v27: exact-head review evidence and invalidatable readiness.
   createPullRequestReadinessTables(db)
 
@@ -1106,6 +1101,10 @@ export function runMigrations(db: Database.Database): void {
 
   // Migration v31: the authorization chain (v23–v30) is gone.
   dropAuthorizationTables(db)
+
+  // Migration v32: merge grants (v19, v26) and the escalation policy are gone.
+  dropMergeGrantTables(db)
+  removeProjectPermissionSettings(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)
@@ -1116,70 +1115,6 @@ export function runMigrations(db: Database.Database): void {
 
   // Migration v11: the Claude Code adapter now honours permission_mode.
   preserveClaudeCodePermissionBehaviour(db)
-}
-
-/**
- * Merge grants (#137): standing merge authority the user gave a project's
- * Captain in words they typed (src/main/merge-grants.ts). A grant is bound
- * to that message (`source_message_id`, `user_text` verbatim; one grant per
- * message, so one message can never reach several projects), has one fixed
- * action and condition, optional filters, and always an expiry.
- * `merge_grant_uses` is the audit trail: one row per merge made under a
- * grant, with the PR, the head SHA merged and the checks and protection
- * state GitHub reported at that moment. `revoked_by` says who revoked it. Both go with their project. New tables, so CREATE IF NOT EXISTS
- * covers fresh and existing DBs alike.
- */
-function createMergeGrantTables(db: Database.Database): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS merge_grants (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-      action TEXT NOT NULL DEFAULT 'merge_pr',
-      condition TEXT NOT NULL DEFAULT 'checks_green_and_protection_satisfied',
-      repo TEXT,
-      base_branch TEXT,
-      pr_numbers TEXT NOT NULL DEFAULT '[]',
-      source TEXT NOT NULL,
-      source_session_id TEXT,
-      source_message_id TEXT NOT NULL,
-      user_text TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      expires_at TEXT NOT NULL,
-      max_uses INTEGER,
-      uses INTEGER NOT NULL DEFAULT 0,
-      last_used_at TEXT,
-      revoked_at TEXT,
-      revoked_by TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_merge_grants_project ON merge_grants(project_id, created_at DESC);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_merge_grants_source_message ON merge_grants(source, source_message_id);
-    CREATE TABLE IF NOT EXISTS merge_grant_uses (
-      id TEXT PRIMARY KEY,
-      grant_id TEXT NOT NULL REFERENCES merge_grants(id) ON DELETE CASCADE,
-      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-      pr_url TEXT NOT NULL,
-      pr_title TEXT NOT NULL DEFAULT '',
-      base_branch TEXT NOT NULL DEFAULT '',
-      head_sha TEXT NOT NULL,
-      method TEXT NOT NULL,
-      merge_state TEXT NOT NULL DEFAULT '',
-      review_decision TEXT NOT NULL DEFAULT '',
-      checks TEXT NOT NULL DEFAULT '[]',
-      authorization_context TEXT NOT NULL DEFAULT '{}',
-      merged_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_merge_grant_uses_grant ON merge_grant_uses(grant_id, merged_at DESC);
-    CREATE TABLE IF NOT EXISTS merge_grant_reservations (
-      id TEXT PRIMARY KEY,
-      grant_id TEXT NOT NULL REFERENCES merge_grants(id) ON DELETE CASCADE,
-      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-      snapshot TEXT NOT NULL,
-      state TEXT NOT NULL DEFAULT 'pending',
-      created_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_merge_grant_reservations_pending ON merge_grant_reservations(state, project_id);
-
-  `)
 }
 
 /**
@@ -1256,47 +1191,6 @@ function migratePullRequestAttestationSecurity(db: Database.Database): void {
     db.exec('ALTER TABLE pr_review_attestations ADD COLUMN handoff_id TEXT REFERENCES pr_review_handoffs(id) ON DELETE RESTRICT')
   }
   db.exec('CREATE INDEX IF NOT EXISTS idx_pr_review_attestations_handoff ON pr_review_attestations(handoff_id)')
-}
-
-/** Migration v19 (#137). Idempotent: `createTables()` already ran the same statements. */
-function migrateMergeGrants(db: Database.Database): void {
-  createMergeGrantTables(db)
-  splitPullRequestEscalation(db)
-}
-
-/** Migration v26 (#159). Existing uses predate separate policy/relay context. */
-function migrateMergeGrantAttribution(db: Database.Database): void {
-  createMergeGrantTables(db)
-  const columns = new Set((db.pragma('table_info(merge_grant_uses)') as { name: string }[]).map((column) => column.name))
-  if (!columns.has('authorization_context')) {
-    db.exec("ALTER TABLE merge_grant_uses ADD COLUMN authorization_context TEXT NOT NULL DEFAULT '{}'")
-  }
-}
-
-/**
- * Migration v19 (#137): the escalation policy's combined "opening or merging
- * pull requests" item (`pr`) becomes two. Whatever level a project had for
- * `pr` now applies to `merge_pr`; `open_pr` gets its new default. Rows
- * without a `pr` key are untouched, so re-runs are no-ops. Unreadable
- * settings are left alone (the reader falls back to defaults).
- */
-export function splitPullRequestEscalation(db: Database.Database): void {
-  const cols = new Set((db.pragma('table_info(projects)') as { name: string }[]).map((c) => c.name))
-  if (!cols.has('settings')) return
-  const rows = db.prepare('SELECT id, settings FROM projects').all() as Array<{ id: string; settings: string | null }>
-  const update = db.prepare('UPDATE projects SET settings = ? WHERE id = ?')
-  for (const row of rows) {
-    if (!row.settings) continue
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(row.settings)
-    } catch {
-      continue
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue
-    const next = splitLegacyPullRequestEscalation(parsed as Record<string, unknown>)
-    if (next) update.run(JSON.stringify(next), row.id)
-  }
 }
 
 function readSetting(db: Database.Database, key: string): string | null {

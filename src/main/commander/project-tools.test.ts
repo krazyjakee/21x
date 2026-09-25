@@ -3,7 +3,6 @@ import { createTestDb } from '../../../test/helpers/db-test-helper'
 import type { DatabaseManager } from '../database'
 import type { ChatToolDefinition, ChatToolResult } from '../chat/tools'
 import { DEFAULT_PROJECT_ID } from '../../shared/projects'
-import type { HeldAction } from '../../shared/project-limit-types'
 import type { UiCommand } from '../../shared/ui-commands'
 import {
   buildCommanderRelayMessage,
@@ -270,12 +269,11 @@ describe('ask_captain', () => {
     expect(output.correlation_id).toMatch(/^cmd-[0-9a-f]{64}$/)
 
     expect(sendMessage).toHaveBeenCalledTimes(1)
-    const [sessionId, text, taskId, agentId, attachments, typedMessage, deliveryId] = sendMessage.mock.calls[0] as unknown as [string, string, string, string, undefined, undefined, string]
+    const [sessionId, text, taskId, agentId, attachments, deliveryId] = sendMessage.mock.calls[0] as unknown as [string, string, string, string, undefined, string]
     expect(sessionId).toBe('')
     expect(taskId).toBe(coordinator.id)
     expect(agentId).toBe(agent.id)
     expect(attachments).toBeUndefined()
-    expect(typedMessage).toBeUndefined()
     expect(deliveryId).toMatch(/^captain-request-message:/)
     expect(text).toContain(COMMANDER_RELAY_BEGIN)
     expect(text).toContain(COMMANDER_RELAY_END)
@@ -328,7 +326,7 @@ describe('ask_captain', () => {
 
     const output = body(await call('ask_captain', { project: project.id, message: 'Status?' }))
     expect(output.captain_session).toBe('running')
-    expect(sendMessage.mock.calls[0]).toEqual(['', expect.stringContaining('Status?'), coordinator.id, agent.id, undefined, undefined, expect.stringMatching(/^captain-request-message:/)])
+    expect(sendMessage.mock.calls[0]).toEqual(['', expect.stringContaining('Status?'), coordinator.id, agent.id, undefined, expect.stringMatching(/^captain-request-message:/)])
     await vi.waitFor(() => expect(terminalFailures).toEqual([{ detail: 'runtime down', timedOut: false }]))
   })
 
@@ -354,7 +352,7 @@ describe('ask_captain', () => {
     live = { sessionId: 'old-1', session: { status: 'idle', agentId: claude.id } }
     expect(body(await call('ask_captain', { project: project.id, message: 'Again?' })).captain_session).toBe('starting')
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2))
-    expect(sendMessage.mock.calls[1]).toEqual(['', expect.stringContaining('Again?'), coordinator.id, sol.id, undefined, undefined, expect.stringMatching(/^captain-request-message:/)])
+    expect(sendMessage.mock.calls[1]).toEqual(['', expect.stringContaining('Again?'), coordinator.id, sol.id, undefined, expect.stringMatching(/^captain-request-message:/)])
   })
 
   it('stops a Captain left on its previous agent when the Commander changes the agent', async () => {
@@ -396,23 +394,17 @@ describe('get_pending_approvals, navigate_to_project and pause_all_projects', ()
     const beta = db.createProject({ name: 'Beta' })!
     const waiting = db.createTask({ title: 'Deploy step', project_id: alpha.id, status: 'agent_working' })!
     db.createTask({ title: 'Quiet task', project_id: beta.id, status: 'agent_working' })
-    const held: HeldAction[] = [
-      { id: 'held-1', projectId: beta.id, action: 'start_task', tool: 'start_task', args: {}, summary: 'Start "Quiet task"', createdAt: '2026-01-01T00:00:00.000Z' },
-      { id: 'held-2', projectId: 'unknown-project', action: 'create_task', tool: 'create_task', args: {}, summary: 'Orphan', createdAt: '2026-01-01T00:00:00.000Z' }
-    ]
     extra = {
       agents: fakeAgents({
         findSessionByTaskId: (taskId: string) => taskId === waiting.id ? { sessionId: 'sess-w', session: { status: 'waiting_approval', agentId: 'a' } } : undefined,
         getSessionStatus: (sessionId: string) => sessionId === 'sess-w' ? { status: 'waiting_approval', agentId: 'a', taskId: waiting.id } : null
-      } as unknown as Partial<CommanderAgents>),
-      listHeldActions: () => held
+      } as unknown as Partial<CommanderAgents>)
     }
     const output = body(await call('get_pending_approvals', {}))
-    expect(output.total).toBe(2)
+    expect(output.total).toBe(1)
     expect(output.truncated).toBe(false)
     expect(output.approvals).toEqual([
-      { kind: 'checkpoint', project_id: alpha.id, project: 'Alpha', task_id: waiting.id, title: 'Deploy step' },
-      { kind: 'held_action', id: 'held-1', project_id: beta.id, project: 'Beta', action: 'start_task', summary: 'Start "Quiet task"', since: '2026-01-01T00:00:00.000Z' }
+      { kind: 'checkpoint', project_id: alpha.id, project: 'Alpha', task_id: waiting.id, title: 'Deploy step' }
     ])
     expect(output.live_state_available).toBe(true)
 
@@ -422,15 +414,19 @@ describe('get_pending_approvals, navigate_to_project and pause_all_projects', ()
 
   it('caps the approvals list', async () => {
     const project = db.createProject({ name: 'Busy' })!
-    const held: HeldAction[] = Array.from({ length: 40 }, (_, index) => ({
-      id: `h-${index}`, projectId: project.id, action: 'start_task', tool: 'start_task', args: {}, summary: 's'.repeat(500), createdAt: '2026-01-01T00:00:00.000Z'
-    }))
-    extra = { listHeldActions: () => held }
+    const waiting = new Set(Array.from({ length: 40 }, (_, index) =>
+      db.createTask({ title: `${index} ${'s'.repeat(500)}`, project_id: project.id, status: 'agent_working' })!.id))
+    extra = {
+      agents: fakeAgents({
+        findSessionByTaskId: (taskId: string) => waiting.has(taskId) ? { sessionId: `sess-${taskId}`, session: { status: 'waiting_approval', agentId: 'a' } } : undefined,
+        getSessionStatus: () => ({ status: 'waiting_approval', agentId: 'a', taskId: '' })
+      } as unknown as Partial<CommanderAgents>)
+    }
     const output = body(await call('get_pending_approvals', {}))
     expect((output.approvals as unknown[]).length).toBe(30)
     expect(output.total).toBe(40)
     expect(output.truncated).toBe(true)
-    expect(((output.approvals as Array<Record<string, string>>)[0].summary).length).toBeLessThanOrEqual(200)
+    expect(((output.approvals as Array<Record<string, string>>)[0].title).length).toBeLessThanOrEqual(120)
   })
 
   it('navigates through the UI command channel and refuses when no window is open', async () => {

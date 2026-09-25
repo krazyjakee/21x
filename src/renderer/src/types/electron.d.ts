@@ -68,8 +68,7 @@ import type {
   ProjectResourceRecord, CreateProjectResourceData, UpdateProjectResourceData,
   ProjectChangedEvent
 } from '@shared/projects'
-import type { HeldAction, ProjectLimitState } from '@shared/project-limit-types'
-import type { MergeGrant, MergeGrantAuditEntry } from '@shared/merge-grants'
+import type { ProjectLimitState } from '@shared/project-limit-types'
 import type { ProjectConcurrencyState } from '@shared/concurrency'
 import type { ProjectStatus, ProjectStatusHistoryPage } from '@shared/project-status'
 import type { ProjectOverviewEntry } from '@shared/project-overview'
@@ -444,21 +443,6 @@ interface ElectronAPI {
     getState: (projectId: string) => Promise<ProjectConcurrencyState>
     setCaptainControl: (projectId: string, enabled: boolean) => Promise<{ success: true } | { error: string }>
     pin: (projectId: string, agentId: string, level: number | null) => Promise<{ success: true } | { error: string }>
-    onChanged: (callback: (event: { projectId: string }) => void) => () => void
-  }
-  /** Captain tool calls held by the escalation policy (#66). */
-  escalation: {
-    listHeld: (projectId?: string) => Promise<HeldAction[]>
-    approve: (id: string) => Promise<{ ok: boolean; result?: unknown; error?: string }>
-    reject: (id: string, note?: string) => Promise<boolean>
-    onHeldChanged: (callback: (event: { held: HeldAction[] }) => void) => () => void
-  }
-  /** Merge grants the user gave Captains (#137). */
-  mergeGrants: {
-    noteTyped: (taskId: string, text: string) => Promise<void>
-    listActive: (projectId?: string) => Promise<MergeGrant[]>
-    audit: (projectId: string) => Promise<MergeGrantAuditEntry[]>
-    revoke: (id: string) => Promise<{ ok: boolean; error?: string }>
     onChanged: (callback: (event: { projectId: string }) => void) => () => void
   }
   /** The all-projects overview (#63). */

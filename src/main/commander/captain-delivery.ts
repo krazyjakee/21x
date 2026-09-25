@@ -79,7 +79,6 @@ export class CaptainDeliveryService {
         claimed.taskId ?? undefined,
         claimed.agentId ?? undefined,
         undefined,
-        undefined,
         `captain-request-message:${claimed.id}`
       )
       this.store.accept(claimed.id, this.owner, result.newSessionId ?? claimed.taskId ?? claimed.id)

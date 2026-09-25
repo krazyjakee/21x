@@ -219,8 +219,8 @@ export function buildSubtaskWakeMessage(
     : allTerminal
       ? 'All subtasks of this task have reached a terminal state.'
       : 'No subtask of this task is in agent_working anymore — the last one reached ready_for_review.'
-  // Subtask titles are agent-authored text. Fencing them and stating the authority
-  // boundary keeps a wake-up from reading as a human go-ahead for privileged work.
+  // Subtask titles are agent-authored text. Fencing them keeps a wake-up from
+  // reading as a human instruction.
   return buildSystemMessage(
     {
       origin: SystemMessageOrigin.Coordinator,

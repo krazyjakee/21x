@@ -15,7 +15,6 @@ import type { DatabaseManager, TaskRecord } from '../database'
 import type { CaptainPromptOptions } from '../prompts/captain'
 import type { CaptainMemory } from '../../shared/captain-memory'
 import { listProjectRepos, taskProjectId } from './project-repos'
-import { escalationPolicyFromSettings } from '../../shared/project-policies'
 
 /** The file the Captain keeps its long-lived notes in, inside its workspace. */
 export const CAPTAIN_MEMORY_FILE = 'MEMORY.md'
@@ -105,8 +104,6 @@ export function captainPromptOptions(
   const projectId = taskProjectId(task)
   return {
     projectContext: buildProjectContext(db, projectId),
-    // #66: the policy travels with every session start, resume and send, like the context.
-    escalationPolicy: escalationPolicyFromSettings(db.getProject(projectId)?.settings),
     memory: readCaptainMemory(workspaceDir)
   }
 }

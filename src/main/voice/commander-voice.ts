@@ -165,7 +165,6 @@ export class CommanderVoice {
       this.bargeIn(sessionId)
       await this.awaitTurnEnd(sessionId, running)
     }
-    // A transcript is not typed text: it cannot back a merge grant (#137).
     return this.options.commander.sendUserMessage(sessionId, content, 'voice')
   }
 

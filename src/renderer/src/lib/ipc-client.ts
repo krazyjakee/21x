@@ -43,8 +43,7 @@ import type {
   ProjectResourceRecord, CreateProjectResourceData, UpdateProjectResourceData,
   ProjectChangedEvent
 } from '@shared/projects'
-import type { HeldAction, ProjectLimitState } from '@shared/project-limit-types'
-import type { MergeGrant, MergeGrantAuditEntry } from '@shared/merge-grants'
+import type { ProjectLimitState } from '@shared/project-limit-types'
 import type { ProjectConcurrencyState } from '@shared/concurrency'
 import type { ProjectStatus, ProjectStatusHistoryPage } from '@shared/project-status'
 import type { ProjectOverviewEntry } from '@shared/project-overview'
@@ -561,22 +560,6 @@ export const projectLimitsApi = {
   pauseAll: (paused: boolean): Promise<boolean> => window.electronAPI.projectLimits.pauseAll(paused)
 }
 
-/** Merge grants the user gave Captains (#137). Absent bridges (tests) read as empty. */
-export const mergeGrantsApi = {
-  /** Text the user typed (not dictated) to a task's agent; main keeps it only for a Captain. */
-  noteTyped: (taskId: string, text: string): void => {
-    if (typeof window.electronAPI.mergeGrants?.noteTyped !== 'function') return
-    window.electronAPI.mergeGrants.noteTyped(taskId, text).catch(() => { /* best effort */ })
-  },
-  listActive: (projectId?: string): Promise<MergeGrant[]> =>
-    typeof window.electronAPI.mergeGrants?.listActive === 'function' ? window.electronAPI.mergeGrants.listActive(projectId) : Promise.resolve([]),
-  audit: (projectId: string): Promise<MergeGrantAuditEntry[]> =>
-    typeof window.electronAPI.mergeGrants?.audit === 'function' ? window.electronAPI.mergeGrants.audit(projectId) : Promise.resolve([]),
-  revoke: (id: string): Promise<{ ok: boolean; error?: string }> => window.electronAPI.mergeGrants.revoke(id),
-  onChanged: (callback: (event: { projectId: string }) => void): (() => void) =>
-    typeof window.electronAPI.mergeGrants?.onChanged === 'function' ? window.electronAPI.mergeGrants.onChanged(callback) : () => {}
-}
-
 /** Captain-managed concurrency under the user-set hard cap (#150). */
 export const concurrencyApi = {
   getState: (projectId: string): Promise<ProjectConcurrencyState> => window.electronAPI.concurrency.getState(projectId),
@@ -588,15 +571,6 @@ export const concurrencyApi = {
     typeof window.electronAPI.concurrency?.onChanged === 'function' ? window.electronAPI.concurrency.onChanged(callback) : () => undefined
 }
 
-/** Captain tool calls held by the escalation policy (#66). */
-export const escalationApi = {
-  listHeld: (projectId?: string): Promise<HeldAction[]> =>
-    typeof window.electronAPI.escalation?.listHeld === 'function' ? window.electronAPI.escalation.listHeld(projectId) : Promise.resolve([]),
-  approve: (id: string): Promise<{ ok: boolean; result?: unknown; error?: string }> => window.electronAPI.escalation.approve(id),
-  reject: (id: string, note?: string): Promise<boolean> => window.electronAPI.escalation.reject(id, note),
-  onHeldChanged: (callback: (event: { held: HeldAction[] }) => void): (() => void) =>
-    typeof window.electronAPI.escalation?.onHeldChanged === 'function' ? window.electronAPI.escalation.onHeldChanged(callback) : () => {}
-}
 
 /** The all-projects overview (#63): every active project's status and card facts in one call. */
 export const overviewApi = {

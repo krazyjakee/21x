@@ -2,14 +2,13 @@
  * The all-projects overview (#63): every active project's status (#58) plus
  * the card-level facts beside it, computed in one pass.
  *
- * Reads: project rows, buildProjectStatus (task counts, live sessions, limit
- * state) and the escalation module's held calls (#66). The last activity time
+ * Reads: project rows and buildProjectStatus (task counts, live sessions,
+ * limit state). The last activity time
  * is the newest task `updated_at` in the project, or the status write if that
  * is newer. Nothing here asks an LLM.
  */
 import type { DatabaseManager } from './database'
 import { buildProjectStatus, type ProjectStatusAgents } from './project-status'
-import { listHeldActions } from './escalation'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
 import { projectNeedsAttention, type ProjectOverviewEntry } from '../shared/project-overview'
 
@@ -33,8 +32,6 @@ function newest(a: string | null, b: string | null | undefined): string | null {
 
 export function buildProjectOverview(db: ProjectOverviewStore, agents: unknown): ProjectOverviewEntry[] {
   const liveAgents = usableAgents(agents)
-  const heldByProject = new Map<string, number>()
-  for (const held of listHeldActions()) heldByProject.set(held.projectId, (heldByProject.get(held.projectId) ?? 0) + 1)
 
   return db.getProjects().map((project) => {
     const status = buildProjectStatus(db, liveAgents, project.id)
@@ -49,7 +46,6 @@ export function buildProjectOverview(db: ProjectOverviewStore, agents: unknown):
       sort_order: project.sort_order,
       status,
       pending_approvals: status.counts.awaiting_approval,
-      held_actions: heldByProject.get(project.id) ?? 0,
       running_agents: limits?.runningAgents ?? status.counts.running,
       paused: limits?.paused ?? false,
       all_projects_paused: limits?.allProjectsPaused ?? false,

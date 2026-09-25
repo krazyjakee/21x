@@ -10,7 +10,8 @@
  * then a report is refused with a plain message the Captain can read.
  */
 
-export type CaptainReportSource = 'captain' | 'escalation'
+/** `captain_action`: a notice the app writes after a Captain merged a PR or wrote a GitHub issue. */
+export type CaptainReportSource = 'captain' | 'captain_action'
 
 export interface CaptainReport {
   projectId: string

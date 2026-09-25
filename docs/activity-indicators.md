@@ -136,7 +136,6 @@ Compact surfaces call `isQuietActivity(result)` and render nothing for a verifie
 | Dashboard hero | `components/dashboard/HeroSection.tsx` | "Captain [badge]" beside the project name, static. |
 | Board task card | `components/dashboard/TaskBoard.tsx` | `TaskActivityBadge` in the card's title row. Quiet states render nothing, so a calm board stays calm. The card's durable lifecycle column and the live badge are separate: sitting in the "Agent working" column never makes the badge say "Running". |
 | Task header bar | `components/tasks/TaskHeaderBar.tsx` | `TaskActivityBadge` between the lifecycle status menu and the recovery pill, via `TaskWorkspace`'s `showActivity` prop. Suppressed inside canvas task panels, whose own header owns it. |
-| Held Captain actions | `components/projects/HeldActionsNotice.tsx` | Unchanged approve/reject pill (policy-held actions, separate from session approvals). It now re-reads every 5 s while visible, and when reads keep failing it shows a static "held actions unavailable" pill instead of silence. |
 
 ## Not wired here
 

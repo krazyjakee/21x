@@ -1,10 +1,8 @@
 /**
- * Renderer-safe shapes for the per-project limit state (#65) and the
- * Captain calls held by the escalation policy (#66). The main process
- * builds them in project-limits.ts and escalation.ts; the bridge and the
- * project editor read them.
+ * Renderer-safe shapes for the per-project limit state (#65). The main
+ * process builds them in project-limits.ts; the bridge and the project
+ * editor read them.
  */
-import type { EscalationAction } from './project-policies'
 import type { ProjectLimitReason } from './project-policies'
 
 /** A start waiting in the admission queue, as clients see it (agent-manager/admission.ts). */
@@ -35,15 +33,3 @@ export interface ProjectLimitState {
   blockedBy: ProjectLimitReason | null
 }
 
-/** A Captain tool call waiting for the user's approval (#66). */
-export interface HeldAction {
-  id: string
-  projectId: string
-  action: EscalationAction
-  tool: string
-  args: Record<string, unknown>
-  /** One line a person can read: what the Captain wants to do. */
-  summary: string
-  /** ISO time. */
-  createdAt: string
-}

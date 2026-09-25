@@ -665,7 +665,7 @@ describe('mobile-api-server: projects', () => {
     const alphaEntry = entries.find(e => e.project_id === alpha.id)!
     expect(alphaEntry).toMatchObject({
       name: 'Alpha', brief: 'The alpha brief', is_default: false,
-      pending_approvals: 1, held_actions: 0, running_agents: 1,
+      pending_approvals: 1, running_agents: 1,
       paused: true, all_projects_paused: false, blocked_by: 'project_paused', needs_attention: true
     })
     expect((alphaEntry.status as { counts: unknown }).counts).toEqual({ running: 1, queued: 1, awaiting_review: 1, awaiting_approval: 1, blocked: 0 })

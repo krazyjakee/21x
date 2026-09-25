@@ -13,7 +13,6 @@ const api = vi.hoisted(() => {
     listeners,
     overviewApi: { getAllStatuses: vi.fn() },
     projectApi: { onStatusChanged: subscribe('project:statusChanged'), onChanged: subscribe('project:changed') },
-    escalationApi: { onHeldChanged: subscribe('escalation:heldChanged') },
     onTaskUpdated: subscribe('task:updated'),
     onTaskCreated: subscribe('task:created'),
     onTaskDeleted: subscribe('task:deleted'),
@@ -33,7 +32,7 @@ function entry(project_id: string, running = 0): ProjectOverviewEntry {
   return {
     project_id, name: project_id, brief: '', is_default: false, sort_order: 0,
     status: { project_id, counts: { running, queued: 0, awaiting_review: 0, awaiting_approval: 0, blocked: 0 }, summary: '', top_blockers: [], updated_at: null },
-    pending_approvals: 0, held_actions: 0, running_agents: running, paused: false, all_projects_paused: false,
+    pending_approvals: 0, running_agents: running, paused: false, all_projects_paused: false,
     blocked_by: null, last_activity_at: null, needs_attention: false
   }
 }
@@ -63,7 +62,7 @@ describe('overview-store', () => {
 
     expect(api.overviewApi.getAllStatuses).toHaveBeenCalledTimes(1)
     expect(useOverviewStore.getState().entries.map((e) => e.project_id)).toEqual(['p1'])
-    for (const name of ['task:updated', 'task:created', 'task:deleted', 'agent:status', 'agent:startQueueChanged', 'project:statusChanged', 'project:changed', 'escalation:heldChanged']) {
+    for (const name of ['task:updated', 'task:created', 'task:deleted', 'agent:status', 'agent:startQueueChanged', 'project:statusChanged', 'project:changed']) {
       expect(api.listeners[name], name).toHaveLength(1)
     }
     stop()
@@ -77,7 +76,6 @@ describe('overview-store', () => {
     emit('task:updated', { taskId: 't1', updates: { status: 'agent_working' } })
     emit('task:created', { task: { id: 't2' } })
     emit('agent:status', { taskId: 't1', status: 'running' })
-    emit('escalation:heldChanged', { held: [] })
     expect(api.overviewApi.getAllStatuses).toHaveBeenCalledTimes(1)
 
     await vi.advanceTimersByTimeAsync(OVERVIEW_REFRESH_DEBOUNCE_MS - 1)

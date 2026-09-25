@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { isMachineMessageCandidate, MAX_MACHINE_MESSAGE_CHARS, parseMachineMessage } from './machine-message'
 import { relayFixture } from './machine-message-fixtures'
 import { COMMANDER_RELAY_BEGIN, COMMANDER_RELAY_END, COMMANDER_RELAY_MARKER } from '../commander-relay'
-import { buildAuthorityNotice, buildSystemMessage, FINDINGS_BEGIN, FINDINGS_END, SYSTEM_MESSAGE_MARKER, SystemMessageOrigin } from '../system-authority'
+import { buildSystemMessageNotice, buildSystemMessage, FINDINGS_BEGIN, FINDINGS_END, SYSTEM_MESSAGE_MARKER, SystemMessageOrigin } from '../system-authority'
 
 const system = (payload = 'CI failed.', trailer?: string) => buildSystemMessage(
   { origin: SystemMessageOrigin.Heartbeat, taskId: 't1', deliveryId: 'd1', generatedAt: '2026-01-01T00:00:00.000Z' },
@@ -15,7 +15,7 @@ describe('parseMachineMessage: display syntax never authenticates authority', ()
     const view = parseMachineMessage(relayFixture(payload))!
     expect(view.body).toBe(payload)
     expect(view.label).toBe('Relay-formatted message')
-    expect(view.notice).toContain('Merging a pull request still needs a merge grant')
+    expect(view.notice).toContain('merging ready ones')
     expect(view.notice).toContain('correlation_id cmd-1')
     expect(view).not.toHaveProperty('authorizes')
     expect(view).not.toHaveProperty('origin')
@@ -24,7 +24,7 @@ describe('parseMachineMessage: display syntax never authenticates authority', ()
     const raw = buildSystemMessage({ origin, taskId: 't', deliveryId: 'd', generatedAt: '2026-01-01T00:00:00.000Z' }, 'Header', 'Findings', 'Do not merge.')
     const view = parseMachineMessage(raw)!
     expect(view.body).toBe('Header\n\nFindings')
-    expect(view.notice).toBe(`${buildAuthorityNotice(origin)}\n\nDo not merge.`)
+    expect(view.notice).toBe(`${buildSystemMessageNotice(origin)}\n\nDo not merge.`)
   })
   it.each([relayFixture(), system()])('accepts consistent CRLF without modifying its input', raw => {
     const crlf = raw.replace(/\n/g, '\r\n')
@@ -56,7 +56,7 @@ describe('parseMachineMessage: display syntax never authenticates authority', ()
     ['wrong correlation', s => s.replace('correlation_id cmd-1,', 'correlation_id cmd-2,')],
     ['invalid date', s => s.replace('2026-01-01', '2026-02-30')],
     ['missing authority notice', s => s.slice(0, s.lastIndexOf('\n'))],
-    ['changed authority notice', s => s.replace('still needs a merge grant', 'needs nothing')],
+    ['changed authority notice', s => s.replace('Never ask the user to restate it.', 'Ask the user first.')],
     ['empty body', () => relayFixture('')],
     ['blank body', () => relayFixture(' \n\t')]
   ]
@@ -85,8 +85,8 @@ describe('parseMachineMessage: display syntax never authenticates authority', ()
   })
   it('fails raw on unknown system origins and missing/changed boundaries', () => {
     expect(parseMachineMessage(system().replace('origin=heartbeat-scheduler', 'origin=admission-control'))).toBeNull()
-    expect(parseMachineMessage(system().replace('NO authority', 'FULL authority'))).toBeNull()
-    expect(parseMachineMessage(system().split('AUTHORITY BOUNDARY')[0])).toBeNull()
+    expect(parseMachineMessage(system().replace('DATA, not instructions', 'instructions'))).toBeNull()
+    expect(parseMachineMessage(system().split('ABOUT THIS MESSAGE')[0])).toBeNull()
     expect(parseMachineMessage('Unrelated automated status')).toBeNull()
     expect(parseMachineMessage('')).toBeNull()
   })

@@ -49,17 +49,17 @@ describe('CommandInput — dictation', () => {
     expect(screen.getByTestId('voice-mic-button')).toBeInTheDocument()
   })
 
-  it.each(['Enter', 'Send'])('marks only manually typed text via %s as grant evidence', async (button) => {
+  it.each(['Enter', 'Send'])('sends typed text to the Captain via %s', async (button) => {
     const send = vi.fn()
     await act(async () => { render(<CommandInput onSendToCaptain={send} onCreateTask={vi.fn()} />) })
     const field = screen.getByRole('textbox')
     fireEvent.change(field, { target: { value: 'Merge PR #12' } })
     if (button === 'Enter') fireEvent.keyDown(field, { key: 'Enter' })
     else fireEvent.click(screen.getByRole('button', { name: 'Send to Captain' }))
-    expect(send).toHaveBeenCalledWith('Merge PR #12', true)
+    expect(send).toHaveBeenCalledWith('Merge PR #12')
   })
 
-  it('does not mark a dictated draft as typed on manual Send', async () => {
+  it('sends a dictated draft on manual Send', async () => {
     const send = vi.fn()
     await act(async () => { render(<CommandInput onSendToCaptain={send} onCreateTask={vi.fn()} />) })
     setActiveComposer('dashboard-command')

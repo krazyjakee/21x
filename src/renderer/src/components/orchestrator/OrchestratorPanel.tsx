@@ -5,7 +5,7 @@ import { AgentTranscriptPanel } from '@/components/agents/AgentTranscriptPanel'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useAgentSession } from '@/hooks/use-agent-session'
 import { useCurrentProject } from '@/hooks/use-project-tasks'
-import { agentApi, captainRuntimeApi, mergeGrantsApi, settingsApi } from '@/lib/ipc-client'
+import { agentApi, captainRuntimeApi, settingsApi } from '@/lib/ipc-client'
 import { captainAgentIdFor, useCaptainTaskId } from '@/stores/coordinator-store'
 import { useProjectStore } from '@/stores/project-store'
 import type { Agent } from '@/types'
@@ -32,7 +32,6 @@ interface StartFailure {
 interface QueuedCaptainMessage {
   message: string
   deliveryId: string
-  typed: boolean
   options?: { attachments?: ComposerAttachment[] }
 }
 
@@ -72,7 +71,6 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
    * Each is delivered once, in order, when a start succeeds.
    */
   const queuedRef = useRef(new Map<string, QueuedCaptainMessage[]>())
-  const typedMessageRef = useRef<string | null>(null)
   const drainingRef = useRef(false)
   const [queuedCount, setQueuedCount] = useState(0)
 
@@ -236,9 +234,6 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
       if (lastMessage?.partType === 'question' && lastMessage?.tool?.questions) {
         await approve(true, withAttachmentNote(message.message, message.options?.attachments))
       } else {
-        // Stage provenance at delivery, after session warm-up and queueing;
-        // IPC consumes this exact text once, then main tracks actual dispatch.
-        if (message.typed && captainTaskId) mergeGrantsApi.noteTyped(captainTaskId, message.message)
         await sendMessage(message.message, { ...message.options, deliveryId: message.deliveryId })
       }
     },
@@ -277,11 +272,9 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
     async (message: string, options?: { attachments?: ComposerAttachment[] }) => {
       const outgoing: QueuedCaptainMessage = {
         message,
-        typed: typedMessageRef.current === message,
         deliveryId: `captain-drawer:${crypto.randomUUID()}`,
         options
       }
-      typedMessageRef.current = null
       const taskId = captainTaskId
       if (!taskId) return
       try {
@@ -367,7 +360,6 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
       if (detail?.message && typeof detail.message === 'string') {
         // Small delay to ensure the panel is mounted and agent is selected
         setTimeout(() => {
-          if (detail.typed === true) typedMessageRef.current = detail.message
           handleSendMessage(detail.message)
         }, 200)
       }
@@ -461,7 +453,6 @@ export function OrchestratorPanel({ onClose }: OrchestratorPanelProps) {
           onStop={stop}
           onSend={handleSendMessage}
           onSaveImages={handleSaveImages}
-          onTypedMessage={(text) => { typedMessageRef.current = text }}
           className="flex-1 min-h-0"
           sessionId={currentSession?.sessionId}
           pendingSend={currentSession?.pendingSend}

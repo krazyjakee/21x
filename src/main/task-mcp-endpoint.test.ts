@@ -12,7 +12,7 @@ import { createTestDb } from '../../test/helpers/db-test-helper'
 import { makeTask } from '../../test/helpers/task-fixtures'
 import type { DatabaseManager } from './database'
 import { getTaskApiToken, startTaskApiServer, stopTaskApiServer, setTaskApiNotifier, setTaskApiAgentController } from './task-api-server'
-import { createMergeGrantFromUserMessage, setGhRunner } from './merge-grants'
+import { setGhRunner } from './pull-request-merge'
 import { buildTaskMcpUrl, parseScopeFromUrl } from './task-mcp-endpoint'
 import { mcpOptionsForTask } from './agent-manager/session-config'
 
@@ -409,7 +409,7 @@ describe('project-scoped MCP session (#56)', () => {
 })
 
 
-describe('merge-grant scope credential over real HTTP', () => {
+describe('merge scope credential over real HTTP', () => {
   it('never grants Captain authority to a heartbeat checking a task', async () => {
     const project = db.createProject({ name: 'Heartbeat target' })!
     const worker = db.createTask(makeTask({ title: 'Worker', project_id: project.id }))!
@@ -422,12 +422,11 @@ describe('merge-grant scope credential over real HTTP', () => {
   })
 
   it('rejects a worker removing its pins, changing projects, or forging/removing the signature', async () => {
-    const project = db.createProject({ name: 'App', settings: { merge_grants: { enabled: true } } })!
+    const project = db.createProject({ name: 'App' })!
     db.addProjectRepo(project.id, { provider: 'github', org: 'acme', name: 'app' })
     const worker = db.createTask(makeTask({ title: 'Worker', project_id: project.id }))!
     const workerAgent = db.createAgent({ name: 'Worker agent' })!
     db.updateTask(worker.id, { agent_id: workerAgent.id })
-    createMergeGrantFromUserMessage(db, project.id, { source: 'commander', sessionId: 's', messageId: 'typed', text: 'merge PRs' })
     const port = await startTaskApiServer(db)
     const gh = vi.fn(async () => { throw new Error('No GitHub call is permitted for the worker') })
     setGhRunner(gh)
@@ -456,10 +455,9 @@ describe('merge-grant scope credential over real HTTP', () => {
       await response.text()
     }
     expect(gh).not.toHaveBeenCalled()
-    expect(db.listMergeGrants()[0].uses).toBe(0)
-    // App-issued Captain credentials still reach the real gate.
+    // App-issued Captain credentials still reach the real handler.
     const captain = await connect(buildTaskMcpUrl(port, getTaskApiToken(), { projectId: project.id }))
-    expect(textOf(await captain.callTool({ name: 'list_merge_grants', arguments: {} }))).toContain('merge PRs')
+    expect(textOf(await captain.callTool({ name: 'list_github_issue_writes', arguments: {} }))).toContain('"total": 0')
     await captain.close()
   })
 })

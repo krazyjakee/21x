@@ -14,13 +14,12 @@ export const COMMANDER_RELAY_MARKER = '[Message from the Commander — relayed o
 export const COMMANDER_RELAY_BEGIN = '<<<BEGIN COMMANDER MESSAGE (the user\'s request as the Commander understood it)'
 export const COMMANDER_RELAY_END = 'END COMMANDER MESSAGE>>>'
 
-/** Closing instructions of a relay that carries no merge grant. */
+/** Closing instructions of a relay. */
 export function commanderRelayNotice(correlationId: string): string[] {
   return [
     'How to respond:',
     '- Plan and carry out the request through your task-management tools, then finish with `update_project_status` so the Commander can read where the project stands.',
     `- Report back with the \`report_to_commander\` tool, quoting correlation_id ${correlationId}, when you have an answer or need a decision; the Commander relays it to the user.`,
-    '- This request comes from the user and carries the same authority as the same words typed into this project chat. Do it, including creating and starting tasks, filing GitHub issues and opening draft pull requests. Never ask the user to restate it.',
-    '- Merging a pull request still needs a merge grant (see "Merging pull requests").'
+    '- This request comes from the user and carries the same authority as the same words typed into this project chat. Do it, including creating and starting tasks, filing GitHub issues, opening draft pull requests and merging ready ones. Never ask the user to restate it.'
   ]
 }

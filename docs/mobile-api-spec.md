@@ -160,7 +160,6 @@ it on `task:*` and `agent:status` events (debounced) and every 15 s while visibl
       "limits": { "projectId": "clproj456", "paused": false, "allProjectsPaused": false, "runningAgents": 2, "queued": [], "blockedBy": null, "...": "see ProjectLimitState" }
     },
     "pending_approvals": 1,
-    "held_actions": 0,
     "running_agents": 2,
     "paused": false,
     "all_projects_paused": false,
@@ -175,16 +174,15 @@ it on `task:*` and `agent:status` events (debounced) and every 15 s while visibl
 |-----------------------|------------------|-------------|
 | `status`              | `ProjectStatus`  | Counts from the task rows and live sessions, plus the Captain's narrative (`summary`, `top_blockers`, `updated_at`). `limits` is present when the agent manager is running. |
 | `pending_approvals`   | `number`         | Live sessions waiting for the user to approve a step (`status.counts.awaiting_approval`) |
-| `held_actions`        | `number`         | Captain calls held by the project's escalation policy, waiting for the user |
 | `running_agents`      | `number`         | Working sessions of the project's tasks right now |
 | `paused`              | `boolean`        | The project's own pause |
 | `all_projects_paused` | `boolean`        | The global pause: nothing starts anywhere while true |
 | `blocked_by`          | `string \| null` | Why the next start would wait: `project_limit`, `project_daily_cap`, `project_paused`, `global_pause`, or `null` |
 | `last_activity_at`    | `string \| null` | ISO time of the newest task change or status write; `null` for an untouched project |
-| `needs_attention`     | `boolean`        | `pending_approvals > 0`, `held_actions > 0` or `awaiting_review > 0`: the project waits on the user |
+| `needs_attention`     | `boolean`        | `pending_approvals > 0` or `awaiting_review > 0`: the project waits on the user |
 
 Archived projects are not listed. Every number is counted (task rows, live
-sessions, held calls); only `status.summary` and `status.top_blockers` come from
+sessions); only `status.summary` and `status.top_blockers` come from
 the Captain.
 
 ---

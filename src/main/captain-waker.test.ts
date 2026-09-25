@@ -335,10 +335,10 @@ describe('helpers', () => {
     expect(taskIdsTouchedByCall({}, null)).toEqual([])
   })
 
-  it('buildCaptainWakeMessage fences the events and states the boundary', () => {
+  it('buildCaptainWakeMessage fences the events and marks them as data', () => {
     const message = buildCaptainWakeMessage('mm', 'P', [event({ taskId: 'x', kind: 'chain_stuck', detail: 'no agent' })])
     expect(message).toContain('[chain stuck] "Task x" (id: x) — no agent')
-    expect(message).toContain('AUTHORITY BOUNDARY')
+    expect(message).toContain('ABOUT THIS MESSAGE')
     expect(message).toContain('task=mm')
   })
 })

@@ -10,7 +10,6 @@ import { readCaptainMemory, type CaptainMemory } from '../agent-manager/captain-
 import { buildProjectStatus, readProjectStatusHistory } from '../project-status'
 import type { ProjectStatus, ProjectStatusHistoryPage } from '../../shared/project-status'
 import type { ProjectChangedEvent } from '../../shared/projects'
-import { approveHeldAction, listHeldActions, rejectHeldAction } from '../escalation'
 import type { ProjectConcurrencyState } from '../../shared/concurrency'
 
 export const PROJECT_CHANGED_CHANNEL = 'project:changed'
@@ -132,9 +131,4 @@ export function registerProjectHandlers({ db, agentManager }: IpcDeps): void {
     agentManager.setUserConcurrency(projectId, { captainControl: enabled === true }))
   ipcMain.handle('concurrency:pin', (_, projectId: string, agentId: string, level: number | null) =>
     agentManager.setUserConcurrency(projectId, { agentId, pinnedLevel: level === null || level === undefined ? null : Number(level) }))
-
-  // ── Escalation policy: held Captain calls (#66) ──
-  ipcMain.handle('escalation:listHeld', (_, projectId?: string) => listHeldActions(projectId))
-  ipcMain.handle('escalation:approve', (_, id: string) => approveHeldAction(id))
-  ipcMain.handle('escalation:reject', (_, id: string, note?: string) => rejectHeldAction(id, note))
 }

@@ -9,10 +9,9 @@ import { CommanderStore } from '../commander/commander-store'
 import { createCommanderProjectTools } from '../commander/project-tools'
 import { CaptainDeliveryService } from '../commander/captain-delivery'
 import { createCommanderSkillTools } from '../commander/skill-tools'
-import { createCommanderMergeGrantTools } from '../commander/merge-grant-tools'
 import { installCommanderReportBridge } from '../commander/report-tools'
 import { broadcastSkillsChanged } from './settings'
-import { listHeldActions, recoverMergeGrantOutcomes, recoverIssueWriteOutcomes } from '../escalation'
+import { recoverIssueWriteOutcomes } from '../captain-github-tools'
 import { guardedIpcSend } from '../guarded-ipc-send'
 import { assertTrustedSender } from '../ipc-sender'
 import { notifyRenderer, uiState } from '../task-api/state'
@@ -113,12 +112,9 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
         context,
         agents: deps.agentManager,
         delivery,
-        listHeldActions,
         sendUiCommand,
         onProjectChanged: (projectId, kind) => broadcastProjectChanged({ projectId, kind }),
       }),
-      // Merge grants (#137): list and revoke; creating one goes through ask_captain.
-      ...createCommanderMergeGrantTools({ db: deps.db, context }),
       // Skill administration (#74): writes act on the first call.
       ...createCommanderSkillTools({
         db: deps.db,
@@ -130,8 +126,8 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
   commanderRef = commander
   service = commander
 
-  // #62: `report_to_commander` (Task API route) and `tell_commander`
-  // escalations reach the sessions through this bridge.
+  // #62: `report_to_commander` (Task API route) and the Captain's merges and
+  // issue writes reach the sessions through this bridge.
   installCommanderReportBridge({
     service: commander,
     store,
@@ -139,7 +135,6 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
     getProject: (projectId) => deps.db.getProject(projectId)
   })
   void delivery.reconcile().catch((error) => console.error('[Commander] Durable Captain delivery recovery failed:', error))
-  void recoverMergeGrantOutcomes(deps.db).catch((error) => console.error('[MergeGrants] Recovery failed:', error))
   void recoverIssueWriteOutcomes(deps.db).catch((error) => console.error('[IssueWrites] Recovery failed:', error))
 
   /** Every Commander call is from the main window; the caller then receives events. */

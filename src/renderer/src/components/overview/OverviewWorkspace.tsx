@@ -10,7 +10,7 @@ import { sortOverviewEntries } from './overview-helpers'
  * The all-projects overview (#63): one card per active project, projects
  * waiting on the user first. Clicking a card makes it the current project and
  * opens the dashboard. The store keeps the cards live from task, session and
- * escalation events; this view only mounts it.
+ * project events; this view only mounts it.
  */
 export function OverviewWorkspace() {
   const entries = useOverviewStore((s) => s.entries)

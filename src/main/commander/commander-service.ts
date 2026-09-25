@@ -31,21 +31,21 @@ import { COMMANDER_ADMIN_TOOLS } from '../../shared/commander-tools'
  *   `ask_captain` within the session's report-ask budget until the user
  *   speaks again (report-tools.ts).
  * - Only a turn the user started gets the admin tools (the ones that write
- *   projects, skills or merge grants, {@link COMMANDER_ADMIN_TOOLS}). A report-started turn
+ *   projects or skills, {@link COMMANDER_ADMIN_TOOLS}). A report-started turn
  *   runs on text a Captain wrote, which may carry instructions from untrusted
  *   sources, so it gets the read-only tools and `ask_captain` only.
  */
 
-/** Tools that change projects, skills or merge grants: never offered to a turn the user did not start. */
+/** Tools that change projects or skills: never offered to a turn the user did not start. */
 export { COMMANDER_ADMIN_TOOLS }
 
 export interface CommanderToolContext {
-  /** Unique per prepared turn, independent of typed-message grant authority. */
+  /** Unique per prepared turn. */
   deliveryScope?: string
   sessionId: string
   /** The user message that immediately precedes this turn's tool calls; empty for a report-triggered turn. */
   userMessage: string
-  /** The stored id of that message (#137: merge grants bind to it); absent for a report-triggered turn. */
+  /** The stored id of that message; absent for a report-triggered turn. */
   userMessageId?: string
   /** What started the turn: the user, or a report being relayed (#62). */
   trigger: 'user' | 'report'
@@ -251,8 +251,8 @@ export class CommanderService {
   }
 
   /**
-   * Images are validated before storage. Only typed text can back a merge
-   * grant; voice-origin messages never provide a userMessageId to tools.
+   * Images are validated before storage. Voice-origin messages never provide
+   * a userMessageId to tools.
    */
   sendUserMessage(sessionId: string, text: string, origin: 'typed' | 'voice' = 'typed', images?: unknown): SendResult {
     const content = typeof text === 'string' ? text.trim() : ''

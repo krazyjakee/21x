@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { Paperclip, Plus, ArrowUp, ChevronDown, Settings } from 'lucide-react'
 import { agentApi, voiceApi } from '@/lib/ipc-client'
 import { VoiceMicButton } from '@/components/voice/VoiceMicButton'
-import { registerComposer, DASHBOARD_COMPOSER_KEY, hasDictatedText, clearDictatedText } from '@/lib/voice-dictation-target'
+import { registerComposer, DASHBOARD_COMPOSER_KEY, clearDictatedText } from '@/lib/voice-dictation-target'
 import { useCurrentProject } from '@/hooks/use-project-tasks'
 import type { Agent } from '@/types'
 
@@ -10,7 +10,7 @@ import type { Agent } from '@/types'
 const VOICE_COMPOSER_KEY = DASHBOARD_COMPOSER_KEY
 
 interface CommandInputProps {
-  onSendToCaptain: (message: string, typed?: boolean) => void
+  onSendToCaptain: (message: string) => void
   onCreateTask: (text: string) => void
 }
 
@@ -62,15 +62,14 @@ export function CommandInput({ onSendToCaptain, onCreateTask }: CommandInputProp
    * field and sends in the same tick. React has not re-rendered by then, so a
    * send that read `text` would send the previous value — usually nothing.
    */
-  const submitField = useCallback((typed = false) => {
+  const submitField = useCallback(() => {
     const trimmed = textareaRef.current?.value.trim() ?? ''
     if (!trimmed) return
     // No answer is expected by voice any more. A spoken sentence arms a fresh
     // expectation straight after this, so the conversation loop is unaffected;
     // a typed one does not, and its reply stays silent.
     void voiceApi.answerNotExpected()
-    if (typed && textareaRef.current && !hasDictatedText(textareaRef.current)) onSendToCaptain(trimmed, true)
-    else onSendToCaptain(trimmed)
+    onSendToCaptain(trimmed)
     setText('')
     if (textareaRef.current) {
       textareaRef.current.value = ''
@@ -79,7 +78,7 @@ export function CommandInput({ onSendToCaptain, onCreateTask }: CommandInputProp
     }
   }, [onSendToCaptain])
 
-  const handleSend = useCallback(() => submitField(true), [submitField])
+  const handleSend = submitField
 
   // Announce this box for as long as it is on screen, so a conversation keeps
   // working even after the dashboard re-renders.

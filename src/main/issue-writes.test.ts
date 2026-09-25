@@ -1,6 +1,6 @@
 /**
  * Delegated GitHub issue writes, end to end through the paths production uses:
- * the Captain's MCP tool dispatch (callToolForScope → escalation gate →
+ * the Captain's MCP tool dispatch (callToolForScope → Captain call handler →
  * issue-write-gate → issue-writes), the Commander's `ask_captain` relay, and
  * the database. `gh` is replaced by a fake that records every request and can
  * be made to time out, refuse or vanish mid-call.
@@ -10,7 +10,7 @@
  * TTS cost-control task (q0gm69mm4zxgkcx0o6mzdl87). One human instruction has
  * to produce exactly two issues, once, and survive being retried.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { execFile } from 'child_process'
 import { createServer } from 'http'
@@ -18,17 +18,13 @@ import { promisify } from 'util'
 import { createTestDb } from '../../test/helpers/db-test-helper'
 import { makeAgent, makeTask } from '../../test/helpers/task-fixtures'
 import type { DatabaseManager } from './database'
-import { callToolForScope, setCoordinatorCallGate, type TaskApiInvoke, type TaskMcpScope } from './mcp-servers/task-management-core'
+import { callToolForScope, setCoordinatorCallHandler, type TaskApiInvoke, type TaskMcpScope } from './mcp-servers/task-management-core'
 import {
-  approveHeldAction,
-  clearHeldActions,
-  configureEscalation,
-  createCoordinatorEscalationGate,
-  listHeldActions,
-  rejectHeldAction,
-  setCommanderEscalationHandler,
-  type EscalationEvent
-} from './escalation'
+  configureCaptainGithubTools,
+  createCaptainCallHandler,
+  setCaptainActionHandler,
+  type CaptainActionEvent
+} from './captain-github-tools'
 import {
   computeIdempotencyKey,
   confirmedIssueWriteFailure,
@@ -64,17 +60,15 @@ interface Harness {
   gh: ReturnType<typeof vi.fn>
   requests: GhRequest[]
   created: Array<{ repo: string; number: number; title: string; body: string; labels?: string[] }>
-  events: EscalationEvent[]
+  events: CaptainActionEvent[]
   notifyUser: ReturnType<typeof vi.fn>
   /** Make the next N gh calls behave in a particular way. */
   failNext: (behaviour: 'timeout' | 'refused' | null) => void
 }
 
-function setup(options: { issuePolicy?: string; repos?: Array<[string, string]>; projectName?: string } = {}): Harness {
+function setup(options: { repos?: Array<[string, string]>; projectName?: string } = {}): Harness {
   const { db } = createTestDb()
-  const settings: Record<string, unknown> = {}
-  if (options.issuePolicy) settings.escalation = { issue_write: options.issuePolicy }
-  const projectId = db.createProject({ name: options.projectName ?? 'Voice', settings })!.id
+  const projectId = db.createProject({ name: options.projectName ?? 'Voice' })!.id
   const otherProjectId = db.createProject({ name: 'Other' })!.id
   for (const [org, name] of options.repos ?? [['krazyjakee', '21x']]) {
     db.addProjectRepo(projectId, { provider: 'github', org, name })
@@ -154,11 +148,11 @@ function setup(options: { issuePolicy?: string; repos?: Array<[string, string]>;
     return { error: 'Unknown route' }
   })
 
-  const events: EscalationEvent[] = []
+  const events: CaptainActionEvent[] = []
   const notifyUser = vi.fn()
-  configureEscalation({ db, mergeDb: db, issueDb: db, notifyUser, notifyRenderer: vi.fn(), tellCaptain: vi.fn(async () => undefined) })
-  setCoordinatorCallGate(createCoordinatorEscalationGate())
-  setCommanderEscalationHandler((event) => events.push(event))
+  configureCaptainGithubTools({ db, mergeDb: db, issueDb: db, notifyUser, notifyRenderer: vi.fn() })
+  setCoordinatorCallHandler(createCaptainCallHandler())
+  setCaptainActionHandler((event) => events.push(event))
 
   return {
     db,
@@ -185,15 +179,11 @@ async function captainCall(h: Harness, tool: string, args: Record<string, unknow
 
 const creates = (h: Harness): GhRequest[] => h.requests.filter((r) => r.args.includes('POST'))
 
-beforeEach(() => {
-  clearHeldActions()
-})
-
 afterEach(() => {
   setIssueGhRunner(null)
-  setCoordinatorCallGate(null)
-  configureEscalation(null)
-  setCommanderEscalationHandler(null)
+  setCoordinatorCallHandler(null)
+  configureCaptainGithubTools(null)
+  setCaptainActionHandler(null)
   vi.useRealTimers()
 })
 
@@ -213,8 +203,6 @@ describe('a delegated issue write needs no grant', () => {
 
     expect(result).toMatchObject({ status: 'created', repo: 'krazyjakee/21x', action: 'create_issue' })
     expect(result.issue_url).toBe('https://github.com/krazyjakee/21x/issues/200')
-    // No grant of any kind was needed or created.
-    expect(h.db.listMergeGrants({ projectId: h.projectId })).toEqual([])
     expect(creates(h)).toHaveLength(1)
   })
 
@@ -372,7 +360,7 @@ describe('idempotency', () => {
     const { db: reopened } = createTestDb()
     ;(reopened as unknown as { db: InstanceType<typeof Database> }).db.close()
     ;(reopened as unknown as { db: InstanceType<typeof Database> }).db = new Database(bytes)
-    configureEscalation({ db: reopened, mergeDb: reopened, issueDb: reopened, notifyUser: vi.fn(), notifyRenderer: vi.fn(), tellCaptain: vi.fn(async () => undefined) })
+    configureCaptainGithubTools({ db: reopened, mergeDb: reopened, issueDb: reopened, notifyUser: vi.fn(), notifyRenderer: vi.fn() })
     const retry = await captainCall({ ...h, db: reopened }, 'create_github_issue', args)
     expect(retry).toMatchObject({ status: 'already_done', issue_url: first.issue_url })
     expect(creates(h)).toHaveLength(1)
@@ -792,48 +780,23 @@ describe('the audit ledger', () => {
   })
 })
 
-// ── The escalation policy on top ──────────────────────────────
+// ── Reporting ─────────────────────────────────────────────────
 
-describe('the project\'s issue_write level', () => {
-  it('reports the write to the Commander by default', async () => {
+describe('reporting an issue write', () => {
+  it('reports the write to the Commander', async () => {
     const h = setup()
     await captainCall(h, 'create_github_issue', { repo: 'krazyjakee/21x', title: 'Reported', task_id: h.taskIds[VOICE_INPUT_TASK] })
-    const reported = h.events.filter((event) => event.action === 'issue_write' && event.outcome === 'performed')
-    expect(reported.length).toBeGreaterThanOrEqual(1)
-    expect(reported.some((event) => event.summary.includes('https://github.com/krazyjakee/21x/issues/200'))).toBe(true)
+    const reported = h.events.filter((event) => event.tool === 'create_github_issue' && event.outcome === 'performed')
+    expect(reported).toHaveLength(1)
+    expect(reported[0].summary).toContain('https://github.com/krazyjakee/21x/issues/200')
   })
 
-  it('stays silent under autonomous', async () => {
-    const h = setup({ issuePolicy: 'autonomous' })
-    await captainCall(h, 'create_github_issue', { repo: 'krazyjakee/21x', title: 'Quiet', task_id: h.taskIds[VOICE_INPUT_TASK] })
-    expect(h.events.filter((event) => event.action === 'issue_write' && event.outcome === 'performed')).toHaveLength(0)
-    expect(h.created).toHaveLength(1)
-  })
-
-  it('holds the write under ask_user, and files it once on approval', async () => {
-    const h = setup({ issuePolicy: 'ask_user' })
-    const held = await captainCall(h, 'create_github_issue', { repo: 'krazyjakee/21x', title: 'Needs a nod', task_id: h.taskIds[VOICE_INPUT_TASK] })
-    expect(held).toMatchObject({ status: 'held', action: 'issue_write' })
-    expect(creates(h)).toHaveLength(0)
-    expect(listHeldActions(h.projectId)[0].summary).toContain('file a GitHub issue "Needs a nod"')
-
-    const approved = await approveHeldAction(String(held.id))
-    expect(approved.ok).toBe(true)
-    expect((approved.result as Record<string, unknown>).status).toBe('created')
-    expect(creates(h)).toHaveLength(1)
-  })
-
-  it('rejects instead of writing, and never asks about a call that would be refused anyway', async () => {
-    const h = setup({ issuePolicy: 'ask_user' })
-    const held = await captainCall(h, 'create_github_issue', { repo: 'krazyjakee/21x', title: 'Not this one', task_id: h.taskIds[VOICE_INPUT_TASK] })
-    expect(rejectHeldAction(String(held.id), 'Not yet.')).toBe(true)
-    expect(creates(h)).toHaveLength(0)
-    expect(h.db.listIssueWrites({ projectId: h.projectId })).toHaveLength(0)
-
-    // A refusal comes straight back rather than becoming a held call.
+  it('reports nothing for a refused write', async () => {
+    const h = setup()
     const refused = await captainCall(h, 'create_github_issue', { repo: 'someone/else', title: 'Bad repo' })
     expect(refused).toMatchObject({ status: 'refused', code: 'repo_not_in_project' })
-    expect(listHeldActions(h.projectId)).toHaveLength(0)
+    expect(h.events).toHaveLength(0)
+    expect(creates(h)).toHaveLength(0)
   })
 })
 
@@ -1026,14 +989,13 @@ describe('the blocked voice tasks, as the user asked for them', () => {
 
 
 describe('the Captain prompt', () => {
-  it('tells the Captain that issues need no grant and merges still do', () => {
+  it('tells the Captain that issues and merges need no separate approval', () => {
     const prompt = buildCaptainSystemPrompt()
     expect(prompt).toContain('## Writing GitHub issues')
-    expect(prompt).toContain('You do not need a grant for it')
+    expect(prompt).toContain('Do not ask for permission first')
     expect(prompt).toContain('`create_github_issue`')
     expect(prompt).toContain('`list_github_issue_writes`')
-    // The merge rule is untouched and still names its own authority.
-    expect(prompt).toContain('merge only with `merge_pull_request`')
-    expect(prompt).toContain('A merge grant is standing permission the user gave')
+    expect(prompt).toContain('Merge only with `merge_pull_request`')
+    expect(prompt).not.toMatch(/merge grant|grant_merge_authority|Escalation policy/)
   })
 })

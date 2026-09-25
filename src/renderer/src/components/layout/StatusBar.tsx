@@ -3,7 +3,6 @@ import { CircleSlash, Clock, Hand, ListChecks, Play, CircleAlert } from 'lucide-
 import { useProjectTasks } from '@/hooks/use-project-tasks'
 import { TaskStatus } from '@/types'
 import { isSnoozed } from '@/lib/utils'
-import { HeldActionsNotice } from '@/components/projects/HeldActionsNotice'
 import { ActivityAnnouncer } from '@/components/activity/ActivityAnnouncer'
 import { ActivityBadge } from '@/components/activity/ActivityBadge'
 import { useCaptainTaskId } from '@/stores/coordinator-store'
@@ -111,7 +110,6 @@ export function StatusBar() {
           allowMotion={false}
         />
       )}
-      <HeldActionsNotice />
       {version && <span className="opacity-70">v{version}</span>}
       <ActivityAnnouncer />
     </div>

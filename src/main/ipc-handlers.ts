@@ -19,7 +19,6 @@ import { registerCommanderHandlers } from './ipc/commander'
 import { registerChatImageHandlers } from './ipc/chat-images'
 import { registerConnectorHandlers } from './ipc/connectors'
 import { registerOverviewHandlers } from './ipc/overview'
-import { registerMergeGrantHandlers } from './ipc/merge-grants'
 
 export function registerIpcHandlers(deps: IpcDeps): void {
   registerTaskHandlers(deps)
@@ -28,7 +27,6 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   registerCliMcpHandlers()
   registerTaskSourceHandlers(deps)
   registerProjectHandlers(deps)
-  registerMergeGrantHandlers(deps)
   registerGitHandlers(deps)
   registerSettingsHandlers(deps)
   registerAppHandlers(deps)

@@ -65,3 +65,24 @@ export type CreatePullRequestReadinessSnapshot = Omit<
   PullRequestReadinessSnapshot,
   'id' | 'created_at' | 'invalidated_at' | 'invalidated_reason'
 >
+
+const GITHUB_PR_URL = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)\/?$/
+
+export interface PullRequestRef {
+  owner: string
+  repo: string
+  number: number
+  /** Canonical `https://github.com/owner/repo/pull/N`. */
+  url: string
+}
+
+/** A canonical GitHub PR URL, else null. Query strings, fragments and sub-pages are refused. */
+export function parseGitHubPullRequestUrl(value: unknown): PullRequestRef | null {
+  if (typeof value !== 'string') return null
+  const match = value.trim().match(GITHUB_PR_URL)
+  if (!match) return null
+  const [, owner, repo, number] = match
+  const n = Number(number)
+  if (!Number.isSafeInteger(n) || n <= 0) return null
+  return { owner, repo, number: n, url: `https://github.com/${owner}/${repo}/pull/${n}` }
+}

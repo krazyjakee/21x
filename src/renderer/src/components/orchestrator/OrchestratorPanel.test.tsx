@@ -30,7 +30,6 @@ const projectApi = vi.hoisted(() => ({
   getAll: vi.fn(async (): Promise<unknown[]> => []),
   update: vi.fn(async (id: string, data: Record<string, unknown>) => ({ id, ...data })),
 }))
-const mergeGrantsApi = vi.hoisted(() => ({ noteTyped: vi.fn() }))
 const captainRuntimeApi = vi.hoisted(() => {
   const state = (projectId: string, agentId: string, phase = 'healthy') => ({
     ownerId: projectId === 'proj-b' ? 'captain-row-b' : 'captain-row-1',
@@ -66,7 +65,6 @@ vi.mock('@/lib/ipc-client', async (importOriginal) => ({
   agentSessionApi,
   taskApi,
   projectApi,
-  mergeGrantsApi,
   captainRuntimeApi,
 }))
 
@@ -74,11 +72,10 @@ vi.mock('@/lib/ipc-client', async (importOriginal) => ({
  * The transcript is a large tree with its own IPC; this file is about the
  * session. Its send handler is captured so a test can send like a user.
  */
-const composer = vi.hoisted(() => ({ send: null as ((text: string) => void) | null, typed: null as ((text: string) => void) | null }))
+const composer = vi.hoisted(() => ({ send: null as ((text: string) => void) | null }))
 vi.mock('@/components/agents/AgentTranscriptPanel', () => ({
-  AgentTranscriptPanel: ({ onSend, onTypedMessage }: { onSend?: (text: string) => void; onTypedMessage?: (text: string) => void }) => {
+  AgentTranscriptPanel: ({ onSend }: { onSend?: (text: string) => void }) => {
     composer.send = onSend ?? null
-    composer.typed = onTypedMessage ?? null
     return null
   },
 }))
@@ -153,26 +150,20 @@ beforeEach(() => {
 })
 
 describe('OrchestratorPanel — warming the session', () => {
-  it('persists typed evidence with the durable send while warm-up is still in flight', async () => {
+  it('sends a message while warm-up is still in flight', async () => {
     const pending = deferredStart()
     await act(async () => { render(<OrchestratorPanel onClose={vi.fn()} />) })
     await waitFor(() => expect(agentSessionApi.start).toHaveBeenCalled())
-    await act(async () => {
-      composer.typed?.('Merge PR #12')
-      void composer.send?.('Merge PR #12')
-    })
+    await act(async () => { void composer.send?.('Merge PR #12') })
     await waitFor(() => expect(agentSessionApi.sendByTaskId).toHaveBeenCalled())
-    expect(mergeGrantsApi.noteTyped).toHaveBeenCalledWith(CAPTAIN, 'Merge PR #12')
-    expect(mergeGrantsApi.noteTyped.mock.invocationCallOrder[0]).toBeLessThan(agentSessionApi.sendByTaskId.mock.invocationCallOrder[0])
     await act(async () => { pending.resolve() })
   })
 
-  it.each([true, false])('only a typed dashboard prefill stages grant evidence (typed=%s)', async (typed) => {
+  it('sends a dashboard prefill', async () => {
     await act(async () => { render(<OrchestratorPanel onClose={vi.fn()} />) })
     await waitFor(() => expect(agentSessionApi.start).toHaveBeenCalled())
-    act(() => { window.dispatchEvent(new CustomEvent('captain-prefill', { detail: { message: 'Merge PR #12', typed } })) })
+    act(() => { window.dispatchEvent(new CustomEvent('captain-prefill', { detail: { message: 'Merge PR #12' } })) })
     await waitFor(() => expect(agentSessionApi.send).toHaveBeenCalled())
-    expect(mergeGrantsApi.noteTyped).toHaveBeenCalledTimes(typed ? 1 : 0)
   })
 
   it('starts the default agent at launch, before any message', async () => {
@@ -311,7 +302,6 @@ describe('OrchestratorPanel — warming the session', () => {
     const attachments = [{ id: 'image-1', filename: 'failure.png', size: 64, mime_type: 'image/png' }]
     agentSessionApi.sendByTaskId.mockRejectedValueOnce(new Error('Captain unavailable'))
     await act(async () => {
-      composer.typed?.('Inspect this')
       await (composer.send as (text: string, options?: unknown) => Promise<unknown>)('Inspect this', { attachments })
     })
     expect(await screen.findByRole('alert')).toHaveTextContent('1 message is waiting')
@@ -323,7 +313,6 @@ describe('OrchestratorPanel — warming the session', () => {
     expect(agentSessionApi.sendByTaskId).toHaveBeenNthCalledWith(2, ...firstCall)
     expect(agentSessionApi.send).toHaveBeenCalledTimes(1)
     expect(agentSessionApi.send).toHaveBeenCalledWith('session-1', 'Next message', CAPTAIN, '', undefined, expect.stringMatching(/^captain-drawer:/))
-    expect(mergeGrantsApi.noteTyped).toHaveBeenCalledTimes(2)
   })
 
   it('keeps an image-only message while warm-up is pending', async () => {
@@ -335,7 +324,6 @@ describe('OrchestratorPanel — warming the session', () => {
       await (composer.send as (text: string, options?: unknown) => Promise<unknown>)('', { attachments })
     })
     expect(agentSessionApi.sendByTaskId).toHaveBeenCalledWith(CAPTAIN, '', attachments, expect.stringMatching(/^captain-drawer:/))
-    expect(mergeGrantsApi.noteTyped).not.toHaveBeenCalled()
     await act(async () => pending.resolve())
   })
 

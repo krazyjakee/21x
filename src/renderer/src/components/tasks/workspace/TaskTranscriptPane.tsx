@@ -1,7 +1,6 @@
 import { memo, type ComponentProps } from 'react'
 import { AgentTranscriptPanel } from '@/components/agents/AgentTranscriptPanel'
 import { useAgentStore, SessionStatus, type AgentMessage } from '@/stores/agent-store'
-import { mergeGrantsApi } from '@/lib/ipc-client'
 
 const EMPTY_MESSAGES: AgentMessage[] = []
 
@@ -37,7 +36,6 @@ export const TaskTranscriptPane = memo(function TaskTranscriptPane({ taskId, age
         taskId={taskId}
         agentId={agentId}
         pendingSend={pendingSend}
-        onTypedMessage={(text) => mergeGrantsApi.noteTyped(taskId, text)}
         className="h-full min-h-0 border-0 bg-background"
       />
     </div>

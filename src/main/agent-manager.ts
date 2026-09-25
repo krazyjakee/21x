@@ -1,5 +1,4 @@
 import { serializeTaskSend } from './task-send-lock'
-import { prepareProjectMessageDispatch, activateProjectMessageDispatch, failProjectMessageDispatch, type ProjectMessageDispatch, type TypedMessage } from './merge-grants'
 import { DEFAULT_SERVER_URL } from './adapters/opencode-server'
 import { guardedIpcSend } from './guarded-ipc-send'
 import { transcriptDisplayPart } from './transcript-display'
@@ -1359,9 +1358,6 @@ export class AgentManager extends EventEmitter {
     }
 
     if (!skipInitialPrompt) {
-      if (task && isCoordinatorTask(task) && task.project_id) {
-        prepareProjectMessageDispatch(task.project_id)
-      }
       let promptText: string
       if (isTriageSession && task) {
         promptText = buildTriagePrompt(task, this.projectRepoNames(task))
@@ -4494,18 +4490,17 @@ export class AgentManager extends EventEmitter {
     taskId: string,
     message: string,
     attachments?: MessageAttachmentRef[],
-    typedMessage?: TypedMessage,
     deliveryId?: string
   ): Promise<{ sessionId: string | null; newSessionId?: string }> {
     const found = this.findSessionByTaskId(taskId)
     if (found) {
       console.log(`[AgentManager] sendByTaskId: found live session ${found.sessionId} for task ${taskId}`)
-      const result = await this.sendMessage(found.sessionId, message, taskId, found.session.agentId, attachments, typedMessage, deliveryId)
+      const result = await this.sendMessage(found.sessionId, message, taskId, found.session.agentId, attachments, deliveryId)
       return { sessionId: found.sessionId, ...result }
     }
     // sendMessage resumes from the persisted session_id or creates a new session.
     console.log(`[AgentManager] sendByTaskId: no live session for task ${taskId}, delegating to sendMessage for recovery`)
-    const result = await this.sendMessage('', message, taskId, undefined, attachments, typedMessage, deliveryId)
+    const result = await this.sendMessage('', message, taskId, undefined, attachments, deliveryId)
     return { sessionId: null, ...result }
   }
 
@@ -4515,14 +4510,13 @@ export class AgentManager extends EventEmitter {
     taskId?: string,
     agentId?: string,
     attachments?: MessageAttachmentRef[],
-    typedMessage?: TypedMessage,
     deliveryId = `agent-message:${randomUUID()}`
   ): Promise<{ newSessionId?: string }> {
     // A few focused unit tests use a structural DB double without SQLite.
     // The shipped DatabaseManager always has `db`, so every application call
     // takes the durable path below.
     if (!this.db.db || typeof this.db.db.prepare !== 'function') {
-      return this.sendMessageNow(sessionId, message, taskId, agentId, attachments, typedMessage)
+      return this.sendMessageNow(sessionId, message, taskId, agentId, attachments)
     }
     const owner = this.resolveSession(sessionId)?.session
     if (owner && taskId && owner.taskId !== taskId) throw new Error('Session belongs to a different task.')
@@ -4534,7 +4528,7 @@ export class AgentManager extends EventEmitter {
         kind: 'agent_message',
         taskId: targetTaskId ?? null,
         agentId: targetAgentId ?? null,
-        payload: JSON.stringify({ sessionId, message, taskId: targetTaskId, agentId: targetAgentId, attachments: attachments ?? [], typedMessage })
+        payload: JSON.stringify({ sessionId, message, taskId: targetTaskId, agentId: targetAgentId, attachments: attachments ?? [] })
       })
       return record
     })()
@@ -4582,7 +4576,6 @@ export class AgentManager extends EventEmitter {
       taskId?: string
       agentId?: string
       attachments?: MessageAttachmentRef[]
-      typedMessage?: TypedMessage
     }
     try {
       payload = JSON.parse(claimed.payload) as typeof payload
@@ -4592,7 +4585,6 @@ export class AgentManager extends EventEmitter {
         payload.taskId,
         payload.agentId,
         payload.attachments,
-        payload.typedMessage,
         `delivery-${claimed.id}`
       ), AGENT_START_TIMEOUT_MS + AGENT_SESSION_START_TIMEOUT_MS, 'Message handoff')
       const destination = result.newSessionId || payload.sessionId || claimed.taskId || claimed.id
@@ -4663,16 +4655,11 @@ export class AgentManager extends EventEmitter {
     taskId?: string,
     agentId?: string,
     attachments?: MessageAttachmentRef[],
-    typedMessage?: TypedMessage,
     transcriptPartId?: string
   ): Promise<{ newSessionId?: string }> {
     const resolved = this.resolveSession(sessionId, 'sendMessage')
     let session = resolved?.session
     if (resolved) sessionId = resolved.sessionId
-    const target = this.db.getTask(session?.taskId ?? taskId ?? '')
-    const dispatch = target && isCoordinatorTask(target) && target.project_id
-      ? prepareProjectMessageDispatch(target.project_id, typedMessage?.taskId === target.id && typedMessage.text === message ? typedMessage : undefined)
-      : undefined
 
     // A renderer can send while its bounded warm-up IPC is still pending.
     // The message is already durable at this point; join that exact start so
@@ -4702,7 +4689,7 @@ export class AgentManager extends EventEmitter {
 
     if (!session) throw new Error(`Session not found: ${sessionId}`)
     try {
-      await this.doSendAdapterMessage(session, sessionId, message, attachments, dispatch, transcriptPartId)
+      await this.doSendAdapterMessage(session, sessionId, message, attachments, transcriptPartId)
     } catch (error) {
       await this.handleSessionError(sessionId, session, error)
       throw error
@@ -4711,9 +4698,8 @@ export class AgentManager extends EventEmitter {
   }
 
   /** Fire-and-forget, so the IPC response is not blocked and the renderer does not freeze. */
-  private sendInBackground(session: AgentSession, sessionId: string, message: string, attachments?: MessageAttachmentRef[], dispatch?: ProjectMessageDispatch): void {
-    this.doSendAdapterMessage(session, sessionId, message, attachments, dispatch).catch((err) => {
-      if (dispatch) failProjectMessageDispatch(dispatch)
+  private sendInBackground(session: AgentSession, sessionId: string, message: string, attachments?: MessageAttachmentRef[]): void {
+    this.doSendAdapterMessage(session, sessionId, message, attachments).catch((err) => {
       console.error(`[AgentManager] doSendAdapterMessage failed for session ${sessionId}:`, err)
       return this.handleSessionError(sessionId, session, err)
     })
@@ -4748,13 +4734,9 @@ export class AgentManager extends EventEmitter {
     sessionId: string,
     message: string,
     attachments?: MessageAttachmentRef[],
-    dispatch?: ProjectMessageDispatch,
     transcriptPartId?: string
   ): Promise<void> {
     this.assertSessionGeneration(sessionId, session)
-    const task = this.db.getTask(session.taskId)
-    // Nudges use this method directly, so they claim the project dispatch too.
-    dispatch ??= task && isCoordinatorTask(task) && task.project_id ? prepareProjectMessageDispatch(task.project_id) : undefined
     session.autoAbortNotified = false
 
     if (session.status === 'error') {
@@ -4789,7 +4771,7 @@ export class AgentManager extends EventEmitter {
       taskId: session.taskId,
       type: 'message',
       data: {
-        id: transcriptPartId ?? dispatch?.typed?.id ?? `user-message-${Date.now()}`,
+        id: transcriptPartId ?? `user-message-${Date.now()}`,
         role: 'user',
         content: buildDisplayMessage(message, attachments),
         partType: 'text'
@@ -4809,18 +4791,12 @@ export class AgentManager extends EventEmitter {
     const recap = session.pendingRecap
     const pendingLossId = session.pendingLossId
     if (recap) promptText = `${recap}\n\n${promptText}`
-    try {
-      const adapter = session.adapter
-      const send = (): Promise<void> => {
-        this.assertSessionGeneration(sessionId, session)
-        if (dispatch) activateProjectMessageDispatch(dispatch)
-        return adapter.sendPrompt(sessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
-      }
-      await serializeTaskSend(this, session.taskId, send)
-    } catch (error) {
-      if (dispatch) failProjectMessageDispatch(dispatch)
-      throw error
+    const adapter = session.adapter
+    const send = (): Promise<void> => {
+      this.assertSessionGeneration(sessionId, session)
+      return adapter.sendPrompt(sessionId, [{ type: MessagePartType.TEXT, text: promptText }], sessionConfig)
     }
+    await serializeTaskSend(this, session.taskId, send)
     // Stop may destroy the session while adapter acceptance is in flight.
     // The accepted call may finish, but it must not re-register polling or
     // otherwise revive the runtime after the explicit Stop boundary.

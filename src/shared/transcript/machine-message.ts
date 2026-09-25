@@ -1,5 +1,5 @@
 import { COMMANDER_RELAY_BEGIN, COMMANDER_RELAY_END, COMMANDER_RELAY_MARKER, commanderRelayNotice } from '../commander-relay'
-import { buildAuthorityNotice, FINDINGS_BEGIN, FINDINGS_END, SYSTEM_MESSAGE_MARKER, SystemMessageOrigin, type SystemMessageOriginValue } from '../system-authority'
+import { buildSystemMessageNotice, FINDINGS_BEGIN, FINDINGS_END, SYSTEM_MESSAGE_MARKER, SystemMessageOrigin, type SystemMessageOriginValue } from '../system-authority'
 import type { AgentMessage } from './types'
 
 // A display budget, not a transport limit. Larger messages remain completely visible.
@@ -68,7 +68,7 @@ export function parseMachineMessage(content: string): MachineMessageView | null 
     const expected = commanderRelayNotice(match[2]).join('\n')
     if (notice !== expected) return null
   } else {
-    const boundary = buildAuthorityNotice(origin)
+    const boundary = buildSystemMessageNotice(origin)
     if (notice !== boundary && !notice.startsWith(`${boundary}\n\n`)) return null
   }
   return {

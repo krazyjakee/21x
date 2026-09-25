@@ -249,18 +249,17 @@ describe('Commander briefing', () => {
   it('builds the briefing from status records only, attention first', () => {
     const text = buildBriefingText(
       [
-        { project: { id: 'a', name: 'Quiet' }, status: null, paused: false, heldActions: 0 },
+        { project: { id: 'a', name: 'Quiet' }, status: null, paused: false },
         {
           project: { id: 'b', name: 'Loud' },
           status: { project_id: 'b', counts: { running: 1, queued: 0, awaiting_review: 0, awaiting_approval: 2, blocked: 0 }, summary: 'Going.', top_blockers: [], updated_at: null },
-          paused: true,
-          heldActions: 1
+          paused: true
         }
       ],
       '2026-09-21'
     )
     expect(text.startsWith('Briefing for 2026-09-21: 2 active projects, 1 needs attention.')).toBe(true)
     expect(text.indexOf('## Loud (paused)')).toBeLessThan(text.indexOf('## Quiet'))
-    expect(text).toContain('Pending approvals: 2 agent steps waiting for approval; 1 Captain action held for your approval.')
+    expect(text).toContain('Pending approvals: 2 agent steps waiting for approval.')
   })
 })

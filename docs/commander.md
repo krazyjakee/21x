@@ -4,8 +4,8 @@ The Commander is a fast conversational model with no canvas. The user talks to
 it in persisted chat sessions; it delegates work to each project's Captain
 and relays their reports. It never does the project work itself, and it has
 no tool that could: its registry (#61, #73) holds delegation, status reads
-and project administration only. Captain replies and escalations come
-back as reports routed to the right session (#62, below).
+and project administration only. Captain replies and Captain action notices
+come back as reports routed to the right session (#62, below).
 
 The hierarchy is **Commander → Captain → task agent**: the Commander works
 across projects, each project's Captain coordinates the work inside one project
@@ -55,7 +55,7 @@ does the following:
 3. Runs one `ChatRuntime` turn with the Commander system prompt (`prompts.ts`)
    and the tools from `getTools`, which is called per turn with the session id,
    user message, `userMessageId`, and trigger (`user` or `report`). Only
-   typed input supplies `userMessageId` for merge grants.
+   typed input supplies `userMessageId`.
    Report turns supply no identity and receive no admin tools (see
    *Immediate administration*). Events stream on `commander:event`.
 4. Stores the assistant and tool messages. A tool row whose result is a JSON
@@ -103,7 +103,7 @@ kept.
 `src/main/commander/skill-tools.ts` the skill registry (#74: `list_skills`,
 `get_skill`, `create_skill`, `update_skill`, `remove_skill`, `promote_skill`,
 `move_skill`; see docs/skills.md, *Scope*). `ipc/commander.ts` concatenates
-them with the merge-grant tools into one registry per turn. Every result is a
+them into one registry per turn. Every result is a
 small JSON object with fixed item and character caps (50 projects, 20 repos,
 20 resources, 30 approvals, 12k characters), never raw tasks or transcripts.
 A project is addressed by its stable id, or by its exact name when that name
@@ -126,7 +126,7 @@ Delegation and status (#61):
   entries arrived meanwhile. The prompt reserves it for "what changed?"
   questions; it is never part of `list_projects` or the system prompt. See
   docs/task-lifecycle.md, "Status journal".
-- `ask_captain(project, message, merge_grant?)`: enqueues a fenced relay to the
+- `ask_captain(project, message)`: enqueues a fenced relay to the
   project's Captain and returns at once with a `correlation_id`. The durable
   delivery service owns the request, retries recoverable failures, and stores
   terminal failures as reports (see [Captain recovery](captain-recovery.md)).
@@ -135,42 +135,27 @@ Delegation and status (#61):
   `<<<BEGIN COMMANDER MESSAGE … END COMMANDER MESSAGE>>>`.
   The relay tells the Captain that the request carries the same authority as
   the same words typed into the project chat, so it creates and starts tasks,
-  files issues and opens draft pull requests without asking the user to
-  restate anything. Without a merge grant it says `authorizes_actions=false`,
-  which concerns merging only. It always uses
+  files issues, opens draft pull requests and merges ready ones without asking
+  the user to restate anything. It always uses
   the project's configured Captain agent;
   a live session on another agent is not reused. `captain_session` reports
   the live session's real state (`running`, `idle`, `waiting_approval`,
   `error`), or `starting` when a session is being started for the message.
-  With `merge_grant` (#137), the app first creates a merge
-  grant bound to the user's message of this turn (stored id and verbatim text
-  from the turn context, never the model's input). The provenance line then
-  says `authorizes_actions=merge_pr:<grant id>` and the relay quotes the
-  user's words. If the grant is refused (no typed user message, no "merge",
-  merge grants off, the message already used), nothing is sent. See
-  docs/task-lifecycle.md, "Merge grants".
-- `list_merge_grants(project?, include_inactive?)` and
-  `revoke_merge_grant(grant_id)` (#137): read and revoke grants. Revoking
-  only narrows authority, so it needs no confirmation, but is still withheld
-  from report-started turns.
 - `get_pending_approvals()`: agent checkpoints (sessions in
-  `waiting_approval`) and held Captain actions (#66) across active
-  projects. Read-only: there is no approve or reject tool.
+  `waiting_approval`) across active projects. Read-only: there is no approve or reject tool.
 - `navigate_to_project(project)`: pushes a `switch_project` UI command down
   the existing `ui:command` channel; the renderer switches the current project
   and leaves the Commander view for the dashboard.
 - `pause_all_projects(paused)`: the #65 pause. It acts at once, in every project.
 
 For delegated issue work, the Captain's platform tools can create an issue,
-update its title/body/labels, or link it to a task without a merge grant.
+update its title/body/labels, or link it to a task.
 They recheck repository/task restrictions at the write boundary, reject
 pull-request targets and secret-bearing payloads, and record the calling
 Captain and outcome in a durable idempotency ledger. Unknown outcomes stay
 unresolved until reconciliation verifies external evidence; recovery never
-blindly repeats a write. The `issue_write` escalation level determines whether
-an authorized external write is silent, reported or held; it does not confer
-authority. Linking is a local, authorized and audited association, so that
-external-write escalation level does not apply.
+blindly repeats a write. A settled create or update is reported to the
+Commander; linking is a local, audited association and is not reported.
 See [Delegated GitHub issue writes](task-lifecycle.md#delegated-github-issue-writes)
 for action limits, audit and recovery details.
 
@@ -221,11 +206,9 @@ questions, or relayed text in that turn.
 A turn started by a report (#62) gets no admin tools at all:
 `CommanderService.prepareTurn` drops every `COMMANDER_ADMIN_TOOLS` entry from
 the registry unless the user started the turn, whatever `getTools` returned.
-That set includes project and skill writes plus `revoke_merge_grant`. The
+That set is the project and skill writes. The
 runtime rejects even a model-invented call to one of those removed tools.
 Read-only tools, navigation and `ask_captain` (within its loop budget) remain.
-On a report-started turn, `ask_captain` has no typed-user identity for a new
-merge grant, so its relay carries `authorizes_actions=false`.
 
 Successful mutations call `onProjectChanged` (or `onSkillChanged`), which
 broadcasts `project:changed` (or `skills:changed`).
@@ -242,8 +225,7 @@ Callers are subscribed to `commander:event`, which carries these events:
 `turn_started`, `turn_event` (runtime events, where `done` carries only the stop
 reason), `messages_appended` and `session_updated`.
 
-It also wires the tool registry to the app: the agent manager, the held-action
-list from `escalation.ts`, the Task API's window notifier for UI commands, and
+It also wires the tool registry to the app: the agent manager, the Task API's window notifier for UI commands, and
 `broadcastProjectChanged` from `ipc/projects.ts`.
 
 `project:changed` (`ProjectChangedEvent`: `projectId`, `kind`) is sent to every
@@ -336,11 +318,11 @@ right place. The pieces:
   the user last spoke. `guardReportAsks` wraps the tool for such turns and
   returns a `loop_guard` error result beyond that; a user message resets the
   count. User-triggered turns are not limited.
-- **Escalations.** `installCommanderReportBridge` also installs the
-  `escalation.ts` handler: a `tell_commander` action the Captain performed
-  (#66) becomes an unprompted, project-tagged report ("Escalation notice …")
-  routed by the rules above. Held, approved and rejected `ask_user` calls are
-  not reported; they are the user's business (`get_pending_approvals`).
+- **Captain actions.** `installCommanderReportBridge` also installs the
+  `captain-github-tools.ts` handler: a merge, a settled issue write, or a
+  merge blocked on a person outside 21x becomes an unprompted, project-tagged
+  report ("Captain action: …" or "Blocked on an external approval: …")
+  routed by the rules above.
 
 ## Voice mode (#64)
 
@@ -462,8 +444,7 @@ one-minute tick, so it runs with the window closed. At each occurrence it:
 
 1. builds the briefing from every active project's status record
    (`buildProjectStatus`): summary, counts, top blockers, and pending approvals
-   (agent steps waiting for approval, plus Captain actions held by the
-   escalation policy). Projects that need the user come first. There is no
+   (agent steps waiting for approval). Projects that need the user come first. There is no
    model and no raw task data in this step;
 2. if a chat provider is configured, asks the Commander model for a three to
    five sentence spoken-style summary of that text (`BRIEFING_SUMMARY_PROMPT`,

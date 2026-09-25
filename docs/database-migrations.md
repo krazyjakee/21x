@@ -26,8 +26,7 @@ backend acceptance and is not automatically resent. Captain terminal failures
 and report inbox insertion are replayable after restart; report destinations
 are persisted before insertion, including archived originating conversations.
 Cross-project correlations and delivery-key ownership changes are refused.
-Provider tool-call IDs are scoped to a Commander turn, independently of the
-typed-message identity used by merge grants.
+Provider tool-call IDs are scoped to a Commander turn.
 
 ## How it works
 
@@ -121,16 +120,14 @@ The repository terminology guard covers source, docs, prompts and tests. Only
 migration fixtures and exact shared compatibility declarations may spell the
 retired name.
 
-### Merge grants and the pull-request policy split (v19)
+### Merge grants (v19, removed in v32)
 
-Migration 19 (`migrateMergeGrants()`, #137) adds `merge_grants`,
-`merge_grant_uses` and durable `merge_grant_reservations` (new tables, also in `createTables()`) and splits the
-escalation policy's combined `pr` item in `projects.settings.escalation`:
-the stored level moves to `merge_pr`, `open_pr` gets its default
-(`tell_commander`), and `pr` is removed (`splitPullRequestEscalation()`).
-Rows without `pr`, or with unreadable settings, are untouched, so re-runs are
-no-ops. **18 was skipped on purpose** for a contemporaneous feature branch;
-the managed-runtime and durable-delivery migration follows as version 20.
+Migration 19 (#137) added the `merge_grants`, `merge_grant_uses` and
+`merge_grant_reservations` tables and split the escalation policy's combined
+`pr` item. Both features are gone: migration 32 drops those tables and the
+code that created them. **18 was skipped on purpose** for a contemporaneous
+feature branch; the managed-runtime and durable-delivery migration follows as
+version 20.
 
 ### Concurrency control (#150, v21)
 
@@ -173,6 +170,13 @@ Migrations 23 and 30 added a human-authorization chain and its dispatch
 bindings. Migration 31 removed that system and drops its tables
 (`dropAuthorizationTables()` in `src/main/database/authorization-schema.ts`).
 
+Migration 32 removes merge grants and the escalation policy: it drops
+`merge_grant_reservations`, `merge_grant_uses` and `merge_grants`
+(`dropMergeGrantTables()`), and deletes the `escalation` and `merge_grants`
+blocks from every project's `settings` JSON
+(`removeProjectPermissionSettings()`, same file). Unreadable settings are left
+alone.
+
 ### Delegated GitHub issue-write ledger (v24)
 
 Migration 24 (`migrateIssueWrites()` in
@@ -201,13 +205,10 @@ canonical repository/issue identity and the payload reconstructed in the
 stored `payload_fields` shape must also reproduce `payload_hash`; a copied
 marker with different title, body or labels is not success evidence.
 
-### Effective merge-grant attribution (#159, v26)
+### Effective merge-grant attribution (#159, v26, removed in v32)
 
-Migration 26 adds `merge_grant_uses.authorization_context`. The effective
-grant remains the merge authority and owns the reservation/use; the policy
-level and verified Commander or project-chat provenance are retained as
-separate audit context across retries and reconciliation. The migration is
-idempotent and fresh databases create the same final table directly.
+Migration 26 added `merge_grant_uses.authorization_context`. The table is
+dropped by migration 32.
 
 ## Adding a column to other tables
 

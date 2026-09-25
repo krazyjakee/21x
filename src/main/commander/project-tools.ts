@@ -5,13 +5,10 @@ import { resolveCaptainAgentId } from '../captain-waker'
 import { buildProjectStatus, readProjectStatusHistory } from '../project-status'
 import { PROJECT_STATUS_HISTORY_DEFAULT_LIMIT, PROJECT_STATUS_HISTORY_MAX_LIMIT } from '../../shared/project-status'
 import { DEFAULT_PROJECT_ID, type ProjectRecord, type ProjectRepoRecord, type ProjectResourceRecord } from '../../shared/projects'
-import type { HeldAction } from '../../shared/project-limit-types'
 import type { ProjectStatus } from '../../shared/project-status'
 import { isCoordinatorTask } from '../../shared/task-roles'
 import type { UiCommand } from '../../shared/ui-commands'
-import type { MergeGrant } from '../../shared/merge-grants'
 import { COMMANDER_RELAY_BEGIN, COMMANDER_RELAY_END, COMMANDER_RELAY_MARKER, commanderRelayNotice } from '../../shared/commander-relay'
-import { grantForRelay, mergeGrantInputSchema, relayGrantLines } from './merge-grant-tools'
 import type { CaptainDeliveryService } from './captain-delivery'
 import { correlationForDeliveryKey } from './captain-delivery'
 
@@ -76,8 +73,6 @@ export interface ProjectToolOptions {
   db: DatabaseManager
   context: ProjectToolContext
   agents?: CommanderAgents | null
-  /** Held Captain calls waiting for the user (#66); injected so the tools need no escalation wiring in tests. */
-  listHeldActions?: () => HeldAction[]
   /** Pushes a command to the desktop window; absent when no window can be reached. */
   sendUiCommand?: (command: UiCommand) => { ok: true } | { ok: false; detail: string }
   onProjectChanged?: (projectId: string, kind: ProjectChangeKind) => void
@@ -294,21 +289,16 @@ export { COMMANDER_RELAY_BEGIN, COMMANDER_RELAY_END }
  * can route the answer back. It carries the user's request with the same
  * authority as the same words typed into the project chat.
  */
-export function buildCommanderRelayMessage(input: { commanderSessionId: string; correlationId: string; message: string; sentAt?: string; grant?: MergeGrant | null }): string {
-  // merge_pull_request independently checks its merge grant.
-  const authorizes = input.grant ? `merge_pr:${input.grant.id}` : 'false'
+export function buildCommanderRelayMessage(input: { commanderSessionId: string; correlationId: string; message: string; sentAt?: string }): string {
   return [
     COMMANDER_RELAY_MARKER,
-    `provenance: origin=commander-relay commander_session=${input.commanderSessionId} correlation_id=${input.correlationId} sent_at=${input.sentAt ?? new Date().toISOString()} human_authored=false authorizes_actions=${authorizes}`,
+    `provenance: origin=commander-relay commander_session=${input.commanderSessionId} correlation_id=${input.correlationId} sent_at=${input.sentAt ?? new Date().toISOString()} human_authored=false authorizes_actions=false`,
     '',
     COMMANDER_RELAY_BEGIN,
     input.message.trim(),
     COMMANDER_RELAY_END,
     '',
-    ...(input.grant ? [...relayGrantLines(input.grant), ''] : []),
-    ...(input.grant
-      ? [...commanderRelayNotice(input.correlationId).slice(0, -1), '- Merging is covered only by the merge grant above.']
-      : commanderRelayNotice(input.correlationId))
+    ...commanderRelayNotice(input.correlationId)
   ].join('\n')
 }
 
@@ -351,12 +341,10 @@ function askCaptain(options: ProjectToolOptions, input: Record<string, unknown>,
   const found = agents.findSessionByTaskId(coordinator.id)
   const live = found?.session.agentId === agentId ? found : undefined
 
-  // #137: created (and bound to the user's message) before anything is sent; a refusal throws.
-  const grant = input.merge_grant === undefined || input.merge_grant === null ? null : grantForRelay(db, options.context, project, input.merge_grant)
   const idempotencyKey = `commander:${options.context.sessionId}:${options.context.deliveryScope ?? options.context.userMessageId ?? 'legacy'}:tool:${toolCallId}`
   const correlationId = correlationForDeliveryKey(idempotencyKey)
   const dispatch: AskCaptainDispatch = { sessionId: options.context.sessionId, projectId: project.id, projectName: project.name, correlationId }
-  const text = buildCommanderRelayMessage({ commanderSessionId: options.context.sessionId, correlationId, message, grant })
+  const text = buildCommanderRelayMessage({ commanderSessionId: options.context.sessionId, correlationId, message })
   const queued = options.delivery.enqueueRequest({
     idempotencyKey,
     sourceSessionId: dispatch.sessionId,
@@ -373,24 +361,19 @@ function askCaptain(options: ProjectToolOptions, input: Record<string, unknown>,
     project_name: clip(project.name, MAX_NAME_CHARS),
     correlation_id: correlationId,
     captain_session: captainSessionLabel(options, project.id, live?.sessionId),
-    ...(grant ? { merge_grant: { id: grant.id, expires_at: grant.expires_at, pr_numbers: grant.pr_numbers, repo: grant.repo } } : {}),
     delivery_id: queued.id,
-    note: grant
-      ? 'Ownership is durable. The merge grant is in place for this project only until it expires or is revoked; the Captain answers later with this correlation_id, and startup failure or timeout returns here.'
-      : 'Ownership is durable. The Captain answers later in a report tagged with this correlation_id; a startup failure or report timeout is routed back to this same conversation.'
+    note: 'Ownership is durable. The Captain answers later in a report tagged with this correlation_id; a startup failure or report timeout is routed back to this same conversation.'
   })
 }
 
 function pendingApprovals(options: ProjectToolOptions): ChatToolResult {
   const { db, agents } = options
   const checkpoints: Array<Record<string, unknown>> = []
-  const held: Array<Record<string, unknown>> = []
   const projects = db.getProjects()
-  const names = new Map(projects.map((project) => [project.id, project.name]))
   if (agents) {
     for (const project of projects) {
       for (const task of db.getTasks({ projectId: project.id })) {
-        // The Captain's own checkpoint is a held action (#66), not a task waiting.
+        // The Captain's own session is not a task waiting on the user.
         if (isCoordinatorTask(task)) continue
         const found = agents.findSessionByTaskId(task.id)
         if (!found || agents.getSessionStatus(found.sessionId)?.status !== 'waiting_approval') continue
@@ -398,18 +381,14 @@ function pendingApprovals(options: ProjectToolOptions): ChatToolResult {
       }
     }
   }
-  for (const action of options.listHeldActions?.() ?? []) {
-    if (!names.has(action.projectId)) continue
-    held.push({ kind: 'held_action', id: action.id, project_id: action.projectId, project: clip(names.get(action.projectId) ?? '', MAX_NAME_CHARS), action: action.action, summary: oneLine(action.summary, 200), since: action.createdAt })
-  }
-  const total = checkpoints.length + held.length
-  const items = [...checkpoints, ...held].slice(0, MAX_APPROVAL_ITEMS)
+  const total = checkpoints.length
+  const items = checkpoints.slice(0, MAX_APPROVAL_ITEMS)
   return result({
     approvals: items,
     total,
     truncated: total > items.length,
     live_state_available: Boolean(agents),
-    note: 'You cannot approve or reject these. Relay them to the user, who decides in the task view or the project editor.'
+    note: 'You cannot approve or reject these. Relay them to the user, who decides in the task view.'
   })
 }
 
@@ -490,8 +469,7 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
         type: 'object',
         properties: {
           ...projectLocatorSchema,
-          message: { type: 'string', maxLength: MAX_ASK_CHARS, description: 'What the user wants, in your own words, with the context the Captain needs.' },
-          merge_grant: mergeGrantInputSchema
+          message: { type: 'string', maxLength: MAX_ASK_CHARS, description: 'What the user wants, in your own words, with the context the Captain needs.' }
         },
         required: ['project', 'message'],
         additionalProperties: false
@@ -500,7 +478,7 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
     },
     {
       name: 'get_pending_approvals',
-      description: 'Everything across projects that is waiting for the user: agent checkpoints and held Captain actions. Read-only; the Commander cannot approve anything.',
+      description: 'Everything across projects that is waiting for the user: agent checkpoints. Read-only; the Commander cannot approve anything.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       handler: async () => pendingApprovals(options)
     },

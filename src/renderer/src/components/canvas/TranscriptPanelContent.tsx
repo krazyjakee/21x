@@ -6,7 +6,6 @@ import { useTaskStore } from '@/stores/task-store'
 import { Bot } from 'lucide-react'
 import type { ComposerAttachment } from '@/components/agents/transcript/TranscriptComposer'
 import { taskImageSaver, withAttachmentNote } from '@/lib/chat-image-attachments'
-import { mergeGrantsApi } from '@/lib/ipc-client'
 
 interface TranscriptPanelContentProps {
   taskId: string
@@ -129,7 +128,6 @@ export function TranscriptPanelContent({ taskId }: TranscriptPanelContentProps) 
       taskId={taskId}
       agentId={task?.agent_id ?? undefined}
       pendingSend={session?.pendingSend}
-      onTypedMessage={(text) => mergeGrantsApi.noteTyped(taskId, text)}
     />
   )
 }

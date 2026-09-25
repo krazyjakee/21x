@@ -5,7 +5,6 @@ import type { ProjectOverviewEntry } from '@shared/project-overview'
 const api = vi.hoisted(() => ({
   overviewApi: { getAllStatuses: vi.fn() },
   projectApi: { onStatusChanged: vi.fn(() => () => {}), onChanged: vi.fn(() => () => {}) },
-  escalationApi: { onHeldChanged: vi.fn(() => () => {}) },
   settingsApi: { get: vi.fn().mockResolvedValue(null), set: vi.fn().mockResolvedValue(undefined) },
   onTaskUpdated: vi.fn(() => () => {}),
   onTaskCreated: vi.fn(() => () => {}),
@@ -30,7 +29,6 @@ function entry(over: Partial<ProjectOverviewEntry> = {}): ProjectOverviewEntry {
     is_default: false,
     sort_order: 1,
     pending_approvals: 0,
-    held_actions: 0,
     running_agents: 0,
     paused: false,
     all_projects_paused: false,
@@ -87,7 +85,7 @@ describe('OverviewWorkspace', () => {
       entry({ project_id: 'a', name: 'Quiet', sort_order: 0 }),
       entry({
         project_id: 'b', name: 'Loud', sort_order: 1, needs_attention: true,
-        pending_approvals: 1, held_actions: 2, status: { counts: { awaiting_review: 3 } } as never
+        pending_approvals: 1, status: { counts: { awaiting_review: 3 } } as never
       })
     ])
 
@@ -98,7 +96,7 @@ describe('OverviewWorkspace', () => {
     expect(cards[0]).toHaveAttribute('data-attention', 'true')
     expect(cards[1]).toHaveAttribute('data-attention', 'false')
     expect(within(cards[0]).getByText('Needs you')).toBeInTheDocument()
-    expect(within(cards[0]).getByText('1 awaiting approval · 2 held Captain calls · 3 to review')).toBeInTheDocument()
+    expect(within(cards[0]).getByText('1 awaiting approval · 3 to review')).toBeInTheDocument()
     expect(within(cards[1]).queryByText('Needs you')).not.toBeInTheDocument()
     expect(screen.getByText('1 project needs your input.')).toBeInTheDocument()
   })

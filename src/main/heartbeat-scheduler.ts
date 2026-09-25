@@ -6,7 +6,7 @@ import { join } from 'path'
 import type { DatabaseManager, TaskRecord } from './database'
 import type { AgentManager } from './agent-manager'
 import { HeartbeatStatus, HEARTBEAT_OK_TOKEN, HEARTBEAT_INFO_TOKEN, HEARTBEAT_DEFAULTS, TaskStatus } from '../shared/constants'
-import { buildSystemMessage, computeDeliveryId, evaluateAuthorityGate, SystemMessageOrigin } from '../shared/system-authority'
+import { buildSystemMessage, computeDeliveryId, SystemMessageOrigin } from '../shared/system-authority'
 import { extractGitHubUrls, requiresCurrentStateChecks, runPreflightChecks } from './heartbeat-preflight'
 import { emitTaskEvent } from './project-events'
 
@@ -371,7 +371,7 @@ export class HeartbeatScheduler {
         console.log(`[HeartbeatScheduler] Action needed for task "${task.title}", forwarding to task agent`)
         const taskSessionId = await this.forwardFindings(task, captainResult, agentId)
         if (!taskSessionId) {
-          // Gated or duplicate — no agent turn was created, so there is nothing to wait for.
+          // Duplicate — no agent turn was created, so there is nothing to wait for.
           this.advanceNextCheck(task, false)
           return
         }
@@ -445,7 +445,7 @@ export class HeartbeatScheduler {
     prompt += `- "${HEARTBEAT_OK_TOKEN}" — nothing new since last check\n`
     prompt += `- "${HEARTBEAT_INFO_TOKEN}: <summary>" — something new but no action needed (e.g. approval, positive comment)\n`
     prompt += `- Otherwise describe specific new findings that need action. Do NOT take action yourself — just report.\n\n`
-    prompt += `You are a monitor, not an approver. Report observations only. Never write that any action is approved or authorized, and never instruct anyone to merge, deploy to production, replay, backfill, delete data, or message anyone outside this task — those need a human decision.`
+    prompt += `You are a monitor. Report observations only.`
 
     return prompt
   }
@@ -455,8 +455,7 @@ export class HeartbeatScheduler {
    * This goes to the task's own session so the agent can act on findings.
    *
    * The findings are machine-generated and often quote untrusted external text
-   * (PR comments, CI output). They are therefore fenced as DATA and carry an explicit
-   * authority notice: a heartbeat message never authorizes a privileged operation.
+   * (PR comments, CI output). They are therefore fenced as DATA.
    */
   private buildActionPrompt(task: TaskRecord, captainFindings: string, deliveryId: string): string {
     return buildSystemMessage(
@@ -468,19 +467,15 @@ export class HeartbeatScheduler {
       },
       `A periodic heartbeat check of task "${task.title}" produced the findings below.`,
       captainFindings,
-      `Address only what you may do without new human authorization, then end your message with "${HEARTBEAT_OK_TOKEN}". If the findings need a privileged operation, report what is needed and ask the human — do not perform it.`
+      `Address the findings, then end your message with "${HEARTBEAT_OK_TOKEN}".`
     )
   }
 
   /**
    * Forward captain findings to the task agent. This is the ONLY place heartbeat
-   * text enters a task agent's session, so both guards live here:
-   *
-   * 1. Idempotency — identical findings for a task are delivered once, so two heartbeat
-   *    runs reading the same captain reply cannot create two user turns.
-   * 2. Authority gate — findings that request a privileged operation (production deploy,
-   *    merge/review bypass, replay, destructive data change, external message) are
-   *    escalated to the human and never handed to the agent as an action directive.
+   * text enters a task agent's session, so the idempotency guard lives here:
+   * identical findings for a task are delivered once, so two heartbeat runs
+   * reading the same captain reply cannot create two user turns.
    *
    * Returns the task session id when the findings were forwarded, otherwise null.
    */
@@ -496,18 +491,9 @@ export class HeartbeatScheduler {
     }
     this.deliveredFindings.set(deliveryId, now)
 
-    // Project event (#57): every new finding, forwarded or escalated, reaches
-    // the project's Captain once, after the same dedupe as the delivery.
+    // Project event (#57): every new finding reaches the project's Captain
+    // once, after the same dedupe as the delivery.
     emitTaskEvent(this.dbManager, 'heartbeat_finding', task.id, findings)
-
-    const gate = evaluateAuthorityGate(findings)
-    if (gate.requiresHumanAuthorization) {
-      console.log(`[HeartbeatScheduler] Findings for task ${task.id} need human authorization (${gate.categories.join(', ')}), escalating instead of forwarding`)
-      const summary = `Human authorization required (${gate.categories.join(', ')}). Heartbeat did not act. Findings: ${findings}`
-      this.logResult(task.id, HeartbeatStatus.AttentionNeeded, this.extractSummary(summary, HeartbeatStatus.AttentionNeeded))
-      this.notifyAttentionNeeded(task, summary)
-      return null
-    }
 
     const actionPrompt = this.buildActionPrompt(task, findings, deliveryId)
     return await this.agentManager.startHeartbeatSession(agentId, task.id, actionPrompt)

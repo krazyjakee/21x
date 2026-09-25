@@ -38,11 +38,7 @@ import { DEFAULT_PROJECT_ID } from '@shared/projects'
 import type { CaptainMemory } from '@shared/captain-memory'
 import type { ProjectStatusJournalEntry } from '@shared/project-status'
 import { formatRelativeDate } from '@shared/date-format'
-import {
-  ESCALATION_ACTIONS, ESCALATION_ACTION_LABELS, ESCALATION_LEVELS, ESCALATION_LEVEL_LABELS,
-  escalationPolicyFromSettings, projectLimitsFromSettings,
-  type EscalationAction, type EscalationLevel, type ProjectLimitsSettings
-} from '@shared/project-policies'
+import { projectLimitsFromSettings, type ProjectLimitsSettings } from '@shared/project-policies'
 import type { ProjectLimitState } from '@shared/project-limit-types'
 import {
   PROJECT_EVENT_KINDS,
@@ -53,7 +49,6 @@ import {
 } from '@shared/captain-wakeups'
 import type { GitHubRepo } from '@/types/electron'
 import { ScheduledReviewSection } from './ScheduledReviewSection'
-import { MergeGrantsSection } from './MergeGrantsSection'
 import { ConcurrencySection } from './ConcurrencySection'
 import { withScheduledReviewSettings } from '@shared/scheduled-coordination'
 
@@ -204,17 +199,10 @@ export function ProjectEditorDialog() {
     ...agents.map((a) => ({ value: a.id, label: a.name }))
   ], [agents])
 
-  // ── Limits (#65) and escalation (#66): keyed blocks of the settings JSON ──
+  // ── Limits (#65): a keyed block of the settings JSON ──
   const limits = useMemo(() => projectLimitsFromSettings(draft.settings), [draft.settings])
   const patchLimits = (fields: Partial<ProjectLimitsSettings>) =>
     setDraft((d) => ({ ...d, settings: { ...d.settings, limits: { ...projectLimitsFromSettings(d.settings), ...fields } } }))
-  const escalation = useMemo(() => escalationPolicyFromSettings(draft.settings), [draft.settings])
-  const patchEscalation = (action: EscalationAction, level: EscalationLevel) =>
-    setDraft((d) => ({ ...d, settings: { ...d.settings, escalation: { ...escalationPolicyFromSettings(d.settings), [action]: level } } }))
-  const escalationOptions = useMemo(
-    () => ESCALATION_LEVELS.map((level) => ({ value: level, label: ESCALATION_LEVEL_LABELS[level] })),
-    []
-  )
 
   // ── Repos ──
   const addRepos = (repos: Omit<RepoDraft, 'key'>[]) => {
@@ -568,39 +556,6 @@ export function ProjectEditorDialog() {
 
                 {/* ── Concurrency (#150): applies at once, outside the draft ── */}
                 {project && <ConcurrencySection projectId={project.id} />}
-
-                {/* ── Escalation (#66) ── */}
-                <section className="space-y-3" aria-label="Escalation">
-                  <div>
-                    <h3 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Escalation</h3>
-                    <p className="text-xs text-muted-foreground">
-                      What the Captain does on its own, does and reports, or asks you about first. “Ask the user first” holds the call until you approve it in the status bar.
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    {ESCALATION_ACTIONS.map((action) => (
-                      <div key={action} className="grid grid-cols-2 items-center gap-4">
-                        <Label htmlFor={`project-escalation-${action}`}>{ESCALATION_ACTION_LABELS[action]}</Label>
-                        <Select
-                          id={`project-escalation-${action}`}
-                          value={escalation[action]}
-                          onChange={(e) => patchEscalation(action, e.target.value as EscalationLevel)}
-                          options={escalationOptions}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    Opening a pull request is done by the agent doing the work. Merging goes through the Captain’s merge tool, which always checks CI and branch protection first.
-                  </p>
-                </section>
-
-                {/* ── Merge grants (#137) ── */}
-                <MergeGrantsSection
-                  projectId={project?.id ?? null}
-                  settings={draft.settings}
-                  onEnabledChange={(enabled) => setDraft((d) => ({ ...d, settings: { ...d.settings, merge_grants: { enabled } } }))}
-                />
 
                 {/* ── Captain wake-ups (#57) ── */}
                 <section className="space-y-3" aria-label="Captain wake-ups">

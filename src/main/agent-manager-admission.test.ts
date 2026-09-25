@@ -924,7 +924,7 @@ describe('recovery ownership adversarial regressions', () => {
     await manager.startTask(task.id)
     const stopping = manager.stopByTaskId(task.id)
     await vi.waitFor(() => expect(adapter.destroySession).toHaveBeenCalledTimes(1))
-    const sending = manager.sendMessage('', 'do not recreate during Stop', task.id, task.agent_id!, undefined, undefined, 'pending-stop-send')
+    const sending = manager.sendMessage('', 'do not recreate during Stop', task.id, task.agent_id!, undefined, 'pending-stop-send')
       .catch((error) => error)
     ;(manager as any).reconcileRuntimeDivergence()
     await settle(30)

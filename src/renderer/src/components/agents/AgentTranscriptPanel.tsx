@@ -40,8 +40,6 @@ interface AgentTranscriptPanelProps {
   agentId?: string
   /** User sent a message and the backend is still resuming the session. */
   pendingSend?: boolean
-  /** Text the user typed and sent (not dictated); see TranscriptComposer. */
-  onTypedMessage?: (text: string) => void
 }
 
 export function AgentTranscriptPanel({
@@ -59,8 +57,7 @@ export function AgentTranscriptPanel({
   sessionId,
   taskId,
   agentId,
-  pendingSend,
-  onTypedMessage
+  pendingSend
 }: AgentTranscriptPanelProps) {
   // The user sent and the backend is still resuming — status still reads idle.
   const isStarting = !!pendingSend && status !== SessionStatus.WORKING && status !== SessionStatus.WAITING_APPROVAL
@@ -283,7 +280,6 @@ export function AgentTranscriptPanel({
             onSaveImages={onSaveImages}
             taskId={taskId}
             isStarting={isStarting}
-            onTypedMessage={onTypedMessage}
           />
         )}
       </div>

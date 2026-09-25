@@ -43,7 +43,7 @@ export interface ProjectDraft {
   git_provider: string | null
   /** null = the global org setting. */
   git_org: string | null
-  /** The project's settings JSON (#49): limits (#65), escalation (#66) and other keyed blocks. */
+  /** The project’s settings JSON (#49): limits (#65) and other keyed blocks. */
   settings: Record<string, unknown>
   repos: RepoDraft[]
   resources: ResourceDraft[]

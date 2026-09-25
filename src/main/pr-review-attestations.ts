@@ -1,5 +1,5 @@
 import type { DatabaseManager } from './database'
-import { parseGitHubPullRequestUrl } from '../shared/merge-grants'
+import { parseGitHubPullRequestUrl } from '../shared/pr-readiness'
 import type {
   PullRequestReviewAttestation,
   PullRequestReviewHandoff,

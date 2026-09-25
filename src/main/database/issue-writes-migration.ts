@@ -31,9 +31,7 @@ import type Database from 'better-sqlite3'
  * - `attempt_epoch` is the identity of the current attempt. Every transition
  *   into `reserved`, and every lease expiry, bumps it, and a settle must quote
  *   the epoch it was issued. A stalled attempt that wakes up after its lease
- *   was taken away therefore cannot resolve a row a newer attempt owns — the
- *   same protection `merge_grant_reservations` gets from minting a fresh
- *   reservation id per attempt.
+ *   was taken away therefore cannot resolve a row a newer attempt owns.
  * - `effects_applied_at` fences the local half of success. The task attachment,
  *   journal entry and marker commit in one transaction; startup can therefore
  *   replay an interrupted local effect without duplicating it.

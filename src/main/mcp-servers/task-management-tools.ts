@@ -3,7 +3,7 @@
  * and how calls are dispatched, is decided in task-management-core.ts.
  */
 import type { Tool } from '@modelcontextprotocol/server'
-import { mergeGrantTools } from './merge-grant-tools'
+import { mergeTools } from './merge-tools'
 import { issueWriteTools } from './issue-write-tools'
 import { reviewAttestationTools } from './review-attestation-tools'
 import { prWriteTools } from './pr-write-tools'
@@ -617,8 +617,8 @@ export const captainTools: Tool[] = [
       required: ['task_id', 'artifact_id']
     }
   },
-  // #137: the Captain's merge tools, answered by the escalation gate.
-  ...mergeGrantTools,
+  // #137: the Captain's merge tool, answered in the main process.
+  ...mergeTools,
   ...issueWriteTools
 ]
 

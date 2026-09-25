@@ -365,29 +365,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener('concurrency:changed', handler)
     }
   },
-  // Captain tool calls held by the escalation policy (#66).
-  escalation: {
-    listHeld: (projectId?: string): Promise<unknown[]> => ipcRenderer.invoke('escalation:listHeld', projectId),
-    approve: (id: string): Promise<unknown> => ipcRenderer.invoke('escalation:approve', id),
-    reject: (id: string, note?: string): Promise<boolean> => ipcRenderer.invoke('escalation:reject', id, note),
-    onHeldChanged: (callback: (event: unknown) => void): (() => void) => {
-      const handler = (_: unknown, event: unknown): void => callback(event)
-      ipcRenderer.on('escalation:heldChanged', handler)
-      return () => ipcRenderer.removeListener('escalation:heldChanged', handler)
-    }
-  },
-  // Merge grants the user gave Captains (#137).
-  mergeGrants: {
-    noteTyped: (taskId: string, text: string): Promise<void> => ipcRenderer.invoke('mergeGrants:noteTyped', taskId, text),
-    listActive: (projectId?: string): Promise<unknown[]> => ipcRenderer.invoke('mergeGrants:listActive', projectId),
-    audit: (projectId: string): Promise<unknown[]> => ipcRenderer.invoke('mergeGrants:audit', projectId),
-    revoke: (id: string): Promise<unknown> => ipcRenderer.invoke('mergeGrants:revoke', id),
-    onChanged: (callback: (event: unknown) => void): (() => void) => {
-      const handler = (_: unknown, event: unknown): void => callback(event)
-      ipcRenderer.on('mergeGrants:changed', handler)
-      return () => ipcRenderer.removeListener('mergeGrants:changed', handler)
-    }
-  },
   // The all-projects overview (#63): every active project's status in one call.
   overview: {
     getAllStatuses: (): Promise<unknown[]> => ipcRenderer.invoke('project:getAllStatuses')

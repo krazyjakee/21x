@@ -25,7 +25,7 @@ import { handleTaskRoute } from './task-api/task-routes'
 import { handleReviewAttestationRoute } from './task-api/review-attestation-routes'
 import { handlePrWriteRoute } from './pr-write-gate'
 import { handleUiRoute } from './task-api/ui-routes'
-import { installEscalation } from './escalation'
+import { installCaptainGithubTools } from './captain-github-tools'
 
 export { setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTranscriptProvider } from './task-api/state'
 
@@ -78,10 +78,10 @@ export function startTaskApiServer(db: DatabaseManager): Promise<number> {
   if (server && port) return Promise.resolve(port)
   if (startupPromise) return startupPromise
 
-  // #66: the Captain's project-scoped tool calls go through its project's
-  // escalation policy. Installed with the server because the MCP endpoint
-  // lives here; tests that call the routes directly install their own.
-  installEscalation(db)
+  // The Captain's merge and issue tools are answered in the main process.
+  // Installed with the server because the MCP endpoint lives here; tests
+  // that call the routes directly install their own.
+  installCaptainGithubTools(db)
 
   startupPromise = new Promise((resolve, reject) => {
     server = createServer(async (req, res) => {

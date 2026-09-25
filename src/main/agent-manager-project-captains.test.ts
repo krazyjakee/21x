@@ -538,7 +538,7 @@ describe('per-project Captain conversations', () => {
     const first = newManager(new FakeAdapter({ sessionIds: ['saved-session'] }))
     await first.startSession(agentId, alphaCaptain, undefined, true)
     vi.spyOn(first as any, 'sendMessageNow').mockRejectedValueOnce(new Error('interrupted'))
-    await expect(first.sendMessage('saved-session', 'Keep me', undefined, undefined, undefined, undefined, 'session-only')).rejects.toThrow('interrupted')
+    await expect(first.sendMessage('saved-session', 'Keep me', undefined, undefined, undefined, 'session-only')).rejects.toThrow('interrupted')
     const row = new DeliveryStore(db).getByKey('session-only')!
     expect(JSON.parse(row.payload)).toMatchObject({ taskId: alphaCaptain, agentId })
     await first.stopAllSessions()
@@ -554,14 +554,14 @@ describe('per-project Captain conversations', () => {
     let finish!: (result: object) => void
     const send = vi.spyOn(manager as any, 'sendMessageNow').mockImplementation(() => new Promise((resolve) => { finish = resolve }))
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
-    const pending = manager.sendMessage('', 'retained', alphaCaptain, agentId, undefined, undefined, 'hung-handoff')
+    const pending = manager.sendMessage('', 'retained', alphaCaptain, agentId, undefined, 'hung-handoff')
     const failed = expect(pending).rejects.toThrow('Message handoff timed out')
     await vi.advanceTimersByTimeAsync(180_001)
     await failed
     expect(new DeliveryStore(db).getByKey('hung-handoff')).toMatchObject({ state: 'timed_out' })
     finish({})
     await Promise.resolve()
-    await expect(manager.sendMessage('', 'retained', alphaCaptain, agentId, undefined, undefined, 'hung-handoff')).rejects.toThrow('acceptance is unknown')
+    await expect(manager.sendMessage('', 'retained', alphaCaptain, agentId, undefined, 'hung-handoff')).rejects.toThrow('acceptance is unknown')
     expect(send).toHaveBeenCalledTimes(1)
   })
 
@@ -569,7 +569,7 @@ describe('per-project Captain conversations', () => {
     const manager = newManager(new FakeAdapter())
     const send = vi.spyOn(manager as any, 'sendMessageNow').mockRejectedValue(new Error('backend unavailable'))
     for (let attempt = 0; attempt < 6; attempt++) {
-      await expect(manager.sendMessage('', 'retained', alphaCaptain, agentId, undefined, undefined, 'bounded-retry')).rejects.toThrow('backend unavailable')
+      await expect(manager.sendMessage('', 'retained', alphaCaptain, agentId, undefined, 'bounded-retry')).rejects.toThrow('backend unavailable')
     }
     expect(send).toHaveBeenCalledTimes(5)
     expect(new DeliveryStore(db).getByKey('bounded-retry')).toMatchObject({ state: 'failed', attemptCount: 5 })
@@ -579,8 +579,8 @@ describe('per-project Captain conversations', () => {
     const fake = new FakeAdapter({ sessionIds: ['one-start'] })
     const manager = newManager(fake)
     await Promise.all([
-      manager.sendMessage('', 'first', alphaCaptain, agentId, undefined, undefined, 'first-delivery'),
-      manager.sendMessage('', 'second', alphaCaptain, agentId, undefined, undefined, 'second-delivery')
+      manager.sendMessage('', 'first', alphaCaptain, agentId, undefined, 'first-delivery'),
+      manager.sendMessage('', 'second', alphaCaptain, agentId, undefined, 'second-delivery')
     ])
     expect(fake.createSession).toHaveBeenCalledTimes(1)
     expect(fake.sendPrompt).toHaveBeenCalledTimes(2)
@@ -605,9 +605,9 @@ describe('per-project Captain conversations', () => {
       if (accepted === 1) await new Promise<void>((resolve) => { finish = resolve })
     })
 
-    const first = manager.sendMessage('live', 'first', task.id, agentId, undefined, undefined, 'stop-first')
+    const first = manager.sendMessage('live', 'first', task.id, agentId, undefined, 'stop-first')
     await vi.waitFor(() => expect(fake.sendPrompt).toHaveBeenCalledTimes(1))
-    const second = manager.sendMessage('live', 'queued before Stop', task.id, agentId, undefined, undefined, 'stop-second')
+    const second = manager.sendMessage('live', 'queued before Stop', task.id, agentId, undefined, 'stop-second')
     const secondRejected = expect(second).rejects.toThrow('user stopped this task')
     await manager.stopByTaskId(task.id)
     finish()
@@ -627,7 +627,7 @@ describe('per-project Captain conversations', () => {
     expect(fake.sendPrompt).toHaveBeenCalledTimes(1)
     expect(accepted).toBe(1)
 
-    await manager.sendMessage('', 'explicitly sent after Stop', task.id, agentId, undefined, undefined, 'after-stop')
+    await manager.sendMessage('', 'explicitly sent after Stop', task.id, agentId, undefined, 'after-stop')
     expect(fake.resumeSession).toHaveBeenCalledTimes(1)
     expect(deliveries.getByKey('after-stop')?.state).toBe('acknowledged')
   })
@@ -643,7 +643,7 @@ describe('per-project Captain conversations', () => {
     fake.sendPrompt.mockImplementationOnce(() => new Promise<void>((resolve) => { finishSend = resolve }))
     fake.destroySession.mockImplementationOnce(() => new Promise<void>((resolve) => { finishDestroy = resolve }))
 
-    const sending = manager.sendMessage('live', 'sent before stop', task.id, agentId, undefined, undefined, 'stop-finishing')
+    const sending = manager.sendMessage('live', 'sent before stop', task.id, agentId, undefined, 'stop-finishing')
     await vi.waitFor(() => expect(finishSend).toBeTypeOf('function'))
     const stopping = manager.stopByTaskId(task.id)
     await vi.waitFor(() => expect(finishDestroy).toBeTypeOf('function'))
@@ -665,8 +665,8 @@ describe('per-project Captain conversations', () => {
     await firstManager.startSession(agentId, alphaCaptain, undefined, true)
     before.sendPrompt.mockRejectedValueOnce(new Error('temporary unavailable'))
     const result = await Promise.allSettled([
-      firstManager.sendMessage('live', 'first', alphaCaptain, agentId, undefined, undefined, 'retry-first'),
-      firstManager.sendMessage('live', 'second', alphaCaptain, agentId, undefined, undefined, 'retry-second')
+      firstManager.sendMessage('live', 'first', alphaCaptain, agentId, undefined, 'retry-first'),
+      firstManager.sendMessage('live', 'second', alphaCaptain, agentId, undefined, 'retry-second')
     ])
     expect(result.map((entry) => entry.status)).toEqual(['rejected', 'fulfilled'])
     expect(new DeliveryStore(db).getByKey('retry-first')).toMatchObject({ state: 'pending', attemptCount: 1 })
@@ -792,7 +792,7 @@ describe('per-project Captain conversations', () => {
     // The delivery is durable before startup; losing the process now leaves
     // its original image references in the outbox for the next manager.
     vi.spyOn(first as any, 'sendMessageNow').mockRejectedValueOnce(new Error('startup interrupted'))
-    await expect(first.sendMessage('', '', alphaCaptain, agentId, [image], undefined, 'captain-drawer:image-retry')).rejects.toThrow('startup interrupted')
+    await expect(first.sendMessage('', '', alphaCaptain, agentId, [image], 'captain-drawer:image-retry')).rejects.toThrow('startup interrupted')
     const store = new DeliveryStore(db)
     const queued = store.getByKey('captain-drawer:image-retry')!
     expect(queued.state).toBe('pending')
@@ -811,7 +811,7 @@ describe('per-project Captain conversations', () => {
 
     // The renderer may retry with stale/empty options after reconnecting;
     // the acknowledged delivery must not dispatch or replace its attachments.
-    await second.sendMessage('', 'changed retry', alphaCaptain, agentId, [], undefined, 'captain-drawer:image-retry')
+    await second.sendMessage('', 'changed retry', alphaCaptain, agentId, [], 'captain-drawer:image-retry')
     expect(fake.sendPrompt).toHaveBeenCalledTimes(1)
     expect(JSON.parse(store.get(queued.id)!.payload).attachments).toEqual([image])
   })

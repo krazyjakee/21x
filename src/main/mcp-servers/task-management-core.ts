@@ -29,7 +29,7 @@ import {
   taskAgentTools
 } from './task-management-tools'
 import { SKILL_SCOPE_PARAM, SKILL_TOOL_NAMES } from '../task-api/skill-routes'
-import { MERGE_GRANT_TOOL_NAMES } from './merge-grant-tools'
+import { MERGE_TOOL_NAMES } from './merge-tools'
 import { ISSUE_WRITE_TOOL_NAMES } from './issue-write-tools'
 import { CREATE_REVIEW_HANDOFF_TOOL, RECORD_REVIEW_ATTESTATION_TOOL } from './review-attestation-tools'
 
@@ -87,29 +87,30 @@ const COORDINATOR_ONLY_TOOLS = new Set([
   'update_project_status',
   'report_to_commander',
   'set_concurrency',
-  ...MERGE_GRANT_TOOL_NAMES,
+  ...MERGE_TOOL_NAMES,
   ...ISSUE_WRITE_TOOL_NAMES
 ])
 
 /**
- * The escalation policy hook (#66). The main process installs one from
- * src/main/escalation.ts; it sees every project-scoped call the Captain
- * makes after the membership checks passed, and decides whether to run it
- * (`run`), run it and report, or hold it for the user. This module cannot
- * read the policy itself: it has no database, and the stdio entry point must
- * not pull Electron in. With no gate installed every call just runs.
+ * The Captain's call hook. The main process installs one from
+ * src/main/captain-github-tools.ts; it sees every project-scoped call the
+ * Captain makes after the membership checks passed, answers the tools that
+ * have no Task API route (merging, GitHub issues) and runs everything else
+ * (`run`). This module cannot answer those itself: it has no database, and
+ * the stdio entry point must not pull Electron in. With no handler installed
+ * every call just runs.
  */
-export type CoordinatorCallGate = (call: {
+export type CoordinatorCallHandler = (call: {
   projectId: string
   tool: string
   args: Record<string, unknown>
   run: () => Promise<unknown>
 }) => Promise<unknown>
 
-let coordinatorCallGate: CoordinatorCallGate | null = null
+let coordinatorCallHandler: CoordinatorCallHandler | null = null
 
-export function setCoordinatorCallGate(gate: CoordinatorCallGate | null): void {
-  coordinatorCallGate = gate
+export function setCoordinatorCallHandler(handler: CoordinatorCallHandler | null): void {
+  coordinatorCallHandler = handler
 }
 
 /** A session is scoped only when it has both a parent and its own task. */
@@ -180,10 +181,10 @@ async function handleProjectCall(
       if (!(await isTaskInProject(id, projectId, invoke))) return PROJECT_ACCESS_DENIED
     }
   }
-  // #66: the Captain's calls pass through the escalation policy. Task
-  // agents in the same project are not covered by it.
-  if (isCoordinator && coordinatorCallGate) {
-    return coordinatorCallGate({ projectId, tool: name, args, run: () => invoke(`/${name}`, args) })
+  // The Captain's calls pass through the main-process handler. Task agents
+  // in the same project cannot reach the Captain-only tools it answers.
+  if (isCoordinator && coordinatorCallHandler) {
+    return coordinatorCallHandler({ projectId, tool: name, args, run: () => invoke(`/${name}`, args) })
   }
   return invoke(`/${name}`, args)
 }

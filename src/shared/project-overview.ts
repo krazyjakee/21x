@@ -3,7 +3,7 @@
  * the facts a card needs beside it, computed by the main process in one pass
  * so the desktop overview and the phone read the same numbers.
  *
- * Every number here is counted (task rows, live sessions, held escalations);
+ * Every number here is counted (task rows, live sessions);
  * only `status.summary` is the Captain's narrative.
  */
 import type { ProjectLimitReason } from './project-policies'
@@ -19,8 +19,6 @@ export interface ProjectOverviewEntry {
   status: ProjectStatus
   /** Live sessions waiting for the user to approve a step (`status.counts.awaiting_approval`). */
   pending_approvals: number
-  /** Captain calls the escalation policy holds for the user (#66). */
-  held_actions: number
   /** Working sessions of the project's tasks right now. */
   running_agents: number
   /** The project's own pause (#65). */
@@ -31,11 +29,11 @@ export interface ProjectOverviewEntry {
   blocked_by: ProjectLimitReason | null
   /** ISO time of the newest task change or status write; null for an untouched project. */
   last_activity_at: string | null
-  /** True when the project waits on the user: approvals, held calls or tasks to review. */
+  /** True when the project waits on the user: approvals or tasks to review. */
   needs_attention: boolean
 }
 
 /** The rule behind `needs_attention`, shared so the renderer and the phone agree. */
-export function projectNeedsAttention(entry: Pick<ProjectOverviewEntry, 'pending_approvals' | 'held_actions' | 'status'>): boolean {
-  return entry.pending_approvals > 0 || entry.held_actions > 0 || entry.status.counts.awaiting_review > 0
+export function projectNeedsAttention(entry: Pick<ProjectOverviewEntry, 'pending_approvals' | 'status'>): boolean {
+  return entry.pending_approvals > 0 || entry.status.counts.awaiting_review > 0
 }

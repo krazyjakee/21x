@@ -9,7 +9,6 @@ import { buildContext, MAX_SUMMARY_TRANSCRIPT_CHARS, planFold, splitTurns } from
 import { createCommanderProjectTools, MUTATING_COMMANDER_TOOLS, type CommanderAgents } from './project-tools'
 import { createCommanderSkillTools, MUTATING_COMMANDER_SKILL_TOOLS } from './skill-tools'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_TITLE_PROMPT } from './prompts'
-import { createCommanderMergeGrantTools } from './merge-grant-tools'
 import { CaptainDeliveryService } from './captain-delivery'
 
 /** A model answer: text, a failure, or text plus tool calls (the turn then continues with their results). */
@@ -174,7 +173,7 @@ describe('CommanderService turns', () => {
   })
 
   describe('admin tools and what started the turn', () => {
-    const adminTools = [...MUTATING_COMMANDER_TOOLS, ...MUTATING_COMMANDER_SKILL_TOOLS, 'revoke_merge_grant'] as string[]
+    const adminTools = [...MUTATING_COMMANDER_TOOLS, ...MUTATING_COMMANDER_SKILL_TOOLS] as string[]
 
     function serviceWithFullRegistry(provider: ChatProvider): CommanderService {
       return new CommanderService({
@@ -183,8 +182,7 @@ describe('CommanderService turns', () => {
         createProvider: () => provider,
         getTools: (context) => [
           ...createCommanderProjectTools({ db, context }),
-          ...createCommanderSkillTools({ db, context }),
-          ...createCommanderMergeGrantTools({ db, context })
+          ...createCommanderSkillTools({ db, context })
         ]
       })
     }
@@ -222,7 +220,7 @@ describe('CommanderService turns', () => {
       const [request] = chatRequests(provider)
       const names = request.tools.map((tool) => tool.name)
       expect(names.filter((name) => COMMANDER_ADMIN_TOOLS.has(name))).toEqual([])
-      expect(names).toEqual(expect.arrayContaining(['list_projects', 'get_project', 'ask_captain', 'list_skills', 'get_skill', 'list_merge_grants']))
+      expect(names).toEqual(expect.arrayContaining(['list_projects', 'get_project', 'ask_captain', 'list_skills', 'get_skill']))
     })
 
     it.each(adminTools)('rejects a model-invented %s call during a report without invoking its handler', async (name) => {

@@ -2,26 +2,15 @@
  * The external-action taxonomy and the least-privilege capability check for
  * delegated GitHub issue writes.
  *
- * Why this exists
- * ---------------
- * 21x had one rule for every external write: "machine-relayed text grants no
- * authority" (shared/system-authority.ts), and one narrow exception, the merge
- * grant (#137), which the user has to give per scope in their own words.
- * That collapsed two very different things into one gate. Creating a GitHub
- * issue for work the user just asked for is ordinary delegated bookkeeping;
- * merging a pull request is not. Because only the merge shape had an answer,
- * a Captain asked to "open tickets for this" could do neither, and the work
- * stalled behind a grant that makes no sense for an issue.
- *
  * The distinction this module encodes:
  *
  * - {@link DELEGATED_ACTION_CLASS} — `delegated_issue_write`. Ordinary
- *   project-work bookkeeping in the project's own repositories. The Captain
- *   may do it with no per-issue grant.
+ *   project-work bookkeeping in the project's own repositories: what the
+ *   Captain's issue tools do.
  * - {@link SPECIALLY_GATED_CLASSES} — merge/approve, deploy/release,
  *   destructive delete, migration/replay, protection bypass, outbound message
- *   and credential change. Each keeps its own separate authorization; nothing
- *   in here can widen into one of them.
+ *   and credential change. The issue tools can reach none of them; nothing in
+ *   here can widen into one of them.
  *
  * Everything here is pure and free of Node built-ins so the renderer can show
  * the same taxonomy in the audit view. Hashing, the ledger and the GitHub
@@ -76,10 +65,9 @@ export const EXTERNAL_ACTION_CLASS_LABELS: Record<ExternalActionClass, string> =
 }
 
 /**
- * How each class is authorized. `delegated` = the Captain may do it as
- * ordinary project work; `separate_authorization` = the class
- * has its own gate (a merge grant, a held call, a human doing it themselves)
- * and this module never satisfies it.
+ * How each class is reached. `delegated` = the Captain's issue tools do it as
+ * ordinary project work; `separate_authorization` = the class has its own
+ * tool or is left to a person, and this module never satisfies it.
  */
 export const EXTERNAL_ACTION_AUTHORIZATION: Record<ExternalActionClass, 'delegated' | 'separate_authorization'> = {
   delegated_issue_write: 'delegated',

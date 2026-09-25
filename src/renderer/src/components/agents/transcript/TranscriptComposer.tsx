@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { VoiceMicButton } from '@/components/voice/VoiceMicButton'
 import { voiceApi } from '@/lib/ipc-client'
 import { dispatchShortcutFeedback } from '@/lib/keyboard-shortcuts'
-import { CAPTAIN_COMPOSER_KEY, registerComposer, hasDictatedText, clearDictatedText } from '@/lib/voice-dictation-target'
+import { CAPTAIN_COMPOSER_KEY, registerComposer, clearDictatedText } from '@/lib/voice-dictation-target'
 import { formatFileSize } from '@/lib/utils'
 import { AttachmentTray } from '@/components/chat/AttachmentTray'
 import { useChatAttachments } from '@/hooks/use-chat-attachments'
@@ -37,12 +37,6 @@ interface TranscriptComposerProps {
   onSaveImages?: SaveImagesHandler
   taskId?: string
   isStarting: boolean
-  /**
-   * Called with text the user typed and sent with Enter or the Send button,
-   * never with dictated or programmatic text (#137: only typed words can back
-   * a merge grant).
-   */
-  onTypedMessage?: (text: string) => void
 }
 
 function mergeAttachments(current: ComposerAttachment[], added: ComposerAttachment[]): ComposerAttachment[] {
@@ -56,7 +50,7 @@ function mergeAttachments(current: ComposerAttachment[], added: ComposerAttachme
   return merged
 }
 
-export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentPaths, onSaveImages, taskId, isStarting, onTypedMessage }: TranscriptComposerProps) {
+export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentPaths, onSaveImages, taskId, isStarting }: TranscriptComposerProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [pendingAttachments, setPendingAttachments] = useState<ComposerAttachment[]>([])
   const images = useChatAttachments({ draftKey: taskId, unsupportedReason: onSaveImages ? null : IMAGES_UNSUPPORTED_HERE })
@@ -77,12 +71,12 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
    * carries on into the panel that replaced this one.
    */
   const composerKey = taskId ?? CAPTAIN_COMPOSER_KEY
-  const sendRef = useRef<((typed: boolean) => void) | null>(null)
+  const sendRef = useRef<(() => void) | null>(null)
   useEffect(() => {
     return registerComposer(composerKey, {
       getField: () => inputRef.current,
-      // Voice conversations submit through here: not typed.
-      submit: () => sendRef.current?.(false),
+      // Voice conversations submit through here.
+      submit: () => sendRef.current?.(),
       sendMessage: (message) => onSend(message),
     })
   }, [composerKey, onSend])
@@ -94,7 +88,7 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
     el.style.height = `${Math.min(el.scrollHeight, 128)}px` // max ~6 lines
   }, [])
 
-  const handleSend = (typed: boolean) => {
+  const handleSend = () => {
     const text = inputRef.current?.value.trim() ?? ''
     const imagesAtSend = images.attachments
     if (sending.current || isStarting || images.isReading || (!text && imagesAtSend.length === 0 && pendingAttachments.length === 0)) return
@@ -102,7 +96,6 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
     setIsSending(true)
     const taskAtSend = taskId
     const value = text || imageOnlyMessage(imagesAtSend.length + pendingAttachments.length)
-    if (typed && text && inputRef.current && !hasDictatedText(inputRef.current)) onTypedMessage?.(value)
     // Whatever answer was expected by voice is not the answer that is now
     // coming, so it is dropped and this reply is not read aloud. A spoken
     // sentence goes through here too and arms a fresh expectation of its own
@@ -238,7 +231,7 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault()
-              handleSend(true)
+              handleSend()
             }
           }}
           onPaste={images.handlePaste}
@@ -247,7 +240,7 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
             autoResize()
           }}
         />
-        <VoiceMicButton mode="dictation" onSubmit={() => handleSend(false)} />
+        <VoiceMicButton mode="dictation" onSubmit={handleSend} />
         {onPickAttachments && (
           <Button
             type="button"
@@ -261,7 +254,7 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
             <Paperclip className="h-4 w-4" />
           </Button>
         )}
-        <Button variant="default" size="icon" onClick={() => handleSend(true)} className="h-[32px] w-[32px] shrink-0 rounded-lg" aria-label="Send message" disabled={isSending || isStarting || images.isReading}>
+        <Button variant="default" size="icon" onClick={handleSend} className="h-[32px] w-[32px] shrink-0 rounded-lg" aria-label="Send message" disabled={isSending || isStarting || images.isReading}>
           <Send className="h-4 w-4" />
         </Button>
       </div>

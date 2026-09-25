@@ -64,9 +64,8 @@ Visibility is enforced where a skill is read, not in the prompt:
 - **Commander**: `create_skill` makes a global skill unless `project` names one.
 - **Captain / task agent**: `create_skill` makes a skill owned by the
   session's project. `global: true` is refused with a message that the user
-  must create it in the Skills view or through the Commander: a session cannot
-  obtain the user's confirmation, and the #66 escalation policy has no action
-  for skill changes today. The Captain may still assign global skills to
+  must create it in the Skills view or through the Commander, because a
+  global skill reaches every project. The Captain may still assign global skills to
   its tasks.
 - **Feedback learning**: a skill the session wrote into its workspace is
   created in the task's project. A changed **global** skill, or one another

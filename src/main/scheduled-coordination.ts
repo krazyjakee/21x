@@ -37,14 +37,12 @@ import type { CommanderService } from './commander/commander-service'
 import { completeText } from './commander/commander-service'
 import { CommanderStore } from './commander/commander-store'
 import { createChatProviderFromSettings } from './chat/provider-factory'
-import { listHeldActions } from './escalation'
 import { getCommanderService } from './ipc/commander'
 import { resolveCaptainAgentId, type CaptainWakerAgents } from './captain-waker'
 import { buildProjectStatus, type ProjectStatusAgents } from './project-status'
 import { isAllProjectsPaused, localDayKey } from './project-limits'
 import { projectLimitsFromSettings } from '../shared/project-policies'
 import type { ProjectStatus } from '../shared/project-status'
-import type { HeldAction } from '../shared/project-limit-types'
 import {
   COMMANDER_BRIEFING_SETTING,
   parseCommanderBriefingSettings,
@@ -77,8 +75,6 @@ export interface ScheduledCoordinationOptions {
   getSpeech?: () => BriefingSpeech | null
   /** True when a window exists to play speech in. */
   canPlayAudio?: () => boolean
-  /** Captain calls held for the user's approval (#66). */
-  listHeldActions?: (projectId: string) => HeldAction[]
   tickMs?: number
   /** A missed occurrence older than this is skipped rather than caught up. */
   catchUpMs?: number
@@ -158,7 +154,7 @@ export function buildScheduledReviewMessage(coordinatorTaskId: string, project: 
   const instructions = [
     'This is your scheduled review. Work through it with the task-management tools, then stop:',
     '- review the board: what is running, waiting for review, blocked, failed or stale;',
-    '- re-plan: create, re-prioritise, re-assign or start tasks where the plan calls for it, within your escalation policy;',
+    '- re-plan: create, re-prioritise, re-assign or start tasks where the plan calls for it;',
     '- finish by calling `update_project_status` with a short summary, the blockers, and the next steps.',
     'Reply to the user only when a decision is needed.'
   ].join('\n')
@@ -179,17 +175,16 @@ export interface BriefingProjectEntry {
   project: Pick<ProjectRecord, 'id' | 'name'>
   status: ProjectStatus | null
   paused: boolean
-  heldActions: number
 }
 
 function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`
 }
 
-/** Needs the user: approvals, held actions, reviews or blockers. */
+/** Needs the user: approvals, reviews or blockers. */
 function needsAttention(entry: BriefingProjectEntry): boolean {
   const c = entry.status?.counts
-  return !!c && (c.awaiting_approval > 0 || c.awaiting_review > 0 || c.blocked > 0) || entry.heldActions > 0 || (entry.status?.top_blockers.length ?? 0) > 0
+  return !!c && (c.awaiting_approval > 0 || c.awaiting_review > 0 || c.blocked > 0) || (entry.status?.top_blockers.length ?? 0) > 0
 }
 
 /**
@@ -211,10 +206,9 @@ export function buildBriefingText(entries: BriefingProjectEntry[], day: string):
       const c = status.counts
       lines.push(`Running ${c.running} · queued ${c.queued} · awaiting review ${c.awaiting_review} · awaiting approval ${c.awaiting_approval} · blocked ${c.blocked}`)
     }
-    const approvals: string[] = []
-    if (status && status.counts.awaiting_approval > 0) approvals.push(`${plural(status.counts.awaiting_approval, 'agent step')} waiting for approval`)
-    if (entry.heldActions > 0) approvals.push(`${plural(entry.heldActions, 'Captain action')} held for your approval`)
-    if (approvals.length > 0) lines.push(`Pending approvals: ${approvals.join('; ')}.`)
+    if (status && status.counts.awaiting_approval > 0) {
+      lines.push(`Pending approvals: ${plural(status.counts.awaiting_approval, 'agent step')} waiting for approval.`)
+    }
     if (status && status.top_blockers.length > 0) {
       lines.push('Blockers:')
       for (const blocker of status.top_blockers) lines.push(`- ${blocker}`)
@@ -442,8 +436,7 @@ export class ScheduledCoordination {
     return db.getProjects().map((project) => ({
       project: { id: project.id, name: project.name },
       status: this.statusOf(project.id),
-      paused: globalPause || projectLimitsFromSettings(project.settings).paused,
-      heldActions: this.options.listHeldActions?.(project.id).length ?? 0
+      paused: globalPause || projectLimitsFromSettings(project.settings).paused
     }))
   }
 
@@ -547,7 +540,6 @@ export function startScheduledCoordination(deps: StartScheduledCoordinationDeps)
     agents: deps.agents,
     getCommander: () => getCommanderService(),
     createProvider: () => createChatProviderFromSettings(deps.db),
-    listHeldActions: (projectId) => listHeldActions(projectId),
     getSpeech: () => deps.getVoice?.()?.speech ?? null,
     canPlayAudio: deps.canPlayAudio
   })

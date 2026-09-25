@@ -218,12 +218,6 @@ export interface IssueWriteRequest {
   clientKey?: string | null
   /** Every remaining tool argument, checked for credential escalation. */
   rawArgs?: Record<string, unknown>
-  /**
-   * Run every check and stop before the claim. Used by the `ask_user` path, so
-   * the person is only ever asked about a write that would really happen and a
-   * refusal never becomes a held call. Returns `{ status: 'allowed' }`.
-   */
-  checkOnly?: boolean
 }
 
 function denial(d: IssueWriteDenial): Record<string, unknown> {
@@ -594,15 +588,6 @@ export async function performIssueWrite(
   // intersection may have changed while it was in flight.
   const dispatchAuthorization = authorizeIssueWriteNow(db, request, target, initialAuthorization.snapshot)
   if ('denial' in dispatchAuthorization) return denial(dispatchAuthorization.denial)
-
-  if (request.checkOnly) {
-    return {
-      status: 'allowed',
-      repo: target.slug,
-      action: request.action,
-      captain_task_id: dispatchAuthorization.snapshot.captainTaskId
-    }
-  }
 
   // 6. Claim the key.
   const payloadHash = hashPayload(request.payload)
