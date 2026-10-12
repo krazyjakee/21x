@@ -8158,7 +8158,7 @@
         {
           "column": 7,
           "file": "src/main/index.ts",
-          "line": 445,
+          "line": 451,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -8922,7 +8922,7 @@
         {
           "column": 15,
           "file": "src/main/index.ts",
-          "line": 597,
+          "line": 603,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -8930,7 +8930,7 @@
         {
           "column": 11,
           "file": "src/main/index.ts",
-          "line": 603,
+          "line": 609,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -9269,7 +9269,7 @@
         {
           "column": 7,
           "file": "src/main/index.ts",
-          "line": 278,
+          "line": 284,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -12410,7 +12410,7 @@
         {
           "column": 50,
           "file": "src/main/index.ts",
-          "line": 727,
+          "line": 747,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -13091,7 +13091,7 @@
         {
           "column": 21,
           "file": "src/main/index.ts",
-          "line": 774,
+          "line": 794,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -18188,7 +18188,7 @@
       "channelExpression": "channel",
       "column": 7,
       "file": "src/main/index.ts",
-      "line": 410,
+      "line": 416,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
@@ -18199,7 +18199,7 @@
       "channelExpression": "channel",
       "column": 7,
       "file": "src/main/index.ts",
-      "line": 429,
+      "line": 435,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
