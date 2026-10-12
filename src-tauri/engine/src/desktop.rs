@@ -83,7 +83,7 @@ fn text(value: &Value, max: usize) -> bool {
 fn nonempty(value: &Value, max: usize) -> bool {
     text(value, max)
         && value.as_str().is_some_and(|s| {
-            !s.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}')
+            !s.trim_matches(|c: char| matches!(c, '\u{0009}'..='\u{000d}' | '\u{0020}' | '\u{00a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'))
                 .is_empty()
         })
 }
@@ -323,6 +323,11 @@ fn delta(value: &Value) -> bool {
     object(value, &["parts", "maxRev"], &[])
         && array(&value["parts"], part)
         && cursor(&value["maxRev"])
+        && value["parts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|part| part["rev"].as_u64().unwrap() <= value["maxRev"].as_u64().unwrap())
 }
 pub(super) fn valid_result(operation: &str, value: &Value) -> bool {
     if !known_operation(operation) || !object(value, &["defined"], &["value"]) || !json(value, 0) {
@@ -396,7 +401,7 @@ pub(super) fn valid_event_envelope(frame: &Value) -> bool {
                     .bytes()
                     .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'.' | b':' | b'-'))
         })
-        && json(frame, 0)
+        && json(&frame["payload"], 0)
 }
 pub(super) fn valid_event(frame: &Value) -> bool {
     let payload = &frame["payload"];
@@ -434,6 +439,9 @@ pub(super) fn valid_event(frame: &Value) -> bool {
                     .iter()
                     .all(|part| part["taskId"] == payload["taskId"])
                 && cursor(&payload["maxRev"])
+                && payload["parts"].as_array().unwrap().iter().all(|part| {
+                    part["rev"].as_u64().unwrap() <= payload["maxRev"].as_u64().unwrap()
+                })
                 && payload.get("reloadRequired").is_none_or(|value| {
                     value == true && payload["parts"].as_array().is_some_and(Vec::is_empty)
                 })
@@ -529,6 +537,19 @@ mod tests {
             "fixture.transcriptUpsert",
             &json!({"maxRev":1,"changedPartIds":vec!["part";33]})
         ));
+    }
+
+    #[test]
+    fn transcript_revisions_are_bounded_by_delta_or_event_cursor() {
+        let part = json!({"taskId":"task-1","partId":"part-1","seq":1,"role":"assistant",
+            "content":"fixture","createdAt":1,"updatedAt":1,"rev":2});
+        let mut event = json!({"operation":"transcript:changed","payload":{"taskId":"task-1","parts":[part],"maxRev":1}});
+        assert!(!valid_event(&event));
+        assert!(!delta(&json!({"parts":[part],"maxRev":1})));
+        event["payload"]["maxRev"] = json!(2);
+        assert!(valid_event(&event));
+        assert!(nonempty(&json!("\u{0085}"), 512));
+        assert!(!nonempty(&json!("\u{feff}\u{00a0}"), 512));
     }
 
     #[test]
