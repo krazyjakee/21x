@@ -18,6 +18,7 @@ export const SERVICE_ERROR_MESSAGES = {
   UNKNOWN_OPERATION: 'Unknown operation.',
   INVALID_ARGUMENTS: 'Invalid operation arguments.',
   INVALID_RESULT: 'Invalid operation result.',
+  SKILL_VERSION_CONFLICT: 'The skill changed. Reload it before writing.',
   INTERNAL_ERROR: 'The operation failed.',
   BACKPRESSURE: 'Transport capacity has been reached.',
   TIMEOUT: 'The operation timed out.',

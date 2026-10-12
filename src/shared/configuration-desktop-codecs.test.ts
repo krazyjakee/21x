@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CONFIGURATION_COMMAND_CODECS as codecs, CONFIGURATION_OWNER_REQUIREMENTS, projectPublicAgent } from './configuration-desktop-codecs'
+import { CONFIGURATION_COMMAND_CODECS as codecs, CONFIGURATION_EVENT_CODECS, CONFIGURATION_OWNER_REQUIREMENTS, projectPublicAgent } from './configuration-desktop-codecs'
 import type { JsonValue } from './service-protocol'
 
 const agent = {
@@ -10,6 +10,13 @@ const agent = {
 const skill = { id: 'skill-1', name: 'Synthetic skill', description: '', content: '\uFEFFinstructions 你好', version: 2, confidence: 0.5, uses: 0, last_used: null, tags: [], preferred_model: null, project_id: null, created_at: '2026-01-01', updated_at: '2026-01-01', is_deleted: 0 }
 
 describe('configuration command codecs', () => {
+  it('limits configuration invalidation events to their exact owned metadata', () => {
+    expect(CONFIGURATION_EVENT_CODECS['skills:changed'].validatePayload({ skillId: 'skill-1', kind: 'scope' })).toBe(true)
+    expect(CONFIGURATION_EVENT_CODECS['skills:changed'].validatePayload({ skillId: 'skill-1', kind: 'scope', content: 'private' })).toBe(false)
+    expect(CONFIGURATION_EVENT_CODECS['skills:changed'].validatePayload({ skillId: 'skill-1', kind: 'unknown' })).toBe(false)
+    expect(CONFIGURATION_EVENT_CODECS['project:changed'].validatePayload({ projectId: 'project-1', kind: 'repos' })).toBe(true)
+    expect(CONFIGURATION_EVENT_CODECS['project:changed'].validatePayload({ projectId: 'project-1', kind: 'settings' })).toBe(false)
+  })
   it('projects Agent metadata while excluding plaintext keys/private columns', () => {
     const encoded = projectPublicAgent(agent)
     expect(JSON.stringify(encoded)).not.toContain('fixture-private-key')

@@ -9,6 +9,8 @@ describe('reviewed finite event forwarding source routes', () => {
     expect(isReviewedForwardedName('agent-broadcast', 'artifact:updated')).toBe(true)
     expect(isReviewedForwardedName('agent-broadcast', 'transcript:changed')).toBe(false)
     expect(isReviewedForwardedName('guarded-direct', 'transcript:changed')).toBe(true)
+    expect(isReviewedForwardedName('agent-host-dispatch', 'transcript:changed')).toBe(true)
+    expect(isReviewedForwardedName('agent-host-dispatch', 'agent:output')).toBe(false)
   })
 
   it('keeps TTS/audio desktop-only and refuses wildcard/new names', () => {
@@ -24,7 +26,7 @@ describe('reviewed finite event forwarding source routes', () => {
   })
 
   it('does not turn forwarding review into installed runtime authority', () => {
-    expect(Object.keys(policies)).toHaveLength(10)
+    expect(Object.keys(policies)).toHaveLength(11)
     for (const policy of Object.values(policies)) {
       expect(policy.runtimeEnforcement).toContain('not-installed')
       expect(policy.destination).toBe('trusted-desktop-main')

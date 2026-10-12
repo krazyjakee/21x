@@ -16,6 +16,9 @@ const uniqueSorted = (items) => [...new Map(items.map((item) => [JSON.stringify(
 // not turn arbitrary application methods into IPC or authorization evidence.
 export const EVENT_WRAPPERS = {
   'src/main/agent-manager.ts': ['this.sendToRenderer', 'this.broadcast'],
+  'src/main/agent-manager-core.ts': ['this.sendToRenderer', 'this.broadcast',
+    { expression: 'this.sendHostEvent', channelIndex: 1 },
+    { expression: 'this.host.renderer.send', channelIndex: 1 }],
   'src/main/auto-updater.ts': ['send'],
   'src/main/heartbeat-scheduler.ts': ['this.sendToRenderer'],
   'src/main/workspace-cleanup-scheduler.ts': ['this.sendToRenderer'],
@@ -285,7 +288,9 @@ export function scanSource(file, source, { constants = new Map(), wrappers = EVE
       if (callee?.kind === 'guardedIpcSend') recordOperation(node, 'guardedIpcSend', 'send', 1, env)
       const methods = { 'ipcMain.method': ['handle', 'on'], 'ipcRenderer.method': ['invoke', 'send', 'on'], 'webContents.method': ['send'] }
       if (methods[callee?.kind] && (callee.method === null || methods[callee.kind].includes(callee.method))) recordOperation(node, callee.kind.replace('.method', ''), callee.method, 0, env)
-      if (wrappers[file]?.includes(node.expression.getText(sf).replaceAll('?.', '.'))) recordOperation(node, 'reviewed-event-wrapper', 'send', 0, env)
+      const expression = node.expression.getText(sf).replaceAll('?.', '.')
+      const wrapper = wrappers[file]?.find(entry => (typeof entry === 'string' ? entry : entry.expression) === expression)
+      if (wrapper) recordOperation(node, 'reviewed-event-wrapper', 'send', typeof wrapper === 'string' ? 0 : wrapper.channelIndex, env)
     }
     const path = apiPath(node)
     const enclosing = enclosingExpression(node)

@@ -1,12 +1,51 @@
 // Generated finite source-review map; no runtime forwarding is installed by this declaration.
 export const DESKTOP_EVENT_FORWARDING = {
+  "agent-host-dispatch": {
+    "id": "agent-host-dispatch",
+    "source": {
+      "file": "src/main/agent-manager-core.ts",
+      "line": 5255,
+      "column": 52,
+      "target": "reviewed-event-wrapper",
+      "method": "send",
+      "channelExpression": "channel"
+    },
+    "producerOwner": "agent-manager-host",
+    "allowedNames": [
+      "agent:incompatible-session",
+      "agent:recoveryStateChanged",
+      "agent:startQueueChanged",
+      "agent:status",
+      "artifact:updated",
+      "concurrency:changed",
+      "project:statusChanged",
+      "task:source-action-failed",
+      "task:updated",
+      "transcript:changed"
+    ],
+    "channelOwners": {
+      "agent:incompatible-session": "service",
+      "agent:recoveryStateChanged": "service",
+      "agent:startQueueChanged": "service",
+      "agent:status": "service",
+      "artifact:updated": "service",
+      "concurrency:changed": "service",
+      "project:statusChanged": "service",
+      "task:source-action-failed": "service",
+      "task:updated": "service",
+      "transcript:changed": "service"
+    },
+    "destination": "trusted-desktop-main",
+    "review": "The mandatory host renderer dispatch receives broadcast names plus direct durable transcript:changed. Electron default points to guardedIpcSend; unsupported portable host refuses delivery. Target/window identity and payload authorization remain the actual host responsibility.",
+    "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
+  },
   "agent-broadcast": {
     "id": "agent-broadcast",
     "source": {
-      "file": "src/main/agent-manager.ts",
-      "line": 5255,
+      "file": "src/main/agent-manager-core.ts",
+      "line": 5260,
       "column": 7,
-      "target": "guardedIpcSend",
+      "target": "reviewed-event-wrapper",
       "method": "send",
       "channelExpression": "channel"
     },
@@ -34,14 +73,14 @@ export const DESKTOP_EVENT_FORWARDING = {
       "task:updated": "service"
     },
     "destination": "trusted-desktop-main",
-    "review": "broadcast accepts sendToRenderer outgoing names plus direct artifact:updated; transcript:changed bypasses broadcast through the durable projection sender.",
+    "review": "broadcast forwards nine names through sendHostEvent and external listeners; durable transcript:changed bypasses broadcast into sendHostEvent directly.",
     "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
   },
   "agent-persist-or-broadcast": {
     "id": "agent-persist-or-broadcast",
     "source": {
-      "file": "src/main/agent-manager.ts",
-      "line": 5286,
+      "file": "src/main/agent-manager-core.ts",
+      "line": 5291,
       "column": 5,
       "target": "reviewed-event-wrapper",
       "method": "send",

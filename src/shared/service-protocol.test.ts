@@ -63,6 +63,14 @@ describe('graceful peer drain', () => {
 })
 
 describe('private service envelope', () => {
+  it('recognizes the fixed optimistic skill conflict code without diagnostic values', () => {
+    const error = new ServiceProtocolError('SKILL_VERSION_CONFLICT')
+    expect(error.message).toBe('The skill changed. Reload it before writing.')
+    const frame = { kind: 'response', protocolVersion: 1, engineEpoch: epoch, requestId: 'host:1',
+      error: { code: error.code, message: error.message } }
+    expect(validateServiceFrame(frame)).toEqual(frame)
+  })
+
   it('validates request, response and event envelopes and bootstrap contracts', () => {
     expect(validateServiceFrame(request())).toEqual(request())
     expect(validateServiceFrame(response())).toEqual(response())

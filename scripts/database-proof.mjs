@@ -8,7 +8,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const dependencies = new Set(['better-sqlite3', '@paralleldrive/cuid2'])
 
 /** Transpile only this small graph; reuse installed dependencies and forbid Electron. */
-export async function stageDatabaseProof(directory, { sqliteModule }) {
+export async function stageDatabaseProof(directory, { sqliteModule, fixture = 'database' }) {
   const seen = new Set()
   if (typeof sqliteModule !== 'string' || !isAbsolute(sqliteModule)) throw new Error('Explicit absolute standalone SQLite package path is required')
   const sqlite = await realpath(sqliteModule)
@@ -59,8 +59,10 @@ export async function stageDatabaseProof(directory, { sqliteModule }) {
     await writeFile(destination, text)
     for (const dependency of follow) await stage(dependency)
   }
-  await stage(join(root, 'scripts/database-proof/fixture.ts'))
-  return { moduleCount: seen.size, fixture: pathToFileURL(join(directory, 'scripts/database-proof/fixture.js')).href }
+  if (!['database', 'configuration'].includes(fixture)) throw new Error('Unexpected proof fixture')
+  const entry = `scripts/${fixture}-proof/fixture.ts`
+  await stage(join(root, entry))
+  return { moduleCount: seen.size, fixture: pathToFileURL(join(directory, entry.replace(/\.ts$/, '.js'))).href }
 }
 
 export async function runDatabaseProof({ sqliteModule = process.env.TAURI_SQLITE_MODULE } = {}) {

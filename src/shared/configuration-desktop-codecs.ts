@@ -1,9 +1,33 @@
-import type { DesktopCommandMap } from './desktop-operations'
+import type { DesktopCommandMap, DesktopEventMap } from './desktop-operations'
 import { hasExactKeys, isJsonValue, isRecord, ServiceProtocolError, type JsonValue } from './service-protocol'
 import type { OptionalResult } from './host-services'
 import { isExternalHostUrl } from './host-services'
 import { DATABASE_COMMAND_CODECS, isDatabaseId } from './database-desktop-codecs'
 import { REASONING_EFFORT_VALUES } from './reasoning-effort'
+
+export const CONFIGURATION_DESKTOP_EVENTS = ['skills:changed', 'project:changed'] as const
+export type ConfigurationDesktopEvent = typeof CONFIGURATION_DESKTOP_EVENTS[number]
+/** Invalidation metadata only: no skill text, paths, credentials or task details. */
+export const CONFIGURATION_EVENT_CODECS = {
+  'skills:changed': {
+    validatePayload: (value: unknown): value is { skillId: string; kind: 'created' | 'updated' | 'removed' | 'scope' } =>
+      isRecord(value) && hasExactKeys(value, ['skillId', 'kind']) && isDatabaseId(value.skillId) &&
+      ['created', 'updated', 'removed', 'scope'].includes(value.kind as string),
+    decodePayload(value: JsonValue): DesktopEventMap['skills:changed'] {
+      if (!this.validatePayload(value)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
+      return value
+    }
+  },
+  'project:changed': {
+    validatePayload: (value: unknown): value is { projectId: string; kind: 'created' | 'updated' | 'archived' | 'restored' | 'repos' | 'resources' } =>
+      isRecord(value) && hasExactKeys(value, ['projectId', 'kind']) && isDatabaseId(value.projectId) &&
+      ['created', 'updated', 'archived', 'restored', 'repos', 'resources'].includes(value.kind as string),
+    decodePayload(value: JsonValue): DesktopEventMap['project:changed'] {
+      if (!this.validatePayload(value)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
+      return value
+    }
+  }
+} as const
 
 export const CONFIGURATION_DESKTOP_OPERATIONS = [
   'agent:getAll', 'agent:create', 'agent:update', 'agent:delete',

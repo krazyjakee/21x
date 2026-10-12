@@ -67,6 +67,18 @@ describe('Tauri source inventory AST scanner', () => {
     expect(result.operations[3]).toMatchObject({ method: 'send', channel: 'static-template', resolution: 'literal' })
   })
 
+  it('tracks the mandatory portable host channel argument without losing dynamic dispatch evidence', () => {
+    const evidence = scanSource('src/main/agent-manager-core.ts', `
+      this.sendHostEvent(target, 'transcript:changed', {});
+      this.host.renderer.send(target, channel, payload);
+      this.broadcast('artifact:updated', {});
+    `)
+    expect(evidence.operations.map((item: { channel: string | null }) => item.channel)).toEqual(['transcript:changed', null, 'artifact:updated'])
+    expect(evidence.operations[1].channelExpression).toBe('channel')
+    expect(evidence.operations[1].resolution).toBe('unresolved')
+    expect(scanSource('src/main/other.ts', `this.host.renderer.send(target, channel, payload)`).operations).toHaveLength(0)
+  })
+
   it('resolves imported constant maps and reviewed wrappers without treating arbitrary same-named methods as IPC', () => {
     const inventory = createInventory({ sources: [
       { file: 'src/shared/events.ts', source: `export const EVENTS = { changed: 'task:changed' } as const; export const CHANNEL = 'ui:' + 'command'` },
