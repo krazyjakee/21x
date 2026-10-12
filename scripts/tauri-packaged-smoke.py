@@ -107,7 +107,7 @@ def running_owned_node(owned_node):
         return found
     if sys.platform == "win32":
         script = "$ErrorActionPreference='Stop'; Get-CimInstance Win32_Process | Select-Object ProcessId,ExecutablePath | ConvertTo-Json -Compress"
-        raw = subprocess.check_output(["powershell.exe", "-NoProfile", "-Command", script], text=True)
+        raw = subprocess.check_output(["powershell.exe", "-NoProfile", "-Command", script], text=True, timeout=30)
         records = json.loads(raw)
         if isinstance(records, dict):
             records = [records]
@@ -116,7 +116,7 @@ def running_owned_node(owned_node):
     if sys.platform == "darwin":
         # lsof reports the mapped executable's txt file (not a truncated ps name).
         raw = subprocess.run(["/usr/sbin/lsof", "-n", "-Fpn", str(owned_node)],
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
         if raw.returncode not in (0, 1):
             raise RuntimeError("Owned process observation failed")
         return [line[1:] for line in raw.stdout.splitlines() if line.startswith("p")]
