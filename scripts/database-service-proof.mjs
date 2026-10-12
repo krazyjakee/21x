@@ -105,6 +105,11 @@ function connect({ node, entry, profileRoot, resourceRoot }) {
     child, closed, events, request, command,
     initialize: () => request('engine.initialize', { protocolVersion: 1, profileRoot, resourceRoot }),
     epoch: () => epoch, diagnostics: () => diagnostics,
+    async waitClosed() {
+      let timer
+      try { return await Promise.race([closed, new Promise((_resolve, reject) => { timer = setTimeout(() => reject(failed('CHILD_STOP_FAILED')), 5000) })]) }
+      finally { clearTimeout(timer) }
+    },
     async stop() {
       if (!finished) {
         child.kill()
@@ -138,7 +143,7 @@ export async function runDatabaseServiceProof({ serviceEntry, node = process.env
     report.handshake = true
     const competing = start()
     await assert.rejects(competing.initialize(), { code: 'INTERNAL_ERROR' })
-    assert.equal((await competing.closed).code, 1)
+    assert.equal((await competing.waitClosed()).code, 1)
     report.profileContentionRejected = true
     const project = await first.command('project:create', { data: { name: 'Synthetic service proof' } })
     const task = await first.command('db:createTask', { data: { title: 'Service task', project_id: project.id } })
@@ -180,7 +185,7 @@ export async function runDatabaseServiceProof({ serviceEntry, node = process.env
     report.durableProjectionAndReloadQueries = true
     report.eventCount = first.events.length
     assert.deepEqual(await first.request('engine.shutdown', {}), { stopped: true })
-    assert.equal((await first.closed).code, 0)
+    assert.equal((await first.waitClosed()).code, 0)
     report.gracefulDrainAndExit = true
 
     const reopened = start()
@@ -194,7 +199,7 @@ export async function runDatabaseServiceProof({ serviceEntry, node = process.env
     assert.equal(await reopened.command('db:deleteTask', { id: task.id }), false)
     assert.equal(await reopened.command('db:getTask', { id: task.id }), undefined)
     assert.deepEqual(await reopened.request('engine.shutdown', {}), { stopped: true })
-    assert.equal((await reopened.closed).code, 0)
+    assert.equal((await reopened.waitClosed()).code, 0)
     report.reopenAndNewEpoch = true
     report.passed = true
   } catch (error) { report.errorCode = errorCodes.has(error.code) ? error.code : 'PROOF_FAILED' }
