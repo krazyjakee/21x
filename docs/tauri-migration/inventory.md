@@ -39,3 +39,7 @@ the recognized forms, generated code, dynamic imports with computed specifiers,
 or actual resource existence. Structural webContents/sender matches require
 review of their runtime types. Use unresolved rows and source references to
 guide the bridge/host audit, then validate behavior and permissions separately.
+
+The [ownership audit](ownership-audit.md) assigns the observed channel
+families, reviews the fourteen unresolved references, and identifies wrapper
+events that require explicit inclusion in the future typed contract.
