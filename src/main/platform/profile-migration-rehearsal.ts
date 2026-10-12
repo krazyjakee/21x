@@ -22,7 +22,7 @@ export type RehearsalErrorCode = 'REHEARSAL_SCOPE_INVALID' | 'REHEARSAL_LOCK_INV
 export class ProfileMigrationRehearsalError extends Error {
   constructor(readonly code: RehearsalErrorCode) { super(code); this.name = 'ProfileMigrationRehearsalError' }
 }
-const fail = (code: RehearsalErrorCode): never => { throw new ProfileMigrationRehearsalError(code) }
+function fail(code: RehearsalErrorCode): never { throw new ProfileMigrationRehearsalError(code) }
 
 export type RehearsalBoundary = 'backup-published' | 'journal-prepared' | 'candidate-written' | 'journal-ready' | 'candidate-published' | 'journal-committed'
 export interface RehearsalOptions {
@@ -201,7 +201,7 @@ function readCapsule(ctx: Context): { snapshot: Buffer; manifest: SnapshotManife
     return { snapshot, manifest, backupHash: hash(encoded) }
   } catch (error) {
     if (error instanceof ProfileMigrationRehearsalError) throw error
-    fail('REHEARSAL_SNAPSHOT_CORRUPT')
+    return fail('REHEARSAL_SNAPSHOT_CORRUPT')
   } finally { for (const part of parts) part.fill(0); encoded.fill(0) }
 }
 
@@ -419,7 +419,7 @@ export function rehearseProfileCredentialImport(options: RehearsalOptions): Rehe
     if (error instanceof ProfileMigrationRehearsalError) throw error
     if (error instanceof CredentialMigrationError) fail(error.code === 'LEGACY_UNAVAILABLE' || error.code === 'DESTINATION_UNAVAILABLE' ? 'REHEARSAL_PROVIDER_UNAVAILABLE' : 'REHEARSAL_SOURCE_INVALID')
     const code = (error as { code?: string }).code
-    fail(code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED' ? 'REHEARSAL_SOURCE_BUSY' : 'REHEARSAL_IO_FAILED')
+    return fail(code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED' ? 'REHEARSAL_SOURCE_BUSY' : 'REHEARSAL_IO_FAILED')
   } finally { snapshot?.fill(0); source?.close() }
 }
 

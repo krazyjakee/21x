@@ -217,7 +217,7 @@ const eventValidators: Record<DatabaseDesktopEvent, (value: unknown) => boolean>
     (value.parts as Record<string, unknown>[]).every(part => part.taskId === value.taskId && (part.rev as number) <= (value.maxRev as number)) &&
     (value.reloadRequired === undefined || value.reloadRequired === true && (value.parts as unknown[]).length === 0)
 }
-interface DatabaseEventCodec<K extends DatabaseDesktopEvent> {
+export interface DatabaseEventCodec<K extends DatabaseDesktopEvent> {
   validatePayload: (value: unknown) => boolean
   decodePayload: (value: JsonValue) => DesktopEventMap[K]
   encodePayload: (value: DesktopEventMap[K]) => JsonValue

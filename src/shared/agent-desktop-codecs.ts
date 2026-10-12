@@ -81,7 +81,7 @@ function codec<K extends Exclude<AgentDesktopOperation, 'agent:getAll'>>(operati
     encodeArguments(args) { if (!schema.validateArguments(args)) return fail('INVALID_ARGUMENTS'); return schema.encode(args) },
     decodeArguments(payload) { if (!isJsonValue(payload)) return fail('INVALID_ARGUMENTS'); const args = schema.decode(payload); if (!schema.validateArguments(args)) return fail('INVALID_ARGUMENTS'); return args as DesktopCommandMap[K]['apiArguments'] },
     encodeResult(value) { if (!schema.validateResult(value) || !isJsonValue(value)) return fail('INVALID_RESULT'); return { defined: true, value } },
-    decodeResult(value) { if (!schema.validateResult(value) || !isJsonValue(value)) return fail('INVALID_RESULT'); return value as DesktopCommandMap[K]['result'] },
+    decodeResult(value) { if (!schema.validateResult(value) || !isJsonValue(value)) return fail('INVALID_RESULT'); return value as unknown as DesktopCommandMap[K]['result'] },
     validateResult: schema.validateResult,
     validateWireResult: value => object(value, ['defined', 'value']) && value.defined === true && schema.validateResult(value.value) && isJsonValue(value.value)
   }

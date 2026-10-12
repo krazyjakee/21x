@@ -11,6 +11,7 @@ import electron from 'electron'
 
 const directory = dirname(fileURLToPath(import.meta.url))
 const fail = () => new Error('Desktop baseline failed; child diagnostics were not retained')
+const failurePhases = new Set(['profile', 'application-bootstrap', 'interactive', 'task-workload', 'reload', 'idle'])
 async function processes() {
   const result = new Map()
   for (const name of await readdir('/proc')) {
@@ -78,18 +79,21 @@ async function measure(profile, token) {
   try {
     const code = await closed
     const elapsedMs = performance.now() - started
-    if (code !== 0 || malformed || buffer.length || report?.schemaVersion !== 1 || report?.passed !== true || !samples) throw fail()
+    if (code !== 0 || malformed || buffer.length || report?.schemaVersion !== 1 || report?.passed !== true || !samples) {
+      throw Object.assign(fail(), { phase: failurePhases.has(report?.failurePhase) ? report.failurePhase : 'process-or-report' })
+    }
     return { ...report, elapsedMs, peakTreeRssBytes, memorySamples: samples,
       shutdownUpperBoundMs: Math.max(0, elapsedMs - report.quitRequestedMs),
       memoryMethod: '250ms Linux /proc descendant snapshots; summed RSS double-counts shared pages; short-lived or escaping descendants can be missed' }
   } finally { clearInterval(interval); clearTimeout(timeout); clearTimeout(force) }
 }
 export async function runDesktopBaseline(repetitions = 3) {
-  if (process.platform !== 'linux' || !Number.isInteger(repetitions) || repetitions < 1 || repetitions > 5) throw fail()
+  if (process.env.GITHUB_ACTIONS !== 'true' || process.env.RUNNER_ENVIRONMENT !== 'github-hosted' || process.platform !== 'linux' || !Number.isInteger(repetitions) || repetitions < 1 || repetitions > 5) throw fail()
   await readFile(resolve(directory, '../../out/main/index.js'))
   const profile = await mkdtemp(resolve(tmpdir(), '21x-desktop-baseline-'))
   const token = randomUUID()
   await writeFile(resolve(profile, '.baseline-owned'), token, { mode: 0o600, flag: 'wx' })
+  await writeFile(resolve(profile, '.21x-identity-migration.json'), JSON.stringify({ outcome: 'fresh-install', renamedInPlace: false, copied: [], failed: [] }), { mode: 0o600, flag: 'wx' })
   try {
     const runs = []
     for (let index = 0; index < repetitions; index++) runs.push(await measure(profile, token))
@@ -100,5 +104,5 @@ export async function runDesktopBaseline(repetitions = 3) {
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { console.log(JSON.stringify(await runDesktopBaseline(), null, 2)) }
-  catch { console.error(fail().message); process.exitCode = 1 }
+  catch (error) { console.error(fail().message + '; phase=' + (failurePhases.has(error?.phase) ? error.phase : 'process-or-report')); process.exitCode = 1 }
 }

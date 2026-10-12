@@ -23,6 +23,10 @@ function fixture() {
   const legacy = new AuthenticatedSecretStorage(sourceKey, 'synthetic-legacy')
   const destination = new AuthenticatedSecretStorage(destinationKey, 'synthetic-destination')
   const db = new Database(join(root, '21x.db'))
+  // Fixture construction needs no per-DDL crash durability. Avoid hundreds of
+  // redundant HDD flushes; the rehearsal checkpoints and fsyncs its real writes.
+  db.pragma('journal_mode=WAL')
+  db.pragma('synchronous=NORMAL')
   db.pragma('foreign_keys=ON')
   applySchema(db) // Actual current production schema, indexes, FTS and migration metadata.
   db.prepare('INSERT INTO secrets(id,name,env_var_name,value,created_at,updated_at) VALUES(?,?,?,?,?,?)').run('secret-row', 'Fixture secret', 'FIXTURE', legacy.encryptString('\uFEFFsynthetic-雪-🔑'), 'fixture-created', 'fixture-updated')

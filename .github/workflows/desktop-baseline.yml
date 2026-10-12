@@ -31,6 +31,7 @@ jobs:
         run: pnpm exec electron-vite build
       - name: Configure Chromium sandbox helper
         run: |
+          node node_modules/electron/install.js
           sandbox="$(node -p "require('node:path').join(require('node:path').dirname(require('electron')), 'chrome-sandbox')")"
           sudo chown root:root "$sandbox"
           sudo chmod 4755 "$sandbox"

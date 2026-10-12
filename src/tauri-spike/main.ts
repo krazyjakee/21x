@@ -22,7 +22,7 @@ async function run(command: string, args?: Record<string, unknown>): Promise<voi
       'syntheticDesktop' in result && result.syntheticDesktop === true && !sliceMounted) {
       sliceMounted = true
       document.querySelector<HTMLButtonElement>('#probe')!.hidden = true
-      void mountSyntheticTaskSlice(native).catch(() => { message.textContent = 'The isolated task service is unavailable.' })
+      void mountSyntheticTaskSlice(native, 'syntheticAgent' in result && result.syntheticAgent === true).catch(() => { message.textContent = 'The isolated task service is unavailable.' })
     }
     output.textContent = JSON.stringify(result, null, 2)
     message.textContent = 'Check finished.'

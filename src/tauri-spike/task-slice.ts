@@ -1,21 +1,24 @@
 import { DesktopClient } from '../renderer/src/lib/desktop-client'
 import { createTauriDesktopTransport, getTauriEngineEpoch, type TauriDesktopApi } from '../renderer/src/lib/tauri-desktop-transport'
 import { DATABASE_COMMAND_CODECS, DATABASE_EVENT_CODECS } from '../shared/database-desktop-codecs'
+import { AGENT_COMMAND_CODECS, AGENT_EVENT_CODECS } from '../shared/agent-desktop-codecs'
 import { createProjection, applyPartsToProjection } from '../shared/transcript/projection'
 import { isRecord, ServiceProtocolError } from '../shared/service-protocol'
 import type { Task } from '../renderer/src/types'
 
 const smokeKey = '21x.database-slice.reload.v1'
-const proofKeys = [
+const databaseProofKeys = [
   'taskCreated', 'taskEventObserved', 'taskUpdated', 'updateEventObserved', 'projectCreated',
   'missingResultPreserved', 'settingPersisted', 'transcriptSnapshotRead', 'transcriptDeltaRead',
   'rendererReloaded', 'rehydrated', 'retiredOperationDenied', 'staleEpochDenied'
 ] as const
-type Proof = Record<typeof proofKeys[number], boolean>
+const agentProofKeys = ['agentStarted', 'approvalRequested', 'staleApprovalDenied', 'approvalAccepted', 'agentCompleted', 'agentStatusEventObserved', 'agentTranscriptRehydrated'] as const
+type Proof = Partial<Record<typeof databaseProofKeys[number] | typeof agentProofKeys[number], boolean>>
 type SmokeWindow = Window & { __TWENTYONEX_DATABASE_SMOKE__?: () => Promise<Proof | { reloadRequired: true }> }
 
 /** A migration test surface; it is mounted only when the host identifies its synthetic service. */
-export async function mountSyntheticTaskSlice(native: TauriDesktopApi): Promise<void> {
+export async function mountSyntheticTaskSlice(native: TauriDesktopApi, agentEnabled = false): Promise<void> {
+  const proofKeys = agentEnabled ? [...databaseProofKeys, ...agentProofKeys] : [...databaseProofKeys]
   const section = document.querySelector<HTMLElement>('#database-slice')!
   const status = document.querySelector<HTMLElement>('#database-status')!
   const list = document.querySelector<HTMLElement>('#database-tasks')!
@@ -31,13 +34,16 @@ export async function mountSyntheticTaskSlice(native: TauriDesktopApi): Promise<
   let hydrated = false
   const projection = createProjection()
   const observers = new Map<string, Set<(id: string) => void>>()
+  let refreshAgentControls = (): void => {}
   const client = new DesktopClient({
-    transport: createTauriDesktopTransport(native), commands: DATABASE_COMMAND_CODECS, events: DATABASE_EVENT_CODECS,
+    transport: createTauriDesktopTransport(native), commands: { ...DATABASE_COMMAND_CODECS, ...(agentEnabled ? AGENT_COMMAND_CODECS : {}) },
+    events: { ...DATABASE_EVENT_CODECS, ...(agentEnabled ? AGENT_EVENT_CODECS : {}) },
     onState: state => {
       if (state.status !== 'ready') hydrated = false
       status.textContent = state.status === 'ready' ? 'Connected to isolated test data.' :
         state.status === 'connecting' ? 'Connecting…' : 'Connection unavailable. Reload the window to reconnect.'
       create.disabled = state.status !== 'ready' || !hydrated
+      refreshAgentControls()
     }
   })
 
@@ -56,6 +62,7 @@ export async function mountSyntheticTaskSlice(native: TauriDesktopApi): Promise<
   }
   function drawTranscript(): void {
     transcript.textContent = projection.sorted.map(part => part.content).join('\n') || 'No transcript parts for this task.'
+    refreshAgentControls()
   }
   function notify(operation: string, id: string): void { for (const callback of observers.get(operation) ?? []) callback(id) }
   function failed(): void { status.textContent = 'The isolated data operation failed.' }
@@ -87,6 +94,56 @@ export async function mountSyntheticTaskSlice(native: TauriDesktopApi): Promise<
     drawTranscript()
   })
 
+  let fixtureAgentId: string | undefined
+  let fixtureTaskId: string | undefined
+  let fixtureSessionId: string | undefined
+  let conversationUsed = false
+  let agentStatus = 'idle'
+  let agentStatusObserved = false
+  const agentControls = document.createElement('div')
+  agentControls.hidden = !agentEnabled
+  agentControls.innerHTML = '<p data-agent-state>Isolated deterministic agent.</p><button type="button" data-agent-start>Start fixture agent</button> <button type="button" data-agent-approve>Approve</button> <button type="button" data-agent-reject>Reject</button> <button type="button" data-agent-stop>Stop</button>'
+  transcript.before(agentControls)
+  const agentStart = agentControls.querySelector<HTMLButtonElement>('[data-agent-start]')!
+  const agentApprove = agentControls.querySelector<HTMLButtonElement>('[data-agent-approve]')!
+  const agentReject = agentControls.querySelector<HTMLButtonElement>('[data-agent-reject]')!
+  const agentStop = agentControls.querySelector<HTMLButtonElement>('[data-agent-stop]')!
+  function pendingApproval(): string | undefined {
+    if (selected !== fixtureTaskId) return undefined
+    const part = projection.sorted.find(part => isRecord(part.tool) && part.tool.name === 'permission' && part.tool.status === 'running' && typeof part.tool.requestId === 'string')
+    return part && isRecord(part.tool) ? part.tool.requestId as string : undefined
+  }
+  refreshAgentControls = () => {
+    const connected = hydrated && client.connection.status === 'ready'
+    agentStart.disabled = !connected || !fixtureAgentId || conversationUsed
+    agentApprove.disabled = agentReject.disabled = !connected || agentStatus !== 'waiting_approval' || !pendingApproval()
+    agentStop.disabled = !connected || !fixtureSessionId
+    agentControls.querySelector('[data-agent-state]')!.textContent = `Isolated deterministic agent: ${agentStatus}.`
+  }
+  if (agentEnabled) client.subscribe('agent:status', event => {
+    if (event.taskId !== fixtureTaskId) return
+    agentStatusObserved = true; agentStatus = event.status; fixtureSessionId = event.sessionId
+    refreshAgentControls()
+  })
+  async function startFixtureAgent(): Promise<void> {
+    if (!fixtureAgentId || !fixtureTaskId) throw new ServiceProtocolError('INVALID_REQUEST')
+    await selectTask(fixtureTaskId)
+    const outcome = await client.invoke('agentSession:start', [fixtureAgentId, fixtureTaskId])
+    if (outcome.queued || !outcome.sessionId) throw new ServiceProtocolError('INVALID_RESULT')
+    fixtureSessionId = outcome.sessionId
+    conversationUsed = true
+    refreshAgentControls()
+  }
+  async function answerFixture(approved: boolean): Promise<void> {
+    const requestId = pendingApproval()
+    if (!requestId || !fixtureSessionId) throw new ServiceProtocolError('INVALID_REQUEST')
+    await client.invoke('agentSession:approve', [fixtureSessionId, approved, undefined, 'permission', requestId])
+  }
+  agentStart.addEventListener('click', () => { void startFixtureAgent().catch(failed) })
+  agentApprove.addEventListener('click', () => { void answerFixture(true).catch(failed) })
+  agentReject.addEventListener('click', () => { void answerFixture(false).catch(failed) })
+  agentStop.addEventListener('click', () => { if (fixtureSessionId) void client.invoke('agentSession:stop', [fixtureSessionId]).then(() => { fixtureSessionId = undefined; agentStatus = 'stopped'; refreshAgentControls() }).catch(failed) })
+
   const ready = (async () => {
     await client.connect(await getTauriEngineEpoch(native))
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -96,8 +153,20 @@ export async function mountSyntheticTaskSlice(native: TauriDesktopApi): Promise<
       tasks.clear()
       for (const task of snapshot) tasks.set(task.id, task)
       drawTasks()
+      if (agentEnabled) {
+        const agents = await client.invoke('agent:getAll', [])
+        const fixture = snapshot.find(task => task.title === 'Synthetic approval task')
+        if (agents.length !== 1 || !fixture) throw new ServiceProtocolError('INVALID_RESULT')
+        fixtureAgentId = agents[0].id; fixtureTaskId = fixture.id; fixtureSessionId = fixture.session_id ?? undefined; conversationUsed = !!fixtureSessionId
+        if (fixtureSessionId) {
+          await selectTask(fixtureTaskId)
+          const resumed = await client.invoke('agentSession:resume', [fixtureAgentId, fixtureTaskId, fixtureSessionId])
+          if (resumed.sessionId !== fixtureSessionId) throw new ServiceProtocolError('INVALID_RESULT')
+        }
+      }
       hydrated = true
       create.disabled = false
+      refreshAgentControls()
       return
     }
     // Bound recovery rather than restoring an older list after a racing deletion/update.
@@ -121,8 +190,8 @@ export async function mountSyntheticTaskSlice(native: TauriDesktopApi): Promise<
     callbacks.add(callback)
     return { seen, stop: () => { callbacks.delete(callback) } }
   }
-  async function waitFor(check: () => boolean): Promise<boolean> {
-    const deadline = Date.now() + 3000
+  async function waitFor(check: () => boolean, timeoutMs = 3000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs
     while (!check() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20))
     return check()
   }
@@ -156,7 +225,16 @@ export async function mountSyntheticTaskSlice(native: TauriDesktopApi): Promise<
           catch (error) { proof.retiredOperationDenied = isRecord(error) && error.code === 'UNKNOWN_OPERATION' }
           try { await native.core.invoke('desktop_invoke', { operation: 'db:getTasks', payload: {}, engineEpoch: 'wrong-epoch' }) }
           catch (error) { proof.staleEpochDenied = isRecord(error) && error.code === 'STALE_EPOCH' }
-          if (proofKeys.filter(key => !['rendererReloaded', 'rehydrated'].includes(key)).some(key => !proof[key])) return proof
+          if (agentEnabled) {
+            await startFixtureAgent()
+            proof.agentStarted = !!fixtureSessionId
+            proof.approvalRequested = await waitFor(() => agentStatus === 'waiting_approval' && !!pendingApproval(), 12000)
+            proof.agentStatusEventObserved = agentStatusObserved
+            if (!fixtureSessionId || !pendingApproval()) return proof
+            try { await client.invoke('agentSession:approve', [fixtureSessionId, true, undefined, 'permission', 'stale-fixture-request']) }
+            catch (error) { proof.staleApprovalDenied = error instanceof ServiceProtocolError && error.code === 'INVALID_REQUEST' }
+          }
+          if (proofKeys.filter(key => !['rendererReloaded', 'rehydrated', 'agentTranscriptRehydrated', 'approvalAccepted', 'agentCompleted'].includes(key)).some(key => !proof[key])) return proof
           sessionStorage.setItem(smokeKey, JSON.stringify({ taskId: task.id, projectId: project.id, value, proof }))
           return { reloadRequired: true }
         } finally { created.stop(); updated.stop() }
@@ -172,6 +250,14 @@ export async function mountSyntheticTaskSlice(native: TauriDesktopApi): Promise<
       proof.rendererReloaded = true
       proof.rehydrated = task?.title === 'Synthetic task after edit' && tasks.has(original.taskId) &&
         project?.id === original.projectId && setting === original.value && !!list.querySelector(`[data-task-id="${original.taskId}"]`)
+      if (agentEnabled && fixtureTaskId && fixtureAgentId && fixtureSessionId) {
+        await selectTask(fixtureTaskId)
+        const pending = await waitFor(() => agentStatus === 'waiting_approval' && !!pendingApproval(), 12000)
+        proof.agentTranscriptRehydrated = pending && !agentApprove.disabled && transcript.textContent?.includes('Allow the synthetic change?') === true
+        await answerFixture(true)
+        proof.approvalAccepted = await waitFor(() => projection.sorted.some(part => part.content === 'Applied the approved synthetic change.'), 12000)
+        proof.agentCompleted = await waitFor(() => tasks.get(fixtureTaskId!)?.status === 'ready_for_review', 12000)
+      }
       sessionStorage.removeItem(smokeKey)
     } catch { /* Return partial fixed metadata only; no native data/errors are exported. */ }
     return proof

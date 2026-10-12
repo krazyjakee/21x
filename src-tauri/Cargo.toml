@@ -26,3 +26,4 @@ twentyonex-engine = { path = "engine" }
 custom-protocol = ["tauri/custom-protocol"]
 synthetic-desktop = ["twentyonex-engine/synthetic-desktop"]
 artifact-authorization-proof = ["synthetic-desktop"]
+synthetic-agent = ["synthetic-desktop", "twentyonex-engine/synthetic-agent"]

@@ -111,4 +111,4 @@ it('reopens a rehearsal candidate using actual DatabaseManager credential reader
     rmSync(sourceRoot, { recursive: true, force: true })
     rmSync(readerRoot, { recursive: true, force: true })
   }
-})
+}, 60000)

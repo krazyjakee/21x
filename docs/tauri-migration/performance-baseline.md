@@ -2,7 +2,9 @@
 
 `node scripts/desktop-baseline/run.mjs` measures the actual built Electron main
 process, production preload/IPC, database and full renderer on Linux. Build the
-desktop first and provide a graphical session (CI uses Xvfb/D-Bus). The manual
+desktop first and provide a graphical session (CI uses Xvfb/D-Bus). The harness
+requires a disposable GitHub-hosted Linux runner: full production startup includes
+OS protocol registration and process cleanup, so it is not a local read-only tool. The manual
 `Desktop Electron performance baseline` workflow builds once and runs three
 starts sequentially. It shares the native Linux proof queue and uses one native
 build worker. The harness is outside shipping bundles and exposes no automation

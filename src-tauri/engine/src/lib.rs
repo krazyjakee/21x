@@ -16,6 +16,8 @@ use tokio::{
     sync::{oneshot, watch, Mutex as AsyncMutex, Semaphore},
     time::timeout,
 };
+#[cfg(feature = "synthetic-agent")]
+mod agent_desktop;
 #[cfg(feature = "synthetic-desktop")]
 mod desktop;
 mod process_tree;
@@ -261,6 +263,8 @@ impl Engine {
         }
         if synthetic {
             command.env("TWENTYONEX_DATABASE_MODE", "synthetic-only");
+            #[cfg(feature = "synthetic-agent")]
+            command.env("TWENTYONEX_AGENT_MODE", "deterministic-fixture");
         }
         if fixture_mode {
             command.env("TWENTYONEX_FEASIBILITY_TEST_MODE", "1");
@@ -583,6 +587,7 @@ impl Engine {
         json!({"available": !self.0.closed.load(Ordering::SeqCst), "protocolVersion": 1,
             "engineEpoch": self.0.epoch.lock().unwrap().clone(), "experimental": true,
             "syntheticDesktop":self.0.synthetic,
+            "syntheticAgent":self.0.synthetic && cfg!(feature = "synthetic-agent"),
             "ownedChildExited": *self.0.exited.borrow(), "ownershipMode": process_tree::ownership_mode()})
     }
 
@@ -762,7 +767,11 @@ mod tests {
                 .await
                 .unwrap_err()
                 .code,
-            "UNKNOWN_OPERATION"
+            if cfg!(feature = "synthetic-agent") {
+                "INVALID_ARGUMENTS"
+            } else {
+                "UNKNOWN_OPERATION"
+            }
         );
         let created = engine
             .desktop_request(

@@ -1,5 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(all(feature = "synthetic-agent", not(debug_assertions)))]
+compile_error!("synthetic-agent is restricted to debug fixture builds");
+
 use serde_json::{json, Value};
 use std::sync::{
     atomic::{AtomicBool, AtomicU8, Ordering},
@@ -92,7 +95,7 @@ impl NativeSmoke {
                 && gui["remoteNavigationDenied"] == true
                 && gui["windowCloseRequested"] == true
                 && gui["windowCloseObserved"] == true
-                && SYNTHETIC_RECEIPT_KEYS
+                && synthetic_receipt_keys(evidence["runtime"]["syntheticAgent"] == true)
                     .iter()
                     .all(|key| evidence["runtime"]["syntheticDesktopProof"][*key] == true)
                 && evidence["shutdown"]["engineUnavailable"] == true
@@ -193,6 +196,23 @@ const SYNTHETIC_RECEIPT_KEYS: &[&str] = &[
 ];
 
 #[cfg(feature = "synthetic-desktop")]
+fn synthetic_receipt_keys(agent: bool) -> Vec<&'static str> {
+    let mut keys = SYNTHETIC_RECEIPT_KEYS.to_vec();
+    if agent {
+        keys.extend([
+            "agentStarted",
+            "approvalRequested",
+            "staleApprovalDenied",
+            "approvalAccepted",
+            "agentCompleted",
+            "agentStatusEventObserved",
+            "agentTranscriptRehydrated",
+        ]);
+    }
+    keys
+}
+
+#[cfg(feature = "synthetic-desktop")]
 fn begin_synthetic_smoke(window: &WebviewWindow, smoke: Arc<NativeSmoke>) {
     if !smoke.enabled() {
         return;
@@ -228,7 +248,12 @@ fn begin_synthetic_smoke(window: &WebviewWindow, smoke: Arc<NativeSmoke>) {
     }
     let window = window.clone();
     std::thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(20);
+        let deadline = Instant::now()
+            + Duration::from_secs(if cfg!(feature = "synthetic-agent") {
+                45
+            } else {
+                20
+            });
         while injected
             && Instant::now() < deadline
             && !(smoke.receipt.load(Ordering::SeqCst)
@@ -312,11 +337,9 @@ fn engine_status(
         }
         #[cfg(feature = "synthetic-desktop")]
         if engine.status()["syntheticDesktop"] == true {
+            let keys = synthetic_receipt_keys(engine.status()["syntheticAgent"] == true);
             if !receipt.as_object().is_some_and(|object| {
-                object.len() == SYNTHETIC_RECEIPT_KEYS.len()
-                    && SYNTHETIC_RECEIPT_KEYS
-                        .iter()
-                        .all(|key| receipt[*key].is_boolean())
+                object.len() == keys.len() && keys.iter().all(|key| receipt[*key].is_boolean())
             }) {
                 return Err(EngineError::new("INVALID_ARGUMENTS"));
             }
@@ -464,6 +487,7 @@ fn main() {
             if setup_smoke.enabled() {
                 setup_smoke.evidence.lock().unwrap()["runtime"] = json!({
                     "initialized":true, "syntheticDesktop":app.state::<Engine>().status()["syntheticDesktop"],
+                    "syntheticAgent":app.state::<Engine>().status()["syntheticAgent"],
                     "resourceRoot":std::fs::canonicalize(&resources)?,
                     "profileRoot":std::fs::canonicalize(&profile)?, "developmentFrontend":tauri::is_dev(),
                     "systemNodeHidden":std::env::var("PATH").as_deref() == Ok("/nonexistent")
@@ -472,7 +496,7 @@ fn main() {
                 let watchdog = setup_smoke.clone();
                 let handle = app.handle().clone();
                 std::thread::spawn(move || {
-                    std::thread::sleep(Duration::from_secs(45));
+                    std::thread::sleep(Duration::from_secs(if cfg!(feature = "synthetic-agent") { 75 } else { 45 }));
                     if !watchdog.finished.load(Ordering::SeqCst) { handle.exit(1); }
                 });
             }

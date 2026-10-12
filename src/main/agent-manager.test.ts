@@ -1826,7 +1826,7 @@ describe('AgentManager shutdown', () => {
     const db = createMockDb({ coding_agent: 'claude-code' })
     const part: ReturnType<typeof db.getTranscriptParts>[number] = {
       taskId: 'task-1', partId: 'shutdown-text', seq: 1, role: 'assistant', content: 'Final durable output',
-      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', rev: 1
+      createdAt: 1767225600000, updatedAt: 1767225600000, rev: 1
     }
     let closed = false
     let lateQueries = 0
@@ -1882,7 +1882,8 @@ describe('AgentManager shutdown', () => {
       finishInitialization()
       await observedStart
       await mgr.stopAllSessions()
-      expect(mgr.hasTaskStartOwnership('task-1')).toBe(false)
+      // Shutdown preserves the durable recovery queue for the next owner.
+      expect(mgr.hasTaskStartOwnership('task-1')).toBe(true)
       expect(fake.createSession).not.toHaveBeenCalled()
       expect(mgr.getActiveSessionsForTask('task-1')).toEqual([])
     } finally {

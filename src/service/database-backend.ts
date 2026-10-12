@@ -23,6 +23,8 @@ export interface DatabaseBackendOptions {
   canAccessProject: (projectId: string, caller: DesktopCallerContext) => boolean
   canCreateProject: (caller: DesktopCallerContext) => boolean
   canEditSettings: (caller: DesktopCallerContext) => boolean
+  /** An attached lifecycle owner must deny deletion while it still owns work. */
+  canDeleteTask?: (taskId: string, caller: DesktopCallerContext) => boolean
   emit: (operation: DatabaseDesktopEvent, payload: JsonValue) => void
 }
 
@@ -114,6 +116,9 @@ export class DatabaseBackend {
       invoke: (args, caller, signal) => {
         this.assertAvailable()
         if (signal.aborted) throw new ServiceProtocolError('CANCELLED')
+        // The registry yields while authorizing. Recheck immediately before a
+        // synchronous effect, including an attached lifecycle owner's guard.
+        if (!authorize(args, caller)) throw new ServiceProtocolError('INVALID_REQUEST')
         const encoded = codec.encodeResult(invoke(args, caller))
         return codec.decodeResult(encoded.defined ? encoded.value : undefined)
       },
@@ -148,7 +153,12 @@ export class DatabaseBackend {
       if (task) this.emit('task:updated', { taskId: id, updates: this.taskDto(task) })
       return task
     })
-    this.bind('db:deleteTask', ([id], caller) => this.canUseTask(id, caller, true), ([id]) => {
+    this.bind('db:deleteTask', ([id], caller) => {
+      if (!this.canUseTask(id, caller, true)) return false
+      if (this.options.canDeleteTask) return this.options.canDeleteTask(id, caller)
+      const task = db.getTask(id)
+      return !task || !task.session_id && !['agent_working', 'triaging', 'agent_learning'].includes(task.status)
+    }, ([id]) => {
       if (!db.getTask(id)) return false
       const deleted = db.deleteTask(id)
       if (deleted) this.emit('task:deleted', { taskId: id })

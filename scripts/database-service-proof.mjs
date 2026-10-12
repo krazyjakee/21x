@@ -12,9 +12,12 @@ const errorCodes = new Set(['INVALID_FRAME', 'FRAME_TOO_LARGE', 'UNSUPPORTED_VER
 const exact = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key))
 const failed = code => Object.assign(new Error(code), { code })
 
-function connect({ node, entry, profileRoot, resourceRoot }) {
+export function connectDatabaseService({ node, entry, profileRoot, resourceRoot, agentMode = false }) {
+  const allowedEvents = new Set(eventNames)
+  if (agentMode) for (const event of ['agent:status', 'agent:startQueueChanged', 'project:statusChanged', 'concurrency:changed', 'agent:recoveryStateChanged']) allowedEvents.add(event)
   const environment = Object.fromEntries(['PATH', 'SystemRoot', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'TMPDIR'].filter(key => process.env[key]).map(key => [key, process.env[key]]))
   Object.assign(environment, { TWENTYONEX_DATABASE_MODE: 'synthetic-only', TWENTYONEX_PROFILE_ROOT: profileRoot, TWENTYONEX_RESOURCE_ROOT: resourceRoot })
+  if (agentMode) environment.TWENTYONEX_AGENT_MODE = 'deterministic-fixture'
   const child = spawn(node, [entry], { stdio: ['pipe', 'pipe', 'pipe'], env: environment, windowsHide: true })
   const pending = new Map()
   const events = []
@@ -40,7 +43,7 @@ function connect({ node, entry, profileRoot, resourceRoot }) {
     if (frame.protocolVersion !== 1 || typeof frame.engineEpoch !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(frame.engineEpoch)) throw failed('INVALID_OUTPUT')
     if (frame.kind === 'event') {
       if (!exact(frame, ['kind', 'protocolVersion', 'engineEpoch', 'operation', 'payload', 'sequence']) || frame.engineEpoch !== epoch ||
-          !eventNames.has(frame.operation) || frame.sequence !== sequence + 1 || events.length >= 128) throw failed('INVALID_OUTPUT')
+          !allowedEvents.has(frame.operation) || frame.sequence !== sequence + 1 || events.length >= 128) throw failed('INVALID_OUTPUT')
       sequence = frame.sequence
       events.push(frame)
       return
@@ -135,7 +138,7 @@ export async function runDatabaseServiceProof({ serviceEntry, node = process.env
   const profileRoot = await realpath(await mkdtemp(join(tmpdir(), '21x-database-service-')))
   const clients = []
   const report = { reportVersion: 1, passed: false, runtime: 'standalone-node', syntheticOnly: true }
-  const start = () => { const client = connect({ node, entry, profileRoot, resourceRoot }); clients.push(client); return client }
+  const start = () => { const client = connectDatabaseService({ node, entry, profileRoot, resourceRoot }); clients.push(client); return client }
   try {
     report.phase = 'initialize'
     const first = start()
