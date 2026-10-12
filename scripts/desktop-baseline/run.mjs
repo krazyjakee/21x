@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Linux application baseline; raw child logs, process arguments and data are never retained. */
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -91,6 +91,7 @@ export async function runDesktopBaseline(repetitions = 3) {
   if (process.env.GITHUB_ACTIONS !== 'true' || process.env.RUNNER_ENVIRONMENT !== 'github-hosted' || process.platform !== 'linux' || !Number.isInteger(repetitions) || repetitions < 1 || repetitions > 5) throw fail()
   await readFile(resolve(directory, '../../out/main/index.js'))
   const profile = await mkdtemp(resolve(tmpdir(), '21x-desktop-baseline-'))
+  await mkdir(resolve(profile, 'session'), { mode: 0o700 })
   const token = randomUUID()
   await writeFile(resolve(profile, '.baseline-owned'), token, { mode: 0o600, flag: 'wx' })
   await writeFile(resolve(profile, '.21x-identity-migration.json'), JSON.stringify({ outcome: 'fresh-install', renamedInPlace: false, copied: [], failed: [] }), { mode: 0o600, flag: 'wx' })
