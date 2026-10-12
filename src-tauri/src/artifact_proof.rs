@@ -46,13 +46,30 @@ fn script(mode: &str, epoch: &str) -> String {
     )
 }
 fn evaluate(window: &WebviewWindow) -> Option<Value> {
+    evaluate_expression(window, "window.__21X_ARTIFACT_PROOF__ || null")
+}
+fn evaluate_expression(window: &WebviewWindow, expression: &str) -> Option<Value> {
     let (sender, receiver) = mpsc::sync_channel(1);
     window
-        .eval_with_callback("window.__21X_ARTIFACT_PROOF__ || null", move |value| {
+        .eval_with_callback(expression, move |value| {
             let _ = sender.try_send(value);
         })
         .ok()?;
     serde_json::from_str(&receiver.recv_timeout(Duration::from_millis(500)).ok()?).ok()
+}
+fn wait_document(window: &WebviewWindow, deadline: Instant, artifact: bool) -> bool {
+    let expression = if artifact {
+        "document.readyState === 'complete' && location.pathname === '/outer' && (location.protocol === 'artifact-proof:' || location.hostname === 'artifact-proof.localhost')"
+    } else {
+        "document.readyState === 'complete' && location.protocol !== 'about:'"
+    };
+    while Instant::now() < deadline {
+        if evaluate_expression(window, expression) == Some(json!(true)) {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    false
 }
 fn wait(
     window: &WebviewWindow,
@@ -137,11 +154,9 @@ pub(crate) fn run(main: &WebviewWindow) -> Value {
         return report;
     }
     let epoch_owned = epoch.to_string();
-    let epoch_for_load = epoch_owned.clone();
     let local_finished = Arc::new(AtomicBool::new(false));
     let local_injected = Arc::new(AtomicBool::new(false));
     let finished_for_load = local_finished.clone();
-    let injected_for_load = local_injected.clone();
     let built = tauri::WebviewWindowBuilder::new(
         main.app_handle(),
         LABEL,
@@ -150,10 +165,11 @@ pub(crate) fn run(main: &WebviewWindow) -> Value {
     .title("Artifact authorization diagnostic")
     .inner_size(420.0, 180.0)
     .on_navigation(|url| {
-        (crate::trusted_origin(url)
-            && matches!(url.path(), "/" | "/index.html")
-            && url.query().is_none()
-            && url.fragment().is_none())
+        url.as_str() == "about:blank"
+            || (crate::trusted_origin(url)
+                && matches!(url.path(), "/" | "/index.html")
+                && url.query().is_none()
+                && url.fragment().is_none())
             || artifact_url(url)
     })
     .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
@@ -169,10 +185,10 @@ pub(crate) fn run(main: &WebviewWindow) -> Value {
             if mode == "excluded" {
                 finished_for_load.store(true, Ordering::SeqCst);
             }
-            let injected = window.eval(script(mode, &epoch_for_load)).is_ok();
-            if mode == "excluded" {
-                injected_for_load.store(injected, Ordering::SeqCst);
-            }
+            // A dynamically created Webview can complete its first load before
+            // this callback is observed. The worker verifies document readiness
+            // and injects once, independently of callback delivery.
+            let _ = window;
         }
     })
     .build();
@@ -180,6 +196,19 @@ pub(crate) fn run(main: &WebviewWindow) -> Value {
         return report;
     };
     let artifact = OwnedWindow(window);
+    let local_ready = wait_document(&artifact.0, deadline, false);
+    let same_origin = artifact
+        .0
+        .url()
+        .is_ok_and(|url| crate::trusted_origin(&url));
+    report["excludedDocumentReady"] = json!(local_ready);
+    report["excludedSameAppOrigin"] = json!(same_origin);
+    if local_ready && same_origin {
+        local_injected.store(
+            artifact.0.eval(script("excluded", epoch)).is_ok(),
+            Ordering::SeqCst,
+        );
+    }
     let local = wait(&artifact.0, deadline, "excluded", false);
     report["sameLocalOriginExcludedWebview"] = local.clone().unwrap_or(Value::Null);
     report["excludedPageFinished"] = json!(local_finished.load(Ordering::SeqCst));
@@ -206,6 +235,14 @@ pub(crate) fn run(main: &WebviewWindow) -> Value {
         "artifact-proof://localhost/outer"
     };
     if artifact.0.navigate(url.parse().unwrap()).is_err() {
+        return report;
+    }
+    if !wait_document(&artifact.0, deadline, true)
+        || !artifact.0.url().is_ok_and(|url| artifact_url(&url))
+    {
+        return report;
+    }
+    if artifact.0.eval(script("frame", epoch)).is_err() {
         return report;
     }
     let frame = wait(&artifact.0, deadline, "frame", false);

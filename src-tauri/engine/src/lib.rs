@@ -49,6 +49,7 @@ impl EngineError {
             "STALE_EPOCH" => "Engine epoch does not match.",
             "FRAME_TOO_LARGE" => "Engine protocol frame exceeds the size limit.",
             "CANCELLED" => "Engine operation cancelled.",
+            "SKILL_VERSION_CONFLICT" => "The skill changed. Reload it before writing.",
             _ => "Engine unavailable.",
         };
         Self {
@@ -624,6 +625,7 @@ fn validate_error(error: &Value) -> Result<EngineError, ()> {
         Some("STALE_EPOCH") => "STALE_EPOCH",
         Some("INVALID_REQUEST") => "INVALID_REQUEST",
         Some("INVALID_RESULT") => "INVALID_RESULT",
+        Some("SKILL_VERSION_CONFLICT") => "SKILL_VERSION_CONFLICT",
         Some("DISCONNECTED") => "DISCONNECTED",
         _ => return Err(()),
     };
