@@ -58,7 +58,6 @@ export function startDatabaseStdio(): void {
   let initialized = false
   let closing = false
   let sequence = 0
-  let peer: ServicePeer
 
   const cleanup = (failed = false): void => {
     if (closing && !backend && !lock && !storage) return
@@ -148,7 +147,7 @@ export function startDatabaseStdio(): void {
       return backend.registry.invoke(operation, payload, caller, signal)
     }
   }
-  peer = new ServicePeer({
+  const peer = new ServicePeer({
     role: 'service', engineEpoch, operations,
     eventSchemas: Object.fromEntries(DATABASE_DESKTOP_EVENTS.map(operation => [operation, DATABASE_EVENT_CODECS[operation].validatePayload])),
     write: bytes => new Promise((resolve, reject) => {
