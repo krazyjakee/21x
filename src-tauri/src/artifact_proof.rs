@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc, Arc,
+        mpsc, Arc, Mutex,
     },
     thread,
     time::{Duration, Instant},
@@ -97,6 +97,54 @@ fn wait(
 fn all(value: &Value, keys: &[&str]) -> bool {
     keys.iter().all(|key| value[*key] == true)
 }
+fn initial_app_url(url: &tauri::Url) -> bool {
+    // Tauri intentionally omits index.html. Its non-HTTP packaged root is
+    // tauri://localhost with an EMPTY path, unlike HTTP's slash root.
+    crate::trusted_origin(url)
+        && matches!(url.path(), "" | "/" | "/index.html")
+        && url.query().is_none()
+        && url.fragment().is_none()
+}
+fn navigation_class(url: &tauri::Url) -> (&'static str, bool) {
+    if url.as_str() == "about:blank" {
+        ("initial-blank", true)
+    } else if initial_app_url(url) {
+        (
+            match url.path() {
+                "" => "app-empty-root",
+                "/" => "app-slash-root",
+                _ => "app-index",
+            },
+            true,
+        )
+    } else if artifact_url(url) {
+        ("fixed-artifact", true)
+    } else if crate::trusted_origin(url) {
+        ("blocked-app-route", false)
+    } else {
+        ("blocked-origin", false)
+    }
+}
+struct NavigationEvidence {
+    observed: u32,
+    allowed: u32,
+    denied: u32,
+    last_class: &'static str,
+}
+impl NavigationEvidence {
+    fn record(&mut self, class: &'static str, allowed: bool) {
+        self.observed = self.observed.saturating_add(1);
+        if allowed {
+            self.allowed = self.allowed.saturating_add(1);
+        } else {
+            self.denied = self.denied.saturating_add(1);
+        }
+        self.last_class = class;
+    }
+    fn report(&self) -> Value {
+        json!({"observed":self.observed,"allowed":self.allowed,"denied":self.denied,"lastClass":self.last_class})
+    }
+}
 fn artifact_url(url: &tauri::Url) -> bool {
     url.username().is_empty()
         && url.password().is_none()
@@ -157,6 +205,13 @@ pub(crate) fn run(main: &WebviewWindow) -> Value {
     let local_finished = Arc::new(AtomicBool::new(false));
     let local_injected = Arc::new(AtomicBool::new(false));
     let finished_for_load = local_finished.clone();
+    let navigation = Arc::new(Mutex::new(NavigationEvidence {
+        observed: 0,
+        allowed: 0,
+        denied: 0,
+        last_class: "none",
+    }));
+    let navigation_for_load = navigation.clone();
     let built = tauri::WebviewWindowBuilder::new(
         main.app_handle(),
         LABEL,
@@ -164,25 +219,17 @@ pub(crate) fn run(main: &WebviewWindow) -> Value {
     )
     .title("Artifact authorization diagnostic")
     .inner_size(420.0, 180.0)
-    .on_navigation(|url| {
-        url.as_str() == "about:blank"
-            || (crate::trusted_origin(url)
-                && matches!(url.path(), "/" | "/index.html")
-                && url.query().is_none()
-                && url.fragment().is_none())
-            || artifact_url(url)
+    .on_navigation(move |url| {
+        let (class, allowed) = navigation_class(url);
+        navigation_for_load.lock().unwrap().record(class, allowed);
+        allowed
     })
     .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
     .on_download(|_, _| false)
     .on_permission_request(|_, _| tauri::webview::PermissionResponse::Deny)
     .on_page_load(move |window, payload| {
         if payload.event() == tauri::webview::PageLoadEvent::Finished {
-            let mode = if artifact_url(payload.url()) {
-                "frame"
-            } else {
-                "excluded"
-            };
-            if mode == "excluded" {
+            if initial_app_url(payload.url()) {
                 finished_for_load.store(true, Ordering::SeqCst);
             }
             // A dynamically created Webview can complete its first load before
@@ -193,8 +240,11 @@ pub(crate) fn run(main: &WebviewWindow) -> Value {
     })
     .build();
     let Ok(window) = built else {
+        report["artifactWindowCreated"] = json!(false);
+        report["navigation"] = navigation.lock().unwrap().report();
         return report;
     };
+    report["artifactWindowCreated"] = json!(true);
     let artifact = OwnedWindow(window);
     let local_ready = wait_document(&artifact.0, deadline, false);
     let same_origin = artifact
@@ -213,6 +263,7 @@ pub(crate) fn run(main: &WebviewWindow) -> Value {
     report["sameLocalOriginExcludedWebview"] = local.clone().unwrap_or(Value::Null);
     report["excludedPageFinished"] = json!(local_finished.load(Ordering::SeqCst));
     report["excludedScriptSubmitted"] = json!(local_injected.load(Ordering::SeqCst));
+    report["navigation"] = navigation.lock().unwrap().report();
     if !local.as_ref().is_some_and(|value| {
         all(
             value,
@@ -294,6 +345,49 @@ pub(crate) fn run(main: &WebviewWindow) -> Value {
         thread::sleep(Duration::from_millis(25));
     }
     report["artifactWindowClosed"] = json!(main.app_handle().get_webview_window(LABEL).is_none());
+    report["navigation"] = navigation.lock().unwrap().report();
     report["passed"] = json!(frame_ok && received && report["artifactWindowClosed"] == true);
     report
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn packaged_root_uses_tauris_actual_empty_path() {
+        let url = tauri::Url::parse("tauri://localhost").unwrap();
+        assert_eq!(url.path(), "");
+        assert_eq!(navigation_class(&url), ("app-empty-root", true));
+        for raw in [
+            "tauri://localhost/",
+            "tauri://localhost/index.html",
+            "http://tauri.localhost/",
+        ] {
+            assert!(initial_app_url(&tauri::Url::parse(raw).unwrap()));
+        }
+    }
+
+    #[test]
+    fn root_compatibility_does_not_grant_other_routes_or_origins() {
+        for raw in [
+            "tauri://localhost/private",
+            "tauri://localhost?fixture=1",
+            "tauri://localhost#fixture",
+            "tauri://user@localhost",
+            "https://example.invalid/",
+            "artifact-proof://localhost/other",
+            "artifact-proof://localhost/outer?fixture=1",
+        ] {
+            assert!(!navigation_class(&tauri::Url::parse(raw).unwrap()).1);
+        }
+        assert_eq!(
+            navigation_class(&tauri::Url::parse("about:blank").unwrap()),
+            ("initial-blank", true)
+        );
+        assert_eq!(
+            navigation_class(&tauri::Url::parse("artifact-proof://localhost/outer").unwrap()),
+            ("fixed-artifact", true)
+        );
+    }
 }

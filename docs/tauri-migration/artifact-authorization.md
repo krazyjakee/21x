@@ -33,6 +33,16 @@ The custom protocol serves only three compiled fixtures to the fixed excluded la
 
 The phases wait for a document-specific `PageLoadEvent::Finished` result and matching phase marker. The proof has a 15-second deadline, bounded evaluation waits and a bounded canary request. Failure closes the owned diagnostic window through a scope guard. No mutation is replayed.
 
+## Packaged initial URL correction
+
+Three Linux diagnostic packages compiled and passed their ordinary synthetic desktop checks, but the excluded window never became ready. This did not provide artifact authorization evidence. The initial artifact navigation policy incorrectly required `/` or `/index.html` for the packaged application root.
+
+The pinned Tauri archive's `src/manager/webview.rs::prepare_webview` deliberately ignores the `index.html` path and uses the application root URL unchanged. `src/manager/mod.rs` includes a packaged-URL assertion for `tauri://localhost` on Linux/macOS and `http://tauri.localhost/` on Windows. The custom-scheme root has an empty pathname. The corrected policy accepts that precise root form while still excluding unrelated paths, query strings, fragments, credentials and outside origins. Regression tests cover both URL forms and forbidden alternatives.
+
+The Wry runtime dispatches worker-created windows onto its GUI event loop and waits for creation to complete. Its WebKitGTK navigation handler explicitly ignores rejected policy decisions. The observed lack of an application load is therefore consistent with the root-path rejection; source inspection did not identify a wrong-thread creation requirement for this case.
+
+Evidence now includes window-creation success and bounded navigation counts with a fixed classification (`app-empty-root`, `app-slash-root`, `app-index`, `initial-blank`, `fixed-artifact`, or a blocked category). It records no raw URL or native error. The native readiness/authorization proof still needs a new central installed-package run with this correction; no timeout was increased.
+
 ## Central validation and remaining gates
 
 After ordinary synthetic desktop smoke passes, stage the database service and build the existing isolated Debian diagnostic package with:
