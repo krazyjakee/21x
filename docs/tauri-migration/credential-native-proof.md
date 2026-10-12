@@ -73,7 +73,9 @@ without an application build, then runs a real Electron main process with the
 canaries in the actual secret BLOB, prefixed provider-setting, OAuth access/refresh
 BLOB, and connector OAuth JSON formats, plus explicitly proven legacy plaintext.
 The real Electron `safeStorage` encryptor/decryptor is used for every encrypted
-class. Corrupted source ciphertext must be rejected by Electron itself.
+class, including a leading BOM and Unicode secret. Corrupted source ciphertext
+must be rejected by Electron itself. Input is bounded before newline completion
+and split UTF-8 pipe chunks are decoded without losing characters.
 
 Electron exports the original representations, their actual decoded values, and
 canary hashes only to the trusted Node candidate over an anonymous pipe. A random
@@ -92,6 +94,9 @@ Electron process then decrypts the untouched original fixtures again, proving
 their continuing legacy usability. Output is metadata and pass/fail booleans;
 raw manifests, canary plaintext, keys, ciphertext, and hashes are not reports.
 Temporary profiles/modules and the fixture key are removed after the run.
+Exporter errors await bounded termination of the owned process/group before
+profile cleanup; failed termination retains the isolated directory and fails the
+proof. The Linux controller has a bounded startup and overall session deadline.
 
 [linux-session.mjs](../../scripts/credential-proof/linux-session.mjs) owns a
 disposable D-Bus/display session and separate XDG/keyring directories. Its random

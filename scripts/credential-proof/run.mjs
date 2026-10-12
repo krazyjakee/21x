@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import ts from 'typescript'
+import { StringDecoder } from 'node:string_decoder'
+import { observeOwnedProcess } from './process.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const hash = (value) => createHash('sha256').update(value).digest('hex')
@@ -34,27 +36,36 @@ function electronFrame(executable, directory, request, legacyBackend, allowedEnv
     const args = [directory]
     if (process.platform === 'linux') args.push('--password-store=' + (legacyBackend === 'basic_text' ? 'basic' : 'gnome-libsecret'))
     if (process.platform === 'linux' && process.getuid?.() === 0) args.push('--no-sandbox')
-    const child = spawn(executable, args, { stdio: ['pipe', 'pipe', 'ignore'], env: allowedEnvironment, windowsHide: true })
+    const child = spawn(executable, args, { stdio: ['pipe', 'pipe', 'ignore'], env: allowedEnvironment, windowsHide: true, detached: process.platform !== 'win32' })
+    const owned = observeOwnedProcess(child, process.platform !== 'win32')
+    const decoder = new StringDecoder('utf8')
     let pending = ''
     let bytes = 0
     let response
     let settled = false
-    const finish = (error) => {
+    const finish = async (error) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
       child.stdin.destroy()
-      child.stdout.destroy()
-      if (error) { child.kill(); reject(Object.assign(new Error(error), { code: error })) }
-      else resolve(response)
+      pending = ''
+      if (error) {
+        const stopped = await owned.stop()
+        child.stdout.destroy()
+        reject(Object.assign(new Error(error), { code: error, cleanupSafe: stopped }))
+      } else {
+        child.stdout.destroy()
+        resolve(response)
+      }
     }
     const timer = setTimeout(() => finish('LEGACY_UNAVAILABLE'), 35_000)
     child.on('error', () => finish('LEGACY_PROBE_FAILED'))
     child.stdin.on('error', () => finish('LEGACY_PROBE_FAILED'))
     child.stdout.on('data', (chunk) => {
+      if (settled) return
       bytes += chunk.length
       if (bytes > 1_048_576) { finish('LEGACY_PROBE_FAILED'); return }
-      pending += chunk.toString('utf8')
+      pending += decoder.write(chunk)
       let newline
       while ((newline = pending.indexOf('\n')) >= 0) {
         const line = pending.slice(0, newline)
@@ -86,6 +97,7 @@ export async function runCredentialProof({ helper, electron, legacyBackend = pro
   let reloaded
   let keys
   let created = false
+  let cleanupSafe = true
   const account = 't03-' + randomBytes(16).toString('hex')
   const report = { reportVersion: 1, platform: process.platform, arch: process.arch, scenario: legacyBackend, passed: false }
   try {
@@ -137,6 +149,7 @@ export async function runCredentialProof({ helper, electron, legacyBackend = pro
     report.passed = report.ambiguousBlobRejected && report.corruptImportRejected && report.originalsUnchanged && report.disposedProviderFailsClosed && report.reloadedDestinationVerified && report.destinationTamperRejected && report.legacyOriginalsReopened
   } catch (error) {
     report.errorCode = SAFE_CODES.has(error.code) ? error.code : 'PROOF_FAILED'
+    if (error.cleanupSafe === false) cleanupSafe = false
   } finally {
     candidate?.dispose()
     reloaded?.dispose()
@@ -147,7 +160,8 @@ export async function runCredentialProof({ helper, electron, legacyBackend = pro
         if (!report.fixtureKeyDeleted) { report.cleanupAccount = account; report.passed = false }
       }
     }
-    await rm(directory, { recursive: true, force: true })
+    if (cleanupSafe) await rm(directory, { recursive: true, force: true })
+    else { report.temporaryProfileRetained = directory; report.passed = false }
   }
   return report
 }

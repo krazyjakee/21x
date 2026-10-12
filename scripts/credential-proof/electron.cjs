@@ -63,7 +63,7 @@ async function probe(request) {
   const connector = JSON.stringify({ type: 'oauth2', clientId: 'synthetic-client', clientSecret: randomCanary(), accessToken: randomCanary(), refreshToken: randomCanary(), expiresAt: 1_800_000_000_000, tokenType: 'Bearer', scope: null })
   const fallback = randomCanary()
   const records = [
-    makeBlob('secrets', 'value', 'fixture-secret', randomCanary()),
+    makeBlob('secrets', 'value', 'fixture-secret', '\uFEFF' + randomCanary() + '-雪-🔑'),
     { location: { table: 'settings', column: 'value', rowId: 'fixture_api_key' }, source: { kind: 'setting', value: 'safeStorage:v1:' + safeStorage.encryptString(key).toString('base64') }, expectedHash: hash(key) },
     makeBlob('oauth_tokens', 'access_token', 'fixture-oauth', randomCanary()),
     makeBlob('oauth_tokens', 'refresh_token', 'fixture-oauth', randomCanary()),
@@ -87,10 +87,12 @@ async function probe(request) {
 }
 
 let size = 0
+process.stdin.on('data', (chunk) => {
+  size += Buffer.byteLength(chunk)
+  if (size > 1_048_576) { process.stdin.destroy(); die() }
+})
 const input = createInterface({ input: process.stdin })
 input.once('line', (line) => {
-  size += Buffer.byteLength(line)
-  if (size > 1_048_576) { die(); return }
   input.close()
   try { probe(JSON.parse(line)).catch(die) } catch { die() }
 })

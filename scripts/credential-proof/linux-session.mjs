@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runCredentialProof, stageModules } from './run.mjs'
+import { observeOwnedProcess } from './process.mjs'
 
 const script = fileURLToPath(import.meta.url)
 const args = process.argv.slice(2)
@@ -26,7 +27,7 @@ function command(executable, arguments_, input, timeout = 15_000) {
   })
 }
 
-const dbus = (path, method, ...arguments_) => command('gdbus', ['call', '--session', '--dest', 'org.freedesktop.secrets', '--object-path', path, '--method', method, ...arguments_])
+const dbus = (path, method, ...arguments_) => command('gdbus', ['call', '--session', '--dest', 'org.freedesktop.secrets', '--object-path', path, '--method', method, ...arguments_], undefined, 2000)
 
 async function insideSession() {
   const temporary = await mkdtemp(join(tmpdir(), '21x-secret-service-'))
@@ -54,7 +55,8 @@ async function insideSession() {
     daemon.stdin.on('error', () => {})
     daemon.stdin.end(password) // Synthetic keyring password lives only in memory/private stdin.
     let collection
-    for (let attempt = 0; attempt < 50 && !collection; attempt++) {
+    const startupDeadline = Date.now() + 10_000
+    while (!collection && Date.now() < startupDeadline) {
       try {
         const alias = await dbus('/org/freedesktop/secrets', 'org.freedesktop.Secret.Service.ReadAlias', 'default')
         collection = alias.match(/\/org\/freedesktop\/secrets\/collection\/[a-zA-Z0-9_/]+/)?.[0]
@@ -125,9 +127,15 @@ if (process.platform !== 'linux' || !helper || !electron) {
   // Owned DBus/display subprocess lifecycle, with no keyring password in args/env.
   const names = ['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'XDG_RUNTIME_DIR', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME']
   const env = Object.fromEntries(names.filter((name) => process.env[name] !== undefined).map((name) => [name, process.env[name]]))
-  const child = spawn('dbus-run-session', ['--', 'xvfb-run', '--auto-servernum', process.execPath, script, '--inside-isolated-session', '--helper', resolve(helper), '--electron', resolve(electron)], { stdio: ['ignore', 'inherit', 'ignore'], env })
+  const child = spawn('dbus-run-session', ['--', 'xvfb-run', '--auto-servernum', process.execPath, script, '--inside-isolated-session', '--helper', resolve(helper), '--electron', resolve(electron)], { stdio: ['ignore', 'inherit', 'ignore'], env, detached: true })
+  const owned = observeOwnedProcess(child, true)
+  const deadline = setTimeout(async () => {
+    await owned.stop()
+    console.error('ISOLATED_SECRET_SERVICE_DEADLINE')
+    process.exitCode = 1
+  }, 150_000)
   child.on('error', () => { console.error('ISOLATED_SECRET_SERVICE_UNAVAILABLE'); process.exitCode = 1 })
-  child.on('close', (code) => { process.exitCode = code === 0 ? 0 : 1 })
+  child.on('close', (code) => { clearTimeout(deadline); process.exitCode = code === 0 ? 0 : 1 })
 } else {
   const report = await insideSession()
   console.log(JSON.stringify(report, null, 2))
