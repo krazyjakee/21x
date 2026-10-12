@@ -34,12 +34,14 @@ async function probe(request) {
   await app.whenReady()
   const backend = process.platform === 'linux' ? safeStorage.getSelectedStorageBackend()
     : process.platform === 'darwin' ? 'macos-keychain' : 'windows-dpapi'
+  // The Chromium command-line switch uses a hyphen; Electron's API reports an underscore.
+  const expectedBackend = request.legacyBackend === 'gnome-libsecret' ? 'gnome_libsecret' : request.legacyBackend
   if (request.legacyBackend === 'basic_text') {
     if (process.platform !== 'linux' || backend !== 'basic_text') throw new Error('unexpected backend')
     // Explicit synthetic legacy-only evidence, never candidate destination policy.
     safeStorage.setUsePlainTextEncryption(true)
   }
-  if (!safeStorage.isEncryptionAvailable() || process.platform === 'linux' && backend !== request.legacyBackend) {
+  if (!safeStorage.isEncryptionAvailable() || process.platform === 'linux' && backend !== expectedBackend) {
     frame({ ok: false, code: 'LEGACY_UNAVAILABLE', backend, encryptionAvailable: false })
     app.exit(1)
     return

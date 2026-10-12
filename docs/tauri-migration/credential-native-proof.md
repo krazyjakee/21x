@@ -34,6 +34,9 @@ stores binary keys using explicit concrete `keyring` 3.6.3 backends:
 | macOS | User Keychain generic credential | Electron Keychain-backed `safeStorage` |
 | Windows | Windows generic Credential Store | Electron DPAPI-backed `safeStorage` |
 
+Electron's Linux API reports `gnome_libsecret`; its command-line selector is
+`--password-store=gnome-libsecret`. The probe checks the actual reported backend.
+
 The helper uses no default/mock store, keyutils-only store, or plaintext fallback.
 The fixed service is `com.krazyjakee.21x.credentials.v1`; the account identifies
 the profile. Native create refuses an existing entry and never treats locked or
