@@ -1,4 +1,10 @@
-import { getSecretStorage } from '../platform/secret-storage'
+import {
+  AUTHENTICATED_SECRET_STORAGE_FORMAT,
+  ELECTRON_SECRET_STORAGE_FORMAT,
+  getSecretStorage,
+  type SecretStorage,
+  type SecretStorageFormatId
+} from '../platform/secret-storage'
 import { TASK_ROLE_TASK, isCoordinatorRole, type TaskRole } from '../../shared/task-roles'
 import { DEFAULT_PROJECT_ID } from '../../shared/projects'
 import type {
@@ -32,30 +38,83 @@ export function isApiKeySetting(key: string): boolean {
   return key.endsWith('_api_key')
 }
 
-/** Marks a settings value (TEXT column) as safeStorage ciphertext in base64. */
-const ENCRYPTED_SETTING_PREFIX = 'safeStorage:v1:'
+const LEGACY_SETTING_PREFIX = 'safeStorage:v1:'
+const AUTHENTICATED_SETTING_PREFIX = `21x-credential:${AUTHENTICATED_SECRET_STORAGE_FORMAT}:`
+
+export class CredentialSettingFormatError extends Error {
+  readonly code = 'CREDENTIAL_SETTING_FORMAT_INVALID'
+  constructor() {
+    super('CREDENTIAL_SETTING_FORMAT_INVALID')
+    this.name = 'CredentialSettingFormatError'
+  }
+}
+
+function storageFormat(storage: SecretStorage): SecretStorageFormatId {
+  const format = storage.formatId === undefined ? ELECTRON_SECRET_STORAGE_FORMAT : storage.formatId
+  if (format !== ELECTRON_SECRET_STORAGE_FORMAT && format !== AUTHENTICATED_SECRET_STORAGE_FORMAT) {
+    throw new CredentialSettingFormatError()
+  }
+  return format
+}
+
+function requireSettingEncryption(storage: SecretStorage): void {
+  try {
+    if (!storage.isEncryptionAvailable()) throw new CredentialSettingFormatError()
+  } catch { throw new CredentialSettingFormatError() }
+}
+
+/**
+ * Credential settings reserve these prefixes, including unsupported versions.
+ * Ordinary settings bypass this codec. Startup must not re-encrypt an unknown
+ * envelope as a plaintext API key or guess which provider can decrypt it.
+ */
+function settingFormat(value: string): SecretStorageFormatId | undefined {
+  if (value.startsWith(LEGACY_SETTING_PREFIX)) return ELECTRON_SECRET_STORAGE_FORMAT
+  if (value.startsWith(AUTHENTICATED_SETTING_PREFIX)) return AUTHENTICATED_SECRET_STORAGE_FORMAT
+  if (value.startsWith('safeStorage:') || value.startsWith('21x-credential:')) throw new CredentialSettingFormatError()
+  return undefined
+}
 
 export function isEncryptedSettingValue(value: string): boolean {
-  return value.startsWith(ENCRYPTED_SETTING_PREFIX)
+  return settingFormat(value) !== undefined
 }
 
-/** Same policy as encryptSecret: keychain when available, plaintext fallback. */
+/** Electron retains its legacy fallback; authenticated providers require encryption. */
 export function encryptSettingValue(value: string): string {
   const storage = getSecretStorage()
-  if (!value || !storage.isEncryptionAvailable()) return value
-  return ENCRYPTED_SETTING_PREFIX + storage.encryptString(value).toString('base64')
+  const format = storageFormat(storage)
+  if (format === ELECTRON_SECRET_STORAGE_FORMAT) {
+    if (!value || !storage.isEncryptionAvailable()) return value
+    return LEGACY_SETTING_PREFIX + storage.encryptString(value).toString('base64')
+  }
+  requireSettingEncryption(storage)
+  if (!value) return value
+  try { return AUTHENTICATED_SETTING_PREFIX + storage.encryptString(value).toString('base64') }
+  catch { throw new CredentialSettingFormatError() }
 }
 
-/** Plaintext (legacy or fallback) values pass through; unreadable ciphertext yields ''. */
+/** Legacy plaintext passes through; an incompatible reserved wrapper fails closed. */
 export function decryptSettingValue(value: string): string {
   const storage = getSecretStorage()
-  if (!isEncryptedSettingValue(value)) return value
-  if (!storage.isEncryptionAvailable()) return ''
-  try {
-    return storage.decryptString(Buffer.from(value.slice(ENCRYPTED_SETTING_PREFIX.length), 'base64'))
-  } catch {
-    return ''
+  const providerFormat = storageFormat(storage)
+  const format = settingFormat(value)
+  if (format && format !== providerFormat) throw new CredentialSettingFormatError()
+  if (providerFormat === AUTHENTICATED_SECRET_STORAGE_FORMAT) requireSettingEncryption(storage)
+  if (!format) return value
+  if (format === ELECTRON_SECRET_STORAGE_FORMAT) {
+    // Preserve Electron's existing availability/decode behavior and stored bytes.
+    if (!storage.isEncryptionAvailable()) return ''
+    try { return storage.decryptString(Buffer.from(value.slice(LEGACY_SETTING_PREFIX.length), 'base64')) }
+    catch { return '' }
   }
+  const encoded = value.slice(AUTHENTICATED_SETTING_PREFIX.length)
+  // Avoid unbounded allocation or accepting Node's permissive base64 decoding.
+  // Limit accommodates the provider's 1 MiB plaintext plus envelope overhead.
+  if (!encoded || encoded.length > 1_398_200 || encoded.length % 4 !== 0) throw new CredentialSettingFormatError()
+  const ciphertext = Buffer.from(encoded, 'base64')
+  if (ciphertext.toString('base64') !== encoded) throw new CredentialSettingFormatError()
+  try { return storage.decryptString(ciphertext) }
+  catch { throw new CredentialSettingFormatError() }
 }
 
 export const UPDATABLE_COLUMNS = new Set([

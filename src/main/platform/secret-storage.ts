@@ -10,7 +10,17 @@
  * A future native provider must complete any asynchronous initialization before
  * registration; database serialization must not hide synchronous native RPC.
  */
+export const ELECTRON_SECRET_STORAGE_FORMAT = 'electron.safeStorage.v1'
+export const AUTHENTICATED_SECRET_STORAGE_FORMAT = '21x.aes256gcm.v1'
+export type SecretStorageFormatId = typeof ELECTRON_SECRET_STORAGE_FORMAT | typeof AUTHENTICATED_SECRET_STORAGE_FORMAT
+
 export interface SecretStorage {
+  /**
+   * Identifies ciphertext compatibility, not an OS-store security attestation.
+   * Absence is the transitional, three-method Electron legacy contract only;
+   * new providers must declare their format and cannot consume another wrapper.
+   */
+  readonly formatId?: SecretStorageFormatId
   isEncryptionAvailable(): boolean
   encryptString(value: string): Buffer
   decryptString(value: Buffer): string

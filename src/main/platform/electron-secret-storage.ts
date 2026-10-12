@@ -1,5 +1,5 @@
 import { safeStorage } from 'electron'
-import type { SecretStorage } from './secret-storage'
+import { ELECTRON_SECRET_STORAGE_FORMAT, type SecretStorage } from './secret-storage'
 
 /**
  * Preserve the shipping Electron implementation and byte formats. Resolve its
@@ -7,6 +7,7 @@ import type { SecretStorage } from './secret-storage'
  * Register after Electron is ready; do not probe the keychain at module import.
  */
 export const electronSecretStorage: SecretStorage = {
+  formatId: ELECTRON_SECRET_STORAGE_FORMAT,
   isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
   encryptString: (value) => safeStorage.encryptString(value),
   decryptString: (value) => safeStorage.decryptString(value)

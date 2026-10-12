@@ -1,8 +1,8 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import { TextDecoder } from 'node:util'
-import type { SecretStorage } from './secret-storage'
+import { AUTHENTICATED_SECRET_STORAGE_FORMAT, type SecretStorage } from './secret-storage'
 
-export const AUTHENTICATED_SECRET_FORMAT = '21x.aes256gcm.v1'
+export const AUTHENTICATED_SECRET_FORMAT = AUTHENTICATED_SECRET_STORAGE_FORMAT
 const MAGIC = Buffer.from('21x-secret\x01', 'ascii')
 const NONCE_BYTES = 12
 const TAG_BYTES = 16
@@ -22,6 +22,7 @@ export class ProtectedSecretStorageError extends Error {
  * format is experimental until the T03/T04 contract review, not legacy safeStorage.
  */
 export class AuthenticatedSecretStorage implements SecretStorage {
+  readonly formatId = AUTHENTICATED_SECRET_FORMAT
   #key: Buffer | undefined
   readonly #aad: Buffer
 
