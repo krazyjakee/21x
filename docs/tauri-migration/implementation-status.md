@@ -57,8 +57,25 @@ CARGO_BUILD_JOBS=1 cargo run --locked --manifest-path src-tauri/Cargo.toml -p tw
 
 This launches the real supervisor, creates a temporary profile, runs the five checks, shuts down its child, and exits unsuccessfully if any check fails. It proves runtime/module compatibility on the executing machine; it does not test bundle layout, WebView behavior or OS distribution signing.
 
+## Second feasibility batch, 2026-10-12
+
+Three workstreams again used separate worktrees, shared dependency tooling and centralized sequential local checks. Native compilation ran on an ephemeral Linux runner with one Cargo/native job; no WebKit libraries were installed on this machine. The manual native workflow retains small evidence separately from the larger Debian package, with seven-day retention and no release publication.
+
+| Delivered | Evidence and scope |
+| --- | --- |
+| [IPC ownership audit](ownership-audit.md) | Assigns observed channel families, resolves five constant references manually, and reviews nine parameter wrappers; identifies additional agent/UI/cleanup events omitted by literal scanning. Full T00/T04 contracts and performance evidence remain open |
+| [Browser foundation](browser-feasibility.md), [#198](https://github.com/krazyjakee/21x/issues/198) | HTTP(S) navigation policy, exact task/panel/session authority, immutable approval arguments, revocation/disposal and bounded outstanding work; 44 authority tests passed. No native browser panel or screenshot/recording implementation |
+| [Credential rehearsal](credential-migration.md), [#199](https://github.com/krazyjakee/21x/issues/199) | Explicit legacy formats/provenance, protected destination assertion and round-trip verification, immutable encrypted-only all-or-nothing output; 23 tests passed, including leading BOM preservation. No OS store or live profile import |
+| [Installed native host](runtime-foundation.md), [#197](https://github.com/krazyjakee/21x/issues/197) | Ubuntu 24.04 debug Debian package compiled, installed and launched under Xvfb/D-Bus with system Node hidden. Real renderer ping, operation allowlist rejection, remote navigation denial, all five runtime probes, window close/shutdown and no surviving owned running process passed. See [smoke report](evidence/linux-x64-installed-gui.json) |
+
+The final source revision `0946d24775917201d6389bc713dced198058cdaf` passed [Verify](https://github.com/krazyjakee/21x/actions/runs/38267753614): lint, typecheck, desktop/mobile builds, **5,007 tests passed / 4 skipped**, 21 subprocess/staging tests, seven Rust supervisor tests and both desktop UI regressions. The [native package workflow](https://github.com/krazyjakee/21x/actions/runs/38267769673) passed independently. Local validation passed 153 focused cases, full typecheck, changed-file lint, inventory refresh and Rust formatting. Current inventory scans 660 files; IPC/reference counts remain unchanged.
+
+An intermediate Verify run timed out in an unchanged real-`gh` integration test at its five-second suite deadline. That test now bounds each subprocess to ten seconds and allows twenty seconds for its multiple calls. The focused case and complete final suite passed. Production issue-writing behavior is unchanged.
+
+Linux debug-package proof does not establish release signing, AppImage/macOS/Windows installs, child reaping, abrupt parent-death/process-tree guarantees, cross-WebView Tauri ACL denial, browser parity or real legacy credential conversion. Foundation issue completion does not close the overarching [#193](https://github.com/krazyjakee/21x/issues/193) or G0/G1.
+
 ## Remaining work and next batch
 
-Complete the native GUI build and packaged runtime evidence in #197, then prove browser replacement (T02) and real legacy credential conversion (T03). Finish T00's handler/resource ownership audit and performance baseline. Resolve the decision register and accept G0/G1 before broad feature porting.
+Extend native packaging/runtime evidence beyond the Linux debug package, prototype real task-linked browser surfaces (T02), and produce real legacy Electron/OS credential conversion fixtures (T03). Finish T00's resource/process ownership audit and performance baseline. Resolve the decision register and accept G0/G1 before broad feature porting.
 
 Current gaps include all macOS/Windows evidence, browser panels/automation/recording, native encrypted fixtures and conversion/rollback, production profile locking, parent-death/process-tree guarantees, complete command/permission mappings, renderer bridge adoption, domain engine extraction, task/session parity and installers/updates. No schema or live credential migration has run, and no migration release has been published.

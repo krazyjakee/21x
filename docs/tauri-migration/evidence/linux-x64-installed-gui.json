@@ -1,0 +1,65 @@
+{
+  "provenance": {
+    "sourceCommit": "0946d24775917201d6389bc713dced198058cdaf",
+    "workflowRun": "https://github.com/krazyjakee/21x/actions/runs/38267769673",
+    "runner": "ubuntu-24.04",
+    "package": "21x-tauri-feasibility 0.1.0 amd64 (debug Debian)",
+    "packageSha256": "b3bdd3763c06f21f1acc093d64eb90012b67a276a6ceb03a072702565e0dbb1e",
+    "gtk": "3.24.41",
+    "webkitGtk": "2.52.6",
+    "librsvg": "2.58.0"
+  },
+  "gui": {
+    "remoteNavigationDenied": true,
+    "rendererPing": true,
+    "restrictedOperationDenied": true,
+    "webviewLoadFinished": true,
+    "windowCloseObserved": true,
+    "windowCloseRequested": true
+  },
+  "passed": true,
+  "runtime": {
+    "developmentFrontend": false,
+    "initialized": true,
+    "nativeProbe": {
+      "arch": "x64",
+      "checks": {
+        "@anthropic-ai/claude-agent-sdk": {
+          "importedOnly": true,
+          "ok": true
+        },
+        "@opencode-ai/sdk": {
+          "importedOnly": true,
+          "ok": true
+        },
+        "pty": {
+          "ok": true
+        },
+        "sqlite": {
+          "inMemory": true,
+          "ok": true
+        },
+        "worker": {
+          "ok": true,
+          "realFile": true
+        }
+      },
+      "nodeAbi": "127",
+      "nodeVersion": "v22.23.2",
+      "ok": true,
+      "platform": "linux"
+    },
+    "profileRoot": "/home/runner/work/_temp/tauri-smoke/data/com.krazyjakee.21x.tauri-feasibility/feasibility",
+    "resourceRoot": "/usr/lib/21x Tauri Feasibility/resources",
+    "systemNodeHidden": true
+  },
+  "schemaVersion": 1,
+  "shutdown": {
+    "engineUnavailable": true
+  },
+  "stage": "complete",
+  "verification": {
+    "installedResources": true,
+    "ownedRunningProcessesAfterExit": []
+  }
+}

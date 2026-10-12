@@ -20,6 +20,8 @@ These documents prepare the work and its review criteria. They do not authorize 
 | [Agent workstreams and task cards](workstreams.md) | Coordinator and implementers: file ownership, dependencies, merge order, handoffs, and ready-to-assign tasks |
 | [Validation and rollout](validation.md) | Reviewers and release owner: parity matrix, fixtures, evidence, cutover, rollback, and completion gates |
 | [IPC ownership audit](ownership-audit.md) | Bridge and feature owners: operation families, unresolved references, and wrapper events missing from literal scans |
+| [Browser feasibility](browser-feasibility.md) | Browser/native owners: capability matrix and bounded task/session policy |
+| [Credential rehearsal](credential-migration.md) | Data/security owners: legacy formats, conversion preparation and remaining OS evidence |
 
 The existing [AGENTS.md](../../AGENTS.md), [task lifecycle](../task-lifecycle.md), [transcript design](../transcript-event-sourcing-rewrite.md), [connector security](../connectors-security.md), and [voice documentation](../voice.md) describe behavior to preserve. Use current code when an older architectural description disagrees with it. For example, `src/main/database/schema.ts` currently declares schema **32**; `AGENTS.md` describes schema 17.
 
