@@ -1,0 +1,51 @@
+name: Desktop Electron performance baseline
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tauri-native-linux
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      HUSKY: '0'
+      MAKEFLAGS: '-j1'
+      npm_package_config_node_gyp_jobs: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.2'
+          cache: pnpm
+      - name: Install locked Electron native dependencies once
+        run: pnpm install --frozen-lockfile
+      - name: Build the actual desktop application
+        run: pnpm exec electron-vite build
+      - name: Configure Chromium sandbox helper
+        run: |
+          sandbox="$(node -p "require('node:path').join(require('node:path').dirname(require('electron')), 'chrome-sandbox')")"
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
+      - name: Measure three sequential isolated application starts
+        run: |
+          mkdir -p baseline-evidence
+          git rev-parse HEAD > baseline-evidence/commit.txt
+          node --version > baseline-evidence/node.txt
+          uname -srmo > baseline-evidence/platform.txt
+          dbus-run-session -- xvfb-run --auto-servernum node scripts/desktop-baseline/run.mjs > baseline-evidence/electron.json
+      - name: Retain metadata only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-baseline-${{ github.sha }}
+          path: baseline-evidence/
+          retention-days: 7
+          if-no-files-found: warn
