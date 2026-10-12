@@ -33,13 +33,13 @@ export async function stageModules(directory) {
   }
 }
 
-function electronFrame(executable, helper, directory, request, legacyBackend, allowedEnvironment, proofOnlyLinuxNoSandbox = false) {
-  return new Promise((resolve, reject) => {
+export function electronFrame(executable, helper, directory, request, legacyBackend, allowedEnvironment, proofOnlyLinuxNoSandbox = false, platform = process.platform) {
+  return new Promise((resolveFrame, reject) => {
     const token = randomBytes(32).toString('hex')
     const args = [directory]
-    if (process.platform === 'win32') args.push('--credential-pipe-attestor=' + resolve(helper))
-    if (process.platform === 'linux') args.push('--password-store=' + (legacyBackend === 'basic_text' ? 'basic' : 'gnome-libsecret'))
-    if (process.platform === 'linux' && (process.getuid?.() === 0 || proofOnlyLinuxNoSandbox)) args.push('--no-sandbox')
+    if (platform === 'win32') args.push('--credential-pipe-attestor=' + resolve(helper))
+    if (platform === 'linux') args.push('--password-store=' + (legacyBackend === 'basic_text' ? 'basic' : 'gnome-libsecret'))
+    if (platform === 'linux' && (process.getuid?.() === 0 || proofOnlyLinuxNoSandbox)) args.push('--no-sandbox')
     const child = spawn(executable, args, { stdio: ['pipe', 'pipe', 'pipe'], env: allowedEnvironment, windowsHide: true, detached: process.platform !== 'win32' })
     const owned = observeOwnedProcess(child, process.platform !== 'win32')
     const decoder = new StringDecoder('utf8')
@@ -68,7 +68,7 @@ function electronFrame(executable, helper, directory, request, legacyBackend, al
         child.stdout.destroy()
         child.stderr.destroy()
         diagnosticTail = ''
-        resolve({ ...response, privatePipeAttested })
+        resolveFrame({ ...response, privatePipeAttested })
       }
     }
     const timer = setTimeout(() => finish('LEGACY_UNAVAILABLE'), 35_000)
@@ -101,7 +101,7 @@ function electronFrame(executable, helper, directory, request, legacyBackend, al
           // this owned private pipe. Successful frames always require the nonce.
           const earlyFailure = message.token === undefined && message.ok === false && message.code === 'LEGACY_PROBE_FAILED' && SOURCE_PHASES.has(message.phase)
           if (message.token !== token && !earlyFailure || response) { finish('LEGACY_PROBE_FAILED'); return }
-          if (process.platform !== 'win32' && message.token === token) privatePipeAttested = true
+          if (platform !== 'win32' && message.token === token) privatePipeAttested = true
           response = message
         } catch { finish('LEGACY_PROBE_FAILED') }
       }
