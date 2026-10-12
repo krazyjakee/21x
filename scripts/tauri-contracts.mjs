@@ -113,7 +113,30 @@ export function generateDesktopApi(declarationSource) {
     printed
 }
 
-export function buildOperationManifest(inventory, preloadSource) {
+export function reviewEventForwarding(inventory, operations, review) {
+  const unresolved = inventory.operations.filter(item => !item.channel)
+  const policies = review?.policies ?? []
+  const events = new Map(operations.filter(item => item.kind === 'event' && item.disposition === 'retained').map(item => [item.name, item]))
+  const seen = new Set()
+  const references = unresolved.map(reference => {
+    const matches = policies.filter(policy => ['file', 'line', 'column', 'target', 'method', 'channelExpression'].every(key => policy.source?.[key] === reference[key]))
+    if (matches.length !== 1) return { ...reference, forwardingReview: null }
+    const policy = matches[0]
+    if (seen.has(policy.id) || !policy.allowedNames?.length || new Set(policy.allowedNames).size !== policy.allowedNames.length ||
+        policy.allowedNames.some(name => !events.has(name) || policy.channelOwners?.[name] !== events.get(name).owner || policy.destination !== events.get(name).destination) ||
+        Object.keys(policy.channelOwners ?? {}).length !== policy.allowedNames.length) throw new Error('Invalid explicit event forwarding review')
+    seen.add(policy.id)
+    return { ...reference, forwardingReview: { policyId: policy.id, producerOwner: policy.producerOwner,
+      allowedNames: policy.allowedNames, channelOwners: policy.channelOwners, destination: policy.destination,
+      runtimeEnforcement: policy.runtimeEnforcement } }
+  })
+  return { references, review: { reviewVersion: review?.reviewVersion ?? 1,
+    status: 'manual-source-review; not runtime validation or namespace authority',
+    reviewedReferences: seen.size, unreviewedReferences: references.length - seen.size,
+    stalePolicies: policies.filter(policy => !seen.has(policy.id)).map(policy => policy.id), policies } }
+}
+
+export function buildOperationManifest(inventory, preloadSource, forwardingReview) {
   const mappings = preloadMappings(preloadSource, inventory.operations)
   const channels = [...new Set(inventory.operations.map(item => item.channel).filter(Boolean))].sort()
   const operations = []
@@ -144,10 +167,11 @@ export function buildOperationManifest(inventory, preloadSource) {
         references: references.map(({ file, line, column, target, method, resolution }) => ({ file, line, column, target, method, resolution })) })
     }
   }
+  const forwarding = reviewEventForwarding(inventory, operations, forwardingReview)
   return { contractVersion: 1, status: 'contract-foundation; G1 not accepted',
     removedFeatures: ['embedded-browser', 'remote-webpage-panels', 'built-in-browser-tools', 'browser-recording-capture', 'browser-cookie-import'],
     retainedSecurity: ['trusted-app-webview', 'sandboxed-artifact-previews', 'external-OAuth', 'external-link-validation'],
-    operations, unresolvedReferences: inventory.operations.filter(item => !item.channel),
+    operations, unresolvedReferences: forwarding.references, forwardingReview: forwarding.review,
     localOnlyPreloadMethods: [{ apiPath: ['webUtils', 'getPathForFile'], portableReplacement: 'required; File objects are not stdio payloads' }] }
 }
 
@@ -180,12 +204,19 @@ export function generateOperationTypes(manifest) {
 export function contractOutputs(root) {
   const inventory = scanRepository(root)
   const preloadSource = readFileSync(resolve(root, 'src/preload/index.ts'), 'utf8')
-  const manifest = buildOperationManifest(inventory, preloadSource)
+  const review = JSON.parse(readFileSync(resolve(root, 'docs/tauri-migration/event-forwarding-review.json'), 'utf8'))
+  const manifest = buildOperationManifest(inventory, preloadSource, review)
+  if (manifest.forwardingReview.unreviewedReferences || manifest.forwardingReview.stalePolicies.length) throw new Error('Event forwarding review must cover each current dynamic source site exactly')
   return {
     'docs/tauri-migration/inventory.json': serializeInventory(inventory),
     'docs/tauri-migration/operations.json': serializeInventory(manifest),
     'src/shared/desktop-api.ts': generateDesktopApi(readFileSync(resolve(root, 'src/renderer/src/types/electron.d.ts'), 'utf8')),
-    'src/shared/desktop-operations.ts': generateOperationTypes(manifest)
+    'src/shared/desktop-operations.ts': generateOperationTypes(manifest),
+    'src/shared/desktop-event-forwarding.ts': '// Generated finite source-review map; no runtime forwarding is installed by this declaration.\n' +
+      'export const DESKTOP_EVENT_FORWARDING = ' + JSON.stringify(Object.fromEntries(review.policies.map(policy => [policy.id, policy])), null, 2) + ' as const\n' +
+      'export type DesktopForwardingPolicyId = keyof typeof DESKTOP_EVENT_FORWARDING\n' +
+      'export function isReviewedForwardedName(policyId: DesktopForwardingPolicyId, value: unknown): value is string {\n' +
+      '  return Object.hasOwn(DESKTOP_EVENT_FORWARDING, policyId) && typeof value === "string" && DESKTOP_EVENT_FORWARDING[policyId].allowedNames.some(name => name === value)\n}\n'
   }
 }
 

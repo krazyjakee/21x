@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 // @ts-expect-error -- parse-only .mjs generator has no declaration file
-import { buildOperationManifest, generateDesktopApi, generateOperationTypes } from './tauri-contracts.mjs'
+import { buildOperationManifest, generateDesktopApi, generateOperationTypes, reviewEventForwarding } from './tauri-contracts.mjs'
 // @ts-expect-error -- parse-only .mjs scanner has no declaration file
 import { createInventory } from './tauri-inventory.mjs'
 
@@ -44,5 +44,22 @@ describe('desktop contract generation', () => {
     expect(buildOperationManifest(createInventory({ sources }), '').unresolvedReferences).toHaveLength(1)
     const unknown = createInventory({ sources: [{ file: 'src/main/a.ts', source: `import { ipcMain } from 'electron'; ipcMain.handle('newFamily:grantEverything', fn)` }] })
     expect(() => buildOperationManifest(unknown, '')).toThrow('Unassigned operation family')
+  })
+
+  it('attaches finite authoritative source ownership without hiding dynamic AST evidence', () => {
+    const source = { file: 'src/main/relay.ts', line: 2, column: 3, target: 'guardedIpcSend', method: 'send', channelExpression: 'channel' }
+    const inventory = { operations: [{ ...source, channel: null, resolution: 'unresolved' }] }
+    const operations = [{ name: 'task:updated', kind: 'event', disposition: 'retained', owner: 'service', destination: 'trusted-desktop-main' }]
+    const policy = { id: 'relay', source, producerOwner: 'task-domain', allowedNames: ['task:updated'], channelOwners: { 'task:updated': 'service' }, destination: 'trusted-desktop-main' }
+    const audited = reviewEventForwarding(inventory, operations, { policies: [policy] })
+    expect(audited.review.reviewedReferences).toBe(1)
+    expect(audited.review.unreviewedReferences).toBe(0)
+    expect(audited.references[0].channel).toBeNull()
+    expect(audited.references[0].resolution).toBe('unresolved')
+    expect(audited.references[0].forwardingReview.allowedNames).toEqual(['task:updated'])
+    expect(() => reviewEventForwarding(inventory, operations, { policies: [{ ...policy, allowedNames: ['task:*'], channelOwners: { 'task:*': 'service' } }] })).toThrow()
+    expect(() => reviewEventForwarding(inventory, operations, { policies: [{ ...policy, channelOwners: { 'task:updated': 'native-host' } }] })).toThrow()
+    expect(() => reviewEventForwarding(inventory, operations, { policies: [{ ...policy, destination: 'remote-webview' }] })).toThrow()
+    expect(reviewEventForwarding(inventory, operations, { policies: [{ ...policy, source: { ...source, line: 3 } }] }).review.unreviewedReferences).toBe(1)
   })
 })

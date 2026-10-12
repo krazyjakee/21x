@@ -1,5 +1,488 @@
 {
   "contractVersion": 1,
+  "forwardingReview": {
+    "policies": [
+      {
+        "allowedNames": [
+          "agent:incompatible-session",
+          "agent:recoveryStateChanged",
+          "agent:startQueueChanged",
+          "agent:status",
+          "artifact:updated",
+          "concurrency:changed",
+          "project:statusChanged",
+          "task:source-action-failed",
+          "task:updated"
+        ],
+        "channelOwners": {
+          "agent:incompatible-session": "service",
+          "agent:recoveryStateChanged": "service",
+          "agent:startQueueChanged": "service",
+          "agent:status": "service",
+          "artifact:updated": "service",
+          "concurrency:changed": "service",
+          "project:statusChanged": "service",
+          "task:source-action-failed": "service",
+          "task:updated": "service"
+        },
+        "destination": "trusted-desktop-main",
+        "id": "agent-broadcast",
+        "producerOwner": "agent-manager",
+        "review": "broadcast accepts sendToRenderer outgoing names plus direct artifact:updated; transcript:changed bypasses broadcast through the durable projection sender.",
+        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding",
+        "source": {
+          "channelExpression": "channel",
+          "column": 7,
+          "file": "src/main/agent-manager.ts",
+          "line": 5255,
+          "method": "send",
+          "target": "guardedIpcSend"
+        }
+      },
+      {
+        "allowedNames": [
+          "agent:incompatible-session",
+          "agent:recoveryStateChanged",
+          "agent:startQueueChanged",
+          "agent:status",
+          "concurrency:changed",
+          "project:statusChanged",
+          "task:source-action-failed",
+          "task:updated"
+        ],
+        "channelOwners": {
+          "agent:incompatible-session": "service",
+          "agent:recoveryStateChanged": "service",
+          "agent:startQueueChanged": "service",
+          "agent:status": "service",
+          "concurrency:changed": "service",
+          "project:statusChanged": "service",
+          "task:source-action-failed": "service",
+          "task:updated": "service"
+        },
+        "destination": "trusted-desktop-main",
+        "id": "agent-persist-or-broadcast",
+        "persistenceOnlyInputs": [
+          "agent:output",
+          "agent:output-batch"
+        ],
+        "producerInputNames": [
+          "agent:incompatible-session",
+          "agent:output",
+          "agent:output-batch",
+          "agent:recoveryStateChanged",
+          "agent:startQueueChanged",
+          "agent:status",
+          "concurrency:changed",
+          "project:statusChanged",
+          "task:source-action-failed",
+          "task:updated"
+        ],
+        "producerOwner": "agent-manager",
+        "review": "agent:output and agent:output-batch are internal persistence inputs and return before this forwarding site.",
+        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding",
+        "source": {
+          "channelExpression": "channel",
+          "column": 5,
+          "file": "src/main/agent-manager.ts",
+          "line": 5286,
+          "method": "send",
+          "target": "reviewed-event-wrapper"
+        }
+      },
+      {
+        "allowedNames": [
+          "updater:status"
+        ],
+        "channelOwners": {
+          "updater:status": "native-host"
+        },
+        "destination": "trusted-desktop-main",
+        "id": "updater-desktop",
+        "producerOwner": "native-updater",
+        "review": "Only updater:status is passed by the current updater owner; native port owns its replacement.",
+        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding",
+        "source": {
+          "channelExpression": "channel",
+          "column": 3,
+          "file": "src/main/auto-updater.ts",
+          "line": 267,
+          "method": "send",
+          "target": "guardedIpcSend"
+        }
+      },
+      {
+        "allowedNames": [
+          "agent-installer:progress",
+          "agent:incompatible-session",
+          "agent:recoveryStateChanged",
+          "agent:startQueueChanged",
+          "agent:status",
+          "artifact:updated",
+          "chat:event",
+          "commander:event",
+          "concurrency:changed",
+          "heartbeat:alert",
+          "heartbeat:disabled",
+          "menu:check-for-updates",
+          "mobile:device-connected",
+          "mobile:pairing-initiated",
+          "oauth:callback",
+          "overdue:check",
+          "project:changed",
+          "project:statusChanged",
+          "skills:changed",
+          "task:checkpointAnswered",
+          "task:created",
+          "task:deleted",
+          "task:source-action-failed",
+          "task:subtasks-reordered",
+          "task:updated",
+          "tasks:refresh",
+          "terminal:data",
+          "terminal:exit",
+          "transcript:changed",
+          "ui:command",
+          "updater:status",
+          "voice:dictate",
+          "voice:error",
+          "voice:final",
+          "voice:hotkey",
+          "voice:navigate",
+          "voice:outcome",
+          "voice:partial",
+          "voice:runtimeProgress",
+          "voice:segment",
+          "voice:speech:chunk",
+          "voice:speech:end",
+          "voice:speech:start",
+          "voice:state",
+          "voice:status",
+          "voice:tts:modelProgress",
+          "voice:tts:status",
+          "workspace:cleanup-complete",
+          "workspace:cleanup-progress",
+          "worktree:progress"
+        ],
+        "channelOwners": {
+          "agent-installer:progress": "service",
+          "agent:incompatible-session": "service",
+          "agent:recoveryStateChanged": "service",
+          "agent:startQueueChanged": "service",
+          "agent:status": "service",
+          "artifact:updated": "service",
+          "chat:event": "service",
+          "commander:event": "service",
+          "concurrency:changed": "service",
+          "heartbeat:alert": "service",
+          "heartbeat:disabled": "service",
+          "menu:check-for-updates": "native-host",
+          "mobile:device-connected": "service",
+          "mobile:pairing-initiated": "service",
+          "oauth:callback": "service",
+          "overdue:check": "service",
+          "project:changed": "service",
+          "project:statusChanged": "service",
+          "skills:changed": "service",
+          "task:checkpointAnswered": "service",
+          "task:created": "service",
+          "task:deleted": "service",
+          "task:source-action-failed": "service",
+          "task:subtasks-reordered": "service",
+          "task:updated": "service",
+          "tasks:refresh": "service",
+          "terminal:data": "service",
+          "terminal:exit": "service",
+          "transcript:changed": "service",
+          "ui:command": "service",
+          "updater:status": "native-host",
+          "voice:dictate": "service",
+          "voice:error": "service",
+          "voice:final": "service",
+          "voice:hotkey": "service",
+          "voice:navigate": "service",
+          "voice:outcome": "service",
+          "voice:partial": "service",
+          "voice:runtimeProgress": "service",
+          "voice:segment": "service",
+          "voice:speech:chunk": "service",
+          "voice:speech:end": "service",
+          "voice:speech:start": "service",
+          "voice:state": "service",
+          "voice:status": "service",
+          "voice:tts:modelProgress": "service",
+          "voice:tts:status": "service",
+          "workspace:cleanup-complete": "service",
+          "workspace:cleanup-progress": "service",
+          "worktree:progress": "service"
+        },
+        "destination": "trusted-desktop-main",
+        "directProducerNames": [
+          "agent-installer:progress",
+          "agent:status",
+          "chat:event",
+          "commander:event",
+          "menu:check-for-updates",
+          "oauth:callback",
+          "overdue:check",
+          "project:changed",
+          "skills:changed",
+          "task:created",
+          "task:deleted",
+          "task:updated",
+          "tasks:refresh",
+          "terminal:data",
+          "terminal:exit",
+          "transcript:changed",
+          "worktree:progress"
+        ],
+        "id": "guarded-direct",
+        "producerOwner": "transport",
+        "relayPolicyIds": [
+          "agent-broadcast",
+          "updater-desktop",
+          "heartbeat-desktop",
+          "task-api-relay",
+          "mobile-to-desktop-relay",
+          "voice-desktop-relay",
+          "workspace-cleanup-desktop"
+        ],
+        "review": "Finite reviewed producer closure; transport has no independent permission or domain owner.",
+        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding",
+        "source": {
+          "channelExpression": "channel",
+          "column": 5,
+          "file": "src/main/guarded-ipc-send.ts",
+          "line": 54,
+          "method": "send",
+          "target": "webContents"
+        }
+      },
+      {
+        "allowedNames": [
+          "agent:output-batch",
+          "transcript:changed"
+        ],
+        "channelOwners": {
+          "agent:output-batch": "service",
+          "transcript:changed": "service"
+        },
+        "destination": "trusted-desktop-main",
+        "id": "guarded-split",
+        "producerOwner": "transport",
+        "review": "The splitting branch explicitly checks these two legacy contracts; raw agent output batches currently persist rather than broadcast.",
+        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding",
+        "source": {
+          "channelExpression": "channel",
+          "column": 9,
+          "file": "src/main/guarded-ipc-send.ts",
+          "line": 117,
+          "method": "send",
+          "target": "webContents"
+        }
+      },
+      {
+        "allowedNames": [
+          "heartbeat:alert",
+          "heartbeat:disabled",
+          "task:updated",
+          "tasks:refresh"
+        ],
+        "channelOwners": {
+          "heartbeat:alert": "service",
+          "heartbeat:disabled": "service",
+          "task:updated": "service",
+          "tasks:refresh": "service"
+        },
+        "destination": "trusted-desktop-main",
+        "id": "heartbeat-desktop",
+        "producerOwner": "heartbeat-scheduler",
+        "review": "Only four current scheduler event names.",
+        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding",
+        "source": {
+          "channelExpression": "channel",
+          "column": 7,
+          "file": "src/main/heartbeat-scheduler.ts",
+          "line": 795,
+          "method": "send",
+          "target": "guardedIpcSend"
+        }
+      },
+      {
+        "allowedNames": [
+          "artifact:updated",
+          "project:statusChanged",
+          "task:checkpointAnswered",
+          "task:created",
+          "task:updated",
+          "ui:command"
+        ],
+        "channelOwners": {
+          "artifact:updated": "service",
+          "project:statusChanged": "service",
+          "task:checkpointAnswered": "service",
+          "task:created": "service",
+          "task:updated": "service",
+          "ui:command": "service"
+        },
+        "destination": "trusted-desktop-main",
+        "id": "task-api-relay",
+        "mobileNames": [
+          "artifact:updated",
+          "project:statusChanged",
+          "task:checkpointAnswered",
+          "task:created",
+          "task:updated",
+          "ui:command"
+        ],
+        "producerOwner": "authenticated-task-api",
+        "review": "setTaskApiNotifier relays six route-owned names to desktop and the separately authenticated mobile broadcaster.",
+        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding",
+        "source": {
+          "channelExpression": "channel",
+          "column": 7,
+          "file": "src/main/index.ts",
+          "line": 416,
+          "method": "send",
+          "target": "guardedIpcSend"
+        }
+      },
+      {
+        "allowedNames": [
+          "mobile:device-connected",
+          "mobile:pairing-initiated",
+          "task:created",
+          "task:subtasks-reordered",
+          "task:updated"
+        ],
+        "channelOwners": {
+          "mobile:device-connected": "service",
+          "mobile:pairing-initiated": "service",
+          "task:created": "service",
+          "task:subtasks-reordered": "service",
+          "task:updated": "service"
+        },
+        "destination": "trusted-desktop-main",
+        "id": "mobile-to-desktop-relay",
+        "producerOwner": "authenticated-mobile-api",
+        "review": "setMobileApiNotifier relays five mobile-owned event names to desktop only.",
+        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding",
+        "source": {
+          "channelExpression": "channel",
+          "column": 7,
+          "file": "src/main/index.ts",
+          "line": 435,
+          "method": "send",
+          "target": "guardedIpcSend"
+        }
+      },
+      {
+        "allowedNames": [
+          "task:created",
+          "task:updated",
+          "voice:dictate",
+          "voice:error",
+          "voice:final",
+          "voice:hotkey",
+          "voice:navigate",
+          "voice:outcome",
+          "voice:partial",
+          "voice:runtimeProgress",
+          "voice:segment",
+          "voice:speech:chunk",
+          "voice:speech:end",
+          "voice:speech:start",
+          "voice:state",
+          "voice:status",
+          "voice:tts:modelProgress",
+          "voice:tts:status"
+        ],
+        "channelOwners": {
+          "task:created": "service",
+          "task:updated": "service",
+          "voice:dictate": "service",
+          "voice:error": "service",
+          "voice:final": "service",
+          "voice:hotkey": "service",
+          "voice:navigate": "service",
+          "voice:outcome": "service",
+          "voice:partial": "service",
+          "voice:runtimeProgress": "service",
+          "voice:segment": "service",
+          "voice:speech:chunk": "service",
+          "voice:speech:end": "service",
+          "voice:speech:start": "service",
+          "voice:state": "service",
+          "voice:status": "service",
+          "voice:tts:modelProgress": "service",
+          "voice:tts:status": "service"
+        },
+        "desktopOnlyNames": [
+          "voice:speech:chunk",
+          "voice:speech:end",
+          "voice:speech:start",
+          "voice:tts:modelProgress",
+          "voice:tts:status"
+        ],
+        "destination": "trusted-desktop-main",
+        "id": "voice-desktop-relay",
+        "mobileNames": [
+          "task:created",
+          "task:updated",
+          "voice:dictate",
+          "voice:error",
+          "voice:final",
+          "voice:hotkey",
+          "voice:navigate",
+          "voice:outcome",
+          "voice:partial",
+          "voice:runtimeProgress",
+          "voice:segment",
+          "voice:state",
+          "voice:status"
+        ],
+        "producerOwner": "voice-domain",
+        "review": "Both notify and notifyRenderer reach this desktop sink. Speech/TTS uses notifyRenderer only; other voice actions/state also use the separate authenticated mobile destination.",
+        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding",
+        "source": {
+          "channelExpression": "channel",
+          "column": 36,
+          "file": "src/main/voice/voice-bridge.ts",
+          "line": 27,
+          "method": "send",
+          "target": "guardedIpcSend"
+        }
+      },
+      {
+        "allowedNames": [
+          "workspace:cleanup-complete",
+          "workspace:cleanup-progress"
+        ],
+        "channelOwners": {
+          "workspace:cleanup-complete": "service",
+          "workspace:cleanup-progress": "service"
+        },
+        "destination": "trusted-desktop-main",
+        "id": "workspace-cleanup-desktop",
+        "producerOwner": "workspace-cleanup-scheduler",
+        "review": "Only cleanup progress/completion names.",
+        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding",
+        "source": {
+          "channelExpression": "channel",
+          "column": 7,
+          "file": "src/main/workspace-cleanup-scheduler.ts",
+          "line": 427,
+          "method": "send",
+          "target": "guardedIpcSend"
+        }
+      }
+    ],
+    "reviewVersion": 1,
+    "reviewedReferences": 10,
+    "stalePolicies": [],
+    "status": "manual-source-review; not runtime validation or namespace authority",
+    "unreviewedReferences": 0
+  },
   "localOnlyPreloadMethods": [
     {
       "apiPath": [
@@ -18122,6 +18605,34 @@
       "channelExpression": "channel",
       "column": 7,
       "file": "src/main/agent-manager.ts",
+      "forwardingReview": {
+        "allowedNames": [
+          "agent:incompatible-session",
+          "agent:recoveryStateChanged",
+          "agent:startQueueChanged",
+          "agent:status",
+          "artifact:updated",
+          "concurrency:changed",
+          "project:statusChanged",
+          "task:source-action-failed",
+          "task:updated"
+        ],
+        "channelOwners": {
+          "agent:incompatible-session": "service",
+          "agent:recoveryStateChanged": "service",
+          "agent:startQueueChanged": "service",
+          "agent:status": "service",
+          "artifact:updated": "service",
+          "concurrency:changed": "service",
+          "project:statusChanged": "service",
+          "task:source-action-failed": "service",
+          "task:updated": "service"
+        },
+        "destination": "trusted-desktop-main",
+        "policyId": "agent-broadcast",
+        "producerOwner": "agent-manager",
+        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
+      },
       "line": 5255,
       "method": "send",
       "methodExpression": null,
@@ -18133,6 +18644,32 @@
       "channelExpression": "channel",
       "column": 5,
       "file": "src/main/agent-manager.ts",
+      "forwardingReview": {
+        "allowedNames": [
+          "agent:incompatible-session",
+          "agent:recoveryStateChanged",
+          "agent:startQueueChanged",
+          "agent:status",
+          "concurrency:changed",
+          "project:statusChanged",
+          "task:source-action-failed",
+          "task:updated"
+        ],
+        "channelOwners": {
+          "agent:incompatible-session": "service",
+          "agent:recoveryStateChanged": "service",
+          "agent:startQueueChanged": "service",
+          "agent:status": "service",
+          "concurrency:changed": "service",
+          "project:statusChanged": "service",
+          "task:source-action-failed": "service",
+          "task:updated": "service"
+        },
+        "destination": "trusted-desktop-main",
+        "policyId": "agent-persist-or-broadcast",
+        "producerOwner": "agent-manager",
+        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
+      },
       "line": 5286,
       "method": "send",
       "methodExpression": null,
@@ -18144,6 +18681,18 @@
       "channelExpression": "channel",
       "column": 3,
       "file": "src/main/auto-updater.ts",
+      "forwardingReview": {
+        "allowedNames": [
+          "updater:status"
+        ],
+        "channelOwners": {
+          "updater:status": "native-host"
+        },
+        "destination": "trusted-desktop-main",
+        "policyId": "updater-desktop",
+        "producerOwner": "native-updater",
+        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
+      },
       "line": 267,
       "method": "send",
       "methodExpression": null,
@@ -18155,6 +18704,116 @@
       "channelExpression": "channel",
       "column": 5,
       "file": "src/main/guarded-ipc-send.ts",
+      "forwardingReview": {
+        "allowedNames": [
+          "agent-installer:progress",
+          "agent:incompatible-session",
+          "agent:recoveryStateChanged",
+          "agent:startQueueChanged",
+          "agent:status",
+          "artifact:updated",
+          "chat:event",
+          "commander:event",
+          "concurrency:changed",
+          "heartbeat:alert",
+          "heartbeat:disabled",
+          "menu:check-for-updates",
+          "mobile:device-connected",
+          "mobile:pairing-initiated",
+          "oauth:callback",
+          "overdue:check",
+          "project:changed",
+          "project:statusChanged",
+          "skills:changed",
+          "task:checkpointAnswered",
+          "task:created",
+          "task:deleted",
+          "task:source-action-failed",
+          "task:subtasks-reordered",
+          "task:updated",
+          "tasks:refresh",
+          "terminal:data",
+          "terminal:exit",
+          "transcript:changed",
+          "ui:command",
+          "updater:status",
+          "voice:dictate",
+          "voice:error",
+          "voice:final",
+          "voice:hotkey",
+          "voice:navigate",
+          "voice:outcome",
+          "voice:partial",
+          "voice:runtimeProgress",
+          "voice:segment",
+          "voice:speech:chunk",
+          "voice:speech:end",
+          "voice:speech:start",
+          "voice:state",
+          "voice:status",
+          "voice:tts:modelProgress",
+          "voice:tts:status",
+          "workspace:cleanup-complete",
+          "workspace:cleanup-progress",
+          "worktree:progress"
+        ],
+        "channelOwners": {
+          "agent-installer:progress": "service",
+          "agent:incompatible-session": "service",
+          "agent:recoveryStateChanged": "service",
+          "agent:startQueueChanged": "service",
+          "agent:status": "service",
+          "artifact:updated": "service",
+          "chat:event": "service",
+          "commander:event": "service",
+          "concurrency:changed": "service",
+          "heartbeat:alert": "service",
+          "heartbeat:disabled": "service",
+          "menu:check-for-updates": "native-host",
+          "mobile:device-connected": "service",
+          "mobile:pairing-initiated": "service",
+          "oauth:callback": "service",
+          "overdue:check": "service",
+          "project:changed": "service",
+          "project:statusChanged": "service",
+          "skills:changed": "service",
+          "task:checkpointAnswered": "service",
+          "task:created": "service",
+          "task:deleted": "service",
+          "task:source-action-failed": "service",
+          "task:subtasks-reordered": "service",
+          "task:updated": "service",
+          "tasks:refresh": "service",
+          "terminal:data": "service",
+          "terminal:exit": "service",
+          "transcript:changed": "service",
+          "ui:command": "service",
+          "updater:status": "native-host",
+          "voice:dictate": "service",
+          "voice:error": "service",
+          "voice:final": "service",
+          "voice:hotkey": "service",
+          "voice:navigate": "service",
+          "voice:outcome": "service",
+          "voice:partial": "service",
+          "voice:runtimeProgress": "service",
+          "voice:segment": "service",
+          "voice:speech:chunk": "service",
+          "voice:speech:end": "service",
+          "voice:speech:start": "service",
+          "voice:state": "service",
+          "voice:status": "service",
+          "voice:tts:modelProgress": "service",
+          "voice:tts:status": "service",
+          "workspace:cleanup-complete": "service",
+          "workspace:cleanup-progress": "service",
+          "worktree:progress": "service"
+        },
+        "destination": "trusted-desktop-main",
+        "policyId": "guarded-direct",
+        "producerOwner": "transport",
+        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
+      },
       "line": 54,
       "method": "send",
       "methodExpression": null,
@@ -18166,6 +18825,20 @@
       "channelExpression": "channel",
       "column": 9,
       "file": "src/main/guarded-ipc-send.ts",
+      "forwardingReview": {
+        "allowedNames": [
+          "agent:output-batch",
+          "transcript:changed"
+        ],
+        "channelOwners": {
+          "agent:output-batch": "service",
+          "transcript:changed": "service"
+        },
+        "destination": "trusted-desktop-main",
+        "policyId": "guarded-split",
+        "producerOwner": "transport",
+        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
+      },
       "line": 117,
       "method": "send",
       "methodExpression": null,
@@ -18177,6 +18850,24 @@
       "channelExpression": "channel",
       "column": 7,
       "file": "src/main/heartbeat-scheduler.ts",
+      "forwardingReview": {
+        "allowedNames": [
+          "heartbeat:alert",
+          "heartbeat:disabled",
+          "task:updated",
+          "tasks:refresh"
+        ],
+        "channelOwners": {
+          "heartbeat:alert": "service",
+          "heartbeat:disabled": "service",
+          "task:updated": "service",
+          "tasks:refresh": "service"
+        },
+        "destination": "trusted-desktop-main",
+        "policyId": "heartbeat-desktop",
+        "producerOwner": "heartbeat-scheduler",
+        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
+      },
       "line": 795,
       "method": "send",
       "methodExpression": null,
@@ -18188,6 +18879,28 @@
       "channelExpression": "channel",
       "column": 7,
       "file": "src/main/index.ts",
+      "forwardingReview": {
+        "allowedNames": [
+          "artifact:updated",
+          "project:statusChanged",
+          "task:checkpointAnswered",
+          "task:created",
+          "task:updated",
+          "ui:command"
+        ],
+        "channelOwners": {
+          "artifact:updated": "service",
+          "project:statusChanged": "service",
+          "task:checkpointAnswered": "service",
+          "task:created": "service",
+          "task:updated": "service",
+          "ui:command": "service"
+        },
+        "destination": "trusted-desktop-main",
+        "policyId": "task-api-relay",
+        "producerOwner": "authenticated-task-api",
+        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
+      },
       "line": 416,
       "method": "send",
       "methodExpression": null,
@@ -18199,6 +18912,26 @@
       "channelExpression": "channel",
       "column": 7,
       "file": "src/main/index.ts",
+      "forwardingReview": {
+        "allowedNames": [
+          "mobile:device-connected",
+          "mobile:pairing-initiated",
+          "task:created",
+          "task:subtasks-reordered",
+          "task:updated"
+        ],
+        "channelOwners": {
+          "mobile:device-connected": "service",
+          "mobile:pairing-initiated": "service",
+          "task:created": "service",
+          "task:subtasks-reordered": "service",
+          "task:updated": "service"
+        },
+        "destination": "trusted-desktop-main",
+        "policyId": "mobile-to-desktop-relay",
+        "producerOwner": "authenticated-mobile-api",
+        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
+      },
       "line": 435,
       "method": "send",
       "methodExpression": null,
@@ -18210,6 +18943,52 @@
       "channelExpression": "channel",
       "column": 36,
       "file": "src/main/voice/voice-bridge.ts",
+      "forwardingReview": {
+        "allowedNames": [
+          "task:created",
+          "task:updated",
+          "voice:dictate",
+          "voice:error",
+          "voice:final",
+          "voice:hotkey",
+          "voice:navigate",
+          "voice:outcome",
+          "voice:partial",
+          "voice:runtimeProgress",
+          "voice:segment",
+          "voice:speech:chunk",
+          "voice:speech:end",
+          "voice:speech:start",
+          "voice:state",
+          "voice:status",
+          "voice:tts:modelProgress",
+          "voice:tts:status"
+        ],
+        "channelOwners": {
+          "task:created": "service",
+          "task:updated": "service",
+          "voice:dictate": "service",
+          "voice:error": "service",
+          "voice:final": "service",
+          "voice:hotkey": "service",
+          "voice:navigate": "service",
+          "voice:outcome": "service",
+          "voice:partial": "service",
+          "voice:runtimeProgress": "service",
+          "voice:segment": "service",
+          "voice:speech:chunk": "service",
+          "voice:speech:end": "service",
+          "voice:speech:start": "service",
+          "voice:state": "service",
+          "voice:status": "service",
+          "voice:tts:modelProgress": "service",
+          "voice:tts:status": "service"
+        },
+        "destination": "trusted-desktop-main",
+        "policyId": "voice-desktop-relay",
+        "producerOwner": "voice-domain",
+        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
+      },
       "line": 27,
       "method": "send",
       "methodExpression": null,
@@ -18221,6 +19000,20 @@
       "channelExpression": "channel",
       "column": 7,
       "file": "src/main/workspace-cleanup-scheduler.ts",
+      "forwardingReview": {
+        "allowedNames": [
+          "workspace:cleanup-complete",
+          "workspace:cleanup-progress"
+        ],
+        "channelOwners": {
+          "workspace:cleanup-complete": "service",
+          "workspace:cleanup-progress": "service"
+        },
+        "destination": "trusted-desktop-main",
+        "policyId": "workspace-cleanup-desktop",
+        "producerOwner": "workspace-cleanup-scheduler",
+        "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
+      },
       "line": 427,
       "method": "send",
       "methodExpression": null,
