@@ -33,6 +33,8 @@ Environment: Linux x64, Debian 12, standalone Node 22.23.2 / ABI 127, Rust 1.98.
 
 The OAuth tests initially timed out on the unchanged baseline and on the new code: this container binds `localhost` servers to IPv6 while its HTTP client selects IPv4. `NODE_OPTIONS=--dns-result-order=ipv4first` aligns test worker endpoints, and all 17 OAuth tests pass. No production OAuth behavior was changed.
 
+The first CI run passed lint, typecheck and builds plus 4,937 tests, but exposed three new wire-fixture launch failures: the existing suite's `process.execPath` is Electron, and the deliberately minimal child environment omits Electron's Node-mode flag. Wire fixtures now launch the developer/CI standalone `node` on PATH with only the required OS/path variables. This changes test tooling, not the packaged runtime's explicit bundled-executable lookup.
+
 The provided `make` binary also required a newer glibc than this Debian image. Validation used a checksummed Debian-compatible `make` in a temporary directory, with `MAKE` set for that one native preparation command; the system toolchain was unchanged. Only the failing PTY addon was rebuilt, with one job. Ordinary environments need a functioning native build toolchain.
 
 ## Running the experiment

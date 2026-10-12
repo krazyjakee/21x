@@ -339,8 +339,12 @@ describe('actual feasibility service wire fixtures', () => {
   function fixture() {
     const profileRoot = '/isolated-protocol-fixture/profile'
     const resourceRoot = '/isolated-protocol-fixture/resources'
-    const child = spawn(process.execPath, [fileURLToPath(new URL('../service/feasibility.mjs', import.meta.url))], {
-      env: { TWENTYONEX_PROFILE_ROOT: profileRoot, TWENTYONEX_RESOURCE_ROOT: resourceRoot },
+    // The legacy suite runs inside Electron-as-Node. Its executable needs an
+    // Electron-specific environment flag and cannot serve as this standalone
+    // Node fixture. Use the developer/CI Node runtime on PATH explicitly.
+    const child = spawn('node', [fileURLToPath(new URL('../service/feasibility.mjs', import.meta.url))], {
+      env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot,
+        TWENTYONEX_PROFILE_ROOT: profileRoot, TWENTYONEX_RESOURCE_ROOT: resourceRoot },
       stdio: ['pipe', 'pipe', 'pipe']
     })
     const closed = once(child, 'close')
