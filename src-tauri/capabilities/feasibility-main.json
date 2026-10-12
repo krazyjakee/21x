@@ -1,0 +1,7 @@
+{
+  "identifier": "feasibility-main",
+  "description": "Only the bundled feasibility screen may call the two restricted engine commands.",
+  "local": true,
+  "webviews": ["main"],
+  "permissions": ["allow-engine-invoke", "allow-engine-status"]
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "21x Tauri Feasibility",
+  "version": "0.1.0",
+  "identifier": "com.krazyjakee.21x.tauri-feasibility",
+  "build": {
+    "beforeDevCommand": "pnpm tauri:prepare && pnpm tauri:frontend:dev",
+    "beforeBuildCommand": "pnpm tauri:prepare && pnpm tauri:frontend:build",
+    "frontendDist": "../out/tauri-renderer",
+    "devUrl": "http://localhost:1420"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "capabilities": ["feasibility-main"],
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self' data:; object-src 'none'; frame-src 'none'; base-uri 'none'",
+      "devCsp": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420; img-src 'self' data:; object-src 'none'; frame-src 'none'; base-uri 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "icon": ["../resources/icon.png", "../resources/icon.ico"],
+    "resources": { "resources/": "resources/" },
+    "targets": ["app", "deb", "nsis"]
+  }
+}
