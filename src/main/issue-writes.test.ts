@@ -860,6 +860,8 @@ describe('linking and updating', () => {
     expect(patch.some((arg) => arg === '--raw-field' || arg === 'labels=[]' || arg === 'labels="[]"')).toBe(false)
   })
 
+  // This wire integration starts multiple real gh processes. Allow scheduling
+  // room on shared CI runners while retaining a deadline for each subprocess.
   it('preserves scalar-looking label names as JSON strings on the actual gh wire', async () => {
     const bodies: Array<Record<string, unknown>> = []
     const server = createServer((request, response) => {
@@ -903,7 +905,8 @@ describe('linking and updating', () => {
           GH_NO_UPDATE_NOTIFIER: '1'
         },
         encoding: 'utf8',
-        maxBuffer: 1024 * 1024
+        maxBuffer: 1024 * 1024,
+        timeout: 10_000
       })
       return stdout
     })
@@ -923,7 +926,7 @@ describe('linking and updating', () => {
     expect(bodies[0].labels).toEqual(['true', 'false', '123', '00123', 'null'])
     expect(Array.isArray(bodies[0].labels) && bodies[0].labels.every((label) => typeof label === 'string')).toBe(true)
     expect(bodies[1].labels).toEqual([])
-  })
+  }, 20_000)
 
   it('updates an issue and refuses an empty update', async () => {
     const h = setup()
