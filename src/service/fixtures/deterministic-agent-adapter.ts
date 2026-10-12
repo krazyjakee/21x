@@ -135,4 +135,8 @@ export class DeterministicAgentAdapter implements CodingAgentAdapter {
     this.destroyed++
   }
   decisions(): State['decisions'] { return structuredClone(this.state.decisions) }
+  getPendingApprovalIdentity(sessionId: string): { requestId: string; taskId: string; agentId: string } | null {
+    if (sessionId !== SESSION_ID || !this.pendingRequest || !this.state.taskId || !this.state.agentId) return null
+    return { requestId: this.pendingRequest, taskId: this.state.taskId, agentId: this.state.agentId }
+  }
 }

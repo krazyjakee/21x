@@ -36,6 +36,7 @@ export async function runAgentLifecycleFixture(directory: string) {
   let waitingEventObserved = false
   let eventCount = 0
   let ownershipRestored = false
+  let removedListenerCalls = 0
   const host = (adapter: DeterministicAgentAdapter): AgentManagerHost => ({
     renderer: { kind: 'unsupported' }, notifications: { kind: 'unsupported' }, energy: { kind: 'unsupported' },
     secrets: { kind: 'unsupported' }, configuredMcp: 'disabled', managedTaskMcp: { kind: 'disabled' },
@@ -65,7 +66,9 @@ export async function runAgentLifecycleFixture(directory: string) {
     db.initialize()
     assert.equal(db.getMcpServers().some(server => server.name === 'task-management'), false)
     const agent = db.createAgent({ name: 'Synthetic deterministic agent', config: { coding_agent: 'opencode', permission_mode: 'ask', mcp_servers: [], secret_ids: [] } })!
-    const task = db.createTask({ title: 'Synthetic lifecycle fixture', agent_id: agent.id, status: TaskStatus.NotStarted })!
+    const task = db.createTask({ title: 'Synthetic lifecycle fixture', status: TaskStatus.NotStarted })!
+    // Assignment uses the actual update API; createTask does not set agent_id.
+    db.updateTask(task.id, { agent_id: agent.id })
     const adapter = new DeterministicAgentAdapter({ fixtureMode: 'synthetic-only', profileRoot: paths.profileRoot })
     assert.throws(() => new AgentManager(db!, undefined as never))
     const policy = host(adapter)
@@ -75,6 +78,10 @@ export async function runAgentLifecycleFixture(directory: string) {
     const configured = db.createAgent({ name: 'Synthetic disallowed MCP agent', config: { mcp_servers: ['synthetic-server'] } })!
     await assert.rejects(buildMcpServers(db, null, configured.id, undefined, policy))
     manager = new AgentManager(db, policy)
+    const detached = (): void => { removedListenerCalls++ }
+    manager.addExternalListener(detached)
+    manager.removeExternalListener(detached)
+    manager.removeExternalListener(detached)
     listen(manager, db)
     phase = 'start'
     const start = await manager.requestSession(agent.id, task.id)
@@ -89,9 +96,11 @@ export async function runAgentLifecycleFixture(directory: string) {
       db!.getTranscriptParts(task.id).some(part => part.partId === `question-${requestOne}` &&
         (part.tool as { requestId?: string; status?: string })?.requestId === requestOne && (part.tool as { status?: string }).status === 'running'))
     assert.equal(waitingEventObserved, true)
+    assert.deepEqual(adapter.getPendingApprovalIdentity(sessionId), { requestId: requestOne, taskId: task.id, agentId: agent.id })
     phase = 'stale-approval'
     await manager.respondToPermission(sessionId, true, undefined, 'approved', 'permission', 'fixture-stale-request')
     assert.deepEqual(adapter.decisions(), [])
+    assert.deepEqual(adapter.getPendingApprovalIdentity(sessionId), { requestId: requestOne, taskId: task.id, agentId: agent.id })
     assert.equal(manager.getSessionStatus(sessionId)?.status, 'waiting_approval')
     assert.equal((db.getTranscriptParts(task.id).find(part => part.partId === `question-${requestOne}`)?.tool as { status?: string }).status, 'running')
 
@@ -141,6 +150,7 @@ export async function runAgentLifecycleFixture(directory: string) {
     assert.equal(durableEventObserved, true)
     assert.equal(eventPersistedBeforeDelivery, true)
     assert.ok(eventCount < 512)
+    assert.equal(removedListenerCalls, 0)
     phase = 'shutdown'
     await manager.stopAllSessions()
     await delay(200)

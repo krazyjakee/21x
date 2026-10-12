@@ -5139,6 +5139,12 @@ export class AgentManager extends EventEmitter {
     this.externalListeners.push(fn)
   }
 
+  /** Releases exactly one registration without affecting other consumers. */
+  removeExternalListener(fn: (channel: string, data: unknown) => void): void {
+    const index = this.externalListeners.indexOf(fn)
+    if (index >= 0) this.externalListeners.splice(index, 1)
+  }
+
   /**
    * Auto-enable heartbeat for a task if a heartbeat.md file exists in the workspace.
    * Called after a task transitions to ready_for_review.
@@ -5263,7 +5269,7 @@ export class AgentManager extends EventEmitter {
   }
 
   private notifyExternalListeners(channel: string, payload: unknown): void {
-    for (const fn of this.externalListeners) {
+    for (const fn of [...this.externalListeners]) {
       try { fn(channel, payload) } catch { /* one failing listener must not block the rest */ }
     }
   }
