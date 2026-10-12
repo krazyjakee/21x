@@ -96,7 +96,9 @@ for (const [name, bytes] of [
   ['unsupported version', '{"protocolVersion":99}\n'],
   ['oversized unterminated frame', 'x'.repeat(1024 * 1024 + 1)],
   ['truncated frame at EOF', '{"protocolVersion":1'],
-  ['invalid UTF-8', Buffer.from([0xff, 0x0a])]
+  ['invalid UTF-8', Buffer.from([0xff, 0x0a])],
+  ['UTF-8 byte-order mark', Buffer.from('\uFEFF{"protocolVersion":1}\n')],
+  ['excessive JSON nesting', '['.repeat(65) + '0' + ']'.repeat(65) + '\n']
 ]) {
   test(`${name} exits safely without reflecting input`, { timeout: 5000 }, async t => {
     const f = fixture(t)
@@ -114,6 +116,24 @@ test('duplicate IDs are rejected rather than executing twice', { timeout: 5000 }
     requestId: 'host:1', operation: 'engine.ping', payload: {} }
   f.child.stdin.end(JSON.stringify(frame) + '\n')
   assert.equal((await f.closed)[0], 1)
+})
+
+test('wrong-direction cancellation cannot target a host request', { timeout: 5000 }, async t => {
+  const f = fixture(t)
+  await f.initialize()
+  f.child.stdin.end(JSON.stringify({ protocolVersion: 1, engineEpoch: f.observed[0].engineEpoch,
+    kind: 'event', operation: 'engine.cancel', payload: { requestId: 'service:1' } }) + '\n')
+  assert.equal((await f.closed)[0], 1)
+})
+
+test('stale cancellation is ignored without disconnecting the current engine', { timeout: 5000 }, async t => {
+  const f = fixture(t)
+  await f.initialize()
+  f.child.stdin.write(JSON.stringify({ protocolVersion: 1, engineEpoch: 'previous-epoch',
+    kind: 'event', operation: 'engine.cancel', payload: { requestId: 'host:1' } }) + '\n')
+  assert.equal((await f.request('engine.ping')).result.nodeVersion, process.version)
+  await f.request('engine.shutdown')
+  assert.equal((await f.closed)[0], 0)
 })
 
 test('real-file worker uses IPC and exits without a system Node lookup', { timeout: 5000 }, async t => {

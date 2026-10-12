@@ -19,8 +19,8 @@ let initialized = false
 let closing = false
 let fatalError = false
 let probeRunning = false
-let fragments = []
-let fragmentBytes = 0
+const accumulator = Buffer.allocUnsafe(MAX_FRAME)
+let frameBytes = 0
 let lastRequestId = 0n
 
 // Dependencies must never contaminate stdout or leak their arguments into logs.
@@ -70,7 +70,9 @@ function flush() {
   if (writing || queue.length === 0) return
   writing = true
   const entry = queue.shift()
+  const stall = setTimeout(() => fatal('TIMEOUT'), DEADLINE_MS)
   process.stdout.write(entry.bytes, error => {
+    clearTimeout(stall)
     queuedBytes -= entry.bytes.length
     writing = false
     if (error) return fatal('DISCONNECTED')
@@ -86,7 +88,7 @@ function respond(requestId, result, error, done) {
       message: messages[error.code] ?? messages.INTERNAL_ERROR } } : { result }) }
   const bytes = Buffer.from(JSON.stringify(frame) + '\n')
   if (bytes.length - 1 > MAX_FRAME) return fatal('FRAME_TOO_LARGE')
-  if (queue.length >= MAX_ACTIVE || queuedBytes + bytes.length > MAX_QUEUE_BYTES) return fatal('BACKPRESSURE')
+  if (queue.length + Number(writing) >= MAX_ACTIVE || queuedBytes + bytes.length > MAX_QUEUE_BYTES) return fatal('BACKPRESSURE')
   queuedBytes += bytes.length
   queue.push({ bytes, done })
   flush()
@@ -197,18 +199,37 @@ async function dispatch(frame, signal) {
 
 function receive(bytes) {
   let frame
-  try { frame = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) }
+  try {
+    let depth = 0
+    let quoted = false
+    let escaped = false
+    for (const byte of bytes) {
+      if (quoted) {
+        if (escaped) escaped = false
+        else if (byte === 92) escaped = true
+        else if (byte === 34) quoted = false
+      } else if (byte === 34) quoted = true
+      else if (byte === 123 || byte === 91) { if (++depth > 64) throw fail('INVALID_FRAME') }
+      else if (byte === 125 || byte === 93) depth--
+    }
+    frame = JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes))
+  }
   catch { return fatal('INVALID_FRAME') }
   if (frame?.protocolVersion !== 1) return fatal('UNSUPPORTED_VERSION')
+  if (typeof frame.engineEpoch !== 'string' || frame.engineEpoch.length > 128 ||
+      (frame.engineEpoch !== '' && !/^[a-zA-Z0-9_-]+$/.test(frame.engineEpoch))) return fatal('INVALID_FRAME')
   if (frame?.kind === 'event') {
     if (!exact(frame, ['protocolVersion', 'engineEpoch', 'kind', 'operation', 'payload']) ||
-        frame.engineEpoch !== epoch || frame.operation !== 'engine.cancel' ||
-        !exact(frame.payload, ['requestId'])) return fatal('INVALID_FRAME')
+        frame.operation !== 'engine.cancel' || !exact(frame.payload, ['requestId']) ||
+        typeof frame.payload.requestId !== 'string' ||
+        !/^host:[1-9][0-9]{0,31}$/.test(frame.payload.requestId)) return fatal('INVALID_FRAME')
+    if (frame.engineEpoch !== epoch) return
     active.get(frame.payload.requestId)?.controller.abort()
     return
   }
   if (!exact(frame, ['protocolVersion', 'engineEpoch', 'kind', 'requestId', 'operation', 'payload']) ||
-      frame.kind !== 'request' || typeof frame.operation !== 'string' ||
+      frame.kind !== 'request' || typeof frame.operation !== 'string' || frame.operation.length > 128 ||
+      !/^[a-zA-Z][a-zA-Z0-9_.:-]*$/.test(frame.operation) ||
       typeof frame.requestId !== 'string' || !/^host:[1-9][0-9]{0,31}$/.test(frame.requestId)) return fatal('INVALID_FRAME')
   const id = BigInt(frame.requestId.slice(5))
   if (id <= lastRequestId) return fatal('INVALID_REQUEST')
@@ -227,7 +248,8 @@ function receive(bytes) {
     controller.signal.addEventListener('abort', onAbort, { once: true })
   })
   active.set(frame.requestId, { controller })
-  Promise.race([dispatch(frame, controller.signal), cancelled]).then(result => {
+  const operation = dispatch(frame, controller.signal).finally(() => active.delete(frame.requestId))
+  Promise.race([operation, cancelled]).then(result => {
     if (controller.signal.aborted) throw fail(timedOut ? 'TIMEOUT' : 'CANCELLED')
     if (frame.operation === 'engine.shutdown') {
       cleanup()
@@ -237,7 +259,6 @@ function receive(bytes) {
     .finally(() => {
       clearTimeout(timer)
       controller.signal.removeEventListener('abort', onAbort)
-      active.delete(frame.requestId)
     })
 }
 
@@ -249,18 +270,17 @@ if (process.argv.includes('--worker')) {
       const newline = chunk.indexOf(10, offset)
       const end = newline < 0 ? chunk.length : newline
       const part = chunk.subarray(offset, end)
-      fragmentBytes += part.length
-      if (fragmentBytes > MAX_FRAME) return fatal('FRAME_TOO_LARGE')
-      fragments.push(part)
+      if (frameBytes + part.length > MAX_FRAME) return fatal('FRAME_TOO_LARGE')
+      part.copy(accumulator, frameBytes)
+      frameBytes += part.length
       offset = end + 1
       if (newline >= 0) {
-        const bytes = Buffer.concat(fragments, fragmentBytes)
-        fragments = []; fragmentBytes = 0
-        receive(bytes)
+        receive(accumulator.subarray(0, frameBytes))
+        frameBytes = 0
       }
     }
   })
-  process.stdin.on('end', () => { cleanup(); if (fragmentBytes) process.exitCode = 1 })
+  process.stdin.on('end', () => { cleanup(); if (frameBytes) process.exitCode = 1 })
   process.stdin.on('error', () => fatal('DISCONNECTED'))
   process.stdout.on('error', () => { cleanup(); process.exitCode = 1; process.stdin.destroy() })
   process.on('SIGTERM', () => { cleanup(); process.stdin.destroy() })

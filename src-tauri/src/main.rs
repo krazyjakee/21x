@@ -3,12 +3,17 @@
 mod engine;
 use engine::{Engine, EngineError};
 use serde_json::{json, Value};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    atomic::{AtomicU8, Ordering},
+    Arc,
+};
 use tauri::{Manager, State, WebviewWindow};
 
 fn trusted_origin(url: &tauri::Url) -> bool {
-    let packaged = url.host_str() == Some("localhost") && url.scheme() == "tauri"
-        || url.host_str() == Some("tauri.localhost") && matches!(url.scheme(), "http" | "https");
+    let packaged = url.port().is_none()
+        && (url.host_str() == Some("localhost") && url.scheme() == "tauri"
+            || url.host_str() == Some("tauri.localhost")
+                && matches!(url.scheme(), "http" | "https"));
     let development = tauri::is_dev()
         && url.scheme() == "http"
         && url.host_str() == Some("localhost")
@@ -71,20 +76,30 @@ fn main() {
             .title("21x Tauri Feasibility")
             .inner_size(920.0, 680.0)
             .on_navigation(trusted_origin)
+            .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
+            .on_download(|_, _| false)
+            .on_permission_request(|_, _| tauri::webview::PermissionResponse::Deny)
             .build()?;
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("failed to initialize isolated Tauri feasibility host");
-    let quitting = AtomicBool::new(false);
+    let quitting = Arc::new(AtomicU8::new(0));
     app.run(move |handle, event| {
         if let tauri::RunEvent::ExitRequested { api, .. } = event {
-            if !quitting.swap(true, Ordering::SeqCst) {
+            if quitting.load(Ordering::SeqCst) != 2 {
                 api.prevent_exit();
+            }
+            if quitting
+                .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
                 let engine = handle.state::<Engine>().inner().clone();
                 let handle = handle.clone();
+                let quitting = quitting.clone();
                 tauri::async_runtime::spawn(async move {
                     engine.shutdown().await;
+                    quitting.store(2, Ordering::SeqCst);
                     handle.exit(0);
                 });
             }

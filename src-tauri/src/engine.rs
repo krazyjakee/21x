@@ -21,6 +21,7 @@ const MAX_FRAME: usize = 1024 * 1024;
 const MAX_PENDING: usize = 128;
 const MAX_QUEUED_BYTES: usize = 4 * 1024 * 1024;
 const DEADLINE: Duration = Duration::from_secs(30);
+const NODE_VERSION: &str = "v22.23.2";
 
 #[derive(Clone, Debug, Serialize)]
 pub struct EngineError {
@@ -48,6 +49,7 @@ impl EngineError {
 
 struct Pending {
     bootstrap: bool,
+    operation: String,
     sender: oneshot::Sender<Result<Value, EngineError>>,
 }
 
@@ -58,6 +60,7 @@ struct Inner {
     next_id: AtomicU64,
     closed: AtomicBool,
     queue_bytes: Arc<Semaphore>,
+    request_slots: Arc<Semaphore>,
     stop: watch::Sender<bool>,
     exited: watch::Receiver<bool>,
 }
@@ -69,15 +72,34 @@ pub struct Engine(Arc<Inner>);
 struct PendingGuard {
     engine: Engine,
     id: String,
+    write_started: bool,
+    written: bool,
+    completed: bool,
 }
 impl Drop for PendingGuard {
     fn drop(&mut self) {
         self.engine.0.pending.lock().unwrap().remove(&self.id);
+        if self.completed {
+            return;
+        }
+        if self.write_started && !self.written {
+            self.engine.disconnect(EngineError::new("CANCELLED"));
+        } else if self.written && !self.engine.0.closed.load(Ordering::SeqCst) {
+            let engine = self.engine.clone();
+            let id = self.id.clone();
+            tokio::spawn(async move {
+                engine.cancel(&id).await;
+            });
+        }
     }
 }
 
 impl Engine {
     pub async fn start(resource_root: PathBuf, profile_root: PathBuf) -> Result<Self, EngineError> {
+        let resource_root =
+            std::fs::canonicalize(resource_root).map_err(|_| EngineError::new("DISCONNECTED"))?;
+        let profile_root =
+            std::fs::canonicalize(profile_root).map_err(|_| EngineError::new("DISCONNECTED"))?;
         let executable =
             resource_root
                 .join("node")
@@ -85,6 +107,25 @@ impl Engine {
         let entry = resource_root.join("service/feasibility.mjs");
         if !executable.is_file() || !entry.is_file() {
             return Err(EngineError::new("DISCONNECTED"));
+        }
+        let executable =
+            std::fs::canonicalize(executable).map_err(|_| EngineError::new("DISCONNECTED"))?;
+        let entry = std::fs::canonicalize(entry).map_err(|_| EngineError::new("DISCONNECTED"))?;
+        if !executable.starts_with(&resource_root) || !entry.starts_with(&resource_root) {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if std::fs::metadata(&executable)
+                .map_err(|_| EngineError::new("DISCONNECTED"))?
+                .permissions()
+                .mode()
+                & 0o111
+                == 0
+            {
+                return Err(EngineError::new("DISCONNECTED"));
+            }
         }
         let mut command = Command::new(executable);
         command
@@ -122,6 +163,7 @@ impl Engine {
             next_id: AtomicU64::new(1),
             closed: AtomicBool::new(false),
             queue_bytes: Arc::new(Semaphore::new(MAX_QUEUED_BYTES)),
+            request_slots: Arc::new(Semaphore::new(MAX_PENDING)),
             stop,
             exited,
         }));
@@ -201,127 +243,125 @@ impl Engine {
         }
         let epoch = frame["engineEpoch"]
             .as_str()
-            .filter(|value| !value.is_empty() && value.len() <= 128)
+            .filter(|value| {
+                !value.is_empty()
+                    && value.len() <= 128
+                    && value
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+            })
             .ok_or(())?;
+        // Validate response structure even when its request has already timed out.
+        let result = if let Some(error) = frame.get("error") {
+            Err(validate_error(error)?)
+        } else {
+            Ok(frame["result"].clone())
+        };
         let mut current = self.0.epoch.lock().unwrap();
         let mut pending = self.0.pending.lock().unwrap();
         let Some(entry) = pending.get(id) else {
             return Ok(());
-        }; // Timed-out responses are not replayed.
-        if entry.bootstrap && frame.get("result").is_some() {
-            let result = &frame["result"];
-            if result.as_object().map(|o| o.len()) != Some(3)
-                || result["protocolVersion"] != 1
-                || result["engineEpoch"] != epoch
-                || result["nodeVersion"].as_str().is_none()
-            {
+        };
+        if !entry.bootstrap && current.as_str() != epoch {
+            return Ok(());
+        }
+        if let Ok(value) = &result {
+            if !valid_result(&entry.operation, value, epoch) {
                 return Err(());
             }
-            *current = epoch.to_string();
-        } else if !entry.bootstrap && current.as_str() != epoch {
-            return Err(());
+            if entry.bootstrap {
+                *current = epoch.to_string();
+            }
         }
         let entry = pending.remove(id).ok_or(())?;
-        let result = if let Some(error) = frame.get("error") {
-            if error.as_object().map(|o| o.len()) != Some(2)
-                || error["message"].as_str().map(|s| s.len()).unwrap_or(257) > 256
-            {
-                return Err(());
-            }
-            let code = match error["code"].as_str() {
-                Some("INVALID_ARGUMENTS") => "INVALID_ARGUMENTS",
-                Some("UNKNOWN_OPERATION") => "UNKNOWN_OPERATION",
-                Some("BACKPRESSURE") => "BACKPRESSURE",
-                Some("TIMEOUT") => "TIMEOUT",
-                Some("CANCELLED") => "CANCELLED",
-                Some("INTERNAL_ERROR") => "INTERNAL_ERROR",
-                Some("INVALID_FRAME") => "INVALID_FRAME",
-                Some("FRAME_TOO_LARGE") => "FRAME_TOO_LARGE",
-                Some("UNSUPPORTED_VERSION") => "UNSUPPORTED_VERSION",
-                Some("STALE_EPOCH") => "STALE_EPOCH",
-                Some("INVALID_REQUEST") => "INVALID_REQUEST",
-                Some("INVALID_RESULT") => "INVALID_RESULT",
-                Some("DISCONNECTED") => "DISCONNECTED",
-                _ => return Err(()),
-            };
-            Err(EngineError::new(code))
-        } else {
-            Ok(frame["result"].clone())
-        };
         let _ = entry.sender.send(result);
         Ok(())
     }
 
     pub async fn request(&self, operation: &str, payload: Value) -> Result<Value, EngineError> {
+        timeout(DEADLINE, self.request_inner(operation, payload))
+            .await
+            .unwrap_or_else(|_| Err(EngineError::new("TIMEOUT")))
+    }
+
+    async fn request_inner(&self, operation: &str, payload: Value) -> Result<Value, EngineError> {
         if self.0.closed.load(Ordering::SeqCst) {
             return Err(EngineError::new("DISCONNECTED"));
         }
+        let _slot = self
+            .0
+            .request_slots
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| EngineError::new("BACKPRESSURE"))?;
+        // Reserve queue bytes before waiting for the writer. The 32-digit placeholder
+        // is an upper bound, so the actual envelope cannot exceed the reservation.
+        let epoch = self.0.epoch.lock().unwrap().clone();
+        let estimate = serde_json::to_vec(&json!({"protocolVersion": 1, "engineEpoch": epoch,
+            "kind": "request", "requestId": "host:99999999999999999999999999999999",
+            "operation": operation, "payload": payload
+        }))
+        .map_err(|_| EngineError::new("INVALID_ARGUMENTS"))?
+        .len()
+            + 1;
+        if estimate - 1 > MAX_FRAME {
+            return Err(EngineError::new("FRAME_TOO_LARGE"));
+        }
+        let queued = self
+            .0
+            .queue_bytes
+            .clone()
+            .try_acquire_many_owned(estimate as u32)
+            .map_err(|_| EngineError::new("BACKPRESSURE"))?;
+        let mut stdin = self.0.stdin.lock().await;
+        if self.0.closed.load(Ordering::SeqCst) {
+            return Err(EngineError::new("DISCONNECTED"));
+        }
+        // Allocation and the complete write share one lock: concurrent runtimes
+        // cannot send host:2 before host:1.
         let id = format!("host:{}", self.0.next_id.fetch_add(1, Ordering::SeqCst));
         let epoch = self.0.epoch.lock().unwrap().clone();
         let mut bytes = serde_json::to_vec(&json!({"protocolVersion": 1, "engineEpoch": epoch,
             "kind": "request", "requestId": id, "operation": operation, "payload": payload
         }))
         .map_err(|_| EngineError::new("INVALID_ARGUMENTS"))?;
-        if bytes.len() > MAX_FRAME {
-            return Err(EngineError::new("FRAME_TOO_LARGE"));
-        }
         bytes.push(b'\n');
-        let queued = self
-            .0
-            .queue_bytes
-            .clone()
-            .try_acquire_many_owned(bytes.len() as u32)
-            .map_err(|_| EngineError::new("BACKPRESSURE"))?;
         let (sender, receiver) = oneshot::channel();
         {
             let mut pending = self.0.pending.lock().unwrap();
-            if pending.len() >= MAX_PENDING {
-                return Err(EngineError::new("BACKPRESSURE"));
+            if self.0.closed.load(Ordering::SeqCst) {
+                return Err(EngineError::new("DISCONNECTED"));
             }
             pending.insert(
                 id.clone(),
                 Pending {
                     bootstrap: epoch.is_empty(),
+                    operation: operation.to_string(),
                     sender,
                 },
             );
         }
-        let _guard = PendingGuard {
+        let mut guard = PendingGuard {
             engine: self.clone(),
-            id: id.clone(),
+            id,
+            write_started: false,
+            written: false,
+            completed: false,
         };
-        let mut written = false;
-        let answer = timeout(DEADLINE, async {
-            let mut stdin = self.0.stdin.lock().await;
-            stdin
-                .write_all(&bytes)
-                .await
-                .map_err(|_| EngineError::new("DISCONNECTED"))?;
-            stdin
-                .flush()
-                .await
-                .map_err(|_| EngineError::new("DISCONNECTED"))?;
-            written = true;
-            drop(bytes);
-            drop(stdin);
-            drop(queued);
-            receiver
-                .await
-                .map_err(|_| EngineError::new("DISCONNECTED"))?
-        })
-        .await;
-        match answer {
-            Ok(result) => result,
-            Err(_) => {
-                // A timeout during a partial write invalidates framing; kill rather than reuse it.
-                if !written {
-                    self.disconnect(EngineError::new("TIMEOUT"));
-                } else {
-                    self.cancel(&id).await;
-                }
-                Err(EngineError::new("TIMEOUT"))
-            }
+        guard.write_started = true;
+        if stdin.write_all(&bytes).await.is_err() || stdin.flush().await.is_err() {
+            self.disconnect(EngineError::new("DISCONNECTED"));
+            return Err(EngineError::new("DISCONNECTED"));
         }
+        guard.written = true;
+        drop(bytes);
+        drop(stdin);
+        drop(queued);
+        let answer = receiver
+            .await
+            .map_err(|_| EngineError::new("DISCONNECTED"))?;
+        guard.completed = true;
+        answer
     }
 
     async fn cancel(&self, id: &str) {
@@ -348,16 +388,86 @@ impl Engine {
     pub async fn shutdown(&self) {
         let mut exited = self.0.exited.clone();
         if !self.0.closed.load(Ordering::SeqCst) {
-            let _ = timeout(
-                Duration::from_secs(3),
-                self.request("engine.shutdown", json!({})),
-            )
+            let _ = timeout(Duration::from_secs(3), async {
+                let _ = self.request("engine.shutdown", json!({})).await;
+                let already_exited = *exited.borrow();
+                if !already_exited {
+                    let _ = exited.changed().await;
+                }
+            })
             .await;
         }
         self.disconnect(EngineError::new("DISCONNECTED"));
-        if !*exited.borrow() {
+        let already_exited = *exited.borrow();
+        if !already_exited {
             let _ = timeout(Duration::from_secs(5), exited.changed()).await;
         }
+    }
+}
+
+fn validate_error(error: &Value) -> Result<EngineError, ()> {
+    if error.as_object().map(|o| o.len()) != Some(2)
+        || error["message"].as_str().map(|s| s.len()).unwrap_or(257) > 256
+    {
+        return Err(());
+    }
+    let code = match error["code"].as_str() {
+        Some("INVALID_ARGUMENTS") => "INVALID_ARGUMENTS",
+        Some("UNKNOWN_OPERATION") => "UNKNOWN_OPERATION",
+        Some("BACKPRESSURE") => "BACKPRESSURE",
+        Some("TIMEOUT") => "TIMEOUT",
+        Some("CANCELLED") => "CANCELLED",
+        Some("INTERNAL_ERROR") => "INTERNAL_ERROR",
+        Some("INVALID_FRAME") => "INVALID_FRAME",
+        Some("FRAME_TOO_LARGE") => "FRAME_TOO_LARGE",
+        Some("UNSUPPORTED_VERSION") => "UNSUPPORTED_VERSION",
+        Some("STALE_EPOCH") => "STALE_EPOCH",
+        Some("INVALID_REQUEST") => "INVALID_REQUEST",
+        Some("INVALID_RESULT") => "INVALID_RESULT",
+        Some("DISCONNECTED") => "DISCONNECTED",
+        _ => return Err(()),
+    };
+    Ok(EngineError::new(code))
+}
+
+fn valid_result(operation: &str, result: &Value, epoch: &str) -> bool {
+    match operation {
+        "engine.initialize" | "engine.ping" => {
+            result.as_object().map(|o| o.len()) == Some(3)
+                && result["protocolVersion"] == 1
+                && result["engineEpoch"] == epoch
+                && result["nodeVersion"] == NODE_VERSION
+        }
+        "engine.shutdown" => result == &json!({"stopped": true}),
+        "engine.probe" => {
+            let Some(checks) = result["checks"].as_object() else {
+                return false;
+            };
+            let names = [
+                "sqlite",
+                "pty",
+                "worker",
+                "@anthropic-ai/claude-agent-sdk",
+                "@opencode-ai/sdk",
+            ];
+            result.as_object().map(|o| o.len()) == Some(6)
+                && checks.len() == names.len()
+                && names.iter().all(|name| {
+                    checks
+                        .get(*name)
+                        .and_then(|check| check["ok"].as_bool())
+                        .is_some()
+                })
+                && result["ok"].as_bool() == Some(checks.values().all(|check| check["ok"] == true))
+                && result["nodeVersion"] == NODE_VERSION
+                && result["nodeAbi"] == "127"
+                && matches!(
+                    result["platform"].as_str(),
+                    Some("linux" | "darwin" | "win32")
+                )
+                && matches!(result["arch"].as_str(), Some("x64" | "arm64"))
+        }
+        _ => false,
     }
 }
 
@@ -381,5 +491,23 @@ mod tests {
         for id in ["service:1", "host:0", "host:01", "host:", "host:-1"] {
             assert!(!valid_id(id));
         }
+    }
+
+    #[test]
+    fn mixed_runtime_bootstrap_is_rejected() {
+        let mut fixture =
+            json!({"protocolVersion": 1, "engineEpoch": "fixture", "nodeVersion": NODE_VERSION});
+        assert!(valid_result("engine.initialize", &fixture, "fixture"));
+        fixture["nodeVersion"] = json!("v20.0.0");
+        assert!(!valid_result("engine.initialize", &fixture, "fixture"));
+    }
+
+    #[test]
+    fn error_message_from_child_is_never_forwarded() {
+        let error =
+            validate_error(&json!({"code": "TIMEOUT", "message": "credential=must-not-appear"}))
+                .unwrap();
+        assert_eq!(error.message, "Engine operation timed out.");
+        assert!(validate_error(&json!({"code": "UNRECOGNIZED", "message": "unsafe"})).is_err());
     }
 }
