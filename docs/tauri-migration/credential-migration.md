@@ -96,6 +96,10 @@ Cover every supported credential class, legacy plaintext provenance, locked and
 unavailable stores, corrupt data, and Linux `basic_text`. A legacy provider may
 decode `basic_text`; a destination must not claim it as OS-protected storage.
 
+The separate [native candidate and real proof](credential-native-proof.md) now
+provides executable Electron/OS-store canary scripts. Its reports must actually
+pass on the platform matrix; these planner unit fixtures still cannot close T03.
+
 T03 still needs the selected native provider and synchronous/async strategy,
 real fixture generation, trusted BLOB provenance, and an authenticated private
 legacy-to-destination transfer. T10 still needs the one-writer profile lock,
