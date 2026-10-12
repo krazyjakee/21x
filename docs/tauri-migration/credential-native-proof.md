@@ -117,7 +117,11 @@ accepted as destination protection.
 Before its first Secret Service call, the controller checks the bus name owner
 without auto-activation and verifies that its PID is the owned daemon's PID.
 This prevents readiness polling from activating a second daemon with the outer
-session's XDG environment. Failure reports include fixed phase names, fixed
+session's XDG environment. The outer bus activation environment also uses separate
+temporary XDG roots, protecting original account keyrings even if the daemon
+loses its name between the ownership check and a call. Failed outer sessions
+retain these isolated activation files to avoid racing another daemon's exit.
+Failure reports include fixed phase names, fixed
 provider/planner codes, owned-daemon exit metadata and boolean ownership/alias
 observations. They never include raw provider errors, D-Bus responses or canaries.
 The bounded `21x.aes256gcm.v1` format identifier is accepted by the planner.

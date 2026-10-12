@@ -159,6 +159,14 @@ if (process.platform !== 'linux' || !helper || !electron) {
   // Owned DBus/display subprocess lifecycle, with no keyring password in args/env.
   const names = ['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'XDG_RUNTIME_DIR', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME']
   const env = Object.fromEntries(names.filter((name) => process.env[name] !== undefined).map((name) => [name, process.env[name]]))
+  // The bus's activation environment is fixed at its creation, before the inner
+  // controller can replace process.env. Isolate it too so a name-loss race cannot
+  // activate a keyring against the developer's original XDG data directories.
+  const activationRoot = await mkdtemp(join(tmpdir(), '21x-secret-service-bus-'))
+  for (const [name, directory] of Object.entries({ XDG_DATA_HOME: 'data', XDG_CONFIG_HOME: 'config', XDG_CACHE_HOME: 'cache', XDG_RUNTIME_DIR: 'runtime' })) {
+    await mkdir(join(activationRoot, directory), { mode: 0o700 })
+    env[name] = join(activationRoot, directory)
+  }
   const child = spawn('dbus-run-session', ['--', 'xvfb-run', '--auto-servernum', process.execPath, script, '--inside-isolated-session', '--helper', resolve(helper), '--electron', resolve(electron)], { stdio: ['ignore', 'inherit', 'ignore'], env, detached: true })
   const owned = observeOwnedProcess(child, true)
   const deadline = setTimeout(async () => {
@@ -167,7 +175,13 @@ if (process.platform !== 'linux' || !helper || !electron) {
     process.exitCode = 1
   }, 150_000)
   child.on('error', () => { console.error('ISOLATED_SECRET_SERVICE_UNAVAILABLE'); process.exitCode = 1 })
-  child.on('close', (code) => { clearTimeout(deadline); process.exitCode = code === 0 ? 0 : 1 })
+  child.on('close', async (code) => {
+    clearTimeout(deadline)
+    process.exitCode = code === 0 ? 0 : 1
+    // On failure retain activation files rather than racing any auto-activated
+    // daemon's exit. They contain isolated synthetic evidence, never live data.
+    if (code === 0) await rm(activationRoot, { recursive: true, force: true })
+  })
 } else {
   const report = await insideSession()
   console.log(JSON.stringify(report, null, 2))
