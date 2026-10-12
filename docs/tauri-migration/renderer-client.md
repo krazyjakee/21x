@@ -24,6 +24,12 @@ Disposal cancels pending requests and releases the native listener, including
 when registration finishes late. Separate callback registrations remain
 independent. Consumer callbacks cannot leak raw diagnostics into native logs.
 
+`tauri-desktop-transport.ts` adapts the native `desktop_invoke` command and the
+`desktop:event` stream targeted at the `main` WebView window. It exposes fixed
+error codes and reads readiness/epoch metadata from the native engine status.
+The native implementation must return the epoch with its result. The adapter uses
+the documented [Tauri event listener and target API](https://v2.tauri.app/reference/javascript/api/namespaceevent/).
+
 The client enforces transport/lifecycle constraints. Native WebView authority,
 domain permissions and operation schemas remain required at their privileged
 boundaries. Production renderer adoption and a complete operation binding set

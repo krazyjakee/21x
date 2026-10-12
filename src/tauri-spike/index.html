@@ -18,6 +18,18 @@
       </div>
       <p id="message" role="status">Connecting…</p>
       <pre id="result" aria-label="Runtime result"></pre>
+      <section id="database-slice" hidden>
+        <h2>Isolated task data</h2>
+        <p>This test surface uses disposable tasks. Agent execution and approvals are not available here.</p>
+        <p id="database-status" role="status">Connecting…</p>
+        <form id="database-create">
+          <label for="database-title">Task title</label>
+          <input id="database-title" maxlength="512" required />
+          <button type="submit" disabled>Create task</button>
+        </form>
+        <ul id="database-tasks" aria-label="Isolated tasks"></ul>
+        <pre id="database-transcript" aria-label="Selected task transcript"></pre>
+      </section>
     </main>
     <script type="module" src="./main.ts"></script>
   </body>

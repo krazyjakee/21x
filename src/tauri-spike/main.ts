@@ -1,13 +1,13 @@
-interface NativeInvoke {
-  <T>(command: string, args?: Record<string, unknown>): Promise<T>
-}
+import { mountSyntheticTaskSlice } from './task-slice'
+import type { TauriDesktopApi } from '../renderer/src/lib/tauri-desktop-transport'
 
 const native = (window as unknown as {
-  __TAURI__?: { core: { invoke: NativeInvoke } }
+  __TAURI__?: TauriDesktopApi
 }).__TAURI__
+let sliceMounted = false
 const message = document.querySelector<HTMLParagraphElement>('#message')!
 const output = document.querySelector<HTMLPreElement>('#result')!
-const buttons = [...document.querySelectorAll<HTMLButtonElement>('button')]
+const buttons = [...document.querySelectorAll<HTMLButtonElement>('#status, #ping, #probe')]
 
 async function run(command: string, args?: Record<string, unknown>): Promise<void> {
   if (!native) {
@@ -18,6 +18,12 @@ async function run(command: string, args?: Record<string, unknown>): Promise<voi
   message.textContent = 'Checking runtime…'
   try {
     const result = await native.core.invoke<unknown>(command, args)
+    if (command === 'engine_status' && result && typeof result === 'object' &&
+      'syntheticDesktop' in result && result.syntheticDesktop === true && !sliceMounted) {
+      sliceMounted = true
+      document.querySelector<HTMLButtonElement>('#probe')!.hidden = true
+      void mountSyntheticTaskSlice(native).catch(() => { message.textContent = 'The isolated task service is unavailable.' })
+    }
     output.textContent = JSON.stringify(result, null, 2)
     message.textContent = 'Check finished.'
   } catch {

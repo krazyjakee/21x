@@ -9,3 +9,8 @@ button { font: inherit; border: 1px solid #666; background: #272727; color: inhe
 button:focus-visible { outline: 2px solid #afbefd; outline-offset: 4px; }
 button:disabled { opacity: .5; cursor: wait; }
 pre { background: #202020; border-radius: .5rem; padding: 1rem; overflow: auto; line-height: 1.5; }
+section { border-top: 1px solid #444; margin-top: 2rem; padding-top: 1rem; }
+form { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; }
+input { color: inherit; background: #202020; border: 1px solid #666; border-radius: .5rem; font: inherit; padding: .75rem; }
+ul { padding: 0; list-style: none; display: grid; gap: .5rem; }
+ul button { width: 100%; text-align: left; }

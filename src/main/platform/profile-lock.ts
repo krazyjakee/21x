@@ -95,6 +95,6 @@ export function acquireProfileLock(profileRoot: string, options: { timeoutMs?: n
     if (ownerKey && !(error instanceof ProfileLockError && error.code === 'PROFILE_DUPLICATE_OWNER')) owners.delete(ownerKey)
     if (error instanceof ProfileLockError) throw error
     const code = (error as { code?: string }).code
-    fail(code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED' ? 'PROFILE_IN_USE' : 'PROFILE_LOCK_INVALID')
+    return fail(code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED' ? 'PROFILE_IN_USE' : 'PROFILE_LOCK_INVALID')
   }
 }

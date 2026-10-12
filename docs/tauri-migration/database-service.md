@@ -1,6 +1,6 @@
 # Synthetic database service slice
 
-`src/service/database-stdio.ts` is the packaged Node entry. It redirects dependency diagnostics to fixed redacted stderr before dynamically importing the domain bootstrap in `database-service.ts`. The native staging owner bundles this as `resources/service/database-stdio.mjs`; the checked native bootstrap remains responsible for pinned runtime/module containment checks. Runtime package dependencies are only standalone-ABI `better-sqlite3` and pure JavaScript `@paralleldrive/cuid2`. There are no agent SDK, Electron, subprocess, or managed MCP tool registry imports.
+`src/service/database-stdio.ts` is the packaged Node entry. It redirects dependency diagnostics to fixed redacted stderr before dynamically importing the domain bootstrap in `database-service.ts`. `pnpm tauri:prepare:database` bundles it with the existing Vite SSR tooling, retaining only the reviewed SQLite/cuid2 runtime imports. A checked `resources/service/database-stdio.mjs` wrapper verifies the pinned Node version, package versions and physical module containment before importing `database-engine.mjs`. Staging writes changed bytes atomically and does not copy repository dependencies. Runtime package dependencies are only standalone-ABI `better-sqlite3` and pure JavaScript `@paralleldrive/cuid2`. There are no agent SDK, Electron, subprocess, or managed MCP tool registry imports.
 
 This entry requires private pipe/socket stdin/stdout, `TWENTYONEX_DATABASE_MODE=synthetic-only`, and absolute host-injected `TWENTYONEX_PROFILE_ROOT` / `TWENTYONEX_RESOURCE_ROOT`. The profile must physically reside under the canonical OS temporary directory and have the dedicated `21x-database-service-` prefix. First initialization accepts only a fresh directory plus the lifetime lock's own files; it never adopts an unmarked existing database. A private `.21x-synthetic-database.json` marker permits subsequent synthetic reopen. The directory and marker do not authorize production migration.
 
@@ -33,6 +33,18 @@ Task result encoding selects declared renderer fields and excludes private `mcp_
 `fixture.transcriptUpsert` is a private synthetic test ingress, outside the desktop manifest and renderer allowlist. It accepts `{ taskId, parts }` (at most 32 explicitly validated parts) and uses the real production transcript transaction/upsert path, emitting durable deltas. Its result is the exact internal `{ maxRev, changedPartIds }` shape. It does not simulate a model, session, or approval response.
 
 ## Lifecycle and remaining gates
+
+After `pnpm tauri:prepare:native` and `pnpm tauri:prepare:database`, build with
+`pnpm tauri:build --debug --features synthetic-desktop`. That explicit feature
+selects the fixed database entry, a fresh private temporary profile, fourteen
+native command schemas and targeted desktop events. The ordinary feasibility
+build keeps its existing entry. The frontend reveals an isolated task list/form
+and durable transcript reads only when native status identifies the synthetic
+service. Its debug GUI proof creates/edits a task, observes events, creates a
+project, persists a setting, reloads the actual WebView and rehydrates those
+records. Browser commands and a stale epoch are tested at the native boundary.
+The manual Linux native workflow has a `synthetic-desktop` mode for this check;
+passing direct-child or headless Rust tests does not establish the GUI result.
 
 The standard initialize/ping handshake returns exactly `{ protocolVersion: 1, engineEpoch, nodeVersion: process.version }`; shutdown accepts `{}` and returns `{ stopped: true }`. Shutdown waits for active handlers and queued response/event writes to drain before closing resources. Pipe EOF/error and signals stop the service; protocol cancellation remains advisory and committed mutations are never replayed. This service spawns no children.
 
