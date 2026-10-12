@@ -35,10 +35,27 @@ export class SecretStorageNotConfiguredError extends Error {
   }
 }
 
+export class SecretStorageFormatError extends Error {
+  readonly code = 'SECRET_STORAGE_FORMAT_INVALID'
+
+  constructor() {
+    super('SECRET_STORAGE_FORMAT_INVALID')
+    this.name = 'SecretStorageFormatError'
+  }
+}
+
 let configuredStorage: SecretStorage | undefined
 
 /** Register once per service process. Repeating the same registration is safe. */
 export function configureSecretStorage(storage: SecretStorage): void {
+  // Validate before assignment, without probing encryption or the OS keychain.
+  // A failed bootstrap leaves the registry available for a valid registration.
+  try {
+    const format = storage.formatId
+    if (format !== undefined && format !== ELECTRON_SECRET_STORAGE_FORMAT && format !== AUTHENTICATED_SECRET_STORAGE_FORMAT) {
+      throw new SecretStorageFormatError()
+    }
+  } catch { throw new SecretStorageFormatError() }
   if (configuredStorage && configuredStorage !== storage) {
     throw new Error('Secret storage is already configured')
   }

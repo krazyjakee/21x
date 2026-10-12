@@ -125,9 +125,22 @@ describe('credential setting format contract', () => {
     expect(() => codec.encryptSettingValue('synthetic')).toThrow('CREDENTIAL_SETTING_FORMAT_INVALID')
   })
 
-  it.each(['future.v1', null])('rejects undeclared runtime format %s instead of selecting legacy', async (formatId) => {
-    const codec = await configured({ ...legacy(), formatId } as unknown as SecretStorage)
-    expect(() => codec.encryptSettingValue('synthetic')).toThrow('CREDENTIAL_SETTING_FORMAT_INVALID')
-    expect(() => codec.decryptSettingValue('synthetic')).toThrow('CREDENTIAL_SETTING_FORMAT_INVALID')
+  it.each(['future.v1', null])('rejects undeclared runtime format %s atomically at bootstrap', async (formatId) => {
+    const registry = await import('./secret-storage')
+    const invalid = { ...legacy(), formatId } as unknown as SecretStorage
+    expect(() => registry.configureSecretStorage(invalid)).toThrow(registry.SecretStorageFormatError)
+    try { registry.configureSecretStorage(invalid) } catch (error) {
+      expect(error).toMatchObject({ code: 'SECRET_STORAGE_FORMAT_INVALID', message: 'SECRET_STORAGE_FORMAT_INVALID' })
+      expect(error).not.toHaveProperty('cause')
+    }
+    expect(() => registry.getSecretStorage()).toThrow(registry.SecretStorageNotConfiguredError)
+    expect(invalid.isEncryptionAvailable).not.toHaveBeenCalled()
+    const validLegacy = legacy()
+    registry.configureSecretStorage(validLegacy)
+    expect(registry.getSecretStorage()).toBe(validLegacy)
+    expect(() => registry.configureSecretStorage(invalid)).toThrow('SECRET_STORAGE_FORMAT_INVALID')
+    expect(registry.getSecretStorage()).toBe(validLegacy)
+    const codec = await import('../database/serializers')
+    expect(codec.decryptSettingValue(codec.encryptSettingValue('synthetic'))).toBe('synthetic')
   })
 })
