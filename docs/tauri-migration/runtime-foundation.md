@@ -52,3 +52,9 @@ The subprocess tests are dependency-free and cover fragmented/coalesced frames, 
 Direct Rust dependency versions are pinned to Tauri 2.12.3, tauri-build 2.7.2, Tokio 1.53.2, Serde 1.0.229, and serde_json 1.0.154, verified against crates.io metadata. Cargo.lock is generated and checked in; Rust 1.90 is the declared source minimum and local core validation used 1.98. Supported GUI platform prerequisites, macOS Node signing, Windows executable inclusion, packaged native addon layout, clean machines with Node absent from PATH, all four architecture builds, and packaged shutdown/crash evidence remain T01 blockers.
 
 Full service extraction, schedulers, shared-profile locking, credentials, browser parity, and production host services belong to later cards and must not be inferred from this screen.
+
+## Remote Linux native verification
+
+The manually dispatched `Tauri native Linux feasibility` workflow installs the [official Linux WebKitGTK prerequisites](https://v2.tauri.app/start/prerequisites/) on Ubuntu 24.04, pins Node 22.23.2 and Rust 1.98.0, stages standalone native modules, and builds a debug Debian package with the locked Rust dependency graph. Cargo/native builds use one job, incremental builds and debug symbols are disabled, only compressed Cargo dependencies are cached, and evidence/package artifacts expire after seven days. The workflow has no release publication step and does not run automatically for each commit.
+
+Build logs and the separate headless native probe are captured as distinct evidence. A successful package build alone does not prove GUI launch, renderer permissions, installed resource discovery, or graceful quit. Those checks remain open until the installed package smoke is implemented and its workflow result is reviewed; no new native validation has been run locally in this workstream.
