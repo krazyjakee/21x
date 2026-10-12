@@ -2700,6 +2700,7 @@ export class AgentManager extends EventEmitter {
     return withStartupDeadline(starting, timeoutMs, `${agentName} startup`, (sessionId) => {
       console.warn(`[AgentManager] ${taskId} came up after its start timed out; stopping ${sessionId}`)
       if (sessionId) return this.ownShutdownWork(this.stopSession(sessionId, false))
+      return undefined
     })
   }
 
