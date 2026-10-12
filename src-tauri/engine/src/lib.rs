@@ -16,6 +16,7 @@ use tokio::{
     sync::{oneshot, watch, Mutex as AsyncMutex, Semaphore},
     time::timeout,
 };
+mod process_tree;
 
 const MAX_FRAME: usize = 1024 * 1024;
 const MAX_PENDING: usize = 128;
@@ -100,6 +101,8 @@ struct Inner {
     pending: Mutex<HashMap<String, Pending>>,
     epoch: Mutex<String>,
     next_id: AtomicU64,
+    #[cfg(feature = "native-fixture-tests")]
+    process_id: u32,
     closed: AtomicBool,
     queue_bytes: Arc<Semaphore>,
     request_slots: Arc<Semaphore>,
@@ -138,6 +141,14 @@ impl Drop for PendingGuard {
 
 impl Engine {
     pub async fn start(resource_root: PathBuf, profile_root: PathBuf) -> Result<Self, EngineError> {
+        Self::start_impl(resource_root, profile_root, false).await
+    }
+
+    async fn start_impl(
+        resource_root: PathBuf,
+        profile_root: PathBuf,
+        fixture_mode: bool,
+    ) -> Result<Self, EngineError> {
         let resource_root = std::fs::canonicalize(resource_root)
             .map_err(|_| EngineError::new("DISCONNECTED").startup("resource-root"))?;
         let profile_root = std::fs::canonicalize(profile_root)
@@ -192,9 +203,18 @@ impl Engine {
                 command.env(key, value);
             }
         }
+        if fixture_mode {
+            command.env("TWENTYONEX_FEASIBILITY_TEST_MODE", "1");
+        }
+        process_tree::configure(&mut command)
+            .map_err(|_| EngineError::new("DISCONNECTED").startup("process-ownership"))?;
         let mut child = command
             .spawn()
             .map_err(|_| EngineError::new("DISCONNECTED").startup("spawn"))?;
+        #[cfg(feature = "native-fixture-tests")]
+        let process_id = child
+            .id()
+            .ok_or_else(|| EngineError::new("DISCONNECTED").startup("spawn"))?;
         let stdin = child
             .stdin
             .take()
@@ -203,13 +223,19 @@ impl Engine {
             .stdout
             .take()
             .ok_or_else(|| EngineError::new("DISCONNECTED").startup("stdio"))?;
-        let (stop, mut stop_rx) = watch::channel(false);
+        // Assignment is complete before the first initialize request. The child
+        // cannot start fixture/native descendants before this private handshake.
+        let owned = process_tree::OwnedChild::attach(child)
+            .map_err(|_| EngineError::new("DISCONNECTED").startup("process-ownership"))?;
+        let (stop, stop_rx) = watch::channel(false);
         let (exited_tx, exited) = watch::channel(false);
         let engine = Self(Arc::new(Inner {
             stdin: AsyncMutex::new(stdin),
             pending: Mutex::new(HashMap::new()),
             epoch: Mutex::new(String::new()),
             next_id: AtomicU64::new(1),
+            #[cfg(feature = "native-fixture-tests")]
+            process_id,
             closed: AtomicBool::new(false),
             queue_bytes: Arc::new(Semaphore::new(MAX_QUEUED_BYTES)),
             request_slots: Arc::new(Semaphore::new(MAX_PENDING)),
@@ -218,12 +244,9 @@ impl Engine {
         }));
         let monitor = engine.clone();
         tokio::spawn(async move {
-            tokio::select! {
-                _ = child.wait() => {},
-                _ = stop_rx.changed() => { let _ = child.start_kill(); let _ = child.wait().await; }
-            }
+            let reaped = owned.supervise(stop_rx).await;
             monitor.disconnect(EngineError::new("DISCONNECTED"));
-            let _ = exited_tx.send(true);
+            let _ = exited_tx.send(reaped);
         });
         let reader = engine.clone();
         tokio::spawn(async move {
@@ -431,7 +454,8 @@ impl Engine {
 
     pub fn status(&self) -> Value {
         json!({"available": !self.0.closed.load(Ordering::SeqCst), "protocolVersion": 1,
-            "engineEpoch": self.0.epoch.lock().unwrap().clone(), "experimental": true})
+            "engineEpoch": self.0.epoch.lock().unwrap().clone(), "experimental": true,
+            "ownedChildExited": *self.0.exited.borrow(), "ownershipMode": process_tree::ownership_mode()})
     }
 
     pub async fn shutdown(&self) {
@@ -486,6 +510,15 @@ fn valid_result(operation: &str, result: &Value, epoch: &str) -> bool {
                 && result["protocolVersion"] == 1
                 && result["engineEpoch"] == epoch
                 && result["nodeVersion"] == NODE_VERSION
+        }
+        #[cfg(feature = "native-fixture-tests")]
+        "engine.fixture.start" | "engine.fixture.cooperative" => {
+            result.as_object().map(|o| o.len()) == Some(2)
+                && ["workerPid", "descendantPid"].iter().all(|key| {
+                    result[*key]
+                        .as_u64()
+                        .is_some_and(|pid| pid > 0 && pid <= u32::MAX as u64)
+                })
         }
         "engine.shutdown" => result == &json!({"stopped": true}),
         "engine.probe" => {
@@ -565,6 +598,180 @@ mod tests {
             .expect("start staged standalone Node 22.23.2 without native dependency probes");
         (engine, profile)
     }
+    #[cfg(feature = "native-fixture-tests")]
+    async fn ownership_engine() -> (Engine, IsolatedProfile) {
+        let resources = std::env::var_os("TWENTYONEX_TEST_RESOURCES")
+            .expect("ownership tests require explicitly staged standalone resources");
+        let profile = IsolatedProfile::new();
+        let engine = Engine::start_impl(PathBuf::from(resources), profile.0.clone(), true)
+            .await
+            .expect("initialize owned fixture engine");
+        (engine, profile)
+    }
+
+    #[cfg(feature = "native-fixture-tests")]
+    async fn assert_fixture_descendants_stopped(pids: &Value) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let running = ["workerPid", "descendantPid"]
+                .iter()
+                .any(|key| process_tree::test_process_running(pids[*key].as_u64().unwrap() as u32));
+            if !running {
+                return;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "owned fixture descendant survived"
+            );
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }
+
+    #[cfg(feature = "native-fixture-tests")]
+    #[tokio::test]
+    #[ignore = "requires explicitly staged standalone resources; creates only private fixture descendants"]
+    async fn staged_crash_rejects_pending_work_and_terminates_owned_descendants() {
+        let (engine, _profile) = ownership_engine().await;
+        let pids = engine
+            .request("engine.fixture.start", json!({}))
+            .await
+            .unwrap();
+        let pending_engine = engine.clone();
+        let pending = tokio::spawn(async move {
+            pending_engine
+                .request("engine.fixture.hang", json!({}))
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        let crash = timeout(
+            Duration::from_secs(5),
+            engine.request("engine.fixture.crash", json!({})),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
+        assert_eq!(crash.code, "DISCONNECTED");
+        assert_eq!(
+            timeout(Duration::from_secs(1), pending)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap_err()
+                .code,
+            "DISCONNECTED"
+        );
+        engine.shutdown().await;
+        assert_eq!(engine.status()["ownedChildExited"], true);
+        assert_fixture_descendants_stopped(&pids).await;
+        assert_eq!(
+            engine
+                .request("engine.ping", json!({}))
+                .await
+                .unwrap_err()
+                .code,
+            "DISCONNECTED"
+        );
+        assert!(engine.0.pending.lock().unwrap().is_empty());
+    }
+
+    #[cfg(feature = "native-fixture-tests")]
+    #[tokio::test]
+    #[ignore = "requires explicitly staged standalone resources; creates only private fixture descendants"]
+    async fn staged_forced_disconnect_terminates_owned_descendants_within_bounds() {
+        let (engine, _profile) = ownership_engine().await;
+        let pids = engine
+            .request("engine.fixture.start", json!({}))
+            .await
+            .unwrap();
+        engine.disconnect(EngineError::new("DISCONNECTED"));
+        timeout(Duration::from_secs(5), engine.shutdown())
+            .await
+            .unwrap();
+        assert_eq!(engine.status()["ownedChildExited"], true);
+        assert_fixture_descendants_stopped(&pids).await;
+        assert_eq!(engine.0.request_slots.available_permits(), MAX_PENDING);
+    }
+
+    #[cfg(feature = "native-fixture-tests")]
+    #[tokio::test]
+    #[ignore = "private helper launched only by the abrupt-host-death test"]
+    async fn staged_host_fixture_process() {
+        let Some(marker) = std::env::var_os("TWENTYONEX_TEST_HOST_MARKER") else {
+            return;
+        };
+        let marker = PathBuf::from(marker);
+        let resources = std::env::var_os("TWENTYONEX_TEST_RESOURCES").unwrap();
+        let engine = Engine::start_impl(
+            PathBuf::from(resources),
+            marker.parent().unwrap().to_path_buf(),
+            true,
+        )
+        .await
+        .unwrap();
+        let operation = if cfg!(windows) {
+            "engine.fixture.start"
+        } else {
+            "engine.fixture.cooperative"
+        };
+        let mut pids = engine.request(operation, json!({})).await.unwrap();
+        pids["servicePid"] = json!(engine.0.process_id);
+        let temporary = marker.with_extension("json.tmp");
+        std::fs::write(&temporary, serde_json::to_vec(&pids).unwrap()).unwrap();
+        std::fs::rename(temporary, marker).unwrap();
+        tokio::time::sleep(Duration::from_secs(3600)).await;
+        engine.shutdown().await;
+    }
+
+    #[cfg(feature = "native-fixture-tests")]
+    #[tokio::test]
+    #[ignore = "requires staged resources; kills only its private Rust fixture host"]
+    async fn staged_abrupt_host_death_cleans_known_children() {
+        let profile = IsolatedProfile::new();
+        let marker = profile.0.join("host-pids.json");
+        let mut host = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::staged_host_fixture_process",
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("TWENTYONEX_TEST_HOST_MARKER", &marker)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while !marker.is_file() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "private fixture host did not start"
+            );
+            assert!(
+                host.try_wait().unwrap().is_none(),
+                "private fixture host exited before marker"
+            );
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        let pids: Value = serde_json::from_slice(&std::fs::read(marker).unwrap()).unwrap();
+        host.start_kill().unwrap();
+        timeout(Duration::from_secs(3), host.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_fixture_descendants_stopped(&pids).await;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while process_tree::test_process_running(pids["servicePid"].as_u64().unwrap() as u32) {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "private service survived abrupt host death"
+            );
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }
+
     #[cfg(windows)]
     #[test]
     fn canonical_windows_paths_are_converted_only_for_node() {

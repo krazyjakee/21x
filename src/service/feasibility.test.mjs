@@ -8,9 +8,10 @@ const entry = fileURLToPath(new URL('./feasibility.mjs', import.meta.url))
 const profileRoot = '/isolated-fixture/profile'
 const resourceRoot = '/isolated-fixture/resources'
 
-function fixture(t) {
+function fixture(t, privateFixture = false) {
   const child = spawn(process.execPath, [entry], {
-    env: { TWENTYONEX_PROFILE_ROOT: profileRoot, TWENTYONEX_RESOURCE_ROOT: resourceRoot },
+    env: { TWENTYONEX_PROFILE_ROOT: profileRoot, TWENTYONEX_RESOURCE_ROOT: resourceRoot,
+      ...(privateFixture ? { TWENTYONEX_FEASIBILITY_TEST_MODE: '1' } : {}) },
     stdio: ['pipe', 'pipe', 'pipe']
   })
   t.after(() => child.kill())
@@ -158,4 +159,30 @@ test('an unstaged service cannot borrow native modules or SDKs from the reposito
   assert.equal(report.checks.worker.ok, true)
   await f.request('engine.shutdown')
   assert.equal((await f.closed)[0], 0)
+})
+
+
+test('private ownership operations are absent from the ordinary engine', { timeout: 5000 }, async t => {
+  const f = fixture(t)
+  await f.initialize()
+  assert.equal((await f.request('engine.fixture.start')).error.code, 'UNKNOWN_OPERATION')
+  await f.request('engine.shutdown')
+  assert.equal((await f.closed)[0], 0)
+})
+
+test('stdin loss drains the known worker and its cooperative descendant', { timeout: 7000 }, async t => {
+  const f = fixture(t, true)
+  await f.initialize()
+  const response = await f.request('engine.fixture.cooperative')
+  assert.equal(response.error, undefined)
+  const pids = [response.result.workerPid, response.result.descendantPid]
+  f.child.stdin.end()
+  assert.equal((await f.closed)[0], 0)
+  const until = Date.now() + 3000
+  for (;;) {
+    const running = pids.filter(pid => { try { process.kill(pid, 0); return true } catch { return false } })
+    if (!running.length) break
+    assert.ok(Date.now() < until, 'known cooperative child survived stdin loss')
+    await new Promise(resolve => setTimeout(resolve, 25))
+  }
 })

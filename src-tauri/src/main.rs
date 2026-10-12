@@ -85,6 +85,7 @@ impl NativeSmoke {
             && gui["windowCloseObserved"] == true
             && evidence["runtime"]["nativeProbe"]["ok"] == true
             && evidence["shutdown"]["engineUnavailable"] == true
+            && evidence["shutdown"]["ownedChildExited"] == true
     }
 }
 
@@ -317,7 +318,9 @@ fn main() {
                     let mut code = 0;
                     if smoke.enabled() {
                         smoke.evidence.lock().unwrap()["shutdown"] =
-                            json!({"engineUnavailable":engine.status()["available"] == false});
+                            json!({"engineUnavailable":engine.status()["available"] == false,
+                                "ownedChildExited":engine.status()["ownedChildExited"],
+                                "ownershipMode":engine.status()["ownershipMode"]});
                         smoke.evidence.lock().unwrap()["stage"] = json!("complete");
                         let passed = smoke.passed();
                         smoke.evidence.lock().unwrap()["passed"] = json!(passed);

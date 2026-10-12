@@ -32,6 +32,8 @@ let initialized = false
 let closing = false
 let fatalError = false
 let probeRunning = false
+let cleanupStarted = false
+const fixtureMode = process.env.TWENTYONEX_FEASIBILITY_TEST_MODE === '1'
 const accumulator = Buffer.allocUnsafe(MAX_FRAME)
 let frameBytes = 0
 let lastRequestId = 0n
@@ -63,10 +65,20 @@ function exact(value, keys) {
 }
 
 function cleanup() {
+  if (cleanupStarted) return
+  cleanupStarted = true
   closing = true
   for (const { controller } of active.values()) controller.abort()
+  // Keep ownership until each exit callback confirms termination. A stopped
+  // probe must not remove a still-running PTY/worker from this set.
   for (const child of children) { try { child.kill() } catch {} }
-  children.clear()
+  if (children.size) {
+    setTimeout(() => {
+      for (const child of children) { try { child.kill('SIGKILL') } catch {} }
+    }, 500).unref()
+  }
+  // Bound exit even if a native addon retains a handle after child cleanup.
+  setTimeout(() => process.exit(process.exitCode ?? 0), 2000).unref()
 }
 
 function fatal(code) {
@@ -176,15 +188,20 @@ async function ptyProbe(signal) {
       if (settled) return
       settled = true
       clearTimeout(timer)
-      children.delete(terminal)
       signal.removeEventListener('abort', abort)
       data.dispose()
-      exit.dispose()
+      if (result.phase === 'cancelled' || result.phase === 'timeout') {
+        setTimeout(() => {
+          if (children.has(terminal)) { try { terminal.kill('SIGKILL') } catch {} }
+        }, 500).unref()
+      }
       resolve({ ...result, helper, dataChunks: chunks, markerSeen: output.includes('pty-ok') })
     }
     const abort = () => { try { terminal.kill() } catch {}; finish({ ok: false, phase: 'cancelled' }) }
     signal.addEventListener('abort', abort, { once: true })
     const exit = terminal.onExit(({ exitCode, signal: exitSignal }) => {
+      children.delete(terminal)
+      exit.dispose()
       finish({ ok: exitCode === 0 && output.includes('pty-ok'), phase: 'exit',
         exitCode: Number.isInteger(exitCode) ? exitCode : null,
         signal: Number.isInteger(exitSignal) ? exitSignal : null })
@@ -229,6 +246,23 @@ async function probe(signal) {
   } finally { probeRunning = false }
 }
 
+async function ownershipFixture(stubborn = true) {
+  return new Promise((resolve, reject) => {
+    const child = fork(fileURLToPath(import.meta.url), [stubborn ? '--ownership-stubborn-worker' : '--ownership-worker'], {
+      execPath: process.execPath, execArgv: [],
+      stdio: ['ignore', 'ignore', 'ignore', 'ipc'], env: workerEnvironment()
+    })
+    children.add(child)
+    child.once('exit', () => children.delete(child))
+    child.once('error', () => reject(fail('INTERNAL_ERROR')))
+    child.once('message', message => {
+      if (Number.isSafeInteger(message?.descendantPid) && message.descendantPid > 0) {
+        resolve({ workerPid: child.pid, descendantPid: message.descendantPid })
+      } else reject(fail('INTERNAL_ERROR'))
+    })
+  })
+}
+
 async function dispatch(frame, signal) {
   if (frame.operation === 'engine.initialize') {
     const p = frame.payload
@@ -243,6 +277,14 @@ async function dispatch(frame, signal) {
   if (!exact(frame.payload, [])) throw fail('INVALID_ARGUMENTS')
   if (frame.operation === 'engine.ping') return { protocolVersion: 1, engineEpoch: epoch, nodeVersion: process.version }
   if (!initialized) throw fail('INVALID_ARGUMENTS')
+  if (fixtureMode && frame.operation === 'engine.fixture.start') return ownershipFixture()
+  if (fixtureMode && frame.operation === 'engine.fixture.cooperative') return ownershipFixture(false)
+  if (fixtureMode && frame.operation === 'engine.fixture.crash') { process.exit(23) }
+  if (fixtureMode && frame.operation === 'engine.fixture.hang') {
+    return new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => reject(fail('CANCELLED')), { once: true })
+    })
+  }
   if (frame.operation === 'engine.probe') return probe(signal)
   if (frame.operation === 'engine.shutdown') return { stopped: true }
   throw fail('UNKNOWN_OPERATION')
@@ -313,7 +355,41 @@ function receive(bytes) {
     })
 }
 
-if (process.argv.includes('--worker')) {
+if (process.argv.includes('--ownership-worker')) {
+  const child = fork(fileURLToPath(import.meta.url), ['--ownership-descendant'], {
+    execPath: process.execPath, execArgv: [],
+    stdio: ['ignore', 'ignore', 'ignore', 'ipc'], env: workerEnvironment()
+  })
+  child.once('message', () => process.send?.({ descendantPid: child.pid }))
+  child.once('exit', () => process.exit(0))
+  const stop = () => {
+    child.kill()
+    setTimeout(() => { try { child.kill('SIGKILL') } catch {} }, 500).unref()
+  }
+  process.on('disconnect', stop)
+  process.on('SIGTERM', stop)
+} else if (process.argv.includes('--ownership-descendant')) {
+  process.on('disconnect', () => process.exit(0))
+  process.send?.({ ready: true })
+  setInterval(() => {}, 1000)
+} else if (process.argv.includes('--ownership-stubborn-worker')) {
+  // Reachable only through the explicitly enabled private fixture operation.
+  // Deliberately resist cooperative exit to exercise the host's owned tree.
+  const child = fork(fileURLToPath(import.meta.url), ['--ownership-stubborn-descendant'], {
+    execPath: process.execPath, execArgv: [],
+    stdio: ['ignore', 'ignore', 'ignore', 'ipc'], env: workerEnvironment()
+  })
+  child.once('message', () => process.send?.({ descendantPid: child.pid }))
+  process.on('disconnect', () => {})
+  process.on('SIGTERM', () => {})
+  setInterval(() => {}, 1000)
+} else if (process.argv.includes('--ownership-stubborn-descendant')) {
+  process.on('disconnect', () => {})
+  process.on('SIGTERM', () => {})
+  process.send?.({ ready: true })
+  setInterval(() => {}, 1000)
+} else if (process.argv.includes('--worker')) {
+  process.on('disconnect', () => process.exit(0))
   process.send?.({ marker: 'worker-ok' }, () => process.disconnect())
 } else {
   process.stdin.on('data', chunk => {
