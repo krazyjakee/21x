@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
+import { fileURLToPath } from 'node:url'
 import {
   SERVICE_LIMITS, SERVICE_ERROR_MESSAGES, ServiceProtocolError, validateServiceFrame,
-  isBootstrapResult, isInitializePayload, isJsonValue,
+  isBootstrapResult, isInitializePayload, isJsonValue, isRecord, hasExactKeys,
   type JsonValue, type ServiceFrame, type ServiceRequest, type ServiceResponse
 } from './service-protocol'
 import { ServiceFrameDecoder, encodeServiceFrame } from '../service/transport/framing'
@@ -19,7 +22,8 @@ const response = (id = 'host:1', result: JsonValue = null, engineEpoch = epoch):
 })
 const peers: ServicePeer[] = []
 const schema: OperationSchema = { validatePayload: isJsonValue, validateResult: isJsonValue }
-const operations = { 'test.echo': schema, 'engine.ping': { validatePayload: (value: unknown) => value === null, validateResult: isBootstrapResult } }
+const emptyPayload = (value: unknown): boolean => isRecord(value) && hasExactKeys(value, [])
+const operations = { 'test.echo': schema, 'engine.ping': { validatePayload: emptyPayload, validateResult: isBootstrapResult } }
 function peer(options: Partial<ConstructorParameters<typeof ServicePeer>[0]> = {}): ServicePeer {
   const instance = new ServicePeer({ role: 'host', engineEpoch: epoch,
     write: async () => {}, operations, ...options })
@@ -124,7 +128,7 @@ describe('bidirectional bounded service peer', () => {
   it('bootstraps a host epoch only from the correlated successful response', async () => {
     const host = peer({ engineEpoch: null })
     await expect(host.request('test.echo', null)).rejects.toMatchObject({ code: 'STALE_EPOCH' })
-    const pending = host.request('engine.ping', null)
+    const pending = host.request('engine.ping', {})
     host.receive(encodeServiceFrame(response('host:99', bootstrapResult)))
     expect(host.engineEpoch).toBeNull()
     host.receive(encodeServiceFrame(response('host:1', bootstrapResult)))
@@ -134,7 +138,7 @@ describe('bidirectional bounded service peer', () => {
 
   it('rejects mismatched bootstrap epochs and result schemas', async () => {
     const host = peer({ engineEpoch: null })
-    const pending = host.request('engine.ping', null)
+    const pending = host.request('engine.ping', {})
     host.receive(encodeServiceFrame(response('host:1', { ...bootstrapResult, engineEpoch: 'other' })))
     await expect(pending).rejects.toMatchObject({ code: 'INVALID_RESULT' })
     expect(host.engineEpoch).toBeNull()
@@ -331,4 +335,83 @@ describe('bidirectional bounded service peer', () => {
     expect(handle).toHaveBeenCalledTimes(SERVICE_LIMITS.activeRequests)
     expect(sent.map(frame => frame.kind === 'response' ? frame.error?.code : null)).toEqual(['BACKPRESSURE', 'STALE_EPOCH'])
   })
+})
+
+describe('actual feasibility service wire fixtures', () => {
+  function fixture() {
+    const profileRoot = '/isolated-protocol-fixture/profile'
+    const resourceRoot = '/isolated-protocol-fixture/resources'
+    const child = spawn(process.execPath, [fileURLToPath(new URL('../service/feasibility.mjs', import.meta.url))], {
+      env: { TWENTYONEX_PROFILE_ROOT: profileRoot, TWENTYONEX_RESOURCE_ROOT: resourceRoot },
+      stdio: ['pipe', 'pipe', 'pipe']
+    })
+    const closed = once(child, 'close')
+    let diagnostics = ''
+    child.stderr.on('data', (chunk: Uint8Array) => {
+      diagnostics = (diagnostics + new TextDecoder().decode(chunk)).slice(-2048)
+    })
+    const host = peer({ engineEpoch: null,
+      operations: {
+        'engine.initialize': { validatePayload: isInitializePayload, validateResult: isBootstrapResult },
+        'engine.ping': { validatePayload: emptyPayload, validateResult: isBootstrapResult },
+        'engine.shutdown': { validatePayload: emptyPayload,
+          validateResult: value => isRecord(value) && hasExactKeys(value, ['stopped']) && value.stopped === true },
+        // Locally known but deliberately absent from the fixture service.
+        'engine.unknown': schema
+      },
+      write: bytes => new Promise((resolve, reject) => {
+        child.stdin.write(bytes, error => error ? reject(error) : resolve())
+      }),
+      onDisconnect: () => { child.stdin.destroy() }
+    })
+    child.stdin.on('error', () => host.disconnect())
+    child.on('error', () => host.disconnect())
+    child.stdout.on('data', (bytes: Uint8Array) => host.receive(bytes))
+    child.stdout.on('end', () => host.end())
+    async function initialize(): Promise<JsonValue> {
+      return host.request('engine.initialize', { protocolVersion: 1, profileRoot, resourceRoot })
+    }
+    return { child, closed, host, initialize, diagnostics: () => diagnostics }
+  }
+
+  it('uses the shared decoder and peer for real initialization, ping, redacted errors and shutdown', async () => {
+    const f = fixture()
+    try {
+      const ready = await f.initialize()
+      expect(isBootstrapResult(ready)).toBe(true)
+      expect(f.host.engineEpoch).not.toBeNull()
+      const ping = await f.host.request('engine.ping', {})
+      expect(ping).toEqual(ready)
+      await expect(f.host.request('engine.unknown', { password: 'fixture-must-not-echo' }))
+        .rejects.toMatchObject({ code: 'INVALID_ARGUMENTS', message: SERVICE_ERROR_MESSAGES.INVALID_ARGUMENTS })
+      await expect(f.host.request('engine.unknown', {})).rejects.toMatchObject({ code: 'UNKNOWN_OPERATION' })
+      await expect(f.host.request('engine.shutdown', {})).resolves.toEqual({ stopped: true })
+      expect((await f.closed)[0]).toBe(0)
+      expect(f.diagnostics()).not.toContain('fixture-must-not-echo')
+    } finally { f.host.disconnect(); f.child.kill(); await f.closed }
+  }, 5000)
+
+  it('rejects BOM input in the actual service consistently with shared framing', async () => {
+    const f = fixture()
+    try {
+      const frame = { ...request('host:1', {}), operation: 'engine.ping', engineEpoch: '' }
+      f.child.stdin.end(encoder.encode('\ufeff' + JSON.stringify(frame) + '\n'))
+      const [exitCode] = await f.closed
+      expect(exitCode).toBe(1)
+      expect(f.diagnostics()).not.toContain('host:1')
+    } finally { f.host.disconnect(); f.child.kill(); await f.closed }
+  }, 5000)
+
+  it('rejects invalid cancellation identifiers rather than accepting an unvalidated callback', async () => {
+    const f = fixture()
+    try {
+      await f.initialize()
+      const invalidCancel = { kind: 'event', protocolVersion: 1, engineEpoch: f.host.engineEpoch,
+        operation: 'engine.cancel', payload: { requestId: 'service:secret-invalid-id' } }
+      f.child.stdin.end(JSON.stringify(invalidCancel) + '\n')
+      const [exitCode] = await f.closed
+      expect(exitCode).toBe(1)
+      expect(f.diagnostics()).not.toContain('secret-invalid-id')
+    } finally { f.host.disconnect(); f.child.kill(); await f.closed }
+  }, 5000)
 })
