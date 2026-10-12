@@ -31,7 +31,7 @@ pub(crate) fn configure(command: &mut Command) -> io::Result<()> {
                     return Err(io::Error::last_os_error());
                 }
                 if libc::getppid() != parent {
-                    return Err(io::Error::other("supervisor disappeared"));
+                    return Err(io::Error::from_raw_os_error(libc::ESRCH));
                 }
                 Ok(())
             });
