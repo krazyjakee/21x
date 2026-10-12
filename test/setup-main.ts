@@ -1,4 +1,6 @@
 import { vi } from 'vitest'
+import { configureSecretStorage } from '../src/main/platform/secret-storage'
+import { electronSecretStorage } from '../src/main/platform/electron-secret-storage'
 
 vi.mock('electron', () => ({
   app: {
@@ -57,3 +59,7 @@ vi.mock('electron', () => ({
     isStarted: vi.fn(() => false)
   }
 }))
+
+// Match production bootstrap without reading the OS keychain during setup.
+// The adapter delegates to the live mocked methods, including per-test changes.
+configureSecretStorage(electronSecretStorage)

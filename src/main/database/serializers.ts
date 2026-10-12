@@ -1,4 +1,4 @@
-import { safeStorage } from 'electron'
+import { getSecretStorage } from '../platform/secret-storage'
 import { TASK_ROLE_TASK, isCoordinatorRole, type TaskRole } from '../../shared/task-roles'
 import { DEFAULT_PROJECT_ID } from '../../shared/projects'
 import type {
@@ -18,11 +18,13 @@ import type {
 /** Columns that can be dynamically updated via updateTask. */
 /** Encrypt at rest with the OS keychain when available (plaintext fallback). */
 export function encryptSecret(value: string): Buffer {
-  return safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(value) : Buffer.from(value, 'utf8')
+  const storage = getSecretStorage()
+  return storage.isEncryptionAvailable() ? storage.encryptString(value) : Buffer.from(value, 'utf8')
 }
 
 function decryptSecret(value: Buffer): string {
-  return safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(value) : value.toString('utf8')
+  const storage = getSecretStorage()
+  return storage.isEncryptionAvailable() ? storage.decryptString(value) : value.toString('utf8')
 }
 
 /** Settings rows that hold provider API keys (e.g. `anthropic_api_key`). */
@@ -39,16 +41,18 @@ export function isEncryptedSettingValue(value: string): boolean {
 
 /** Same policy as encryptSecret: keychain when available, plaintext fallback. */
 export function encryptSettingValue(value: string): string {
-  if (!value || !safeStorage.isEncryptionAvailable()) return value
-  return ENCRYPTED_SETTING_PREFIX + safeStorage.encryptString(value).toString('base64')
+  const storage = getSecretStorage()
+  if (!value || !storage.isEncryptionAvailable()) return value
+  return ENCRYPTED_SETTING_PREFIX + storage.encryptString(value).toString('base64')
 }
 
 /** Plaintext (legacy or fallback) values pass through; unreadable ciphertext yields ''. */
 export function decryptSettingValue(value: string): string {
+  const storage = getSecretStorage()
   if (!isEncryptedSettingValue(value)) return value
-  if (!safeStorage.isEncryptionAvailable()) return ''
+  if (!storage.isEncryptionAvailable()) return ''
   try {
-    return safeStorage.decryptString(Buffer.from(value.slice(ENCRYPTED_SETTING_PREFIX.length), 'base64'))
+    return storage.decryptString(Buffer.from(value.slice(ENCRYPTED_SETTING_PREFIX.length), 'base64'))
   } catch {
     return ''
   }

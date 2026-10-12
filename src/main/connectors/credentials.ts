@@ -1,4 +1,4 @@
-import { safeStorage } from 'electron'
+import { getSecretStorage } from '../platform/secret-storage'
 import type { ConnectorStore } from './connector-store'
 
 /**
@@ -148,7 +148,7 @@ export class ConnectorCredentialStore {
 
   /** Whether persistent (encrypted) credentials can be stored right now. */
   isPersistentStorageAvailable(): boolean {
-    return safeStorage.isEncryptionAvailable()
+    return getSecretStorage().isEncryptionAvailable()
   }
 
   /**
@@ -161,8 +161,9 @@ export class ConnectorCredentialStore {
     if (!isCredentials(creds)) throw new Error('Invalid connector credentials')
     if (!this.store.getInstance(instanceId)) throw new Error(`Connector instance not found: ${instanceId}`)
     if (storage === 'persistent') {
-      if (!safeStorage.isEncryptionAvailable()) throw new ConnectorCredentialsUnavailableError()
-      const blob = safeStorage.encryptString(JSON.stringify(creds))
+      const secretStorage = getSecretStorage()
+      if (!secretStorage.isEncryptionAvailable()) throw new ConnectorCredentialsUnavailableError()
+      const blob = secretStorage.encryptString(JSON.stringify(creds))
       this.store.setAuthBlob(instanceId, creds.type, blob)
       this.session.delete(instanceId)
     } else {
@@ -180,9 +181,11 @@ export class ConnectorCredentialStore {
     const sessionCreds = this.session.get(instanceId)
     if (sessionCreds) return sessionCreds
     const row = this.store.getAuthBlob(instanceId)
-    if (!row?.auth || !safeStorage.isEncryptionAvailable()) return null
+    if (!row?.auth) return null
+    const secretStorage = getSecretStorage()
+    if (!secretStorage.isEncryptionAvailable()) return null
     try {
-      const parsed = JSON.parse(safeStorage.decryptString(row.auth)) as unknown
+      const parsed = JSON.parse(secretStorage.decryptString(row.auth)) as unknown
       return isCredentials(parsed) ? parsed : null
     } catch {
       // Deliberately no error detail: it could echo the decrypted text.
