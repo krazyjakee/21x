@@ -25,8 +25,21 @@ quit timestamp to the parent's close observation; process startup overhead is
 included in that upper bound. OS/code caches remain uncontrolled, so reused
 profiles are labelled explicitly rather than called cold or warm cache trials.
 
-This supplies an Electron application baseline, pending a successful recorded
-run. It does not establish a performance gain or complete T00/G0. The current
+The [hosted baseline run](https://github.com/krazyjakee/21x/actions/runs/38301839412)
+passed all three application starts at `fad9ed1`; the
+[retained report](evidence/linux-x64-electron-baseline.json) records exact metrics
+and versions. Electron 44.0.0 used its own Node 24.18.1 runtime, while the runner
+tooling used standalone Node 22.23.2.
+
+| Profile condition | Interactive readiness | Reload/read | Peak summed sampled RSS |
+| --- | --- | --- | --- |
+| First fresh profile | 2.240 s | 198.6 ms | 795.2 MiB |
+| Reused profile, second start | 0.490 s | 177.8 ms | 929.6 MiB |
+| Reused profile, third start | 0.531 s | 190.6 ms | 1043.8 MiB |
+
+These are three observations on one hosted runner under the measurement limits
+above. They supply an Electron application baseline, without establishing a
+performance gain or completing T00/G0. The current
 Tauri frontend contains a small synthetic task slice; comparison to the complete
 Electron renderer would be misleading. A matched fixture, hardware, production
 feature set and repetition count still need to cover interactive task list,

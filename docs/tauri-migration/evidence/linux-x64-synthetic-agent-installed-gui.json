@@ -1,0 +1,113 @@
+{
+  "gui": {
+    "remoteNavigationDenied": true,
+    "webviewLoadFinished": true,
+    "windowCloseObserved": true,
+    "windowCloseRequested": true
+  },
+  "passed": true,
+  "runtime": {
+    "developmentFrontend": false,
+    "initialized": true,
+    "profileRoot": "/tmp/21x-database-service-10397-1791834816534247446-0",
+    "resourceRoot": "/usr/lib/21x Tauri Feasibility/resources",
+    "syntheticAgent": true,
+    "syntheticDesktop": true,
+    "syntheticDesktopProof": {
+      "agentCompleted": true,
+      "agentStarted": true,
+      "agentStatusEventObserved": true,
+      "agentTranscriptRehydrated": true,
+      "approvalAccepted": true,
+      "approvalRequested": true,
+      "missingResultPreserved": true,
+      "projectCreated": true,
+      "rehydrated": true,
+      "rendererReloaded": true,
+      "retiredOperationDenied": true,
+      "settingPersisted": true,
+      "staleApprovalDenied": true,
+      "staleEpochDenied": true,
+      "taskCreated": true,
+      "taskEventObserved": true,
+      "taskUpdated": true,
+      "transcriptDeltaRead": true,
+      "transcriptSnapshotRead": true,
+      "updateEventObserved": true
+    },
+    "systemNodeHidden": true
+  },
+  "schemaVersion": 1,
+  "shutdown": {
+    "engineUnavailable": true,
+    "ownedChildExited": true,
+    "ownershipMode": "unix-process-group-linux-parent-death-signal"
+  },
+  "stage": "complete",
+  "verification": {
+    "installedResources": true,
+    "ownedRunningProcessesAfterExit": [],
+    "packageSha256": "a4d21105be4d31f14886eb7271529fa13336ae2fac13616ce8b182f3628b3149"
+  },
+  "provenance": {
+    "sourceCommit": "a4a980f753b519c1b23122811da5beb1b0c1b14f",
+    "workflowRun": 38299978450,
+    "target": "linux-x64-synthetic-agent",
+    "scope": "debug isolated installed actual-manager fixture; no model-provider parity, live-profile import or release claim"
+  },
+  "additionalProofs": {
+    "nativeUnitTests": {
+      "passed": 16,
+      "ignored": 5
+    },
+    "stagedDatabaseRoundtrip": "passed",
+    "actualDesktopOwner": {
+      "ok": true,
+      "actualLifecycleOwner": true,
+      "actualAdapterIdentityGate": true,
+      "realSqlite": true,
+      "standaloneNode": true,
+      "publicFixtureAgentOnly": true,
+      "requestIdRequired": true,
+      "scopedTaskAndSession": true,
+      "staleApprovalDenied": true,
+      "duplicateApprovalDenied": true,
+      "approvalAccepted": true,
+      "approvalRejected": true,
+      "acknowledgedStop": true,
+      "approvalInFlightClaimVerified": true,
+      "ownerRecreated": true,
+      "staleRestoredCallbackDenied": true,
+      "durableProjectionAndDelta": true,
+      "liveResumeStatusSnapshot": true,
+      "criticalEventFailureExplicit": true,
+      "noAgentCrudOrSendGranted": true,
+      "noSdkParityClaim": true,
+      "eventCount": 30,
+      "portableModuleCount": 85,
+      "sqliteVersion": "13.0.3",
+      "nodeVersion": "v22.23.2",
+      "diagnosticCounts": {
+        "log": 46,
+        "info": 0,
+        "debug": 0,
+        "warn": 0,
+        "error": 0
+      }
+    },
+    "actualBundledService": {
+      "reportVersion": 1,
+      "passed": true,
+      "actualBundledService": true,
+      "phase": "complete",
+      "publicFixtureIdentity": true,
+      "actualApprovalProjection": true,
+      "pendingOwnerSnapshot": true,
+      "approvalAcceptedAndCompleted": true,
+      "staleApprovalAndActiveDeleteDenied": true,
+      "managedTaskDeletionRemainsUnbound": true,
+      "eventCount": 15,
+      "syntheticProfileRemoved": true
+    }
+  }
+}

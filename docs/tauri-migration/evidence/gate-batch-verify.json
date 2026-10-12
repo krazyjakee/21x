@@ -1,0 +1,27 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-12",
+  "sourceCommit": "711dd21bfdace356fa9e4b7523f12f2154081cc1",
+  "workflowRun": 38300673519,
+  "workflowUrl": "https://github.com/krazyjakee/21x/actions/runs/38300673519",
+  "conclusion": "success",
+  "checks": {
+    "connectorAllowlistPinsLicenses": "passed",
+    "lint": "passed",
+    "typecheck": "passed",
+    "desktopAndMobileBuilds": "passed",
+    "testSuite": { "passed": 5093, "skipped": 8, "failed": 0, "filesPassed": 351, "filesSkipped": 5 },
+    "foundationSubprocessRegressions": { "passed": 26, "failed": 0 },
+    "headlessSupervisor": { "unitPassed": 3, "stagedNodePassed": 4 },
+    "navigationRailRealScrollport": "passed",
+    "commanderNativeKeyboardAndFocus": "passed"
+  },
+  "shutdownRegression": {
+    "previousRun": 38299979516,
+    "previousSource": "a4a980f753b519c1b23122811da5beb1b0c1b14f",
+    "failure": "One existing test expected shutdown success while adapter creation remained blocked.",
+    "correction": "Test now observes bounded incomplete-drain rejection, late-session fencing and subsequent successful cleanup; production code unchanged.",
+    "focusedCasesPassed": 78
+  },
+  "scope": "Existing application regressions and foundations; no full Tauri feature parity, signed installer/update rehearsal or live-profile migration acceptance. Subsequent baseline harness and documentation changes do not change shipping application code."
+}

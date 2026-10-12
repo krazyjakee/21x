@@ -1,0 +1,102 @@
+{
+  "gui": {
+    "remoteNavigationDenied": true,
+    "webviewLoadFinished": true,
+    "windowCloseObserved": true,
+    "windowCloseRequested": true
+  },
+  "passed": true,
+  "runtime": {
+    "artifactAuthorizationProof": {
+      "artifactWindowClosed": true,
+      "artifactWindowCreated": true,
+      "boundary": "separate-webview",
+      "defaultMainCspUnchanged": true,
+      "excludedDocumentReady": true,
+      "excludedPageFinished": true,
+      "excludedSameAppOrigin": true,
+      "excludedScriptSubmitted": true,
+      "frameNativeAttemptMethod": "unprivileged-parent-relay",
+      "mainPositiveControls": {
+        "complete": true,
+        "desktopAccepted": true,
+        "eventReceived": false,
+        "listenAccepted": true,
+        "phase": "main",
+        "statusAccepted": true,
+        "transportAvailable": true
+      },
+      "mainReceivedTargetedServiceEvent": true,
+      "navigation": {
+        "allowed": 3,
+        "denied": 0,
+        "lastClass": "fixed-artifact",
+        "observed": 3
+      },
+      "passed": true,
+      "sameLocalOriginExcludedWebview": {
+        "attempt": "listen",
+        "complete": true,
+        "desktopDenied": true,
+        "listenDenied": true,
+        "phase": "excluded",
+        "statusDenied": true,
+        "transportAvailable": true
+      },
+      "sameMainIframeIsolationProven": false,
+      "sandboxedArtifactFrame": {
+        "attempt": "listen",
+        "complete": true,
+        "frameBridgeAbsent": true,
+        "frameLoaded": true,
+        "parentAccessDenied": true,
+        "parentGlobalDenied": true,
+        "phase": "frame",
+        "relayDesktopDenied": true,
+        "relayListenDenied": true,
+        "relayStatusDenied": true,
+        "transportAvailable": true
+      }
+    },
+    "developmentFrontend": false,
+    "initialized": true,
+    "profileRoot": "/tmp/21x-database-service-10120-1791835133309745990-0",
+    "resourceRoot": "/usr/lib/21x Tauri Feasibility/resources",
+    "syntheticAgent": false,
+    "syntheticDesktop": true,
+    "syntheticDesktopProof": {
+      "missingResultPreserved": true,
+      "projectCreated": true,
+      "rehydrated": true,
+      "rendererReloaded": true,
+      "retiredOperationDenied": true,
+      "settingPersisted": true,
+      "staleEpochDenied": true,
+      "taskCreated": true,
+      "taskEventObserved": true,
+      "taskUpdated": true,
+      "transcriptDeltaRead": true,
+      "transcriptSnapshotRead": true,
+      "updateEventObserved": true
+    },
+    "systemNodeHidden": true
+  },
+  "schemaVersion": 1,
+  "shutdown": {
+    "engineUnavailable": true,
+    "ownedChildExited": true,
+    "ownershipMode": "unix-process-group-linux-parent-death-signal"
+  },
+  "stage": "complete",
+  "verification": {
+    "installedResources": true,
+    "ownedRunningProcessesAfterExit": [],
+    "packageSha256": "e387e055e8b9ad7c5267d8d3067519b3e3e060009c89eb414fc14c67939cce61"
+  },
+  "provenance": {
+    "sourceCommit": "a4a980f753b519c1b23122811da5beb1b0c1b14f",
+    "workflowRun": 38300023337,
+    "target": "linux-x64-artifact-authorization",
+    "scope": "debug separate-WebView authorization proof; sandbox requests use unprivileged parent relay; no authenticated child-frame IPC or privileged-main iframe isolation claim"
+  }
+}
