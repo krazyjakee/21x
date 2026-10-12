@@ -212,6 +212,8 @@ pnpm run build:linux  # Linux
 
 ## Architecture
 
+The proposed [Electron to Tauri migration plan](./docs/tauri-migration/README.md) defines the target architecture, multi-agent workstreams, implementation dependencies, and validation/rollout gates. The current application still uses Electron.
+
 ### Data Flow
 
 ```
