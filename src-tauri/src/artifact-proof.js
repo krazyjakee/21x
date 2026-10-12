@@ -1,0 +1,67 @@
+/** Compile-selected fixed diagnostic; exports Boolean metadata only. */
+(configuration => {
+  const result = { complete: false, phase: configuration.mode };
+  window.__21X_ARTIFACT_PROOF__ = result;
+  const native = window.__TAURI__;
+  result.transportAvailable = typeof native?.core?.invoke === 'function' && typeof native?.event?.listen === 'function';
+  const commands = {
+    desktop: () => native.core.invoke('desktop_invoke', { operation: 'db:getTasks', payload: {}, engineEpoch: configuration.engineEpoch }),
+    status: () => native.core.invoke('engine_status', {}),
+    listen: () => native.event.listen('desktop:event', event => {
+      if (event.payload?.engineEpoch === configuration.engineEpoch && event.payload?.operation === 'task:created' &&
+          event.payload?.payload?.task?.title === 'Artifact isolation canary') result.eventReceived = true;
+    })
+  };
+  async function denied(command) {
+    try { const value = await commands[command](); if (typeof value === 'function') value(); return false; }
+    catch (error) {
+      // Accept only recognized native authorization errors, never absence,
+      // malformed arguments, unknown commands, generic failure or timeout.
+      return error?.code === 'UNAUTHORIZED' || typeof error === 'string' && /not allowed|not authorized|denied/i.test(error);
+    }
+  }
+  if (configuration.mode === 'main') {
+    result.desktopAccepted = false; result.statusAccepted = false; result.listenAccepted = false; result.eventReceived = false;
+    (async () => {
+      if (!result.transportAvailable) return;
+      const response = await commands.desktop();
+      result.desktopAccepted = response?.engineEpoch === configuration.engineEpoch && response?.result?.defined === true;
+      const status = await commands.status();
+      result.statusAccepted = status?.engineEpoch === configuration.engineEpoch && status?.syntheticDesktop === true;
+      window.__21X_ARTIFACT_PROOF_UNLISTEN__ = await commands.listen();
+      result.listenAccepted = typeof window.__21X_ARTIFACT_PROOF_UNLISTEN__ === 'function';
+    })().catch(() => {}).finally(() => { result.complete = true; });
+  } else if (configuration.mode === 'excluded') {
+    result.desktopDenied = false; result.statusDenied = false; result.listenDenied = false;
+    (async () => {
+      if (!result.transportAvailable) return;
+      result.desktopDenied = await denied('desktop');
+      result.statusDenied = await denied('status');
+      result.listenDenied = await denied('listen');
+    })().catch(() => {}).finally(() => { result.complete = true; });
+  } else if (configuration.mode === 'frame') {
+    const frame = document.querySelector('#hostile-artifact');
+    result.frameLoaded = false;
+    const receive = async event => {
+      if (event.source !== frame?.contentWindow || !event.data || typeof event.data !== 'object') return;
+      if (event.data.kind === 'artifact-attempt' && Object.hasOwn(commands, event.data.command)) {
+        const authorized = result.transportAvailable ? await denied(event.data.command) : false;
+        event.source.postMessage({ kind: 'artifact-result', command: event.data.command, denied: authorized }, '*');
+      } else if (event.data.kind === 'artifact-complete') {
+        const names = ['parentAccessDenied', 'parentGlobalDenied', 'frameBridgeAbsent',
+          'relayDesktopDenied', 'relayStatusDenied', 'relayListenDenied'];
+        if (Object.keys(event.data).length !== names.length + 1 || !names.every(key => typeof event.data[key] === 'boolean')) return;
+        for (const key of names) result[key] = event.data[key];
+        result.frameLoaded = true;
+        result.complete = true;
+        clearInterval(start);
+        window.removeEventListener('message', receive);
+      }
+    };
+    window.addEventListener('message', receive);
+    const start = setInterval(() => {
+      frame?.contentWindow?.postMessage({ kind: 'artifact-start' }, '*');
+    }, 50);
+    setTimeout(() => { clearInterval(start); window.removeEventListener('message', receive); }, 8000);
+  }
+})(__21X_PROOF_CONFIG__);

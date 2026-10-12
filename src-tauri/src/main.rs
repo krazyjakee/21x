@@ -15,6 +15,9 @@ use tauri::{Emitter, EventTarget};
 use tauri::{Manager, State, WebviewWindow};
 use twentyonex_engine::{Engine, EngineError};
 
+#[cfg(all(feature = "artifact-authorization-proof", debug_assertions))]
+mod artifact_proof;
+
 // Developer/CI diagnostics only: release builds never read this opt-in variable.
 // No command lets the renderer enable it, choose output paths, or bypass policy.
 struct NativeSmoke {
@@ -85,7 +88,7 @@ impl NativeSmoke {
         let gui = &evidence["gui"];
         #[cfg(feature = "synthetic-desktop")]
         if evidence["runtime"]["syntheticDesktop"] == true {
-            return gui["webviewLoadFinished"] == true
+            let accepted = gui["webviewLoadFinished"] == true
                 && gui["remoteNavigationDenied"] == true
                 && gui["windowCloseRequested"] == true
                 && gui["windowCloseObserved"] == true
@@ -94,6 +97,10 @@ impl NativeSmoke {
                     .all(|key| evidence["runtime"]["syntheticDesktopProof"][*key] == true)
                 && evidence["shutdown"]["engineUnavailable"] == true
                 && evidence["shutdown"]["ownedChildExited"] == true;
+            #[cfg(all(feature = "artifact-authorization-proof", debug_assertions))]
+            let accepted =
+                accepted && evidence["runtime"]["artifactAuthorizationProof"]["passed"] == true;
+            return accepted;
         }
         gui["webviewLoadFinished"] == true
             && gui["rendererPing"] == true
@@ -228,6 +235,17 @@ fn begin_synthetic_smoke(window: &WebviewWindow, smoke: Arc<NativeSmoke>) {
                 && smoke.navigation_denied.load(Ordering::SeqCst))
         {
             std::thread::sleep(Duration::from_millis(25));
+        }
+        #[cfg(all(feature = "artifact-authorization-proof", debug_assertions))]
+        {
+            let proof = if smoke.receipt.load(Ordering::SeqCst)
+                && smoke.navigation_denied.load(Ordering::SeqCst)
+            {
+                artifact_proof::run(&window)
+            } else {
+                json!({"passed":false,"prerequisiteSyntheticSmoke":false})
+            };
+            smoke.evidence.lock().unwrap()["runtime"]["artifactAuthorizationProof"] = proof;
         }
         {
             let mut evidence = smoke.evidence.lock().unwrap();
@@ -392,9 +410,16 @@ fn main() {
     }
     assert!(smoke.write(), "failed to initialize native smoke report");
     let setup_smoke = smoke.clone();
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .manage(smoke.clone())
-        .invoke_handler(tauri::generate_handler![engine_invoke, engine_status, desktop_invoke])
+        .invoke_handler(tauri::generate_handler![
+            engine_invoke,
+            engine_status,
+            desktop_invoke
+        ]);
+    #[cfg(all(feature = "artifact-authorization-proof", debug_assertions))]
+    let builder = artifact_proof::register(builder);
+    let app = builder
         .setup(move |app| {
             // Different identity/path from Electron: the spike never imports live data or schemes.
             #[cfg(feature = "synthetic-desktop")]
