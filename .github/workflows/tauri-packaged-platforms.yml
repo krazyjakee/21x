@@ -109,6 +109,9 @@ jobs:
           cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features native-fixture-tests -- --test-threads=1 2>&1 | tee native-evidence/engine-unit-tests.log
           cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features native-fixture-tests -- --ignored --test-threads=1 2>&1 | tee native-evidence/engine-staged-tests.log
       - name: Build the actual platform package
+        env:
+          # Preserve staged Node/addon bytes in the debug AppImage proof.
+          NO_STRIP: 'true'
         run: pnpm tauri:build --verbose --debug --bundles ${{ matrix.bundle }} -- --locked 2>&1 | tee native-evidence/native-build.log
       - name: Exercise packaged GUI, resources, native probes and quit
         timeout-minutes: 8
