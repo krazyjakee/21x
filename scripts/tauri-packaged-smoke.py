@@ -151,6 +151,8 @@ def main():
         assert physical_path(runtime["profileRoot"]) == root / "profile"
         owned_node = resources / "node" / ("node.exe" if sys.platform == "win32" else "node")
         assert owned_node.is_file()
+        assert (resources / "node/LICENSE").is_file()
+        assert (resources / "service/THIRD_PARTY_NOTICES.json").is_file()
         assert (resources / "service/feasibility.mjs").is_file()
         assert report["shutdown"]["engineUnavailable"] is True
         survivors = running_owned_node(owned_node.resolve())

@@ -2,6 +2,12 @@ name: Tauri packaged platform feasibility
 
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: 'Run all targets sequentially or retry only one target.'
+        type: choice
+        default: all
+        options: [all, macos-x64, macos-arm64, windows-x64, linux-appimage-x64]
 
 permissions:
   contents: read
@@ -11,28 +17,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  select:
+    runs-on: ubuntu-slim
+    timeout-minutes: 3
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+    steps:
+      - id: targets
+        shell: bash
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          macos_x64='{"label":"macos-x64","runner":"macos-15-intel","arch":"x64","bundle":"dmg"}'
+          macos_arm64='{"label":"macos-arm64","runner":"macos-14","arch":"arm64","bundle":"dmg"}'
+          windows_x64='{"label":"windows-x64","runner":"windows-2022","arch":"x64","bundle":"nsis"}'
+          linux_appimage='{"label":"linux-appimage-x64","runner":"ubuntu-24.04","arch":"x64","bundle":"appimage"}'
+          case "$TARGET" in
+            all) selected="$macos_x64,$macos_arm64,$windows_x64,$linux_appimage" ;;
+            macos-x64) selected="$macos_x64" ;;
+            macos-arm64) selected="$macos_arm64" ;;
+            windows-x64) selected="$windows_x64" ;;
+            linux-appimage-x64) selected="$linux_appimage" ;;
+            *) exit 1 ;;
+          esac
+          printf 'matrix={"include":[%s]}\n' "$selected" >> "$GITHUB_OUTPUT"
   package:
+    needs: select
     strategy:
       fail-fast: false
       max-parallel: 1
-      matrix:
-        include:
-          - label: macos-x64
-            runner: macos-15-intel
-            arch: x64
-            bundle: dmg
-          - label: macos-arm64
-            runner: macos-14
-            arch: arm64
-            bundle: dmg
-          - label: windows-x64
-            runner: windows-2022
-            arch: x64
-            bundle: nsis
-          - label: linux-appimage-x64
-            runner: ubuntu-24.04
-            arch: x64
-            bundle: appimage
+      matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     env:
@@ -81,6 +95,8 @@ jobs:
         run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Stage pinned standalone Node and native modules once
         run: pnpm tauri:prepare:native 2>&1 | tee native-evidence/native-staging.log
+      - name: Preserve Node and dependency redistribution notices
+        run: node scripts/tauri-resource-notices.mjs | tee native-evidence/third-party-notices.json
       - name: Build the actual platform package
         run: pnpm tauri:build --debug --bundles ${{ matrix.bundle }} -- --locked 2>&1 | tee native-evidence/native-build.log
       - name: Exercise packaged GUI, resources, native probes and quit
