@@ -16,7 +16,11 @@ use tokio::{
     sync::{oneshot, watch, Mutex as AsyncMutex, Semaphore},
     time::timeout,
 };
+#[cfg(feature = "synthetic-desktop")]
+mod desktop;
 mod process_tree;
+#[cfg(feature = "synthetic-desktop")]
+pub type DesktopEventSink = Arc<dyn Fn(Value) -> Result<(), EngineError> + Send + Sync>;
 
 const MAX_FRAME: usize = 1024 * 1024;
 const MAX_PENDING: usize = 128;
@@ -42,6 +46,7 @@ impl EngineError {
             "UNAUTHORIZED" => "Caller is not authorized.",
             "INVALID_FRAME" => "Invalid engine protocol frame.",
             "INVALID_RESULT" => "Invalid engine operation result.",
+            "STALE_EPOCH" => "Engine epoch does not match.",
             "FRAME_TOO_LARGE" => "Engine protocol frame exceeds the size limit.",
             "CANCELLED" => "Engine operation cancelled.",
             _ => "Engine unavailable.",
@@ -104,6 +109,11 @@ struct Inner {
     #[cfg(feature = "native-fixture-tests")]
     process_id: u32,
     closed: AtomicBool,
+    synthetic: bool,
+    #[cfg(feature = "synthetic-desktop")]
+    event_sink: Option<DesktopEventSink>,
+    #[cfg(feature = "synthetic-desktop")]
+    event_sequence: Mutex<u64>,
     queue_bytes: Arc<Semaphore>,
     request_slots: Arc<Semaphore>,
     stop: watch::Sender<bool>,
@@ -144,11 +154,52 @@ impl Engine {
         Self::start_impl(resource_root, profile_root, false).await
     }
 
+    #[cfg(feature = "synthetic-desktop")]
+    pub async fn start_synthetic(
+        resource_root: PathBuf,
+        profile_root: PathBuf,
+        sink: DesktopEventSink,
+    ) -> Result<Self, EngineError> {
+        let profile = std::fs::canonicalize(&profile_root)
+            .map_err(|_| EngineError::new("DISCONNECTED").startup("synthetic-profile"))?;
+        let temporary = std::fs::canonicalize(std::env::temp_dir())
+            .map_err(|_| EngineError::new("DISCONNECTED").startup("synthetic-profile"))?;
+        if !profile.starts_with(temporary)
+            || !profile
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("21x-database-service-"))
+        {
+            return Err(EngineError::new("DISCONNECTED").startup("synthetic-profile"));
+        }
+        Self::start_selected(resource_root, profile, false, Some(sink)).await
+    }
+
     async fn start_impl(
         resource_root: PathBuf,
         profile_root: PathBuf,
         fixture_mode: bool,
     ) -> Result<Self, EngineError> {
+        Self::start_selected(
+            resource_root,
+            profile_root,
+            fixture_mode,
+            #[cfg(feature = "synthetic-desktop")]
+            None,
+        )
+        .await
+    }
+
+    async fn start_selected(
+        resource_root: PathBuf,
+        profile_root: PathBuf,
+        fixture_mode: bool,
+        #[cfg(feature = "synthetic-desktop")] event_sink: Option<DesktopEventSink>,
+    ) -> Result<Self, EngineError> {
+        #[cfg(feature = "synthetic-desktop")]
+        let synthetic = event_sink.is_some();
+        #[cfg(not(feature = "synthetic-desktop"))]
+        let synthetic = false;
         let resource_root = std::fs::canonicalize(resource_root)
             .map_err(|_| EngineError::new("DISCONNECTED").startup("resource-root"))?;
         let profile_root = std::fs::canonicalize(profile_root)
@@ -157,7 +208,11 @@ impl Engine {
             resource_root
                 .join("node")
                 .join(if cfg!(windows) { "node.exe" } else { "node" });
-        let entry = resource_root.join("service/feasibility.mjs");
+        let entry = resource_root.join(if synthetic {
+            "service/database-stdio.mjs"
+        } else {
+            "service/feasibility.mjs"
+        });
         if !executable.is_file() || !entry.is_file() {
             return Err(EngineError::new("DISCONNECTED").startup("resource-files"));
         }
@@ -203,6 +258,9 @@ impl Engine {
                 command.env(key, value);
             }
         }
+        if synthetic {
+            command.env("TWENTYONEX_DATABASE_MODE", "synthetic-only");
+        }
         if fixture_mode {
             command.env("TWENTYONEX_FEASIBILITY_TEST_MODE", "1");
         }
@@ -237,6 +295,11 @@ impl Engine {
             #[cfg(feature = "native-fixture-tests")]
             process_id,
             closed: AtomicBool::new(false),
+            synthetic,
+            #[cfg(feature = "synthetic-desktop")]
+            event_sink,
+            #[cfg(feature = "synthetic-desktop")]
+            event_sequence: Mutex::new(0),
             queue_bytes: Arc::new(Semaphore::new(MAX_QUEUED_BYTES)),
             request_slots: Arc::new(Semaphore::new(MAX_PENDING)),
             stop,
@@ -301,6 +364,10 @@ impl Engine {
 
     fn accept_response(&self, bytes: &[u8]) -> Result<(), ()> {
         let frame: Value = serde_json::from_slice(bytes).map_err(|_| ())?;
+        #[cfg(feature = "synthetic-desktop")]
+        if frame["kind"] == "event" {
+            return self.accept_desktop_event(frame);
+        }
         let object = frame.as_object().ok_or(())?;
         if object.len() != 5
             || frame["protocolVersion"] != 1
@@ -338,7 +405,11 @@ impl Engine {
             return Ok(());
         }
         if let Ok(value) = &result {
-            if !valid_result(&entry.operation, value, epoch) {
+            let valid = valid_result(&entry.operation, value, epoch);
+            #[cfg(feature = "synthetic-desktop")]
+            let valid =
+                valid || (self.0.synthetic && desktop::valid_result(&entry.operation, value));
+            if !valid {
                 return Err(());
             }
             if entry.bootstrap {
@@ -348,6 +419,59 @@ impl Engine {
         let entry = pending.remove(id).ok_or(())?;
         let _ = entry.sender.send(result);
         Ok(())
+    }
+
+    #[cfg(feature = "synthetic-desktop")]
+    fn accept_desktop_event(&self, frame: Value) -> Result<(), ()> {
+        if !self.0.synthetic || !desktop::valid_event_envelope(&frame) {
+            return Err(());
+        }
+        let current = self.0.epoch.lock().unwrap().clone();
+        if current.is_empty() {
+            return Err(());
+        }
+        if frame["engineEpoch"] != current {
+            return Ok(());
+        }
+        if !desktop::valid_event(&frame) {
+            return Err(());
+        }
+        let sequence = frame["sequence"].as_u64().ok_or(())?;
+        let mut previous = self.0.event_sequence.lock().unwrap();
+        if sequence <= *previous {
+            return Ok(());
+        }
+        if sequence != *previous + 1 {
+            return Err(());
+        }
+        let sink = self.0.event_sink.as_ref().ok_or(())?;
+        sink(frame).map_err(|_| ())?;
+        *previous = sequence;
+        Ok(())
+    }
+
+    #[cfg(feature = "synthetic-desktop")]
+    pub async fn desktop_request(
+        &self,
+        epoch: &str,
+        operation: &str,
+        payload: Value,
+    ) -> Result<Value, EngineError> {
+        if !self.0.synthetic {
+            return Err(EngineError::new("UNKNOWN_OPERATION"));
+        }
+        if !desktop::known_operation(operation) {
+            return Err(EngineError::new("UNKNOWN_OPERATION"));
+        }
+        if !desktop::valid_request(operation, &payload) {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        let current = self.0.epoch.lock().unwrap().clone();
+        if current.is_empty() || epoch != current {
+            return Err(EngineError::new("STALE_EPOCH"));
+        }
+        let result = self.request(operation, payload).await?;
+        Ok(json!({"engineEpoch": current, "result": result}))
     }
 
     pub async fn request(&self, operation: &str, payload: Value) -> Result<Value, EngineError> {
@@ -455,6 +579,7 @@ impl Engine {
     pub fn status(&self) -> Value {
         json!({"available": !self.0.closed.load(Ordering::SeqCst), "protocolVersion": 1,
             "engineEpoch": self.0.epoch.lock().unwrap().clone(), "experimental": true,
+            "syntheticDesktop":self.0.synthetic,
             "ownedChildExited": *self.0.exited.borrow(), "ownershipMode": process_tree::ownership_mode()})
     }
 
@@ -572,12 +697,15 @@ mod tests {
 
     impl IsolatedProfile {
         fn new() -> Self {
+            Self::with_prefix("21x-engine-test")
+        }
+        fn with_prefix(prefix: &str) -> Self {
             let stamp = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let path = std::env::temp_dir()
-                .join(format!("21x-engine-test-{}-{stamp}", std::process::id()));
+            let path =
+                std::env::temp_dir().join(format!("{prefix}-{}-{stamp}", std::process::id()));
             std::fs::create_dir(&path).expect("create isolated test profile");
             Self(path)
         }
@@ -598,6 +726,126 @@ mod tests {
             .expect("start staged standalone Node 22.23.2 without native dependency probes");
         (engine, profile)
     }
+    #[cfg(feature = "synthetic-desktop")]
+    #[tokio::test]
+    #[ignore = "requires explicitly staged database-stdio.mjs and standalone native SQLite"]
+    async fn staged_synthetic_database_roundtrip_emits_real_target_events() {
+        let resources = std::env::var_os("TWENTYONEX_TEST_RESOURCES")
+            .expect("explicit synthetic staged resources");
+        let profile = IsolatedProfile::with_prefix("21x-database-service");
+        let events = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let received = events.clone();
+        let sink: DesktopEventSink = Arc::new(move |frame| {
+            received.lock().unwrap().push(frame);
+            Ok(())
+        });
+        let engine = Engine::start_synthetic(PathBuf::from(resources), profile.0.clone(), sink)
+            .await
+            .unwrap();
+        let epoch = engine.status()["engineEpoch"].as_str().unwrap().to_string();
+        assert_eq!(engine.status()["syntheticDesktop"], true);
+        assert_eq!(
+            engine
+                .desktop_request("stale", "db:getTasks", json!({}))
+                .await
+                .unwrap_err()
+                .code,
+            "STALE_EPOCH"
+        );
+        assert_eq!(
+            engine
+                .desktop_request(&epoch, "agentSession:approve", json!({}))
+                .await
+                .unwrap_err()
+                .code,
+            "UNKNOWN_OPERATION"
+        );
+        let created = engine
+            .desktop_request(
+                &epoch,
+                "db:createTask",
+                json!({"data":{"title":"native synthetic fixture"}}),
+            )
+            .await
+            .unwrap();
+        let id = created["result"]["value"]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        engine
+            .desktop_request(
+                &epoch,
+                "db:updateTask",
+                json!({"id":id,"data":{"description":"edited"}}),
+            )
+            .await
+            .unwrap();
+        let fetched = engine
+            .desktop_request(&epoch, "db:getTask", json!({"id":id}))
+            .await
+            .unwrap();
+        assert_eq!(fetched["result"]["value"]["description"], "edited");
+        let missing = engine
+            .desktop_request(&epoch, "db:getTask", json!({"id":"missing-native-fixture"}))
+            .await
+            .unwrap();
+        assert_eq!(missing["result"], json!({"defined":false}));
+        let set = engine
+            .desktop_request(
+                &epoch,
+                "settings:set",
+                json!({"key":"synthetic_ui_value","value":"native-fixture"}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(set["result"], json!({"defined":false}));
+        let setting = engine
+            .desktop_request(&epoch, "settings:get", json!({"key":"synthetic_ui_value"}))
+            .await
+            .unwrap();
+        assert_eq!(setting["result"]["value"], "native-fixture");
+        engine
+            .desktop_request(
+                &epoch,
+                "project:create",
+                json!({"data":{"name":"native fixture project"}}),
+            )
+            .await
+            .unwrap();
+        let snapshot = engine
+            .desktop_request(
+                &epoch,
+                "agentSession:getTranscriptSnapshot",
+                json!({"taskId":id}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(snapshot["result"]["value"], json!([]));
+        let delta = engine
+            .desktop_request(
+                &epoch,
+                "agentSession:getTranscriptDelta",
+                json!({"taskId":id,"sinceRev":0}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(delta["result"]["value"], json!({"parts":[],"maxRev":0}));
+        {
+            let received = events.lock().unwrap();
+            assert_eq!(received.len(), 3);
+            for (index, operation) in ["task:created", "task:updated", "project:changed"]
+                .iter()
+                .enumerate()
+            {
+                assert_eq!(received[index]["operation"], *operation);
+                assert_eq!(received[index]["engineEpoch"], epoch);
+                assert_eq!(received[index]["sequence"], (index + 1) as u64);
+            }
+        }
+        engine.shutdown().await;
+        assert_eq!(engine.status()["ownedChildExited"], true);
+    }
+
     #[cfg(feature = "native-fixture-tests")]
     async fn ownership_engine() -> (Engine, IsolatedProfile) {
         let resources = std::env::var_os("TWENTYONEX_TEST_RESOURCES")

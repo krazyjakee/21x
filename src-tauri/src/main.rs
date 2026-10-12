@@ -10,6 +10,8 @@ use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
+#[cfg(feature = "synthetic-desktop")]
+use tauri::{Emitter, EventTarget};
 use tauri::{Manager, State, WebviewWindow};
 use twentyonex_engine::{Engine, EngineError};
 
@@ -18,6 +20,8 @@ use twentyonex_engine::{Engine, EngineError};
 struct NativeSmoke {
     report: Option<PathBuf>,
     started: AtomicBool,
+    #[cfg(feature = "synthetic-desktop")]
+    synthetic_loads: AtomicU8,
     receipt: AtomicBool,
     navigation_denied: AtomicBool,
     finished: AtomicBool,
@@ -39,6 +43,8 @@ impl NativeSmoke {
         Self {
             report,
             started: AtomicBool::new(false),
+            #[cfg(feature = "synthetic-desktop")]
+            synthetic_loads: AtomicU8::new(0),
             receipt: AtomicBool::new(false),
             navigation_denied: AtomicBool::new(false),
             finished: AtomicBool::new(false),
@@ -77,6 +83,18 @@ impl NativeSmoke {
     fn passed(&self) -> bool {
         let evidence = self.evidence.lock().unwrap();
         let gui = &evidence["gui"];
+        #[cfg(feature = "synthetic-desktop")]
+        if evidence["runtime"]["syntheticDesktop"] == true {
+            return gui["webviewLoadFinished"] == true
+                && gui["remoteNavigationDenied"] == true
+                && gui["windowCloseRequested"] == true
+                && gui["windowCloseObserved"] == true
+                && SYNTHETIC_RECEIPT_KEYS
+                    .iter()
+                    .all(|key| evidence["runtime"]["syntheticDesktopProof"][*key] == true)
+                && evidence["shutdown"]["engineUnavailable"] == true
+                && evidence["shutdown"]["ownedChildExited"] == true;
+        }
         gui["webviewLoadFinished"] == true
             && gui["rendererPing"] == true
             && gui["restrictedOperationDenied"] == true
@@ -90,6 +108,11 @@ impl NativeSmoke {
 }
 
 fn begin_smoke(window: &WebviewWindow, smoke: Arc<NativeSmoke>) {
+    #[cfg(feature = "synthetic-desktop")]
+    if window.state::<Engine>().status()["syntheticDesktop"] == true {
+        begin_synthetic_smoke(window, smoke);
+        return;
+    }
     if !smoke.enabled() || smoke.started.swap(true, Ordering::SeqCst) {
         return;
     }
@@ -145,6 +168,80 @@ fn begin_smoke(window: &WebviewWindow, smoke: Arc<NativeSmoke>) {
     });
 }
 
+#[cfg(feature = "synthetic-desktop")]
+const SYNTHETIC_RECEIPT_KEYS: &[&str] = &[
+    "taskCreated",
+    "taskEventObserved",
+    "taskUpdated",
+    "updateEventObserved",
+    "projectCreated",
+    "missingResultPreserved",
+    "settingPersisted",
+    "transcriptSnapshotRead",
+    "transcriptDeltaRead",
+    "rendererReloaded",
+    "rehydrated",
+    "retiredOperationDenied",
+    "staleEpochDenied",
+];
+
+#[cfg(feature = "synthetic-desktop")]
+fn begin_synthetic_smoke(window: &WebviewWindow, smoke: Arc<NativeSmoke>) {
+    if !smoke.enabled() {
+        return;
+    }
+    smoke.evidence.lock().unwrap()["gui"]["webviewLoadFinished"] = json!(true);
+    // The trusted bundled proof performs one real renderer reload. A third
+    // finished load cannot start another mutation cycle.
+    if smoke.synthetic_loads.fetch_add(1, Ordering::SeqCst) >= 2 {
+        return;
+    }
+    let injected = window
+        .eval(
+            r#"
+        (async () => {
+            const deadline = Date.now() + 5000;
+            while (typeof window.__TWENTYONEX_DATABASE_SMOKE__ !== 'function') {
+                if (Date.now() >= deadline) throw new Error('unavailable');
+                await new Promise(resolve => setTimeout(resolve, 25));
+            }
+            const receipt = await window.__TWENTYONEX_DATABASE_SMOKE__();
+            if (receipt && receipt.reloadRequired === true && Object.keys(receipt).length === 1) {
+                location.reload();
+                return;
+            }
+            await window.__TAURI__.core.invoke('engine_status', {smokeReceipt: receipt});
+            location.href = 'https://tauri-smoke.invalid/blocked';
+        })().catch(() => {});
+    "#,
+        )
+        .is_ok();
+    if smoke.started.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let window = window.clone();
+    std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while injected
+            && Instant::now() < deadline
+            && !(smoke.receipt.load(Ordering::SeqCst)
+                && smoke.navigation_denied.load(Ordering::SeqCst))
+        {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        {
+            let mut evidence = smoke.evidence.lock().unwrap();
+            evidence["gui"]["remoteNavigationDenied"] =
+                json!(smoke.navigation_denied.load(Ordering::SeqCst));
+            evidence["gui"]["windowCloseRequested"] = json!(true);
+            evidence["stage"] = json!("closing");
+        }
+        if !smoke.write() || window.close().is_err() {
+            window.app_handle().exit(1);
+        }
+    });
+}
+
 fn trusted_origin(url: &tauri::Url) -> bool {
     let packaged = url.port().is_none()
         && (url.host_str() == Some("localhost") && url.scheme() == "tauri"
@@ -192,8 +289,24 @@ fn engine_status(
 ) -> Result<Value, EngineError> {
     authorize(&window)?;
     if let Some(receipt) = smoke_receipt {
-        if !smoke.enabled()
-            || receipt.as_object().map(|object| object.len()) != Some(2)
+        if !smoke.enabled() {
+            return Err(EngineError::new("INVALID_ARGUMENTS"));
+        }
+        #[cfg(feature = "synthetic-desktop")]
+        if engine.status()["syntheticDesktop"] == true {
+            if !receipt.as_object().is_some_and(|object| {
+                object.len() == SYNTHETIC_RECEIPT_KEYS.len()
+                    && SYNTHETIC_RECEIPT_KEYS
+                        .iter()
+                        .all(|key| receipt[*key].is_boolean())
+            }) {
+                return Err(EngineError::new("INVALID_ARGUMENTS"));
+            }
+            smoke.evidence.lock().unwrap()["runtime"]["syntheticDesktopProof"] = receipt;
+            smoke.receipt.store(true, Ordering::SeqCst);
+            return Ok(engine.status());
+        }
+        if receipt.as_object().map(|object| object.len()) != Some(2)
             || receipt["bridgePing"].as_bool().is_none()
             || receipt["deniedOperation"].as_bool().is_none()
         {
@@ -207,6 +320,69 @@ fn engine_status(
     Ok(engine.status())
 }
 
+#[tauri::command]
+async fn desktop_invoke(
+    window: WebviewWindow,
+    engine: State<'_, Engine>,
+    engine_epoch: String,
+    operation: String,
+    payload: Value,
+) -> Result<Value, EngineError> {
+    authorize(&window)?;
+    #[cfg(feature = "synthetic-desktop")]
+    {
+        engine
+            .desktop_request(&engine_epoch, &operation, payload)
+            .await
+    }
+    #[cfg(not(feature = "synthetic-desktop"))]
+    {
+        let _ = (engine, engine_epoch, operation, payload);
+        Err(EngineError::new("UNKNOWN_OPERATION"))
+    }
+}
+
+#[cfg(feature = "synthetic-desktop")]
+struct SyntheticProfile(PathBuf);
+
+#[cfg(feature = "synthetic-desktop")]
+impl SyntheticProfile {
+    fn create() -> std::io::Result<Self> {
+        let temporary = std::fs::canonicalize(std::env::temp_dir())?;
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| std::io::Error::other("synthetic profile clock unavailable"))?
+            .as_nanos();
+        for attempt in 0..16 {
+            let path = temporary.join(format!(
+                "21x-database-service-{}-{stamp}-{attempt}",
+                std::process::id()
+            ));
+            let mut builder = std::fs::DirBuilder::new();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                builder.mode(0o700);
+            }
+            match builder.create(&path) {
+                Ok(()) => return Ok(Self(path)),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            }
+        }
+        Err(std::io::Error::other(
+            "synthetic profile allocation exhausted",
+        ))
+    }
+}
+
+#[cfg(feature = "synthetic-desktop")]
+impl Drop for SyntheticProfile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 fn main() {
     let smoke = Arc::new(NativeSmoke::new());
     // Package launchers may need PATH while starting. Once this explicit debug
@@ -218,9 +394,14 @@ fn main() {
     let setup_smoke = smoke.clone();
     let app = tauri::Builder::default()
         .manage(smoke.clone())
-        .invoke_handler(tauri::generate_handler![engine_invoke, engine_status])
+        .invoke_handler(tauri::generate_handler![engine_invoke, engine_status, desktop_invoke])
         .setup(move |app| {
             // Different identity/path from Electron: the spike never imports live data or schemes.
+            #[cfg(feature = "synthetic-desktop")]
+            let owned_profile = SyntheticProfile::create()?;
+            #[cfg(feature = "synthetic-desktop")]
+            let profile = owned_profile.0.clone();
+            #[cfg(not(feature = "synthetic-desktop"))]
             let profile = if setup_smoke.enabled() {
                 std::env::var_os("TWENTYONEX_NATIVE_SMOKE_PROFILE").map(PathBuf::from)
                     .unwrap_or(app.path().app_local_data_dir()?.join("feasibility"))
@@ -228,8 +409,18 @@ fn main() {
             assert!(profile.is_absolute(), "feasibility profile must be absolute");
             std::fs::create_dir_all(&profile)?;
             let resources = app.path().resource_dir()?.join("resources");
-            let engine = tauri::async_runtime::block_on(Engine::start(resources.clone(), profile.clone()))
-                .map_err(|error| {
+            #[cfg(feature = "synthetic-desktop")]
+            let started = {
+                let handle = app.handle().clone();
+                let sink = Arc::new(move |frame: Value| {
+                    handle.emit_to(EventTarget::WebviewWindow { label: "main".into() }, "desktop:event", frame)
+                        .map_err(|_| EngineError::new("DISCONNECTED"))
+                });
+                tauri::async_runtime::block_on(Engine::start_synthetic(resources.clone(), profile.clone(), sink))
+            };
+            #[cfg(not(feature = "synthetic-desktop"))]
+            let started = tauri::async_runtime::block_on(Engine::start(resources.clone(), profile.clone()));
+            let engine = started.map_err(|error| {
                     if setup_smoke.enabled() {
                         setup_smoke.evidence.lock().unwrap()["runtime"] = json!({
                             "initialized": false, "startupFailure": {
@@ -243,9 +434,12 @@ fn main() {
                     )
                 })?;
             app.manage(engine);
+            #[cfg(feature = "synthetic-desktop")]
+            app.manage(owned_profile);
             if setup_smoke.enabled() {
                 setup_smoke.evidence.lock().unwrap()["runtime"] = json!({
-                    "initialized":true, "resourceRoot":std::fs::canonicalize(&resources)?,
+                    "initialized":true, "syntheticDesktop":app.state::<Engine>().status()["syntheticDesktop"],
+                    "resourceRoot":std::fs::canonicalize(&resources)?,
                     "profileRoot":std::fs::canonicalize(&profile)?, "developmentFrontend":tauri::is_dev(),
                     "systemNodeHidden":std::env::var("PATH").as_deref() == Ok("/nonexistent")
                 });
