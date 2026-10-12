@@ -100,7 +100,7 @@ jobs:
       - name: Check actual staged native probes before compiling the GUI
         run: node scripts/tauri-service-preflight.mjs src-tauri/resources | tee native-evidence/staged-native-preflight.json
       - name: Build the actual platform package
-        run: pnpm tauri:build --debug --bundles ${{ matrix.bundle }} -- --locked 2>&1 | tee native-evidence/native-build.log
+        run: pnpm tauri:build --verbose --debug --bundles ${{ matrix.bundle }} -- --locked 2>&1 | tee native-evidence/native-build.log
       - name: Exercise packaged GUI, resources, native probes and quit
         timeout-minutes: 8
         run: python scripts/tauri-packaged-smoke.py --kind ${{ matrix.bundle }} --arch ${{ matrix.arch }} --evidence native-evidence

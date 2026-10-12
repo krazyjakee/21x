@@ -27,6 +27,8 @@ const NODE_VERSION: &str = "v22.23.2";
 pub struct EngineError {
     pub code: &'static str,
     pub message: &'static str,
+    #[serde(skip)]
+    pub startup_phase: Option<&'static str>,
 }
 
 impl EngineError {
@@ -43,8 +45,48 @@ impl EngineError {
             "CANCELLED" => "Engine operation cancelled.",
             _ => "Engine unavailable.",
         };
-        Self { code, message }
+        Self {
+            code,
+            message,
+            startup_phase: None,
+        }
     }
+    fn startup(mut self, phase: &'static str) -> Self {
+        self.startup_phase = Some(phase);
+        self
+    }
+}
+
+#[cfg(not(windows))]
+fn node_path(path: PathBuf) -> Result<PathBuf, EngineError> {
+    Ok(path)
+}
+
+#[cfg(windows)]
+fn node_path(path: PathBuf) -> Result<PathBuf, EngineError> {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    let units: Vec<u16> = path.as_os_str().encode_wide().collect();
+    let namespace: Vec<u16> = r"\\?\".encode_utf16().collect();
+    let unc: Vec<u16> = r"\\?\UNC\".encode_utf16().collect();
+    let normalized = if units.starts_with(&unc) {
+        [
+            vec![b'\\' as u16, b'\\' as u16],
+            units[unc.len()..].to_vec(),
+        ]
+        .concat()
+    } else if units.starts_with(&namespace) {
+        if units.len() < 7
+            || !matches!(units[4], 65..=90 | 97..=122)
+            || units[5] != b':' as u16
+            || units[6] != b'\\' as u16
+        {
+            return Err(EngineError::new("DISCONNECTED").startup("node-path-format"));
+        }
+        units[namespace.len()..].to_vec()
+    } else {
+        units
+    };
+    Ok(PathBuf::from(std::ffi::OsString::from_wide(&normalized)))
 }
 
 struct Pending {
@@ -96,37 +138,44 @@ impl Drop for PendingGuard {
 
 impl Engine {
     pub async fn start(resource_root: PathBuf, profile_root: PathBuf) -> Result<Self, EngineError> {
-        let resource_root =
-            std::fs::canonicalize(resource_root).map_err(|_| EngineError::new("DISCONNECTED"))?;
-        let profile_root =
-            std::fs::canonicalize(profile_root).map_err(|_| EngineError::new("DISCONNECTED"))?;
+        let resource_root = std::fs::canonicalize(resource_root)
+            .map_err(|_| EngineError::new("DISCONNECTED").startup("resource-root"))?;
+        let profile_root = std::fs::canonicalize(profile_root)
+            .map_err(|_| EngineError::new("DISCONNECTED").startup("profile-root"))?;
         let executable =
             resource_root
                 .join("node")
                 .join(if cfg!(windows) { "node.exe" } else { "node" });
         let entry = resource_root.join("service/feasibility.mjs");
         if !executable.is_file() || !entry.is_file() {
-            return Err(EngineError::new("DISCONNECTED"));
+            return Err(EngineError::new("DISCONNECTED").startup("resource-files"));
         }
-        let executable =
-            std::fs::canonicalize(executable).map_err(|_| EngineError::new("DISCONNECTED"))?;
-        let entry = std::fs::canonicalize(entry).map_err(|_| EngineError::new("DISCONNECTED"))?;
+        let executable = std::fs::canonicalize(executable)
+            .map_err(|_| EngineError::new("DISCONNECTED").startup("node-path"))?;
+        let entry = std::fs::canonicalize(entry)
+            .map_err(|_| EngineError::new("DISCONNECTED").startup("entry-path"))?;
         if !executable.starts_with(&resource_root) || !entry.starts_with(&resource_root) {
-            return Err(EngineError::new("DISCONNECTED"));
+            return Err(EngineError::new("DISCONNECTED").startup("resource-containment"));
         }
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             if std::fs::metadata(&executable)
-                .map_err(|_| EngineError::new("DISCONNECTED"))?
+                .map_err(|_| EngineError::new("DISCONNECTED").startup("node-permission"))?
                 .permissions()
                 .mode()
                 & 0o111
                 == 0
             {
-                return Err(EngineError::new("DISCONNECTED"));
+                return Err(EngineError::new("DISCONNECTED").startup("node-permission"));
             }
         }
+        // Canonical containment is checked above. Node 22's script resolver must
+        // receive ordinary drive/UNC paths instead of Rust's Win32 namespace.
+        let executable = node_path(executable)?;
+        let entry = node_path(entry)?;
+        let resource_root = node_path(resource_root)?;
+        let profile_root = node_path(profile_root)?;
         let mut command = Command::new(executable);
         command
             .arg(entry)
@@ -145,15 +194,15 @@ impl Engine {
         }
         let mut child = command
             .spawn()
-            .map_err(|_| EngineError::new("DISCONNECTED"))?;
+            .map_err(|_| EngineError::new("DISCONNECTED").startup("spawn"))?;
         let stdin = child
             .stdin
             .take()
-            .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
+            .ok_or_else(|| EngineError::new("DISCONNECTED").startup("stdio"))?;
         let mut stdout = child
             .stdout
             .take()
-            .ok_or_else(|| EngineError::new("DISCONNECTED"))?;
+            .ok_or_else(|| EngineError::new("DISCONNECTED").startup("stdio"))?;
         let (stop, mut stop_rx) = watch::channel(false);
         let (exited_tx, exited) = watch::channel(false);
         let engine = Self(Arc::new(Inner {
@@ -213,7 +262,7 @@ impl Engine {
             .await;
         if let Err(error) = ready {
             engine.shutdown().await;
-            return Err(error);
+            return Err(error.startup("initialize"));
         }
         Ok(engine)
     }
@@ -516,6 +565,24 @@ mod tests {
             .expect("start staged standalone Node 22.23.2 without native dependency probes");
         (engine, profile)
     }
+    #[cfg(windows)]
+    #[test]
+    fn canonical_windows_paths_are_converted_only_for_node() {
+        assert_eq!(
+            node_path(PathBuf::from(r"\\?\C:\安装\service\feasibility.mjs")).unwrap(),
+            PathBuf::from(r"C:\安装\service\feasibility.mjs")
+        );
+        assert_eq!(
+            node_path(PathBuf::from(r"\\?\UNC\server\share\service")).unwrap(),
+            PathBuf::from(r"\\server\share\service")
+        );
+        assert_eq!(
+            node_path(PathBuf::from(r"C:\ordinary\path")).unwrap(),
+            PathBuf::from(r"C:\ordinary\path")
+        );
+        assert!(node_path(PathBuf::from(r"\\?\Volume{device}\service")).is_err());
+    }
+
     #[test]
     fn ids_reject_wrong_direction_and_leading_zero() {
         assert!(valid_id("host:123"));

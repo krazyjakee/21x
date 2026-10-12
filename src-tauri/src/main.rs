@@ -228,7 +228,15 @@ fn main() {
             std::fs::create_dir_all(&profile)?;
             let resources = app.path().resource_dir()?.join("resources");
             let engine = tauri::async_runtime::block_on(Engine::start(resources.clone(), profile.clone()))
-                .map_err(|_| {
+                .map_err(|error| {
+                    if setup_smoke.enabled() {
+                        setup_smoke.evidence.lock().unwrap()["runtime"] = json!({
+                            "initialized": false, "startupFailure": {
+                                "phase": error.startup_phase.unwrap_or("unknown"), "code": error.code
+                            }
+                        });
+                        let _ = setup_smoke.write();
+                    }
                     std::io::Error::other(
                         "Bundled feasibility engine failed to initialize; run tauri:prepare.",
                     )
