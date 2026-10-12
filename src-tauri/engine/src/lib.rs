@@ -407,8 +407,10 @@ impl Engine {
         if let Ok(value) = &result {
             let valid = valid_result(&entry.operation, value, epoch);
             #[cfg(feature = "synthetic-desktop")]
-            let valid =
-                valid || (self.0.synthetic && desktop::valid_result(&entry.operation, value));
+            let valid = valid
+                || (self.0.synthetic
+                    && (desktop::valid_result(&entry.operation, value)
+                        || desktop::valid_internal_result(&entry.operation, value)));
             if !valid {
                 return Err(());
             }
@@ -812,6 +814,16 @@ mod tests {
             )
             .await
             .unwrap();
+        let projection = engine
+            .request(
+                "fixture.transcriptUpsert",
+                json!({"taskId":id,"parts":[{
+                    "id":"native-part-1","role":"assistant","content":"fixture projection"
+                }]}),
+            )
+            .await
+            .unwrap();
+        assert!(projection["maxRev"].as_u64().unwrap() > 0);
         let snapshot = engine
             .desktop_request(
                 &epoch,
@@ -820,7 +832,8 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(snapshot["result"]["value"], json!([]));
+        assert_eq!(snapshot["result"]["value"].as_array().unwrap().len(), 1);
+        assert_eq!(snapshot["result"]["value"][0]["partId"], "native-part-1");
         let delta = engine
             .desktop_request(
                 &epoch,
@@ -829,13 +842,23 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(delta["result"]["value"], json!({"parts":[],"maxRev":0}));
+        assert_eq!(
+            delta["result"]["value"]["parts"][0]["content"],
+            "fixture projection"
+        );
+        assert_eq!(delta["result"]["value"]["maxRev"], projection["maxRev"]);
         {
             let received = events.lock().unwrap();
-            assert_eq!(received.len(), 3);
-            for (index, operation) in ["task:created", "task:updated", "project:changed"]
-                .iter()
-                .enumerate()
+            assert_eq!(received.len(), 5);
+            for (index, operation) in [
+                "task:created",
+                "task:updated",
+                "project:changed",
+                "transcript:changed",
+                "task:updated",
+            ]
+            .iter()
+            .enumerate()
             {
                 assert_eq!(received[index]["operation"], *operation);
                 assert_eq!(received[index]["engineEpoch"], epoch);

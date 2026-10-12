@@ -360,6 +360,19 @@ pub(super) fn valid_result(operation: &str, value: &Value) -> bool {
         _ => false,
     }
 }
+// Fixed native test ingress; deliberately absent from known_operation/request.
+pub(super) fn valid_internal_result(operation: &str, value: &Value) -> bool {
+    operation == "fixture.transcriptUpsert"
+        && object(value, &["maxRev", "changedPartIds"], &[])
+        && cursor(&value["maxRev"])
+        && value["changedPartIds"].as_array().is_some_and(|ids| {
+            ids.len() <= 32
+                && ids.iter().all(|value| {
+                    text(value, 512) && value.as_str().is_some_and(|id| !id.is_empty())
+                })
+        })
+}
+
 pub(super) fn valid_event_envelope(frame: &Value) -> bool {
     object(
         frame,
@@ -393,6 +406,7 @@ pub(super) fn valid_event(frame: &Value) -> bool {
             object(payload, &["taskId", "updates"], &[])
                 && id(&payload["taskId"])
                 && task(&payload["updates"])
+                && payload["taskId"] == payload["updates"]["id"]
         }
         Some("task:deleted") => object(payload, &["taskId"], &[]) && id(&payload["taskId"]),
         Some("project:changed") => {
@@ -414,6 +428,11 @@ pub(super) fn valid_event(frame: &Value) -> bool {
             object(payload, &["taskId", "parts", "maxRev"], &["reloadRequired"])
                 && id(&payload["taskId"])
                 && array(&payload["parts"], part)
+                && payload["parts"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|part| part["taskId"] == payload["taskId"])
                 && cursor(&payload["maxRev"])
                 && payload.get("reloadRequired").is_none_or(|value| {
                     value == true && payload["parts"].as_array().is_some_and(Vec::is_empty)
@@ -451,6 +470,67 @@ mod tests {
             &json!({"key":"secret", "value":"private"})
         ));
     }
+    #[test]
+    fn task_events_cannot_forward_private_columns_or_change_target_id() {
+        let mut record = serde_json::Map::new();
+        for key in TASK_STRINGS {
+            record.insert((*key).into(), json!(""));
+        }
+        for key in TASK_NULLABLE {
+            record.insert((*key).into(), Value::Null);
+        }
+        for key in TASK_BOOLEANS {
+            record.insert((*key).into(), json!(false));
+        }
+        for key in TASK_OTHER {
+            record.insert(
+                (*key).into(),
+                match *key {
+                    "labels" | "attachments" | "repos" | "output_fields" | "next_subtask_ids" => {
+                        json!([])
+                    }
+                    "sort_order" => json!(0),
+                    _ => Value::Null,
+                },
+            );
+        }
+        let mut public = Value::Object(record);
+        for (key, value) in [
+            ("id", "task-1"),
+            ("project_id", "default"),
+            ("type", "general"),
+            ("priority", "medium"),
+            ("status", "not_started"),
+        ] {
+            public[key] = json!(value);
+        }
+        assert!(task(&public));
+        let mut event =
+            json!({"operation":"task:updated","payload":{"taskId":"task-2","updates":public}});
+        assert!(!valid_event(&event));
+        event["payload"]["taskId"] = json!("task-1");
+        assert!(valid_event(&event));
+        event["payload"]["updates"]["mcp_scope_nonce"] = json!("must-not-forward");
+        assert!(!valid_event(&event));
+    }
+
+    #[test]
+    fn internal_projection_result_does_not_expose_renderer_ingress() {
+        assert!(!known_operation("fixture.transcriptUpsert"));
+        assert!(valid_internal_result(
+            "fixture.transcriptUpsert",
+            &json!({"maxRev":1,"changedPartIds":["part-1"]})
+        ));
+        assert!(!valid_internal_result(
+            "fixture.transcriptUpsert",
+            &json!({"maxRev":1,"changedPartIds":["part-1"],"private":"must-not-forward"})
+        ));
+        assert!(!valid_internal_result(
+            "fixture.transcriptUpsert",
+            &json!({"maxRev":1,"changedPartIds":vec!["part";33]})
+        ));
+    }
+
     #[test]
     fn optional_result_preserves_missing_and_rejects_extra_keys() {
         assert!(valid_result("db:getTask", &json!({"defined":false})));
