@@ -104,6 +104,14 @@ Temporary profiles/modules and the fixture key are removed after the run.
 Exporter errors await bounded termination of the owned process/group before
 profile cleanup; failed termination retains the isolated directory and fails the
 proof. The Linux controller has a bounded startup and overall session deadline.
+Successful exporters flush their private metadata frame, then call graceful
+`app.quit()`: Windows OSCrypt's protected profile-key preferences must persist
+before an independent process can reopen original ciphertext. Immediate
+`app.exit()` bypasses normal quit events. The parent still requires the owned
+process to close successfully and enforces its bounded termination deadline;
+failures emit fixed private frames and exit under a separate short deadline.
+See [Electron's quit/exit lifecycle](https://www.electronjs.org/docs/latest/api/app)
+and [OSCrypt initialization in Electron](https://github.com/electron/electron/blob/v44.0.0/shell/browser/browser_process_impl.cc).
 
 [linux-session.mjs](../../scripts/credential-proof/linux-session.mjs) owns a
 disposable D-Bus/display session and separate XDG/keyring directories. Its random

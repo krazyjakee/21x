@@ -8,8 +8,27 @@ const { spawnSync } = require('node:child_process')
 const { isAbsolute } = require('node:path')
 let token
 let phase = 'stdio-attest'
-const frame = (value) => process.stdout.write('21X_CREDENTIAL_FRAME ' + JSON.stringify({ token, ...value }) + '\n')
-const die = () => { try { frame({ ok: false, code: 'LEGACY_PROBE_FAILED', phase }) } catch {} app.exit(1) }
+const frame = (value) => new Promise((resolveFrame, rejectFrame) => {
+  process.stdout.write('21X_CREDENTIAL_FRAME ' + JSON.stringify({ token, ...value }) + '\n', (error) => {
+    if (error) rejectFrame(new Error('PRIVATE_FRAME_FAILED'))
+    else resolveFrame()
+  })
+})
+let dying = false
+const die = () => {
+  if (dying) { app.exit(1); return }
+  dying = true
+  const deadline = setTimeout(() => app.exit(1), 1000)
+  const exit = () => { clearTimeout(deadline); app.exit(1) }
+  frame({ ok: false, code: 'LEGACY_PROBE_FAILED', phase }).then(exit, exit)
+}
+const complete = async (value) => {
+  await frame(value)
+  // Windows OSCrypt retains an OS-protected profile key in Local State.
+  // Graceful quit runs normal browser/prefs shutdown before the parent reopens
+  // originals. No renderer/window is created; the parent still owns a deadline.
+  app.quit()
+}
 process.on('uncaughtException', die)
 process.on('unhandledRejection', die)
 
@@ -60,7 +79,7 @@ async function probe(request) {
     safeStorage.setUsePlainTextEncryption(true)
   }
   if (!safeStorage.isEncryptionAvailable() || process.platform === 'linux' && backend !== expectedBackend) {
-    frame({ ok: false, code: 'LEGACY_UNAVAILABLE', phase, backend, encryptionAvailable: false })
+    await frame({ ok: false, code: 'LEGACY_UNAVAILABLE', phase, backend, encryptionAvailable: false })
     app.exit(1)
     return
   }
@@ -68,8 +87,8 @@ async function probe(request) {
     phase = 'originals-verify'
     if (!Array.isArray(request.records) || request.records.length > 16) throw new Error('invalid records')
     const verified = request.records.every((record) => hash(decode(record)) === record.expectedHash)
-    frame({ ok: verified, backend, originalsVerified: verified })
-    app.exit(verified ? 0 : 1)
+    if (!verified) throw new Error('original verification failed')
+    await complete({ ok: true, backend, originalsVerified: true, phase })
     return
   }
   if (request.operation !== 'generate') throw new Error('invalid operation')
@@ -102,10 +121,9 @@ async function probe(request) {
   // Original fixtures stay encrypted/explicitly classified and are never written.
   for (const record of records) record.decoded = decode(record)
   phase = 'source-export'
-  frame({ ok: true, backend, appName: app.getName(), isPackaged: app.isPackaged,
+  await complete({ ok: true, backend, appName: app.getName(), isPackaged: app.isPackaged,
     isolatedProfile: app.getPath('userData').startsWith(__dirname),
     corruptCiphertextsRejected: rejected, phase, records })
-  app.exit(0)
 }
 
 let size = 0
