@@ -11,6 +11,8 @@ import { seedOrchestratorSkill } from './captain-migration'
 import { userTaskRoleFilter } from './task-roles'
 import { TASK_ROLE_CAPTAIN, type TaskRole } from '../../shared/task-roles'
 import { DEFAULT_PROJECT_ID } from '../../shared/projects'
+import { isTranscriptCursor, isTranscriptPageRequest, TRANSCRIPT_PAGE_LIMITS, TRANSCRIPT_PREVIEW_NOTICE, type TranscriptPage, type TranscriptPageRequest } from '../../shared/transcript-page'
+import { ServiceProtocolError } from '../../shared/service-protocol'
 import type {
   CreatePullRequestReadinessSnapshot,
   CreatePullRequestReviewAttestation,
@@ -548,6 +550,85 @@ export class DatabaseManager {
     if (!this.ensureDbOpen()) return 0
     const row = this.prepare('SELECT COALESCE(MAX(rev), 0) AS m FROM transcript_parts WHERE task_id = ?').get(taskId) as { m: number }
     return row.m
+  }
+
+  /** Indexed durable event read. Oversized fields never cross SQLite into JS. */
+  getTranscriptEventPart(taskId: string, partId: string): { rev: number; part?: TranscriptPartRecord } | undefined {
+    if (!this.ensureDbOpen()) throw new ServiceProtocolError('DISCONNECTED')
+    const field = TRANSCRIPT_PAGE_LIMITS.fieldChars
+    const row = this.prepare(`SELECT rev,
+      CASE WHEN length(part_id) <= 512 AND length(role) <= 128 AND COALESCE(length(part_type), 0) <= 128
+        AND length(content) <= ${field} AND COALESCE(length(tool), 0) <= ${field} AND COALESCE(length(payload), 0) <= ${field}
+        THEN 1 ELSE 0 END AS fits
+      FROM transcript_parts WHERE task_id = ? AND part_id = ?`).get(taskId, partId) as { rev: number; fits: number } | undefined
+    if (!row) return undefined
+    if (!isTranscriptCursor(row.rev) || row.rev === 0) throw new ServiceProtocolError('INVALID_RESULT')
+    if (!row.fits) return { rev: row.rev }
+    // Both statements are synchronous on the writer connection: no owner write
+    // can interleave between the size check and this exact primary-key read.
+    const saved = this.prepare('SELECT * FROM transcript_parts WHERE task_id = ? AND part_id = ?').get(taskId, partId) as TranscriptPartRow
+    return { rev: row.rev, part: toTranscriptPartRecord(saved) }
+  }
+
+  /** Verify only the durable permission identity, never a truncated display card. */
+  hasTranscriptPermission(taskId: string, partId: string, requestId: string): boolean {
+    if (!this.ensureDbOpen()) throw new ServiceProtocolError('DISCONNECTED')
+    return !!this.prepare(`SELECT 1 FROM transcript_parts WHERE task_id = ? AND part_id = ? AND
+      CASE WHEN json_valid(tool) THEN json_extract(tool, '$.name') = 'permission'
+        AND json_extract(tool, '$.status') = 'running' AND json_extract(tool, '$.requestId') = ? ELSE 0 END`)
+      .get(taskId, partId, requestId)
+  }
+
+  /** Bounded display read; the immutable watermark is a revision, not a seq. */
+  getTranscriptPage(taskId: string, request: TranscriptPageRequest): TranscriptPage {
+    if (typeof taskId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(taskId) || !isTranscriptPageRequest(request)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
+    if (!this.ensureDbOpen()) throw new ServiceProtocolError('DISCONNECTED')
+    return this.db.transaction((): TranscriptPage => {
+      const current = this.getTranscriptMaxRev(taskId)
+      if (!isTranscriptCursor(current)) throw new ServiceProtocolError('INVALID_RESULT')
+      const watermark = request.watermark ?? current
+      if (watermark > current || request.mode === 'delta' && request.after > watermark) throw new ServiceProtocolError('STALE_EPOCH')
+      const limit = request.limit ?? TRANSCRIPT_PAGE_LIMITS.parts
+      const field = TRANSCRIPT_PAGE_LIMITS.fieldChars
+      const key = request.mode === 'snapshot' ? 'seq' : 'rev'
+      // Bound values in SQLite before materializing them in JS. Dropped JSON
+      // fields are presentation previews; stored content and identities survive.
+      const rows = this.prepare(`SELECT task_id,
+        CASE WHEN length(part_id) <= 512 THEN part_id ELSE NULL END AS part_id,
+        CASE WHEN length(role) <= 128 THEN role ELSE NULL END AS role,
+        CASE WHEN length(part_type) <= 128 THEN part_type ELSE NULL END AS part_type,
+        (length(part_id) > 512 OR length(role) > 128 OR COALESCE(length(part_type) > 128, 0)) AS invalid_metadata,
+        seq, created_at, updated_at, rev,
+        substr(content, 1, ${field}) AS content,
+        CASE WHEN length(tool) <= ${field} THEN tool ELSE NULL END AS tool,
+        CASE WHEN length(payload) <= ${field} THEN payload ELSE NULL END AS payload,
+        (length(content) > ${field} OR COALESCE(length(tool) > ${field}, 0) OR COALESCE(length(payload) > ${field}, 0)) AS preview
+        FROM transcript_parts WHERE task_id = ? AND ${key} > ? AND rev <= ? ORDER BY ${key} ASC LIMIT ?`)
+        .iterate(taskId, request.after, watermark, limit + 1)
+      const parts: TranscriptPartRecord[] = []
+      let bytes = 1024 // Reserve DTO metadata/array punctuation; pipe framing remains below 1 MiB.
+      let cursor = request.after
+      let hasMore = false
+      for (const source of rows) {
+        if (parts.length === limit) { hasMore = true; break }
+        const row = source as TranscriptPartRow & { preview: number; invalid_metadata: number }
+        if (row.invalid_metadata || !isTranscriptCursor(row.seq) || !isTranscriptCursor(row.rev)) throw new ServiceProtocolError('INVALID_RESULT')
+        const part = toTranscriptPartRecord(row)
+        for (const optional of ['partType', 'tool', 'payload'] as const) if (part[optional] === undefined) delete part[optional]
+        if (row.preview) part.content += TRANSCRIPT_PREVIEW_NOTICE
+        const size = new TextEncoder().encode(JSON.stringify(part)).byteLength + 1
+        if (bytes + size > TRANSCRIPT_PAGE_LIMITS.bytes) {
+          if (!parts.length) throw new ServiceProtocolError('FRAME_TOO_LARGE')
+          hasMore = true
+          break
+        }
+        parts.push(part)
+        bytes += size
+        cursor = request.mode === 'snapshot' ? part.seq : part.rev
+      }
+      if (request.mode === 'delta' && !hasMore) cursor = watermark
+      return { version: 1, taskId, mode: request.mode, after: request.after, parts, cursor, watermark, hasMore }
+    })()
   }
 
   /** Snapshot query: ordered transcript for a task, optionally only parts after seq. */

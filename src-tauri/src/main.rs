@@ -486,7 +486,8 @@ fn main() {
             app.manage(owned_profile);
             if setup_smoke.enabled() {
                 setup_smoke.evidence.lock().unwrap()["runtime"] = json!({
-                    "initialized":true, "syntheticDesktop":app.state::<Engine>().status()["syntheticDesktop"],
+                    "initialized":true, "hostArch":std::env::consts::ARCH,
+                    "syntheticDesktop":app.state::<Engine>().status()["syntheticDesktop"],
                     "syntheticAgent":app.state::<Engine>().status()["syntheticAgent"],
                     "resourceRoot":std::fs::canonicalize(&resources)?,
                     "profileRoot":std::fs::canonicalize(&profile)?, "developmentFrontend":tauri::is_dev(),

@@ -16,6 +16,7 @@ const OPERATIONS: &[&str] = &[
     "settings:getAll",
     "agentSession:getTranscriptSnapshot",
     "agentSession:getTranscriptDelta",
+    "agentSession:getTranscriptPage",
 ];
 const TASK_STRINGS: &[&str] = &[
     "id",
@@ -67,7 +68,7 @@ const TASK_OTHER: &[&str] = &[
 ];
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
-fn object(value: &Value, required: &[&str], optional: &[&str]) -> bool {
+pub(super) fn object(value: &Value, required: &[&str], optional: &[&str]) -> bool {
     value.as_object().is_some_and(|map| {
         required.iter().all(|key| map.contains_key(*key))
             && map
@@ -75,19 +76,19 @@ fn object(value: &Value, required: &[&str], optional: &[&str]) -> bool {
                 .all(|key| required.contains(&key.as_str()) || optional.contains(&key.as_str()))
     })
 }
-fn text(value: &Value, max: usize) -> bool {
+pub(super) fn text(value: &Value, max: usize) -> bool {
     value
         .as_str()
         .is_some_and(|s| !s.contains('\0') && s.encode_utf16().count() <= max)
 }
-fn nonempty(value: &Value, max: usize) -> bool {
+pub(super) fn nonempty(value: &Value, max: usize) -> bool {
     text(value, max)
         && value.as_str().is_some_and(|s| {
             !s.trim_matches(|c: char| matches!(c, '\u{0009}'..='\u{000d}' | '\u{0020}' | '\u{00a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'))
                 .is_empty()
         })
 }
-fn id(value: &Value) -> bool {
+pub(super) fn id(value: &Value) -> bool {
     value.as_str().is_some_and(|s| {
         !s.is_empty()
             && s.len() <= 128
@@ -95,16 +96,16 @@ fn id(value: &Value) -> bool {
                 .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
     })
 }
-fn cursor(value: &Value) -> bool {
+pub(super) fn cursor(value: &Value) -> bool {
     value.as_u64().is_some_and(|n| n <= MAX_SAFE_INTEGER)
 }
-fn member(value: &Value, choices: &[&str]) -> bool {
+pub(super) fn member(value: &Value, choices: &[&str]) -> bool {
     value.as_str().is_some_and(|s| choices.contains(&s))
 }
 fn nullable_text(value: &Value) -> bool {
     value.is_null() || text(value, 65_536)
 }
-fn array(value: &Value, check: fn(&Value) -> bool) -> bool {
+pub(super) fn array(value: &Value, check: fn(&Value) -> bool) -> bool {
     value
         .as_array()
         .is_some_and(|items| items.len() <= 128 && items.iter().all(check))
@@ -163,7 +164,7 @@ fn project_input(value: &Value) -> bool {
             .is_none_or(|item| text(item, 65_536))
 }
 pub(super) fn known_operation(operation: &str) -> bool {
-    if OPERATIONS.contains(&operation) {
+    if OPERATIONS.contains(&operation) || super::configuration_desktop::known_operation(operation) {
         return true;
     }
     #[cfg(feature = "synthetic-agent")]
@@ -176,6 +177,9 @@ pub(super) fn known_operation(operation: &str) -> bool {
 pub(super) fn valid_request(operation: &str, value: &Value) -> bool {
     if !json(value, 0) {
         return false;
+    }
+    if super::configuration_desktop::known_operation(operation) {
+        return super::configuration_desktop::valid_request(operation, value);
     }
     #[cfg(feature = "synthetic-agent")]
     if super::agent_desktop::known_operation(operation) {
@@ -215,6 +219,11 @@ pub(super) fn valid_request(operation: &str, value: &Value) -> bool {
             object(value, &["taskId", "sinceRev"], &[])
                 && id(&value["taskId"])
                 && cursor(&value["sinceRev"])
+        }
+        "agentSession:getTranscriptPage" => {
+            object(value, &["taskId", "page"], &[])
+                && id(&value["taskId"])
+                && page_request(&value["page"])
         }
         _ => false,
     }
@@ -271,7 +280,7 @@ fn task(value: &Value) -> bool {
         && value.get("last_activity_at").is_none_or(nullable_text)
         && json(value, 0)
 }
-fn project(value: &Value) -> bool {
+pub(super) fn project(value: &Value) -> bool {
     object(
         value,
         &[
@@ -341,7 +350,99 @@ fn delta(value: &Value) -> bool {
             .iter()
             .all(|part| part["rev"].as_u64().unwrap() <= value["maxRev"].as_u64().unwrap())
 }
+fn page_request(value: &Value) -> bool {
+    object(
+        value,
+        &["version", "mode", "after"],
+        &["watermark", "limit"],
+    ) && value["version"] == 1
+        && member(&value["mode"], &["snapshot", "delta"])
+        && cursor(&value["after"])
+        && value.get("watermark").is_none_or(cursor)
+        && value
+            .get("limit")
+            .is_none_or(|v| v.as_u64().is_some_and(|n| (1..=64).contains(&n)))
+        && (value["mode"] != "delta"
+            || value
+                .get("watermark")
+                .is_none_or(|v| value["after"].as_u64() <= v.as_u64()))
+}
+fn page_result(value: &Value) -> bool {
+    if !object(
+        value,
+        &[
+            "version",
+            "taskId",
+            "mode",
+            "after",
+            "parts",
+            "cursor",
+            "watermark",
+            "hasMore",
+        ],
+        &[],
+    ) || value["version"] != 1
+        || !id(&value["taskId"])
+        || !member(&value["mode"], &["snapshot", "delta"])
+        || !["after", "cursor", "watermark"]
+            .iter()
+            .all(|key| cursor(&value[*key]))
+        || !value["hasMore"].is_boolean()
+        || !value["parts"]
+            .as_array()
+            .is_some_and(|items| items.len() <= 64 && items.iter().all(part))
+    {
+        return false;
+    }
+    let key = if value["mode"] == "snapshot" {
+        "seq"
+    } else {
+        "rev"
+    };
+    let mut previous = value["after"].as_u64().unwrap();
+    let watermark = value["watermark"].as_u64().unwrap();
+    let mut ids = std::collections::HashSet::new();
+    for part in value["parts"].as_array().unwrap() {
+        let next = part[key].as_u64().unwrap();
+        if part["taskId"] != value["taskId"]
+            || next <= previous
+            || part["rev"].as_u64().unwrap() > watermark
+            || !ids.insert(part["partId"].as_str().unwrap())
+        {
+            return false;
+        }
+        previous = next;
+    }
+    let has_more = value["hasMore"] == true;
+    let expected = if value["mode"] == "delta" && !has_more {
+        watermark
+    } else {
+        previous
+    };
+    (!has_more || !value["parts"].as_array().unwrap().is_empty())
+        && value["cursor"].as_u64() == Some(expected)
+        && expected >= value["after"].as_u64().unwrap()
+        && (value["mode"] != "delta" || expected <= watermark)
+        && serde_json::to_vec(value).is_ok_and(|bytes| bytes.len() <= 256 * 1024)
+}
+
+pub(super) fn valid_page_for_request(request: &Value, result: &Value) -> bool {
+    let page = &result["value"];
+    result["defined"] == true
+        && page_result(page)
+        && page["taskId"] == request["taskId"]
+        && page["mode"] == request["page"]["mode"]
+        && page["after"] == request["page"]["after"]
+        && request["page"]
+            .get("watermark")
+            .is_none_or(|value| value == &page["watermark"])
+        && page["parts"].as_array().unwrap().len() as u64
+            <= request["page"]["limit"].as_u64().unwrap_or(64)
+}
 pub(super) fn valid_result(operation: &str, value: &Value) -> bool {
+    if super::configuration_desktop::known_operation(operation) {
+        return json(value, 0) && super::configuration_desktop::valid_result(operation, value);
+    }
     #[cfg(feature = "synthetic-agent")]
     if super::agent_desktop::known_operation(operation) {
         return super::agent_desktop::valid_result(operation, value);
@@ -378,6 +479,7 @@ pub(super) fn valid_result(operation: &str, value: &Value) -> bool {
         }),
         "agentSession:getTranscriptSnapshot" => array(result, part),
         "agentSession:getTranscriptDelta" => delta(result),
+        "agentSession:getTranscriptPage" => page_result(result),
         _ => false,
     }
 }
@@ -463,6 +565,9 @@ pub(super) fn valid_event(frame: &Value) -> bool {
                 })
         }
         _ => {
+            if super::configuration_desktop::valid_event(frame) {
+                return true;
+            }
             #[cfg(feature = "synthetic-agent")]
             {
                 return super::agent_desktop::valid_event(frame);
@@ -477,6 +582,65 @@ pub(super) fn valid_event(frame: &Value) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn transcript_pages_bound_requests_and_preserve_distinct_sequence_and_revision_cursors() {
+        let request =
+            json!({"taskId":"task-1","page":{"version":1,"mode":"snapshot","after":0,"limit":64}});
+        assert!(valid_request("agentSession:getTranscriptPage", &request));
+        for bad in [
+            json!({"version":2,"mode":"snapshot","after":0}),
+            json!({"version":1,"mode":"snapshot","after":0,"limit":65}),
+            json!({"version":1,"mode":"snapshot","after":0,"watermark":null}),
+            json!({"version":1,"mode":"delta","after":2,"watermark":1}),
+            json!({"version":1,"mode":"snapshot","after":0,"workspace":"private"}),
+        ] {
+            assert!(!valid_request(
+                "agentSession:getTranscriptPage",
+                &json!({"taskId":"task-1","page":bad})
+            ));
+        }
+        let part = json!({"taskId":"task-1","partId":"part-1","seq":20,"role":"assistant","content":"preview","createdAt":1,"updatedAt":1,"rev":1});
+        let value = json!({"version":1,"taskId":"task-1","mode":"snapshot","after":0,"parts":[part],"cursor":20,"watermark":1,"hasMore":false});
+        assert!(valid_result(
+            "agentSession:getTranscriptPage",
+            &json!({"defined":true,"value":value})
+        ));
+        let response = json!({"defined":true,"value":value});
+        assert!(valid_page_for_request(&request, &response));
+        let mut other = request.clone();
+        other["taskId"] = json!("foreign");
+        assert!(!valid_page_for_request(&other, &response));
+        other = request.clone();
+        other["page"]["watermark"] = json!(0);
+        assert!(!valid_page_for_request(&other, &response));
+        let mut malformed = value.clone();
+        malformed["parts"][0]["taskId"] = json!("foreign");
+        assert!(!page_result(&malformed));
+        malformed = value.clone();
+        malformed["cursor"] = json!(0);
+        assert!(!page_result(&malformed));
+        malformed = value.clone();
+        malformed["parts"] = json!([]);
+        malformed["hasMore"] = json!(true);
+        assert!(!page_result(&malformed));
+        let delta = json!({"version":1,"taskId":"task-1","mode":"delta","after":1,"parts":[],"cursor":3,"watermark":3,"hasMore":false});
+        assert!(page_result(&delta));
+        let mut regression = delta;
+        regression["cursor"] = json!(1);
+        assert!(!page_result(&regression));
+    }
+
+    #[test]
+    fn transcript_page_byte_budget_is_tighter_than_the_pipe_frame_limit() {
+        let parts: Vec<Value> = (1..=16)
+            .map(|n| {
+                json!({"taskId":"task-1","partId":format!("part-{n}"),"seq":n,"role":"assistant",
+            "content":"🚀".repeat(8192),"createdAt":1,"updatedAt":1,"rev":n})
+            })
+            .collect();
+        let value = json!({"version":1,"taskId":"task-1","mode":"snapshot","after":0,"parts":parts,"cursor":16,"watermark":16,"hasMore":false});
+        assert!(!page_result(&value));
+    }
     #[cfg(feature = "synthetic-agent")]
     #[test]
     fn agent_fixture_delegation_keeps_database_authority_bounds() {

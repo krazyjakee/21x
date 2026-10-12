@@ -23,6 +23,12 @@ On 2026-10-12 the user approved removing embedded browser features during migrat
 | [Architecture and contracts](architecture.md) | All implementers: process ownership, transport, platform services, data compatibility, and unresolved decisions |
 | [Agent workstreams and task cards](workstreams.md) | Coordinator and implementers: file ownership, dependencies, merge order, handoffs, and ready-to-assign tasks |
 | [Validation and rollout](validation.md) | Reviewers and release owner: parity matrix, fixtures, evidence, cutover, rollback, and completion gates |
+| [Current readiness audit](readiness-audit.md) | Current source and local validation findings, full remaining-work issue coverage and cutover blockers |
+| [Electron retirement preparation](electron-retirement.md) | Ordered shipping/tooling removal, prerequisites and retained recovery artifacts |
+| [Bounded transcript pages](transcript-pages.md) | Versioned read-only pagination, display previews, cursor-race recovery and local wire evidence |
+| [Content configuration integration](configuration-integration.md) | Eighteen content operations through the actual synthetic service/native boundary, conflicts and restart durability |
+| [Standalone portable tests](standalone-tests.md) | Staged Node/SQLite runner, rejected Electron imports and reusable CI evidence |
+| [Approval and Stop lifetime](approval-lifetime.md) | Raw response/teardown ownership and rejected late state writes after Stop |
 | [IPC ownership audit](ownership-audit.md) | Bridge and feature owners: operation families, unresolved references, and wrapper events missing from literal scans |
 | [Retired browser feasibility](browser-feasibility.md) | Historical work and the approved removal decision |
 | [Credential rehearsal](credential-migration.md) | Data/security owners: legacy formats, conversion preparation and remaining OS evidence |

@@ -3,6 +3,7 @@
   "include": [
     "electron.vite.config.*",
     "vite.tauri.config.ts",
+    "vitest.tauri.config.ts",
     "src/main/**/*",
     "src/service/**/*.ts",
     "src/preload/**/*",

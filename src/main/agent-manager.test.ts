@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest'
 import { AgentManager, AgentShutdownIncompleteError, AGENT_SHUTDOWN_DRAIN_TIMEOUT_MS, withStartupDeadline } from './agent-manager'
+import { AGENT_SERVER_START_TIMEOUT_MS, AGENT_SESSION_START_TIMEOUT_MS } from './agent-manager-core'
 import { FakeAdapter } from '../../test/helpers/fake-adapter'
 import { shouldEnableTillDone } from './agent-manager/session-config'
 import { isDelegationTool } from './agent-manager/watchdogs'
@@ -1789,6 +1790,201 @@ describe('AgentManager shutdown', () => {
     vi.clearAllMocks()
   })
 
+  async function expectIncompleteShutdown(mgr: AgentManager): Promise<void> {
+    const stopped = expect(mgr.stopAllSessions()).rejects.toBeInstanceOf(AgentShutdownIncompleteError)
+    await flushEventLoop()
+    await vi.advanceTimersByTimeAsync(AGENT_SHUTDOWN_DRAIN_TIMEOUT_MS)
+    await stopped
+  }
+
+  it('retains a user Stop already in flight after its session has left the live map', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    const fake = new FakeAdapter({ sessionIds: ['stopping-session'] })
+    let finish!: () => void
+    fake.destroySession.mockImplementation(() => new Promise<void>(resolve => { finish = resolve }))
+    installFakeAdapter(fake)
+    const mgr = new AgentManager(createMockDb({ coding_agent: 'claude-code' }))
+    let stopping: Promise<void> | undefined
+    try {
+      await mgr.startSession('agent-1', 'task-1', '/tmp/ws', true)
+      stopping = mgr.stopSession('stopping-session')
+      await flushEventLoop(8)
+      expect(fake.destroySession).toHaveBeenCalledOnce()
+      expect(mgr.getSession('stopping-session')).toBeUndefined()
+      await expectIncompleteShutdown(mgr)
+      finish()
+      await stopping
+      await mgr.stopAllSessions()
+      expect(fake.destroySession).toHaveBeenCalledOnce()
+    } finally {
+      finish?.()
+      await stopping
+      await mgr.stopAllSessions()
+      vi.useRealTimers()
+    }
+  })
+
+  it.each(['initialize', 'health', 'readiness'] as const)('retains a raw %s probe after its startup deadline has already expired', async (phase) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    let finish!: () => void
+    const pending = new Promise<void>(resolve => { finish = resolve })
+    const fake = new FakeAdapter()
+    if (phase === 'initialize') fake.initialize.mockImplementation(() => pending)
+    else if (phase === 'health') fake.checkHealth.mockImplementation(async () => { await pending; return { available: true } })
+    else fake.getStatus.mockImplementation(async () => { await pending; return { type: SessionStatusType.BUSY } })
+    installFakeAdapter(fake)
+    const mgr = new AgentManager(createMockDb({ coding_agent: 'claude-code' }))
+    const starting = expect(mgr.startSession('agent-1', 'task-1', '/tmp/ws', true)).rejects.toThrow('timed out')
+    try {
+      await flushEventLoop(8)
+      const method = phase === 'initialize' ? fake.initialize : phase === 'health' ? fake.checkHealth : fake.getStatus
+      expect(method).toHaveBeenCalledOnce()
+      await vi.advanceTimersByTimeAsync(AGENT_SERVER_START_TIMEOUT_MS)
+      await starting
+      await expectIncompleteShutdown(mgr)
+      finish()
+      await mgr.stopAllSessions()
+      if (phase !== 'readiness') expect(fake.createSession).not.toHaveBeenCalled()
+      else expect(fake.destroySession).toHaveBeenCalledOnce()
+    } finally {
+      finish()
+      await starting
+      await mgr.stopAllSessions()
+      vi.useRealTimers()
+    }
+  })
+
+  it('retains timed-out resume and its late teardown after the public resume has failed', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    let resumed!: (messages: any[]) => void
+    let destroyed!: () => void
+    const fake = new FakeAdapter()
+    fake.resumeSession.mockImplementation(() => new Promise(resolve => { resumed = resolve }))
+    fake.destroySession.mockImplementation(() => new Promise<void>(resolve => { destroyed = resolve }))
+    installFakeAdapter(fake)
+    const db = createMockDb({ coding_agent: 'claude-code' })
+    db.getTask = vi.fn(() => ({ id: 'task-1', title: 'Test task', agent_id: 'agent-1', session_id: 'persisted-session', repos: [], skill_ids: [] }) as unknown as TaskRecord)
+    const mgr = new AgentManager(db)
+    const resuming = expect(mgr.resumeSession('agent-1', 'task-1', 'persisted-session')).rejects.toThrow('timed out')
+    try {
+      await flushEventLoop(8)
+      expect(fake.resumeSession).toHaveBeenCalledOnce()
+      await vi.advanceTimersByTimeAsync(AGENT_SESSION_START_TIMEOUT_MS)
+      await resuming
+      await expectIncompleteShutdown(mgr)
+      resumed([])
+      await flushEventLoop()
+      expect(fake.destroySession).toHaveBeenCalledWith('persisted-session', expect.objectContaining({ taskId: 'task-1' }))
+      await expectIncompleteShutdown(mgr)
+      destroyed()
+      await mgr.stopAllSessions()
+      expect(mgr.getActiveSessionsForTask('task-1')).toEqual([])
+    } finally {
+      resumed?.([])
+      await flushEventLoop()
+      destroyed?.()
+      await resuming
+      await mgr.stopAllSessions()
+      vi.useRealTimers()
+    }
+  })
+
+  it('retains timed-out creation and its late teardown until the adapter acknowledges both', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    let created!: (id: string) => void
+    let destroyed!: () => void
+    const fake = new FakeAdapter()
+    fake.createSession.mockImplementation(() => new Promise<string>(resolve => { created = resolve }))
+    fake.destroySession.mockImplementation(() => new Promise<void>(resolve => { destroyed = resolve }))
+    installFakeAdapter(fake)
+    const mgr = new AgentManager(createMockDb({ coding_agent: 'claude-code' }))
+    const starting = expect(mgr.startSession('agent-1', 'task-1', '/tmp/ws', true)).rejects.toThrow('timed out')
+    try {
+      await flushEventLoop(8)
+      expect(fake.createSession).toHaveBeenCalledOnce()
+      await vi.advanceTimersByTimeAsync(AGENT_SESSION_START_TIMEOUT_MS)
+      await starting
+      await expectIncompleteShutdown(mgr)
+      created('late-session')
+      await flushEventLoop()
+      expect(fake.destroySession).toHaveBeenCalledWith('late-session', expect.objectContaining({ taskId: 'task-1' }))
+      await expectIncompleteShutdown(mgr)
+      destroyed()
+      await mgr.stopAllSessions()
+      expect(mgr.getActiveSessionsForTask('task-1')).toEqual([])
+    } finally {
+      created('late-session')
+      await flushEventLoop()
+      destroyed?.()
+      await starting
+      await mgr.stopAllSessions()
+      vi.useRealTimers()
+    }
+  })
+
+  it.each(['snapshot', 'delta'] as const)('drains an in-flight transcript %s and rejects new reads before touching a closed database', async (kind) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    let finish!: (messages: any[]) => void
+    const history = vi.fn(() => new Promise<any[]>(resolve => { finish = resolve }))
+    const fake = Object.assign(new FakeAdapter(), { getPersistedMessages: history })
+    installFakeAdapter(fake)
+    const db = createMockDb({ coding_agent: 'claude-code' })
+    db.getTask = vi.fn(() => ({ id: 'task-1', agent_id: 'agent-1', session_id: 'persisted-session' }) as TaskRecord)
+    db.hasTranscriptParts = vi.fn(() => false)
+    let closed = false
+    let lateQueries = 0
+    const query = () => { if (closed) lateQueries++ }
+    db.getTranscriptParts = vi.fn(() => { query(); return [] })
+    db.getTranscriptDelta = vi.fn(() => { query(); return { parts: [], maxRev: 0 } })
+    db.upsertTranscriptParts = vi.fn(() => { query(); return { maxRev: 1, changedPartIds: ['history-part'] } })
+    const mgr = new AgentManager(db)
+    const read = () => kind === 'snapshot' ? mgr.getTranscriptSnapshot('task-1') : mgr.getTranscriptDelta('task-1', 0)
+    const pending = read()
+    try {
+      expect(history).toHaveBeenCalledOnce()
+      await expectIncompleteShutdown(mgr)
+      finish([{ role: MessageRole.ASSISTANT, parts: [{ id: 'history-part', type: MessagePartType.TEXT, text: 'Recovered history' }] }])
+      await pending
+      await mgr.stopAllSessions()
+      expect(db.upsertTranscriptParts).toHaveBeenCalledOnce()
+      closed = true
+      await expect(read()).rejects.toThrow('shutting down')
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(history).toHaveBeenCalledOnce()
+      expect(lateQueries).toBe(0)
+    } finally {
+      finish([])
+      await pending
+      await mgr.stopAllSessions()
+      vi.useRealTimers()
+    }
+  })
+
+  it('drains a live history read even after removing the session from the live map', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    let finish!: (messages: any[]) => void
+    const history = vi.fn(() => new Promise<any[]>(resolve => { finish = resolve }))
+    const fake = Object.assign(new FakeAdapter(), { getAllMessages: history })
+    installFakeAdapter(fake)
+    const mgr = new AgentManager(createMockDb({ coding_agent: 'claude-code' }))
+    try {
+      await mgr.startSession('agent-1', 'task-1', '/tmp/ws', true)
+      const pending = mgr.getRawTranscriptForDebug('task-1')
+      expect(history).toHaveBeenCalledOnce()
+      await expectIncompleteShutdown(mgr)
+      expect(mgr.getActiveSessionsForTask('task-1')).toEqual([])
+      finish([])
+      await pending
+      await mgr.stopAllSessions()
+      await expect(mgr.getTranscriptForTask('task-1')).resolves.toEqual([])
+      expect(history).toHaveBeenCalledOnce()
+    } finally {
+      finish?.([])
+      await mgr.stopAllSessions()
+      vi.useRealTimers()
+    }
+  })
+
   it('stopAllSessions destroys every live session, waits for each, and keeps task status', async () => {
     const fake = new FakeAdapter({ sessionIds: ['s1', 's2'] })
     let pendingStops = 0
@@ -2016,6 +2212,7 @@ describe('AgentManager permission and question routing', () => {
         getStatus: vi.fn(async () => ({ type: 'working' })),
         sendPrompt: vi.fn(async () => undefined),
         abortPrompt: vi.fn(async () => undefined),
+        destroySession: vi.fn(async () => undefined),
       },
       pollingStarted: true,
       createdAt: new Date(),
@@ -2027,6 +2224,85 @@ describe('AgentManager permission and question routing', () => {
 
     return { mgr, session, mockDb }
   }
+
+  it.each(['permission', 'question', 'configuration'] as const)('retains a pending %s response across shutdown and rejects late effects', async (phase) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    const { mgr, session, mockDb } = createManagerWithSession()
+    let finish!: () => void
+    const blocked = new Promise<void>(resolve => { finish = resolve })
+    const adapter = {
+      ...session.adapter,
+      respondToQuestion: vi.fn(async () => { if (phase === 'question') await blocked; return undefined }),
+      respondToApproval: vi.fn(async () => { await blocked; return false }),
+      destroySession: vi.fn(async () => undefined)
+    }
+    session.adapter = adapter
+    vi.spyOn(mgr as any, 'getAdapter').mockReturnValue(adapter)
+    const config = vi.spyOn(mgr as any, 'buildSessionConfig').mockResolvedValue({ workspaceDir: '/tmp/ws' })
+    if (phase === 'configuration') config.mockImplementationOnce(async () => { await blocked; return { workspaceDir: '/tmp/ws' } })
+    const continuation = vi.spyOn(mgr as any, 'sendInBackground')
+    const response = mgr.respondToPermission('temp-id', true, 'answer', undefined, phase === 'permission' ? 'permission' : 'question').catch(error => error)
+    try {
+      await flushEventLoop(8)
+      const stopping = mgr.stopAllSessions().catch(error => error)
+      await flushEventLoop(8)
+      await vi.advanceTimersByTimeAsync(AGENT_SHUTDOWN_DRAIN_TIMEOUT_MS)
+      expect(await stopping).toBeInstanceOf(AgentShutdownIncompleteError)
+      finish()
+      expect(await response).toBeInstanceOf(Error)
+      expect(mgr.getSession('temp-id')).toBeUndefined()
+      expect(continuation).not.toHaveBeenCalled()
+      expect(mockDb.updateTask).not.toHaveBeenCalledWith('task-1', expect.objectContaining({ status: TaskStatus.AgentWorking }))
+      if (phase === 'configuration') expect(adapter.respondToQuestion).not.toHaveBeenCalled()
+      await mgr.stopAllSessions()
+    } finally {
+      finish()
+      await response
+      await mgr.stopAllSessions()
+      vi.useRealTimers()
+    }
+  })
+
+  it('rejects a new approval after shutdown before querying task or adapter state', async () => {
+    const { mgr, session, mockDb } = createManagerWithSession()
+    const adapter = { ...session.adapter, respondToApproval: vi.fn(async () => true) }
+    session.adapter = adapter
+    vi.spyOn(mgr as any, 'getAdapter').mockReturnValue(adapter)
+    vi.spyOn(mgr as any, 'buildSessionConfig').mockResolvedValue({ workspaceDir: '/tmp/ws' })
+    await mgr.stopAllSessions()
+    vi.mocked(mockDb.getTask).mockClear()
+    await expect(mgr.respondToPermission('temp-id', true)).rejects.toThrow('shutting down')
+    expect(mockDb.getTask).not.toHaveBeenCalled()
+    expect(adapter.respondToApproval).not.toHaveBeenCalled()
+  })
+
+  it.each(['permission', 'question'] as const)('does not revive a manually stopped session after a late %s response', async (kind) => {
+    const { mgr, session, mockDb } = createManagerWithSession()
+    let finish!: () => void
+    const blocked = new Promise<void>(resolve => { finish = resolve })
+    const adapter = { ...session.adapter,
+      respondToQuestion: vi.fn(async () => { await blocked; return undefined }),
+      respondToApproval: vi.fn(async () => { await blocked; return false }) }
+    session.adapter = adapter
+    vi.spyOn(mgr as any, 'getAdapter').mockReturnValue(adapter)
+    vi.spyOn(mgr as any, 'buildSessionConfig').mockResolvedValue({ workspaceDir: '/tmp/ws' })
+    const continuation = vi.spyOn(mgr as any, 'sendInBackground')
+    const response = mgr.respondToPermission('temp-id', true, 'answer', undefined, kind).catch(error => error)
+    try {
+      await flushEventLoop(8)
+      await mgr.stopSession('temp-id')
+      // A replacement may reuse the provider's ID. It must never inherit the
+      // old generation's callback or be put back to work by a stale response.
+      const replacement = { ...session, status: 'idle' }
+      ;(mgr as any).sessions.set('temp-id', replacement)
+      vi.mocked(mockDb.updateTask).mockClear()
+      finish()
+      expect(await response).toBeInstanceOf(Error)
+      expect(replacement.status).toBe('idle')
+      expect(continuation).not.toHaveBeenCalled()
+      expect(mockDb.updateTask).not.toHaveBeenCalled()
+    } finally { finish(); await response; await mgr.stopAllSessions() }
+  })
 
   it('routes an explicit question response to the question method when the adapter also handles permissions', async () => {
     const { mgr, session } = createManagerWithSession()

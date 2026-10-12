@@ -35,8 +35,16 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Tauri inventory and contract freshness
+        run: |
+          node scripts/tauri-inventory.mjs --check
+          node scripts/tauri-contracts.mjs --check
+
       - name: Build
         run: pnpm build
+
+      - name: Build the isolated Tauri renderer
+        run: pnpm tauri:frontend:build
 
       - name: Test
         run: pnpm test:run
@@ -44,12 +52,17 @@ jobs:
       - name: Tauri foundation subprocess regressions
         run: pnpm test:tauri:spike
 
+      - name: Tauri installed evidence policy regressions
+        run: python scripts/tauri-packaged-smoke.test.py
+
       - name: Tauri headless supervisor regressions
         env:
           CARGO_BUILD_JOBS: '1'
         run: |
           cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine -- --test-threads=1
-          pnpm tauri:prepare
+          cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features synthetic-agent -- --test-threads=1
+          pnpm tauri:prepare:native
+          pnpm test:tauri -- --silent
           TWENTYONEX_TEST_RESOURCES="$PWD/src-tauri/resources" cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine -- --ignored --test-threads=1
 
       - name: Navigation rail real-scrollport regression

@@ -1,0 +1,13 @@
+# Approval and Stop lifetime continuation
+
+Scoped [#208](https://github.com/krazyjakee/21x/issues/208) continuation for the actual portable/shipping AgentManager. Permission/question responses now remain in its shutdown-work set through configuration preparation, raw adapter response and final state/event handling. New responses reject after shutdown starts. The existing session-generation guard runs before dispatch, after asynchronous configuration and after the provider response. A late callback cannot resume a stopped/replaced session, send a continuation, update task status or restart polling.
+
+This preserves legitimate request/answer handling and existing adapter return semantics. It does not prove that an already-dispatched provider action was cancelled or reverse a committed backend decision. The manager waits for the raw response before declaring its writer resources releasable; the service's incomplete-cleanup/process-exit policy still applies.
+
+The shutdown drain also includes `sessionStops`: a user Stop removes the live session synchronously while adapter teardown is still pending. Previously a subsequent shutdown could see an empty live map and omit that ongoing teardown and its final database effects. It now waits on the retained Stop operation; its deadline rejects without dropping ownership.
+
+Seven added regressions cover held permission/question/configuration responses across shutdown, new response denial before reads, two late callbacks after manual Stop and ID reuse, and a user Stop already in flight when shutdown begins. The manager/admission/concurrency suite passed 268 cases, including 172 manager cases. Positive request identity, approval/rejection and teardown are additionally exercised by the actual standalone graph and bundled fixture proofs. Full provider/process-tree cleanup and remaining async operations stay open; this does not close G2/G3.
+
+The three manual dynamic-event review coordinates shifted after the wrapper insertion. Their dispatch/broadcast/persistence functions were inspected: producer names, routing and ownership remain unchanged. Source locations were refreshed and inventory/contracts regenerated; this adds no operation or event grant.
+
+The [latest local report](evidence/approval-lifetime-local.json) retains exact source/service hashes and the successful full recheck: **5,155 passed / 4 skipped**, 363 files, with standalone proof wrappers enabled. The actual bundled agent/configuration/transcript proofs and six staged native cases passed again. Typecheck, changed-source lint, source freshness and the desktop/mobile build passed. Expanded standalone tooling separately passed 463 cases/44 files, including all 29 shared files. No hosted/installed run for this source is claimed.

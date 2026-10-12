@@ -1,12 +1,13 @@
 import type { DesktopCommandMap, DesktopEventMap } from './desktop-operations'
 import { hasExactKeys, isJsonValue, isRecord, ServiceProtocolError, type JsonValue } from './service-protocol'
 import type { OptionalResult } from './host-services'
+import { isTranscriptPage, isTranscriptPageRequest } from './transcript-page'
 
 export const DATABASE_DESKTOP_OPERATIONS = [
   'db:getTasks', 'db:getTask', 'db:createTask', 'db:updateTask', 'db:deleteTask',
   'project:getAll', 'project:get', 'project:getDefault', 'project:create',
   'settings:get', 'settings:set', 'settings:getAll',
-  'agentSession:getTranscriptSnapshot', 'agentSession:getTranscriptDelta'
+  'agentSession:getTranscriptSnapshot', 'agentSession:getTranscriptDelta', 'agentSession:getTranscriptPage'
 ] as const
 export type DatabaseDesktopOperation = typeof DATABASE_DESKTOP_OPERATIONS[number]
 export const DATABASE_DESKTOP_EVENTS = ['task:created', 'task:updated', 'task:deleted', 'project:changed', 'transcript:changed'] as const
@@ -184,6 +185,13 @@ const descriptors: Record<DatabaseDesktopOperation, Descriptor> = {
     encodeArgs: args => ({ taskId: args[0] as string, sinceRev: args[1] as number }),
     decodeArgs: value => { if (!object(value, ['taskId', 'sinceRev']) || !isDatabaseId(value.taskId) || !cursor(value.sinceRev)) return fail('INVALID_ARGUMENTS'); return [value.taskId, value.sinceRev] },
     validateResult: delta, encodeResult: value => ({ parts: ((value as { parts: unknown[] }).parts).map(encodeDatabaseTranscriptPart), maxRev: (value as { maxRev: number }).maxRev })
+  },
+  'agentSession:getTranscriptPage': {
+    validateArgs: value => Array.isArray(value) && value.length === 2 && isDatabaseId(value[0]) && isTranscriptPageRequest(value[1]),
+    encodeArgs: args => ({ taskId: args[0] as string, page: args[1] as JsonValue }),
+    decodeArgs: value => { if (!object(value, ['taskId', 'page']) || !isDatabaseId(value.taskId) || !isTranscriptPageRequest(value.page)) return fail('INVALID_ARGUMENTS'); return [value.taskId, value.page] },
+    validateResult: value => isTranscriptPage(value, isDatabaseTranscriptPart),
+    encodeResult: value => { if (!isTranscriptPage(value, isDatabaseTranscriptPart)) return fail('INVALID_RESULT'); return { ...value, parts: value.parts.map(encodeDatabaseTranscriptPart) } as JsonValue }
   }
 }
 

@@ -35,6 +35,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "test:tauri:spike": "node --test --test-concurrency=1 src/service/feasibility.test.mjs scripts/tauri-prepare.test.mjs",
+    "test:tauri": "node scripts/tauri-test.mjs",
     "release": "bash scripts/release.sh"
   },
   "dependencies": {

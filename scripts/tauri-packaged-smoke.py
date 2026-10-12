@@ -8,6 +8,71 @@ import subprocess
 import sys
 import tempfile
 
+PROOF_MODES = ("feasibility", "synthetic-desktop", "synthetic-agent", "artifact-authorization-proof")
+DESKTOP_RECEIPTS = (
+    "taskCreated", "taskEventObserved", "taskUpdated", "updateEventObserved",
+    "projectCreated", "missingResultPreserved", "settingPersisted",
+    "transcriptSnapshotRead", "transcriptDeltaRead", "rendererReloaded",
+    "rehydrated", "retiredOperationDenied", "staleEpochDenied",
+)
+AGENT_RECEIPTS = (
+    "agentStarted", "approvalRequested", "staleApprovalDenied", "approvalAccepted",
+    "agentCompleted", "agentStatusEventObserved", "agentTranscriptRehydrated",
+)
+
+
+def verify_report(report, *, mode, arch, installed, root):
+    """Fail closed if a successful package report exercised a different proof."""
+    assert mode in PROOF_MODES
+    assert report["stage"] == "complete" and report["passed"] is True
+    runtime = report["runtime"]
+    assert runtime["initialized"] is True and runtime["systemNodeHidden"] is True
+    assert runtime["developmentFrontend"] is False
+    assert runtime["hostArch"] == {"x64": "x86_64", "arm64": "aarch64"}[arch]
+    for key in ("webviewLoadFinished", "remoteNavigationDenied", "windowCloseRequested", "windowCloseObserved"):
+        assert report["gui"][key] is True
+    assert report["shutdown"]["engineUnavailable"] is True
+    assert report["shutdown"]["ownedChildExited"] is True
+    resources = physical_path(runtime["resourceRoot"])
+    assert resources.is_relative_to(installed)
+    profile = physical_path(runtime["profileRoot"])
+    assert runtime["syntheticDesktop"] is (mode != "feasibility")
+    assert runtime["syntheticAgent"] is (mode == "synthetic-agent")
+    if mode == "feasibility":
+        assert profile == root / "profile"
+        assert runtime["nativeProbe"]["ok"] is True
+        assert runtime["nativeProbe"]["arch"] == arch
+        assert report["gui"]["rendererPing"] is True
+        assert report["gui"]["restrictedOperationDenied"] is True
+    else:
+        assert profile.is_relative_to(root) and profile.name.startswith("21x-database-service-")
+        keys = DESKTOP_RECEIPTS + (AGENT_RECEIPTS if mode == "synthetic-agent" else ())
+        proof = runtime["syntheticDesktopProof"]
+        assert set(proof) == set(keys) and all(proof[key] is True for key in keys)
+        assert (resources / "service/database-stdio.mjs").is_file()
+        assert (resources / "service/database-engine.mjs").is_file()
+    if mode == "artifact-authorization-proof":
+        authority = runtime["artifactAuthorizationProof"]
+        assert authority["passed"] is True and authority["boundary"] == "separate-webview"
+        assert authority["sameMainIframeIsolationProven"] is False
+        assert authority["frameNativeAttemptMethod"] == "unprivileged-parent-relay"
+        for key in ("artifactWindowClosed", "excludedDocumentReady", "mainReceivedTargetedServiceEvent", "defaultMainCspUnchanged"):
+            assert authority[key] is True
+        for section, keys in (
+            ("mainPositiveControls", ("transportAvailable", "desktopAccepted", "statusAccepted", "listenAccepted")),
+            ("sameLocalOriginExcludedWebview", ("transportAvailable", "desktopDenied", "statusDenied", "listenDenied")),
+            ("sandboxedArtifactFrame", ("transportAvailable", "frameLoaded", "parentAccessDenied", "parentGlobalDenied",
+                                       "frameBridgeAbsent", "relayDesktopDenied", "relayStatusDenied", "relayListenDenied")),
+        ):
+            assert all(authority[section][key] is True for key in keys)
+    else:
+        assert "artifactAuthorizationProof" not in runtime
+    owned_node = resources / "node" / ("node.exe" if sys.platform == "win32" else "node")
+    for required in (owned_node, resources / "node/LICENSE", resources / "service/THIRD_PARTY_NOTICES.json",
+                     resources / "service/feasibility.mjs"):
+        assert required.is_file()
+    return owned_node.resolve()
+
 
 def run(command, *, cwd=None, env=None, timeout=180, log=None):
     if log:
@@ -127,6 +192,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--kind", choices=["dmg", "nsis", "appimage"], required=True)
     parser.add_argument("--arch", choices=["x64", "arm64"], required=True)
+    parser.add_argument("--mode", choices=PROOF_MODES, default="feasibility")
     parser.add_argument("--evidence", type=Path, required=True)
     args = parser.parse_args()
     evidence = args.evidence.resolve()
@@ -137,26 +203,13 @@ def main():
         report_path = evidence / "packaged-gui-smoke.json"
         env = {**os.environ, **extra,
                "TWENTYONEX_NATIVE_SMOKE_REPORT": str(report_path),
-               "TWENTYONEX_NATIVE_SMOKE_PROFILE": str(root / "profile")}
+               "TWENTYONEX_NATIVE_SMOKE_PROFILE": str(root / "profile"),
+               "TMPDIR": str(root), "TMP": str(root), "TEMP": str(root)}
         run(command, cwd=root, env=env, timeout=120, log=evidence / "packaged-gui-smoke.log")
         report = json.loads(report_path.read_text())
-        runtime = report["runtime"]
-        assert report["stage"] == "complete" and report["passed"] is True
-        assert runtime["initialized"] and runtime["systemNodeHidden"]
-        assert runtime["developmentFrontend"] is False
-        assert runtime["nativeProbe"]["ok"] is True
-        assert runtime["nativeProbe"]["arch"] == args.arch
-        resources = physical_path(runtime["resourceRoot"])
-        assert resources.is_relative_to(installed)
-        assert physical_path(runtime["profileRoot"]) == root / "profile"
-        owned_node = resources / "node" / ("node.exe" if sys.platform == "win32" else "node")
-        assert owned_node.is_file()
-        assert (resources / "node/LICENSE").is_file()
-        assert (resources / "service/THIRD_PARTY_NOTICES.json").is_file()
-        assert (resources / "service/feasibility.mjs").is_file()
-        assert report["shutdown"]["engineUnavailable"] is True
-        survivors = running_owned_node(owned_node.resolve())
-        report["verification"] = {"packageKind": args.kind, "packageSha256": checksum,
+        owned_node = verify_report(report, mode=args.mode, arch=args.arch, installed=installed, root=root)
+        survivors = running_owned_node(owned_node)
+        report["verification"] = {"packageKind": args.kind, "proofMode": args.mode, "packageSha256": checksum,
                                   "artifact": artifact.name, "packagedExecutable": str(executable),
                                   "packagedResources": True, "ownedRunningProcessesAfterExit": survivors}
         report_path.write_text(json.dumps(report, indent=2) + "\n")

@@ -52,6 +52,7 @@ export class ServicePeer {
   private failure: ServiceProtocolError | null = null
   private epoch: string | null
   private readonly drainWaiters = new Set<{ resolve: () => void; reject: (error: ServiceProtocolError) => void }>()
+  private readonly handlerWaiters = new Set<() => void>()
 
   constructor(private readonly options: ServicePeerOptions) {
     this.epoch = options.engineEpoch
@@ -70,6 +71,23 @@ export class ServicePeer {
     if (this.failure) return Promise.reject(this.failure)
     if (!this.writing && this.queue.length === 0 && this.active.size === 0) return Promise.resolve()
     return new Promise((resolve, reject) => this.drainWaiters.add({ resolve, reject }))
+  }
+
+  /** Terminal cleanup still owns raw handlers after replies/cancellation stop. */
+  waitForHandlers(timeoutMs = 2000): Promise<void> {
+    if (!this.failure) return Promise.reject(new ServiceProtocolError('INVALID_REQUEST'))
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) return Promise.reject(new ServiceProtocolError('INVALID_ARGUMENTS'))
+    if (!this.active.size) return Promise.resolve()
+    return new Promise((resolve, reject) => {
+      const done = (): void => { clearTimeout(timer); this.handlerWaiters.delete(done); resolve() }
+      const timer = setTimeout(() => {
+        this.handlerWaiters.delete(done)
+        // Timeout ends the wait, never raw ownership. Caller must retain its
+        // database/provider/lock until process exit if this fails.
+        reject(new ServiceProtocolError('TIMEOUT'))
+      }, timeoutMs)
+      this.handlerWaiters.add(done)
+    })
   }
 
   private settleDrain(): void {
@@ -105,7 +123,7 @@ export class ServicePeer {
       clearTimeout(request.timer)
       request.controller.abort()
     }
-    this.active.clear()
+    // Abort is advisory. Keep each raw handler owned until its finally runs.
     this.queue.length = 0
     this.queuedBytes = 0
     try { this.options.onDisconnect?.(error) } catch { /* Never reflect adapter diagnostics. */ }
@@ -261,7 +279,10 @@ export class ServicePeer {
       }, SERVICE_LIMITS.requestTimeoutMs)
     }
     this.active.set(frame.requestId, active)
-    void Promise.resolve().then(() => schema.handle!(frame.payload, active.controller.signal)).then(result => {
+    void Promise.resolve().then(() => {
+      if (this.failure || active.controller.signal.aborted) throw new ServiceProtocolError('CANCELLED')
+      return schema.handle!(frame.payload, active.controller.signal)
+    }).then(result => {
       if (this.failure || active.replied) return
       let valid = false
       try { valid = isJsonValue(result) && schema.validateResult(result) } catch { /* Redacted below. */ }
@@ -277,6 +298,7 @@ export class ServicePeer {
     }).finally(() => {
       clearTimeout(active.timer)
       this.active.delete(frame.requestId)
+      if (!this.active.size) for (const done of [...this.handlerWaiters]) done()
       this.settleDrain()
     })
     // The active slot remains occupied until the handler settles, even after abort.

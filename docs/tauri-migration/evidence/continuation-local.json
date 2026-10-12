@@ -1,0 +1,87 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-12",
+  "source": {
+    "baseCommit": "38f1a1b0250c7ed4fb1d6268b26074399e01ab12",
+    "workingTree": true,
+    "filesSha256": {
+      ".github/workflows/tauri-packaged-platforms.yml": "261127f2662843a4cd268022bba562f28495c68bd44d5de34973adae4522e1ed",
+      ".github/workflows/verify.yml": "92281a5724e51c2b706ad02f3bfe3bdcca7992251fa175dcf82cf09617304d41",
+      "scripts/tauri-packaged-smoke.py": "e26f77f878b6757299287769907cd2ff332af03e541b2e42412380541360afbd",
+      "scripts/tauri-packaged-smoke.test.py": "e5837270cc7d62a5a8c6e8eb7f1a77d5c177f576e9184ce6c14f257a934841b6",
+      "src-tauri/.gitignore": "954f49fb8a2d14d8a5af9223e7341d4b1e567adc6ced3c9ac1c96678ab95c4f9",
+      "src-tauri/src/main.rs": "e4517b60cc29ebab88146580c7c1cdad315a4bffe649add3f3a8d6c8dff8b4bb",
+      "src/main/agent-manager-core.ts": "2a842814227a39cb20747b9abc1e638ea7b7e37c8d853d0ecc8a8d7cc3785c4a",
+      "src/main/agent-manager.test.ts": "ec74a34934cd5801f297b4f08e311b69ac4ab053421c33d8fd37f65e34e7656e"
+    }
+  },
+  "environment": {
+    "platform": "linux-x64",
+    "distribution": "Linux Mint 22.3",
+    "node": "v22.23.2",
+    "sqlite": "13.0.3",
+    "rust": "1.98.0"
+  },
+  "typescriptRegressions": {
+    "passed": 331,
+    "files": 10,
+    "shutdownCasesAdded": 8,
+    "standaloneOptInCasesPassed": 2
+  },
+  "pythonEvidencePolicy": {
+    "passed": 11
+  },
+  "typecheck": "passed",
+  "changedTypeScriptLint": "passed",
+  "isolatedFrontendBuild": "passed",
+  "workflowYamlAndShellSyntax": {
+    "passed": true,
+    "shellSteps": 25
+  },
+  "nativeHostCheck": {
+    "passed": true,
+    "features": [
+      "synthetic-agent",
+      "artifact-authorization-proof"
+    ],
+    "locked": true,
+    "compilationJobs": 1
+  },
+  "engineUnitTests": {
+    "passed": 16,
+    "ignored": 5
+  },
+  "stagedRustDatabaseRoundtrip": {
+    "passed": true,
+    "observedActualServiceEvents": true
+  },
+  "standaloneProofs": {
+    "lifecycle": {
+      "passed": true,
+      "modules": 75,
+      "events": 18,
+      "warnings": 0,
+      "errors": 0
+    },
+    "desktopBoundary": {
+      "passed": true,
+      "modules": 85,
+      "events": 30,
+      "warnings": 0,
+      "errors": 0
+    },
+    "bundledAgentPrivatePipe": {
+      "passed": true,
+      "events": 14,
+      "syntheticProfileRemoved": true
+    }
+  },
+  "stagedNativePreflight": {
+    "sqlite": true,
+    "pty": true,
+    "worker": true,
+    "representativeSdkImports": true
+  },
+  "installedPlatformRuns": "not_run_for_this_continuation",
+  "scope": "Local working-tree validation and executable platform proof modes. No installed WebView, full SDK teardown, real-provider parity, live profile import, release, matched performance or gate closure claim."
+}

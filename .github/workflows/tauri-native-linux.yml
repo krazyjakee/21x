@@ -67,10 +67,14 @@ jobs:
         run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Stage the standalone Node runtime and native addons once
         run: pnpm tauri:prepare:native 2>&1 | tee native-evidence/native-staging.log
+      - name: Run portable unit tests under staged standalone Node
+        run: pnpm test:tauri -- --silent --reporter=json --outputFile=native-evidence/standalone-tests.json
       - name: Stage the synthetic database service and check its actual native boundary
         if: inputs.mode != 'feasibility'
         run: |
           pnpm tauri:prepare:database | tee native-evidence/database-staging.json
+          TAURI_NODE_RUNTIME="$PWD/src-tauri/resources/node/node" TAURI_DATABASE_SERVICE_ENTRY="$PWD/src-tauri/resources/service/database-stdio.mjs" "$PWD/src-tauri/resources/node/node" scripts/transcript-page-proof.mjs | tee native-evidence/transcript-page-proof.json
+          TAURI_NODE_RUNTIME="$PWD/src-tauri/resources/node/node" TAURI_DATABASE_SERVICE_ENTRY="$PWD/src-tauri/resources/service/database-stdio.mjs" "$PWD/src-tauri/resources/node/node" scripts/configuration-service-proof.mjs | tee native-evidence/configuration-service-proof.json
           if [ "$TAURI_NATIVE_PROOF_MODE" = 'synthetic-agent' ]; then
             TAURI_SQLITE_MODULE="$PWD/src-tauri/resources/service/node_modules/better-sqlite3" node scripts/agent-desktop-proof.mjs | tee native-evidence/agent-desktop-proof.json
             TAURI_NODE_RUNTIME="$PWD/src-tauri/resources/node/node" TAURI_DATABASE_SERVICE_ENTRY="$PWD/src-tauri/resources/service/database-stdio.mjs" node scripts/agent-service-proof.mjs | tee native-evidence/agent-service-proof.json
@@ -80,6 +84,7 @@ jobs:
           if [ "$TAURI_NATIVE_PROOF_MODE" = 'synthetic-agent' ]; then native_features=synthetic-agent; fi
           cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features "$native_features" -- --test-threads=1 2>&1 | tee native-evidence/database-native-unit.log
           cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features synthetic-desktop -- --ignored staged_synthetic_database_roundtrip_emits_real_target_events --test-threads=1 2>&1 | tee native-evidence/database-native-roundtrip.log
+          cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features synthetic-desktop -- --ignored staged_synthetic_configuration_roundtrip_preserves_real_content_effects --test-threads=1 2>&1 | tee native-evidence/configuration-native-roundtrip.log
       - name: Build the native host and Debian package
         run: |
           feature_args=()

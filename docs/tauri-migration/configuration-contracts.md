@@ -1,6 +1,6 @@
 # Configuration codecs and forwarding ownership
 
-This G1 batch reviews eleven generic event forwarding sites after the actual AgentManager extraction, supplies codecs for 22 retained configuration operations, and provides reusable real database bindings for the 18 skill/project/repo/resource operations. Service bootstrap, native operation grants and renderer integration remain separate. Existing Electron handlers remain unchanged.
+This G1 batch reviews eleven generic event forwarding sites after the actual AgentManager extraction, supplies codecs for 22 retained configuration operations, and provides real database bindings for the 18 skill/project/repo/resource operations. The content bindings are now composed into the disposable synthetic service, exact native policy and isolated renderer client. Production configuration UI and owner integration remain open. Existing Electron handlers remain unchanged.
 
 ## Ten forwarding sites
 

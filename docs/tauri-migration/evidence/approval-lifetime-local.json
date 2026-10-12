@@ -1,0 +1,125 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "issue": 208,
+  "scope": "Owned permission/question/configuration responses, in-flight user Stops and late state/continuation denial. No all-SDK cancellation, process-tree or migration gate claim.",
+  "source": {
+    "baseCommit": "38f1a1b0250c7ed4fb1d6268b26074399e01ab12",
+    "workingTree": true,
+    "filesSha256": {
+      "src/main/agent-manager-core.ts": "db07c3ce85276cfc17a033c33a95cb8ded49fdc4ee7d1e6b3631646a4853e7be",
+      "src/main/agent-manager.test.ts": "07866502395c531f1bce104bd32dd921f0f25c42293b3e38f598569aea7cd0fe",
+      "src/service/database-service.ts": "8e00306a0c7049c46e85bdc6d7176c47507967a89c9b898cd313c3f3e4bac7c9",
+      "src/service/transport/peer.ts": "2b776b988ff859a93a318cf93a67a8807d5164674bee7fc0d20551b1a5b941f4",
+      "vitest.tauri.config.ts": "0fc40645e817447cc3b60dc6cb12b533bce6b91e418a5df24902719a03c6b75b",
+      "docs/tauri-migration/event-forwarding-review.json": "e378169c9e058836c24d68c949cecdbec0c00be4eb593837cffdcf90908b0656",
+      "docs/tauri-migration/operations.json": "fb4b7251472cb192098491baa4b6dc2585256a019ae1dff0743895d2889648f5",
+      "src/shared/desktop-event-forwarding.ts": "ef8f60209a9668f8a0a76e5f8496c5b7a41f1d8bc80b5bcf32017aa4d74bff5e",
+      "src-tauri/engine/src/lib.rs": "ef77e8a3433f40576607101d5006e7d86159ebb1aa51aa1c362445748509f81b",
+      "src-tauri/engine/src/desktop.rs": "7d7d361e5d331af655526bf3d695a4d2e38f892fb3ef576e3339b8fce2ef63b1"
+    }
+  },
+  "focusedManagerAdmissionConcurrency": {
+    "passed": 268,
+    "files": 3,
+    "managerCases": 172,
+    "addedLifetimeCases": 7
+  },
+  "fullApplicationSuite": {
+    "passed": 5155,
+    "failed": 0,
+    "skipped": 4,
+    "files": 363,
+    "rawReportSha256": "93dfbd6d3dd52ec186d11968bff6e8ef579e777286dc5fd11130c366dabcda51",
+    "optInProofsEnabled": true
+  },
+  "actualBundledProofs": {
+    "configuration": {
+      "reportVersion": 1,
+      "passed": true,
+      "actualBundledService": true,
+      "syntheticOnly": true,
+      "phase": "complete",
+      "contentCommands": 18,
+      "commands": [
+        "project:archive",
+        "project:reorder",
+        "project:update",
+        "projectRepo:add",
+        "projectRepo:list",
+        "projectRepo:remove",
+        "projectRepo:reorder",
+        "projectRepo:update",
+        "projectResource:add",
+        "projectResource:list",
+        "projectResource:remove",
+        "projectResource:reorder",
+        "projectResource:update",
+        "skills:create",
+        "skills:delete",
+        "skills:getAll",
+        "skills:setProject",
+        "skills:update"
+      ],
+      "skillConflictsPreserved": true,
+      "invalidReordersRejected": true,
+      "lifecycleFieldsRejected": true,
+      "publicInvalidationsOnly": true,
+      "cancellationBeforeEffects": true,
+      "newEpochAndDurability": true,
+      "acknowledgedServiceExit": true,
+      "syntheticProfileRemoved": true
+    },
+    "transcript": {
+      "reportVersion": 1,
+      "passed": true,
+      "actualBundledService": true,
+      "phase": "complete",
+      "parts": 642,
+      "snapshotPages": 43,
+      "deltaPages": 3,
+      "largestPageBytes": 248188,
+      "pageByteLimit": 262144,
+      "racingUpdatesRecovered": true,
+      "widePayloadsBounded": true,
+      "overflowInvalidations": 21,
+      "boundedLiveInvalidationRecovery": true,
+      "oversizedFieldPreviewOnly": true,
+      "missingTaskAndMalformedRequestsDenied": true,
+      "acknowledgedServiceExit": true,
+      "syntheticProfileRemoved": true
+    },
+    "agent": {
+      "reportVersion": 1,
+      "passed": true,
+      "actualBundledService": true,
+      "phase": "complete",
+      "publicFixtureIdentity": true,
+      "actualApprovalProjection": true,
+      "pendingOwnerSnapshot": true,
+      "approvalAcceptedAndCompleted": true,
+      "staleApprovalAndActiveDeleteDenied": true,
+      "managedTaskDeletionRemainsUnbound": true,
+      "eventCount": 14,
+      "syntheticProfileRemoved": true
+    }
+  },
+  "stagedServiceEngineSha256": "95a92222658a887615d9a519255c8c0ee84768923cef304a78ea4fe10a2d0692",
+  "checks": {
+    "forcedTypecheck": "passed",
+    "changedSourceLint": "passed",
+    "electronAndMobileBuild": "passed",
+    "nativeStagedCases": 6,
+    "inventoryAndContractFreshness": "passed",
+    "gitDiffCheck": "passed"
+  },
+  "standaloneSuiteEvidence": "standalone-tests-local.json",
+  "productionReady": false,
+  "electronRetirementReady": false,
+  "limitations": [
+    "Local uncommitted source",
+    "No hosted/installed run for this source",
+    "Backend actions already dispatched may have uncertain outcomes",
+    "Failed SDK cleanup and remaining provider operations require further evidence"
+  ]
+}
