@@ -6,7 +6,7 @@ rust-version = "1.90"
 publish = false
 
 [workspace]
-members = ["engine"]
+members = ["engine", "credentials"]
 resolver = "2"
 
 [workspace.dependencies]
