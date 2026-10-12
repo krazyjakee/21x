@@ -1,6 +1,6 @@
 # Migration implementation status
 
-First foundation batch, 2026-10-12. The shipping application still uses Electron. The Tauri experiment has a separate identity and temporary/isolated profile; it does not import tasks, credentials, or production OAuth schemes.
+Foundation batches and scope decisions, 2026-10-12. The shipping application still uses Electron. The Tauri experiment has a separate identity and temporary/isolated profile; it does not import tasks, credentials, or production OAuth schemes. The [approved browser removal](README.md#approved-browser-removal) supersedes the historical browser parity requirements below.
 
 The overall [migration tracker is #193](https://github.com/krazyjakee/21x/issues/193). G0 and G1 remain open: Linux headless runtime evidence is partial feasibility evidence, not packaged WebView or cross-platform parity.
 
@@ -74,8 +74,14 @@ An intermediate Verify run timed out in an unchanged real-`gh` integration test 
 
 Linux debug-package proof does not establish release signing, AppImage/macOS/Windows installs, child reaping, abrupt parent-death/process-tree guarantees, cross-WebView Tauri ACL denial, browser parity or real legacy credential conversion. Foundation issue completion does not close the overarching [#193](https://github.com/krazyjakee/21x/issues/193) or G0/G1.
 
+## Approved scope reduction, 2026-10-12
+
+The user approved removing browser features from the migration. T02 is cancelled, D5 is accepted as removal, and T11 now covers removal/data compatibility rather than browser parity. Embedded browser and arbitrary website panels, browser automation/tools and recordings will be omitted from Tauri; external OAuth, external URL opening, artifact previews and trusted app WebView security remain required. Saved browser metadata/edges and recording files are retained without navigation or replay. The unused migration-only browser policy/authority modules and their 44 tests have been removed; the completed batch evidence above remains historical. The shipping Electron browser features are retired during host cutover, not removed by this scope update.
+
+Scope-change validation: full TypeScript typecheck and ten inventory/terminology tests passed. Refreshed inventory scans 658 source files; Electron/IPC counts are unchanged. Native host/service code and dependencies did not change, so native compilation is deferred to the next implementation batch.
+
 ## Remaining work and next batch
 
-Extend native packaging/runtime evidence beyond the Linux debug package, prototype real task-linked browser surfaces (T02), and produce real legacy Electron/OS credential conversion fixtures (T03). Finish T00's resource/process ownership audit and performance baseline. Resolve the decision register and accept G0/G1 before broad feature porting.
+Extend native packaging/runtime evidence beyond the Linux debug package, produce real legacy Electron/OS credential conversion fixtures (T03). Finish T00's resource/process ownership audit and performance baseline. Resolve the decision register and accept G0/G1 before broad feature porting.
 
-Current gaps include all macOS/Windows evidence, browser panels/automation/recording, native encrypted fixtures and conversion/rollback, production profile locking, parent-death/process-tree guarantees, complete command/permission mappings, renderer bridge adoption, domain engine extraction, task/session parity and installers/updates. No schema or live credential migration has run, and no migration release has been published.
+Current gaps include all macOS/Windows evidence, browser retirement/data compatibility, native encrypted fixtures and conversion/rollback, production profile locking, parent-death/process-tree guarantees, complete command/permission mappings, renderer bridge adoption, domain engine extraction, task/session parity and installers/updates. No schema or live credential migration has run, and no migration release has been published.

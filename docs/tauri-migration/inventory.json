@@ -5964,8 +5964,6 @@
     "src/shared/agent-utils.ts",
     "src/shared/artifact-navigation.ts",
     "src/shared/artifacts.ts",
-    "src/shared/browser-authority.ts",
-    "src/shared/browser-policy.ts",
     "src/shared/browser-recording.ts",
     "src/shared/captain-compat.ts",
     "src/shared/captain-memory.ts",
@@ -12873,7 +12871,7 @@
   ],
   "summary": {
     "directAPIConsumers": 368,
-    "files": 660,
+    "files": 658,
     "operations": 609,
     "runtimeElectronImports": 48,
     "typeOnlyElectronImports": 4,

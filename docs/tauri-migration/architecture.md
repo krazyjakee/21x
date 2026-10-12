@@ -12,7 +12,6 @@ flowchart TB
     Host -->|targeted events and ordered streams| UI
     Host <-->|private versioned stdio RPC| Engine[Bundled Node service]
     Host --> Native[Windows, tray, dialogs, permissions, key store]
-    Host --> Panels[Untrusted browser panel WebViews]
     Engine --> DB[(SQLite and transcript projection)]
     Engine --> Agents[OpenCode, Claude Code, Codex, Cursor, Pi]
     Engine --> Workers[PTYs, isolated connectors, voice workers]
@@ -20,7 +19,7 @@ flowchart TB
     Mobile[Existing paired mobile web client] <-->|HTTP and WebSocket| Engine
 ```
 
-Remote browser panels receive no application capabilities. Browser actions travel from the authorized task service to a restricted host browser adapter, never through an unrestricted remote-page bridge.
+Embedded browsing and browser automation are removed from the Tauri target by the user decision of 2026-10-12. No browser adapter, remote panel WebView or browser tool registry is part of the target architecture. The trusted app WebView and sandboxed artifact previews retain their security boundaries.
 
 Tauri supports bundled external executables through `bundle.externalBin`, with binaries prepared for each target triple. Rust can launch and communicate with these executables. This supports the proposed Node service boundary, but does not by itself package JavaScript dependencies, native addons, or worker scripts. [Tauri external binaries](https://v2.tauri.app/develop/sidecar/).
 
@@ -40,7 +39,7 @@ Avoid a repository-wide file move at the same time as behavioral porting. Electr
 
 ## Desktop bridge
 
-Inventory every `ipcRenderer.invoke/send/on`, `ipcMain.handle/on`, preload method, and direct `window.electronAPI` consumer. Include dynamic and computed event names; a literal-string scan is a starting point, not proof of completeness. Reconcile the inventory with renderer declarations, domain handlers, and mobile/task routes without changing those routes' contracts.
+Inventory every `ipcRenderer.invoke/send/on`, `ipcMain.handle/on`, preload method, and direct `window.electronAPI` consumer. Include dynamic and computed event names; a literal-string scan is a starting point, not proof of completeness. Reconcile the inventory with renderer declarations, domain handlers, and mobile/task routes. Mark retired browser operations as removed instead of generating dispatch entries; preserve retained route contracts.
 
 Preserve the renderer-facing APIs in `ipc-client.ts` where possible and introduce a host-neutral bridge beneath them. Direct consumers use the same bridge. A temporary Electron adapter permits incremental verification; final UI code must not require a global named `electronAPI`.
 
@@ -110,7 +109,7 @@ Replace `BrowserWindow` references and `guardedIpcSend` calls in domain services
 | `utilityProcess.fork`, `process.parentPort` | Isolated Node child plus adapted connector host transport and entry |
 | `globalShortcut`, `systemPreferences` | Native shortcut and microphone permission adapters with explicit denial/error states |
 | `powerSaveBlocker` | Native sleep inhibitor held only while the engine has the corresponding live work |
-| `webContents`, session/header hooks | Browser adapter proven in T02; no assumed one-to-one plugin replacement |
+| Browser `webContents`, session/header/cookie-import hooks | Retire browser-specific hooks and tools; keep trusted UI/artifact security and integration OAuth callbacks |
 | `electron-updater` | Native updater or explicit manual-download flow; framework-transition plan |
 
 Startup order: acquire the cross-host profile lock; resolve identity, resources, and compatible paths; initialize the credential provider; run any guarded import; launch Node; open/migrate its database; initialize domain services and authenticated APIs; announce readiness; attach the UI and hydrate. Deliver a cold-start OAuth callback only when the owning service is ready; validate callback scheme/path/state and consume it once.
@@ -145,13 +144,13 @@ Adapt both sides of the connector host: `utility-transport.ts` and `host-entry.t
 
 Agent CLI discovery, shell environment loading, secret-shell wrapping, Git provider sessions, local/remote MCP and OAuth, tunnels, chat, and Commander all run against the new runtime paths. Preserve voice turn epochs, cancellation, install/remove state, optional recognition runtime, system TTS availability, and suppression of speech audio to mobile. PCM and speech chunks need an explicit byte format tested across Rust/JSON/JS boundaries.
 
-## Browser and WebView feasibility
+## Browser retirement and saved-data compatibility
 
-The current broker explicitly uses `loadURL`, `executeJavaScript`, and `capturePage` on registered panel WebContents; it is not a global CDP integration. Recordings additionally use isolated-world scripts and browser event hooks. Tauri uses WebView2 on Windows and WebKit on macOS/Linux, so Chromium-only behavior and Electron `<webview>` methods need platform evidence. [Tauri WebView versions](https://v2.tauri.app/reference/webview-versions/).
+T02 is cancelled. T11 removes embedded `browser` and arbitrary-site `webpage` panels, broker/recording initialization, browser IPC and HTTP/MCP tools, toolbar actions and browser-specific Chrome cookie import from the Tauri target. Retained domain extraction omits these registrations rather than providing successful no-op replacements. Explicit attempts to call retired operations return an unavailable/removed result.
 
-T02 must demonstrate browser-panel placement/clipping in the canvas, focus/resize/zoom, persistence and cookie isolation, navigation/popups/downloads, task-linked registration, DOM snapshot/actions, script results, screenshot capture, console/network visibility, and recording start/stop/cleanup. Characterize current header/frame handling and decide which behavior can be carried over safely. An iframe or external browser link alone does not satisfy the current broker contract.
+Preserve original canvas state, panel IDs, titles, URLs, geometry, ordering and task edges. Represent retired panels as inert placeholders; do not navigate, embed their URLs or trust stale native view/session IDs. Repeated load/save must round-trip dormant records and edges. Keep `browser-recordings` manifests, steps and snapshots unchanged in the compatible profile and backup. Do not instantiate the old recording service during archival: it can rewrite unfinished recordings. No automatic replay, capture or deletion; deletion requires an explicit user action. T10/T11 fixtures cover retention and rollback.
 
-Native child WebViews may require per-platform extensions. If the prototype cannot prove parity, record the failure and alternatives with product implications: a scoped browser helper adds packaging cost; a reduced browser feature set changes scope. Do not continue full implementation on the assumption that an unspecified plugin will solve it.
+External URL opening, provider/connector/MCP OAuth authentication and validated cold/warm callbacks remain required. Preserve user-managed MCP configuration; this removal targets the app's embedded browser services and built-in tools. Artifact previews remain sandboxed and do not reintroduce arbitrary website panels.
 
 ## Security boundary
 
@@ -159,7 +158,7 @@ Define explicit capabilities for the trusted desktop WebView, with no remote URL
 
 Task/project authorization and path checks remain domain responsibilities. Canonicalize paths, reject traversal and symlink escapes where applicable, validate external URLs, and restrict attachment resource access. Preserve artifact sandboxing and main-window navigation guards. Review CSP, remote navigation, download handling, origin checks, and native command exposure on the actual packaged host.
 
-The Rust/Node channel is private to the supervised child; existing local APIs retain independent authentication. Native event delivery must explicitly target trusted destinations because event access is not a substitute for command authorization. Test malicious remote panels and artifact frames against every privileged command family.
+The Rust/Node channel is private to the supervised child; existing local APIs retain independent authentication. Native event delivery must explicitly target trusted destinations because event access is not a substitute for command authorization. Test attempted remote navigation and untrusted artifact frames against every privileged command family. Verify retired browser tool/command registrations are absent.
 
 ## Build and update boundaries
 

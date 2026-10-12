@@ -36,25 +36,25 @@ For every row attach test/report location, OS/architecture, build version, fixtu
 | MCP/task APIs | Authenticated HTTP and stdio task tools; rejected missing/wrong launch token; local/remote MCP tool scopes/OAuth; correct app-managed runtime paths; preserve user MCP entries | T06/T09/T10 |
 | Task sources/connectors | Sync/import/export/actions, OAuth warm/cold callbacks, allowlist/pins, call-scoped KV/credentials, timeout/cancel/crash restart, minimal child environment and redacted diagnostics | T09/T13 |
 | Terminals/Commander/chat | PTY create/write/resize/reconnect/buffer/exit/kill; ownership and PID guards; CLI resolution and shell environment; Commander/chat sessions and image attachments | T09 |
-| Canvas/artifacts/files | Browser/terminal/task panel lifecycle and layering; drawing/canvas persistence; sandboxed artifact previews; attachment URLs/drag-drop; read/open/reveal/download; image and file clipboard behavior | T07/T08/T11 |
-| Browser tools/recordings | Multiple task-linked panels, ambiguity/missing-panel errors, navigation/DOM actions/snapshots/screenshots, console/network tooling, cookie isolation, recording consent/redaction/start/stop/cleanup | T02/T11 |
+| Canvas/artifacts/files | Retained terminal/task panel lifecycle and layering; drawing/canvas persistence; sandboxed artifact previews; attachment URLs/drag-drop; read/open/reveal/download; image and file clipboard behavior | T07/T08/T11 |
+| Browser retirement | No browser/webpage creation or live embedding, browser tools/routes/controls absent, retired operations fail explicitly; inert saved panel IDs/layout/URLs/edges survive repeated load/save; recording files and rollback backup unchanged | T10/T11 |
 | Voice recognition/TTS | Optional runtime visibility/install/remove, model selection, microphone denial, global shortcut, dictation/commands, progressive recognition, speech cancellation/epochs, system/downloaded TTS, no audio to mobile | T07/T09 |
 | Mobile/tunnel | Existing mobile build, pairing/auth/session revoke, task/session controls, WebSocket projection rehydrate, settings/tunnel lifecycle; no desktop bridge requirement | T09/T12 |
 | Distribution/updates | Install/open on clean target; all native binaries/workers/resources present; system Node absent; framework install transition; second Tauri update/manual path; version/signature policy; uninstall preserves documented data | T12/T14 |
 
 ## Contract, security, and failure tests
 
-Test the real privileged boundary in a packaged build, including remote browser panels and sandboxed artifact frames. Verify denial for custom app commands as well as plugin calls; checking only a generated capability JSON is insufficient.
+Test the real privileged boundary in a packaged build, including attempted remote main-WebView navigation and sandboxed artifact frames. Verify denial for custom app commands as well as plugin calls; checking only a generated capability JSON is insufficient.
 
 Required adversarial/failure cases:
 
-- Unknown command, malformed/oversized frame, wrong protocol version, forged task/project context, unauthorized panel registration, path traversal/symlink escape, and unsupported external URL scheme.
-- Main WebView navigation to remote content, iframe/artifact command attempts, browser popup/window creation, and remote-page attempts to read task/terminal/secret/native event data.
+- Unknown command, malformed/oversized frame, wrong protocol version, forged task/project context, attempted retired browser commands, path traversal/symlink escape, and unsupported external URL scheme.
+- Main WebView navigation to remote content, iframe/artifact command attempts, untrusted popup/window creation, and remote-page attempts to read task/terminal/secret/native event data.
 - Partial stdio frames, simultaneous requests in both directions, cancellation/timeout, late response after engine restart, queue saturation and channel teardown during component unmount.
 - Host/service/worker crash and forced quit; process tree cleanup on each OS; next-start cleanup preserves unrelated user processes. Blocked keychain, missing native resource, denied microphone, missing agent CLI, low disk, locked database, and invalid import journal yield useful failure states.
 - Interrupted/repeated credential conversion; interrupted update; downgrade attempted with incompatible credential format; a second Electron/Tauri process attempts to open the same live profile.
 
-Verify that logs, error payloads, process arguments, exported reports, screenshots/recordings, and temporary migration storage do not expose synthetic canary secrets. Preserve existing connector security tests and bundle checks.
+Verify that logs, error payloads, process arguments, exported reports, retained recording archives, and temporary migration storage do not expose synthetic canary secrets. Preserve existing connector security tests and bundle checks.
 
 ## Test tooling and evidence
 
@@ -82,7 +82,7 @@ Each gate report records base/head commit, artifact checksums, OS/WebView/Node v
 1. Stop new starts and all running sessions/schedulers; shut down the old app and its owned workers/APIs/tunnel. Require an exclusive cross-host profile lock before opening data. A transitional Electron build must honor the lock or the procedure must prove the old host is stopped and cannot relaunch during conversion.
 2. Create a consistent, access-restricted backup of the stopped profile and an import journal recording versions, source/destination, stages, and checksums without plaintext credentials. Keep the backup immutable.
 3. Convert credentials through the proven private import path and open the candidate with compatible profile paths. Commit conversion and completion marker only after database integrity, critical row counts/IDs, resources, and credential verification pass. On failure, preserve the original and provide recovery instructions.
-4. Verify task/project lists, transcript snapshot/delta, representative agent session/approval, worktree/attachment access, OAuth refresh, browser, voice state, and mobile reconnect before allowing new live work. A successful launch alone is not enough.
+4. Verify task/project lists, transcript snapshot/delta, representative agent session/approval, worktree/attachment access, OAuth refresh, browser retirement/data preservation, voice state, and mobile reconnect before allowing new live work. A successful launch alone is not enough.
 5. Enable normal work, record the cutover point, and retain backups and the supported transition tooling for the defined recovery window. Keep logs free of decrypted values.
 
 ### Rollback boundaries

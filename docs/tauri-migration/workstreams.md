@@ -9,12 +9,11 @@ One coordinator maintains the integration branch and shared contracts. Parallel 
 | Role | Owns | Delivers | Boundary with other roles |
 | --- | --- | --- | --- |
 | Coordinator | Migration docs, decision register, final assembly in `src/main/index.ts`, interface review and merge queue | Inventory, contract acceptance, integrated gates, retirement audit | Shared-file changes require coordination; every feature gets a distinct task owner |
-| Runtime | Proposed `src/service/`, native host lifecycle/supervision modules, `node-worker-runtime.ts`, resource manifest design | Bundled Node service, bootstrap, shutdown/crash recovery, native ABI proof | Native host modules are separate from browser/security/update modules; release owns packaging configuration |
+| Runtime | Proposed `src/service/`, native host lifecycle/supervision modules, `node-worker-runtime.ts`, resource manifest design | Bundled Node service, bootstrap, shutdown/crash recovery, native ABI proof | Native host modules are separate from security/update modules; release owns packaging configuration |
 | Bridge | Proposed shared desktop/host types, service dispatcher, Electron compatibility adapter, event sinks, `src/main/ipc/` domain extraction | Versioned transport and complete command/event mappings | Native IPC logic is handed to feature owners; freeze types before dependent feature edits |
-| Renderer | `src/renderer/`, desktop Vite configuration | Bridge adoption, listener lifetimes, UI readiness/recovery, WebView layout parity | Browser agent owns browser panel components; feature tests agreed before editing shared stores |
+| Renderer | `src/renderer/`, desktop Vite configuration | Bridge adoption, listener lifetimes, UI readiness/recovery, retained canvas layout | Owns browser retirement with Data/Bridge; feature tests agreed before editing shared stores |
 | Data | `src/main/database*`, serializers, credentials, compatible paths/identity import, native credential module | Safe profile/secret transition, one-writer lock, backup/recovery | Schema edits are serialized; native secret interfaces reviewed with runtime/bridge |
 | Integrations | Adapters and agent-manager helpers, connectors, OAuth, CLI/MCP, PTYs, voice, mobile/task APIs | Worker and integration parity under standalone Node | Bridge owns handler registration/extraction; existing terminal/voice handler logic stays with this role |
-| Browser | Browser panel UI, broker, hardening, recording, native browser modules | Cross-platform embedding and task-linked automation/recording | Shares resource/path contracts with data; cannot grant remote pages application capabilities |
 | Release | `package.json`, lockfiles, CI, packaging/release scripts, `src-tauri` manifests and native updater module | Reproducible target artifacts, installer transition, update policy | Single lockfile/config writer; runtime supplies resource/runtime requirements |
 | Verification | Test harness/setup, new contract/parity tests, evidence reports | Cross-platform regression, load, security, upgrade and recovery evidence | Test changes that move existing feature files are coordinated with their owners |
 
@@ -25,22 +24,20 @@ Large areas such as integrations can be split into smaller cards after G1. Do no
 1. Start a migration integration branch from a recorded revision. Create one worktree/branch per task from the latest accepted integration head. Use isolated synthetic/copied profile roots; never test on the live user profile.
 2. Read the architecture contracts and relevant existing behavior docs. Recheck current sources, because inventory counts and schema versions change.
 3. Declare owned paths and requested shared-file edits before implementation. The coordinator records collisions and dependency changes.
-4. Keep public contracts backward-compatible through G3. Interface changes include types, serialization, fixtures, both callers, and compatibility behavior in the same reviewed change.
+4. Keep retained public contracts backward-compatible through G3; browser removal is the approved exception. Interface changes include types, serialization, fixtures, both callers, and compatibility behavior in the same reviewed change.
 5. Submit small reviewable PRs. Merge foundation contracts first, then service/native adapters, then dependent features. Rebase dependent work when a shared contract changes.
 6. Provide executable tests or packaged evidence appropriate to the change. A mocked Electron API does not prove a Tauri native feature works.
 7. Report blockers with a minimal reproduction, affected gate, and options. An agent does not redefine product scope or mark a missing feature complete.
 
-The coordinator integrates feature commits, resolves entry-point wiring, and reruns the affected gates. During G0, runtime, browser, and credential prototypes can proceed in parallel once T00 has identified their shared identity/profile assumptions. During implementation, use the dependency graph below; broad parallel edits start after T04.
+The coordinator integrates feature commits, resolves entry-point wiring, and reruns the affected gates. During G0, runtime and credential prototypes can proceed in parallel once T00 has identified their shared identity/profile assumptions. During implementation, use the dependency graph below; broad parallel edits start after T04.
 
 ## Dependency graph
 
 ```mermaid
 flowchart LR
     T00[Inventory T00] --> T01[Runtime spike T01]
-    T00 --> T02[Browser spike T02]
     T00 --> T03[Credential spike T03]
     T01 --> T04[Contracts T04]
-    T02 --> T04
     T03 --> T04
     T04 --> T05[Service T05]
     T04 --> T06[Bridge T06]
@@ -53,7 +50,8 @@ flowchart LR
     T07 --> T09
     T05 --> T10[Profile import T10]
     T07 --> T10
-    T07 --> T11[Browser parity T11]
+    T08 --> T11[Browser retirement T11]
+    T10 --> T11
     T06 --> T11
     T04 --> T12[Packaging CI T12]
     T05 --> T12
@@ -87,13 +85,9 @@ Build a minimal Tauri host that launches a pinned bundled Node with a private ro
 
 Deliver: prototype, resource manifest, measured packaged results, and D1 recommendation. Done when all four target builds run or an explicit failed feasibility report blocks G0. Development-only launch is insufficient.
 
-### T02 — Prove browser replacement
+### T02 — Browser replacement cancelled
 
-Owner: browser. Dependencies: T00.
-
-Prototype the browser surface described in [architecture.md](architecture.md#browser-and-webview-feasibility): canvas placement, task-linked registry, DOM action/result, screenshot, cookie isolation, console/network observability, and recording hooks. Test representative sites and malicious navigation/IPC probes on WebView2 and both WebKit platforms. Compare with the existing Electron broker rather than assuming a CDP dependency.
-
-Deliver: platform capability matrix, prototype evidence, supported adapter proposal, and unresolved costs/limitations. Done when required behavior is demonstrated or the coordinator records a blocking scope/architecture decision. An iframe-only demonstration is incomplete.
+Cancelled by the user scope decision on 2026-10-12. No native browser prototype is required for G0 or T04. The historical foundation is recorded in [browser-feasibility.md](browser-feasibility.md). T11 owns removal and saved-data compatibility.
 
 ### T03 — Prove legacy credential and profile compatibility
 
@@ -105,11 +99,11 @@ Deliver: format inventory, fixture generator, private import prototype, D3/D4 re
 
 ### T04 — Freeze shared interfaces and permissions
 
-Owner: bridge; coordinator accepts. Dependencies: T00–T03.
+Owner: bridge; coordinator accepts. Dependencies: T00/T01/T03; T02 is cancelled.
 
 Define desktop command/event maps, host-services interface, stdio framing/bootstrap/versioning/errors, byte encoding, queue/frame limits, cancellation, retry policy, and listener lifecycle. Define custom native command permissions and trusted destinations. Assign handler ownership and specify native-to-service callbacks without synchronous deadlocks.
 
-Deliver: shared contract types, reviewed permission/operation inventory, contract fixtures, D2/D7/D8 decisions. Done when runtime, data, renderer, integrations, and browser owners can implement against stable interfaces and G1 is accepted.
+Deliver: shared contract types, reviewed permission/operation inventory, contract fixtures, D2/D7/D8 decisions. Done when runtime, data, renderer and integrations owners can implement against stable interfaces and G1 is accepted.
 
 ### T05 — Extract service lifecycle and supervise it
 
@@ -123,7 +117,7 @@ Deliver: service entry, supervisor, deterministic lifecycle fixture and packaged
 
 Owner: bridge. Dependencies: T04.
 
-Separate domain handlers from Electron registration and map the full inventory onto typed dispatch. Replace BrowserWindow-bound event sends with sinks. Implement trusted destination routing, validation, ordered streaming, listener disposal, and transcript snapshot/delta recovery. Keep mobile/task API contracts separate.
+Separate domain handlers from Electron registration and map retained inventory operations onto typed dispatch and mark retired browser operations as removed. Replace BrowserWindow-bound event sends with sinks. Implement trusted destination routing, validation, ordered streaming, listener disposal, and transcript snapshot/delta recovery. Keep mobile/task API contracts separate.
 
 Deliver: service dispatch, compatibility adapter, Tauri bridge, contract tests for operations/events and reconnect races. Done when inventory coverage is complete and invalid callers/frames/arguments cannot reach privileged handlers. Feature owners supply native implementations; coordinator resolves shared handler registration.
 
@@ -131,7 +125,7 @@ Deliver: service dispatch, compatibility adapter, Tauri bridge, contract tests f
 
 Owner: runtime, with data/feature owners for their native modules. Dependencies: T04.
 
-Implement window state/chrome, tray, menus, dialogs, clipboard/image/file handling, URL/path opening, compatible resource serving, permission prompts, shortcuts, sleep inhibition, and callback delivery. Supply restricted native command permissions. Browser modules and credential conversion stay with their owning cards.
+Implement window state/chrome, tray, menus, dialogs, clipboard/image/file handling, URL/path opening, compatible resource serving, permission prompts, shortcuts, sleep inhibition, and callback delivery. Supply restricted native command permissions. Credential conversion stays with its owning card; browser-panel native services are omitted.
 
 Deliver: native modules plus packaged per-platform checks. Done when current UX and trusted-caller restrictions match the inventory, attachment URLs cannot escape scope, and cold/warm OAuth callbacks are queued/validated exactly once.
 
@@ -159,13 +153,15 @@ Implement consistent backup, import journal/idempotence, compatible paths, compl
 
 Deliver: transitional Electron importer/exporter if required, Tauri import path, fixtures, interrupted/repeated import tests, and operator recovery instructions. Done when copied real encrypted profiles pass on every OS, failure leaves a recoverable original, and post-conversion rollback limitations are explicit.
 
-### T11 — Implement browser panels, automation, and recordings
+### T11 — Retire embedded browser features
 
-Owner: browser. Dependencies: T06/T07 and the accepted T02 decision.
+Owner: renderer + bridge + data. Dependencies: T06/T08/T10. Replaces the former browser parity card following the user decision of 2026-10-12.
 
-Replace panel UI and broker/native hooks using the proven adapter. Preserve exact panel IDs, task-link authorization, no access to main UI, redacted snapshots, screenshots, isolated recordings, and storage/cleanup. Include console/network tooling, browser permissions, canvas layering/focus, and navigation/session lifecycle.
+Remove browser and arbitrary website panel creation, embedded browsing, browser automation/recording controls, browser IPC/HTTP/MCP registrations, broker/recording startup and browser-specific Chrome authentication/cookie import from the Tauri target. Keep external URL opening and integration OAuth. Remove browser hints from agent prompts and exclude browser operations from the reviewed bridge map.
 
-Deliver: native adapters, broker/UI changes, cross-platform parity and isolation evidence. Done when browser agents and recordings work with multiple panels and cross-task access is rejected on every OS. Unsupported features remain blockers, not successful no-ops.
+Keep saved `browser`/`webpage` panel IDs, titles, URLs, layout and task edges as inert metadata/placeholders, with no automatic URL loading. Repeated canvas saves retain dormant records. Preserve recording files unchanged in profile copies/backups; do not run the old recording service during import or delete data implicitly.
+
+Deliver: explicit removal mapping, retained-data fixtures and removal UX. Done when Tauri advertises no embedded browser tools/controls, attempted retired operations fail explicitly, current profiles load/save without data loss, and rollback retains original browser data. The existing Electron features remain until their shipping host is retired.
 
 ### T12 — Build target artifacts and CI
 

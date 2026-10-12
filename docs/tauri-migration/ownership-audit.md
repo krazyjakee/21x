@@ -16,7 +16,7 @@ below contains the literal channels in `inventory.json` with that prefix.
 | `terminal` | Integrations | Node PTY service and caller-scoped streams | Session/task ownership, resize/write validation, output backpressure, process-tree cleanup |
 | `artifacts`, `artifact`, `attachments` | Data + Runtime | Node scoped file services with native pick/open/copy callbacks | Canonical path containment, size limits, URL scope, attachment lifecycle, safe clipboard formats |
 | `chatImages` | Runtime + Data | Native clipboard read, Node task attachment persistence | Image type/size, task scope, clipboard permission, temporary file cleanup |
-| `browser` | Browser | Native panel adapter with Node task-linked broker | Separate remote WebViews, no app capabilities, navigation/permission denial, recording and screenshot parity |
+| `browser` | Renderer + Bridge + Data | Removed from Tauri by approved scope decision; no native browser adapter | No tool/command/control registrations; preserve inert panel metadata, edges and recording files under T11 |
 | `voice` | Integrations + Runtime | Node recognition/TTS services with native permission/hotkey callbacks | Optional install, microphone permission, cancellation, worker cleanup, desktop-only speech audio |
 | `mobile` | Integrations | Node mobile pairing/tunnel service | Authentication, pairing/session revocation, bounded broadcasts, desktop capability isolation |
 | `app`, `shell`, `notifications` | Runtime | Explicit native commands; Node scoped file reads where appropriate | Trusted app frame, path/URL validation, permission prompts, close/tray/reopen behavior |

@@ -51,7 +51,7 @@ The subprocess tests are dependency-free and cover fragmented/coalesced frames, 
 
 Direct Rust dependency versions are pinned to Tauri 2.12.3, tauri-build 2.7.2, Tokio 1.53.2, Serde 1.0.229, and serde_json 1.0.154, verified against crates.io metadata. Cargo.lock is generated and checked in; Rust 1.90 is the declared source minimum and local core validation used 1.98. Supported GUI platform prerequisites, macOS Node signing, Windows executable inclusion, packaged native addon layout, clean machines with Node absent from PATH, all four architecture builds, and packaged shutdown/crash evidence remain T01 blockers.
 
-Full service extraction, schedulers, shared-profile locking, credentials, browser parity, and production host services belong to later cards and must not be inferred from this screen.
+Full service extraction, schedulers, shared-profile locking, credentials, browser retirement/data compatibility, and production host services belong to later cards and must not be inferred from this screen.
 
 ## Remote Linux native verification
 
@@ -63,6 +63,6 @@ The installed-package smoke now installs that Debian package on the ephemeral ru
 
 The smoke report is diagnostic metadata, not a product API. Release builds ignore its enabling environment variable. The renderer cannot enable smoke mode or choose report paths, and its optional receipt is accepted only when a trusted developer/CI environment already enabled that mode. Missing callbacks and failed probes produce a failed report/nonzero exit, with bounded watchdog and workflow deadlines.
 
-This proves only the exercised Linux debug package when a successful smoke report exists. The trusted WebView command success and explicit operation rejection do **not** establish Tauri capability denial across untrusted/remote WebViews. Cross-WebView ACL attacks, browser panels, release signing, AppImage/macOS/Windows installs, and abrupt parent-death/process-tree behavior remain separate gates. Do not close #197 on the first compile-only report; review the installed GUI smoke outcome first.
+This proves only the exercised Linux debug package when a successful smoke report exists. The trusted WebView command success and explicit operation rejection do **not** establish Tauri capability denial across untrusted/remote WebViews. Cross-WebView ACL attacks involving untrusted artifact frames, release signing, AppImage/macOS/Windows installs, and abrupt parent-death/process-tree behavior remain separate gates. Do not close #197 on the first compile-only report; review the installed GUI smoke outcome first.
 
 The [installed-package run](https://github.com/krazyjakee/21x/actions/runs/38267769673) passed at source revision `0946d24775917201d6389bc713dced198058cdaf`. The checked-in [smoke report](evidence/linux-x64-installed-gui.json) records all exercised checks and no surviving owned process. Ubuntu 24.04 used GTK 3.24.41, WebKitGTK 2.52.6 and librsvg 2.58.0. These are observed versions, not accepted minimum platform requirements. The compact evidence artifact contains logs, checksums and a separate headless report; the debug Debian artifact is a feasibility package, not a published release.
