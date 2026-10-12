@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { dirname, join, relative, resolve, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 
@@ -11,6 +11,96 @@ const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0
 const normalize = (file) => file.replaceAll('\\', '/')
 const uniqueSorted = (items) => [...new Map(items.map((item) => [JSON.stringify(item), item])).values()]
   .sort((a, b) => compare(a.file ?? '', b.file ?? '') || (a.line ?? 0) - (b.line ?? 0) || (a.column ?? 0) - (b.column ?? 0) || compare(JSON.stringify(a), JSON.stringify(b)))
+
+// Exact source/receiver forms reviewed in ownership-audit.md. Names alone do
+// not turn arbitrary application methods into IPC or authorization evidence.
+export const EVENT_WRAPPERS = {
+  'src/main/agent-manager.ts': ['this.sendToRenderer', 'this.broadcast'],
+  'src/main/auto-updater.ts': ['send'],
+  'src/main/heartbeat-scheduler.ts': ['this.sendToRenderer'],
+  'src/main/workspace-cleanup-scheduler.ts': ['this.sendToRenderer'],
+  'src/main/task-api/state.ts': ['notifyRenderer'],
+  'src/main/task-api/ui-routes.ts': ['notifyRenderer'],
+  'src/main/task-api/task-routes.ts': ['notifyRenderer'],
+  'src/main/task-api/session-routes.ts': ['notifyRenderer'],
+  'src/main/task-api/artifact-routes.ts': ['notifyRenderer'],
+  'src/main/mobile-api-server.ts': ['notifyDesktop'],
+  'src/main/voice/voice-session-manager.ts': ['this.options.notify'],
+  'src/main/voice/voice-action-service.ts': ['this.deps.notify'],
+  'src/main/voice/voice-speech-service.ts': ['this.options.notifyRenderer', 'options.notifyRenderer'],
+  'src/main/index.ts': ['voiceEvents.notify', 'voiceEvents.notifyRenderer']
+}
+
+function constantValue(node, lookup) {
+  node = unwrap(node)
+  const direct = literal(node)
+  if (direct !== null) return direct
+  if (!node) return undefined
+  if (ts.isIdentifier(node)) return lookup(node.text)
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = constantValue(node.left, lookup), right = constantValue(node.right, lookup)
+    if (typeof left === 'string' && typeof right === 'string') return left + right
+  }
+  if (ts.isObjectLiteralExpression(node)) {
+    const value = Object.create(null)
+    for (const property of node.properties) {
+      if (!ts.isPropertyAssignment(property)) return undefined
+      const key = ts.isIdentifier(property.name) ? property.name.text : literal(property.name)
+      const item = constantValue(property.initializer, lookup)
+      if (key === null || item === undefined) return undefined
+      value[key] = item
+    }
+    return value
+  }
+  const property = member(node)
+  if (property) {
+    const object = constantValue(property.object, lookup)
+    if (object && typeof object === 'object' && Object.hasOwn(object, property.name)) return object[property.name]
+  }
+  return undefined
+}
+
+/** Resolve only repository-local exported const data; no code/module execution. */
+export function sourceConstantMaps(sources) {
+  const maps = new Map()
+  for (const { file, source } of sources) {
+    const values = new Map()
+    const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true)
+    for (const statement of sf.statements) {
+      if (!ts.isVariableStatement(statement) || !(statement.declarationList.flags & ts.NodeFlags.Const)) continue
+      for (const declaration of statement.declarationList.declarations) if (ts.isIdentifier(declaration.name)) {
+        const value = constantValue(declaration.initializer, name => values.get(name))
+        if (value !== undefined) values.set(declaration.name.text, value)
+      }
+    }
+    const exported = new Map()
+    for (const statement of sf.statements) if (ts.isVariableStatement(statement) && statement.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.ExportKeyword)) {
+      for (const declaration of statement.declarationList.declarations) if (ts.isIdentifier(declaration.name) && values.has(declaration.name.text)) exported.set(declaration.name.text, values.get(declaration.name.text))
+    }
+    maps.set(normalize(file), exported)
+  }
+  return maps
+}
+
+function importedConstants(file, source, maps) {
+  const constants = new Map()
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true)
+  for (const statement of sf.statements) {
+    if (!ts.isImportDeclaration(statement) || statement.importClause?.isTypeOnly) continue
+    const specifier = literal(statement.moduleSpecifier)
+    if (!specifier || !specifier.startsWith('.') && !specifier.startsWith('@shared/')) continue
+    const base = specifier.startsWith('@shared/') ? 'src/shared/' + specifier.slice(8)
+      : posix.normalize(posix.join(posix.dirname(normalize(file)), specifier))
+    const values = [base, base + '.ts', base + '.tsx', base + '/index.ts'].map(key => maps.get(key)).find(Boolean)
+    if (!values) continue
+    const bindings = statement.importClause?.namedBindings
+    if (bindings && ts.isNamedImports(bindings)) for (const binding of bindings.elements) {
+      if (!binding.isTypeOnly && values.has((binding.propertyName ?? binding.name).text)) constants.set(binding.name.text, values.get((binding.propertyName ?? binding.name).text))
+    }
+    if (bindings && ts.isNamespaceImport(bindings)) constants.set(bindings.name.text, Object.fromEntries(values))
+  }
+  return constants
+}
 
 function unwrap(node) {
   while (node && (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isTypeAssertionExpression(node) || ts.isNonNullExpression(node) || ts.isSatisfiesExpression(node))) node = node.expression
@@ -35,7 +125,7 @@ function bindingNames(name) {
 }
 
 /** Parse one source without compiling, resolving modules, or loading addons. */
-export function scanSource(file, source) {
+export function scanSource(file, source, { constants = new Map(), wrappers = EVENT_WRAPPERS } = {}) {
   file = normalize(file)
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true)
   const result = { electronImports: [], operations: [], electronAPIConsumers: [], webviews: [] }
@@ -49,6 +139,10 @@ export function scanSource(file, source) {
     for (let scope = env; scope; scope = scope.parent) if (scope.bindings.has(name)) return scope.bindings.get(name)
     return undefined
   }
+  const constant = (node, env) => constantValue(node, name => {
+    const value = lookup(env, name)
+    return value?.kind === 'constant' ? value.value : undefined
+  })
   const identify = (node, env) => {
     node = unwrap(node)
     if (!node) return null
@@ -56,6 +150,10 @@ export function scanSource(file, source) {
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'require' && literal(node.arguments[0]) === 'electron') return { kind: 'electron' }
     const property = member(node)
     if (!property) return null
+    if (property.name === null && ts.isElementAccessExpression(node)) {
+      const key = constant(node.argumentExpression, env)
+      if (typeof key === 'string') property.name = key
+    }
     const object = identify(property.object, env)
     if (object?.kind === 'electron' && ['ipcMain', 'ipcRenderer'].includes(property.name)) return { kind: property.name }
     if (['ipcMain', 'ipcRenderer', 'webContents'].includes(object?.kind)) return { kind: `${object.kind}.method`, method: property.name }
@@ -96,7 +194,8 @@ export function scanSource(file, source) {
         if (clause.name) env.bindings.set(clause.name.text, literal(stmt.moduleSpecifier) === 'electron' && !clause.isTypeOnly ? { kind: 'electron' } : null)
         const bindings = clause.namedBindings
         if (bindings && ts.isNamespaceImport(bindings)) {
-          env.bindings.set(bindings.name.text, literal(stmt.moduleSpecifier) === 'electron' && !clause.isTypeOnly ? { kind: 'electron' } : null)
+          env.bindings.set(bindings.name.text, literal(stmt.moduleSpecifier) === 'electron' && !clause.isTypeOnly ? { kind: 'electron' }
+            : !clause.isTypeOnly && constants.has(bindings.name.text) ? { kind: 'constant', value: constants.get(bindings.name.text) } : null)
           if (literal(stmt.moduleSpecifier) === 'electron') electronNamespaces.add(bindings.name.text)
         }
         if (bindings && ts.isNamedImports(bindings)) for (const item of bindings.elements) {
@@ -105,7 +204,7 @@ export function scanSource(file, source) {
           const runtime = !clause.isTypeOnly && !item.isTypeOnly
           const kind = runtime && literal(stmt.moduleSpecifier) === 'electron' && ['ipcMain', 'ipcRenderer'].includes(original) ? original
             : runtime && original === 'guardedIpcSend' ? 'guardedIpcSend' : null
-          env.bindings.set(item.name.text, kind ? { kind } : null)
+          env.bindings.set(item.name.text, kind ? { kind } : runtime && constants.has(item.name.text) ? { kind: 'constant', value: constants.get(item.name.text) } : null)
         }
       }
     }
@@ -119,13 +218,14 @@ export function scanSource(file, source) {
     const path = apiPath(property.object)
     return path ? [...path, property.name] : null
   }
-  const recordOperation = (node, target, method, channelIndex) => {
+  const recordOperation = (node, target, method, channelIndex, env) => {
     const arg = node.arguments[channelIndex]
-    const channel = literal(arg)
+    const resolved = constant(arg, env)
+    const channel = typeof resolved === 'string' ? resolved : null
     result.operations.push({ ...location(node), target, method: method ?? null,
       methodExpression: method === null ? node.expression.getText(sf) : null,
-      channel, channelExpression: channel === null && arg ? arg.getText(sf) : null,
-      resolution: channel !== null && method !== null ? 'literal' : 'unresolved' })
+      channel, channelExpression: literal(arg) === null && arg ? arg.getText(sf) : null,
+      resolution: channel !== null && method !== null ? literal(arg) === null ? 'constant' : 'literal' : 'unresolved' })
   }
   const enclosingExpression = (node) => {
     while (node.parent && unwrap(node.parent) === node) node = node.parent
@@ -165,17 +265,27 @@ export function scanSource(file, source) {
       result.electronImports.push({ ...location(node), syntax: 'import-equals', mode: node.isTypeOnly ? 'type-only' : 'runtime', bindings: [{ imported: '*', local: node.name.text, typeOnly: node.isTypeOnly }] })
       env.bindings.set(node.name.text, node.isTypeOnly ? null : { kind: 'electron' })
     }
-    if (ts.isVariableDeclaration(node)) bind(node.name, identify(node.initializer, env) ?? (isWebContentsType(node.type) ? { kind: 'webContents' } : null), env)
+    if (ts.isVariableDeclaration(node)) {
+      const resolved = constant(node.initializer, env)
+      bind(node.name, identify(node.initializer, env) ?? (resolved !== undefined ? { kind: 'constant', value: resolved } : isWebContentsType(node.type) ? { kind: 'webContents' } : null), env)
+    }
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(node.left)) {
       // A reassigned alias is no longer reliable; do not follow arbitrary data flow.
       for (let scope = env; scope; scope = scope.parent) if (scope.bindings.has(node.left.text)) { scope.bindings.set(node.left.text, null); break }
     }
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken && member(node.left)) {
+      const object = unwrap(member(node.left).object)
+      if (object && ts.isIdentifier(object)) for (let scope = env; scope; scope = scope.parent) {
+        if (scope.bindings.has(object.text)) { scope.bindings.set(object.text, null); break }
+      }
+    }
     if (ts.isCallExpression(node)) {
       if ((node.expression.kind === ts.SyntaxKind.ImportKeyword || ts.isIdentifier(node.expression) && node.expression.text === 'require') && literal(node.arguments[0]) === 'electron') result.electronImports.push({ ...location(node), syntax: node.expression.kind === ts.SyntaxKind.ImportKeyword ? 'dynamic-import' : 'require', mode: 'runtime', bindings: [] })
       const callee = identify(node.expression, env)
-      if (callee?.kind === 'guardedIpcSend') recordOperation(node, 'guardedIpcSend', 'send', 1)
+      if (callee?.kind === 'guardedIpcSend') recordOperation(node, 'guardedIpcSend', 'send', 1, env)
       const methods = { 'ipcMain.method': ['handle', 'on'], 'ipcRenderer.method': ['invoke', 'send', 'on'], 'webContents.method': ['send'] }
-      if (methods[callee?.kind] && (callee.method === null || methods[callee.kind].includes(callee.method))) recordOperation(node, callee.kind.replace('.method', ''), callee.method, 0)
+      if (methods[callee?.kind] && (callee.method === null || methods[callee.kind].includes(callee.method))) recordOperation(node, callee.kind.replace('.method', ''), callee.method, 0, env)
+      if (wrappers[file]?.includes(node.expression.getText(sf).replaceAll('?.', '.'))) recordOperation(node, 'reviewed-event-wrapper', 'send', 0, env)
     }
     const path = apiPath(node)
     const enclosing = enclosingExpression(node)
@@ -205,9 +315,10 @@ function schemaVersion(source) {
 /** Injectable source list keeps scanner tests small and independent of the repo. */
 export function createInventory({ sources, packageJson = {} }) {
   const sorted = [...sources].sort((a, b) => compare(normalize(a.file), normalize(b.file)))
+  const constantMaps = sourceConstantMaps(sorted)
   const collections = { electronImports: [], operations: [], electronAPIConsumers: [], webviews: [] }
   for (const { file, source } of sorted) {
-    const scanned = scanSource(file, source)
+    const scanned = scanSource(file, source, { constants: importedConstants(file, source, constantMaps) })
     for (const key of Object.keys(collections)) collections[key].push(...scanned[key])
   }
   for (const key of Object.keys(collections)) collections[key] = uniqueSorted(collections[key])
@@ -218,7 +329,7 @@ export function createInventory({ sources, packageJson = {} }) {
   const platforms = ['mac', 'win', 'linux']
   const resourceKeys = ['icon', 'entitlements', 'entitlementsInherit', 'include', 'installerIcon', 'uninstallerIcon', 'installerHeaderIcon']
   return {
-    formatVersion: 1,
+    formatVersion: 2,
     methodology: 'Parse-only syntactic inventory; unresolved expressions require review. This is not a runtime coverage or permission proof.',
     sourceRoots: SOURCE_ROOTS,
     files: [...new Set(sorted.map(({ file }) => normalize(file)))],

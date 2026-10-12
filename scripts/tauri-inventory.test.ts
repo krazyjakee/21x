@@ -52,7 +52,7 @@ describe('Tauri source inventory AST scanner', () => {
     ])
   })
 
-  it('records computed channels and methods as unresolved without guessing constant values', () => {
+  it('resolves literal constants while retaining dynamic channels and methods as unresolved', () => {
     const result = scanSource('src/main/computed.ts', `
       import { ipcMain, ipcRenderer } from 'electron'
       const CHANNEL = 'constant-value'
@@ -61,10 +61,40 @@ describe('Tauri source inventory AST scanner', () => {
       ipcRenderer[operation]('literal-channel', {})
       ipcRenderer['send'](\`static-template\`, {})
     `)
-    expect(result.operations[0]).toMatchObject({ method: 'handle', channel: null, channelExpression: 'CHANNEL', resolution: 'unresolved' })
+    expect(result.operations[0]).toMatchObject({ method: 'handle', channel: 'constant-value', channelExpression: 'CHANNEL', resolution: 'constant' })
     expect(result.operations[1]).toMatchObject({ channel: null, channelExpression: '`dynamic:${id}`', resolution: 'unresolved' })
     expect(result.operations[2]).toMatchObject({ method: null, methodExpression: 'ipcRenderer[operation]', channel: 'literal-channel', resolution: 'unresolved' })
     expect(result.operations[3]).toMatchObject({ method: 'send', channel: 'static-template', resolution: 'literal' })
+  })
+
+  it('resolves imported constant maps and reviewed wrappers without treating arbitrary same-named methods as IPC', () => {
+    const inventory = createInventory({ sources: [
+      { file: 'src/shared/events.ts', source: `export const EVENTS = { changed: 'task:changed' } as const; export const CHANNEL = 'ui:' + 'command'` },
+      { file: 'src/main/agent-manager.ts', source: `import { EVENTS, CHANNEL } from '../shared/events';
+        class Agent { send() { this.sendToRenderer(EVENTS.changed, {}); this.broadcast(CHANNEL, {}) } }` },
+      { file: 'src/main/other.ts', source: `import { EVENTS } from '../shared/events'; this.sendToRenderer(EVENTS.changed, {})` }
+    ] })
+    expect(inventory.operations.map((item: { channel: string }) => item.channel)).toEqual(['task:changed', 'ui:command'])
+    expect(inventory.operations.every((item: { target: string; resolution: string }) => item.target === 'reviewed-event-wrapper' && item.resolution === 'constant')).toBe(true)
+  })
+
+  it('does not resolve a shadowed or visibly mutated constant object', () => {
+    const result = scanSource('src/main/constants.ts', `import { ipcMain } from 'electron';
+      const EVENTS = { changed: 'first' };
+      EVENTS.changed = 'second';
+      ipcMain.handle(EVENTS.changed, fn);
+      const CHANNEL = 'actual';
+      function local(CHANNEL: string) { ipcMain.handle(CHANNEL, fn) }
+      ipcMain.handle(CHANNEL, fn)
+    `)
+    expect(result.operations.map((item: { channel: string | null }) => item.channel)).toEqual([null, null, 'actual'])
+  })
+
+  it('resolves literal computed IPC methods without executing arbitrary expressions', () => {
+    const result = scanSource('src/preload/constant-method.ts', `import { ipcRenderer } from 'electron';
+      const METHOD = 'invoke'; const CHANNEL = 'db:' + 'getTasks'; ipcRenderer[METHOD](CHANNEL)
+    `)
+    expect(result.operations[0]).toMatchObject({ method: 'invoke', channel: 'db:getTasks', resolution: 'constant' })
   })
 
   it('does not treat shadowed, type-only, or reassigned bindings as imported IPC', () => {

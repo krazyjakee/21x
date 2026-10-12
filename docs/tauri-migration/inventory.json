@@ -5980,6 +5980,10 @@
     "src/shared/connector-bridge.ts",
     "src/shared/constants.ts",
     "src/shared/date-format.ts",
+    "src/shared/desktop-api.ts",
+    "src/shared/desktop-domain-events.ts",
+    "src/shared/desktop-operations.ts",
+    "src/shared/host-services.ts",
     "src/shared/issue-actions.ts",
     "src/shared/menu-styles.ts",
     "src/shared/pr-readiness.ts",
@@ -6010,7 +6014,7 @@
     "src/shared/voice-tts.ts",
     "src/shared/voice.ts"
   ],
-  "formatVersion": 1,
+  "formatVersion": 2,
   "methodology": "Parse-only syntactic inventory; unresolved expressions require review. This is not a runtime coverage or permission proof.",
   "nativeDependencies": [
     {
@@ -6026,6 +6030,105 @@
   ],
   "operations": [
     {
+      "channel": "task:updated",
+      "channelExpression": null,
+      "column": 9,
+      "file": "src/main/agent-manager.ts",
+      "line": 365,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:updated",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/agent-manager.ts",
+      "line": 378,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "agent:status",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/agent-manager.ts",
+      "line": 1030,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "agent:output",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/agent-manager.ts",
+      "line": 1047,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "agent:output",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/agent-manager.ts",
+      "line": 1056,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:updated",
+      "channelExpression": null,
+      "column": 7,
+      "file": "src/main/agent-manager.ts",
+      "line": 1343,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "agent:output",
+      "channelExpression": null,
+      "column": 7,
+      "file": "src/main/agent-manager.ts",
+      "line": 1389,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:updated",
+      "channelExpression": null,
+      "column": 11,
+      "file": "src/main/agent-manager.ts",
+      "line": 1540,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "agent:output-batch",
+      "channelExpression": null,
+      "column": 9,
+      "file": "src/main/agent-manager.ts",
+      "line": 1730,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
       "channel": "agent:status",
       "channelExpression": null,
       "column": 5,
@@ -6035,6 +6138,259 @@
       "methodExpression": null,
       "resolution": "literal",
       "target": "guardedIpcSend"
+    },
+    {
+      "channel": "agent:incompatible-session",
+      "channelExpression": null,
+      "column": 7,
+      "file": "src/main/agent-manager.ts",
+      "line": 1962,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:updated",
+      "channelExpression": null,
+      "column": 11,
+      "file": "src/main/agent-manager.ts",
+      "line": 2383,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "agent:incompatible-session",
+      "channelExpression": null,
+      "column": 9,
+      "file": "src/main/agent-manager.ts",
+      "line": 2403,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:updated",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/agent-manager.ts",
+      "line": 2461,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:updated",
+      "channelExpression": null,
+      "column": 7,
+      "file": "src/main/agent-manager.ts",
+      "line": 2894,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:updated",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/agent-manager.ts",
+      "line": 3014,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:updated",
+      "channelExpression": null,
+      "column": 7,
+      "file": "src/main/agent-manager.ts",
+      "line": 3149,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "agent:output-batch",
+      "channelExpression": null,
+      "column": 9,
+      "file": "src/main/agent-manager.ts",
+      "line": 3583,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:updated",
+      "channelExpression": null,
+      "column": 7,
+      "file": "src/main/agent-manager.ts",
+      "line": 3642,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:updated",
+      "channelExpression": null,
+      "column": 9,
+      "file": "src/main/agent-manager.ts",
+      "line": 3706,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:source-action-failed",
+      "channelExpression": null,
+      "column": 9,
+      "file": "src/main/agent-manager.ts",
+      "line": 3719,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:updated",
+      "channelExpression": null,
+      "column": 7,
+      "file": "src/main/agent-manager.ts",
+      "line": 3721,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:updated",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/agent-manager.ts",
+      "line": 3752,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "concurrency:changed",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/agent-manager.ts",
+      "line": 4095,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "project:statusChanged",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/agent-manager.ts",
+      "line": 4096,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "agent:startQueueChanged",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/agent-manager.ts",
+      "line": 4289,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "agent:recoveryStateChanged",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/agent-manager.ts",
+      "line": 4304,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "project:statusChanged",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/agent-manager.ts",
+      "line": 4305,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "agent:startQueueChanged",
+      "channelExpression": null,
+      "column": 11,
+      "file": "src/main/agent-manager.ts",
+      "line": 4462,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "agent:output",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/agent-manager.ts",
+      "line": 4769,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "agent:output",
+      "channelExpression": null,
+      "column": 11,
+      "file": "src/main/agent-manager.ts",
+      "line": 4877,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "agent:output",
+      "channelExpression": null,
+      "column": 9,
+      "file": "src/main/agent-manager.ts",
+      "line": 4903,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "agent:output",
+      "channelExpression": null,
+      "column": 9,
+      "file": "src/main/agent-manager.ts",
+      "line": 4949,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
     },
     {
       "channel": "transcript:changed",
@@ -6059,6 +6415,17 @@
       "target": "guardedIpcSend"
     },
     {
+      "channel": "artifact:updated",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/agent-manager.ts",
+      "line": 5249,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
       "channel": null,
       "channelExpression": "channel",
       "column": 7,
@@ -6068,6 +6435,17 @@
       "methodExpression": null,
       "resolution": "unresolved",
       "target": "guardedIpcSend"
+    },
+    {
+      "channel": null,
+      "channelExpression": "channel",
+      "column": 5,
+      "file": "src/main/agent-manager.ts",
+      "line": 5286,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "unresolved",
+      "target": "reviewed-event-wrapper"
     },
     {
       "channel": "updater:check",
@@ -6092,6 +6470,17 @@
       "target": "ipcMain"
     },
     {
+      "channel": "updater:status",
+      "channelExpression": null,
+      "column": 7,
+      "file": "src/main/auto-updater.ts",
+      "line": 85,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
       "channel": "updater:install",
       "channelExpression": null,
       "column": 3,
@@ -6112,6 +6501,94 @@
       "methodExpression": null,
       "resolution": "literal",
       "target": "ipcMain"
+    },
+    {
+      "channel": "updater:status",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/auto-updater.ts",
+      "line": 145,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "updater:status",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/auto-updater.ts",
+      "line": 160,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "updater:status",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/auto-updater.ts",
+      "line": 180,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "updater:status",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/auto-updater.ts",
+      "line": 185,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "updater:status",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/auto-updater.ts",
+      "line": 201,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "updater:status",
+      "channelExpression": null,
+      "column": 7,
+      "file": "src/main/auto-updater.ts",
+      "line": 212,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "updater:status",
+      "channelExpression": null,
+      "column": 7,
+      "file": "src/main/auto-updater.ts",
+      "line": 222,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "updater:status",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/auto-updater.ts",
+      "line": 228,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
     },
     {
       "channel": null,
@@ -6145,6 +6622,61 @@
       "methodExpression": null,
       "resolution": "unresolved",
       "target": "webContents"
+    },
+    {
+      "channel": "task:updated",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/heartbeat-scheduler.ts",
+      "line": 94,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:updated",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/heartbeat-scheduler.ts",
+      "line": 115,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "heartbeat:alert",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/heartbeat-scheduler.ts",
+      "line": 652,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "tasks:refresh",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/heartbeat-scheduler.ts",
+      "line": 659,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "heartbeat:disabled",
+      "channelExpression": null,
+      "column": 9,
+      "file": "src/main/heartbeat-scheduler.ts",
+      "line": 743,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
     },
     {
       "channel": null,
@@ -6807,14 +7339,14 @@
       "target": "ipcMain"
     },
     {
-      "channel": null,
+      "channel": "chat:event",
       "channelExpression": "CHAT_EVENT_CHANNEL",
       "column": 9,
       "file": "src/main/ipc/chat.ts",
       "line": 96,
       "method": "send",
       "methodExpression": null,
-      "resolution": "unresolved",
+      "resolution": "constant",
       "target": "guardedIpcSend"
     },
     {
@@ -7016,14 +7548,14 @@
       "target": "ipcMain"
     },
     {
-      "channel": null,
+      "channel": "commander:event",
       "channelExpression": "COMMANDER_EVENT_CHANNEL",
       "column": 7,
       "file": "src/main/ipc/commander.ts",
       "line": 65,
       "method": "send",
       "methodExpression": null,
-      "resolution": "unresolved",
+      "resolution": "constant",
       "target": "guardedIpcSend"
     },
     {
@@ -7687,14 +8219,14 @@
       "target": "ipcMain"
     },
     {
-      "channel": null,
+      "channel": "project:changed",
       "channelExpression": "PROJECT_CHANGED_CHANNEL",
       "column": 29,
       "file": "src/main/ipc/projects.ts",
       "line": 24,
       "method": "send",
       "methodExpression": null,
-      "resolution": "unresolved",
+      "resolution": "constant",
       "target": "guardedIpcSend"
     },
     {
@@ -8006,14 +8538,14 @@
       "target": "ipcMain"
     },
     {
-      "channel": null,
+      "channel": "skills:changed",
       "channelExpression": "SKILLS_CHANGED_CHANNEL",
       "column": 29,
       "file": "src/main/ipc/settings.ts",
       "line": 23,
       "method": "send",
       "methodExpression": null,
-      "resolution": "unresolved",
+      "resolution": "constant",
       "target": "guardedIpcSend"
     },
     {
@@ -9238,6 +9770,72 @@
       "target": "ipcMain"
     },
     {
+      "channel": "mobile:pairing-initiated",
+      "channelExpression": null,
+      "column": 7,
+      "file": "src/main/mobile-api-server.ts",
+      "line": 714,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "mobile:device-connected",
+      "channelExpression": null,
+      "column": 7,
+      "file": "src/main/mobile-api-server.ts",
+      "line": 757,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:subtasks-reordered",
+      "channelExpression": null,
+      "column": 24,
+      "file": "src/main/mobile-api-server.ts",
+      "line": 825,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:created",
+      "channelExpression": null,
+      "column": 24,
+      "file": "src/main/mobile-api-server.ts",
+      "line": 848,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:updated",
+      "channelExpression": null,
+      "column": 28,
+      "file": "src/main/mobile-api-server.ts",
+      "line": 871,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:updated",
+      "channelExpression": null,
+      "column": 26,
+      "file": "src/main/mobile-api-server.ts",
+      "line": 904,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
       "channel": "tasks:refresh",
       "channelExpression": null,
       "column": 9,
@@ -9260,6 +9858,116 @@
       "target": "guardedIpcSend"
     },
     {
+      "channel": "artifact:updated",
+      "channelExpression": null,
+      "column": 7,
+      "file": "src/main/task-api/artifact-routes.ts",
+      "line": 43,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "artifact:updated",
+      "channelExpression": null,
+      "column": 7,
+      "file": "src/main/task-api/artifact-routes.ts",
+      "line": 60,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:checkpointAnswered",
+      "channelExpression": null,
+      "column": 7,
+      "file": "src/main/task-api/session-routes.ts",
+      "line": 159,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:created",
+      "channelExpression": null,
+      "column": 13,
+      "file": "src/main/task-api/task-routes.ts",
+      "line": 74,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:updated",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/task-api/task-routes.ts",
+      "line": 248,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "project:statusChanged",
+      "channelExpression": null,
+      "column": 3,
+      "file": "src/main/task-api/task-routes.ts",
+      "line": 436,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "ui:command",
+      "channelExpression": "UI_COMMAND_CHANNEL",
+      "column": 3,
+      "file": "src/main/task-api/ui-routes.ts",
+      "line": 61,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:created",
+      "channelExpression": null,
+      "column": 9,
+      "file": "src/main/voice/voice-action-service.ts",
+      "line": 199,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:updated",
+      "channelExpression": null,
+      "column": 9,
+      "file": "src/main/voice/voice-action-service.ts",
+      "line": 233,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:navigate",
+      "channelExpression": "VOICE_EVENTS.navigate",
+      "column": 9,
+      "file": "src/main/voice/voice-action-service.ts",
+      "line": 292,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
       "channel": null,
       "channelExpression": "channel",
       "column": 36,
@@ -9269,6 +9977,435 @@
       "methodExpression": null,
       "resolution": "unresolved",
       "target": "guardedIpcSend"
+    },
+    {
+      "channel": "voice:outcome",
+      "channelExpression": "VOICE_EVENTS.outcome",
+      "column": 5,
+      "file": "src/main/voice/voice-session-manager.ts",
+      "line": 422,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:segment",
+      "channelExpression": "VOICE_EVENTS.segment",
+      "column": 5,
+      "file": "src/main/voice/voice-session-manager.ts",
+      "line": 446,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:partial",
+      "channelExpression": "VOICE_EVENTS.partial",
+      "column": 5,
+      "file": "src/main/voice/voice-session-manager.ts",
+      "line": 454,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:final",
+      "channelExpression": "VOICE_EVENTS.final",
+      "column": 5,
+      "file": "src/main/voice/voice-session-manager.ts",
+      "line": 462,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:outcome",
+      "channelExpression": "VOICE_EVENTS.outcome",
+      "column": 9,
+      "file": "src/main/voice/voice-session-manager.ts",
+      "line": 477,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:outcome",
+      "channelExpression": "VOICE_EVENTS.outcome",
+      "column": 7,
+      "file": "src/main/voice/voice-session-manager.ts",
+      "line": 485,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:dictate",
+      "channelExpression": "VOICE_EVENTS.dictate",
+      "column": 7,
+      "file": "src/main/voice/voice-session-manager.ts",
+      "line": 498,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:outcome",
+      "channelExpression": "VOICE_EVENTS.outcome",
+      "column": 7,
+      "file": "src/main/voice/voice-session-manager.ts",
+      "line": 499,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:outcome",
+      "channelExpression": "VOICE_EVENTS.outcome",
+      "column": 7,
+      "file": "src/main/voice/voice-session-manager.ts",
+      "line": 509,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:outcome",
+      "channelExpression": "VOICE_EVENTS.outcome",
+      "column": 7,
+      "file": "src/main/voice/voice-session-manager.ts",
+      "line": 548,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:error",
+      "channelExpression": "VOICE_EVENTS.error",
+      "column": 5,
+      "file": "src/main/voice/voice-session-manager.ts",
+      "line": 559,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:outcome",
+      "channelExpression": "VOICE_EVENTS.outcome",
+      "column": 7,
+      "file": "src/main/voice/voice-session-manager.ts",
+      "line": 613,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:outcome",
+      "channelExpression": "VOICE_EVENTS.outcome",
+      "column": 5,
+      "file": "src/main/voice/voice-session-manager.ts",
+      "line": 619,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:outcome",
+      "channelExpression": "VOICE_EVENTS.outcome",
+      "column": 7,
+      "file": "src/main/voice/voice-session-manager.ts",
+      "line": 805,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:outcome",
+      "channelExpression": "VOICE_EVENTS.outcome",
+      "column": 7,
+      "file": "src/main/voice/voice-session-manager.ts",
+      "line": 823,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:outcome",
+      "channelExpression": "VOICE_EVENTS.outcome",
+      "column": 5,
+      "file": "src/main/voice/voice-session-manager.ts",
+      "line": 833,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:runtimeProgress",
+      "channelExpression": "VOICE_EVENTS.runtimeProgress",
+      "column": 5,
+      "file": "src/main/voice/voice-session-manager.ts",
+      "line": 937,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:status",
+      "channelExpression": "VOICE_EVENTS.status",
+      "column": 5,
+      "file": "src/main/voice/voice-session-manager.ts",
+      "line": 1035,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:hotkey",
+      "channelExpression": "VOICE_EVENTS.hotkey",
+      "column": 9,
+      "file": "src/main/voice/voice-session-manager.ts",
+      "line": 1061,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:state",
+      "channelExpression": "VOICE_EVENTS.state",
+      "column": 5,
+      "file": "src/main/voice/voice-session-manager.ts",
+      "line": 1149,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:status",
+      "channelExpression": "VOICE_EVENTS.status",
+      "column": 5,
+      "file": "src/main/voice/voice-session-manager.ts",
+      "line": 1176,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:tts:modelProgress",
+      "channelExpression": "VOICE_TTS_EVENTS.ttsModelProgress",
+      "column": 11,
+      "file": "src/main/voice/voice-speech-service.ts",
+      "line": 192,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:speech:start",
+      "channelExpression": "VOICE_TTS_EVENTS.speechStart",
+      "column": 5,
+      "file": "src/main/voice/voice-speech-service.ts",
+      "line": 780,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:speech:start",
+      "channelExpression": "VOICE_TTS_EVENTS.speechStart",
+      "column": 5,
+      "file": "src/main/voice/voice-speech-service.ts",
+      "line": 861,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:speech:start",
+      "channelExpression": "VOICE_TTS_EVENTS.speechStart",
+      "column": 5,
+      "file": "src/main/voice/voice-speech-service.ts",
+      "line": 941,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:speech:end",
+      "channelExpression": "VOICE_TTS_EVENTS.speechEnd",
+      "column": 5,
+      "file": "src/main/voice/voice-speech-service.ts",
+      "line": 1032,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:speech:chunk",
+      "channelExpression": "VOICE_TTS_EVENTS.speechChunk",
+      "column": 5,
+      "file": "src/main/voice/voice-speech-service.ts",
+      "line": 1132,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:speech:end",
+      "channelExpression": "VOICE_TTS_EVENTS.speechEnd",
+      "column": 5,
+      "file": "src/main/voice/voice-speech-service.ts",
+      "line": 1148,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:speech:end",
+      "channelExpression": "VOICE_TTS_EVENTS.speechEnd",
+      "column": 5,
+      "file": "src/main/voice/voice-speech-service.ts",
+      "line": 1163,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "voice:tts:status",
+      "channelExpression": "VOICE_TTS_EVENTS.ttsStatus",
+      "column": 5,
+      "file": "src/main/voice/voice-speech-service.ts",
+      "line": 1200,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "constant",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "workspace:cleanup-progress",
+      "channelExpression": null,
+      "column": 5,
+      "file": "src/main/workspace-cleanup-scheduler.ts",
+      "line": 92,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "workspace:cleanup-progress",
+      "channelExpression": null,
+      "column": 7,
+      "file": "src/main/workspace-cleanup-scheduler.ts",
+      "line": 101,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "workspace:cleanup-complete",
+      "channelExpression": null,
+      "column": 9,
+      "file": "src/main/workspace-cleanup-scheduler.ts",
+      "line": 153,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "workspace:cleanup-progress",
+      "channelExpression": null,
+      "column": 7,
+      "file": "src/main/workspace-cleanup-scheduler.ts",
+      "line": 230,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "workspace:cleanup-progress",
+      "channelExpression": null,
+      "column": 9,
+      "file": "src/main/workspace-cleanup-scheduler.ts",
+      "line": 242,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "workspace:cleanup-progress",
+      "channelExpression": null,
+      "column": 9,
+      "file": "src/main/workspace-cleanup-scheduler.ts",
+      "line": 277,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "workspace:cleanup-progress",
+      "channelExpression": null,
+      "column": 7,
+      "file": "src/main/workspace-cleanup-scheduler.ts",
+      "line": 387,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "workspace:cleanup-progress",
+      "channelExpression": null,
+      "column": 13,
+      "file": "src/main/workspace-cleanup-scheduler.ts",
+      "line": 401,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "workspace:cleanup-progress",
+      "channelExpression": null,
+      "column": 7,
+      "file": "src/main/workspace-cleanup-scheduler.ts",
+      "line": 412,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
     },
     {
       "channel": null,
@@ -11823,14 +12960,14 @@
       "target": "ipcRenderer"
     },
     {
-      "channel": null,
+      "channel": "ui:command",
       "channelExpression": "UI_COMMAND_CHANNEL",
       "column": 7,
       "file": "src/preload/index.ts",
       "line": 603,
       "method": "on",
       "methodExpression": null,
-      "resolution": "unresolved",
+      "resolution": "constant",
       "target": "ipcRenderer"
     },
     {
@@ -12871,11 +14008,11 @@
   ],
   "summary": {
     "directAPIConsumers": 368,
-    "files": 658,
-    "operations": 609,
+    "files": 662,
+    "operations": 712,
     "runtimeElectronImports": 48,
     "typeOnlyElectronImports": 4,
-    "unresolvedOperations": 14,
+    "unresolvedOperations": 10,
     "webviews": 1
   },
   "webviews": [
