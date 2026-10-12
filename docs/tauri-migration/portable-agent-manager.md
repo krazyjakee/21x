@@ -8,4 +8,20 @@ Database profile, workspace and attachment locations remain the responsibility o
 
 Session configuration and transcript notification helpers have portable cores and Electron-default API wrappers. The pure backend enum/provider identity moved out of the SDK adapter factory so a fixture can inject its deterministic adapter without loading real SDK backends. The Electron host retains the actual factory, Codex type predicate, IPC guard, notification behavior, energy blocker and authenticated task-MCP URL builder.
 
-A static TypeScript transpilation/import walk of the lifecycle core reached 59 source modules, with Node builtins and `@paralleldrive/cuid2` as the only external runtime dependencies. It found no Electron import or real SDK factory. This is source-boundary evidence; centralized type checks, the existing Electron regression suite and a real standalone Node/staged-SQLite lifecycle proof still need execution. The deterministic adapter will be a synthetic fixture, with no claim of real backend parity or restored browser support.
+A static TypeScript transpilation/import walk of the lifecycle core reached 59 source modules, with Node builtins and `@paralleldrive/cuid2` as the only external runtime dependencies. It found no Electron import or real SDK factory. The central integration passed full type checking, changed-source lint and 358 existing lifecycle/admission/concurrency/project/session-configuration regressions in 13 files with one worker. These checks establish regression coverage; native host behavior and backend parity remain separate gates.
+
+## Actual standalone lifecycle proof
+
+`scripts/agent-lifecycle-proof.mjs` stages a bounded 75-module graph containing the actual manager and portable database. It forbids Electron, SDK factories, unexpected external dependencies and dynamic module loading in that graph. It requires an explicit standalone Node SQLite package path and reuses only SQLite/CUID dependencies; Verify's Electron-ABI SQLite cannot become a fallback.
+
+After the central native preparation batch, run:
+
+```sh
+node scripts/agent-lifecycle-proof.mjs --sqlite-module "$PWD/src-tauri/resources/service/node_modules/better-sqlite3"
+```
+
+The fixture creates its own temporary profile/workspace/attachments, configures explicit credential denial and disables every GUI/native/MCP service. It drives public manager APIs with a deterministic adapter: real admission/start, persisted pending approval, rejection of a stale request ID, a matching approval response, durable projection/event delivery without a GUI, database reopening and manager/backend recreation, real resume, matching rejection of a second request, delta reads and stop. There is no direct mutation of private manager state or fabricated database approval response. Dependency diagnostics become counts; failure emits a fixed code and phase, without raw errors or transcript data. Temporary staging/profile files are removed.
+
+The reusable fixture adapter lives in `src/service/fixtures/deterministic-agent-adapter.ts`. Its explicit synthetic-only profile holds a bounded conversation with task/agent identity and unique approval IDs. Missing/stale approval IDs are refused. It supports one persisted conversation and fails on a second create; it never starts a model, shell, browser, tool server or credential API. Persistence represents a deterministic fixture backend, rather than any of the five production providers.
+
+The standalone proof is written but has not yet been executed in the central batch. Actual debug native renderer/service wiring is a subsequent step. The existing manager's permission API still accepts an optional request ID and can send a continuation when a provider reports no pending request without an ID; the retained native command codec must require the exact request identity. Neither this fixture nor the host extraction establishes full agent backend parity, restored browser support or production rollout readiness.
