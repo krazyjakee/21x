@@ -57,24 +57,28 @@ export function startDatabaseStdio(): void {
   let backend: DatabaseBackend | undefined
   let initialized = false
   let closing = false
+  let cleaned = false
   let sequence = 0
 
   const cleanup = (failed = false): void => {
-    if (closing && !backend && !lock && !storage) return
+    if (cleaned) return
+    cleaned = true
     closing = true
     let error = failed
     let databaseClosed = true
     try { backend?.close() } catch { error = true; databaseClosed = !backend?.database.db.open }
-    backend = undefined
+    if (databaseClosed) backend = undefined
     try { storage?.dispose() } catch { error = true }
     storage = undefined
     // A failed domain close must never release lifetime ownership while its
     // SQLite connection remains alive. Process exit releases both connections.
-    if (databaseClosed) { try { lock?.release() } catch { error = true } }
-    lock = undefined
+    let lockReleased = !lock
+    if (databaseClosed) {
+      try { lock?.release(); lockReleased = true; lock = undefined } catch { error = true }
+    }
     process.exitCode = error ? 1 : 0
     process.stdin.destroy()
-    if (databaseClosed) process.stdout.end()
+    if (databaseClosed && lockReleased) process.stdout.end()
     else {
       process.stdout.end(() => process.exit(1))
       setTimeout(() => process.exit(1), 1000).unref()

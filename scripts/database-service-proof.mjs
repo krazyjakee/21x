@@ -137,14 +137,18 @@ export async function runDatabaseServiceProof({ serviceEntry, node = process.env
   const report = { reportVersion: 1, passed: false, runtime: 'standalone-node', syntheticOnly: true }
   const start = () => { const client = connect({ node, entry, profileRoot, resourceRoot }); clients.push(client); return client }
   try {
+    report.phase = 'initialize'
     const first = start()
     const ready = await first.initialize()
     assert.match(ready.nodeVersion, /^v22\./)
     report.handshake = true
+    report.phase = 'profile-contention-rejection'
     const competing = start()
     await assert.rejects(competing.initialize(), { code: 'INTERNAL_ERROR' })
+    report.phase = 'profile-contention-exit'
     assert.equal((await competing.waitClosed()).code, 1)
     report.profileContentionRejected = true
+    report.phase = 'task-project-commands'
     const project = await first.command('project:create', { data: { name: 'Synthetic service proof' } })
     const task = await first.command('db:createTask', { data: { title: 'Service task', project_id: project.id } })
     assert.equal(task.status, 'not_started')
@@ -153,11 +157,14 @@ export async function runDatabaseServiceProof({ serviceEntry, node = process.env
     assert.equal(await first.command('db:getTask', { id: 'missing-task' }), undefined)
     const changed = await first.command('db:updateTask', { id: task.id, data: { title: 'Updated service task' } })
     assert.equal(changed.title, 'Updated service task')
+    report.phase = 'denied-commands'
     await assert.rejects(first.command('db:updateTask', { id: task.id, data: { status: 'agent_working' } }), { code: 'INVALID_ARGUMENTS' })
     await assert.rejects(first.request('agentSession:approve', { password: 'fixture-must-not-echo' }), { code: 'UNKNOWN_OPERATION' })
     await assert.rejects(first.command('settings:set', { key: 'anthropic_api_key', value: 'fixture-must-not-echo' }), { code: 'INVALID_ARGUMENTS' })
+    report.phase = 'cancellation'
     await assert.rejects(first.command('db:updateTask', { id: task.id, data: { title: 'Cancelled mutation' } }, { cancelImmediately: true }), { code: 'CANCELLED' })
     assert.equal((await first.command('db:getTask', { id: task.id })).title, changed.title)
+    report.phase = 'settings-and-stale-epoch'
     await assert.rejects(first.command('db:getTasks', {}, { epoch: 'old-engine' }), { code: 'STALE_EPOCH' })
     assert.equal(await first.command('settings:set', { key: 'synthetic_ui_value', value: 'persisted-ui' }), undefined)
     assert.equal(await first.command('settings:get', { key: 'synthetic_ui_value' }), 'persisted-ui')
@@ -166,6 +173,7 @@ export async function runDatabaseServiceProof({ serviceEntry, node = process.env
     report.lifecycleAndCredentialCommandsRejected = true
     report.cancelBeforeEffects = true
 
+    report.phase = 'durable-projection'
     const initial = await first.request('fixture.transcriptUpsert', { taskId: task.id, parts: [{ id: 'adapter:part/1', role: 'assistant', content: 'partial' }] })
     const snapshot = await first.command('agentSession:getTranscriptSnapshot', { taskId: task.id })
     assert.equal(snapshot[0].content, 'partial')
@@ -184,10 +192,12 @@ export async function runDatabaseServiceProof({ serviceEntry, node = process.env
     assert.equal(first.diagnostics().includes('fixture-must-not-echo'), false)
     report.durableProjectionAndReloadQueries = true
     report.eventCount = first.events.length
+    report.phase = 'shutdown'
     assert.deepEqual(await first.request('engine.shutdown', {}), { stopped: true })
     assert.equal((await first.waitClosed()).code, 0)
     report.gracefulDrainAndExit = true
 
+    report.phase = 'reopen'
     const reopened = start()
     await reopened.initialize()
     assert.notEqual(reopened.epoch(), first.epoch())
@@ -202,7 +212,8 @@ export async function runDatabaseServiceProof({ serviceEntry, node = process.env
     assert.equal((await reopened.waitClosed()).code, 0)
     report.reopenAndNewEpoch = true
     report.passed = true
-  } catch (error) { report.errorCode = errorCodes.has(error.code) ? error.code : 'PROOF_FAILED' }
+    report.phase = 'complete'
+  } catch (error) { report.errorCode = errorCodes.has(error.code) || ['CHILD_STOP_FAILED', 'INVALID_OUTPUT'].includes(error.code) ? error.code : 'PROOF_FAILED' }
   finally {
     let stopped = true
     for (const client of clients) { try { await client.stop() } catch { stopped = false } }
