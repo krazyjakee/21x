@@ -163,11 +163,23 @@ fn project_input(value: &Value) -> bool {
             .is_none_or(|item| text(item, 65_536))
 }
 pub(super) fn known_operation(operation: &str) -> bool {
-    OPERATIONS.contains(&operation)
+    if OPERATIONS.contains(&operation) {
+        return true;
+    }
+    #[cfg(feature = "synthetic-agent")]
+    {
+        return super::agent_desktop::known_operation(operation);
+    }
+    #[cfg(not(feature = "synthetic-agent"))]
+    false
 }
 pub(super) fn valid_request(operation: &str, value: &Value) -> bool {
     if !json(value, 0) {
         return false;
+    }
+    #[cfg(feature = "synthetic-agent")]
+    if super::agent_desktop::known_operation(operation) {
+        return super::agent_desktop::valid_request(operation, value);
     }
     match operation {
         "db:getTasks" => {
@@ -330,6 +342,10 @@ fn delta(value: &Value) -> bool {
             .all(|part| part["rev"].as_u64().unwrap() <= value["maxRev"].as_u64().unwrap())
 }
 pub(super) fn valid_result(operation: &str, value: &Value) -> bool {
+    #[cfg(feature = "synthetic-agent")]
+    if super::agent_desktop::known_operation(operation) {
+        return super::agent_desktop::valid_result(operation, value);
+    }
     if !known_operation(operation) || !object(value, &["defined"], &["value"]) || !json(value, 0) {
         return false;
     }
@@ -446,7 +462,14 @@ pub(super) fn valid_event(frame: &Value) -> bool {
                     value == true && payload["parts"].as_array().is_some_and(Vec::is_empty)
                 })
         }
-        _ => false,
+        _ => {
+            #[cfg(feature = "synthetic-agent")]
+            {
+                return super::agent_desktop::valid_event(frame);
+            }
+            #[cfg(not(feature = "synthetic-agent"))]
+            false
+        }
     }
 }
 
@@ -454,6 +477,33 @@ pub(super) fn valid_event(frame: &Value) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[cfg(feature = "synthetic-agent")]
+    #[test]
+    fn agent_fixture_delegation_keeps_database_authority_bounds() {
+        assert!(known_operation("agent:getAll"));
+        assert!(valid_request("agent:getAll", &json!({})));
+        assert!(valid_request(
+            "agentSession:stop",
+            &json!({"sessionId":"session-1"})
+        ));
+        assert!(!valid_request(
+            "agentSession:approve",
+            &json!({"sessionId":"session-1","approved":true})
+        ));
+        assert!(!valid_request(
+            "db:updateTask",
+            &json!({"id":"task-1","data":{"status":"completed"}})
+        ));
+        assert!(valid_event(
+            &json!({"operation":"agent:status","payload":{"sessionId":"session-1","agentId":"agent-1","taskId":"task-1","status":"working","epoch":"fixture:1","seq":1,"heartbeat":true}})
+        ));
+        assert!(!valid_event(
+            &json!({"operation":"agent:status","payload":{"sessionId":"session-1","agentId":"agent-1","taskId":"task-1","status":"working","api_keys":{}}})
+        ));
+        assert!(!valid_event(
+            &json!({"operation":"agent:unknownCriticalEvent","payload":{}})
+        ));
+    }
     #[test]
     fn synthetic_inputs_cannot_start_agents_or_change_lifecycle() {
         assert!(valid_request(
@@ -471,6 +521,7 @@ mod tests {
             "db:updateTask",
             &json!({"id":"task-1", "data":{"status":"completed"}})
         ));
+        #[cfg(not(feature = "synthetic-agent"))]
         assert!(!known_operation("agentSession:approve"));
         assert!(!known_operation("fixture.transcriptUpsert"));
         assert!(!valid_request(
