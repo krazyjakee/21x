@@ -22,5 +22,9 @@ export async function runConfigurationProof({ sqliteModule = process.env.TAURI_S
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { process.stdout.write(JSON.stringify(await runConfigurationProof()) + '\n') }
-  catch { process.stderr.write('[configuration-proof] proof failed\n'); process.exitCode = 1 }
+  catch (error) {
+    process.stdout.write(JSON.stringify({ passed: false, code: 'PROOF_FAILED',
+      phase: typeof error?.phase === 'string' && /^[a-z-]{1,64}$/.test(error.phase) ? error.phase : 'staging' }) + '\n')
+    process.exitCode = 1
+  }
 }

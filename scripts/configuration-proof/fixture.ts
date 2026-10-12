@@ -13,6 +13,10 @@ import { ServiceProtocolError, isRecord, type JsonValue } from '../../src/shared
 import type { DesktopCallerContext } from '../../src/service/transport/desktop-registry'
 import { DEFAULT_PROJECT_ID } from '../../src/shared/projects'
 
+export class ConfigurationProofError extends Error {
+  constructor(readonly phase: string) { super('Configuration proof failed') }
+}
+
 /** Real private SQLite, no profile reuse, AgentManager simulation or Electron shim. */
 export async function runConfigurationFixture(directory: string) {
   assert.equal(process.versions.electron, undefined)
@@ -28,6 +32,7 @@ export async function runConfigurationFixture(directory: string) {
     managedTaskMcp: { disabled: true }, logger: { log() {}, error() {} }
   }
   let db = new DatabaseManager(runtime)
+  let phase = 'initialize'
   try {
     db.initialize()
     const a = db.createProject({ name: 'Fixture A' })!
@@ -63,6 +68,7 @@ export async function runConfigurationFixture(directory: string) {
     for (const operation of ['agent:getAll', 'agent:create', 'agent:update', 'agent:delete'] as const) {
       await rejected(backend.registry.invoke(operation, {}, admin, signal), 'UNKNOWN_OPERATION')
     }
+    phase = 'skill-create-and-scope'
     const global = await call('skills:create', [{ name: 'fixture-global', description: '', content: '\uFEFFglobal 你好' }]) as unknown as SkillRecord
     const skillA = await call('skills:create', [{ name: 'fixture-a', description: '', content: 'A', project_id: a.id }], user) as unknown as SkillRecord
     const skillB = await call('skills:create', [{ name: 'fixture-b', description: '', content: 'B', project_id: b.id }]) as unknown as SkillRecord
@@ -76,6 +82,7 @@ export async function runConfigurationFixture(directory: string) {
     await rejected(call('skills:setProject', [skillA.id, b.id], mover), 'INVALID_REQUEST')
     await rejected(call('skills:setProject', [skillA.id, null], user), 'INVALID_REQUEST')
     assert.equal(events.length, unchangedEvents)
+    phase = 'skill-version-conflict'
     const updated = await call('skills:update', [skillA.id, { content: 'updated', expected_version: 1 }], user) as unknown as SkillRecord
     assert.equal(updated.version, 2)
     const beforeConflict = events.length
@@ -84,10 +91,13 @@ export async function runConfigurationFixture(directory: string) {
     assert.equal(events.length, beforeConflict)
     assert.equal(await call('skills:update', ['missing', {}], user), undefined)
     assert.equal(await call('skills:delete', ['missing'], user), false)
+    phase = 'skill-reassignment'
     await call('skills:setProject', [skillA.id, null], admin)
     assert.equal(db.getSkill(skillA.id)?.project_id, null)
     await call('skills:setProject', [skillA.id, a.id], admin)
-    const foreignTask = db.createTask({ title: 'Reference fixture', project_id: b.id, skill_ids: [global.id] })!
+    const foreignTask = db.createTask({ title: 'Reference fixture', project_id: b.id })!
+    // Assignment is an update API; CreateTaskData does not accept skill_ids.
+    db.updateTask(foreignTask.id, { skill_ids: [global.id] })
     await rejected(call('skills:setProject', [global.id, a.id]), 'INVALID_REQUEST')
     db.updateTask(foreignTask.id, { skill_ids: [] })
     const agent = db.getAgents()[0]
@@ -98,6 +108,7 @@ export async function runConfigurationFixture(directory: string) {
     await call('skills:setProject', [global.id, a.id])
     assert.equal(db.getSkill(global.id)?.project_id, a.id)
 
+    phase = 'child-crud-and-association'
     const repoA = await call('projectRepo:add', [a.id, { name: 'first', org: 'group/subgroup' }], user) as unknown as ProjectRepoRecord
     const repoA2 = await call('projectRepo:add', [a.id, { name: 'second' }], user) as unknown as ProjectRepoRecord
     const repoB = await call('projectRepo:add', [b.id, { name: 'foreign' }]) as unknown as ProjectRepoRecord
@@ -123,6 +134,7 @@ export async function runConfigurationFixture(directory: string) {
 
     // Inject a malformed return after an actual INSERT, verifying that output
     // validation rolls back SQLite rather than leaving an unacknowledged row.
+    phase = 'result-rollback'
     const addRepo = db.addProjectRepo
     const repoCount = db.getProjectRepos(a.id).length
     const eventsBeforeInvalidResult = events.length
@@ -137,6 +149,7 @@ export async function runConfigurationFixture(directory: string) {
     assert.equal(events.length, eventsBeforeInvalidResult)
 
     // Authorization must be checked after registry's await, not cached by ID.
+    phase = 'revocation-and-cancellation'
     let accessCalls = 0
     accessHook = () => { if (++accessCalls === 2) ownA.delete(a.id) }
     await rejected(call('projectRepo:update', [repoA.id, { name: 'revoked' }], user), 'INVALID_REQUEST')
@@ -147,6 +160,7 @@ export async function runConfigurationFixture(directory: string) {
     aborted.abort()
     await rejected(call('projectResource:remove', [resourceA.id], user, aborted.signal), 'CANCELLED')
     assert.ok(db.getProjectResource(resourceA.id))
+    phase = 'project-protection-and-reorder'
     await rejected(call('project:archive', [DEFAULT_PROJECT_ID]), 'INVALID_REQUEST')
     await rejected(call('project:update', [b.id, { description: 'denied' }], user), 'INVALID_REQUEST')
     await rejected(call('project:update', [a.id, { settings: { api_keys: 'denied' } }]), 'INVALID_ARGUMENTS')
@@ -160,6 +174,7 @@ export async function runConfigurationFixture(directory: string) {
     await call('project:archive', [b.id, false])
 
     // Result projection fails inside the transaction: no durable write/event.
+    phase = 'private-fields-and-events'
     db.updateProject(a.id, { settings: { nested: { mcp_scope_nonce: 'private-fixture' } } })
     const beforeRollback = events.length
     await rejected(call('project:update', [a.id, { description: 'rolled back' }]), 'INVALID_RESULT')
@@ -173,6 +188,7 @@ export async function runConfigurationFixture(directory: string) {
     assert.equal(JSON.stringify(events).includes('private-fixture'), false)
     await rejected(backend.registry.invoke('skills:getAll', {}, { ...admin, principal: 'service' }, signal), 'INVALID_REQUEST')
     await rejected(backend.registry.invoke('skills:getAll', {}, { ...admin, engineEpoch: 'old:1' }, signal), 'STALE_EPOCH')
+    phase = 'durable-reopen'
     available = false
     await rejected(call('skills:update', [skillA.id, { content: 'closed' }]), 'INVALID_REQUEST')
     available = true
@@ -191,7 +207,8 @@ export async function runConfigurationFixture(directory: string) {
       reportVersion: 1, passed: true, runtime: 'standalone-node', boundCommands: 18,
       proofs: ['caller-project-association', 'skill-current-destination-authority', 'skill-version-conflict', 'complete-reorder-sets', 'transaction-rollback', 'durable-reopen', 'agent-crud-unbound', 'reference-safe-scope-move', 'cancel-before-effects', 'epoch-identity-checks']
     }
-  } finally {
+  } catch { throw new ConfigurationProofError(phase) }
+  finally {
     db.close()
     storage.dispose()
     lock.release()
