@@ -20,7 +20,7 @@ export function runDatabaseFixture(directory: string) {
   const storage = new AuthenticatedSecretStorage(key, 'database-proof')
   key.fill(0)
   configureSecretStorage(storage)
-  const options: DatabaseRuntimeOptions = {
+  const options = {
     paths,
     managedTaskMcp: {
       command: process.execPath,
@@ -29,7 +29,7 @@ export function runDatabaseFixture(directory: string) {
       tools: [{ name: 'fixture_task_list', description: 'Synthetic metadata; no real MCP server is started' }]
     },
     logger: { log() {}, error() {} }
-  }
+  } satisfies DatabaseRuntimeOptions
   let manager: DatabaseManager | undefined
   try {
     assert.throws(() => new DatabaseManager({ ...options, paths: { ...paths, profileRoot: 'relative' } }))

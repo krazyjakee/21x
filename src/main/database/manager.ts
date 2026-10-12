@@ -237,7 +237,7 @@ export interface DatabasePaths {
 export interface DatabaseRuntimeOptions {
   paths: DatabasePaths
   /** The server's actual tool metadata and executable/entry-point configuration. */
-  managedTaskMcp: ManagedTaskMcpRuntime
+  managedTaskMcp: ManagedTaskMcpRuntime | { disabled: true }
   /** Service callers route diagnostics to stderr, leaving protocol stdout private. */
   logger?: Pick<Console, 'log' | 'error'>
 }
@@ -245,7 +245,7 @@ export interface DatabaseRuntimeOptions {
 /** The sole implementation of database/schema/domain behavior for both hosts. */
 export class DatabaseManager {
   private readonly paths: DatabasePaths
-  private readonly managedTaskMcp: ManagedTaskMcpRuntime
+  private readonly managedTaskMcp: ManagedTaskMcpRuntime | { disabled: true }
   private readonly logger: Pick<Console, 'log' | 'error'>
 
   constructor(options: DatabaseRuntimeOptions) {
@@ -253,14 +253,18 @@ export class DatabaseManager {
     for (const path of [options.paths.profileRoot, options.paths.workspaceRoot, options.paths.attachmentRoot]) {
       if (typeof path !== 'string' || !isAbsolute(path) || path.includes('\0')) throw new Error('Database paths must be absolute')
     }
-    validateManagedTaskMcpRuntime(options.managedTaskMcp)
+    const disabled = options.managedTaskMcp && 'disabled' in options.managedTaskMcp
+    if (disabled) {
+      if (options.managedTaskMcp.disabled !== true || Object.keys(options.managedTaskMcp).length !== 1) throw new Error('Invalid managed task MCP policy')
+    } else validateManagedTaskMcpRuntime(options.managedTaskMcp as ManagedTaskMcpRuntime)
     this.paths = { ...options.paths }
-    this.managedTaskMcp = {
-      ...options.managedTaskMcp,
-      existingServer: options.managedTaskMcp.existingServer ? { ...options.managedTaskMcp.existingServer } : undefined,
-      args: [...options.managedTaskMcp.args],
-      environment: { ...options.managedTaskMcp.environment },
-      tools: options.managedTaskMcp.tools.map((tool) => ({ ...tool }))
+    const runtime = options.managedTaskMcp as ManagedTaskMcpRuntime
+    this.managedTaskMcp = disabled ? { disabled: true } : {
+      ...runtime,
+      existingServer: runtime.existingServer ? { ...runtime.existingServer } : undefined,
+      args: [...runtime.args],
+      environment: { ...runtime.environment },
+      tools: runtime.tools.map((tool) => ({ ...tool }))
     }
     this.logger = options.logger ?? { log: (...args) => console.error(...args), error: (...args) => console.error(...args) }
   }
@@ -328,7 +332,7 @@ export class DatabaseManager {
         this.logger.error('[Database] Failed to encrypt stored API keys:', err)
       }
 
-      seedTaskManagementMcpServer(this.db, this.managedTaskMcp)
+      if (!('disabled' in this.managedTaskMcp)) seedTaskManagementMcpServer(this.db, this.managedTaskMcp)
       seedOrchestratorSkill(this.db)
       seedCaptainTasks(this.db)
 

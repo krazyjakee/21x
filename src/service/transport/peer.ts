@@ -51,6 +51,7 @@ export class ServicePeer {
   private lastRemoteId = 0n
   private failure: ServiceProtocolError | null = null
   private epoch: string | null
+  private readonly drainWaiters = new Set<{ resolve: () => void; reject: (error: ServiceProtocolError) => void }>()
 
   constructor(private readonly options: ServicePeerOptions) {
     this.epoch = options.engineEpoch
@@ -63,6 +64,19 @@ export class ServicePeer {
   get engineEpoch(): string | null { return this.epoch }
   get pendingCount(): number { return this.pending.size }
   get activeCount(): number { return this.active.size }
+
+  /** Call after returning the shutdown handler result, so its response is queued. */
+  drain(): Promise<void> {
+    if (this.failure) return Promise.reject(this.failure)
+    if (!this.writing && this.queue.length === 0 && this.active.size === 0) return Promise.resolve()
+    return new Promise((resolve, reject) => this.drainWaiters.add({ resolve, reject }))
+  }
+
+  private settleDrain(): void {
+    if (this.writing || this.queue.length || this.active.size) return
+    for (const waiter of this.drainWaiters) waiter.resolve()
+    this.drainWaiters.clear()
+  }
 
   receive(bytes: Uint8Array): void {
     if (this.failure) return
@@ -80,6 +94,8 @@ export class ServicePeer {
     if (this.failure) return
     const error = new ServiceProtocolError(code)
     this.failure = error
+    for (const waiter of this.drainWaiters) waiter.reject(error)
+    this.drainWaiters.clear()
     this.stopWrite?.()
     for (const [id, pending] of this.pending) {
       this.releasePending(id, pending)
@@ -261,6 +277,7 @@ export class ServicePeer {
     }).finally(() => {
       clearTimeout(active.timer)
       this.active.delete(frame.requestId)
+      this.settleDrain()
     })
     // The active slot remains occupied until the handler settles, even after abort.
   }
@@ -309,6 +326,6 @@ export class ServicePeer {
         }
       }
     } catch (error) { this.disconnect(error instanceof ServiceProtocolError ? error.code : 'DISCONNECTED') }
-    finally { this.writing = false }
+    finally { this.writing = false; this.settleDrain() }
   }
 }

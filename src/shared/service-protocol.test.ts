@@ -38,6 +38,30 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+describe('graceful peer drain', () => {
+  it('waits for active handlers and the final queued response to drain', async () => {
+    let releaseWrite: (() => void) | undefined
+    const service = peer({ role: 'service', operations: { 'test.echo': { ...schema, handle: payload => payload } }, write: () => new Promise(resolve => { releaseWrite = resolve }) })
+    service.receive(encodeServiceFrame(request('host:1', { stopped: true })))
+    let finished = false
+    const drained = service.drain().then(() => { finished = true })
+    await drain()
+    expect(finished).toBe(false)
+    expect(releaseWrite).toBeTypeOf('function')
+    releaseWrite!()
+    await drained
+    expect(finished).toBe(true)
+  })
+
+  it('rejects waiting drains when the peer disconnects', async () => {
+    const service = peer({ role: 'service', operations: { 'test.echo': { ...schema, handle: () => new Promise(() => {}) } } })
+    service.receive(encodeServiceFrame(request()))
+    const drained = service.drain()
+    service.disconnect()
+    await expect(drained).rejects.toMatchObject({ code: 'DISCONNECTED' })
+  })
+})
+
 describe('private service envelope', () => {
   it('validates request, response and event envelopes and bootstrap contracts', () => {
     expect(validateServiceFrame(request())).toEqual(request())
