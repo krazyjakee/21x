@@ -98,17 +98,31 @@ describe('Tauri source inventory AST scanner', () => {
     const result = scanSource('src/renderer/src/view.tsx', `
       // <webview />; window.electronAPI.fake()
       type Bridge = typeof window.electronAPI
-      window.electronAPI.db.getTasks()
+      window.electronAPI.db.getTasks();
       (window.electronAPI).tasks.start('task')
+      window.electronAPI?.tasks?.start?.('optional-task')
       window['electronAPI'][section]['read']()
       const root = window.electronAPI
       const view = <><webview src="https://example.test" /><webview></webview><div /></>
     `)
     expect(result.electronAPIConsumers.map((item: { path: (string | null)[] }) => item.path)).toEqual([
-      ['db', 'getTasks'], ['tasks', 'start'], [null, 'read'], []
+      ['db', 'getTasks'], ['tasks', 'start'], ['tasks', 'start'], [null, 'read'], []
     ])
-    expect(result.electronAPIConsumers[2]).toMatchObject({ kind: 'call', resolution: 'unresolved' })
+    expect(result.electronAPIConsumers[1]).toMatchObject({ kind: 'call', resolution: 'literal' })
+    expect(result.electronAPIConsumers[2]).toMatchObject({ kind: 'call', resolution: 'literal' })
+    expect(result.electronAPIConsumers[3]).toMatchObject({ kind: 'call', resolution: 'unresolved' })
     expect(result.webviews).toHaveLength(2)
+  })
+
+  it('keeps call-result members distinct from direct API consumers across automatic semicolon insertion', () => {
+    const result = scanSource('src/renderer/src/asi.ts', `
+      window.electronAPI.db.getTasks()
+      (window.electronAPI).tasks.start('task')
+    `)
+    // These lines are one expression: the parenthesized API root is an argument
+    // to the result of getTasks(), rather than the receiver of tasks.start().
+    expect(result.electronAPIConsumers.map((item: { path: string[] }) => item.path))
+      .toEqual([['db', 'getTasks'], []])
   })
 
   it('produces identical bytes for reordered source inputs and package keys', () => {
