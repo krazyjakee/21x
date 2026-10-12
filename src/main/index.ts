@@ -8,6 +8,7 @@ import { is } from '@electron-toolkit/utils'
 import { DatabaseManager } from './database'
 import { configureSecretStorage } from './platform/secret-storage'
 import { electronSecretStorage } from './platform/electron-secret-storage'
+import { acquireProfileLock, type ProfileLock } from './platform/profile-lock'
 import { AgentManager } from './agent-manager'
 import { GitHubManager } from './github-manager'
 import { GitLabManager } from './gitlab-manager'
@@ -41,14 +42,14 @@ import { WORKSPACES_DIR, listWorkspaceDirs, taskAttachmentsDir } from './workspa
 import { setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTranscriptProvider, startTaskApiServer, stopTaskApiServer } from './task-api-server'
 import { setTaskAutomationTrigger, setTaskSchedulers } from './task-updates'
 import { CaptainWaker } from './captain-waker'
-import { startScheduledCoordination } from './scheduled-coordination'
+import { startScheduledCoordination, stopScheduledCoordination } from './scheduled-coordination'
 import { startSecretBroker, stopSecretBroker, writeSecretShellWrapper } from './secret-broker'
 import { isMainWindowUrl } from './main-window-url'
 import { applyMobileAccessSettings, setMobileApiDeps, stopMobileApiServer, broadcastToMobileClients, setMobileApiNotifier } from './mobile-api-server'
 import { registerUpdaterIpc, initAutoUpdater, isUpdateDownloaded, getPendingVersion } from './auto-updater'
 import { initCrashLogger } from './crash-logger'
 import { APP_NAME, DEEP_LINK_SCHEMES, parseOAuthCallbackUrl } from './app-identity'
-import { migrateAppIdentity } from './app-identity-migration'
+import { migrateAppIdentity, legacyUserDataDirs } from './app-identity-migration'
 import { installProcessStreamErrorHandlers } from './process-stream-errors'
 
 /**
@@ -70,6 +71,7 @@ let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let isQuitting = false
 let db: DatabaseManager | null = null
+let profileLock: ProfileLock | null = null
 let agentManager: AgentManager | null = null
 let githubManager: GitHubManager | null = null
 let gitlabManager: GitLabManager | null = null
@@ -177,6 +179,8 @@ async function sweepLeakedWorkspaces(graceMs?: number, orphansIgnoreTaskState = 
 
 async function shutdownAppServices(): Promise<void> {
   voiceSessionManager?.shutdown()
+  recurrenceScheduler?.stop()
+  stopScheduledCoordination()
   heartbeatScheduler?.stop()
   captainWaker?.stop()
   taskAutomationScheduler?.stop()
@@ -198,6 +202,8 @@ async function shutdownAppServices(): Promise<void> {
   await sweepLeakedWorkspaces(SHUTDOWN_GRACE_MS)
 
   db?.close()
+  // Retain profile ownership through process exit, including in-flight async
+  // callbacks. OS-backed SQLite locks release on exit/crash; no early handoff.
 
   if (tray) {
     tray.destroy()
@@ -669,6 +675,18 @@ app.commandLine.appendSwitch('disable-features', [
 installProcessStreamErrorHandlers()
 
 app.whenReady().then(async () => {
+  const requestedProfileRoot = app.getPath('userData')
+  try {
+    profileLock = acquireProfileLock(requestedProfileRoot)
+    app.setPath('userData', profileLock.profileRoot)
+  } catch {
+    dialog.showErrorBox(
+      `${APP_NAME} could not open your profile`,
+      'Another desktop host may already be using this profile, or its profile lock is unavailable. Close the other host and use a supported local profile directory, then try again. Your data was not changed.'
+    )
+    app.exit(1)
+    return
+  }
   configureSecretStorage(electronSecretStorage)
   // Collect MCP server processes that a previous crash or force-quit orphaned.
   // Safe for a second live instance: only parentless processes match here,
@@ -705,7 +723,8 @@ app.whenReady().then(async () => {
 
   // 20x → 21x: copy the previous userData over once, before the database opens.
   try {
-    migrateAppIdentity({ userDataDir: app.getPath('userData') })
+    profileLock.assertHeld()
+    migrateAppIdentity({ userDataDir: profileLock.profileRoot, legacyUserDataDirs: legacyUserDataDirs(requestedProfileRoot) })
   } catch (error) {
     // Opening the database now would create an empty one that hides the
     // user's data from every later launch. Stop instead; nothing was moved.
@@ -721,6 +740,7 @@ app.whenReady().then(async () => {
   }
 
   db = new DatabaseManager()
+  profileLock.assertHeld()
   db.initialize()
   db.onTaskActivity = (taskId, last_activity_at) => {
     const data = { taskId, updates: { last_activity_at } }
@@ -1037,6 +1057,15 @@ app.on('before-quit', async (event) => {
     if (response === 0) {
       // Install & restart — set flag first to prevent before-quit loop
       isShuttingDown = true
+      isQuitting = true
+      try {
+        await shutdownAppServices()
+      } catch {
+        // Keep ownership until exit if teardown fails; do not start a new host
+        // while this process still has active profile services.
+        app.exit(1)
+        return
+      }
       const { autoUpdater } = await import('electron-updater')
       autoUpdater.quitAndInstall()
       return
