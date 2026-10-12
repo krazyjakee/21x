@@ -1,0 +1,77 @@
+{
+  "gui": {
+    "remoteNavigationDenied": true,
+    "rendererPing": true,
+    "restrictedOperationDenied": true,
+    "webviewLoadFinished": true,
+    "windowCloseObserved": true,
+    "windowCloseRequested": true
+  },
+  "passed": true,
+  "runtime": {
+    "developmentFrontend": false,
+    "initialized": true,
+    "nativeProbe": {
+      "arch": "x64",
+      "checks": {
+        "@anthropic-ai/claude-agent-sdk": {
+          "importedOnly": true,
+          "ok": true
+        },
+        "@opencode-ai/sdk": {
+          "importedOnly": true,
+          "ok": true
+        },
+        "pty": {
+          "dataChunks": 1,
+          "exitCode": 0,
+          "helper": {
+            "executable": true,
+            "mode": "755",
+            "present": true
+          },
+          "markerSeen": true,
+          "ok": true,
+          "phase": "exit",
+          "signal": 0
+        },
+        "sqlite": {
+          "inMemory": true,
+          "ok": true
+        },
+        "worker": {
+          "ok": true,
+          "realFile": true
+        }
+      },
+      "nodeAbi": "127",
+      "nodeVersion": "v22.23.2",
+      "ok": true,
+      "platform": "darwin"
+    },
+    "profileRoot": "/Users/runner/work/_temp/21x-packaged-ezfvk1zj/profile",
+    "resourceRoot": "/Users/runner/work/_temp/21x-packaged-ezfvk1zj/21x Tauri Feasibility.app/Contents/Resources/resources",
+    "systemNodeHidden": true
+  },
+  "schemaVersion": 1,
+  "shutdown": {
+    "engineUnavailable": true,
+    "ownedChildExited": true,
+    "ownershipMode": "unix-process-group-cooperative-parent-loss"
+  },
+  "stage": "complete",
+  "verification": {
+    "packageKind": "dmg",
+    "packageSha256": "2fcc79fcbee660ca94f7a521c37e15a426ed05bdc74fc40d09395c74f6db71a8",
+    "artifact": "21x Tauri Feasibility_0.1.0_x64.dmg",
+    "packagedExecutable": "/Users/runner/work/_temp/21x-packaged-ezfvk1zj/21x Tauri Feasibility.app/Contents/MacOS/twentyonex-tauri-feasibility",
+    "packagedResources": true,
+    "ownedRunningProcessesAfterExit": []
+  },
+  "provenance": {
+    "sourceCommit": "c8f131c85300bd1f20986af7de36c7b1ed1b3cf9",
+    "workflowRun": 38281521042,
+    "target": "macos-x64",
+    "scope": "debug packaged feasibility; synthetic runtime/database tests; not release signing or full feature parity"
+  }
+}

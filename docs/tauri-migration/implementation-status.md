@@ -110,6 +110,35 @@ macOS PTY failure was traced to non-executable upstream helper files, and stagin
 now repairs permissions only on owned regular helpers. Windows initialization and
 Linux bundling need diagnosed retries. These failures keep G0 open.
 
+The next [packaged run](https://github.com/krazyjakee/21x/actions/runs/38281521042)
+passed both macOS architectures, including the actual DMG install/GUI, SQLite,
+PTY, worker, SDK imports, database proof and shutdown checks. Compact reports are
+checked in for [x64](evidence/macos-x64-installed-gui.json) and
+[arm64](evidence/macos-arm64-installed-gui.json). Windows stopped at the staged
+dependency link check; isolated npm environment/cwd and containment checks now
+prevent repository dependency borrowing. Linux passed supervisor tests and GUI
+compilation, then linuxdeploy rejected an unused musl SQLite prebuild. Staging
+now removes unused foreign SQLite prebuilds while preserving the selected bytes.
+Windows/Linux still need successful package retries.
+
+The real [credential retry](https://github.com/krazyjakee/21x/actions/runs/38282440311)
+passed macOS [x64](evidence/macos-x64-credential-proof.json) and
+[arm64](evidence/macos-arm64-credential-proof.json), including candidate reload,
+tamper rejection and reopening original Electron ciphertext. Linux and Windows
+need diagnosed retries. These are unpacked real Electron synthetic fixtures;
+existing signed-installation ACLs and live credential import remain untested.
+
+The shared lifetime profile lock now precedes shipping Electron data/provider
+startup and stays held until process exit. Ten real lock regressions passed,
+including cross-process contention/crash and aliases. The synthetic Node service
+uses the same guard before opening the real schema-32 database. Its actual staged
+private-pipe proof passed commands, seven events, projection update/duplicate
+handling, contention rejection, cancellation before mutation, graceful drain,
+reopen/new epoch and final cleanup. The restricted Rust database round trip also
+passed. A separate compile-selected task UI and installed Linux reload smoke are
+implemented; their GUI result is still pending. Full agent/HITL and large-snapshot
+work remains open, so this database slice does not close G2.
+
 ## Remaining work and next batch
 
 Extend native packaging/runtime evidence beyond the Linux debug package, produce real legacy Electron/OS credential conversion fixtures (T03). Finish T00's resource/process ownership audit and performance baseline. Resolve the decision register and accept G0/G1 before broad feature porting.
