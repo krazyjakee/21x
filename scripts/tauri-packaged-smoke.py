@@ -4,7 +4,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -26,6 +25,18 @@ def one(pattern):
     if len(values) != 1:
         raise RuntimeError(f"Expected one package for {pattern}; found {len(values)}")
     return values[0].resolve()
+
+
+def physical_path(value):
+    # Rust canonicalize uses Win32 extended-length paths; normalize them before
+    # comparing to Python's ordinary runner/installer paths.
+    value = str(value)
+    if sys.platform == "win32":
+        if value.startswith("\\\\?\\UNC\\"):
+            value = "\\\\" + value[8:]
+        elif value.startswith("\\\\?\\"):
+            value = value[4:]
+    return Path(value).resolve()
 
 
 def packaged_executable(kind, root, evidence):
@@ -77,7 +88,8 @@ def packaged_executable(kind, root, evidence):
         raise RuntimeError("Unsupported package kind")
     if not executable.is_file():
         raise RuntimeError("Packaged executable is missing")
-    checksum = hashlib.file_digest(open(artifact, "rb"), "sha256").hexdigest()
+    with open(artifact, "rb") as package_file:
+        checksum = hashlib.file_digest(package_file, "sha256").hexdigest()
     return command, installed.resolve(), executable.resolve(), extra, artifact, checksum
 
 
@@ -100,7 +112,7 @@ def running_owned_node(owned_node):
         if isinstance(records, dict):
             records = [records]
         return [str(item["ProcessId"]) for item in records
-                if item.get("ExecutablePath") and Path(item["ExecutablePath"]).resolve() == owned_node]
+                if item.get("ExecutablePath") and physical_path(item["ExecutablePath"]) == owned_node]
     if sys.platform == "darwin":
         # lsof reports the mapped executable's txt file (not a truncated ps name).
         raw = subprocess.run(["/usr/sbin/lsof", "-n", "-Fpn", str(owned_node)],
@@ -134,9 +146,9 @@ def main():
         assert runtime["developmentFrontend"] is False
         assert runtime["nativeProbe"]["ok"] is True
         assert runtime["nativeProbe"]["arch"] == args.arch
-        resources = Path(runtime["resourceRoot"]).resolve()
+        resources = physical_path(runtime["resourceRoot"])
         assert resources.is_relative_to(installed)
-        assert Path(runtime["profileRoot"]).resolve() == root / "profile"
+        assert physical_path(runtime["profileRoot"]) == root / "profile"
         owned_node = resources / "node" / ("node.exe" if sys.platform == "win32" else "node")
         assert owned_node.is_file()
         assert (resources / "service/feasibility.mjs").is_file()
