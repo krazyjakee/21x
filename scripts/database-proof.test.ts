@@ -7,8 +7,11 @@ import { describe, expect, it } from 'vitest'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 describe('portable database standalone Node proof', () => {
-  it('uses real SQLite and durable projections without Electron or a production profile', async () => {
-    const executable = process.env.TAURI_NODE_RUNTIME || process.execPath
+  it.skipIf(!process.env.TAURI_SQLITE_MODULE)('uses explicitly staged SQLite in standalone Node without a production profile', async () => {
+    // Verify executes Vitest under Electron and rebuilds its root SQLite addon
+    // for Electron. Select Node independently and require an explicit Node ABI
+    // addon; the native workflow enables this after tauri:prepare:native.
+    const executable = process.env.TAURI_NODE_RUNTIME || 'node'
     const { stdout } = await promisify(execFile)(executable, ['scripts/database-proof.mjs'], {
       cwd: root,
       timeout: 30_000,

@@ -10,9 +10,11 @@ Legacy managed task MCP ownership is ambiguous: Electron identifies the row by `
 
 ## Standalone proof
 
-Run `node scripts/database-proof.mjs` after the central batch has installed/rebuilt native dependencies for standalone Node. The Vitest wrapper is `scripts/database-proof.test.ts`; `TAURI_NODE_RUNTIME` can select the installed standalone executable when the test harness itself uses another runtime. The executable must match the installed `better-sqlite3` ABI. The proof rejects Electron runtimes.
+After `tauri:prepare:native`, run `node scripts/database-proof.mjs --sqlite-module /absolute/repo/src-tauri/resources/service/node_modules/better-sqlite3`. `TAURI_SQLITE_MODULE` can supply that explicit package path instead. The runner never defaults to the root SQLite addon: Verify rebuilds it for Electron, which has a different ABI. The selected package must match the standalone Node executable. The proof rejects Electron runtimes. The native workflow owns execution after preparation; this script does not install or rebuild dependencies.
 
-The runner transpiles only the portable dependency graph into a temporary directory, reuses the installed dependency tree via a temporary link, and rejects unexpected packages, Electron imports, or dynamic runtime imports. It creates a synthetic profile and separate workspace/attachment roots, initializes the real production schema, then checks:
+The Vitest wrapper is `scripts/database-proof.test.ts` and skips the actual native proof unless `TAURI_SQLITE_MODULE` is set. It defaults to `node` on PATH, independently of the Electron test runner; `TAURI_NODE_RUNTIME` selects a specific standalone executable. A skipped test does not constitute a passing Node proof.
+
+The runner transpiles only the portable dependency graph into a temporary directory, links the root pure JavaScript `cuid2` package and the explicitly selected standalone SQLite package separately, and rejects unexpected packages, Electron imports, or dynamic runtime imports. There is no whole-tree link or implicit SQLite ABI fallback. It creates a synthetic profile and separate workspace/attachment roots, initializes the real production schema, then checks:
 
 - task create/read and project/Captain/default-agent seeds;
 - durable transcript snapshot, update delta, duplicate suppression, task isolation, revision continuity, and close/reopen;
