@@ -26,6 +26,26 @@ const QUEUE_REASONS: &[&str] = &[
     "agent_unavailable",
 ];
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+const RECOVERY_ERROR: &str = "The agent operation failed.";
+const QUEUE_FIELDS: &[&str] = &[
+    "id",
+    "taskId",
+    "projectId",
+    "agentId",
+    "reason",
+    "queuedAt",
+    "position",
+    "priority",
+    "state",
+    "retryCount",
+    "nextRetryAt",
+    "generation",
+    "dependencyReason",
+    "recoveryCause",
+    "recoveryAction",
+    "recoveryResult",
+    "lastError",
+];
 
 fn object(value: &Value, required: &[&str], optional: &[&str]) -> bool {
     value.as_object().is_some_and(|map| {
@@ -65,6 +85,9 @@ fn positive(value: &Value) -> bool {
     value
         .as_u64()
         .is_some_and(|n| n >= 1 && n <= MAX_SAFE_INTEGER)
+}
+fn nonnegative(value: &Value) -> bool {
+    value.as_u64().is_some_and(|n| n <= MAX_SAFE_INTEGER)
 }
 fn member(value: &Value, allowed: &[&str]) -> bool {
     value.as_str().is_some_and(|s| allowed.contains(&s))
@@ -289,6 +312,41 @@ fn recovery_token(value: &Value) -> bool {
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'_' | b'-'))
     })
 }
+fn queue_entry(value: &Value) -> bool {
+    object(value, QUEUE_FIELDS, &[])
+        && ["id", "taskId", "projectId", "agentId"]
+            .iter()
+            .all(|key| id(&value[*key]))
+        && member(&value["reason"], QUEUE_REASONS)
+        && text(&value["queuedAt"], 128)
+        && positive(&value["position"])
+        && (value["priority"].is_null() || text(&value["priority"], 128))
+        && member(
+            &value["state"],
+            &[
+                "queued",
+                "retrying",
+                "claimed",
+                "starting",
+                "started",
+                "recovered",
+                "failed",
+                "cancelled",
+            ],
+        )
+        && nonnegative(&value["retryCount"])
+        && nonnegative(&value["generation"])
+        && (value["nextRetryAt"].is_null() || text(&value["nextRetryAt"], 128))
+        && [
+            "dependencyReason",
+            "recoveryCause",
+            "recoveryAction",
+            "recoveryResult",
+        ]
+        .iter()
+        .all(|key| value[*key].is_null() || recovery_token(&value[*key]))
+        && (value["lastError"].is_null() || value["lastError"] == RECOVERY_ERROR)
+}
 pub(super) fn valid_event(frame: &Value) -> bool {
     let payload = &frame["payload"];
     if !json(payload, 0) {
@@ -315,8 +373,15 @@ pub(super) fn valid_event(frame: &Value) -> bool {
                     .is_none_or(|item| *item == true && payload.get("epoch").is_some())
         }
         Some("agent:startQueueChanged") => {
-            object(payload, &["queue"], &[])
-                && payload["queue"].as_array().is_some_and(Vec::is_empty)
+            object(payload, &["queue"], &["failed"])
+                && payload["queue"]
+                    .as_array()
+                    .is_some_and(|entries| entries.len() <= 1 && entries.iter().all(queue_entry))
+                && payload.get("failed").is_none_or(|failure| {
+                    object(failure, &["taskId", "error"], &[])
+                        && id(&failure["taskId"])
+                        && failure["error"] == RECOVERY_ERROR
+                })
         }
         Some("project:statusChanged" | "concurrency:changed") => {
             object(payload, &["projectId"], &[]) && id(&payload["projectId"])
@@ -330,7 +395,7 @@ pub(super) fn valid_event(frame: &Value) -> bool {
                 && ["cause", "action", "result"]
                     .iter()
                     .all(|key| recovery_token(&payload[*key]))
-                && (payload["error"].is_null() || payload["error"] == "The agent operation failed.")
+                && (payload["error"].is_null() || payload["error"] == RECOVERY_ERROR)
         }
         // Existing task:updated/transcript:changed use desktop.rs's exact DB DTO.
         _ => false,
@@ -469,5 +534,44 @@ mod tests {
         assert!(!nonblank(&json!("\u{feff}\u{00a0}"), 512));
         assert!(text(&json!("🔑".repeat(256)), 512));
         assert!(!text(&json!("🔑".repeat(257)), 512));
+    }
+    #[test]
+    fn actual_start_claim_queue_is_public_bounded_and_has_exact_recovery_metadata() {
+        let row = json!({"id":"claim-1","taskId":"task-1","projectId":"project-1","agentId":"agent-1", "reason":"agent_limit","queuedAt":"fixture-time","position":1,"priority":"medium","state":"starting","retryCount":0,"nextRetryAt":null,"generation":1,"dependencyReason":null,"recoveryCause":null,"recoveryAction":null,"recoveryResult":null,"lastError":null});
+        let event =
+            |rows: Value| json!({"operation":"agent:startQueueChanged","payload":{"queue":rows}});
+        assert!(valid_event(&event(json!([row.clone()]))));
+        assert!(!valid_event(&event(json!([row.clone(), row.clone()]))));
+        for (key, invalid) in [
+            ("position", json!(0)),
+            ("retryCount", json!(-1)),
+            ("generation", json!(9007199254740992u64)),
+            ("state", json!("private_state")),
+            ("recoveryCause", json!("private diagnostic text")),
+            ("lastError", json!("private backend detail")),
+            ("nextRetryAt", json!("x".repeat(129))),
+        ] {
+            let mut malformed = row.clone();
+            malformed[key] = invalid;
+            assert!(!valid_event(&event(json!([malformed]))));
+        }
+        let mut private = row.clone();
+        private["ownerToken"] = json!("must-not-forward");
+        assert!(!valid_event(&event(json!([private]))));
+        let mut recovery = row.clone();
+        recovery["recoveryCause"] = json!("fixture_restart");
+        recovery["recoveryAction"] = json!("resume");
+        recovery["recoveryResult"] = json!("failed");
+        recovery["lastError"] = json!(RECOVERY_ERROR);
+        assert!(valid_event(&event(json!([recovery]))));
+        assert!(valid_event(
+            &json!({"operation":"agent:startQueueChanged","payload":{"queue":[],"failed":{"taskId":"task-1","error":RECOVERY_ERROR}}})
+        ));
+        assert!(!valid_event(
+            &json!({"operation":"agent:startQueueChanged","payload":{"queue":[],"failed":{"taskId":"task-1","error":"private failure"}}})
+        ));
+        assert!(!valid_event(
+            &json!({"operation":"agent:startQueueChanged","payload":{"queue":[],"failed":null}})
+        ));
     }
 }
