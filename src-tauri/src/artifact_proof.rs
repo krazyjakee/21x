@@ -1,7 +1,10 @@
 //! A fixed debug diagnostic. Production artifacts require a separate unprivileged Webview.
 use serde_json::{json, Value};
 use std::{
-    sync::mpsc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -57,8 +60,12 @@ fn wait(
     phase: &str,
     require_event: bool,
 ) -> Option<Value> {
+    let mut last = None;
     while Instant::now() < deadline {
         if let Some(value) = evaluate(window) {
+            if value["phase"] == phase {
+                last = Some(value.clone());
+            }
             if value["phase"] == phase
                 && value["complete"] == true
                 && (!require_event || value["eventReceived"] == true)
@@ -68,7 +75,7 @@ fn wait(
         }
         thread::sleep(Duration::from_millis(50));
     }
-    None
+    last
 }
 fn all(value: &Value, keys: &[&str]) -> bool {
     keys.iter().all(|key| value[*key] == true)
@@ -131,6 +138,10 @@ pub(crate) fn run(main: &WebviewWindow) -> Value {
     }
     let epoch_owned = epoch.to_string();
     let epoch_for_load = epoch_owned.clone();
+    let local_finished = Arc::new(AtomicBool::new(false));
+    let local_injected = Arc::new(AtomicBool::new(false));
+    let finished_for_load = local_finished.clone();
+    let injected_for_load = local_injected.clone();
     let built = tauri::WebviewWindowBuilder::new(
         main.app_handle(),
         LABEL,
@@ -155,7 +166,13 @@ pub(crate) fn run(main: &WebviewWindow) -> Value {
             } else {
                 "excluded"
             };
-            let _ = window.eval(script(mode, &epoch_for_load));
+            if mode == "excluded" {
+                finished_for_load.store(true, Ordering::SeqCst);
+            }
+            let injected = window.eval(script(mode, &epoch_for_load)).is_ok();
+            if mode == "excluded" {
+                injected_for_load.store(injected, Ordering::SeqCst);
+            }
         }
     })
     .build();
@@ -165,6 +182,8 @@ pub(crate) fn run(main: &WebviewWindow) -> Value {
     let artifact = OwnedWindow(window);
     let local = wait(&artifact.0, deadline, "excluded", false);
     report["sameLocalOriginExcludedWebview"] = local.clone().unwrap_or(Value::Null);
+    report["excludedPageFinished"] = json!(local_finished.load(Ordering::SeqCst));
+    report["excludedScriptSubmitted"] = json!(local_injected.load(Ordering::SeqCst));
     if !local.as_ref().is_some_and(|value| {
         all(
             value,
@@ -229,13 +248,15 @@ pub(crate) fn run(main: &WebviewWindow) -> Value {
     } else {
         None
     };
-    report["mainReceivedTargetedServiceEvent"] = json!(canary.is_some());
+    let received = canary
+        .as_ref()
+        .is_some_and(|value| value["eventReceived"] == true);
+    report["mainReceivedTargetedServiceEvent"] = json!(received);
     let _ = artifact.0.close();
     while Instant::now() < deadline && main.app_handle().get_webview_window(LABEL).is_some() {
         thread::sleep(Duration::from_millis(25));
     }
     report["artifactWindowClosed"] = json!(main.app_handle().get_webview_window(LABEL).is_none());
-    report["passed"] =
-        json!(frame_ok && canary.is_some() && report["artifactWindowClosed"] == true);
+    report["passed"] = json!(frame_ok && received && report["artifactWindowClosed"] == true);
     report
 }

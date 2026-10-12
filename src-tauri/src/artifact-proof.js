@@ -13,12 +13,17 @@
     })
   };
   async function denied(command) {
-    try { const value = await commands[command](); if (typeof value === 'function') value(); return false; }
+    result.attempt = command;
+    let timeout;
+    try { const value = await Promise.race([commands[command](), new Promise((_, reject) => {
+      timeout = setTimeout(() => reject({ code: 'PROOF_DEADLINE' }), 2000);
+    })]); if (typeof value === 'function') value(); return false; }
     catch (error) {
       // Accept only recognized native authorization errors, never absence,
       // malformed arguments, unknown commands, generic failure or timeout.
+      if (error?.code === 'PROOF_DEADLINE') result.deadlineReached = true;
       return error?.code === 'UNAUTHORIZED' || typeof error === 'string' && /not allowed|not authorized|denied/i.test(error);
-    }
+    } finally { clearTimeout(timeout); }
   }
   if (configuration.mode === 'main') {
     result.desktopAccepted = false; result.statusAccepted = false; result.listenAccepted = false; result.eventReceived = false;
