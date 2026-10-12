@@ -36,7 +36,7 @@
           "channelExpression": "channel",
           "column": 52,
           "file": "src/main/agent-manager-core.ts",
-          "line": 5255,
+          "line": 5261,
           "method": "send",
           "target": "reviewed-event-wrapper"
         }
@@ -73,7 +73,7 @@
           "channelExpression": "channel",
           "column": 7,
           "file": "src/main/agent-manager-core.ts",
-          "line": 5260,
+          "line": 5266,
           "method": "send",
           "target": "reviewed-event-wrapper"
         }
@@ -124,7 +124,7 @@
           "channelExpression": "channel",
           "column": 5,
           "file": "src/main/agent-manager-core.ts",
-          "line": 5291,
+          "line": 5297,
           "method": "send",
           "target": "reviewed-event-wrapper"
         }
@@ -2747,7 +2747,7 @@
         {
           "column": 5,
           "file": "src/main/agent-manager-core.ts",
-          "line": 5250,
+          "line": 5256,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -14118,7 +14118,7 @@
         {
           "column": 16,
           "file": "src/main/agent-manager-core.ts",
-          "line": 5232,
+          "line": 5238,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -14126,7 +14126,7 @@
         {
           "column": 9,
           "file": "src/main/agent-manager-core.ts",
-          "line": 5240,
+          "line": 5246,
           "method": "send",
           "resolution": "literal",
           "target": "reviewed-event-wrapper"
@@ -18674,7 +18674,7 @@
         "producerOwner": "agent-manager-host",
         "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
       },
-      "line": 5255,
+      "line": 5261,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
@@ -18713,7 +18713,7 @@
         "producerOwner": "agent-manager",
         "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
       },
-      "line": 5260,
+      "line": 5266,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
@@ -18750,7 +18750,7 @@
         "producerOwner": "agent-manager",
         "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
       },
-      "line": 5291,
+      "line": 5297,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
