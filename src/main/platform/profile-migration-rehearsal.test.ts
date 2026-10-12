@@ -151,6 +151,15 @@ describe('bounded actual SQLite import rehearsal', () => {
     expect(query(join(value.root, '21x.db'), 'SELECT rowid,value FROM fixture_rowids')).toEqual([{ rowid: 100, value: 'preserve identity' }])
   })
 
+  it('rejects a credential trigger that changes an unrelated AUTOINCREMENT sequence', () => {
+    const value = fixture()
+    const source = new Database(join(value.root, '21x.db'))
+    source.exec("CREATE TABLE fixture_sequence(id INTEGER PRIMARY KEY AUTOINCREMENT, value TEXT); INSERT INTO fixture_sequence(value) VALUES('ordinary'); CREATE TRIGGER fixture_sequence_mutation BEFORE UPDATE OF value ON secrets BEGIN UPDATE sqlite_sequence SET seq=999 WHERE name='fixture_sequence'; END")
+    source.close()
+    expect(() => rehearseProfileCredentialImport(value.options)).toThrow('REHEARSAL_PRESERVATION_FAILED')
+    expect(query(join(value.root, '21x.db'), "SELECT seq FROM sqlite_sequence WHERE name='fixture_sequence'")).toEqual([{ seq: 1 }])
+  })
+
   it('rejects an active SQLite transaction even with the fixture profile sentinel held', () => {
     const value = fixture()
     const busy = new Database(join(value.root, '21x.db'))

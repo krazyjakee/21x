@@ -174,7 +174,7 @@ function createCapsule(ctx: Context, snapshot: Buffer, resources: Resource[]): {
   finally { encryptedManifest.fill(0) }
 }
 function fromBase64(value: unknown, limit: number): Buffer {
-  if (typeof value !== 'string' || !value || value.length > limit * 2 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) fail('REHEARSAL_SNAPSHOT_CORRUPT')
+  if (typeof value !== 'string' || !value || value.length > limit * 2 || value.length % 4 !== 0) fail('REHEARSAL_SNAPSHOT_CORRUPT')
   const bytes = Buffer.from(value, 'base64')
   if (bytes.length > limit || bytes.toString('base64') !== value) { bytes.fill(0); fail('REHEARSAL_SNAPSHOT_CORRUPT') }
   return bytes
@@ -254,7 +254,7 @@ function inputs(db: Database.Database, options: RehearsalOptions): LegacyCredent
 }
 function preservedHash(db: Database.Database, locations: readonly CredentialLocation[]): string {
   const excluded = new Set(locations.map(keyOf))
-  const tables = db.prepare("SELECT name, sql FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string; sql: string }[]
+  const tables = db.prepare("SELECT name, sql FROM sqlite_schema WHERE type='table' AND (name NOT LIKE 'sqlite_%' OR name='sqlite_sequence') ORDER BY name").all() as { name: string; sql: string }[]
   const digest = createHash('sha256')
   for (const table of tables) {
     let rows: Record<string, unknown>[]
