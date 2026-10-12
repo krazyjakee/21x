@@ -80,7 +80,7 @@ export class DatabaseBackend {
     if (signal.aborted) throw new ServiceProtocolError('CANCELLED')
     if (!this.options.isTrustedDesktop(caller) || caller.engineEpoch !== this.options.engineEpoch ||
       caller.principal !== 'trusted-desktop-main' || !isFixtureTranscriptInput(payload)) throw new ServiceProtocolError('INVALID_ARGUMENTS')
-    const input = payload as { taskId: string; parts: TranscriptPartInput[] }
+    const input = payload
     if (!this.database.getTask(input.taskId) || !this.canUseTask(input.taskId, caller, true)) throw new ServiceProtocolError('INVALID_REQUEST')
     const result = this.database.upsertTranscriptParts(input.taskId, input.parts, 'live')
     if (result.changedPartIds.length) {
@@ -170,7 +170,7 @@ export class DatabaseBackend {
   }
 }
 
-export function isFixtureTranscriptInput(value: unknown): boolean {
+export function isFixtureTranscriptInput(value: unknown): value is { taskId: string; parts: TranscriptPartInput[] } {
   return isRecord(value) && hasExactKeys(value, ['taskId', 'parts']) && isDatabaseId(value.taskId) && Array.isArray(value.parts) && value.parts.length <= 32 &&
     value.parts.every(part => isRecord(part) && hasExactKeys(part, ['id', 'role', 'content'], ['partType', 'tool', 'payload', 'receivedAt']) &&
       typeof part.id === 'string' && part.id.length > 0 && part.id.length <= 512 && !part.id.includes('\0') &&

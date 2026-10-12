@@ -136,7 +136,7 @@ const oneData = (check: (value: unknown) => boolean, copy: (value: Record<string
 const descriptors: Record<DatabaseDesktopOperation, Descriptor> = {
   'db:getTasks': {
     validateArgs: value => Array.isArray(value) && value.length <= 1 && (value[0] === undefined || isDatabaseId(value[0])),
-    encodeArgs: args => args[0] === undefined ? {} : { projectId: args[0] as string },
+    encodeArgs: args => { const payload: Record<string, JsonValue> = {}; if (args[0] !== undefined) payload.projectId = args[0] as string; return payload },
     decodeArgs: value => { if (!object(value, [], ['projectId']) || value.projectId !== undefined && !isDatabaseId(value.projectId)) return fail('INVALID_ARGUMENTS'); return value.projectId === undefined ? [] : [value.projectId] },
     validateResult: value => Array.isArray(value) && value.length <= 128 && value.every(isDatabaseTask),
     encodeResult: value => (value as unknown[]).map(encodeTask)
@@ -152,7 +152,7 @@ const descriptors: Record<DatabaseDesktopOperation, Descriptor> = {
   'db:deleteTask': { ...idArgs('id'), validateResult: value => typeof value === 'boolean' },
   'project:getAll': {
     validateArgs: value => Array.isArray(value) && value.length <= 1 && (value[0] === undefined || object(value[0], [], ['includeArchived']) && (value[0].includeArchived === undefined || typeof value[0].includeArchived === 'boolean')),
-    encodeArgs: args => (args[0] as { includeArchived?: boolean } | undefined)?.includeArchived === undefined ? {} : { includeArchived: (args[0] as { includeArchived: boolean }).includeArchived },
+    encodeArgs: args => { const payload: Record<string, JsonValue> = {}; const value = (args[0] as { includeArchived?: boolean } | undefined)?.includeArchived; if (value !== undefined) payload.includeArchived = value; return payload },
     decodeArgs: value => { if (!object(value, [], ['includeArchived']) || value.includeArchived !== undefined && typeof value.includeArchived !== 'boolean') return fail('INVALID_ARGUMENTS'); return value.includeArchived === undefined ? [] : [{ includeArchived: value.includeArchived }] },
     validateResult: value => Array.isArray(value) && value.length <= 128 && value.every(isDatabaseProject), encodeResult: value => (value as unknown[]).map(encodeProject)
   },
@@ -217,8 +217,20 @@ const eventValidators: Record<DatabaseDesktopEvent, (value: unknown) => boolean>
     (value.parts as Record<string, unknown>[]).every(part => part.taskId === value.taskId && (part.rev as number) <= (value.maxRev as number)) &&
     (value.reloadRequired === undefined || value.reloadRequired === true && (value.parts as unknown[]).length === 0)
 }
-export const DATABASE_EVENT_CODECS = Object.fromEntries(DATABASE_DESKTOP_EVENTS.map(operation => [operation, {
-  validatePayload: eventValidators[operation],
-  decodePayload(value: JsonValue) { if (!eventValidators[operation](value) || !isJsonValue(value)) return fail('INVALID_RESULT'); return value },
-  encodePayload(value: unknown) { if (!eventValidators[operation](value) || !isJsonValue(value)) return fail('INVALID_ARGUMENTS'); return value }
-}])) as { [K in DatabaseDesktopEvent]: { validatePayload: (value: unknown) => boolean; decodePayload: (value: JsonValue) => DesktopEventMap[K]; encodePayload: (value: DesktopEventMap[K]) => JsonValue } }
+interface DatabaseEventCodec<K extends DatabaseDesktopEvent> {
+  validatePayload: (value: unknown) => boolean
+  decodePayload: (value: JsonValue) => DesktopEventMap[K]
+  encodePayload: (value: DesktopEventMap[K]) => JsonValue
+}
+function eventCodec<K extends DatabaseDesktopEvent>(operation: K): DatabaseEventCodec<K> {
+  return {
+    validatePayload: eventValidators[operation],
+    decodePayload(value) {
+      if (!eventValidators[operation](value) || !isJsonValue(value)) return fail('INVALID_RESULT')
+      // Each exact event schema above validates the public DTO before this cast.
+      return value as unknown as DesktopEventMap[K]
+    },
+    encodePayload(value) { if (!eventValidators[operation](value) || !isJsonValue(value)) return fail('INVALID_ARGUMENTS'); return value }
+  }
+}
+export const DATABASE_EVENT_CODECS = Object.fromEntries(DATABASE_DESKTOP_EVENTS.map(operation => [operation, eventCodec(operation)])) as { [K in DatabaseDesktopEvent]: DatabaseEventCodec<K> }

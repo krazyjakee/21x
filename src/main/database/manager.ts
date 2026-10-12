@@ -254,7 +254,7 @@ export class DatabaseManager {
       if (typeof path !== 'string' || !isAbsolute(path) || path.includes('\0')) throw new Error('Database paths must be absolute')
     }
     const disabled = options.managedTaskMcp && 'disabled' in options.managedTaskMcp
-    if (disabled) {
+    if (options.managedTaskMcp && 'disabled' in options.managedTaskMcp) {
       if (options.managedTaskMcp.disabled !== true || Object.keys(options.managedTaskMcp).length !== 1) throw new Error('Invalid managed task MCP policy')
     } else validateManagedTaskMcpRuntime(options.managedTaskMcp as ManagedTaskMcpRuntime)
     this.paths = { ...options.paths }

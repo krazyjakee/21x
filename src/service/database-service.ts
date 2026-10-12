@@ -9,7 +9,7 @@ import { DatabaseBackend, isFixtureTranscriptInput } from './database-backend'
 import { ServicePeer, type OperationSchema } from './transport/peer'
 import {
   hasExactKeys, isBootstrapResult, isInitializePayload, isJsonValue, isRecord, ServiceProtocolError,
-  SERVICE_PROTOCOL_VERSION, type JsonValue
+  SERVICE_PROTOCOL_VERSION
 } from '../shared/service-protocol'
 import { DATABASE_COMMAND_CODECS, DATABASE_DESKTOP_EVENTS, DATABASE_EVENT_CODECS } from '../shared/database-desktop-codecs'
 
