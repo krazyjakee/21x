@@ -73,6 +73,34 @@ async function npmCli(nodeExecutable, supplied) {
   throw new Error('Native preparation needs npm-cli.js; pass --npm-cli with its absolute path')
 }
 
+/** A parent pnpm lifecycle must never choose npm's project or linked strategy. */
+export function nativeNpmEnvironment(service, nodeRoot, inherited = process.env) {
+  const env = Object.fromEntries(Object.entries(inherited).filter(([key]) => {
+    const name = key.toLowerCase();
+    return !name.startsWith('npm_package_') && !name.startsWith('npm_lifecycle_') &&
+      !['npm_execpath', 'npm_node_execpath', 'npm_config_local_prefix', 'npm_config_prefix',
+        'npm_config_workspace', 'npm_config_workspaces', 'npm_config_include_workspace_root',
+        'npm_config_install_strategy', 'pnpm_config_workspace_dir', 'pnpm_script_src_dir',
+        'init_cwd', 'path'].includes(name)
+  }))
+  return { ...env, npm_config_prefix: service, npm_config_local_prefix: service,
+    npm_config_workspaces: 'false', npm_config_install_strategy: 'hoisted',
+    npm_package_config_node_gyp_jobs: '1', MAKEFLAGS: '-j1',
+    PATH: nodeRoot + (process.platform === 'win32' ? ';' : ':') + (inherited.PATH ?? '') }
+}
+
+async function stagedPackageVersion(service, name) {
+  const base = await realpath(join(service, 'node_modules'))
+  const directory = join(service, 'node_modules', name)
+  let details
+  try { details = await lstat(directory) }
+  catch (error) { if (error.code === 'ENOENT') return; throw error }
+  if (!details.isDirectory() || details.isSymbolicLink()) return
+  const location = relative(base, await realpath(directory))
+  if (isAbsolute(location) || location === '..' || location.startsWith(`..${sep}`)) return
+  return (await readJson(join(directory, 'package.json')))?.version
+}
+
 export async function repairPtyHelperModes(service, platform = process.platform) {
   if (platform !== 'darwin') return []
   const base = await realpath(service)
@@ -139,12 +167,11 @@ export async function prepareRuntime({
       arch: process.arch, dependencies: manifest.dependencies }
     const installed = await readJson(join(service, '.native-prepared.json'))
     const packagesPresent = (await Promise.all(Object.entries(manifest.dependencies).map(async ([name, version]) => {
-      const details = await readJson(join(service, 'node_modules', name, 'package.json'))
-      return details?.version === version
+      return await stagedPackageVersion(service, name) === version
     }))).every(Boolean)
     const smoke = () => {
       const checked = spawnSync(executable, ['--input-type=commonjs', '-e',
-        "console.log=()=>{};const result={};for(const name of ['better-sqlite3','node-pty']){try{const module=require(name);if(name==='better-sqlite3'){const db=new module(':memory:');db.prepare('SELECT 1').get();db.close()}result[name]=true}catch{result[name]=false}}process.stdout.write(JSON.stringify(result))"],
+        "console.log=()=>{};const fs=require('node:fs'),path=require('node:path');const base=fs.realpathSync(path.join(process.cwd(),'node_modules'));const result={};for(const name of ['better-sqlite3','node-pty']){try{const entry=fs.realpathSync(require.resolve(name));const within=path.relative(base,entry);if(path.isAbsolute(within)||within==='..'||within.startsWith('..'+path.sep))throw new Error();const module=require(entry);if(name==='better-sqlite3'){const db=new module(':memory:');db.prepare('SELECT 1').get();db.close()}result[name]=true}catch{result[name]=false}}process.stdout.write(JSON.stringify(result))"],
       { cwd: service, stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8', timeout: 15_000, maxBuffer: 8192 })
       try {
         if (checked.error || checked.status !== 0) return { 'better-sqlite3': false, 'node-pty': false }
@@ -154,10 +181,8 @@ export async function prepareRuntime({
     const healthy = result => Object.keys(config.nativeDependencies).every(name => result?.[name] === true)
     const priorSmoke = packagesPresent ? smoke() : undefined
     if (!packagesPresent || JSON.stringify(installed) !== JSON.stringify(nativeSignature) || !healthy(priorSmoke)) {
-      const result = spawnSync(nodeExecutable, [cli, 'install', '--prefix', service, '--omit=dev', '--no-audit', '--no-fund', '--foreground-scripts'], {
-        stdio: 'inherit',
-        env: { ...process.env, npm_package_config_node_gyp_jobs: '1', MAKEFLAGS: '-j1',
-          PATH: nodeRoot + (process.platform === 'win32' ? ';' : ':') + (process.env.PATH ?? '') }
+      const result = spawnSync(nodeExecutable, [cli, 'install', '--prefix', service, '--omit=dev', '--workspaces=false', '--install-strategy=hoisted', '--install-links=true', '--no-audit', '--no-fund', '--foreground-scripts'], {
+        cwd: service, stdio: 'inherit', env: nativeNpmEnvironment(service, nodeRoot)
       })
       if (result.error || result.status !== 0) throw new Error('Native module preparation failed; no success marker was written')
       let checked = smoke()
@@ -166,15 +191,16 @@ export async function prepareRuntime({
         // the explicitly pinned addons, in their standalone staging directory.
         const failed = Object.keys(config.nativeDependencies).filter(name => checked[name] !== true)
         const rebuilt = spawnSync(nodeExecutable, [cli, 'rebuild', ...failed,
-          '--prefix', service, '--foreground-scripts'], {
-          stdio: 'inherit',
-          env: { ...process.env, npm_package_config_node_gyp_jobs: '1', MAKEFLAGS: '-j1',
-            PATH: nodeRoot + (process.platform === 'win32' ? ';' : ':') + (process.env.PATH ?? '') }
+          '--prefix', service, '--workspaces=false', '--install-strategy=hoisted', '--foreground-scripts'], {
+          cwd: service, stdio: 'inherit', env: nativeNpmEnvironment(service, nodeRoot)
         })
         if (rebuilt.error || rebuilt.status !== 0) throw new Error('Standalone addon rebuild failed; no success marker was written')
         checked = smoke()
       }
-      if (!healthy(checked)) throw new Error('Standalone native module verification failed; no success marker was written')
+      if (!healthy(checked) || !(await Promise.all(Object.entries(manifest.dependencies).map(async ([name, version]) =>
+        await stagedPackageVersion(service, name) === version))).every(Boolean)) {
+        throw new Error('Standalone native module verification failed; no success marker was written')
+      }
       await writeChanged(join(service, '.native-prepared.json'), nativeSignature)
     }
     await repairPtyHelperModes(service)

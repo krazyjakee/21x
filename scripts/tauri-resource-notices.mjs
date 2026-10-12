@@ -60,12 +60,14 @@ async function inspectModules(directory) {
   catch (error) { if (error.code === 'ENOENT') return; throw error }
   for (const entry of entries) {
     if (entry.name.startsWith('.')) continue
-    if (entry.isSymbolicLink()) throw new Error('Staged dependency tree cannot contain linked packages')
+    if (entry.isSymbolicLink()) throw new Error('Staged dependency tree cannot contain linked packages: ' +
+      JSON.stringify(relative(resourceRoot, join(directory, entry.name)).split('\\').join('/')))
     if (!entry.isDirectory()) continue
     const path = join(directory, entry.name)
     if (entry.name.startsWith('@')) {
       for (const scoped of await readdir(path, { withFileTypes: true })) {
-        if (scoped.isSymbolicLink()) throw new Error('Staged scoped package cannot be linked')
+        if (scoped.isSymbolicLink()) throw new Error('Staged scoped package cannot be linked: ' +
+          JSON.stringify(relative(resourceRoot, join(path, scoped.name)).split('\\').join('/')))
         if (scoped.isDirectory()) await inspectPackage(join(path, scoped.name))
       }
     } else await inspectPackage(path)

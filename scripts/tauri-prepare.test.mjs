@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { prepareRuntime, repairPtyHelperModes } from './tauri-prepare.mjs'
+import { prepareRuntime, repairPtyHelperModes, nativeNpmEnvironment } from './tauri-prepare.mjs'
 
 async function fixture(t, nodeVersion = process.versions.node) {
   const root = await mkdtemp(join(tmpdir(), '21x-tauri-preparation-'))
@@ -89,4 +89,29 @@ test('native preparation refuses a module tree linked to another host', { skip: 
   await symlink(outside, join(root, 'src-tauri/resources/service/node_modules'))
   await assert.rejects(prepareRuntime({ projectRoot: root, native: true }), /cannot be symlinks/)
   assert.equal(await stat(join(outside, 'package.json')).catch(() => null), null)
+})
+
+
+test('private npm staging overrides repository lifecycle and linked install context', () => {
+  const env = nativeNpmEnvironment('/owned/service', '/owned/node', {
+    PATH: '/tools', SystemRoot: 'fixture-windows-root', npm_package_json: '/repository/package.json',
+    npm_lifecycle_event: 'tauri:prepare:native', npm_execpath: '/tools/pnpm.cjs',
+    npm_config_local_prefix: '/repository', NPM_CONFIG_PREFIX: '/repository',
+    npm_config_workspace: '/repository', npm_config_install_strategy: 'linked',
+    INIT_CWD: '/repository', npm_config_cache: '/preserved-cache', HTTPS_PROXY: 'fixture-proxy'
+  })
+  assert.equal(env.npm_package_json, undefined)
+  assert.equal(env.npm_lifecycle_event, undefined)
+  assert.equal(env.npm_execpath, undefined)
+  assert.equal(env.NPM_CONFIG_PREFIX, undefined)
+  assert.equal(env.npm_config_workspace, undefined)
+  assert.equal(env.INIT_CWD, undefined)
+  assert.equal(env.npm_config_local_prefix, '/owned/service')
+  assert.equal(env.npm_config_prefix, '/owned/service')
+  assert.equal(env.npm_config_workspaces, 'false')
+  assert.equal(env.npm_config_install_strategy, 'hoisted')
+  assert.equal(env.npm_config_cache, '/preserved-cache')
+  assert.equal(env.HTTPS_PROXY, 'fixture-proxy')
+  assert.equal(env.SystemRoot, 'fixture-windows-root')
+  assert.ok(env.PATH.startsWith('/owned/node'))
 })
