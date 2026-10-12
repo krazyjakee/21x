@@ -66,7 +66,14 @@ export const CAPTAIN_START_TIMEOUT_MS = 90_000
 export const AGENT_START_TIMEOUT_MS = 120_000
 export const AGENT_SERVER_START_TIMEOUT_MS = 30_000
 export const AGENT_SESSION_START_TIMEOUT_MS = 60_000
+export const AGENT_SHUTDOWN_DRAIN_TIMEOUT_MS = 1000
 const DELIVERY_CLAIM_MS = 60_000
+
+/** A host must keep its DB/provider/profile lease until exit on this failure. */
+export class AgentShutdownIncompleteError extends Error {
+  readonly code = 'AGENT_SHUTDOWN_INCOMPLETE'
+  constructor() { super('Agent lifecycle teardown did not finish before its shutdown deadline') }
+}
 
 /** A deadline whose late completion is fenced from the winning generation. */
 export function withStartupDeadline<T>(
@@ -308,6 +315,8 @@ export class AgentManager extends EventEmitter {
   /** In-flight admitted starts, so a durable message accepted during warm-up
    * joins that start instead of opening a competing Captain session. */
   private sessionStarts: Map<string, Promise<string>> = new Map()
+  /** Raw flights stay owned even when their caller's startup deadline expires. */
+  private readonly shutdownWork = new Set<Promise<unknown>>()
   private sessionStops: Map<string, Promise<void>> = new Map()
   private startupReconciliation: Promise<void> | null = null
   private startQueueDrainScheduled = false
@@ -1589,7 +1598,7 @@ export class AgentManager extends EventEmitter {
   private ensurePollingCoordinator(): void {
     if (this.pollingTimer || this.pollingInProgress) return // Already running or executing
 
-    const tick = async (): Promise<void> => {
+    const runTick = async (): Promise<void> => {
       // Prevent overlapping tick() calls from nudge + heartbeat firing together
       if (this.pollingInProgress) return
       this.pollingInProgress = true
@@ -1627,6 +1636,8 @@ export class AgentManager extends EventEmitter {
         this.nudgePollingCoordinator()
       }
     }
+
+    const tick = (): Promise<void> => this.ownShutdownWork(runTick())
 
     this.pollTickFn = tick
     this.pollingTimer = setTimeout(tick, 1000)
@@ -2263,7 +2274,7 @@ export class AgentManager extends EventEmitter {
     // Unregister FIRST so other sessions aren't starved while transitionToIdle
     // runs (it can be slow due to extractOutputValues); it is not awaited.
     this.stopAdapterPolling(sessionId)
-    this.transitionToIdle(sessionId, session).catch((err) => {
+    this.ownShutdownWork(this.transitionToIdle(sessionId, session)).catch((err) => {
       console.error(`[AgentManager] transitionToIdle error for ${sessionId}:`, err)
     })
   }
@@ -2510,6 +2521,10 @@ export class AgentManager extends EventEmitter {
    * heartbeat and triage sessions bypass the limits (see admission.ts).
    */
   async requestSession(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<SessionStartOutcome> {
+    return this.ownShutdownWork(this.requestSessionNow(agentId, taskId, workspaceDir, skipInitialPrompt))
+  }
+
+  private async requestSessionNow(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<SessionStartOutcome> {
     if (this.shuttingDown) throw new Error('The app is shutting down; retry after restart.')
     const stopping = this.taskStops.get(taskId)
     if (stopping) {
@@ -2681,9 +2696,10 @@ export class AgentManager extends EventEmitter {
    * failed and may be starting another.
    */
   private boundedSessionStart(starting: Promise<string>, agentName: string, taskId: string, timeoutMs: number): Promise<string> {
+    this.ownShutdownWork(starting)
     return withStartupDeadline(starting, timeoutMs, `${agentName} startup`, (sessionId) => {
       console.warn(`[AgentManager] ${taskId} came up after its start timed out; stopping ${sessionId}`)
-      if (sessionId) void this.stopSession(sessionId, false)
+      if (sessionId) return this.ownShutdownWork(this.stopSession(sessionId, false))
     })
   }
 
@@ -3522,6 +3538,11 @@ export class AgentManager extends EventEmitter {
    * its provider status (history is not replayed; clients render the durable projection).
    */
   async resumeSession(agentId: string, taskId: string, sessionId: string): Promise<string> {
+    return this.ownShutdownWork(this.resumeSessionNow(agentId, taskId, sessionId))
+  }
+
+  private async resumeSessionNow(agentId: string, taskId: string, sessionId: string): Promise<string> {
+    if (this.shuttingDown) throw new Error('The app is shutting down; retry after restart.')
     console.log('[AgentManager] resumeSession called:', { agentId, taskId, sessionId })
     const stopping = this.taskStops.get(taskId)
     if (stopping) {
@@ -3542,7 +3563,7 @@ export class AgentManager extends EventEmitter {
     if (pending) return pending
     const live = this.findSessionByTaskId(taskId)
     if (live && live.session.status !== 'error') return live.sessionId
-    const resumed = this.resumeAdapterSession(adapter, agentId, taskId, sessionId)
+    const resumed = this.ownShutdownWork(this.resumeAdapterSession(adapter, agentId, taskId, sessionId))
     this.sessionStarts.set(taskId, resumed)
     try {
       return await resumed
@@ -5000,6 +5021,8 @@ export class AgentManager extends EventEmitter {
       clearTimeout(this.pollingTimer)
       this.pollingTimer = null
     }
+    if (this.nudgeTimer) clearTimeout(this.nudgeTimer)
+    this.nudgeTimer = null
     this.pollingEntries.clear()
 
     if (this.reaperTimer) {
@@ -5011,6 +5034,43 @@ export class AgentManager extends EventEmitter {
       // Shutdown preserves task status.
       [...this.sessions.keys()].map((sessionId) => this.stopSession(sessionId, false))
     )
+    // Don't wait for 60/120-second startup deadlines or declare lease release
+    // safe while the underlying start can still touch this profile. The host
+    // exits with DB/provider/lease held if this short drain cannot complete.
+    await this.drainShutdownWork()
+    await Promise.allSettled([...this.sessions.keys()].map(sessionId => this.stopSession(sessionId, false)))
+    if (this.transcriptChangedTimer) clearTimeout(this.transcriptChangedTimer)
+    this.transcriptChangedTimer = null
+    this.flushTranscriptChanged()
+  }
+
+  private ownShutdownWork<T>(operation: Promise<T>): Promise<T> {
+    this.shutdownWork.add(operation)
+    void operation.then(() => { this.shutdownWork.delete(operation) }, () => { this.shutdownWork.delete(operation) })
+    return operation
+  }
+
+  private async drainShutdownWork(): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const expired = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new AgentShutdownIncompleteError()), AGENT_SHUTDOWN_DRAIN_TIMEOUT_MS)
+    })
+    try {
+      while (true) {
+        const work = [...this.shutdownWork, ...this.sessionStarts.values(),
+          ...[...this.captainSwitches.values()].map(entry => entry.promise),
+          ...(this.startupReconciliation ? [this.startupReconciliation] : [])]
+        if (!work.length) {
+          if (this.admittedStarts.size) throw new AgentShutdownIncompleteError()
+          return
+        }
+        await Promise.race([Promise.allSettled(work), expired])
+        // Map cleanup and a queued start's post-settlement handlers may await
+        // an event-loop yield. Do not starve them or the bounded timer by
+        // repeatedly awaiting an already-settled reservation promise.
+        await Promise.race([yieldEventLoop(), expired])
+      }
+    } finally { if (timer) clearTimeout(timer) }
   }
 
   getSessionStatus(sessionId: string): { status: string; agentId: string; taskId: string } | null {

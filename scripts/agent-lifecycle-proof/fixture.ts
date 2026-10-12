@@ -117,8 +117,6 @@ export async function runAgentLifecycleFixture(directory: string) {
     phase = 'recreate-owner'
     await manager.stopAllSessions()
     assert.equal(adapter.destroyed, 1)
-    // The manager's projection flush is intentionally coalesced for 125ms.
-    await delay(200)
     db.close()
     db = new DatabaseManager(options)
     db.initialize()
@@ -153,7 +151,6 @@ export async function runAgentLifecycleFixture(directory: string) {
     assert.equal(removedListenerCalls, 0)
     phase = 'shutdown'
     await manager.stopAllSessions()
-    await delay(200)
     assert.equal(resumedAdapter.destroyed, 1)
     assert.equal(manager.getActiveSessionsForTask(task.id).length, 0)
     return { ok: true, actualLifecycleOwner: true, realSqlite: true, standaloneNode: true,
@@ -165,7 +162,6 @@ export async function runAgentLifecycleFixture(directory: string) {
   } catch { throw new AgentLifecycleProofError(phase) }
   finally {
     await manager?.stopAllSessions()
-    await delay(200)
     db?.close()
   }
 }

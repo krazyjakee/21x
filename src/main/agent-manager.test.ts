@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest'
-import { AgentManager, withStartupDeadline } from './agent-manager'
+import { AgentManager, AgentShutdownIncompleteError, AGENT_SHUTDOWN_DRAIN_TIMEOUT_MS, withStartupDeadline } from './agent-manager'
 import { FakeAdapter } from '../../test/helpers/fake-adapter'
 import { shouldEnableTillDone } from './agent-manager/session-config'
 import { isDelegationTool } from './agent-manager/watchdogs'
@@ -1817,6 +1817,80 @@ describe('AgentManager shutdown', () => {
       expect.anything(),
       expect.objectContaining({ status: TaskStatus.NotStarted })
     )
+  })
+
+  it('flushes the final coalesced transcript before an immediate DB close and leaves no late timer query', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
+    const fake = new FakeAdapter({ sessionIds: ['shutdown-session'] })
+    installFakeAdapter(fake)
+    const db = createMockDb({ coding_agent: 'claude-code' })
+    const part: ReturnType<typeof db.getTranscriptParts>[number] = {
+      taskId: 'task-1', partId: 'shutdown-text', seq: 1, role: 'assistant', content: 'Final durable output',
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', rev: 1
+    }
+    let closed = false
+    let lateQueries = 0
+    db.upsertTranscriptParts = vi.fn(() => ({ maxRev: 1, changedPartIds: [part.partId] }))
+    db.getTranscriptDelta = vi.fn(() => {
+      if (closed) { lateQueries++; throw new Error('Database already closed') }
+      return { parts: [part], maxRev: 1 }
+    })
+    const mgr = new AgentManager(db)
+    const updates: unknown[] = []
+    mgr.addExternalListener((channel, payload) => { if (channel === 'transcript:changed') updates.push(payload) })
+    try {
+      await mgr.startSession('agent-1', 'task-1', '/tmp/ws', true)
+      fake.enqueueParts({ id: part.partId, type: MessagePartType.TEXT, content: part.content })
+      fake.signalData('shutdown-session')
+      await vi.advanceTimersByTimeAsync(50)
+      await flushEventLoop(4)
+      expect(db.upsertTranscriptParts).toHaveBeenCalled()
+      expect(updates).toHaveLength(0)
+      await mgr.stopAllSessions()
+      expect(updates).toEqual([{ taskId: 'task-1', parts: [part], maxRev: 1 }])
+      closed = true
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(lateQueries).toBe(0)
+      expect(updates).toHaveLength(1)
+    } finally {
+      await mgr.stopAllSessions()
+      vi.useRealTimers()
+    }
+  })
+
+  it('bounds an unfinished start without releasing its ownership, then drains after cancellation settles', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
+    let finishInitialization!: () => void
+    const initializing = new Promise<void>(resolve => { finishInitialization = resolve })
+    const fake = new FakeAdapter()
+    fake.initialize.mockImplementation(() => initializing)
+    installFakeAdapter(fake)
+    const mgr = new AgentManager(createMockDb({ coding_agent: 'claude-code' }))
+    const starting = mgr.startSession('agent-1', 'task-1', '/tmp/ws', true)
+    const observedStart = starting.catch(() => undefined)
+    try {
+      await flushEventLoop(8)
+      expect(fake.initialize).toHaveBeenCalled()
+      let failure: unknown
+      const stopping = mgr.stopAllSessions().catch(error => { failure = error })
+      await flushEventLoop()
+      expect(mgr.hasTaskStartOwnership('task-1')).toBe(true)
+      await vi.advanceTimersByTimeAsync(AGENT_SHUTDOWN_DRAIN_TIMEOUT_MS)
+      await stopping
+      expect(failure).toBeInstanceOf(AgentShutdownIncompleteError)
+      expect(mgr.hasTaskStartOwnership('task-1')).toBe(true)
+      finishInitialization()
+      await observedStart
+      await mgr.stopAllSessions()
+      expect(mgr.hasTaskStartOwnership('task-1')).toBe(false)
+      expect(fake.createSession).not.toHaveBeenCalled()
+      expect(mgr.getActiveSessionsForTask('task-1')).toEqual([])
+    } finally {
+      finishInitialization()
+      await observedStart
+      await mgr.stopAllSessions()
+      vi.useRealTimers()
+    }
   })
 })
 
