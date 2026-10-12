@@ -185,3 +185,24 @@ process uses randomized GCM nonces; total key lifetime usage and rotation must b
 bounded in the final persistent-provider contract. A locked OS store does not
 erase a key already loaded into a running service; shutdown/disposal is the current
 cache boundary, and any stronger lock-event behavior needs a reviewed host policy.
+
+The retry at commit `e135643` passed actual macOS x64 and arm64 conversion,
+independent reload, corruption rejection and unchanged-original reopening. Linux
+and Windows remain pending; the reports expose provenance checks and fixed runtime
+failure categories before any conversion is accepted. The Linux synthetic fixture
+can retry a specifically classified Chromium sandbox startup failure without a
+sandbox; this is a fixed main-only exporter with no renderer, listener, arbitrary
+code or live profile, and reports `proofOnlyLinuxSandboxDisabled`. Shipping host
+sandbox configuration is unaffected. Raw startup stderr is privately bounded,
+classified into fixed categories, discarded, and never exported.
+
+For Linux key survival after a verified collection lock, the controller terminates
+its owned daemon, reopens the same isolated keyring with the same private password,
+verifies the new daemon PID and unlocked property, then loads the original key.
+Reports label this `unlockMethod: owned-daemon-restart`. It proves lock rejection
+and persistent protected-key survival/reopen; it does not prove interactive unlock
+of the same daemon. GNOME's
+[daemon implementation](https://github.com/GNOME/gnome-keyring/blob/46.2/daemon/gkd-main.c)
+uses `--unlock` during daemon initialization, so starting an additional daemon was
+not a reliable way to unlock the originally owned process. The workflow's optional
+`target` selector retries one affected platform while retaining `max-parallel: 1`.

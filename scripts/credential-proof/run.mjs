@@ -12,6 +12,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const hash = (value) => createHash('sha256').update(value).digest('hex')
 const SAFE_CODES = new Set(['LEGACY_UNAVAILABLE', 'LEGACY_PROBE_FAILED', 'KEYSTORE_NO_ACCESS', 'KEYSTORE_NO_ENTRY', 'KEYSTORE_ALREADY_EXISTS', 'KEYSTORE_INVALID_DATA', 'KEYSTORE_UNSUPPORTED', 'SECRET_STORE_UNAVAILABLE', 'KEYSTORE_PROTOCOL_ERROR', 'INVALID_SECRET_KEY', 'INVALID_SECRET_VALUE', 'INVALID_SECRET_CIPHERTEXT', 'INVALID_SOURCE', 'AMBIGUOUS_BLOB', 'INVALID_SOURCE_FORMAT', 'DUPLICATE_LOCATION', 'BOUNDS_EXCEEDED', 'LEGACY_DECRYPT_FAILED', 'DESTINATION_NOT_SECURE', 'DESTINATION_UNAVAILABLE', 'DESTINATION_ENCRYPT_FAILED', 'DESTINATION_VERIFY_FAILED'])
 const SOURCE_PHASES = new Set(['stdio-attest', 'profile-setup', 'control-read', 'app-ready', 'source-protection-check', 'originals-verify', 'canary-generate', 'source-corruption-check', 'source-export'])
+const SPAWN_CODES = new Set(['ENOENT', 'EACCES', 'ENOEXEC', 'EMFILE', 'ENOMEM'])
+const SIGNALS = new Set(['SIGABRT', 'SIGTRAP', 'SIGSEGV', 'SIGTERM', 'SIGKILL'])
 
 /** Low-cost transpilation of four isolated modules; no application build/addons. */
 export async function stageModules(directory) {
@@ -31,19 +33,23 @@ export async function stageModules(directory) {
   }
 }
 
-function electronFrame(executable, helper, directory, request, legacyBackend, allowedEnvironment) {
+function electronFrame(executable, helper, directory, request, legacyBackend, allowedEnvironment, proofOnlyLinuxNoSandbox = false) {
   return new Promise((resolve, reject) => {
     const token = randomBytes(32).toString('hex')
     const args = [directory]
     if (process.platform === 'win32') args.push('--credential-pipe-attestor=' + resolve(helper))
     if (process.platform === 'linux') args.push('--password-store=' + (legacyBackend === 'basic_text' ? 'basic' : 'gnome-libsecret'))
-    if (process.platform === 'linux' && process.getuid?.() === 0) args.push('--no-sandbox')
-    const child = spawn(executable, args, { stdio: ['pipe', 'pipe', 'ignore'], env: allowedEnvironment, windowsHide: true, detached: process.platform !== 'win32' })
+    if (process.platform === 'linux' && (process.getuid?.() === 0 || proofOnlyLinuxNoSandbox)) args.push('--no-sandbox')
+    const child = spawn(executable, args, { stdio: ['pipe', 'pipe', 'pipe'], env: allowedEnvironment, windowsHide: true, detached: process.platform !== 'win32' })
     const owned = observeOwnedProcess(child, process.platform !== 'win32')
     const decoder = new StringDecoder('utf8')
     let pending = ''
     let bytes = 0
     let response
+    let spawnCode
+    let runtimeFailure
+    let diagnosticTail = ''
+    let diagnosticBytes = 0
     let privatePipeAttested = process.platform !== 'win32'
     let settled = false
     const finish = async (error) => {
@@ -55,15 +61,29 @@ function electronFrame(executable, helper, directory, request, legacyBackend, al
       if (error) {
         const stopped = await owned.stop()
         child.stdout.destroy()
-        reject(Object.assign(new Error(error), { code: error, cleanupSafe: stopped, sourcePhase: SOURCE_PHASES.has(response?.phase) ? response.phase : 'no-frame', sourceExitCode: child.exitCode, privatePipeAttested }))
+        child.stderr.destroy()
+        diagnosticTail = ''
+        reject(Object.assign(new Error(error), { code: error, cleanupSafe: stopped, sourcePhase: SOURCE_PHASES.has(response?.phase) ? response.phase : 'no-frame', sourceExitCode: child.exitCode, sourceSignal: SIGNALS.has(child.signalCode) ? child.signalCode : child.signalCode ? 'other' : null, spawnCode, runtimeFailure, privatePipeAttested }))
       } else {
         child.stdout.destroy()
+        child.stderr.destroy()
+        diagnosticTail = ''
         resolve({ ...response, privatePipeAttested })
       }
     }
     const timer = setTimeout(() => finish('LEGACY_UNAVAILABLE'), 35_000)
-    child.on('error', () => finish('LEGACY_PROBE_FAILED'))
+    child.on('error', (error) => { spawnCode = SPAWN_CODES.has(error.code) ? error.code : 'other'; finish('LEGACY_PROBE_FAILED') })
     child.stdin.on('error', () => finish('LEGACY_PROBE_FAILED'))
+    // Discard raw runtime diagnostics. Only fixed startup categories can leave
+    // this private bounded classifier; no error/provider text reaches reports.
+    child.stderr.on('data', (chunk) => {
+      diagnosticBytes += chunk.length
+      if (diagnosticBytes > 16_384) return
+      diagnosticTail = (diagnosticTail + chunk.toString('utf8')).slice(-4096)
+      if (/error while loading shared libraries/i.test(diagnosticTail)) runtimeFailure = 'runtime-library-missing'
+      else if (/No usable sandbox|Failed to move to new namespace|SUID sandbox|Operation not permitted.*namespace|Check failed:.*sandbox|zygote_host_impl_linux/i.test(diagnosticTail)) runtimeFailure = 'runtime-sandbox-unavailable'
+      else if (/Missing X server|Unable to open X display|The platform failed to initialize/i.test(diagnosticTail)) runtimeFailure = 'runtime-display-unavailable'
+    })
     child.stdout.on('data', (chunk) => {
       if (settled) return
       bytes += chunk.length
@@ -111,10 +131,23 @@ export async function runCredentialProof({ helper, electron, legacyBackend = pro
   try {
     const modules = await stageModules(directory)
     const allowedEnvironment = modules.keys.nativeCredentialEnvironment(process.env)
+    let proofOnlyLinuxNoSandbox = process.platform === 'linux' && process.getuid?.() === 0
+    const legacyFrame = async (request) => {
+      try { return await electronFrame(electron, helper, directory, request, legacyBackend, allowedEnvironment, proofOnlyLinuxNoSandbox) }
+      catch (error) {
+        // Ubuntu CI can deny Chromium namespaces through AppArmor. Retry only
+        // a classified sandbox startup failure in this fixed synthetic MAIN
+        // process: no renderer, arbitrary code, listener or live profile exists.
+        if (process.platform !== 'linux' || proofOnlyLinuxNoSandbox || error.runtimeFailure !== 'runtime-sandbox-unavailable' || error.cleanupSafe === false) throw error
+        proofOnlyLinuxNoSandbox = true
+        report.proofOnlyLinuxSandboxDisabled = true
+        return await electronFrame(electron, helper, directory, request, legacyBackend, allowedEnvironment, true)
+      }
+    }
     phase = 'legacy-generate'
-    const source = await electronFrame(electron, helper, directory, { operation: 'generate' }, legacyBackend, allowedEnvironment)
-    if (!Array.isArray(source.records) || source.records.length !== 6 || source.corruptCiphertextsRejected !== 5 || source.appName !== '21x' || !source.isolatedProfile) throw Object.assign(new Error('PROOF_FAILED'), { code: 'PROOF_FAILED' })
-    report.legacy = { backend: source.backend, appName: source.appName, isPackaged: source.isPackaged, isolatedProfile: source.isolatedProfile, corruptCiphertextsRejected: source.corruptCiphertextsRejected, privatePipeAttested: source.privatePipeAttested }
+    const source = await legacyFrame({ operation: 'generate' })
+    report.legacy = { backend: ['windows-dpapi', 'macos-keychain', 'gnome_libsecret', 'basic_text'].includes(source.backend) ? source.backend : 'other', appName: source.appName === '21x' ? '21x' : 'other', isPackaged: source.isPackaged === true, isolatedProfile: source.isolatedProfile === true, corruptCiphertextsRejected: Number.isInteger(source.corruptCiphertextsRejected) && source.corruptCiphertextsRejected >= 0 && source.corruptCiphertextsRejected <= 5 ? source.corruptCiphertextsRejected : null, sourceRecordsValid: Array.isArray(source.records) && source.records.length === 6, privatePipeAttested: source.privatePipeAttested === true }
+    if (!report.legacy.sourceRecordsValid || source.corruptCiphertextsRejected !== 5 || source.appName !== '21x' || !source.isolatedProfile) throw Object.assign(new Error('PROOF_FAILED'), { code: 'PROOF_FAILED' })
     keys = new modules.keys.NativeApplicationKeyStore(resolve(helper))
     phase = 'destination-create'
     created = true // Cleanup even if key creation succeeds but subsequent read fails.
@@ -159,14 +192,14 @@ export async function runCredentialProof({ helper, electron, legacyBackend = pro
     damaged[damaged.length - 1] ^= 0xff
     report.destinationTamperRejected = expectRejected(() => reloaded.decryptString(damaged), 'INVALID_SECRET_CIPHERTEXT')
     phase = 'legacy-rollback'
-    const rollback = await electronFrame(electron, helper, directory, { operation: 'verify-originals', records: source.records }, legacyBackend, allowedEnvironment)
+    const rollback = await legacyFrame({ operation: 'verify-originals', records: source.records })
     report.legacyOriginalsReopened = rollback.originalsVerified === true
     report.credentialClasses = ['secret-blob', 'provider-key-setting', 'oauth-access-refresh-blobs', 'connector-oauth-json', 'explicit-legacy-plaintext']
     report.passed = report.ambiguousBlobRejected && report.corruptImportRejected && report.originalsUnchanged && report.disposedProviderFailsClosed && report.reloadedDestinationVerified && report.destinationTamperRejected && report.legacyOriginalsReopened
   } catch (error) {
     report.errorCode = SAFE_CODES.has(error.code) ? error.code : 'PROOF_FAILED'
     report.failurePhase = phase
-    if (error.sourcePhase) report.legacyFailure = { phase: error.sourcePhase, privatePipeAttested: error.privatePipeAttested, exitCode: error.sourceExitCode }
+    if (error.sourcePhase) report.legacyFailure = { phase: error.sourcePhase, privatePipeAttested: error.privatePipeAttested, exitCode: error.sourceExitCode, signal: error.sourceSignal, spawnCode: error.spawnCode, runtimeFailure: error.runtimeFailure }
     if (error.cleanupSafe === false) cleanupSafe = false
   } finally {
     candidate?.dispose()
