@@ -485,6 +485,37 @@ fn valid_id(id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct IsolatedProfile(PathBuf);
+
+    impl IsolatedProfile {
+        fn new() -> Self {
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir()
+                .join(format!("21x-engine-test-{}-{stamp}", std::process::id()));
+            std::fs::create_dir(&path).expect("create isolated test profile");
+            Self(path)
+        }
+    }
+
+    impl Drop for IsolatedProfile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    async fn staged_engine() -> (Engine, IsolatedProfile) {
+        let resources = std::env::var_os("TWENTYONEX_TEST_RESOURCES")
+            .expect("ignored supervisor tests require TWENTYONEX_TEST_RESOURCES pointing at staged resources");
+        let profile = IsolatedProfile::new();
+        let engine = Engine::start(PathBuf::from(resources), profile.0.clone())
+            .await
+            .expect("start staged standalone Node 22.23.2 without native dependency probes");
+        (engine, profile)
+    }
     #[test]
     fn ids_reject_wrong_direction_and_leading_zero() {
         assert!(valid_id("host:123"));
@@ -509,5 +540,103 @@ mod tests {
                 .unwrap();
         assert_eq!(error.message, "Engine operation timed out.");
         assert!(validate_error(&json!({"code": "UNRECOGNIZED", "message": "unsafe"})).is_err());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires an explicitly staged standalone Node 22.23.2 resource directory"]
+    async fn staged_initialize_ping_unknown_operation_and_shutdown() {
+        let (engine, _profile) = staged_engine().await;
+        let status = engine.status();
+        assert_eq!(status["available"], true);
+        assert!(status["engineEpoch"].as_str().unwrap().len() > 0);
+        let reply = engine.request("engine.ping", json!({})).await.unwrap();
+        assert_eq!(reply["engineEpoch"], status["engineEpoch"]);
+        assert_eq!(reply["nodeVersion"], NODE_VERSION);
+        let error = engine
+            .request("engine.unknown", json!({}))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "UNKNOWN_OPERATION");
+        assert!(engine.request("engine.ping", json!({})).await.is_ok());
+        engine.shutdown().await;
+        assert_eq!(engine.status()["available"], false);
+        assert!(*engine.0.exited.borrow());
+        assert_eq!(
+            engine
+                .request("engine.ping", json!({}))
+                .await
+                .unwrap_err()
+                .code,
+            "DISCONNECTED"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires an explicitly staged standalone Node 22.23.2 resource directory"]
+    async fn staged_concurrent_requests_preserve_monotonic_wire_order() {
+        let (engine, _profile) = staged_engine().await;
+        let epoch = engine.status()["engineEpoch"].clone();
+        let mut calls = Vec::new();
+        for _ in 0..64 {
+            let engine = engine.clone();
+            calls.push(tokio::spawn(async move {
+                engine.request("engine.ping", json!({})).await
+            }));
+        }
+        for call in calls {
+            let reply = call.await.unwrap().unwrap();
+            assert_eq!(reply["engineEpoch"], epoch);
+        }
+        assert_eq!(engine.0.request_slots.available_permits(), MAX_PENDING);
+        assert!(engine.0.pending.lock().unwrap().is_empty());
+        engine.shutdown().await;
+        assert!(*engine.0.exited.borrow());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires an explicitly staged standalone Node 22.23.2 resource directory"]
+    async fn staged_cancel_while_waiting_for_writer_releases_capacity() {
+        let (engine, _profile) = staged_engine().await;
+        let writer = engine.0.stdin.lock().await;
+        let queued = engine.clone();
+        let call = tokio::spawn(async move { queued.request("engine.ping", json!({})).await });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(engine.0.request_slots.available_permits(), MAX_PENDING - 1);
+        call.abort();
+        assert!(call.await.unwrap_err().is_cancelled());
+        assert_eq!(engine.0.request_slots.available_permits(), MAX_PENDING);
+        assert!(engine.0.pending.lock().unwrap().is_empty());
+        drop(writer);
+        assert!(engine.request("engine.ping", json!({})).await.is_ok());
+        engine.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires an explicitly staged standalone Node 22.23.2 resource directory"]
+    async fn staged_shutdown_settles_concurrent_calls_and_reaps_child() {
+        let (engine, _profile) = staged_engine().await;
+        let mut calls = Vec::new();
+        for _ in 0..32 {
+            let engine = engine.clone();
+            calls.push(tokio::spawn(async move {
+                engine.request("engine.ping", json!({})).await
+            }));
+        }
+        timeout(Duration::from_secs(10), engine.shutdown())
+            .await
+            .unwrap();
+        for call in calls {
+            match timeout(Duration::from_secs(1), call)
+                .await
+                .unwrap()
+                .unwrap()
+            {
+                Ok(reply) => assert_eq!(reply["nodeVersion"], NODE_VERSION),
+                Err(error) => assert!(matches!(error.code, "DISCONNECTED" | "CANCELLED")),
+            }
+        }
+        assert!(*engine.0.exited.borrow());
+        assert!(engine.0.pending.lock().unwrap().is_empty());
+        assert_eq!(engine.0.request_slots.available_permits(), MAX_PENDING);
     }
 }

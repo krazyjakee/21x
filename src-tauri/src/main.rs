@@ -1,13 +1,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod engine;
-use engine::{Engine, EngineError};
 use serde_json::{json, Value};
 use std::sync::{
     atomic::{AtomicU8, Ordering},
     Arc,
 };
 use tauri::{Manager, State, WebviewWindow};
+use twentyonex_engine::{Engine, EngineError};
 
 fn trusted_origin(url: &tauri::Url) -> bool {
     let packaged = url.port().is_none()
