@@ -66,12 +66,15 @@ export async function stageDatabaseProof(directory, { sqliteModule }) {
 export async function runDatabaseProof({ sqliteModule = process.env.TAURI_SQLITE_MODULE } = {}) {
   if (process.versions.electron) throw new Error('Standalone Node is required')
   const directory = await mkdtemp(join(tmpdir(), '21x-database-proof-'))
+  const diagnostics = new Map(['log', 'info', 'debug', 'warn', 'error'].map(method => [method, console[method]]))
+  for (const method of diagnostics.keys()) console[method] = () => process.stderr.write('[database-proof] dependency diagnostic redacted\n')
   try {
     const staged = await stageDatabaseProof(directory, { sqliteModule })
     const { runDatabaseFixture } = await import(staged.fixture)
     const report = runDatabaseFixture(directory)
     return { ...report, portableModuleCount: staged.moduleCount }
   } finally {
+    for (const [method, original] of diagnostics) console[method] = original
     await rm(directory, { recursive: true, force: true })
   }
 }
