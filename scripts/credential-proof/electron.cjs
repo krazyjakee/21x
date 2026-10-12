@@ -3,6 +3,10 @@ const { app, safeStorage } = require('electron')
 const { randomBytes, createHash } = require('node:crypto')
 const { createInterface } = require('node:readline')
 const { join } = require('node:path')
+const { fstatSync } = require('node:fs')
+
+const pipe = (fd) => { const kind = fstatSync(fd); return kind.isFIFO() || kind.isSocket() }
+if (!pipe(0) || !pipe(1)) app.exit(1)
 
 app.setName('21x')
 app.setPath('userData', join(__dirname, 'isolated-profile'))

@@ -56,10 +56,11 @@ The key helper is selected by trusted host code using an absolute packaged path.
 It receives one bounded request through private stdin and returns one bounded
 response through the parent's private stdout pipe. No shell is involved.
 Keys never enter argv, environment variables, renderer messages, diagnostic logs,
-or files. The helper refuses terminal stdin/stdout, suppresses panic/provider
-details, and emits fixed error codes. This binary must only be invoked by the
-trusted pipe client: redirecting its private response to a file is outside this
-interface's contract. Child environments include only required OS/keychain,
+or files. The helper and exporter require pipe/socket stdin/stdout and refuse
+terminal or regular-file redirection, suppress provider details, and emit fixed
+error codes. The helper uses the official
+[Win32 pipe handle type](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfiletype)
+on Windows. Child environments include only required OS/keychain,
 locale, display, and D-Bus/XDG variables; arbitrary API tokens and preload hooks
 are dropped. Calls have a deadline and bounded output.
 

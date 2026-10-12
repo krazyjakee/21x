@@ -4,6 +4,33 @@ use serde_json::json;
 use std::io::{IsTerminal, Read, Write};
 use zeroize::{Zeroize, Zeroizing};
 
+#[cfg(unix)]
+fn private_pipes() -> bool {
+    use std::os::fd::AsFd;
+    use std::os::unix::fs::FileTypeExt;
+    let check = |descriptor: std::os::fd::OwnedFd| {
+        std::fs::File::from(descriptor).metadata().map(|metadata| {
+            let kind = metadata.file_type();
+            kind.is_fifo() || kind.is_socket()
+        }).unwrap_or(false)
+    };
+    let input = std::io::stdin().as_fd().try_clone_to_owned();
+    let output = std::io::stdout().as_fd().try_clone_to_owned();
+    match (input, output) { (Ok(input), Ok(output)) => check(input) && check(output), _ => false }
+}
+
+#[cfg(windows)]
+fn private_pipes() -> bool {
+    use std::os::windows::io::AsRawHandle;
+    #[link(name = "kernel32")]
+    extern "system" { fn GetFileType(handle: *mut std::ffi::c_void) -> u32; }
+    // Official Win32 FILE_TYPE_PIPE includes anonymous pipes. No filesystem I/O.
+    unsafe { GetFileType(std::io::stdin().as_raw_handle()) == 3 && GetFileType(std::io::stdout().as_raw_handle()) == 3 }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn private_pipes() -> bool { false }
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Request {
@@ -40,7 +67,7 @@ fn handle(request: &Request) -> Result<serde_json::Value, &'static str> {
 fn main() {
     // Never print debug/panic/provider error text, which may contain secrets.
     std::panic::set_hook(Box::new(|_| {}));
-    if std::io::stdin().is_terminal() || std::io::stdout().is_terminal() { std::process::exit(1); }
+    if std::io::stdin().is_terminal() || std::io::stdout().is_terminal() || !private_pipes() { std::process::exit(1); }
     let result = std::panic::catch_unwind(|| {
         let mut input = Zeroizing::new(Vec::new());
         std::io::stdin().take(4097).read_to_end(&mut input).map_err(|_| "KEYSTORE_PROTOCOL_ERROR")?;
