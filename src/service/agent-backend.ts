@@ -32,6 +32,7 @@ export class AgentBackend {
   readonly registry: DesktopOperationRegistry
   private disposed = false
   private failed = false
+  private readonly approvalsInFlight = new Set<string>()
   private readonly listener = (operation: string, payload: unknown): void => this.acceptOwnerEvent(operation, payload)
 
   /** Internal owner ingress; never registered as a renderer/service operation. */
@@ -163,22 +164,29 @@ export class AgentBackend {
     })
     this.bind('agentSession:approve', ([sessionId, _approved, _message, responseType], caller) => responseType !== 'question' && this.sessionAllowed(sessionId, caller),
       async ([sessionId, approved, message, responseType, requestId], caller) => {
-        const session = manager.getSession(sessionId)
-        const pending = fixtureAdapter.getPendingApprovalIdentity(sessionId)
-        const taskId = session?.taskId
-        if (!taskId || !requestId || !pending || pending.requestId !== requestId || pending.taskId !== taskId || pending.agentId !== fixtureAgentId ||
-          session?.status !== 'waiting_approval' || !this.sessionAllowed(sessionId, caller) ||
-          !db.getTranscriptParts(taskId).some(part => isRecord(part.tool) && part.partId === `question-${requestId}` &&
-            part.tool.name === 'permission' && part.tool.status === 'running' && part.tool.requestId === requestId)) {
-          throw new ServiceProtocolError('INVALID_REQUEST')
-        }
-        const before = fixtureAdapter.decisions().length
-        await manager.respondToPermission(sessionId, approved, message, undefined, responseType ?? 'permission', requestId)
-        const decision = fixtureAdapter.decisions()[before]
-        if (!decision || decision.requestId !== requestId || decision.approved !== approved || fixtureAdapter.getPendingApprovalIdentity(sessionId)?.requestId === requestId) {
-          throw new ServiceProtocolError('INVALID_REQUEST')
-        }
-        return { success: true }
+        if (this.approvalsInFlight.has(sessionId)) throw new ServiceProtocolError('INVALID_REQUEST')
+        // The legacy owner returns void. Claim before its first await so two
+        // callers cannot confirm the same newly recorded adapter decision.
+        this.approvalsInFlight.add(sessionId)
+        try {
+          const session = manager.getSession(sessionId)
+          const pending = fixtureAdapter.getPendingApprovalIdentity(sessionId)
+          const taskId = session?.taskId
+          if (!taskId || !requestId || !pending || pending.requestId !== requestId || pending.taskId !== taskId || pending.agentId !== fixtureAgentId ||
+            session?.status !== 'waiting_approval' || !this.sessionAllowed(sessionId, caller) ||
+            !db.getTranscriptParts(taskId).some(part => isRecord(part.tool) && part.partId === `question-${requestId}` &&
+              part.tool.name === 'permission' && part.tool.status === 'running' && part.tool.requestId === requestId)) {
+            throw new ServiceProtocolError('INVALID_REQUEST')
+          }
+          const before = fixtureAdapter.decisions().length
+          await manager.respondToPermission(sessionId, approved, message, undefined, responseType ?? 'permission', requestId)
+          const decisions = fixtureAdapter.decisions()
+          const decision = decisions[before]
+          if (decisions.length !== before + 1 || !decision || decision.requestId !== requestId || decision.approved !== approved || fixtureAdapter.getPendingApprovalIdentity(sessionId)?.requestId === requestId) {
+            throw new ServiceProtocolError('INVALID_REQUEST')
+          }
+          return { success: true }
+        } finally { this.approvalsInFlight.delete(sessionId) }
       })
     this.bind('agentSession:stop', ([sessionId], caller) => this.sessionAllowed(sessionId, caller), async ([sessionId]) => {
       const destroyed = fixtureAdapter.destroyed

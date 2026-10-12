@@ -119,10 +119,36 @@ export async function runAgentDesktopFixture(directory: string) {
     await reject(call('agentSession:approve', [sessionId, true, undefined, 'permission', 'stale-request']), 'INVALID_REQUEST')
     await reject(call('agentSession:approve', [sessionId, true, undefined, 'question', 'fixture-approval-1']), 'INVALID_REQUEST')
     assert.deepEqual(adapter.decisions(), [])
-    const responses = await Promise.allSettled([
-      call('agentSession:approve', [sessionId, true, undefined, 'permission', 'fixture-approval-1']),
-      call('agentSession:approve', [sessionId, true, undefined, 'permission', 'fixture-approval-1'])
-    ])
+    // Pause before the real adapter identity gate, keeping its pending request
+    // visible while the owner awaits. The duplicate must reject while that
+    // pause is held, rather than sharing the first caller's decision afterward.
+    let releaseApproval!: () => void
+    let enteredApproval!: () => void
+    const approvalGate = new Promise<void>(resolve => { releaseApproval = resolve })
+    const approvalEntered = new Promise<void>(resolve => { enteredApproval = resolve })
+    const respond = adapter.respondToApproval
+    let adapterCalls = 0
+    adapter.respondToApproval = async function (...args) {
+      adapterCalls++
+      enteredApproval()
+      await approvalGate
+      return respond.apply(this, args)
+    }
+    const first = call('agentSession:approve', [sessionId, true, undefined, 'permission', 'fixture-approval-1'])
+    await approvalEntered
+    const duplicate = call('agentSession:approve', [sessionId, true, undefined, 'permission', 'fixture-approval-1'])
+    const settled = Promise.allSettled([first, duplicate])
+    try {
+      const rejectedDuplicate = duplicate.then(() => { throw new AgentDesktopProofError(phase) }, error => error)
+      const error = await Promise.race([rejectedDuplicate, delay(1000).then(() => { throw new AgentDesktopProofError(phase) })])
+      assert.ok(error instanceof ServiceProtocolError && error.code === 'INVALID_REQUEST')
+      assert.equal(adapterCalls, 1)
+      assert.deepEqual(adapter.decisions(), [])
+    } finally {
+      releaseApproval()
+      adapter.respondToApproval = respond
+    }
+    const responses = await settled
     assert.equal(responses.filter(response => response.status === 'fulfilled').length, 1)
     assert.ok(responses.some(response => response.status === 'rejected' && response.reason instanceof ServiceProtocolError && response.reason.code === 'INVALID_REQUEST'))
     assert.deepEqual(adapter.decisions(), [{ requestId: 'fixture-approval-1', approved: true }])
@@ -184,6 +210,7 @@ export async function runAgentDesktopFixture(directory: string) {
       ok: true, actualLifecycleOwner: true, actualAdapterIdentityGate: true, realSqlite: true, standaloneNode: true,
       publicFixtureAgentOnly: true, requestIdRequired: true, scopedTaskAndSession: true, staleApprovalDenied: true,
       duplicateApprovalDenied: true, approvalAccepted: true, approvalRejected: true, acknowledgedStop: true,
+      approvalInFlightClaimVerified: true,
       ownerRecreated: true, staleRestoredCallbackDenied: true, durableProjectionAndDelta: true,
       liveResumeStatusSnapshot: true,
       criticalEventFailureExplicit: true, noAgentCrudOrSendGranted: true, noSdkParityClaim: true, eventCount: events.length
