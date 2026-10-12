@@ -1,9 +1,11 @@
 # Native credential candidate and real legacy proof
 
-This is the runnable T03 candidate tracked in #201. It preserves shipping
-Electron storage and does not convert a live profile. A passing unit test is
-separate from an actual OS proof report; the reports have to be generated on
-the supported platform matrix before accepting the credential feasibility gate.
+The T03 synthetic candidate proof tracked in #201 has passed real OS-store
+fixtures on Linux x64, macOS x64/arm64 and Windows x64. The
+[retained evidence](credential-proof-evidence.json) links each exact report to its
+source commit, workflow run and tool versions. This closes that issue's candidate
+proof scope; #193 retains the installed-profile and live-cutover gates. Shipping
+Electron storage remains compatible, and no live profile is converted.
 
 ## Candidate provider
 
@@ -166,11 +168,11 @@ Focused unit checks are:
 node node_modules/vitest/vitest.mjs run --project main --maxWorkers=1 src/main/platform/authenticated-secret-storage.test.ts src/main/platform/native-application-key-store.test.ts src/main/platform/credential-migration.test.ts
 ```
 
-## Evidence boundaries and future integration
+## Evidence boundaries and remaining integration
 
-Do not mark T03 passed merely because these scripts exist. Retain actual reports,
-the source commit/tool versions, successful fixture cleanup, and platform/account
-conditions. Hosted CI proves the developer Electron binary under the `21x` product
+The retained reports establish the four-target synthetic proof, with successful
+fixture cleanup and explicit platform/account conditions. Hosted CI proves the
+developer Electron binary under the `21x` product
 name, not compatibility with an existing signed installation. The report includes
 `isPackaged`; a consistently signed transitional Electron build under the installed
 identity/account is still needed to prove existing macOS Keychain ACL access.
@@ -179,19 +181,44 @@ these synthetic fixtures. Windows existing DPAPI data and Linux's other supporte
 keyring backends also require installed-profile rehearsal.
 
 The candidate's versioned ciphertext is distinct from Electron `safeStorage`.
-Current serializers' `safeStorage:v1:` setting wrapper and their availability-based
-fallback policy cannot simply be reused for the candidate. T10 must introduce
-reviewed format-aware serialization, reject native-provider unavailability without
-plaintext writes, and preserve explicit legacy read/import paths. No current
-shipping bootstrap registers this candidate provider.
+[SecretStorage](../../src/main/platform/secret-storage.ts) now declares a typed
+provider format contract, with unsupported runtime format IDs rejected atomically
+at registration. An absent format ID means only the transitional three-method
+legacy contract. [Production serializers](../../src/main/database/serializers.ts)
+retain Electron's `safeStorage:v1:` wrapper and historical availability fallback;
+the authenticated provider writes and reads
+`21x-credential:21x.aes256gcm.v1:<ciphertext-base64>`. Credential setting reads
+reject unknown reserved versions, incompatible providers and malformed native
+ciphertext with fixed errors. Native setting access refuses unavailable/disposed
+providers instead of writing plaintext. Ordinary settings bypass this codec.
+
+The [actual DatabaseManager reopen test](../../src/main/platform/profile-migration-settings-integration.test.ts)
+initializes a copied, rehearsal-owned candidate with the matching destination
+provider, reads all four credential classes, writes/reopens an encrypted setting,
+and checks that startup does not re-encrypt its wrapper. The original profile
+and committed candidate remain unchanged. This is synthetic-key integration
+evidence, separate from the real OS-store reports. No shipping bootstrap registers
+this candidate provider.
 
 The [profile lock](profile-lock.md) now provides local lifetime ownership for updated
-Electron/service hosts; installed cross-host rehearsal and filesystem validation
-remain necessary. Consistent database/WAL backup, import journaling, atomic database
-apply, JSON configuration credential extraction, repeated/interrupted import
-recovery, native helper signing/path verification, key rotation/write-volume policy,
-and post-cutover rollback are outstanding release integration work. The current
-process uses randomized GCM nonces; total key lifetime usage and rotation must be
+Electron/service hosts before database opens; trusted native bootstrap must hold
+the same lock before key creation. The
+[journaled SQLite import rehearsal](profile-import-rehearsal.md) now snapshots a
+stopped fixture with explicit WAL handling, encrypts its immutable original SQLite
+capsule in memory before persistence, and transactionally converts credential
+fields. Authenticated journal states and fsync/rename publication support repeated
+and interrupted candidate commit/recovery. Explicit rollback writes only an owned
+rehearsal output and refuses to persist historical plaintext credentials. It never
+overwrites the original database or activates a candidate. Declared resources are
+retained and verified byte-for-byte, not archived; this is not an encrypted backup
+of an entire profile.
+
+Installed cross-host/filesystem rehearsal, actual exporter-to-journal integration,
+typed JSON configuration credential extraction, full resource archival and
+power-loss durability, native helper signing/path verification, key rotation and
+write-volume policy, live activation and post-cutover rollback remain release
+integration work. The current process uses randomized GCM nonces; total key
+lifetime usage and rotation must be
 bounded in the final persistent-provider contract. A locked OS store does not
 erase a key already loaded into a running service; shutdown/disposal is the current
 cache boundary, and any stronger lock-event behavior needs a reviewed host policy.
