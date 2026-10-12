@@ -2,9 +2,22 @@
 import { randomUUID } from 'node:crypto'
 import { fork } from 'node:child_process'
 import { createRequire } from 'node:module'
+import { lstatSync, realpathSync } from 'node:fs'
+import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const require = createRequire(import.meta.url)
+
+function stagedModule(name) {
+  const modules = join(dirname(fileURLToPath(import.meta.url)), 'node_modules')
+  const details = lstatSync(modules)
+  if (!details.isDirectory() || details.isSymbolicLink()) throw fail('INTERNAL_ERROR')
+  const base = realpathSync(modules)
+  const resolved = realpathSync(fileURLToPath(import.meta.resolve(name)))
+  const location = relative(base, resolved)
+  if (isAbsolute(location) || location === '..' || location.startsWith(`..${sep}`)) throw fail('INTERNAL_ERROR')
+  return resolved
+}
 const MAX_FRAME = 1024 * 1024
 const MAX_ACTIVE = 128
 const MAX_QUEUE_BYTES = 4 * 1024 * 1024
@@ -123,7 +136,7 @@ function workerEnvironment() {
 }
 
 async function ptyProbe(signal) {
-  const pty = require('node-pty')
+  const pty = require(stagedModule('node-pty'))
   return new Promise((resolve, reject) => {
     const terminal = pty.spawn(process.execPath, ['-e', "process.stdout.write('pty-ok');"], {
       name: 'xterm', cols: 40, rows: 10, cwd: fileURLToPath(new URL('.', import.meta.url)),
@@ -157,7 +170,7 @@ async function probe(signal) {
   }
   try {
     await check('sqlite', () => {
-      const Database = require('better-sqlite3')
+      const Database = require(stagedModule('better-sqlite3'))
       const db = new Database(':memory:')
       try {
         db.exec('CREATE TABLE probe (value TEXT NOT NULL)')
@@ -169,7 +182,7 @@ async function probe(signal) {
     await check('pty', () => ptyProbe(signal))
     await check('worker', () => workerProbe(signal))
     for (const name of ['@anthropic-ai/claude-agent-sdk', '@opencode-ai/sdk']) {
-      await check(name, async () => { await import(name); return { ok: true, importedOnly: true } })
+      await check(name, async () => { stagedModule(name); await import(name); return { ok: true, importedOnly: true } })
     }
     if (signal.aborted) throw fail('CANCELLED')
     return { ok: Object.values(checks).every(check => check.ok), checks,

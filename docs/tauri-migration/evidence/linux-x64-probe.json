@@ -1,0 +1,28 @@
+{
+  "arch": "x64",
+  "checks": {
+    "@anthropic-ai/claude-agent-sdk": {
+      "importedOnly": true,
+      "ok": true
+    },
+    "@opencode-ai/sdk": {
+      "importedOnly": true,
+      "ok": true
+    },
+    "pty": {
+      "ok": true
+    },
+    "sqlite": {
+      "inMemory": true,
+      "ok": true
+    },
+    "worker": {
+      "ok": true,
+      "realFile": true
+    }
+  },
+  "nodeAbi": "127",
+  "nodeVersion": "v22.23.2",
+  "ok": true,
+  "platform": "linux"
+}

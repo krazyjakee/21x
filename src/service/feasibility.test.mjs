@@ -146,3 +146,16 @@ test('real-file worker uses IPC and exits without a system Node lookup', { timeo
   assert.deepEqual(message, { marker: 'worker-ok' })
   assert.equal((await closed)[0], 0)
 })
+
+test('an unstaged service cannot borrow native modules or SDKs from the repository', { timeout: 5000 }, async t => {
+  const f = fixture(t)
+  await f.initialize()
+  const report = (await f.request('engine.probe')).result
+  assert.equal(report.ok, false)
+  for (const name of ['sqlite', 'pty', '@anthropic-ai/claude-agent-sdk', '@opencode-ai/sdk']) {
+    assert.equal(report.checks[name].ok, false)
+  }
+  assert.equal(report.checks.worker.ok, true)
+  await f.request('engine.shutdown')
+  assert.equal((await f.closed)[0], 0)
+})

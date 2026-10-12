@@ -21,7 +21,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.2
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
@@ -40,6 +40,17 @@ jobs:
 
       - name: Test
         run: pnpm test:run
+
+      - name: Tauri foundation subprocess regressions
+        run: pnpm test:tauri:spike
+
+      - name: Tauri headless supervisor regressions
+        env:
+          CARGO_BUILD_JOBS: '1'
+        run: |
+          cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine -- --test-threads=1
+          pnpm tauri:prepare
+          TWENTYONEX_TEST_RESOURCES="$PWD/src-tauri/resources" cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine -- --ignored --test-threads=1
 
       - name: Navigation rail real-scrollport regression
         run: |

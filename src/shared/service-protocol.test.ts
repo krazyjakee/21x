@@ -149,12 +149,11 @@ describe('bidirectional bounded service peer', () => {
   })
 
   it('processes native callbacks while a service operation is awaiting them', async () => {
-    let service: ServicePeer
     const host = peer({ write: async bytes => service.receive(bytes), operations: {
       'test.echo': schema,
       'native.value': { ...schema, handle: () => 'native result' }
     } })
-    service = peer({ role: 'service', write: async bytes => host.receive(bytes), operations: {
+    const service = peer({ role: 'service', write: async bytes => host.receive(bytes), operations: {
       'test.echo': { ...schema, handle: async () => service.request('native.value', null) },
       'native.value': schema
     } })
@@ -209,10 +208,9 @@ describe('bidirectional bounded service peer', () => {
   })
 
   it('cancels outbound calls and aborts inbound handlers without releasing uncooperative slots', async () => {
-    let service: ServicePeer
     let signal: AbortSignal | undefined
     const host = peer({ write: async bytes => service.receive(bytes) })
-    service = peer({ role: 'service', write: async bytes => host.receive(bytes),
+    const service = peer({ role: 'service', write: async bytes => host.receive(bytes),
       operations: { 'test.echo': { ...schema, handle: (_payload, inputSignal) => {
         signal = inputSignal
         return new Promise(() => {})

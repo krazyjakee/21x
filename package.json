@@ -26,6 +26,14 @@
     "prepare": "husky",
     "dev:mobile": "vite --config vite.mobile.config.ts --host",
     "build:mobile": "vite build --config vite.mobile.config.ts",
+    "tauri:inventory": "node scripts/tauri-inventory.mjs",
+    "tauri:prepare": "node scripts/tauri-prepare.mjs",
+    "tauri:prepare:native": "node scripts/tauri-prepare.mjs --native",
+    "tauri:frontend:dev": "vite --config vite.tauri.config.ts",
+    "tauri:frontend:build": "vite build --config vite.tauri.config.ts",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "test:tauri:spike": "node --test --test-concurrency=1 src/service/feasibility.test.mjs scripts/tauri-prepare.test.mjs",
     "release": "bash scripts/release.sh"
   },
   "dependencies": {
@@ -58,6 +66,7 @@
     "ws": "^8.19.0"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "2.12.2",
     "@activepieces/pieces-framework": "0.32.0",
     "@electron-toolkit/tsconfig": "^1.0.1",
     "@electron/fuses": "^1.8.0",

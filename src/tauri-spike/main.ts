@@ -1,0 +1,39 @@
+interface NativeInvoke {
+  <T>(command: string, args?: Record<string, unknown>): Promise<T>
+}
+
+const native = (window as unknown as {
+  __TAURI__?: { core: { invoke: NativeInvoke } }
+}).__TAURI__
+const message = document.querySelector<HTMLParagraphElement>('#message')!
+const output = document.querySelector<HTMLPreElement>('#result')!
+const buttons = [...document.querySelectorAll<HTMLButtonElement>('button')]
+
+async function run(command: string, args?: Record<string, unknown>): Promise<void> {
+  if (!native) {
+    message.textContent = 'Open this experiment with pnpm tauri:dev to connect the native host.'
+    return
+  }
+  for (const button of buttons) button.disabled = true
+  message.textContent = 'Checking runtime…'
+  try {
+    const result = await native.core.invoke<unknown>(command, args)
+    output.textContent = JSON.stringify(result, null, 2)
+    message.textContent = 'Check finished.'
+  } catch {
+    // Native failures may contain third-party details. The UI shows a fixed error.
+    output.textContent = ''
+    message.textContent = 'The runtime check failed. Check the redacted native host logs.'
+  } finally {
+    for (const button of buttons) button.disabled = false
+  }
+}
+
+document.querySelector('#status')!.addEventListener('click', () => { void run('engine_status') })
+document.querySelector('#ping')!.addEventListener('click', () => {
+  void run('engine_invoke', { operation: 'engine.ping', payload: {} })
+})
+document.querySelector('#probe')!.addEventListener('click', () => {
+  void run('engine_invoke', { operation: 'engine.probe', payload: {} })
+})
+void run('engine_status')

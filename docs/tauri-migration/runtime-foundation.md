@@ -35,17 +35,20 @@ Custom commands are included in `AppManifest::commands` to generate command ACLs
 
 ## Batch validation
 
-No installation, test execution, native rebuild, or Cargo compilation was run by this workstream during the parallel edit batch. Coordinator checks should run sequentially:
+Installation, tests and compilation were deferred during parallel editing and then run centrally. [Implementation status](implementation-status.md) records the results and remaining platform gaps. Run batch checks sequentially:
 
 ```sh
 node --test --test-concurrency=1 src/service/feasibility.test.mjs
 pnpm tauri:prepare
 pnpm tauri:frontend:build
-CARGO_BUILD_JOBS=1 cargo check --manifest-path src-tauri/Cargo.toml
+CARGO_BUILD_JOBS=1 cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine -- --test-threads=1
+TWENTYONEX_TEST_RESOURCES="$PWD/src-tauri/resources" CARGO_BUILD_JOBS=1 cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine -- --ignored --test-threads=1
+# Requires the platform WebView development libraries:
+CARGO_BUILD_JOBS=1 cargo check --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-tauri-feasibility
 ```
 
-The subprocess tests are dependency-free and cover fragmented/coalesced frames, initialize/ping/shutdown, root validation, stale epochs, malformed/oversized/truncated frames, UTF-8 errors/BOM, JSON depth, cancellation IDs, duplicate IDs, and real-file fork execution. Native probes are performed through the screen only after standalone-native staging. Cargo tests cover request IDs, mixed-runtime bootstrap rejection, and child error redaction, and still require the host platform dependencies; no GTK-independent supervisor test crate is supplied.
+The subprocess tests are dependency-free and cover fragmented/coalesced frames, initialize/ping/shutdown, root validation, stale epochs, malformed/oversized/truncated frames, UTF-8 errors/BOM, JSON depth, cancellation IDs, duplicate IDs, and real-file fork execution. The GTK-independent `twentyonex-engine` crate contains the actual supervisor, three unit tests and four opt-in staged-Node tests. These exercise startup, concurrent wire ordering, queued cancellation, and shutdown/reaping. Its `probe` example runs the native checks after standalone-native staging without building a GUI host.
 
-Direct Rust dependency versions are pinned to Tauri 2.12.3, tauri-build 2.7.2, Tokio 1.53.2, Serde 1.0.229, and serde_json 1.0.154, confirmed directly against crates.io metadata as available and not yanked. Tauri and tauri-build require **Rust 1.90 or newer**, declared in Cargo.toml. A Cargo.lock must be generated and committed centrally when dependencies are resolved; transitive reproducibility is not established until then. The current Linux workspace lacks GTK/WebKit pkg-config prerequisites; native compilation cannot validate this host here until they are installed. Supported platform prerequisites, macOS Node signing, Windows executable inclusion, native addon packaging, clean machines with Node absent from PATH, all four architecture builds, and packaged shutdown/crash evidence remain T01 blockers.
+Direct Rust dependency versions are pinned to Tauri 2.12.3, tauri-build 2.7.2, Tokio 1.53.2, Serde 1.0.229, and serde_json 1.0.154, verified against crates.io metadata. Cargo.lock is generated and checked in; Rust 1.90 is the declared source minimum and local core validation used 1.98. Supported GUI platform prerequisites, macOS Node signing, Windows executable inclusion, packaged native addon layout, clean machines with Node absent from PATH, all four architecture builds, and packaged shutdown/crash evidence remain T01 blockers.
 
 Full service extraction, schedulers, shared-profile locking, credentials, browser parity, and production host services belong to later cards and must not be inferred from this screen.

@@ -22,6 +22,6 @@
     "active": true,
     "icon": ["../resources/icon.png", "../resources/icon.ico"],
     "resources": { "resources/": "resources/" },
-    "targets": ["app", "deb", "nsis"]
+    "targets": ["app", "dmg", "appimage", "nsis"]
   }
 }

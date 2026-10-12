@@ -1,0 +1,12 @@
+{
+  "nodeVersion": "22.23.2",
+  "nativeDependencies": {
+    "better-sqlite3": "13.0.3",
+    "node-pty": "1.1.0"
+  },
+  "sdkDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.260",
+    "@anthropic-ai/sdk": "0.123.0",
+    "@opencode-ai/sdk": "1.18.28"
+  }
+}

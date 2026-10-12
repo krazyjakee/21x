@@ -1,6 +1,6 @@
 # Electron to Tauri migration: multi-agent plan
 
-Status: proposed implementation plan; no runtime migration has been implemented by these documents.
+Status: implementation started. The isolated foundation experiment is described in [implementation status](implementation-status.md); the shipping application still uses Electron. The milestones below remain acceptance gates.
 
 Baseline: repository commit `2d65835`, package version `0.0.161`, inspected on 2026-10-12. Recheck the inventory against the implementation branch before assigning work.
 

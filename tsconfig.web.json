@@ -4,7 +4,9 @@
     "src/renderer/src/**/*",
     "src/renderer/src/**/*.d.ts",
     "src/shared/**/*",
-    "src/mobile/**/*"
+    "src/service/transport/**/*.ts",
+    "src/mobile/**/*",
+    "src/tauri-spike/**/*.ts"
   ],
   "compilerOptions": {
     "composite": true,

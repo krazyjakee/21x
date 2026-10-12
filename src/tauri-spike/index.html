@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>21x runtime feasibility</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">21x · migration experiment</p>
+      <h1>Runtime feasibility</h1>
+      <p>This isolated experiment checks the bundled runtime. It does not open your tasks or credentials.</p>
+      <div class="actions">
+        <button id="status" type="button">Refresh status</button>
+        <button id="ping" type="button">Check connection</button>
+        <button id="probe" type="button">Probe native modules</button>
+      </div>
+      <p id="message" role="status">Connecting…</p>
+      <pre id="result" aria-label="Runtime result"></pre>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

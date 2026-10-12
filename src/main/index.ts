@@ -6,6 +6,8 @@ import { join } from 'path'
 import { pathToFileURL } from 'url'
 import { is } from '@electron-toolkit/utils'
 import { DatabaseManager } from './database'
+import { configureSecretStorage } from './platform/secret-storage'
+import { electronSecretStorage } from './platform/electron-secret-storage'
 import { AgentManager } from './agent-manager'
 import { GitHubManager } from './github-manager'
 import { GitLabManager } from './gitlab-manager'
@@ -667,6 +669,7 @@ app.commandLine.appendSwitch('disable-features', [
 installProcessStreamErrorHandlers()
 
 app.whenReady().then(async () => {
+  configureSecretStorage(electronSecretStorage)
   // Collect MCP server processes that a previous crash or force-quit orphaned.
   // Safe for a second live instance: only parentless processes match here,
   // because this instance has no descendants yet.
