@@ -9,7 +9,13 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const dependencies = new Set(['better-sqlite3', '@paralleldrive/cuid2'])
 
 /** Actual manager graph; no Electron shim, SDK factory, network or tool server. */
-export async function stageAgentLifecycleProof(directory, { sqliteModule }) {
+export async function stageAgentLifecycleProof(directory, { sqliteModule, fixture = 'lifecycle' }) {
+  const entries = {
+    lifecycle: 'scripts/agent-lifecycle-proof/fixture.ts',
+    desktop: 'scripts/agent-desktop-proof/fixture.ts'
+  }
+  if (!Object.hasOwn(entries, fixture)) throw new Error('Unknown fixed proof fixture')
+  const entry = entries[fixture]
   if (typeof sqliteModule !== 'string' || !isAbsolute(sqliteModule)) throw new Error('Explicit standalone SQLite package path required')
   const sqlite = await realpath(sqliteModule)
   const metadata = JSON.parse(await readFile(join(sqlite, 'package.json'), 'utf8'))
@@ -61,9 +67,9 @@ export async function stageAgentLifecycleProof(directory, { sqliteModule }) {
     await writeFile(destination, text)
     for (const dependency of follow) await stage(dependency)
   }
-  await stage(join(root, 'scripts/agent-lifecycle-proof/fixture.ts'))
+  await stage(join(root, entry))
   return { moduleCount: seen.size, sqliteVersion: metadata.version,
-    fixture: pathToFileURL(join(directory, 'scripts/agent-lifecycle-proof/fixture.js')).href }
+    fixture: pathToFileURL(join(directory, entry.replace(/\.ts$/, '.js'))).href }
 }
 
 export async function runAgentLifecycleProof({ sqliteModule = process.env.TAURI_SQLITE_MODULE } = {}) {
