@@ -99,9 +99,13 @@ jobs:
         run: node scripts/tauri-resource-notices.mjs | tee native-evidence/third-party-notices.json
       - name: Check actual staged native probes before compiling the GUI
         run: node scripts/tauri-service-preflight.mjs src-tauri/resources | tee native-evidence/staged-native-preflight.json
+      - name: Prove portable database against the staged standalone SQLite addon
+        run: |
+          sqlite_module="$(node -e 'process.stdout.write(require("node:path").resolve("src-tauri/resources/service/node_modules/better-sqlite3"))')"
+          node scripts/database-proof.mjs --sqlite-module "$sqlite_module" | tee native-evidence/database-proof.json
       - name: Check supervisor on this actual platform with the same staged resources
         run: |
-          export TWENTYONEX_TEST_RESOURCES="$PWD/src-tauri/resources"
+          export TWENTYONEX_TEST_RESOURCES="$(node -e 'process.stdout.write(require("node:path").resolve("src-tauri/resources"))')"
           cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features native-fixture-tests -- --test-threads=1 2>&1 | tee native-evidence/engine-unit-tests.log
           cargo test --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --features native-fixture-tests -- --ignored --test-threads=1 2>&1 | tee native-evidence/engine-staged-tests.log
       - name: Build the actual platform package
