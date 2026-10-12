@@ -50,7 +50,7 @@ function electronFrame(executable, helper, directory, request, legacyBackend, al
     let runtimeFailure
     let diagnosticTail = ''
     let diagnosticBytes = 0
-    let privatePipeAttested = process.platform !== 'win32'
+    let privatePipeAttested = false
     let settled = false
     const finish = async (error) => {
       if (settled) return
@@ -101,6 +101,7 @@ function electronFrame(executable, helper, directory, request, legacyBackend, al
           // this owned private pipe. Successful frames always require the nonce.
           const earlyFailure = message.token === undefined && message.ok === false && message.code === 'LEGACY_PROBE_FAILED' && SOURCE_PHASES.has(message.phase)
           if (message.token !== token && !earlyFailure || response) { finish('LEGACY_PROBE_FAILED'); return }
+          if (process.platform !== 'win32' && message.token === token) privatePipeAttested = true
           response = message
         } catch { finish('LEGACY_PROBE_FAILED') }
       }
