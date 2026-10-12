@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
-import type { ProfileLock } from './profile-lock'
+import { PROFILE_LOCK_FILE, type ProfileLock } from './profile-lock'
 import { CredentialMigrationError, prepareCredentialMigration, type CredentialLocation, type CredentialMigrationProviders, type LegacyCredentialInput } from './credential-migration'
 
 export const REHEARSAL_MAX_BYTES = 8 * 1024 * 1024
@@ -89,7 +89,11 @@ function fileIdentity(path: string): string {
   return `${file.dev}:${file.ino}`
 }
 function secureResource(ctx: Context, path: string): string {
-  if (typeof path !== 'string' || !path || path.length > 512 || isAbsolute(path) || path.split(/[\\/]/).some((part) => !part || part === '.' || part === '..') || path === MARKER || path.startsWith(OUTPUT + '/')) fail('REHEARSAL_SCOPE_INVALID')
+  if (typeof path !== 'string' || !path || path.length > 512 || isAbsolute(path)) fail('REHEARSAL_SCOPE_INVALID')
+  const parts = path.split(/[\\/]/)
+  // Closing a second fd to an owned SQLite file can release POSIX process locks.
+  // Resource verification must never open the sentinel/source or their sidecars.
+  if (parts.some((part) => !part || part === '.' || part === '..') || parts[0] === MARKER || parts[0] === OUTPUT || parts[0].startsWith(PROFILE_LOCK_FILE) || parts[0].startsWith('21x.db')) fail('REHEARSAL_SCOPE_INVALID')
   const target = join(ctx.root, path)
   if (relative(ctx.root, target).startsWith('..' + sep)) fail('REHEARSAL_SCOPE_INVALID')
   let cursor = ctx.root

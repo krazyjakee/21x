@@ -207,6 +207,13 @@ describe('bounded actual SQLite import rehearsal', () => {
     expect(existsSync(join(value.root, 'credential-import-rehearsal/original.sqlite.enc'))).toBe(false)
   })
 
+  it.each(['.21x-profile-lock.sqlite', '21x.db', 'credential-import-rehearsal\\journal.enc'])('rejects SQLite ownership/output resource %s before opening another descriptor', (path) => {
+    const value = fixture()
+    expect(() => rehearseProfileCredentialImport({ ...value.options, resourcePaths: [path] })).toThrow('REHEARSAL_SCOPE_INVALID')
+    value.lock.assertHeld()
+    expect(existsSync(join(value.root, 'credential-import-rehearsal/original.sqlite.enc'))).toBe(false)
+  })
+
   it('converts explicit legacy plaintext safely but refuses plaintext-original rollback files', () => {
     const value = fixture()
     const source = new Database(join(value.root, '21x.db'))
