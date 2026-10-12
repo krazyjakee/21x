@@ -97,6 +97,20 @@ fn main() {
     if std::io::stdin().is_terminal() || std::io::stdout().is_terminal() || !private_pipes() {
         std::process::exit(1);
     }
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    // Non-secret attestation for Electron/Windows, whose CRT fstat view of an
+    // inherited pipe can look like a file and whose process.stdin is always EOF.
+    // Inspect native handles only; never consume the queued exporter control data.
+    if arguments.len() == 1 && arguments[0] == "--attest-private-stdio" {
+        let metadata = b"21X_PIPE_ATTEST {\"version\":1,\"privatePipes\":true}\n";
+        let written = std::io::stdout()
+            .write_all(metadata)
+            .and_then(|_| std::io::stdout().flush());
+        std::process::exit(if written.is_ok() { 0 } else { 1 });
+    }
+    if !arguments.is_empty() {
+        std::process::exit(1);
+    }
     let result = std::panic::catch_unwind(|| {
         let mut input = Zeroizing::new(Vec::new());
         std::io::stdin()

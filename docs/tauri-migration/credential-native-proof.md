@@ -67,6 +67,13 @@ on Windows. Child environments include only required OS/keychain,
 locale, display, and D-Bus/XDG variables; arbitrary API tokens and preload hooks
 are dropped. Calls have a deadline and bounded output.
 
+The Windows exporter uses the trusted native helper's
+`--attest-private-stdio` mode to inspect its inherited handles without reading
+queued control bytes or accessing a key store. It then reads fd 0 directly:
+[Electron 44's initialization](https://github.com/electron/electron/blob/v44.0.0/lib/common/init.ts)
+replaces `process.stdin` with an EOF-only stream on Windows. This preserves
+regular-file rejection without relying on CRT `fstat` pipe classification.
+
 [run.mjs](../../scripts/credential-proof/run.mjs) stages three small service modules
 without an application build, then runs a real Electron main process with the
 `21x` product name and a separate temporary profile. It creates random synthetic
@@ -106,6 +113,14 @@ to the protected candidate, a verified locked collection and rejected new key
 bootstrap/legacy access, key survival after unlock, and a rejected missing-bus
 bootstrap. It does not lock a developer's login keyring. `basic_text` is never
 accepted as destination protection.
+
+Before its first Secret Service call, the controller checks the bus name owner
+without auto-activation and verifies that its PID is the owned daemon's PID.
+This prevents readiness polling from activating a second daemon with the outer
+session's XDG environment. Failure reports include fixed phase names, fixed
+provider/planner codes, owned-daemon exit metadata and boolean ownership/alias
+observations. They never include raw provider errors, D-Bus responses or canaries.
+The bounded `21x.aes256gcm.v1` format identifier is accepted by the planner.
 
 ## Execute at a batch boundary
 

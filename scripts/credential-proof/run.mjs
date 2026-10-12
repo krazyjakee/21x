@@ -10,7 +10,8 @@ import { observeOwnedProcess } from './process.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const hash = (value) => createHash('sha256').update(value).digest('hex')
-const SAFE_CODES = new Set(['LEGACY_UNAVAILABLE', 'LEGACY_PROBE_FAILED', 'KEYSTORE_NO_ACCESS', 'KEYSTORE_NO_ENTRY', 'KEYSTORE_ALREADY_EXISTS', 'KEYSTORE_INVALID_DATA', 'KEYSTORE_UNSUPPORTED', 'SECRET_STORE_UNAVAILABLE'])
+const SAFE_CODES = new Set(['LEGACY_UNAVAILABLE', 'LEGACY_PROBE_FAILED', 'KEYSTORE_NO_ACCESS', 'KEYSTORE_NO_ENTRY', 'KEYSTORE_ALREADY_EXISTS', 'KEYSTORE_INVALID_DATA', 'KEYSTORE_UNSUPPORTED', 'SECRET_STORE_UNAVAILABLE', 'KEYSTORE_PROTOCOL_ERROR', 'INVALID_SECRET_KEY', 'INVALID_SECRET_VALUE', 'INVALID_SECRET_CIPHERTEXT', 'INVALID_SOURCE', 'AMBIGUOUS_BLOB', 'INVALID_SOURCE_FORMAT', 'DUPLICATE_LOCATION', 'BOUNDS_EXCEEDED', 'LEGACY_DECRYPT_FAILED', 'DESTINATION_NOT_SECURE', 'DESTINATION_UNAVAILABLE', 'DESTINATION_ENCRYPT_FAILED', 'DESTINATION_VERIFY_FAILED'])
+const SOURCE_PHASES = new Set(['stdio-attest', 'profile-setup', 'control-read', 'app-ready', 'source-protection-check', 'originals-verify', 'canary-generate', 'source-corruption-check', 'source-export'])
 
 /** Low-cost transpilation of four isolated modules; no application build/addons. */
 export async function stageModules(directory) {
@@ -30,10 +31,11 @@ export async function stageModules(directory) {
   }
 }
 
-function electronFrame(executable, directory, request, legacyBackend, allowedEnvironment) {
+function electronFrame(executable, helper, directory, request, legacyBackend, allowedEnvironment) {
   return new Promise((resolve, reject) => {
     const token = randomBytes(32).toString('hex')
     const args = [directory]
+    if (process.platform === 'win32') args.push('--credential-pipe-attestor=' + resolve(helper))
     if (process.platform === 'linux') args.push('--password-store=' + (legacyBackend === 'basic_text' ? 'basic' : 'gnome-libsecret'))
     if (process.platform === 'linux' && process.getuid?.() === 0) args.push('--no-sandbox')
     const child = spawn(executable, args, { stdio: ['pipe', 'pipe', 'ignore'], env: allowedEnvironment, windowsHide: true, detached: process.platform !== 'win32' })
@@ -42,6 +44,7 @@ function electronFrame(executable, directory, request, legacyBackend, allowedEnv
     let pending = ''
     let bytes = 0
     let response
+    let privatePipeAttested = process.platform !== 'win32'
     let settled = false
     const finish = async (error) => {
       if (settled) return
@@ -52,10 +55,10 @@ function electronFrame(executable, directory, request, legacyBackend, allowedEnv
       if (error) {
         const stopped = await owned.stop()
         child.stdout.destroy()
-        reject(Object.assign(new Error(error), { code: error, cleanupSafe: stopped }))
+        reject(Object.assign(new Error(error), { code: error, cleanupSafe: stopped, sourcePhase: SOURCE_PHASES.has(response?.phase) ? response.phase : 'no-frame', sourceExitCode: child.exitCode, privatePipeAttested }))
       } else {
         child.stdout.destroy()
-        resolve(response)
+        resolve({ ...response, privatePipeAttested })
       }
     }
     const timer = setTimeout(() => finish('LEGACY_UNAVAILABLE'), 35_000)
@@ -70,10 +73,14 @@ function electronFrame(executable, directory, request, legacyBackend, allowedEnv
       while ((newline = pending.indexOf('\n')) >= 0) {
         const line = pending.slice(0, newline)
         pending = pending.slice(newline + 1)
+        if (line === '21X_PIPE_ATTEST {"version":1,"privatePipes":true}') { privatePipeAttested = true; continue }
         if (!line.startsWith('21X_CREDENTIAL_FRAME ')) continue
         try {
           const message = JSON.parse(line.slice('21X_CREDENTIAL_FRAME '.length))
-          if (message.token !== token || response) { finish('LEGACY_PROBE_FAILED'); return }
+          // Before control can be read, accept only a fixed metadata failure from
+          // this owned private pipe. Successful frames always require the nonce.
+          const earlyFailure = message.token === undefined && message.ok === false && message.code === 'LEGACY_PROBE_FAILED' && SOURCE_PHASES.has(message.phase)
+          if (message.token !== token && !earlyFailure || response) { finish('LEGACY_PROBE_FAILED'); return }
           response = message
         } catch { finish('LEGACY_PROBE_FAILED') }
       }
@@ -98,18 +105,22 @@ export async function runCredentialProof({ helper, electron, legacyBackend = pro
   let keys
   let created = false
   let cleanupSafe = true
+  let phase = 'stage-modules'
   const account = 't03-' + randomBytes(16).toString('hex')
   const report = { reportVersion: 1, platform: process.platform, arch: process.arch, scenario: legacyBackend, passed: false }
   try {
     const modules = await stageModules(directory)
     const allowedEnvironment = modules.keys.nativeCredentialEnvironment(process.env)
-    const source = await electronFrame(electron, directory, { operation: 'generate' }, legacyBackend, allowedEnvironment)
+    phase = 'legacy-generate'
+    const source = await electronFrame(electron, helper, directory, { operation: 'generate' }, legacyBackend, allowedEnvironment)
     if (!Array.isArray(source.records) || source.records.length !== 6 || source.corruptCiphertextsRejected !== 5 || source.appName !== '21x' || !source.isolatedProfile) throw Object.assign(new Error('PROOF_FAILED'), { code: 'PROOF_FAILED' })
-    report.legacy = { backend: source.backend, appName: source.appName, isPackaged: source.isPackaged, isolatedProfile: source.isolatedProfile, corruptCiphertextsRejected: source.corruptCiphertextsRejected }
+    report.legacy = { backend: source.backend, appName: source.appName, isPackaged: source.isPackaged, isolatedProfile: source.isolatedProfile, corruptCiphertextsRejected: source.corruptCiphertextsRejected, privatePipeAttested: source.privatePipeAttested }
     keys = new modules.keys.NativeApplicationKeyStore(resolve(helper))
+    phase = 'destination-create'
     created = true // Cleanup even if key creation succeeds but subsequent read fails.
     candidate = await modules.provider.initializeProtectedSecretStorage(keys, account, 'create')
     report.destination = { backend: await keys.backend(account), format: modules.provider.AUTHENTICATED_SECRET_FORMAT }
+    phase = 'source-provenance'
     const decoded = new Map()
     const inputs = source.records.map((record) => {
       if (hash(record.decoded) !== record.expectedHash) throw Object.assign(new Error('PROOF_FAILED'), { code: 'PROOF_FAILED' })
@@ -127,7 +138,9 @@ export async function runCredentialProof({ helper, electron, legacyBackend = pro
       return value
     } }
     const injected = { legacy, destination: { storage: candidate, formatId: modules.provider.AUTHENTICATED_SECRET_FORMAT, persistentProtection: 'os-protected' } }
+    phase = 'conversion-plan'
     const plan = modules.migration.prepareCredentialMigration(inputs, injected)
+    phase = 'import-rejection-checks'
     const ambiguous = { ...inputs[0], source: { ...inputs[0].source, interpretation: undefined } }
     report.ambiguousBlobRejected = expectRejected(() => modules.migration.prepareCredentialMigration([ambiguous], injected), 'AMBIGUOUS_BLOB')
     const corrupt = { ...inputs[0], source: { ...inputs[0].source, value: Buffer.from(inputs[0].source.value) } }
@@ -136,19 +149,24 @@ export async function runCredentialProof({ helper, electron, legacyBackend = pro
     report.originalsUnchanged = hash(JSON.stringify(inputs)) === originalFingerprint
     decoded.clear()
     for (const record of source.records) delete record.decoded
+    phase = 'destination-dispose'
     candidate.dispose()
     report.disposedProviderFailsClosed = expectRejected(() => candidate.isEncryptionAvailable(), 'SECRET_STORE_UNAVAILABLE')
+    phase = 'destination-reload'
     reloaded = await modules.provider.initializeProtectedSecretStorage(keys, account, 'load')
     report.reloadedDestinationVerified = plan.changes.every((change, index) => hash(reloaded.decryptString(Buffer.from(change.ciphertextBase64, 'base64'))) === source.records[index].expectedHash)
     const damaged = Buffer.from(plan.changes[0].ciphertextBase64, 'base64')
     damaged[damaged.length - 1] ^= 0xff
     report.destinationTamperRejected = expectRejected(() => reloaded.decryptString(damaged), 'INVALID_SECRET_CIPHERTEXT')
-    const rollback = await electronFrame(electron, directory, { operation: 'verify-originals', records: source.records }, legacyBackend, allowedEnvironment)
+    phase = 'legacy-rollback'
+    const rollback = await electronFrame(electron, helper, directory, { operation: 'verify-originals', records: source.records }, legacyBackend, allowedEnvironment)
     report.legacyOriginalsReopened = rollback.originalsVerified === true
     report.credentialClasses = ['secret-blob', 'provider-key-setting', 'oauth-access-refresh-blobs', 'connector-oauth-json', 'explicit-legacy-plaintext']
     report.passed = report.ambiguousBlobRejected && report.corruptImportRejected && report.originalsUnchanged && report.disposedProviderFailsClosed && report.reloadedDestinationVerified && report.destinationTamperRejected && report.legacyOriginalsReopened
   } catch (error) {
     report.errorCode = SAFE_CODES.has(error.code) ? error.code : 'PROOF_FAILED'
+    report.failurePhase = phase
+    if (error.sourcePhase) report.legacyFailure = { phase: error.sourcePhase, privatePipeAttested: error.privatePipeAttested, exitCode: error.sourceExitCode }
     if (error.cleanupSafe === false) cleanupSafe = false
   } finally {
     candidate?.dispose()

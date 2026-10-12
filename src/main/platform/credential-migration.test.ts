@@ -62,6 +62,12 @@ function errorCode(action: () => unknown, code: CredentialMigrationErrorCode): C
 }
 
 describe('legacy credential rehearsal preparation', () => {
+  it('accepts a bounded numeric application namespace for the native destination format', () => {
+    const p = providers()
+    const plan = prepareCredentialMigration([setting('synthetic')], { ...p.injected, destination: { ...p.injected.destination, formatId: '21x.aes256gcm.v1' } })
+    expect(plan.destinationFormat).toBe('21x.aes256gcm.v1')
+  })
+
   it('converts secret/settings/OAuth/connector formats through injected providers without touching originals', () => {
     const p = providers()
     const connector = {

@@ -28,6 +28,11 @@ function command(executable, arguments_, input, timeout = 15_000) {
 }
 
 const dbus = (path, method, ...arguments_) => command('gdbus', ['call', '--session', '--dest', 'org.freedesktop.secrets', '--object-path', path, '--method', method, ...arguments_], undefined, 2000)
+// Bus ownership queries cannot auto-activate Secret Service. Never issue a
+// Secret Service call before our own daemon owns the name: DBus activation can
+// otherwise start a second daemon with the outer session's original XDG paths.
+const bus = (method, ...arguments_) => command('gdbus', ['call', '--session', '--dest', 'org.freedesktop.DBus', '--object-path', '/org/freedesktop/DBus', '--method', `org.freedesktop.DBus.${method}`, ...arguments_], undefined, 1000)
+const SESSION_CODES = new Set(['SESSION_COMMAND_FAILED', 'SESSION_UNAVAILABLE', 'SESSION_FOREIGN_OWNER', 'SESSION_KEY_MISMATCH', 'SESSION_NOT_LOCKED'])
 
 async function insideSession() {
   const temporary = await mkdtemp(join(tmpdir(), '21x-secret-service-'))
@@ -35,9 +40,11 @@ async function insideSession() {
   const lockAccount = 't03-lock-' + randomBytes(16).toString('hex')
   const key = randomBytes(32)
   let daemon
+  let daemonOwned
   let store
   let locked = false
   let lockEntryAttempted = false
+  let phase = 'isolation-setup'
   const report = { reportVersion: 1, platform: 'linux', arch: process.arch, isolatedDBus: true, passed: false }
   try {
     for (const [name, directory] of Object.entries({ XDG_DATA_HOME: 'data', XDG_CONFIG_HOME: 'config', XDG_CACHE_HOME: 'cache', XDG_RUNTIME_DIR: 'runtime' })) {
@@ -50,44 +57,71 @@ async function insideSession() {
     // Drop unrelated parent secrets and preload variables before any child spawn.
     const allowed = modules.keys.nativeCredentialEnvironment(process.env)
     for (const name of Object.keys(process.env)) if (!(name in allowed)) delete process.env[name]
-    daemon = spawn('gnome-keyring-daemon', ['--foreground', '--components=secrets', '--unlock'], { stdio: ['pipe', 'ignore', 'ignore'], env: allowed })
-    daemon.on('error', () => {})
+    phase = 'owned-daemon-start'
+    await mkdir(join(temporary, 'runtime', 'keyring'), { mode: 0o700 })
+    daemon = spawn('gnome-keyring-daemon', ['--foreground', '--components=secrets', '--unlock', '--control-directory=' + join(temporary, 'runtime', 'keyring')], { stdio: ['pipe', 'ignore', 'ignore'], env: allowed })
+    daemonOwned = observeOwnedProcess(daemon)
+    daemon.on('error', () => { report.daemonSpawnFailed = true })
+    daemon.once('close', (code, signal) => { report.daemonExit = { code, signal: signal === 'SIGTERM' || signal === 'SIGKILL' ? signal : signal ? 'other' : null } })
     daemon.stdin.on('error', () => {})
     daemon.stdin.end(password) // Synthetic keyring password lives only in memory/private stdin.
     let collection
+    report.startup = { ownerSeen: false, ownerMatchesOwnedDaemon: false, aliasSeen: false, aliasRootSeen: false, commandFailures: 0 }
+    phase = 'owned-daemon-readiness'
     const startupDeadline = Date.now() + 10_000
     while (!collection && Date.now() < startupDeadline) {
       try {
+        if (daemonOwned.closed()) throw new Error('SESSION_UNAVAILABLE')
+        const present = await bus('NameHasOwner', 'org.freedesktop.secrets')
+        if (!/\btrue\b/.test(present)) { await new Promise((resolvePromise) => setTimeout(resolvePromise, 100)); continue }
+        report.startup.ownerSeen = true
+        const owner = await bus('GetConnectionUnixProcessID', 'org.freedesktop.secrets')
+        const ownerPid = Number(owner.match(/uint32\s+(\d+)/)?.[1])
+        if (ownerPid !== daemon.pid) throw new Error('SESSION_FOREIGN_OWNER')
+        report.startup.ownerMatchesOwnedDaemon = true
         const alias = await dbus('/org/freedesktop/secrets', 'org.freedesktop.Secret.Service.ReadAlias', 'default')
         collection = alias.match(/\/org\/freedesktop\/secrets\/collection\/[a-zA-Z0-9_/]+/)?.[0]
-      } catch { /* Service startup may still be in progress. */ }
+        report.startup.aliasSeen = Boolean(collection)
+        report.startup.aliasRootSeen = alias.includes("'/'")
+      } catch (error) {
+        if (error.message === 'SESSION_FOREIGN_OWNER' || daemonOwned.closed()) throw error
+        report.startup.commandFailures++
+      }
       if (!collection) await new Promise((resolvePromise) => setTimeout(resolvePromise, 100))
     }
     if (!collection) throw new Error('SESSION_UNAVAILABLE')
+    phase = 'unlocked-conversion'
     report.unlocked = await runCredentialProof({ helper, electron, legacyBackend: 'gnome-libsecret' })
+    phase = 'basic-text-conversion'
     report.basicTextLegacy = await runCredentialProof({ helper, electron, legacyBackend: 'basic_text' })
 
+    phase = 'lock-canary-create'
     store = new modules.keys.NativeApplicationKeyStore(resolve(helper), 5000)
     lockEntryAttempted = true
     await store.create(lockAccount, key)
     const before = await store.load(lockAccount)
     if (!before.equals(key)) throw new Error('SESSION_KEY_MISMATCH')
     before.fill(0)
+    phase = 'collection-lock'
     await dbus('/org/freedesktop/secrets', 'org.freedesktop.Secret.Service.Lock', `[ '${collection}' ]`)
     const property = await dbus(collection, 'org.freedesktop.DBus.Properties.Get', 'org.freedesktop.Secret.Collection', 'Locked')
     locked = /\btrue\b/.test(property)
     if (!locked) throw new Error('SESSION_NOT_LOCKED')
+    phase = 'locked-destination'
     let blocked = false
     try { const unexpected = await store.load(lockAccount); unexpected.fill(0) } catch (error) { blocked = error.code === 'KEYSTORE_NO_ACCESS' }
     report.lockedDestinationBootstrapRejected = blocked
     // An independent real Electron process must refuse locked legacy access.
+    phase = 'locked-legacy'
     report.lockedLegacy = await runCredentialProof({ helper, electron, legacyBackend: 'gnome-libsecret' })
     report.lockedLegacyRejected = !report.lockedLegacy.passed && report.lockedLegacy.errorCode === 'LEGACY_UNAVAILABLE'
+    phase = 'collection-unlock'
     await command('gnome-keyring-daemon', ['--unlock', '--components=secrets'], password)
     locked = false
     const reopened = await store.load(lockAccount)
     report.keySurvivedLock = reopened.equals(key)
     reopened.fill(0)
+    phase = 'unavailable-destination'
     const sessionBus = process.env.DBUS_SESSION_BUS_ADDRESS
     try {
       process.env.DBUS_SESSION_BUS_ADDRESS = `unix:path=${join(temporary, 'absent-bus')}`
@@ -97,24 +131,22 @@ async function insideSession() {
     } finally {
       process.env.DBUS_SESSION_BUS_ADDRESS = sessionBus
     }
+    phase = 'fixture-delete'
     await store.deleteFixture(lockAccount)
     lockEntryAttempted = false
     report.fixtureKeysDeleted = true
     report.passed = report.unlocked.passed && report.basicTextLegacy.passed && report.lockedDestinationBootstrapRejected && report.lockedLegacyRejected && report.keySurvivedLock && report.unavailableDestinationBootstrapRejected
-  } catch {
-    report.errorCode = 'ISOLATED_SECRET_SERVICE_PROOF_FAILED'
+  } catch (error) {
+    report.errorCode = SESSION_CODES.has(error.message) ? error.message : /^KEYSTORE_(NO_ACCESS|NO_ENTRY|ALREADY_EXISTS|INVALID_DATA|UNSUPPORTED|PROTOCOL_ERROR)$/.test(error.code) ? error.code : 'ISOLATED_SECRET_SERVICE_PROOF_FAILED'
+    report.failurePhase = phase
   } finally {
     if (locked) { try { await command('gnome-keyring-daemon', ['--unlock', '--components=secrets'], password) } catch { report.cleanupFailed = true } }
     if (store && lockEntryAttempted) { try { await store.deleteFixture(lockAccount) } catch { report.cleanupFailed = true } }
     key.fill(0)
     password.fill(0)
-    if (daemon) {
-      const stopped = new Promise((resolvePromise) => { if (daemon.exitCode !== null) resolvePromise(); else daemon.once('close', resolvePromise) })
-      daemon.kill()
-      await Promise.race([stopped, new Promise((resolvePromise) => setTimeout(resolvePromise, 2000))])
-      if (daemon.exitCode === null) daemon.kill('SIGKILL')
-    }
-    await rm(temporary, { recursive: true, force: true })
+    const stopped = !daemonOwned || await daemonOwned.stop()
+    if (stopped) await rm(temporary, { recursive: true, force: true })
+    else { report.temporaryProfileRetained = temporary; report.cleanupFailed = true }
     if (report.cleanupFailed) report.passed = false
   }
   return report

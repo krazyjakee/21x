@@ -224,7 +224,7 @@ export function prepareCredentialMigration(
   if (!Array.isArray(inputs) || inputs.length > limits.maxRecords) fail('BOUNDS_EXCEEDED')
   const destination = providers?.destination
   if (!destination || destination.persistentProtection !== 'os-protected' ||
-      typeof destination.formatId !== 'string' || !/^[a-z][a-z0-9.-]{0,63}$/.test(destination.formatId)) fail('DESTINATION_NOT_SECURE')
+      typeof destination.formatId !== 'string' || !/^[a-z0-9][a-z0-9.-]{0,63}$/.test(destination.formatId)) fail('DESTINATION_NOT_SECURE')
   available(destination.storage, 'DESTINATION_UNAVAILABLE')
 
   let inputBytes = 0
