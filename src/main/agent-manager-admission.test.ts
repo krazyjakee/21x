@@ -1214,7 +1214,15 @@ describe('adapter start fencing before effects', () => {
     const stopping = action === 'stop' ? manager.stopByTaskId(task.id) : undefined
     if (action === 'complete') db.updateTask(task.id, { status: TaskStatus.Completed })
     if (action === 'delete') db.deleteTask(task.id)
-    if (action === 'shutdown') await manager.stopAllSessions()
+    if (action === 'shutdown') {
+      // Observe rejection immediately: the blocked creation remains owned past
+      // the bounded shutdown drain and must settle before cleanup can succeed.
+      const shutdownRejected = expect(manager.stopAllSessions()).rejects.toMatchObject({
+        code: 'AGENT_SHUTDOWN_INCOMPLETE'
+      })
+      await shutdownRejected
+    }
+    const taskBeforeLateCreation = db.getTask(task.id)
     finish('late-session')
     await rejected
     await stopping
@@ -1222,7 +1230,10 @@ describe('adapter start fencing before effects', () => {
     expect(adapter.destroySession).toHaveBeenCalledTimes(1)
     expect(manager.findSessionByTaskId(task.id)).toBeUndefined()
     if (action === 'complete') expect(db.getTask(task.id)?.status).toBe(TaskStatus.Completed)
-    await manager.stopAllSessions()
+    // Fenced-start cleanup may refresh the row's bookkeeping timestamp while
+    // the incomplete shutdown still owns the DB. Domain fields stay unchanged.
+    if (action === 'shutdown') expect(db.getTask(task.id)).toEqual({ ...taskBeforeLateCreation, updated_at: expect.any(String) })
+    await expect(manager.stopAllSessions()).resolves.toBeUndefined()
   })
 })
 
