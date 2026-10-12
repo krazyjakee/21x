@@ -42,7 +42,7 @@ The fixed service is `com.krazyjakee.21x.credentials.v1`; the account identifies
 the profile. Native create refuses an existing entry and never treats locked or
 unreadable storage as permission to replace it. Generic credential APIs do not
 provide an atomic compare-and-create operation: **trusted bootstrap must hold the
-future cross-host profile lock before key creation**. The probe uses unique
+cross-host profile lock before key creation**. The probe uses unique
 `t03-` accounts and never touches production profile keys. Only fixture accounts
 may be deleted through the helper protocol.
 
@@ -185,7 +185,9 @@ reviewed format-aware serialization, reject native-provider unavailability witho
 plaintext writes, and preserve explicit legacy read/import paths. No current
 shipping bootstrap registers this candidate provider.
 
-Profile locking, consistent database/WAL backup, import journaling, atomic database
+The [profile lock](profile-lock.md) now provides local lifetime ownership for updated
+Electron/service hosts; installed cross-host rehearsal and filesystem validation
+remain necessary. Consistent database/WAL backup, import journaling, atomic database
 apply, JSON configuration credential extraction, repeated/interrupted import
 recovery, native helper signing/path verification, key rotation/write-volume policy,
 and post-cutover rollback are outstanding release integration work. The current
@@ -194,10 +196,29 @@ bounded in the final persistent-provider contract. A locked OS store does not
 erase a key already loaded into a running service; shutdown/disposal is the current
 cache boundary, and any stronger lock-event behavior needs a reviewed host policy.
 
-The retry at commit `e135643` passed actual macOS x64 and arm64 conversion,
-independent reload, corruption rejection and unchanged-original reopening. Linux
-and Windows remain pending; the reports expose provenance checks and fixed runtime
-failure categories before any conversion is accepted. The Linux synthetic fixture
+Real synthetic OS-store conversion now passes on all four supported targets.
+The [retained metadata record](credential-proof-evidence.json) preserves exact
+reports, source commits and tool versions after hosted artifact retention expires.
+The successful runs used different commits as platform-specific fixture defects
+were corrected; these are not a claim that one revision was rerun on every target.
+
+| Target | Source commit | Passing run |
+| --- | --- | --- |
+| Linux x64 | `f5a35ea` | [38288066977](https://github.com/krazyjakee/21x/actions/runs/38288066977) |
+| macOS x64 | `e135643` | [38282440311](https://github.com/krazyjakee/21x/actions/runs/38282440311) |
+| macOS arm64 | `e135643` | [38282440311](https://github.com/krazyjakee/21x/actions/runs/38282440311) |
+| Windows x64 | `eb5c81e` | [38291150315](https://github.com/krazyjakee/21x/actions/runs/38291150315) |
+
+All successful reports prove converted values survive independent native key
+reload, source/destination corruption is rejected, original representations remain
+unchanged and reopen through a second Electron process, and native fixture keys
+are deleted. Linux additionally proves locked legacy/native refusal, missing-bus
+refusal and protected-key survival after labelled owned-daemon restart. This
+completes #201's synthetic candidate proof scope; #193 still owns signed installed
+macOS ACL access, actual user ciphertext rehearsal and transactional live import.
+
+The reports expose provenance checks and fixed runtime failure categories before
+any conversion is accepted. The Linux synthetic fixture
 can retry a specifically classified Chromium sandbox startup failure without a
 sandbox; this is a fixed main-only exporter with no renderer, listener, arbitrary
 code or live profile, and reports `proofOnlyLinuxSandboxDisabled`. Shipping host
