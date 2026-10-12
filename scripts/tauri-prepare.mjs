@@ -1,6 +1,6 @@
 /** Stage an isolated runtime once; native compilation is an explicit batch action. */
 import { constants } from 'node:fs'
-import { copyFile, lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -71,6 +71,24 @@ async function npmCli(nodeExecutable, supplied) {
     catch (error) { if (error.code !== 'ENOENT') throw error }
   }
   throw new Error('Native preparation needs npm-cli.js; pass --npm-cli with its absolute path')
+}
+
+export async function repairPtyHelperModes(service, platform = process.platform) {
+  if (platform !== 'darwin') return []
+  const helpers = []
+  // node-pty1.1.0 publishes Darwin prebuild helpers as0644. Repair only
+  // isolated staging copies; no application or dependency code is changed.
+  for (const directory of ['build/Release', 'build/Debug', 'prebuilds/darwin-x64', 'prebuilds/darwin-arm64']) {
+    const path = join(service, 'node_modules/node-pty', directory, 'spawn-helper')
+    let details
+    try { details = await lstat(path) }
+    catch (error) { if (error.code === 'ENOENT') continue; throw error }
+    if (!details.isFile() || details.isSymbolicLink()) throw new Error('PTY helper must be a regular staged file')
+    if ((details.mode & 0o111) !== 0o111) await chmod(path, (details.mode & 0o777) | 0o111)
+    helpers.push(directory)
+  }
+  if (helpers.length === 0) throw new Error('Staged Darwin PTY spawn helper is missing')
+  return helpers
 }
 
 export async function prepareRuntime({
@@ -154,6 +172,7 @@ export async function prepareRuntime({
       if (!healthy(checked)) throw new Error('Standalone native module verification failed; no success marker was written')
       await writeChanged(join(service, '.native-prepared.json'), nativeSignature)
     }
+    await repairPtyHelperModes(service)
   }
   await writeChanged(manifestPath, { node: nodeSignature, service: sourceSignature })
   return { nodeVersion: config.nodeVersion, nativePrepared: native, resources: root }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { prepareRuntime } from './tauri-prepare.mjs'
+import { prepareRuntime, repairPtyHelperModes } from './tauri-prepare.mjs'
 
 async function fixture(t, nodeVersion = process.versions.node) {
   const root = await mkdtemp(join(tmpdir(), '21x-tauri-preparation-'))
@@ -15,6 +15,22 @@ async function fixture(t, nodeVersion = process.versions.node) {
   await writeFile(join(root, 'src/service/feasibility.mjs'), 'process.exit(0)\n')
   return root
 }
+
+test('Darwin staged PTY helpers gain executable bits without rewriting their contents', async t => {
+  if (process.platform === 'win32') return
+  const root = await fixture(t)
+  const service = join(root, 'service')
+  const directory = join(service, 'node_modules/node-pty/prebuilds/darwin-x64')
+  await mkdir(directory, { recursive: true })
+  const helper = join(directory, 'spawn-helper')
+  await writeFile(helper, 'fixture-helper', { mode: 0o644 })
+  const before = await stat(helper)
+  assert.deepEqual(await repairPtyHelperModes(service, 'darwin'), ['prebuilds/darwin-x64'])
+  assert.equal((await stat(helper)).mode & 0o111, 0o111)
+  assert.equal((await stat(helper)).mtimeMs, before.mtimeMs)
+  assert.equal(await readFile(helper, 'utf8'), 'fixture-helper')
+  assert.deepEqual(await repairPtyHelperModes(service, 'darwin'), ['prebuilds/darwin-x64'])
+})
 
 test('repeated preparation leaves the large runtime and service untouched', async t => {
   const root = await fixture(t)

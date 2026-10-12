@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto'
 import { fork } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { lstatSync, realpathSync } from 'node:fs'
+import { lstatSync, realpathSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -136,25 +136,63 @@ function workerEnvironment() {
 }
 
 async function ptyProbe(signal) {
-  const pty = require(stagedModule('node-pty'))
-  return new Promise((resolve, reject) => {
-    const terminal = pty.spawn(process.execPath, ['-e', "process.stdout.write('pty-ok');"], {
-      name: 'xterm', cols: 40, rows: 10, cwd: fileURLToPath(new URL('.', import.meta.url)),
-      env: workerEnvironment()
-    })
+  const errno = error => ['EACCES', 'ENOENT', 'ENOEXEC', 'EPERM', 'EAGAIN', 'ENOMEM', 'ENOTDIR', 'EIO',
+    'ETIMEDOUT', 'ERR_DLOPEN_FAILED'].includes(error?.code) ? error.code : 'UNKNOWN'
+  let pty
+  let helper = null
+  try {
+    const entry = stagedModule('node-pty')
+    pty = require(entry)
+    if (process.platform === 'darwin') {
+      const native = require(join(dirname(entry), 'utils.js')).loadNativeModule('pty')
+      const path = join(dirname(entry), native.dir, 'spawn-helper')
+      let details
+      try { details = statSync(path) } catch (error) {
+        return { ok: false, phase: 'helper-lookup', errno: errno(error), helper: { present: false } }
+      }
+      helper = { present: details.isFile(), mode: (details.mode & 0o777).toString(8),
+        executable: Boolean(details.mode & 0o111) }
+      if (!helper.present || !helper.executable) return { ok: false, phase: 'helper-permission', helper }
+    }
+  } catch (error) { return { ok: false, phase: 'module-load', errno: errno(error) } }
+  return new Promise(resolve => {
+    let terminal
+    try {
+      terminal = pty.spawn(process.execPath, ['-e',
+        "process.stdout.write('pty-ok', () => setTimeout(() => process.exit(0), 100));"], {
+        name: 'xterm', cols: 40, rows: 10, cwd: fileURLToPath(new URL('.', import.meta.url)),
+        env: workerEnvironment()
+      })
+    } catch (error) { resolve({ ok: false, phase: 'spawn', errno: errno(error), helper }); return }
     children.add(terminal)
     let output = ''
-    const data = terminal.onData(chunk => { output = (output + chunk).slice(-256) })
-    const abort = () => { try { terminal.kill() } catch {}; reject(fail('CANCELLED')) }
-    signal.addEventListener('abort', abort, { once: true })
-    const exit = terminal.onExit(({ exitCode }) => {
+    let chunks = 0
+    let settled = false
+    const data = terminal.onData(chunk => {
+      output = (output + chunk).slice(-256)
+      chunks = Math.min(chunks + 1, 1_000_000)
+    })
+    const finish = result => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
       children.delete(terminal)
       signal.removeEventListener('abort', abort)
       data.dispose()
       exit.dispose()
-      if (exitCode === 0 && output.includes('pty-ok')) resolve({ ok: true })
-      else reject(fail('INTERNAL_ERROR'))
+      resolve({ ...result, helper, dataChunks: chunks, markerSeen: output.includes('pty-ok') })
+    }
+    const abort = () => { try { terminal.kill() } catch {}; finish({ ok: false, phase: 'cancelled' }) }
+    signal.addEventListener('abort', abort, { once: true })
+    const exit = terminal.onExit(({ exitCode, signal: exitSignal }) => {
+      finish({ ok: exitCode === 0 && output.includes('pty-ok'), phase: 'exit',
+        exitCode: Number.isInteger(exitCode) ? exitCode : null,
+        signal: Number.isInteger(exitSignal) ? exitSignal : null })
     })
+    const timer = setTimeout(() => {
+      try { terminal.kill() } catch {}
+      finish({ ok: false, phase: 'timeout' })
+    }, 10_000)
     if (signal.aborted) abort()
   })
 }

@@ -97,6 +97,8 @@ jobs:
         run: pnpm tauri:prepare:native 2>&1 | tee native-evidence/native-staging.log
       - name: Preserve Node and dependency redistribution notices
         run: node scripts/tauri-resource-notices.mjs | tee native-evidence/third-party-notices.json
+      - name: Check actual staged native probes before compiling the GUI
+        run: node scripts/tauri-service-preflight.mjs src-tauri/resources | tee native-evidence/staged-native-preflight.json
       - name: Build the actual platform package
         run: pnpm tauri:build --debug --bundles ${{ matrix.bundle }} -- --locked 2>&1 | tee native-evidence/native-build.log
       - name: Exercise packaged GUI, resources, native probes and quit
