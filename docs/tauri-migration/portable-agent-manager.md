@@ -1,0 +1,11 @@
+# Portable AgentManager host
+
+`src/main/agent-manager-core.ts` owns the existing production session lifecycle, admission/queue ownership, startup deadlines, polling coordinator, approval forwarding, transcript projection, resume and stop behavior. The extraction changes host calls and import boundaries; it does not replace those operations with a second manager. `src/main/agent-manager.ts` remains the shipping Electron wrapper with its original constructor and `BrowserWindow` attachment API.
+
+The portable constructor requires an explicit `AgentManagerHost`. Its services are renderer delivery, notification support/click handling, energy blocking, secret sessions/shell wrapper access, managed task-MCP configuration and adapter creation/identification. Renderer and native services can be explicitly unsupported. Agent secret/API-key configuration fails when secrets are unsupported; configured MCP servers fail when configured MCP is disabled. A disabled managed task-MCP host does not register a task/browser server or claim those tools are available.
+
+Database profile, workspace and attachment locations remain the responsibility of the supplied portable database manager's explicit runtime configuration. The lifecycle core supplies no default Electron profile and does not locate user data itself. Durable transcript writes and external event listeners continue independently of a GUI window.
+
+Session configuration and transcript notification helpers have portable cores and Electron-default API wrappers. The pure backend enum/provider identity moved out of the SDK adapter factory so a fixture can inject its deterministic adapter without loading real SDK backends. The Electron host retains the actual factory, Codex type predicate, IPC guard, notification behavior, energy blocker and authenticated task-MCP URL builder.
+
+A static TypeScript transpilation/import walk of the lifecycle core reached 59 source modules, with Node builtins and `@paralleldrive/cuid2` as the only external runtime dependencies. It found no Electron import or real SDK factory. This is source-boundary evidence; centralized type checks, the existing Electron regression suite and a real standalone Node/staged-SQLite lifecycle proof still need execution. The deterministic adapter will be a synthetic fixture, with no claim of real backend parity or restored browser support.

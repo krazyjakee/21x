@@ -55,7 +55,7 @@
 import type { AgentRecord, TaskRecord } from '../database'
 import { isCoordinatorTask } from '../../shared/task-roles'
 import type { ProjectLimitReason } from '../../shared/project-policies'
-import { isTriageSessionTask } from './session-config'
+import { isTriageSessionTask } from './session-config-core'
 import { agentHardCap } from '../../shared/concurrency'
 
 /** Settings key for the global cap on concurrently working agent sessions. */

@@ -6,19 +6,8 @@ import { AcpAdapter } from '../adapters/acp-adapter'
 import { CodexAppServerAdapter } from '../adapters/codex-app-server-adapter'
 import { PiAdapter } from '../adapters/pi-adapter'
 
-export enum CodingAgentType {
-  OPENCODE = 'opencode',
-  CLAUDE_CODE = 'claude-code',
-  CODEX = 'codex',
-  CURSOR = 'cursor',
-  PI = 'pi'
-}
-
-type AgentLike = { config?: { coding_agent?: string } } | null | undefined
-
-export function getAgentProvider(agent: AgentLike): string {
-  return agent?.config?.coding_agent || CodingAgentType.OPENCODE
-}
+import { CodingAgentType } from './agent-types'
+export { CodingAgentType, getAgentProvider } from './agent-types'
 
 export function isCodexAppServerAdapter(adapter: CodingAgentAdapter): boolean {
   return adapter instanceof CodexAppServerAdapter || adapter.constructor?.name === 'CodexAppServerAdapter'
