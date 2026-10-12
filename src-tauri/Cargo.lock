@@ -4210,9 +4210,11 @@ dependencies = [
 name = "twentyonex-engine"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "serde",
  "serde_json",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
