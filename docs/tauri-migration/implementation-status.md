@@ -80,6 +80,36 @@ The user approved removing browser features from the migration. T02 is cancelled
 
 Scope-change validation: full TypeScript typecheck and ten inventory/terminology tests passed. Refreshed inventory scans 658 source files; Electron/IPC counts are unchanged. Native host/service code and dependencies did not change, so native compilation is deferred to the next implementation batch.
 
+## Remaining-gate implementation batch
+
+The retained desktop contract manifest now records exact command/event ownership,
+typed legacy signatures and removed browser commands. The registry requires
+request/result codecs, validation and authorization for every binding; unbound
+operations fail closed. This establishes the contract framework, not acceptance
+of G1: production service/native bindings and permission checks remain open.
+
+The production canvas components now have a Tauri build policy that renders saved
+browser and website panels as inert placeholders and hides browser creation and
+connection controls. Store mutations reject new browser panels/edges and avoid
+calling the legacy browser broker. Four renderer regressions cover inert mounts,
+retained tools, repeated saved-data round trips and rejected mutations. Existing
+Electron builds retain their current behavior. The experiment still uses its
+separate frontend; production renderer adoption and service/tool removal remain
+part of T08/T11.
+
+The native credential candidate uses an OS-store application key and authenticated
+encryption in the Node service. Its real Electron conversion workflow uses
+synthetic isolated profiles and private pipes. Local validation passed 65 focused
+credential/contract/inventory cases, full typecheck, 22 service/staging tests and
+three Rust supervisor unit tests. These checks do not establish real Keychain,
+Credential Store or Secret Service behavior; the manual platform proof is required.
+
+The first cross-platform package run compiled both macOS architectures and Windows,
+but packaged smoke failed; Linux compiled and then failed AppImage bundling. The
+macOS PTY failure was traced to non-executable upstream helper files, and staging
+now repairs permissions only on owned regular helpers. Windows initialization and
+Linux bundling need diagnosed retries. These failures keep G0 open.
+
 ## Remaining work and next batch
 
 Extend native packaging/runtime evidence beyond the Linux debug package, produce real legacy Electron/OS credential conversion fixtures (T03). Finish T00's resource/process ownership audit and performance baseline. Resolve the decision register and accept G0/G1 before broad feature porting.

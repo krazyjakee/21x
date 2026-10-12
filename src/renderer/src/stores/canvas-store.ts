@@ -4,6 +4,7 @@ import { settingsApi } from '@/lib/ipc-client'
 import { migrateLegacySettingToDefaultProject, projectScopedKey } from '@/lib/project-scoped-setting'
 import { getCurrentProjectId, useProjectStore } from '@/stores/project-store'
 import { DEFAULT_PROJECT_ID } from '@shared/projects'
+import { embeddedBrowserEnabled, isRetiredBrowserPanel } from '@/lib/desktop-features'
 
 /**
  * The canvas is kept once per project under `canvas_state:<projectId>`. The
@@ -37,6 +38,7 @@ function clog(...args: unknown[]): void {
  * registered panels are affected.
  */
 function releaseBrokerPanel(panelId: string): void {
+  if (!embeddedBrowserEnabled()) return
   try {
     void window.electronAPI?.browser?.unregisterBrokerPanel(panelId)?.catch(() => {})
   } catch {
@@ -503,6 +505,7 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
   },
 
   addPanel: (panel) => {
+    if (isRetiredBrowserPanel(panel.type)) return ''
     const id = `panel-${++panelCounter}-${Date.now()}`
     const { nextZIndex } = get()
     set((s) => ({
@@ -577,6 +580,8 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
   // Edges
   addEdge: (fromPanelId, toPanelId, edgeType) => {
     const { edges, panels } = get()
+    if (!embeddedBrowserEnabled() && (edgeType === 'browser' ||
+      panels.some((panel) => (panel.id === fromPanelId || panel.id === toPanelId) && isRetiredBrowserPanel(panel.type)))) return ''
     const exists = edges.some(
       (e) =>
         (e.fromPanelId === fromPanelId && e.toPanelId === toPanelId) ||
@@ -590,7 +595,7 @@ export const useCanvasStore = create<CanvasState>()(subscribeWithSelector((set, 
     scheduleSave()
 
     // ── Notify agent when a browser/terminal edge connects to a task ──
-    if (edgeType === 'browser') {
+    if (embeddedBrowserEnabled() && edgeType === 'browser') {
       notifyAgentOfBrowserConnection(panels, fromPanelId, toPanelId)
     }
     if (edgeType === 'terminal') {

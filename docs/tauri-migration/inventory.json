@@ -93,7 +93,7 @@
       "expression": "window.electronAPI?.browser?.recordingStatus",
       "file": "src/renderer/src/components/canvas/BrowserPanelContent.tsx",
       "kind": "access",
-      "line": 78,
+      "line": 86,
       "path": [
         "browser",
         "recordingStatus"
@@ -105,7 +105,7 @@
       "expression": "window.electronAPI.browser.registerBrokerPanel",
       "file": "src/renderer/src/components/canvas/BrowserPanelContent.tsx",
       "kind": "call",
-      "line": 126,
+      "line": 134,
       "path": [
         "browser",
         "registerBrokerPanel"
@@ -117,7 +117,7 @@
       "expression": "window.electronAPI?.browser\n        ?.registerBrokerPanel",
       "file": "src/renderer/src/components/canvas/BrowserPanelContent.tsx",
       "kind": "call",
-      "line": 231,
+      "line": 239,
       "path": [
         "browser",
         "registerBrokerPanel"
@@ -129,7 +129,7 @@
       "expression": "window.electronAPI?.browser?.unregisterBrokerPanel",
       "file": "src/renderer/src/components/canvas/BrowserPanelContent.tsx",
       "kind": "call",
-      "line": 258,
+      "line": 266,
       "path": [
         "browser",
         "unregisterBrokerPanel"
@@ -141,7 +141,7 @@
       "expression": "window.electronAPI.browser.openExternalAuth",
       "file": "src/renderer/src/components/canvas/BrowserPanelContent.tsx",
       "kind": "call",
-      "line": 411,
+      "line": 419,
       "path": [
         "browser",
         "openExternalAuth"
@@ -4380,7 +4380,7 @@
       "expression": "window.electronAPI?.browser?.unregisterBrokerPanel",
       "file": "src/renderer/src/stores/canvas-store.ts",
       "kind": "call",
-      "line": 41,
+      "line": 43,
       "path": [
         "browser",
         "unregisterBrokerPanel"
@@ -4392,7 +4392,7 @@
       "expression": "window.electronAPI.terminal.getBuffer",
       "file": "src/renderer/src/stores/canvas-store.ts",
       "kind": "call",
-      "line": 873,
+      "line": 878,
       "path": [
         "terminal",
         "getBuffer"
@@ -5545,8 +5545,10 @@
     "src/main/oauth/providers/mcp-oauth-provider.ts",
     "src/main/output-extraction.ts",
     "src/main/panel-browser-broker.ts",
+    "src/main/platform/authenticated-secret-storage.ts",
     "src/main/platform/credential-migration.ts",
     "src/main/platform/electron-secret-storage.ts",
+    "src/main/platform/native-application-key-store.ts",
     "src/main/platform/secret-storage.ts",
     "src/main/plugins/attachments.ts",
     "src/main/plugins/connector-bridge-plugin.ts",
@@ -5720,6 +5722,7 @@
     "src/renderer/src/components/canvas/CanvasMinimap.tsx",
     "src/renderer/src/components/canvas/CanvasPanel.tsx",
     "src/renderer/src/components/canvas/InfiniteCanvas.tsx",
+    "src/renderer/src/components/canvas/RetiredBrowserPanelContent.tsx",
     "src/renderer/src/components/canvas/SnapGuides.tsx",
     "src/renderer/src/components/canvas/TaskPanelContent.tsx",
     "src/renderer/src/components/canvas/TerminalPanelContent.tsx",
@@ -5916,6 +5919,7 @@
     "src/renderer/src/lib/chat-image-attachments.ts",
     "src/renderer/src/lib/commander-call/derive-call-state.ts",
     "src/renderer/src/lib/commander-images.ts",
+    "src/renderer/src/lib/desktop-features.ts",
     "src/renderer/src/lib/diff-parser.ts",
     "src/renderer/src/lib/git-provider-api.ts",
     "src/renderer/src/lib/ipc-client.ts",
@@ -14008,7 +14012,7 @@
   ],
   "summary": {
     "directAPIConsumers": 368,
-    "files": 662,
+    "files": 666,
     "operations": 712,
     "runtimeElectronImports": 48,
     "typeOnlyElectronImports": 4,
@@ -14019,7 +14023,7 @@
     {
       "column": 9,
       "file": "src/renderer/src/components/canvas/BrowserPanelContent.tsx",
-      "line": 508
+      "line": 516
     }
   ]
 }

@@ -1,6 +1,8 @@
 import { Globe, ExternalLink, RefreshCw, ArrowRight } from 'lucide-react'
 import { useState, useCallback } from 'react'
 import { useCanvasStore } from '@/stores/canvas-store'
+import { embeddedBrowserEnabled } from '@/lib/desktop-features'
+import { RetiredBrowserPanelContent } from './RetiredBrowserPanelContent'
 
 interface WebPagePanelContentProps {
   panelId: string
@@ -14,6 +16,12 @@ interface WebPagePanelContentProps {
  * The URL bar is always editable — click it to change the address.
  */
 export function WebPagePanelContent({ panelId, url, title }: WebPagePanelContentProps) {
+  return embeddedBrowserEnabled()
+    ? <LiveWebPagePanelContent panelId={panelId} url={url} title={title} />
+    : <RetiredBrowserPanelContent />
+}
+
+function LiveWebPagePanelContent({ panelId, url, title }: WebPagePanelContentProps) {
   const updatePanel = useCanvasStore((s) => s.updatePanel)
   const [iframeKey, setIframeKey] = useState(0)
   const [isEditing, setIsEditing] = useState(!url)

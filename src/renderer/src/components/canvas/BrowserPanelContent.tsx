@@ -13,6 +13,8 @@ import type { BrowserRecordingManifest } from '@shared/browser-recording'
 import { browserRecordingApi } from '@/lib/ipc-client'
 import { notifyAgentsOfBrowserRecording } from '@/lib/browser-agent-notifications'
 import { useCanvasStore } from '@/stores/canvas-store'
+import { embeddedBrowserEnabled } from '@/lib/desktop-features'
+import { RetiredBrowserPanelContent } from './RetiredBrowserPanelContent'
 
 interface BrowserPanelContentProps {
   panelId: string
@@ -48,7 +50,13 @@ function getChromeUserAgent(): string {
  * tools. Only registered panels are addressable — the main app window never
  * is. The user sees + interacts with the same page live on the canvas.
  */
-export function BrowserPanelContent({
+export function BrowserPanelContent(props: BrowserPanelContentProps) {
+  return embeddedBrowserEnabled()
+    ? <LiveBrowserPanelContent {...props} />
+    : <RetiredBrowserPanelContent />
+}
+
+function LiveBrowserPanelContent({
   panelId,
   url: initialUrl,
 }: BrowserPanelContentProps) {

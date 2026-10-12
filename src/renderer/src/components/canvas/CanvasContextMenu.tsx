@@ -9,6 +9,7 @@ import { useUIStore } from '@/stores/ui-store'
 import { TaskStatus } from '@/types'
 import type { CanvasPanelType } from '@/stores/canvas-store'
 import type { DrawingTool } from '@/components/canvas/drawing/types'
+import { embeddedBrowserEnabled } from '@/lib/desktop-features'
 
 interface ContextMenuPosition {
   clientX: number
@@ -142,14 +143,14 @@ export function CanvasContextMenu({ position, onClose }: CanvasContextMenuProps)
         />
         <div className="mx-3 my-1 border-t border-border/20" />
 
-        {/* Browser & Terminal — always available */}
+        {/* Retained tools; browser creation is only available in the legacy host. */}
         <MenuSection title="Tools">
-          <MenuItem
+          {embeddedBrowserEnabled() && <MenuItem
             icon={<Globe className="h-3.5 w-3.5 text-orange-400" />}
             label="Agent Browser"
             sublabel="Browser controlled by agent via CDP"
             onClick={() => handleAddPanel('browser', 'Agent Browser', undefined, 'https://www.google.com')}
-          />
+          />}
           <MenuItem
             icon={<TerminalSquare className="h-3.5 w-3.5 text-amber-400" />}
             label="Terminal"

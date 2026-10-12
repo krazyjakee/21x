@@ -19,6 +19,7 @@ import { TerminalPanelContent } from './TerminalPanelContent'
 import { BrowserPanelContent } from './BrowserPanelContent'
 import { getCanvasTaskStatusStyle, shouldFlashCanvasPanelTransition } from './canvas-status-style'
 import { TaskActivityBadge } from '@/components/activity/TaskActivityBadge'
+import { embeddedBrowserEnabled } from '@/lib/desktop-features'
 
 /**
  * Off-viewport ("frozen") resource panel content.
@@ -438,6 +439,7 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
     (e: React.MouseEvent) => {
       e.stopPropagation()
       e.preventDefault()
+      if (!embeddedBrowserEnabled()) return
       // Place new browser panel to the right of this panel with a gap
       const gap = 40
       const newX = panel.x + panel.width + gap
@@ -668,7 +670,7 @@ export const CanvasPanel = memo(function CanvasPanel({ panel, zoom, frozen = fal
       )}
 
       {/* Side handle — React Flow style, for task panels: click to create browser, drag to connect */}
-      {panel.type === 'task' && !isCollapsed && !isDragging && (
+      {embeddedBrowserEnabled() && panel.type === 'task' && !isCollapsed && !isDragging && (
         <div
           className={`absolute transition-opacity duration-200 ${sideHandleVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
           style={{
