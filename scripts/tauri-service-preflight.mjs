@@ -15,7 +15,7 @@ const child = spawn(executable, [join(resourceRoot, 'service/feasibility.mjs')],
   stdio: ['pipe', 'pipe', 'ignore']
 })
 child.stdin.on('error', () => {})
-const exited = once(child, 'close')
+const exited = once(child, 'close').catch(() => [-1])
 let buffered = ''
 let epoch = ''
 let counter = 0

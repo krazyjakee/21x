@@ -2,7 +2,7 @@
 import { constants } from 'node:fs'
 import { chmod, copyFile, lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -75,6 +75,7 @@ async function npmCli(nodeExecutable, supplied) {
 
 export async function repairPtyHelperModes(service, platform = process.platform) {
   if (platform !== 'darwin') return []
+  const base = await realpath(service)
   const helpers = []
   // node-pty1.1.0 publishes Darwin prebuild helpers as0644. Repair only
   // isolated staging copies; no application or dependency code is changed.
@@ -84,6 +85,10 @@ export async function repairPtyHelperModes(service, platform = process.platform)
     try { details = await lstat(path) }
     catch (error) { if (error.code === 'ENOENT') continue; throw error }
     if (!details.isFile() || details.isSymbolicLink()) throw new Error('PTY helper must be a regular staged file')
+    const location = relative(base, await realpath(path))
+    if (isAbsolute(location) || location === '..' || location.startsWith(`..${sep}`)) {
+      throw new Error('PTY helper cannot escape the isolated staging tree')
+    }
     if ((details.mode & 0o111) !== 0o111) await chmod(path, (details.mode & 0o777) | 0o111)
     helpers.push(directory)
   }
