@@ -144,3 +144,22 @@ work remains open, so this database slice does not close G2.
 Extend native packaging/runtime evidence beyond the Linux debug package, produce real legacy Electron/OS credential conversion fixtures (T03). Finish T00's resource/process ownership audit and performance baseline. Resolve the decision register and accept G0/G1 before broad feature porting.
 
 Current gaps include all macOS/Windows evidence, browser retirement/data compatibility, native encrypted fixtures and conversion/rollback, production profile locking, parent-death/process-tree guarantees, complete command/permission mappings, renderer bridge adoption, domain engine extraction, task/session parity and installers/updates. No schema or live credential migration has run, and no migration release has been published.
+
+## Completed package retries and installed task flow
+
+The [Windows NSIS retry](https://github.com/krazyjakee/21x/actions/runs/38288059431)
+and [Linux AppImage retry](https://github.com/krazyjakee/21x/actions/runs/38288063299)
+passed on `f5a35ea`. Together with both macOS DMG proofs above, all four requested
+package targets now launch with system Node hidden, load the bundled native
+modules, pass operation/navigation guards and close with no surviving owned
+service. Compact reports record source commits and package hashes for
+[Windows](evidence/windows-x64-installed-gui.json) and
+[AppImage](evidence/linux-appimage-x64-installed-gui.json). These are debug
+feasibility packages; signing, updates and feature parity remain open.
+
+The [installed Linux synthetic task flow](https://github.com/krazyjakee/21x/actions/runs/38288055264)
+passed all thirteen task/project/settings/transcript checks across a real WebView
+reload with the service/database still owning state, then shut down cleanly.
+Its [report](evidence/linux-x64-synthetic-desktop-installed-gui.json) is partial
+G2 evidence: a deterministic agent session and real approval owner still need
+to be extracted and exercised.

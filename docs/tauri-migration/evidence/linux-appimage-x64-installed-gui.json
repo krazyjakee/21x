@@ -1,0 +1,74 @@
+{
+  "gui": {
+    "remoteNavigationDenied": true,
+    "rendererPing": true,
+    "restrictedOperationDenied": true,
+    "webviewLoadFinished": true,
+    "windowCloseObserved": true,
+    "windowCloseRequested": true
+  },
+  "passed": true,
+  "runtime": {
+    "developmentFrontend": false,
+    "initialized": true,
+    "nativeProbe": {
+      "arch": "x64",
+      "checks": {
+        "@anthropic-ai/claude-agent-sdk": {
+          "importedOnly": true,
+          "ok": true
+        },
+        "@opencode-ai/sdk": {
+          "importedOnly": true,
+          "ok": true
+        },
+        "pty": {
+          "dataChunks": 1,
+          "exitCode": 0,
+          "helper": null,
+          "markerSeen": true,
+          "ok": true,
+          "phase": "exit",
+          "signal": 0
+        },
+        "sqlite": {
+          "inMemory": true,
+          "ok": true
+        },
+        "worker": {
+          "ok": true,
+          "realFile": true
+        }
+      },
+      "nodeAbi": "127",
+      "nodeVersion": "v22.23.2",
+      "ok": true,
+      "platform": "linux"
+    },
+    "profileRoot": "/home/runner/work/_temp/21x-packaged-3tv3xe_0/profile",
+    "resourceRoot": "/home/runner/work/_temp/21x-packaged-3tv3xe_0/squashfs-root/usr/lib/21x Tauri Feasibility/resources",
+    "syntheticDesktop": false,
+    "systemNodeHidden": true
+  },
+  "schemaVersion": 1,
+  "shutdown": {
+    "engineUnavailable": true,
+    "ownedChildExited": true,
+    "ownershipMode": "unix-process-group-linux-parent-death-signal"
+  },
+  "stage": "complete",
+  "verification": {
+    "packageKind": "appimage",
+    "packageSha256": "937b8a90c611046e581a934cc1bce3a397b4eb780cccfd743dd312365f14ba90",
+    "artifact": "21x Tauri Feasibility_0.1.0_amd64.AppImage",
+    "packagedExecutable": "/home/runner/work/_temp/21x-packaged-3tv3xe_0/squashfs-root/usr/bin/twentyonex-tauri-feasibility",
+    "packagedResources": true,
+    "ownedRunningProcessesAfterExit": []
+  },
+  "provenance": {
+    "sourceCommit": "f5a35ea666e7330567aa106d8c4ba0333c29a307",
+    "workflowRun": 38288063299,
+    "target": "linux-appimage-x64",
+    "scope": "debug isolated packaged proof; not release signing, live profile import or full feature parity"
+  }
+}

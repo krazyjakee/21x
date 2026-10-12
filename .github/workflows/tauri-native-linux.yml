@@ -11,6 +11,7 @@ on:
         options:
           - feasibility
           - synthetic-desktop
+          - artifact-authorization-proof
 
 permissions:
   contents: read
@@ -66,7 +67,7 @@ jobs:
       - name: Stage the standalone Node runtime and native addons once
         run: pnpm tauri:prepare:native 2>&1 | tee native-evidence/native-staging.log
       - name: Stage the synthetic database service and check its actual native boundary
-        if: inputs.mode == 'synthetic-desktop'
+        if: inputs.mode == 'synthetic-desktop' || inputs.mode == 'artifact-authorization-proof'
         run: |
           pnpm tauri:prepare:database | tee native-evidence/database-staging.json
           export TWENTYONEX_TEST_RESOURCES="$PWD/src-tauri/resources"
@@ -77,6 +78,8 @@ jobs:
           feature_args=()
           if [ "$TAURI_NATIVE_PROOF_MODE" = 'synthetic-desktop' ]; then
             feature_args=(--features synthetic-desktop)
+          elif [ "$TAURI_NATIVE_PROOF_MODE" = 'artifact-authorization-proof' ]; then
+            feature_args=(--features artifact-authorization-proof)
           elif [ "$TAURI_NATIVE_PROOF_MODE" != 'feasibility' ]; then
             exit 2
           fi
@@ -128,6 +131,12 @@ jobs:
           else:
               assert runtime['nativeProbe']['ok'] is True
               assert runtime['profileRoot'].startswith(os.environ['RUNNER_TEMP'] + '/tauri-smoke/')
+          if os.environ['TAURI_NATIVE_PROOF_MODE'] == 'artifact-authorization-proof':
+              authority = runtime['artifactAuthorizationProof']
+              assert authority['passed'] is True
+              assert authority['boundary'] == 'separate-webview'
+              assert authority['sameMainIframeIsolationProven'] is False
+              assert authority['frameNativeAttemptMethod'] == 'unprivileged-parent-relay'
           assert runtime['resourceRoot'].startswith('/usr/lib/')
           owned_node = (Path(runtime['resourceRoot']) / 'node/node').resolve()
           assert owned_node.is_file()
