@@ -59,14 +59,80 @@ jobs:
         run: pnpm tauri:build --debug --bundles deb -- --locked 2>&1 | tee native-evidence/native-build.log
       - name: Exercise the headless native runtime separately from the GUI
         run: cargo run --locked --manifest-path src-tauri/Cargo.toml -p twentyonex-engine --example probe -- src-tauri/resources 2>native-evidence/headless-probe.log | tee native-evidence/headless-probe.json
-      - name: Upload exact build logs, probe evidence and package
+      - name: Install the actual Debian package
+        run: |
+          packages=(src-tauri/target/debug/bundle/deb/*.deb)
+          test "${#packages[@]}" -eq 1
+          sha256sum "${packages[0]}" > native-evidence/package-sha256.txt
+          dpkg-deb --field "${packages[0]}" Package Version Architecture > native-evidence/package-info.txt
+          sudo dpkg --install "${packages[0]}" 2>&1 | tee native-evidence/package-install.log
+          test -x /usr/bin/twentyonex-tauri-feasibility
+      - name: Launch the installed GUI with bundled Node, probe and close gracefully
+        timeout-minutes: 3
+        run: |
+          mkdir -p "$RUNNER_TEMP/tauri-smoke/data" "$RUNNER_TEMP/tauri-smoke/config" "$RUNNER_TEMP/tauri-smoke/cache" "$RUNNER_TEMP/tauri-smoke/runtime"
+          chmod 700 "$RUNNER_TEMP/tauri-smoke/runtime"
+          test ! -e /nonexistent
+          timeout --signal=TERM --kill-after=5s 90s dbus-run-session -- xvfb-run --auto-servernum --server-args='-screen 0 1280x720x24' /usr/bin/env \
+            PATH=/nonexistent \
+            XDG_DATA_HOME="$RUNNER_TEMP/tauri-smoke/data" \
+            XDG_CONFIG_HOME="$RUNNER_TEMP/tauri-smoke/config" \
+            XDG_CACHE_HOME="$RUNNER_TEMP/tauri-smoke/cache" \
+            XDG_RUNTIME_DIR="$RUNNER_TEMP/tauri-smoke/runtime" \
+            WEBKIT_DISABLE_COMPOSITING_MODE=1 \
+            TWENTYONEX_NATIVE_SMOKE_REPORT="$PWD/native-evidence/installed-gui-smoke.json" \
+            /usr/bin/twentyonex-tauri-feasibility 2>&1 | tee native-evidence/installed-gui-smoke.log
+      - name: Verify GUI evidence, installed resources and absence of an orphaned service
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          report_path = Path('native-evidence/installed-gui-smoke.json')
+          report = json.loads(report_path.read_text())
+          assert report['stage'] == 'complete' and report['passed'] is True
+          runtime = report['runtime']
+          assert runtime['initialized'] is True
+          assert runtime['developmentFrontend'] is False
+          assert runtime['systemNodeHidden'] is True
+          assert runtime['nativeProbe']['ok'] is True
+          assert runtime['resourceRoot'].startswith('/usr/lib/')
+          assert runtime['profileRoot'].startswith(os.environ['RUNNER_TEMP'] + '/tauri-smoke/')
+          owned_node = (Path(runtime['resourceRoot']) / 'node/node').resolve()
+          assert owned_node.is_file()
+          assert (Path(runtime['resourceRoot']) / 'service/feasibility.mjs').is_file()
+          assert report['shutdown']['engineUnavailable'] is True
+          profile_marker = ('TWENTYONEX_PROFILE_ROOT=' + runtime['profileRoot']).encode()
+          orphaned = []
+          for process in Path('/proc').iterdir():
+              if process.name.isdecimal():
+                  try:
+                      environment = (process / 'environ').read_bytes().split(b'\0')
+                      executable = (process / 'exe').resolve(strict=True)
+                  except (OSError, PermissionError):
+                      continue
+                  if profile_marker in environment or executable == owned_node:
+                      orphaned.append(process.name)
+          report['verification'] = {'installedResources': True, 'ownedRunningProcessesAfterExit': orphaned}
+          report_path.write_text(json.dumps(report, indent=2) + '\n')
+          assert not orphaned, 'Owned staged Node process remained alive after native quit'
+          print(json.dumps(report, indent=2))
+          PY
+      - name: Upload compact build and smoke evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tauri-native-linux-${{ github.sha }}
-          path: |
-            native-evidence/
-            src-tauri/target/debug/bundle/deb/*.deb
+          name: tauri-native-linux-evidence-${{ github.sha }}
+          path: native-evidence/
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 0
+      - name: Upload the Debian package separately
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-native-linux-deb-${{ github.sha }}
+          path: src-tauri/target/debug/bundle/deb/*.deb
           if-no-files-found: warn
           retention-days: 7
           compression-level: 0
