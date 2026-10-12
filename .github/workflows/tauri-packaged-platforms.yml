@@ -1,0 +1,109 @@
+name: Tauri packaged platform feasibility
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tauri-packaged-platforms
+  cancel-in-progress: false
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - label: macos-x64
+            runner: macos-15-intel
+            arch: x64
+            bundle: dmg
+          - label: macos-arm64
+            runner: macos-14
+            arch: arm64
+            bundle: dmg
+          - label: windows-x64
+            runner: windows-2022
+            arch: x64
+            bundle: nsis
+          - label: linux-appimage-x64
+            runner: ubuntu-24.04
+            arch: x64
+            bundle: appimage
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: '1'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      MAKEFLAGS: '-j1'
+      npm_package_config_node_gyp_jobs: '1'
+      HUSKY: '0'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.2'
+          architecture: ${{ matrix.arch }}
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned Rust with one compilation job
+        run: rustup toolchain install 1.98.0 --profile minimal --no-self-update && rustup default 1.98.0
+      - name: Linux native and AppImage prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev xvfb xauth dbus-x11 patchelf libfuse2t64
+      - name: Cache compressed Rust dependencies only
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+          key: tauri-platform-archives-${{ matrix.label }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+      - name: Record provenance
+        run: |
+          mkdir -p native-evidence
+          git rev-parse HEAD > native-evidence/commit.txt
+          rustc --version > native-evidence/rust.txt
+          node --version > native-evidence/node.txt
+          node -p 'process.platform + "/" + process.arch' > native-evidence/architecture.txt
+      - name: Install locked JavaScript tools without Electron lifecycle builds
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Stage pinned standalone Node and native modules once
+        run: pnpm tauri:prepare:native 2>&1 | tee native-evidence/native-staging.log
+      - name: Build the actual platform package
+        run: pnpm tauri:build --debug --bundles ${{ matrix.bundle }} -- --locked 2>&1 | tee native-evidence/native-build.log
+      - name: Exercise packaged GUI, resources, native probes and quit
+        timeout-minutes: 8
+        run: python scripts/tauri-packaged-smoke.py --kind ${{ matrix.bundle }} --arch ${{ matrix.arch }} --evidence native-evidence
+      - name: Upload compact evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-platform-evidence-${{ matrix.label }}-${{ github.sha }}
+          path: native-evidence/
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 0
+      - name: Upload package separately
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-platform-package-${{ matrix.label }}-${{ github.sha }}
+          path: |
+            src-tauri/target/debug/bundle/dmg/*.dmg
+            src-tauri/target/debug/bundle/nsis/*-setup.exe
+            src-tauri/target/debug/bundle/appimage/*.AppImage
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 0

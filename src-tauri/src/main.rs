@@ -208,6 +208,11 @@ fn engine_status(
 
 fn main() {
     let smoke = Arc::new(NativeSmoke::new());
+    // Package launchers may need PATH while starting. Once this explicit debug
+    // diagnostic is active, remove system executables before any engine spawn.
+    if smoke.enabled() {
+        std::env::set_var("PATH", "/nonexistent");
+    }
     assert!(smoke.write(), "failed to initialize native smoke report");
     let setup_smoke = smoke.clone();
     let app = tauri::Builder::default()
@@ -215,7 +220,11 @@ fn main() {
         .invoke_handler(tauri::generate_handler![engine_invoke, engine_status])
         .setup(move |app| {
             // Different identity/path from Electron: the spike never imports live data or schemes.
-            let profile = app.path().app_local_data_dir()?.join("feasibility");
+            let profile = if setup_smoke.enabled() {
+                std::env::var_os("TWENTYONEX_NATIVE_SMOKE_PROFILE").map(PathBuf::from)
+                    .unwrap_or(app.path().app_local_data_dir()?.join("feasibility"))
+            } else { app.path().app_local_data_dir()?.join("feasibility") };
+            assert!(profile.is_absolute(), "feasibility profile must be absolute");
             std::fs::create_dir_all(&profile)?;
             let resources = app.path().resource_dir()?.join("resources");
             let engine = tauri::async_runtime::block_on(Engine::start(resources.clone(), profile.clone()))
@@ -278,6 +287,9 @@ fn main() {
         {
             if smoke.enabled() && label == "main" {
                 smoke.evidence.lock().unwrap()["gui"]["windowCloseObserved"] = json!(true);
+                // macOS can keep the app alive after its last window closes.
+                // The diagnostic still exercises native close, then explicit quit.
+                handle.exit(0);
             }
         }
         if let tauri::RunEvent::ExitRequested { api, .. } = event {
