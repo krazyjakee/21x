@@ -1,6 +1,6 @@
 /** Stage an isolated runtime once; native compilation is an explicit batch action. */
 import { constants } from 'node:fs'
-import { chmod, copyFile, lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -99,6 +99,37 @@ async function stagedPackageVersion(service, name) {
   const location = relative(base, await realpath(directory))
   if (isAbsolute(location) || location === '..' || location.startsWith(`..${sep}`)) return
   return (await readJson(join(directory, 'package.json')))?.version
+}
+
+/** Match better-sqlite3 13's default selector; AppImage must not scan foreign libc binaries. */
+export async function pruneForeignSqlitePrebuilds(service, {
+  platform = process.platform, arch = process.arch,
+  glibc = platform === 'linux' ? Boolean(process.report.getReport().header.glibcVersionRuntime) : false
+} = {}) {
+  if (platform !== 'linux') return []
+  if (!['x64', 'arm64'].includes(arch)) throw new Error('Unsupported staged SQLite architecture')
+  const base = await realpath(service)
+  const directory = join(service, 'node_modules/better-sqlite3/prebuilds')
+  const details = await lstat(directory)
+  if (!details.isDirectory() || details.isSymbolicLink()) throw new Error('SQLite prebuilds must be a physical staged directory')
+  const within = relative(base, await realpath(directory))
+  if (isAbsolute(within) || within === '..' || within.startsWith(`..${sep}`)) {
+    throw new Error('SQLite prebuilds cannot escape the isolated staging tree')
+  }
+  const selected = `${glibc ? 'linux' : 'linuxmusl'}-${arch}.node`
+  const candidates = []
+  let selectedPresent = false
+  for (const name of await readdir(directory)) {
+    if (!/^(linux|linuxmusl|darwin|win32)-(x64|arm64)\.node$/.test(name)) continue
+    const path = join(directory, name)
+    const file = await lstat(path)
+    if (!file.isFile() || file.isSymbolicLink()) throw new Error('SQLite prebuild must be a regular staged file')
+    if (name === selected) selectedPresent = true
+    else candidates.push(path)
+  }
+  if (!selectedPresent) throw new Error('Selected standalone SQLite prebuild is missing')
+  for (const path of candidates) await rm(path)
+  return candidates.map(path => relative(directory, path)).sort()
 }
 
 export async function repairPtyHelperModes(service, platform = process.platform) {
@@ -204,6 +235,7 @@ export async function prepareRuntime({
       await writeChanged(join(service, '.native-prepared.json'), nativeSignature)
     }
     await repairPtyHelperModes(service)
+    await pruneForeignSqlitePrebuilds(service)
   }
   await writeChanged(manifestPath, { node: nodeSignature, service: sourceSignature })
   return { nodeVersion: config.nodeVersion, nativePrepared: native, resources: root }

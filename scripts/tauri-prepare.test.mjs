@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { prepareRuntime, repairPtyHelperModes, nativeNpmEnvironment } from './tauri-prepare.mjs'
+import { prepareRuntime, repairPtyHelperModes, nativeNpmEnvironment, pruneForeignSqlitePrebuilds } from './tauri-prepare.mjs'
 
 async function fixture(t, nodeVersion = process.versions.node) {
   const root = await mkdtemp(join(tmpdir(), '21x-tauri-preparation-'))
@@ -114,4 +114,24 @@ test('private npm staging overrides repository lifecycle and linked install cont
   assert.equal(env.HTTPS_PROXY, 'fixture-proxy')
   assert.equal(env.SystemRoot, 'fixture-windows-root')
   assert.ok(env.PATH.startsWith('/owned/node'))
+})
+
+
+test('Linux staging retains only its SQLite architecture/libc prebuild without rewriting it', async t => {
+  const root = await fixture(t)
+  const service = join(root, 'service')
+  const directory = join(service, 'node_modules/better-sqlite3/prebuilds')
+  await mkdir(directory, { recursive: true })
+  for (const name of ['linux-x64.node', 'linux-arm64.node', 'linuxmusl-x64.node', 'darwin-arm64.node', 'win32-x64.node']) {
+    await writeFile(join(directory, name), name)
+  }
+  const selected = join(directory, 'linux-x64.node')
+  const before = await stat(selected)
+  assert.deepEqual(await pruneForeignSqlitePrebuilds(service, { platform: 'linux', arch: 'x64', glibc: true }),
+    ['darwin-arm64.node', 'linux-arm64.node', 'linuxmusl-x64.node', 'win32-x64.node'])
+  assert.equal(await readFile(selected, 'utf8'), 'linux-x64.node')
+  assert.equal((await stat(selected)).mtimeMs, before.mtimeMs)
+  assert.deepEqual(await pruneForeignSqlitePrebuilds(service, { platform: 'linux', arch: 'x64', glibc: true }), [])
+  await assert.rejects(pruneForeignSqlitePrebuilds(service, { platform: 'linux', arch: 'arm64', glibc: false }), /prebuild is missing/)
+  assert.equal(await readFile(selected, 'utf8'), 'linux-x64.node')
 })
