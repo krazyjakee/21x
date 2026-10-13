@@ -26,6 +26,7 @@ import { YouTrackPlugin } from './plugins/youtrack-plugin'
 import { ConnectorBridgePlugin } from './plugins/connector-bridge-plugin'
 import { closeConnectorRuntime, disposeConnectorRuntime } from './connectors/bridge/runtime'
 import { registerIpcHandlers } from './ipc-handlers'
+import { shutdownTerminalServices, closeTerminalServices } from './ipc/terminal'
 import { panelBrowserBroker } from './panel-browser-broker'
 import { hardenWebviewPreferences } from './webview-hardening'
 import { VoiceSessionManager } from './voice/voice-session-manager'
@@ -183,6 +184,7 @@ async function sweepLeakedWorkspaces(graceMs?: number, orphansIgnoreTaskState = 
 
 async function shutdownAppServices(): Promise<void> {
   overdueNotifier.shutdown()
+  shutdownTerminalServices()
   stopTaskApiServer()
   void stopMobileApiServer()
   syncManager?.stop()
@@ -201,7 +203,7 @@ async function shutdownAppServices(): Promise<void> {
 
   oauthManager?.destroy()
   const serviceDrains = await Promise.allSettled([
-    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined, closeTaskApiServer(), closeMobileApiServer(), taskAutomationScheduler?.close(), captainWaker?.close(), recurrenceScheduler?.close(), closeScheduledCoordination(), heartbeatScheduler?.close(), workspaceCleanupScheduler?.close()
+    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined, closeTaskApiServer(), closeMobileApiServer(), taskAutomationScheduler?.close(), captainWaker?.close(), recurrenceScheduler?.close(), closeScheduledCoordination(), heartbeatScheduler?.close(), workspaceCleanupScheduler?.close(), closeTerminalServices()
   ])
   const incompleteServiceDrain = serviceDrains.find(result => result.status === 'rejected')
   if (incompleteServiceDrain?.status === 'rejected') throw incompleteServiceDrain.reason

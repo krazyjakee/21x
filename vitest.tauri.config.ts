@@ -20,7 +20,7 @@ const resolveOptions = { alias: [
   { find: '@shared', replacement: join(root, 'src/shared') }
 ] }
 const mainFiles = [
-  'test/tauri-runtime.test.ts',
+  'test/tauri-runtime.test.ts', 'test/tauri-terminal-native.test.ts',
   'src/main/node-worker-runtime.test.ts',
   'src/main/adapters/opencode-adapter.test.ts',
   'src/main/adapters/claude-code-adapter.test.ts',
@@ -40,6 +40,7 @@ const mainFiles = [
   'src/main/captain-waker.test.ts', 'src/main/captain-waker-lifetime.test.ts',
   'src/main/recurrence-scheduler.test.ts', 'src/main/recurrence-scheduler-lifetime.test.ts',
   'src/main/scheduled-coordination.test.ts', 'src/main/scheduled-coordination-lifetime.test.ts',
+  'src/main/terminal-service-core.test.ts', 'src/main/terminal-process.test.ts',
   'src/main/overdue-notifier.test.ts',
   'src/main/workspace-cleanup-scheduler.test.ts', 'src/main/workspace-cleanup-scheduler-lifetime.test.ts',
   'src/main/heartbeat-scheduler.test.ts', 'src/main/heartbeat-scheduler-lifetime.test.ts',

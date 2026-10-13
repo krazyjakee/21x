@@ -353,7 +353,7 @@
           "channelExpression": "channel",
           "column": 7,
           "file": "src/main/index.ts",
-          "line": 423,
+          "line": 425,
           "method": "send",
           "target": "guardedIpcSend"
         }
@@ -382,7 +382,7 @@
           "channelExpression": "channel",
           "column": 7,
           "file": "src/main/index.ts",
-          "line": 444,
+          "line": 446,
           "method": "send",
           "target": "guardedIpcSend"
         }
@@ -8686,7 +8686,7 @@
         {
           "column": 7,
           "file": "src/main/index.ts",
-          "line": 460,
+          "line": 462,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -9450,7 +9450,7 @@
         {
           "column": 15,
           "file": "src/main/index.ts",
-          "line": 612,
+          "line": 614,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -9458,7 +9458,7 @@
         {
           "column": 11,
           "file": "src/main/index.ts",
-          "line": 618,
+          "line": 620,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -9797,7 +9797,7 @@
         {
           "column": 48,
           "file": "src/main/index.ts",
-          "line": 94,
+          "line": 95,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -12930,7 +12930,7 @@
         {
           "column": 50,
           "file": "src/main/index.ts",
-          "line": 756,
+          "line": 758,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -13611,7 +13611,7 @@
         {
           "column": 23,
           "file": "src/main/index.ts",
-          "line": 803,
+          "line": 805,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -13675,7 +13675,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/terminal.ts",
-          "line": 248,
+          "line": 32,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -13727,9 +13727,9 @@
       "permission": "exact-operation; validate native caller and domain authorization before effects",
       "references": [
         {
-          "column": 36,
+          "column": 56,
           "file": "src/main/ipc/terminal.ts",
-          "line": 269,
+          "line": 36,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -13781,9 +13781,9 @@
       "permission": "exact-operation; validate native caller and domain authorization before effects",
       "references": [
         {
-          "column": 36,
+          "column": 48,
           "file": "src/main/ipc/terminal.ts",
-          "line": 277,
+          "line": 37,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -13839,7 +13839,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/terminal.ts",
-          "line": 301,
+          "line": 48,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -13895,7 +13895,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/terminal.ts",
-          "line": 317,
+          "line": 56,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -13951,7 +13951,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/terminal.ts",
-          "line": 307,
+          "line": 52,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -14007,7 +14007,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/terminal.ts",
-          "line": 297,
+          "line": 44,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -14063,7 +14063,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/terminal.ts",
-          "line": 286,
+          "line": 40,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -18894,7 +18894,7 @@
         "producerOwner": "authenticated-task-api",
         "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
       },
-      "line": 423,
+      "line": 425,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
@@ -18925,7 +18925,7 @@
         "producerOwner": "authenticated-mobile-api",
         "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
       },
-      "line": 444,
+      "line": 446,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
