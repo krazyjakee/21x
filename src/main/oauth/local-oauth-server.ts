@@ -19,18 +19,24 @@ export class LocalOAuthServer {
   private port: number = 3000
   private resolver: ((value: OAuthCallback) => void) | null = null
   private rejecter: ((reason: Error) => void) | null = null
+  private callbackTimeout: ReturnType<typeof setTimeout> | null = null
+  private stopTimer: ReturnType<typeof setTimeout> | null = null
+  private generation = 0
 
   /**
    * Start the local server and return the redirect URI
    */
   async start(): Promise<string> {
+    if (this.server) throw new Error('OAuth callback server is already started')
+    const generation = ++this.generation
     // Try ports 3000-3010 until we find an available one
     for (let port = 3000; port <= 3010; port++) {
       try {
-        await this.startOnPort(port)
+        await this.startOnPort(port, generation)
         this.port = port
         return `http://localhost:${port}/callback`
       } catch {
+        if (generation !== this.generation) throw new Error('OAuth callback server stopped during startup')
         // Port in use, try next one
         continue
       }
@@ -41,11 +47,15 @@ export class LocalOAuthServer {
   /**
    * Start server on a specific port
    */
-  private startOnPort(port: number): Promise<void> {
+  private startOnPort(port: number, generation: number): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.server = createServer(this.handleRequest.bind(this))
+      const server = createServer(this.handleRequest.bind(this))
+      this.server = server
+      server.once('close', () => {
+        if (generation !== this.generation) reject(new Error('OAuth callback server stopped during startup'))
+      })
 
-      this.server.on('error', (err: NodeJS.ErrnoException) => {
+      server.on('error', (err: NodeJS.ErrnoException) => {
         if (err.code === 'EADDRINUSE') {
           reject(new Error(`Port ${port} already in use`))
         } else {
@@ -53,7 +63,11 @@ export class LocalOAuthServer {
         }
       })
 
-      this.server.listen(port, 'localhost', () => {
+      server.listen(port, 'localhost', () => {
+        if (generation !== this.generation) {
+          server.close(() => reject(new Error('OAuth callback server stopped during startup')))
+          return
+        }
         console.log(`[LocalOAuthServer] Listening on http://localhost:${port}/callback`)
         resolve()
       })
@@ -69,10 +83,9 @@ export class LocalOAuthServer {
       this.rejecter = reject
 
       // Timeout after 5 minutes
-      setTimeout(() => {
+      this.callbackTimeout = setTimeout(() => {
         if (this.resolver) {
-          this.stop()
-          reject(new Error('OAuth timeout: No callback received within 5 minutes'))
+          this.stop(new Error('OAuth timeout: No callback received within 5 minutes'))
         }
       }, 5 * 60 * 1000)
     })
@@ -123,9 +136,11 @@ export class LocalOAuthServer {
         this.resolver = null
         this.rejecter = null
       }
+      if (this.callbackTimeout) clearTimeout(this.callbackTimeout)
+      this.callbackTimeout = null
 
       // Stop the server after a short delay (let the browser render the page)
-      setTimeout(() => this.stop(), 1000)
+      this.stopTimer = setTimeout(() => this.stop(), 1000)
     } else {
       // Unknown path
       res.writeHead(404, { 'Content-Type': 'text/plain' })
@@ -145,7 +160,13 @@ export class LocalOAuthServer {
   /**
    * Stop the server
    */
-  stop(): void {
+  stop(reason = new Error('OAuth callback server stopped')): void {
+    this.generation++
+    if (this.callbackTimeout) clearTimeout(this.callbackTimeout)
+    if (this.stopTimer) clearTimeout(this.stopTimer)
+    this.callbackTimeout = null
+    this.stopTimer = null
+    this.rejecter?.(reason)
     if (this.server) {
       this.server.close(() => {
         console.log('[LocalOAuthServer] Server stopped')
