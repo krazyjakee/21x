@@ -138,6 +138,8 @@ jobs:
         if: inputs.mode != 'feasibility'
         run: |
           pnpm tauri:prepare:database | tee native-evidence/database-staging.json
+          pnpm test:tauri -- --service-proofs scripts/transcript-page-proof.test.ts --silent --reporter=json --outputFile=native-evidence/startup-transcript-tests.json
+          node -e 'const report = require("./native-evidence/startup-transcript-tests.json"); if (!report.success || report.numPassedTests !== 6 || report.numPendingTests) process.exit(1)'
           staged_node="$(node -e 'process.stdout.write(require("node:path").resolve("src-tauri/resources/node", process.platform === "win32" ? "node.exe" : "node"))')"
           sqlite_module="$(node -e 'process.stdout.write(require("node:path").resolve("src-tauri/resources/service/node_modules/better-sqlite3"))')"
           service_entry="$(node -e 'process.stdout.write(require("node:path").resolve("src-tauri/resources/service/database-stdio.mjs"))')"
