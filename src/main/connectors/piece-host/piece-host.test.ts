@@ -563,42 +563,60 @@ describe('PieceHostClient + host runtime', () => {
 
 describe('polling trigger cursor in connector_kv', () => {
   let dir: string
+  const owners: { db: InstanceType<typeof Database>; client?: PieceHostClient }[] = []
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), '21x-piece-host-'))
     remote.items = []
   })
-  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+  afterEach(async () => {
+    for (const owner of owners) {
+      await owner.client?.close()
+      if (owner.db.open) owner.db.close()
+    }
+    owners.length = 0
+    rmSync(dir, { recursive: true, force: true })
+  })
 
   function openStore(): { db: InstanceType<typeof Database>; store: ConnectorStore } {
     const db = new Database(join(dir, 'app.db'))
+    owners.push({ db })
     db.pragma('foreign_keys = ON')
     applySchema(db)
     return { db, store: new ConnectorStore({ db }) }
   }
 
   it('persists the cursor across a simulated app restart', async () => {
+    const phase = async <T>(name: string, work: () => T | Promise<T>): Promise<T> => {
+      const started = performance.now()
+      try { return await work() }
+      finally { console.info('[piece-restart-proof]', { phase: name, durationMs: Math.round(performance.now() - started) }) }
+    }
     // First app run: enable the trigger, which stores the initial cursor.
-    const first = openStore()
+    const first = await phase('first-schema', openStore)
     const instance = first.store.createInstance({ pieceName: PIECE, pieceVersion: VERSION })
     const run1 = makeClient({ kv: kvBackendFromConnectorStore(first.store) })
-    const trigger = { ...base, instanceId: instance.id, triggerName: 'new_items' }
-    await run1.client.runTrigger({ ...trigger, hook: 'onEnable' })
+    owners[owners.length - 1].client = run1.client
+    const trigger = { ...base, instanceId: instance.id, triggerName: 'new_items', timeoutMs: 2000 }
+    await phase('enable', () => run1.client.runTrigger({ ...trigger, hook: 'onEnable' }))
     remote.items = [
       { id: 'a', ts: 150 },
       { id: 'b', ts: 200 }
     ]
-    expect(await run1.client.runTrigger({ ...trigger, hook: 'run' })).toEqual(['a', 'b'])
+    expect(await phase('first-poll', () => run1.client.runTrigger({ ...trigger, hook: 'run' }))).toEqual(['a', 'b'])
     expect(first.store.kvGet(instance.id, 'flow', 'lastPoll')).toBe(200)
-    run1.client.dispose()
+    await phase('first-worker-close', () => run1.client.close())
     first.db.close()
 
     // Second app run: new database handle, new client, new host process.
-    const second = openStore()
+    const second = await phase('second-schema', openStore)
     const run2 = makeClient({ kv: kvBackendFromConnectorStore(second.store) })
+    owners[owners.length - 1].client = run2.client
     remote.items.push({ id: 'c', ts: 300 })
-    expect(await run2.client.runTrigger({ ...trigger, hook: 'run' })).toEqual(['c'])
+    expect(await phase('second-poll', () => run2.client.runTrigger({ ...trigger, hook: 'run' }))).toEqual(['c'])
     expect(second.store.kvGet(instance.id, 'flow', 'lastPoll')).toBe(300)
-    run2.client.dispose()
+    await phase('second-worker-close', () => run2.client.close())
     second.db.close()
-  })
+  // Two real on-disk schema initializations can exceed Vitest's five-second
+  // fixture budget on Windows. Calls and close barriers retain two-second bounds.
+  }, 15_000)
 })
