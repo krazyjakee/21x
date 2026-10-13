@@ -1,0 +1,56 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "baseCommit": "1174b112396aaff7a8db889fa36f7dbc871ff0d7",
+  "scope": "Working-tree owning Node runtime selection and real-file IPC control; full legacy application and portable suites are separate graphs.",
+  "sourceSha256": {
+    "src/main/node-worker-runtime.ts": "c3da371ca17e39e8a47e58168d091b608ca4ef0bf5b6e9f7e8f22f33b97d4441",
+    "src/main/node-worker-runtime.test.ts": "f89c11f1c402770f292c34a06ff172f34d680f15d1bc23e7a8eda799883d342d",
+    "test/fixtures/node-worker-runtime.mjs": "b88799281593cf4311fe4292f7669143bf5b74540c5d7688825b05de60e3f17b",
+    "src/main/adapters/pi-adapter.ts": "a97844a61a5d5314c516dd7615713ec7031d520d3b71d6c83fef50472bd3194f",
+    "vitest.tauri.config.ts": "0eb6bb209f10fbc59f77248d1272c7d83a8cd8a5908930597a4d1cf458d3e90a"
+  },
+  "tests": {
+    "fullApplication": {
+      "passed": 5180,
+      "skipped": 5,
+      "files": 363,
+      "reportSha256": "7ee5473508e552e179652bd7192f9a313fce170974a24440d7b8d1a33f52ab8e"
+    },
+    "standaloneAndService": {
+      "passed": 480,
+      "skipped": 0,
+      "files": 45,
+      "reportSha256": "8482642e38167dc29f69a84d3040f4a5b344fc0f543e98053a90f858e5756a40"
+    },
+    "legacyPiVoiceCallers": {
+      "passed": 59,
+      "skipped": 4,
+      "files": 4,
+      "reportSha256": "98fb3a5891ae15c17bbaa02516c101bac2c3d7f5b7aef55673cb5e15f5f151c6"
+    }
+  },
+  "standaloneWorkerCases": 10,
+  "realIpcChild": {
+    "node": "v22.23.2",
+    "systemNodeHidden": true,
+    "electronRuntimeAbsent": true,
+    "electronModeAliasesAbsent": true,
+    "parentEnvironmentUnchanged": true,
+    "sameOwningExecutable": true,
+    "messageAndExitJoined": true
+  },
+  "checks": {
+    "forcedTypecheck": "passed",
+    "changedSourceLint": "passed",
+    "inventoryAndContractFreshness": "passed",
+    "diffWhitespace": "passed"
+  },
+  "limitations": [
+    "Real worker IPC control skips in the Electron-launched graph and passes in standalone Node.",
+    "Legacy Pi/voice caller tests use their existing mocks and four recorded skips.",
+    "Actual speech engines, production worker resources/transports and real provider sessions remain unproven by this control."
+  ],
+  "productionReady": false,
+  "electronRetirementReady": false
+}

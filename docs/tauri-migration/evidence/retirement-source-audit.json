@@ -7,6 +7,7 @@
     "src/service/database-service.ts": "db87e3f4e49234ccaa66f6fb8de617de3a58efaccceda82a1ab6049bc00c60a5",
     "src/service/configuration-backend.ts": "42efdec80e5e8de2743760771fb5530d2b3497035a327c264064fb62da3ecdbd",
     "src/service/agent-backend.ts": "4f805731787787d01afafa16d6607cc0c56bee665a40626c56003d509f239d02",
+    "src/main/node-worker-runtime.ts": "c3da371ca17e39e8a47e58168d091b608ca4ef0bf5b6e9f7e8f22f33b97d4441",
     "src/shared/database-desktop-codecs.ts": "1301a41eaa42001a31430f136e14081fd79b636596426eee8c5af02037b3c928",
     "src/shared/configuration-desktop-codecs.ts": "9500cb85047e874bf74c4d0992c21fc9e12bb0fcfe18f2fd9e2d869fa09404c4",
     "src/shared/agent-desktop-codecs.ts": "61361c40c942d1115c3f5b0d8ee6497211ac736bca5eb71a552ec5df96dbc347",

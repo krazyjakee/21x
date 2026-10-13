@@ -40,6 +40,7 @@ const report = {
   sourceFilesSha256: Object.fromEntries([
     'package.json', 'vite.tauri.config.ts', 'src-tauri/tauri.conf.json',
     'src/service/database-service.ts', 'src/service/configuration-backend.ts', 'src/service/agent-backend.ts',
+    'src/main/node-worker-runtime.ts',
     'src/shared/database-desktop-codecs.ts', 'src/shared/configuration-desktop-codecs.ts', 'src/shared/agent-desktop-codecs.ts',
     'src-tauri/engine/src/desktop.rs', 'src-tauri/engine/src/configuration_desktop.rs', 'src-tauri/engine/src/agent_desktop.rs',
     'src/renderer/src/lib/ipc-client.ts', 'docs/tauri-migration/operations.json'

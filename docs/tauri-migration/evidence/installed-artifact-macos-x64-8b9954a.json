@@ -1,0 +1,19 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "sourceCommit": "8b9954a31dbb93eb38a46170488bfbc49539e67c",
+  "workflowRun": "https://github.com/krazyjakee/21x/actions/runs/38326219903",
+  "target": "macos-x64",
+  "conclusion": "success",
+  "scope": "Installed separate-artifact-WebView authorization with positive main controls and sandboxed-frame relay denial; not same-main-WebView iframe isolation or production viewer acceptance.",
+  "compactArtifactId": 11782220710,
+  "compactArtifactSha256": "64560028e6a459fa1b9932c9e70e7dc74aebd0488613a1f768c2e847f148a8d1",
+  "packageSha256": "9e2ff7c1aa598211db2dca72e089a736452b910de0698ed7142cabdeeaf7a322",
+  "retainedGui": {
+    "path": "installed-artifact-8b9954a-macos-x64-packaged-gui-smoke.json",
+    "sha256": "5aadab2c1bffcfe72e3e8fe6081c9c21f74eca3c42566b69f856c2b6d020dd13"
+  },
+  "otherTargets": "in progress or queued; Windows at this source has a known service-startup defect fixed in the separate 1174b11 service proof",
+  "productionReady": false,
+  "electronRetirementReady": false
+}

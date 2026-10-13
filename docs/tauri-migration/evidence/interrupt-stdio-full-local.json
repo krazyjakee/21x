@@ -1,0 +1,14 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "applicationSourceCommit": "29a11e5f",
+  "workflowContinuationCommit": "1174b112396aaff7a8db889fa36f7dbc871ff0d7",
+  "scope": "Full application recheck before the later owning-Node worker selector change; optional standalone/private-pipe proofs enabled.",
+  "passed": 5174,
+  "failed": 0,
+  "skipped": 4,
+  "files": 363,
+  "reportSha256": "e1181af4c666f3f7652e553f154fcccf43d3fb86fe56396b0a8bed26b75d8168",
+  "productionReady": false,
+  "electronRetirementReady": false
+}

@@ -1,0 +1,19 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "sourceCommit": "8b9954a31dbb93eb38a46170488bfbc49539e67c",
+  "workflowRun": "https://github.com/krazyjakee/21x/actions/runs/38326219903",
+  "target": "macos-arm64",
+  "conclusion": "success",
+  "scope": "Installed separate-artifact-WebView authorization with positive main controls and sandboxed-frame relay denial; not same-main-WebView iframe isolation or production viewer acceptance.",
+  "compactArtifactId": 11782206969,
+  "compactArtifactSha256": "a144942c73a7356dd430b08a6ebcd81e595dc0dcea18f2d9a81fa3549a759836",
+  "packageSha256": "b3cc6b7569d4cfad494b0dddf66abcdfb3976c68bd85e496c18e871c472753e6",
+  "retainedGui": {
+    "path": "installed-artifact-8b9954a-macos-arm64-packaged-gui-smoke.json",
+    "sha256": "f33fa6d57baa0442c372e0e0e8dfe18e08d4d774607af172d4ae7702be29668a"
+  },
+  "otherTargets": "macOS x64 also passed; Linux is running; old Windows source failed before packaging and the corrected installed agent retry is queued",
+  "productionReady": false,
+  "electronRetirementReady": false
+}

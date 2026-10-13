@@ -1,0 +1,59 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "sourceCommit": "1174b112396aaff7a8db889fa36f7dbc871ff0d7",
+  "workflowRun": "https://github.com/krazyjakee/21x/actions/runs/38328154115",
+  "conclusion": "success",
+  "target": "windows-x64",
+  "scope": "Staged standalone/private-pipe service only. Rust compilation, GUI build and installed execution were intentionally omitted.",
+  "serviceOnly": true,
+  "installedGuiProven": false,
+  "compactArtifactId": 11782206464,
+  "compactArtifactSha256": "87caf84ab62534e2a171f78a90ea6fa90ed71dd8e8268f3e010437232e0f8182",
+  "portableTests": {
+    "passed": 462,
+    "skipped": 0,
+    "files": 41,
+    "reportSha256": "f9c1feb87e0f5cc3ca4548f60fed526525b296ef8cbb9851931503ba2b0486cb"
+  },
+  "startupAndTranscriptTests": {
+    "passed": 6,
+    "skipped": 0
+  },
+  "retained": {
+    "startup-transcript-tests.json": {
+      "path": "windows-service-1174b11-startup-transcript-tests.json",
+      "sha256": "5816ea57d8a1263b2eb633faf957a535a4d8e6ed35fdd347c6fef548b7585405"
+    },
+    "transcript-page-proof.json": {
+      "path": "windows-service-1174b11-transcript-page-proof.json",
+      "sha256": "0fa3fa98d05fc16b9527eb92529c0558d22e66819a1e46f34981c66f57e0d7d1"
+    },
+    "configuration-service-proof.json": {
+      "path": "windows-service-1174b11-configuration-service-proof.json",
+      "sha256": "929521047a97e3610218841dbd8228d977df3027b6479a38d2063a0dcab0af99"
+    },
+    "agent-service-proof.json": {
+      "path": "windows-service-1174b11-agent-service-proof.json",
+      "sha256": "7380a4d83dd2ec26c475525d45341d130af9a883485e9bc4f1e329b2dad90818"
+    },
+    "agent-desktop-proof.json": {
+      "path": "windows-service-1174b11-agent-desktop-proof.json",
+      "sha256": "bc52ec20ae7813810cb81ad6c8466e66983e78912124a66ff1dbba7be54df958"
+    },
+    "proof-scope.json": {
+      "path": "windows-service-1174b11-proof-scope.json",
+      "sha256": "c1aa16135dfae315703e24a4274b436104eda49f7421ab1ee8843a9c70d58a00"
+    },
+    "staged-native-preflight.json": {
+      "path": "windows-service-1174b11-staged-native-preflight.json",
+      "sha256": "01000dd5f8d8123505c00efcce96edcd7321bee288e9330612299f64fb50173c"
+    },
+    "database-proof.json": {
+      "path": "windows-service-1174b11-database-proof.json",
+      "sha256": "dddfee22c5977c8e9a71be1173b3bc011df0031c515176aa6ed4b79951830260"
+    }
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

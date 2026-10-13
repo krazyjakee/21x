@@ -21,6 +21,7 @@ const resolveOptions = { alias: [
 ] }
 const mainFiles = [
   'test/tauri-runtime.test.ts',
+  'src/main/node-worker-runtime.test.ts',
   'src/main/database-transcript-page.test.ts', 'src/main/transcript-events.test.ts', 'src/main/transcript-page-authority.test.ts',
   'src/shared/**/*.test.ts',
   'scripts/tauri-inventory.test.ts', 'scripts/tauri-contracts.test.ts',
