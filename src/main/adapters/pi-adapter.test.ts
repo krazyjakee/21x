@@ -7,6 +7,7 @@ import { join } from 'path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }))
+const PI_EXECUTABLE = process.platform === 'win32' ? 'C:\\fixture\\pi.cmd' : '/usr/local/bin/pi'
 
 vi.mock('child_process', () => ({
   spawn: spawnMock,
@@ -43,7 +44,7 @@ function fakeProcess() {
 // The adapter strips variables set by a parent agent harness (see processEnv),
 // so the expectation must too, or the test fails when run from inside an agent.
 function expectedPiEnv(): NodeJS.ProcessEnv {
-  const env = { ...nodeWorkerRuntime().env }
+  const env = { ...(process.platform === 'win32' ? process.env : nodeWorkerRuntime().env) }
   delete env.AI_AGENT
   delete env.PI_CODING_AGENT
   delete env.MCP_DIRECT_TOOLS
@@ -88,7 +89,7 @@ describe('PiAdapter', () => {
     const child = fakeProcess()
     spawnMock.mockReturnValue(child)
     const adapter = new PiAdapter()
-    vi.spyOn(adapter as any, 'findPiExecutable').mockResolvedValue('/usr/local/bin/pi')
+    vi.spyOn(adapter as any, 'findPiExecutable').mockResolvedValue(PI_EXECUTABLE)
     vi.spyOn(adapter as any, 'removeLegacyGatewayProvider').mockReturnValue(undefined)
     vi.spyOn(adapter as any, 'buildMcpConfig').mockReturnValue(undefined)
     vi.spyOn(adapter as any, 'installPermissionExtension').mockReturnValue('/tmp/20x-permissions.ts')
@@ -111,9 +112,10 @@ describe('PiAdapter', () => {
     })
 
     expect(id).toBe('/sessions/native-session.jsonl')
-    expect(spawnMock.mock.calls[0][0]).toBe(nodeWorkerRuntime().execPath)
+    expect(spawnMock.mock.calls[0][0]).toBe(process.platform === 'win32' ? PI_EXECUTABLE : nodeWorkerRuntime().execPath)
     const args = spawnMock.mock.calls[0][1] as string[]
-    expect(args[0]).toBe('/usr/local/bin/pi')
+    if (process.platform === 'win32') expect(args[0]).toBe('--mode')
+    else expect(args[0]).toBe(PI_EXECUTABLE)
     expect(args).toContain('--mode')
     expect(args).toContain('--extension')
     expect(args).not.toContain('--session-dir')
@@ -121,7 +123,7 @@ describe('PiAdapter', () => {
     expect(args).not.toContain('--model')
     expect(spawnMock.mock.calls[0][2]).toMatchObject({
       env: expectedPiEnv(),
-      shell: false,
+      shell: process.platform === 'win32',
     })
     expect(command).toHaveBeenLastCalledWith(
       expect.anything(),
@@ -142,7 +144,7 @@ describe('PiAdapter', () => {
       return true
     })
     const adapter = new PiAdapter()
-    vi.spyOn(adapter as any, 'findPiExecutable').mockResolvedValue('/usr/local/bin/pi')
+    vi.spyOn(adapter as any, 'findPiExecutable').mockResolvedValue(PI_EXECUTABLE)
     vi.spyOn(adapter as any, 'removeLegacyGatewayProvider').mockReturnValue(undefined)
     vi.spyOn(adapter as any, 'buildMcpConfig').mockReturnValue(undefined)
     vi.spyOn(adapter as any, 'installPermissionExtension').mockReturnValue('/tmp/20x-permissions.ts')
@@ -161,7 +163,7 @@ describe('PiAdapter', () => {
     const child = fakeProcess()
     spawnMock.mockReturnValue(child)
     const adapter = new PiAdapter()
-    vi.spyOn(adapter as any, 'findPiExecutable').mockResolvedValue('/usr/local/bin/pi')
+    vi.spyOn(adapter as any, 'findPiExecutable').mockResolvedValue(PI_EXECUTABLE)
     vi.spyOn(adapter as any, 'removeLegacyGatewayProvider').mockReturnValue(undefined)
     vi.spyOn(adapter as any, 'attachProcess').mockImplementation(() => undefined)
     vi.spyOn(adapter as any, 'terminateProcess').mockResolvedValue(undefined)
@@ -191,9 +193,9 @@ describe('PiAdapter', () => {
       ],
       default: { anthropic: 'model-one' },
     })
-    expect(spawnMock.mock.calls[0][0]).toBe(nodeWorkerRuntime().execPath)
+    expect(spawnMock.mock.calls[0][0]).toBe(process.platform === 'win32' ? PI_EXECUTABLE : nodeWorkerRuntime().execPath)
     expect(spawnMock.mock.calls[0][1]).toEqual([
-      '/usr/local/bin/pi',
+      ...(process.platform === 'win32' ? [] : [PI_EXECUTABLE]),
       '--mode',
       'rpc',
       '--no-session',
@@ -201,7 +203,7 @@ describe('PiAdapter', () => {
     ])
     expect(spawnMock.mock.calls[0][2]).toMatchObject({
       env: expectedPiEnv(),
-      shell: false,
+      shell: process.platform === 'win32',
     })
   })
 

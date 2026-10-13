@@ -1,0 +1,45 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "scope": "Platform-specific fixture corrections only. ACP uses platform path separators, Codex expects resolved absolute writable roots, and Pi expects Windows shell launch versus Unix owning-Node entrypoint. Production adapter code and native authority are unchanged.",
+  "sourceFilesSha256": {
+    "src/main/adapters/acp-adapter.test.ts": "f244141a7f95d9574f6b54c961c8c9166c8b89c9c0e9170474b0ca11a8d5a155",
+    "src/main/adapters/codex-app-server-adapter.test.ts": "519c157d6a60836b46b7e443caf6f15c1bf488be883b8a87e9bcaa3028aa2dd9",
+    "src/main/adapters/pi-adapter.test.ts": "cba97116831d12c734d97f99bbb4da2e56a78c5d4b534ed109c36771b4da0c3a"
+  },
+  "reports": [
+    {
+      "command": "pnpm test:tauri -- src/main/adapters",
+      "report": "/tmp/21x-provider-adapters-paths-standalone.json",
+      "sha256": "9146be3138c804508669a33d8370898c478ff5b490a6a87e408e12e3315ba525",
+      "passed": 299,
+      "skipped": 0,
+      "files": 7
+    },
+    {
+      "command": "pnpm test -- src/main/adapters/pi-adapter.test.ts src/main/adapters/acp-adapter.test.ts src/main/adapters/codex-app-server-adapter.test.ts",
+      "report": "/tmp/21x-provider-adapters-paths-legacy.json",
+      "sha256": "c254fbf8de5e0cfec865a4e04257cddee0ab51c9c6c7f274cf7042121aff6aa3",
+      "passed": 170,
+      "skipped": 0,
+      "files": 3
+    }
+  ],
+  "priorWindowsFailure": {
+    "sourceCommit": "85e09e3d05ecf0bab309d9be8d180b2502ff0748",
+    "run": "https://github.com/krazyjakee/21x/actions/runs/38353990675",
+    "passed": 1014,
+    "failed": 4,
+    "reportSha256": "8297baa4910c8615fc4defcaa2081460ec77b2967bfdee4443508b11306618ff",
+    "failedAssertions": [
+      "AcpAdapter process spawning for packaged Electron apps codex should spawn via node with the JS entrypoint (new package)",
+      "CodexAppServerAdapter converts 20x MCP configs to codex app-server config shape",
+      "PiAdapter uses the native Pi session file and applies model selection through RPC",
+      "PiAdapter discovers the effective Pi model catalog through RPC"
+    ],
+    "fixtureFailure": true,
+    "correctedWindowsRetryPassed": false
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

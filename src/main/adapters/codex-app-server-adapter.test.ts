@@ -3,7 +3,7 @@ import { EventEmitter } from 'events'
 import { spawn } from 'child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import { CodexAppServerAdapter } from './codex-app-server-adapter'
 import { MessagePartType, MessageRole, SessionStatusType } from './coding-agent-adapter'
 
@@ -1167,7 +1167,7 @@ describe('CodexAppServerAdapter', () => {
       model_reasoning_effort: 'high',
       sandbox_workspace_write: {
         network_access: true,
-        writable_roots: ['/tmp/workspace']
+        writable_roots: [resolve('/tmp/workspace')]
       },
       mcp_servers: {
         local: {
