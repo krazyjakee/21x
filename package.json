@@ -15,6 +15,7 @@
     "test": "cross-env ELECTRON_RUN_AS_NODE=1 electron ./node_modules/vitest/vitest.mjs",
     "test:nav-rail": "node scripts/nav-rail-layout/run.mjs",
     "test:commander-input": "node scripts/commander-input/run.mjs",
+    "test:task-layout": "node scripts/task-workspace-layout/run.mjs",
     "test:run": "cross-env ELECTRON_RUN_AS_NODE=1 electron ./node_modules/vitest/vitest.mjs run",
     "test:main": "cross-env ELECTRON_RUN_AS_NODE=1 electron ./node_modules/vitest/vitest.mjs --project main",
     "test:renderer": "cross-env ELECTRON_RUN_AS_NODE=1 electron ./node_modules/vitest/vitest.mjs --project renderer",

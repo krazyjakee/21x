@@ -353,7 +353,7 @@
           "channelExpression": "channel",
           "column": 7,
           "file": "src/main/index.ts",
-          "line": 432,
+          "line": 410,
           "method": "send",
           "target": "guardedIpcSend"
         }
@@ -382,7 +382,7 @@
           "channelExpression": "channel",
           "column": 7,
           "file": "src/main/index.ts",
-          "line": 453,
+          "line": 431,
           "method": "send",
           "target": "guardedIpcSend"
         }
@@ -3260,7 +3260,7 @@
             "source": {
               "column": 7,
               "file": "src/preload/index.ts",
-              "line": 819
+              "line": 820
             },
             "typeReference": "DesktopApi[\"browser\"][\"openExternalAuth\"]"
           }
@@ -3285,7 +3285,7 @@
         {
           "column": 7,
           "file": "src/preload/index.ts",
-          "line": 819,
+          "line": 820,
           "method": "invoke",
           "resolution": "literal",
           "target": "ipcRenderer"
@@ -3316,7 +3316,7 @@
             "source": {
               "column": 7,
               "file": "src/preload/index.ts",
-              "line": 813
+              "line": 814
             },
             "typeReference": "DesktopApi[\"browser\"][\"recordingStatus\"]"
           }
@@ -3341,7 +3341,7 @@
         {
           "column": 7,
           "file": "src/preload/index.ts",
-          "line": 813,
+          "line": 814,
           "method": "invoke",
           "resolution": "literal",
           "target": "ipcRenderer"
@@ -3372,7 +3372,7 @@
             "source": {
               "column": 7,
               "file": "src/preload/index.ts",
-              "line": 815
+              "line": 816
             },
             "typeReference": "DesktopApi[\"browser\"][\"registerBrokerPanel\"]"
           }
@@ -3397,7 +3397,7 @@
         {
           "column": 7,
           "file": "src/preload/index.ts",
-          "line": 815,
+          "line": 816,
           "method": "invoke",
           "resolution": "literal",
           "target": "ipcRenderer"
@@ -3429,7 +3429,7 @@
             "source": {
               "column": 7,
               "file": "src/preload/index.ts",
-              "line": 809
+              "line": 810
             },
             "typeReference": "DesktopApi[\"browser\"][\"startRecording\"]"
           }
@@ -3454,7 +3454,7 @@
         {
           "column": 7,
           "file": "src/preload/index.ts",
-          "line": 809,
+          "line": 810,
           "method": "invoke",
           "resolution": "literal",
           "target": "ipcRenderer"
@@ -3485,7 +3485,7 @@
             "source": {
               "column": 7,
               "file": "src/preload/index.ts",
-              "line": 811
+              "line": 812
             },
             "typeReference": "DesktopApi[\"browser\"][\"stopRecording\"]"
           }
@@ -3510,7 +3510,7 @@
         {
           "column": 7,
           "file": "src/preload/index.ts",
-          "line": 811,
+          "line": 812,
           "method": "invoke",
           "resolution": "literal",
           "target": "ipcRenderer"
@@ -3541,7 +3541,7 @@
             "source": {
               "column": 7,
               "file": "src/preload/index.ts",
-              "line": 817
+              "line": 818
             },
             "typeReference": "DesktopApi[\"browser\"][\"unregisterBrokerPanel\"]"
           }
@@ -3566,7 +3566,7 @@
         {
           "column": 7,
           "file": "src/preload/index.ts",
-          "line": 817,
+          "line": 818,
           "method": "invoke",
           "resolution": "literal",
           "target": "ipcRenderer"
@@ -5063,7 +5063,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/commander.ts",
-          "line": 224,
+          "line": 225,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -5119,7 +5119,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/commander.ts",
-          "line": 270,
+          "line": 271,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -5175,7 +5175,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/commander.ts",
-          "line": 209,
+          "line": 210,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -5212,7 +5212,7 @@
             "source": {
               "column": 7,
               "file": "src/preload/index.ts",
-              "line": 787
+              "line": 788
             },
             "typeReference": "DesktopApi[\"commander\"][\"onEvent\"]"
           }
@@ -5229,7 +5229,7 @@
         {
           "column": 7,
           "file": "src/main/ipc/commander.ts",
-          "line": 103,
+          "line": 104,
           "method": "send",
           "resolution": "constant",
           "target": "guardedIpcSend"
@@ -5237,7 +5237,7 @@
         {
           "column": 7,
           "file": "src/preload/index.ts",
-          "line": 787,
+          "line": 788,
           "method": "on",
           "resolution": "literal",
           "target": "ipcRenderer"
@@ -5285,7 +5285,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/commander.ts",
-          "line": 264,
+          "line": 265,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -5341,7 +5341,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/commander.ts",
-          "line": 233,
+          "line": 234,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -5397,7 +5397,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/commander.ts",
-          "line": 203,
+          "line": 204,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -5453,7 +5453,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/commander.ts",
-          "line": 239,
+          "line": 240,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -5509,7 +5509,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/commander.ts",
-          "line": 215,
+          "line": 216,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -5565,7 +5565,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/commander.ts",
-          "line": 256,
+          "line": 257,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -5621,7 +5621,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/commander.ts",
-          "line": 248,
+          "line": 249,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -5630,6 +5630,62 @@
           "column": 68,
           "file": "src/preload/index.ts",
           "line": 780,
+          "method": "invoke",
+          "resolution": "literal",
+          "target": "ipcRenderer"
+        }
+      ],
+      "result": {
+        "convention": "preserve declared undefined/null/void semantics with explicit result codec",
+        "validation": "required-before-binding"
+      }
+    },
+    {
+      "caller": "trusted-desktop-main",
+      "deadline": "30000ms default; cancellation advisory; no automatic mutation replay",
+      "destination": "service",
+      "disposition": "retained",
+      "input": {
+        "convention": "legacy-preload-api-arguments; explicit codec required for IPC transformations",
+        "preload": [
+          {
+            "apiPath": [
+              "commander",
+              "undoAction"
+            ],
+            "arguments": [
+              "{ sessionId, actionId }"
+            ],
+            "method": "invoke",
+            "source": {
+              "column": 76,
+              "file": "src/preload/index.ts",
+              "line": 785
+            },
+            "typeReference": "DesktopApi[\"commander\"][\"undoAction\"]"
+          }
+        ],
+        "reviewedType": null,
+        "validation": "required-before-binding; source signatures are not runtime schemas"
+      },
+      "kind": "command",
+      "name": "commander:undoAction",
+      "nativeCallback": false,
+      "owner": "service",
+      "permission": "exact-operation; validate native caller and domain authorization before effects",
+      "references": [
+        {
+          "column": 3,
+          "file": "src/main/ipc/commander.ts",
+          "line": 277,
+          "method": "handle",
+          "resolution": "literal",
+          "target": "ipcMain"
+        },
+        {
+          "column": 76,
+          "file": "src/preload/index.ts",
+          "line": 785,
           "method": "invoke",
           "resolution": "literal",
           "target": "ipcRenderer"
@@ -8686,7 +8742,7 @@
         {
           "column": 7,
           "file": "src/main/index.ts",
-          "line": 469,
+          "line": 447,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -9450,7 +9506,7 @@
         {
           "column": 15,
           "file": "src/main/index.ts",
-          "line": 621,
+          "line": 599,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -9458,7 +9514,7 @@
         {
           "column": 11,
           "file": "src/main/index.ts",
-          "line": 627,
+          "line": 605,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -9797,7 +9853,7 @@
         {
           "column": 48,
           "file": "src/main/index.ts",
-          "line": 98,
+          "line": 99,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -12930,7 +12986,7 @@
         {
           "column": 50,
           "file": "src/main/index.ts",
-          "line": 765,
+          "line": 743,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -13611,7 +13667,7 @@
         {
           "column": 23,
           "file": "src/main/index.ts",
-          "line": 812,
+          "line": 790,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -14719,7 +14775,7 @@
             "source": {
               "column": 70,
               "file": "src/preload/index.ts",
-              "line": 804
+              "line": 805
             },
             "typeReference": "DesktopApi[\"commanderVoice\"][\"bargeIn\"]"
           }
@@ -14744,7 +14800,7 @@
         {
           "column": 70,
           "file": "src/preload/index.ts",
-          "line": 804,
+          "line": 805,
           "method": "invoke",
           "resolution": "literal",
           "target": "ipcRenderer"
@@ -14775,7 +14831,7 @@
             "source": {
               "column": 66,
               "file": "src/preload/index.ts",
-              "line": 805
+              "line": 806
             },
             "typeReference": "DesktopApi[\"commanderVoice\"][\"send\"]"
           }
@@ -14800,7 +14856,7 @@
         {
           "column": 66,
           "file": "src/preload/index.ts",
-          "line": 805,
+          "line": 806,
           "method": "invoke",
           "resolution": "literal",
           "target": "ipcRenderer"
@@ -14831,7 +14887,7 @@
             "source": {
               "column": 7,
               "file": "src/preload/index.ts",
-              "line": 803
+              "line": 804
             },
             "typeReference": "DesktopApi[\"commanderVoice\"][\"setActive\"]"
           }
@@ -14856,7 +14912,7 @@
         {
           "column": 7,
           "file": "src/preload/index.ts",
-          "line": 803,
+          "line": 804,
           "method": "invoke",
           "resolution": "literal",
           "target": "ipcRenderer"
@@ -16924,7 +16980,7 @@
             "source": {
               "column": 47,
               "file": "src/preload/index.ts",
-              "line": 797
+              "line": 798
             },
             "typeReference": "DesktopApi[\"voiceElevenLabs\"][\"acceptDisclosure\"]"
           }
@@ -16949,7 +17005,7 @@
         {
           "column": 47,
           "file": "src/preload/index.ts",
-          "line": 797,
+          "line": 798,
           "method": "invoke",
           "resolution": "literal",
           "target": "ipcRenderer"
@@ -16978,7 +17034,7 @@
             "source": {
               "column": 39,
               "file": "src/preload/index.ts",
-              "line": 796
+              "line": 797
             },
             "typeReference": "DesktopApi[\"voiceElevenLabs\"][\"clearKey\"]"
           }
@@ -17003,7 +17059,7 @@
         {
           "column": 39,
           "file": "src/preload/index.ts",
-          "line": 796,
+          "line": 797,
           "method": "invoke",
           "resolution": "literal",
           "target": "ipcRenderer"
@@ -17032,7 +17088,7 @@
             "source": {
               "column": 38,
               "file": "src/preload/index.ts",
-              "line": 798
+              "line": 799
             },
             "typeReference": "DesktopApi[\"voiceElevenLabs\"][\"refresh\"]"
           }
@@ -17057,7 +17113,7 @@
         {
           "column": 38,
           "file": "src/preload/index.ts",
-          "line": 798,
+          "line": 799,
           "method": "invoke",
           "resolution": "literal",
           "target": "ipcRenderer"
@@ -17088,7 +17144,7 @@
             "source": {
               "column": 48,
               "file": "src/preload/index.ts",
-              "line": 795
+              "line": 796
             },
             "typeReference": "DesktopApi[\"voiceElevenLabs\"][\"setKey\"]"
           }
@@ -17113,7 +17169,7 @@
         {
           "column": 48,
           "file": "src/preload/index.ts",
-          "line": 795,
+          "line": 796,
           "method": "invoke",
           "resolution": "literal",
           "target": "ipcRenderer"
@@ -17144,7 +17200,7 @@
             "source": {
               "column": 54,
               "file": "src/preload/index.ts",
-              "line": 799
+              "line": 800
             },
             "typeReference": "DesktopApi[\"voiceElevenLabs\"][\"setModel\"]"
           }
@@ -17169,7 +17225,7 @@
         {
           "column": 54,
           "file": "src/preload/index.ts",
-          "line": 799,
+          "line": 800,
           "method": "invoke",
           "resolution": "literal",
           "target": "ipcRenderer"
@@ -18894,7 +18950,7 @@
         "producerOwner": "authenticated-task-api",
         "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
       },
-      "line": 432,
+      "line": 410,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
@@ -18925,7 +18981,7 @@
         "producerOwner": "authenticated-mobile-api",
         "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
       },
-      "line": 453,
+      "line": 431,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",

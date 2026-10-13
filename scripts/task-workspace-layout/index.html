@@ -1,0 +1,16 @@
+<!doctype html>
+<html><head><meta charset="UTF-8"><title>Task workspace desktop regression</title></head>
+<body><div id="root"></div>
+<script>
+// In-memory fixture only: no provider, live profile or application services.
+const lists = new Set(['getAll', 'getTasks', 'getSubtasks', 'getStartQueue', 'scan', 'getRepos'])
+const methods = new Proxy({}, { get: (_, key) => key.startsWith('on') ? () => () => {} : async () => lists.has(key) ? [] : null })
+window.electronAPI = new Proxy({
+  settings: { getAll: async () => ({ github_org: '', git_provider: 'github' }) },
+  agents: { getStartRecoveryState: async () => null },
+  artifacts: { scan: async () => [], read: async () => null },
+  attachments: { getImages: async () => [] }
+}, { get: (target, key) => key in target ? target[key] : key.startsWith('on') ? () => () => {} : methods })
+window.fixture = {}
+</script>
+<script type="module" src="/fixture.tsx"></script></body></html>

@@ -50,6 +50,7 @@ import { startScheduledCoordination, stopScheduledCoordination, closeScheduledCo
 import { startSecretBroker, shutdownSecretBroker, closeSecretBroker, writeSecretShellWrapper } from './secret-broker'
 import { shutdownMcpProbes, closeMcpProbes } from './agent-manager/mcp-server-test'
 import { isMainWindowUrl } from './main-window-url'
+import { attachWindowStartup } from './window-startup'
 import { applyMobileAccessSettings, setMobileApiDeps, stopMobileApiServer, closeMobileApiServer, broadcastToMobileClients, setMobileApiNotifier } from './mobile-api-server'
 import { registerUpdaterIpc, initAutoUpdater, isUpdateDownloaded, getPendingVersion } from './auto-updater'
 import { initCrashLogger } from './crash-logger'
@@ -273,36 +274,13 @@ function createWindow(): void {
   // (Electron 44, X11) that event is sometimes never sent: the page loads but
   // the window stays unmapped for good. Show it once the load has finished
   // anyway, and make sure the start-up work below runs only once.
-  let didShowWindow = false
-  const showWindowOnce = (): void => {
-    if (didShowWindow || !mainWindow || mainWindow.isDestroyed()) return
-    didShowWindow = true
-    mainWindow.show()
-
-    if (!is.dev && mainWindow) {
-      initAutoUpdater(mainWindow)
-    }
-
-    if (recurrenceScheduler && mainWindow) {
-      recurrenceScheduler.start(mainWindow)
-    }
-
-    if (heartbeatScheduler && mainWindow) {
-      heartbeatScheduler.start(mainWindow)
-    }
-
-    // Auto-start / auto-complete reconciliation is deliberately
-    // window-independent: the flags must hold with no window open.
+  attachWindowStartup(mainWindow, (window) => {
+    if (!is.dev) initAutoUpdater(window)
+    recurrenceScheduler?.start(window)
+    heartbeatScheduler?.start(window)
+    // Auto-start / auto-complete remains independent of the window lifetime.
     taskAutomationScheduler?.start()
-
-    if (workspaceCleanupScheduler && mainWindow) {
-      workspaceCleanupScheduler.start(mainWindow)
-    }
-
-  }
-  mainWindow.once('ready-to-show', showWindowOnce)
-  mainWindow.webContents.once('did-finish-load', () => {
-    setTimeout(showWindowOnce, 1000)
+    workspaceCleanupScheduler?.start(window)
   })
 
   // Force the main window to 100% zoom on first load. Chromium persists page

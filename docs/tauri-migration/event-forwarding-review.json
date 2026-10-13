@@ -1,7 +1,7 @@
 {
   "reviewVersion": 1,
   "status": "source-ownership-reviewed; no runtime grant or G1 acceptance",
-  "reviewedSourceBase": "da8e4c0d",
+  "reviewedSourceBase": "0b5ae672",
   "policies": [
     {
       "id": "agent-host-dispatch",
@@ -324,7 +324,7 @@
       "id": "task-api-relay",
       "source": {
         "file": "src/main/index.ts",
-        "line": 432,
+        "line": 410,
         "column": 7,
         "target": "guardedIpcSend",
         "method": "send",
@@ -363,7 +363,7 @@
       "id": "mobile-to-desktop-relay",
       "source": {
         "file": "src/main/index.ts",
-        "line": 453,
+        "line": 431,
         "column": 7,
         "target": "guardedIpcSend",
         "method": "send",
