@@ -66,7 +66,10 @@ afterEach(() => {
   }
 })
 
-describe('bounded actual SQLite import rehearsal', () => {
+// These tests keep real SQLite checkpoints and fsync at every recovery boundary.
+// Several completed cases exceed Vitest's default 5 s on a busy local disk;
+// allow durable IO without weakening production bounds or preservation checks.
+describe('bounded actual SQLite import rehearsal', { timeout: 15_000 }, () => {
   it('commits a real encrypted candidate while retaining original rows, schema and byte-identical resources', () => {
     const value = fixture()
     const originals = originalRows(value.root)

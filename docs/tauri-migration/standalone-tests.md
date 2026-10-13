@@ -77,3 +77,5 @@ and six startup/transcript controls. This predates the later process/API-owner
 changes. The earlier `85e09e3` matrix remains failed overall. No installed GUI,
 real model provider, privileged installer or system-proxy acceptance is claimed
 by these service-only receipts.
+
+The later [task API matrix](evidence/task-api-service-four-target-scenarios.json) passed 1,137 default portable cases with zero skips in 76 files on all four targets at `08d495f`. Local portable coverage subsequently adds the retained HTTP MCP, mobile server/lifetime, task automation and Captain wakeup suites. [Captain wake ownership](captain-wake-owner.md) documents the current full local results and the distinction between fixtures and production native/provider acceptance.

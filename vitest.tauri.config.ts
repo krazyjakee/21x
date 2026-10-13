@@ -37,6 +37,7 @@ const mainFiles = [
   'src/main/mobile-api-server.test.ts',
   'src/main/mobile-api-lifetime.test.ts',
   'src/main/task-automation-scheduler.test.ts', 'src/main/task-automation-lifetime.test.ts',
+  'src/main/captain-waker.test.ts', 'src/main/captain-waker-lifetime.test.ts',
   'src/main/agent-installer/detect.test.ts', 'src/main/agent-installer/install.test.ts',
   'src/main/sync-manager-lifetime.test.ts',
   'src/main/sync-manager.test.ts',

@@ -81,11 +81,11 @@ Earlier [issue continuation evidence](evidence/issue-continuation-local.json)
 retains its original 5,148-pass scope and fixture corrections. Subsequent reports
 supersede its counts without changing its source provenance.
 
-All twenty new issues are open, with role owners, gate/task IDs, dependencies and concrete acceptance/evidence criteria. [#193](https://github.com/krazyjakee/21x/issues/193) is the overall tracker. Existing [#202](https://github.com/krazyjakee/21x/issues/202) remains the contracts umbrella; foundation issues #200/#201/#203 remain closed within their original scope.
+Nineteen remaining issues are open, with role owners, gate/task IDs, dependencies and concrete acceptance/evidence criteria. Bounded diagnostic issue [#204](https://github.com/krazyjakee/21x/issues/204) is closed with the retained four-target agent and artifact matrices; overall G2 remains open. [#193](https://github.com/krazyjakee/21x/issues/193) is the overall tracker. Existing [#202](https://github.com/krazyjakee/21x/issues/202) remains the contracts umbrella; foundation issues #200/#201/#203 remain closed within their original scope.
 
-| Acceptance area / parity rows | Open issue |
+| Acceptance area / parity rows | Issue |
 | --- | --- |
-| Installed agent/HITL/reload and artifact proofs, all four targets (G2) | [#204](https://github.com/krazyjakee/21x/issues/204) |
+| Installed agent/HITL/reload and artifact diagnostics, all four targets | [#204](https://github.com/krazyjakee/21x/issues/204), completed within diagnostic scope |
 | Matched performance and resource budgets (G0) | [#205](https://github.com/krazyjakee/21x/issues/205) |
 | Minimum platforms/WebViews, pins and redistribution (G0/G1; D1/D7) | [#206](https://github.com/krazyjakee/21x/issues/206) |
 | Large snapshots/bytes/streams/backpressure/reconnect (G1/G2; D2/D8) | [#207](https://github.com/krazyjakee/21x/issues/207), [#202](https://github.com/krazyjakee/21x/issues/202) |
@@ -110,6 +110,6 @@ This maps every row of [the parity matrix](validation.md#feature-parity-matrix) 
 
 ## Cutover decision
 
-Keep the shipping Electron configuration until the dependent acceptance criteria pass. Prepared proof workflows can run the outstanding installed diagnostics; their new local modes must be committed and available to hosted workflows before dispatch. Tests passing locally do not convert a debug synthetic host into a production candidate.
+Keep the shipping Electron configuration until the dependent acceptance criteria pass. The installed diagnostic workflows passed all four targets with retained package/runtime evidence. Production feature, profile and release acceptance still needs its own evidence. Tests passing locally do not convert a debug synthetic host into a production candidate.
 
 The next integration sequence is G0/G1 decisions/contracts and platform proof runs, then production service/native/domain/renderer integration, retained feature parity, installed data/release rehearsal, and finally [Electron retirement](electron-retirement.md). No production release, update feed or live profile was changed by this audit.

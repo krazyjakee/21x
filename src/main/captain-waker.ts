@@ -170,6 +170,8 @@ export class CaptainWaker {
   private readonly capLogged = new Set<string>()
   private unsubscribe: (() => void) | null = null
   private flushing = new Set<string>()
+  private closing = false
+  private readonly deliveries = new Set<Promise<unknown>>()
 
   constructor(
     private readonly db: CaptainWakerStore,
@@ -188,6 +190,7 @@ export class CaptainWaker {
 
   /** Subscribes to the project event bus and the MCP tool-call observer. */
   start(): void {
+    if (this.closing) throw new Error('CAPTAIN_WAKER_CLOSED')
     if (this.unsubscribe) return
     this.unsubscribe = projectEvents.onEvent((event) => this.handleEvent(event))
     setToolCallObserver((call) => this.observeToolCall(call.scope, call.args, call.result))
@@ -203,8 +206,29 @@ export class CaptainWaker {
     this.pending.clear()
   }
 
+  /** Final admission stop; accepted sends retain their raw ownership. */
+  shutdown(): void {
+    this.closing = true
+    this.stop()
+  }
+
+  async close(timeoutMs = 2000): Promise<void> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) {
+      throw new RangeError('Captain wake shutdown deadline must be an integer from 1 to 3000 ms')
+    }
+    this.shutdown()
+    if (!this.deliveries.size) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const expired = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('CAPTAIN_WAKER_SHUTDOWN_INCOMPLETE')), timeoutMs)
+    })
+    try { await Promise.race([Promise.allSettled([...this.deliveries]), expired]) }
+    finally { if (timer) clearTimeout(timer) }
+  }
+
   /** Records that the Captain itself just changed a task, so its own change does not wake it. */
   noteCoordinatorTouched(taskId: string): void {
+    if (this.closing) return
     this.touched.set(taskId, this.now())
     // Keep the map small: entries outside the window are of no use.
     if (this.touched.size > 500) {
@@ -225,6 +249,7 @@ export class CaptainWaker {
   }
 
   handleEvent(event: ProjectEvent): void {
+    if (this.closing) return
     const project = this.db.getProject(event.projectId)
     if (!project || project.archived) return
     if (!wakeupKindEnabled(readCaptainWakeupSettings(project.settings), event.kind)) return
@@ -255,6 +280,7 @@ export class CaptainWaker {
 
   /** Delivers a project's batch now (the timer calls this; tests may too). */
   async flush(projectId: string): Promise<void> {
+    if (this.closing) return
     const batch = this.pending.get(projectId)
     if (!batch || batch.events.length === 0) {
       this.pending.delete(projectId)
@@ -313,12 +339,20 @@ export class CaptainWaker {
     const message = buildCaptainWakeMessage(coordinator.id, project.name, listed, batch.events.length - listed.length)
     this.recordWake(projectId)
     this.flushing.add(projectId)
+    // Register before invoking the host: close also owns a queued send, and a
+    // synchronous host callback cannot hide it by starting shutdown reentrantly.
+    const delivery = Promise.resolve().then(() => {
+      if (this.closing) return
+      return this.agents.sendMessage(liveSessionId, message, coordinator.id, agentId)
+    })
+    this.deliveries.add(delivery)
     try {
       console.log(`[CaptainWaker] Waking Captain of ${projectId} with ${batch.events.length} event(s)`)
-      await this.agents.sendMessage(liveSessionId, message, coordinator.id, agentId)
+      await delivery
     } catch (err) {
       console.error(`[CaptainWaker] Could not wake the Captain of ${projectId}:`, err)
     } finally {
+      this.deliveries.delete(delivery)
       this.flushing.delete(projectId)
     }
   }

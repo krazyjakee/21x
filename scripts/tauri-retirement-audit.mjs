@@ -57,6 +57,7 @@ const report = {
     'src/main/task-mcp-endpoint.ts', 'src/main/mcp-servers/task-management-core.ts',
     'src/main/mobile-api-server.ts',
     'src/main/task-automation-scheduler.ts',
+    'src/main/captain-waker.ts',
     'src/main/oauth/connector-oauth-flow.ts', 'src/main/oauth/local-oauth-server.ts',
     'src-tauri/src/main.rs', 'src-tauri/src/artifact_proof.rs', 'src-tauri/src/artifact-denial-matcher.js',
     'src-tauri/src/artifact-proof.js', 'src-tauri/src/artifact-frame-proof.js',
