@@ -22,6 +22,13 @@ const resolveOptions = { alias: [
 const mainFiles = [
   'test/tauri-runtime.test.ts',
   'src/main/node-worker-runtime.test.ts',
+  'src/main/adapters/opencode-adapter.test.ts',
+  'src/main/adapters/claude-code-adapter.test.ts',
+  'src/main/adapters/codex-app-server-adapter.test.ts',
+  'src/main/adapters/acp-adapter.test.ts',
+  'src/main/adapters/pi-adapter.test.ts',
+  'src/main/adapters/claude-code-history.test.ts',
+  'src/main/adapters/permission-mode.test.ts',
   'src/main/sync-manager-lifetime.test.ts',
   'src/main/sync-manager.test.ts',
   'src/main/connectors/piece-host/piece-host.test.ts',

@@ -42,3 +42,21 @@ gh workflow run tauri-packaged-platforms.yml --ref codex/tauri-migration-readine
 ```
 
 This runs pinned native staging, portable tests, preflight and the actual private-pipe configuration/transcript/agent proofs. It omits Rust installation/compilation, GUI packaging and installed execution. A separate concurrency group and `-service-only` evidence name keep this cheap diagnostic run distinct from installed acceptance; its provenance also states that scope. Service-only feasibility mode rejects rather than producing an empty database-service proof.
+
+## Provider and connector regression continuation
+
+All five backend adapter suites, Claude history and permission resolution now
+run under the pinned standalone Node with Electron imports forbidden.
+[Provider regression evidence](evidence/provider-adapters-portable-local.json)
+records 299 cases in seven files and the expanded complete opt-in service suite.
+Process/SDK interactions are mocked. This exercises the adapters' protocol,
+approval, streaming, history and error handling, while real installed providers
+and authenticated model sessions remain [#211](https://github.com/krazyjakee/21x/issues/211).
+
+The connector/source/security graph also runs standalone, including portable
+runtime/plugin/form services and an actual staged child loading both pinned
+local hooks. Its commands and revision scopes are retained in
+[connector shutdown](connector-shutdown.md). Prepare connector resources with
+`pnpm tauri:prepare:connectors` before the opt-in worker proof; that proof joins
+plugin/runtime close before its real SQLite fixture closes. Default and opt-in
+suite counts are reported separately in their evidence.
