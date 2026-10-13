@@ -45,6 +45,7 @@ const report = {
     'src/main/connectors/piece-host/worker-environment.ts', 'src/main/connectors/piece-host/client.ts',
     'src/main/connectors/bridge/runtime.ts', 'src/main/connectors/bridge/scheduler.ts', 'src/main/connectors/oauth.ts',
     'src/main/connectors/bridge/engine.ts', 'src/main/plugins/connector-bridge-plugin.ts',
+    'src/main/plugins/connector-bridge-core.ts',
     'src/main/connectors/bridge/runtime-core.ts', 'src/main/connectors/piece-host/packaged-resources.ts',
     'scripts/tauri-runtime.json', 'scripts/tauri-stage-connectors.mjs',
     'src/main/sync-manager.ts', 'src/main/index.ts',

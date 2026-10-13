@@ -5542,6 +5542,7 @@
     "src/main/platform/profile-migration-rehearsal.ts",
     "src/main/platform/secret-storage.ts",
     "src/main/plugins/attachments.ts",
+    "src/main/plugins/connector-bridge-core.ts",
     "src/main/plugins/connector-bridge-plugin.ts",
     "src/main/plugins/forgejo-issues-plugin.ts",
     "src/main/plugins/github-issues-plugin.ts",
@@ -14044,7 +14045,7 @@
   ],
   "summary": {
     "directAPIConsumers": 368,
-    "files": 688,
+    "files": 689,
     "operations": 715,
     "runtimeElectronImports": 47,
     "typeOnlyElectronImports": 3,

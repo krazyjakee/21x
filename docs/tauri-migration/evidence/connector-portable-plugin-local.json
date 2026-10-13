@@ -1,0 +1,32 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "baseCommit": "4708dd02dd1039c78d53d54ff3d7abce93fdf760",
+  "scope": "Portable connector plugin core with explicit runtime; actual staged runtime/SQLite/local hooks and missing-config rejection under standalone Node. Legacy wrapper retains desktop defaults. Production/native command bindings, provider APIs and external OAuth remain unproved.",
+  "sourceSha256": {
+    "src/main/plugins/connector-bridge-core.ts": "00796e10d3d414d02d001e95470b99cce45bee8011261b31740912c3b36421eb",
+    "src/main/plugins/connector-bridge-plugin.ts": "d0476c408bf9d4dab97ad77873b5f4397e680c086ae7291b33d5edf18912d203",
+    "scripts/connector-worker-service-proof.test.ts": "614b09b1068c6d83b59d2428e5607e30958fc5828924622d977e124069ee5966"
+  },
+  "tests": {
+    "standaloneStagedRuntimeAndPlugin": {
+      "passed": 1,
+      "skipped": 0,
+      "files": 1,
+      "reportSha256": "83367a0f7382bf00d894b1dbad3a8753a5470e5ac15c22b429ceeda410cc1e4e"
+    },
+    "legacyConnectorRegressions": {
+      "passed": 63,
+      "skipped": 0,
+      "files": 3,
+      "reportSha256": "3e8b860a1f348de2354d0ad36bebf83f6d13cd815c6a52de39e22586d9ada093"
+    }
+  },
+  "checks": {
+    "forcedTypecheck": "passed",
+    "changedSourceLint": "passed",
+    "inventoryAndContracts": "passed"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

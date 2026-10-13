@@ -82,3 +82,10 @@ standalone/private-pipe cases, nine resource controls, four staging controls and
 No installed GUI acceptance, real provider API or external OAuth is claimed.
 Redistribution review remains incomplete, including missing vendor notice files.
 Tauri plugin/native host/bootstrap bindings remain to integrate.
+
+The plugin implementation is now split similarly: `ConnectorBridgeCore` requires
+an explicit runtime and imports no Electron host. The legacy plugin class supplies
+its desktop default. [Portable plugin evidence](evidence/connector-portable-plugin-local.json)
+extends the staged proof with a real portable database manager, engine ownership
+and a configuration rejection before closing plugin/runtime/database in order.
+Native source command bindings and production bootstrap integration remain open.
