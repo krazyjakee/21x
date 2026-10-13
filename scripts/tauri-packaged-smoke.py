@@ -81,11 +81,32 @@ def verify_report(report, *, mode, arch, installed, root):
         verify_artifact_authority(runtime["artifactAuthorizationProof"])
     else:
         assert "artifactAuthorizationProof" not in runtime
-    owned_node = resources / "node" / ("node.exe" if sys.platform == "win32" else "node")
+    owned_node = verified_owned_node(runtime, installed)
     for required in (owned_node, resources / "node/LICENSE", resources / "service/THIRD_PARTY_NOTICES.json",
                      resources / "service/feasibility.mjs"):
         assert required.is_file()
     return owned_node.resolve()
+
+
+def verified_owned_node(runtime, installed):
+    resources = physical_path(runtime["resourceRoot"])
+    assert resources.is_relative_to(installed)
+    entry = resources / "node" / ("node.exe" if sys.platform == "win32" else "node")
+    assert entry.is_file() and not entry.is_symlink()
+    owned_node = entry.resolve()
+    assert owned_node.is_relative_to(resources) and owned_node.is_relative_to(installed)
+    return owned_node
+
+
+def observe_package(report, *, installed, arch, provenance, require_versions):
+    """Retain failed-run provenance without marking its native proof accepted."""
+    owned_node = verified_owned_node(report["runtime"], installed)
+    verification = {**provenance, "ownedNodeContained": True,
+                    "ownedRunningProcessesAfterExit": running_owned_node(owned_node)}
+    if require_versions:
+        verification["runtimeVersions"] = runtime_versions(owned_node, report["runtime"], arch)
+    report["verification"] = verification
+    return owned_node
 
 
 def run(command, *, cwd=None, env=None, timeout=180, log=None):
@@ -248,15 +269,32 @@ def main():
                "TWENTYONEX_NATIVE_SMOKE_REPORT": str(report_path),
                "TWENTYONEX_NATIVE_SMOKE_PROFILE": str(root / "profile"),
                "TMPDIR": str(root), "TMP": str(root), "TEMP": str(root)}
-        run(command, cwd=root, env=env, timeout=120, log=evidence / "packaged-gui-smoke.log")
+        provenance = {"packageKind": args.kind, "proofMode": args.mode, "packageSha256": checksum,
+                      "artifact": artifact.name, "packagedExecutable": str(executable),
+                      "smokeCommandSucceeded": False}
+        provenance_path = evidence / "package-provenance.json"
+        provenance_path.write_text(json.dumps(provenance, indent=2) + "\n")
+        try:
+            run(command, cwd=root, env=env, timeout=120, log=evidence / "packaged-gui-smoke.log")
+        except (RuntimeError, subprocess.TimeoutExpired):
+            if report_path.is_file() and report_path.stat().st_size <= 1024 * 1024:
+                try:
+                    report = json.loads(report_path.read_text())
+                    observe_package(report, installed=installed, arch=args.arch, provenance=provenance,
+                                    require_versions=args.require_runtime_versions)
+                    report_path.write_text(json.dumps(report, indent=2) + "\n")
+                except (AssertionError, KeyError, ValueError, OSError, subprocess.SubprocessError):
+                    provenance["nativeMetadataUnavailable"] = True
+                    provenance_path.write_text(json.dumps(provenance, indent=2) + "\n")
+            raise
+        provenance["smokeCommandSucceeded"] = True
+        provenance_path.write_text(json.dumps(provenance, indent=2) + "\n")
         report = json.loads(report_path.read_text())
         owned_node = verify_report(report, mode=args.mode, arch=args.arch, installed=installed, root=root)
-        survivors = running_owned_node(owned_node)
-        report["verification"] = {"packageKind": args.kind, "proofMode": args.mode, "packageSha256": checksum,
-                                  "artifact": artifact.name, "packagedExecutable": str(executable),
-                                  "packagedResources": True, "ownedRunningProcessesAfterExit": survivors}
-        if args.require_runtime_versions:
-            report["verification"]["runtimeVersions"] = runtime_versions(owned_node, report["runtime"], args.arch)
+        observe_package(report, installed=installed, arch=args.arch, provenance=provenance,
+                        require_versions=args.require_runtime_versions)
+        survivors = report["verification"]["ownedRunningProcessesAfterExit"]
+        report["verification"]["packagedResources"] = True
         report_path.write_text(json.dumps(report, indent=2) + "\n")
         assert not survivors, "Owned packaged Node survived native shutdown"
         print(json.dumps(report, indent=2))

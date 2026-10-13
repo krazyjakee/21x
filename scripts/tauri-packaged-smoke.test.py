@@ -215,6 +215,62 @@ class ReportValidationTests(unittest.TestCase):
                     self.assertRaises(AssertionError):
                 smoke.runtime_versions(self.resources / "node/node", {"webviewVersion": "123", "webviewDefaultRuntime": True}, "x64")
 
+    def test_node_resolving_outside_resources_is_rejected_before_metadata_execution(self):
+        entry = self.resources / "node" / ("node.exe" if sys.platform == "win32" else "node")
+        original = Path.resolve
+
+        def resolve(path, *args, **kwargs):
+            return self.root / "outside-node" if path == entry else original(path, *args, **kwargs)
+
+        with patch.object(Path, "resolve", resolve), patch.object(smoke.subprocess, "check_output") as query:
+            with self.assertRaises(AssertionError):
+                smoke.observe_package(self.report("synthetic-agent"), installed=self.installed, arch="x64",
+                                      provenance={}, require_versions=True)
+            query.assert_not_called()
+
+    def test_failed_gui_retains_checksum_and_versions_without_becoming_accepted(self):
+        evidence = self.root / "evidence"
+        evidence.mkdir()
+        failed = self.report("artifact-authorization-proof")
+        failed["passed"] = False
+        failed["runtime"]["artifactAuthorizationProof"]["passed"] = False
+        metadata = {"fixture": "versions"}
+
+        def fail(command, **kwargs):
+            (evidence / "packaged-gui-smoke.json").write_text(smoke.json.dumps(failed))
+            raise RuntimeError("Packaged command failed with exit status 1")
+
+        executable = self.installed / "fixture-app"
+        with patch.object(sys, "argv", ["smoke", "--kind", "nsis", "--arch", "x64", "--mode",
+                                       "artifact-authorization-proof", "--evidence", str(evidence), "--require-runtime-versions"]), \
+                patch.object(smoke, "packaged_executable", return_value=([str(executable)], self.installed, executable, {}, Path("fixture.exe"), "a" * 64)), \
+                patch.object(smoke, "run", side_effect=fail), \
+                patch.object(smoke, "running_owned_node", return_value=[]), \
+                patch.object(smoke, "runtime_versions", return_value=metadata), \
+                self.assertRaisesRegex(RuntimeError, "exit status 1"):
+            smoke.main()
+        observed = smoke.json.loads((evidence / "packaged-gui-smoke.json").read_text())
+        self.assertIs(observed["passed"], False)
+        self.assertIs(observed["runtime"]["artifactAuthorizationProof"]["passed"], False)
+        self.assertIs(observed["verification"]["smokeCommandSucceeded"], False)
+        self.assertEqual(observed["verification"]["packageSha256"], "a" * 64)
+        self.assertEqual(observed["verification"]["runtimeVersions"], metadata)
+        with self.assertRaises(AssertionError):
+            self.verify(observed, "artifact-authorization-proof")
+
+    def test_failure_before_a_native_report_still_retains_package_provenance(self):
+        evidence = self.root / "empty-evidence"
+        executable = self.installed / "fixture-app"
+        with patch.object(sys, "argv", ["smoke", "--kind", "nsis", "--arch", "x64", "--evidence", str(evidence)]), \
+                patch.object(smoke, "packaged_executable", return_value=([str(executable)], self.installed, executable, {}, Path("fixture.exe"), "b" * 64)), \
+                patch.object(smoke, "run", side_effect=RuntimeError("Packaged command failed")), \
+                self.assertRaises(RuntimeError):
+            smoke.main()
+        provenance = smoke.json.loads((evidence / "package-provenance.json").read_text())
+        self.assertEqual(provenance["packageSha256"], "b" * 64)
+        self.assertIs(provenance["smokeCommandSucceeded"], False)
+        self.assertFalse((evidence / "packaged-gui-smoke.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
