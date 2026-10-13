@@ -307,7 +307,9 @@ class MemoryKv implements PieceKvBackend {
   }
 }
 
-function makeClient(opts: { kv?: PieceKvBackend; creds?: Record<string, ConnectorCredentials | null> } = {}): {
+function makeClient(opts: { kv?: PieceKvBackend; creds?: Record<string, ConnectorCredentials | null>;
+  getCredentials?: (id: string) => ConnectorCredentials | null | Promise<ConnectorCredentials | null>
+} = {}): {
   client: PieceHostClient
   processes: FakeHostProcess[]
 } {
@@ -320,7 +322,7 @@ function makeClient(opts: { kv?: PieceKvBackend; creds?: Record<string, Connecto
       return p
     },
     kv: opts.kv ?? new MemoryKv(),
-    credentials: { get: (id) => creds[id] ?? null },
+    credentials: { get: opts.getCredentials ?? ((id) => creds[id] ?? null) },
     allowlist: CLIENT_ALLOWLIST,
     defaultTimeoutMs: 2_000
   })
@@ -328,6 +330,46 @@ function makeClient(opts: { kv?: PieceKvBackend; creds?: Record<string, Connecto
 }
 
 const base = { instanceId: 'inst-1', pieceName: PIECE, pieceVersion: VERSION }
+
+describe('piece host credential-read lifetime', () => {
+  it.each(['cancel', 'timeout', 'dispose'] as const)('does not spawn a worker when credentials resolve after %s', async reason => {
+    let finish!: (value: ConnectorCredentials | null) => void
+    const held = new Promise<ConnectorCredentials | null>(resolve => { finish = resolve })
+    const { client, processes } = makeClient({ getCredentials: () => held })
+    const controller = new AbortController()
+    const result = client.runAction({ ...base, actionName: 'echo', signal: controller.signal,
+      timeoutMs: reason === 'timeout' ? 10 : 2000 }).catch(error => error)
+    try {
+      await new Promise<void>(resolve => setImmediate(resolve))
+      if (reason === 'cancel') controller.abort()
+      if (reason === 'dispose') client.dispose()
+      expect(await result).toBeInstanceOf(reason === 'timeout' ? PieceTimeoutError : PieceCancelledError)
+      finish({ type: 'secret_text', secret: 'late-fixture-credential' })
+      await new Promise<void>(resolve => setImmediate(resolve))
+      expect(processes).toHaveLength(0)
+      expect(client.starts).toBe(0)
+    } finally { finish(null); client.dispose(); await result }
+  })
+
+  it('does not let a cancelled credential read replace the next call owner', async () => {
+    let finish!: (value: ConnectorCredentials | null) => void
+    const held = new Promise<ConnectorCredentials | null>(resolve => { finish = resolve })
+    let reads = 0
+    const { client, processes } = makeClient({ getCredentials: () => ++reads === 1 ? held : null })
+    const controller = new AbortController()
+    const cancelled = client.runAction({ ...base, actionName: 'echo', signal: controller.signal }).catch(error => error)
+    try {
+      await new Promise<void>(resolve => setImmediate(resolve))
+      controller.abort()
+      expect(await cancelled).toBeInstanceOf(PieceCancelledError)
+      const next = client.runAction({ ...base, actionName: 'echo', propsValue: { text: 'current' } })
+      finish(null)
+      expect(await next).toMatchObject({ text: 'current' })
+      expect(client.starts).toBe(1)
+      expect(processes).toHaveLength(1)
+    } finally { finish(null); client.dispose(); await cancelled }
+  })
+})
 
 describe('PieceHostClient + host runtime', () => {
   beforeEach(() => {

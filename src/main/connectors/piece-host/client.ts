@@ -181,6 +181,9 @@ export class PieceHostClient {
         void (async () => {
           try {
             const creds = await this.options.credentials.get(req.instanceId)
+            // A late credential read must not create a worker after timeout,
+            // cancellation or disposal, or replace the next call's live host.
+            if (this.disposed || this.active !== call || req.signal?.aborted) return
             resolved.creds = creds
             const host = this.ensureHost()
             await host.ready
