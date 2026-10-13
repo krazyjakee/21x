@@ -1,0 +1,188 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "issues": [
+    83,
+    109,
+    111,
+    113,
+    114,
+    150,
+    157,
+    161,
+    172,
+    173,
+    174,
+    213,
+    222
+  ],
+  "scope": "Local Linux integrated regression and actual Electron keyboard/layout checks using isolated fixture profiles. Scoped downloader and standalone-test progress; no production Tauri parity, live-profile, real provider/marketplace, release or all-platform gate claim.",
+  "source": {
+    "baseCommit": "da8e4c0dc6e62a4c16e40be4e9e13540357a54c5",
+    "targetBranch": "master",
+    "schemaVersion": 33,
+    "changedSourceHashes": {
+      "eslint.config.mjs": "a13d498bc863e812e0593d780afe62f35877db9e762a4f05117c57c254e49294",
+      "scripts/commander-input/check.cjs": "12011809a84c388b957ed04332b036a408b2b7f068fdabfc14ab57a0c6735b68",
+      "scripts/commander-input/fixture.tsx": "409cd49addb5a14197db23baeb99e86fb530bb445a184831515d84fef72660e6",
+      "scripts/database-proof.test.ts": "0f17d64d66d7712c1508813a93aa73d1877535fd04655cca3d9c05f464ec6a97",
+      "scripts/database-proof/fixture.ts": "da104ecb753b6d3f9035d976f2161f682033c306cfa1d5e3130900afb6948d77",
+      "src/main/adapters/acp-adapter.ts": "33b1ab397c49e3c45f1044b0f256b6e8fb8f70659b103b8d708b1e64b3720e92",
+      "src/main/adapters/claude-code-adapter.ts": "7cd69a8fd2bb551440bdb5dafb5ea5703d5c9bf112f7a4699197329670ca33cb",
+      "src/main/adapters/codex-app-server-adapter.test.ts": "827fbaf47dce8bc77df40ac359fc9d5f5ac34677fe71657f2425207d0ccf0987",
+      "src/main/adapters/codex-app-server-adapter.ts": "4ea3e01c877567429b78eb5ffed5cc9f59df2ab74b52f01cedf2248f6108b789",
+      "src/main/adapters/codex-app-server-items.ts": "a306d78f0160f2df114c7006827653a0bde19c7a7418f15125938f9de4365372",
+      "src/main/adapters/coding-agent-adapter.ts": "434d6dfd853ffe6a216268d8dfa5c41307cfd2cc9a3aea7544dccd6fbe96ce4a",
+      "src/main/adapters/opencode-adapter.ts": "8739082befd8a11c2ab9edb4c8d96bcd999f0618a5d30eb3ceb68fee90cd35e4",
+      "src/main/adapters/pi-adapter.test.ts": "870b1271b9f62d088862b78fad1d6cb601773a8aa105f5867c0abd3924e6872b",
+      "src/main/adapters/pi-adapter.ts": "5ef77926bc1c7749627a258c9ad49a7e64621659e40eded4d9f44fce44d0d00c",
+      "src/main/agent-manager-core.ts": "d5b8c79519b5834fa7852fb66ce792f0817ec73441ec235c0144dfd03bb53dff",
+      "src/main/agent-manager-project-captains.test.ts": "3c00995a02262a4004c8deceb06ae91acab8cedde4cf8738b0568408fb60abdb",
+      "src/main/agent-manager-provider-recovery.test.ts": "457d7f822566505782533b2a6e5632c866db69f57ef5d6c8fcc4133d7d62710d",
+      "src/main/agent-manager.test.ts": "ee30a6b96ef0bd1e7a9c502da343d97ca277d25bbde5031debd71235babf81b2",
+      "src/main/agent-manager/provider-failure.test.ts": "db40808b316fe50b7c56ec0adf4a00e673b8544d51f9cabb4f306d3742caa295",
+      "src/main/agent-manager/provider-failure.ts": "ca99a60226902d34b456edb203eb55c5a33ae118b76f275a62e1155a4c5555b7",
+      "src/main/captain-github-tools.ts": "dcf77f638c0830f5cee80d578f2285a786fe0c1a1527434ad481cd79f4e8cb54",
+      "src/main/claude-plugin-lifetime.test.ts": "b235ef1e833d39285496f953dbbc8df4d7fdce59d9b4e0e8473161f718536dea",
+      "src/main/claude-plugin-manager.test.ts": "b042b88315205fb7be4849a8aa0094f296a4d8792155802e07e293c3f18cf847",
+      "src/main/claude-plugin-manager.ts": "c9f49e612faff0a28cc407bd7d15b255106007d0b12def75b8539015040bf469",
+      "src/main/claude-plugins/containment.test.ts": "94ddb6274386c347d2122e13fe05e2349337de40895dfb4313c2380eaa927567",
+      "src/main/claude-plugins/containment.ts": "e94ce1aa617c59deec72d667d738a4e717c9c323b2a723b9b0895d4de6076e2b",
+      "src/main/claude-plugins/resources.containment.test.ts": "260c0d4d06468646f1854030465a744e94089ab324c54eaa84d89b72a893f57a",
+      "src/main/claude-plugins/resources.ts": "bf1dbbe87901da79000651d922296ffff2b9c0785fb09e68901e6ba20a116a81",
+      "src/main/claude-plugins/sources.test.ts": "42b333487df88c93d599f444c343b4bc70a34b0edfaf85397f69df53dd399539",
+      "src/main/claude-plugins/sources.ts": "7ed3c03e655267eff3c3352744eb8fbee747d5184a78785ebc93a3a20e9d21ad",
+      "src/main/commander/prompts.test.ts": "2da06f2772df695f7f30a9f02b8675dfd490b0f54c93b9c2c9f93a3db42ce90c",
+      "src/main/commander/prompts.ts": "9bdf3893722bc1b5793f7dcc90c45dd5d6c130127d108f32bdd04add8d925064",
+      "src/main/commander/report-tools.test.ts": "9f379fd1a1ee77184637677bf16a22c5daea7210e11df05efd53de54cca8de62",
+      "src/main/commander/report-tools.ts": "d947a3880bd6a57abaaed9c51b1d1bd289bd69feb5df3fd5a7e4605f2f0f25dc",
+      "src/main/database-migration.test.ts": "ea8001a7008ef3170b16c072ed6a4556c1581a902a35886cd03fa9ccee41de14",
+      "src/main/database-projects.test.ts": "6783dc592d20c256ae195fa39dccbb6cb84b56ced012be5e4ca40e62f3c374bf",
+      "src/main/database-task-activity.test.ts": "858abbad54f095f9e39a52b9853c4f0c8ecc0dad94cf0c2397f9e4594b17e9a4",
+      "src/main/database/captain-migration.test.ts": "d2f18e2e1090396dde05c72272c0ff49c340bb03d19e2a278a5e20360dc3c515",
+      "src/main/database/provider-recovery-migration.ts": "9a80d9d2454ce0a2d1304c2cdf9ea2db1fbf681fef8ed7a120c572e2f5e50cbd",
+      "src/main/database/schema.ts": "e111b9a754a29f4ca40d7795f72f7e21116aab59606c015d6f075455d906f174",
+      "src/main/issue-writes.test.ts": "431ae11c6a4ace7ce4e3b6fa61a8c68aa28767852cee31b6d7500f878310d496",
+      "src/main/mcp-servers/task-management-tools.ts": "8a3223c4f94bbde14af084700a82da07673c586c1a6fb355356655d27f12a8a2",
+      "src/main/prompts/captain.test.ts": "8d944de1ba55902330e164a13a154ef72b41c752b51c8319b67e4619a9db80ef",
+      "src/main/prompts/captain.ts": "c4b31061ee2dc1e59b277a3c8183d1bf8ad5690c05dfbb5dae14be264f4b4338",
+      "src/main/pull-request-merge.test.ts": "9111769a1239f96689d711614542d746149fa669727de176d15cd3727ab059c9",
+      "src/main/pull-request-merge.ts": "3fd20fac11c515cc852d662a21ba224c7d84f5380b11b063412f02173732f1c0",
+      "src/main/scheduled-coordination-core.ts": "d684ea5a8beacf95e7ec7e8d75b06467790a6aa21dff707c878a5df6f340e86c",
+      "src/main/scheduled-coordination.test.ts": "fde244a5179f6ebdb19211caacf7c0005c9c6b5a4899ceff67540abe432cfb65",
+      "src/main/sessions/provider-recovery-store.test.ts": "00f501829d50dc9a78b32d0d2c5578d85458daa540c7c523c4bd5b349db599aa",
+      "src/main/sessions/provider-recovery-store.ts": "8adc87396f9af6587f60e07e773b96072551659203e2ebe4936cff3508b9c138",
+      "src/main/task-api/task-routes.ts": "99aca36fdbbf8d423397d96922265742d508f9e50620ddea2ba97b852ff51938",
+      "src/main/voice/commander-voice.test.ts": "7974c72d03ca8b65fbbd6f2a100075e7ba8f496edff1ad2ea3afbadda88ac51b",
+      "src/main/voice/commander-voice.ts": "96e17775fe2110669621dfd23f662229c0536f53062b2d1433b3f1c705c60d91",
+      "src/renderer/src/components/commander/CommanderChatPane.tsx": "91fd51194af536680a677c0b9488170e7812866d378d2366abb9c0824e26e991",
+      "src/renderer/src/components/commander/CommanderMessageItem.test.tsx": "37d5ce5224a9de34bda958e3c44526af5e2c633fcaa0ff4e8f06cc1985fbc93f",
+      "src/renderer/src/components/commander/CommanderMessageItem.tsx": "aaf10f6518c789222dc08c6ac5260c8a450eae96cbd1a61a8463d5cc870a5283",
+      "src/renderer/src/components/commander/CommanderSessionList.tsx": "8bc6872396f4f9586c5c41440136b59e891a574b7bd43fc3d102dec085050462",
+      "src/renderer/src/components/commander/CommanderVoiceControls.real-store.test.tsx": "d4343003a6fe8980168a9b8ba0b1b9db10445ba335e4f4f8ca3fa19b556bad60",
+      "src/renderer/src/components/commander/CommanderVoiceControls.tsx": "ca6222a487702b0a10a40685e7e2373150917aef2c58ea921746a4abc7f496ce",
+      "src/renderer/src/components/commander/CommanderWorkspace.test.tsx": "b30781ec8737f243f2fc65e7f99892bf096ff5c76eb3384963cdd89a11734478",
+      "src/renderer/src/components/commander/CommanderWorkspace.tsx": "b9fd8b1fecaac1653b3d593ffa596e86bd7ef8641bf8442dba23fd107d14b9b7",
+      "src/renderer/src/components/dashboard/DashboardWorkspace.test.tsx": "a9a2e1f2dd84a1cc112e221938e61a5849decbd9f0fb6800d5287f396e407fad",
+      "src/renderer/src/components/dashboard/DashboardWorkspace.tsx": "e75e62f2fc2abfbe90b2b11e379b319b31c0d60e40b229ec212ecf16649a55cc",
+      "src/renderer/src/components/dashboard/TaskSearch.tsx": "cfe1edabbd8d09f57423e9ad530c0fd36077f22767a03142cfe59bd14a1b403d",
+      "src/renderer/src/components/layout/CommandPalette.test.tsx": "0365a252dfdb4e536d2651cf740f95febc2b945da0d1f6e58742d172c105a8d8",
+      "src/renderer/src/components/layout/CommandPalette.tsx": "4dada70e50902a35f956b0805bb51125a76995e1e3e1bc4e1219c4b03d760000",
+      "src/renderer/src/components/layout/hooks/use-active-task-actions.ts": "8bac02ffec4fab28896def6473773aad82876e841455b99ae226b28731fa3e1a",
+      "src/renderer/src/hooks/use-tasks.test.tsx": "3db4b1c64774861857838b1fd8a0c8e41a2f9c23c68e62b11f4f044aad08dbe5",
+      "src/renderer/src/hooks/use-tasks.ts": "24eda48ec0320ee2bd1a2bf7ca5f88b9dbb8f4a28a0d8116d10faf361969d1e0",
+      "src/renderer/src/lib/task-search.ts": "2fc537dc4b27e28bd77fcb9371a4e8faf4e0ff67db0a5945a23b280bcee65566",
+      "src/renderer/src/styles/globals.css": "69de067ea76232da8e1c972b7a032c427b7495da9ab4fb1c97620ee9b29b89b8",
+      "src/renderer/src/types/index.ts": "74d1c40494ed8014e7885d99c82523409f29d8d16fee94cc45d34108643a5dd4",
+      "src/shared/commander-report.test.ts": "d3ee6951ce61f2233333aa8daa93e14cc7560b1d2e702512000ac50065d2aafd",
+      "src/shared/commander-report.ts": "1927c6ad3658cdf0fccf54264986f6c56c9a7634e745dd50695bfe0fff2c0bf6",
+      "src/shared/desktop-event-forwarding.ts": "12a6e25a29e5ae8c88f4b8cd82d327e78ee4a5bd2035271aac7260f522748b40",
+      "vitest.tauri.config.ts": "c22c6414a2b8ee3dfbbac7d501c5f6e8bcef956316bd8861dbac6ab571bd57d6"
+    }
+  },
+  "tests": {
+    "application-delivery-tests": {
+      "passed": 5488,
+      "failed": 0,
+      "skipped": 20,
+      "files": 409,
+      "success": true,
+      "reportSha256": "03da7f0c72006d0c2e54928bca6bf8938d85ed0f5c814ab0711f8fe5dc29a88c"
+    },
+    "standalone-delivery-tests": {
+      "passed": 1793,
+      "failed": 0,
+      "skipped": 0,
+      "files": 123,
+      "success": true,
+      "reportSha256": "2e1e77765beb962a6ed0c56962b141159fc223548a05f492ec8be6e57addf061"
+    }
+  },
+  "verification": {
+    "forcedTypecheck": {
+      "command": "pnpm exec tsc --build --noEmit --force",
+      "exitCode": 0
+    },
+    "lint": {
+      "command": "pnpm lint",
+      "exitCode": 0,
+      "existingWarnings": 165,
+      "generatedArtifactsExcluded": [
+        "src-tauri/resources",
+        "src-tauri/target"
+      ],
+      "changedMigrationFilesLint": 0
+    },
+    "build": {
+      "command": "pnpm build",
+      "exitCode": 0
+    },
+    "isolatedRendererBuild": {
+      "command": "pnpm tauri:frontend:build",
+      "exitCode": 0
+    },
+    "standaloneServiceStage": {
+      "command": "pnpm tauri:prepare:database",
+      "exitCode": 0,
+      "bundleSha256": "30aba17476531dfd4cd519d65282578cfcccfde53f19427cc3057d8026cafc68"
+    },
+    "contractFreshness": {
+      "commands": [
+        "node scripts/tauri-inventory.mjs --check",
+        "node scripts/tauri-contracts.mjs --check"
+      ],
+      "exitCode": 0
+    },
+    "nativeCommander": {
+      "command": "DISPLAY=:199 pnpm test:commander-input",
+      "exitCode": 0,
+      "checks": 9,
+      "zoomFactors": [
+        1,
+        1.5
+      ],
+      "widthsPx": [
+        1200,
+        640
+      ],
+      "logSha256": "b39ddcf18be2cabebf60ebf22078281cc2385f8889d876d19680bb93b8591e8c"
+    },
+    "nativeNavigation": {
+      "command": "DISPLAY=:199 pnpm test:nav-rail",
+      "exitCode": 0,
+      "layoutCombinations": 96,
+      "logSha256": "699fd15bafd30fa3e7f56e403fa8107f690901ddbff83b5c1ff60e4637f7c7d6"
+    }
+  },
+  "remainingScopedWork": {
+    "213": [
+      "Native adversarial exclusive rename and reparse-point attestation",
+      "Crash-lock/manual historical-collision reconciliation",
+      "Production Tauri bootstrap/operation authority and installed marketplace behavior"
+    ],
+    "222": [
+      "Remaining host-neutral suites and native installed Tauri UI harness",
+      "Historical Electron transition tests and production diagnostic retirement"
+    ]
+  }
+}

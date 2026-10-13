@@ -4,8 +4,8 @@
  * ['plugin', pluginName]; MCP servers and agents are named "<pluginName>:<key>".
  */
 
-import { readFileSync, existsSync, readdirSync, statSync } from 'fs'
-import { join, basename } from 'path'
+import { join, basename, relative } from 'path'
+import { readPluginTree, validateManifestPaths, PluginSourceError } from './containment'
 
 import type { DatabaseManager, InstalledPluginRecord } from '../database'
 
@@ -43,7 +43,6 @@ function markdownDescription(content: string): string {
   return ''
 }
 
-const listMdFiles = (dir: string): string[] => readdirSync(dir).filter((f) => f.endsWith('.md'))
 
 function createPluginSkill(
   db: DatabaseManager,
@@ -102,32 +101,53 @@ export function applyPluginResources(db: DatabaseManager, plugin: InstalledPlugi
   const pluginName = plugin.name
   const manifest = plugin.manifest
 
+  // Validate and read the entire bounded tree before modifying any resources.
+  // Historic trees containing links are preserved and require manual reconciliation.
+  const contents = new Map([...readPluginTree(pluginDir)].map(([path, content]) => [path, content.toString('utf-8')]))
+  const key = (path: string): string => relative(pluginDir, path).replace(/\\/g, '/')
+  const exists = (path: string): boolean => contents.has(key(path)) || [...contents.keys()].some(file => file.startsWith(key(path) + '/'))
+  const list = (path: string): string[] => {
+    const prefix = key(path) + '/'
+    return [...new Set([...contents.keys()].filter(file => file.startsWith(prefix)).map(file => file.slice(prefix.length).split('/')[0]))]
+  }
+  const stat = (path: string) => ({ isFile: () => contents.has(key(path)), isDirectory: () => !contents.has(key(path)) && exists(path) })
+  const listMdFiles = (path: string): string[] => list(path).filter(file => file.endsWith('.md') && stat(join(path, file)).isFile())
+  const readResource = (path: string): string => {
+    const content = contents.get(key(path))
+    if (content === undefined) throw new PluginSourceError('Plugin resource was not present in the contained tree')
+    return content
+  }
+  validateManifestPaths(manifest as unknown as Record<string, unknown>)
+  if (exists(join(pluginDir, '.mcp.json')) && !contents.has('.mcp.json')) {
+    throw new PluginSourceError('Plugin MCP resource must be a contained regular file')
+  }
+
   const skillsDir = join(pluginDir, 'skills')
-  if (existsSync(skillsDir)) {
-    for (const entry of readdirSync(skillsDir)) {
+  if (exists(skillsDir)) {
+    for (const entry of list(skillsDir)) {
       const entryPath = join(skillsDir, entry)
-      const stat = statSync(entryPath)
-      if (stat.isDirectory()) {
+      const entryStat = stat(entryPath)
+      if (entryStat.isDirectory()) {
         // Claude Code format: skills/<skill-name>/SKILL.md; otherwise every .md in the dir
         const skillMdPath = join(entryPath, 'SKILL.md')
-        if (existsSync(skillMdPath)) {
-          const content = readFileSync(skillMdPath, 'utf-8')
+        if (stat(skillMdPath).isFile()) {
+          const content = readResource(skillMdPath)
           createPluginSkill(db, pluginName, entry, markdownDescription(content), content)
         } else {
           for (const mdFile of listMdFiles(entryPath)) {
-            const content = readFileSync(join(entryPath, mdFile), 'utf-8')
+            const content = readResource(join(entryPath, mdFile))
             createPluginSkill(db, pluginName, `${entry}/${basename(mdFile, '.md')}`, markdownDescription(content), content)
           }
         }
-      } else if (stat.isFile() && entry.endsWith('.md')) {
-        const content = readFileSync(entryPath, 'utf-8')
+      } else if (entryStat.isFile() && entry.endsWith('.md')) {
+        const content = readResource(entryPath)
         createPluginSkill(db, pluginName, basename(entry, '.md'), markdownDescription(content), content)
       }
     }
   }
 
   const commandsDir = join(pluginDir, 'commands')
-  if (existsSync(commandsDir)) {
+  if (exists(commandsDir)) {
     const createCommand = (key: string, cmdName: string, content: string): void =>
       createPluginSkill(
         db,
@@ -137,25 +157,25 @@ export function applyPluginResources(db: DatabaseManager, plugin: InstalledPlugi
         content
       )
 
-    for (const entry of readdirSync(commandsDir)) {
+    for (const entry of list(commandsDir)) {
       const entryPath = join(commandsDir, entry)
-      const stat = statSync(entryPath)
-      if (stat.isFile() && entry.endsWith('.md')) {
+      const entryStat = stat(entryPath)
+      if (entryStat.isFile() && entry.endsWith('.md')) {
         const cmdName = basename(entry, '.md')
-        createCommand(cmdName, cmdName, readFileSync(entryPath, 'utf-8'))
-      } else if (stat.isDirectory()) {
+        createCommand(cmdName, cmdName, readResource(entryPath))
+      } else if (entryStat.isDirectory()) {
         for (const mdFile of listMdFiles(entryPath)) {
           const cmdName = basename(mdFile, '.md')
-          createCommand(`${entry}/${cmdName}`, cmdName, readFileSync(join(entryPath, mdFile), 'utf-8'))
+          createCommand(`${entry}/${cmdName}`, cmdName, readResource(join(entryPath, mdFile)))
         }
       }
     }
   }
 
   const mcpJsonPath = join(pluginDir, '.mcp.json')
-  if (existsSync(mcpJsonPath)) {
+  if (exists(mcpJsonPath)) {
     try {
-      const mcpConfig = JSON.parse(readFileSync(mcpJsonPath, 'utf-8'))
+      const mcpConfig = JSON.parse(readResource(mcpJsonPath))
       // Standard format is { mcpServers: { name: config } }; some plugins omit the wrapper
       const servers = mcpConfig.mcpServers || mcpConfig
       if (typeof servers === 'object' && !Array.isArray(servers)) {
@@ -173,11 +193,11 @@ export function applyPluginResources(db: DatabaseManager, plugin: InstalledPlugi
   const mcpServerIds = pluginMcpServers(db, pluginName).map((s) => s.id)
 
   const agentsDir = join(pluginDir, 'agents')
-  if (existsSync(agentsDir)) {
-    for (const entry of readdirSync(agentsDir)) {
+  if (exists(agentsDir)) {
+    for (const entry of list(agentsDir)) {
       const entryPath = join(agentsDir, entry)
-      if (!statSync(entryPath).isFile() || !entry.endsWith('.md')) continue
-      const content = readFileSync(entryPath, 'utf-8')
+      if (!stat(entryPath).isFile() || !entry.endsWith('.md')) continue
+      const content = readResource(entryPath)
       const agentKey = basename(entry, '.md')
       try {
         db.createAgent({
@@ -196,7 +216,7 @@ export function applyPluginResources(db: DatabaseManager, plugin: InstalledPlugi
   }
 
   // Fallbacks for plugins that declare resources in the manifest instead of shipping files
-  if (!existsSync(mcpJsonPath) && manifest.mcpServers && typeof manifest.mcpServers === 'object' && !Array.isArray(manifest.mcpServers)) {
+  if (!exists(mcpJsonPath) && manifest.mcpServers && typeof manifest.mcpServers === 'object' && !Array.isArray(manifest.mcpServers)) {
     const servers = manifest.mcpServers as Record<string, { command?: string; args?: string[]; env?: Record<string, string> }>
     for (const [serverName, serverConfig] of Object.entries(servers)) {
       try {
@@ -213,7 +233,7 @@ export function applyPluginResources(db: DatabaseManager, plugin: InstalledPlugi
     }
   }
 
-  const hasSkillFiles = existsSync(skillsDir) || existsSync(commandsDir)
+  const hasSkillFiles = exists(skillsDir) || exists(commandsDir)
   if (!hasSkillFiles && Array.isArray(manifest.skills)) {
     for (const skillPath of manifest.skills) {
       try {

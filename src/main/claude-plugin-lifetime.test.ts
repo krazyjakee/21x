@@ -118,6 +118,20 @@ describe('portable plugin manager lifetime', () => {
     expect(source.db.getInstalledPlugin(record.id)).toBeDefined()
   })
 
+  it.each(['fixture-plugin', 'fixture-plugin:legacy'])('preserves historical directory/resource collisions (%s) and refuses ambiguous removal or enumeration', async otherName => {
+    const owner = own(), [first, second] = owner.getMarketplaceSources()
+    const a = source.db.createInstalledPlugin({ name: 'fixture-plugin', marketplace_id: first.id })
+    const b = source.db.createInstalledPlugin({ name: otherName, marketplace_id: second.id })
+    const skill = source.db.createSkill({ name: 'fixture-plugin:shared', description: 'legacy', content: 'preserve', tags: ['plugin', 'fixture-plugin'] })
+    if (!skill) throw new Error('Expected the shared fixture skill to be created')
+    const dir = join(root, 'fixture-plugin'); mkdirSync(dir); writeFileSync(join(dir, 'legacy.txt'), 'preserve')
+    await expect(owner.uninstallPlugin(a.id)).rejects.toThrow('manual reconciliation')
+    expect(() => owner.getPluginResources(b.id)).toThrow('manual reconciliation')
+    expect(source.db.getInstalledPlugins().map(plugin => plugin.id).sort()).toEqual([a.id, b.id].sort())
+    expect(source.db.getSkills().map(record => record.id)).toEqual([skill.id])
+    expect(existsSync(join(dir, 'legacy.txt'))).toBe(true)
+  })
+
   it('cancels a late real downloader response before fallback requests, file writes or DB publication', async () => {
     const responseGate = gate<Response>(), cancel = vi.fn()
     const http = vi.fn().mockResolvedValueOnce(Response.json(catalog)).mockImplementationOnce(() => responseGate.promise)

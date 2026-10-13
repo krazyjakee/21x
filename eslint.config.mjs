@@ -16,6 +16,8 @@ export default tseslint.config(
       '**/out/**',
       '**/dist/**',
       '**/node_modules/**',
+      'src-tauri/resources/**',
+      'src-tauri/target/**',
       '**/*.js',
       '**/*.mjs',
       '**/.claude/**'

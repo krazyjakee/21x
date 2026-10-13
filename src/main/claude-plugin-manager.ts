@@ -6,7 +6,8 @@
  */
 
 import { isAbsolute, join } from 'path'
-import { existsSync, rmSync } from 'fs'
+import { existsSync, lstatSync, rmSync } from 'fs'
+import { inspectPluginTree } from './claude-plugins/containment'
 
 import type {
   DatabaseManager,
@@ -277,6 +278,14 @@ export class ClaudePluginManager {
     if (!plugin) return false
 
     const pluginDir = this.pluginPath(plugin.name)
+    this.assertUnambiguousResources(plugin.name)
+    // Existing linked/ambiguous trees are never treated as owned uninstall data.
+    let directoryPresent = true
+    try { lstatSync(pluginDir) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      directoryPresent = false
+    }
+    if (directoryPresent) inspectPluginTree(pluginDir)
     removePluginResources(this.db, plugin.name)
     if (existsSync(pluginDir)) {
       try {
@@ -287,6 +296,12 @@ export class ClaudePluginManager {
     }
 
     return this.db.deleteInstalledPlugin(pluginId)
+  }
+
+  private assertUnambiguousResources(name: string): void {
+    if (this.db.getInstalledPlugins().filter(plugin => plugin.name === name || plugin.name.startsWith(name + ':') || name.startsWith(plugin.name + ':')).length > 1) {
+      throw new Error('Historical plugin directory/resource collision requires manual reconciliation; all data was preserved')
+    }
   }
 
   enablePlugin(pluginId: string): InstalledPluginRecord | undefined {
@@ -313,6 +328,7 @@ export class ClaudePluginManager {
     const plugin = this.db.getInstalledPlugin(pluginId)
     if (!plugin) return { skills: [], mcpServers: [], agents: [], commands: [] }
 
+    this.assertUnambiguousResources(plugin.name)
     const { commands } = plugin.manifest
     return {
       skills: pluginSkills(this.db, plugin.name).map((s) => ({ id: s.id, name: s.name, description: s.description })),

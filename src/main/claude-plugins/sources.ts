@@ -1,11 +1,8 @@
-/**
- * Marketplace catalog fetching and plugin file downloads from GitHub, URL, or local sources.
- */
-
-import { readFileSync, existsSync, writeFileSync, mkdirSync, cpSync } from 'fs'
-import { join, resolve } from 'path'
-
+/** Bounded plugin acquisition. Only a complete private tree is published. */
+import { existsSync, writeFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, lstatSync, rmdirSync } from 'node:fs'
+import { dirname, isAbsolute, join, resolve, relative } from 'node:path'
 import type { MarketplaceSourceRecord, ClaudePluginManifest, ClaudePluginSource } from '../database'
+import { containedPath, inspectPluginTree, PLUGIN_LIMITS, PluginSourceError, readPluginFile, safeComponent, safeRelative, validateManifestPaths, readPluginTree } from './containment'
 
 interface MarketplacePluginEntry {
   name: string
@@ -32,239 +29,241 @@ export interface MarketplaceCatalog {
   plugins: MarketplacePluginEntry[]
 }
 
-interface GitHubContentEntry {
-  name: string
-  path: string
-  type: 'file' | 'dir' | 'symlink'
-  download_url: string | null
-}
 
-async function fetchSource(url: string, signal?: AbortSignal, headers?: Record<string, string>): Promise<Response> {
-  signal?.throwIfAborted()
-  const response = await fetch(url, { signal, headers })
-  if (signal?.aborted) {
-    await response.body?.cancel()
-    signal.throwIfAborted()
+interface DownloadBudget { entries: number; bytes: number }
+function pathExists(path: string): boolean {
+  try { lstatSync(path); return true } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw new PluginSourceError('Plugin destination could not be inspected')
   }
-  return response
+}
+function sameIdentity(path: string, expected?: { ino: number; dev: number }): boolean {
+  if (!expected || !pathExists(path)) return false
+  const actual = lstatSync(path)
+  return actual.ino === expected.ino && actual.dev === expected.dev && !actual.isSymbolicLink()
 }
 
-const stripDotSlash = (p: string): string => p.replace(/^\.\//, '')
+const fail = (message: string): never => { throw new PluginSourceError(message) }
 
-/** Splits "owner/repo#ref" into repo path and branch (default "main"). */
+async function fetchSource(address: string, signal?: AbortSignal, headers?: Record<string, string>): Promise<Response> {
+  let url: URL
+  try { url = new URL(address) } catch { return fail('Invalid plugin source URL') }
+  for (let redirects = 0; ; redirects++) {
+    signal?.throwIfAborted()
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) fail('Unsupported plugin source URL')
+    const response = await fetch(url.href, { signal, headers, redirect: 'manual' })
+    if (signal?.aborted) { await response.body?.cancel(); signal.throwIfAborted() }
+    if (![301, 302, 303, 307, 308].includes(response.status)) return response
+    await response.body?.cancel()
+    if (redirects >= PLUGIN_LIMITS.redirects) fail('Plugin source exceeds the redirect limit')
+    const location = response.headers.get('location')
+    if (!location) fail('Plugin source redirect has no destination')
+    try { url = new URL(location!, url) } catch { return fail('Invalid plugin source redirect') }
+  }
+}
+
+async function readBody(response: Response, limit: number, signal?: AbortSignal): Promise<Buffer> {
+  const advertised = Number(response.headers.get('content-length'))
+  if (advertised > limit) { await response.body?.cancel(); return fail('Plugin response exceeds the byte limit') }
+  if (!response.body) return Buffer.alloc(0)
+  const reader = response.body.getReader(), chunks: Buffer[] = []
+  let bytes = 0, complete = false
+  try {
+    for (;;) {
+      signal?.throwIfAborted()
+      const part = await reader.read()
+      signal?.throwIfAborted()
+      if (part.done) { complete = true; break }
+      bytes += part.value.byteLength
+      if (bytes > limit) fail('Plugin response exceeds the byte limit')
+      chunks.push(Buffer.from(part.value))
+    }
+    return Buffer.concat(chunks, bytes)
+  } finally {
+    // Do not release ownership before the raw reader/cancellation settles.
+    try { if (!complete) await reader.cancel() } finally { reader.releaseLock() }
+  }
+}
+
+async function responseJson(response: Response, signal?: AbortSignal): Promise<unknown> {
+  try { return JSON.parse((await readBody(response, PLUGIN_LIMITS.jsonBytes, signal)).toString('utf-8')) }
+  catch (error) { signal?.throwIfAborted(); if (error instanceof PluginSourceError) throw error; return fail('Invalid plugin source JSON') }
+}
+
 function parseRepoSlug(slug: string): { repoPath: string; branch: string } {
-  const [repoPath, ref] = slug.split('#')
-  return { repoPath, branch: ref || 'main' }
+  const [repoPath, ref, extra] = slug.split('#')
+  if (extra !== undefined || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repoPath)) fail('Invalid plugin repository')
+  repoPath.split('/').forEach(safeComponent)
+  const branch = ref || 'main'
+  safeRelative(branch)
+  return { repoPath, branch }
+}
+
+function catalog(value: unknown): MarketplaceCatalog {
+  if (!value || typeof value !== 'object' || !Array.isArray((value as MarketplaceCatalog).plugins)) fail('Invalid marketplace catalog')
+  const result = value as MarketplaceCatalog
+  if (result.plugins.length > PLUGIN_LIMITS.entries) fail('Marketplace exceeds the plugin count limit')
+  if (result.metadata?.pluginRoot) safeRelative(result.metadata.pluginRoot)
+  for (const entry of result.plugins) {
+    safeComponent(entry.name)
+    const source = typeof entry.source === 'string' ? { path: entry.source } : entry.source
+    if (!source || typeof source !== 'object') fail('Invalid marketplace plugin source')
+    if (source.path) safeRelative(source.path)
+    if (source.repo) parseRepoSlug(source.repo)
+    if (source.ref) safeRelative(source.ref)
+  }
+  return result
 }
 
 export async function fetchCatalogFromSource(source: MarketplaceSourceRecord, signal?: AbortSignal): Promise<MarketplaceCatalog | null> {
   signal?.throwIfAborted()
-  const { source_type, source_url } = source
-  if (source_type === 'github') return fetchGitHubCatalog(source_url, signal)
-  if (source_type === 'url') return fetchJson(source_url, signal)
-  if (source_type === 'local') return readLocalCatalog(source_url)
-  return null
+  if (source.source_type === 'local') {
+    const root = source.source_url.endsWith('.json') ? dirname(source.source_url) : source.source_url
+    const paths = source.source_url.endsWith('.json') ? [safeComponent(source.source_url.split(/[\\/]/).pop()!)] : ['.claude-plugin/marketplace.json', 'marketplace.json']
+    for (const path of paths) {
+      if (existsSync(join(root, path))) return catalog(JSON.parse(readPluginFile(root, path, PLUGIN_LIMITS.jsonBytes).toString('utf-8')))
+    }
+    return null
+  }
+  const repo = source.source_type === 'github' ? parseRepoSlug(source.source_url) : null
+  const url = repo ? `https://raw.githubusercontent.com/${repo.repoPath}/${encodeURIComponent(repo.branch)}/.claude-plugin/marketplace.json` : source.source_url
+  let response = await fetchSource(url, signal)
+  if (!response.ok && repo?.branch === 'main') {
+    await response.body?.cancel()
+    response = await fetchSource(`https://raw.githubusercontent.com/${repo.repoPath}/HEAD/.claude-plugin/marketplace.json`, signal)
+  }
+  if (!response.ok) { await response.body?.cancel(); return fail('Marketplace request failed') }
+  return catalog(await responseJson(response, signal))
 }
 
-async function fetchJson(url: string, signal?: AbortSignal): Promise<MarketplaceCatalog> {
-  const response = await fetchSource(url, signal)
-  if (!response.ok) { await response.body?.cancel(); throw new Error(`Failed to fetch: ${response.status}`) }
-  return (await response.json()) as MarketplaceCatalog
+/** An exclusive publication lock serializes cooperating installers across processes.
+ * Existing final trees are refused; cleanup touches only this invocation's staging/lock. */
+export async function downloadPluginFiles(pluginsDir: string, pluginName: string, source: ClaudePluginSource,
+  marketplaceSource?: MarketplaceSourceRecord, pluginRoot?: string, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted()
+  if (!isAbsolute(pluginsDir) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(pluginName)) fail('Invalid plugin directory name')
+  safeComponent(pluginName)
+  mkdirSync(pluginsDir, { recursive: true })
+  containedPath(pluginsDir)
+  const pluginDir = join(pluginsDir, pluginName), lock = join(pluginsDir, `.install-${pluginName}`)
+  if (pathExists(pluginDir)) fail('Plugin destination already exists; existing files were preserved')
+  mkdirSync(lock, { mode: 0o700 })
+  const lockIdentity = lstatSync(lock)
+  let staging: string | undefined
+  let stagingIdentity: { ino: number; dev: number } | undefined
+  try {
+    staging = mkdtempSync(join(pluginsDir, '.plugin-stage-'))
+    stagingIdentity = lstatSync(staging)
+    const budget: DownloadBudget = { entries: 0, bytes: 0 }
+    if (source.source === 'github' && source.repo) {
+      const repo = parseRepoSlug(source.repo)
+      await downloadFromGitHub(repo.repoPath, source.ref || repo.branch, safeRelative(source.path || ''), staging, budget, 0, signal)
+    } else if (source.path && marketplaceSource?.source_type === 'github') {
+      const repo = parseRepoSlug(marketplaceSource.source_url)
+      const path = [safeRelative(pluginRoot || ''), safeRelative(source.path)].filter(Boolean).join('/')
+      await downloadFromGitHub(repo.repoPath, repo.branch, path, staging, budget, 0, signal)
+    } else if (source.url) {
+      await downloadFromUrl(source.url, staging, budget, signal)
+    } else if (source.path && marketplaceSource?.source_type === 'local') {
+      copyFromLocal(marketplaceSource.source_url, source.path, pluginRoot, staging, signal)
+    } else fail('Unsupported plugin source')
+    signal?.throwIfAborted()
+    if (!readPluginTree(staging).size) fail('Plugin source contained no files')
+    readPluginManifest(staging, { name: pluginName, source })
+    containedPath(pluginsDir)
+    if (pathExists(pluginDir)) fail('Plugin destination appeared during installation; existing files were preserved')
+    renameSync(staging, pluginDir)
+    staging = undefined
+    return pluginDir
+  } catch (error) {
+    signal?.throwIfAborted()
+    if (error instanceof PluginSourceError) throw error
+    throw new PluginSourceError('Plugin acquisition failed; existing files were preserved')
+  } finally {
+    if (staging && sameIdentity(staging, stagingIdentity)) rmSync(staging, { recursive: true, force: true })
+    if (sameIdentity(lock, lockIdentity)) rmdirSync(lock)
+  }
 }
 
-async function fetchGitHubCatalog(repoSlug: string, signal?: AbortSignal): Promise<MarketplaceCatalog | null> {
-  const { repoPath, branch } = parseRepoSlug(repoSlug)
-  const url = `https://raw.githubusercontent.com/${repoPath}/${branch}/.claude-plugin/marketplace.json`
-
+async function downloadToFile(url: string, path: string, budget: DownloadBudget, signal?: AbortSignal, optional = false): Promise<void> {
   const response = await fetchSource(url, signal)
   if (!response.ok) {
     await response.body?.cancel()
-    // Repos whose default branch isn't "main" (e.g. "master") still resolve via HEAD
-    if (branch === 'main') {
-      const fallback = await fetchSource(`https://raw.githubusercontent.com/${repoPath}/HEAD/.claude-plugin/marketplace.json`, signal)
-      if (fallback.ok) return (await fallback.json()) as MarketplaceCatalog
-      await fallback.body?.cancel()
-    }
-    throw new Error(`Failed to fetch marketplace.json: ${response.status}`)
+    if (optional && response.status === 404) return
+    return fail('Plugin file request failed')
   }
-  return (await response.json()) as MarketplaceCatalog
-}
-
-function readLocalCatalog(dirPath: string): MarketplaceCatalog | null {
-  let catalogPath = join(dirPath, '.claude-plugin', 'marketplace.json')
-  if (!existsSync(catalogPath)) {
-    // The user may have pointed at marketplace.json itself
-    catalogPath = dirPath.endsWith('.json') ? dirPath : join(dirPath, 'marketplace.json')
-  }
-  if (!existsSync(catalogPath)) return null
-  return JSON.parse(readFileSync(catalogPath, 'utf-8')) as MarketplaceCatalog
-}
-
-/** Downloads plugin files into <pluginsDir>/<pluginName>/ and returns that directory. */
-export async function downloadPluginFiles(
-  pluginsDir: string,
-  pluginName: string,
-  source: ClaudePluginSource,
-  marketplaceSource?: MarketplaceSourceRecord,
-  pluginRoot?: string,
-  signal?: AbortSignal
-): Promise<string> {
+  const body = await readBody(response, Math.min(PLUGIN_LIMITS.fileBytes, PLUGIN_LIMITS.totalBytes - budget.bytes), signal)
+  budget.bytes += body.byteLength
+  if (++budget.entries > PLUGIN_LIMITS.entries) fail('Plugin source exceeds the entry limit')
   signal?.throwIfAborted()
-  const pluginDir = join(pluginsDir, pluginName)
-  mkdirSync(pluginDir, { recursive: true })
-
-  if (source.source === 'github' && source.repo) {
-    await downloadFromGitHub(source.repo, source.ref || 'main', source.path || '', pluginDir, signal)
-  } else if (source.path && marketplaceSource?.source_type === 'github') {
-    // Relative path within the marketplace's own repo
-    const { repoPath, branch } = parseRepoSlug(marketplaceSource.source_url)
-    let remotePath = stripDotSlash(source.path)
-    if (pluginRoot) remotePath = `${stripDotSlash(pluginRoot)}/${remotePath}`
-    await downloadFromGitHub(repoPath, branch, remotePath, pluginDir, signal)
-  } else if (source.url) {
-    await downloadFromUrl(source.url, pluginDir, signal)
-  } else if (source.path && marketplaceSource?.source_type === 'local') {
-    copyFromLocal(marketplaceSource.source_url, source.path, pluginRoot, pluginDir)
-  }
-
-  return pluginDir
+  writeFileSync(path, body, { flag: 'wx', mode: 0o600 })
 }
 
-async function downloadToFile(url: string, localPath: string, signal?: AbortSignal): Promise<void> {
-  const response = await fetchSource(url, signal)
-  if (response.ok) {
-    const body = await response.text()
-    signal?.throwIfAborted()
-    writeFileSync(localPath, body, 'utf-8')
-  } else { await response.body?.cancel() }
-}
-
-/** Recursively downloads a repo directory via the GitHub Contents API. */
-async function downloadFromGitHub(
-  repoPath: string,
-  branch: string,
-  remotePath: string,
-  localDir: string,
-  signal?: AbortSignal
-): Promise<void> {
+async function downloadFromGitHub(repoPath: string, branch: string, remotePath: string, localDir: string,
+  budget: DownloadBudget, depth: number, signal?: AbortSignal): Promise<void> {
   signal?.throwIfAborted()
-  const apiUrl = `https://api.github.com/repos/${repoPath}/contents/${remotePath}?ref=${branch}`
-
-  try {
-    const response = await fetchSource(apiUrl, signal, { Accept: 'application/vnd.github.v3+json' })
-    if (!response.ok) {
-      await response.body?.cancel()
-      if (response.status === 404) {
-        console.warn(`[ClaudePluginManager] Path not found on GitHub: ${remotePath}`)
-        return
-      }
-      throw new Error(`GitHub API error: ${response.status}`)
-    }
-
-    const data = await response.json()
+  safeRelative(branch)
+  if (depth > PLUGIN_LIMITS.depth || ++budget.entries > PLUGIN_LIMITS.entries) fail('Plugin source exceeds the depth or entry limit')
+  const response = await fetchSource(`https://api.github.com/repos/${repoPath}/contents/${remotePath.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(branch)}`, signal, { Accept: 'application/vnd.github.v3+json' })
+  if (!response.ok) {
+    await response.body?.cancel()
+    // A fallback is allowed only for an API rate limit; malformed/unsafe data
+    // and file/body failures must never be reinterpreted as another source.
+    if (response.status === 403 || response.status === 429) return downloadKnownFilesRaw(repoPath, branch, remotePath, localDir, budget, signal)
+    return fail('GitHub plugin source request failed')
+  }
+  const data = await responseJson(response, signal)
+  if (!Array.isArray(data)) return fail('GitHub plugin source must be a directory')
+  if (data.length > PLUGIN_LIMITS.entries - budget.entries) fail('GitHub plugin source exceeds the entry limit')
+  for (const value of data) {
+    if (!value || typeof value !== 'object') fail('Invalid GitHub plugin entry')
+    const entry = value as { name: string; path: string; type: string; download_url?: string }
+    const name = safeComponent(entry.name), expected = remotePath ? `${remotePath}/${name}` : name
+    if (entry.path !== expected) fail('GitHub plugin entry escaped its directory')
     signal?.throwIfAborted()
-    if (Array.isArray(data)) {
-      for (const entry of data as GitHubContentEntry[]) {
-        signal?.throwIfAborted()
-        if (entry.type === 'file' && entry.download_url) {
-          await downloadToFile(entry.download_url, join(localDir, entry.name), signal)
-        } else if (entry.type === 'dir') {
-          const subDir = join(localDir, entry.name)
-          mkdirSync(subDir, { recursive: true })
-          await downloadFromGitHub(repoPath, branch, `${remotePath}/${entry.name}`, subDir, signal)
-        }
-      }
-    } else if (data.type === 'file' && data.download_url) {
-      await downloadToFile(data.download_url, join(localDir, remotePath.split('/').pop() || 'file'), signal)
-    }
-  } catch {
-    signal?.throwIfAborted()
-    console.error('[ClaudePluginManager] Failed to download from GitHub')
-    await downloadKnownFilesRaw(repoPath, branch, remotePath, localDir, signal)
+    if (entry.type === 'file' && entry.download_url) await downloadToFile(entry.download_url, join(localDir, name), budget, signal)
+    else if (entry.type === 'dir') {
+      const subDir = join(localDir, name); mkdirSync(subDir, { mode: 0o700 })
+      await downloadFromGitHub(repoPath, branch, expected, subDir, budget, depth + 1, signal)
+    } else fail('Unsupported GitHub plugin entry type')
   }
 }
 
-/**
- * Fallback when the GitHub API is unavailable (rate-limited, etc.): fetch well-known
- * plugin files via raw.githubusercontent.com, which cannot list directories.
- */
-async function downloadKnownFilesRaw(
-  repoPath: string,
-  branch: string,
-  remotePath: string,
-  localDir: string,
-  signal?: AbortSignal
-): Promise<void> {
+async function downloadKnownFilesRaw(repoPath: string, branch: string, remotePath: string, localDir: string,
+  budget: DownloadBudget, signal?: AbortSignal): Promise<void> {
+  const base = `https://raw.githubusercontent.com/${repoPath}/${encodeURIComponent(branch)}/${remotePath.split('/').map(encodeURIComponent).join('/')}`
+  for (const name of ['plugin.json', '.mcp.json', 'CLAUDE.md']) await downloadToFile(`${base}/${name}`, join(localDir, name), budget, signal, true)
+}
+
+async function downloadFromUrl(address: string, localDir: string, budget: DownloadBudget, signal?: AbortSignal): Promise<void> {
+  const url = new URL(address), name = safeComponent(decodeURIComponent(url.pathname.split('/').pop() || 'plugin.json'))
+  const response = await fetchSource(address, signal)
+  const contentType = response.headers.get('content-type') || ''
+  if (!response.ok) { await response.body?.cancel(); return fail('Plugin URL request failed') }
+  if (!name.endsWith('.json') || !/^(application\/(?:[a-z0-9.+-]+\+)?json)(?:;|$)/i.test(contentType)) {
+    await response.body?.cancel()
+    return fail('Plugin archives and non-JSON URL sources are unsupported')
+  }
+  const body = await readBody(response, PLUGIN_LIMITS.jsonBytes, signal)
+  try { JSON.parse(body.toString('utf-8')) } catch { return fail('Invalid plugin source JSON') }
   signal?.throwIfAborted()
-  const baseUrl = `https://raw.githubusercontent.com/${repoPath}/${branch}/${remotePath}`
-
-  for (const file of ['plugin.json', '.mcp.json', 'CLAUDE.md']) {
-    try {
-      await downloadToFile(`${baseUrl}/${file}`, join(localDir, file), signal)
-    } catch {
-      signal?.throwIfAborted()
-      // Missing files are expected
-    }
-  }
-
-  for (const dir of ['skills', 'commands']) {
-    try {
-      const response = await fetchSource(`${baseUrl}/${dir}/`, signal)
-      await response.body?.cancel()
-      signal?.throwIfAborted()
-      if (response.ok) mkdirSync(join(localDir, dir), { recursive: true })
-    } catch {
-      signal?.throwIfAborted()
-      // Missing dirs are expected
-    }
-  }
+  budget.bytes += body.byteLength; budget.entries++
+  writeFileSync(join(localDir, name), body, { flag: 'wx', mode: 0o600 })
+  if (name !== 'plugin.json') await downloadToFile(new URL('plugin.json', url).href, join(localDir, 'plugin.json'), budget, signal, true)
 }
 
-async function downloadFromUrl(url: string, localDir: string, signal?: AbortSignal): Promise<void> {
-  try {
-    const response = await fetchSource(url, signal)
-    if (!response.ok) { await response.body?.cancel(); throw new Error(`Failed to fetch: ${response.status}`) }
-
-    const contentType = response.headers.get('content-type') || ''
-    if (contentType.includes('application/json') || url.endsWith('.json')) {
-      const body = await response.text()
-      signal?.throwIfAborted()
-      writeFileSync(join(localDir, url.split('/').pop() || 'plugin.json'), body, 'utf-8')
-    } else {
-      // Archives (tarball/zip) are saved as-is; extraction is not supported
-      const buffer = Buffer.from(await response.arrayBuffer())
-      signal?.throwIfAborted()
-      writeFileSync(join(localDir, url.split('/').pop() || 'plugin-archive'), buffer)
-    }
-  } catch {
+function copyFromLocal(marketplacePath: string, pluginPath: string, pluginRoot: string | undefined, localDir: string, signal?: AbortSignal): void {
+  const base = marketplacePath.endsWith('.json') ? dirname(marketplacePath) : marketplacePath
+  const path = [safeRelative(pluginRoot || ''), safeRelative(pluginPath)].filter(Boolean).join('/')
+  const source = containedPath(base, path)
+  const location = relative(resolve(source), resolve(localDir))
+  if (!location || (!location.startsWith('..') && !isAbsolute(location))) fail('Plugin source contains its installation directory')
+  const files = readPluginTree(source)
+  for (const [file, content] of files) {
     signal?.throwIfAborted()
-    console.warn('[ClaudePluginManager] Failed to download from URL')
-  }
-
-  if (!url.endsWith('plugin.json')) {
-    try {
-      await downloadToFile(`${url.replace(/\/[^/]*$/, '')}/plugin.json`, join(localDir, 'plugin.json'), signal)
-    } catch {
-      signal?.throwIfAborted()
-      // plugin.json alongside the URL is optional
-    }
-  }
-}
-
-function copyFromLocal(
-  marketplacePath: string,
-  pluginPath: string,
-  pluginRoot: string | undefined,
-  localDir: string
-): void {
-  let sourcePath = stripDotSlash(pluginPath)
-  if (pluginRoot) sourcePath = `${stripDotSlash(pluginRoot)}/${sourcePath}`
-
-  const baseDir = marketplacePath.endsWith('.json') ? resolve(marketplacePath, '..') : marketplacePath
-  const fullSourcePath = join(baseDir, sourcePath)
-
-  if (existsSync(fullSourcePath) && resolve(fullSourcePath) !== resolve(localDir)) {
-    cpSync(fullSourcePath, localDir, { recursive: true })
+    const target = join(localDir, file)
+    mkdirSync(dirname(target), { recursive: true, mode: 0o700 })
+    writeFileSync(target, content, { flag: 'wx', mode: 0o600 })
   }
 }
 
@@ -273,6 +272,7 @@ function copyFromLocal(
  * catalog entry; falls back to a manifest built purely from the catalog entry.
  */
 export function readPluginManifest(pluginDir: string, entry: MarketplacePluginEntry): ClaudePluginManifest {
+  inspectPluginTree(pluginDir)
   const fromEntry: ClaudePluginManifest = {
     name: entry.name,
     version: entry.version,
@@ -287,7 +287,8 @@ export function readPluginManifest(pluginDir: string, entry: MarketplacePluginEn
   const manifestPath = join(pluginDir, 'plugin.json')
   if (existsSync(manifestPath)) {
     try {
-      const parsed = JSON.parse(readFileSync(manifestPath, 'utf-8')) as ClaudePluginManifest
+      const parsed = JSON.parse(readPluginFile(pluginDir, 'plugin.json', PLUGIN_LIMITS.jsonBytes).toString('utf-8')) as ClaudePluginManifest
+      validateManifestPaths(parsed as unknown as Record<string, unknown>)
       return {
         ...parsed,
         name: parsed.name || entry.name,
@@ -300,7 +301,8 @@ export function readPluginManifest(pluginDir: string, entry: MarketplacePluginEn
         keywords: parsed.keywords || entry.keywords
       }
     } catch (err) {
-      console.warn(`[ClaudePluginManager] Failed to parse plugin.json:`, err)
+      if (err instanceof PluginSourceError) throw err
+      console.warn('[ClaudePluginManager] Failed to parse plugin.json')
     }
   }
   return fromEntry

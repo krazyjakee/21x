@@ -16,12 +16,9 @@ beforeEach(() => {
   manager = new ClaudePluginManager(db, tempPluginsDir)
 
   // Mock global fetch to prevent actual network requests during tests
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: false,
-    status: 404,
-    json: async () => ({}),
-    text: async () => ''
-  }))
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.includes('api.github.com')
+    ? Response.json([{ name: 'plugin.json', path: url.includes('cool-plugin') ? 'plugins/cool-plugin/plugin.json' : 'plugin.json', type: 'file', download_url: 'https://fixture.invalid/plugin.json' }])
+    : Response.json({})))
 })
 
 afterEach(async () => {
@@ -315,7 +312,7 @@ describe('Plugin Resource Materialization from Files', () => {
     const source = manager.addMarketplaceSource({
       name: 'local-mp',
       source_type: 'local',
-      source_url: tempPluginsDir
+      source_url: join(tempPluginsDir, 'marketplace')
     })
     marketplaceId = source.id
 
@@ -334,7 +331,7 @@ describe('Plugin Resource Materialization from Files', () => {
   })
 
   function setupPluginFiles(): void {
-    const pluginDir = join(tempPluginsDir, 'file-plugin')
+    const pluginDir = join(tempPluginsDir, 'marketplace', 'file-plugin')
     mkdirSync(pluginDir, { recursive: true })
 
     // Create skills/my-skill/SKILL.md
