@@ -1,0 +1,33 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "baseCommit": "5e4b0a53085a930dcf88490d71a9884bbc2384a3",
+  "scope": "Real callback HTTP server close acknowledgement joined through the OAuth flow; existing optional test servers without close retain their earlier interface. Production runtime and outer bridge job teardown integration remain open.",
+  "sourceSha256": {
+    "src/main/oauth/local-oauth-server.ts": "615265b1f7ac40f0c3fe4291b6a30607c3b8307d3d35fcff64e3aff674e9e250",
+    "src/main/oauth/local-oauth-server.test.ts": "0240e181585c7d2c85aebedf12925a0f57b17991b5f7c4554f4a2a0f68f06944",
+    "src/main/oauth/connector-oauth-flow.ts": "4dec30ec8e0235378297594a9ab9e9237db1ffa6280a4a83571ece874a6d75d3",
+    "src/main/connectors/oauth-lifetime.test.ts": "a2875304c3fd0f9d9c2146d5c778008f92c99f530db3b22e4a836ccd480ad7ad"
+  },
+  "tests": {
+    "standalone": {
+      "passed": 14,
+      "skipped": 0,
+      "files": 2,
+      "reportSha256": "671b0752516dcaaa0ba08f2cfe07761b9ca4ac77d2a13c84184acc0ac47da2d7"
+    },
+    "legacy": {
+      "passed": 31,
+      "skipped": 0,
+      "files": 3,
+      "reportSha256": "5006d08172fef52d80348ede84bc18cc0134794eb944c8c3a0c7d343760b02c5"
+    }
+  },
+  "newCloseAcknowledgementCases": 3,
+  "checks": {
+    "forcedTypecheck": "passed",
+    "changedSourceLint": "passed"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

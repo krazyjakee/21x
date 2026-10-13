@@ -50,6 +50,23 @@ The eight full-suite skips include opt-in/environment-dependent cases. The two o
 
 ## Remaining work and issue coverage
 
+The 2026-10-13 continuation is committed in draft [PR #224](https://github.com/krazyjakee/21x/pull/224).
+Installed synthetic-agent scenarios passed on all four targets across their
+recorded revisions. Artifact policy v2 passed both macOS targets and Linux;
+Windows remains failed because its opaque frame reaches the native Origin
+parser before ACL evaluation. The exact failed receipt is retained in
+[artifact authorization](artifact-authorization.md); no retirement gate was closed.
+
+[Connector shutdown](connector-shutdown.md) now records Node IPC transport,
+raw credential/KV/worker/OAuth/polling ownership, and HTTP close acknowledgement.
+The standalone/private-pipe suite passed 526 cases in 51 files before the stricter
+matcher and HTTP close additions. The latest full local application run passed
+5,194 with 16 optional skips before polling/transport additions. New focused
+controls record their own scopes; hosted Verify passed through `2ecb3e22`.
+The generated source audit includes the new worker, OAuth and artifact sources
+while retaining 38 scoped synthetic commands, 221 missing packaged commands and
+false production/retirement readiness flags.
+
 The subsequent [issue continuation report](evidence/issue-continuation-local.json) records the latest full recheck: **5,148 passed / 4 skipped**, all 363 test files passed with opt-in standalone proofs enabled. The initial run exposed a stale standalone database fixture expectation for the old credential wrapper; the corrected authenticated-format/tamper proof and final rerun passed. Latest native validation passed 20 unit + 6 staged cases. Typecheck, desktop/mobile/isolated frontend builds, lint (165 existing warnings), source freshness, 26 subprocess cases and 11 installed-evidence policy cases passed. No installed or hosted run for this uncommitted continuation is claimed.
 
 All twenty new issues are open, with role owners, gate/task IDs, dependencies and concrete acceptance/evidence criteria. [#193](https://github.com/krazyjakee/21x/issues/193) is the overall tracker. Existing [#202](https://github.com/krazyjakee/21x/issues/202) remains the contracts umbrella; foundation issues #200/#201/#203 remain closed within their original scope.

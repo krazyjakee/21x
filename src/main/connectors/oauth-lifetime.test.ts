@@ -135,4 +135,27 @@ describe('connector OAuth shutdown ownership', () => {
     expect(opened).not.toHaveBeenCalled()
     expect(f.fetch).not.toHaveBeenCalled()
   })
+
+  it('retains the callback server close acknowledgement after the token exchange completes', async () => {
+    const f = fixture()
+    const callback = deferred<{ code: string; state: string }>()
+    const acknowledged = deferred<void>()
+    const closeServer = vi.fn(() => acknowledged.promise)
+    const service = new ConnectorOAuthService({ ...f.options,
+      createServer: () => ({ start: async () => 'http://localhost:3000/callback',
+        waitForCallback: () => callback.promise, stop: vi.fn(), close: closeServer }),
+      openExternal: url => callback.resolve({ code: 'fixture-code', state: new URL(url).searchParams.get('state')! }) })
+    const result = expect(service.connect('instance', { clientId: 'fixture-client', clientSecret: 'fixture-secret' }, 'session'))
+      .rejects.toBeInstanceOf(ConnectorOAuthClosedError)
+    f.response.resolve(new Response(JSON.stringify({ access_token: 'new-fixture' })))
+    await vi.waitFor(() => expect(closeServer).toHaveBeenCalledOnce())
+    let closed = false
+    const close = service.close().then(() => { closed = true })
+    await Promise.resolve()
+    expect(closed).toBe(false)
+    expect(f.credentials.set).not.toHaveBeenCalled()
+    acknowledged.resolve()
+    await result
+    await close
+  })
 })

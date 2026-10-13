@@ -27,8 +27,11 @@ storage. These controls use isolated fixtures and no real provider credentials.
 Production teardown still uses `disposeConnectorRuntime`. Integration must first
 stop admission at polling, manual sync and IPC entry points, join higher-level
 bridge jobs, await both barriers, and retain resources when a deadline expires.
-The callback HTTP server also needs an explicit close acknowledgement through
-its owner. Packaged Node worker transport and external OAuth scheme integration
+The actual callback HTTP server now retains every listener until its close event,
+including failed bind attempts. The OAuth flow joins that acknowledgement before
+it can persist credentials or settle. [HTTP close evidence](evidence/connector-http-close-local.json)
+covers a held acknowledgement, rebinding after close and a busy-port retry.
+Packaged Node worker transport and external OAuth scheme integration
 remain part of [#216](https://github.com/krazyjakee/21x/issues/216).
 
 The [four-target service-only worker receipts](evidence/service-workers-four-target-scenarios.json)

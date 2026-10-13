@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LocalOAuthServer } from './local-oauth-server'
+import { createServer } from 'node:http'
 
 describe('LocalOAuthServer', () => {
   let server: LocalOAuthServer
 
-  afterEach(() => server?.stop())
+  afterEach(async () => { await server?.close() })
 
   it('escapes the provider error text on the callback page', async () => {
     server = new LocalOAuthServer()
@@ -56,8 +57,34 @@ describe('LocalOAuthServer', () => {
     const result = expect(started).rejects.toThrow('OAuth callback server stopped during startup')
     server.stop()
     await result
+    await server.close()
     // The same instance can bind normally after the cancelled start has joined.
     const redirectUri = await server.start()
     expect(new URL(redirectUri).port).toBe('3000')
+  })
+
+  it('joins actual close before rebinding the callback port', async () => {
+    server = new LocalOAuthServer()
+    const first = await server.start()
+    await server.close()
+    const second = await server.start()
+    expect(second).toBe(first)
+  })
+
+  it('joins failed bind attempts as well as the successful callback listener', async () => {
+    const occupied = createServer()
+    await new Promise<void>((resolve, reject) => {
+      occupied.once('error', reject)
+      occupied.listen(3000, 'localhost', resolve)
+    })
+    try {
+      server = new LocalOAuthServer()
+      const redirect = await server.start()
+      expect(new URL(redirect).port).toBe('3001')
+      await server.close()
+      const restarted = await server.start()
+      expect(restarted).toBe(redirect)
+      await server.close()
+    } finally { await new Promise<void>(resolve => occupied.close(() => resolve())) }
   })
 })

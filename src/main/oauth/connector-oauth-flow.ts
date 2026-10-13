@@ -18,6 +18,7 @@ export interface LoopbackCallbackServer {
   start(): Promise<string>
   waitForCallback(): Promise<{ code: string; state: string }>
   stop(): void
+  close?(): Promise<void>
 }
 
 export interface ConnectorOAuthFlowOptions {
@@ -59,5 +60,6 @@ export async function runLoopbackOAuthFlow(options: ConnectorOAuthFlowOptions): 
   } finally {
     options.signal?.removeEventListener('abort', stopOnAbort)
     server.stop()
+    await server.close?.()
   }
 }

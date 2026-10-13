@@ -22,6 +22,7 @@ export class LocalOAuthServer {
   private callbackTimeout: ReturnType<typeof setTimeout> | null = null
   private stopTimer: ReturnType<typeof setTimeout> | null = null
   private generation = 0
+  private readonly ownedServers = new Map<Server, Promise<void>>()
 
   /**
    * Start the local server and return the redirect URI
@@ -51,11 +52,16 @@ export class LocalOAuthServer {
     return new Promise((resolve, reject) => {
       const server = createServer(this.handleRequest.bind(this))
       this.server = server
+      let closed!: () => void
+      this.ownedServers.set(server, new Promise<void>(done => { closed = done }))
       server.once('close', () => {
+        this.ownedServers.delete(server)
+        closed()
         if (generation !== this.generation) reject(new Error('OAuth callback server stopped during startup'))
       })
 
       server.on('error', (err: NodeJS.ErrnoException) => {
+        server.close()
         if (err.code === 'EADDRINUSE') {
           reject(new Error(`Port ${port} already in use`))
         } else {
@@ -175,6 +181,13 @@ export class LocalOAuthServer {
     }
     this.resolver = null
     this.rejecter = null
+  }
+
+  /** Join actual close events, including listeners being cancelled during startup. */
+  async close(): Promise<void> {
+    this.stop()
+    do { await Promise.all([...this.ownedServers.values()]) }
+    while (this.ownedServers.size)
   }
 }
 

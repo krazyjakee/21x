@@ -41,6 +41,13 @@ const report = {
     'package.json', 'vite.tauri.config.ts', 'src-tauri/tauri.conf.json',
     'src/service/database-service.ts', 'src/service/configuration-backend.ts', 'src/service/agent-backend.ts',
     'src/main/node-worker-runtime.ts',
+    'src/main/connectors/piece-host/node-transport.ts', 'src/main/connectors/piece-host/host-entry.ts',
+    'src/main/connectors/piece-host/worker-environment.ts', 'src/main/connectors/piece-host/client.ts',
+    'src/main/connectors/bridge/runtime.ts', 'src/main/connectors/bridge/scheduler.ts', 'src/main/connectors/oauth.ts',
+    'src/main/oauth/connector-oauth-flow.ts', 'src/main/oauth/local-oauth-server.ts',
+    'src-tauri/src/main.rs', 'src-tauri/src/artifact_proof.rs', 'src-tauri/src/artifact-denial-matcher.js',
+    'src-tauri/src/artifact-proof.js', 'src-tauri/src/artifact-frame-proof.js',
+    'scripts/tauri-packaged-smoke.py', 'scripts/tauri-retirement-audit.mjs',
     'src/shared/database-desktop-codecs.ts', 'src/shared/configuration-desktop-codecs.ts', 'src/shared/agent-desktop-codecs.ts',
     'src-tauri/engine/src/desktop.rs', 'src-tauri/engine/src/configuration_desktop.rs', 'src-tauri/engine/src/agent_desktop.rs',
     'src/renderer/src/lib/ipc-client.ts', 'docs/tauri-migration/operations.json'
