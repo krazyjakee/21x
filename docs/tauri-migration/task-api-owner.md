@@ -44,3 +44,10 @@ in 378 files. Focused standalone API/skill/lifetime checks passed 84 cases;
 legacy API/MCP checks passed 338. Forced typecheck, source/contract freshness,
 changed-source lint (one existing warning) and desktop/mobile build passed.
 The synthetic service restage remained byte-for-byte unchanged.
+
+The existing 23 HTTP MCP endpoint regressions also run under standalone Node,
+using the portable session-config helper and joining API close before SQLite
+cleanup. [MCP evidence](evidence/task-mcp-portable-local.json) records all 23
+passes under each launcher, including signed scope, project/task isolation, tool
+visibility and delegated fixture controllers. GitHub interactions are fixtures
+and temporary local repositories; no real remote write or model call is made.
