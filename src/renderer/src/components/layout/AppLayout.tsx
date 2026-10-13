@@ -1,3 +1,5 @@
+import { desktopApi, desktopSupports } from '@/lib/desktop-api'
+import { DesktopHostStatus } from './DesktopHostStatus'
 import { useEffect, useState, useCallback, useMemo, lazy, Suspense } from 'react'
 import { Sidebar } from './Sidebar'
 import { TaskWorkspace } from '@/components/tasks/TaskWorkspace'
@@ -172,22 +174,23 @@ export function AppLayout() {
 
   // Auto-open onboarding on first launch or major/minor version bumps
   useEffect(() => {
+    if (!desktopSupports('app.getVersion')) return
     Promise.all([
       settingsApi.get('setup_completed_version'),
-      window.electronAPI?.app?.getVersion()
+      desktopApi?.app?.getVersion()
     ]).then(([completedVersion, currentVersion]) => {
       if (currentVersion && shouldShowOnboarding(completedVersion, currentVersion)) {
         setOnboardingOpen(true)
       }
-    })
+    }).catch(() => { /* Unsupported native setup metadata does not open onboarding. */ })
   }, [])
 
   const handleOnboardingChange = (open: boolean) => {
     setOnboardingOpen(open)
     if (!open) {
-      window.electronAPI?.app?.getVersion().then((v) => {
+      desktopApi?.app?.getVersion().then((v) => {
         if (v) settingsApi.set('setup_completed_version', v)
-      })
+      }).catch(() => {})
     }
   }
 
@@ -225,6 +228,7 @@ export function AppLayout() {
     <>
       {completionDialog}
       <TopBar onOpenCommandPalette={() => setCmdOpen(true)} />
+      <DesktopHostStatus />
 
       {/* ── Content area: left rail + optional sidebar + workspace + orchestrator ── */}
       <div className="app-chrome-field flex flex-1 min-h-0 overflow-hidden bg-background">

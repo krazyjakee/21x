@@ -1,3 +1,4 @@
+import { desktopApi, electronBrowserApi } from '@/lib/desktop-api'
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { settingsApi } from '@/lib/ipc-client'
@@ -40,7 +41,7 @@ function clog(...args: unknown[]): void {
 function releaseBrokerPanel(panelId: string): void {
   if (!embeddedBrowserEnabled()) return
   try {
-    void window.electronAPI?.browser?.unregisterBrokerPanel(panelId)?.catch(() => {})
+    void electronBrowserApi()?.unregisterBrokerPanel(panelId)?.catch(() => {})
   } catch {
     // IPC bridge unavailable (tests) — ignore
   }
@@ -875,7 +876,7 @@ function notifyAgentOfTerminalConnection(
     const terminalId = terminalPanel.id
     let bufferPreview = ''
     try {
-      const { lines } = await window.electronAPI.terminal.getBuffer(terminalId, 50)
+      const { lines } = await desktopApi.terminal.getBuffer(terminalId, 50)
       if (lines.length > 0) {
         bufferPreview = `\n\nCurrent terminal output (last ${lines.length} lines):\n\`\`\`\n${lines.join('\n')}\n\`\`\``
       }

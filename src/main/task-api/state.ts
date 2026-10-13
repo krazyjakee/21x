@@ -43,11 +43,11 @@ export function setTaskApiUiState(state: Record<string, unknown> | null): void {
   uiState = state ? { ...state, available: true, updatedAt: Date.now() } : { available: false }
 }
 
-export function setTaskApiNotifier(fn: (channel: string, data: unknown) => void): void {
+export function setTaskApiNotifier(fn: ((channel: string, data: unknown) => void) | null): void {
   notifyRenderer = fn
 }
 
-export function setTranscriptProvider(fn: TranscriptProvider): void {
+export function setTranscriptProvider(fn: TranscriptProvider | null): void {
   transcriptProvider = fn
 }
 

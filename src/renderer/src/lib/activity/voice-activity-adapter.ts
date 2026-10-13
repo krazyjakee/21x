@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import { useSyncExternalStore } from 'react'
 import { create } from 'zustand'
 import { voicePlayback } from '@/lib/voice-playback'
@@ -137,7 +138,7 @@ let latestAttributionGeneration = 0
 export function ensureVoiceAttribution(): void {
   if (attributionOff) return
   try {
-    const tts = typeof window !== 'undefined' ? window.electronAPI?.voice?.tts : undefined
+    const tts = typeof window !== 'undefined' ? desktopApi?.voice?.tts : undefined
     if (typeof tts?.onSpeechStart !== 'function' || typeof tts?.onSpeechEnd !== 'function') return
     const offStart = tts.onSpeechStart((event) => {
       if (!event?.speechId || !Number.isSafeInteger(event.speechGeneration) || event.speechGeneration <= 0) return

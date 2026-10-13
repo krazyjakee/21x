@@ -1,5 +1,6 @@
 import { DatabaseManager, type DatabaseRuntimeOptions, type TranscriptPartInput } from '../main/database/manager'
 import { DEFAULT_PROJECT_ID } from '../shared/projects'
+import { join } from 'node:path'
 import {
   DATABASE_COMMAND_CODECS, DATABASE_DESKTOP_EVENTS, DATABASE_DESKTOP_OPERATIONS, DATABASE_EVENT_CODECS,
   isDatabaseId, isSyntheticSettingKey,
@@ -20,8 +21,10 @@ export interface DatabaseBackendOptions {
   engineEpoch: string
   lock: DatabaseProfileLock
   runtime: DatabaseRuntimeOptions
+  /** Trusted singleton-owner attachment; never accepted from a wire request. */
+  database?: DatabaseManager
   isTrustedDesktop: (caller: DesktopCallerContext) => boolean
-  canAccessProject: (projectId: string, caller: DesktopCallerContext) => boolean
+  canAccessProject: (projectId: string, caller: DesktopCallerContext, access?: 'read' | 'write') => boolean
   canCreateProject: (caller: DesktopCallerContext) => boolean
   canEditSettings: (caller: DesktopCallerContext) => boolean
   /** Attached service closing state, checked again after authorization yields. */
@@ -36,14 +39,18 @@ export class DatabaseBackend {
   readonly database: DatabaseManager
   readonly registry: DesktopOperationRegistry
   private closed = false
+  private readonly ownsDatabase: boolean
 
   constructor(private readonly options: DatabaseBackendOptions) {
     options.lock.assertHeld()
     if (options.runtime.paths.profileRoot !== options.lock.profileRoot) throw new ServiceProtocolError('INVALID_ARGUMENTS')
-    this.database = new DatabaseManager(options.runtime)
+    this.ownsDatabase = !options.database
+    if (options.database && (!options.database.db.open || options.database.db.name !== join(options.lock.profileRoot, '21x.db')))
+      throw new ServiceProtocolError('INVALID_ARGUMENTS')
+    this.database = options.database ?? new DatabaseManager(options.runtime)
     this.registry = new DesktopOperationRegistry({ owner: 'service', engineEpoch: options.engineEpoch, isTrustedDesktop: options.isTrustedDesktop })
     try {
-      this.database.initialize()
+      if (this.ownsDatabase) this.database.initialize()
       for (const operation of DATABASE_DESKTOP_EVENTS) this.registry.bindEvent(operation, {
         validatePayload: DATABASE_EVENT_CODECS[operation].validatePayload,
         encodePayload: payload => {
@@ -53,7 +60,7 @@ export class DatabaseBackend {
       })
       this.bindCommands()
     } catch (error) {
-      this.database.close()
+      if (this.ownsDatabase) this.database.close()
       throw error
     }
   }
@@ -63,7 +70,7 @@ export class DatabaseBackend {
     // Leave the lifetime guard held until the caller disposes its provider.
     let lost = false
     try { this.options.lock.assertHeld() } catch { lost = true }
-    this.database.close()
+    if (this.ownsDatabase) this.database.close()
     this.closed = true
     if (lost) throw new ServiceProtocolError('DISCONNECTED')
   }
@@ -106,7 +113,7 @@ export class DatabaseBackend {
   private canUseTask(id: string, caller: DesktopCallerContext, mutation = false): boolean {
     const task = this.database.getTask(id)
     if (!task) return true // Missing reads/updates are undefined; missing deletes return false without filesystem effects.
-    return this.options.canAccessProject(task.project_id, caller) && (!mutation ||
+    return this.options.canAccessProject(task.project_id, caller, mutation ? 'write' : 'read') && (!mutation ||
       task.role === 'task' && task.source === 'local' && task.source_id === null && task.status === 'not_started' && task.agent_id === null && task.session_id === null &&
       !task.auto_start_agent && !task.auto_complete_without_review && !task.is_recurring && !task.heartbeat_enabled)
   }
@@ -147,7 +154,7 @@ export class DatabaseBackend {
     this.bind('db:getTasks', ([projectId], caller) => !projectId || this.options.canAccessProject(projectId, caller), ([projectId], caller) =>
       db.getTasks(projectId ? { projectId } : undefined).filter(task => this.options.canAccessProject(task.project_id, caller)))
     this.bind('db:getTask', ([id], caller) => this.canUseTask(id, caller), ([id]) => db.getTask(id))
-    this.bind('db:createTask', ([data], caller) => this.options.canAccessProject(data.project_id ?? DEFAULT_PROJECT_ID, caller) && !!db.getProject(data.project_id ?? DEFAULT_PROJECT_ID), ([data]) => {
+    this.bind('db:createTask', ([data], caller) => this.options.canAccessProject(data.project_id ?? DEFAULT_PROJECT_ID, caller, 'write') && !!db.getProject(data.project_id ?? DEFAULT_PROJECT_ID), ([data]) => {
       const task = db.createTask(data)
       if (task) this.emit('task:created', { task: this.taskDto(task) })
       return task

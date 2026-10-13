@@ -130,7 +130,7 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
 
   subscribe: () => {
     if (!unsubscribeEvents) {
-      unsubscribeEvents = commanderApi.onEvent((event) => get().handleEvent(event))
+      unsubscribeEvents = commanderApi.onEvent((event) => get().handleEvent(event)) ?? null
     }
     eventSubscribers++
     let subscribed = true

@@ -1,6 +1,6 @@
 import type { AgentRecord, DatabaseManager, McpServerRecord, SecretRecord, TaskRecord } from '../database'
 import type { McpServerConfig, SessionConfig } from '../adapters/coding-agent-adapter'
-import type { OAuthManager } from '../oauth/oauth-manager'
+import type { OAuthManager } from '../oauth/oauth-manager-core'
 import { TaskStatus } from '../../shared/constants'
 import { isCoordinatorTask } from '../../shared/task-roles'
 import type { SessionConfigHost } from './host'

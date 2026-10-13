@@ -48,8 +48,8 @@ export function TopBar({ onOpenCommandPalette }: { onOpenCommandPalette: () => v
       setUpdateDialogOpen(true)
     })
     return () => {
-      cleanupStatus()
-      cleanupMenu()
+      cleanupStatus?.()
+      cleanupMenu?.()
     }
   }, [])
 

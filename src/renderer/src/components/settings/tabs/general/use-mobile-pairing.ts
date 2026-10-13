@@ -47,7 +47,7 @@ export function useMobilePairing() {
       } catch { /* ignore */ }
 
       // Restore a pending PIN if the phone scanned the QR while this tab was not mounted
-      const pending = await mobileApi.getPendingPin()
+      const pending = await mobileApi.getPendingPin().catch(() => null)
       if (pending && !disposed) activatePin(pending.pin, pending.expiresAt)
     }
     load()
@@ -55,7 +55,7 @@ export function useMobilePairing() {
     return () => {
       disposed = true
       clearTimeout(tickTimer)
-      for (const unsubscribe of unsubscribers) unsubscribe()
+      for (const unsubscribe of unsubscribers) unsubscribe?.()
     }
   }, [])
 

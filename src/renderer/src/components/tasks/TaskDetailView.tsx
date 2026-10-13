@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import React, { useEffect } from 'react'
 import { Pencil, Trash2, Calendar, User, Tag, Clock, Bot, Play, History, GitBranch, Route, Plus, X, BookOpen, AlarmClockOff, BellRing, Folder, Repeat, Star, Sparkles, Layers, Settings2, Terminal } from 'lucide-react'
 import { CollapsibleDescription } from '@/components/ui/CollapsibleDescription'
@@ -87,8 +88,8 @@ function TaskDetailViewComponent({ task, agents, onEdit, onDelete, onUpdateAttac
   const dueSoon = isActive && !overdue && isDueSoon(task.due_date)
 
   const handleOpenFolder = async () => {
-    const workspaceDir = await window.electronAPI.tasks.getWorkspaceDir(task.id)
-    await window.electronAPI.shell.openPath(workspaceDir)
+    const workspaceDir = await desktopApi.tasks.getWorkspaceDir(task.id)
+    await desktopApi.shell.openPath(workspaceDir)
   }
 
   return (

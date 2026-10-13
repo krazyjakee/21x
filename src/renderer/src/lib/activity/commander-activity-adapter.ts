@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import { create } from 'zustand'
 import type { CommanderEvent } from '@shared/commander'
 import { ACTIVITY_REVALIDATE_MS, readCommanderActivitySnapshot } from '@shared/activity'
@@ -162,7 +163,7 @@ let sourceTimer: ReturnType<typeof setInterval> | null = null
 let requestSequence = 0
 
 async function readSource(sessionId: string): Promise<void> {
-  const api = typeof window !== 'undefined' ? window.electronAPI?.commander : undefined
+  const api = typeof window !== 'undefined' ? desktopApi?.commander : undefined
   if (typeof api?.getActivity !== 'function' || !consumers.has(sessionId) || requests.has(sessionId)) return
   const request = ++requestSequence
   requests.set(sessionId, request)
@@ -206,7 +207,7 @@ if (typeof document !== 'undefined') document.addEventListener('visibilitychange
 export function ensureCommanderActivitySubscription(): void {
   if (unsubscribe) return
   try {
-    const onEvent = typeof window !== 'undefined' ? window.electronAPI?.commander?.onEvent : undefined
+    const onEvent = typeof window !== 'undefined' ? desktopApi?.commander?.onEvent : undefined
     if (typeof onEvent !== 'function') return
     unsubscribe = onEvent((event) => recordCommanderEvent(event))
     useCommanderActivityStore.setState({ subscribed: true })

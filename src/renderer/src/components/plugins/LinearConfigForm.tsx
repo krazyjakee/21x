@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import { useState, useEffect, useCallback } from 'react'
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
@@ -23,7 +24,7 @@ export function LinearConfigForm({ value, onChange, sourceId, onRequestSave }: P
 
   // Check if OAuth token exists
   useEffect(() => {
-    if (sourceId && window.electronAPI?.oauth) {
+    if (sourceId && desktopApi?.oauth) {
       oauthApi
         .getValidToken(sourceId)
         .then((token) => {
@@ -38,7 +39,7 @@ export function LinearConfigForm({ value, onChange, sourceId, onRequestSave }: P
   const handleOAuthSuccess = async () => {
     setShowOAuthDialog(false)
 
-    if (sourceId && window.electronAPI?.oauth) {
+    if (sourceId && desktopApi?.oauth) {
       try {
         const token = await oauthApi.getValidToken(sourceId)
         setOauthConnected(!!token)
@@ -62,7 +63,7 @@ export function LinearConfigForm({ value, onChange, sourceId, onRequestSave }: P
             <button
               type="button"
               onClick={() =>
-                window.electronAPI.shell.openExternal('https://linear.app/settings/api/applications/new')
+                desktopApi.shell.openExternal('https://linear.app/settings/api/applications/new')
               }
               className="text-primary hover:underline"
             >

@@ -6,7 +6,8 @@
     "src/shared/**/*",
     "src/service/transport/**/*.ts",
     "src/mobile/**/*",
-    "src/tauri-spike/**/*.ts"
+    "src/tauri-spike/**/*.ts",
+    "src/tauri-production/**/*.ts"
   ],
   "compilerOptions": {
     "composite": true,

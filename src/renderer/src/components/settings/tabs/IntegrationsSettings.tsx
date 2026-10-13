@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import { useState, useEffect } from 'react'
 import { Plus, Loader2, RefreshCw, Edit3, Trash2, CheckCircle, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -39,14 +40,14 @@ export function IntegrationsSettings() {
   }, [sources.length, plugins.length])
 
   const checkOAuthStatus = async () => {
-    if (sources.length > 0 && window.electronAPI?.oauth) {
+    if (sources.length > 0 && desktopApi?.oauth) {
       const statusMap = new Map<string, boolean>()
       for (const source of sources) {
         const plugin = plugins.find((p) => p.id === source.plugin_id)
         // Check OAuth status for plugins that support OAuth (Linear, HubSpot with OAuth)
         if (plugin?.id === 'linear' || (plugin?.id === 'hubspot' && source.config.auth_type === 'oauth')) {
           try {
-            const token = await window.electronAPI.oauth.getValidToken(source.id)
+            const token = await desktopApi.oauth.getValidToken(source.id)
             statusMap.set(source.id, !!token)
           } catch {
             statusMap.set(source.id, false)

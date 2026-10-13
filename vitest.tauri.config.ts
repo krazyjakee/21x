@@ -17,9 +17,12 @@ if (sqlite !== expected || metadata.name !== 'better-sqlite3' || metadata.versio
 const resolveOptions = { alias: [
   { find: /^better-sqlite3$/, replacement: join(sqlite, 'lib/index.js') },
   { find: /^electron(?:$|\/)/, replacement: join(root, 'test/forbid-electron.ts') },
-  { find: '@shared', replacement: join(root, 'src/shared') }
+  { find: '@shared', replacement: join(root, 'src/shared') },
+  { find: '@', replacement: join(root, 'src/renderer/src') }
 ] }
 const mainFiles = [
+  'src/service/**/*.test.ts', 'src/main/agent-manager-configuration.test.ts',
+  'src/main/oauth/oauth-manager-host.test.ts', 'src/main/worktree-manager-host.test.ts', 'src/main/platform/secret-storage.test.ts',
   'test/tauri-runtime.test.ts', 'test/tauri-terminal-native.test.ts',
   'src/main/node-worker-runtime.test.ts',
   'src/main/adapters/opencode-adapter.test.ts',
@@ -113,8 +116,10 @@ export default defineConfig({
     projects: [
       { resolve: resolveOptions, test: { name: 'portable-main', environment: 'node', include: mainFiles,
         setupFiles: [join(root, 'test/setup-tauri.ts')] } },
-      { resolve: resolveOptions, test: { name: 'portable-renderer', environment: 'happy-dom',
-        include: ['src/renderer/src/lib/desktop-client.test.ts', 'src/renderer/src/lib/transcript-pagination.test.ts', 'src/renderer/src/lib/tauri-task-slice.test.ts'] } }
+      { resolve: resolveOptions, esbuild: { jsx: 'automatic' }, test: { name: 'portable-renderer', environment: 'happy-dom',
+        include: ['src/renderer/src/lib/desktop-client.test.ts', 'src/renderer/src/lib/transcript-pagination.test.ts', 'src/renderer/src/lib/tauri-task-slice.test.ts',
+          'src/renderer/src/lib/desktop-api.test.ts', 'src/renderer/src/lib/native-desktop-host.test.ts', 'src/renderer/src/lib/shared-ipc-listeners.test.ts',
+          'src/renderer/src/components/layout/DesktopHostStatus.test.tsx'], setupFiles: [join(root, 'test/setup-renderer.ts')] } }
     ]
   }
 })

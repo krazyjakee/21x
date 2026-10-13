@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/Dialog'
 import { Button } from '../ui/Button'
@@ -40,7 +41,7 @@ export function OAuthDialog({ open, provider, config, sourceId, onSuccess, onCan
 
       // Linear uses custom URL scheme (twentyonex://, or legacy nuanu://)
       const authUrl = await oauthApi.startFlow(provider, config)
-      await window.electronAPI.shell.openExternal(authUrl)
+      await desktopApi.shell.openExternal(authUrl)
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to start OAuth flow'
       setError(errorMsg)
@@ -65,7 +66,7 @@ export function OAuthDialog({ open, provider, config, sourceId, onSuccess, onCan
     if (!open) return
 
     // Listen for OAuth callback from main process
-    const unlisten = window.electronAPI.onOAuthCallback(async ({ code, state: oauthState }) => {
+    const unlisten = desktopApi.onOAuthCallback?.(async ({ code, state: oauthState }) => {
       try {
         setState('waiting')
         await oauthApi.exchangeCode(provider, code, oauthState, sourceId)

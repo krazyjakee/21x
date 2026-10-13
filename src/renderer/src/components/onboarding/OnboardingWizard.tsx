@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import React, { useEffect, useState, useCallback } from 'react'
 import {
   Check,
@@ -455,7 +456,7 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
   const runDetection = useCallback(async () => {
     setDetecting(true)
     try {
-      const fresh = await window.electronAPI.agentInstaller.detect()
+      const fresh = await desktopApi.agentInstaller.detect()
       setToolStatus(fresh)
       return fresh
     } catch {
@@ -490,7 +491,7 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
   // Listen for install progress events
   useEffect(() => {
     if (!open) return
-    const cleanup = window.electronAPI.agentInstaller.onProgress(
+    const cleanup = desktopApi.agentInstaller.onProgress?.(
       (data: { stage: string }) => {
         if (data.stage === 'complete' || data.stage === 'error') {
           setInstalling(null)
@@ -505,7 +506,7 @@ export function OnboardingWizard({ open, onOpenChange }: OnboardingWizardProps) 
     setError(null)
     setInstalling(toolKey)
     try {
-      const result = (await window.electronAPI.agentInstaller.install(toolKey)) as {
+      const result = (await desktopApi.agentInstaller.install(toolKey)) as {
         success: boolean
         error: string | null
         newStatus: Record<string, ToolStatus>

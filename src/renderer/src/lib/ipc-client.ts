@@ -1,3 +1,4 @@
+import { desktopApi, electronBrowserApi } from '@/lib/desktop-api'
 import type { Task, CreateTaskDTO, UpdateTaskDTO, FileAttachment, Agent, CreateAgentDTO, UpdateAgentDTO, McpServer, CreateMcpServerDTO, UpdateMcpServerDTO, Skill, CreateSkillDTO, UpdateSkillDTO, Secret, CreateSecretDTO, UpdateSecretDTO, TaskSource, CreateTaskSourceDTO, UpdateTaskSourceDTO, SyncResult, PluginMeta, ConfigFieldOption, ActionResult, SourceUser, ReassignResult, MarketplaceSource, InstalledPlugin, DiscoverablePlugin, MarketplaceCatalog, PluginResources } from '@/types'
 import type { AgentStatusEvent, GhCliStatus, GlabCliStatus, TeaCliStatus, GitHubRepo, WorktreeProgressEvent, WorkspaceCleanupProgressEvent, McpTestResult, AgentMessageAttachment, TranscriptPartRecord, TranscriptChangedEvent, AgentSessionStartResult, AgentTaskStartResult, AgentStartQueueChangedEvent, QueuedAgentStart } from '@/types/electron'
 import type { ArtifactApi } from '@shared/artifacts'
@@ -52,330 +53,330 @@ import type { CaptainMemory } from '@shared/captain-memory'
 import type { CreateTaskGroupData, TaskGroupReviewData } from '@shared/task-groups'
 
 export const taskGroupsApi = {
-  list: (projectId: string, includeDissolved = false) => window.electronAPI.taskGroups.list(projectId, includeDissolved),
-  get: (id: string) => window.electronAPI.taskGroups.get(id),
-  history: (taskId: string) => window.electronAPI.taskGroups.history(taskId),
-  create: (data: CreateTaskGroupData) => window.electronAPI.taskGroups.create(data),
-  add: (id: string, taskIds: string[]) => window.electronAPI.taskGroups.add(id, taskIds),
-  remove: (id: string, taskId: string) => window.electronAPI.taskGroups.remove(id, taskId),
-  dissolve: (id: string) => window.electronAPI.taskGroups.dissolve(id),
-  move: (id: string, status: string) => window.electronAPI.taskGroups.move(id, status),
-  review: (data: TaskGroupReviewData) => window.electronAPI.taskGroups.review(data)
+  list: (projectId: string, includeDissolved = false) => desktopApi.taskGroups.list(projectId, includeDissolved),
+  get: (id: string) => desktopApi.taskGroups.get(id),
+  history: (taskId: string) => desktopApi.taskGroups.history(taskId),
+  create: (data: CreateTaskGroupData) => desktopApi.taskGroups.create(data),
+  add: (id: string, taskIds: string[]) => desktopApi.taskGroups.add(id, taskIds),
+  remove: (id: string, taskId: string) => desktopApi.taskGroups.remove(id, taskId),
+  dissolve: (id: string) => desktopApi.taskGroups.dissolve(id),
+  move: (id: string, status: string) => desktopApi.taskGroups.move(id, status),
+  review: (data: TaskGroupReviewData) => desktopApi.taskGroups.review(data)
 }
 
 export const taskApi = {
   /** Every project's tasks, or one project's when `projectId` is given. */
   getAll: (projectId?: string): Promise<Task[]> => {
-    return window.electronAPI.db.getTasks(projectId)
+    return desktopApi.db.getTasks(projectId)
   },
 
   getById: (id: string): Promise<Task | undefined> => {
-    return window.electronAPI.db.getTask(id)
+    return desktopApi.db.getTask(id)
   },
 
   create: (data: CreateTaskDTO): Promise<Task> => {
-    return window.electronAPI.db.createTask(data)
+    return desktopApi.db.createTask(data)
   },
 
   update: (id: string, data: UpdateTaskDTO): Promise<Task | undefined> => {
-    return window.electronAPI.db.updateTask(id, data)
+    return desktopApi.db.updateTask(id, data)
   },
 
   delete: (id: string): Promise<boolean> => {
-    return window.electronAPI.db.deleteTask(id)
+    return desktopApi.db.deleteTask(id)
   },
 
   getSubtasks: (parentId: string): Promise<Task[]> => {
-    return window.electronAPI.db.getSubtasks(parentId)
+    return desktopApi.db.getSubtasks(parentId)
   },
 
   reorderSubtasks: (parentId: string, orderedIds: string[]): Promise<boolean> => {
-    return window.electronAPI.db.reorderSubtasks(parentId, orderedIds)
+    return desktopApi.db.reorderSubtasks(parentId, orderedIds)
   },
 
   /** A project's Captain task row id (#55). Hidden from getAll, so it is asked for by project. */
   getCoordinatorTaskId: (projectId?: string): Promise<string | null> => {
-    return window.electronAPI.tasks.getCoordinatorTaskId(projectId)
+    return desktopApi.tasks.getCoordinatorTaskId(projectId)
   }
 }
 
 export const artifactApi: ArtifactApi = {
-  scan: (taskId) => window.electronAPI.artifacts.scan(taskId),
-  read: (taskId, relativePath) => window.electronAPI.artifacts.read(taskId, relativePath),
-  copyFile: (taskId, relativePath) => window.electronAPI.artifacts.copyFile(taskId, relativePath)
+  scan: (taskId) => desktopApi.artifacts.scan(taskId),
+  read: (taskId, relativePath) => desktopApi.artifacts.read(taskId, relativePath),
+  copyFile: (taskId, relativePath) => desktopApi.artifacts.copyFile(taskId, relativePath)
 }
 
 export const mcpServerApi = {
   getAll: (): Promise<McpServer[]> => {
-    return window.electronAPI.mcpServers.getAll()
+    return desktopApi.mcpServers.getAll()
   },
 
   create: (data: CreateMcpServerDTO): Promise<McpServer> => {
-    return window.electronAPI.mcpServers.create(data)
+    return desktopApi.mcpServers.create(data)
   },
 
   update: (id: string, data: UpdateMcpServerDTO): Promise<McpServer | undefined> => {
-    return window.electronAPI.mcpServers.update(id, data)
+    return desktopApi.mcpServers.update(id, data)
   },
 
   delete: (id: string): Promise<boolean> => {
-    return window.electronAPI.mcpServers.delete(id)
+    return desktopApi.mcpServers.delete(id)
   },
 
   testConnection: (data: { id?: string; name: string; type?: 'local' | 'remote'; command?: string; args?: string[]; url?: string; headers?: Record<string, string>; environment?: Record<string, string> }): Promise<McpTestResult> => {
-    return window.electronAPI.mcpServers.testConnection(data)
+    return desktopApi.mcpServers.testConnection(data)
   },
 
   startOAuthFlow: (mcpServerId: string): Promise<{ needsManualClientId?: boolean }> => {
-    return window.electronAPI.mcpServers.startOAuthFlow(mcpServerId)
+    return desktopApi.mcpServers.startOAuthFlow(mcpServerId)
   },
 
   getOAuthStatus: (mcpServerId: string): Promise<{ connected: boolean; expiresAt?: string }> => {
-    return window.electronAPI.mcpServers.getOAuthStatus(mcpServerId)
+    return desktopApi.mcpServers.getOAuthStatus(mcpServerId)
   },
 
   revokeOAuthToken: (mcpServerId: string): Promise<void> => {
-    return window.electronAPI.mcpServers.revokeOAuthToken(mcpServerId)
+    return desktopApi.mcpServers.revokeOAuthToken(mcpServerId)
   },
 
   probeForAuth: (serverUrl: string): Promise<{ requiresAuth: boolean }> => {
-    return window.electronAPI.mcpServers.probeForAuth(serverUrl)
+    return desktopApi.mcpServers.probeForAuth(serverUrl)
   },
 
   submitManualClientId: (mcpServerId: string, clientId: string): Promise<{ needsManualClientId?: boolean }> => {
-    return window.electronAPI.mcpServers.submitManualClientId(mcpServerId, clientId)
+    return desktopApi.mcpServers.submitManualClientId(mcpServerId, clientId)
   }
 }
 
 export const agentApi = {
   getAll: (): Promise<Agent[]> => {
-    return window.electronAPI.agents.getAll()
+    return desktopApi.agents.getAll()
   },
 
   create: (data: CreateAgentDTO): Promise<Agent> => {
-    return window.electronAPI.agents.create(data)
+    return desktopApi.agents.create(data)
   },
 
   update: (id: string, data: UpdateAgentDTO): Promise<Agent | undefined> => {
-    return window.electronAPI.agents.update(id, data)
+    return desktopApi.agents.update(id, data)
   },
 
   delete: (id: string): Promise<boolean> => {
-    return window.electronAPI.agents.delete(id)
+    return desktopApi.agents.delete(id)
   },
 
   /** Durable starts waiting on capacity, dependencies or retry deadlines. */
   getStartQueue: (): Promise<QueuedAgentStart[]> => {
-    return window.electronAPI.agents.getStartQueue()
+    return desktopApi.agents.getStartQueue()
   },
 
   /** Latest durable queue/recovery outcome for one task, including terminal states. */
   getStartRecoveryState: (taskId: string): Promise<QueuedAgentStart | null> => {
-    return typeof window.electronAPI.agents.getStartRecoveryState === 'function'
-      ? window.electronAPI.agents.getStartRecoveryState(taskId)
+    return typeof desktopApi.agents.getStartRecoveryState === 'function'
+      ? desktopApi.agents.getStartRecoveryState(taskId)
       : Promise.resolve(null)
   }
 }
 
 export const agentSessionApi = {
   start: (agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<AgentSessionStartResult> => {
-    return window.electronAPI.agentSession.start(agentId, taskId, workspaceDir, skipInitialPrompt)
+    return desktopApi.agentSession.start(agentId, taskId, workspaceDir, skipInitialPrompt)
   },
 
   startTask: (taskId: string): Promise<AgentTaskStartResult> => {
-    return window.electronAPI.agentSession.startTask(taskId)
+    return desktopApi.agentSession.startTask(taskId)
   },
 
   resume: (agentId: string, taskId: string, ocSessionId: string): Promise<{ sessionId: string; ended?: boolean }> => {
-    return window.electronAPI.agentSession.resume(agentId, taskId, ocSessionId)
+    return desktopApi.agentSession.resume(agentId, taskId, ocSessionId)
   },
 
   abort: (sessionId: string): Promise<{ success: boolean }> => {
-    return window.electronAPI.agentSession.abort(sessionId)
+    return desktopApi.agentSession.abort(sessionId)
   },
 
   stop: (sessionId: string): Promise<{ success: boolean }> => {
-    return window.electronAPI.agentSession.stop(sessionId)
+    return desktopApi.agentSession.stop(sessionId)
   },
 
   stopByTaskId: (taskId: string): Promise<{ success: boolean; sessionId: string | null }> => {
-    return window.electronAPI.agentSession.stopByTaskId(taskId)
+    return desktopApi.agentSession.stopByTaskId(taskId)
   },
 
   switchAgent: (taskId: string, newAgentId: string): Promise<{ sessionId: string }> => {
-    return window.electronAPI.agentSession.switchAgent(taskId, newAgentId)
+    return desktopApi.agentSession.switchAgent(taskId, newAgentId)
   },
 
   send: (sessionId: string, message: string, taskId?: string, agentId?: string, attachments?: AgentMessageAttachment[], deliveryId?: string): Promise<{ success: boolean; newSessionId?: string }> => {
-    return window.electronAPI.agentSession.send(sessionId, message, taskId, agentId, attachments, deliveryId)
+    return desktopApi.agentSession.send(sessionId, message, taskId, agentId, attachments, deliveryId)
   },
 
   sendByTaskId: (taskId: string, message: string, attachments?: AgentMessageAttachment[], deliveryId?: string): Promise<{ success: boolean; sessionId: string | null; newSessionId?: string }> => {
-    return window.electronAPI.agentSession.sendByTaskId(taskId, message, attachments, deliveryId)
+    return desktopApi.agentSession.sendByTaskId(taskId, message, attachments, deliveryId)
   },
 
   approve: (sessionId: string, approved: boolean, message?: string, responseType?: 'permission' | 'question', requestId?: string): Promise<{ success: boolean }> => {
-    if (requestId) return window.electronAPI.agentSession.approve(sessionId, approved, message, responseType, requestId)
-    if (responseType) return window.electronAPI.agentSession.approve(sessionId, approved, message, responseType)
-    return window.electronAPI.agentSession.approve(sessionId, approved, message)
+    if (requestId) return desktopApi.agentSession.approve(sessionId, approved, message, responseType, requestId)
+    if (responseType) return desktopApi.agentSession.approve(sessionId, approved, message, responseType)
+    return desktopApi.agentSession.approve(sessionId, approved, message)
   },
 
   getRawTranscript: (taskId: string): Promise<Array<{ role: string; parts: Array<{ type: string; content?: string; tool?: { name: string; status?: string; input?: string; output?: string; error?: string } }> }>> => {
-    return window.electronAPI.agentSession.getRawTranscript(taskId)
+    return desktopApi.agentSession.getRawTranscript(taskId)
   },
 
   getTranscriptSnapshot: (taskId: string, sinceSeq?: number): Promise<TranscriptPartRecord[]> => {
-    return window.electronAPI.agentSession.getTranscriptSnapshot(taskId, sinceSeq)
+    return desktopApi.agentSession.getTranscriptSnapshot(taskId, sinceSeq)
   },
 
   getTranscriptDelta: (taskId: string, sinceRev: number): Promise<{ parts: TranscriptPartRecord[]; maxRev: number }> => {
-    return window.electronAPI.agentSession.getTranscriptDelta(taskId, sinceRev)
+    return desktopApi.agentSession.getTranscriptDelta(taskId, sinceRev)
   }
 }
 
 export const captainRuntimeApi = {
-  get: (projectId: string): Promise<CaptainRuntimeState | null> => window.electronAPI.captainRuntime.get(projectId),
-  switch: (projectId: string, agentId: string): Promise<CaptainRuntimeState> => window.electronAPI.captainRuntime.switch(projectId, agentId),
-  retry: (projectId: string): Promise<CaptainRuntimeState> => window.electronAPI.captainRuntime.retry(projectId),
-  rollback: (projectId: string): Promise<CaptainRuntimeState> => window.electronAPI.captainRuntime.rollback(projectId)
+  get: (projectId: string): Promise<CaptainRuntimeState | null> => desktopApi.captainRuntime.get(projectId),
+  switch: (projectId: string, agentId: string): Promise<CaptainRuntimeState> => desktopApi.captainRuntime.switch(projectId, agentId),
+  retry: (projectId: string): Promise<CaptainRuntimeState> => desktopApi.captainRuntime.retry(projectId),
+  rollback: (projectId: string): Promise<CaptainRuntimeState> => desktopApi.captainRuntime.rollback(projectId)
 }
 
 export const agentConfigApi = {
   getProviders: (serverUrl?: string, backendType?: string): Promise<{ providers: { id: string; name: string; models: unknown }[]; default: Record<string, string> } | null> => {
-    return window.electronAPI.agentConfig.getProviders(serverUrl, backendType)
+    return desktopApi.agentConfig.getProviders(serverUrl, backendType)
   },
   listModels: (backendType: string): Promise<{ id: string; name: string }[] | null> => {
-    return window.electronAPI.agentConfig.listModels(backendType)
+    return desktopApi.agentConfig.listModels(backendType)
   }
 }
 
 export const shellApi = {
   openPath: (filePath: string): Promise<void> => {
-    return window.electronAPI.shell.openPath(filePath)
+    return desktopApi.shell.openPath(filePath)
   },
   showItemInFolder: (filePath: string): Promise<void> => {
-    return window.electronAPI.shell.showItemInFolder(filePath)
+    return desktopApi.shell.showItemInFolder(filePath)
   },
   readTextFile: (filePath: string): Promise<{ content: string; size: number } | null> => {
-    return window.electronAPI.shell.readTextFile(filePath)
+    return desktopApi.shell.readTextFile(filePath)
   }
 }
 
 export const notificationApi = {
   show: (title: string, body: string): Promise<void> => {
-    return window.electronAPI.notifications.show(title, body)
+    return desktopApi.notifications.show(title, body)
   }
 }
 
-export const onOverdueCheck = (callback: () => void): (() => void) => {
-  return window.electronAPI.onOverdueCheck(callback)
+export const onOverdueCheck = (callback: () => void): (() => void) | undefined => {
+  return desktopApi.onOverdueCheck?.(callback)
 }
 
-export const onTasksRefresh = (callback: () => void): (() => void) => {
-  return window.electronAPI.onTasksRefresh(callback)
+export const onTasksRefresh = (callback: () => void): (() => void) | undefined => {
+  return desktopApi.onTasksRefresh?.(callback)
 }
 
 // Chat image attachments (#144): the clipboard fallback and task storage.
 export const chatImageApi = {
   readClipboard: (): Promise<{ images: ChatImageInput[]; errors: string[] }> =>
-    typeof window.electronAPI.chatImages?.readClipboard === 'function'
-      ? window.electronAPI.chatImages.readClipboard()
+    typeof desktopApi.chatImages?.readClipboard === 'function'
+      ? desktopApi.chatImages.readClipboard()
       : Promise.resolve({ images: [], errors: [] }),
   saveToTask: (taskId: string, images: ChatImageInput[]): Promise<FileAttachment[]> =>
-    window.electronAPI.chatImages.saveToTask(taskId, images)
+    desktopApi.chatImages.saveToTask(taskId, images)
 }
 
 export const attachmentApi = {
   pick: (): Promise<string[]> => {
-    return window.electronAPI.attachments.pick()
+    return desktopApi.attachments.pick()
   },
 
   save: (taskId: string, filePath: string): Promise<FileAttachment> => {
-    return window.electronAPI.attachments.save(taskId, filePath)
+    return desktopApi.attachments.save(taskId, filePath)
   },
 
   remove: (taskId: string, attachmentId: string): Promise<void> => {
-    return window.electronAPI.attachments.remove(taskId, attachmentId)
+    return desktopApi.attachments.remove(taskId, attachmentId)
   },
 
   open: (taskId: string, attachmentId: string): Promise<void> => {
-    return window.electronAPI.attachments.open(taskId, attachmentId)
+    return desktopApi.attachments.open(taskId, attachmentId)
   },
 
   download: (taskId: string, attachmentId: string): Promise<void> => {
-    return window.electronAPI.attachments.download(taskId, attachmentId)
+    return desktopApi.attachments.download(taskId, attachmentId)
   }
 }
 
-export const onArtifactUpdated = (callback: (event: { taskId: string; artifact: import('@shared/artifacts').Artifact }) => void): (() => void) => {
-  return window.electronAPI.onArtifactUpdated(callback)
+export const onArtifactUpdated = (callback: (event: { taskId: string; artifact: import('@shared/artifacts').Artifact }) => void): (() => void) | undefined => {
+  return desktopApi.onArtifactUpdated?.(callback)
 }
 
-export const onTranscriptChanged = (callback: (event: TranscriptChangedEvent) => void): (() => void) => {
-  return window.electronAPI.onTranscriptChanged(callback)
+export const onTranscriptChanged = (callback: (event: TranscriptChangedEvent) => void): (() => void) | undefined => {
+  return desktopApi.onTranscriptChanged?.(callback)
 }
 
-export const onAgentStatus = (callback: (event: AgentStatusEvent) => void): (() => void) => {
-  return window.electronAPI.onAgentStatus(callback)
+export const onAgentStatus = (callback: (event: AgentStatusEvent) => void): (() => void) | undefined => {
+  return desktopApi.onAgentStatus?.(callback)
 }
 
-export const onAgentStartQueueChanged = (callback: (event: AgentStartQueueChangedEvent) => void): (() => void) => {
-  return window.electronAPI.onAgentStartQueueChanged(callback)
+export const onAgentStartQueueChanged = (callback: (event: AgentStartQueueChangedEvent) => void): (() => void) | undefined => {
+  return desktopApi.onAgentStartQueueChanged?.(callback)
 }
 
-export const onAgentIncompatibleSession = (callback: (event: { taskId: string; agentId: string; error: string }) => void): (() => void) => {
-  return window.electronAPI.onAgentIncompatibleSession(callback)
+export const onAgentIncompatibleSession = (callback: (event: { taskId: string; agentId: string; error: string }) => void): (() => void) | undefined => {
+  return desktopApi.onAgentIncompatibleSession?.(callback)
 }
 
-export const onTaskUpdated = (callback: (event: { taskId: string; updates: Partial<Task> }) => void): (() => void) => {
-  return window.electronAPI.onTaskUpdated(callback)
+export const onTaskUpdated = (callback: (event: { taskId: string; updates: Partial<Task> }) => void): (() => void) | undefined => {
+  return desktopApi.onTaskUpdated?.(callback)
 }
 
 /** Fires when the main process could not push a completion to the task's source. */
 export const onTaskSourceActionFailed = (
   callback: (event: { taskId: string; taskTitle: string; error: string }) => void
-): (() => void) => {
-  return window.electronAPI.onTaskSourceActionFailed(callback)
+): (() => void) | undefined => {
+  return desktopApi.onTaskSourceActionFailed?.(callback)
 }
 
-export const onTaskCreated = (callback: (event: { task: Task }) => void): (() => void) => {
-  return window.electronAPI.onTaskCreated(callback)
+export const onTaskCreated = (callback: (event: { task: Task }) => void): (() => void) | undefined => {
+  return desktopApi.onTaskCreated?.(callback)
 }
 
-export const onTaskDeleted = (callback: (event: { taskId: string }) => void): (() => void) => {
-  return window.electronAPI.onTaskDeleted(callback)
+export const onTaskDeleted = (callback: (event: { taskId: string }) => void): (() => void) | undefined => {
+  return desktopApi.onTaskDeleted?.(callback)
 }
 
 export const settingsApi = {
   get: (key: string): Promise<string | null> => {
-    return window.electronAPI.settings.get(key)
+    return desktopApi.settings.get(key)
   },
   set: (key: string, value: string): Promise<void> => {
-    return window.electronAPI.settings.set(key, value)
+    return desktopApi.settings.set(key, value)
   },
   getAll: (): Promise<Record<string, string>> => {
-    return window.electronAPI.settings.getAll()
+    return desktopApi.settings.getAll()
   }
 }
 
 export const updaterApi = {
   check: (): Promise<{ success: boolean; version?: string; error?: string }> => {
-    return window.electronAPI?.updater?.check() ?? Promise.resolve({ success: false, error: 'Not available' })
+    return desktopApi?.updater?.check() ?? Promise.resolve({ success: false, error: 'Not available' })
   },
   download: (): Promise<{ success: boolean; error?: string }> => {
-    return window.electronAPI?.updater?.download() ?? Promise.resolve({ success: false, error: 'Not available' })
+    return desktopApi?.updater?.download() ?? Promise.resolve({ success: false, error: 'Not available' })
   },
   install: (): Promise<void> => {
-    return window.electronAPI?.updater?.install() ?? Promise.resolve()
+    return desktopApi?.updater?.install() ?? Promise.resolve()
   },
   getVersion: (): Promise<string> => {
-    return window.electronAPI?.updater?.getVersion() ?? Promise.resolve('?.?.?')
+    return desktopApi?.updater?.getVersion() ?? Promise.resolve('?.?.?')
   },
-  onStatus: (callback: (data: { status: string; version?: string; percent?: number; error?: string; releaseNotes?: string; releaseDate?: string; currentVersion?: string }) => void): (() => void) => {
-    return window.electronAPI?.updater?.onStatus(callback) ?? (() => {})
+  onStatus: (callback: (data: { status: string; version?: string; percent?: number; error?: string; releaseNotes?: string; releaseDate?: string; currentVersion?: string }) => void): (() => void) | undefined => {
+    return desktopApi?.updater?.onStatus?.(callback)
   },
-  onMenuCheckForUpdates: (callback: () => void): (() => void) => {
-    return window.electronAPI?.updater?.onMenuCheckForUpdates(callback) ?? (() => {})
+  onMenuCheckForUpdates: (callback: () => void): (() => void) | undefined => {
+    return desktopApi?.updater?.onMenuCheckForUpdates?.(callback)
   }
 }
 
@@ -393,266 +394,266 @@ export const mobileApi = {
     customUrl: string | null
   }> => {
     return (
-      window.electronAPI?.mobile?.getInfo() ??
+      desktopApi?.mobile?.getInfo() ??
       Promise.resolve({ enabled: false, lanAccess: false, sessionIdleDays: 7, url: '', port: 0, lanUrl: null, tunnelUrl: null, tunnelActive: false, remoteMode: 'quick', customUrl: null })
     )
   },
   setAccess: (options: { enabled?: boolean; lanAccess?: boolean; sessionIdleDays?: number }): Promise<{ enabled: boolean; lanAccess: boolean; sessionIdleDays: number; listening: boolean }> => {
     return (
-      window.electronAPI?.mobile?.setAccess(options) ??
+      desktopApi?.mobile?.setAccess(options) ??
       Promise.resolve({ enabled: false, lanAccess: false, sessionIdleDays: 7, listening: false })
     )
   },
   startTunnel: (): Promise<{ tunnelUrl: string }> => {
-    return window.electronAPI?.mobile?.startTunnel() ?? Promise.resolve({ tunnelUrl: '' })
+    return desktopApi?.mobile?.startTunnel() ?? Promise.resolve({ tunnelUrl: '' })
   },
   stopTunnel: (): Promise<{ success: boolean }> => {
-    return window.electronAPI?.mobile?.stopTunnel() ?? Promise.resolve({ success: false })
+    return desktopApi?.mobile?.stopTunnel() ?? Promise.resolve({ success: false })
   },
   setCustomUrl: (url: string): Promise<{ url: string }> => {
-    return window.electronAPI?.mobile?.setCustomUrl(url) ?? Promise.resolve({ url: '' })
+    return desktopApi?.mobile?.setCustomUrl(url) ?? Promise.resolve({ url: '' })
   },
   clearCustomUrl: (): Promise<{ success: boolean }> => {
-    return window.electronAPI?.mobile?.clearCustomUrl() ?? Promise.resolve({ success: false })
+    return desktopApi?.mobile?.clearCustomUrl() ?? Promise.resolve({ success: false })
   },
   getPendingPin: (): Promise<{ pin: string; pairCodeId: string; expiresAt: number } | null> => {
-    return window.electronAPI?.mobile?.getPendingPin() ?? Promise.resolve(null)
+    return desktopApi?.mobile?.getPendingPin() ?? Promise.resolve(null)
   },
   getSessions: (): Promise<{ id: string; device_name: string; paired_at: number; last_seen: number }[]> => {
-    return window.electronAPI?.mobile?.getSessions() ?? Promise.resolve([])
+    return desktopApi?.mobile?.getSessions() ?? Promise.resolve([])
   },
   revokeSession: (sessionId: string): Promise<{ success: boolean }> => {
-    return window.electronAPI?.mobile?.revokeSession(sessionId) ?? Promise.resolve({ success: false })
+    return desktopApi?.mobile?.revokeSession(sessionId) ?? Promise.resolve({ success: false })
   },
   revokeAllSessions: (): Promise<{ success: boolean }> => {
-    return window.electronAPI?.mobile?.revokeAllSessions() ?? Promise.resolve({ success: false })
+    return desktopApi?.mobile?.revokeAllSessions() ?? Promise.resolve({ success: false })
   },
-  onPairingInitiated: (fn: (data: { pin: string; pairCodeId: string; expiresAt: number }) => void): (() => void) => {
-    return window.electronAPI?.mobile?.onPairingInitiated(fn) ?? (() => {})
+  onPairingInitiated: (fn: (data: { pin: string; pairCodeId: string; expiresAt: number }) => void): (() => void) | undefined => {
+    return desktopApi?.mobile?.onPairingInitiated?.(fn)
   },
-  onDeviceConnected: (fn: (data: { sessionId: string; deviceName: string }) => void): (() => void) => {
-    return window.electronAPI?.mobile?.onDeviceConnected(fn) ?? (() => {})
+  onDeviceConnected: (fn: (data: { sessionId: string; deviceName: string }) => void): (() => void) | undefined => {
+    return desktopApi?.mobile?.onDeviceConnected?.(fn)
   }
 }
 
 export const githubApi = {
   checkCli: (): Promise<GhCliStatus> => {
-    return window.electronAPI.github.checkCli()
+    return desktopApi.github.checkCli()
   },
   fetchOrgs: (): Promise<string[]> => {
-    return window.electronAPI.github.fetchOrgs()
+    return desktopApi.github.fetchOrgs()
   },
   fetchOrgRepos: (org: string): Promise<GitHubRepo[]> => {
-    return window.electronAPI.github.fetchOrgRepos(org)
+    return desktopApi.github.fetchOrgRepos(org)
   },
   fetchUserRepos: (): Promise<GitHubRepo[]> => {
-    return window.electronAPI.github.fetchUserRepos()
+    return desktopApi.github.fetchUserRepos()
   }
 }
 
 export const gitlabApi = {
   checkCli: (): Promise<GlabCliStatus> => {
-    return window.electronAPI.gitlab.checkCli()
+    return desktopApi.gitlab.checkCli()
   },
   fetchOrgs: (): Promise<string[]> => {
-    return window.electronAPI.gitlab.fetchOrgs()
+    return desktopApi.gitlab.fetchOrgs()
   },
   fetchOrgRepos: (org: string): Promise<GitHubRepo[]> => {
-    return window.electronAPI.gitlab.fetchOrgRepos(org)
+    return desktopApi.gitlab.fetchOrgRepos(org)
   },
   fetchUserRepos: (): Promise<GitHubRepo[]> => {
-    return window.electronAPI.gitlab.fetchUserRepos()
+    return desktopApi.gitlab.fetchUserRepos()
   }
 }
 
 export const forgejoApi = {
   checkCli: (): Promise<TeaCliStatus> => {
-    return window.electronAPI.forgejo.checkCli()
+    return desktopApi.forgejo.checkCli()
   },
   setLogin: (loginName: string | null): Promise<TeaCliStatus> => {
-    return window.electronAPI.forgejo.setLogin(loginName)
+    return desktopApi.forgejo.setLogin(loginName)
   },
   fetchOrgs: (): Promise<string[]> => {
-    return window.electronAPI.forgejo.fetchOrgs()
+    return desktopApi.forgejo.fetchOrgs()
   },
   fetchOrgRepos: (org: string): Promise<GitHubRepo[]> => {
-    return window.electronAPI.forgejo.fetchOrgRepos(org)
+    return desktopApi.forgejo.fetchOrgRepos(org)
   },
   fetchUserRepos: (): Promise<GitHubRepo[]> => {
-    return window.electronAPI.forgejo.fetchUserRepos()
+    return desktopApi.forgejo.fetchUserRepos()
   }
 }
 
 export const gitApi = {
   recordRepoProviders: (repoFullNames: string[], provider: 'github' | 'gitlab' | 'forgejo'): Promise<void> => {
-    return window.electronAPI.git.recordRepoProviders(repoFullNames, provider)
+    return desktopApi.git.recordRepoProviders(repoFullNames, provider)
   }
 }
 
 export const taskSourceApi = {
   /** Every project's sources, or one project's when `projectId` is given. */
   getAll: (projectId?: string): Promise<TaskSource[]> => {
-    return window.electronAPI.taskSources.getAll(projectId)
+    return desktopApi.taskSources.getAll(projectId)
   },
 
   create: (data: CreateTaskSourceDTO): Promise<TaskSource> => {
-    return window.electronAPI.taskSources.create(data)
+    return desktopApi.taskSources.create(data)
   },
 
   update: (id: string, data: UpdateTaskSourceDTO): Promise<TaskSource | undefined> => {
-    return window.electronAPI.taskSources.update(id, data)
+    return desktopApi.taskSources.update(id, data)
   },
 
   delete: (id: string): Promise<boolean> => {
-    return window.electronAPI.taskSources.delete(id)
+    return desktopApi.taskSources.delete(id)
   },
 
   sync: (sourceId: string): Promise<SyncResult> => {
-    return window.electronAPI.taskSources.sync(sourceId)
+    return desktopApi.taskSources.sync(sourceId)
   },
 
   exportUpdate: (taskId: string, fields: Record<string, unknown>): Promise<void> => {
-    return window.electronAPI.taskSources.exportUpdate(taskId, fields)
+    return desktopApi.taskSources.exportUpdate(taskId, fields)
   },
 
   getUsers: (sourceId: string): Promise<SourceUser[]> => {
-    return window.electronAPI.taskSources.getUsers(sourceId)
+    return desktopApi.taskSources.getUsers(sourceId)
   },
 
   reassign: (taskId: string, userIds: string[], assigneeDisplay: string): Promise<ReassignResult> => {
-    return window.electronAPI.taskSources.reassign(taskId, userIds, assigneeDisplay)
+    return desktopApi.taskSources.reassign(taskId, userIds, assigneeDisplay)
   }
 }
 
 export const projectApi = {
-  getAll: (opts?: { includeArchived?: boolean }): Promise<ProjectRecord[]> => window.electronAPI.projects.getAll(opts),
-  get: (id: string): Promise<ProjectRecord | undefined> => window.electronAPI.projects.get(id),
-  getDefault: (): Promise<ProjectRecord | undefined> => window.electronAPI.projects.getDefault(),
-  create: (data: CreateProjectData): Promise<ProjectRecord | undefined> => window.electronAPI.projects.create(data),
-  update: (id: string, data: UpdateProjectData): Promise<ProjectRecord | undefined> => window.electronAPI.projects.update(id, data),
-  archive: (id: string, archived?: boolean): Promise<ProjectRecord | undefined> => window.electronAPI.projects.archive(id, archived),
-  reorder: (orderedIds: string[]): Promise<void> => window.electronAPI.projects.reorder(orderedIds),
+  getAll: (opts?: { includeArchived?: boolean }): Promise<ProjectRecord[]> => desktopApi.projects.getAll(opts),
+  get: (id: string): Promise<ProjectRecord | undefined> => desktopApi.projects.get(id),
+  getDefault: (): Promise<ProjectRecord | undefined> => desktopApi.projects.getDefault(),
+  create: (data: CreateProjectData): Promise<ProjectRecord | undefined> => desktopApi.projects.create(data),
+  update: (id: string, data: UpdateProjectData): Promise<ProjectRecord | undefined> => desktopApi.projects.update(id, data),
+  archive: (id: string, archived?: boolean): Promise<ProjectRecord | undefined> => desktopApi.projects.archive(id, archived),
+  reorder: (orderedIds: string[]): Promise<void> => desktopApi.projects.reorder(orderedIds),
   /** The memory file the project's Captain keeps (#55); null when the project has no Captain. */
   getCaptainMemory: (projectId: string): Promise<CaptainMemory | null> =>
-    window.electronAPI.projects.getCaptainMemory(projectId),
+    desktopApi.projects.getCaptainMemory(projectId),
   /** Moves a top-level task with its subtasks; resolves to the moved rows, or null when refused. */
-  moveTask: (taskId: string, projectId: string): Promise<Task[] | null> => window.electronAPI.projects.moveTask(taskId, projectId),
-  onChanged: (callback: (event: ProjectChangedEvent) => void): (() => void) =>
-    typeof window.electronAPI.projects.onChanged === 'function' ? window.electronAPI.projects.onChanged(callback) : () => {},
+  moveTask: (taskId: string, projectId: string): Promise<Task[] | null> => desktopApi.projects.moveTask(taskId, projectId),
+  onChanged: (callback: (event: ProjectChangedEvent) => void): (() => void) | undefined =>
+    typeof desktopApi.projects.onChanged === 'function' ? desktopApi.projects.onChanged?.(callback) : undefined,
   /** Project status (#58): counts computed now, plus the Captain's latest summary. */
-  getStatus: (projectId: string): Promise<ProjectStatus> => window.electronAPI.projects.getStatus(projectId),
+  getStatus: (projectId: string): Promise<ProjectStatus> => desktopApi.projects.getStatus(projectId),
   /** Status history (#72): one page of the Captain's journal, newest first; pass `next_cursor` back for older entries. */
   getStatusHistory: (projectId: string, query?: { limit?: number; cursor?: string | null }): Promise<ProjectStatusHistoryPage> =>
-    window.electronAPI.projects.getStatusHistory(projectId, query),
+    desktopApi.projects.getStatusHistory(projectId, query),
   /** Fires when the Captain writes a new summary through `update_project_status`. */
-  onStatusChanged: (callback: (event: { projectId: string }) => void): (() => void) =>
-    typeof window.electronAPI.projects.onStatusChanged === 'function' ? window.electronAPI.projects.onStatusChanged(callback) : () => {},
+  onStatusChanged: (callback: (event: { projectId: string }) => void): (() => void) | undefined =>
+    typeof desktopApi.projects.onStatusChanged === 'function' ? desktopApi.projects.onStatusChanged?.(callback) : undefined,
 
-  listRepos: (projectId: string): Promise<ProjectRepoRecord[]> => window.electronAPI.projects.repos.list(projectId),
+  listRepos: (projectId: string): Promise<ProjectRepoRecord[]> => desktopApi.projects.repos.list(projectId),
   addRepo: (projectId: string, data: CreateProjectRepoData): Promise<ProjectRepoRecord | undefined> =>
-    window.electronAPI.projects.repos.add(projectId, data),
+    desktopApi.projects.repos.add(projectId, data),
   updateRepo: (id: string, data: UpdateProjectRepoData): Promise<ProjectRepoRecord | undefined> =>
-    window.electronAPI.projects.repos.update(id, data),
-  removeRepo: (id: string): Promise<boolean> => window.electronAPI.projects.repos.remove(id),
+    desktopApi.projects.repos.update(id, data),
+  removeRepo: (id: string): Promise<boolean> => desktopApi.projects.repos.remove(id),
   reorderRepos: (projectId: string, orderedIds: string[]): Promise<void> =>
-    window.electronAPI.projects.repos.reorder(projectId, orderedIds),
+    desktopApi.projects.repos.reorder(projectId, orderedIds),
 
-  listResources: (projectId: string): Promise<ProjectResourceRecord[]> => window.electronAPI.projects.resources.list(projectId),
+  listResources: (projectId: string): Promise<ProjectResourceRecord[]> => desktopApi.projects.resources.list(projectId),
   addResource: (projectId: string, data: CreateProjectResourceData): Promise<ProjectResourceRecord | undefined> =>
-    window.electronAPI.projects.resources.add(projectId, data),
+    desktopApi.projects.resources.add(projectId, data),
   updateResource: (id: string, data: UpdateProjectResourceData): Promise<ProjectResourceRecord | undefined> =>
-    window.electronAPI.projects.resources.update(id, data),
-  removeResource: (id: string): Promise<boolean> => window.electronAPI.projects.resources.remove(id),
+    desktopApi.projects.resources.update(id, data),
+  removeResource: (id: string): Promise<boolean> => desktopApi.projects.resources.remove(id),
   reorderResources: (projectId: string, orderedIds: string[]): Promise<void> =>
-    window.electronAPI.projects.resources.reorder(projectId, orderedIds)
+    desktopApi.projects.resources.reorder(projectId, orderedIds)
 }
 
 /** Per-project limits and the global pause (#65). */
 export const projectLimitsApi = {
-  getState: (projectId: string): Promise<ProjectLimitState> => window.electronAPI.projectLimits.getState(projectId),
-  isAllPaused: (): Promise<boolean> => window.electronAPI.projectLimits.isAllPaused(),
-  pauseAll: (paused: boolean): Promise<boolean> => window.electronAPI.projectLimits.pauseAll(paused)
+  getState: (projectId: string): Promise<ProjectLimitState> => desktopApi.projectLimits.getState(projectId),
+  isAllPaused: (): Promise<boolean> => desktopApi.projectLimits.isAllPaused(),
+  pauseAll: (paused: boolean): Promise<boolean> => desktopApi.projectLimits.pauseAll(paused)
 }
 
 /** Captain-managed concurrency under the user-set hard cap (#150). */
 export const concurrencyApi = {
-  getState: (projectId: string): Promise<ProjectConcurrencyState> => window.electronAPI.concurrency.getState(projectId),
+  getState: (projectId: string): Promise<ProjectConcurrencyState> => desktopApi.concurrency.getState(projectId),
   setCaptainControl: (projectId: string, enabled: boolean): Promise<{ success: true } | { error: string }> =>
-    window.electronAPI.concurrency.setCaptainControl(projectId, enabled),
+    desktopApi.concurrency.setCaptainControl(projectId, enabled),
   pin: (projectId: string, agentId: string, level: number | null): Promise<{ success: true } | { error: string }> =>
-    window.electronAPI.concurrency.pin(projectId, agentId, level),
-  onChanged: (callback: (event: { projectId: string }) => void): (() => void) =>
-    typeof window.electronAPI.concurrency?.onChanged === 'function' ? window.electronAPI.concurrency.onChanged(callback) : () => undefined
+    desktopApi.concurrency.pin(projectId, agentId, level),
+  onChanged: (callback: (event: { projectId: string }) => void): (() => void) | undefined =>
+    typeof desktopApi.concurrency?.onChanged === 'function' ? desktopApi.concurrency.onChanged?.(callback) : undefined
 }
 
 
 /** The all-projects overview (#63): every active project's status and card facts in one call. */
 export const overviewApi = {
   getAllStatuses: (): Promise<ProjectOverviewEntry[]> =>
-    typeof window.electronAPI.overview?.getAllStatuses === 'function' ? window.electronAPI.overview.getAllStatuses() : Promise.resolve([])
+    typeof desktopApi.overview?.getAllStatuses === 'function' ? desktopApi.overview.getAllStatuses() : Promise.resolve([])
 }
 
 export const skillApi = {
   getAll: (): Promise<Skill[]> => {
-    return window.electronAPI.skills.getAll()
+    return desktopApi.skills.getAll()
   },
 
   create: (data: CreateSkillDTO): Promise<Skill> => {
-    return window.electronAPI.skills.create(data)
+    return desktopApi.skills.create(data)
   },
 
   update: (id: string, data: UpdateSkillDTO): Promise<Skill | undefined> => {
-    return window.electronAPI.skills.update(id, data)
+    return desktopApi.skills.update(id, data)
   },
 
   delete: (id: string): Promise<boolean> => {
-    return window.electronAPI.skills.delete(id)
+    return desktopApi.skills.delete(id)
   },
 
   /** Promote to global (null) or move into a project (#74). */
   setProject: (id: string, projectId: string | null): Promise<Skill | undefined> => {
-    return window.electronAPI.skills.setProject(id, projectId)
+    return desktopApi.skills.setProject(id, projectId)
   },
 
   /** A skill changed outside the Skills view (the Commander); absent on older preloads. */
-  onChanged: (callback: (event: { skillId: string; kind: string }) => void): (() => void) => {
-    return typeof window.electronAPI.skills.onChanged === 'function' ? window.electronAPI.skills.onChanged(callback) : () => {}
+  onChanged: (callback: (event: { skillId: string; kind: string }) => void): (() => void) | undefined => {
+    return typeof desktopApi.skills.onChanged === 'function' ? desktopApi.skills.onChanged?.(callback) : undefined
   }
 }
 
 export const secretApi = {
   getAll: (): Promise<Secret[]> => {
-    return window.electronAPI.secrets.getAll()
+    return desktopApi.secrets.getAll()
   },
 
   create: (data: CreateSecretDTO): Promise<Secret> => {
-    return window.electronAPI.secrets.create(data)
+    return desktopApi.secrets.create(data)
   },
 
   update: (id: string, data: UpdateSecretDTO): Promise<Secret | undefined> => {
-    return window.electronAPI.secrets.update(id, data)
+    return desktopApi.secrets.update(id, data)
   },
 
   delete: (id: string): Promise<boolean> => {
-    return window.electronAPI.secrets.delete(id)
+    return desktopApi.secrets.delete(id)
   }
 }
 
 export const pluginApi = {
   list: (): Promise<PluginMeta[]> => {
-    return window.electronAPI.plugins.list()
+    return desktopApi.plugins.list()
   },
 
   getDocumentation: (pluginId: string): Promise<string | null> => {
-    return window.electronAPI.plugins.getDocumentation(pluginId)
+    return desktopApi.plugins.getDocumentation(pluginId)
   },
 
   resolveOptions: (pluginId: string, resolverKey: string, config: Record<string, unknown>, mcpServerId?: string, sourceId?: string): Promise<ConfigFieldOption[]> => {
-    return window.electronAPI.plugins.resolveOptions(pluginId, resolverKey, config, mcpServerId, sourceId)
+    return desktopApi.plugins.resolveOptions(pluginId, resolverKey, config, mcpServerId, sourceId)
   },
 
   executeAction: (actionId: string, taskId: string, sourceId: string, input?: string): Promise<ActionResult> => {
-    return window.electronAPI.plugins.executeAction(actionId, taskId, sourceId, input)
+    return desktopApi.plugins.executeAction(actionId, taskId, sourceId, input)
   }
 }
 
@@ -660,101 +661,101 @@ export const pluginApi = {
 // Credentials are write-only: no call returns them.
 
 export const connectorBridgeApi = {
-  bridgePieces: (): Promise<ConnectorBridgePiece[]> => window.electronAPI.connectors.bridgePieces(),
+  bridgePieces: (): Promise<ConnectorBridgePiece[]> => desktopApi.connectors.bridgePieces(),
   ensureInstance: (pieceName: string, instanceId?: string): Promise<ConnectorBridgeInstance> =>
-    window.electronAPI.connectors.ensureInstance(pieceName, instanceId),
-  credentialStatus: (instanceId: string): Promise<ConnectorBridgeCredentialStatus> => window.electronAPI.connectors.credentialStatus(instanceId),
+    desktopApi.connectors.ensureInstance(pieceName, instanceId),
+  credentialStatus: (instanceId: string): Promise<ConnectorBridgeCredentialStatus> => desktopApi.connectors.credentialStatus(instanceId),
   setCredentials: (
     instanceId: string,
     input: ConnectorBridgeCredentialInput,
     storage?: ConnectorBridgeCredentialStorage
-  ): Promise<ConnectorBridgeSetCredentialsResult> => window.electronAPI.connectors.setCredentials(instanceId, input, storage),
-  clearCredentials: (instanceId: string): Promise<void> => window.electronAPI.connectors.clearCredentials(instanceId),
+  ): Promise<ConnectorBridgeSetCredentialsResult> => desktopApi.connectors.setCredentials(instanceId, input, storage),
+  clearCredentials: (instanceId: string): Promise<void> => desktopApi.connectors.clearCredentials(instanceId),
   oauthConnect: (
     instanceId: string,
     input: ConnectorBridgeOAuthConnectInput,
     storage?: ConnectorBridgeCredentialStorage
-  ): Promise<ConnectorBridgeSetCredentialsResult> => window.electronAPI.connectors.oauthConnect(instanceId, input, storage),
-  syncStatus: (instanceId: string): Promise<ConnectorBridgeSyncStatus> => window.electronAPI.connectors.syncStatus(instanceId)
+  ): Promise<ConnectorBridgeSetCredentialsResult> => desktopApi.connectors.oauthConnect(instanceId, input, storage),
+  syncStatus: (instanceId: string): Promise<ConnectorBridgeSyncStatus> => desktopApi.connectors.syncStatus(instanceId)
 }
 
 export const claudePluginApi = {
   getMarketplaceSources: (): Promise<MarketplaceSource[]> => {
-    return window.electronAPI.claudePlugins.getMarketplaceSources()
+    return desktopApi.claudePlugins.getMarketplaceSources()
   },
 
   addMarketplaceSource: (data: { name: string; source_type?: string; source_url: string; auto_update?: boolean }): Promise<MarketplaceSource> => {
-    return window.electronAPI.claudePlugins.addMarketplaceSource(data)
+    return desktopApi.claudePlugins.addMarketplaceSource(data)
   },
 
   removeMarketplaceSource: (id: string): Promise<boolean> => {
-    return window.electronAPI.claudePlugins.removeMarketplaceSource(id)
+    return desktopApi.claudePlugins.removeMarketplaceSource(id)
   },
 
   fetchCatalog: (sourceId: string): Promise<MarketplaceCatalog | null> => {
-    return window.electronAPI.claudePlugins.fetchCatalog(sourceId)
+    return desktopApi.claudePlugins.fetchCatalog(sourceId)
   },
 
   discoverPlugins: (searchQuery?: string): Promise<DiscoverablePlugin[]> => {
-    return window.electronAPI.claudePlugins.discoverPlugins(searchQuery)
+    return desktopApi.claudePlugins.discoverPlugins(searchQuery)
   },
 
   getInstalledPlugins: (): Promise<InstalledPlugin[]> => {
-    return window.electronAPI.claudePlugins.getInstalledPlugins()
+    return desktopApi.claudePlugins.getInstalledPlugins()
   },
 
   installPlugin: (pluginName: string, marketplaceId: string, scope?: string): Promise<InstalledPlugin> => {
-    return window.electronAPI.claudePlugins.installPlugin(pluginName, marketplaceId, scope)
+    return desktopApi.claudePlugins.installPlugin(pluginName, marketplaceId, scope)
   },
 
   uninstallPlugin: (pluginId: string): Promise<boolean> => {
-    return window.electronAPI.claudePlugins.uninstallPlugin(pluginId)
+    return desktopApi.claudePlugins.uninstallPlugin(pluginId)
   },
 
   enablePlugin: (pluginId: string): Promise<InstalledPlugin | undefined> => {
-    return window.electronAPI.claudePlugins.enablePlugin(pluginId)
+    return desktopApi.claudePlugins.enablePlugin(pluginId)
   },
 
   disablePlugin: (pluginId: string): Promise<InstalledPlugin | undefined> => {
-    return window.electronAPI.claudePlugins.disablePlugin(pluginId)
+    return desktopApi.claudePlugins.disablePlugin(pluginId)
   },
 
   getPluginResources: (pluginId: string): Promise<PluginResources> => {
-    return window.electronAPI.claudePlugins.getPluginResources(pluginId)
+    return desktopApi.claudePlugins.getPluginResources(pluginId)
   }
 }
 
 export const worktreeApi = {
   setup: (taskId: string, repos: { fullName: string; defaultBranch: string }[], org: string, provider: 'github' | 'gitlab' | 'forgejo'): Promise<string> => {
-    return window.electronAPI.worktree.setup(taskId, repos, org, provider)
+    return desktopApi.worktree.setup(taskId, repos, org, provider)
   },
   cleanup: (taskId: string, repos: { fullName: string }[], org: string, removeTaskDir?: boolean): Promise<void> => {
-    return window.electronAPI.worktree.cleanup(taskId, repos, org, removeTaskDir)
+    return desktopApi.worktree.cleanup(taskId, repos, org, removeTaskDir)
   },
   changes: (taskId: string, repos: { fullName: string }[]): Promise<Array<{ repo: string; diff: string; allFiles?: string[]; workspace?: boolean; error?: string; noWorktree?: boolean; path?: string; branch?: string; pushed?: boolean; prNumber?: number; prUrl?: string; prState?: string; prTitle?: string; ciStatus?: 'passing' | 'failing' | 'pending' | 'none' }>> => {
-    return window.electronAPI.worktree.changes(taskId, repos)
+    return desktopApi.worktree.changes(taskId, repos)
   },
   files: (taskId: string, repos: { fullName: string }[]): Promise<Array<{ repo: string; allFiles: string[]; workspace?: boolean; error?: string; noWorktree?: boolean; path?: string }>> => {
-    return window.electronAPI.worktree.files(taskId, repos)
+    return desktopApi.worktree.files(taskId, repos)
   },
   readFile: (taskId: string, repoFullName: string | null, filePath: string): Promise<{ content: string; size: number; binary: boolean; truncated: boolean } | null> => {
-    const readFile = window.electronAPI.worktree.readFile
+    const readFile = desktopApi.worktree.readFile
     if (typeof readFile !== 'function') {
       return Promise.reject(new Error('Restart 21x to enable workspace file previews.'))
     }
     return readFile(taskId, repoFullName, filePath)
   },
   runCleanupNow: (): Promise<{ cleaned: number; errors: string[]; nodeModulesCleaned: number }> => {
-    return window.electronAPI.worktree.runCleanupNow()
+    return desktopApi.worktree.runCleanupNow()
   }
 }
 
-export const onWorktreeProgress = (callback: (event: WorktreeProgressEvent) => void): (() => void) => {
-  return window.electronAPI.onWorktreeProgress(callback)
+export const onWorktreeProgress = (callback: (event: WorktreeProgressEvent) => void): (() => void) | undefined => {
+  return desktopApi.onWorktreeProgress?.(callback)
 }
 
-export const onWorkspaceCleanupProgress = (callback: (event: WorkspaceCleanupProgressEvent) => void): (() => void) => {
-  return window.electronAPI.onWorkspaceCleanupProgress(callback)
+export const onWorkspaceCleanupProgress = (callback: (event: WorkspaceCleanupProgressEvent) => void): (() => void) | undefined => {
+  return desktopApi.onWorkspaceCleanupProgress?.(callback)
 }
 
 // ── Voice control ───────────────────────────────────────────
@@ -762,111 +763,111 @@ export const onWorkspaceCleanupProgress = (callback: (event: WorkspaceCleanupPro
 // captures audio and shows what the main process reports.
 
 export const voiceApi = {
-  getSnapshot: (): Promise<VoiceSnapshot> => window.electronAPI.voice.getSnapshot(),
-  setEnabled: (enabled: boolean): Promise<VoiceSnapshot> => window.electronAPI.voice.setEnabled(enabled),
-  getPermission: (): Promise<{ status: MicrophonePermission }> => window.electronAPI.voice.getPermission(),
+  getSnapshot: (): Promise<VoiceSnapshot> => desktopApi.voice.getSnapshot(),
+  setEnabled: (enabled: boolean): Promise<VoiceSnapshot> => desktopApi.voice.setEnabled(enabled),
+  getPermission: (): Promise<{ status: MicrophonePermission }> => desktopApi.voice.getPermission(),
   requestPermission: (): Promise<{ status: MicrophonePermission }> =>
-    window.electronAPI.voice.requestPermission(),
+    desktopApi.voice.requestPermission(),
   startTurn: (mode: VoiceTurnMode, context: VoiceUiContext): Promise<{ turnId: string; turnEpoch?: string } | { error: string }> =>
-    window.electronAPI.voice.startTurn(mode, context),
+    desktopApi.voice.startTurn(mode, context),
   pushAudio: (turnId: string, chunk: Uint8Array): Promise<void> =>
-    window.electronAPI.voice.pushAudio(turnId, chunk),
-  endTurn: (turnId: string): Promise<void> => window.electronAPI.voice.endTurn(turnId),
+    desktopApi.voice.pushAudio(turnId, chunk),
+  endTurn: (turnId: string): Promise<void> => desktopApi.voice.endTurn(turnId),
   cancelTurn: (turnId?: string, turnEpoch?: string): Promise<void> =>
-    window.electronAPI.voice.cancelTurn(turnId, turnEpoch),
+    desktopApi.voice.cancelTurn(turnId, turnEpoch),
   confirm: (turnId: string, choice?: { taskId?: string; agentName?: string }, turnEpoch?: string): Promise<{ success: boolean }> =>
     turnEpoch
-      ? window.electronAPI.voice.confirm(turnId, choice, turnEpoch)
-      : window.electronAPI.voice.confirm(turnId, choice),
+      ? desktopApi.voice.confirm(turnId, choice, turnEpoch)
+      : desktopApi.voice.confirm(turnId, choice),
   dismiss: (turnId: string, turnEpoch?: string): Promise<void> =>
     turnEpoch
-      ? window.electronAPI.voice.dismiss(turnId, turnEpoch)
-      : window.electronAPI.voice.dismiss(turnId),
-  getRuntime: (): Promise<VoiceRuntimeStatus> => window.electronAPI.voice.getRuntime(),
-  installRuntime: (): Promise<VoiceRuntimeStatus> => window.electronAPI.voice.installRuntime(),
-  removeRuntime: (): Promise<VoiceRuntimeStatus> => window.electronAPI.voice.removeRuntime(),
-  installModel: (id: string): Promise<VoiceModelState> => window.electronAPI.voice.installModel(id),
-  removeModel: (id: string): Promise<VoiceModelState[]> => window.electronAPI.voice.removeModel(id),
-  selectModel: (id: string): Promise<VoiceModelState[]> => window.electronAPI.voice.selectModel(id),
-  removeAllModels: (): Promise<{ success: boolean }> => window.electronAPI.voice.removeAllModels(),
-  setCustomModelDir: (dir: string): Promise<VoiceSnapshot> => window.electronAPI.voice.setCustomModelDir(dir),
-  pickModelDir: (): Promise<{ dir: string | null }> => window.electronAPI.voice.pickModelDir(),
+      ? desktopApi.voice.dismiss(turnId, turnEpoch)
+      : desktopApi.voice.dismiss(turnId),
+  getRuntime: (): Promise<VoiceRuntimeStatus> => desktopApi.voice.getRuntime(),
+  installRuntime: (): Promise<VoiceRuntimeStatus> => desktopApi.voice.installRuntime(),
+  removeRuntime: (): Promise<VoiceRuntimeStatus> => desktopApi.voice.removeRuntime(),
+  installModel: (id: string): Promise<VoiceModelState> => desktopApi.voice.installModel(id),
+  removeModel: (id: string): Promise<VoiceModelState[]> => desktopApi.voice.removeModel(id),
+  selectModel: (id: string): Promise<VoiceModelState[]> => desktopApi.voice.selectModel(id),
+  removeAllModels: (): Promise<{ success: boolean }> => desktopApi.voice.removeAllModels(),
+  setCustomModelDir: (dir: string): Promise<VoiceSnapshot> => desktopApi.voice.setCustomModelDir(dir),
+  pickModelDir: (): Promise<{ dir: string | null }> => desktopApi.voice.pickModelDir(),
   setEndpointSilence: (seconds: number): Promise<{ success: boolean }> =>
-    window.electronAPI.voice.setEndpointSilence(seconds),
-  setShortcut: (accelerator: string): Promise<VoiceSnapshot> => window.electronAPI.voice.setShortcut(accelerator),
+    desktopApi.voice.setEndpointSilence(seconds),
+  setShortcut: (accelerator: string): Promise<VoiceSnapshot> => desktopApi.voice.setShortcut(accelerator),
   expectAnswer: (turnId: string, taskId?: string): Promise<void> =>
-    window.electronAPI.voice.expectAnswer(turnId, taskId),
+    desktopApi.voice.expectAnswer(turnId, taskId),
   /** The user typed rather than spoke, so no answer is expected by voice. */
   answerNotExpected: (taskId?: string): Promise<void> =>
-    window.electronAPI?.voice?.answerNotExpected?.(taskId) ?? Promise.resolve(),
-  onState: (callback: (event: VoiceStateEvent) => void): (() => void) =>
-    window.electronAPI.voice.onState(callback),
-  onPartial: (callback: (event: { turnId: string; turnEpoch: string | null; text: string }) => void): (() => void) =>
-    window.electronAPI.voice.onPartial(callback),
-  onFinal: (callback: (event: { turnId: string; turnEpoch: string | null; text: string }) => void): (() => void) =>
-    window.electronAPI.voice.onFinal(callback),
+    desktopApi?.voice?.answerNotExpected?.(taskId) ?? Promise.resolve(),
+  onState: (callback: (event: VoiceStateEvent) => void): (() => void) | undefined =>
+    desktopApi.voice.onState?.(callback),
+  onPartial: (callback: (event: { turnId: string; turnEpoch: string | null; text: string }) => void): (() => void) | undefined =>
+    desktopApi.voice.onPartial?.(callback),
+  onFinal: (callback: (event: { turnId: string; turnEpoch: string | null; text: string }) => void): (() => void) | undefined =>
+    desktopApi.voice.onFinal?.(callback),
   onSegment: (
     callback: (event: { turnId: string; turnEpoch: string | null; text: string; index: number }) => void
-  ): (() => void) => window.electronAPI.voice.onSegment(callback),
-  onOutcome: (callback: (event: VoiceActionOutcome) => void): (() => void) =>
-    window.electronAPI.voice.onOutcome(callback),
-  onStatus: (callback: (event: Partial<VoiceSnapshot> & { model?: VoiceModelState }) => void): (() => void) =>
-    window.electronAPI.voice.onStatus(callback),
-  onError: (callback: (event: VoiceErrorEvent) => void): (() => void) =>
-    window.electronAPI.voice.onError(callback),
-  onNavigate: (callback: (event: { destination: VoiceViewName; taskId: string | null }) => void): (() => void) =>
-    window.electronAPI.voice.onNavigate(callback),
-  onDictate: (callback: (event: { turnId: string; text: string }) => void): (() => void) =>
-    window.electronAPI.voice.onDictate(callback),
-  onRuntimeProgress: (callback: (event: VoiceRuntimeProgressEvent) => void): (() => void) =>
-    window.electronAPI.voice.onRuntimeProgress(callback),
-  onHotkey: (callback: (event: { action: string }) => void): (() => void) =>
-    window.electronAPI.voice.onHotkey(callback)
+  ): (() => void) | undefined => desktopApi.voice.onSegment?.(callback),
+  onOutcome: (callback: (event: VoiceActionOutcome) => void): (() => void) | undefined =>
+    desktopApi.voice.onOutcome?.(callback),
+  onStatus: (callback: (event: Partial<VoiceSnapshot> & { model?: VoiceModelState }) => void): (() => void) | undefined =>
+    desktopApi.voice.onStatus?.(callback),
+  onError: (callback: (event: VoiceErrorEvent) => void): (() => void) | undefined =>
+    desktopApi.voice.onError?.(callback),
+  onNavigate: (callback: (event: { destination: VoiceViewName; taskId: string | null }) => void): (() => void) | undefined =>
+    desktopApi.voice.onNavigate?.(callback),
+  onDictate: (callback: (event: { turnId: string; text: string }) => void): (() => void) | undefined =>
+    desktopApi.voice.onDictate?.(callback),
+  onRuntimeProgress: (callback: (event: VoiceRuntimeProgressEvent) => void): (() => void) | undefined =>
+    desktopApi.voice.onRuntimeProgress?.(callback),
+  onHotkey: (callback: (event: { action: string }) => void): (() => void) | undefined =>
+    desktopApi.voice.onHotkey?.(callback)
 }
 
 /** Spoken answers. Main produces the audio; the renderer only plays it. */
 export const voiceTtsApi = {
-  getSnapshot: (): Promise<VoiceTtsSnapshot> => window.electronAPI.voice.tts.getSnapshot(),
+  getSnapshot: (): Promise<VoiceTtsSnapshot> => desktopApi.voice.tts.getSnapshot(),
   setEnabled: (enabled: boolean): Promise<VoiceTtsSnapshot> =>
-    window.electronAPI.voice.tts.setEnabled(enabled),
+    desktopApi.voice.tts.setEnabled(enabled),
   setEngine: (engine: VoiceTtsEngineId): Promise<VoiceTtsSnapshot> =>
-    window.electronAPI.voice.tts.setEngine(engine),
-  setVoice: (voiceId: string): Promise<VoiceTtsSnapshot> => window.electronAPI.voice.tts.setVoice(voiceId),
-  setSpeed: (speed: number): Promise<VoiceTtsSnapshot> => window.electronAPI.voice.tts.setSpeed(speed),
+    desktopApi.voice.tts.setEngine(engine),
+  setVoice: (voiceId: string): Promise<VoiceTtsSnapshot> => desktopApi.voice.tts.setVoice(voiceId),
+  setSpeed: (speed: number): Promise<VoiceTtsSnapshot> => desktopApi.voice.tts.setSpeed(speed),
   setMaxChars: (maxChars: number): Promise<VoiceTtsSnapshot> =>
-    window.electronAPI.voice.tts.setMaxChars(maxChars),
+    desktopApi.voice.tts.setMaxChars(maxChars),
   setSpeakActionResults: (on: boolean): Promise<VoiceTtsSnapshot> =>
-    window.electronAPI.voice.tts.setSpeakActionResults(on),
+    desktopApi.voice.tts.setSpeakActionResults(on),
   setOnlyVoiceTurns: (on: boolean): Promise<VoiceTtsSnapshot> =>
-    window.electronAPI.voice.tts.setOnlyVoiceTurns(on),
-  installModel: (id: string): Promise<VoiceTtsSnapshot> => window.electronAPI.voice.tts.installModel(id),
-  selectModel: (id: string): Promise<VoiceTtsSnapshot> => window.electronAPI.voice.tts.selectModel(id),
-  removeModel: (id: string): Promise<VoiceTtsSnapshot> => window.electronAPI.voice.tts.removeModel(id),
-  preview: (voiceId: string): Promise<{ spoken: boolean }> => window.electronAPI.voice.tts.preview(voiceId),
+    desktopApi.voice.tts.setOnlyVoiceTurns(on),
+  installModel: (id: string): Promise<VoiceTtsSnapshot> => desktopApi.voice.tts.installModel(id),
+  selectModel: (id: string): Promise<VoiceTtsSnapshot> => desktopApi.voice.tts.selectModel(id),
+  removeModel: (id: string): Promise<VoiceTtsSnapshot> => desktopApi.voice.tts.removeModel(id),
+  preview: (voiceId: string): Promise<{ spoken: boolean }> => desktopApi.voice.tts.preview(voiceId),
   speak: (text: string, taskId?: string): Promise<{ spoken: boolean }> =>
-    window.electronAPI.voice.tts.speak(text, taskId),
-  stop: (): Promise<void> => window.electronAPI.voice.tts.stop(),
-  onSpeechStart: (callback: (event: VoiceSpeechStartEvent) => void): (() => void) =>
-    window.electronAPI.voice.tts.onSpeechStart(callback),
-  onSpeechChunk: (callback: (event: VoiceSpeechChunkEvent) => void): (() => void) =>
-    window.electronAPI.voice.tts.onSpeechChunk(callback),
-  onSpeechEnd: (callback: (event: VoiceSpeechEndEvent) => void): (() => void) =>
-    window.electronAPI.voice.tts.onSpeechEnd(callback),
-  onStatus: (callback: (event: VoiceTtsSnapshot) => void): (() => void) =>
-    window.electronAPI.voice.tts.onStatus(callback),
-  onModelProgress: (callback: (event: { model: VoiceTtsModelState }) => void): (() => void) =>
-    window.electronAPI.voice.tts.onModelProgress(callback)
+    desktopApi.voice.tts.speak(text, taskId),
+  stop: (): Promise<void> => desktopApi.voice.tts.stop(),
+  onSpeechStart: (callback: (event: VoiceSpeechStartEvent) => void): (() => void) | undefined =>
+    desktopApi.voice.tts.onSpeechStart?.(callback),
+  onSpeechChunk: (callback: (event: VoiceSpeechChunkEvent) => void): (() => void) | undefined =>
+    desktopApi.voice.tts.onSpeechChunk?.(callback),
+  onSpeechEnd: (callback: (event: VoiceSpeechEndEvent) => void): (() => void) | undefined =>
+    desktopApi.voice.tts.onSpeechEnd?.(callback),
+  onStatus: (callback: (event: VoiceTtsSnapshot) => void): (() => void) | undefined =>
+    desktopApi.voice.tts.onStatus?.(callback),
+  onModelProgress: (callback: (event: { model: VoiceTtsModelState }) => void): (() => void) | undefined =>
+    desktopApi.voice.tts.onModelProgress?.(callback)
 }
 
 export const browserRecordingApi = {
-  start: (panelId: string, title?: string) => window.electronAPI?.browser?.startRecording
-    ? window.electronAPI.browser.startRecording(panelId, title)
+  start: (panelId: string, title?: string) => electronBrowserApi()?.startRecording
+    ? electronBrowserApi()!.startRecording(panelId, title)
     : Promise.resolve({ error: 'Browser recording is unavailable.' } as const),
-  stop: (panelId: string) => window.electronAPI?.browser?.stopRecording
-    ? window.electronAPI.browser.stopRecording(panelId)
+  stop: (panelId: string) => electronBrowserApi()?.stopRecording
+    ? electronBrowserApi()!.stopRecording(panelId)
     : Promise.resolve({ error: 'Browser recording is unavailable.' } as const),
-  status: (panelId: string) => window.electronAPI?.browser?.recordingStatus
-    ? window.electronAPI.browser.recordingStatus(panelId)
+  status: (panelId: string) => electronBrowserApi()?.recordingStatus
+    ? electronBrowserApi()!.recordingStatus(panelId)
     : Promise.resolve({ recording: null }),
 }
 
@@ -877,9 +878,9 @@ export const browserRecordingApi = {
 
 export const chatApi = {
   start: (payload: ChatStartRequest): Promise<{ turnId: string; provider: string; model: string }> =>
-    window.electronAPI.chat.start(payload),
-  cancel: (turnId: string): Promise<{ cancelled: boolean }> => window.electronAPI.chat.cancel(turnId),
-  onEvent: (callback: (event: ChatIpcEvent) => void): (() => void) => window.electronAPI.chat.onEvent(callback)
+    desktopApi.chat.start(payload),
+  cancel: (turnId: string): Promise<{ cancelled: boolean }> => desktopApi.chat.cancel(turnId),
+  onEvent: (callback: (event: ChatIpcEvent) => void): (() => void) | undefined => desktopApi.chat.onEvent?.(callback)
 }
 
 // ── Commander sessions ─────────────────────────────────────
@@ -887,42 +888,42 @@ export const chatApi = {
 // message and runs the turns; the renderer lists, sends and draws events.
 
 export const sessionContextApi = {
-  getSnapshot: (scope: SessionContextScope): Promise<SessionContextSnapshot> => window.electronAPI.sessionContext.getSnapshot(scope),
-  setPolicy: (policy: RolloverPolicy): Promise<RolloverPolicy> => window.electronAPI.sessionContext.setPolicy(policy)
+  getSnapshot: (scope: SessionContextScope): Promise<SessionContextSnapshot> => desktopApi.sessionContext.getSnapshot(scope),
+  setPolicy: (policy: RolloverPolicy): Promise<RolloverPolicy> => desktopApi.sessionContext.setPolicy(policy)
 }
 
 export const commanderApi = {
-  listSessions: (payload?: CommanderListSessionsRequest): Promise<CommanderSession[]> => window.electronAPI.commander.listSessions(payload),
-  createSession: (title?: string): Promise<CommanderSession> => window.electronAPI.commander.createSession(title ? { title } : undefined),
-  renameSession: (id: string, title: string): Promise<CommanderSession | null> => window.electronAPI.commander.renameSession(id, title),
-  archiveSession: (id: string, archived: boolean): Promise<CommanderSession | null> => window.electronAPI.commander.archiveSession(id, archived),
+  listSessions: (payload?: CommanderListSessionsRequest): Promise<CommanderSession[]> => desktopApi.commander.listSessions(payload),
+  createSession: (title?: string): Promise<CommanderSession> => desktopApi.commander.createSession(title ? { title } : undefined),
+  renameSession: (id: string, title: string): Promise<CommanderSession | null> => desktopApi.commander.renameSession(id, title),
+  archiveSession: (id: string, archived: boolean): Promise<CommanderSession | null> => desktopApi.commander.archiveSession(id, archived),
   listMessages: (sessionId: string): Promise<{ messages: CommanderMessage[]; activeTurnId: string | null }> =>
-    window.electronAPI.commander.listMessages(sessionId),
-  markRead: (sessionId: string): Promise<CommanderSession | null> => window.electronAPI.commander.markRead(sessionId),
+    desktopApi.commander.listMessages(sessionId),
+  markRead: (sessionId: string): Promise<CommanderSession | null> => desktopApi.commander.markRead(sessionId),
   /** Tells main which session the view shows (#62): a report for it is relayed at once, others only queue as unread. */
   setActiveSession: (sessionId: string | null): Promise<void> =>
-    typeof window.electronAPI.commander.setActiveSession === 'function' ? window.electronAPI.commander.setActiveSession(sessionId) : Promise.resolve(),
+    typeof desktopApi.commander.setActiveSession === 'function' ? desktopApi.commander.setActiveSession(sessionId) : Promise.resolve(),
   send: (sessionId: string, text: string, images?: ChatImageInput[]): Promise<{ turnId: string; message: CommanderMessage }> =>
-    images?.length ? window.electronAPI.commander.send(sessionId, text, images) : window.electronAPI.commander.send(sessionId, text),
-  getImage: (id: string): Promise<(ChatImageInput & { id: string }) | null> => window.electronAPI.commander.getImage(id),
-  cancel: (sessionId: string): Promise<{ cancelled: boolean }> => window.electronAPI.commander.cancel(sessionId),
+    images?.length ? desktopApi.commander.send(sessionId, text, images) : desktopApi.commander.send(sessionId, text),
+  getImage: (id: string): Promise<(ChatImageInput & { id: string }) | null> => desktopApi.commander.getImage(id),
+  cancel: (sessionId: string): Promise<{ cancelled: boolean }> => desktopApi.commander.cancel(sessionId),
   undoAction: (sessionId: string, actionId: string): Promise<{ alreadyUndone: boolean; message: CommanderMessage }> =>
-    window.electronAPI.commander.undoAction(sessionId, actionId),
-  getActivity: (sessionId: string): Promise<import('@shared/activity').CommanderActivitySnapshot> => window.electronAPI.commander.getActivity(sessionId),
-  onEvent: (callback: (event: CommanderEvent) => void): (() => void) => window.electronAPI.commander.onEvent(callback)
+    desktopApi.commander.undoAction(sessionId, actionId),
+  getActivity: (sessionId: string): Promise<import('@shared/activity').CommanderActivitySnapshot> => desktopApi.commander.getActivity(sessionId),
+  onEvent: (callback: (event: CommanderEvent) => void): (() => void) | undefined => desktopApi.commander.onEvent?.(callback)
 }
 
 // ── Global MCP config of the coding-agent CLIs ───────────────
 // Claude Code, OpenCode and Codex global MCP servers (docs/mcp-global-config.md).
 
 export const cliMcpApi = {
-  snapshot: (): Promise<CliMcpSnapshot> => window.electronAPI.cliMcp.snapshot(),
-  upsert: (request: CliMcpUpsertRequest): Promise<CliMcpMutationResult> => window.electronAPI.cliMcp.upsert(request),
-  remove: (ref: CliMcpServerRef): Promise<CliMcpMutationResult> => window.electronAPI.cliMcp.remove(ref),
-  setEnabled: (ref: CliMcpServerRef & { enabled: boolean }): Promise<CliMcpMutationResult> => window.electronAPI.cliMcp.setEnabled(ref),
+  snapshot: (): Promise<CliMcpSnapshot> => desktopApi.cliMcp.snapshot(),
+  upsert: (request: CliMcpUpsertRequest): Promise<CliMcpMutationResult> => desktopApi.cliMcp.upsert(request),
+  remove: (ref: CliMcpServerRef): Promise<CliMcpMutationResult> => desktopApi.cliMcp.remove(ref),
+  setEnabled: (ref: CliMcpServerRef & { enabled: boolean }): Promise<CliMcpMutationResult> => desktopApi.cliMcp.setEnabled(ref),
   setToolEnabled: (ref: CliMcpServerRef & { tool: string; enabled: boolean }): Promise<CliMcpMutationResult> =>
-    window.electronAPI.cliMcp.setToolEnabled(ref),
-  probe: (ref: CliMcpServerRef): Promise<CliMcpProbeResult> => window.electronAPI.cliMcp.probe(ref)
+    desktopApi.cliMcp.setToolEnabled(ref),
+  probe: (ref: CliMcpServerRef): Promise<CliMcpProbeResult> => desktopApi.cliMcp.probe(ref)
 }
 
 // ── Voice: ElevenLabs engine and Commander voice mode (#64) ──
@@ -930,16 +931,16 @@ export const cliMcpApi = {
 // snapshot, which only says whether a key is set.
 
 export const voiceElevenLabsApi = {
-  setKey: (key: string): Promise<VoiceTtsSnapshot> => window.electronAPI.voiceElevenLabs.setKey(key),
-  clearKey: (): Promise<VoiceTtsSnapshot> => window.electronAPI.voiceElevenLabs.clearKey(),
-  acceptDisclosure: (): Promise<VoiceTtsSnapshot> => window.electronAPI.voiceElevenLabs.acceptDisclosure(),
-  refresh: (): Promise<VoiceTtsSnapshot> => window.electronAPI.voiceElevenLabs.refresh(),
-  setModel: (modelId: string): Promise<VoiceTtsSnapshot> => window.electronAPI.voiceElevenLabs.setModel(modelId)
+  setKey: (key: string): Promise<VoiceTtsSnapshot> => desktopApi.voiceElevenLabs.setKey(key),
+  clearKey: (): Promise<VoiceTtsSnapshot> => desktopApi.voiceElevenLabs.clearKey(),
+  acceptDisclosure: (): Promise<VoiceTtsSnapshot> => desktopApi.voiceElevenLabs.acceptDisclosure(),
+  refresh: (): Promise<VoiceTtsSnapshot> => desktopApi.voiceElevenLabs.refresh(),
+  setModel: (modelId: string): Promise<VoiceTtsSnapshot> => desktopApi.voiceElevenLabs.setModel(modelId)
 }
 
 export const commanderVoiceApi = {
-  setActive: (sessionId: string | null): Promise<{ active: string | null }> => window.electronAPI.commanderVoice.setActive(sessionId),
-  bargeIn: (sessionId: string): Promise<{ cancelled: boolean }> => window.electronAPI.commanderVoice.bargeIn(sessionId),
+  setActive: (sessionId: string | null): Promise<{ active: string | null }> => desktopApi.commanderVoice.setActive(sessionId),
+  bargeIn: (sessionId: string): Promise<{ cancelled: boolean }> => desktopApi.commanderVoice.bargeIn(sessionId),
   send: (sessionId: string, text: string): Promise<{ turnId: string; message: CommanderMessage }> =>
-    window.electronAPI.commanderVoice.send(sessionId, text)
+    desktopApi.commanderVoice.send(sessionId, text)
 }

@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import { useState, useCallback } from 'react'
 import { Paperclip, X, FileText, Download } from 'lucide-react'
 import { attachmentApi } from '@/lib/ipc-client'
@@ -88,7 +89,7 @@ export function TaskAttachments({
 
       const files = Array.from(e.dataTransfer.files)
       const filePaths = files
-        .map((f) => window.electronAPI.webUtils.getPathForFile(f))
+        .map((f) => desktopApi.webUtils.getPathForFile(f))
         .filter((p) => !!p)
       processFilePaths(filePaths)
     },

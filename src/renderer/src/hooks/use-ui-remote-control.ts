@@ -1,3 +1,4 @@
+import { desktopApi, desktopSupports } from '@/lib/desktop-api'
 import { useEffect } from 'react'
 import { useUIStore } from '@/stores/ui-store'
 import { useTaskStore } from '@/stores/task-store'
@@ -21,7 +22,7 @@ export const UI_PUBLISH_THROTTLE_MS = 250
  */
 export function useUiRemoteControl(): void {
   useEffect(() => {
-    if (typeof window === 'undefined' || !window.electronAPI?.ui) return undefined
+    if (!desktopSupports('ui.publishState')) return undefined
 
     let timer: ReturnType<typeof setTimeout> | null = null
     let pending = false
@@ -29,7 +30,7 @@ export function useUiRemoteControl(): void {
     const publishNow = (): void => {
       pending = false
       if (timer) clearTimeout(timer)
-      void window.electronAPI.ui.publishState({ ...collectUiState() })
+      void desktopApi.ui.publishState({ ...collectUiState() })
       timer = setTimeout(() => {
         timer = null
         if (!pending) return
@@ -56,7 +57,7 @@ export function useUiRemoteControl(): void {
     const offPanels = useCanvasStore.subscribe((s) => s.panels, publish)
     const offViewport = useCanvasStore.subscribe((s) => s.viewport, publish)
 
-    const offCommand = window.electronAPI.ui.onCommand?.((command) => {
+    const offCommand = desktopApi.ui.onCommand?.((command) => {
       applyUiCommand(command)
       // Past the throttle on purpose: the next tool call must see the result of
       // this command, not the screen that was there before it. A command is one

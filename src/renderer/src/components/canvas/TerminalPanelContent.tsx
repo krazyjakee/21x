@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -132,7 +133,7 @@ export function TerminalPanelContent({ terminalId, cwd }: TerminalPanelContentPr
     if (!xtermRef.current) return
 
     try {
-      const { pid } = await window.electronAPI.terminal.create(
+      const { pid } = await desktopApi.terminal.create(
         terminalId,
         term.cols,
         term.rows,
@@ -142,7 +143,7 @@ export function TerminalPanelContent({ terminalId, cwd }: TerminalPanelContentPr
       // StrictMode / fast remount can unmount this instance before create() resolves.
       // In that case, kill only the PTY we just created and let the live instance continue.
       if (!isMountedRef.current || xtermRef.current !== term) {
-        await window.electronAPI.terminal.kill(terminalId, pid).catch(() => {})
+        await desktopApi.terminal.kill(terminalId, pid).catch(() => {})
         return
       }
 
@@ -151,12 +152,12 @@ export function TerminalPanelContent({ terminalId, cwd }: TerminalPanelContentPr
       tlog(`[Terminal:${terminalId}] PTY created, setting up listeners`)
 
       const inputDispose = term.onData((data) => {
-        window.electronAPI.terminal.write(terminalId, data)
+        desktopApi.terminal.write(terminalId, data)
       })
 
       const removeDataListener = subscribe<{ id: string; data: string }>(
         'terminal:data',
-        (cb) => window.electronAPI.terminal.onData(cb),
+        (cb) => desktopApi.terminal.onData?.(cb),
         ({ id, data }) => {
           if (id === terminalId) {
             term.write(data)
@@ -168,7 +169,7 @@ export function TerminalPanelContent({ terminalId, cwd }: TerminalPanelContentPr
 
       const removeExitListener = subscribe<{ id: string }>(
         'terminal:exit',
-        (cb) => window.electronAPI.terminal.onExit(cb),
+        (cb) => desktopApi.terminal.onExit?.(cb),
         ({ id }) => {
           if (id === terminalId) {
             processExited = true
@@ -182,7 +183,7 @@ export function TerminalPanelContent({ terminalId, cwd }: TerminalPanelContentPr
         if (processExited && domEvent.key === 'Enter') {
           processExited = false
           term.clear()
-          window.electronAPI.terminal.create(
+          desktopApi.terminal.create(
             terminalId,
             term.cols,
             term.rows,
@@ -254,7 +255,7 @@ export function TerminalPanelContent({ terminalId, cwd }: TerminalPanelContentPr
         try {
           fitAddonRef.current.fit()
           if (xtermRef.current && isReadyRef.current) {
-            window.electronAPI.terminal.resize(
+            desktopApi.terminal.resize(
               terminalId,
               xtermRef.current.cols,
               xtermRef.current.rows
@@ -284,13 +285,13 @@ export function TerminalPanelContent({ terminalId, cwd }: TerminalPanelContentPr
       if (expectedPid !== undefined) {
         // Capture cwd before killing the terminal — persists across restarts.
         // Skip ID-only cleanup when this instance never acquired a PTY pid.
-        window.electronAPI.terminal.getCwd(terminalId, expectedPid).then(({ cwd: currentCwd }) => {
+        desktopApi.terminal.getCwd(terminalId, expectedPid).then(({ cwd: currentCwd }) => {
           if (currentCwd && currentCwd !== lastWrittenCwdRef.current) {
             lastWrittenCwdRef.current = currentCwd
             useCanvasStore.getState().updatePanel(terminalId, { url: currentCwd })
           }
         }).catch(() => {}).finally(() => {
-          window.electronAPI.terminal.kill(terminalId, expectedPid).catch(() => {})
+          desktopApi.terminal.kill(terminalId, expectedPid).catch(() => {})
         })
       }
 
@@ -316,7 +317,7 @@ export function TerminalPanelContent({ terminalId, cwd }: TerminalPanelContentPr
     const interval = setInterval(async () => {
       try {
         const expectedPid = activePidRef.current ?? undefined
-        const { cwd: currentCwd } = await window.electronAPI.terminal.getCwd(terminalId, expectedPid)
+        const { cwd: currentCwd } = await desktopApi.terminal.getCwd(terminalId, expectedPid)
         // Skip the store write (and the re-render/persist it triggers) when the
         // directory hasn't changed since the last write.
         if (currentCwd && currentCwd !== lastWrittenCwdRef.current) {

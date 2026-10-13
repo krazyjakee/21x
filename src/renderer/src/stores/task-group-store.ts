@@ -95,7 +95,7 @@ export const useTaskGroupStore = create<GroupState>((set, get) => {
         }
         const offUpdate = onTaskUpdated(reload)
         const offRefresh = onTasksRefresh(reload)
-        owned.stop = () => { offUpdate(); offRefresh() }
+        owned.stop = () => { offUpdate?.(); offRefresh?.() }
         source = owned; sources.set(projectId, owned)
         reload()
       }

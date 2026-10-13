@@ -67,3 +67,9 @@ export function getSecretStorage(): SecretStorage {
   if (!configuredStorage) throw new SecretStorageNotConfiguredError()
   return configuredStorage
 }
+
+/** Release only the provider owned by a successfully drained service lifetime. */
+export function releaseSecretStorage(expectedStorage: SecretStorage): void {
+  if (configuredStorage !== expectedStorage) throw new Error('SECRET_STORAGE_OWNER_MISMATCH')
+  configuredStorage = undefined
+}

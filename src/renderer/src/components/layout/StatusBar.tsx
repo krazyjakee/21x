@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import { useEffect, useMemo, useState } from 'react'
 import { CircleSlash, Clock, Hand, ListChecks, Play, CircleAlert } from 'lucide-react'
 import { useProjectTasks } from '@/hooks/use-project-tasks'
@@ -28,7 +29,7 @@ export function StatusBar() {
   const [version, setVersion] = useState('')
 
   useEffect(() => {
-    window.electronAPI?.app?.getVersion().then((v) => v && setVersion(v))
+    desktopApi?.app?.getVersion().then((v) => v && setVersion(v)).catch(() => {})
   }, [])
   useEffect(() => {
     return useTaskGroupStore.getState().subscribe(projectId)

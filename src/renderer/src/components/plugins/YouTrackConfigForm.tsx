@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Loader2, RefreshCw, CheckCircle2, XCircle } from 'lucide-react'
 import { Input } from '@/components/ui/Input'
@@ -348,7 +349,7 @@ export function YouTrackConfigForm({ value, onChange }: PluginFormProps) {
                   <button
                     type="button"
                     onClick={() =>
-                      window.electronAPI.shell.openExternal(
+                      desktopApi.shell.openExternal(
                         'https://www.jetbrains.com/help/youtrack/server/search-for-issues.html'
                       )
                     }

@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import { useState, useEffect, useCallback } from 'react'
 import { Search, Plus, Trash2, Download, Power, PowerOff, RefreshCw, Loader2, ExternalLink, Store, X, ChevronDown, ChevronRight, Sparkles, Server, Bot, Terminal } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -527,7 +528,7 @@ function DiscoverPluginCard({
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => window.electronAPI?.shell?.openExternal?.(plugin.homepage)}
+              onClick={() => desktopApi?.shell?.openExternal?.(plugin.homepage)}
               title="View homepage"
             >
               <ExternalLink className="h-3.5 w-3.5" />

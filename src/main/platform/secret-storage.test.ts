@@ -41,6 +41,20 @@ describe('host secret storage bootstrap', () => {
     expect(registry.getSecretStorage()).toBe(storage)
   })
 
+  it('releases only the exact drained owner and never clears a newer provider', async () => {
+    const registry = await import('./secret-storage')
+    const first = fakeStorage()
+    const other = fakeStorage()
+    registry.configureSecretStorage(first)
+    expect(() => registry.releaseSecretStorage(other)).toThrow('SECRET_STORAGE_OWNER_MISMATCH')
+    expect(registry.getSecretStorage()).toBe(first)
+    registry.releaseSecretStorage(first)
+    expect(() => registry.getSecretStorage()).toThrow(registry.SecretStorageNotConfiguredError)
+    registry.configureSecretStorage(other)
+    expect(() => registry.releaseSecretStorage(first)).toThrow('SECRET_STORAGE_OWNER_MISMATCH')
+    expect(registry.getSecretStorage()).toBe(other)
+  })
+
   it('fails closed before serializing or decrypting any credential without a provider', async () => {
     const { SecretStorageNotConfiguredError } = await import('./secret-storage')
     const serializers = await import('../database/serializers')

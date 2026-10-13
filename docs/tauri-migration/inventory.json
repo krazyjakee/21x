@@ -3,13 +3,13 @@
     "file": "src/main/database/schema.ts",
     "schemaVersion": 37
   },
-  "electronAPIConsumers": [
+  "desktopAPIConsumers": [
     {
       "column": 5,
-      "expression": "window.electronAPI.env.get",
+      "expression": "desktopApi.env.get",
       "file": "src/renderer/src/components/agents/AgentForm.tsx",
       "kind": "call",
-      "line": 101,
+      "line": 102,
       "path": [
         "env",
         "get"
@@ -18,10 +18,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.env.get",
+      "expression": "desktopApi.env.get",
       "file": "src/renderer/src/components/agents/AgentForm.tsx",
       "kind": "call",
-      "line": 104,
+      "line": 105,
       "path": [
         "env",
         "get"
@@ -30,10 +30,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.env.get",
+      "expression": "desktopApi.env.get",
       "file": "src/renderer/src/components/agents/AgentForm.tsx",
       "kind": "call",
-      "line": 107,
+      "line": 108,
       "path": [
         "env",
         "get"
@@ -42,10 +42,10 @@
     },
     {
       "column": 22,
-      "expression": "window.electronAPI.webUtils.getPathForFile",
+      "expression": "desktopApi.webUtils.getPathForFile",
       "file": "src/renderer/src/components/agents/transcript/TranscriptComposer.tsx",
       "kind": "call",
-      "line": 179,
+      "line": 180,
       "path": [
         "webUtils",
         "getPathForFile"
@@ -54,10 +54,22 @@
     },
     {
       "column": 37,
-      "expression": "window.electronAPI.github.fetchPullRequestDetails",
+      "expression": "desktopApi.github.fetchPullRequestDetails",
       "file": "src/renderer/src/components/artifacts/viewers/PrArtifactView.tsx",
       "kind": "access",
-      "line": 83,
+      "line": 84,
+      "path": [
+        "github",
+        "fetchPullRequestDetails"
+      ],
+      "resolution": "literal"
+    },
+    {
+      "column": 10,
+      "expression": "fetchPullRequestDetails",
+      "file": "src/renderer/src/components/artifacts/viewers/PrArtifactView.tsx",
+      "kind": "call",
+      "line": 95,
       "path": [
         "github",
         "fetchPullRequestDetails"
@@ -66,10 +78,10 @@
     },
     {
       "column": 77,
-      "expression": "window.electronAPI.shell.openExternal",
+      "expression": "desktopApi.shell.openExternal",
       "file": "src/renderer/src/components/artifacts/viewers/PrArtifactView.tsx",
       "kind": "call",
-      "line": 132,
+      "line": 133,
       "path": [
         "shell",
         "openExternal"
@@ -78,10 +90,10 @@
     },
     {
       "column": 80,
-      "expression": "window.electronAPI.shell.openExternal",
+      "expression": "desktopApi.shell.openExternal",
       "file": "src/renderer/src/components/artifacts/viewers/PrArtifactView.tsx",
       "kind": "call",
-      "line": 175,
+      "line": 176,
       "path": [
         "shell",
         "openExternal"
@@ -89,71 +101,11 @@
       "resolution": "literal"
     },
     {
-      "column": 10,
-      "expression": "window.electronAPI?.browser?.recordingStatus",
-      "file": "src/renderer/src/components/canvas/BrowserPanelContent.tsx",
-      "kind": "access",
-      "line": 86,
-      "path": [
-        "browser",
-        "recordingStatus"
-      ],
-      "resolution": "literal"
-    },
-    {
-      "column": 13,
-      "expression": "window.electronAPI.browser.registerBrokerPanel",
-      "file": "src/renderer/src/components/canvas/BrowserPanelContent.tsx",
-      "kind": "call",
-      "line": 134,
-      "path": [
-        "browser",
-        "registerBrokerPanel"
-      ],
-      "resolution": "literal"
-    },
-    {
-      "column": 12,
-      "expression": "window.electronAPI?.browser\n        ?.registerBrokerPanel",
-      "file": "src/renderer/src/components/canvas/BrowserPanelContent.tsx",
-      "kind": "call",
-      "line": 239,
-      "path": [
-        "browser",
-        "registerBrokerPanel"
-      ],
-      "resolution": "literal"
-    },
-    {
-      "column": 14,
-      "expression": "window.electronAPI?.browser?.unregisterBrokerPanel",
-      "file": "src/renderer/src/components/canvas/BrowserPanelContent.tsx",
-      "kind": "call",
-      "line": 266,
-      "path": [
-        "browser",
-        "unregisterBrokerPanel"
-      ],
-      "resolution": "literal"
-    },
-    {
-      "column": 28,
-      "expression": "window.electronAPI.browser.openExternalAuth",
-      "file": "src/renderer/src/components/canvas/BrowserPanelContent.tsx",
-      "kind": "call",
-      "line": 419,
-      "path": [
-        "browser",
-        "openExternalAuth"
-      ],
-      "resolution": "literal"
-    },
-    {
       "column": 29,
-      "expression": "window.electronAPI.terminal.create",
+      "expression": "desktopApi.terminal.create",
       "file": "src/renderer/src/components/canvas/TerminalPanelContent.tsx",
       "kind": "call",
-      "line": 135,
+      "line": 136,
       "path": [
         "terminal",
         "create"
@@ -162,10 +114,10 @@
     },
     {
       "column": 15,
-      "expression": "window.electronAPI.terminal.kill",
+      "expression": "desktopApi.terminal.kill",
       "file": "src/renderer/src/components/canvas/TerminalPanelContent.tsx",
       "kind": "call",
-      "line": 145,
+      "line": 146,
       "path": [
         "terminal",
         "kill"
@@ -174,10 +126,10 @@
     },
     {
       "column": 9,
-      "expression": "window.electronAPI.terminal.write",
+      "expression": "desktopApi.terminal.write",
       "file": "src/renderer/src/components/canvas/TerminalPanelContent.tsx",
       "kind": "call",
-      "line": 154,
+      "line": 155,
       "path": [
         "terminal",
         "write"
@@ -186,10 +138,10 @@
     },
     {
       "column": 17,
-      "expression": "window.electronAPI.terminal.onData",
+      "expression": "desktopApi.terminal.onData",
       "file": "src/renderer/src/components/canvas/TerminalPanelContent.tsx",
       "kind": "call",
-      "line": 159,
+      "line": 160,
       "path": [
         "terminal",
         "onData"
@@ -198,10 +150,10 @@
     },
     {
       "column": 17,
-      "expression": "window.electronAPI.terminal.onExit",
+      "expression": "desktopApi.terminal.onExit",
       "file": "src/renderer/src/components/canvas/TerminalPanelContent.tsx",
       "kind": "call",
-      "line": 171,
+      "line": 172,
       "path": [
         "terminal",
         "onExit"
@@ -210,10 +162,10 @@
     },
     {
       "column": 11,
-      "expression": "window.electronAPI.terminal.create",
+      "expression": "desktopApi.terminal.create",
       "file": "src/renderer/src/components/canvas/TerminalPanelContent.tsx",
       "kind": "call",
-      "line": 185,
+      "line": 186,
       "path": [
         "terminal",
         "create"
@@ -222,10 +174,10 @@
     },
     {
       "column": 13,
-      "expression": "window.electronAPI.terminal.resize",
+      "expression": "desktopApi.terminal.resize",
       "file": "src/renderer/src/components/canvas/TerminalPanelContent.tsx",
       "kind": "call",
-      "line": 257,
+      "line": 258,
       "path": [
         "terminal",
         "resize"
@@ -234,10 +186,10 @@
     },
     {
       "column": 9,
-      "expression": "window.electronAPI.terminal.getCwd",
+      "expression": "desktopApi.terminal.getCwd",
       "file": "src/renderer/src/components/canvas/TerminalPanelContent.tsx",
       "kind": "call",
-      "line": 287,
+      "line": 288,
       "path": [
         "terminal",
         "getCwd"
@@ -246,10 +198,10 @@
     },
     {
       "column": 11,
-      "expression": "window.electronAPI.terminal.kill",
+      "expression": "desktopApi.terminal.kill",
       "file": "src/renderer/src/components/canvas/TerminalPanelContent.tsx",
       "kind": "call",
-      "line": 293,
+      "line": 294,
       "path": [
         "terminal",
         "kill"
@@ -258,10 +210,10 @@
     },
     {
       "column": 43,
-      "expression": "window.electronAPI.terminal.getCwd",
+      "expression": "desktopApi.terminal.getCwd",
       "file": "src/renderer/src/components/canvas/TerminalPanelContent.tsx",
       "kind": "call",
-      "line": 319,
+      "line": 320,
       "path": [
         "terminal",
         "getCwd"
@@ -270,10 +222,10 @@
     },
     {
       "column": 7,
-      "expression": "window.electronAPI?.app?.getVersion",
+      "expression": "desktopApi?.app?.getVersion",
       "file": "src/renderer/src/components/layout/AppLayout.tsx",
       "kind": "call",
-      "line": 177,
+      "line": 180,
       "path": [
         "app",
         "getVersion"
@@ -282,10 +234,10 @@
     },
     {
       "column": 7,
-      "expression": "window.electronAPI?.app?.getVersion",
+      "expression": "desktopApi?.app?.getVersion",
       "file": "src/renderer/src/components/layout/AppLayout.tsx",
       "kind": "call",
-      "line": 188,
+      "line": 191,
       "path": [
         "app",
         "getVersion"
@@ -294,10 +246,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI?.app?.getVersion",
+      "expression": "desktopApi?.app?.getVersion",
       "file": "src/renderer/src/components/layout/StatusBar.tsx",
       "kind": "call",
-      "line": 31,
+      "line": 32,
       "path": [
         "app",
         "getVersion"
@@ -306,10 +258,10 @@
     },
     {
       "column": 28,
-      "expression": "window.electronAPI.heartbeat.runNow",
+      "expression": "desktopApi.heartbeat.runNow",
       "file": "src/renderer/src/components/layout/hooks/use-active-task-actions.ts",
       "kind": "call",
-      "line": 156,
+      "line": 157,
       "path": [
         "heartbeat",
         "runNow"
@@ -318,10 +270,10 @@
     },
     {
       "column": 13,
-      "expression": "window.electronAPI.shell.openExternal",
+      "expression": "desktopApi.shell.openExternal",
       "file": "src/renderer/src/components/oauth/OAuthDialog.tsx",
       "kind": "call",
-      "line": 43,
+      "line": 44,
       "path": [
         "shell",
         "openExternal"
@@ -330,10 +282,10 @@
     },
     {
       "column": 22,
-      "expression": "window.electronAPI.onOAuthCallback",
+      "expression": "desktopApi.onOAuthCallback",
       "file": "src/renderer/src/components/oauth/OAuthDialog.tsx",
       "kind": "call",
-      "line": 68,
+      "line": 69,
       "path": [
         "onOAuthCallback"
       ],
@@ -341,10 +293,10 @@
     },
     {
       "column": 27,
-      "expression": "window.electronAPI.agentInstaller.detect",
+      "expression": "desktopApi.agentInstaller.detect",
       "file": "src/renderer/src/components/onboarding/OnboardingWizard.tsx",
       "kind": "call",
-      "line": 458,
+      "line": 459,
       "path": [
         "agentInstaller",
         "detect"
@@ -353,10 +305,10 @@
     },
     {
       "column": 21,
-      "expression": "window.electronAPI.agentInstaller.onProgress",
+      "expression": "desktopApi.agentInstaller.onProgress",
       "file": "src/renderer/src/components/onboarding/OnboardingWizard.tsx",
       "kind": "call",
-      "line": 493,
+      "line": 494,
       "path": [
         "agentInstaller",
         "onProgress"
@@ -365,10 +317,10 @@
     },
     {
       "column": 29,
-      "expression": "window.electronAPI.agentInstaller.install",
+      "expression": "desktopApi.agentInstaller.install",
       "file": "src/renderer/src/components/onboarding/OnboardingWizard.tsx",
       "kind": "call",
-      "line": 508,
+      "line": 509,
       "path": [
         "agentInstaller",
         "install"
@@ -377,10 +329,10 @@
     },
     {
       "column": 52,
-      "expression": "window.electronAPI?.oauth",
+      "expression": "desktopApi?.oauth",
       "file": "src/renderer/src/components/plugins/HubSpotConfigForm.tsx",
       "kind": "access",
-      "line": 35,
+      "line": 36,
       "path": [
         "oauth"
       ],
@@ -388,10 +340,10 @@
     },
     {
       "column": 21,
-      "expression": "window.electronAPI?.oauth",
+      "expression": "desktopApi?.oauth",
       "file": "src/renderer/src/components/plugins/HubSpotConfigForm.tsx",
       "kind": "access",
-      "line": 50,
+      "line": 51,
       "path": [
         "oauth"
       ],
@@ -399,10 +351,10 @@
     },
     {
       "column": 21,
-      "expression": "window.electronAPI.shell.openExternal",
+      "expression": "desktopApi.shell.openExternal",
       "file": "src/renderer/src/components/plugins/HubSpotConfigForm.tsx",
       "kind": "call",
-      "line": 135,
+      "line": 136,
       "path": [
         "shell",
         "openExternal"
@@ -411,10 +363,10 @@
     },
     {
       "column": 21,
-      "expression": "window.electronAPI?.oauth",
+      "expression": "desktopApi?.oauth",
       "file": "src/renderer/src/components/plugins/LinearConfigForm.tsx",
       "kind": "access",
-      "line": 26,
+      "line": 27,
       "path": [
         "oauth"
       ],
@@ -422,43 +374,8 @@
     },
     {
       "column": 21,
-      "expression": "window.electronAPI?.oauth",
+      "expression": "desktopApi?.oauth",
       "file": "src/renderer/src/components/plugins/LinearConfigForm.tsx",
-      "kind": "access",
-      "line": 41,
-      "path": [
-        "oauth"
-      ],
-      "resolution": "literal"
-    },
-    {
-      "column": 17,
-      "expression": "window.electronAPI.shell.openExternal",
-      "file": "src/renderer/src/components/plugins/LinearConfigForm.tsx",
-      "kind": "call",
-      "line": 65,
-      "path": [
-        "shell",
-        "openExternal"
-      ],
-      "resolution": "literal"
-    },
-    {
-      "column": 23,
-      "expression": "window.electronAPI.shell.openExternal",
-      "file": "src/renderer/src/components/plugins/YouTrackConfigForm.tsx",
-      "kind": "call",
-      "line": 351,
-      "path": [
-        "shell",
-        "openExternal"
-      ],
-      "resolution": "literal"
-    },
-    {
-      "column": 31,
-      "expression": "window.electronAPI?.oauth",
-      "file": "src/renderer/src/components/settings/tabs/IntegrationsSettings.tsx",
       "kind": "access",
       "line": 42,
       "path": [
@@ -467,11 +384,46 @@
       "resolution": "literal"
     },
     {
+      "column": 17,
+      "expression": "desktopApi.shell.openExternal",
+      "file": "src/renderer/src/components/plugins/LinearConfigForm.tsx",
+      "kind": "call",
+      "line": 66,
+      "path": [
+        "shell",
+        "openExternal"
+      ],
+      "resolution": "literal"
+    },
+    {
+      "column": 23,
+      "expression": "desktopApi.shell.openExternal",
+      "file": "src/renderer/src/components/plugins/YouTrackConfigForm.tsx",
+      "kind": "call",
+      "line": 352,
+      "path": [
+        "shell",
+        "openExternal"
+      ],
+      "resolution": "literal"
+    },
+    {
+      "column": 31,
+      "expression": "desktopApi?.oauth",
+      "file": "src/renderer/src/components/settings/tabs/IntegrationsSettings.tsx",
+      "kind": "access",
+      "line": 43,
+      "path": [
+        "oauth"
+      ],
+      "resolution": "literal"
+    },
+    {
       "column": 33,
-      "expression": "window.electronAPI.oauth.getValidToken",
+      "expression": "desktopApi.oauth.getValidToken",
       "file": "src/renderer/src/components/settings/tabs/IntegrationsSettings.tsx",
       "kind": "call",
-      "line": 49,
+      "line": 50,
       "path": [
         "oauth",
         "getValidToken"
@@ -480,10 +432,10 @@
     },
     {
       "column": 30,
-      "expression": "window.electronAPI?.shell?.openExternal",
+      "expression": "desktopApi?.shell?.openExternal",
       "file": "src/renderer/src/components/settings/tabs/PluginsSettings.tsx",
       "kind": "call",
-      "line": 530,
+      "line": 531,
       "path": [
         "shell",
         "openExternal"
@@ -492,10 +444,10 @@
     },
     {
       "column": 37,
-      "expression": "window.electronAPI?.app?.getLoginItemSettings",
+      "expression": "desktopApi?.app?.getLoginItemSettings",
       "file": "src/renderer/src/components/settings/tabs/general/AppPreferencesSection.tsx",
       "kind": "call",
-      "line": 37,
+      "line": 38,
       "path": [
         "app",
         "getLoginItemSettings"
@@ -504,10 +456,10 @@
     },
     {
       "column": 33,
-      "expression": "window.electronAPI?.app?.getNotificationPermission",
+      "expression": "desktopApi?.app?.getNotificationPermission",
       "file": "src/renderer/src/components/settings/tabs/general/AppPreferencesSection.tsx",
       "kind": "call",
-      "line": 39,
+      "line": 40,
       "path": [
         "app",
         "getNotificationPermission"
@@ -516,10 +468,10 @@
     },
     {
       "column": 28,
-      "expression": "window.electronAPI?.app?.getMinimizeToTray",
+      "expression": "desktopApi?.app?.getMinimizeToTray",
       "file": "src/renderer/src/components/settings/tabs/general/AppPreferencesSection.tsx",
       "kind": "call",
-      "line": 41,
+      "line": 42,
       "path": [
         "app",
         "getMinimizeToTray"
@@ -528,10 +480,10 @@
     },
     {
       "column": 13,
-      "expression": "window.electronAPI?.app?.setLoginItemSettings",
+      "expression": "desktopApi?.app?.setLoginItemSettings",
       "file": "src/renderer/src/components/settings/tabs/general/AppPreferencesSection.tsx",
       "kind": "call",
-      "line": 61,
+      "line": 62,
       "path": [
         "app",
         "setLoginItemSettings"
@@ -540,10 +492,10 @@
     },
     {
       "column": 34,
-      "expression": "window.electronAPI?.app?.requestNotificationPermission",
+      "expression": "desktopApi?.app?.requestNotificationPermission",
       "file": "src/renderer/src/components/settings/tabs/general/AppPreferencesSection.tsx",
       "kind": "call",
-      "line": 78,
+      "line": 79,
       "path": [
         "app",
         "requestNotificationPermission"
@@ -552,10 +504,10 @@
     },
     {
       "column": 13,
-      "expression": "window.electronAPI?.app?.setMinimizeToTray",
+      "expression": "desktopApi?.app?.setMinimizeToTray",
       "file": "src/renderer/src/components/settings/tabs/general/AppPreferencesSection.tsx",
       "kind": "call",
-      "line": 90,
+      "line": 91,
       "path": [
         "app",
         "setMinimizeToTray"
@@ -564,10 +516,10 @@
     },
     {
       "column": 28,
-      "expression": "window.electronAPI.heartbeat.getStatus",
+      "expression": "desktopApi.heartbeat.getStatus",
       "file": "src/renderer/src/components/tasks/HeartbeatSection.tsx",
       "kind": "call",
-      "line": 45,
+      "line": 46,
       "path": [
         "heartbeat",
         "getStatus"
@@ -576,10 +528,10 @@
     },
     {
       "column": 29,
-      "expression": "window.electronAPI.heartbeat.readFile",
+      "expression": "desktopApi.heartbeat.readFile",
       "file": "src/renderer/src/components/tasks/HeartbeatSection.tsx",
       "kind": "call",
-      "line": 52,
+      "line": 53,
       "path": [
         "heartbeat",
         "readFile"
@@ -588,10 +540,10 @@
     },
     {
       "column": 28,
-      "expression": "window.electronAPI.heartbeat.getLogs",
+      "expression": "desktopApi.heartbeat.getLogs",
       "file": "src/renderer/src/components/tasks/HeartbeatSection.tsx",
       "kind": "call",
-      "line": 59,
+      "line": 60,
       "path": [
         "heartbeat",
         "getLogs"
@@ -600,10 +552,10 @@
     },
     {
       "column": 15,
-      "expression": "window.electronAPI.onHeartbeatAlert",
+      "expression": "desktopApi.onHeartbeatAlert",
       "file": "src/renderer/src/components/tasks/HeartbeatSection.tsx",
       "kind": "call",
-      "line": 74,
+      "line": 75,
       "path": [
         "onHeartbeatAlert"
       ],
@@ -611,10 +563,10 @@
     },
     {
       "column": 15,
-      "expression": "window.electronAPI.onHeartbeatDisabled",
+      "expression": "desktopApi.onHeartbeatDisabled",
       "file": "src/renderer/src/components/tasks/HeartbeatSection.tsx",
       "kind": "call",
-      "line": 85,
+      "line": 86,
       "path": [
         "onHeartbeatDisabled"
       ],
@@ -622,10 +574,10 @@
     },
     {
       "column": 13,
-      "expression": "window.electronAPI.heartbeat.writeFile",
+      "expression": "desktopApi.heartbeat.writeFile",
       "file": "src/renderer/src/components/tasks/HeartbeatSection.tsx",
       "kind": "call",
-      "line": 110,
+      "line": 111,
       "path": [
         "heartbeat",
         "writeFile"
@@ -634,10 +586,10 @@
     },
     {
       "column": 13,
-      "expression": "window.electronAPI.heartbeat.disable",
+      "expression": "desktopApi.heartbeat.disable",
       "file": "src/renderer/src/components/tasks/HeartbeatSection.tsx",
       "kind": "call",
-      "line": 122,
+      "line": 123,
       "path": [
         "heartbeat",
         "disable"
@@ -646,10 +598,10 @@
     },
     {
       "column": 13,
-      "expression": "window.electronAPI.heartbeat.enable",
+      "expression": "desktopApi.heartbeat.enable",
       "file": "src/renderer/src/components/tasks/HeartbeatSection.tsx",
       "kind": "call",
-      "line": 124,
+      "line": 125,
       "path": [
         "heartbeat",
         "enable"
@@ -658,10 +610,10 @@
     },
     {
       "column": 26,
-      "expression": "window.electronAPI.heartbeat.runNow",
+      "expression": "desktopApi.heartbeat.runNow",
       "file": "src/renderer/src/components/tasks/HeartbeatSection.tsx",
       "kind": "call",
-      "line": 133,
+      "line": 134,
       "path": [
         "heartbeat",
         "runNow"
@@ -670,10 +622,10 @@
     },
     {
       "column": 11,
-      "expression": "window.electronAPI.heartbeat.updateInterval",
+      "expression": "desktopApi.heartbeat.updateInterval",
       "file": "src/renderer/src/components/tasks/HeartbeatSection.tsx",
       "kind": "call",
-      "line": 149,
+      "line": 150,
       "path": [
         "heartbeat",
         "updateInterval"
@@ -682,10 +634,10 @@
     },
     {
       "column": 21,
-      "expression": "window.electronAPI.webUtils.getPathForFile",
+      "expression": "desktopApi.webUtils.getPathForFile",
       "file": "src/renderer/src/components/tasks/TaskAttachments.tsx",
       "kind": "call",
-      "line": 91,
+      "line": 92,
       "path": [
         "webUtils",
         "getPathForFile"
@@ -694,10 +646,10 @@
     },
     {
       "column": 32,
-      "expression": "window.electronAPI.tasks.getWorkspaceDir",
+      "expression": "desktopApi.tasks.getWorkspaceDir",
       "file": "src/renderer/src/components/tasks/TaskDetailView.tsx",
       "kind": "call",
-      "line": 90,
+      "line": 91,
       "path": [
         "tasks",
         "getWorkspaceDir"
@@ -706,10 +658,10 @@
     },
     {
       "column": 11,
-      "expression": "window.electronAPI.shell.openPath",
+      "expression": "desktopApi.shell.openPath",
       "file": "src/renderer/src/components/tasks/TaskDetailView.tsx",
       "kind": "call",
-      "line": 91,
+      "line": 92,
       "path": [
         "shell",
         "openPath"
@@ -718,10 +670,10 @@
     },
     {
       "column": 32,
-      "expression": "window.electronAPI.tasks.getWorkspaceDir",
+      "expression": "desktopApi.tasks.getWorkspaceDir",
       "file": "src/renderer/src/components/tasks/TaskWorkspace.tsx",
       "kind": "call",
-      "line": 582,
+      "line": 583,
       "path": [
         "tasks",
         "getWorkspaceDir"
@@ -730,10 +682,10 @@
     },
     {
       "column": 11,
-      "expression": "window.electronAPI.shell.openPath",
+      "expression": "desktopApi.shell.openPath",
       "file": "src/renderer/src/components/tasks/TaskWorkspace.tsx",
       "kind": "call",
-      "line": 583,
+      "line": 584,
       "path": [
         "shell",
         "openPath"
@@ -742,10 +694,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.github.fetchPullRequestDetails",
+      "expression": "desktopApi.github.fetchPullRequestDetails",
       "file": "src/renderer/src/components/tasks/workspace/useTaskShortcutRouter.ts",
       "kind": "call",
-      "line": 116,
+      "line": 117,
       "path": [
         "github",
         "fetchPullRequestDetails"
@@ -754,10 +706,10 @@
     },
     {
       "column": 23,
-      "expression": "window.electronAPI?.shell?.openExternal",
+      "expression": "desktopApi?.shell?.openExternal",
       "file": "src/renderer/src/components/update/UpdateDialog.tsx",
       "kind": "call",
-      "line": 69,
+      "line": 70,
       "path": [
         "shell",
         "openExternal"
@@ -766,10 +718,10 @@
     },
     {
       "column": 19,
-      "expression": "window.electronAPI?.shell?.openExternal",
+      "expression": "desktopApi?.shell?.openExternal",
       "file": "src/renderer/src/components/update/UpdateDialog.tsx",
       "kind": "call",
-      "line": 278,
+      "line": 279,
       "path": [
         "shell",
         "openExternal"
@@ -778,10 +730,10 @@
     },
     {
       "column": 10,
-      "expression": "window.electronAPI?.app?.setTitleBarOverlay",
+      "expression": "desktopApi?.app?.setTitleBarOverlay",
       "file": "src/renderer/src/hooks/use-title-bar-overlay-theme.ts",
       "kind": "call",
-      "line": 20,
+      "line": 21,
       "path": [
         "app",
         "setTitleBarOverlay"
@@ -789,22 +741,11 @@
       "resolution": "literal"
     },
     {
-      "column": 43,
-      "expression": "window.electronAPI?.ui",
-      "file": "src/renderer/src/hooks/use-ui-remote-control.ts",
-      "kind": "access",
-      "line": 24,
-      "path": [
-        "ui"
-      ],
-      "resolution": "literal"
-    },
-    {
       "column": 12,
-      "expression": "window.electronAPI.ui.publishState",
+      "expression": "desktopApi.ui.publishState",
       "file": "src/renderer/src/hooks/use-ui-remote-control.ts",
       "kind": "call",
-      "line": 32,
+      "line": 33,
       "path": [
         "ui",
         "publishState"
@@ -813,10 +754,10 @@
     },
     {
       "column": 24,
-      "expression": "window.electronAPI.ui.onCommand",
+      "expression": "desktopApi.ui.onCommand",
       "file": "src/renderer/src/hooks/use-ui-remote-control.ts",
       "kind": "call",
-      "line": 59,
+      "line": 60,
       "path": [
         "ui",
         "onCommand"
@@ -824,22 +765,11 @@
       "resolution": "literal"
     },
     {
-      "column": 43,
-      "expression": "window.electronAPI?.voice",
-      "file": "src/renderer/src/hooks/use-voice-control.ts",
-      "kind": "access",
-      "line": 64,
-      "path": [
-        "voice"
-      ],
-      "resolution": "literal"
-    },
-    {
       "column": 47,
-      "expression": "window.electronAPI?.commander",
+      "expression": "desktopApi?.commander",
       "file": "src/renderer/src/lib/activity/commander-activity-adapter.ts",
       "kind": "access",
-      "line": 165,
+      "line": 166,
       "path": [
         "commander"
       ],
@@ -847,10 +777,10 @@
     },
     {
       "column": 53,
-      "expression": "window.electronAPI?.commander?.onEvent",
+      "expression": "desktopApi?.commander?.onEvent",
       "file": "src/renderer/src/lib/activity/commander-activity-adapter.ts",
       "kind": "access",
-      "line": 209,
+      "line": 210,
       "path": [
         "commander",
         "onEvent"
@@ -859,10 +789,10 @@
     },
     {
       "column": 47,
-      "expression": "window.electronAPI?.agents",
+      "expression": "desktopApi?.agents",
       "file": "src/renderer/src/lib/activity/session-activity-adapter.ts",
       "kind": "access",
-      "line": 255,
+      "line": 256,
       "path": [
         "agents"
       ],
@@ -870,10 +800,21 @@
     },
     {
       "column": 25,
-      "expression": "window.electronAPI?.onAgentStartQueueChanged",
+      "expression": "desktopApi?.onAgentStartQueueChanged",
       "file": "src/renderer/src/lib/activity/session-activity-adapter.ts",
       "kind": "access",
-      "line": 281,
+      "line": 282,
+      "path": [
+        "onAgentStartQueueChanged"
+      ],
+      "resolution": "literal"
+    },
+    {
+      "column": 24,
+      "expression": "subscribe",
+      "file": "src/renderer/src/lib/activity/session-activity-adapter.ts",
+      "kind": "call",
+      "line": 284,
       "path": [
         "onAgentStartQueueChanged"
       ],
@@ -881,10 +822,10 @@
     },
     {
       "column": 49,
-      "expression": "window.electronAPI?.voice?.tts",
+      "expression": "desktopApi?.voice?.tts",
       "file": "src/renderer/src/lib/activity/voice-activity-adapter.ts",
       "kind": "access",
-      "line": 140,
+      "line": 141,
       "path": [
         "voice",
         "tts"
@@ -893,10 +834,10 @@
     },
     {
       "column": 58,
-      "expression": "window.electronAPI.taskGroups.list",
+      "expression": "desktopApi.taskGroups.list",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 55,
+      "line": 56,
       "path": [
         "taskGroups",
         "list"
@@ -905,10 +846,10 @@
     },
     {
       "column": 24,
-      "expression": "window.electronAPI.taskGroups.get",
+      "expression": "desktopApi.taskGroups.get",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 56,
+      "line": 57,
       "path": [
         "taskGroups",
         "get"
@@ -917,10 +858,10 @@
     },
     {
       "column": 32,
-      "expression": "window.electronAPI.taskGroups.history",
+      "expression": "desktopApi.taskGroups.history",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 57,
+      "line": 58,
       "path": [
         "taskGroups",
         "history"
@@ -929,10 +870,10 @@
     },
     {
       "column": 42,
-      "expression": "window.electronAPI.taskGroups.create",
+      "expression": "desktopApi.taskGroups.create",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 58,
+      "line": 59,
       "path": [
         "taskGroups",
         "create"
@@ -941,10 +882,10 @@
     },
     {
       "column": 43,
-      "expression": "window.electronAPI.taskGroups.add",
+      "expression": "desktopApi.taskGroups.add",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 59,
+      "line": 60,
       "path": [
         "taskGroups",
         "add"
@@ -953,10 +894,10 @@
     },
     {
       "column": 43,
-      "expression": "window.electronAPI.taskGroups.remove",
+      "expression": "desktopApi.taskGroups.remove",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 60,
+      "line": 61,
       "path": [
         "taskGroups",
         "remove"
@@ -965,10 +906,10 @@
     },
     {
       "column": 29,
-      "expression": "window.electronAPI.taskGroups.dissolve",
+      "expression": "desktopApi.taskGroups.dissolve",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 61,
+      "line": 62,
       "path": [
         "taskGroups",
         "dissolve"
@@ -977,10 +918,10 @@
     },
     {
       "column": 41,
-      "expression": "window.electronAPI.taskGroups.move",
+      "expression": "desktopApi.taskGroups.move",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 62,
+      "line": 63,
       "path": [
         "taskGroups",
         "move"
@@ -989,10 +930,10 @@
     },
     {
       "column": 42,
-      "expression": "window.electronAPI.taskGroups.review",
+      "expression": "desktopApi.taskGroups.review",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 63,
+      "line": 64,
       "path": [
         "taskGroups",
         "review"
@@ -1001,10 +942,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.db.getTasks",
+      "expression": "desktopApi.db.getTasks",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 69,
+      "line": 70,
       "path": [
         "db",
         "getTasks"
@@ -1013,10 +954,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.db.getTask",
+      "expression": "desktopApi.db.getTask",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 73,
+      "line": 74,
       "path": [
         "db",
         "getTask"
@@ -1025,10 +966,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.db.createTask",
+      "expression": "desktopApi.db.createTask",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 77,
+      "line": 78,
       "path": [
         "db",
         "createTask"
@@ -1037,10 +978,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.db.updateTask",
+      "expression": "desktopApi.db.updateTask",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 81,
+      "line": 82,
       "path": [
         "db",
         "updateTask"
@@ -1049,10 +990,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.db.deleteTask",
+      "expression": "desktopApi.db.deleteTask",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 85,
+      "line": 86,
       "path": [
         "db",
         "deleteTask"
@@ -1061,10 +1002,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.db.getSubtasks",
+      "expression": "desktopApi.db.getSubtasks",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 89,
+      "line": 90,
       "path": [
         "db",
         "getSubtasks"
@@ -1073,10 +1014,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.db.reorderSubtasks",
+      "expression": "desktopApi.db.reorderSubtasks",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 93,
+      "line": 94,
       "path": [
         "db",
         "reorderSubtasks"
@@ -1085,10 +1026,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.tasks.getCoordinatorTaskId",
+      "expression": "desktopApi.tasks.getCoordinatorTaskId",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 98,
+      "line": 99,
       "path": [
         "tasks",
         "getCoordinatorTaskId"
@@ -1097,10 +1038,10 @@
     },
     {
       "column": 21,
-      "expression": "window.electronAPI.artifacts.scan",
+      "expression": "desktopApi.artifacts.scan",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 103,
+      "line": 104,
       "path": [
         "artifacts",
         "scan"
@@ -1109,10 +1050,10 @@
     },
     {
       "column": 35,
-      "expression": "window.electronAPI.artifacts.read",
+      "expression": "desktopApi.artifacts.read",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 104,
+      "line": 105,
       "path": [
         "artifacts",
         "read"
@@ -1121,10 +1062,10 @@
     },
     {
       "column": 39,
-      "expression": "window.electronAPI.artifacts.copyFile",
+      "expression": "desktopApi.artifacts.copyFile",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 105,
+      "line": 106,
       "path": [
         "artifacts",
         "copyFile"
@@ -1133,10 +1074,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.mcpServers.getAll",
+      "expression": "desktopApi.mcpServers.getAll",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 110,
+      "line": 111,
       "path": [
         "mcpServers",
         "getAll"
@@ -1145,10 +1086,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.mcpServers.create",
+      "expression": "desktopApi.mcpServers.create",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 114,
+      "line": 115,
       "path": [
         "mcpServers",
         "create"
@@ -1157,10 +1098,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.mcpServers.update",
+      "expression": "desktopApi.mcpServers.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 118,
+      "line": 119,
       "path": [
         "mcpServers",
         "update"
@@ -1169,10 +1110,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.mcpServers.delete",
+      "expression": "desktopApi.mcpServers.delete",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 122,
+      "line": 123,
       "path": [
         "mcpServers",
         "delete"
@@ -1181,10 +1122,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.mcpServers.testConnection",
+      "expression": "desktopApi.mcpServers.testConnection",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 126,
+      "line": 127,
       "path": [
         "mcpServers",
         "testConnection"
@@ -1193,10 +1134,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.mcpServers.startOAuthFlow",
+      "expression": "desktopApi.mcpServers.startOAuthFlow",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 130,
+      "line": 131,
       "path": [
         "mcpServers",
         "startOAuthFlow"
@@ -1205,10 +1146,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.mcpServers.getOAuthStatus",
+      "expression": "desktopApi.mcpServers.getOAuthStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 134,
+      "line": 135,
       "path": [
         "mcpServers",
         "getOAuthStatus"
@@ -1217,10 +1158,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.mcpServers.revokeOAuthToken",
+      "expression": "desktopApi.mcpServers.revokeOAuthToken",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 138,
+      "line": 139,
       "path": [
         "mcpServers",
         "revokeOAuthToken"
@@ -1229,10 +1170,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.mcpServers.probeForAuth",
+      "expression": "desktopApi.mcpServers.probeForAuth",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 142,
+      "line": 143,
       "path": [
         "mcpServers",
         "probeForAuth"
@@ -1241,10 +1182,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.mcpServers.submitManualClientId",
+      "expression": "desktopApi.mcpServers.submitManualClientId",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 146,
+      "line": 147,
       "path": [
         "mcpServers",
         "submitManualClientId"
@@ -1253,10 +1194,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.agents.getAll",
+      "expression": "desktopApi.agents.getAll",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 152,
+      "line": 153,
       "path": [
         "agents",
         "getAll"
@@ -1265,10 +1206,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.agents.create",
+      "expression": "desktopApi.agents.create",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 156,
+      "line": 157,
       "path": [
         "agents",
         "create"
@@ -1277,10 +1218,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.agents.update",
+      "expression": "desktopApi.agents.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 160,
+      "line": 161,
       "path": [
         "agents",
         "update"
@@ -1289,10 +1230,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.agents.delete",
+      "expression": "desktopApi.agents.delete",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 164,
+      "line": 165,
       "path": [
         "agents",
         "delete"
@@ -1301,10 +1242,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.agents.getStartQueue",
+      "expression": "desktopApi.agents.getStartQueue",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 169,
+      "line": 170,
       "path": [
         "agents",
         "getStartQueue"
@@ -1313,21 +1254,9 @@
     },
     {
       "column": 19,
-      "expression": "window.electronAPI.agents.getStartRecoveryState",
+      "expression": "desktopApi.agents.getStartRecoveryState",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 174,
-      "path": [
-        "agents",
-        "getStartRecoveryState"
-      ],
-      "resolution": "literal"
-    },
-    {
-      "column": 9,
-      "expression": "window.electronAPI.agents.getStartRecoveryState",
-      "file": "src/renderer/src/lib/ipc-client.ts",
-      "kind": "call",
       "line": 175,
       "path": [
         "agents",
@@ -1336,11 +1265,23 @@
       "resolution": "literal"
     },
     {
-      "column": 12,
-      "expression": "window.electronAPI.agentSession.start",
+      "column": 9,
+      "expression": "desktopApi.agents.getStartRecoveryState",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 182,
+      "line": 176,
+      "path": [
+        "agents",
+        "getStartRecoveryState"
+      ],
+      "resolution": "literal"
+    },
+    {
+      "column": 12,
+      "expression": "desktopApi.agentSession.start",
+      "file": "src/renderer/src/lib/ipc-client.ts",
+      "kind": "call",
+      "line": 183,
       "path": [
         "agentSession",
         "start"
@@ -1349,10 +1290,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.agentSession.startTask",
+      "expression": "desktopApi.agentSession.startTask",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 186,
+      "line": 187,
       "path": [
         "agentSession",
         "startTask"
@@ -1361,10 +1302,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.agentSession.resume",
+      "expression": "desktopApi.agentSession.resume",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 190,
+      "line": 191,
       "path": [
         "agentSession",
         "resume"
@@ -1373,10 +1314,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.agentSession.abort",
+      "expression": "desktopApi.agentSession.abort",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 194,
+      "line": 195,
       "path": [
         "agentSession",
         "abort"
@@ -1385,10 +1326,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.agentSession.stop",
+      "expression": "desktopApi.agentSession.stop",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 198,
+      "line": 199,
       "path": [
         "agentSession",
         "stop"
@@ -1397,10 +1338,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.agentSession.stopByTaskId",
+      "expression": "desktopApi.agentSession.stopByTaskId",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 202,
+      "line": 203,
       "path": [
         "agentSession",
         "stopByTaskId"
@@ -1409,10 +1350,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.agentSession.switchAgent",
+      "expression": "desktopApi.agentSession.switchAgent",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 206,
+      "line": 207,
       "path": [
         "agentSession",
         "switchAgent"
@@ -1421,10 +1362,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.agentSession.send",
+      "expression": "desktopApi.agentSession.send",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 210,
+      "line": 211,
       "path": [
         "agentSession",
         "send"
@@ -1433,10 +1374,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.agentSession.sendByTaskId",
+      "expression": "desktopApi.agentSession.sendByTaskId",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 214,
+      "line": 215,
       "path": [
         "agentSession",
         "sendByTaskId"
@@ -1445,19 +1386,7 @@
     },
     {
       "column": 27,
-      "expression": "window.electronAPI.agentSession.approve",
-      "file": "src/renderer/src/lib/ipc-client.ts",
-      "kind": "call",
-      "line": 218,
-      "path": [
-        "agentSession",
-        "approve"
-      ],
-      "resolution": "literal"
-    },
-    {
-      "column": 30,
-      "expression": "window.electronAPI.agentSession.approve",
+      "expression": "desktopApi.agentSession.approve",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
       "line": 219,
@@ -1468,8 +1397,8 @@
       "resolution": "literal"
     },
     {
-      "column": 12,
-      "expression": "window.electronAPI.agentSession.approve",
+      "column": 30,
+      "expression": "desktopApi.agentSession.approve",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
       "line": 220,
@@ -1481,10 +1410,22 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.agentSession.getRawTranscript",
+      "expression": "desktopApi.agentSession.approve",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 224,
+      "line": 221,
+      "path": [
+        "agentSession",
+        "approve"
+      ],
+      "resolution": "literal"
+    },
+    {
+      "column": 12,
+      "expression": "desktopApi.agentSession.getRawTranscript",
+      "file": "src/renderer/src/lib/ipc-client.ts",
+      "kind": "call",
+      "line": 225,
       "path": [
         "agentSession",
         "getRawTranscript"
@@ -1493,10 +1434,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.agentSession.getTranscriptSnapshot",
+      "expression": "desktopApi.agentSession.getTranscriptSnapshot",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 228,
+      "line": 229,
       "path": [
         "agentSession",
         "getTranscriptSnapshot"
@@ -1505,10 +1446,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.agentSession.getTranscriptDelta",
+      "expression": "desktopApi.agentSession.getTranscriptDelta",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 232,
+      "line": 233,
       "path": [
         "agentSession",
         "getTranscriptDelta"
@@ -1517,10 +1458,10 @@
     },
     {
       "column": 68,
-      "expression": "window.electronAPI.captainRuntime.get",
+      "expression": "desktopApi.captainRuntime.get",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 237,
+      "line": 238,
       "path": [
         "captainRuntime",
         "get"
@@ -1529,10 +1470,10 @@
     },
     {
       "column": 81,
-      "expression": "window.electronAPI.captainRuntime.switch",
+      "expression": "desktopApi.captainRuntime.switch",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 238,
+      "line": 239,
       "path": [
         "captainRuntime",
         "switch"
@@ -1541,10 +1482,10 @@
     },
     {
       "column": 63,
-      "expression": "window.electronAPI.captainRuntime.retry",
+      "expression": "desktopApi.captainRuntime.retry",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 239,
+      "line": 240,
       "path": [
         "captainRuntime",
         "retry"
@@ -1553,10 +1494,10 @@
     },
     {
       "column": 66,
-      "expression": "window.electronAPI.captainRuntime.rollback",
+      "expression": "desktopApi.captainRuntime.rollback",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 240,
+      "line": 241,
       "path": [
         "captainRuntime",
         "rollback"
@@ -1565,10 +1506,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.agentConfig.getProviders",
+      "expression": "desktopApi.agentConfig.getProviders",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 245,
+      "line": 246,
       "path": [
         "agentConfig",
         "getProviders"
@@ -1577,10 +1518,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.agentConfig.listModels",
+      "expression": "desktopApi.agentConfig.listModels",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 248,
+      "line": 249,
       "path": [
         "agentConfig",
         "listModels"
@@ -1589,10 +1530,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.shell.openPath",
+      "expression": "desktopApi.shell.openPath",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 254,
+      "line": 255,
       "path": [
         "shell",
         "openPath"
@@ -1601,10 +1542,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.shell.showItemInFolder",
+      "expression": "desktopApi.shell.showItemInFolder",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 257,
+      "line": 258,
       "path": [
         "shell",
         "showItemInFolder"
@@ -1613,10 +1554,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.shell.readTextFile",
+      "expression": "desktopApi.shell.readTextFile",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 260,
+      "line": 261,
       "path": [
         "shell",
         "readTextFile"
@@ -1625,10 +1566,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.notifications.show",
+      "expression": "desktopApi.notifications.show",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 266,
+      "line": 267,
       "path": [
         "notifications",
         "show"
@@ -1637,10 +1578,10 @@
     },
     {
       "column": 10,
-      "expression": "window.electronAPI.onOverdueCheck",
+      "expression": "desktopApi.onOverdueCheck",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 271,
+      "line": 272,
       "path": [
         "onOverdueCheck"
       ],
@@ -1648,10 +1589,10 @@
     },
     {
       "column": 10,
-      "expression": "window.electronAPI.onTasksRefresh",
+      "expression": "desktopApi.onTasksRefresh",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 275,
+      "line": 276,
       "path": [
         "onTasksRefresh"
       ],
@@ -1659,21 +1600,9 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.chatImages?.readClipboard",
+      "expression": "desktopApi.chatImages?.readClipboard",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 281,
-      "path": [
-        "chatImages",
-        "readClipboard"
-      ],
-      "resolution": "literal"
-    },
-    {
-      "column": 9,
-      "expression": "window.electronAPI.chatImages.readClipboard",
-      "file": "src/renderer/src/lib/ipc-client.ts",
-      "kind": "call",
       "line": 282,
       "path": [
         "chatImages",
@@ -1682,11 +1611,23 @@
       "resolution": "literal"
     },
     {
-      "column": 5,
-      "expression": "window.electronAPI.chatImages.saveToTask",
+      "column": 9,
+      "expression": "desktopApi.chatImages.readClipboard",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 285,
+      "line": 283,
+      "path": [
+        "chatImages",
+        "readClipboard"
+      ],
+      "resolution": "literal"
+    },
+    {
+      "column": 5,
+      "expression": "desktopApi.chatImages.saveToTask",
+      "file": "src/renderer/src/lib/ipc-client.ts",
+      "kind": "call",
+      "line": 286,
       "path": [
         "chatImages",
         "saveToTask"
@@ -1695,10 +1636,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.attachments.pick",
+      "expression": "desktopApi.attachments.pick",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 290,
+      "line": 291,
       "path": [
         "attachments",
         "pick"
@@ -1707,10 +1648,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.attachments.save",
+      "expression": "desktopApi.attachments.save",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 294,
+      "line": 295,
       "path": [
         "attachments",
         "save"
@@ -1719,10 +1660,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.attachments.remove",
+      "expression": "desktopApi.attachments.remove",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 298,
+      "line": 299,
       "path": [
         "attachments",
         "remove"
@@ -1731,10 +1672,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.attachments.open",
+      "expression": "desktopApi.attachments.open",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 302,
+      "line": 303,
       "path": [
         "attachments",
         "open"
@@ -1743,10 +1684,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.attachments.download",
+      "expression": "desktopApi.attachments.download",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 306,
+      "line": 307,
       "path": [
         "attachments",
         "download"
@@ -1755,10 +1696,10 @@
     },
     {
       "column": 10,
-      "expression": "window.electronAPI.onArtifactUpdated",
+      "expression": "desktopApi.onArtifactUpdated",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 311,
+      "line": 312,
       "path": [
         "onArtifactUpdated"
       ],
@@ -1766,10 +1707,10 @@
     },
     {
       "column": 10,
-      "expression": "window.electronAPI.onTranscriptChanged",
+      "expression": "desktopApi.onTranscriptChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 315,
+      "line": 316,
       "path": [
         "onTranscriptChanged"
       ],
@@ -1777,10 +1718,10 @@
     },
     {
       "column": 10,
-      "expression": "window.electronAPI.onAgentStatus",
+      "expression": "desktopApi.onAgentStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 319,
+      "line": 320,
       "path": [
         "onAgentStatus"
       ],
@@ -1788,10 +1729,10 @@
     },
     {
       "column": 10,
-      "expression": "window.electronAPI.onAgentStartQueueChanged",
+      "expression": "desktopApi.onAgentStartQueueChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 323,
+      "line": 324,
       "path": [
         "onAgentStartQueueChanged"
       ],
@@ -1799,10 +1740,10 @@
     },
     {
       "column": 10,
-      "expression": "window.electronAPI.onAgentIncompatibleSession",
+      "expression": "desktopApi.onAgentIncompatibleSession",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 327,
+      "line": 328,
       "path": [
         "onAgentIncompatibleSession"
       ],
@@ -1810,10 +1751,10 @@
     },
     {
       "column": 10,
-      "expression": "window.electronAPI.onTaskUpdated",
+      "expression": "desktopApi.onTaskUpdated",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 331,
+      "line": 332,
       "path": [
         "onTaskUpdated"
       ],
@@ -1821,10 +1762,10 @@
     },
     {
       "column": 10,
-      "expression": "window.electronAPI.onTaskSourceActionFailed",
+      "expression": "desktopApi.onTaskSourceActionFailed",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 338,
+      "line": 339,
       "path": [
         "onTaskSourceActionFailed"
       ],
@@ -1832,10 +1773,10 @@
     },
     {
       "column": 10,
-      "expression": "window.electronAPI.onTaskCreated",
+      "expression": "desktopApi.onTaskCreated",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 342,
+      "line": 343,
       "path": [
         "onTaskCreated"
       ],
@@ -1843,10 +1784,10 @@
     },
     {
       "column": 10,
-      "expression": "window.electronAPI.onTaskDeleted",
+      "expression": "desktopApi.onTaskDeleted",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 346,
+      "line": 347,
       "path": [
         "onTaskDeleted"
       ],
@@ -1854,10 +1795,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.settings.get",
+      "expression": "desktopApi.settings.get",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 351,
+      "line": 352,
       "path": [
         "settings",
         "get"
@@ -1866,10 +1807,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.settings.set",
+      "expression": "desktopApi.settings.set",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 354,
+      "line": 355,
       "path": [
         "settings",
         "set"
@@ -1878,10 +1819,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.settings.getAll",
+      "expression": "desktopApi.settings.getAll",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 357,
+      "line": 358,
       "path": [
         "settings",
         "getAll"
@@ -1890,10 +1831,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI?.updater?.check",
+      "expression": "desktopApi?.updater?.check",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 363,
+      "line": 364,
       "path": [
         "updater",
         "check"
@@ -1902,10 +1843,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI?.updater?.download",
+      "expression": "desktopApi?.updater?.download",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 366,
+      "line": 367,
       "path": [
         "updater",
         "download"
@@ -1914,10 +1855,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI?.updater?.install",
+      "expression": "desktopApi?.updater?.install",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 369,
+      "line": 370,
       "path": [
         "updater",
         "install"
@@ -1926,10 +1867,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI?.updater?.getVersion",
+      "expression": "desktopApi?.updater?.getVersion",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 372,
+      "line": 373,
       "path": [
         "updater",
         "getVersion"
@@ -1938,10 +1879,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI?.updater?.onStatus",
+      "expression": "desktopApi?.updater?.onStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 375,
+      "line": 376,
       "path": [
         "updater",
         "onStatus"
@@ -1950,10 +1891,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI?.updater?.onMenuCheckForUpdates",
+      "expression": "desktopApi?.updater?.onMenuCheckForUpdates",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 378,
+      "line": 379,
       "path": [
         "updater",
         "onMenuCheckForUpdates"
@@ -1962,10 +1903,10 @@
     },
     {
       "column": 7,
-      "expression": "window.electronAPI?.mobile?.getInfo",
+      "expression": "desktopApi?.mobile?.getInfo",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 396,
+      "line": 397,
       "path": [
         "mobile",
         "getInfo"
@@ -1974,10 +1915,10 @@
     },
     {
       "column": 7,
-      "expression": "window.electronAPI?.mobile?.setAccess",
+      "expression": "desktopApi?.mobile?.setAccess",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 402,
+      "line": 403,
       "path": [
         "mobile",
         "setAccess"
@@ -1986,10 +1927,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI?.mobile?.startTunnel",
+      "expression": "desktopApi?.mobile?.startTunnel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 407,
+      "line": 408,
       "path": [
         "mobile",
         "startTunnel"
@@ -1998,10 +1939,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI?.mobile?.stopTunnel",
+      "expression": "desktopApi?.mobile?.stopTunnel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 410,
+      "line": 411,
       "path": [
         "mobile",
         "stopTunnel"
@@ -2010,10 +1951,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI?.mobile?.setCustomUrl",
+      "expression": "desktopApi?.mobile?.setCustomUrl",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 413,
+      "line": 414,
       "path": [
         "mobile",
         "setCustomUrl"
@@ -2022,10 +1963,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI?.mobile?.clearCustomUrl",
+      "expression": "desktopApi?.mobile?.clearCustomUrl",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 416,
+      "line": 417,
       "path": [
         "mobile",
         "clearCustomUrl"
@@ -2034,10 +1975,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI?.mobile?.getPendingPin",
+      "expression": "desktopApi?.mobile?.getPendingPin",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 419,
+      "line": 420,
       "path": [
         "mobile",
         "getPendingPin"
@@ -2046,10 +1987,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI?.mobile?.getSessions",
+      "expression": "desktopApi?.mobile?.getSessions",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 422,
+      "line": 423,
       "path": [
         "mobile",
         "getSessions"
@@ -2058,10 +1999,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI?.mobile?.revokeSession",
+      "expression": "desktopApi?.mobile?.revokeSession",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 425,
+      "line": 426,
       "path": [
         "mobile",
         "revokeSession"
@@ -2070,10 +2011,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI?.mobile?.revokeAllSessions",
+      "expression": "desktopApi?.mobile?.revokeAllSessions",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 428,
+      "line": 429,
       "path": [
         "mobile",
         "revokeAllSessions"
@@ -2082,10 +2023,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI?.mobile?.onPairingInitiated",
+      "expression": "desktopApi?.mobile?.onPairingInitiated",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 431,
+      "line": 432,
       "path": [
         "mobile",
         "onPairingInitiated"
@@ -2094,10 +2035,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI?.mobile?.onDeviceConnected",
+      "expression": "desktopApi?.mobile?.onDeviceConnected",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 434,
+      "line": 435,
       "path": [
         "mobile",
         "onDeviceConnected"
@@ -2106,10 +2047,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.github.checkCli",
+      "expression": "desktopApi.github.checkCli",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 440,
+      "line": 441,
       "path": [
         "github",
         "checkCli"
@@ -2118,10 +2059,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.github.fetchOrgs",
+      "expression": "desktopApi.github.fetchOrgs",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 443,
+      "line": 444,
       "path": [
         "github",
         "fetchOrgs"
@@ -2130,10 +2071,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.github.fetchOrgRepos",
+      "expression": "desktopApi.github.fetchOrgRepos",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 446,
+      "line": 447,
       "path": [
         "github",
         "fetchOrgRepos"
@@ -2142,10 +2083,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.github.fetchUserRepos",
+      "expression": "desktopApi.github.fetchUserRepos",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 449,
+      "line": 450,
       "path": [
         "github",
         "fetchUserRepos"
@@ -2154,10 +2095,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.gitlab.checkCli",
+      "expression": "desktopApi.gitlab.checkCli",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 455,
+      "line": 456,
       "path": [
         "gitlab",
         "checkCli"
@@ -2166,10 +2107,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.gitlab.fetchOrgs",
+      "expression": "desktopApi.gitlab.fetchOrgs",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 458,
+      "line": 459,
       "path": [
         "gitlab",
         "fetchOrgs"
@@ -2178,10 +2119,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.gitlab.fetchOrgRepos",
+      "expression": "desktopApi.gitlab.fetchOrgRepos",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 461,
+      "line": 462,
       "path": [
         "gitlab",
         "fetchOrgRepos"
@@ -2190,10 +2131,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.gitlab.fetchUserRepos",
+      "expression": "desktopApi.gitlab.fetchUserRepos",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 464,
+      "line": 465,
       "path": [
         "gitlab",
         "fetchUserRepos"
@@ -2202,10 +2143,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.forgejo.checkCli",
+      "expression": "desktopApi.forgejo.checkCli",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 470,
+      "line": 471,
       "path": [
         "forgejo",
         "checkCli"
@@ -2214,10 +2155,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.forgejo.setLogin",
+      "expression": "desktopApi.forgejo.setLogin",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 473,
+      "line": 474,
       "path": [
         "forgejo",
         "setLogin"
@@ -2226,10 +2167,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.forgejo.fetchOrgs",
+      "expression": "desktopApi.forgejo.fetchOrgs",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 476,
+      "line": 477,
       "path": [
         "forgejo",
         "fetchOrgs"
@@ -2238,10 +2179,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.forgejo.fetchOrgRepos",
+      "expression": "desktopApi.forgejo.fetchOrgRepos",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 479,
+      "line": 480,
       "path": [
         "forgejo",
         "fetchOrgRepos"
@@ -2250,10 +2191,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.forgejo.fetchUserRepos",
+      "expression": "desktopApi.forgejo.fetchUserRepos",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 482,
+      "line": 483,
       "path": [
         "forgejo",
         "fetchUserRepos"
@@ -2262,10 +2203,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.git.recordRepoProviders",
+      "expression": "desktopApi.git.recordRepoProviders",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 488,
+      "line": 489,
       "path": [
         "git",
         "recordRepoProviders"
@@ -2274,10 +2215,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.taskSources.getAll",
+      "expression": "desktopApi.taskSources.getAll",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 495,
+      "line": 496,
       "path": [
         "taskSources",
         "getAll"
@@ -2286,10 +2227,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.taskSources.create",
+      "expression": "desktopApi.taskSources.create",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 499,
+      "line": 500,
       "path": [
         "taskSources",
         "create"
@@ -2298,10 +2239,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.taskSources.update",
+      "expression": "desktopApi.taskSources.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 503,
+      "line": 504,
       "path": [
         "taskSources",
         "update"
@@ -2310,10 +2251,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.taskSources.delete",
+      "expression": "desktopApi.taskSources.delete",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 507,
+      "line": 508,
       "path": [
         "taskSources",
         "delete"
@@ -2322,10 +2263,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.taskSources.sync",
+      "expression": "desktopApi.taskSources.sync",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 511,
+      "line": 512,
       "path": [
         "taskSources",
         "sync"
@@ -2334,10 +2275,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.taskSources.exportUpdate",
+      "expression": "desktopApi.taskSources.exportUpdate",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 515,
+      "line": 516,
       "path": [
         "taskSources",
         "exportUpdate"
@@ -2346,10 +2287,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.taskSources.getUsers",
+      "expression": "desktopApi.taskSources.getUsers",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 519,
+      "line": 520,
       "path": [
         "taskSources",
         "getUsers"
@@ -2358,10 +2299,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.taskSources.reassign",
+      "expression": "desktopApi.taskSources.reassign",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 523,
+      "line": 524,
       "path": [
         "taskSources",
         "reassign"
@@ -2370,10 +2311,10 @@
     },
     {
       "column": 79,
-      "expression": "window.electronAPI.projects.getAll",
+      "expression": "desktopApi.projects.getAll",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 528,
+      "line": 529,
       "path": [
         "projects",
         "getAll"
@@ -2382,10 +2323,10 @@
     },
     {
       "column": 60,
-      "expression": "window.electronAPI.projects.get",
+      "expression": "desktopApi.projects.get",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 529,
+      "line": 530,
       "path": [
         "projects",
         "get"
@@ -2394,10 +2335,10 @@
     },
     {
       "column": 57,
-      "expression": "window.electronAPI.projects.getDefault",
+      "expression": "desktopApi.projects.getDefault",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 530,
+      "line": 531,
       "path": [
         "projects",
         "getDefault"
@@ -2406,10 +2347,10 @@
     },
     {
       "column": 76,
-      "expression": "window.electronAPI.projects.create",
+      "expression": "desktopApi.projects.create",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 531,
+      "line": 532,
       "path": [
         "projects",
         "create"
@@ -2418,10 +2359,10 @@
     },
     {
       "column": 88,
-      "expression": "window.electronAPI.projects.update",
+      "expression": "desktopApi.projects.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 532,
+      "line": 533,
       "path": [
         "projects",
         "update"
@@ -2430,10 +2371,10 @@
     },
     {
       "column": 84,
-      "expression": "window.electronAPI.projects.archive",
+      "expression": "desktopApi.projects.archive",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 533,
+      "line": 534,
       "path": [
         "projects",
         "archive"
@@ -2442,10 +2383,10 @@
     },
     {
       "column": 53,
-      "expression": "window.electronAPI.projects.reorder",
+      "expression": "desktopApi.projects.reorder",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 534,
+      "line": 535,
       "path": [
         "projects",
         "reorder"
@@ -2454,10 +2395,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.projects.getCaptainMemory",
+      "expression": "desktopApi.projects.getCaptainMemory",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 537,
+      "line": 538,
       "path": [
         "projects",
         "getCaptainMemory"
@@ -2466,10 +2407,10 @@
     },
     {
       "column": 76,
-      "expression": "window.electronAPI.projects.moveTask",
+      "expression": "desktopApi.projects.moveTask",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 539,
+      "line": 540,
       "path": [
         "projects",
         "moveTask"
@@ -2478,10 +2419,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.projects.onChanged",
+      "expression": "desktopApi.projects.onChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 541,
+      "line": 542,
       "path": [
         "projects",
         "onChanged"
@@ -2489,11 +2430,11 @@
       "resolution": "literal"
     },
     {
-      "column": 67,
-      "expression": "window.electronAPI.projects.onChanged",
+      "column": 59,
+      "expression": "desktopApi.projects.onChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 541,
+      "line": 542,
       "path": [
         "projects",
         "onChanged"
@@ -2502,10 +2443,10 @@
     },
     {
       "column": 61,
-      "expression": "window.electronAPI.projects.getStatus",
+      "expression": "desktopApi.projects.getStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 543,
+      "line": 544,
       "path": [
         "projects",
         "getStatus"
@@ -2514,10 +2455,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.projects.getStatusHistory",
+      "expression": "desktopApi.projects.getStatusHistory",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 546,
+      "line": 547,
       "path": [
         "projects",
         "getStatusHistory"
@@ -2526,10 +2467,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.projects.onStatusChanged",
+      "expression": "desktopApi.projects.onStatusChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 549,
+      "line": 550,
       "path": [
         "projects",
         "onStatusChanged"
@@ -2537,11 +2478,11 @@
       "resolution": "literal"
     },
     {
-      "column": 73,
-      "expression": "window.electronAPI.projects.onStatusChanged",
+      "column": 65,
+      "expression": "desktopApi.projects.onStatusChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 549,
+      "line": 550,
       "path": [
         "projects",
         "onStatusChanged"
@@ -2550,10 +2491,10 @@
     },
     {
       "column": 67,
-      "expression": "window.electronAPI.projects.repos.list",
+      "expression": "desktopApi.projects.repos.list",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 551,
+      "line": 552,
       "path": [
         "projects",
         "repos",
@@ -2563,10 +2504,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.projects.repos.add",
+      "expression": "desktopApi.projects.repos.add",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 553,
+      "line": 554,
       "path": [
         "projects",
         "repos",
@@ -2576,10 +2517,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.projects.repos.update",
+      "expression": "desktopApi.projects.repos.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 555,
+      "line": 556,
       "path": [
         "projects",
         "repos",
@@ -2589,10 +2530,10 @@
     },
     {
       "column": 49,
-      "expression": "window.electronAPI.projects.repos.remove",
+      "expression": "desktopApi.projects.repos.remove",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 556,
+      "line": 557,
       "path": [
         "projects",
         "repos",
@@ -2602,10 +2543,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.projects.repos.reorder",
+      "expression": "desktopApi.projects.repos.reorder",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 558,
+      "line": 559,
       "path": [
         "projects",
         "repos",
@@ -2615,10 +2556,10 @@
     },
     {
       "column": 75,
-      "expression": "window.electronAPI.projects.resources.list",
+      "expression": "desktopApi.projects.resources.list",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 560,
+      "line": 561,
       "path": [
         "projects",
         "resources",
@@ -2628,10 +2569,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.projects.resources.add",
+      "expression": "desktopApi.projects.resources.add",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 562,
+      "line": 563,
       "path": [
         "projects",
         "resources",
@@ -2641,10 +2582,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.projects.resources.update",
+      "expression": "desktopApi.projects.resources.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 564,
+      "line": 565,
       "path": [
         "projects",
         "resources",
@@ -2654,10 +2595,10 @@
     },
     {
       "column": 53,
-      "expression": "window.electronAPI.projects.resources.remove",
+      "expression": "desktopApi.projects.resources.remove",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 565,
+      "line": 566,
       "path": [
         "projects",
         "resources",
@@ -2667,10 +2608,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.projects.resources.reorder",
+      "expression": "desktopApi.projects.resources.reorder",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 567,
+      "line": 568,
       "path": [
         "projects",
         "resources",
@@ -2680,10 +2621,10 @@
     },
     {
       "column": 64,
-      "expression": "window.electronAPI.projectLimits.getState",
+      "expression": "desktopApi.projectLimits.getState",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 572,
+      "line": 573,
       "path": [
         "projectLimits",
         "getState"
@@ -2692,10 +2633,10 @@
     },
     {
       "column": 40,
-      "expression": "window.electronAPI.projectLimits.isAllPaused",
+      "expression": "desktopApi.projectLimits.isAllPaused",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 573,
+      "line": 574,
       "path": [
         "projectLimits",
         "isAllPaused"
@@ -2704,10 +2645,10 @@
     },
     {
       "column": 52,
-      "expression": "window.electronAPI.projectLimits.pauseAll",
+      "expression": "desktopApi.projectLimits.pauseAll",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 574,
+      "line": 575,
       "path": [
         "projectLimits",
         "pauseAll"
@@ -2716,10 +2657,10 @@
     },
     {
       "column": 70,
-      "expression": "window.electronAPI.concurrency.getState",
+      "expression": "desktopApi.concurrency.getState",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 579,
+      "line": 580,
       "path": [
         "concurrency",
         "getState"
@@ -2728,10 +2669,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.concurrency.setCaptainControl",
+      "expression": "desktopApi.concurrency.setCaptainControl",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 581,
+      "line": 582,
       "path": [
         "concurrency",
         "setCaptainControl"
@@ -2740,10 +2681,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.concurrency.pin",
+      "expression": "desktopApi.concurrency.pin",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 583,
+      "line": 584,
       "path": [
         "concurrency",
         "pin"
@@ -2752,10 +2693,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.concurrency?.onChanged",
+      "expression": "desktopApi.concurrency?.onChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 585,
+      "line": 586,
       "path": [
         "concurrency",
         "onChanged"
@@ -2763,11 +2704,11 @@
       "resolution": "literal"
     },
     {
-      "column": 71,
-      "expression": "window.electronAPI.concurrency.onChanged",
+      "column": 63,
+      "expression": "desktopApi.concurrency.onChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 585,
+      "line": 586,
       "path": [
         "concurrency",
         "onChanged"
@@ -2776,10 +2717,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.overview?.getAllStatuses",
+      "expression": "desktopApi.overview?.getAllStatuses",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 592,
+      "line": 593,
       "path": [
         "overview",
         "getAllStatuses"
@@ -2787,11 +2728,11 @@
       "resolution": "literal"
     },
     {
-      "column": 73,
-      "expression": "window.electronAPI.overview.getAllStatuses",
+      "column": 65,
+      "expression": "desktopApi.overview.getAllStatuses",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 592,
+      "line": 593,
       "path": [
         "overview",
         "getAllStatuses"
@@ -2800,10 +2741,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.skills.getAll",
+      "expression": "desktopApi.skills.getAll",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 597,
+      "line": 598,
       "path": [
         "skills",
         "getAll"
@@ -2812,10 +2753,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.skills.create",
+      "expression": "desktopApi.skills.create",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 601,
+      "line": 602,
       "path": [
         "skills",
         "create"
@@ -2824,10 +2765,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.skills.update",
+      "expression": "desktopApi.skills.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 605,
+      "line": 606,
       "path": [
         "skills",
         "update"
@@ -2836,10 +2777,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.skills.delete",
+      "expression": "desktopApi.skills.delete",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 609,
+      "line": 610,
       "path": [
         "skills",
         "delete"
@@ -2848,10 +2789,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.skills.setProject",
+      "expression": "desktopApi.skills.setProject",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 614,
+      "line": 615,
       "path": [
         "skills",
         "setProject"
@@ -2860,10 +2801,10 @@
     },
     {
       "column": 19,
-      "expression": "window.electronAPI.skills.onChanged",
+      "expression": "desktopApi.skills.onChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 619,
+      "line": 620,
       "path": [
         "skills",
         "onChanged"
@@ -2871,11 +2812,11 @@
       "resolution": "literal"
     },
     {
-      "column": 72,
-      "expression": "window.electronAPI.skills.onChanged",
+      "column": 64,
+      "expression": "desktopApi.skills.onChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 619,
+      "line": 620,
       "path": [
         "skills",
         "onChanged"
@@ -2884,10 +2825,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.secrets.getAll",
+      "expression": "desktopApi.secrets.getAll",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 625,
+      "line": 626,
       "path": [
         "secrets",
         "getAll"
@@ -2896,10 +2837,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.secrets.create",
+      "expression": "desktopApi.secrets.create",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 629,
+      "line": 630,
       "path": [
         "secrets",
         "create"
@@ -2908,10 +2849,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.secrets.update",
+      "expression": "desktopApi.secrets.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 633,
+      "line": 634,
       "path": [
         "secrets",
         "update"
@@ -2920,10 +2861,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.secrets.delete",
+      "expression": "desktopApi.secrets.delete",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 637,
+      "line": 638,
       "path": [
         "secrets",
         "delete"
@@ -2932,10 +2873,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.plugins.list",
+      "expression": "desktopApi.plugins.list",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 643,
+      "line": 644,
       "path": [
         "plugins",
         "list"
@@ -2944,10 +2885,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.plugins.getDocumentation",
+      "expression": "desktopApi.plugins.getDocumentation",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 647,
+      "line": 648,
       "path": [
         "plugins",
         "getDocumentation"
@@ -2956,10 +2897,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.plugins.resolveOptions",
+      "expression": "desktopApi.plugins.resolveOptions",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 651,
+      "line": 652,
       "path": [
         "plugins",
         "resolveOptions"
@@ -2968,10 +2909,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.plugins.executeAction",
+      "expression": "desktopApi.plugins.executeAction",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 655,
+      "line": 656,
       "path": [
         "plugins",
         "executeAction"
@@ -2980,10 +2921,10 @@
     },
     {
       "column": 56,
-      "expression": "window.electronAPI.connectors.bridgePieces",
+      "expression": "desktopApi.connectors.bridgePieces",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 663,
+      "line": 664,
       "path": [
         "connectors",
         "bridgePieces"
@@ -2992,10 +2933,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.connectors.ensureInstance",
+      "expression": "desktopApi.connectors.ensureInstance",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 665,
+      "line": 666,
       "path": [
         "connectors",
         "ensureInstance"
@@ -3004,10 +2945,10 @@
     },
     {
       "column": 87,
-      "expression": "window.electronAPI.connectors.credentialStatus",
+      "expression": "desktopApi.connectors.credentialStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 666,
+      "line": 667,
       "path": [
         "connectors",
         "credentialStatus"
@@ -3016,10 +2957,10 @@
     },
     {
       "column": 54,
-      "expression": "window.electronAPI.connectors.setCredentials",
+      "expression": "desktopApi.connectors.setCredentials",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 671,
+      "line": 672,
       "path": [
         "connectors",
         "setCredentials"
@@ -3028,10 +2969,10 @@
     },
     {
       "column": 60,
-      "expression": "window.electronAPI.connectors.clearCredentials",
+      "expression": "desktopApi.connectors.clearCredentials",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 672,
+      "line": 673,
       "path": [
         "connectors",
         "clearCredentials"
@@ -3040,10 +2981,10 @@
     },
     {
       "column": 54,
-      "expression": "window.electronAPI.connectors.oauthConnect",
+      "expression": "desktopApi.connectors.oauthConnect",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 677,
+      "line": 678,
       "path": [
         "connectors",
         "oauthConnect"
@@ -3052,10 +2993,10 @@
     },
     {
       "column": 75,
-      "expression": "window.electronAPI.connectors.syncStatus",
+      "expression": "desktopApi.connectors.syncStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 678,
+      "line": 679,
       "path": [
         "connectors",
         "syncStatus"
@@ -3064,10 +3005,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.claudePlugins.getMarketplaceSources",
+      "expression": "desktopApi.claudePlugins.getMarketplaceSources",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 683,
+      "line": 684,
       "path": [
         "claudePlugins",
         "getMarketplaceSources"
@@ -3076,10 +3017,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.claudePlugins.addMarketplaceSource",
+      "expression": "desktopApi.claudePlugins.addMarketplaceSource",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 687,
+      "line": 688,
       "path": [
         "claudePlugins",
         "addMarketplaceSource"
@@ -3088,10 +3029,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.claudePlugins.removeMarketplaceSource",
+      "expression": "desktopApi.claudePlugins.removeMarketplaceSource",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 691,
+      "line": 692,
       "path": [
         "claudePlugins",
         "removeMarketplaceSource"
@@ -3100,10 +3041,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.claudePlugins.fetchCatalog",
+      "expression": "desktopApi.claudePlugins.fetchCatalog",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 695,
+      "line": 696,
       "path": [
         "claudePlugins",
         "fetchCatalog"
@@ -3112,10 +3053,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.claudePlugins.discoverPlugins",
+      "expression": "desktopApi.claudePlugins.discoverPlugins",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 699,
+      "line": 700,
       "path": [
         "claudePlugins",
         "discoverPlugins"
@@ -3124,10 +3065,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.claudePlugins.getInstalledPlugins",
+      "expression": "desktopApi.claudePlugins.getInstalledPlugins",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 703,
+      "line": 704,
       "path": [
         "claudePlugins",
         "getInstalledPlugins"
@@ -3136,10 +3077,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.claudePlugins.installPlugin",
+      "expression": "desktopApi.claudePlugins.installPlugin",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 707,
+      "line": 708,
       "path": [
         "claudePlugins",
         "installPlugin"
@@ -3148,10 +3089,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.claudePlugins.uninstallPlugin",
+      "expression": "desktopApi.claudePlugins.uninstallPlugin",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 711,
+      "line": 712,
       "path": [
         "claudePlugins",
         "uninstallPlugin"
@@ -3160,10 +3101,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.claudePlugins.enablePlugin",
+      "expression": "desktopApi.claudePlugins.enablePlugin",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 715,
+      "line": 716,
       "path": [
         "claudePlugins",
         "enablePlugin"
@@ -3172,10 +3113,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.claudePlugins.disablePlugin",
+      "expression": "desktopApi.claudePlugins.disablePlugin",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 719,
+      "line": 720,
       "path": [
         "claudePlugins",
         "disablePlugin"
@@ -3184,10 +3125,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.claudePlugins.getPluginResources",
+      "expression": "desktopApi.claudePlugins.getPluginResources",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 723,
+      "line": 724,
       "path": [
         "claudePlugins",
         "getPluginResources"
@@ -3196,10 +3137,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.worktree.setup",
+      "expression": "desktopApi.worktree.setup",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 729,
+      "line": 730,
       "path": [
         "worktree",
         "setup"
@@ -3208,10 +3149,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.worktree.cleanup",
+      "expression": "desktopApi.worktree.cleanup",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 732,
+      "line": 733,
       "path": [
         "worktree",
         "cleanup"
@@ -3220,10 +3161,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.worktree.changes",
+      "expression": "desktopApi.worktree.changes",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 735,
+      "line": 736,
       "path": [
         "worktree",
         "changes"
@@ -3232,10 +3173,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.worktree.files",
+      "expression": "desktopApi.worktree.files",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 738,
+      "line": 739,
       "path": [
         "worktree",
         "files"
@@ -3244,10 +3185,10 @@
     },
     {
       "column": 22,
-      "expression": "window.electronAPI.worktree.readFile",
+      "expression": "desktopApi.worktree.readFile",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 741,
+      "line": 742,
       "path": [
         "worktree",
         "readFile"
@@ -3256,10 +3197,22 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.worktree.runCleanupNow",
+      "expression": "readFile",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 748,
+      "line": 746,
+      "path": [
+        "worktree",
+        "readFile"
+      ],
+      "resolution": "literal"
+    },
+    {
+      "column": 12,
+      "expression": "desktopApi.worktree.runCleanupNow",
+      "file": "src/renderer/src/lib/ipc-client.ts",
+      "kind": "call",
+      "line": 749,
       "path": [
         "worktree",
         "runCleanupNow"
@@ -3268,10 +3221,10 @@
     },
     {
       "column": 10,
-      "expression": "window.electronAPI.onWorktreeProgress",
+      "expression": "desktopApi.onWorktreeProgress",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 753,
+      "line": 754,
       "path": [
         "onWorktreeProgress"
       ],
@@ -3279,10 +3232,10 @@
     },
     {
       "column": 10,
-      "expression": "window.electronAPI.onWorkspaceCleanupProgress",
+      "expression": "desktopApi.onWorkspaceCleanupProgress",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 757,
+      "line": 758,
       "path": [
         "onWorkspaceCleanupProgress"
       ],
@@ -3290,10 +3243,10 @@
     },
     {
       "column": 46,
-      "expression": "window.electronAPI.voice.getSnapshot",
+      "expression": "desktopApi.voice.getSnapshot",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 765,
+      "line": 766,
       "path": [
         "voice",
         "getSnapshot"
@@ -3302,10 +3255,10 @@
     },
     {
       "column": 61,
-      "expression": "window.electronAPI.voice.setEnabled",
+      "expression": "desktopApi.voice.setEnabled",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 766,
+      "line": 767,
       "path": [
         "voice",
         "setEnabled"
@@ -3314,10 +3267,10 @@
     },
     {
       "column": 67,
-      "expression": "window.electronAPI.voice.getPermission",
+      "expression": "desktopApi.voice.getPermission",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 767,
+      "line": 768,
       "path": [
         "voice",
         "getPermission"
@@ -3326,10 +3279,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.requestPermission",
+      "expression": "desktopApi.voice.requestPermission",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 769,
+      "line": 770,
       "path": [
         "voice",
         "requestPermission"
@@ -3338,10 +3291,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.startTurn",
+      "expression": "desktopApi.voice.startTurn",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 771,
+      "line": 772,
       "path": [
         "voice",
         "startTurn"
@@ -3350,10 +3303,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.pushAudio",
+      "expression": "desktopApi.voice.pushAudio",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 773,
+      "line": 774,
       "path": [
         "voice",
         "pushAudio"
@@ -3362,10 +3315,10 @@
     },
     {
       "column": 47,
-      "expression": "window.electronAPI.voice.endTurn",
+      "expression": "desktopApi.voice.endTurn",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 774,
+      "line": 775,
       "path": [
         "voice",
         "endTurn"
@@ -3374,10 +3327,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.cancelTurn",
+      "expression": "desktopApi.voice.cancelTurn",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 776,
+      "line": 777,
       "path": [
         "voice",
         "cancelTurn"
@@ -3386,19 +3339,7 @@
     },
     {
       "column": 9,
-      "expression": "window.electronAPI.voice.confirm",
-      "file": "src/renderer/src/lib/ipc-client.ts",
-      "kind": "call",
-      "line": 779,
-      "path": [
-        "voice",
-        "confirm"
-      ],
-      "resolution": "literal"
-    },
-    {
-      "column": 9,
-      "expression": "window.electronAPI.voice.confirm",
+      "expression": "desktopApi.voice.confirm",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
       "line": 780,
@@ -3410,19 +3351,19 @@
     },
     {
       "column": 9,
-      "expression": "window.electronAPI.voice.dismiss",
+      "expression": "desktopApi.voice.confirm",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 783,
+      "line": 781,
       "path": [
         "voice",
-        "dismiss"
+        "confirm"
       ],
       "resolution": "literal"
     },
     {
       "column": 9,
-      "expression": "window.electronAPI.voice.dismiss",
+      "expression": "desktopApi.voice.dismiss",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
       "line": 784,
@@ -3433,11 +3374,23 @@
       "resolution": "literal"
     },
     {
-      "column": 50,
-      "expression": "window.electronAPI.voice.getRuntime",
+      "column": 9,
+      "expression": "desktopApi.voice.dismiss",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
       "line": 785,
+      "path": [
+        "voice",
+        "dismiss"
+      ],
+      "resolution": "literal"
+    },
+    {
+      "column": 50,
+      "expression": "desktopApi.voice.getRuntime",
+      "file": "src/renderer/src/lib/ipc-client.ts",
+      "kind": "call",
+      "line": 786,
       "path": [
         "voice",
         "getRuntime"
@@ -3446,10 +3399,10 @@
     },
     {
       "column": 54,
-      "expression": "window.electronAPI.voice.installRuntime",
+      "expression": "desktopApi.voice.installRuntime",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 786,
+      "line": 787,
       "path": [
         "voice",
         "installRuntime"
@@ -3458,10 +3411,10 @@
     },
     {
       "column": 53,
-      "expression": "window.electronAPI.voice.removeRuntime",
+      "expression": "desktopApi.voice.removeRuntime",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 787,
+      "line": 788,
       "path": [
         "voice",
         "removeRuntime"
@@ -3470,10 +3423,10 @@
     },
     {
       "column": 59,
-      "expression": "window.electronAPI.voice.installModel",
+      "expression": "desktopApi.voice.installModel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 788,
+      "line": 789,
       "path": [
         "voice",
         "installModel"
@@ -3482,10 +3435,10 @@
     },
     {
       "column": 60,
-      "expression": "window.electronAPI.voice.removeModel",
+      "expression": "desktopApi.voice.removeModel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 789,
+      "line": 790,
       "path": [
         "voice",
         "removeModel"
@@ -3494,10 +3447,10 @@
     },
     {
       "column": 60,
-      "expression": "window.electronAPI.voice.selectModel",
+      "expression": "desktopApi.voice.selectModel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 790,
+      "line": 791,
       "path": [
         "voice",
         "selectModel"
@@ -3506,10 +3459,10 @@
     },
     {
       "column": 57,
-      "expression": "window.electronAPI.voice.removeAllModels",
+      "expression": "desktopApi.voice.removeAllModels",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 791,
+      "line": 792,
       "path": [
         "voice",
         "removeAllModels"
@@ -3518,10 +3471,10 @@
     },
     {
       "column": 63,
-      "expression": "window.electronAPI.voice.setCustomModelDir",
+      "expression": "desktopApi.voice.setCustomModelDir",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 792,
+      "line": 793,
       "path": [
         "voice",
         "setCustomModelDir"
@@ -3530,10 +3483,10 @@
     },
     {
       "column": 56,
-      "expression": "window.electronAPI.voice.pickModelDir",
+      "expression": "desktopApi.voice.pickModelDir",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 793,
+      "line": 794,
       "path": [
         "voice",
         "pickModelDir"
@@ -3542,10 +3495,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.setEndpointSilence",
+      "expression": "desktopApi.voice.setEndpointSilence",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 795,
+      "line": 796,
       "path": [
         "voice",
         "setEndpointSilence"
@@ -3554,10 +3507,10 @@
     },
     {
       "column": 65,
-      "expression": "window.electronAPI.voice.setShortcut",
+      "expression": "desktopApi.voice.setShortcut",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 796,
+      "line": 797,
       "path": [
         "voice",
         "setShortcut"
@@ -3566,10 +3519,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.expectAnswer",
+      "expression": "desktopApi.voice.expectAnswer",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 798,
+      "line": 799,
       "path": [
         "voice",
         "expectAnswer"
@@ -3578,10 +3531,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI?.voice?.answerNotExpected",
+      "expression": "desktopApi?.voice?.answerNotExpected",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 801,
+      "line": 802,
       "path": [
         "voice",
         "answerNotExpected"
@@ -3590,10 +3543,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.onState",
+      "expression": "desktopApi.voice.onState",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 803,
+      "line": 804,
       "path": [
         "voice",
         "onState"
@@ -3602,10 +3555,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.onPartial",
+      "expression": "desktopApi.voice.onPartial",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 805,
+      "line": 806,
       "path": [
         "voice",
         "onPartial"
@@ -3614,10 +3567,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.onFinal",
+      "expression": "desktopApi.voice.onFinal",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 807,
+      "line": 808,
       "path": [
         "voice",
         "onFinal"
@@ -3625,11 +3578,11 @@
       "resolution": "literal"
     },
     {
-      "column": 22,
-      "expression": "window.electronAPI.voice.onSegment",
+      "column": 34,
+      "expression": "desktopApi.voice.onSegment",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 810,
+      "line": 811,
       "path": [
         "voice",
         "onSegment"
@@ -3638,10 +3591,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.onOutcome",
+      "expression": "desktopApi.voice.onOutcome",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 812,
+      "line": 813,
       "path": [
         "voice",
         "onOutcome"
@@ -3650,10 +3603,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.onStatus",
+      "expression": "desktopApi.voice.onStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 814,
+      "line": 815,
       "path": [
         "voice",
         "onStatus"
@@ -3662,10 +3615,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.onError",
+      "expression": "desktopApi.voice.onError",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 816,
+      "line": 817,
       "path": [
         "voice",
         "onError"
@@ -3674,10 +3627,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.onNavigate",
+      "expression": "desktopApi.voice.onNavigate",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 818,
+      "line": 819,
       "path": [
         "voice",
         "onNavigate"
@@ -3686,10 +3639,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.onDictate",
+      "expression": "desktopApi.voice.onDictate",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 820,
+      "line": 821,
       "path": [
         "voice",
         "onDictate"
@@ -3698,10 +3651,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.onRuntimeProgress",
+      "expression": "desktopApi.voice.onRuntimeProgress",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 822,
+      "line": 823,
       "path": [
         "voice",
         "onRuntimeProgress"
@@ -3710,10 +3663,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.onHotkey",
+      "expression": "desktopApi.voice.onHotkey",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 824,
+      "line": 825,
       "path": [
         "voice",
         "onHotkey"
@@ -3722,10 +3675,10 @@
     },
     {
       "column": 49,
-      "expression": "window.electronAPI.voice.tts.getSnapshot",
+      "expression": "desktopApi.voice.tts.getSnapshot",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 829,
+      "line": 830,
       "path": [
         "voice",
         "tts",
@@ -3735,10 +3688,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.tts.setEnabled",
+      "expression": "desktopApi.voice.tts.setEnabled",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 831,
+      "line": 832,
       "path": [
         "voice",
         "tts",
@@ -3748,10 +3701,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.tts.setEngine",
+      "expression": "desktopApi.voice.tts.setEngine",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 833,
+      "line": 834,
       "path": [
         "voice",
         "tts",
@@ -3761,10 +3714,10 @@
     },
     {
       "column": 61,
-      "expression": "window.electronAPI.voice.tts.setVoice",
+      "expression": "desktopApi.voice.tts.setVoice",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 834,
+      "line": 835,
       "path": [
         "voice",
         "tts",
@@ -3774,10 +3727,10 @@
     },
     {
       "column": 59,
-      "expression": "window.electronAPI.voice.tts.setSpeed",
+      "expression": "desktopApi.voice.tts.setSpeed",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 835,
+      "line": 836,
       "path": [
         "voice",
         "tts",
@@ -3787,10 +3740,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.tts.setMaxChars",
+      "expression": "desktopApi.voice.tts.setMaxChars",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 837,
+      "line": 838,
       "path": [
         "voice",
         "tts",
@@ -3800,10 +3753,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.tts.setSpeakActionResults",
+      "expression": "desktopApi.voice.tts.setSpeakActionResults",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 839,
+      "line": 840,
       "path": [
         "voice",
         "tts",
@@ -3813,10 +3766,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.tts.setOnlyVoiceTurns",
+      "expression": "desktopApi.voice.tts.setOnlyVoiceTurns",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 841,
+      "line": 842,
       "path": [
         "voice",
         "tts",
@@ -3826,10 +3779,10 @@
     },
     {
       "column": 60,
-      "expression": "window.electronAPI.voice.tts.installModel",
+      "expression": "desktopApi.voice.tts.installModel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 842,
+      "line": 843,
       "path": [
         "voice",
         "tts",
@@ -3839,10 +3792,10 @@
     },
     {
       "column": 59,
-      "expression": "window.electronAPI.voice.tts.selectModel",
+      "expression": "desktopApi.voice.tts.selectModel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 843,
+      "line": 844,
       "path": [
         "voice",
         "tts",
@@ -3852,10 +3805,10 @@
     },
     {
       "column": 59,
-      "expression": "window.electronAPI.voice.tts.removeModel",
+      "expression": "desktopApi.voice.tts.removeModel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 844,
+      "line": 845,
       "path": [
         "voice",
         "tts",
@@ -3865,10 +3818,10 @@
     },
     {
       "column": 63,
-      "expression": "window.electronAPI.voice.tts.preview",
+      "expression": "desktopApi.voice.tts.preview",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 845,
+      "line": 846,
       "path": [
         "voice",
         "tts",
@@ -3878,10 +3831,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.tts.speak",
+      "expression": "desktopApi.voice.tts.speak",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 847,
+      "line": 848,
       "path": [
         "voice",
         "tts",
@@ -3891,10 +3844,10 @@
     },
     {
       "column": 30,
-      "expression": "window.electronAPI.voice.tts.stop",
+      "expression": "desktopApi.voice.tts.stop",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 848,
+      "line": 849,
       "path": [
         "voice",
         "tts",
@@ -3904,10 +3857,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.tts.onSpeechStart",
+      "expression": "desktopApi.voice.tts.onSpeechStart",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 850,
+      "line": 851,
       "path": [
         "voice",
         "tts",
@@ -3917,10 +3870,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.tts.onSpeechChunk",
+      "expression": "desktopApi.voice.tts.onSpeechChunk",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 852,
+      "line": 853,
       "path": [
         "voice",
         "tts",
@@ -3930,10 +3883,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.tts.onSpeechEnd",
+      "expression": "desktopApi.voice.tts.onSpeechEnd",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 854,
+      "line": 855,
       "path": [
         "voice",
         "tts",
@@ -3943,10 +3896,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.tts.onStatus",
+      "expression": "desktopApi.voice.tts.onStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 856,
+      "line": 857,
       "path": [
         "voice",
         "tts",
@@ -3956,10 +3909,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.voice.tts.onModelProgress",
+      "expression": "desktopApi.voice.tts.onModelProgress",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 858,
+      "line": 859,
       "path": [
         "voice",
         "tts",
@@ -3968,83 +3921,11 @@
       "resolution": "literal"
     },
     {
-      "column": 47,
-      "expression": "window.electronAPI?.browser?.startRecording",
-      "file": "src/renderer/src/lib/ipc-client.ts",
-      "kind": "access",
-      "line": 862,
-      "path": [
-        "browser",
-        "startRecording"
-      ],
-      "resolution": "literal"
-    },
-    {
-      "column": 7,
-      "expression": "window.electronAPI.browser.startRecording",
-      "file": "src/renderer/src/lib/ipc-client.ts",
-      "kind": "call",
-      "line": 863,
-      "path": [
-        "browser",
-        "startRecording"
-      ],
-      "resolution": "literal"
-    },
-    {
-      "column": 30,
-      "expression": "window.electronAPI?.browser?.stopRecording",
-      "file": "src/renderer/src/lib/ipc-client.ts",
-      "kind": "access",
-      "line": 865,
-      "path": [
-        "browser",
-        "stopRecording"
-      ],
-      "resolution": "literal"
-    },
-    {
-      "column": 7,
-      "expression": "window.electronAPI.browser.stopRecording",
-      "file": "src/renderer/src/lib/ipc-client.ts",
-      "kind": "call",
-      "line": 866,
-      "path": [
-        "browser",
-        "stopRecording"
-      ],
-      "resolution": "literal"
-    },
-    {
-      "column": 32,
-      "expression": "window.electronAPI?.browser?.recordingStatus",
-      "file": "src/renderer/src/lib/ipc-client.ts",
-      "kind": "access",
-      "line": 868,
-      "path": [
-        "browser",
-        "recordingStatus"
-      ],
-      "resolution": "literal"
-    },
-    {
-      "column": 7,
-      "expression": "window.electronAPI.browser.recordingStatus",
-      "file": "src/renderer/src/lib/ipc-client.ts",
-      "kind": "call",
-      "line": 869,
-      "path": [
-        "browser",
-        "recordingStatus"
-      ],
-      "resolution": "literal"
-    },
-    {
       "column": 5,
-      "expression": "window.electronAPI.chat.start",
+      "expression": "desktopApi.chat.start",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 880,
+      "line": 881,
       "path": [
         "chat",
         "start"
@@ -4053,10 +3934,10 @@
     },
     {
       "column": 64,
-      "expression": "window.electronAPI.chat.cancel",
+      "expression": "desktopApi.chat.cancel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 881,
+      "line": 882,
       "path": [
         "chat",
         "cancel"
@@ -4064,11 +3945,11 @@
       "resolution": "literal"
     },
     {
-      "column": 71,
-      "expression": "window.electronAPI.chat.onEvent",
+      "column": 83,
+      "expression": "desktopApi.chat.onEvent",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 882,
+      "line": 883,
       "path": [
         "chat",
         "onEvent"
@@ -4077,10 +3958,10 @@
     },
     {
       "column": 81,
-      "expression": "window.electronAPI.sessionContext.getSnapshot",
+      "expression": "desktopApi.sessionContext.getSnapshot",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 890,
+      "line": 891,
       "path": [
         "sessionContext",
         "getSnapshot"
@@ -4089,10 +3970,10 @@
     },
     {
       "column": 67,
-      "expression": "window.electronAPI.sessionContext.setPolicy",
+      "expression": "desktopApi.sessionContext.setPolicy",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 891,
+      "line": 892,
       "path": [
         "sessionContext",
         "setPolicy"
@@ -4101,10 +3982,10 @@
     },
     {
       "column": 90,
-      "expression": "window.electronAPI.commander.listSessions",
+      "expression": "desktopApi.commander.listSessions",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 895,
+      "line": 896,
       "path": [
         "commander",
         "listSessions"
@@ -4113,10 +3994,10 @@
     },
     {
       "column": 65,
-      "expression": "window.electronAPI.commander.createSession",
+      "expression": "desktopApi.commander.createSession",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 896,
+      "line": 897,
       "path": [
         "commander",
         "createSession"
@@ -4125,10 +4006,10 @@
     },
     {
       "column": 83,
-      "expression": "window.electronAPI.commander.renameSession",
+      "expression": "desktopApi.commander.renameSession",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 897,
+      "line": 898,
       "path": [
         "commander",
         "renameSession"
@@ -4137,10 +4018,10 @@
     },
     {
       "column": 88,
-      "expression": "window.electronAPI.commander.archiveSession",
+      "expression": "desktopApi.commander.archiveSession",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 898,
+      "line": 899,
       "path": [
         "commander",
         "archiveSession"
@@ -4149,10 +4030,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.commander.listMessages",
+      "expression": "desktopApi.commander.listMessages",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 900,
+      "line": 901,
       "path": [
         "commander",
         "listMessages"
@@ -4161,10 +4042,10 @@
     },
     {
       "column": 70,
-      "expression": "window.electronAPI.commander.markRead",
+      "expression": "desktopApi.commander.markRead",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 901,
+      "line": 902,
       "path": [
         "commander",
         "markRead"
@@ -4173,10 +4054,10 @@
     },
     {
       "column": 12,
-      "expression": "window.electronAPI.commander.setActiveSession",
+      "expression": "desktopApi.commander.setActiveSession",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 904,
+      "line": 905,
       "path": [
         "commander",
         "setActiveSession"
@@ -4184,11 +4065,11 @@
       "resolution": "literal"
     },
     {
-      "column": 75,
-      "expression": "window.electronAPI.commander.setActiveSession",
+      "column": 67,
+      "expression": "desktopApi.commander.setActiveSession",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 904,
+      "line": 905,
       "path": [
         "commander",
         "setActiveSession"
@@ -4197,10 +4078,10 @@
     },
     {
       "column": 22,
-      "expression": "window.electronAPI.commander.send",
+      "expression": "desktopApi.commander.send",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 906,
+      "line": 907,
       "path": [
         "commander",
         "send"
@@ -4208,11 +4089,11 @@
       "resolution": "literal"
     },
     {
-      "column": 83,
-      "expression": "window.electronAPI.commander.send",
+      "column": 75,
+      "expression": "desktopApi.commander.send",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 906,
+      "line": 907,
       "path": [
         "commander",
         "send"
@@ -4221,10 +4102,10 @@
     },
     {
       "column": 80,
-      "expression": "window.electronAPI.commander.getImage",
+      "expression": "desktopApi.commander.getImage",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 907,
+      "line": 908,
       "path": [
         "commander",
         "getImage"
@@ -4233,10 +4114,10 @@
     },
     {
       "column": 67,
-      "expression": "window.electronAPI.commander.cancel",
+      "expression": "desktopApi.commander.cancel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 908,
+      "line": 909,
       "path": [
         "commander",
         "cancel"
@@ -4245,10 +4126,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.commander.undoAction",
+      "expression": "desktopApi.commander.undoAction",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 910,
+      "line": 911,
       "path": [
         "commander",
         "undoAction"
@@ -4257,10 +4138,10 @@
     },
     {
       "column": 102,
-      "expression": "window.electronAPI.commander.getActivity",
+      "expression": "desktopApi.commander.getActivity",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 911,
+      "line": 912,
       "path": [
         "commander",
         "getActivity"
@@ -4268,11 +4149,11 @@
       "resolution": "literal"
     },
     {
-      "column": 73,
-      "expression": "window.electronAPI.commander.onEvent",
+      "column": 85,
+      "expression": "desktopApi.commander.onEvent",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 912,
+      "line": 913,
       "path": [
         "commander",
         "onEvent"
@@ -4281,10 +4162,10 @@
     },
     {
       "column": 44,
-      "expression": "window.electronAPI.cliMcp.snapshot",
+      "expression": "desktopApi.cliMcp.snapshot",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 919,
+      "line": 920,
       "path": [
         "cliMcp",
         "snapshot"
@@ -4293,10 +4174,10 @@
     },
     {
       "column": 76,
-      "expression": "window.electronAPI.cliMcp.upsert",
+      "expression": "desktopApi.cliMcp.upsert",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 920,
+      "line": 921,
       "path": [
         "cliMcp",
         "upsert"
@@ -4305,10 +4186,10 @@
     },
     {
       "column": 68,
-      "expression": "window.electronAPI.cliMcp.remove",
+      "expression": "desktopApi.cliMcp.remove",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 921,
+      "line": 922,
       "path": [
         "cliMcp",
         "remove"
@@ -4317,10 +4198,10 @@
     },
     {
       "column": 95,
-      "expression": "window.electronAPI.cliMcp.setEnabled",
+      "expression": "desktopApi.cliMcp.setEnabled",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 922,
+      "line": 923,
       "path": [
         "cliMcp",
         "setEnabled"
@@ -4329,10 +4210,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.cliMcp.setToolEnabled",
+      "expression": "desktopApi.cliMcp.setToolEnabled",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 924,
+      "line": 925,
       "path": [
         "cliMcp",
         "setToolEnabled"
@@ -4341,10 +4222,10 @@
     },
     {
       "column": 64,
-      "expression": "window.electronAPI.cliMcp.probe",
+      "expression": "desktopApi.cliMcp.probe",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 925,
+      "line": 926,
       "path": [
         "cliMcp",
         "probe"
@@ -4353,10 +4234,10 @@
     },
     {
       "column": 55,
-      "expression": "window.electronAPI.voiceElevenLabs.setKey",
+      "expression": "desktopApi.voiceElevenLabs.setKey",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 933,
+      "line": 934,
       "path": [
         "voiceElevenLabs",
         "setKey"
@@ -4365,10 +4246,10 @@
     },
     {
       "column": 46,
-      "expression": "window.electronAPI.voiceElevenLabs.clearKey",
+      "expression": "desktopApi.voiceElevenLabs.clearKey",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 934,
+      "line": 935,
       "path": [
         "voiceElevenLabs",
         "clearKey"
@@ -4377,10 +4258,10 @@
     },
     {
       "column": 54,
-      "expression": "window.electronAPI.voiceElevenLabs.acceptDisclosure",
+      "expression": "desktopApi.voiceElevenLabs.acceptDisclosure",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 935,
+      "line": 936,
       "path": [
         "voiceElevenLabs",
         "acceptDisclosure"
@@ -4389,10 +4270,10 @@
     },
     {
       "column": 45,
-      "expression": "window.electronAPI.voiceElevenLabs.refresh",
+      "expression": "desktopApi.voiceElevenLabs.refresh",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 936,
+      "line": 937,
       "path": [
         "voiceElevenLabs",
         "refresh"
@@ -4401,10 +4282,10 @@
     },
     {
       "column": 61,
-      "expression": "window.electronAPI.voiceElevenLabs.setModel",
+      "expression": "desktopApi.voiceElevenLabs.setModel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 937,
+      "line": 938,
       "path": [
         "voiceElevenLabs",
         "setModel"
@@ -4413,10 +4294,10 @@
     },
     {
       "column": 80,
-      "expression": "window.electronAPI.commanderVoice.setActive",
+      "expression": "desktopApi.commanderVoice.setActive",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 941,
+      "line": 942,
       "path": [
         "commanderVoice",
         "setActive"
@@ -4425,10 +4306,10 @@
     },
     {
       "column": 68,
-      "expression": "window.electronAPI.commanderVoice.bargeIn",
+      "expression": "desktopApi.commanderVoice.bargeIn",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 942,
+      "line": 943,
       "path": [
         "commanderVoice",
         "bargeIn"
@@ -4437,10 +4318,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.commanderVoice.send",
+      "expression": "desktopApi.commanderVoice.send",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 944,
+      "line": 945,
       "path": [
         "commanderVoice",
         "send"
@@ -4449,10 +4330,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.oauth.startFlow",
+      "expression": "desktopApi.oauth.startFlow",
       "file": "src/renderer/src/lib/oauth-api.ts",
       "kind": "call",
-      "line": 10,
+      "line": 11,
       "path": [
         "oauth",
         "startFlow"
@@ -4461,10 +4342,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.oauth.exchangeCode",
+      "expression": "desktopApi.oauth.exchangeCode",
       "file": "src/renderer/src/lib/oauth-api.ts",
       "kind": "call",
-      "line": 16,
+      "line": 17,
       "path": [
         "oauth",
         "exchangeCode"
@@ -4473,10 +4354,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.oauth.startLocalhostFlow",
+      "expression": "desktopApi.oauth.startLocalhostFlow",
       "file": "src/renderer/src/lib/oauth-api.ts",
       "kind": "call",
-      "line": 22,
+      "line": 23,
       "path": [
         "oauth",
         "startLocalhostFlow"
@@ -4485,10 +4366,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.oauth.getValidToken",
+      "expression": "desktopApi.oauth.getValidToken",
       "file": "src/renderer/src/lib/oauth-api.ts",
       "kind": "call",
-      "line": 28,
+      "line": 29,
       "path": [
         "oauth",
         "getValidToken"
@@ -4497,10 +4378,10 @@
     },
     {
       "column": 5,
-      "expression": "window.electronAPI.oauth.revokeToken",
+      "expression": "desktopApi.oauth.revokeToken",
       "file": "src/renderer/src/lib/oauth-api.ts",
       "kind": "call",
-      "line": 34,
+      "line": 35,
       "path": [
         "oauth",
         "revokeToken"
@@ -4509,10 +4390,10 @@
     },
     {
       "column": 16,
-      "expression": "window.electronAPI?.agentSession?.getTranscriptSnapshot",
+      "expression": "desktopApi?.agentSession?.getTranscriptSnapshot",
       "file": "src/renderer/src/stores/agent-store.ts",
       "kind": "access",
-      "line": 137,
+      "line": 148,
       "path": [
         "agentSession",
         "getTranscriptSnapshot"
@@ -4520,11 +4401,23 @@
       "resolution": "literal"
     },
     {
+      "column": 57,
+      "expression": "desktopApi.agentSession.getTranscriptPage",
+      "file": "src/renderer/src/stores/agent-store.ts",
+      "kind": "call",
+      "line": 156,
+      "path": [
+        "agentSession",
+        "getTranscriptPage"
+      ],
+      "resolution": "literal"
+    },
+    {
       "column": 16,
-      "expression": "window.electronAPI?.agentSession?.getTranscriptDelta",
+      "expression": "desktopApi?.agentSession?.getTranscriptDelta",
       "file": "src/renderer/src/stores/agent-store.ts",
       "kind": "access",
-      "line": 167,
+      "line": 186,
       "path": [
         "agentSession",
         "getTranscriptDelta"
@@ -4532,63 +4425,49 @@
       "resolution": "literal"
     },
     {
+      "column": 71,
+      "expression": "desktopApi.agentSession.getTranscriptPage",
+      "file": "src/renderer/src/stores/agent-store.ts",
+      "kind": "call",
+      "line": 198,
+      "path": [
+        "agentSession",
+        "getTranscriptPage"
+      ],
+      "resolution": "literal"
+    },
+    {
       "column": 45,
-      "expression": "window.electronAPI?.onArtifactUpdated",
+      "expression": "desktopApi?.onArtifactUpdated",
       "file": "src/renderer/src/stores/artifact-store.ts",
       "kind": "access",
-      "line": 451,
+      "line": 452,
       "path": [
         "onArtifactUpdated"
       ],
       "resolution": "literal"
     },
     {
-      "column": 10,
-      "expression": "window.electronAPI?.browser?.unregisterBrokerPanel",
-      "file": "src/renderer/src/stores/canvas-store.ts",
-      "kind": "call",
-      "line": 43,
-      "path": [
-        "browser",
-        "unregisterBrokerPanel"
-      ],
-      "resolution": "literal"
-    },
-    {
       "column": 31,
-      "expression": "window.electronAPI.terminal.getBuffer",
+      "expression": "desktopApi.terminal.getBuffer",
       "file": "src/renderer/src/stores/canvas-store.ts",
       "kind": "call",
-      "line": 878,
+      "line": 879,
       "path": [
         "terminal",
         "getBuffer"
       ],
       "resolution": "literal"
-    },
+    }
+  ],
+  "electronAPIConsumers": [
     {
-      "column": 50,
-      "expression": "window.electronAPI?.voice?.getSnapshot",
-      "file": "src/renderer/src/stores/voice-store.ts",
+      "column": 54,
+      "expression": "window.electronAPI",
+      "file": "src/renderer/src/lib/desktop-api.ts",
       "kind": "access",
-      "line": 197,
-      "path": [
-        "voice",
-        "getSnapshot"
-      ],
-      "resolution": "literal"
-    },
-    {
-      "column": 50,
-      "expression": "window.electronAPI?.voice?.tts?.getSnapshot",
-      "file": "src/renderer/src/stores/voice-store.ts",
-      "kind": "access",
-      "line": 208,
-      "path": [
-        "voice",
-        "tts",
-        "getSnapshot"
-      ],
+      "line": 22,
+      "path": [],
       "resolution": "literal"
     }
   ],
@@ -5303,7 +5182,7 @@
       ],
       "column": 1,
       "file": "src/main/oauth/oauth-manager.ts",
-      "line": 10,
+      "line": 1,
       "mode": "runtime",
       "syntax": "import"
     },
@@ -5499,7 +5378,7 @@
       ],
       "column": 1,
       "file": "src/main/worktree-manager.ts",
-      "line": 7,
+      "line": 1,
       "mode": "mixed",
       "syntax": "import"
     },
@@ -5744,6 +5623,7 @@
     "src/main/oauth/connector-oauth-flow.ts",
     "src/main/oauth/local-oauth-server.ts",
     "src/main/oauth/mcp-discovery.ts",
+    "src/main/oauth/oauth-manager-core.ts",
     "src/main/oauth/oauth-manager.ts",
     "src/main/oauth/oauth-provider.ts",
     "src/main/oauth/pkce.ts",
@@ -5754,6 +5634,7 @@
     "src/main/oauth/providers/mcp-oauth-provider.ts",
     "src/main/output-extraction.ts",
     "src/main/overdue-notifier.ts",
+    "src/main/owned-operation-lifetime.ts",
     "src/main/panel-browser-broker.ts",
     "src/main/platform/authenticated-secret-storage.ts",
     "src/main/platform/credential-migration.ts",
@@ -5875,6 +5756,7 @@
     "src/main/workspace-node-modules-gc.ts",
     "src/main/workspace-paths.ts",
     "src/main/workspace-process-cleanup.ts",
+    "src/main/worktree-manager-core.ts",
     "src/main/worktree-manager.ts",
     "src/mobile/App.tsx",
     "src/mobile/api/auth.ts",
@@ -6026,6 +5908,7 @@
     "src/renderer/src/components/icons/AgentLogos.tsx",
     "src/renderer/src/components/layout/AppLayout.tsx",
     "src/renderer/src/components/layout/CommandPalette.tsx",
+    "src/renderer/src/components/layout/DesktopHostStatus.tsx",
     "src/renderer/src/components/layout/KeyboardShortcutsDialog.tsx",
     "src/renderer/src/components/layout/NavRail.tsx",
     "src/renderer/src/components/layout/ProjectSwitcher.tsx",
@@ -6184,13 +6067,16 @@
     "src/renderer/src/lib/commander-call/presence-level.ts",
     "src/renderer/src/lib/commander-images.ts",
     "src/renderer/src/lib/commander-report-threads.ts",
+    "src/renderer/src/lib/desktop-api.ts",
     "src/renderer/src/lib/desktop-client.ts",
     "src/renderer/src/lib/desktop-features.ts",
+    "src/renderer/src/lib/desktop-rehydration.ts",
     "src/renderer/src/lib/diff-parser.ts",
     "src/renderer/src/lib/git-provider-api.ts",
     "src/renderer/src/lib/ipc-client.ts",
     "src/renderer/src/lib/keyboard-shortcuts.ts",
     "src/renderer/src/lib/mermaid-fence.ts",
+    "src/renderer/src/lib/native-desktop-host.ts",
     "src/renderer/src/lib/oauth-api.ts",
     "src/renderer/src/lib/platform.ts",
     "src/renderer/src/lib/project-editor.ts",
@@ -6234,8 +6120,25 @@
     "src/renderer/src/stores/ui-store.ts",
     "src/renderer/src/stores/user-store.ts",
     "src/renderer/src/stores/voice-store.ts",
+    "src/renderer/src/tauri-main.ts",
     "src/renderer/src/types/index.ts",
+    "src/service/agent-backend.ts",
+    "src/service/agent-configuration-backend.ts",
+    "src/service/configuration-backend.ts",
+    "src/service/database-backend.ts",
+    "src/service/database-service.ts",
+    "src/service/database-stdio.ts",
+    "src/service/feasibility.mjs",
+    "src/service/production-adapters.ts",
+    "src/service/production-desktop-bindings.ts",
+    "src/service/production-owner.ts",
+    "src/service/transcript-events.ts",
+    "src/service/transport/desktop-registry.ts",
+    "src/service/transport/framing.ts",
+    "src/service/transport/peer.ts",
+    "src/service/transport/streams.ts",
     "src/shared/activity.ts",
+    "src/shared/agent-configuration-codecs.ts",
     "src/shared/agent-desktop-codecs.ts",
     "src/shared/agent-utils.ts",
     "src/shared/artifact-navigation.ts",
@@ -6279,6 +6182,7 @@
     "src/shared/service-protocol.ts",
     "src/shared/session-context.ts",
     "src/shared/skill-scope.ts",
+    "src/shared/stream-protocol.ts",
     "src/shared/subtask-graph.ts",
     "src/shared/system-authority.ts",
     "src/shared/task-completion.ts",
@@ -6296,10 +6200,11 @@
     "src/shared/ui-commands.ts",
     "src/shared/voice-intent-parser.ts",
     "src/shared/voice-tts.ts",
-    "src/shared/voice.ts"
+    "src/shared/voice.ts",
+    "src/tauri-production/main.ts"
   ],
   "formatVersion": 2,
-  "methodology": "Parse-only syntactic inventory; unresolved expressions require review. This is not a runtime coverage or permission proof.",
+  "methodology": "Parse-only syntactic inventory including the typed desktop facade and private service source. Direct preload reads and facade consumers are separate. Unresolved expressions require review; this is not runtime coverage or permission proof.",
   "nativeDependencies": [
     {
       "evidence": "Known addons rebuilt by scripts/rebuild-native.mjs; declared version, not installed ABI verification",
@@ -6318,7 +6223,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/main/agent-manager-core.ts",
-      "line": 478,
+      "line": 482,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6329,7 +6234,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 491,
+      "line": 495,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6340,7 +6245,7 @@
       "channelExpression": null,
       "column": 79,
       "file": "src/main/agent-manager-core.ts",
-      "line": 1221,
+      "line": 1304,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6351,7 +6256,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 1235,
+      "line": 1318,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6362,7 +6267,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 1244,
+      "line": 1327,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6373,7 +6278,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 1583,
+      "line": 1666,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6384,7 +6289,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 1632,
+      "line": 1715,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6395,7 +6300,7 @@
       "channelExpression": null,
       "column": 11,
       "file": "src/main/agent-manager-core.ts",
-      "line": 1783,
+      "line": 1866,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6406,7 +6311,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/main/agent-manager-core.ts",
-      "line": 1995,
+      "line": 2078,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6417,7 +6322,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 2116,
+      "line": 2199,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6428,7 +6333,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 2125,
+      "line": 2208,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6439,7 +6344,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 2332,
+      "line": 2415,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6450,7 +6355,7 @@
       "channelExpression": null,
       "column": 11,
       "file": "src/main/agent-manager-core.ts",
-      "line": 2679,
+      "line": 2763,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6461,7 +6366,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/main/agent-manager-core.ts",
-      "line": 2699,
+      "line": 2783,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6472,7 +6377,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 2762,
+      "line": 2846,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6483,7 +6388,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/main/agent-manager-core.ts",
-      "line": 2791,
+      "line": 2875,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6494,7 +6399,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 3213,
+      "line": 3302,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6505,7 +6410,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 3338,
+      "line": 3429,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6516,7 +6421,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 3476,
+      "line": 3567,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6527,7 +6432,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/main/agent-manager-core.ts",
-      "line": 3937,
+      "line": 4029,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6538,7 +6443,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 3997,
+      "line": 4089,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6549,7 +6454,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/main/agent-manager-core.ts",
-      "line": 4073,
+      "line": 4165,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6560,7 +6465,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/main/agent-manager-core.ts",
-      "line": 4086,
+      "line": 4178,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6571,7 +6476,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 4088,
+      "line": 4180,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6582,7 +6487,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 4123,
+      "line": 4215,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6593,7 +6498,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 4315,
+      "line": 4407,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6604,7 +6509,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 4677,
+      "line": 4769,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6615,7 +6520,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 4678,
+      "line": 4770,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6626,7 +6531,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 4871,
+      "line": 4963,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6637,7 +6542,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 4886,
+      "line": 4978,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6648,7 +6553,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 4887,
+      "line": 4979,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6659,7 +6564,7 @@
       "channelExpression": null,
       "column": 11,
       "file": "src/main/agent-manager-core.ts",
-      "line": 5044,
+      "line": 5137,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6670,7 +6575,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 5632,
+      "line": 5725,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6681,7 +6586,7 @@
       "channelExpression": null,
       "column": 11,
       "file": "src/main/agent-manager-core.ts",
-      "line": 5758,
+      "line": 5852,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6692,7 +6597,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/main/agent-manager-core.ts",
-      "line": 5784,
+      "line": 5878,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6703,7 +6608,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/main/agent-manager-core.ts",
-      "line": 5831,
+      "line": 5925,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6714,7 +6619,7 @@
       "channelExpression": null,
       "column": 16,
       "file": "src/main/agent-manager-core.ts",
-      "line": 6179,
+      "line": 6265,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6725,7 +6630,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/main/agent-manager-core.ts",
-      "line": 6187,
+      "line": 6273,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6736,7 +6641,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 6197,
+      "line": 6283,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6747,7 +6652,7 @@
       "channelExpression": "channel",
       "column": 52,
       "file": "src/main/agent-manager-core.ts",
-      "line": 6202,
+      "line": 6288,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
@@ -6758,7 +6663,7 @@
       "channelExpression": "channel",
       "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 6207,
+      "line": 6293,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
@@ -6769,7 +6674,7 @@
       "channelExpression": "channel",
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 6238,
+      "line": 6324,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
@@ -7132,7 +7037,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 15,
+      "line": 19,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7154,7 +7059,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 25,
+      "line": 26,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7165,7 +7070,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 34,
+      "line": 35,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7176,7 +7081,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 38,
+      "line": 39,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7187,7 +7092,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 39,
+      "line": 40,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7198,7 +7103,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 41,
+      "line": 42,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7209,7 +7114,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 49,
+      "line": 50,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7220,7 +7125,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 54,
+      "line": 55,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7231,7 +7136,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 59,
+      "line": 60,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7242,7 +7147,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 64,
+      "line": 65,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7253,7 +7158,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 69,
+      "line": 70,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7264,7 +7169,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 70,
+      "line": 71,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7275,7 +7180,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 72,
+      "line": 73,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7286,7 +7191,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 74,
+      "line": 75,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7297,7 +7202,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 78,
+      "line": 79,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7308,7 +7213,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 83,
+      "line": 84,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7319,7 +7224,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 91,
+      "line": 92,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7330,7 +7235,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 96,
+      "line": 97,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7341,7 +7246,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 106,
+      "line": 107,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7352,7 +7257,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 113,
+      "line": 114,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7363,7 +7268,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 119,
+      "line": 120,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7374,7 +7279,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 121,
+      "line": 122,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7385,7 +7290,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 128,
+      "line": 129,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7396,7 +7301,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 130,
+      "line": 131,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7407,7 +7312,7 @@
       "channelExpression": null,
       "column": 3,
       "file": "src/main/ipc/agents.ts",
-      "line": 135,
+      "line": 136,
       "method": "handle",
       "methodExpression": null,
       "resolution": "literal",
@@ -7418,7 +7323,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/main/ipc/agents.ts",
-      "line": 138,
+      "line": 139,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -10815,9 +10720,9 @@
     {
       "channel": "worktree:progress",
       "channelExpression": null,
-      "column": 7,
+      "column": 46,
       "file": "src/main/worktree-manager.ts",
-      "line": 92,
+      "line": 17,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -14552,11 +14457,14 @@
     "src/preload",
     "src/renderer/src",
     "src/shared",
-    "src/mobile"
+    "src/mobile",
+    "src/service",
+    "src/tauri-production"
   ],
   "summary": {
-    "directAPIConsumers": 382,
-    "files": 768,
+    "desktopAPIConsumers": 371,
+    "directAPIConsumers": 1,
+    "files": 794,
     "operations": 736,
     "runtimeElectronImports": 46,
     "typeOnlyElectronImports": 6,
@@ -14567,7 +14475,7 @@
     {
       "column": 9,
       "file": "src/renderer/src/components/canvas/BrowserPanelContent.tsx",
-      "line": 516
+      "line": 517
     }
   ]
 }

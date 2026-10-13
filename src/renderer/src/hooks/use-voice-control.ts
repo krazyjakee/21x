@@ -61,8 +61,6 @@ export function useVoiceControl(): void {
   }, [setContextProvider])
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !window.electronAPI?.voice) return undefined
-
     const offNavigate = voiceApi.onNavigate(({ destination, taskId }) => {
       const ui = useUIStore.getState()
       if (taskId) useTaskStore.getState().selectTask(taskId)
@@ -139,10 +137,10 @@ export function useVoiceControl(): void {
     })
 
     return () => {
-      offNavigate()
-      offHotkey()
-      offDictate()
-      offSegment()
+      offNavigate?.()
+      offHotkey?.()
+      offDictate?.()
+      offSegment?.()
     }
   }, [toggleTurn])
 }

@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import { useState, useEffect, useRef } from 'react'
 import { Loader2, ChevronRight, Plus, X, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
@@ -98,13 +99,13 @@ export function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
     fetchSkills()
 
     // Check for environment variables
-    window.electronAPI.env.get('OPENAI_API_KEY').then(value => {
+    desktopApi.env.get('OPENAI_API_KEY').then(value => {
       setHasOpenaiEnv(!!value)
     })
-    window.electronAPI.env.get('ANTHROPIC_API_KEY').then(value => {
+    desktopApi.env.get('ANTHROPIC_API_KEY').then(value => {
       setHasAnthropicEnv(!!value)
     })
-    window.electronAPI.env.get('CURSOR_API_KEY').then(value => {
+    desktopApi.env.get('CURSOR_API_KEY').then(value => {
       setHasCursorEnv(!!value)
     })
   }, [])

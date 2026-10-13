@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import { useState, useEffect, useCallback } from 'react'
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
@@ -32,7 +33,7 @@ export function HubSpotConfigForm({ value, onChange, sourceId, onRequestSave }: 
 
   // Check if OAuth token exists (only for OAuth auth type)
   useEffect(() => {
-    if (value.auth_type === 'oauth' && sourceId && window.electronAPI?.oauth) {
+    if (value.auth_type === 'oauth' && sourceId && desktopApi?.oauth) {
       oauthApi
         .getValidToken(sourceId)
         .then((token) => {
@@ -47,7 +48,7 @@ export function HubSpotConfigForm({ value, onChange, sourceId, onRequestSave }: 
   const handleOAuthSuccess = async () => {
     setShowOAuthDialog(false)
 
-    if (sourceId && window.electronAPI?.oauth) {
+    if (sourceId && desktopApi?.oauth) {
       try {
         const token = await oauthApi.getValidToken(sourceId)
         setOauthConnected(!!token)
@@ -132,7 +133,7 @@ export function HubSpotConfigForm({ value, onChange, sourceId, onRequestSave }: 
                 <button
                   type="button"
                   onClick={() =>
-                    window.electronAPI.shell.openExternal('https://developers.hubspot.com/docs/getting-started/quickstart')
+                    desktopApi.shell.openExternal('https://developers.hubspot.com/docs/getting-started/quickstart')
                   }
                   className="text-primary hover:underline"
                 >

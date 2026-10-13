@@ -100,7 +100,7 @@ export const useOverviewStore = create<OverviewState>((set, get) => ({
       ]
       pollTimer = setInterval(() => { void get().fetchAll() }, OVERVIEW_FALLBACK_POLL_MS)
       unsubscribeAll = () => {
-        for (const off of offs) off()
+        for (const off of offs) off?.()
         if (pollTimer) clearInterval(pollTimer)
         pollTimer = null
       }

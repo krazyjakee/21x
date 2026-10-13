@@ -1,3 +1,4 @@
+import { desktopApi, desktopSupports } from '@/lib/desktop-api'
 import { useEffect } from 'react'
 import { useThemeStore } from '@/stores/theme-store'
 import { platform } from '@/lib/platform'
@@ -12,11 +13,11 @@ export function useTitleBarOverlayTheme(): void {
   const resolved = useThemeStore((s) => s.resolved)
 
   useEffect(() => {
-    if (platform === 'darwin') return
+    if (platform === 'darwin' || !desktopSupports('app.setTitleBarOverlay')) return
     const styles = getComputedStyle(document.documentElement)
     const color = styles.getPropertyValue('--background').trim()
     const symbolColor = styles.getPropertyValue('--muted-foreground').trim()
     if (!color || !symbolColor) return
-    void window.electronAPI?.app?.setTitleBarOverlay?.({ color, symbolColor })
+    void desktopApi?.app?.setTitleBarOverlay?.({ color, symbolColor })
   }, [resolved])
 }

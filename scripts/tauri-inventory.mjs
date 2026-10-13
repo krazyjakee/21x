@@ -4,7 +4,7 @@ import { dirname, join, relative, resolve, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 
-export const SOURCE_ROOTS = ['src/main', 'src/preload', 'src/renderer/src', 'src/shared', 'src/mobile']
+export const SOURCE_ROOTS = ['src/main', 'src/preload', 'src/renderer/src', 'src/shared', 'src/mobile', 'src/service', 'src/tauri-production']
 const OUTPUT = 'docs/tauri-migration/inventory.json'
 const SKIP_DIRECTORIES = new Set(['node_modules', 'dist', 'out', 'build', 'generated', '__generated__', '__tests__', 'fixtures', '__fixtures__', '.git'])
 const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0
@@ -131,7 +131,7 @@ function bindingNames(name) {
 export function scanSource(file, source, { constants = new Map(), wrappers = EVENT_WRAPPERS } = {}) {
   file = normalize(file)
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true)
-  const result = { electronImports: [], operations: [], electronAPIConsumers: [], webviews: [] }
+  const result = { electronImports: [], operations: [], electronAPIConsumers: [], desktopAPIConsumers: [], webviews: [] }
   const webContentsTypes = new Set()
   const electronNamespaces = new Set()
   const location = (node) => {
@@ -158,6 +158,7 @@ export function scanSource(file, source, { constants = new Map(), wrappers = EVE
       if (typeof key === 'string') property.name = key
     }
     const object = identify(property.object, env)
+    if (object?.kind === 'desktopFacade') return { kind: 'desktopFacade', path: [...object.path, property.name] }
     if (object?.kind === 'electron' && ['ipcMain', 'ipcRenderer'].includes(property.name)) return { kind: property.name }
     if (['ipcMain', 'ipcRenderer', 'webContents'].includes(object?.kind)) return { kind: `${object.kind}.method`, method: property.name }
     // Structural candidates: this records receiver syntax, not its runtime type.
@@ -183,6 +184,7 @@ export function scanSource(file, source, { constants = new Map(), wrappers = EVE
         let itemValue = null
         if (value?.kind === 'electron' && ['ipcMain', 'ipcRenderer'].includes(key)) itemValue = { kind: key }
         if (['ipcMain', 'ipcRenderer', 'webContents'].includes(value?.kind)) itemValue = { kind: `${value.kind}.method`, method: key }
+        if (value?.kind === 'desktopFacade') itemValue = { kind: 'desktopFacade', path: [...value.path, key] }
         bind(item.name, itemValue, env)
       }
     } else for (const id of bindingNames(name)) env.bindings.set(id, null)
@@ -205,9 +207,13 @@ export function scanSource(file, source, { constants = new Map(), wrappers = EVE
           const original = (item.propertyName ?? item.name).text
           if (literal(stmt.moduleSpecifier) === 'electron' && original === 'WebContents') webContentsTypes.add(item.name.text)
           const runtime = !clause.isTypeOnly && !item.isTypeOnly
+          const specifier = literal(stmt.moduleSpecifier)
+          const importedPath = specifier?.startsWith('@/') ? 'src/renderer/src/' + specifier.slice(2)
+            : specifier?.startsWith('.') ? posix.normalize(posix.join(posix.dirname(file), specifier)) : null
           const kind = runtime && literal(stmt.moduleSpecifier) === 'electron' && ['ipcMain', 'ipcRenderer'].includes(original) ? original
             : runtime && original === 'guardedIpcSend' ? 'guardedIpcSend' : null
-          env.bindings.set(item.name.text, kind ? { kind } : runtime && constants.has(item.name.text) ? { kind: 'constant', value: constants.get(item.name.text) } : null)
+          env.bindings.set(item.name.text, runtime && original === 'desktopApi' && ['src/renderer/src/lib/desktop-api', 'src/renderer/src/lib/desktop-api.ts'].includes(importedPath)
+            ? { kind: 'desktopFacade', path: [] } : kind ? { kind } : runtime && constants.has(item.name.text) ? { kind: 'constant', value: constants.get(item.name.text) } : null)
         }
       }
     }
@@ -285,6 +291,7 @@ export function scanSource(file, source, { constants = new Map(), wrappers = EVE
     if (ts.isCallExpression(node)) {
       if ((node.expression.kind === ts.SyntaxKind.ImportKeyword || ts.isIdentifier(node.expression) && node.expression.text === 'require') && literal(node.arguments[0]) === 'electron') result.electronImports.push({ ...location(node), syntax: node.expression.kind === ts.SyntaxKind.ImportKeyword ? 'dynamic-import' : 'require', mode: 'runtime', bindings: [] })
       const callee = identify(node.expression, env)
+      if (callee?.kind === 'desktopFacade' && ts.isIdentifier(unwrap(node.expression))) result.desktopAPIConsumers.push({ ...location(node.expression), path: callee.path, expression: node.expression.getText(sf), kind: 'call', resolution: callee.path.includes(null) ? 'unresolved' : 'literal' })
       if (callee?.kind === 'guardedIpcSend') recordOperation(node, 'guardedIpcSend', 'send', 1, env)
       const methods = { 'ipcMain.method': ['handle', 'on'], 'ipcRenderer.method': ['invoke', 'send', 'on'], 'webContents.method': ['send'] }
       if (methods[callee?.kind] && (callee.method === null || methods[callee.kind].includes(callee.method))) recordOperation(node, callee.kind.replace('.method', ''), callee.method, 0, env)
@@ -296,6 +303,10 @@ export function scanSource(file, source, { constants = new Map(), wrappers = EVE
     const enclosing = enclosingExpression(node)
     if (path && !(member(enclosing.parent)?.object === enclosing) && unwrap(node) === node) {
       result.electronAPIConsumers.push({ ...location(node), path, expression: node.getText(sf), kind: ts.isCallExpression(enclosing.parent) && enclosing.parent.expression === enclosing ? 'call' : 'access', resolution: path.includes(null) ? 'unresolved' : 'literal' })
+    }
+    const facade = member(node) && identify(node, env)
+    if (facade?.kind === 'desktopFacade' && !(member(enclosing.parent)?.object === enclosing) && unwrap(node) === node) {
+      result.desktopAPIConsumers.push({ ...location(node), path: facade.path, expression: node.getText(sf), kind: ts.isCallExpression(enclosing.parent) && enclosing.parent.expression === enclosing ? 'call' : 'access', resolution: facade.path.includes(null) ? 'unresolved' : 'literal' })
     }
     if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && node.tagName.getText(sf) === 'webview') result.webviews.push(location(node))
     ts.forEachChild(node, (child) => visit(child, env))
@@ -321,7 +332,7 @@ function schemaVersion(source) {
 export function createInventory({ sources, packageJson = {} }) {
   const sorted = [...sources].sort((a, b) => compare(normalize(a.file), normalize(b.file)))
   const constantMaps = sourceConstantMaps(sorted)
-  const collections = { electronImports: [], operations: [], electronAPIConsumers: [], webviews: [] }
+  const collections = { electronImports: [], operations: [], electronAPIConsumers: [], desktopAPIConsumers: [], webviews: [] }
   for (const { file, source } of sorted) {
     const scanned = scanSource(file, source, { constants: importedConstants(file, source, constantMaps) })
     for (const key of Object.keys(collections)) collections[key].push(...scanned[key])
@@ -335,14 +346,14 @@ export function createInventory({ sources, packageJson = {} }) {
   const resourceKeys = ['icon', 'entitlements', 'entitlementsInherit', 'include', 'installerIcon', 'uninstallerIcon', 'installerHeaderIcon']
   return {
     formatVersion: 2,
-    methodology: 'Parse-only syntactic inventory; unresolved expressions require review. This is not a runtime coverage or permission proof.',
+    methodology: 'Parse-only syntactic inventory including the typed desktop facade and private service source. Direct preload reads and facade consumers are separate. Unresolved expressions require review; this is not runtime coverage or permission proof.',
     sourceRoots: SOURCE_ROOTS,
     files: [...new Set(sorted.map(({ file }) => normalize(file)))],
     package: { name: packageJson.name ?? null, productName: packageJson.productName ?? null, version: packageJson.version ?? null, packageManager: packageJson.packageManager ?? null, electron: devDependencies.electron ?? dependencies.electron ?? null, dependencies, devDependencies },
     database: { file: 'src/main/database/schema.ts', schemaVersion: schema ? schemaVersion(schema.source) : null },
     nativeDependencies: ['better-sqlite3', 'node-pty'].filter((name) => dependencies[name]).map((name) => ({ name, version: dependencies[name], evidence: 'Known addons rebuilt by scripts/rebuild-native.mjs; declared version, not installed ABI verification' })),
     packaging: { appId: build.appId ?? null, directories: build.directories ?? null, files: build.files ?? [], extraResources: build.extraResources ?? [], asarUnpack: build.asarUnpack ?? [], nativeRebuilder: build.nativeRebuilder ?? null, hooks: { afterPack: build.afterPack ?? null, afterSign: build.afterSign ?? null }, platformResources: Object.fromEntries(platforms.map((platform) => [platform, Object.fromEntries(resourceKeys.filter((key) => build[platform]?.[key] !== undefined).map((key) => [key, build[platform][key]]))])), targets: Object.fromEntries(platforms.map((platform) => [platform, build[platform]?.target ?? []])) },
-    summary: { files: new Set(sorted.map(({ file }) => normalize(file))).size, runtimeElectronImports: collections.electronImports.filter(({ mode }) => mode !== 'type-only').length, typeOnlyElectronImports: collections.electronImports.filter(({ mode }) => mode === 'type-only').length, operations: collections.operations.length, unresolvedOperations: collections.operations.filter(({ resolution }) => resolution === 'unresolved').length, directAPIConsumers: collections.electronAPIConsumers.length, webviews: collections.webviews.length },
+    summary: { files: new Set(sorted.map(({ file }) => normalize(file))).size, runtimeElectronImports: collections.electronImports.filter(({ mode }) => mode !== 'type-only').length, typeOnlyElectronImports: collections.electronImports.filter(({ mode }) => mode === 'type-only').length, operations: collections.operations.length, unresolvedOperations: collections.operations.filter(({ resolution }) => resolution === 'unresolved').length, directAPIConsumers: collections.electronAPIConsumers.length, desktopAPIConsumers: collections.desktopAPIConsumers.length, webviews: collections.webviews.length },
     ...collections
   }
 }

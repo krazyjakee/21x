@@ -1,3 +1,6 @@
+import { desktopApi, getDesktopHost } from '@/lib/desktop-api'
+import { hydrateTranscriptProjection, readTranscriptWindow } from '@/lib/transcript-pagination'
+import { ServiceProtocolError } from '@shared/service-protocol'
 import { create } from 'zustand'
 import type { Agent, CreateAgentDTO, UpdateAgentDTO } from '@/types'
 import { agentApi, agentSessionApi, onAgentStatus, onTranscriptChanged } from '@/lib/ipc-client'
@@ -131,19 +134,35 @@ export const useAgentStore = create<AgentState>((set, get) => {
     if (projection.parts.size || get().sessions.has(taskId)) commitMessages(taskId)
   }
 
-  const hydrateTranscript = async (taskId: string, requireBinding = false): Promise<void> => {
+  const hydrationJobs = new Map<string, Promise<void>>()
+  const hydrateTranscript = (taskId: string, requireBinding = false): Promise<void> => {
+    const pending = hydrationJobs.get(taskId)
+    if (pending) return pending
+    const job = hydrateTranscriptOnce(taskId, requireBinding).finally(() => { if (hydrationJobs.get(taskId) === job) hydrationJobs.delete(taskId) })
+    hydrationJobs.set(taskId, job)
+    return job
+  }
+  const hydrateTranscriptOnce = async (taskId: string, requireBinding = false): Promise<void> => {
     if (!taskId || bindingTasks.has(taskId)) return
     if (requireBinding && !projectionBindings.has(taskId)) return
-    if (typeof window.electronAPI?.agentSession?.getTranscriptSnapshot !== 'function') return
+    if (typeof desktopApi?.agentSession?.getTranscriptSnapshot !== 'function') return
     bindingTasks.add(taskId)
     dirtyTranscripts.add(taskId)
     try {
-      const snapshot = await agentSessionApi.getTranscriptSnapshot(taskId)
+      let projection: TranscriptProjection
+      let snapshot: TranscriptPartRecord[]
+      if (getDesktopHost().kind === 'tauri') {
+        projection = createProjection()
+        await hydrateTranscriptProjection((id, page) => desktopApi.agentSession.getTranscriptPage(id, page), taskId, projection)
+        snapshot = [...projection.parts.values()]
+      } else {
+        snapshot = await agentSessionApi.getTranscriptSnapshot(taskId)
+        const maxRev = snapshot.reduce((m, p) => Math.max(m, p.rev || 0), 0)
+        projection = createProjection(snapshot, maxRev)
+      }
       // The panel may have gone off-screen while the snapshot IPC was in
       // flight. Do not repopulate the cache after its final consumer left.
       if (requireBinding && !projectionBindings.has(taskId)) return
-      const maxRev = snapshot.reduce((m, p) => Math.max(m, p.rev || 0), 0)
-      const projection = createProjection(snapshot, maxRev)
       // Live events can arrive while the snapshot is in flight. Keep their
       // newer rows, then reconcile from the snapshot cursor to cover changes
       // behind the scan.
@@ -164,7 +183,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
   // changed since our cursor. Used as a safety net at idle to catch any delta
   // the renderer may have missed (dropped IPC event).
   const reconcileDelta = async (taskId: string): Promise<void> => {
-    if (typeof window.electronAPI?.agentSession?.getTranscriptDelta !== 'function') return
+    if (typeof desktopApi?.agentSession?.getTranscriptDelta !== 'function') return
     if (!projections.has(taskId)) return
     if (bindingTasks.has(taskId)) return
     // One delta read per task at a time; a request that arrives meanwhile
@@ -175,6 +194,15 @@ export const useAgentStore = create<AgentState>((set, get) => {
       do {
         recoverAgain.delete(taskId)
         const projection = getProjection(taskId)
+        if (getDesktopHost().kind === 'tauri') {
+          const { cursor } = await readTranscriptWindow((id, page) => desktopApi.agentSession.getTranscriptPage(id, page), taskId,
+            { version: 1, mode: 'delta', after: projection.rev }, { onPage: page => {
+              if (projections.get(taskId) === projection) applyParts(taskId, page.parts)
+            } })
+          if (projections.get(taskId) !== projection) return
+          applyParts(taskId, [], cursor)
+          continue
+        }
         const { parts, maxRev } = await agentSessionApi.getTranscriptDelta(taskId, projection.rev)
         // Unbound (or re-hydrated) while the read was in flight.
         if (projections.get(taskId) !== projection) return
@@ -209,6 +237,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
       const recovering = dirtyTranscripts.has(event.taskId) || recoveringTranscripts.has(event.taskId)
       applyParts(event.taskId, event.parts || [], recovering ? undefined : event.maxRev)
       if (recovering) void reconcileDelta(event.taskId)
+      else if (getDesktopHost().kind === 'tauri' && get().sessions.get(event.taskId)?.status === SessionStatus.WAITING_APPROVAL) void reconcileDelta(event.taskId)
     }
   })
 
@@ -251,7 +280,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
     }
 
     // Safety-net reconcile at end of each turn — catches any missed delta.
-    if (event.status === SessionStatus.IDLE) void reconcileDelta(session.taskId)
+    if (event.status === SessionStatus.IDLE || getDesktopHost().kind === 'tauri' && event.status === SessionStatus.WAITING_APPROVAL) void reconcileDelta(session.taskId)
   })
 
   const clearPendingSend = (taskId: string): void => {
@@ -430,3 +459,10 @@ export const useAgentStore = create<AgentState>((set, get) => {
     getSession: (taskId) => get().sessions.get(taskId)
   }
 })
+
+/** Restore only transcripts retained by real views; historical deltas stay in the durable owner. */
+export async function rehydrateDesktopAgentState(): Promise<void> {
+  await useAgentStore.getState().fetchAgents()
+  await Promise.all([...projectionBindings.keys()].map(taskId => useAgentStore.getState().hydrateTranscript(taskId)))
+  if (useAgentStore.getState().error || [...projectionBindings.keys()].some(taskId => dirtyTranscripts.has(taskId) || bindingTasks.has(taskId))) throw new ServiceProtocolError('DISCONNECTED')
+}

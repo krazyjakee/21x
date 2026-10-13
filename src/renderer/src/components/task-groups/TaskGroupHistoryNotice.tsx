@@ -23,7 +23,7 @@ export function TaskGroupHistoryNotice({ taskId }: { taskId: string }) {
     setHistory([]); setError(''); setOpen(null); void reload()
     const offRefresh = onTasksRefresh(queueReload)
     const offUpdate = onTaskUpdated(queueReload)
-    return () => { disposed = true; offRefresh(); offUpdate() }
+    return () => { disposed = true; offRefresh?.(); offUpdate?.() }
   }, [taskId])
   if (!history.length && !error) return null
   return <aside className="shrink-0 border-b border-border bg-primary/5 px-4 py-2 text-sm" aria-label="Task group history">

@@ -1,3 +1,4 @@
+import { desktopSupports } from '@/lib/desktop-api'
 import { create } from 'zustand'
 import { settingsApi, voiceApi, voiceElevenLabsApi, voiceTtsApi } from '@/lib/ipc-client'
 import { voiceCapture } from '@/lib/voice-capture'
@@ -194,7 +195,7 @@ export function selectVoiceSetupComplete(state: {
 }
 
 function hasVoiceBridge(): boolean {
-  return typeof window !== 'undefined' && typeof window.electronAPI?.voice?.getSnapshot === 'function'
+  return desktopSupports('voice.getSnapshot')
 }
 
 /**
@@ -205,7 +206,7 @@ function hasVoiceBridge(): boolean {
  * text switched off can still read an answer aloud.
  */
 function hasTtsBridge(): boolean {
-  return typeof window !== 'undefined' && typeof window.electronAPI?.voice?.tts?.getSnapshot === 'function'
+  return desktopSupports('voice.tts.getSnapshot')
 }
 
 /**

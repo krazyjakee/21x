@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import { useCallback, useMemo, useRef, type Dispatch, type SetStateAction } from 'react'
 import { useUIStore } from '@/stores/ui-store'
 import { useTaskCompletion } from '@/hooks/use-task-completion'
@@ -153,7 +154,7 @@ export function useActiveTaskActions({
       return
     }
     try {
-      const result = await window.electronAPI.heartbeat.runNow(activeTaskId)
+      const result = await desktopApi.heartbeat.runNow(activeTaskId)
       const feedback = {
         sent: ['Heartbeat check started', false],
         no_file: ['This task has no heartbeat.md file', true],

@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
@@ -80,7 +81,7 @@ export function PrArtifactView({ artifact, refreshTrigger = 0 }: { artifact: Art
       setError('Pull request URL is unavailable.')
       return
     }
-    const fetchPullRequestDetails = window.electronAPI.github.fetchPullRequestDetails
+    const fetchPullRequestDetails = desktopApi.github.fetchPullRequestDetails
     if (typeof fetchPullRequestDetails !== 'function') {
       setLoading(false)
       setError('Restart 21x to load the updated pull request integration.')
@@ -129,7 +130,7 @@ export function PrArtifactView({ artifact, refreshTrigger = 0 }: { artifact: Art
           <p className="mt-1 text-xs text-muted-foreground">{error || 'The pull request is unavailable.'}</p>
           <div className="mt-4 flex justify-center gap-2">
             <Button type="button" size="sm" variant="outline" onClick={() => setRefreshKey((value) => value + 1)}><RefreshCw className="h-3.5 w-3.5" />Retry</Button>
-            {artifact.url && <Button type="button" size="sm" onClick={() => window.electronAPI.shell.openExternal(artifact.url!)}><ExternalLink className="h-3.5 w-3.5" />Open</Button>}
+            {artifact.url && <Button type="button" size="sm" onClick={() => desktopApi.shell.openExternal(artifact.url!)}><ExternalLink className="h-3.5 w-3.5" />Open</Button>}
           </div>
         </div>
       </div>
@@ -172,7 +173,7 @@ export function PrArtifactView({ artifact, refreshTrigger = 0 }: { artifact: Art
                 {copied === 'branch' ? <Check className="h-3.5 w-3.5" /> : <GitCommitHorizontal className="h-3.5 w-3.5" />}
                 {copied === 'branch' ? 'Copied branch' : 'Copy branch'}
               </Button>
-              <Button type="button" size="sm" variant="outline" onClick={() => window.electronAPI.shell.openExternal(details.url)}><ExternalLink className="h-3.5 w-3.5" />Open</Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => desktopApi.shell.openExternal(details.url)}><ExternalLink className="h-3.5 w-3.5" />Open</Button>
             </div>
           </div>
           {details.body && <p className="mt-4 line-clamp-4 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">{details.body}</p>}

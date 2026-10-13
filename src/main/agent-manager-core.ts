@@ -8,12 +8,13 @@ import { EventEmitter } from 'events'
 import { join } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import type { AgentRecord, DatabaseManager, TaskRecord } from './database/manager'
+import type { UpdateAgentData } from './database/types'
 import { TaskStatus } from '../shared/constants'
 import { isCoordinatorTask } from '../shared/task-roles'
 import { resolveCaptainAgentId } from './captain-waker'
 import { emitTaskEvent } from './project-events'
 import { findBlockingSibling, isSuccessorGraphInProgress, successorsFireOnReview } from '../shared/subtask-graph'
-import type { WorktreeManager } from './worktree-manager'
+import type { WorktreeManager } from './worktree-manager-core'
 import type { GitHubManager } from './github-manager'
 import type { GitLabManager } from './gitlab-manager'
 import type { ForgejoManager } from './forgejo-manager'
@@ -225,7 +226,7 @@ export class AgentManager extends EventEmitter {
   private githubManager: GitHubManager | null = null
   private gitlabManager: GitLabManager | null = null
   private forgejoManager: ForgejoManager | null = null
-  private oauthManager: import('./oauth/oauth-manager').OAuthManager | null = null
+  private oauthManager: import('./oauth/oauth-manager-core').OAuthManager | null = null
   private externalListeners: Array<(channel: string, data: unknown) => void> = []
   private readonly captainRuntimes: CaptainRuntimeStore
   private readonly captainEngine: AdapterEngine | null
@@ -346,6 +347,9 @@ export class AgentManager extends EventEmitter {
   private sessionStarts: Map<string, Promise<string>> = new Map()
   /** Raw flights stay owned even when their caller's startup deadline expires. */
   private readonly shutdownWork = new Set<Promise<unknown>>()
+  private readonly agentConfigurationMutations = new Set<string>()
+  private readonly backendConfigurationMutations = new Set<string>()
+  private readonly failedBackendConfigurations = new Set<string>()
   private sessionStops: Map<string, Promise<void>> = new Map()
   private startupReconciliation: Promise<void> | null = null
   private startQueueDrainScheduled = false
@@ -1029,7 +1033,7 @@ export class AgentManager extends EventEmitter {
     this.forgejoManager = forgejoManager ?? null
   }
 
-  setOAuthManager(manager: import('./oauth/oauth-manager').OAuthManager): void {
+  setOAuthManager(manager: import('./oauth/oauth-manager-core').OAuthManager): void {
     this.oauthManager = manager
   }
 
@@ -1184,6 +1188,84 @@ export class AgentManager extends EventEmitter {
     })())
   }
 
+  /** Configuration changes join the actual lifecycle owner. Cap/name changes
+   * leave live sessions intact; runtime edits and deletion acknowledge Stop
+   * before committing. Shared backend adapters cannot disrupt another agent. */
+  async runAgentConfigurationMutation<T>(agentId: string, kind: 'update' | 'delete', mutation: () => T | Promise<T>, changes?: UpdateAgentData): Promise<T> {
+    if (this.shuttingDown) throw new Error('The app is shutting down.')
+    if (typeof agentId !== 'string' || !agentId || !['update', 'delete'].includes(kind) || typeof mutation !== 'function') throw new Error('Invalid agent configuration mutation.')
+    if (this.agentConfigurationMutations.has(agentId)) throw new Error('This agent configuration is already being updated.')
+    if ([...this.captainSwitches.values()].some(flight => flight.agentId === agentId)) throw new Error('Wait for the Captain switch to finish before changing this agent.')
+    const before = this.db.getAgent(agentId)
+    if (!before) return this.ownShutdownWork(Promise.resolve().then(mutation))
+    if (kind === 'delete' && this.db.db?.prepare && this.db.db.prepare("SELECT 1 FROM task_groups WHERE agent_id=? AND state='active' LIMIT 1").get(agentId))
+      throw new Error('Dissolve this agent’s active task groups before deleting it.')
+    const backend = getAgentProvider(before)
+    const config = (value: AgentRecord['config']): string => JSON.stringify(Object.fromEntries(Object.keys(value).sort()
+      .filter(key => !['max_parallel_sessions', 'concurrency_cap', 'fallback_agent_ids'].includes(key)).map(key => [key, value[key as keyof typeof value]])))
+    const disruptive = kind === 'delete' || this.failedBackendConfigurations.has(backend) || !changes
+      || changes.server_url !== undefined && changes.server_url !== before.server_url
+      || changes.config !== undefined && config(changes.config) !== config(before.config)
+    const nextBackend = changes?.config ? changes.config.coding_agent ?? CodingAgentType.OPENCODE : backend
+    const backends = new Set(disruptive ? [backend, nextBackend] : [])
+    if ([...backends].some(type => this.backendConfigurationMutations.has(type))) throw new Error('This backend configuration is already being updated.')
+    const sharedBusy = [...this.sessions.values()].some(session => session.agentId !== agentId && backends.has(getAgentProvider(this.db.getAgent(session.agentId) ?? before)))
+      || [...this.admittedStarts.values()].some(id => id !== agentId && backends.has(getAgentProvider(this.db.getAgent(id) ?? before)))
+    if (sharedBusy) throw new Error('Stop other agents using this backend before changing its runtime configuration.')
+    this.agentConfigurationMutations.add(agentId)
+    for (const type of backends) this.backendConfigurationMutations.add(type)
+    return this.ownShutdownWork((async () => {
+      try {
+        const taskIds = new Set<string>([
+          ...[...this.sessions.values()].filter(session => session.agentId === agentId).map(session => session.taskId),
+          ...[...this.admittedStarts.entries()].filter(([, id]) => id === agentId).map(([id]) => id),
+          ...this.startQueue.active().filter(row => row.agentId === agentId).map(row => row.taskId),
+          ...[...this.sessionStarts.keys()].filter(taskId => (this.admittedStarts.get(taskId) ?? this.db.getTask(taskId)?.agent_id
+            ?? this.db.getSetting(coordinatorSessionAgentKey(taskId))) === agentId)
+        ])
+        if ([...taskIds].some(taskId => this.taskGroupMutations.has(taskId))) throw new Error('Wait for task-group review or membership changes to finish before changing this agent.')
+        if (disruptive) {
+          for (const taskId of taskIds) this.cancelQueuedStart(taskId)
+          for (const taskId of taskIds) await this.stopByTaskId(taskId)
+        }
+        if (disruptive) await Promise.all([...taskIds].map(taskId => serializeTaskSend(this, taskId, async () => undefined)))
+        if (this.shuttingDown) throw new Error('The app is shutting down.')
+        const result = await mutation()
+        if (disruptive) {
+          for (const type of backends) {
+            const adapter = this.adapters.get(type)
+            if (adapter?.notifyConfigChanged) {
+              try { await this.ownShutdownWork(adapter.notifyConfigChanged()) }
+              catch (error) { this.failedBackendConfigurations.add(type); throw error }
+            }
+            this.failedBackendConfigurations.delete(type)
+          }
+        }
+        return result
+      } finally {
+        this.agentConfigurationMutations.delete(agentId)
+        for (const type of backends) this.backendConfigurationMutations.delete(type)
+        this.drainStartQueue()
+        this.scheduleProviderRecovery()
+      }
+    })())
+  }
+
+  private assertAgentConfigurationAvailable(agentId: string | undefined): void {
+    if (!agentId) return
+    const agent = this.db.getAgent(agentId)
+    const backend = agent && getAgentProvider(agent)
+    if (this.agentConfigurationMutations.has(agentId) || backend && this.backendConfigurationMutations.has(backend))
+      throw new Error('The agent configuration is being updated. Retry after it finishes.')
+    if (backend && this.failedBackendConfigurations.has(backend)) throw new Error('Backend configuration could not be refreshed. Retry the configuration change or restart before starting work.')
+  }
+
+  private agentConfigurationBlocked(agentId: string): boolean {
+    const agent = this.db.getAgent(agentId)
+    const backend = agent && getAgentProvider(agent)
+    return this.agentConfigurationMutations.has(agentId) || !!backend && (this.backendConfigurationMutations.has(backend) || this.failedBackendConfigurations.has(backend))
+  }
+
   /** Membership changes retire only their idle backend. Saved transcript and
    * the pending continuity seed survive until the next accepted instruction. */
   async retireTaskGroupContext(taskId: string): Promise<void> {
@@ -1206,6 +1288,7 @@ export class AgentManager extends EventEmitter {
 
   private assertNoTaskGroupMutation(taskId: string): void {
     if (this.taskGroupMutations.has(taskId)) throw new Error('The task group is being updated. Retry after its review or membership change finishes.')
+    this.assertAgentConfigurationAvailable(this.db.getTask(taskId)?.agent_id ?? this.findSessionByTaskId(taskId)?.session.agentId)
   }
 
   private emitStatus(sessionId: string, owner: { agentId: string; taskId: string }, status: AgentSession['status'], activityOutcome: AgentActivityOutcome | undefined = status === 'error' ? 'failed' : undefined): void {
@@ -2589,6 +2672,7 @@ export class AgentManager extends EventEmitter {
     taskId: string,
     adapterSessionId: string
   ): Promise<string> {
+    this.assertAgentConfigurationAvailable(agentId)
     const agent = this.db.getAgent(agentId)!
     const originalTask = this.db.getTask(taskId)
     const managedCaptain = isManagedCaptain(originalTask, this.captainEngine?.enabled ?? false)
@@ -2817,11 +2901,13 @@ export class AgentManager extends EventEmitter {
   async requestSession(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<SessionStartOutcome> {
     const execution = this.taskGroupExecution(taskId)
     if (execution) { taskId = execution.id; agentId = execution.agent_id! }
+    this.assertAgentConfigurationAvailable(agentId)
     this.assertNoTaskGroupMutation(taskId)
     return this.ownShutdownWork(this.requestSessionNow(agentId, taskId, workspaceDir, skipInitialPrompt))
   }
 
   private async requestSessionNow(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<SessionStartOutcome> {
+    this.assertAgentConfigurationAvailable(agentId)
     this.assertNoTaskGroupMutation(taskId)
     if (this.shuttingDown) throw new Error('The app is shutting down; retry after restart.')
     const stopping = this.taskStops.get(taskId)
@@ -3004,6 +3090,7 @@ export class AgentManager extends EventEmitter {
 
   /** Starts without admission control — callers are exempt or already admitted. */
   private async startSessionNow(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<string> {
+    this.assertAgentConfigurationAvailable(agentId)
     this.assertNoTaskGroupMutation(taskId)
     const stopping = this.taskStops.get(taskId)
     if (stopping) {
@@ -3019,6 +3106,7 @@ export class AgentManager extends EventEmitter {
     const runtime = this.captainRuntimes.get(taskId)
     const mayStart = (): boolean => {
       if (this.shuttingDown) return false
+      if (this.agentConfigurationMutations.has(agentId) || this.backendConfigurationMutations.has(getAgentProvider(agent))) return false
       if (runtime) {
         const latest = this.captainRuntimes.get(taskId)
         if (latest?.generation !== runtime.generation || ['failed', 'timed_out', 'rolled_back'].includes(latest.phase)) return false
@@ -3134,6 +3222,7 @@ export class AgentManager extends EventEmitter {
   }
 
   private async switchCaptainAgentNow(projectId: string, candidateAgentId: string, retry: boolean): Promise<CaptainRuntimeState> {
+    this.assertAgentConfigurationAvailable(candidateAgentId)
     const project = this.db.getProject(projectId)
     const coordinator = this.db.getCoordinatorTask(projectId)
     const candidate = this.db.getAgent(candidateAgentId)
@@ -3300,6 +3389,7 @@ export class AgentManager extends EventEmitter {
    * blank slate.
    */
   async switchAgent(taskId: string, newAgentId: string): Promise<string> {
+    this.assertAgentConfigurationAvailable(newAgentId)
     taskId = this.taskGroupExecution(taskId)?.id ?? taskId
     this.assertNoTaskGroupMutation(taskId)
     return this.switchAgentWithContext(taskId, newAgentId)
@@ -3310,6 +3400,7 @@ export class AgentManager extends EventEmitter {
     newAgentId: string,
     fallbackState?: AgentFallbackState
   ): Promise<string> {
+    this.assertAgentConfigurationAvailable(newAgentId)
     const task = this.db.getTask(taskId)
     if (!task) throw new Error(`Task not found: ${taskId}`)
 
@@ -3869,6 +3960,7 @@ export class AgentManager extends EventEmitter {
   }
 
   private async resumeSessionNow(agentId: string, taskId: string, sessionId: string): Promise<string> {
+    this.assertAgentConfigurationAvailable(agentId)
     this.assertNoTaskGroupMutation(taskId)
     if (this.shuttingDown) throw new Error('The app is shutting down; retry after restart.')
     console.log('[AgentManager] resumeSession called:', { agentId, taskId, sessionId })
@@ -4941,6 +5033,7 @@ export class AgentManager extends EventEmitter {
       return task ? { projectId: taskProjectId(task), priority: task.priority } : undefined
     })
     for (const entry of this.startQueue.snapshot()) {
+      if (this.agentConfigurationBlocked(entry.agentId)) continue
       const agent = this.db.getAgent(entry.agentId)
       const task = this.db.getTask(entry.taskId)
       const exclusion = this.retryExclusion(task)
@@ -5441,13 +5534,13 @@ export class AgentManager extends EventEmitter {
   private scheduleProviderRecovery(): void {
     if (this.shuttingDown || this.startupReconciliation) return
     if (this.providerRecoveryTimer) clearTimeout(this.providerRecoveryTimer)
-    const pending = this.providerRecoveries.list(['retrying']).filter((row) => !this.providerRecoveryFlights.has(row.taskId))
+    const pending = this.providerRecoveries.list(['retrying']).filter((row) => !this.providerRecoveryFlights.has(row.taskId) && !this.agentConfigurationBlocked(row.agentId))
     if (!pending.length) { this.providerRecoveryTimer = null; return }
     const deadline = Math.min(...pending.map((row) => row.nextRetryAt ?? Date.now()))
     this.providerRecoveryTimer = setTimeout(() => {
       this.providerRecoveryTimer = null
       for (const row of this.providerRecoveries.list(['retrying'])) {
-        if (row.state !== 'retrying' || (row.nextRetryAt ?? 0) > Date.now() || this.providerRecoveryFlights.has(row.taskId)) continue
+        if (row.state !== 'retrying' || (row.nextRetryAt ?? 0) > Date.now() || this.providerRecoveryFlights.has(row.taskId) || this.agentConfigurationBlocked(row.agentId)) continue
         this.providerRecoveryFlights.add(row.taskId)
         void this.ownShutdownWork(this.dispatchProviderRecovery(row)).finally(() => {
           this.providerRecoveryFlights.delete(row.taskId)
@@ -5686,6 +5779,7 @@ export class AgentManager extends EventEmitter {
     responseType?: 'permission' | 'question',
     requestId?: string
   ): Promise<void> {
+    this.assertAgentConfigurationAvailable(this.resolveSession(sessionId)?.session.agentId)
     return this.ownShutdownWork(this.respondToPermissionNow(sessionId, approved, message, optionId, responseType, requestId))
   }
 
@@ -5969,6 +6063,7 @@ export class AgentManager extends EventEmitter {
       const defaultAgent = this.defaultAgent()
       const baseUrl = serverUrl || defaultAgent?.server_url || DEFAULT_SERVER_URL
       const resolvedBackend = backendType || getAgentProvider(defaultAgent)
+      if (this.backendConfigurationMutations.has(resolvedBackend) || this.failedBackendConfigurations.has(resolvedBackend)) throw new Error('Backend configuration is unavailable while it is being refreshed.')
 
       // Only OpenCode and Pi expose configurable providers/models.
       if (resolvedBackend !== CodingAgentType.OPENCODE && resolvedBackend !== CodingAgentType.PI) {
@@ -5982,18 +6077,8 @@ export class AgentManager extends EventEmitter {
         return null
       }
 
-      // Push updated config to the server before querying providers. This is
-      // user-initiated (settings UI) so it's safe to push even if sessions are
-      // running — the user explicitly opened settings to change config.
-      if (adapter.notifyConfigChanged) {
-        try {
-          await adapter.notifyConfigChanged()
-        } catch {
-          // notifyConfigChanged already logs; proceed with cached config
-        }
-      }
-      // A settings refresh can finish after shutdown started. Keep its raw
-      // flight owned, and never start another provider operation afterward.
+      // Enumeration is a read. Runtime configuration refresh belongs to the
+      // explicit mutation fence, since a shared server refresh can stop work.
       if (this.shuttingDown) return null
       const providers = await adapter.getProviders(baseUrl, directory)
       return this.shuttingDown ? null : providers
@@ -6013,6 +6098,7 @@ export class AgentManager extends EventEmitter {
 
   private async listModelsNow(backendType: string): Promise<BackendModel[] | null> {
     if (this.shuttingDown) return null
+    if (this.backendConfigurationMutations.has(backendType) || this.failedBackendConfigurations.has(backendType)) return null
     const adapter = this.getAdapterByType(backendType)
     if (!adapter?.listModels) return null
     try {

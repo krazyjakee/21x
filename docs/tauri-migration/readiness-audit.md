@@ -2,6 +2,30 @@
 
 **Verdict: the Tauri migration is not ready for production cutover or Electron retirement. G0–G5 remain open.** The implemented synthetic slices are functional within the evidence below. The production application still uses Electron. The audit covers the working tree based on `38f1a1b0250c7ed4fb1d6268b26074399e01ab12`, including the shutdown/platform-proof continuation; it is not an installed candidate acceptance report.
 
+## Production foundation continuation — 2026-10-13
+
+The [production owner](production-owner.md) now constructs the actual database,
+AgentManager, Commander, Captain delivery and background scheduler stack from an
+explicit trusted bootstrap. [Production desktop bindings](agent-configuration.md)
+borrow that same writer and register 39 reviewed database/content/agent-configuration
+commands. Private [binary streams](stream-contract.md) add bounded, acknowledged
+Node pipe transport. These sources do not select a live profile or supply the
+remaining native bootstrap, capabilities or retained domain operations.
+
+`tauri:production:frontend:build` separately builds the full production App through
+a typed desktop facade, with connection recovery and snapshot hydration before
+writes. Its 43 codec bindings include four agent lifecycle commands still owned
+by the existing diagnostic backend. The packaged/native diagnostic slice remains
+38 commands; source bindings are not native grants. One central reader retains
+Electron compatibility, including an Electron-only legacy browser accessor. Tauri
+saved browser panels remain inert. Shipping Electron entry and build defaults remain in place. Its agent editor
+uses the same acknowledged configuration fence as portable agent CRUD.
+
+The original audit table and reports below retain their historical source scope.
+The continuation's verification and exact source hashes are recorded in
+[production foundation evidence](evidence/issue-closing-20261013-production-foundation.json).
+Full feature parity, installed production evidence and G0–G5 remain open.
+
 ## Source findings
 
 The table records the original readiness audit. Subsequent [transcript page

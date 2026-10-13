@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import { LayoutList, Send, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -166,7 +167,7 @@ function TaskWorkspaceComponent({
     const unsubscribe = onAgentStartQueueChanged(refresh)
     return () => {
       live = false
-      unsubscribe()
+      unsubscribe?.()
     }
   }, [task?.id])
 
@@ -579,8 +580,8 @@ function TaskWorkspaceComponent({
 
   const handleOpenFolder = useCallback(async () => {
     if (!task?.id) return
-    const workspaceDir = await window.electronAPI.tasks.getWorkspaceDir(task.id)
-    await window.electronAPI.shell.openPath(workspaceDir)
+    const workspaceDir = await desktopApi.tasks.getWorkspaceDir(task.id)
+    await desktopApi.shell.openPath(workspaceDir)
   }, [task?.id])
 
   const handleKickoff = useCallback(async () => {

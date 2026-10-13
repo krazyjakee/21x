@@ -1074,6 +1074,7 @@ describe('AgentManager implicit resume behavior', () => {
     const task = { id: 'task-1', agent_id: 'agent-1', session_id: 'original-session' }
     const db = {
       getTask: vi.fn(() => task),
+      getAgent: vi.fn(() => ({ id: 'agent-1', config: { coding_agent: 'pi' } })),
       updateTask: vi.fn(),
     } as unknown as ConstructorParameters<typeof AgentManager>[0]
     const manager = new AgentManager(db)
@@ -1892,20 +1893,24 @@ describe('AgentManager shutdown', () => {
     vi.mocked(PiAdapter).mockImplementationOnce(function () { return fake } as unknown as typeof PiAdapter)
     const db = createMockDb({ coding_agent: 'pi' })
     const mgr = new AgentManager(db)
-    const listing = mgr.getProviders()
+    await mgr.getProviders() // Resolve the actual cached backend without a refresh.
+    fake.getProviders.mockClear()
+    const updating = mgr.runAgentConfigurationMutation('agent-1', 'update', () => undefined, { config: { coding_agent: 'pi', model: 'changed-model' } })
     try {
+      await flushEventLoop(8)
       expect(fake.notifyConfigChanged).toHaveBeenCalledOnce()
       await expectIncompleteShutdown(mgr)
       vi.mocked(db.getAgents).mockClear()
       await expect(mgr.getProviders()).resolves.toBeNull()
       expect(db.getAgents).not.toHaveBeenCalled()
       finish()
-      await expect(listing).resolves.toBeNull()
+      if (outcome === 'reject') await expect(updating).rejects.toThrow('Unavailable provider')
+      else await expect(updating).resolves.toBeUndefined()
       expect(fake.getProviders).not.toHaveBeenCalled()
       await mgr.stopAllSessions()
     } finally {
       finish()
-      await listing
+      await updating.catch(() => undefined)
       await mgr.stopAllSessions()
       vi.useRealTimers()
     }
@@ -1957,6 +1962,7 @@ describe('AgentManager shutdown', () => {
       await expect(mgr.getProviders('http://localhost:1234', '/fixture')).resolves.toEqual(providers)
       expect(fake.getProviders).toHaveBeenCalledWith('http://localhost:1234', '/fixture')
       await expect(mgr.listModels('pi')).resolves.toEqual(models)
+      expect(fake.notifyConfigChanged).not.toHaveBeenCalled()
     } finally { await mgr.stopAllSessions() }
   })
 

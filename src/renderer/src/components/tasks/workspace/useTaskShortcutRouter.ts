@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import { useCallback, useEffect, type RefObject } from 'react'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useArtifactStore, PinnedArtifactTabId } from '@/stores/artifact-store'
@@ -113,7 +114,7 @@ export function useTaskShortcutRouter({
         .then(() => dispatchShortcutFeedback('Pull-request URL copied'))
         .catch(() => dispatchShortcutFeedback('Could not copy the pull-request URL', true))
     } else if (action === TaskShortcutAction.COPY_PR_BRANCH && pullRequest.url) {
-      void window.electronAPI.github.fetchPullRequestDetails(pullRequest.url)
+      void desktopApi.github.fetchPullRequestDetails(pullRequest.url)
         .then((details) => navigator.clipboard.writeText(details.headRefName))
         .then(() => dispatchShortcutFeedback('Pull-request branch copied'))
         .catch(() => dispatchShortcutFeedback('Could not copy the pull-request branch', true))

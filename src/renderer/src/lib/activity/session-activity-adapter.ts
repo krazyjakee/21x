@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import { create } from 'zustand'
 import { readAgentStatusActivityMeta, ACTIVITY_REVALIDATE_MS, type ActivityQueueReason, type AgentActivityOutcome } from '@shared/activity'
 import { activityNow, revalidateActivityNow } from './activity-clock'
@@ -252,7 +253,7 @@ let queuePushOff: (() => void) | null = null
 let queueGeneration = 0
 
 async function readQueue(): Promise<void> {
-  const api = typeof window !== 'undefined' ? window.electronAPI?.agents : undefined
+  const api = typeof window !== 'undefined' ? desktopApi?.agents : undefined
   if (typeof api?.getStartQueue !== 'function') return
   const generation = ++queueGeneration
   try {
@@ -278,7 +279,7 @@ export function retainQueueSource(): () => void {
       void readQueue()
     }, ACTIVITY_REVALIDATE_MS)
     try {
-      const subscribe = window.electronAPI?.onAgentStartQueueChanged
+      const subscribe = desktopApi?.onAgentStartQueueChanged
       if (typeof subscribe === 'function') {
         queuePushOff = subscribe((event) => {
           queueGeneration += 1

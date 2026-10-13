@@ -1,3 +1,4 @@
+import { desktopApi, desktopSupports, getDesktopHost } from '@/lib/desktop-api'
 import { useState, useEffect } from 'react'
 import { SettingsSection } from '../../SettingsSection'
 import { Label } from '@/components/ui/Label'
@@ -34,11 +35,11 @@ export function AppPreferencesSection() {
   useEffect(() => {
     const load = async () => {
       try {
-        const loginSettings = await window.electronAPI?.app?.getLoginItemSettings()
+        const loginSettings = await desktopApi?.app?.getLoginItemSettings()
         if (loginSettings) setLaunchAtStartup(loginSettings.openAtLogin)
-        const notifPerm = await window.electronAPI?.app?.getNotificationPermission()
+        const notifPerm = await desktopApi?.app?.getNotificationPermission()
         setNotificationsEnabled(notifPerm === 'granted')
-        const tray = await window.electronAPI?.app?.getMinimizeToTray()
+        const tray = await desktopApi?.app?.getMinimizeToTray()
         setMinimizeToTray(tray || false)
       } catch (error) {
         console.error('Failed to load app preferences:', error)
@@ -58,7 +59,7 @@ export function AppPreferencesSection() {
 
   const handleLaunchAtStartupChange = async (checked: boolean) => {
     try {
-      await window.electronAPI?.app?.setLoginItemSettings(checked)
+      await desktopApi?.app?.setLoginItemSettings(checked)
       setLaunchAtStartup(checked)
     } catch (error) {
       console.error('Failed to update launch at startup:', error)
@@ -75,7 +76,7 @@ export function AppPreferencesSection() {
   const handleNotificationsChange = async (checked: boolean) => {
     try {
       if (checked) {
-        const permission = await window.electronAPI?.app?.requestNotificationPermission()
+        const permission = await desktopApi?.app?.requestNotificationPermission()
         setNotificationsEnabled(permission === 'granted')
       } else {
         setNotificationsEnabled(false)
@@ -87,7 +88,7 @@ export function AppPreferencesSection() {
 
   const handleMinimizeToTrayChange = async (checked: boolean) => {
     try {
-      await window.electronAPI?.app?.setMinimizeToTray(checked)
+      await desktopApi?.app?.setMinimizeToTray(checked)
       setMinimizeToTray(checked)
     } catch (error) {
       console.error('Failed to update minimize to tray:', error)
@@ -100,13 +101,14 @@ export function AppPreferencesSection() {
       description="Configure general application behavior and preferences"
     >
       <div className="space-y-4">
+        {getDesktopHost().kind === 'tauri' && <p className="text-sm text-muted-foreground">These application preferences are unavailable in this preview.</p>}
         <PreferenceRow
           id="launch-startup"
           label="Launch at startup"
           description="Automatically launch the app when you log in"
           checked={launchAtStartup}
           onCheckedChange={handleLaunchAtStartupChange}
-          disabled={loading}
+          disabled={loading || !desktopSupports('app.setLoginItemSettings')}
         />
         <PreferenceRow
           id="captain-prewarm"
@@ -114,7 +116,7 @@ export function AppPreferencesSection() {
           description="Bring the agent up in the background so your first message does not wait for it. Costs one idle agent process. Applies at the next launch."
           checked={captainPrewarm}
           onCheckedChange={handleCaptainPrewarmChange}
-          disabled={loading}
+          disabled={loading || getDesktopHost().kind === 'tauri'}
         />
         <PreferenceRow
           id="enable-notifications"
@@ -122,7 +124,7 @@ export function AppPreferencesSection() {
           description="Show desktop notifications for task updates"
           checked={notificationsEnabled}
           onCheckedChange={handleNotificationsChange}
-          disabled={loading}
+          disabled={loading || !desktopSupports('app.requestNotificationPermission')}
         />
         <PreferenceRow
           id="minimize-tray"
@@ -130,7 +132,7 @@ export function AppPreferencesSection() {
           description="Keep app running in system tray when closed"
           checked={minimizeToTray}
           onCheckedChange={handleMinimizeToTrayChange}
-          disabled={loading}
+          disabled={loading || !desktopSupports('app.setMinimizeToTray')}
         />
       </div>
     </SettingsSection>

@@ -167,6 +167,25 @@ describe('Tauri source inventory AST scanner', () => {
       .toEqual([['db', 'getTasks'], []])
   })
 
+  it('tracks the exact facade import and aliases without confusing shadowed or unrelated API names', () => {
+    const result = scanSource('src/renderer/src/view.tsx', `
+      import { desktopApi as desktop } from '@/lib/desktop-api'
+      import { desktopApi as unrelated } from './unrelated'
+      desktop.db.getTasks()
+      const alias = desktop.projects
+      alias.getAll()
+      const { get: read } = desktop.settings
+      read('theme')
+      function shadow(desktop: any) { desktop.db.getTasks() }
+      unrelated.db.getTasks()
+      window.electronAPI.db.getTasks()
+    `)
+    expect(result.desktopAPIConsumers.map((item: { path: string[] }) => item.path)).toEqual([
+      ['db', 'getTasks'], ['projects'], ['projects', 'getAll'], ['settings'], ['settings', 'get']
+    ])
+    expect(result.electronAPIConsumers).toHaveLength(1)
+  })
+
   it('produces identical bytes for reordered source inputs and package keys', () => {
     const sources = [
       { file: 'src/main/z.ts', source: `import { ipcMain } from 'electron'; ipcMain.handle('z', fn)` },

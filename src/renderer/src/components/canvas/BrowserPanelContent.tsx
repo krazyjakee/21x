@@ -1,3 +1,4 @@
+import { electronBrowserApi } from '@/lib/desktop-api'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Globe,
@@ -83,7 +84,7 @@ function LiveBrowserPanelContent({
   const [retryNotification, setRetryNotification] = useState<{ recording: BrowserRecordingManifest; taskIds: string[] } | null>(null)
 
   useEffect(() => {
-    if (!window.electronAPI?.browser?.recordingStatus) return
+    if (!electronBrowserApi()?.recordingStatus) return
     let disposed = false
     const refresh = () => {
       if (recordingLock.current) return
@@ -131,7 +132,7 @@ function LiveBrowserPanelContent({
       }))]
       const wcId = webviewRef.current?.getWebContentsId?.()
       if (!wcId) throw new Error('Wait for the browser page to load.')
-      await window.electronAPI.browser.registerBrokerPanel({ panelId, webContentsId: wcId, taskIds })
+      await electronBrowserApi()!.registerBrokerPanel({ panelId, webContentsId: wcId, taskIds })
       if (recording) {
         const result = await browserRecordingApi.stop(panelId)
         if ('error' in result) throw new Error(result.error)
@@ -236,7 +237,7 @@ function LiveBrowserPanelContent({
     if (!wcId || wcId <= 0) return
     updatePanel(panelId, { webContentsId: wcId })
     try {
-      void window.electronAPI?.browser
+      void electronBrowserApi()
         ?.registerBrokerPanel({ panelId, webContentsId: wcId, taskIds: linkedTaskIds })
         ?.catch(() => {})
     } catch {
@@ -263,7 +264,7 @@ function LiveBrowserPanelContent({
     const pid = panelId
     return () => {
       try {
-        void window.electronAPI?.browser?.unregisterBrokerPanel(pid)?.catch(() => {})
+        void electronBrowserApi()?.unregisterBrokerPanel(pid)?.catch(() => {})
       } catch {
         // IPC bridge unavailable (tests) — ignore
       }
@@ -416,7 +417,7 @@ function LiveBrowserPanelContent({
     setAuthStatus('Launching Chrome…')
 
     try {
-      const result = await window.electronAPI.browser.openExternalAuth(blockedUrl)
+      const result = await electronBrowserApi()!.openExternalAuth(blockedUrl)
 
       if (result.success) {
         setAuthStatus(`Imported ${result.cookieCount} cookies — reloading…`)

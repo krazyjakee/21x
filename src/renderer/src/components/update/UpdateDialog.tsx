@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import { Fragment, useState, useEffect, useMemo, type JSX, type ReactNode } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogBody, DialogTitle, DialogDescription } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
@@ -66,7 +67,7 @@ function toReactNodes(node: Node, keyPrefix: string): ReactNode[] {
           className="text-primary underline"
           onClick={(event) => {
             event.preventDefault()
-            if (href) window.electronAPI?.shell?.openExternal(href)
+            if (href) desktopApi?.shell?.openExternal(href)
           }}
         >
           {children}
@@ -275,7 +276,7 @@ export function UpdateDialog({ open, onClose }: UpdateDialogProps) {
                 className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
                 onClick={(e) => {
                   e.preventDefault()
-                  window.electronAPI?.shell?.openExternal(`https://github.com/krazyjakee/21x/releases/tag/v${state.version}`)
+                  desktopApi?.shell?.openExternal(`https://github.com/krazyjakee/21x/releases/tag/v${state.version}`)
                 }}
               >
                 <ExternalLink className="h-3 w-3" />

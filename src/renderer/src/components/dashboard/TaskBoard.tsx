@@ -537,7 +537,7 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
     })
     return () => {
       disposed = true
-      unsubscribe()
+      unsubscribe?.()
     }
   }, [visibleTaskIds])
 

@@ -64,7 +64,7 @@ function eventRefresh(scope: SessionContextScope) {
 }
 function installWatchers() {
   document.addEventListener('visibilitychange', visibilityChanged)
-  const install = (subscribe: () => (() => void)) => { try { const off = subscribe(); if (typeof off === 'function') unsubscribeEvents.push(off) } catch { /* Partial bridges still show an honest fetch error. */ } }
+  const install = (subscribe: () => (() => void) | undefined) => { try { const off = subscribe(); if (typeof off === 'function') unsubscribeEvents.push(off) } catch { /* Partial bridges still show an honest fetch error. */ } }
   install(() => commanderApi.onEvent(event => {
     if (event.type === 'turn_started' || event.type === 'messages_appended' || event.type === 'turn_event' && ['done', 'error'].includes(event.event.type)) eventRefresh({ kind: 'commander', ownerId: event.sessionId })
   }))

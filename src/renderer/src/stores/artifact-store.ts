@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import { create } from 'zustand'
 import {
   ArtifactType,
@@ -448,7 +449,7 @@ if (typeof window !== 'undefined') {
   })
 }
 
-if (typeof window !== 'undefined' && typeof window.electronAPI?.onArtifactUpdated === 'function') {
+if (typeof window !== 'undefined' && typeof desktopApi?.onArtifactUpdated === 'function') {
   onArtifactUpdated(({ artifact }) => {
     useArtifactStore.getState().upsertArtifact(artifact, true)
   })

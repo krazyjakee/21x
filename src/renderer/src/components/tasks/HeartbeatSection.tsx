@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import { useState, useEffect, useCallback } from 'react'
 import { HeartPulse } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -42,21 +43,21 @@ export function HeartbeatSection({ task, onTaskUpdated }: HeartbeatSectionProps)
 
   const fetchStatus = useCallback(async () => {
     try {
-      const result = await window.electronAPI.heartbeat.getStatus(task.id)
+      const result = await desktopApi.heartbeat.getStatus(task.id)
       setStatus(result)
     } catch { /* noop */ }
   }, [task.id])
 
   const fetchContent = useCallback(async () => {
     try {
-      const content = await window.electronAPI.heartbeat.readFile(task.id)
+      const content = await desktopApi.heartbeat.readFile(task.id)
       setHeartbeatContent(content)
     } catch { /* noop */ }
   }, [task.id])
 
   const fetchLogs = useCallback(async () => {
     try {
-      const result = await window.electronAPI.heartbeat.getLogs(task.id, 5) as HeartbeatLog[]
+      const result = await desktopApi.heartbeat.getLogs(task.id, 5) as HeartbeatLog[]
       setLogs(result)
     } catch { /* noop */ }
   }, [task.id])
@@ -71,7 +72,7 @@ export function HeartbeatSection({ task, onTaskUpdated }: HeartbeatSectionProps)
   useEffect(() => {
     const unsubAlert = subscribe<{ taskId: string }>(
       'heartbeat:alert',
-      (cb) => window.electronAPI.onHeartbeatAlert(cb as (event: unknown) => void),
+      (cb) => desktopApi.onHeartbeatAlert?.(cb as (event: unknown) => void),
       (alert) => {
         if (alert.taskId === task.id) {
           fetchStatus()
@@ -82,7 +83,7 @@ export function HeartbeatSection({ task, onTaskUpdated }: HeartbeatSectionProps)
     )
     const unsubDisabled = subscribe<{ taskId: string }>(
       'heartbeat:disabled',
-      (cb) => window.electronAPI.onHeartbeatDisabled(cb as (event: unknown) => void),
+      (cb) => desktopApi.onHeartbeatDisabled?.(cb as (event: unknown) => void),
       (data) => {
         if (data.taskId === task.id) {
           fetchStatus()
@@ -107,7 +108,7 @@ export function HeartbeatSection({ task, onTaskUpdated }: HeartbeatSectionProps)
   const handleSave = async () => {
     setSaving(true)
     try {
-      await window.electronAPI.heartbeat.writeFile(task.id, editDraft)
+      await desktopApi.heartbeat.writeFile(task.id, editDraft)
       setHeartbeatContent(editDraft.trim() || null)
       await fetchStatus()
       onTaskUpdated?.()
@@ -119,9 +120,9 @@ export function HeartbeatSection({ task, onTaskUpdated }: HeartbeatSectionProps)
 
   const handleToggle = async () => {
     if (status?.enabled) {
-      await window.electronAPI.heartbeat.disable(task.id)
+      await desktopApi.heartbeat.disable(task.id)
     } else {
-      await window.electronAPI.heartbeat.enable(task.id)
+      await desktopApi.heartbeat.enable(task.id)
     }
     await fetchStatus()
     onTaskUpdated?.()
@@ -130,7 +131,7 @@ export function HeartbeatSection({ task, onTaskUpdated }: HeartbeatSectionProps)
 
   const handleRunNow = async () => {
     setModalOpen(false)
-    const result = await window.electronAPI.heartbeat.runNow(task.id)
+    const result = await desktopApi.heartbeat.runNow(task.id)
     if (result === 'sent') {
       // Agent is now working - transcript will update visibly
       onTaskUpdated?.()
@@ -146,7 +147,7 @@ export function HeartbeatSection({ task, onTaskUpdated }: HeartbeatSectionProps)
   }
 
   const handleIntervalChange = async (minutes: number) => {
-    await window.electronAPI.heartbeat.updateInterval(task.id, minutes)
+    await desktopApi.heartbeat.updateInterval(task.id, minutes)
     await fetchStatus()
     onTaskUpdated?.()
   }

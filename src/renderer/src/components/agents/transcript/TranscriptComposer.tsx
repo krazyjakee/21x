@@ -1,3 +1,4 @@
+import { desktopApi } from '@/lib/desktop-api'
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import { FileText, Paperclip, Send, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -176,7 +177,7 @@ export function TranscriptComposer({ onSend, onPickAttachments, onAddAttachmentP
     if (sending.current) return
 
     const filePaths = Array.from(e.dataTransfer.files)
-      .map((file) => window.electronAPI.webUtils.getPathForFile(file))
+      .map((file) => desktopApi.webUtils.getPathForFile(file))
       .filter(Boolean)
     if (filePaths.length > 0) addAttachments(await onAddAttachmentPaths(filePaths))
   }

@@ -5,6 +5,8 @@ import {
   type ServiceFrame, type ServiceRequest, type ServiceResponse, type ServiceRole
 } from '../../shared/service-protocol'
 import { ServiceFrameDecoder, encodeServiceFrame } from './framing'
+import { ServiceStreams } from './streams'
+import { STREAM_OPERATIONS } from '../../shared/stream-protocol'
 
 export interface OperationSchema {
   validatePayload: (value: unknown) => boolean
@@ -38,8 +40,16 @@ interface ActiveRequest {
 }
 interface QueuedFrame { bytes: Uint8Array; requestId?: RequestId }
 
+function boundedDrain(work: Promise<void>, timeoutMs: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const expired = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new ServiceProtocolError('TIMEOUT')), timeoutMs) })
+  return Promise.race([work, expired]).finally(() => clearTimeout(timer))
+}
+
 /** One peer per engine lifetime. Failed peers are terminal and never replay requests. */
 export class ServicePeer {
+  readonly streams: ServiceStreams
+  private readonly operations: Readonly<Record<string, OperationSchema>>
   private readonly decoder = new ServiceFrameDecoder()
   private readonly pending = new Map<RequestId, PendingRequest>()
   private readonly active = new Map<RequestId, ActiveRequest>()
@@ -60,11 +70,16 @@ export class ServicePeer {
       (this.epoch !== null && !/^[a-zA-Z0-9_-]{1,128}$/.test(this.epoch))) {
       throw new ServiceProtocolError('INVALID_ARGUMENTS')
     }
+    if (STREAM_OPERATIONS.some(operation => Object.hasOwn(options.operations, operation))) throw new ServiceProtocolError('INVALID_ARGUMENTS')
+    this.streams = new ServiceStreams(options.role, (operation, payload, signal) => this.request(operation, payload, { signal }), () => this.disconnect('INTERNAL_ERROR'))
+    this.operations = { ...options.operations, ...this.streams.operationSchemas() }
   }
 
   get engineEpoch(): string | null { return this.epoch }
   get pendingCount(): number { return this.pending.size }
   get activeCount(): number { return this.active.size }
+  get queuedByteCount(): number { return this.queuedBytes }
+  get queuedFrameCount(): number { return this.queue.length }
 
   /** Call after returning the shutdown handler result, so its response is queued. */
   drain(): Promise<void> {
@@ -77,8 +92,9 @@ export class ServicePeer {
   waitForHandlers(timeoutMs = 2000): Promise<void> {
     if (!this.failure) return Promise.reject(new ServiceProtocolError('INVALID_REQUEST'))
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) return Promise.reject(new ServiceProtocolError('INVALID_ARGUMENTS'))
-    if (!this.active.size) return Promise.resolve()
-    return new Promise((resolve, reject) => {
+    const streams = this.streams.drain()
+    if (!this.active.size) return boundedDrain(streams, timeoutMs)
+    return boundedDrain(Promise.all([streams, new Promise<void>((resolve, reject) => {
       const done = (): void => { clearTimeout(timer); this.handlerWaiters.delete(done); resolve() }
       const timer = setTimeout(() => {
         this.handlerWaiters.delete(done)
@@ -87,7 +103,7 @@ export class ServicePeer {
         reject(new ServiceProtocolError('TIMEOUT'))
       }, timeoutMs)
       this.handlerWaiters.add(done)
-    })
+    })]).then(() => {}), timeoutMs)
   }
 
   private settleDrain(): void {
@@ -112,6 +128,7 @@ export class ServicePeer {
     if (this.failure) return
     const error = new ServiceProtocolError(code)
     this.failure = error
+    this.streams.disconnect()
     for (const waiter of this.drainWaiters) waiter.reject(error)
     this.drainWaiters.clear()
     this.stopWrite?.()
@@ -131,7 +148,7 @@ export class ServicePeer {
 
   request(operation: string, payload: JsonValue, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<JsonValue> {
     if (this.failure) return Promise.reject(this.failure)
-    const schema = Object.hasOwn(this.options.operations, operation) ? this.options.operations[operation] : undefined
+    const schema = Object.hasOwn(this.operations, operation) ? this.operations[operation] : undefined
     if (!schema) return Promise.reject(new ServiceProtocolError('UNKNOWN_OPERATION'))
     try { if (!schema.validatePayload(payload)) return Promise.reject(new ServiceProtocolError('INVALID_ARGUMENTS')) }
     catch { return Promise.reject(new ServiceProtocolError('INVALID_ARGUMENTS')) }
@@ -183,7 +200,13 @@ export class ServicePeer {
     if (!validate || operation === 'engine.cancel') throw new ServiceProtocolError('UNKNOWN_OPERATION')
     try { if (!validate(payload)) throw new ServiceProtocolError('INVALID_ARGUMENTS') }
     catch { throw new ServiceProtocolError('INVALID_ARGUMENTS') }
-    this.enqueue({ ...this.eventFrame(operation, payload), ...(sequence === undefined ? {} : { sequence }) })
+    try { this.enqueue({ ...this.eventFrame(operation, payload), ...(sequence === undefined ? {} : { sequence }) }) }
+    catch (error) {
+      // Dropping an owner event would leave consumers silently stale. A saturated
+      // publisher is terminal; the next epoch must rehydrate durable state.
+      if (error instanceof ServiceProtocolError && error.code === 'BACKPRESSURE') this.disconnect('BACKPRESSURE')
+      throw error
+    }
   }
 
   private eventFrame(operation: string, payload: JsonValue): ServiceEvent {
@@ -234,7 +257,7 @@ export class ServicePeer {
     const counter = BigInt(frame.requestId.split(':')[1])
     if (counter <= this.lastRemoteId) { this.replyError(frame.requestId, 'INVALID_REQUEST'); return }
     this.lastRemoteId = counter
-    const schema = Object.hasOwn(this.options.operations, frame.operation) ? this.options.operations[frame.operation] : undefined
+    const schema = Object.hasOwn(this.operations, frame.operation) ? this.operations[frame.operation] : undefined
     if (!schema?.handle) { this.replyError(frame.requestId, 'UNKNOWN_OPERATION'); return }
     try { if (!schema.validatePayload(frame.payload)) { this.replyError(frame.requestId, 'INVALID_ARGUMENTS'); return } }
     catch { this.replyError(frame.requestId, 'INVALID_ARGUMENTS'); return }

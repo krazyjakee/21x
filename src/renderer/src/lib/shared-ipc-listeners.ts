@@ -27,7 +27,7 @@ const ipcCleanups = new Map<string, () => void>()
  */
 function ensureListener(
   channel: string,
-  registrar: (cb: Callback) => () => void
+  registrar: (cb: Callback) => (() => void) | undefined
 ): void {
   if (ipcCleanups.has(channel)) return
 
@@ -45,7 +45,7 @@ function ensureListener(
   }
 
   const cleanup = registrar(handler)
-  ipcCleanups.set(channel, cleanup)
+  if (cleanup) ipcCleanups.set(channel, cleanup)
 }
 
 /**
@@ -57,7 +57,7 @@ function ensureListener(
  */
 export function subscribe<T>(
   channel: string,
-  registrar: (cb: Callback<T>) => () => void,
+  registrar: (cb: Callback<T>) => (() => void) | undefined,
   callback: Callback<T>
 ): () => void {
   if (!subscribers.has(channel)) {
@@ -65,15 +65,25 @@ export function subscribe<T>(
   }
 
   const subs = subscribers.get(channel)!
-  subs.add(callback as Callback)
+  // Identical callbacks retained by two views still own separate leases.
+  const registered: Callback = data => callback(data as T)
+  subs.add(registered)
 
   // Register the single IPC listener on first subscriber
-  ensureListener(channel, registrar as (cb: Callback) => () => void)
+  try { ensureListener(channel, registrar as (cb: Callback) => (() => void) | undefined) }
+  catch (error) { subs.delete(registered); if (!subs.size) subscribers.delete(channel); throw error }
 
   // Return unsubscribe
+  let released = false
   return () => {
-    subs.delete(callback as Callback)
-    // Optionally tear down when no subscribers remain
-    // (kept alive to avoid re-registration overhead)
+    if (released) return
+    released = true
+    subs.delete(registered)
+    if (!subs.size && subscribers.get(channel) === subs) {
+      subscribers.delete(channel)
+      const cleanup = ipcCleanups.get(channel)
+      ipcCleanups.delete(channel)
+      cleanup?.()
+    }
   }
 }

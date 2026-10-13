@@ -11,14 +11,15 @@ type MessageAttachment = { id: string; filename: string; size: number; mime_type
 
 export function registerAgentHandlers({ db, agentManager }: IpcDeps): void {
   ipcMain.handle('agent:getAll', () => db.getAgents())
-  ipcMain.handle('agent:create', (_, data: CreateAgentData) => db.createAgent(data))
-  ipcMain.handle('agent:update', (_, id: string, data: UpdateAgentData) => {
-    const updated = db.updateAgent(id, data)
-    // A raised max_parallel_sessions frees slots now, not at the next idle.
+  ipcMain.handle('agent:create', (_, data: CreateAgentData) => {
+    const created = db.createAgent(data)
     agentManager.drainStartQueue()
-    return updated
+    return created
   })
-  ipcMain.handle('agent:delete', (_, id: string) => db.deleteAgent(id))
+  ipcMain.handle('agent:update', (_, id: string, data: UpdateAgentData) =>
+    agentManager.runAgentConfigurationMutation(id, 'update', () => db.updateAgent(id, data), data))
+  ipcMain.handle('agent:delete', (_, id: string) =>
+    agentManager.runAgentConfigurationMutation(id, 'delete', () => db.deleteAgent(id)))
 
   // A deferred start is committed to the durable queue before this reply;
   // empty sessionId means there is no live session yet.
