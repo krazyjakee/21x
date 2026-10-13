@@ -1,0 +1,42 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "scope": "Portable application-owned overdue reminder clock; fake timer/renderer host lifecycle, not installed UI or backend activity observations.",
+  "sourceFilesSha256": {
+    "src/main/overdue-notifier.ts": "f1042c8c6c2f7606a2c08d8343d0eb482e46d98686cb72c9ab73b1383ce92cd0",
+    "src/main/overdue-notifier.test.ts": "97a0f26a688a32368dcebd2107d70e9192333bca941f295af78f3829875bac14",
+    "src/main/index.ts": "4c6592c25b82104247480e6658b9636d3ed605b3e049e1abb4f8ace7558ec01a",
+    "vitest.tauri.config.ts": "98260ab1d7127e9c1891c8904fe0dfbe4617152d6c9ae775bd21e498c22a4993"
+  },
+  "reports": [
+    {
+      "report": "/tmp/21x-overdue-service.json",
+      "sha256": "903162e7cce6b120b2f5110d855d0c3629ab75443e454cf410f2f44e104ae858",
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "files": 2,
+      "commandExitCode": 0
+    },
+    {
+      "report": "/tmp/21x-overdue-legacy.json",
+      "sha256": "56f7dddd3abc764ca51c7e21468011c8aad02455990a56e42d33cf20ecded1c6",
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "files": 2,
+      "commandExitCode": 0
+    }
+  ],
+  "forcedTypecheckPassed": true,
+  "changedSourceLintErrors": 0,
+  "sourceContractFreshnessPassed": true,
+  "fullSuiteBaseline": "8614daa012259ada2ce9b73a5a3987d894515dc4: workspace-cleanup-owner-local.json, before this timer change",
+  "productionReady": false,
+  "electronRetirementReady": false,
+  "build": {
+    "passed": true,
+    "command": "pnpm build",
+    "logSha256": "6034d509a4f0f2761c48f599e0dc328b7a89673a4cae15353638392b97452737"
+  }
+}

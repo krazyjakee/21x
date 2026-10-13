@@ -35,6 +35,7 @@ import { RecurrenceScheduler } from './recurrence-scheduler'
 import { HeartbeatScheduler } from './heartbeat-scheduler'
 import { TaskAutomationScheduler } from './task-automation-scheduler'
 import { WorkspaceCleanupScheduler } from './workspace-cleanup-scheduler'
+import { OverdueNotifier } from './overdue-notifier'
 import { ClaudePluginManager } from './claude-plugin-manager'
 import { parseProcessTable, selectKillableMcpPids, WINDOWS_PROCESS_TABLE_SCRIPT } from './mcp-process-cleanup'
 import { buildWorkspaceStates, sweepLeakedWorkspaceProcesses, readDiskSpace, workspacePressureWarning, SHUTDOWN_GRACE_MS } from './workspace-process-cleanup'
@@ -89,6 +90,9 @@ let workspaceCleanupScheduler: WorkspaceCleanupScheduler | null = null
 let claudePluginManager: ClaudePluginManager | null = null
 let voiceSessionManager: VoiceSessionManager | null = null
 let isShuttingDown = false
+const overdueNotifier = new OverdueNotifier(() => {
+  if (mainWindow && !mainWindow.isDestroyed()) guardedIpcSend(mainWindow.webContents, 'overdue:check')
+})
 
 /**
  * Kills stdio MCP server processes that this instance leaked.
@@ -178,6 +182,7 @@ async function sweepLeakedWorkspaces(graceMs?: number, orphansIgnoreTaskState = 
 }
 
 async function shutdownAppServices(): Promise<void> {
+  overdueNotifier.shutdown()
   stopTaskApiServer()
   void stopMobileApiServer()
   syncManager?.stop()
@@ -285,10 +290,6 @@ function createWindow(): void {
       workspaceCleanupScheduler.start(mainWindow)
     }
 
-    // Periodic overdue check — nudges renderer every 60s
-    setInterval(() => {
-      guardedIpcSend(mainWindow?.webContents, 'overdue:check')
-    }, 60_000)
   }
   mainWindow.once('ready-to-show', showWindowOnce)
   mainWindow.webContents.once('did-finish-load', () => {
@@ -830,6 +831,8 @@ app.whenReady().then(async () => {
     canPlayAudio: () => mainWindow != null && !mainWindow.isDestroyed()
   })
   workspaceCleanupScheduler = new WorkspaceCleanupScheduler(db, worktreeManager)
+  // The reminder clock belongs to the application, across window recreation.
+  overdueNotifier.start()
 
   claudePluginManager = new ClaudePluginManager(db)
 

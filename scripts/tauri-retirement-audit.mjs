@@ -60,6 +60,7 @@ const report = {
     'src/main/captain-waker.ts',
     'src/main/recurrence-scheduler.ts', 'src/main/recurrence-scheduler-core.ts',
     'src/main/scheduled-coordination.ts', 'src/main/scheduled-coordination-core.ts',
+    'src/main/overdue-notifier.ts',
     'src/main/workspace-cleanup-scheduler.ts', 'src/main/workspace-cleanup-scheduler-core.ts',
     'src/main/heartbeat-scheduler.ts', 'src/main/heartbeat-scheduler-core.ts',
     'src/main/oauth/connector-oauth-flow.ts', 'src/main/oauth/local-oauth-server.ts',
