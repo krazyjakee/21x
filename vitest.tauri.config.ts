@@ -30,6 +30,7 @@ const mainFiles = [
   'src/main/adapters/claude-code-history.test.ts',
   'src/main/adapters/permission-mode.test.ts',
   'src/main/agent-installer/installer-network.test.ts',
+  'src/main/agent-installer/installer-process.test.ts',
   'src/main/agent-installer/detect.test.ts', 'src/main/agent-installer/install.test.ts',
   'src/main/sync-manager-lifetime.test.ts',
   'src/main/sync-manager.test.ts',

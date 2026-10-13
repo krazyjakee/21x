@@ -4,6 +4,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { detectInstalledAgents } from './detect.js'
 import { InstallerNetwork } from './installer-network.js'
+import { InstallerProcessOwner } from './installer-process.js'
 
 /** @typedef {(progress: { stage: string, output: string, percent: number }) => void} OnProgress */
 
@@ -87,24 +88,8 @@ export async function downloadFile(url, destPath, onProgress) {
  * @returns {Promise<{ error: Error | null, code: number | null, stdout: string, stderr: string }>}
  */
 export function streamProcess(cmd, args, onProgress, percent, options = {}) {
-  return new Promise((resolve) => {
-    const proc = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], ...options })
-    let stdout = ''
-    let stderr = ''
-
-    proc.stdout?.on('data', (chunk) => {
-      const text = chunk.toString()
-      stdout += text
-      onProgress({ stage: 'installing', output: text, percent })
-    })
-    proc.stderr?.on('data', (chunk) => {
-      const text = chunk.toString()
-      stderr += text
-      onProgress({ stage: 'installing', output: text, percent })
-    })
-    proc.on('error', (error) => resolve({ error, code: null, stdout, stderr }))
-    proc.on('close', (code) => resolve({ error: null, code, stdout, stderr }))
-  })
+  const owner = new InstallerProcessOwner(spawn)
+  return owner.run(cmd, args, onProgress, percent, options).finally(() => owner.close())
 }
 
 /** Run a helper command (tar, unzip) silently; throws on failure. */

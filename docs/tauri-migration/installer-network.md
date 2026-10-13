@@ -37,3 +37,21 @@ application passes with 20 optional skips in 376 files. All ten core controls
 and two legacy adapter controls passed. Typecheck, changed-source lint,
 source/contract freshness and the existing desktop/mobile build passed. These
 results use local fixtures and retain their explicit scope.
+
+## CLI process owner
+
+`InstallerProcessOwner` similarly receives its spawn host. Legacy `streamProcess`
+delegates to it and waits for actual child close, including after asynchronous
+spawn/stdio errors. Progress callback failures are caught and stop the owned
+child. Captured stdout/stderr retain at most 262,144 characters each; live
+progress remains streamed. Shutdown closes admission, stops late progress,
+signals only owned child objects and retains incomplete close ownership.
+
+[Process evidence](evidence/installer-process-local.json) includes a real
+owning-runtime fixture and actual cancellation while an unrelated fixture
+process remains alive. Delayed close after spawn error, callback failure,
+bounded tails, deadline/admission and synchronous spawn failure also passed
+under both launchers. These checks concern direct children. Descendant trees,
+elevated installers, native lifecycle registration and production bootstrap
+remain open. The full source-scoped local rechecks and builds are recorded in
+the evidence rather than counting this helper as a production migration gate.

@@ -1,0 +1,54 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "scope": "Portable installer process owner; asynchronous errors remain owned through actual child close. Tests include actual owning-runtime output/cancellation and unrelated-process preservation, plus delayed close/error/capture/admission fixtures. Does not prove descendant process trees, real installers/elevation or production Tauri bootstrap.",
+  "sourceFilesSha256": {
+    "src/main/agent-installer/installer-process.js": "95d5362badc73517fe04e9f9ed81ca60f654eb08ccc5111aff2584dd49f359af",
+    "src/main/agent-installer/installer-utils.js": "3f15a329a9b0e56f6ea228cfe2710f2ac10af131b37f93338aff75541acbf1d6",
+    "src/main/agent-installer/installer-process.test.ts": "0d8f9b63401410d7a9b65241681c1e6ffc3670b0b389235180093f99cf3c9b01",
+    "vitest.tauri.config.ts": "75371e39aa98e95b6f8f686983b5ffb6a017773fa2c76a610592c61dd4190ef1"
+  },
+  "reports": [
+    {
+      "command": "pnpm test:tauri -- src/main/agent-installer",
+      "report": "/tmp/21x-installer-process-standalone.json",
+      "sha256": "afca1ac06a8e2bbb5fd550741c62ada1e16876d7c6094f69f2d52c30d5836715",
+      "passed": 35,
+      "skipped": 0,
+      "files": 4
+    },
+    {
+      "command": "pnpm test -- src/main/agent-installer",
+      "report": "/tmp/21x-installer-process-legacy.json",
+      "sha256": "5f7bc10b203f56f3a1869818bd70ee233a47a7835aa2583a31fbc3de580c20c0",
+      "passed": 37,
+      "skipped": 0,
+      "files": 5
+    },
+    {
+      "command": "pnpm test:tauri -- --service-proofs",
+      "report": "/tmp/21x-installer-process-full-service.json",
+      "sha256": "de0d3d23bc2ce63b24897776548eff4bef25c1f256e3a7720c06f9f906a9b5de",
+      "passed": 1062,
+      "skipped": 0,
+      "files": 77
+    },
+    {
+      "command": "pnpm test -- --run",
+      "report": "/tmp/21x-installer-process-full-legacy.json",
+      "sha256": "a1930315e2f35b02f4fdf3a8be224d1996d98fc29cd68e37980076e9825f74c9",
+      "passed": 5274,
+      "skipped": 20,
+      "files": 377
+    }
+  ],
+  "forcedTypecheckPassed": true,
+  "changedSourceLintErrors": 0,
+  "build": {
+    "command": "pnpm build",
+    "passed": true,
+    "logSha256": "f89ca40f98fc019009e879bd6f877df6d87be32506b3a125e6d55a7cd266f8c7"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}
