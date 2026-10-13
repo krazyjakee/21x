@@ -1797,6 +1797,81 @@ describe('AgentManager shutdown', () => {
     await stopped
   }
 
+  it.each(['configuration', 'abort-success', 'abort-error'] as const)('retains an in-flight %s interrupt and prevents late status writes', async phase => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    let finish!: () => void
+    const held = new Promise<void>(resolve => { finish = resolve })
+    const fake = new FakeAdapter({ sessionIds: ['interrupt-session'] })
+    installFakeAdapter(fake)
+    const db = createMockDb({ coding_agent: 'claude-code' })
+    const mgr = new AgentManager(db)
+    let interrupted: Promise<void> | undefined
+    try {
+      await mgr.startSession('agent-1', 'task-1', '/tmp/ws', true)
+      if (phase === 'configuration') {
+        vi.spyOn(mgr as any, 'buildSessionConfig').mockImplementationOnce(async () => { await held; return {} })
+      } else {
+        fake.abortPrompt.mockImplementation(async () => { await held; if (phase === 'abort-error') throw new Error('Provider abort failed') })
+      }
+      interrupted = mgr.abortSession('interrupt-session')
+      const rejected = expect(interrupted).rejects.toThrow('stopped')
+      await flushEventLoop()
+      await expectIncompleteShutdown(mgr)
+      const events: string[] = []
+      mgr.addExternalListener(channel => { events.push(channel) })
+      vi.mocked(db.getTask).mockClear()
+      finish()
+      await rejected
+      await mgr.stopAllSessions()
+      expect(fake.abortPrompt).toHaveBeenCalledTimes(phase === 'configuration' ? 0 : 1)
+      expect(events).toEqual([])
+      expect(db.getTask).not.toHaveBeenCalled()
+      await expect(mgr.abortSession('interrupt-session')).rejects.toThrow('shutting down')
+    } finally {
+      finish()
+      await interrupted?.catch(() => undefined)
+      await mgr.stopAllSessions()
+      vi.useRealTimers()
+    }
+  })
+
+  it('owns a pending reaper tool probe after shutdown removes the session', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    let finish!: () => void
+    const held = new Promise<void>(resolve => { finish = resolve })
+    const fake = Object.assign(new FakeAdapter({ sessionIds: ['idle-session'] }), {
+      getRunningTools: vi.fn(async () => { await held; return [] })
+    })
+    installFakeAdapter(fake)
+    const db = createMockDb({ coding_agent: 'claude-code' })
+    const mgr = new AgentManager(db)
+    let sweep: Promise<void> | undefined
+    try {
+      await mgr.startSession('agent-1', 'task-1', '/tmp/ws', true)
+      vi.mocked(db.getTask).mockReturnValue({ id: 'task-1', session_id: 'idle-session' } as TaskRecord)
+      const session = mgr.getSession('idle-session')!
+      session.status = 'idle'
+      session.lastActivityAt = Date.now() - 31 * 60_000
+      sweep = (mgr as any).reapInactiveSessions()
+      expect((mgr as any).reapInactiveSessions()).toBe(sweep)
+      expect(fake.getRunningTools).toHaveBeenCalledOnce()
+      await expectIncompleteShutdown(mgr)
+      vi.mocked(db.getTask).mockClear()
+      finish()
+      await sweep
+      await mgr.stopAllSessions()
+      await (mgr as any).reapInactiveSessions()
+      expect(fake.destroySession).toHaveBeenCalledOnce()
+      expect(fake.getRunningTools).toHaveBeenCalledOnce()
+      expect(db.getTask).not.toHaveBeenCalled()
+    } finally {
+      finish()
+      await sweep
+      await mgr.stopAllSessions()
+      vi.useRealTimers()
+    }
+  })
+
   it.each(['resolve', 'reject'] as const)('owns a pending provider configuration refresh through shutdown when it will %s', async outcome => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
     let finish!: () => void
@@ -3894,6 +3969,23 @@ describe('AgentManager idle-session inactivity reaper', () => {
     ;(mgr as any).sessions.set((overrides.id as string) || 'session-1', session)
     return session
   }
+
+  it.each(['working', 'recent-activity', 'replacement', 'child-started'] as const)('does not reap a session after %s changes while its tool probe is pending', async change => {
+    const { mgr, mockDb, stopSpy } = buildManager()
+    let finish!: () => void
+    const held = new Promise<void>(resolve => { finish = resolve })
+    const getRunningTools = vi.fn(async () => { await held; return [] })
+    const session = addSession(mgr, { adapter: { getRunningTools } })
+    const sweep = (mgr as any).reapInactiveSessions()
+    expect(getRunningTools).toHaveBeenCalledOnce()
+    if (change === 'working') (session as any).status = 'working'
+    if (change === 'recent-activity') session.lastActivityAt = Date.now()
+    if (change === 'replacement') addSession(mgr, { adapter: { getRunningTools } })
+    if (change === 'child-started') vi.mocked(mockDb.getSubtasks).mockReturnValue([{ status: TaskStatus.AgentWorking } as TaskRecord])
+    finish()
+    await sweep
+    expect(stopSpy).not.toHaveBeenCalled()
+  })
 
   it('releases the runtime of a long-idle session (resume-capable)', async () => {
     const { mgr, stopSpy } = buildManager()

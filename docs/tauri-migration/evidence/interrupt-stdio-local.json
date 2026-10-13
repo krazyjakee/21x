@@ -1,0 +1,49 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "baseCommit": "3d3ff988aff1660ed3fc16ed65783bc46d8f9cd5",
+  "scope": "Working-tree Windows inherited stdio correction and Interrupt/reaper shutdown/race ownership. Windows acceptance requires the actual platform retry.",
+  "sourceSha256": {
+    "src/main/agent-manager-core.ts": "833c4633bf43cb0e02c77bda680771ca9decc690e29ad2862c115c927eb63512",
+    "src/main/agent-manager.test.ts": "1dc64636d3ee2e04dab4310a1dd9b84b3124906ebd89ddd4041371aafb1e75ec",
+    "src/service/database-service.ts": "db87e3f4e49234ccaa66f6fb8de617de3a58efaccceda82a1ab6049bc00c60a5",
+    "scripts/transcript-page-proof.test.ts": "99994554a8cda3599ba3c5de7ecf38dea64748043397957a6bf7ce8dcc1876e4",
+    "docs/tauri-migration/event-forwarding-review.json": "d46e651d40d622da42497ae6562c220d432c0ecc691b54faddc034c4ed45a164"
+  },
+  "diagnosis": {
+    "run": "https://github.com/krazyjakee/21x/actions/runs/38327288299",
+    "sourceCommit": "3d3ff988aff1660ed3fc16ed65783bc46d8f9cd5",
+    "target": "windows-x64",
+    "serviceOnly": true,
+    "errorCode": "DISCONNECTED",
+    "serviceFailureStage": "startup-stdio",
+    "serviceExitCode": 1
+  },
+  "tests": {
+    "managerAdmissionConcurrency": {
+      "passed": 282,
+      "skipped": 0,
+      "files": 3,
+      "reportSha256": "5abab125d7edb84a0ef058affaeca6d8552dab071c8e1ef3b6c2868d9f2d1948"
+    },
+    "standaloneAndService": {
+      "passed": 470,
+      "skipped": 0,
+      "files": 44,
+      "reportSha256": "3285db59618122ba13b71407bd5851527e185ce0f58800a551626c4720890a02"
+    }
+  },
+  "newInterruptReaperCases": 8,
+  "startupNegativeCases": 5,
+  "pinnedNode": "v22.23.2",
+  "pinnedLibuv": "1.51.0",
+  "checks": {
+    "typecheck": "passed",
+    "changedSourceLint": "passed",
+    "sourceInventoryAndContracts": "regenerated after review of unchanged event producers/grants",
+    "diffWhitespace": "passed"
+  },
+  "wholeApplicationRecheck": "in progress; not counted in this scoped report",
+  "productionReady": false,
+  "electronRetirementReady": false
+}

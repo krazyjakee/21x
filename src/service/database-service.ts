@@ -2,6 +2,8 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { fstatSync, lstatSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { basename, isAbsolute, join, relative, sep } from 'node:path'
 import { tmpdir } from 'node:os'
+import { Socket } from 'node:net'
+import { isatty } from 'node:tty'
 import { acquireProfileLock, PROFILE_LOCK_FILE, type ProfileLock } from '../main/platform/profile-lock'
 import { configureSecretStorage } from '../main/platform/secret-storage'
 import { AuthenticatedSecretStorage } from '../main/platform/authenticated-secret-storage'
@@ -67,6 +69,15 @@ export function startDatabaseStdio(): void {
     return enabled
   })
   startupPrerequisite('stdio', () => {
+    if (process.platform === 'win32') {
+      // Node wraps inherited PIPE/TCP stdio as net.Socket. Its Windows child
+      // launcher can supply sockets that fstat cannot classify as FIFO/socket.
+      // File streams and terminal handles still fail before protocol startup.
+      if (!(process.stdin instanceof Socket) || !(process.stdout instanceof Socket) ||
+          isatty(0) || isatty(1) || process.stdin.fd !== 0 || process.stdout.fd !== 1 ||
+          !process.stdin.readable || !process.stdout.writable || process.stdin.destroyed || process.stdout.destroyed) return fail()
+      return
+    }
     if (![0, 1].every(fd => { const file = fstatSync(fd); return file.isFIFO() || file.isSocket() })) return fail()
   })
   const profileRoot = startupPrerequisite('profile', () => canonicalSyntheticRoot(process.env.TWENTYONEX_PROFILE_ROOT))

@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 
 const entry = process.env.TAURI_DATABASE_SERVICE_ENTRY
 describe('actual bundled transcript pagination', () => {
-  it.skipIf(!entry).each(['runtime', 'stdio', 'profile', 'resources'] as const)('reports only a fixed %s startup classification on unavailable prerequisites', stage => {
+  it.skipIf(!entry).each(['runtime', 'stdio-input', 'stdio-output', 'profile', 'resources'] as const)('reports only a fixed %s startup classification on unavailable prerequisites', stage => {
     const root = mkdtempSync(join(tmpdir(), '21x-database-service-'))
     const resourceRoot = dirname(dirname(entry!))
     const sensitive = 'fixture-sensitive-path-must-not-echo'
@@ -15,19 +15,19 @@ describe('actual bundled transcript pagination', () => {
     Object.assign(environment, { TWENTYONEX_DATABASE_MODE: stage === 'runtime' ? sensitive : 'synthetic-only',
       TWENTYONEX_PROFILE_ROOT: stage === 'profile' ? sensitive : root,
       TWENTYONEX_RESOURCE_ROOT: stage === 'resources' ? sensitive : resourceRoot })
-    const outputFile = stage === 'stdio' ? openSync(join(root, 'redirected-output'), 'w') : undefined
+    const file = stage.startsWith('stdio-') ? openSync(join(root, 'redirected-stream'), 'w+') : undefined
     try {
       const result = spawnSync(process.env.TAURI_NODE_RUNTIME || 'node', [entry!], {
-        env: environment, encoding: 'utf8', input: '', timeout: 10_000, maxBuffer: 32_768,
-        stdio: ['pipe', outputFile ?? 'pipe', 'pipe']
+        env: environment, encoding: 'utf8', ...(stage === 'stdio-input' ? {} : { input: '' }), timeout: 10_000, maxBuffer: 32_768,
+        stdio: [stage === 'stdio-input' ? file! : 'pipe', stage === 'stdio-output' ? file! : 'pipe', 'pipe']
       })
       expect(result.status).toBe(1)
       expect(result.stderr).toContain(stage === 'runtime' ? '[database-service] trusted bootstrap runtime unavailable\n'
-        : `[database-service] startup ${stage} unavailable\n`)
+        : `[database-service] startup ${stage.startsWith('stdio-') ? 'stdio' : stage} unavailable\n`)
       expect(result.stderr).not.toContain(sensitive)
       expect(result.stdout ?? '').toBe('')
     } finally {
-      if (outputFile !== undefined) closeSync(outputFile)
+      if (file !== undefined) closeSync(file)
       rmSync(root, { recursive: true, force: true })
     }
   })

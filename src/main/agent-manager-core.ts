@@ -253,6 +253,7 @@ export class AgentManager extends EventEmitter {
    *  not polled at all between sweeps. */
   private static readonly IDLE_REAP_SWEEP_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
   private reaperTimer: ReturnType<typeof setInterval> | null = null
+  private reaperSweep: Promise<void> | null = null
 
   /** Parents currently being woken after subtask completion (dedupe guard so
    *  several subtasks finishing at once produce a single wake-up). */
@@ -809,12 +810,23 @@ export class AgentManager extends EventEmitter {
     setImmediate(() => this.updatePowerSaveBlocker())
   }
 
-  private async reapInactiveSessions(): Promise<void> {
+  private reapInactiveSessions(): Promise<void> {
+    if (this.shuttingDown) return Promise.resolve()
+    if (this.reaperSweep) return this.reaperSweep
+    const sweep = this.ownShutdownWork(this.reapInactiveSessionsNow())
+    this.reaperSweep = sweep
+    const settled = (): void => { if (this.reaperSweep === sweep) this.reaperSweep = null }
+    void sweep.then(settled, settled)
+    return sweep
+  }
+
+  private async reapInactiveSessionsNow(): Promise<void> {
     // Safety net for limits raised in settings or the agent form: nothing
     // else signals those, so re-check the queue on every sweep.
     this.scheduleStartQueueDrain()
     const now = Date.now()
     for (const [sessionId, session] of [...this.sessions.entries()]) {
+      if (this.shuttingDown) return
       // Only idle sessions are candidates — an active turn is never reaped.
       if (session.status !== 'idle') continue
 
@@ -836,6 +848,10 @@ export class AgentManager extends EventEmitter {
       // have no DB subtask row, so hasActiveSubtaskWork can't see them — but
       // destroying the session here aborts the query and kills them outright.
       if (await this.hasActiveDelegationTools(session)) continue
+      if (this.shuttingDown) return
+      if (!this.ownsSessionGeneration(sessionId, session) || session.status !== 'idle' ||
+          Date.now() - (session.lastActivityAt ?? session.createdAt.getTime()) < AgentManager.IDLE_SESSION_REAP_THRESHOLD_MS) continue
+      if (this.hasActiveSubtaskWork(session.taskId)) continue
 
       console.log(
         `[AgentManager] Releasing runtime of idle session ${sessionId} (task ${session.taskId}, idle ${Math.round(idleForMs / 1000)}s). ` +
@@ -1029,7 +1045,7 @@ export class AgentManager extends EventEmitter {
   }
 
   private assertSessionGeneration(sessionId: string, session: AgentSession): void {
-    if (!this.ownsSessionGeneration(sessionId, session)) {
+    if (this.shuttingDown || !this.ownsSessionGeneration(sessionId, session)) {
       throw new Error('Message delivery was cancelled because the user stopped this task.')
     }
   }
@@ -3810,24 +3826,32 @@ export class AgentManager extends EventEmitter {
 
   /** Interrupts the current generation and stops polling; keeps the transcript and task status. */
   async abortSession(sessionId: string): Promise<void> {
+    return this.ownShutdownWork(this.abortSessionNow(sessionId))
+  }
+
+  private async abortSessionNow(sessionId: string): Promise<void> {
+    if (this.shuttingDown) throw new Error('The app is shutting down; retry after restart.')
     const resolved = this.resolveSession(sessionId, 'abortSession')
     if (!resolved) return
     const { session } = resolved
     sessionId = resolved.sessionId
+    this.assertSessionGeneration(sessionId, session)
 
     console.log(`[AgentManager] Aborting session ${sessionId}`)
     this.stopAdapterPolling(sessionId)
 
-    const adapter = this.getAdapter(session.agentId)
+    const adapter = session.adapter ?? this.getAdapter(session.agentId)
     if (adapter) {
       try {
         const sessionConfig = await this.buildSessionConfig(session.agentId, session.taskId, session.workspaceDir)
+        this.assertSessionGeneration(sessionId, session)
         await adapter.abortPrompt(sessionId, sessionConfig)
       } catch (error) {
         console.error(`[AgentManager] Error aborting adapter session:`, error)
       }
     }
 
+    this.assertSessionGeneration(sessionId, session)
     session.status = 'idle'
     this.emitStatus(sessionId, session, 'idle')
   }
