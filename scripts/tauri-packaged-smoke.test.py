@@ -192,9 +192,12 @@ class ReportValidationTests(unittest.TestCase):
             result = smoke.runtime_versions(binary, runtime, "x64")
         self.assertEqual(result["node"], metadata)
         self.assertEqual(result["webview"]["version"], "123.4.5")
-        self.assertEqual(query.call_args.args[0][:2], [str(binary), "-p"])
+        # Windows platform.version() may query cmd's version afterward too.
+        # Assert the explicit packaged-Node query rather than the final OS query.
+        node_query = query.call_args_list[0]
+        self.assertEqual(node_query.args[0][:2], [str(binary), "-p"])
         for name in ("NODE_OPTIONS", "PATH", "ELECTRON_RUN_AS_NODE", "SECRET_KEY"):
-            self.assertNotIn(name, query.call_args.kwargs["env"])
+            self.assertNotIn(name, node_query.kwargs["env"])
 
     def test_runtime_versions_reject_missing_webview_version_and_selected_runtime_override(self):
         metadata = {"nodeVersion": "v22.23.2", "nodeAbi": "127", "platform": sys.platform, "arch": "x64"}
