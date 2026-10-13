@@ -48,6 +48,7 @@ import { setTaskAutomationTrigger, setTaskSchedulers } from './task-updates'
 import { CaptainWaker } from './captain-waker'
 import { startScheduledCoordination, stopScheduledCoordination, closeScheduledCoordination } from './scheduled-coordination'
 import { startSecretBroker, shutdownSecretBroker, closeSecretBroker, writeSecretShellWrapper } from './secret-broker'
+import { shutdownMcpProbes, closeMcpProbes } from './agent-manager/mcp-server-test'
 import { isMainWindowUrl } from './main-window-url'
 import { applyMobileAccessSettings, setMobileApiDeps, stopMobileApiServer, closeMobileApiServer, broadcastToMobileClients, setMobileApiNotifier } from './mobile-api-server'
 import { registerUpdaterIpc, initAutoUpdater, isUpdateDownloaded, getPendingVersion } from './auto-updater'
@@ -190,6 +191,7 @@ async function shutdownAppServices(): Promise<void> {
   shutdownChatServices()
   shutdownCommanderServices()
   shutdownSecretBroker()
+  shutdownMcpProbes()
   stopTaskApiServer()
   void stopMobileApiServer()
   syncManager?.stop()
@@ -208,7 +210,7 @@ async function shutdownAppServices(): Promise<void> {
 
   oauthManager?.destroy()
   const serviceDrains = await Promise.allSettled([
-    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined, closeTaskApiServer(), closeMobileApiServer(), taskAutomationScheduler?.close(), captainWaker?.close(), recurrenceScheduler?.close(), closeScheduledCoordination(), heartbeatScheduler?.close(), workspaceCleanupScheduler?.close(), closeTerminalServices(), closeChatServices(), closeCommanderServices(), closeSecretBroker()
+    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined, closeTaskApiServer(), closeMobileApiServer(), taskAutomationScheduler?.close(), captainWaker?.close(), recurrenceScheduler?.close(), closeScheduledCoordination(), heartbeatScheduler?.close(), workspaceCleanupScheduler?.close(), closeTerminalServices(), closeChatServices(), closeCommanderServices(), closeSecretBroker(), closeMcpProbes()
   ])
   const incompleteServiceDrain = serviceDrains.find(result => result.status === 'rejected')
   if (incompleteServiceDrain?.status === 'rejected') throw incompleteServiceDrain.reason

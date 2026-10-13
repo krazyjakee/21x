@@ -60,6 +60,7 @@ const report = {
     'src/main/captain-waker.ts',
     'src/main/recurrence-scheduler.ts', 'src/main/recurrence-scheduler-core.ts',
     'src/main/scheduled-coordination.ts', 'src/main/scheduled-coordination-core.ts',
+    'src/main/agent-manager/mcp-probe-service.ts', 'src/main/agent-manager/mcp-server-test.ts', 'src/main/ipc/mcp.ts',
     'src/main/secret-broker.ts', 'src/main/secret-broker-core.ts', 'src/main/secret-shell.ts',
     'src/main/commander/commander-service.ts', 'src/main/commander/captain-delivery.ts', 'src/main/ipc/commander.ts',
     'src/main/chat/chat-runtime.ts', 'src/main/ipc/chat.ts',

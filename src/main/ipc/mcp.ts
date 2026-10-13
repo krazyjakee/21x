@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron'
 import type { CreateMcpServerData, UpdateMcpServerData } from '../database'
 import { OAuthManager } from '../oauth/oauth-manager'
-import { testMcpServer, type McpServerProbeInput } from '../agent-manager/mcp-server-test'
+import { testMcpServer, areMcpProbesClosed, type McpServerProbeInput } from '../agent-manager/mcp-server-test'
 import { required, type IpcDeps } from './deps'
 
 export function registerMcpHandlers({ db, oauthManager }: IpcDeps): void {
@@ -12,7 +12,7 @@ export function registerMcpHandlers({ db, oauthManager }: IpcDeps): void {
 
   ipcMain.handle('mcp:testConnection', async (_, serverData: McpServerProbeInput & { id?: string }) => {
     const result = await testMcpServer(serverData)
-    if (serverData.id && result.status === 'connected' && result.tools) {
+    if (!areMcpProbesClosed() && serverData.id && result.status === 'connected' && result.tools) {
       db.updateMcpServerTools(serverData.id, result.tools)
     }
     return result

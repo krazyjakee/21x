@@ -324,7 +324,7 @@
       "id": "task-api-relay",
       "source": {
         "file": "src/main/index.ts",
-        "line": 429,
+        "line": 431,
         "column": 7,
         "target": "guardedIpcSend",
         "method": "send",
@@ -363,7 +363,7 @@
       "id": "mobile-to-desktop-relay",
       "source": {
         "file": "src/main/index.ts",
-        "line": 450,
+        "line": 452,
         "column": 7,
         "target": "guardedIpcSend",
         "method": "send",
