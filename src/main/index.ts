@@ -24,7 +24,7 @@ import { ForgejoIssuesPlugin } from './plugins/forgejo-issues-plugin'
 import { NotionPlugin } from './plugins/notion-plugin'
 import { YouTrackPlugin } from './plugins/youtrack-plugin'
 import { ConnectorBridgePlugin } from './plugins/connector-bridge-plugin'
-import { disposeConnectorRuntime } from './connectors/bridge/runtime'
+import { closeConnectorRuntime, disposeConnectorRuntime } from './connectors/bridge/runtime'
 import { registerIpcHandlers } from './ipc-handlers'
 import { panelBrowserBroker } from './panel-browser-broker'
 import { hardenWebviewPreferences } from './webview-hardening'
@@ -178,6 +178,9 @@ async function sweepLeakedWorkspaces(graceMs?: number, orphansIgnoreTaskState = 
 }
 
 async function shutdownAppServices(): Promise<void> {
+  syncManager?.stop()
+  connectorBridgePlugin?.stopPolling()
+  if (db) disposeConnectorRuntime(db)
   voiceSessionManager?.shutdown()
   recurrenceScheduler?.stop()
   stopScheduledCoordination()
@@ -190,8 +193,11 @@ async function shutdownAppServices(): Promise<void> {
   await agentManager?.stopServer()
 
   oauthManager?.destroy()
-  connectorBridgePlugin?.stopPolling()
-  if (db) disposeConnectorRuntime(db)
+  const connectorDrains = await Promise.allSettled([
+    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined
+  ])
+  const incompleteConnectorDrain = connectorDrains.find(result => result.status === 'rejected')
+  if (incompleteConnectorDrain?.status === 'rejected') throw incompleteConnectorDrain.reason
   stopSecretBroker()
   stopMobileApiServer()
   stopTaskApiServer()
@@ -791,7 +797,7 @@ app.whenReady().then(async () => {
   pluginRegistry.register(connectorBridgePlugin)
   connectorBridgePlugin.startPolling({
     db,
-    onSynced: () => guardedIpcSend(mainWindow?.webContents, 'tasks:refresh')
+    onSynced: () => { guardedIpcSend(mainWindow?.webContents, 'tasks:refresh') }
   })
 
   syncManager = new SyncManager(db, pluginRegistry, oauthManager)
@@ -1075,7 +1081,5 @@ app.on('before-quit', async (event) => {
   isShuttingDown = true
   isQuitting = true
 
-  void shutdownAppServices().finally(() => {
-    app.exit(0)
-  })
+  void shutdownAppServices().then(() => app.exit(0), () => app.exit(1))
 })

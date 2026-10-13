@@ -381,7 +381,7 @@
           "channelExpression": "channel",
           "column": 7,
           "file": "src/main/index.ts",
-          "line": 416,
+          "line": 422,
           "method": "send",
           "target": "guardedIpcSend"
         }
@@ -410,7 +410,7 @@
           "channelExpression": "channel",
           "column": 7,
           "file": "src/main/index.ts",
-          "line": 435,
+          "line": 441,
           "method": "send",
           "target": "guardedIpcSend"
         }
@@ -8737,7 +8737,7 @@
         {
           "column": 7,
           "file": "src/main/index.ts",
-          "line": 451,
+          "line": 457,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -9501,7 +9501,7 @@
         {
           "column": 15,
           "file": "src/main/index.ts",
-          "line": 603,
+          "line": 609,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -9509,7 +9509,7 @@
         {
           "column": 11,
           "file": "src/main/index.ts",
-          "line": 609,
+          "line": 615,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -9848,7 +9848,7 @@
         {
           "column": 7,
           "file": "src/main/index.ts",
-          "line": 284,
+          "line": 290,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -12989,7 +12989,7 @@
         {
           "column": 50,
           "file": "src/main/index.ts",
-          "line": 747,
+          "line": 753,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -13668,9 +13668,9 @@
           "target": "reviewed-event-wrapper"
         },
         {
-          "column": 21,
+          "column": 23,
           "file": "src/main/index.ts",
-          "line": 794,
+          "line": 800,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -19038,7 +19038,7 @@
         "producerOwner": "authenticated-task-api",
         "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
       },
-      "line": 416,
+      "line": 422,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
@@ -19069,7 +19069,7 @@
         "producerOwner": "authenticated-mobile-api",
         "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
       },
-      "line": 435,
+      "line": 441,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",

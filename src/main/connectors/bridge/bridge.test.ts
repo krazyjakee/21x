@@ -9,11 +9,11 @@ import { kvBackendFromConnectorStore, PieceHostClient, type PieceHostTransport }
 import type { HostInboundMessage, HostOutboundMessage } from '../piece-host/protocol'
 import { ConnectorBridgePlugin } from '../../plugins/connector-bridge-plugin'
 import type { PluginContext } from '../../plugins/types'
-import { ConnectorBridgeEngine, type BridgeRuntime } from './engine'
+import { ConnectorBridgeClosedError, ConnectorBridgeEngine, type BridgeRuntime } from './engine'
 import { mapItem, validateMapping, type ConnectorTaskMapping } from './mapping'
 import { CONNECTOR_TASK_MAPPINGS } from './mappings'
 import { backoffDelayMs, classifyError, parseRetryAfter, type RetryPolicy } from './retry'
-import { BridgeScheduler } from './scheduler'
+import { BridgeScheduler, BridgeSchedulerShutdownIncompleteError } from './scheduler'
 import { readCursor } from './state'
 
 /**
@@ -548,5 +548,73 @@ describe('scheduler', () => {
     now += 60 * 60_000
     await scheduler.tick()
     expect(runSource).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('plugin shutdown', () => {
+  it('joins a previously paused polling callback after an incomplete close', async () => {
+    const plugin = makePlugin()
+    const held = deferred<Item[]>()
+    handlers['action:list_items'] = () => held.promise
+    const onSynced = vi.fn()
+    const recorded = vi.spyOn(db, 'updateTaskSourceLastSynced')
+    try {
+      plugin.startPolling({ db, onSynced, tickMs: 10_000 })
+      await vi.waitFor(() => expect(listCalls()).toBe(1))
+      plugin.stopPolling()
+      await expect(plugin.close(5)).rejects.toBeInstanceOf(BridgeSchedulerShutdownIncompleteError)
+      let closed = false
+      const retry = plugin.close().then(() => { closed = true })
+      await Promise.resolve()
+      expect(closed).toBe(false)
+      expect(onSynced).not.toHaveBeenCalled()
+      expect(() => plugin.engineFor(db)).toThrow(ConnectorBridgeClosedError)
+      expect(() => plugin.importTasks(sourceId, config, ctx)).toThrow(ConnectorBridgeClosedError)
+      held.resolve([])
+      await retry
+      expect(onSynced).toHaveBeenCalledOnce()
+      expect(recorded).toHaveBeenCalledWith(sourceId)
+    } finally {
+      held.resolve([])
+      await plugin.close()
+      recorded.mockRestore()
+    }
+  })
+
+  it('closes an unused plugin without allocating a runtime or starting polling', async () => {
+    const createRuntime = vi.fn(() => runtime())
+    const plugin = new ConnectorBridgePlugin({ runtime: createRuntime })
+    await plugin.close()
+    await plugin.close()
+    expect(createRuntime).not.toHaveBeenCalled()
+    expect(() => plugin.engineFor(db)).toThrow(ConnectorBridgeClosedError)
+    expect(() => plugin.startPolling({ db })).toThrow(ConnectorBridgeClosedError)
+  })
+
+  it('joins an asynchronous post-sync callback before releasing database ownership', async () => {
+    const plugin = makePlugin()
+    const held = deferred<void>()
+    const onSynced = vi.fn(async () => { await held.promise; db.getTaskSource(sourceId) })
+    const lookup = vi.spyOn(db, 'getTaskSource')
+    try {
+      plugin.startPolling({ db, onSynced, tickMs: 10_000 })
+      await vi.waitFor(() => expect(onSynced).toHaveBeenCalledOnce())
+      const reads = lookup.mock.calls.length
+      let closed = false
+      const close = plugin.close().then(() => { closed = true })
+      await Promise.resolve()
+      expect(closed).toBe(false)
+      expect(lookup).toHaveBeenCalledTimes(reads)
+      held.resolve()
+      await close
+      expect(lookup).toHaveBeenCalledTimes(reads + 1)
+    } finally { held.resolve(); await plugin.close(); lookup.mockRestore() }
+  })
+
+  it('validates a close deadline before rejecting further imports', async () => {
+    const plugin = makePlugin()
+    await expect(plugin.close(0)).rejects.toBeInstanceOf(RangeError)
+    await expect(plugin.importTasks(sourceId, config, ctx)).resolves.toMatchObject({ errors: [] })
+    await plugin.close()
   })
 })

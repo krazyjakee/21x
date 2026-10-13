@@ -24,9 +24,19 @@ the full application suite. The existing fake Todoist proof still exercises the
 pinned piece, loopback callbacks, refresh/revocation and encrypted/session token
 storage. These controls use isolated fixtures and no real provider credentials.
 
-Production teardown still uses `disposeConnectorRuntime`. Integration must first
-stop admission at polling, manual sync and IPC entry points, join higher-level
-bridge jobs, await both barriers, and retain resources when a deadline expires.
+The Electron application teardown now stops source-sync admission, pauses polling
+and cancels the connector runtime before stopping agents. It then joins source
+sync, plugin and runtime close barriers before SQLite close. A failed drain keeps
+SQLite/profile ownership until process exit and exits with failure. Runtime
+disposal retains the original raw owners for a later join and refuses recreation.
+
+The bridge engine joins active jobs and rejects queued imports/updates. The
+plugin also joins previously paused polling and asynchronous post-sync callbacks.
+`SyncManager` retains imports, exports, source actions, user listings and
+reassignments through their final database writes. [Integrated local evidence](evidence/connector-source-shutdown-local.json)
+records 109 source/connector cases, 548 standalone/private-pipe cases, and the
+full application recheck. This integrates the existing Electron source path;
+the Tauri production bootstrap and other domain/native lifecycle owners remain open.
 The actual callback HTTP server now retains every listener until its close event,
 including failed bind attempts. The OAuth flow joins that acknowledgement before
 it can persist credentials or settle. [HTTP close evidence](evidence/connector-http-close-local.json)

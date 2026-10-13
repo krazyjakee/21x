@@ -136,6 +136,7 @@ export class ConnectorBridgeEngine {
   private readonly log: (message: string) => void
   private readonly chains = new Map<string, Promise<unknown>>()
   private readonly inflightSyncs = new Map<string, Promise<PluginSyncResult>>()
+  private closing = false
 
   constructor(options: BridgeEngineOptions) {
     this.runtime = options.runtime
@@ -163,6 +164,7 @@ export class ConnectorBridgeEngine {
   // ── Import ──────────────────────────────────────────────────
 
   sync(sourceId: string, config: Record<string, unknown>, ctx: PluginContext, options: BridgeSyncOptions = {}): Promise<PluginSyncResult> {
+    if (this.closing) return Promise.reject(new ConnectorBridgeClosedError())
     const resolved = this.resolve(config)
     if ('error' in resolved) return Promise.resolve({ imported: 0, updated: 0, errors: [resolved.error] })
     const key = resolved.cfg.instanceId
@@ -390,6 +392,7 @@ export class ConnectorBridgeEngine {
     config: Record<string, unknown>,
     options: { queueOnFailure: boolean }
   ): Promise<BridgeUpdateResult> {
+    if (this.closing) return Promise.reject(new ConnectorBridgeClosedError())
     const resolved = this.resolve(config)
     if ('error' in resolved) return Promise.resolve({ ok: false, error: resolved.error })
     const externalId = task.external_id
@@ -575,7 +578,11 @@ export class ConnectorBridgeEngine {
   /** Serialises work per connector instance. */
   private withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const prev = this.chains.get(key) ?? Promise.resolve()
-    const run = prev.then(fn, fn)
+    const execute = () => {
+      if (this.closing) throw new ConnectorBridgeClosedError()
+      return fn()
+    }
+    const run = prev.then(execute, execute)
     const tail = run.catch(() => undefined)
     this.chains.set(key, tail)
     void tail.then(() => {
@@ -583,4 +590,30 @@ export class ConnectorBridgeEngine {
     })
     return run
   }
+
+  /** Stop admission, reject queued jobs and join running jobs before releasing the store. */
+  async close(timeoutMs = 2000): Promise<void> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) {
+      throw new RangeError('Connector bridge shutdown deadline must be an integer from 1 to 3000 ms')
+    }
+    this.closing = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const expired = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new ConnectorBridgeShutdownIncompleteError()), timeoutMs)
+    })
+    try {
+      do { await Promise.race([Promise.allSettled([...this.chains.values()]), expired]) }
+      while (this.chains.size)
+    } finally { if (timer) clearTimeout(timer) }
+  }
+}
+
+export class ConnectorBridgeClosedError extends Error {
+  readonly code = 'CONNECTOR_BRIDGE_CLOSED'
+  constructor() { super('Connector bridge is shutting down'); this.name = 'ConnectorBridgeClosedError' }
+}
+
+export class ConnectorBridgeShutdownIncompleteError extends Error {
+  readonly code = 'CONNECTOR_BRIDGE_SHUTDOWN_INCOMPLETE'
+  constructor() { super('Connector bridge jobs have not finished'); this.name = 'ConnectorBridgeShutdownIncompleteError' }
 }

@@ -206,8 +206,7 @@ export class ConnectorOAuthService implements PieceCredentialSource {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) {
       throw new RangeError('Connector OAuth shutdown deadline must be an integer from 1 to 3000 ms')
     }
-    this.closing = true
-    this.shutdown.abort(new ConnectorOAuthClosedError())
+    this.stop()
     let timer: ReturnType<typeof setTimeout> | undefined
     const expired = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => reject(new ConnectorOAuthShutdownIncompleteError()), timeoutMs)
@@ -216,6 +215,12 @@ export class ConnectorOAuthService implements PieceCredentialSource {
       do { await Promise.race([Promise.allSettled([...this.pendingWork]), expired]) }
       while (this.pendingWork.size)
     } finally { if (timer) clearTimeout(timer) }
+  }
+
+  /** Cancel admission and token/browser work while retaining it for a later close join. */
+  stop(): void {
+    this.closing = true
+    this.shutdown.abort(new ConnectorOAuthClosedError())
   }
 
   private requireOpen(): void {

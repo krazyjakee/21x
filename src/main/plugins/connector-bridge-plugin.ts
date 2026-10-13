@@ -3,6 +3,7 @@ import { TaskStatus } from '../../shared/constants'
 import {
   CONNECTOR_BRIDGE_PLUGIN_ID,
   ConnectorBridgeEngine,
+  ConnectorBridgeClosedError,
   DEFAULT_POLL_INTERVAL_MINUTES,
   type BridgeEngineOptions,
   type BridgeRuntime
@@ -44,7 +45,7 @@ export interface ConnectorBridgePluginOptions {
 export interface BridgePollingOptions {
   db: DatabaseManager
   /** Called after each scheduled sync (e.g. to refresh the renderer). */
-  onSynced?: (sourceId: string, result: PluginSyncResult) => void
+  onSynced?: (sourceId: string, result: PluginSyncResult) => Promise<void> | void
   tickMs?: number
 }
 
@@ -55,16 +56,21 @@ export class ConnectorBridgePlugin implements TaskSourcePlugin {
   icon = 'Plug'
 
   private readonly engines = new WeakMap<DatabaseManager, ConnectorBridgeEngine>()
+  private readonly ownedEngines = new Set<ConnectorBridgeEngine>()
+  private readonly ownedSchedulers = new Set<BridgeScheduler>()
   private scheduler: BridgeScheduler | null = null
+  private closing = false
 
   constructor(private readonly options: ConnectorBridgePluginOptions = {}) {}
 
   engineFor(db: DatabaseManager): ConnectorBridgeEngine {
+    if (this.closing) throw new ConnectorBridgeClosedError()
     let engine = this.engines.get(db)
     if (!engine) {
       const runtime = this.options.runtime ? this.options.runtime(db) : getConnectorRuntime(db)
       engine = new ConnectorBridgeEngine({ ...this.options.engine, runtime })
       this.engines.set(db, engine)
+      this.ownedEngines.add(engine)
     }
     return engine
   }
@@ -130,6 +136,7 @@ export class ConnectorBridgePlugin implements TaskSourcePlugin {
 
   /** Starts interval polling and retry scheduling for every bridge source. */
   startPolling({ db, onSynced, tickMs }: BridgePollingOptions): void {
+    if (this.closing) throw new ConnectorBridgeClosedError()
     if (this.scheduler) return
     const engine = this.engineFor(db)
     this.scheduler = new BridgeScheduler({
@@ -142,14 +149,32 @@ export class ConnectorBridgePlugin implements TaskSourcePlugin {
         if (!source) return
         const result = await engine.sync(sourceId, { ...source.config }, { db, sourceId }, { manual: false })
         db.updateTaskSourceLastSynced(sourceId)
-        onSynced?.(sourceId, result)
+        await onSynced?.(sourceId, result)
       }
     })
+    this.ownedSchedulers.add(this.scheduler)
     this.scheduler.start()
   }
 
   stopPolling(): void {
     this.scheduler?.stop()
+    this.scheduler = null
+  }
+
+  /** Join active and previously paused polling callbacks and all bridge jobs. */
+  async close(timeoutMs = 2000): Promise<void> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) {
+      throw new RangeError('Connector plugin shutdown deadline must be an integer from 1 to 3000 ms')
+    }
+    this.closing = true
+    const results = await Promise.allSettled([
+      ...[...this.ownedSchedulers].map(scheduler => scheduler.close(timeoutMs)),
+      ...[...this.ownedEngines].map(engine => engine.close(timeoutMs))
+    ])
+    const incomplete = results.find(result => result.status === 'rejected')
+    if (incomplete?.status === 'rejected') throw incomplete.reason
+    this.ownedSchedulers.clear()
+    this.ownedEngines.clear()
     this.scheduler = null
   }
 
