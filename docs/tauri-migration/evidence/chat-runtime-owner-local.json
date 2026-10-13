@@ -1,0 +1,77 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "scope": "Fixture providers/tools prove raw chat iteration, iterator cleanup, accepted effects and final admission. Application owner test uses actual portable SQLite late cleanup write. No real provider/model, native UI or Commander auxiliary-work drain claim.",
+  "sourceFilesSha256": {
+    "src/main/chat/chat-runtime.ts": "eeb27472424fee1264b468abc6245b612b452e02e58176e833d5faec725fedbb",
+    "src/main/chat/chat-runtime-lifetime.test.ts": "c80cf342d45effbcb753c5c46603242028a921c43b6112ca6614790214029fe8",
+    "src/main/ipc/chat.ts": "769f6bcb7d9f76ab4a3ac3da52765a35e672de650f1c3a23d21bc8e4d192860a",
+    "src/main/ipc/chat-lifetime.test.ts": "86db3fc1f720c5806679749751a8f31b2f9ebf6f4ecc7ba0ee1eb51abdfd7cb1",
+    "src/main/index.ts": "0b1774d12828e71c98e8ead9ed06a7f4b92c32751784568426464344205acea2",
+    "vitest.tauri.config.ts": "1dbdf8393f3c51d65ee450536229e1b94c506dc6d6146999bbfb6498f5989585"
+  },
+  "reports": [
+    {
+      "report": "/tmp/21x-chat-initial-service.json",
+      "sha256": "6ab087342839457a34745f21180d512e5e3e0d1231d4bf2bc30f2ed9c42a153f",
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "files": 2,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "d3c4f0ab826cf0f123a68c620d946328845d911b6c0c7b5d90da43af9c77f998",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-chat-targeted-legacy.json",
+      "sha256": "59fc3d474632596f354621f979bfdeaf42854891d3d5dbf5320844efe2b7e88b",
+      "passed": 65,
+      "failed": 0,
+      "skipped": 0,
+      "files": 5,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "98d2d8c0c5bfb751ba7a8cf886544dfd8ca64ac394e8cf2bcb68ceeca10d323d",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-chat-full-service.json",
+      "sha256": "d3bd244b1a7f41898d7be0b2ef6dd9b152358157dae5b25decd89569350af7de",
+      "passed": 1472,
+      "failed": 0,
+      "skipped": 0,
+      "files": 101,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "19944d0d926ed911edc25f0adad7e7e196b93ad323eac090a53d59c06bbbe1f7",
+      "unhandledErrorsReported": false
+    },
+    {
+      "report": "/tmp/21x-chat-full-legacy.json",
+      "sha256": "94d87a57545befad78a5815c1e8b75e99cab98f28d23e6a38521e4fb9f245340",
+      "passed": 5351,
+      "failed": 0,
+      "skipped": 20,
+      "files": 394,
+      "commandExitCode": 0,
+      "accepted": true,
+      "capturedLogSha256": "bf3fd559b5708b914910ef3f298991c3d1a87b877553c62356b03d45c39a1189",
+      "unhandledErrorsReported": false
+    }
+  ],
+  "commands": {
+    "standalone": "pnpm test:tauri -- --service-proofs --reporter=json --outputFile=/tmp/21x-chat-full-service.json",
+    "application": "ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/electron node_modules/vitest/vitest.mjs run --maxWorkers=4 --reporter=default --reporter=json --outputFile=/tmp/21x-chat-full-legacy.json"
+  },
+  "forcedTypecheckPassed": true,
+  "changedSourceLintErrors": 0,
+  "sourceContractFreshnessPassed": true,
+  "build": {
+    "command": "pnpm build",
+    "passed": true,
+    "logSha256": "c3e542cf3f17c71065ecb9263b1ce0c08e3a36d5d3d783ef8bb580eb6cb5aa61"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

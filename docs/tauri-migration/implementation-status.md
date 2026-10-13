@@ -1,8 +1,16 @@
 # Migration implementation status
 
-Updated 2026-10-13 with the [readiness audit](readiness-audit.md), hosted Verify at `23109a4` and `8b9954a`, and installed agent evidence on three targets. Baseline harness `fad9ed1` retains its original measurement scope. **The shipping application still uses Electron, and G0–G5 remain open.** The [overall migration tracker, #193](https://github.com/krazyjakee/21x/issues/193), links twenty open remaining-work issues (#204–#223); #202 retains complete contract ownership. Completed scoped issues and successful fixtures establish the behavior they exercised; they do not establish a finished migration or authorize live cutover.
+Updated 2026-10-13 with four-target installed diagnostic acceptance, the scheduler service matrix at `251685c`, hosted Verify at `d032673`, and local chat/terminal ownership validation. **The shipping application still uses Electron, and G0–G5 remain open.** The [overall migration tracker, #193](https://github.com/krazyjakee/21x/issues/193), links nineteen open remaining-work issues (#205–#223); bounded diagnostic issue #204 is closed and #202 retains complete contract ownership. Completed scoped issues and successful fixtures establish the behavior they exercised; they do not establish a finished migration or authorize live cutover.
 
 This page describes current work. Earlier batch notes and reports retain their original source revisions and limits; their former platform failures or unimplemented-agent statements are historical.
+
+## Latest continuation
+
+- Installed artifact policy v3 and the twenty-receipt synthetic-agent diagnostic passed on all four targets, completing [#204](https://github.com/krazyjakee/21x/issues/204). See [artifact provenance](evidence/installed-artifact-v3-four-target-scenarios.json) and [agent provenance](evidence/installed-agent-08d495f-four-target-scenarios.json).
+- [Recurrence](recurrence-owner.md), [scheduled coordination](scheduled-coordination-owner.md), [heartbeat](heartbeat-owner.md), [workspace cleanup](workspace-cleanup-owner.md) and [overdue reminders](overdue-notifier.md) have portable owners and explicit host boundaries. The [four-target scheduler matrix](evidence/schedulers-four-target-scenarios.json) passed 1,436 default standalone cases with zero skips in 92 files per target at `251685c`; it predates terminal and chat ownership.
+- [Terminal ownership](terminal-owner.md) retains native close and cwd work, bounds replay, supports host reattachment and applies trusted IPC checks. A staged native PTY fixture passed locally on Linux; installed behavior, other-OS native acceptance and descendant cleanup remain open.
+- [Chat runtime ownership](chat-runtime-owner.md) joins raw providers/tools and iterator cleanup before source teardown. Commander title/summary/persistence/report-delivery ownership remains open.
+- Latest [local validation](evidence/chat-runtime-owner-local.json): 1,472 standalone/private-pipe tests with zero skips in 101 files, and 5,351 application tests with 20 optional skips in 394 files. Both commands exited zero without unhandled errors. Forced typecheck, changed-source lint, source freshness and desktop/mobile build passed. Hosted Verify passed the preceding terminal commit `d032673`; chat validation is local until its own hosted run completes.
 
 ## Completed scoped platform evidence
 
@@ -35,7 +43,7 @@ The actual agent slice starts an assigned task through admission control, persis
 
 Browser removal is approved: T02 is cancelled and T11 covers removal/data compatibility. Tauri canvas browser/webpage surfaces and legacy controls are inert; saved metadata/edges and recording files are preserved without navigation or replay. Shipping Electron behavior remains until cutover. External OAuth, external links, sandboxed artifact previews and trusted app WebView security remain required. Historical migration-only browser policy modules/tests were removed. See the [scope decision](README.md#approved-browser-removal).
 
-## Completed validation batch
+## Earlier validation batch
 
 Latest [local batch evidence](evidence/gate-batch-local.json) passed: 54 credential/rehearsal cases including actual candidate `DatabaseManager` reopen, 67 shared contract/schema cases, full TypeScript typecheck, lint for 18 changed TypeScript files, isolated frontend build, locked Rust metadata and formatting. The actual bundled service wire proof passed with 14 events. The standalone actual agent boundary proof passed with 85 portable modules, 30 validated events and zero warnings/errors, including current/stale/duplicate approval, pending live-resume status, owner recreation, durable delta and acknowledged teardown. These are focused local results, not a new installed-platform acceptance report.
 
@@ -58,7 +66,9 @@ The packaged-platform workflow now selects `feasibility`, `synthetic-desktop`, `
 
 The [local continuation report](evidence/continuation-local.json) records 331 passing TypeScript regression cases (including the two opt-in standalone proof tests and seventeen inventory/contract cases), the eleven Python evidence-policy cases, full typecheck, changed-source lint and the isolated frontend build. Pinned Node 22.23.2 / SQLite 13.0.3 passed the actual lifecycle, desktop boundary and bundled private-pipe proofs with 18, 30 and 14 observed events respectively; all fixture dependency warnings/errors were zero. Staged SQLite, PTY, worker and representative SDK import preflight also passed. The native host compiled with both agent/artifact features; sixteen engine unit cases and the actual staged Rust database roundtrip passed. These local checks do not close any acceptance gate or replace installed platform reports.
 
-## Remaining acceptance gates
+## Earlier continuation records
+
+These paragraphs preserve the evidence and pending state at their named historical revisions. The latest continuation above supplies current platform and validation status.
 
 [Hosted Verify at `23109a4`](evidence/continuation-hosted-verify.json) passed 5,149 application cases with ten recorded skips, the default 460-case standalone suite, builds/typecheck/lint/freshness, native/service tests and the real navigation/Commander desktop regressions. [Verify at `8b9954a`](https://github.com/krazyjakee/21x/actions/runs/38326133274) also passed after the runner/checkout fixes. The three successful installed agent targets above ran `23109a4`; the matrix conclusion is failure because Windows did not reach installed execution. [Windows retry](https://github.com/krazyjakee/21x/actions/runs/38326153468) fixed its scanner failures and JSON capture, then exposed a bundled-service startup disconnect. The [artifact matrix](https://github.com/krazyjakee/21x/actions/runs/38326219903) is separate in-progress evidence at `8b9954a`.
 
@@ -78,11 +88,13 @@ This continuation addresses #207 live transcript overflow, #210 content configur
 
 The [readiness audit](readiness-audit.md) records the full local recheck (5,101 tests passed / 8 skipped, builds/typecheck passed, lint passed with 165 warnings, 26 subprocess and 21 Rust unit/staged cases). It corrected stale source inventory/review coordinates and added Verify freshness checks. The [retirement plan](electron-retirement.md) inventories eight Electron packages, 47 runtime imports and 368 direct preload references in 34 files, with ordered removal after G0–G4 acceptance. This prepares the work; no production entrypoint, release feed or live profile was switched.
 
+## Remaining acceptance gates
+
 | Gate | What still prevents acceptance |
 | --- | --- |
 | **G0 — feasibility** | Matched resource/performance baseline and regression budgets, accepted supported platform/WebView minimums, app identity/path and redistribution decisions. Four package and OS credential proofs are completed scoped evidence, not the entire gate |
-| **G1 — contracts** | Complete runtime schemas, real command/event/native callback bindings, caller/task/project/path authority and capability review; remaining decisions and general stream limits. The typed 311-operation framework and eleven manual wrapper reviews do not make every operation safe or implemented |
-| **G2 — working vertical slice** | Equivalent agent/HITL/reload and artifact authorization evidence on the other OS families, plus review of lifecycle/recovery/large-data limits. The twenty-check installed Linux slice and separate-WebView authority proof passed; the full gate remains open |
+| **G1 — contracts** | Complete runtime schemas, real command/event/native callback bindings, caller/task/project/path authority and capability review; remaining decisions and general stream limits. The typed 311-operation framework and nine current dynamic-site reviews do not make every operation implemented |
+| **G2 — working vertical slice** | Production slice integration and review of lifecycle/recovery/large-data limits. Bounded installed agent/HITL/reload and artifact diagnostic acceptance passed on all four targets under #204; the full gate remains open |
 | **G3 — retained feature parity** | Full production renderer, all five real agent providers, Captain/admission/handoff, background/mobile/API services, terminals/workers, voice, connectors/OAuth, native host services and retained canvas/artifact behavior across the [parity matrix](validation.md#feature-parity-matrix). Complete browser retirement/data-preservation checks remain required |
 | **G4 — release rehearsal** | Signed/installed historical-profile conversion, live import and credential rollback boundaries, release signing/notarization, first framework-transition install, second update, uninstall and recovery/cutover rehearsals; accepted updater/manual-update policy |
 | **G5 — retirement** | Switch the shipping application only after prior acceptance, remove Electron shipping dependencies/artifacts/host assumptions and complete final native/service/security/documentation audits |

@@ -353,7 +353,7 @@
           "channelExpression": "channel",
           "column": 7,
           "file": "src/main/index.ts",
-          "line": 425,
+          "line": 427,
           "method": "send",
           "target": "guardedIpcSend"
         }
@@ -382,7 +382,7 @@
           "channelExpression": "channel",
           "column": 7,
           "file": "src/main/index.ts",
-          "line": 446,
+          "line": 448,
           "method": "send",
           "target": "guardedIpcSend"
         }
@@ -3839,7 +3839,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/chat.ts",
-          "line": 109,
+          "line": 128,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -3893,7 +3893,7 @@
         {
           "column": 9,
           "file": "src/main/ipc/chat.ts",
-          "line": 96,
+          "line": 115,
           "method": "send",
           "resolution": "constant",
           "target": "guardedIpcSend"
@@ -3949,7 +3949,7 @@
         {
           "column": 3,
           "file": "src/main/ipc/chat.ts",
-          "line": 81,
+          "line": 99,
           "method": "handle",
           "resolution": "literal",
           "target": "ipcMain"
@@ -8686,7 +8686,7 @@
         {
           "column": 7,
           "file": "src/main/index.ts",
-          "line": 462,
+          "line": 464,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -9450,7 +9450,7 @@
         {
           "column": 15,
           "file": "src/main/index.ts",
-          "line": 614,
+          "line": 616,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -9458,7 +9458,7 @@
         {
           "column": 11,
           "file": "src/main/index.ts",
-          "line": 620,
+          "line": 622,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -9797,7 +9797,7 @@
         {
           "column": 48,
           "file": "src/main/index.ts",
-          "line": 95,
+          "line": 96,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -12930,7 +12930,7 @@
         {
           "column": 50,
           "file": "src/main/index.ts",
-          "line": 758,
+          "line": 760,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -13611,7 +13611,7 @@
         {
           "column": 23,
           "file": "src/main/index.ts",
-          "line": 805,
+          "line": 807,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -18894,7 +18894,7 @@
         "producerOwner": "authenticated-task-api",
         "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
       },
-      "line": 425,
+      "line": 427,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
@@ -18925,7 +18925,7 @@
         "producerOwner": "authenticated-mobile-api",
         "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
       },
-      "line": 446,
+      "line": 448,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",

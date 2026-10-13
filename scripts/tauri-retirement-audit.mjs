@@ -60,6 +60,7 @@ const report = {
     'src/main/captain-waker.ts',
     'src/main/recurrence-scheduler.ts', 'src/main/recurrence-scheduler-core.ts',
     'src/main/scheduled-coordination.ts', 'src/main/scheduled-coordination-core.ts',
+    'src/main/chat/chat-runtime.ts', 'src/main/ipc/chat.ts',
     'src/main/terminal-service-core.ts', 'src/main/terminal-process.ts', 'src/main/terminal-service.ts', 'src/main/ipc/terminal.ts',
     'src/main/overdue-notifier.ts',
     'src/main/workspace-cleanup-scheduler.ts', 'src/main/workspace-cleanup-scheduler-core.ts',

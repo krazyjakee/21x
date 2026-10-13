@@ -71,8 +71,26 @@ export function sanitizeChatMessages(raw: unknown): ChatMessage[] {
   return messages
 }
 
+const runtimes = new Set<ChatRuntime>()
+let closing = false
+
+export function shutdownChatServices(): void {
+  closing = true
+  for (const runtime of runtimes) runtime.shutdown()
+}
+
+export async function closeChatServices(): Promise<void> {
+  shutdownChatServices()
+  await Promise.all([...runtimes].map(async runtime => {
+    await runtime.close()
+    runtimes.delete(runtime)
+  }))
+}
+
 export function registerChatHandlers(deps: IpcDeps, options: ChatIpcOptions = {}): ChatRuntime {
+  if (closing) throw new Error('CHAT_RUNTIME_CLOSED')
   const runtime = options.runtime ?? new ChatRuntime()
+  runtimes.add(runtime)
   const tools = options.tools ?? []
   const createProvider = options.createProvider ?? ((d: IpcDeps) => createChatProviderFromSettings(d.db))
   // Which turns belong to which window, so a closing window cancels its own turns only.
@@ -80,6 +98,7 @@ export function registerChatHandlers(deps: IpcDeps, options: ChatIpcOptions = {}
 
   ipcMain.handle('chat:start', async (event: IpcMainInvokeEvent, payload: ChatStartRequest) => {
     assertTrustedSender(event, 'chat:start')
+    if (closing) throw new Error('CHAT_RUNTIME_CLOSED')
     const messages = sanitizeChatMessages(payload?.messages)
     const system = typeof payload?.system === 'string' ? payload.system.slice(0, MAX_SYSTEM_CHARS) : undefined
     const maxToolCalls = typeof payload?.maxToolCalls === 'number' ? payload.maxToolCalls : undefined
@@ -102,7 +121,7 @@ export function registerChatHandlers(deps: IpcDeps, options: ChatIpcOptions = {}
     void handle.done.finally(() => {
       turnOwners.delete(handle.turnId)
       if (!sender.isDestroyed()) sender.removeListener('destroyed', onDestroyed)
-    })
+    }).catch(() => {})
     return { turnId: handle.turnId, provider: provider.id, model: provider.model }
   })
 

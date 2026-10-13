@@ -40,6 +40,7 @@ const mainFiles = [
   'src/main/captain-waker.test.ts', 'src/main/captain-waker-lifetime.test.ts',
   'src/main/recurrence-scheduler.test.ts', 'src/main/recurrence-scheduler-lifetime.test.ts',
   'src/main/scheduled-coordination.test.ts', 'src/main/scheduled-coordination-lifetime.test.ts',
+  'src/main/chat/chat-runtime.test.ts', 'src/main/chat/chat-runtime-lifetime.test.ts',
   'src/main/terminal-service-core.test.ts', 'src/main/terminal-process.test.ts',
   'src/main/overdue-notifier.test.ts',
   'src/main/workspace-cleanup-scheduler.test.ts', 'src/main/workspace-cleanup-scheduler-lifetime.test.ts',
