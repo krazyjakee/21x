@@ -18,6 +18,8 @@ import {
   listToolsForScope,
   type TaskMcpScope
 } from './task-management-core'
+import { TASK_GROUP_TOOL_NAMES } from './task-management-tools'
+import { forwardTaskGroupTool, signedTaskMcpForwarding } from './task-group-stdio'
 
 const apiUrl = process.env.TASK_API_URL
 if (!apiUrl) {
@@ -36,6 +38,8 @@ const scope: TaskMcpScope = {
   artifactTaskId: process.env.TASK_ARTIFACT_SCOPE_ID || process.env.TASK_SCOPE_TASK_ID || null,
   projectId: process.env.TASK_SCOPE_PROJECT_ID || null
 }
+const groupForwarding = signedTaskMcpForwarding(process.env.TASK_MCP_URL, apiUrl)
+const effectiveScope = groupForwarding?.scope ?? scope
 
 async function callApi(route: string, params: Record<string, unknown> = {}): Promise<unknown> {
   const url = `${apiUrl}${route}`
@@ -62,12 +66,13 @@ const server = new Server(
 )
 
 server.setRequestHandler('tools/list', async () => ({
-  tools: listToolsForScope(scope)
+  tools: listToolsForScope(effectiveScope).filter(tool => groupForwarding || !TASK_GROUP_TOOL_NAMES.has(tool.name))
 }))
 
 server.setRequestHandler('tools/call', async (request) => {
   const { name, arguments: args } = request.params as { name: string; arguments?: Record<string, unknown> }
-  return callToolForScope(name, args, scope, callApi)
+  if (TASK_GROUP_TOOL_NAMES.has(name)) return forwardTaskGroupTool(groupForwarding, name, args)
+  return callToolForScope(name, args, effectiveScope, callApi)
 })
 
 async function main(): Promise<void> {

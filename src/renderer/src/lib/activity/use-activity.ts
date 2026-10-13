@@ -143,6 +143,7 @@ export function summarizeProjectActivity(
 ): { summary: ProjectActivitySummary; expiresAt: number | null } {
   const summary: ProjectActivitySummary = { running: 0, needsInput: 0, queued: 0, failed: 0, unavailable: 0 }
   let expiresAt: number | null = null
+  const countedSessions = new Set<string>()
   const note = (at: number | null): void => {
     if (at != null && (expiresAt == null || at < expiresAt)) expiresAt = at
   }
@@ -152,6 +153,13 @@ export function summarizeProjectActivity(
     if (!session && !queue) continue
     const r = deriveActivity(taskEvidence({ session, queue }), now)
     note(r.expiresAt)
+    // Group members mirror one native execution session. Their durable task
+    // totals remain separate; the live session must count only once.
+    if (session) {
+      const key = `${session.agentId}:${session.sessionId}`
+      if (countedSessions.has(key)) continue
+      countedSessions.add(key)
+    }
     if (isRunningActivity(r.state)) summary.running++
     else if (r.state === 'waiting-for-user') summary.needsInput++
     else if (r.state === 'queued') summary.queued++

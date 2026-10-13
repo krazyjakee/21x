@@ -5,7 +5,7 @@ import {
   type SecretStorage,
   type SecretStorageFormatId
 } from '../platform/secret-storage'
-import { TASK_ROLE_TASK, isCoordinatorRole, type TaskRole } from '../../shared/task-roles'
+import { TASK_ROLE_TASK, isHiddenUserTaskRole, type TaskRole } from '../../shared/task-roles'
 import { DEFAULT_PROJECT_ID } from '../../shared/projects'
 import type {
   AgentConfigRecord, AgentRecord, AgentRow,
@@ -201,7 +201,8 @@ export function deserializeTask(row: TaskRow): TaskRecord {
     auto_complete_without_review: (row.auto_complete_without_review ?? 0) === 1,
     complete_at_source: row.complete_at_source == null ? null : row.complete_at_source === 1,
     next_subtask_ids: parseJsonArray(row.next_subtask_ids),
-    role: isCoordinatorRole(row.role) ? (row.role as TaskRole) : TASK_ROLE_TASK,
+    role: isHiddenUserTaskRole(row.role) ? (row.role as TaskRole) : TASK_ROLE_TASK,
+    group_id: row.group_id ?? null,
     project_id: row.project_id ?? DEFAULT_PROJECT_ID
   }
 }

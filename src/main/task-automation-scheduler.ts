@@ -276,6 +276,7 @@ export class TaskAutomationScheduler {
     const rows = this.dbManager.db.prepare(`
       SELECT id FROM tasks
       WHERE auto_complete_without_review = 1
+        AND group_id IS NULL AND role = 'task'
         AND status = ?
         AND NOT (is_recurring = 1 AND recurrence_parent_id IS NULL)
       ORDER BY updated_at ASC

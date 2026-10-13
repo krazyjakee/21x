@@ -298,3 +298,19 @@ was not recorded stays visibly unconfirmed and is never issued again on retry.
 Existing conversation, task and ledger rows remain intact. Commander memory
 uses one global `sessions.commander_memory` settings record; the active
 generation pointer is scoped to each existing Commander conversation.
+
+### Version 37 — task groups
+
+`task-groups-migration.ts` adds `task_groups`, `tasks.group_id`, and retained
+`task_group_memberships` episodes with per-member progress. A group points to
+one hidden `task_group` execution task; its native session and transcript live
+on that anchor. Ordinary member tasks keep their source links and have no native
+session binding. Group anchors are hidden from user task lists but count as
+work for admission; only Captains receive the coordinator exemption.
+
+The upgrade leaves existing task assignments, sessions, transcripts and sources
+unchanged. Removing members or dissolving a group clears current membership
+without deleting its anchor, shared transcript or membership/progress history.
+The manager commits anchor lifecycle changes and unfinished member mirroring
+together, preserving completed members. Progress reports never authorize source
+completion or user review.

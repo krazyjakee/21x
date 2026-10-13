@@ -4,6 +4,7 @@
  */
 import type { AgentManager } from '../agent-manager'
 import type { DatabaseManager } from '../database'
+import type { TaskGroupService } from '../task-groups/service'
 
 type TaskApiAgentController = Pick<
   AgentManager,
@@ -28,6 +29,8 @@ type TranscriptProvider = (taskId: string) => Promise<Array<{ role: string; text
 export let notifyRenderer: ((channel: string, data: unknown) => void) | null = null
 export let transcriptProvider: TranscriptProvider | null = null
 export let agentController: TaskApiAgentController | null = null
+export let taskGroupService: TaskGroupService | null = null
+export function setTaskApiTaskGroupService(service: TaskGroupService | null): void { taskGroupService = service }
 
 /**
  * What the renderer is showing. It is pushed on change and cached here, so a

@@ -301,6 +301,7 @@ export type RecurrencePattern = RecurrencePatternObject | string
 
 export interface Task {
   id: string
+  group_id?: string | null
   /** Coordinator conversations are excluded from task discovery surfaces. */
   role?: import('@shared/task-roles').TaskRole | null
   title: string

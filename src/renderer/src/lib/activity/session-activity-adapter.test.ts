@@ -158,6 +158,16 @@ describe('evidence builders', () => {
 })
 
 describe('summarizeProjectActivity (status bar)', () => {
+  it('counts grouped task mirrors as one native session while unrelated sessions stay separate', () => {
+    recordAgentStatus(status('member-one', 'working', 1, { sessionId: 'shared-native' }), 0)
+    recordAgentStatus(status('member-two', 'working', 2, { sessionId: 'shared-native' }), 0)
+    recordAgentStatus(status('ordinary', 'working', 3), 0)
+    const ids = new Set(['member-one', 'member-two', 'ordinary'])
+    expect(summarizeProjectActivity(ids, useSessionActivityStore.getState(), 1000).summary.running).toBe(2)
+    recordAgentStatus(status('member-one', 'waiting_approval', 4, { sessionId: 'shared-native' }), 1000)
+    recordAgentStatus(status('member-two', 'waiting_approval', 5, { sessionId: 'shared-native' }), 1000)
+    expect(summarizeProjectActivity(ids, useSessionActivityStore.getState(), 1001).summary).toMatchObject({ running: 1, needsInput: 1 })
+  })
   it('counts only fresh running sessions as running, scoped to the project', () => {
     recordAgentStatus(status('run', 'working', 1), 0)
     recordAgentStatus(status('wait', 'working', 2), 0)

@@ -1,0 +1,250 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "issues": [
+    192
+  ],
+  "resolvedIssues": [
+    192
+  ],
+  "source": {
+    "baseCommit": "0e569bb445cd1d52e16599dfb1152ad223bd6a94",
+    "targetBranch": "master",
+    "schemaVersion": 37,
+    "changedSourceHashes": {
+      "docs/database-migrations.md": "03c24c6382e94381624a05a0f114b24293c9bfd2c23009db3d9ca01a47f142ab",
+      "docs/task-groups.md": "8376d56324a8b38d6ba4f841bd73fccadd5b369a92417256026f9011b8691534",
+      "docs/task-lifecycle.md": "78ea2242a24e1aa15d9746a6d1663304cc32373939d2f27375bafd5abe1e0653",
+      "docs/tauri-migration/event-forwarding-review.json": "a263de409ffd1a797a37cb22cfac8c25eb1c0019ceb83d2ef5ce4f34d61f5959",
+      "docs/tauri-migration/inventory.json": "1a244274a1f42a36e8e8befc022c85c3cb4bab206f545e7143767ca2d64c6aa6",
+      "docs/tauri-migration/operations.json": "0fc240dc328f5af907d1b959981e9bf6ed06ca845721afd7ba01998623cdf4f2",
+      "package.json": "70513dcaa11ca196e2a60d796ffe76916c7808c96e0e53cc534a10fd7d7a05cc",
+      "scripts/activity-input/index.html": "850a42b3cd08edfb5006f39ca59fa59445b3816c85873850627ff00d8494072c",
+      "scripts/commander-input/index.html": "176f0e717fa787493c3b5d5f3d1151bf4bbd07210f08816ca874a4a21b221a9d",
+      "scripts/database-proof.test.ts": "ce2de7b8cbf182d7582a9034c44d4eb64e28f58ce8efb3b51ce5efb655e5e1f3",
+      "scripts/database-proof/fixture.ts": "528a7424a2dce477c84107a35ed48e09f0f61166053931b0cff721919b91c2ae",
+      "scripts/task-group-input/check.cjs": "685053152aaaf24eee2b511432d6247010ab9e7ca114647ba7c660b8625c4d31",
+      "scripts/task-group-input/fixture.css": "13c2445900a31b328cedaada850095f8522f8015262f8bbdeabe08d69969ccbb",
+      "scripts/task-group-input/fixture.tsx": "e1a2d84a969f6d7fc994eb98094f4eadae69b0fab7b6c235d19dad2f2ee3175c",
+      "scripts/task-group-input/index.html": "b19bffc55447416cba2051c8a673e2104a1bbe03002bcdc81af38e577d4d43d4",
+      "scripts/task-group-input/run.mjs": "be05bf038b2ea986e84ec286308942a4f140192aa99fc15e46f7d8751f1f2871",
+      "scripts/task-workspace-layout/index.html": "daa99e92a74ca00a4a576e629c9e684d653f8e94b3af443547edfeaa2249f493",
+      "scripts/tauri-contracts.mjs": "8b1f1b2430f887e2092094d9a5032d3cb7b03d9b4589896fc2c3af8f722c49d4",
+      "src/main/agent-manager-core.ts": "929a49048f703e78c782a68d311e58e9219cf87acd95d8ed3048af4781eb1952",
+      "src/main/agent-manager/attachments.ts": "b0d7b6d445987a6f72d4f9eefdfdaa5e27f403851e3213fe496f1d164afde8d5",
+      "src/main/agent-manager/prompts.ts": "e188776314d4f015fddec93e0eb30d15669f720e2ab30341acc151109de31755",
+      "src/main/database-migration.test.ts": "6922531bfabb95479c25a7863bc0662529a72831809da8169fc4b19a576c1168",
+      "src/main/database-projects.test.ts": "c9ec89653a713d567ff92a1b5fdf0ff4d1b1608284d3734f613fb0906e564c8b",
+      "src/main/database-task-activity.test.ts": "12ce2fa7b35f8034c3d385e59262e1bce4aef75f8099c96c980c05ef1b632e78",
+      "src/main/database/captain-migration.test.ts": "b60570f488ea39aa515c6297eb7773e0c04d2fad725647c3b2ee03389d9d4350",
+      "src/main/database/commander-actions-migration.test.ts": "7132bf46a0ab4ff57a3c3194d5f15f594bf11ed279f36c833eacba00172f20dd",
+      "src/main/database/manager.ts": "fa6c6b45383cf2bba0838f86c497ac29344b20b666fb17a15f8de602dc2559e6",
+      "src/main/database/schema.ts": "fd868bb21bedc5e891448f5e4d429d2cbe5bd9f037ef01f5863e122252a6611c",
+      "src/main/database/serializers.ts": "9ebd73d59d41d2c491bea7c6e4ce18ccbdee56c76b03b94ec9f83998eb2e89b7",
+      "src/main/database/session-handoff-migration.test.ts": "6fd8ee594cdb83686b72480aaed6f779dc5140a3d4c56170154c114eb803ec2a",
+      "src/main/database/task-groups-migration.test.ts": "2d0792706924e0e9c39588ad29471cb46d99bf5d437267a45924e188a6597fec",
+      "src/main/database/task-groups-migration.ts": "a9272d6f61772f63f0851cb6863de72eebecb1fe38f3fffaeab3c35e4e46fc4d",
+      "src/main/database/task-groups.test.ts": "c28fbf33072532b318f5ce442fbdf17ed48bad44412b7d12e8e3fe2eb2d48506",
+      "src/main/database/task-groups.ts": "9c0975b44827e8dbd7a8318a378d09005e9d0b25b73aebc25d95a0ea142ece81",
+      "src/main/database/task-roles.ts": "e11c4f921e7cf1cb7faf08836d00263439d8397e8c2e3410714ba310640cb1ec",
+      "src/main/database/types.ts": "d49ca77b048aae0e5de5eb41ed4354e0dc6b3ad54fde6c479e1f29abc90f12a5",
+      "src/main/index.ts": "c77774e445e306c50a4985b1e0efb8b13ee37baa4b5e32d09d26e55d31ed9f7f",
+      "src/main/ipc-handlers.ts": "fd802251d514039e9ccc5a9d05e6623edaf2e98ff19f291880110e3047719bbf",
+      "src/main/ipc/deps.ts": "8cff84661cc43404a81b628cae8784036944d063e48b814fb74405a13240b86c",
+      "src/main/ipc/task-groups.ts": "75ac949dcac66bc7f4b5de112c108e9e20ee2b41a80b3c3547b43132eaf0e92e",
+      "src/main/mcp-servers/task-group-stdio.test.ts": "8c00d77dffc8749fb3e6fe6fcbb58499ca6ba7749869ff8a85b98b70315255c4",
+      "src/main/mcp-servers/task-group-stdio.ts": "96a2fa96ec47da0bdf705abc994d9b1fc529b285604eec03e6ff183319de532e",
+      "src/main/mcp-servers/task-management-core.ts": "cb0b9dd41253547980862ee4adfef30c40da5f626217b65527cb67c891b3d040",
+      "src/main/mcp-servers/task-management-groups.test.ts": "0893693e078df6d7cdb06c4247f12347354549434cf85d9ea2578d33c90921c4",
+      "src/main/mcp-servers/task-management-mcp.ts": "033fad440758ca299864f5445ec04f5faf62ef45885f2dc49e1a60648d53dc2c",
+      "src/main/mcp-servers/task-management-project-scope.test.ts": "83c9d8de7c7405fc6a1d4e9510a5461290bb22cc6fd63155fd5279038e6b7ef6",
+      "src/main/mcp-servers/task-management-tools.ts": "17657e54048ceb0543997b762bdf1193684aa8b7ad00d9a33407229c5a7c46ad",
+      "src/main/prompts/captain.test.ts": "7f25e7ffa976fe501339e36162a49d04ef3201dcbffa5fe59471b7fc74c38e49",
+      "src/main/prompts/captain.ts": "33e57dcb2c21a06b582068e672b15f43e3e584ecab294f7ce65488cdb2583a67",
+      "src/main/session-feedback.ts": "a6dc590a794158ef0add40e90fdb2a6dbf1f407d1cae61b4552f7d9b6902adfd",
+      "src/main/sync-manager.ts": "8f9e71b6ea4204ef08ce86b403e4e8b8e53ece2b24f9fcb09663f9c459eab459",
+      "src/main/task-api-server-core.ts": "c9f647813318ca36e7aace374d1b9872373b4a787e340d6aaf0c4a374c613254",
+      "src/main/task-api/state.ts": "05a2b1efcd3de8781f8a00e4a62da07a37cad74e48acec33e1e6e9173299a8c1",
+      "src/main/task-api/task-group-routes.test.ts": "8125a7f46d6ccb553584e32268d7c2ad17908485b4922dc9b3e35f6485051b06",
+      "src/main/task-api/task-group-routes.ts": "46cb396ee443fdef5f1c00ccd83f4cde9895286053fe6ce0dda734477b50c3b2",
+      "src/main/task-automation-scheduler.ts": "1358fc126da6d52dcddb59dec35f76717a50f34dfe256e4f66e25dd57722d26e",
+      "src/main/task-groups/attachments.ts": "d90e7b682ea1c3d7bc1d26b6aafee0da4c2764c40cdd151b3dced5fd105c4f10",
+      "src/main/task-groups/service.test.ts": "1f3a57fd877e0ab5bdc7ca95a2548e87bba00122e3074d51590d342fd07d1bd5",
+      "src/main/task-groups/service.ts": "0286a21bf672bd5765b734e0fdb15237818544bd09c94d555aef2e1bd573c2d3",
+      "src/preload/index.ts": "40d53ea9bb2c967fcaadef0b54255b623c2cf9b67c8b3472f663375637941316",
+      "src/renderer/src/components/dashboard/TaskBoard.groups.test.tsx": "b33cffa0bb16f8db7ee70857d4b8c126569fcc9c46b2a502fb65b1ee8342f00a",
+      "src/renderer/src/components/dashboard/TaskBoard.tsx": "fd290a559cbbc4ac76a1dc0e295fd7d2b812f28cf346a25f75f197ea6bc932ce",
+      "src/renderer/src/components/layout/StatusBar.tsx": "3bd76beeb1bca0cd3fcbe7cc84fd44150f396a5c3868aa82761e43694f0481cd",
+      "src/renderer/src/components/task-groups/TaskGroupCard.tsx": "5c29a6892433c789039794295f42b71b021144a06007ed1835ebe4e6ea13df8b",
+      "src/renderer/src/components/task-groups/TaskGroupDialog.test.tsx": "90e3b8a91999828831b6ae0a1232289b783e09f9445567a120809b18d4f1ab16",
+      "src/renderer/src/components/task-groups/TaskGroupDialog.tsx": "1942725aa5bc7333c52ebab2f10f75161d3f7f2a92251df6002d003eb0a6a62a",
+      "src/renderer/src/components/task-groups/TaskGroupHistoryNotice.test.tsx": "fb1daff645466703057a1831865f6153199fc4ad0d37608180a9d21d2a885537",
+      "src/renderer/src/components/task-groups/TaskGroupHistoryNotice.tsx": "3b9e4e94addffa43e90d587d06f4e117a80e87ab1609e7e508b5e905427a6464",
+      "src/renderer/src/components/tasks/TaskWorkspace.test.tsx": "69f8e89b75c0cbae21aa3848c8c9f7041d2514f34cc2336b6308d24fed8913cd",
+      "src/renderer/src/components/tasks/TaskWorkspace.tsx": "3b397ab67dbd1fcdce7015a0af67e587b84c0479068908f1b8feb7bf3bb51d50",
+      "src/renderer/src/lib/activity/session-activity-adapter.test.ts": "17969620966b27a5dcb169f3dd91df5bbac05822daef571e00013b57723fc826",
+      "src/renderer/src/lib/activity/use-activity.ts": "ba979fe8c503ee47834907171316a9dd40b4ac585aafe6c6b00765de1ddf2697",
+      "src/renderer/src/lib/ipc-client.ts": "c535eb951d8620cad2524254fa7df4af058a1e422d7e348d116db758fbc6f284",
+      "src/renderer/src/stores/task-group-store.test.ts": "ce3834ad1cc7bfca0f6a5fd8cd7e93e17b40006bc6a07f31404e22b3a5dc86f5",
+      "src/renderer/src/stores/task-group-store.ts": "4c1b8e4a3e0dc5b74e543c2eb8506cbbeaa37054288ddf104ccef1fade4cccbc",
+      "src/renderer/src/types/electron.d.ts": "6971479c69d7ec8f56c7cfe4cb48113f9d677236d8ed6877b20ff042bdc341db",
+      "src/renderer/src/types/index.ts": "e2fe1f860478dfa0a84b39b3a97680970896b2c9f7a517b257f9edf5fc4bc3e1",
+      "src/shared/database-desktop-codecs.test.ts": "c311a76141d85b7bb042a0f8ffc3f375ce72fbf55ed383050a38bb010b0572e7",
+      "src/shared/database-desktop-codecs.ts": "2d6eaf278e2a4ae53ebb036f6d810f7b8d5a39ab32840f3389f17757a6d63050",
+      "src/shared/desktop-api.ts": "9fbf06c288941635589b1e8be3c02a1d8d4ae65934ec800c5ede0071ab8ce84a",
+      "src/shared/desktop-event-forwarding.ts": "0862b05368a55a651144a35381bbd948f8e45905875df6e55235b456970b170f",
+      "src/shared/desktop-operations.ts": "c05d09c5ceec3764d882064fb1a5bffd025f6676c7865521037800893bd31f28",
+      "src/shared/task-groups.ts": "9c15d23a752befff3eea8e9a53a8566a4004de3b8af5e2d289cad98da4ecf80e",
+      "src/shared/task-roles.test.ts": "a1bc4ceaaa9926ee1a0e9724d4a1ac1600c5d1b6e6e132b1fc57ae3bc6c93955",
+      "src/shared/task-roles.ts": "e6b5613874cb2193b89de5b443b5bb320174ad2da507246a96f79696cd5c0880",
+      "test/setup-renderer.ts": "c8a0880cd21c64e6fe1235b3c402ae19c673879b5216d7f4decd71300df696e0",
+      "vitest.tauri.config.ts": "05e7af33de28f39c6c3103f071de4389eeb1cd3f885618579a0de21aa64c3740"
+    }
+  },
+  "scope": "Actual SQLite, AgentManager admission/restart, shared workspace attachment staging, authenticated HTTP MCP and source-review owners with controlled adapters/source results; production renderer native keyboard/pointer checks on Linux. No live SDK/cloud task-source, other-OS, independent manual accessibility or production Tauri cutover claim.",
+  "tests": {
+    "application": {
+      "command": "rtk pnpm test:run --reporter=json --outputFile=.git/issue-closing/batch6-app-corrected.json",
+      "passed": 5846,
+      "failed": 0,
+      "skipped": 21,
+      "reportSha256": "dae8c7036f21bd776d516eb5e25dab80e1bd925a0074781b75e7aef464d35482"
+    },
+    "rendererFollowup": {
+      "command": "rtk pnpm test:run --project renderer --reporter=json --outputFile=.git/issue-closing/batch6-renderer-delivery.json",
+      "passed": 1527,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "ed44ea99caf9a853a645f7a87263468ab9c4bea7bfa6f8fccfb70dc60341ce98"
+    },
+    "groupServiceFollowup": {
+      "command": "rtk pnpm test:run --project main src/main/task-groups/service.test.ts --reporter=json --outputFile=.git/issue-closing/batch6-service-final.json",
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "97206a8caf34f391329f298e31b243acdac308f41d11765ae36c3173df67d540"
+    },
+    "standalone": {
+      "command": "rtk pnpm test:tauri --service-proofs --reporter=json --outputFile=.git/issue-closing/batch6-tauri-delivery.json",
+      "passed": 2088,
+      "failed": 0,
+      "skipped": 0,
+      "reportSha256": "326652e2e7a7f866a1ce76e431c661676d1cc1f681b794bedf28bf9c6ee31653"
+    }
+  },
+  "verification": {
+    "forcedTypecheck": {
+      "command": "rtk pnpm exec tsc --build --noEmit --force",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": "rtk pnpm lint",
+      "exitCode": 0,
+      "logSha256": "9e82aeb1d63ebe144cbbfad5a99774612d72479a110c12337892816d99ce2890",
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "followupLint": {
+      "command": "rtk pnpm exec eslint src/main/agent-manager-core.ts src/main/task-groups/service.test.ts src/renderer/src/components/task-groups/TaskGroupDialog.tsx",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "build": {
+      "command": "rtk pnpm build",
+      "exitCode": 0,
+      "logSha256": "2729df2cd77c2d88349d350f8c60d6daeed31c503b6a40adcf8df621c2bfc593"
+    },
+    "tauriFrontend": {
+      "command": "rtk pnpm tauri:frontend:build",
+      "exitCode": 0,
+      "logSha256": "ae871c75490043d29816d61c3e11f1da98ed780f948d32c6b784cfcfb6c82184"
+    },
+    "standaloneDatabaseStage": {
+      "command": "rtk pnpm tauri:prepare:database",
+      "exitCode": 0,
+      "logSha256": "06c385d28ad98128cdb8b49ffd06cd15d369743c7df619d79f1b5d4c2d808d8f"
+    },
+    "inventoryFreshness": {
+      "command": "rtk node scripts/tauri-inventory.mjs --check",
+      "exitCode": 0,
+      "logSha256": "6937ba5fa3cc7d6c78a5d995bd58fdab79cf00e47e4e65b3889e31bbe737b30d"
+    },
+    "contractFreshness": {
+      "command": "rtk node scripts/tauri-contracts.mjs --check",
+      "exitCode": 0,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    "diffWhitespace": {
+      "command": "rtk git diff --check",
+      "exitCode": 0,
+      "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    "nativeCommander": {
+      "command": "DISPLAY=:199 rtk pnpm test:commander-input",
+      "exitCode": 0,
+      "logSha256": "cb72f3fb12ba81f6213c5eef8e688988bd456da2396b65955c66940c3cca5593",
+      "checks": 16
+    },
+    "nativeTaskLayout": {
+      "command": "DISPLAY=:199 rtk pnpm test:task-layout",
+      "exitCode": 0,
+      "logSha256": "0d0278376966aec09438fe8a5827838abcba7b2eb81cd314f4b321e165bb0e7d",
+      "checks": 10
+    },
+    "nativeActivity": {
+      "command": "DISPLAY=:199 rtk pnpm test:activity-input",
+      "exitCode": 0,
+      "logSha256": "53e820abc636c79499a0ef197069f5aef3291d2459c4b3f27c8ab2c9032e3af7",
+      "checks": 13,
+      "passedCases": [
+        "hydration is static and agent health cannot bless a cached dead session",
+        "many cards and canvas mirrors have one motion owner per entity",
+        "successful five-second observations keep an eighteen-second silent tool fresh",
+        "no new observation and a missed done expire at the fifteen-second deadline",
+        "explicit disconnect immediately removes motion and shows unknown",
+        "real hidden/show/focus rechecks elapsed age before motion resumes",
+        "agent epochs, replaced sessions and replayed stamps cannot renew ownership",
+        "late source response and retired Commander epoch are fenced",
+        "new queue push wins over an older in-flight queue read",
+        "cancelled and interrupted Captain/task turns stay Stopped, explicit success alone finishes",
+        "observed review accent settles while Ready for review persists",
+        "both themes honor reduced motion and actual badge contrast",
+        "native NavRail tooltip focus and Commander/PiP share source ownership"
+      ]
+    },
+    "nativeTaskGroups": {
+      "command": "DISPLAY=:199 rtk node scripts/task-group-input/run.mjs",
+      "exitCode": 0,
+      "logSha256": "09abe5849eb347934f79605c4b848076c4e6be52189f075ce57ad9ab440e4165",
+      "checks": 5,
+      "passedCases": [
+        "one distinct group card, no independently draggable members, keyboard disclosure",
+        "shared Start and HITL target only the hidden execution task",
+        "native pointer drag moves one group unit through the group API",
+        "selected source failure stays selected; app-only approval affects one member",
+        "queued membership refusal is visible; removal preserves shared history"
+      ]
+    }
+  },
+  "acceptance": {
+    "192": [
+      "Captain-scoped signed MCP create/add/remove/dissolve and exact active execution progress authority",
+      "Hidden execution task owns one counted session/workspace/transcript; members retain source IDs and never independent native bindings",
+      "Distinct collapsible group card, native whole-unit dragging and individually inspectable members",
+      "Idle membership edits preserve shared transcript/history; active/queued edits and incompatible member mutations refused",
+      "Selected source-confirmed or app-only approval and selected send-back preserve other review/completed work",
+      "Schema 37 fresh/upgrade/rebuild and task/Captain/group documentation"
+    ]
+  },
+  "correctionsDuringVerification": [
+    "Restart recovery selects shared execution anchors, excluding individually grouped rows.",
+    "Native harness waits for exiting dialog overlay hit targets and scopes duplicate removal labels to the visible dialog; ordinary heartbeat logs use the real empty-array API shape.",
+    "Typed renderer agent fixture restored; new member-message attachments require shared composer rather than silently using wrong workspace paths."
+  ],
+  "remainingAcceptance": [
+    "Hosted #92 remains explicitly deferred by the user; #93/#94 optional features remain unselected.",
+    "#91/#95 independent manual/platform accessibility evidence remains open.",
+    "Tauri umbrella and feature issues remain open until actual runtime bindings and installed platform evidence meet their own criteria."
+  ]
+}

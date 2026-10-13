@@ -14,7 +14,7 @@ describe('installed v35 session handoff upgrade', () => {
     fixture.rawDb.exec('DROP TABLE session_handoffs')
     fixture.db.setSetting('__schema_version', '35')
     expect(applySchema(fixture.rawDb)).toBe(true)
-    expect(fixture.db.getSetting('__schema_version')).toBe('36')
+    expect(fixture.db.getSetting('__schema_version')).toBe('37')
     expect(store.listMessages(session.id)).toEqual([message])
     fixture.rawDb.prepare(`INSERT INTO session_handoffs
       (id, owner_id, engine, generation_key, next_generation_key, model, source, state, created_at, updated_at)

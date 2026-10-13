@@ -194,6 +194,15 @@ export interface DesktopCommandMap {
   "skills:getAll": { apiArguments: Parameters<NonNullable<DesktopApi["skills"]["getAll"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["skills"]["getAll"]>>> }
   "skills:setProject": { apiArguments: Parameters<NonNullable<DesktopApi["skills"]["setProject"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["skills"]["setProject"]>>> }
   "skills:update": { apiArguments: Parameters<NonNullable<DesktopApi["skills"]["update"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["skills"]["update"]>>> }
+  "taskGroups:add": { apiArguments: Parameters<NonNullable<DesktopApi["taskGroups"]["add"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["taskGroups"]["add"]>>> }
+  "taskGroups:create": { apiArguments: Parameters<NonNullable<DesktopApi["taskGroups"]["create"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["taskGroups"]["create"]>>> }
+  "taskGroups:dissolve": { apiArguments: Parameters<NonNullable<DesktopApi["taskGroups"]["dissolve"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["taskGroups"]["dissolve"]>>> }
+  "taskGroups:get": { apiArguments: Parameters<NonNullable<DesktopApi["taskGroups"]["get"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["taskGroups"]["get"]>>> }
+  "taskGroups:history": { apiArguments: Parameters<NonNullable<DesktopApi["taskGroups"]["history"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["taskGroups"]["history"]>>> }
+  "taskGroups:list": { apiArguments: Parameters<NonNullable<DesktopApi["taskGroups"]["list"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["taskGroups"]["list"]>>> }
+  "taskGroups:move": { apiArguments: Parameters<NonNullable<DesktopApi["taskGroups"]["move"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["taskGroups"]["move"]>>> }
+  "taskGroups:remove": { apiArguments: Parameters<NonNullable<DesktopApi["taskGroups"]["remove"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["taskGroups"]["remove"]>>> }
+  "taskGroups:review": { apiArguments: Parameters<NonNullable<DesktopApi["taskGroups"]["review"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["taskGroups"]["review"]>>> }
   "taskSource:create": { apiArguments: Parameters<NonNullable<DesktopApi["taskSources"]["create"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["taskSources"]["create"]>>> }
   "taskSource:delete": { apiArguments: Parameters<NonNullable<DesktopApi["taskSources"]["delete"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["taskSources"]["delete"]>>> }
   "taskSource:exportUpdate": { apiArguments: Parameters<NonNullable<DesktopApi["taskSources"]["exportUpdate"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["taskSources"]["exportUpdate"]>>> }
@@ -546,6 +555,15 @@ export const DESKTOP_OPERATION_MANIFEST = {
   "event/task:source-action-failed": {"name":"task:source-action-failed","kind":"event","disposition":"retained","owner":"service","caller":"service","destination":"trusted-desktop-main"},
   "event/task:subtasks-reordered": {"name":"task:subtasks-reordered","kind":"event","disposition":"retained","owner":"service","caller":"service","destination":"trusted-desktop-main"},
   "event/task:updated": {"name":"task:updated","kind":"event","disposition":"retained","owner":"service","caller":"service","destination":"trusted-desktop-main"},
+  "command/taskGroups:add": {"name":"taskGroups:add","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
+  "command/taskGroups:create": {"name":"taskGroups:create","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
+  "command/taskGroups:dissolve": {"name":"taskGroups:dissolve","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
+  "command/taskGroups:get": {"name":"taskGroups:get","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
+  "command/taskGroups:history": {"name":"taskGroups:history","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
+  "command/taskGroups:list": {"name":"taskGroups:list","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
+  "command/taskGroups:move": {"name":"taskGroups:move","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
+  "command/taskGroups:remove": {"name":"taskGroups:remove","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
+  "command/taskGroups:review": {"name":"taskGroups:review","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/taskSource:create": {"name":"taskSource:create","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/taskSource:delete": {"name":"taskSource:delete","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/taskSource:exportUpdate": {"name":"taskSource:exportUpdate","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},

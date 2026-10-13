@@ -80,9 +80,32 @@ const artifactTools: Tool[] = [
 export const artifactToolNames = new Set(artifactTools.map((tool) => tool.name))
 
 /** Mutations available only to a signed ordinary task, nested or top-level. */
-export const taskAgentTools: Tool[] = [...prWriteTools]
+export const taskGroupCaptainTools: Tool[] = [
+  { name: 'create_task_group', description: 'Captain only: batch 2–10 small related unstarted tasks in this project into one workspace, agent session and review. Tasks must have matching repositories and compatible assignments.',
+    inputSchema: { type: 'object', properties: { title: { type: 'string' }, task_ids: { type: 'array', items: { type: 'string' }, minItems: 2, maxItems: 10, uniqueItems: true }, agent_id: { type: 'string' } }, required: ['title', 'task_ids'] } },
+  { name: 'add_to_task_group', description: 'Captain only: add compatible unstarted tasks to a stopped group. A group may contain at most ten members; stop owned or queued work before changing its definition.',
+    inputSchema: { type: 'object', properties: { group_id: { type: 'string' }, task_ids: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 10, uniqueItems: true } }, required: ['group_id', 'task_ids'] } },
+  { name: 'remove_from_task_group', description: 'Captain only: remove one member from a stopped group. Preserve its lifecycle and the shared transcript/membership history.',
+    inputSchema: { type: 'object', properties: { group_id: { type: 'string' }, task_id: { type: 'string' } }, required: ['group_id', 'task_id'] } },
+  { name: 'dissolve_task_group', description: 'Captain only: ungroup stopped work while preserving member lifecycle and the shared transcript/history. Refused while the execution owner is queued or active.',
+    inputSchema: { type: 'object', properties: { group_id: { type: 'string' } }, required: ['group_id'] } }
+]
+const taskGroupReadTools: Tool[] = [
+  { name: 'list_task_groups', description: 'List task groups in this session’s project, including member IDs, progress and shared execution task. Optionally include dissolved groups for history.',
+    inputSchema: { type: 'object', properties: { include_dissolved: { type: 'boolean' } } } },
+  { name: 'get_task_group', description: 'Read one group in this session’s project, its execution task and retained current/former members. The execution task owns the single shared transcript.',
+    inputSchema: { type: 'object', properties: { group_id: { type: 'string' } }, required: ['group_id'] } }
+]
+const taskGroupReportTool: Tool = {
+  name: 'report_group_task', description: 'The signed group execution agent reports working, done or blocked progress for one current member. Done is implementation progress only: it cannot approve, complete at source, or change the group lifecycle. Report a blocked member without failing the entire group.',
+  inputSchema: { type: 'object', properties: { group_id: { type: 'string' }, task_id: { type: 'string' }, state: { type: 'string', enum: ['working', 'done', 'blocked'] }, message: { type: 'string' } }, required: ['group_id', 'task_id', 'state', 'message'] }
+}
+export const TASK_GROUP_TOOL_NAMES = new Set([...taskGroupCaptainTools, ...taskGroupReadTools, taskGroupReportTool].map(tool => tool.name))
+export const TASK_GROUP_MUTATION_TOOL_NAMES = new Set(taskGroupCaptainTools.map(tool => tool.name))
+export const taskAgentTools: Tool[] = [...prWriteTools, taskGroupReportTool]
 
 export const sharedTools: Tool[] = [
+  ...taskGroupReadTools,
   ...artifactTools,
   ...reviewAttestationTools,
   {

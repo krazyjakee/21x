@@ -11,6 +11,7 @@ import type { ClaudePluginManager } from '../claude-plugin-manager'
 import type { HeartbeatScheduler } from '../heartbeat-scheduler'
 import type { WorkspaceCleanupScheduler } from '../workspace-cleanup-scheduler'
 import type { VoiceSessionManager } from '../voice/voice-session-manager'
+import type { TaskGroupService } from '../task-groups/service'
 
 /** Everything the IPC handlers reach into. Optional services may be absent in tests. */
 export interface IpcDeps {
@@ -27,6 +28,7 @@ export interface IpcDeps {
   forgejoManager?: ForgejoManager
   workspaceCleanupScheduler?: WorkspaceCleanupScheduler
   voiceSessionManager?: VoiceSessionManager
+  taskGroups?: TaskGroupService
 }
 
 /** Returns an optional service, or throws the error the renderer shows when it is missing. */

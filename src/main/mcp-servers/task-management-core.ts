@@ -26,6 +26,8 @@ import {
   captainTools,
   sharedTools,
   subtaskTools,
+  taskGroupCaptainTools,
+  TASK_GROUP_MUTATION_TOOL_NAMES,
   taskAgentTools
 } from './task-management-tools'
 import { SKILL_SCOPE_PARAM, SKILL_TOOL_NAMES } from '../task-api/skill-routes'
@@ -87,6 +89,7 @@ const COORDINATOR_ONLY_TOOLS = new Set([
   'update_project_status',
   'report_to_commander',
   'set_concurrency',
+  ...TASK_GROUP_MUTATION_TOOL_NAMES,
   ...MERGE_TOOL_NAMES,
   ...ISSUE_WRITE_TOOL_NAMES
 ])
@@ -137,7 +140,8 @@ const PROJECT_FILTERED_TOOLS = new Set([
   'update_project_status',
   'report_to_commander',
   'get_concurrency',
-  'set_concurrency'
+  'set_concurrency',
+  'list_task_groups'
 ])
 
 const PROJECT_ACCESS_DENIED = { error: 'Access denied: task is not in this project' }
@@ -180,6 +184,9 @@ async function handleProjectCall(
     for (const id of args.next_subtask_ids) {
       if (!(await isTaskInProject(id, projectId, invoke))) return PROJECT_ACCESS_DENIED
     }
+  }
+  if (TASK_GROUP_MUTATION_TOOL_NAMES.has(name) && Array.isArray(args.task_ids)) {
+    for (const id of args.task_ids) if (!(await isTaskInProject(id, projectId, invoke))) return PROJECT_ACCESS_DENIED
   }
   // The Captain's calls pass through the main-process handler. Task agents
   // in the same project cannot reach the Captain-only tools it answers.
@@ -311,7 +318,7 @@ export function listToolsForScope(scope: TaskMcpScope, availability: TaskToolAva
   const browser = availability.includeLegacyBrowserTools === false ? [] : browserTools
   return isScopedSession(scope)
     ? [...subtaskTools, ...taskOnly, ...browser, ...sharedTools]
-    : [...captainTools, ...taskOnly, ...browser, ...sharedTools]
+    : [...captainTools, ...(isCoordinatorScope(scope) ? taskGroupCaptainTools : []), ...taskOnly, ...browser, ...sharedTools]
 }
 
 /**

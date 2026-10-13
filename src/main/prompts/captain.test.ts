@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { buildCaptainSystemPrompt, withCaptainSystemPrompt } from './captain'
-import { FULL_ACCESS_SCOPE, listToolsForScope } from '../mcp-servers/task-management-core'
+import { listToolsForScope } from '../mcp-servers/task-management-core'
 
 describe('buildCaptainSystemPrompt', () => {
   it('references only task-management tools the Captain really has', () => {
-    const tools = new Set(listToolsForScope(FULL_ACCESS_SCOPE).map((tool) => tool.name))
+    const tools = new Set(listToolsForScope({ parentTaskId: null, taskId: null, artifactTaskId: null, projectId: 'project' }).map((tool) => tool.name))
     const referenced = [...buildCaptainSystemPrompt().matchAll(/`([a-z_]+)`/g)].map((m) => m[1])
     expect(referenced.length).toBeGreaterThan(10)
     expect(referenced.filter((name) => !tools.has(name))).toEqual([])
@@ -53,5 +53,16 @@ describe('buildCaptainSystemPrompt', () => {
     expect(prompt).toContain('If impact or the next step is unknown, say so plainly')
     expect(prompt).toContain('Do not invent impact or imply that integrated work is released')
     expect(prompt).toContain('Combine related updates into one coherent explanation')
+  })
+
+  it('guides small shared-session groups without turning progress into approval or source completion', () => {
+    const prompt = buildCaptainSystemPrompt()
+    for (const name of ['create_task_group', 'add_to_task_group', 'remove_from_task_group', 'dissolve_task_group', 'list_task_groups', 'get_task_group']) expect(prompt).toContain(`\`${name}\``)
+    expect(prompt).toContain('2–10 small, ordinary, unstarted root tasks')
+    expect(prompt).toContain('exactly the same repositories and compatible agent assignments')
+    expect(prompt).toContain('do not start a separate session for each member')
+    expect(prompt).toContain('queued or running ownership has stopped')
+    expect(prompt).toContain('Done means implementation progress, never user approval or completion at the task source')
+    expect(prompt).toContain('A blocked member does not fail every other member')
   })
 })

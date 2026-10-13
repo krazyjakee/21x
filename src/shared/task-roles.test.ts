@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { COORDINATOR_ROLES, TASK_ROLE_CAPTAIN, TASK_ROLE_TASK, isCoordinatorRole, isCoordinatorTask } from './task-roles'
+import { COORDINATOR_ROLES, TASK_ROLE_CAPTAIN, TASK_ROLE_TASK, TASK_ROLE_TASK_GROUP, isCoordinatorRole, isCoordinatorTask, isHiddenUserTaskRole, isTaskGroupTask } from './task-roles'
 
 describe('task roles', () => {
   it('treats only coordinator roles as coordinators', () => {
@@ -19,5 +19,16 @@ describe('task roles', () => {
     expect(isCoordinatorTask({})).toBe(false)
     expect(isCoordinatorTask(null)).toBe(false)
     expect(isCoordinatorTask(undefined)).toBe(false)
+  })
+
+  it('hides counted group anchors without granting the coordinator exemption', () => {
+    expect(isHiddenUserTaskRole(TASK_ROLE_TASK_GROUP)).toBe(true)
+    expect(isHiddenUserTaskRole(TASK_ROLE_CAPTAIN)).toBe(true)
+    expect(isHiddenUserTaskRole(TASK_ROLE_TASK)).toBe(false)
+    expect(isTaskGroupTask({ role: TASK_ROLE_TASK_GROUP })).toBe(true)
+    expect(isTaskGroupTask(null)).toBe(false)
+    expect(isCoordinatorRole(TASK_ROLE_TASK_GROUP)).toBe(false)
+    expect(isCoordinatorTask({ role: TASK_ROLE_TASK_GROUP })).toBe(false)
+    expect(COORDINATOR_ROLES).toEqual([TASK_ROLE_CAPTAIN])
   })
 })

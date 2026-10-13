@@ -15,19 +15,20 @@ import type { IncomingMessage } from 'http'
 import { TaskApiListener } from './task-api/listener'
 import { randomBytes, timingSafeEqual } from 'crypto'
 import type { DatabaseManager } from './database'
-import { TASK_MCP_PATH, handleTaskMcpRequest } from './task-mcp-endpoint'
+import { TASK_MCP_PATH, handleTaskMcpRequest, buildTaskMcpUrl } from './task-mcp-endpoint'
 import { bearerToken, parseJsonBody, readBody } from './http-utils'
 import { handleArtifactRoute } from './task-api/artifact-routes'
 import { handleConcurrencyRoute } from './task-api/concurrency-routes'
 import { handleSessionRoute } from './task-api/session-routes'
 import { handleSkillRoute } from './task-api/skill-routes'
 import { handleTaskRoute } from './task-api/task-routes'
+import { handleTaskGroupRoute } from './task-api/task-group-routes'
 import { handleReviewAttestationRoute } from './task-api/review-attestation-routes'
 import { handlePrWriteRoute } from './pr-write-gate'
 import { handleUiRoute } from './task-api/ui-routes'
 import { installCaptainGithubTools } from './captain-github-tools'
 
-export { setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTranscriptProvider } from './task-api/state'
+export { setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTranscriptProvider, setTaskApiTaskGroupService } from './task-api/state'
 
 export type TaskApiRouteHandler = (db: DatabaseManager, route: string, params: Record<string, unknown>, scope?: TaskMcpScope) => Promise<unknown>
 interface ServerOwner { db: DatabaseManager; listener: TaskApiListener; startup: Promise<number> }
@@ -53,9 +54,10 @@ export function getTaskApiToken(): string {
 }
 
 /** Environment for a child process that calls the task API directly. */
-export function getTaskApiEnv(): Record<string, string> {
+export function getTaskApiEnv(scope?: TaskMcpScope): Record<string, string> {
   const currentPort = getTaskApiPort()
-  return currentPort ? { TASK_API_URL: `http://127.0.0.1:${currentPort}`, TASK_API_TOKEN: apiToken } : {}
+  return currentPort ? { TASK_API_URL: `http://127.0.0.1:${currentPort}`, TASK_API_TOKEN: apiToken,
+    ...(scope ? { TASK_MCP_URL: buildTaskMcpUrl(currentPort, apiToken, scope) } : {}) } : {}
 }
 
 function isAuthorized(req: IncomingMessage, url: URL): boolean {
@@ -171,7 +173,7 @@ export async function closeTaskApiServer(timeoutMs = 2000): Promise<void> {
   if (incomplete?.status === 'rejected') throw incomplete.reason
 }
 
-const ROUTE_HANDLERS = [handleTaskRoute, handleSkillRoute, handleSessionRoute, handleUiRoute, handleArtifactRoute, handleConcurrencyRoute, handleReviewAttestationRoute, handlePrWriteRoute]
+const ROUTE_HANDLERS = [handleTaskGroupRoute, handleTaskRoute, handleSkillRoute, handleSessionRoute, handleUiRoute, handleArtifactRoute, handleConcurrencyRoute, handleReviewAttestationRoute, handlePrWriteRoute]
 
 /** Exported so the routes can be tested without starting an HTTP server. */
 export async function handleRoute(db: DatabaseManager, route: string, params: Record<string, unknown>, trustedScope?: TaskMcpScope, host: TaskApiHost = {}): Promise<unknown> {

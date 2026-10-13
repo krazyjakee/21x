@@ -6,6 +6,7 @@
 const lists = new Set(['getAll', 'getTasks', 'getSubtasks', 'getStartQueue', 'scan', 'getRepos'])
 const methods = new Proxy({}, { get: (_, key) => key.startsWith('on') ? () => () => {} : async () => lists.has(key) ? [] : null })
 window.electronAPI = new Proxy({
+  taskGroups: { list: async () => [], history: async () => [], get: async () => { throw new Error('No task groups in this layout fixture') } },
   settings: { getAll: async () => ({ github_org: '', git_provider: 'github' }) },
   agents: { getStartRecoveryState: async () => null },
   artifacts: { scan: async () => [], read: async () => null },

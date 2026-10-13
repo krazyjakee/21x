@@ -20,9 +20,11 @@ import { registerChatImageHandlers } from './ipc/chat-images'
 import { registerConnectorHandlers } from './ipc/connectors'
 import { registerOverviewHandlers } from './ipc/overview'
 import { registerSessionContextHandlers } from './ipc/session-context'
+import { registerTaskGroupHandlers } from './ipc/task-groups'
 
 export function registerIpcHandlers(deps: IpcDeps): void {
   registerTaskHandlers(deps)
+  registerTaskGroupHandlers(deps)
   registerAgentHandlers(deps)
   registerMcpHandlers(deps)
   registerCliMcpHandlers()

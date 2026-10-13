@@ -18,7 +18,7 @@ const knownFamilies = new Set(['agent-installer', 'agent', 'agentConfig', 'agent
   'attachments', 'browser', 'captainRuntime', 'chat', 'chatImages', 'claudePlugin', 'cliMcp', 'commander', 'concurrency',
   'connectors', 'db', 'env', 'forgejo', 'git', 'github', 'gitlab', 'heartbeat', 'mcp', 'menu', 'mobile', 'notifications',
   'oauth', 'overdue', 'plugin', 'project', 'projectLimits', 'projectRepo', 'projectResource', 'secrets', 'settings',
-  'sessionContext', 'shell', 'skills', 'task', 'taskSource', 'tasks', 'terminal', 'transcript', 'ui', 'updater', 'voice', 'workspace', 'worktree'])
+  'sessionContext', 'shell', 'skills', 'task', 'taskGroups', 'taskSource', 'tasks', 'terminal', 'transcript', 'ui', 'updater', 'voice', 'workspace', 'worktree'])
 const callbackCommands = new Set(['artifacts:copyFile', 'attachments:open', 'attachments:download',
   'oauth:startFlow', 'oauth:startLocalhostFlow', 'mcp:startOAuthFlow', 'connectors:oauthConnect',
   'voice:setShortcut', 'voice:startTurn', 'voice:tts:speak', 'voice:tts:preview'])

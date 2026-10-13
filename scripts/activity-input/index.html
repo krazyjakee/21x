@@ -53,6 +53,7 @@ const noop = async () => undefined
 const listMethods = new Set(['getAll', 'getSubtasks', 'getImages', 'getRepos', 'scan', 'getModels'])
 const methods = new Proxy({}, { get: (_, key) => key.startsWith('on') ? subscribe(key) : async () => listMethods.has(key) ? [] : null })
 window.electronAPI = new Proxy({
+  taskGroups: { list: async () => [], history: async () => [], get: async () => { throw new Error('No task groups in this activity fixture') } },
   app: { getVersion: async () => 'controlled-fixture', setTitleBarOverlay: noop },
   settings: { getAll: async () => ({}), set: noop, get: async () => null },
   agents: new Proxy({

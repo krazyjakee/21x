@@ -244,6 +244,7 @@ export class AgentManager extends EventEmitter {
    * The existing durable start row remains `started` for the same generation;
    * this index lets every in-process ownership consumer join that teardown. */
   private readonly taskStops = new Map<string, PendingTaskStop>()
+  private readonly taskGroupMutations = new Set<string>()
   private deliveryRecoveryTimer: ReturnType<typeof setInterval> | null = null
   private readonly captainSwitches = new Map<string, { agentId: string; promise: Promise<CaptainRuntimeState> }>()
   private readonly deliveryOwner = `agent-manager:${process.pid}:${randomUUID()}`
@@ -463,6 +464,7 @@ export class AgentManager extends EventEmitter {
    * restores the same row/start path used by normal starts and boot recovery.
    */
   reconcileTaskRuntime(taskId: string, cause = 'status_runtime_divergence'): boolean {
+    taskId = this.taskGroupExecution(taskId)?.id ?? taskId
     const task = this.db.getTask(taskId)
     if (!task || (task.status !== TaskStatus.AgentWorking && task.status !== TaskStatus.Triaging)) return false
     if (this.taskStops.has(taskId) || this.sessionStarts.has(taskId) || this.admittedStarts.has(taskId)) return false
@@ -545,7 +547,7 @@ export class AgentManager extends EventEmitter {
     if (this.shuttingDown || this.startupReconciliation) return
     const rows = this.db.db.prepare(`
       SELECT id FROM tasks
-      WHERE role = 'task' AND status IN (?, ?)
+      WHERE (role = 'task' AND group_id IS NULL OR role = 'task_group') AND status IN (?, ?)
     `).all(TaskStatus.AgentWorking, TaskStatus.Triaging) as Array<{ id: string }>
     for (const row of rows) this.reconcileTaskRuntime(row.id, 'periodic_runtime_reconciliation')
   }
@@ -679,7 +681,7 @@ export class AgentManager extends EventEmitter {
 
     const staleTasks = this.db.db.prepare(`
       SELECT id, agent_id, session_id FROM tasks
-      WHERE role = 'task' AND (status = ? OR (status != 'completed' AND session_id IS NOT NULL
+      WHERE (role = 'task' AND group_id IS NULL OR role = 'task_group') AND (status = ? OR (status != 'completed' AND session_id IS NOT NULL
         AND id IN (SELECT task_id FROM agent_start_queue WHERE state IN ('queued', 'retrying', 'claimed', 'starting'))))
     `).all(TaskStatus.AgentWorking) as Array<{ id: string; agent_id: string | null; session_id: string | null }>
     for (const stale of staleTasks) {
@@ -1164,6 +1166,48 @@ export class AgentManager extends EventEmitter {
     }
   }
 
+  /** A definition/review lease blocks new dispatches while source effects or
+   * acknowledged idle teardown finish. Shutdown joins this work before SQLite. */
+  async runTaskGroupMutation<T>(taskIds: string[], mutation: () => Promise<T>): Promise<T> {
+    if (this.shuttingDown) throw new Error('The app is shutting down.')
+    if (!Array.isArray(taskIds) || !taskIds.length || taskIds.length > 32 || taskIds.some(id => typeof id !== 'string' || !id))
+      throw new Error('Select valid task-group members.')
+    const ids = [...new Set(taskIds)]
+    if (ids.some(id => this.taskGroupMutations.has(id))) throw new Error('This task group is already being updated.')
+    for (const id of ids) this.taskGroupMutations.add(id)
+    return this.ownShutdownWork((async () => {
+      try {
+        await Promise.all(ids.map(id => serializeTaskSend(this, id, async () => undefined)))
+        if (this.shuttingDown) throw new Error('The app is shutting down.')
+        return await mutation()
+      } finally { for (const id of ids) this.taskGroupMutations.delete(id) }
+    })())
+  }
+
+  /** Membership changes retire only their idle backend. Saved transcript and
+   * the pending continuity seed survive until the next accepted instruction. */
+  async retireTaskGroupContext(taskId: string): Promise<void> {
+    const task = this.db.getTask(taskId)
+    if (task?.role !== 'task_group') throw new Error('Task group execution was not found.')
+    const live = this.findSessionByTaskId(taskId)
+    if (live && ['working', 'waiting_approval'].includes(live.session.status)) throw new Error('Stop the group before changing its members.')
+    const previousId = live?.sessionId ?? task.session_id
+    if (live) await this.stopSession(live.sessionId, false, true)
+    if (previousId) {
+      const lossId = `session-loss-pending-${randomUUID()}`
+      this.emitSystemNotice(previousId, taskId, lossId, 'Group membership changed. The previous shared transcript is retained; the next accepted instruction carries a continuity recap.')
+      this.db.updateTask(taskId, { session_id: null })
+    }
+  }
+
+  private taskGroupExecution(taskId: string): TaskRecord | undefined {
+    return this.db.getTaskGroupExecution?.(taskId)
+  }
+
+  private assertNoTaskGroupMutation(taskId: string): void {
+    if (this.taskGroupMutations.has(taskId)) throw new Error('The task group is being updated. Retry after its review or membership change finishes.')
+  }
+
   private emitStatus(sessionId: string, owner: { agentId: string; taskId: string }, status: AgentSession['status'], activityOutcome: AgentActivityOutcome | undefined = status === 'error' ? 'failed' : undefined): void {
     const task = this.db.getTask(owner.taskId)
     if (sessionId && isCoordinatorTask(task) && task?.session_id && task.session_id !== sessionId) return
@@ -1174,13 +1218,9 @@ export class AgentManager extends EventEmitter {
       this.retainCaptainObservation(this.managedEngine(managed)!.finishTurn(owner.taskId, sessionId, intentId,
         activityOutcome === 'cancelled' || activityOutcome === 'interrupted' ? activityOutcome : status === 'idle' ? 'end_turn' : 'error'))
     }
-    this.sendToRenderer('agent:status', {
-      sessionId,
-      agentId: owner.agentId,
-      taskId: owner.taskId,
-      status,
-      ...(activityOutcome ? { activityOutcome } : {}),
-      ...this.activityObservations.stamp()
+    for (const taskId of this.taskGroupActivityTargets(owner.taskId, status)) this.sendToRenderer('agent:status', {
+      sessionId, agentId: owner.agentId, taskId, status,
+      ...(activityOutcome ? { activityOutcome } : {}), ...this.activityObservations.stamp()
     })
     // Every idle transition and every stop ends here: a slot may have freed.
     if (status === 'idle' || status === 'error') this.scheduleStartQueueDrain()
@@ -2072,20 +2112,27 @@ export class AgentManager extends EventEmitter {
     if (!session || !shouldPublishHeartbeat(session.status)) return
     if (!this.activityObservations.takeHeartbeat(sessionId)) return
     if (!this.mainWindow || this.mainWindow.isDestroyed()) return
-    this.sendHostEvent(this.mainWindow.webContents, 'agent:status', {
-      sessionId,
-      agentId: session.agentId,
-      taskId: session.taskId,
-      status: session.status,
-      ...this.activityObservations.stamp(true)
-    })
+    for (const taskId of this.taskGroupActivityTargets(session.taskId, session.status))
+      this.sendHostEvent(this.mainWindow.webContents, 'agent:status', {
+        sessionId, agentId: session.agentId, taskId, status: session.status, ...this.activityObservations.stamp(true)
+      })
   }
 
   private publishActivityDisconnect(sessionId: string, session: AgentSession): void {
     this.activityObservations.forget(sessionId)
     if (!this.mainWindow || this.mainWindow.isDestroyed()) return
-    this.sendHostEvent(this.mainWindow.webContents, 'agent:status', { sessionId, agentId: session.agentId,
-      taskId: session.taskId, status: session.status, ...this.activityObservations.stamp(true), disconnected: true })
+    for (const taskId of this.taskGroupActivityTargets(session.taskId, session.status))
+      this.sendHostEvent(this.mainWindow.webContents, 'agent:status', { sessionId, agentId: session.agentId,
+        taskId, status: session.status, ...this.activityObservations.stamp(true), disconnected: true })
+  }
+
+  private taskGroupActivityTargets(ownerId: string, status: AgentSession['status']): string[] {
+    if (this.db.getTask(ownerId)?.role !== 'task_group') return [ownerId]
+    const group = this.db.getTaskGroupByTask(ownerId)
+    return [ownerId, ...(group ? this.db.getTaskGroupMembers(group.id)
+      .filter(task => task.status !== TaskStatus.Completed && (status === 'idle'
+        || [TaskStatus.AgentWorking, TaskStatus.Triaging, TaskStatus.AgentLearning].includes(task.status as TaskStatus)))
+      .map(task => task.id) : [])]
   }
 
   /** Follows a re-key (temp -> real id) by task id and moves the polling entry with it. */
@@ -2738,6 +2785,11 @@ export class AgentManager extends EventEmitter {
     if (Object.keys(fields).length === 0) return this.db.getTask(taskId)
     const before = fields.status !== undefined ? this.db.getTask(taskId)?.status : undefined
     const updated = origin ? this.db.updateTask(taskId, fields, origin) : this.db.updateTask(taskId, fields)
+    if (updated?.role === 'task_group' && fields.status !== undefined) {
+      const group = this.db.getTaskGroupByTask(taskId)
+      if (group) for (const member of this.db.getTaskGroupMembers(group.id))
+        this.sendToRenderer('task:updated', { taskId: member.id, updates: member })
+    }
     // Project event (#57): an agent's own work reaching review bypasses
     // afterTaskUpdated (task-updates.ts), so the event is raised here.
     if (fields.status === TaskStatus.ReadyForReview && updated?.status === TaskStatus.ReadyForReview && before !== TaskStatus.ReadyForReview) {
@@ -2763,10 +2815,14 @@ export class AgentManager extends EventEmitter {
    * heartbeat and triage sessions bypass the limits (see admission.ts).
    */
   async requestSession(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<SessionStartOutcome> {
+    const execution = this.taskGroupExecution(taskId)
+    if (execution) { taskId = execution.id; agentId = execution.agent_id! }
+    this.assertNoTaskGroupMutation(taskId)
     return this.ownShutdownWork(this.requestSessionNow(agentId, taskId, workspaceDir, skipInitialPrompt))
   }
 
   private async requestSessionNow(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<SessionStartOutcome> {
+    this.assertNoTaskGroupMutation(taskId)
     if (this.shuttingDown) throw new Error('The app is shutting down; retry after restart.')
     const stopping = this.taskStops.get(taskId)
     if (stopping) {
@@ -2948,6 +3004,7 @@ export class AgentManager extends EventEmitter {
 
   /** Starts without admission control — callers are exempt or already admitted. */
   private async startSessionNow(agentId: string, taskId: string, workspaceDir?: string, skipInitialPrompt?: boolean): Promise<string> {
+    this.assertNoTaskGroupMutation(taskId)
     const stopping = this.taskStops.get(taskId)
     if (stopping) {
       await stopping.promise
@@ -3243,6 +3300,8 @@ export class AgentManager extends EventEmitter {
    * blank slate.
    */
   async switchAgent(taskId: string, newAgentId: string): Promise<string> {
+    taskId = this.taskGroupExecution(taskId)?.id ?? taskId
+    this.assertNoTaskGroupMutation(taskId)
     return this.switchAgentWithContext(taskId, newAgentId)
   }
 
@@ -3312,6 +3371,9 @@ export class AgentManager extends EventEmitter {
     queuePosition?: number
     queueReason?: AdmissionReason
   }> {
+    const execution = this.taskGroupExecution(taskId)
+    if (execution && execution.id !== taskId) return this.startTask(execution.id, opts)
+    this.assertNoTaskGroupMutation(taskId)
     const task = this.db.getTask(taskId)
     if (!task) {
       throw new Error(`Task not found: ${taskId}`)
@@ -3797,10 +3859,17 @@ export class AgentManager extends EventEmitter {
    * its provider status (history is not replayed; clients render the durable projection).
    */
   async resumeSession(agentId: string, taskId: string, sessionId: string): Promise<string> {
+    const execution = this.taskGroupExecution(taskId)
+    if (execution) {
+      if (execution.session_id !== sessionId) throw new Error('The native session does not belong to this task group.')
+      taskId = execution.id; agentId = execution.agent_id!
+    }
+    this.assertNoTaskGroupMutation(taskId)
     return this.ownShutdownWork(this.resumeSessionNow(agentId, taskId, sessionId))
   }
 
   private async resumeSessionNow(agentId: string, taskId: string, sessionId: string): Promise<string> {
+    this.assertNoTaskGroupMutation(taskId)
     if (this.shuttingDown) throw new Error('The app is shutting down; retry after restart.')
     console.log('[AgentManager] resumeSession called:', { agentId, taskId, sessionId })
     const stopping = this.taskStops.get(taskId)
@@ -4438,6 +4507,7 @@ export class AgentManager extends EventEmitter {
    * is broken (Session: none) and the normal stop-by-sessionId path fails.
    */
   async stopByTaskId(taskId: string): Promise<{ sessionId: string | null }> {
+    taskId = this.taskGroupExecution(taskId)?.id ?? taskId
     this.captainRollover?.cancel(taskId)
     const pending = this.taskStops.get(taskId)
     if (pending) {
@@ -5004,6 +5074,14 @@ export class AgentManager extends EventEmitter {
     attachments?: MessageAttachmentRef[],
     deliveryId?: string
   ): Promise<{ sessionId: string | null; newSessionId?: string }> {
+    const execution = this.taskGroupExecution(taskId)
+    if (execution && execution.id !== taskId) {
+      if (attachments?.length) throw new Error('Send attachments from the shared group conversation so they belong to its execution workspace.')
+      const member = this.db.getTask(taskId)
+      message = `For group member ${member?.title ?? taskId} (id: ${taskId}):\n${message}`
+      taskId = execution.id
+    }
+    this.assertNoTaskGroupMutation(taskId)
     const found = this.findSessionByTaskId(taskId)
     if (found) {
       console.log(`[AgentManager] sendByTaskId: found live session ${found.sessionId} for task ${taskId}`)
@@ -5024,6 +5102,18 @@ export class AgentManager extends EventEmitter {
     attachments?: MessageAttachmentRef[],
     deliveryId = `agent-message:${randomUUID()}`
   ): Promise<{ newSessionId?: string }> {
+    if (taskId) {
+      const execution = this.taskGroupExecution(taskId)
+      if (execution && execution.id !== taskId) {
+        if (attachments?.length) throw new Error('Send attachments from the shared group conversation so they belong to its execution workspace.')
+        message = `For group member ${this.db.getTask(taskId)?.title ?? taskId} (id: ${taskId}):\n${message}`
+        taskId = execution.id; agentId = execution.agent_id!
+      }
+      this.assertNoTaskGroupMutation(taskId)
+    } else {
+      const ownerTaskId = this.resolveSession(sessionId)?.session.taskId
+      if (ownerTaskId) this.assertNoTaskGroupMutation(ownerTaskId)
+    }
     // A few focused unit tests use a structural DB double without SQLite.
     // The shipped DatabaseManager always has `db`, so every application call
     // takes the durable path below.
@@ -5245,6 +5335,7 @@ export class AgentManager extends EventEmitter {
   /** Persists intent before crossing the wire. Acceptance cannot reset a retry
    * budget: the same intent owns the whole interrupted turn until idle. */
   private async sendTrackedPrompt(session: AgentSession, sessionId: string, prompt: string, config: SessionConfig, recovery?: ProviderRecovery): Promise<void> {
+    this.assertNoTaskGroupMutation(session.taskId)
     this.assertSessionGeneration(sessionId, session)
     if (recovery) {
       const current = this.providerRecoveries.get(recovery.taskId)
@@ -5999,6 +6090,7 @@ export class AgentManager extends EventEmitter {
    * Called after a task transitions to ready_for_review.
    */
   private autoEnableHeartbeat(taskId: string): void {
+    if (this.db.getTask(taskId)?.role === 'task_group') return
     try {
       const workspaceDir = this.db.getWorkspaceDir(taskId)
       const heartbeatPath = join(workspaceDir, 'heartbeat.md')

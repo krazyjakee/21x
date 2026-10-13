@@ -12,8 +12,21 @@ import type { CaptainMemory } from '../shared/captain-memory'
 import type { CaptainRuntimeState } from '../shared/captain-runtime'
 import type { TranscriptPage, TranscriptPageRequest } from '../shared/transcript-page'
 import type { RolloverPolicy, SessionContextScope, SessionContextSnapshot } from '../shared/session-context'
+import type { CreateTaskGroupData, TaskGroupRecord, TaskGroupReviewData, TaskGroupReviewResult, TaskGroupSnapshot } from '../shared/task-groups'
+import type { TaskRecord } from '../main/database/types'
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  taskGroups: {
+    list: (projectId: string, includeDissolved?: boolean): Promise<TaskGroupRecord[]> => ipcRenderer.invoke('taskGroups:list', projectId, includeDissolved),
+    get: (id: string): Promise<TaskGroupSnapshot<TaskRecord>> => ipcRenderer.invoke('taskGroups:get', id),
+    history: (taskId: string): Promise<TaskGroupRecord[]> => ipcRenderer.invoke('taskGroups:history', taskId),
+    create: (data: CreateTaskGroupData): Promise<TaskGroupRecord> => ipcRenderer.invoke('taskGroups:create', data),
+    add: (id: string, taskIds: string[]): Promise<TaskGroupRecord> => ipcRenderer.invoke('taskGroups:add', id, taskIds),
+    remove: (id: string, taskId: string): Promise<TaskGroupRecord> => ipcRenderer.invoke('taskGroups:remove', id, taskId),
+    dissolve: (id: string): Promise<TaskGroupRecord> => ipcRenderer.invoke('taskGroups:dissolve', id),
+    move: (id: string, status: string): Promise<TaskGroupRecord> => ipcRenderer.invoke('taskGroups:move', id, status),
+    review: (data: TaskGroupReviewData): Promise<TaskGroupReviewResult> => ipcRenderer.invoke('taskGroups:review', data)
+  },
   sessionContext: {
     getSnapshot: (scope: SessionContextScope): Promise<SessionContextSnapshot> => ipcRenderer.invoke('sessionContext:getSnapshot', scope),
     setPolicy: (policy: RolloverPolicy): Promise<RolloverPolicy> => ipcRenderer.invoke('sessionContext:setPolicy', policy)

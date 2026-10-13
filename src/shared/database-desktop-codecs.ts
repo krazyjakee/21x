@@ -68,7 +68,7 @@ const taskBooleans = ['is_recurring', 'heartbeat_enabled', 'auto_start_agent', '
 const taskOtherFields = ['labels', 'attachments', 'repos', 'output_fields', 'skill_ids', 'feedback_rating', 'recurrence_pattern', 'heartbeat_interval_minutes', 'complete_at_source', 'next_subtask_ids', 'sort_order']
 const taskKeys = [...taskStringFields, ...taskNullableStrings, ...taskBooleans, ...taskOtherFields]
 export function isDatabaseTask(value: unknown): boolean {
-  return object(value, taskKeys, ['last_activity_at']) && taskStringFields.every(key => text(value[key])) &&
+  return object(value, taskKeys, ['last_activity_at', 'group_id']) && taskStringFields.every(key => text(value[key])) &&
     isDatabaseId(value.id) && isDatabaseId(value.project_id) &&
     ['general', 'coding', 'manual', 'review', 'approval'].includes(value.type as string) &&
     ['critical', 'high', 'medium', 'low'].includes(value.priority as string) &&
@@ -82,13 +82,15 @@ export function isDatabaseTask(value: unknown): boolean {
     (value.recurrence_pattern === null || text(value.recurrence_pattern) || isRecord(value.recurrence_pattern) && isJsonValue(value.recurrence_pattern)) &&
     (value.heartbeat_interval_minutes === null || cursor(value.heartbeat_interval_minutes)) &&
     (value.complete_at_source === null || typeof value.complete_at_source === 'boolean') && cursor(value.sort_order) &&
-    (value.last_activity_at === undefined || nullableText(value.last_activity_at)) && isJsonValue(value)
+    (value.last_activity_at === undefined || nullableText(value.last_activity_at)) &&
+    (value.group_id === undefined || value.group_id === null || isDatabaseId(value.group_id)) && isJsonValue(value)
 }
 function encodeTask(value: unknown): JsonValue {
   if (!isRecord(value)) return fail('INVALID_RESULT')
   const result: Record<string, JsonValue> = {}
   for (const key of taskKeys) result[key] = value[key] as JsonValue
   if (value.last_activity_at !== undefined) result.last_activity_at = value.last_activity_at as JsonValue
+  if (value.group_id !== undefined) result.group_id = value.group_id as JsonValue
   // Database rows also carry private MCP scope nonces and legacy checklist JSON;
   // neither belongs to the renderer Task DTO. Never spread a database row.
   if (!isDatabaseTask(result)) return fail('INVALID_RESULT')

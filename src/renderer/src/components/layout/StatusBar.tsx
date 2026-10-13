@@ -8,6 +8,10 @@ import { ActivityBadge } from '@/components/activity/ActivityBadge'
 import { useCaptainTaskId } from '@/stores/coordinator-store'
 import { useCommanderActivity, useProjectActivitySummary } from '@/lib/activity/use-activity'
 import { isQuietActivity } from '@/lib/activity/derive-activity'
+import { useProjectStore } from '@/stores/project-store'
+import { useTaskGroupStore } from '@/stores/task-group-store'
+
+const NO_GROUPS: readonly import('@shared/task-groups').TaskGroupRecord[] = []
 
 /**
  * Slim always-visible strip at the bottom of the shell: project-scoped live
@@ -19,11 +23,16 @@ export function StatusBar() {
   // Counts are the current project's.
   const tasks = useProjectTasks()
   const captainTaskId = useCaptainTaskId()
+  const projectId = useProjectStore(s => s.currentProjectId)
+  const groups = useTaskGroupStore(s => s.projects[projectId] ?? NO_GROUPS)
   const [version, setVersion] = useState('')
 
   useEffect(() => {
     window.electronAPI?.app?.getVersion().then((v) => v && setVersion(v))
   }, [])
+  useEffect(() => {
+    return useTaskGroupStore.getState().subscribe(projectId)
+  }, [projectId])
 
   const { active, total, review, taskIds } = useMemo(() => {
     let a = 0
@@ -38,8 +47,9 @@ export function StatusBar() {
       if (task.status !== TaskStatus.Completed && !isSnoozed(task.snoozed_until)) a++
     }
     if (captainTaskId) ids.add(captainTaskId)
+    for (const group of groups) if (group.state === 'active') ids.add(group.execution_task_id)
     return { active: a, total: t, review: r, taskIds: ids }
-  }, [tasks, captainTaskId])
+  }, [tasks, captainTaskId, groups])
 
   // Only fresh running/thinking/tool sessions count as running; waiting,
   // queued, failed and unavailable are separate and never "running".

@@ -28,6 +28,12 @@ import { useSnoozeTick } from '@/hooks/use-snooze-tick'
 import { isSnoozed, isOverdue, formatDueDistance } from '@/lib/utils'
 import { agentApi, onAgentStartQueueChanged } from '@/lib/ipc-client'
 import { TaskActivityBadge } from '@/components/activity/TaskActivityBadge'
+import type { TaskGroupRecord } from '@shared/task-groups'
+import { useTaskGroupStore } from '@/stores/task-group-store'
+import { TaskGroupCard } from '@/components/task-groups/TaskGroupCard'
+import { TaskGroupDialog } from '@/components/task-groups/TaskGroupDialog'
+
+const EMPTY_GROUPS: TaskGroupRecord[] = []
 import { TASK_STATUS_STYLES, type TaskStatusStyle } from '@shared/task-status-styles'
 import { TaskStatus, CodingAgentType } from '@/types'
 import type { Task, Agent } from '@/types'
@@ -308,11 +314,12 @@ const TaskCard = memo(function TaskCard({ task, onSelect, agent, transitionPhase
         onSelect(task.id)
       }}
       onKeyDown={(event) => {
-        listeners?.onKeyDown?.(event)
-        if (!event.defaultPrevented && event.key === 'Enter') {
+        if (!isDragging && event.key === 'Enter') {
           event.preventDefault()
           onSelect(task.id)
+          return
         }
+        listeners?.onKeyDown?.(event)
       }}
       aria-label={`${task.title}. Drag to change status, or press Enter to open.`}
     >
@@ -349,7 +356,7 @@ const ColumnHeader = memo(function ColumnHeader({ column, count }: { column: Sta
 
 // ── Column wrapper ───────────────────────────────────────────
 
-const BoardColumn = memo(function BoardColumn({ column, tasks, onSelect, agentMap, isDraggingTask, transitionStates, manualOrder, onSortByActivity }: { column: StatusColumn; tasks: Task[]; onSelect: (id: string) => void; agentMap: Map<string, Agent>; isDraggingTask: boolean; transitionStates: Record<string, TaskBoardTransitionPhase>; manualOrder: boolean; onSortByActivity: (status: TaskStatus) => void }) {
+const BoardColumn = memo(function BoardColumn({ column, tasks, groups, members, onSelectGroup, onSelect, agentMap, isDraggingTask, transitionStates, manualOrder, onSortByActivity }: { column: StatusColumn; tasks: Task[]; groups: TaskGroupRecord[]; members: Task[]; onSelectGroup: (id: string) => void; onSelect: (id: string) => void; agentMap: Map<string, Agent>; isDraggingTask: boolean; transitionStates: Record<string, TaskBoardTransitionPhase>; manualOrder: boolean; onSortByActivity: (status: TaskStatus) => void }) {
   const { isOver, setNodeRef } = useDroppable({
     id: `status:${column.key}`,
     data: { status: column.key }
@@ -362,12 +369,12 @@ const BoardColumn = memo(function BoardColumn({ column, tasks, onSelect, agentMa
       data-testid={`task-column-${column.key}`}
       data-drop-active={isDraggingTask || undefined}
       data-drop-over={isOver || undefined}
-      aria-label={`${column.label} column, ${tasks.length} task${tasks.length === 1 ? '' : 's'}`}
+      aria-label={`${column.label} column, ${tasks.length + groups.length} item${tasks.length + groups.length === 1 ? '' : 's'}`}
       className={`relative min-w-[248px] max-w-[340px] flex-1 flex flex-col rounded-xl ${column.columnBg} border transition-[border-color,box-shadow,background-color] ${isOver ? `border-current ring-2 ring-current/50 ${column.text}` : isDraggingTask ? 'border-foreground/30' : 'border-border/15'}`}
     >
       {/* Sticky header within column */}
       <div className={`sticky top-0 z-10 ${column.columnBg} backdrop-blur-md rounded-t-xl border-b border-border/15`}>
-        <ColumnHeader column={column} count={tasks.length} />
+        <ColumnHeader column={column} count={tasks.length + groups.length} />
         {manualOrder && (
           <button type="button" className="mx-3 mb-2 text-xs text-muted-foreground hover:text-foreground"
             onClick={() => onSortByActivity(column.key)}>
@@ -378,7 +385,8 @@ const BoardColumn = memo(function BoardColumn({ column, tasks, onSelect, agentMa
 
       {/* Cards */}
       <div className="flex-1 p-2 space-y-2 overflow-y-auto">
-        {tasks.length === 0 ? (
+        {groups.map(group => <TaskGroupCard key={group.id} group={group} members={members} onOpen={() => onSelectGroup(group.id)} onMember={onSelect} />)}
+        {tasks.length === 0 && groups.length === 0 ? (
           <div className="text-xs text-muted-foreground/50 text-center py-8 px-2">
             No tasks
           </div>
@@ -443,6 +451,11 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
   const manualOrders = useBoardOrderStore((s) => s.orders)
   const resetColumnOrder = useBoardOrderStore((s) => s.resetColumnOrder)
   const previewTaskId = useUIStore((s) => s.dashboardPreviewTaskId)
+  const groups = useTaskGroupStore(state => state.projects[projectId]) ?? EMPTY_GROUPS
+  const groupError = useTaskGroupStore(state => state.errors[`project:${projectId}`])
+  const [openGroupId, setOpenGroupId] = useState<string | null>(null)
+  useEffect(() => useTaskGroupStore.getState().subscribe(projectId), [projectId])
+  useEffect(() => { setOpenGroupId(null) }, [projectId])
   const handleSortByActivity = useCallback((status: TaskStatus) => {
     resetColumnOrder(projectId, status)
   }, [projectId, resetColumnOrder])
@@ -466,7 +479,7 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
 
   // Only show top-level tasks that are not snoozed (not subtasks) and not recurring templates
   const topLevelTasks = useMemo(
-    () => tasks.filter((t) => !t.parent_task_id && !isSnoozed(t.snoozed_until) && !(t.is_recurring && !t.recurrence_parent_id)),
+    () => tasks.filter((t) => !t.group_id && t.role !== 'task_group' && !t.parent_task_id && !isSnoozed(t.snoozed_until) && !(t.is_recurring && !t.recurrence_parent_id)),
     [tasks, snoozeTick]
   )
 
@@ -584,7 +597,7 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
   // Data received during the interaction is applied when it closes. A project
   // switch must never show the previous project's held cards.
   const heldOrder = useRef({ projectId, value: sortedTasksByStatus })
-  const interactionLocked = !!draggedTaskId || topLevelTasks.some((task) => task.id === previewTaskId)
+  const interactionLocked = !!draggedTaskId || !!openGroupId || topLevelTasks.some((task) => task.id === previewTaskId)
   const tasksByStatus = interactionLocked && heldOrder.current.projectId === projectId
     ? heldOrder.current.value : sortedTasksByStatus
   useEffect(() => {
@@ -608,6 +621,16 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
   }, [])
 
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {
+    const groupId = event.active.data.current?.groupId as string | undefined
+    if (groupId) {
+      setDraggedTaskId(null)
+      const status = event.over?.data.current?.status as TaskStatus | undefined
+      const group = groups.find(item => item.id === groupId)
+      if (group && status && group.status !== status) {
+        try { await useTaskGroupStore.getState().move(groupId, status) } catch { /* Group card surfaces the service refusal. */ }
+      }
+      return
+    }
     const taskId = String(event.active.id)
     const status = event.over?.data.current?.status as TaskStatus | undefined
     const task = topLevelTasks.find((candidate) => candidate.id === taskId)
@@ -642,7 +665,10 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
       setTransitionStates((current) => ({ ...current, [task.id]: 'failed' }))
       console.error(`[TaskBoard] Failed to move task ${task.id} to ${status}:`, error)
     }
-  }, [onStatusChange, topLevelTasks])
+  }, [onStatusChange, topLevelTasks, groups])
+
+  const activeGroups = groups.filter(group => group.state === 'active' && group.status !== TaskStatus.Completed)
+  const groupColumn = (group: TaskGroupRecord) => group.status === TaskStatus.AgentLearning ? TaskStatus.ReadyForReview : COLUMNS.some(column => column.key === group.status) ? group.status : TaskStatus.NotStarted
 
   return (
     <DndContext
@@ -653,13 +679,14 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
       onDragEnd={(event) => { void handleDragEnd(event) }}
     >
       <section>
+        {groupError && <p role="alert" className="mb-3 text-sm text-destructive">{groupError}<button className="ml-2 underline" onClick={() => { void useTaskGroupStore.getState().fetch(projectId) }}>Retry groups</button></p>}
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-semibold tracking-wide">Task Board</h2>
           <div className="flex items-center gap-3">
-            <CompletedDropTarget count={tasksByStatus.completedCount} isDraggingTask={!!draggedTask} />
+            <CompletedDropTarget count={tasksByStatus.completedCount + groups.filter(group => group.state === 'active' && group.status === TaskStatus.Completed).length} isDraggingTask={!!draggedTaskId} />
             <span className="text-sm text-muted-foreground">
-              {activeTasks} active task{activeTasks !== 1 ? 's' : ''}
+              {activeTasks + activeGroups.length} active {activeGroups.length ? 'items' : `task${activeTasks !== 1 ? 's' : ''}`}
             </span>
           </div>
         </div>
@@ -686,7 +713,7 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
               </div>
             ))}
           </div>
-        ) : topLevelTasks.length === 0 ? (
+        ) : topLevelTasks.length === 0 && activeGroups.length === 0 ? (
           <div className="rounded-xl border border-border/30 bg-card/50 p-8 text-center">
             <p className="text-sm text-muted-foreground">
               No tasks yet. Create tasks or sync from an integration to see them here.
@@ -699,9 +726,12 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
                 key={col.key}
                 column={col}
                 tasks={tasksByStatus.grouped[col.key] || []}
+                groups={activeGroups.filter(group => groupColumn(group) === col.key)}
+                members={tasks}
+                onSelectGroup={setOpenGroupId}
                 onSelect={handleSelectTask}
                 agentMap={agentMap}
-                isDraggingTask={!!draggedTask}
+                isDraggingTask={!!draggedTaskId}
                 transitionStates={displayedTransitions}
                 manualOrder={manualOrders[boardColumnKey(projectId, col.key)] !== undefined}
                 onSortByActivity={handleSortByActivity}
@@ -710,13 +740,14 @@ export function TaskBoard({ onStatusChange }: TaskBoardProps = {}) {
           </div>
         )}
       </section>
+      <TaskGroupDialog groupId={openGroupId} onClose={() => setOpenGroupId(null)} />
       <DragOverlay dropAnimation={{ duration: 160, easing: 'ease-out' }}>
         {draggedTask ? (
           <TaskCardOverlay
             task={draggedTask}
             agent={draggedTask.agent_id ? agentMap.get(draggedTask.agent_id) : undefined}
           />
-        ) : null}
+        ) : draggedTaskId?.startsWith('group:') ? <div className="rounded-xl border-2 border-primary/40 bg-card p-4 text-sm font-semibold">Task group · {groups.find(group => `group:${group.id}` === draggedTaskId)?.title}</div> : null}
       </DragOverlay>
     </DndContext>
   )

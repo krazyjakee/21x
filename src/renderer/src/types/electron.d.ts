@@ -259,6 +259,17 @@ export interface TeaCliStatus {
 }
 
 interface ElectronAPI {
+  taskGroups: {
+    list(projectId: string, includeDissolved?: boolean): Promise<import('@shared/task-groups').TaskGroupRecord[]>
+    get(id: string): Promise<import('@shared/task-groups').TaskGroupSnapshot<Task>>
+    history(taskId: string): Promise<import('@shared/task-groups').TaskGroupRecord[]>
+    create(data: import('@shared/task-groups').CreateTaskGroupData): Promise<import('@shared/task-groups').TaskGroupRecord>
+    add(id: string, taskIds: string[]): Promise<import('@shared/task-groups').TaskGroupRecord>
+    remove(id: string, taskId: string): Promise<import('@shared/task-groups').TaskGroupRecord>
+    dissolve(id: string): Promise<import('@shared/task-groups').TaskGroupRecord>
+    move(id: string, status: string): Promise<import('@shared/task-groups').TaskGroupRecord>
+    review(data: import('@shared/task-groups').TaskGroupReviewData): Promise<import('@shared/task-groups').TaskGroupReviewResult>
+  }
   db: {
     getTasks: (projectId?: string) => Promise<Task[]>
     getTask: (id: string) => Promise<Task | undefined>

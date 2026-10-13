@@ -5,6 +5,7 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 import { callToolForScope, listToolsForScope, FULL_ACCESS_SCOPE, type TaskMcpScope } from './task-management-core'
+import { TASK_GROUP_MUTATION_TOOL_NAMES } from './task-management-tools'
 
 const PROJECT: TaskMcpScope = { parentTaskId: null, taskId: null, artifactTaskId: null, projectId: 'proj-a' }
 
@@ -36,8 +37,10 @@ function argsFor(tool: { inputSchema: { properties?: Record<string, unknown>; re
 const errorText = (result: { content: Array<{ text: string }> }): string => result.content[0]?.text ?? ''
 
 describe('project-scoped task-management tools', () => {
-  it('serves the orchestration tool set, like full access', () => {
-    expect(listToolsForScope(PROJECT).map((t) => t.name)).toEqual(listToolsForScope(FULL_ACCESS_SCOPE).map((t) => t.name))
+  it('serves ordinary orchestration plus Captain-only group mutations', () => {
+    const names = listToolsForScope(PROJECT).map(tool => tool.name)
+    expect(names.filter(name => !TASK_GROUP_MUTATION_TOOL_NAMES.has(name))).toEqual(listToolsForScope(FULL_ACCESS_SCOPE).map(tool => tool.name))
+    expect(names.filter(name => TASK_GROUP_MUTATION_TOOL_NAMES.has(name))).toEqual([...TASK_GROUP_MUTATION_TOOL_NAMES])
   })
 
   const byIdTools = listToolsForScope(PROJECT).filter((tool) => {

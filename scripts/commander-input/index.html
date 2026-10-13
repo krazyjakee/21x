@@ -46,6 +46,7 @@ window.fixture.emit = event => {
 Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { enumerateDevices: async () => [{ kind: 'audioinput', deviceId: 'fixture-mic', label: 'Fixture microphone' }], addEventListener: () => {}, removeEventListener: () => {} } })
 const noop = async () => {}
 window.electronAPI = new Proxy({
+  taskGroups: { list: async () => [], history: async () => [], get: async () => { throw new Error('No task groups in this Commander fixture') } },
   sessionContext: {
     getSnapshot: async scope => { window.fixture.contextReads++; return {
       scope, generation: { id: 'generation-1', key: 'commander:session-1:initial', engine: 'chat', state: 'open', createdAt: 1, backendId: null },

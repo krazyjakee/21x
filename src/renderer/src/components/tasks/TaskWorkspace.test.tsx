@@ -7,7 +7,7 @@ import { clampTranscriptWidth } from './workspace/useResizableTranscript'
 import { useAgentStore, SessionStatus } from '@/stores/agent-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useArtifactStore } from '@/stores/artifact-store'
-import { TaskStatus } from '@/types'
+import { TaskStatus, CodingAgentType } from '@/types'
 import type { Task, Agent } from '@/types'
 import { dispatchTaskShortcut, TaskShortcutAction } from '@/lib/keyboard-shortcuts'
 import { PinnedArtifactTabId } from '@/stores/artifact-store'
@@ -90,6 +90,48 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
 
 const noopFn = vi.fn()
 const noopAsync = vi.fn().mockResolvedValue(undefined)
+
+describe('task group execution boundaries', () => {
+  it('shows member details and retained history access without binding or starting an independent transcript', () => {
+    const task = makeRendererTask({ group_id: 'group-1', title: 'Grouped copy change' })
+    renderWorkspace(task, [makeAgent({ config: { coding_agent: CodingAgentType.CLAUDE_CODE, model: 'sonnet' } })])
+    expect(screen.getByTestId('group-member-workspace')).toHaveTextContent('Grouped copy change')
+    expect(screen.queryByTestId('mock-send')).toBeNull()
+    expect(screen.queryByLabelText('Kickoff instructions')).toBeNull()
+    expect(screen.queryByTestId('header-cta-start')).toBeNull()
+    act(() => dispatchTaskShortcut({ taskId: task.id, action: TaskShortcutAction.RUN }))
+    act(() => dispatchTaskShortcut({ taskId: task.id, action: TaskShortcutAction.COMPLETE }))
+    expect(window.electronAPI.agentSession.start).not.toHaveBeenCalled()
+    expect(noopFn).not.toHaveBeenCalled()
+  })
+  it('retains the group execution Start control and shared transcript, while refusing ordinary anchor completion', async () => {
+    const task = makeRendererTask({ role: 'task_group' })
+    const agent = makeAgent({ config: { coding_agent: CodingAgentType.CLAUDE_CODE, model: 'sonnet' } })
+    vi.mocked(window.electronAPI.agentSession.start).mockResolvedValue({ sessionId: 'shared-group-session' })
+    renderWorkspace(task, [agent])
+    expect(screen.getByRole('button', { name: 'Start group' })).toBeTruthy()
+    expect(screen.getByTestId('mock-send')).toBeTruthy()
+    expect(screen.queryByLabelText('Change task status')).toBeNull()
+    expect(screen.queryByLabelText('Task actions')).toBeNull()
+    expect(screen.queryByTestId('header-cta-complete')).toBeNull()
+    act(() => dispatchTaskShortcut({ taskId: task.id, action: TaskShortcutAction.COMPLETE }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Review member tasks in the group')
+    expect(noopFn).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Start group' }))
+    await waitFor(() => expect(window.electronAPI.agentSession.start).toHaveBeenCalledWith(agent.id, task.id, undefined, undefined))
+  })
+  it('opens dissolved group history with its transcript while disabling send and fresh execution', () => {
+    const task = makeRendererTask({ role: 'task_group', session_id: 'persisted-group', status: TaskStatus.ReadyForReview })
+    render(<TaskWorkspace task={task} agents={[makeAgent()]} groupExecution="history" panelLayout="both" onEdit={noopFn} onDelete={noopFn} onUpdateAttachments={noopFn} onUpdateOutputFields={noopFn} onCompleteTask={noopFn} onAssignAgent={noopFn} />)
+    expect(screen.getByText('Retained shared conversation')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^(Start|Restart|Resume) group$/ })).toBeNull()
+    fireEvent.click(screen.getByTestId('mock-send'))
+    expect(window.electronAPI.agentSession.send).not.toHaveBeenCalled()
+    expect(window.electronAPI.agentSession.sendByTaskId).not.toHaveBeenCalled()
+    act(() => dispatchTaskShortcut({ taskId: task.id, action: TaskShortcutAction.RUN }))
+    expect(window.electronAPI.agentSession.start).not.toHaveBeenCalled()
+  })
+})
 
 function renderWorkspace(task: Task, agents: Agent[] = [makeAgent()]) {
   return render(

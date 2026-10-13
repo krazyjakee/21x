@@ -1,7 +1,7 @@
 {
   "database": {
     "file": "src/main/database/schema.ts",
-    "schemaVersion": 36
+    "schemaVersion": 37
   },
   "electronAPIConsumers": [
     {
@@ -297,7 +297,7 @@
       "expression": "window.electronAPI?.app?.getVersion",
       "file": "src/renderer/src/components/layout/StatusBar.tsx",
       "kind": "call",
-      "line": 25,
+      "line": 31,
       "path": [
         "app",
         "getVersion"
@@ -721,7 +721,7 @@
       "expression": "window.electronAPI.tasks.getWorkspaceDir",
       "file": "src/renderer/src/components/tasks/TaskWorkspace.tsx",
       "kind": "call",
-      "line": 571,
+      "line": 582,
       "path": [
         "tasks",
         "getWorkspaceDir"
@@ -733,7 +733,7 @@
       "expression": "window.electronAPI.shell.openPath",
       "file": "src/renderer/src/components/tasks/TaskWorkspace.tsx",
       "kind": "call",
-      "line": 572,
+      "line": 583,
       "path": [
         "shell",
         "openPath"
@@ -892,11 +892,119 @@
       "resolution": "literal"
     },
     {
+      "column": 58,
+      "expression": "window.electronAPI.taskGroups.list",
+      "file": "src/renderer/src/lib/ipc-client.ts",
+      "kind": "call",
+      "line": 55,
+      "path": [
+        "taskGroups",
+        "list"
+      ],
+      "resolution": "literal"
+    },
+    {
+      "column": 24,
+      "expression": "window.electronAPI.taskGroups.get",
+      "file": "src/renderer/src/lib/ipc-client.ts",
+      "kind": "call",
+      "line": 56,
+      "path": [
+        "taskGroups",
+        "get"
+      ],
+      "resolution": "literal"
+    },
+    {
+      "column": 32,
+      "expression": "window.electronAPI.taskGroups.history",
+      "file": "src/renderer/src/lib/ipc-client.ts",
+      "kind": "call",
+      "line": 57,
+      "path": [
+        "taskGroups",
+        "history"
+      ],
+      "resolution": "literal"
+    },
+    {
+      "column": 42,
+      "expression": "window.electronAPI.taskGroups.create",
+      "file": "src/renderer/src/lib/ipc-client.ts",
+      "kind": "call",
+      "line": 58,
+      "path": [
+        "taskGroups",
+        "create"
+      ],
+      "resolution": "literal"
+    },
+    {
+      "column": 43,
+      "expression": "window.electronAPI.taskGroups.add",
+      "file": "src/renderer/src/lib/ipc-client.ts",
+      "kind": "call",
+      "line": 59,
+      "path": [
+        "taskGroups",
+        "add"
+      ],
+      "resolution": "literal"
+    },
+    {
+      "column": 43,
+      "expression": "window.electronAPI.taskGroups.remove",
+      "file": "src/renderer/src/lib/ipc-client.ts",
+      "kind": "call",
+      "line": 60,
+      "path": [
+        "taskGroups",
+        "remove"
+      ],
+      "resolution": "literal"
+    },
+    {
+      "column": 29,
+      "expression": "window.electronAPI.taskGroups.dissolve",
+      "file": "src/renderer/src/lib/ipc-client.ts",
+      "kind": "call",
+      "line": 61,
+      "path": [
+        "taskGroups",
+        "dissolve"
+      ],
+      "resolution": "literal"
+    },
+    {
+      "column": 41,
+      "expression": "window.electronAPI.taskGroups.move",
+      "file": "src/renderer/src/lib/ipc-client.ts",
+      "kind": "call",
+      "line": 62,
+      "path": [
+        "taskGroups",
+        "move"
+      ],
+      "resolution": "literal"
+    },
+    {
+      "column": 42,
+      "expression": "window.electronAPI.taskGroups.review",
+      "file": "src/renderer/src/lib/ipc-client.ts",
+      "kind": "call",
+      "line": 63,
+      "path": [
+        "taskGroups",
+        "review"
+      ],
+      "resolution": "literal"
+    },
+    {
       "column": 12,
       "expression": "window.electronAPI.db.getTasks",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 56,
+      "line": 69,
       "path": [
         "db",
         "getTasks"
@@ -908,7 +1016,7 @@
       "expression": "window.electronAPI.db.getTask",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 60,
+      "line": 73,
       "path": [
         "db",
         "getTask"
@@ -920,7 +1028,7 @@
       "expression": "window.electronAPI.db.createTask",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 64,
+      "line": 77,
       "path": [
         "db",
         "createTask"
@@ -932,7 +1040,7 @@
       "expression": "window.electronAPI.db.updateTask",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 68,
+      "line": 81,
       "path": [
         "db",
         "updateTask"
@@ -944,7 +1052,7 @@
       "expression": "window.electronAPI.db.deleteTask",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 72,
+      "line": 85,
       "path": [
         "db",
         "deleteTask"
@@ -956,7 +1064,7 @@
       "expression": "window.electronAPI.db.getSubtasks",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 76,
+      "line": 89,
       "path": [
         "db",
         "getSubtasks"
@@ -968,7 +1076,7 @@
       "expression": "window.electronAPI.db.reorderSubtasks",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 80,
+      "line": 93,
       "path": [
         "db",
         "reorderSubtasks"
@@ -980,7 +1088,7 @@
       "expression": "window.electronAPI.tasks.getCoordinatorTaskId",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 85,
+      "line": 98,
       "path": [
         "tasks",
         "getCoordinatorTaskId"
@@ -992,7 +1100,7 @@
       "expression": "window.electronAPI.artifacts.scan",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 90,
+      "line": 103,
       "path": [
         "artifacts",
         "scan"
@@ -1004,7 +1112,7 @@
       "expression": "window.electronAPI.artifacts.read",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 91,
+      "line": 104,
       "path": [
         "artifacts",
         "read"
@@ -1016,7 +1124,7 @@
       "expression": "window.electronAPI.artifacts.copyFile",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 92,
+      "line": 105,
       "path": [
         "artifacts",
         "copyFile"
@@ -1028,7 +1136,7 @@
       "expression": "window.electronAPI.mcpServers.getAll",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 97,
+      "line": 110,
       "path": [
         "mcpServers",
         "getAll"
@@ -1040,7 +1148,7 @@
       "expression": "window.electronAPI.mcpServers.create",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 101,
+      "line": 114,
       "path": [
         "mcpServers",
         "create"
@@ -1052,7 +1160,7 @@
       "expression": "window.electronAPI.mcpServers.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 105,
+      "line": 118,
       "path": [
         "mcpServers",
         "update"
@@ -1064,7 +1172,7 @@
       "expression": "window.electronAPI.mcpServers.delete",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 109,
+      "line": 122,
       "path": [
         "mcpServers",
         "delete"
@@ -1076,7 +1184,7 @@
       "expression": "window.electronAPI.mcpServers.testConnection",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 113,
+      "line": 126,
       "path": [
         "mcpServers",
         "testConnection"
@@ -1088,7 +1196,7 @@
       "expression": "window.electronAPI.mcpServers.startOAuthFlow",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 117,
+      "line": 130,
       "path": [
         "mcpServers",
         "startOAuthFlow"
@@ -1100,7 +1208,7 @@
       "expression": "window.electronAPI.mcpServers.getOAuthStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 121,
+      "line": 134,
       "path": [
         "mcpServers",
         "getOAuthStatus"
@@ -1112,7 +1220,7 @@
       "expression": "window.electronAPI.mcpServers.revokeOAuthToken",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 125,
+      "line": 138,
       "path": [
         "mcpServers",
         "revokeOAuthToken"
@@ -1124,7 +1232,7 @@
       "expression": "window.electronAPI.mcpServers.probeForAuth",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 129,
+      "line": 142,
       "path": [
         "mcpServers",
         "probeForAuth"
@@ -1136,7 +1244,7 @@
       "expression": "window.electronAPI.mcpServers.submitManualClientId",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 133,
+      "line": 146,
       "path": [
         "mcpServers",
         "submitManualClientId"
@@ -1148,7 +1256,7 @@
       "expression": "window.electronAPI.agents.getAll",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 139,
+      "line": 152,
       "path": [
         "agents",
         "getAll"
@@ -1160,7 +1268,7 @@
       "expression": "window.electronAPI.agents.create",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 143,
+      "line": 156,
       "path": [
         "agents",
         "create"
@@ -1172,7 +1280,7 @@
       "expression": "window.electronAPI.agents.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 147,
+      "line": 160,
       "path": [
         "agents",
         "update"
@@ -1184,7 +1292,7 @@
       "expression": "window.electronAPI.agents.delete",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 151,
+      "line": 164,
       "path": [
         "agents",
         "delete"
@@ -1196,7 +1304,7 @@
       "expression": "window.electronAPI.agents.getStartQueue",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 156,
+      "line": 169,
       "path": [
         "agents",
         "getStartQueue"
@@ -1208,7 +1316,7 @@
       "expression": "window.electronAPI.agents.getStartRecoveryState",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 161,
+      "line": 174,
       "path": [
         "agents",
         "getStartRecoveryState"
@@ -1220,7 +1328,7 @@
       "expression": "window.electronAPI.agents.getStartRecoveryState",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 162,
+      "line": 175,
       "path": [
         "agents",
         "getStartRecoveryState"
@@ -1232,7 +1340,7 @@
       "expression": "window.electronAPI.agentSession.start",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 169,
+      "line": 182,
       "path": [
         "agentSession",
         "start"
@@ -1244,7 +1352,7 @@
       "expression": "window.electronAPI.agentSession.startTask",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 173,
+      "line": 186,
       "path": [
         "agentSession",
         "startTask"
@@ -1256,7 +1364,7 @@
       "expression": "window.electronAPI.agentSession.resume",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 177,
+      "line": 190,
       "path": [
         "agentSession",
         "resume"
@@ -1268,7 +1376,7 @@
       "expression": "window.electronAPI.agentSession.abort",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 181,
+      "line": 194,
       "path": [
         "agentSession",
         "abort"
@@ -1280,7 +1388,7 @@
       "expression": "window.electronAPI.agentSession.stop",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 185,
+      "line": 198,
       "path": [
         "agentSession",
         "stop"
@@ -1292,7 +1400,7 @@
       "expression": "window.electronAPI.agentSession.stopByTaskId",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 189,
+      "line": 202,
       "path": [
         "agentSession",
         "stopByTaskId"
@@ -1304,7 +1412,7 @@
       "expression": "window.electronAPI.agentSession.switchAgent",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 193,
+      "line": 206,
       "path": [
         "agentSession",
         "switchAgent"
@@ -1316,7 +1424,7 @@
       "expression": "window.electronAPI.agentSession.send",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 197,
+      "line": 210,
       "path": [
         "agentSession",
         "send"
@@ -1328,7 +1436,7 @@
       "expression": "window.electronAPI.agentSession.sendByTaskId",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 201,
+      "line": 214,
       "path": [
         "agentSession",
         "sendByTaskId"
@@ -1340,7 +1448,7 @@
       "expression": "window.electronAPI.agentSession.approve",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 205,
+      "line": 218,
       "path": [
         "agentSession",
         "approve"
@@ -1352,7 +1460,7 @@
       "expression": "window.electronAPI.agentSession.approve",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 206,
+      "line": 219,
       "path": [
         "agentSession",
         "approve"
@@ -1364,7 +1472,7 @@
       "expression": "window.electronAPI.agentSession.approve",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 207,
+      "line": 220,
       "path": [
         "agentSession",
         "approve"
@@ -1376,7 +1484,7 @@
       "expression": "window.electronAPI.agentSession.getRawTranscript",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 211,
+      "line": 224,
       "path": [
         "agentSession",
         "getRawTranscript"
@@ -1388,7 +1496,7 @@
       "expression": "window.electronAPI.agentSession.getTranscriptSnapshot",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 215,
+      "line": 228,
       "path": [
         "agentSession",
         "getTranscriptSnapshot"
@@ -1400,7 +1508,7 @@
       "expression": "window.electronAPI.agentSession.getTranscriptDelta",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 219,
+      "line": 232,
       "path": [
         "agentSession",
         "getTranscriptDelta"
@@ -1412,7 +1520,7 @@
       "expression": "window.electronAPI.captainRuntime.get",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 224,
+      "line": 237,
       "path": [
         "captainRuntime",
         "get"
@@ -1424,7 +1532,7 @@
       "expression": "window.electronAPI.captainRuntime.switch",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 225,
+      "line": 238,
       "path": [
         "captainRuntime",
         "switch"
@@ -1436,7 +1544,7 @@
       "expression": "window.electronAPI.captainRuntime.retry",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 226,
+      "line": 239,
       "path": [
         "captainRuntime",
         "retry"
@@ -1448,7 +1556,7 @@
       "expression": "window.electronAPI.captainRuntime.rollback",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 227,
+      "line": 240,
       "path": [
         "captainRuntime",
         "rollback"
@@ -1460,7 +1568,7 @@
       "expression": "window.electronAPI.agentConfig.getProviders",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 232,
+      "line": 245,
       "path": [
         "agentConfig",
         "getProviders"
@@ -1472,7 +1580,7 @@
       "expression": "window.electronAPI.agentConfig.listModels",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 235,
+      "line": 248,
       "path": [
         "agentConfig",
         "listModels"
@@ -1484,7 +1592,7 @@
       "expression": "window.electronAPI.shell.openPath",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 241,
+      "line": 254,
       "path": [
         "shell",
         "openPath"
@@ -1496,7 +1604,7 @@
       "expression": "window.electronAPI.shell.showItemInFolder",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 244,
+      "line": 257,
       "path": [
         "shell",
         "showItemInFolder"
@@ -1508,7 +1616,7 @@
       "expression": "window.electronAPI.shell.readTextFile",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 247,
+      "line": 260,
       "path": [
         "shell",
         "readTextFile"
@@ -1520,7 +1628,7 @@
       "expression": "window.electronAPI.notifications.show",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 253,
+      "line": 266,
       "path": [
         "notifications",
         "show"
@@ -1532,7 +1640,7 @@
       "expression": "window.electronAPI.onOverdueCheck",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 258,
+      "line": 271,
       "path": [
         "onOverdueCheck"
       ],
@@ -1543,7 +1651,7 @@
       "expression": "window.electronAPI.onTasksRefresh",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 262,
+      "line": 275,
       "path": [
         "onTasksRefresh"
       ],
@@ -1554,7 +1662,7 @@
       "expression": "window.electronAPI.chatImages?.readClipboard",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 268,
+      "line": 281,
       "path": [
         "chatImages",
         "readClipboard"
@@ -1566,7 +1674,7 @@
       "expression": "window.electronAPI.chatImages.readClipboard",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 269,
+      "line": 282,
       "path": [
         "chatImages",
         "readClipboard"
@@ -1578,7 +1686,7 @@
       "expression": "window.electronAPI.chatImages.saveToTask",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 272,
+      "line": 285,
       "path": [
         "chatImages",
         "saveToTask"
@@ -1590,7 +1698,7 @@
       "expression": "window.electronAPI.attachments.pick",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 277,
+      "line": 290,
       "path": [
         "attachments",
         "pick"
@@ -1602,7 +1710,7 @@
       "expression": "window.electronAPI.attachments.save",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 281,
+      "line": 294,
       "path": [
         "attachments",
         "save"
@@ -1614,7 +1722,7 @@
       "expression": "window.electronAPI.attachments.remove",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 285,
+      "line": 298,
       "path": [
         "attachments",
         "remove"
@@ -1626,7 +1734,7 @@
       "expression": "window.electronAPI.attachments.open",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 289,
+      "line": 302,
       "path": [
         "attachments",
         "open"
@@ -1638,7 +1746,7 @@
       "expression": "window.electronAPI.attachments.download",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 293,
+      "line": 306,
       "path": [
         "attachments",
         "download"
@@ -1650,7 +1758,7 @@
       "expression": "window.electronAPI.onArtifactUpdated",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 298,
+      "line": 311,
       "path": [
         "onArtifactUpdated"
       ],
@@ -1661,7 +1769,7 @@
       "expression": "window.electronAPI.onTranscriptChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 302,
+      "line": 315,
       "path": [
         "onTranscriptChanged"
       ],
@@ -1672,7 +1780,7 @@
       "expression": "window.electronAPI.onAgentStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 306,
+      "line": 319,
       "path": [
         "onAgentStatus"
       ],
@@ -1683,7 +1791,7 @@
       "expression": "window.electronAPI.onAgentStartQueueChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 310,
+      "line": 323,
       "path": [
         "onAgentStartQueueChanged"
       ],
@@ -1694,7 +1802,7 @@
       "expression": "window.electronAPI.onAgentIncompatibleSession",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 314,
+      "line": 327,
       "path": [
         "onAgentIncompatibleSession"
       ],
@@ -1705,7 +1813,7 @@
       "expression": "window.electronAPI.onTaskUpdated",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 318,
+      "line": 331,
       "path": [
         "onTaskUpdated"
       ],
@@ -1716,7 +1824,7 @@
       "expression": "window.electronAPI.onTaskSourceActionFailed",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 325,
+      "line": 338,
       "path": [
         "onTaskSourceActionFailed"
       ],
@@ -1727,7 +1835,7 @@
       "expression": "window.electronAPI.onTaskCreated",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 329,
+      "line": 342,
       "path": [
         "onTaskCreated"
       ],
@@ -1738,7 +1846,7 @@
       "expression": "window.electronAPI.onTaskDeleted",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 333,
+      "line": 346,
       "path": [
         "onTaskDeleted"
       ],
@@ -1749,7 +1857,7 @@
       "expression": "window.electronAPI.settings.get",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 338,
+      "line": 351,
       "path": [
         "settings",
         "get"
@@ -1761,7 +1869,7 @@
       "expression": "window.electronAPI.settings.set",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 341,
+      "line": 354,
       "path": [
         "settings",
         "set"
@@ -1773,7 +1881,7 @@
       "expression": "window.electronAPI.settings.getAll",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 344,
+      "line": 357,
       "path": [
         "settings",
         "getAll"
@@ -1785,7 +1893,7 @@
       "expression": "window.electronAPI?.updater?.check",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 350,
+      "line": 363,
       "path": [
         "updater",
         "check"
@@ -1797,7 +1905,7 @@
       "expression": "window.electronAPI?.updater?.download",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 353,
+      "line": 366,
       "path": [
         "updater",
         "download"
@@ -1809,7 +1917,7 @@
       "expression": "window.electronAPI?.updater?.install",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 356,
+      "line": 369,
       "path": [
         "updater",
         "install"
@@ -1821,7 +1929,7 @@
       "expression": "window.electronAPI?.updater?.getVersion",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 359,
+      "line": 372,
       "path": [
         "updater",
         "getVersion"
@@ -1833,7 +1941,7 @@
       "expression": "window.electronAPI?.updater?.onStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 362,
+      "line": 375,
       "path": [
         "updater",
         "onStatus"
@@ -1845,7 +1953,7 @@
       "expression": "window.electronAPI?.updater?.onMenuCheckForUpdates",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 365,
+      "line": 378,
       "path": [
         "updater",
         "onMenuCheckForUpdates"
@@ -1857,7 +1965,7 @@
       "expression": "window.electronAPI?.mobile?.getInfo",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 383,
+      "line": 396,
       "path": [
         "mobile",
         "getInfo"
@@ -1869,7 +1977,7 @@
       "expression": "window.electronAPI?.mobile?.setAccess",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 389,
+      "line": 402,
       "path": [
         "mobile",
         "setAccess"
@@ -1881,7 +1989,7 @@
       "expression": "window.electronAPI?.mobile?.startTunnel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 394,
+      "line": 407,
       "path": [
         "mobile",
         "startTunnel"
@@ -1893,7 +2001,7 @@
       "expression": "window.electronAPI?.mobile?.stopTunnel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 397,
+      "line": 410,
       "path": [
         "mobile",
         "stopTunnel"
@@ -1905,7 +2013,7 @@
       "expression": "window.electronAPI?.mobile?.setCustomUrl",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 400,
+      "line": 413,
       "path": [
         "mobile",
         "setCustomUrl"
@@ -1917,7 +2025,7 @@
       "expression": "window.electronAPI?.mobile?.clearCustomUrl",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 403,
+      "line": 416,
       "path": [
         "mobile",
         "clearCustomUrl"
@@ -1929,7 +2037,7 @@
       "expression": "window.electronAPI?.mobile?.getPendingPin",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 406,
+      "line": 419,
       "path": [
         "mobile",
         "getPendingPin"
@@ -1941,7 +2049,7 @@
       "expression": "window.electronAPI?.mobile?.getSessions",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 409,
+      "line": 422,
       "path": [
         "mobile",
         "getSessions"
@@ -1953,7 +2061,7 @@
       "expression": "window.electronAPI?.mobile?.revokeSession",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 412,
+      "line": 425,
       "path": [
         "mobile",
         "revokeSession"
@@ -1965,7 +2073,7 @@
       "expression": "window.electronAPI?.mobile?.revokeAllSessions",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 415,
+      "line": 428,
       "path": [
         "mobile",
         "revokeAllSessions"
@@ -1977,7 +2085,7 @@
       "expression": "window.electronAPI?.mobile?.onPairingInitiated",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 418,
+      "line": 431,
       "path": [
         "mobile",
         "onPairingInitiated"
@@ -1989,7 +2097,7 @@
       "expression": "window.electronAPI?.mobile?.onDeviceConnected",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 421,
+      "line": 434,
       "path": [
         "mobile",
         "onDeviceConnected"
@@ -2001,7 +2109,7 @@
       "expression": "window.electronAPI.github.checkCli",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 427,
+      "line": 440,
       "path": [
         "github",
         "checkCli"
@@ -2013,7 +2121,7 @@
       "expression": "window.electronAPI.github.fetchOrgs",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 430,
+      "line": 443,
       "path": [
         "github",
         "fetchOrgs"
@@ -2025,7 +2133,7 @@
       "expression": "window.electronAPI.github.fetchOrgRepos",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 433,
+      "line": 446,
       "path": [
         "github",
         "fetchOrgRepos"
@@ -2037,7 +2145,7 @@
       "expression": "window.electronAPI.github.fetchUserRepos",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 436,
+      "line": 449,
       "path": [
         "github",
         "fetchUserRepos"
@@ -2049,7 +2157,7 @@
       "expression": "window.electronAPI.gitlab.checkCli",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 442,
+      "line": 455,
       "path": [
         "gitlab",
         "checkCli"
@@ -2061,7 +2169,7 @@
       "expression": "window.electronAPI.gitlab.fetchOrgs",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 445,
+      "line": 458,
       "path": [
         "gitlab",
         "fetchOrgs"
@@ -2073,7 +2181,7 @@
       "expression": "window.electronAPI.gitlab.fetchOrgRepos",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 448,
+      "line": 461,
       "path": [
         "gitlab",
         "fetchOrgRepos"
@@ -2085,7 +2193,7 @@
       "expression": "window.electronAPI.gitlab.fetchUserRepos",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 451,
+      "line": 464,
       "path": [
         "gitlab",
         "fetchUserRepos"
@@ -2097,7 +2205,7 @@
       "expression": "window.electronAPI.forgejo.checkCli",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 457,
+      "line": 470,
       "path": [
         "forgejo",
         "checkCli"
@@ -2109,7 +2217,7 @@
       "expression": "window.electronAPI.forgejo.setLogin",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 460,
+      "line": 473,
       "path": [
         "forgejo",
         "setLogin"
@@ -2121,7 +2229,7 @@
       "expression": "window.electronAPI.forgejo.fetchOrgs",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 463,
+      "line": 476,
       "path": [
         "forgejo",
         "fetchOrgs"
@@ -2133,7 +2241,7 @@
       "expression": "window.electronAPI.forgejo.fetchOrgRepos",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 466,
+      "line": 479,
       "path": [
         "forgejo",
         "fetchOrgRepos"
@@ -2145,7 +2253,7 @@
       "expression": "window.electronAPI.forgejo.fetchUserRepos",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 469,
+      "line": 482,
       "path": [
         "forgejo",
         "fetchUserRepos"
@@ -2157,7 +2265,7 @@
       "expression": "window.electronAPI.git.recordRepoProviders",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 475,
+      "line": 488,
       "path": [
         "git",
         "recordRepoProviders"
@@ -2169,7 +2277,7 @@
       "expression": "window.electronAPI.taskSources.getAll",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 482,
+      "line": 495,
       "path": [
         "taskSources",
         "getAll"
@@ -2181,7 +2289,7 @@
       "expression": "window.electronAPI.taskSources.create",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 486,
+      "line": 499,
       "path": [
         "taskSources",
         "create"
@@ -2193,7 +2301,7 @@
       "expression": "window.electronAPI.taskSources.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 490,
+      "line": 503,
       "path": [
         "taskSources",
         "update"
@@ -2205,7 +2313,7 @@
       "expression": "window.electronAPI.taskSources.delete",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 494,
+      "line": 507,
       "path": [
         "taskSources",
         "delete"
@@ -2217,7 +2325,7 @@
       "expression": "window.electronAPI.taskSources.sync",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 498,
+      "line": 511,
       "path": [
         "taskSources",
         "sync"
@@ -2229,7 +2337,7 @@
       "expression": "window.electronAPI.taskSources.exportUpdate",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 502,
+      "line": 515,
       "path": [
         "taskSources",
         "exportUpdate"
@@ -2241,7 +2349,7 @@
       "expression": "window.electronAPI.taskSources.getUsers",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 506,
+      "line": 519,
       "path": [
         "taskSources",
         "getUsers"
@@ -2253,7 +2361,7 @@
       "expression": "window.electronAPI.taskSources.reassign",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 510,
+      "line": 523,
       "path": [
         "taskSources",
         "reassign"
@@ -2265,7 +2373,7 @@
       "expression": "window.electronAPI.projects.getAll",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 515,
+      "line": 528,
       "path": [
         "projects",
         "getAll"
@@ -2277,7 +2385,7 @@
       "expression": "window.electronAPI.projects.get",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 516,
+      "line": 529,
       "path": [
         "projects",
         "get"
@@ -2289,7 +2397,7 @@
       "expression": "window.electronAPI.projects.getDefault",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 517,
+      "line": 530,
       "path": [
         "projects",
         "getDefault"
@@ -2301,7 +2409,7 @@
       "expression": "window.electronAPI.projects.create",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 518,
+      "line": 531,
       "path": [
         "projects",
         "create"
@@ -2313,7 +2421,7 @@
       "expression": "window.electronAPI.projects.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 519,
+      "line": 532,
       "path": [
         "projects",
         "update"
@@ -2325,7 +2433,7 @@
       "expression": "window.electronAPI.projects.archive",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 520,
+      "line": 533,
       "path": [
         "projects",
         "archive"
@@ -2337,7 +2445,7 @@
       "expression": "window.electronAPI.projects.reorder",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 521,
+      "line": 534,
       "path": [
         "projects",
         "reorder"
@@ -2349,7 +2457,7 @@
       "expression": "window.electronAPI.projects.getCaptainMemory",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 524,
+      "line": 537,
       "path": [
         "projects",
         "getCaptainMemory"
@@ -2361,7 +2469,7 @@
       "expression": "window.electronAPI.projects.moveTask",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 526,
+      "line": 539,
       "path": [
         "projects",
         "moveTask"
@@ -2373,7 +2481,7 @@
       "expression": "window.electronAPI.projects.onChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 528,
+      "line": 541,
       "path": [
         "projects",
         "onChanged"
@@ -2385,7 +2493,7 @@
       "expression": "window.electronAPI.projects.onChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 528,
+      "line": 541,
       "path": [
         "projects",
         "onChanged"
@@ -2397,7 +2505,7 @@
       "expression": "window.electronAPI.projects.getStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 530,
+      "line": 543,
       "path": [
         "projects",
         "getStatus"
@@ -2409,7 +2517,7 @@
       "expression": "window.electronAPI.projects.getStatusHistory",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 533,
+      "line": 546,
       "path": [
         "projects",
         "getStatusHistory"
@@ -2421,7 +2529,7 @@
       "expression": "window.electronAPI.projects.onStatusChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 536,
+      "line": 549,
       "path": [
         "projects",
         "onStatusChanged"
@@ -2433,7 +2541,7 @@
       "expression": "window.electronAPI.projects.onStatusChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 536,
+      "line": 549,
       "path": [
         "projects",
         "onStatusChanged"
@@ -2445,7 +2553,7 @@
       "expression": "window.electronAPI.projects.repos.list",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 538,
+      "line": 551,
       "path": [
         "projects",
         "repos",
@@ -2458,7 +2566,7 @@
       "expression": "window.electronAPI.projects.repos.add",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 540,
+      "line": 553,
       "path": [
         "projects",
         "repos",
@@ -2471,7 +2579,7 @@
       "expression": "window.electronAPI.projects.repos.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 542,
+      "line": 555,
       "path": [
         "projects",
         "repos",
@@ -2484,7 +2592,7 @@
       "expression": "window.electronAPI.projects.repos.remove",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 543,
+      "line": 556,
       "path": [
         "projects",
         "repos",
@@ -2497,7 +2605,7 @@
       "expression": "window.electronAPI.projects.repos.reorder",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 545,
+      "line": 558,
       "path": [
         "projects",
         "repos",
@@ -2510,7 +2618,7 @@
       "expression": "window.electronAPI.projects.resources.list",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 547,
+      "line": 560,
       "path": [
         "projects",
         "resources",
@@ -2523,7 +2631,7 @@
       "expression": "window.electronAPI.projects.resources.add",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 549,
+      "line": 562,
       "path": [
         "projects",
         "resources",
@@ -2536,7 +2644,7 @@
       "expression": "window.electronAPI.projects.resources.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 551,
+      "line": 564,
       "path": [
         "projects",
         "resources",
@@ -2549,7 +2657,7 @@
       "expression": "window.electronAPI.projects.resources.remove",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 552,
+      "line": 565,
       "path": [
         "projects",
         "resources",
@@ -2562,7 +2670,7 @@
       "expression": "window.electronAPI.projects.resources.reorder",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 554,
+      "line": 567,
       "path": [
         "projects",
         "resources",
@@ -2575,7 +2683,7 @@
       "expression": "window.electronAPI.projectLimits.getState",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 559,
+      "line": 572,
       "path": [
         "projectLimits",
         "getState"
@@ -2587,7 +2695,7 @@
       "expression": "window.electronAPI.projectLimits.isAllPaused",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 560,
+      "line": 573,
       "path": [
         "projectLimits",
         "isAllPaused"
@@ -2599,7 +2707,7 @@
       "expression": "window.electronAPI.projectLimits.pauseAll",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 561,
+      "line": 574,
       "path": [
         "projectLimits",
         "pauseAll"
@@ -2611,7 +2719,7 @@
       "expression": "window.electronAPI.concurrency.getState",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 566,
+      "line": 579,
       "path": [
         "concurrency",
         "getState"
@@ -2623,7 +2731,7 @@
       "expression": "window.electronAPI.concurrency.setCaptainControl",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 568,
+      "line": 581,
       "path": [
         "concurrency",
         "setCaptainControl"
@@ -2635,7 +2743,7 @@
       "expression": "window.electronAPI.concurrency.pin",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 570,
+      "line": 583,
       "path": [
         "concurrency",
         "pin"
@@ -2647,7 +2755,7 @@
       "expression": "window.electronAPI.concurrency?.onChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 572,
+      "line": 585,
       "path": [
         "concurrency",
         "onChanged"
@@ -2659,7 +2767,7 @@
       "expression": "window.electronAPI.concurrency.onChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 572,
+      "line": 585,
       "path": [
         "concurrency",
         "onChanged"
@@ -2671,7 +2779,7 @@
       "expression": "window.electronAPI.overview?.getAllStatuses",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 579,
+      "line": 592,
       "path": [
         "overview",
         "getAllStatuses"
@@ -2683,7 +2791,7 @@
       "expression": "window.electronAPI.overview.getAllStatuses",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 579,
+      "line": 592,
       "path": [
         "overview",
         "getAllStatuses"
@@ -2695,7 +2803,7 @@
       "expression": "window.electronAPI.skills.getAll",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 584,
+      "line": 597,
       "path": [
         "skills",
         "getAll"
@@ -2707,7 +2815,7 @@
       "expression": "window.electronAPI.skills.create",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 588,
+      "line": 601,
       "path": [
         "skills",
         "create"
@@ -2719,7 +2827,7 @@
       "expression": "window.electronAPI.skills.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 592,
+      "line": 605,
       "path": [
         "skills",
         "update"
@@ -2731,7 +2839,7 @@
       "expression": "window.electronAPI.skills.delete",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 596,
+      "line": 609,
       "path": [
         "skills",
         "delete"
@@ -2743,7 +2851,7 @@
       "expression": "window.electronAPI.skills.setProject",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 601,
+      "line": 614,
       "path": [
         "skills",
         "setProject"
@@ -2755,7 +2863,7 @@
       "expression": "window.electronAPI.skills.onChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 606,
+      "line": 619,
       "path": [
         "skills",
         "onChanged"
@@ -2767,7 +2875,7 @@
       "expression": "window.electronAPI.skills.onChanged",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 606,
+      "line": 619,
       "path": [
         "skills",
         "onChanged"
@@ -2779,7 +2887,7 @@
       "expression": "window.electronAPI.secrets.getAll",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 612,
+      "line": 625,
       "path": [
         "secrets",
         "getAll"
@@ -2791,7 +2899,7 @@
       "expression": "window.electronAPI.secrets.create",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 616,
+      "line": 629,
       "path": [
         "secrets",
         "create"
@@ -2803,7 +2911,7 @@
       "expression": "window.electronAPI.secrets.update",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 620,
+      "line": 633,
       "path": [
         "secrets",
         "update"
@@ -2815,7 +2923,7 @@
       "expression": "window.electronAPI.secrets.delete",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 624,
+      "line": 637,
       "path": [
         "secrets",
         "delete"
@@ -2827,7 +2935,7 @@
       "expression": "window.electronAPI.plugins.list",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 630,
+      "line": 643,
       "path": [
         "plugins",
         "list"
@@ -2839,7 +2947,7 @@
       "expression": "window.electronAPI.plugins.getDocumentation",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 634,
+      "line": 647,
       "path": [
         "plugins",
         "getDocumentation"
@@ -2851,7 +2959,7 @@
       "expression": "window.electronAPI.plugins.resolveOptions",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 638,
+      "line": 651,
       "path": [
         "plugins",
         "resolveOptions"
@@ -2863,7 +2971,7 @@
       "expression": "window.electronAPI.plugins.executeAction",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 642,
+      "line": 655,
       "path": [
         "plugins",
         "executeAction"
@@ -2875,7 +2983,7 @@
       "expression": "window.electronAPI.connectors.bridgePieces",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 650,
+      "line": 663,
       "path": [
         "connectors",
         "bridgePieces"
@@ -2887,7 +2995,7 @@
       "expression": "window.electronAPI.connectors.ensureInstance",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 652,
+      "line": 665,
       "path": [
         "connectors",
         "ensureInstance"
@@ -2899,7 +3007,7 @@
       "expression": "window.electronAPI.connectors.credentialStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 653,
+      "line": 666,
       "path": [
         "connectors",
         "credentialStatus"
@@ -2911,7 +3019,7 @@
       "expression": "window.electronAPI.connectors.setCredentials",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 658,
+      "line": 671,
       "path": [
         "connectors",
         "setCredentials"
@@ -2923,7 +3031,7 @@
       "expression": "window.electronAPI.connectors.clearCredentials",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 659,
+      "line": 672,
       "path": [
         "connectors",
         "clearCredentials"
@@ -2935,7 +3043,7 @@
       "expression": "window.electronAPI.connectors.oauthConnect",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 664,
+      "line": 677,
       "path": [
         "connectors",
         "oauthConnect"
@@ -2947,7 +3055,7 @@
       "expression": "window.electronAPI.connectors.syncStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 665,
+      "line": 678,
       "path": [
         "connectors",
         "syncStatus"
@@ -2959,7 +3067,7 @@
       "expression": "window.electronAPI.claudePlugins.getMarketplaceSources",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 670,
+      "line": 683,
       "path": [
         "claudePlugins",
         "getMarketplaceSources"
@@ -2971,7 +3079,7 @@
       "expression": "window.electronAPI.claudePlugins.addMarketplaceSource",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 674,
+      "line": 687,
       "path": [
         "claudePlugins",
         "addMarketplaceSource"
@@ -2983,7 +3091,7 @@
       "expression": "window.electronAPI.claudePlugins.removeMarketplaceSource",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 678,
+      "line": 691,
       "path": [
         "claudePlugins",
         "removeMarketplaceSource"
@@ -2995,7 +3103,7 @@
       "expression": "window.electronAPI.claudePlugins.fetchCatalog",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 682,
+      "line": 695,
       "path": [
         "claudePlugins",
         "fetchCatalog"
@@ -3007,7 +3115,7 @@
       "expression": "window.electronAPI.claudePlugins.discoverPlugins",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 686,
+      "line": 699,
       "path": [
         "claudePlugins",
         "discoverPlugins"
@@ -3019,7 +3127,7 @@
       "expression": "window.electronAPI.claudePlugins.getInstalledPlugins",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 690,
+      "line": 703,
       "path": [
         "claudePlugins",
         "getInstalledPlugins"
@@ -3031,7 +3139,7 @@
       "expression": "window.electronAPI.claudePlugins.installPlugin",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 694,
+      "line": 707,
       "path": [
         "claudePlugins",
         "installPlugin"
@@ -3043,7 +3151,7 @@
       "expression": "window.electronAPI.claudePlugins.uninstallPlugin",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 698,
+      "line": 711,
       "path": [
         "claudePlugins",
         "uninstallPlugin"
@@ -3055,7 +3163,7 @@
       "expression": "window.electronAPI.claudePlugins.enablePlugin",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 702,
+      "line": 715,
       "path": [
         "claudePlugins",
         "enablePlugin"
@@ -3067,7 +3175,7 @@
       "expression": "window.electronAPI.claudePlugins.disablePlugin",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 706,
+      "line": 719,
       "path": [
         "claudePlugins",
         "disablePlugin"
@@ -3079,7 +3187,7 @@
       "expression": "window.electronAPI.claudePlugins.getPluginResources",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 710,
+      "line": 723,
       "path": [
         "claudePlugins",
         "getPluginResources"
@@ -3091,7 +3199,7 @@
       "expression": "window.electronAPI.worktree.setup",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 716,
+      "line": 729,
       "path": [
         "worktree",
         "setup"
@@ -3103,7 +3211,7 @@
       "expression": "window.electronAPI.worktree.cleanup",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 719,
+      "line": 732,
       "path": [
         "worktree",
         "cleanup"
@@ -3115,7 +3223,7 @@
       "expression": "window.electronAPI.worktree.changes",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 722,
+      "line": 735,
       "path": [
         "worktree",
         "changes"
@@ -3127,7 +3235,7 @@
       "expression": "window.electronAPI.worktree.files",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 725,
+      "line": 738,
       "path": [
         "worktree",
         "files"
@@ -3139,7 +3247,7 @@
       "expression": "window.electronAPI.worktree.readFile",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 728,
+      "line": 741,
       "path": [
         "worktree",
         "readFile"
@@ -3151,7 +3259,7 @@
       "expression": "window.electronAPI.worktree.runCleanupNow",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 735,
+      "line": 748,
       "path": [
         "worktree",
         "runCleanupNow"
@@ -3163,7 +3271,7 @@
       "expression": "window.electronAPI.onWorktreeProgress",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 740,
+      "line": 753,
       "path": [
         "onWorktreeProgress"
       ],
@@ -3174,7 +3282,7 @@
       "expression": "window.electronAPI.onWorkspaceCleanupProgress",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 744,
+      "line": 757,
       "path": [
         "onWorkspaceCleanupProgress"
       ],
@@ -3185,7 +3293,7 @@
       "expression": "window.electronAPI.voice.getSnapshot",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 752,
+      "line": 765,
       "path": [
         "voice",
         "getSnapshot"
@@ -3197,7 +3305,7 @@
       "expression": "window.electronAPI.voice.setEnabled",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 753,
+      "line": 766,
       "path": [
         "voice",
         "setEnabled"
@@ -3209,7 +3317,7 @@
       "expression": "window.electronAPI.voice.getPermission",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 754,
+      "line": 767,
       "path": [
         "voice",
         "getPermission"
@@ -3221,7 +3329,7 @@
       "expression": "window.electronAPI.voice.requestPermission",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 756,
+      "line": 769,
       "path": [
         "voice",
         "requestPermission"
@@ -3233,7 +3341,7 @@
       "expression": "window.electronAPI.voice.startTurn",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 758,
+      "line": 771,
       "path": [
         "voice",
         "startTurn"
@@ -3245,7 +3353,7 @@
       "expression": "window.electronAPI.voice.pushAudio",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 760,
+      "line": 773,
       "path": [
         "voice",
         "pushAudio"
@@ -3257,7 +3365,7 @@
       "expression": "window.electronAPI.voice.endTurn",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 761,
+      "line": 774,
       "path": [
         "voice",
         "endTurn"
@@ -3269,7 +3377,7 @@
       "expression": "window.electronAPI.voice.cancelTurn",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 763,
+      "line": 776,
       "path": [
         "voice",
         "cancelTurn"
@@ -3281,7 +3389,7 @@
       "expression": "window.electronAPI.voice.confirm",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 766,
+      "line": 779,
       "path": [
         "voice",
         "confirm"
@@ -3293,7 +3401,7 @@
       "expression": "window.electronAPI.voice.confirm",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 767,
+      "line": 780,
       "path": [
         "voice",
         "confirm"
@@ -3305,7 +3413,7 @@
       "expression": "window.electronAPI.voice.dismiss",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 770,
+      "line": 783,
       "path": [
         "voice",
         "dismiss"
@@ -3317,7 +3425,7 @@
       "expression": "window.electronAPI.voice.dismiss",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 771,
+      "line": 784,
       "path": [
         "voice",
         "dismiss"
@@ -3329,7 +3437,7 @@
       "expression": "window.electronAPI.voice.getRuntime",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 772,
+      "line": 785,
       "path": [
         "voice",
         "getRuntime"
@@ -3341,7 +3449,7 @@
       "expression": "window.electronAPI.voice.installRuntime",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 773,
+      "line": 786,
       "path": [
         "voice",
         "installRuntime"
@@ -3353,7 +3461,7 @@
       "expression": "window.electronAPI.voice.removeRuntime",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 774,
+      "line": 787,
       "path": [
         "voice",
         "removeRuntime"
@@ -3365,7 +3473,7 @@
       "expression": "window.electronAPI.voice.installModel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 775,
+      "line": 788,
       "path": [
         "voice",
         "installModel"
@@ -3377,7 +3485,7 @@
       "expression": "window.electronAPI.voice.removeModel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 776,
+      "line": 789,
       "path": [
         "voice",
         "removeModel"
@@ -3389,7 +3497,7 @@
       "expression": "window.electronAPI.voice.selectModel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 777,
+      "line": 790,
       "path": [
         "voice",
         "selectModel"
@@ -3401,7 +3509,7 @@
       "expression": "window.electronAPI.voice.removeAllModels",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 778,
+      "line": 791,
       "path": [
         "voice",
         "removeAllModels"
@@ -3413,7 +3521,7 @@
       "expression": "window.electronAPI.voice.setCustomModelDir",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 779,
+      "line": 792,
       "path": [
         "voice",
         "setCustomModelDir"
@@ -3425,7 +3533,7 @@
       "expression": "window.electronAPI.voice.pickModelDir",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 780,
+      "line": 793,
       "path": [
         "voice",
         "pickModelDir"
@@ -3437,7 +3545,7 @@
       "expression": "window.electronAPI.voice.setEndpointSilence",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 782,
+      "line": 795,
       "path": [
         "voice",
         "setEndpointSilence"
@@ -3449,7 +3557,7 @@
       "expression": "window.electronAPI.voice.setShortcut",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 783,
+      "line": 796,
       "path": [
         "voice",
         "setShortcut"
@@ -3461,7 +3569,7 @@
       "expression": "window.electronAPI.voice.expectAnswer",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 785,
+      "line": 798,
       "path": [
         "voice",
         "expectAnswer"
@@ -3473,7 +3581,7 @@
       "expression": "window.electronAPI?.voice?.answerNotExpected",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 788,
+      "line": 801,
       "path": [
         "voice",
         "answerNotExpected"
@@ -3485,7 +3593,7 @@
       "expression": "window.electronAPI.voice.onState",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 790,
+      "line": 803,
       "path": [
         "voice",
         "onState"
@@ -3497,7 +3605,7 @@
       "expression": "window.electronAPI.voice.onPartial",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 792,
+      "line": 805,
       "path": [
         "voice",
         "onPartial"
@@ -3509,7 +3617,7 @@
       "expression": "window.electronAPI.voice.onFinal",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 794,
+      "line": 807,
       "path": [
         "voice",
         "onFinal"
@@ -3521,7 +3629,7 @@
       "expression": "window.electronAPI.voice.onSegment",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 797,
+      "line": 810,
       "path": [
         "voice",
         "onSegment"
@@ -3533,7 +3641,7 @@
       "expression": "window.electronAPI.voice.onOutcome",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 799,
+      "line": 812,
       "path": [
         "voice",
         "onOutcome"
@@ -3545,7 +3653,7 @@
       "expression": "window.electronAPI.voice.onStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 801,
+      "line": 814,
       "path": [
         "voice",
         "onStatus"
@@ -3557,7 +3665,7 @@
       "expression": "window.electronAPI.voice.onError",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 803,
+      "line": 816,
       "path": [
         "voice",
         "onError"
@@ -3569,7 +3677,7 @@
       "expression": "window.electronAPI.voice.onNavigate",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 805,
+      "line": 818,
       "path": [
         "voice",
         "onNavigate"
@@ -3581,7 +3689,7 @@
       "expression": "window.electronAPI.voice.onDictate",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 807,
+      "line": 820,
       "path": [
         "voice",
         "onDictate"
@@ -3593,7 +3701,7 @@
       "expression": "window.electronAPI.voice.onRuntimeProgress",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 809,
+      "line": 822,
       "path": [
         "voice",
         "onRuntimeProgress"
@@ -3605,7 +3713,7 @@
       "expression": "window.electronAPI.voice.onHotkey",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 811,
+      "line": 824,
       "path": [
         "voice",
         "onHotkey"
@@ -3617,7 +3725,7 @@
       "expression": "window.electronAPI.voice.tts.getSnapshot",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 816,
+      "line": 829,
       "path": [
         "voice",
         "tts",
@@ -3630,7 +3738,7 @@
       "expression": "window.electronAPI.voice.tts.setEnabled",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 818,
+      "line": 831,
       "path": [
         "voice",
         "tts",
@@ -3643,7 +3751,7 @@
       "expression": "window.electronAPI.voice.tts.setEngine",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 820,
+      "line": 833,
       "path": [
         "voice",
         "tts",
@@ -3656,7 +3764,7 @@
       "expression": "window.electronAPI.voice.tts.setVoice",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 821,
+      "line": 834,
       "path": [
         "voice",
         "tts",
@@ -3669,7 +3777,7 @@
       "expression": "window.electronAPI.voice.tts.setSpeed",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 822,
+      "line": 835,
       "path": [
         "voice",
         "tts",
@@ -3682,7 +3790,7 @@
       "expression": "window.electronAPI.voice.tts.setMaxChars",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 824,
+      "line": 837,
       "path": [
         "voice",
         "tts",
@@ -3695,7 +3803,7 @@
       "expression": "window.electronAPI.voice.tts.setSpeakActionResults",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 826,
+      "line": 839,
       "path": [
         "voice",
         "tts",
@@ -3708,7 +3816,7 @@
       "expression": "window.electronAPI.voice.tts.setOnlyVoiceTurns",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 828,
+      "line": 841,
       "path": [
         "voice",
         "tts",
@@ -3721,7 +3829,7 @@
       "expression": "window.electronAPI.voice.tts.installModel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 829,
+      "line": 842,
       "path": [
         "voice",
         "tts",
@@ -3734,7 +3842,7 @@
       "expression": "window.electronAPI.voice.tts.selectModel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 830,
+      "line": 843,
       "path": [
         "voice",
         "tts",
@@ -3747,7 +3855,7 @@
       "expression": "window.electronAPI.voice.tts.removeModel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 831,
+      "line": 844,
       "path": [
         "voice",
         "tts",
@@ -3760,7 +3868,7 @@
       "expression": "window.electronAPI.voice.tts.preview",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 832,
+      "line": 845,
       "path": [
         "voice",
         "tts",
@@ -3773,7 +3881,7 @@
       "expression": "window.electronAPI.voice.tts.speak",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 834,
+      "line": 847,
       "path": [
         "voice",
         "tts",
@@ -3786,7 +3894,7 @@
       "expression": "window.electronAPI.voice.tts.stop",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 835,
+      "line": 848,
       "path": [
         "voice",
         "tts",
@@ -3799,7 +3907,7 @@
       "expression": "window.electronAPI.voice.tts.onSpeechStart",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 837,
+      "line": 850,
       "path": [
         "voice",
         "tts",
@@ -3812,7 +3920,7 @@
       "expression": "window.electronAPI.voice.tts.onSpeechChunk",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 839,
+      "line": 852,
       "path": [
         "voice",
         "tts",
@@ -3825,7 +3933,7 @@
       "expression": "window.electronAPI.voice.tts.onSpeechEnd",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 841,
+      "line": 854,
       "path": [
         "voice",
         "tts",
@@ -3838,7 +3946,7 @@
       "expression": "window.electronAPI.voice.tts.onStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 843,
+      "line": 856,
       "path": [
         "voice",
         "tts",
@@ -3851,7 +3959,7 @@
       "expression": "window.electronAPI.voice.tts.onModelProgress",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 845,
+      "line": 858,
       "path": [
         "voice",
         "tts",
@@ -3864,7 +3972,7 @@
       "expression": "window.electronAPI?.browser?.startRecording",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 849,
+      "line": 862,
       "path": [
         "browser",
         "startRecording"
@@ -3876,7 +3984,7 @@
       "expression": "window.electronAPI.browser.startRecording",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 850,
+      "line": 863,
       "path": [
         "browser",
         "startRecording"
@@ -3888,7 +3996,7 @@
       "expression": "window.electronAPI?.browser?.stopRecording",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 852,
+      "line": 865,
       "path": [
         "browser",
         "stopRecording"
@@ -3900,7 +4008,7 @@
       "expression": "window.electronAPI.browser.stopRecording",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 853,
+      "line": 866,
       "path": [
         "browser",
         "stopRecording"
@@ -3912,7 +4020,7 @@
       "expression": "window.electronAPI?.browser?.recordingStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 855,
+      "line": 868,
       "path": [
         "browser",
         "recordingStatus"
@@ -3924,7 +4032,7 @@
       "expression": "window.electronAPI.browser.recordingStatus",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 856,
+      "line": 869,
       "path": [
         "browser",
         "recordingStatus"
@@ -3936,7 +4044,7 @@
       "expression": "window.electronAPI.chat.start",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 867,
+      "line": 880,
       "path": [
         "chat",
         "start"
@@ -3948,7 +4056,7 @@
       "expression": "window.electronAPI.chat.cancel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 868,
+      "line": 881,
       "path": [
         "chat",
         "cancel"
@@ -3960,7 +4068,7 @@
       "expression": "window.electronAPI.chat.onEvent",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 869,
+      "line": 882,
       "path": [
         "chat",
         "onEvent"
@@ -3972,7 +4080,7 @@
       "expression": "window.electronAPI.sessionContext.getSnapshot",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 877,
+      "line": 890,
       "path": [
         "sessionContext",
         "getSnapshot"
@@ -3984,7 +4092,7 @@
       "expression": "window.electronAPI.sessionContext.setPolicy",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 878,
+      "line": 891,
       "path": [
         "sessionContext",
         "setPolicy"
@@ -3996,7 +4104,7 @@
       "expression": "window.electronAPI.commander.listSessions",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 882,
+      "line": 895,
       "path": [
         "commander",
         "listSessions"
@@ -4008,7 +4116,7 @@
       "expression": "window.electronAPI.commander.createSession",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 883,
+      "line": 896,
       "path": [
         "commander",
         "createSession"
@@ -4020,7 +4128,7 @@
       "expression": "window.electronAPI.commander.renameSession",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 884,
+      "line": 897,
       "path": [
         "commander",
         "renameSession"
@@ -4032,7 +4140,7 @@
       "expression": "window.electronAPI.commander.archiveSession",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 885,
+      "line": 898,
       "path": [
         "commander",
         "archiveSession"
@@ -4044,7 +4152,7 @@
       "expression": "window.electronAPI.commander.listMessages",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 887,
+      "line": 900,
       "path": [
         "commander",
         "listMessages"
@@ -4056,7 +4164,7 @@
       "expression": "window.electronAPI.commander.markRead",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 888,
+      "line": 901,
       "path": [
         "commander",
         "markRead"
@@ -4068,7 +4176,7 @@
       "expression": "window.electronAPI.commander.setActiveSession",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "access",
-      "line": 891,
+      "line": 904,
       "path": [
         "commander",
         "setActiveSession"
@@ -4080,7 +4188,7 @@
       "expression": "window.electronAPI.commander.setActiveSession",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 891,
+      "line": 904,
       "path": [
         "commander",
         "setActiveSession"
@@ -4092,7 +4200,7 @@
       "expression": "window.electronAPI.commander.send",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 893,
+      "line": 906,
       "path": [
         "commander",
         "send"
@@ -4104,7 +4212,7 @@
       "expression": "window.electronAPI.commander.send",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 893,
+      "line": 906,
       "path": [
         "commander",
         "send"
@@ -4116,7 +4224,7 @@
       "expression": "window.electronAPI.commander.getImage",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 894,
+      "line": 907,
       "path": [
         "commander",
         "getImage"
@@ -4128,7 +4236,7 @@
       "expression": "window.electronAPI.commander.cancel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 895,
+      "line": 908,
       "path": [
         "commander",
         "cancel"
@@ -4140,7 +4248,7 @@
       "expression": "window.electronAPI.commander.undoAction",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 897,
+      "line": 910,
       "path": [
         "commander",
         "undoAction"
@@ -4152,7 +4260,7 @@
       "expression": "window.electronAPI.commander.getActivity",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 898,
+      "line": 911,
       "path": [
         "commander",
         "getActivity"
@@ -4164,7 +4272,7 @@
       "expression": "window.electronAPI.commander.onEvent",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 899,
+      "line": 912,
       "path": [
         "commander",
         "onEvent"
@@ -4176,7 +4284,7 @@
       "expression": "window.electronAPI.cliMcp.snapshot",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 906,
+      "line": 919,
       "path": [
         "cliMcp",
         "snapshot"
@@ -4188,7 +4296,7 @@
       "expression": "window.electronAPI.cliMcp.upsert",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 907,
+      "line": 920,
       "path": [
         "cliMcp",
         "upsert"
@@ -4200,7 +4308,7 @@
       "expression": "window.electronAPI.cliMcp.remove",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 908,
+      "line": 921,
       "path": [
         "cliMcp",
         "remove"
@@ -4212,7 +4320,7 @@
       "expression": "window.electronAPI.cliMcp.setEnabled",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 909,
+      "line": 922,
       "path": [
         "cliMcp",
         "setEnabled"
@@ -4224,7 +4332,7 @@
       "expression": "window.electronAPI.cliMcp.setToolEnabled",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 911,
+      "line": 924,
       "path": [
         "cliMcp",
         "setToolEnabled"
@@ -4236,7 +4344,7 @@
       "expression": "window.electronAPI.cliMcp.probe",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 912,
+      "line": 925,
       "path": [
         "cliMcp",
         "probe"
@@ -4248,7 +4356,7 @@
       "expression": "window.electronAPI.voiceElevenLabs.setKey",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 920,
+      "line": 933,
       "path": [
         "voiceElevenLabs",
         "setKey"
@@ -4260,7 +4368,7 @@
       "expression": "window.electronAPI.voiceElevenLabs.clearKey",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 921,
+      "line": 934,
       "path": [
         "voiceElevenLabs",
         "clearKey"
@@ -4272,7 +4380,7 @@
       "expression": "window.electronAPI.voiceElevenLabs.acceptDisclosure",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 922,
+      "line": 935,
       "path": [
         "voiceElevenLabs",
         "acceptDisclosure"
@@ -4284,7 +4392,7 @@
       "expression": "window.electronAPI.voiceElevenLabs.refresh",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 923,
+      "line": 936,
       "path": [
         "voiceElevenLabs",
         "refresh"
@@ -4296,7 +4404,7 @@
       "expression": "window.electronAPI.voiceElevenLabs.setModel",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 924,
+      "line": 937,
       "path": [
         "voiceElevenLabs",
         "setModel"
@@ -4308,7 +4416,7 @@
       "expression": "window.electronAPI.commanderVoice.setActive",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 928,
+      "line": 941,
       "path": [
         "commanderVoice",
         "setActive"
@@ -4320,7 +4428,7 @@
       "expression": "window.electronAPI.commanderVoice.bargeIn",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 929,
+      "line": 942,
       "path": [
         "commanderVoice",
         "bargeIn"
@@ -4332,7 +4440,7 @@
       "expression": "window.electronAPI.commanderVoice.send",
       "file": "src/renderer/src/lib/ipc-client.ts",
       "kind": "call",
-      "line": 931,
+      "line": 944,
       "path": [
         "commanderVoice",
         "send"
@@ -5099,6 +5207,20 @@
         }
       ],
       "column": 1,
+      "file": "src/main/ipc/task-groups.ts",
+      "line": 1,
+      "mode": "runtime",
+      "syntax": "import"
+    },
+    {
+      "bindings": [
+        {
+          "imported": "ipcMain",
+          "local": "ipcMain",
+          "typeOnly": false
+        }
+      ],
+      "column": 1,
       "file": "src/main/ipc/task-sources.ts",
       "line": 2,
       "mode": "runtime",
@@ -5562,6 +5684,8 @@
     "src/main/database/session-handoff-migration.ts",
     "src/main/database/start-queue-migration.ts",
     "src/main/database/task-activity-migration.ts",
+    "src/main/database/task-groups-migration.ts",
+    "src/main/database/task-groups.ts",
     "src/main/database/task-roles.ts",
     "src/main/database/types.ts",
     "src/main/find-executable.ts",
@@ -5595,6 +5719,7 @@
     "src/main/ipc/projects.ts",
     "src/main/ipc/session-context.ts",
     "src/main/ipc/settings.ts",
+    "src/main/ipc/task-groups.ts",
     "src/main/ipc/task-sources.ts",
     "src/main/ipc/tasks.ts",
     "src/main/ipc/terminal.ts",
@@ -5608,6 +5733,7 @@
     "src/main/mcp-servers/merge-tools.ts",
     "src/main/mcp-servers/pr-write-tools.ts",
     "src/main/mcp-servers/review-attestation-tools.ts",
+    "src/main/mcp-servers/task-group-stdio.ts",
     "src/main/mcp-servers/task-management-core.ts",
     "src/main/mcp-servers/task-management-mcp.ts",
     "src/main/mcp-servers/task-management-tools.ts",
@@ -5708,9 +5834,12 @@
     "src/main/task-api/session-routes.ts",
     "src/main/task-api/skill-routes.ts",
     "src/main/task-api/state.ts",
+    "src/main/task-api/task-group-routes.ts",
     "src/main/task-api/task-routes.ts",
     "src/main/task-api/ui-routes.ts",
     "src/main/task-automation-scheduler.ts",
+    "src/main/task-groups/attachments.ts",
+    "src/main/task-groups/service.ts",
     "src/main/task-mcp-endpoint.ts",
     "src/main/task-search.ts",
     "src/main/task-send-lock.ts",
@@ -5963,6 +6092,9 @@
     "src/renderer/src/components/skills/SkillModelPicker.tsx",
     "src/renderer/src/components/skills/SkillSelectorDialog.tsx",
     "src/renderer/src/components/skills/SkillWorkspace.tsx",
+    "src/renderer/src/components/task-groups/TaskGroupCard.tsx",
+    "src/renderer/src/components/task-groups/TaskGroupDialog.tsx",
+    "src/renderer/src/components/task-groups/TaskGroupHistoryNotice.tsx",
     "src/renderer/src/components/tasks/AgentConfigWarning.tsx",
     "src/renderer/src/components/tasks/AssigneeSelect.tsx",
     "src/renderer/src/components/tasks/ChangesPanel.tsx",
@@ -6095,6 +6227,7 @@
     "src/renderer/src/stores/secret-store.ts",
     "src/renderer/src/stores/settings-store.ts",
     "src/renderer/src/stores/skill-store.ts",
+    "src/renderer/src/stores/task-group-store.ts",
     "src/renderer/src/stores/task-source-store.ts",
     "src/renderer/src/stores/task-store.ts",
     "src/renderer/src/stores/theme-store.ts",
@@ -6149,6 +6282,7 @@
     "src/shared/subtask-graph.ts",
     "src/shared/system-authority.ts",
     "src/shared/task-completion.ts",
+    "src/shared/task-groups.ts",
     "src/shared/task-roles.ts",
     "src/shared/task-status-styles.ts",
     "src/shared/transcript-page.ts",
@@ -6184,7 +6318,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/main/agent-manager-core.ts",
-      "line": 476,
+      "line": 478,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6195,7 +6329,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 489,
+      "line": 491,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6204,9 +6338,9 @@
     {
       "channel": "agent:status",
       "channelExpression": null,
-      "column": 5,
+      "column": 79,
       "file": "src/main/agent-manager-core.ts",
-      "line": 1177,
+      "line": 1221,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6217,7 +6351,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 1195,
+      "line": 1235,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6228,7 +6362,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 1204,
+      "line": 1244,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6239,7 +6373,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 1543,
+      "line": 1583,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6250,7 +6384,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 1592,
+      "line": 1632,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6261,7 +6395,7 @@
       "channelExpression": null,
       "column": 11,
       "file": "src/main/agent-manager-core.ts",
-      "line": 1743,
+      "line": 1783,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6272,7 +6406,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/main/agent-manager-core.ts",
-      "line": 1955,
+      "line": 1995,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6281,9 +6415,9 @@
     {
       "channel": "agent:status",
       "channelExpression": null,
-      "column": 5,
+      "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 2075,
+      "line": 2116,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6292,9 +6426,9 @@
     {
       "channel": "agent:status",
       "channelExpression": null,
-      "column": 5,
+      "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 2087,
+      "line": 2125,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6305,7 +6439,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 2285,
+      "line": 2332,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6316,7 +6450,7 @@
       "channelExpression": null,
       "column": 11,
       "file": "src/main/agent-manager-core.ts",
-      "line": 2632,
+      "line": 2679,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6327,7 +6461,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/main/agent-manager-core.ts",
-      "line": 2652,
+      "line": 2699,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6338,7 +6472,18 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 2715,
+      "line": 2762,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "reviewed-event-wrapper"
+    },
+    {
+      "channel": "task:updated",
+      "channelExpression": null,
+      "column": 9,
+      "file": "src/main/agent-manager-core.ts",
+      "line": 2791,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6349,7 +6494,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 3156,
+      "line": 3213,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6360,7 +6505,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 3279,
+      "line": 3338,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6371,7 +6516,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 3414,
+      "line": 3476,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6382,7 +6527,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/main/agent-manager-core.ts",
-      "line": 3868,
+      "line": 3937,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6393,7 +6538,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 3928,
+      "line": 3997,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6404,7 +6549,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/main/agent-manager-core.ts",
-      "line": 4004,
+      "line": 4073,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6415,7 +6560,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/main/agent-manager-core.ts",
-      "line": 4017,
+      "line": 4086,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6426,7 +6571,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 4019,
+      "line": 4088,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6437,7 +6582,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 4054,
+      "line": 4123,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6448,7 +6593,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 4246,
+      "line": 4315,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6459,7 +6604,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 4607,
+      "line": 4677,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6470,7 +6615,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 4608,
+      "line": 4678,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6481,7 +6626,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 4801,
+      "line": 4871,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6492,7 +6637,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 4816,
+      "line": 4886,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6503,7 +6648,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 4817,
+      "line": 4887,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6514,7 +6659,7 @@
       "channelExpression": null,
       "column": 11,
       "file": "src/main/agent-manager-core.ts",
-      "line": 4974,
+      "line": 5044,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6525,7 +6670,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 5541,
+      "line": 5632,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6536,7 +6681,7 @@
       "channelExpression": null,
       "column": 11,
       "file": "src/main/agent-manager-core.ts",
-      "line": 5667,
+      "line": 5758,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6547,7 +6692,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/main/agent-manager-core.ts",
-      "line": 5693,
+      "line": 5784,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6558,7 +6703,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/main/agent-manager-core.ts",
-      "line": 5740,
+      "line": 5831,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6569,7 +6714,7 @@
       "channelExpression": null,
       "column": 16,
       "file": "src/main/agent-manager-core.ts",
-      "line": 6087,
+      "line": 6179,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6580,7 +6725,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/main/agent-manager-core.ts",
-      "line": 6095,
+      "line": 6187,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6591,7 +6736,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 6105,
+      "line": 6197,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6602,7 +6747,7 @@
       "channelExpression": "channel",
       "column": 52,
       "file": "src/main/agent-manager-core.ts",
-      "line": 6110,
+      "line": 6202,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
@@ -6613,7 +6758,7 @@
       "channelExpression": "channel",
       "column": 7,
       "file": "src/main/agent-manager-core.ts",
-      "line": 6115,
+      "line": 6207,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
@@ -6624,7 +6769,7 @@
       "channelExpression": "channel",
       "column": 5,
       "file": "src/main/agent-manager-core.ts",
-      "line": 6146,
+      "line": 6238,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
@@ -6855,7 +7000,7 @@
       "channelExpression": null,
       "column": 48,
       "file": "src/main/index.ts",
-      "line": 99,
+      "line": 100,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6866,7 +7011,7 @@
       "channelExpression": "channel",
       "column": 7,
       "file": "src/main/index.ts",
-      "line": 410,
+      "line": 411,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
@@ -6877,7 +7022,7 @@
       "channelExpression": "channel",
       "column": 7,
       "file": "src/main/index.ts",
-      "line": 431,
+      "line": 432,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
@@ -6888,7 +7033,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/main/index.ts",
-      "line": 447,
+      "line": 448,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6899,7 +7044,7 @@
       "channelExpression": null,
       "column": 15,
       "file": "src/main/index.ts",
-      "line": 599,
+      "line": 600,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6910,7 +7055,7 @@
       "channelExpression": null,
       "column": 11,
       "file": "src/main/index.ts",
-      "line": 605,
+      "line": 606,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6921,7 +7066,7 @@
       "channelExpression": null,
       "column": 50,
       "file": "src/main/index.ts",
-      "line": 743,
+      "line": 744,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -6932,7 +7077,29 @@
       "channelExpression": null,
       "column": 23,
       "file": "src/main/index.ts",
-      "line": 790,
+      "line": 791,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "guardedIpcSend"
+    },
+    {
+      "channel": "task:updated",
+      "channelExpression": null,
+      "column": 39,
+      "file": "src/main/index.ts",
+      "line": 798,
+      "method": "send",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "guardedIpcSend"
+    },
+    {
+      "channel": "tasks:refresh",
+      "channelExpression": null,
+      "column": 12,
+      "file": "src/main/index.ts",
+      "line": 799,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -8908,6 +9075,105 @@
       "target": "ipcMain"
     },
     {
+      "channel": "taskGroups:list",
+      "channelExpression": null,
+      "column": 3,
+      "file": "src/main/ipc/task-groups.ts",
+      "line": 7,
+      "method": "handle",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "ipcMain"
+    },
+    {
+      "channel": "taskGroups:get",
+      "channelExpression": null,
+      "column": 3,
+      "file": "src/main/ipc/task-groups.ts",
+      "line": 8,
+      "method": "handle",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "ipcMain"
+    },
+    {
+      "channel": "taskGroups:history",
+      "channelExpression": null,
+      "column": 3,
+      "file": "src/main/ipc/task-groups.ts",
+      "line": 9,
+      "method": "handle",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "ipcMain"
+    },
+    {
+      "channel": "taskGroups:create",
+      "channelExpression": null,
+      "column": 3,
+      "file": "src/main/ipc/task-groups.ts",
+      "line": 10,
+      "method": "handle",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "ipcMain"
+    },
+    {
+      "channel": "taskGroups:add",
+      "channelExpression": null,
+      "column": 3,
+      "file": "src/main/ipc/task-groups.ts",
+      "line": 11,
+      "method": "handle",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "ipcMain"
+    },
+    {
+      "channel": "taskGroups:remove",
+      "channelExpression": null,
+      "column": 3,
+      "file": "src/main/ipc/task-groups.ts",
+      "line": 12,
+      "method": "handle",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "ipcMain"
+    },
+    {
+      "channel": "taskGroups:dissolve",
+      "channelExpression": null,
+      "column": 3,
+      "file": "src/main/ipc/task-groups.ts",
+      "line": 13,
+      "method": "handle",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "ipcMain"
+    },
+    {
+      "channel": "taskGroups:move",
+      "channelExpression": null,
+      "column": 3,
+      "file": "src/main/ipc/task-groups.ts",
+      "line": 14,
+      "method": "handle",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "ipcMain"
+    },
+    {
+      "channel": "taskGroups:review",
+      "channelExpression": null,
+      "column": 3,
+      "file": "src/main/ipc/task-groups.ts",
+      "line": 15,
+      "method": "handle",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "ipcMain"
+    },
+    {
       "channel": "taskSource:getAll",
       "channelExpression": null,
       "column": 3,
@@ -10558,11 +10824,110 @@
       "target": "guardedIpcSend"
     },
     {
+      "channel": "taskGroups:list",
+      "channelExpression": null,
+      "column": 90,
+      "file": "src/preload/index.ts",
+      "line": 20,
+      "method": "invoke",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "ipcRenderer"
+    },
+    {
+      "channel": "taskGroups:get",
+      "channelExpression": null,
+      "column": 66,
+      "file": "src/preload/index.ts",
+      "line": 21,
+      "method": "invoke",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "ipcRenderer"
+    },
+    {
+      "channel": "taskGroups:history",
+      "channelExpression": null,
+      "column": 62,
+      "file": "src/preload/index.ts",
+      "line": 22,
+      "method": "invoke",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "ipcRenderer"
+    },
+    {
+      "channel": "taskGroups:create",
+      "channelExpression": null,
+      "column": 70,
+      "file": "src/preload/index.ts",
+      "line": 23,
+      "method": "invoke",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "ipcRenderer"
+    },
+    {
+      "channel": "taskGroups:add",
+      "channelExpression": null,
+      "column": 71,
+      "file": "src/preload/index.ts",
+      "line": 24,
+      "method": "invoke",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "ipcRenderer"
+    },
+    {
+      "channel": "taskGroups:remove",
+      "channelExpression": null,
+      "column": 71,
+      "file": "src/preload/index.ts",
+      "line": 25,
+      "method": "invoke",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "ipcRenderer"
+    },
+    {
+      "channel": "taskGroups:dissolve",
+      "channelExpression": null,
+      "column": 57,
+      "file": "src/preload/index.ts",
+      "line": 26,
+      "method": "invoke",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "ipcRenderer"
+    },
+    {
+      "channel": "taskGroups:move",
+      "channelExpression": null,
+      "column": 69,
+      "file": "src/preload/index.ts",
+      "line": 27,
+      "method": "invoke",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "ipcRenderer"
+    },
+    {
+      "channel": "taskGroups:review",
+      "channelExpression": null,
+      "column": 76,
+      "file": "src/preload/index.ts",
+      "line": 28,
+      "method": "invoke",
+      "methodExpression": null,
+      "resolution": "literal",
+      "target": "ipcRenderer"
+    },
+    {
       "channel": "sessionContext:getSnapshot",
       "channelExpression": null,
       "column": 83,
       "file": "src/preload/index.ts",
-      "line": 18,
+      "line": 31,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10573,7 +10938,7 @@
       "channelExpression": null,
       "column": 69,
       "file": "src/preload/index.ts",
-      "line": 19,
+      "line": 32,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10584,7 +10949,7 @@
       "channelExpression": null,
       "column": 59,
       "file": "src/preload/index.ts",
-      "line": 22,
+      "line": 35,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10595,7 +10960,7 @@
       "channelExpression": null,
       "column": 48,
       "file": "src/preload/index.ts",
-      "line": 23,
+      "line": 36,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10606,7 +10971,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 25,
+      "line": 38,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10617,7 +10982,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 27,
+      "line": 40,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10628,7 +10993,7 @@
       "channelExpression": null,
       "column": 51,
       "file": "src/preload/index.ts",
-      "line": 28,
+      "line": 41,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10639,7 +11004,7 @@
       "channelExpression": null,
       "column": 60,
       "file": "src/preload/index.ts",
-      "line": 29,
+      "line": 42,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10650,7 +11015,7 @@
       "channelExpression": null,
       "column": 84,
       "file": "src/preload/index.ts",
-      "line": 30,
+      "line": 43,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10661,7 +11026,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 34,
+      "line": 47,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10672,7 +11037,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 37,
+      "line": 50,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10683,7 +11048,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 41,
+      "line": 54,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10694,7 +11059,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 43,
+      "line": 56,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10705,7 +11070,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 45,
+      "line": 58,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10716,7 +11081,7 @@
       "channelExpression": null,
       "column": 36,
       "file": "src/preload/index.ts",
-      "line": 48,
+      "line": 61,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10727,7 +11092,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 50,
+      "line": 63,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10738,7 +11103,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 52,
+      "line": 65,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10749,7 +11114,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 54,
+      "line": 67,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10760,7 +11125,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 56,
+      "line": 69,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10771,7 +11136,7 @@
       "channelExpression": null,
       "column": 44,
       "file": "src/preload/index.ts",
-      "line": 60,
+      "line": 73,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10782,7 +11147,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 62,
+      "line": 75,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10793,7 +11158,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 66,
+      "line": 79,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10804,7 +11169,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 68,
+      "line": 81,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10815,7 +11180,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 70,
+      "line": 83,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10826,7 +11191,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 72,
+      "line": 85,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10837,7 +11202,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 76,
+      "line": 89,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10848,7 +11213,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 78,
+      "line": 91,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10859,7 +11224,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 80,
+      "line": 93,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10870,7 +11235,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 82,
+      "line": 95,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10881,7 +11246,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 84,
+      "line": 97,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10892,7 +11257,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/preload/index.ts",
-      "line": 88,
+      "line": 101,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -10903,7 +11268,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 93,
+      "line": 106,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10914,7 +11279,7 @@
       "channelExpression": null,
       "column": 39,
       "file": "src/preload/index.ts",
-      "line": 96,
+      "line": 109,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10925,7 +11290,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 98,
+      "line": 111,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10936,7 +11301,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 100,
+      "line": 113,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10947,7 +11312,7 @@
       "channelExpression": null,
       "column": 47,
       "file": "src/preload/index.ts",
-      "line": 101,
+      "line": 114,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10958,7 +11323,7 @@
       "channelExpression": null,
       "column": 46,
       "file": "src/preload/index.ts",
-      "line": 102,
+      "line": 115,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10969,7 +11334,7 @@
       "channelExpression": null,
       "column": 66,
       "file": "src/preload/index.ts",
-      "line": 103,
+      "line": 116,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10980,7 +11345,7 @@
       "channelExpression": null,
       "column": 39,
       "file": "src/preload/index.ts",
-      "line": 106,
+      "line": 119,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -10991,7 +11356,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 108,
+      "line": 121,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11002,7 +11367,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 110,
+      "line": 123,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11013,7 +11378,7 @@
       "channelExpression": null,
       "column": 47,
       "file": "src/preload/index.ts",
-      "line": 111,
+      "line": 124,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11024,7 +11389,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 113,
+      "line": 126,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11035,7 +11400,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 115,
+      "line": 128,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11046,7 +11411,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 117,
+      "line": 130,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11057,7 +11422,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 119,
+      "line": 132,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11068,7 +11433,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 121,
+      "line": 134,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11079,7 +11444,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 123,
+      "line": 136,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11090,7 +11455,7 @@
       "channelExpression": null,
       "column": 39,
       "file": "src/preload/index.ts",
-      "line": 127,
+      "line": 140,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11101,7 +11466,7 @@
       "channelExpression": null,
       "column": 69,
       "file": "src/preload/index.ts",
-      "line": 128,
+      "line": 141,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11112,7 +11477,7 @@
       "channelExpression": null,
       "column": 65,
       "file": "src/preload/index.ts",
-      "line": 129,
+      "line": 142,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11123,7 +11488,7 @@
       "channelExpression": null,
       "column": 69,
       "file": "src/preload/index.ts",
-      "line": 130,
+      "line": 143,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11134,7 +11499,7 @@
       "channelExpression": null,
       "column": 73,
       "file": "src/preload/index.ts",
-      "line": 131,
+      "line": 144,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11145,7 +11510,7 @@
       "channelExpression": null,
       "column": 64,
       "file": "src/preload/index.ts",
-      "line": 132,
+      "line": 145,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11156,7 +11521,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 136,
+      "line": 149,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11167,7 +11532,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 138,
+      "line": 151,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11178,7 +11543,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 140,
+      "line": 153,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11189,7 +11554,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 142,
+      "line": 155,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11200,7 +11565,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 144,
+      "line": 157,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11211,7 +11576,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 146,
+      "line": 159,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11222,7 +11587,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 148,
+      "line": 161,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11233,7 +11598,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 150,
+      "line": 163,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11244,7 +11609,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 152,
+      "line": 165,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11255,7 +11620,7 @@
       "channelExpression": null,
       "column": 11,
       "file": "src/preload/index.ts",
-      "line": 155,
+      "line": 168,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11266,7 +11631,7 @@
       "channelExpression": null,
       "column": 13,
       "file": "src/preload/index.ts",
-      "line": 157,
+      "line": 170,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11277,7 +11642,7 @@
       "channelExpression": null,
       "column": 13,
       "file": "src/preload/index.ts",
-      "line": 158,
+      "line": 171,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11288,7 +11653,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 160,
+      "line": 173,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11299,7 +11664,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 162,
+      "line": 175,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11310,7 +11675,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 164,
+      "line": 177,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11321,7 +11686,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 166,
+      "line": 179,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11332,7 +11697,7 @@
       "channelExpression": null,
       "column": 70,
       "file": "src/preload/index.ts",
-      "line": 169,
+      "line": 182,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11343,7 +11708,7 @@
       "channelExpression": null,
       "column": 83,
       "file": "src/preload/index.ts",
-      "line": 170,
+      "line": 183,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11354,7 +11719,7 @@
       "channelExpression": null,
       "column": 65,
       "file": "src/preload/index.ts",
-      "line": 171,
+      "line": 184,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11365,7 +11730,7 @@
       "channelExpression": null,
       "column": 68,
       "file": "src/preload/index.ts",
-      "line": 172,
+      "line": 185,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11376,7 +11741,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 176,
+      "line": 189,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11387,7 +11752,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 178,
+      "line": 191,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11398,7 +11763,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/preload/index.ts",
-      "line": 182,
+      "line": 195,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -11409,7 +11774,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/preload/index.ts",
-      "line": 187,
+      "line": 200,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -11420,7 +11785,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/preload/index.ts",
-      "line": 192,
+      "line": 205,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -11431,7 +11796,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/preload/index.ts",
-      "line": 197,
+      "line": 210,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -11442,7 +11807,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/preload/index.ts",
-      "line": 202,
+      "line": 215,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -11453,7 +11818,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/preload/index.ts",
-      "line": 207,
+      "line": 220,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -11464,7 +11829,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/preload/index.ts",
-      "line": 212,
+      "line": 225,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -11475,7 +11840,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/preload/index.ts",
-      "line": 217,
+      "line": 230,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -11486,7 +11851,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/preload/index.ts",
-      "line": 222,
+      "line": 235,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -11497,7 +11862,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/preload/index.ts",
-      "line": 227,
+      "line": 240,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -11508,7 +11873,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/preload/index.ts",
-      "line": 232,
+      "line": 245,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -11519,7 +11884,7 @@
       "channelExpression": null,
       "column": 51,
       "file": "src/preload/index.ts",
-      "line": 236,
+      "line": 249,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11530,7 +11895,7 @@
       "channelExpression": null,
       "column": 57,
       "file": "src/preload/index.ts",
-      "line": 237,
+      "line": 250,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11541,7 +11906,7 @@
       "channelExpression": null,
       "column": 52,
       "file": "src/preload/index.ts",
-      "line": 238,
+      "line": 251,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11552,7 +11917,7 @@
       "channelExpression": null,
       "column": 51,
       "file": "src/preload/index.ts",
-      "line": 241,
+      "line": 254,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11563,7 +11928,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 245,
+      "line": 258,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11574,7 +11939,7 @@
       "channelExpression": null,
       "column": 41,
       "file": "src/preload/index.ts",
-      "line": 246,
+      "line": 259,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11585,7 +11950,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 248,
+      "line": 261,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11596,7 +11961,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 250,
+      "line": 263,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11607,7 +11972,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 252,
+      "line": 265,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11618,7 +11983,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 256,
+      "line": 269,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11629,7 +11994,7 @@
       "channelExpression": null,
       "column": 41,
       "file": "src/preload/index.ts",
-      "line": 257,
+      "line": 270,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11640,7 +12005,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 259,
+      "line": 272,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11651,7 +12016,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 261,
+      "line": 274,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11662,7 +12027,7 @@
       "channelExpression": null,
       "column": 39,
       "file": "src/preload/index.ts",
-      "line": 264,
+      "line": 277,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11673,7 +12038,7 @@
       "channelExpression": null,
       "column": 63,
       "file": "src/preload/index.ts",
-      "line": 265,
+      "line": 278,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11684,7 +12049,7 @@
       "channelExpression": null,
       "column": 41,
       "file": "src/preload/index.ts",
-      "line": 266,
+      "line": 279,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11695,7 +12060,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 268,
+      "line": 281,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11706,7 +12071,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 270,
+      "line": 283,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11717,7 +12082,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 274,
+      "line": 287,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11728,7 +12093,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 278,
+      "line": 291,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11739,7 +12104,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 280,
+      "line": 293,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11750,7 +12115,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 282,
+      "line": 295,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11761,7 +12126,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 284,
+      "line": 297,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11772,7 +12137,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 286,
+      "line": 299,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11783,7 +12148,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 288,
+      "line": 301,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11794,7 +12159,7 @@
       "channelExpression": null,
       "column": 57,
       "file": "src/preload/index.ts",
-      "line": 291,
+      "line": 304,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11805,7 +12170,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 293,
+      "line": 306,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11816,7 +12181,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 295,
+      "line": 308,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11827,7 +12192,7 @@
       "channelExpression": null,
       "column": 47,
       "file": "src/preload/index.ts",
-      "line": 296,
+      "line": 309,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11838,7 +12203,7 @@
       "channelExpression": null,
       "column": 51,
       "file": "src/preload/index.ts",
-      "line": 297,
+      "line": 310,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11849,7 +12214,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 299,
+      "line": 312,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11860,7 +12225,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 301,
+      "line": 314,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11871,7 +12236,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 303,
+      "line": 316,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11882,7 +12247,7 @@
       "channelExpression": null,
       "column": 81,
       "file": "src/preload/index.ts",
-      "line": 306,
+      "line": 319,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11893,7 +12258,7 @@
       "channelExpression": null,
       "column": 62,
       "file": "src/preload/index.ts",
-      "line": 307,
+      "line": 320,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11904,7 +12269,7 @@
       "channelExpression": null,
       "column": 59,
       "file": "src/preload/index.ts",
-      "line": 308,
+      "line": 321,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11915,7 +12280,7 @@
       "channelExpression": null,
       "column": 78,
       "file": "src/preload/index.ts",
-      "line": 309,
+      "line": 322,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11926,7 +12291,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 311,
+      "line": 324,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11937,7 +12302,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 313,
+      "line": 326,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11948,7 +12313,7 @@
       "channelExpression": null,
       "column": 55,
       "file": "src/preload/index.ts",
-      "line": 314,
+      "line": 327,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11959,7 +12324,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 317,
+      "line": 330,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11970,7 +12335,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 319,
+      "line": 332,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -11981,7 +12346,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 322,
+      "line": 335,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -11992,7 +12357,7 @@
       "channelExpression": null,
       "column": 57,
       "file": "src/preload/index.ts",
-      "line": 327,
+      "line": 340,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12003,7 +12368,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 330,
+      "line": 343,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12014,7 +12379,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 333,
+      "line": 346,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -12025,7 +12390,7 @@
       "channelExpression": null,
       "column": 66,
       "file": "src/preload/index.ts",
-      "line": 337,
+      "line": 350,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12036,7 +12401,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/preload/index.ts",
-      "line": 339,
+      "line": 352,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12047,7 +12412,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/preload/index.ts",
-      "line": 341,
+      "line": 354,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12058,7 +12423,7 @@
       "channelExpression": null,
       "column": 49,
       "file": "src/preload/index.ts",
-      "line": 342,
+      "line": 355,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12069,7 +12434,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/preload/index.ts",
-      "line": 344,
+      "line": 357,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12080,7 +12445,7 @@
       "channelExpression": null,
       "column": 70,
       "file": "src/preload/index.ts",
-      "line": 347,
+      "line": 360,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12091,7 +12456,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/preload/index.ts",
-      "line": 349,
+      "line": 362,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12102,7 +12467,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/preload/index.ts",
-      "line": 351,
+      "line": 364,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12113,7 +12478,7 @@
       "channelExpression": null,
       "column": 49,
       "file": "src/preload/index.ts",
-      "line": 352,
+      "line": 365,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12124,7 +12489,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/preload/index.ts",
-      "line": 354,
+      "line": 367,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12135,7 +12500,7 @@
       "channelExpression": null,
       "column": 56,
       "file": "src/preload/index.ts",
-      "line": 359,
+      "line": 372,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12146,7 +12511,7 @@
       "channelExpression": null,
       "column": 42,
       "file": "src/preload/index.ts",
-      "line": 360,
+      "line": 373,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12157,7 +12522,7 @@
       "channelExpression": null,
       "column": 54,
       "file": "src/preload/index.ts",
-      "line": 361,
+      "line": 374,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12168,7 +12533,7 @@
       "channelExpression": null,
       "column": 56,
       "file": "src/preload/index.ts",
-      "line": 365,
+      "line": 378,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12179,7 +12544,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 367,
+      "line": 380,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12190,7 +12555,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 369,
+      "line": 382,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12201,7 +12566,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 372,
+      "line": 385,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -12212,7 +12577,7 @@
       "channelExpression": null,
       "column": 47,
       "file": "src/preload/index.ts",
-      "line": 378,
+      "line": 391,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12223,7 +12588,7 @@
       "channelExpression": null,
       "column": 39,
       "file": "src/preload/index.ts",
-      "line": 381,
+      "line": 394,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12234,7 +12599,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 383,
+      "line": 396,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12245,7 +12610,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 385,
+      "line": 398,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12256,7 +12621,7 @@
       "channelExpression": null,
       "column": 47,
       "file": "src/preload/index.ts",
-      "line": 386,
+      "line": 399,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12267,7 +12632,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 389,
+      "line": 402,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12278,7 +12643,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 392,
+      "line": 405,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -12289,7 +12654,7 @@
       "channelExpression": null,
       "column": 39,
       "file": "src/preload/index.ts",
-      "line": 397,
+      "line": 410,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12300,7 +12665,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 399,
+      "line": 412,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12311,7 +12676,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 401,
+      "line": 414,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12322,7 +12687,7 @@
       "channelExpression": null,
       "column": 47,
       "file": "src/preload/index.ts",
-      "line": 402,
+      "line": 415,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12333,7 +12698,7 @@
       "channelExpression": null,
       "column": 37,
       "file": "src/preload/index.ts",
-      "line": 405,
+      "line": 418,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12344,7 +12709,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 407,
+      "line": 420,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12355,7 +12720,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 409,
+      "line": 422,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12366,7 +12731,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 411,
+      "line": 424,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12377,7 +12742,7 @@
       "channelExpression": null,
       "column": 45,
       "file": "src/preload/index.ts",
-      "line": 415,
+      "line": 428,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12388,7 +12753,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 417,
+      "line": 430,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12399,7 +12764,7 @@
       "channelExpression": null,
       "column": 65,
       "file": "src/preload/index.ts",
-      "line": 418,
+      "line": 431,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12410,7 +12775,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 420,
+      "line": 433,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12421,7 +12786,7 @@
       "channelExpression": null,
       "column": 62,
       "file": "src/preload/index.ts",
-      "line": 421,
+      "line": 434,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12432,7 +12797,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 423,
+      "line": 436,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12443,7 +12808,7 @@
       "channelExpression": null,
       "column": 59,
       "file": "src/preload/index.ts",
-      "line": 424,
+      "line": 437,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12454,7 +12819,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 428,
+      "line": 441,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12465,7 +12830,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 430,
+      "line": 443,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12476,7 +12841,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 432,
+      "line": 445,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12487,7 +12852,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 434,
+      "line": 447,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12498,7 +12863,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 436,
+      "line": 449,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12509,7 +12874,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 438,
+      "line": 451,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12520,7 +12885,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 440,
+      "line": 453,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12531,7 +12896,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 442,
+      "line": 455,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12542,7 +12907,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 444,
+      "line": 457,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12553,7 +12918,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 446,
+      "line": 459,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12564,7 +12929,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 448,
+      "line": 461,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12575,7 +12940,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 452,
+      "line": 465,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12586,7 +12951,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 454,
+      "line": 467,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12597,7 +12962,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 456,
+      "line": 469,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12608,7 +12973,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 458,
+      "line": 471,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12619,7 +12984,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 460,
+      "line": 473,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12630,7 +12995,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 462,
+      "line": 475,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12641,7 +13006,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 464,
+      "line": 477,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12652,7 +13017,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 466,
+      "line": 479,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12663,7 +13028,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/preload/index.ts",
-      "line": 470,
+      "line": 483,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -12674,7 +13039,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/preload/index.ts",
-      "line": 475,
+      "line": 488,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -12685,7 +13050,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/preload/index.ts",
-      "line": 480,
+      "line": 493,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -12696,7 +13061,7 @@
       "channelExpression": null,
       "column": 5,
       "file": "src/preload/index.ts",
-      "line": 485,
+      "line": 498,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -12707,7 +13072,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 490,
+      "line": 503,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12718,7 +13083,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 492,
+      "line": 505,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12729,7 +13094,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 494,
+      "line": 507,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12740,7 +13105,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 496,
+      "line": 509,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12751,7 +13116,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 498,
+      "line": 511,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12762,7 +13127,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 500,
+      "line": 513,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12773,7 +13138,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 502,
+      "line": 515,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12784,7 +13149,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 504,
+      "line": 517,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12795,7 +13160,7 @@
       "channelExpression": null,
       "column": 11,
       "file": "src/preload/index.ts",
-      "line": 518,
+      "line": 531,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12806,7 +13171,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 520,
+      "line": 533,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12817,7 +13182,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 522,
+      "line": 535,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12828,7 +13193,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 524,
+      "line": 537,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12839,7 +13204,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 526,
+      "line": 539,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12850,7 +13215,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 528,
+      "line": 541,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12861,7 +13226,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 530,
+      "line": 543,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12872,7 +13237,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 532,
+      "line": 545,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12883,7 +13248,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 534,
+      "line": 547,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12894,7 +13259,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 536,
+      "line": 549,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12905,7 +13270,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 539,
+      "line": 552,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -12916,7 +13281,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 544,
+      "line": 557,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -12927,7 +13292,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 550,
+      "line": 563,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12938,7 +13303,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 552,
+      "line": 565,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12949,7 +13314,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 554,
+      "line": 567,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12960,7 +13325,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 557,
+      "line": 570,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -12971,7 +13336,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 561,
+      "line": 574,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -12982,7 +13347,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 564,
+      "line": 577,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -12993,7 +13358,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 570,
+      "line": 583,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13004,7 +13369,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 572,
+      "line": 585,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13015,7 +13380,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 575,
+      "line": 588,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -13026,7 +13391,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 584,
+      "line": 597,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13037,7 +13402,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 586,
+      "line": 599,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13048,7 +13413,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 588,
+      "line": 601,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13059,7 +13424,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 590,
+      "line": 603,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13070,7 +13435,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 592,
+      "line": 605,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13081,7 +13446,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 594,
+      "line": 607,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13092,7 +13457,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 597,
+      "line": 610,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -13103,7 +13468,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 602,
+      "line": 615,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -13114,7 +13479,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 608,
+      "line": 621,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13125,7 +13490,7 @@
       "channelExpression": "UI_COMMAND_CHANNEL",
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 611,
+      "line": 624,
       "method": "on",
       "methodExpression": null,
       "resolution": "constant",
@@ -13136,7 +13501,7 @@
       "channelExpression": null,
       "column": 42,
       "file": "src/preload/index.ts",
-      "line": 616,
+      "line": 629,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13147,7 +13512,7 @@
       "channelExpression": null,
       "column": 57,
       "file": "src/preload/index.ts",
-      "line": 617,
+      "line": 630,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13158,7 +13523,7 @@
       "channelExpression": null,
       "column": 55,
       "file": "src/preload/index.ts",
-      "line": 618,
+      "line": 631,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13169,7 +13534,7 @@
       "channelExpression": null,
       "column": 59,
       "file": "src/preload/index.ts",
-      "line": 619,
+      "line": 632,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13180,7 +13545,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 621,
+      "line": 634,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13191,7 +13556,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 624,
+      "line": 637,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13202,7 +13567,7 @@
       "channelExpression": null,
       "column": 49,
       "file": "src/preload/index.ts",
-      "line": 625,
+      "line": 638,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13213,7 +13578,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 627,
+      "line": 640,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13224,7 +13589,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 629,
+      "line": 642,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13235,7 +13600,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 631,
+      "line": 644,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13246,7 +13611,7 @@
       "channelExpression": null,
       "column": 41,
       "file": "src/preload/index.ts",
-      "line": 632,
+      "line": 645,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13257,7 +13622,7 @@
       "channelExpression": null,
       "column": 45,
       "file": "src/preload/index.ts",
-      "line": 633,
+      "line": 646,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13268,7 +13633,7 @@
       "channelExpression": null,
       "column": 44,
       "file": "src/preload/index.ts",
-      "line": 634,
+      "line": 647,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13279,7 +13644,7 @@
       "channelExpression": null,
       "column": 53,
       "file": "src/preload/index.ts",
-      "line": 635,
+      "line": 648,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13290,7 +13655,7 @@
       "channelExpression": null,
       "column": 52,
       "file": "src/preload/index.ts",
-      "line": 636,
+      "line": 649,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13301,7 +13666,7 @@
       "channelExpression": null,
       "column": 52,
       "file": "src/preload/index.ts",
-      "line": 637,
+      "line": 650,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13312,7 +13677,7 @@
       "channelExpression": null,
       "column": 46,
       "file": "src/preload/index.ts",
-      "line": 638,
+      "line": 651,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13323,7 +13688,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 640,
+      "line": 653,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13334,7 +13699,7 @@
       "channelExpression": null,
       "column": 58,
       "file": "src/preload/index.ts",
-      "line": 641,
+      "line": 654,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13345,7 +13710,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 643,
+      "line": 656,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13356,7 +13721,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 645,
+      "line": 658,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13367,7 +13732,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 647,
+      "line": 660,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13378,7 +13743,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 649,
+      "line": 662,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13389,7 +13754,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 652,
+      "line": 665,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -13400,7 +13765,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 657,
+      "line": 670,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -13411,7 +13776,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 662,
+      "line": 675,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -13422,7 +13787,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 667,
+      "line": 680,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -13433,7 +13798,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 672,
+      "line": 685,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -13444,7 +13809,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 677,
+      "line": 690,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -13455,7 +13820,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 682,
+      "line": 695,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -13466,7 +13831,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 687,
+      "line": 700,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -13477,7 +13842,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 692,
+      "line": 705,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -13488,7 +13853,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 699,
+      "line": 712,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -13499,7 +13864,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 704,
+      "line": 717,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -13510,7 +13875,7 @@
       "channelExpression": null,
       "column": 44,
       "file": "src/preload/index.ts",
-      "line": 712,
+      "line": 725,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13521,7 +13886,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/preload/index.ts",
-      "line": 714,
+      "line": 727,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13532,7 +13897,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/preload/index.ts",
-      "line": 716,
+      "line": 729,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13543,7 +13908,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/preload/index.ts",
-      "line": 718,
+      "line": 731,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13554,7 +13919,7 @@
       "channelExpression": null,
       "column": 54,
       "file": "src/preload/index.ts",
-      "line": 719,
+      "line": 732,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13565,7 +13930,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/preload/index.ts",
-      "line": 721,
+      "line": 734,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13576,7 +13941,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/preload/index.ts",
-      "line": 723,
+      "line": 736,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13587,7 +13952,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/preload/index.ts",
-      "line": 725,
+      "line": 738,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13598,7 +13963,7 @@
       "channelExpression": null,
       "column": 55,
       "file": "src/preload/index.ts",
-      "line": 726,
+      "line": 739,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13609,7 +13974,7 @@
       "channelExpression": null,
       "column": 54,
       "file": "src/preload/index.ts",
-      "line": 727,
+      "line": 740,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13620,7 +13985,7 @@
       "channelExpression": null,
       "column": 54,
       "file": "src/preload/index.ts",
-      "line": 728,
+      "line": 741,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13631,7 +13996,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/preload/index.ts",
-      "line": 730,
+      "line": 743,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13642,7 +14007,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/preload/index.ts",
-      "line": 732,
+      "line": 745,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13653,7 +14018,7 @@
       "channelExpression": null,
       "column": 34,
       "file": "src/preload/index.ts",
-      "line": 733,
+      "line": 746,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13664,7 +14029,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/preload/index.ts",
-      "line": 736,
+      "line": 749,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -13675,7 +14040,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/preload/index.ts",
-      "line": 743,
+      "line": 756,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -13686,7 +14051,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/preload/index.ts",
-      "line": 748,
+      "line": 761,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -13697,7 +14062,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/preload/index.ts",
-      "line": 753,
+      "line": 766,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -13708,7 +14073,7 @@
       "channelExpression": null,
       "column": 9,
       "file": "src/preload/index.ts",
-      "line": 758,
+      "line": 771,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -13719,7 +14084,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 767,
+      "line": 780,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13730,7 +14095,7 @@
       "channelExpression": null,
       "column": 66,
       "file": "src/preload/index.ts",
-      "line": 768,
+      "line": 781,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13741,7 +14106,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 771,
+      "line": 784,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -13752,7 +14117,7 @@
       "channelExpression": null,
       "column": 78,
       "file": "src/preload/index.ts",
-      "line": 778,
+      "line": 791,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13763,7 +14128,7 @@
       "channelExpression": null,
       "column": 77,
       "file": "src/preload/index.ts",
-      "line": 779,
+      "line": 792,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13774,7 +14139,7 @@
       "channelExpression": null,
       "column": 69,
       "file": "src/preload/index.ts",
-      "line": 780,
+      "line": 793,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13785,7 +14150,7 @@
       "channelExpression": null,
       "column": 74,
       "file": "src/preload/index.ts",
-      "line": 781,
+      "line": 794,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13796,7 +14161,7 @@
       "channelExpression": null,
       "column": 60,
       "file": "src/preload/index.ts",
-      "line": 782,
+      "line": 795,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13807,7 +14172,7 @@
       "channelExpression": null,
       "column": 56,
       "file": "src/preload/index.ts",
-      "line": 783,
+      "line": 796,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13818,7 +14183,7 @@
       "channelExpression": null,
       "column": 68,
       "file": "src/preload/index.ts",
-      "line": 785,
+      "line": 798,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13829,7 +14194,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 787,
+      "line": 800,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13840,7 +14205,7 @@
       "channelExpression": null,
       "column": 49,
       "file": "src/preload/index.ts",
-      "line": 788,
+      "line": 801,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13851,7 +14216,7 @@
       "channelExpression": null,
       "column": 69,
       "file": "src/preload/index.ts",
-      "line": 789,
+      "line": 802,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13862,7 +14227,7 @@
       "channelExpression": null,
       "column": 76,
       "file": "src/preload/index.ts",
-      "line": 790,
+      "line": 803,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13873,7 +14238,7 @@
       "channelExpression": null,
       "column": 59,
       "file": "src/preload/index.ts",
-      "line": 791,
+      "line": 804,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13884,7 +14249,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 794,
+      "line": 807,
       "method": "on",
       "methodExpression": null,
       "resolution": "literal",
@@ -13895,7 +14260,7 @@
       "channelExpression": null,
       "column": 48,
       "file": "src/preload/index.ts",
-      "line": 802,
+      "line": 815,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13906,7 +14271,7 @@
       "channelExpression": null,
       "column": 39,
       "file": "src/preload/index.ts",
-      "line": 803,
+      "line": 816,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13917,7 +14282,7 @@
       "channelExpression": null,
       "column": 47,
       "file": "src/preload/index.ts",
-      "line": 804,
+      "line": 817,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13928,7 +14293,7 @@
       "channelExpression": null,
       "column": 38,
       "file": "src/preload/index.ts",
-      "line": 805,
+      "line": 818,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13939,7 +14304,7 @@
       "channelExpression": null,
       "column": 54,
       "file": "src/preload/index.ts",
-      "line": 806,
+      "line": 819,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13950,7 +14315,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 810,
+      "line": 823,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13961,7 +14326,7 @@
       "channelExpression": null,
       "column": 70,
       "file": "src/preload/index.ts",
-      "line": 811,
+      "line": 824,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13972,7 +14337,7 @@
       "channelExpression": null,
       "column": 66,
       "file": "src/preload/index.ts",
-      "line": 812,
+      "line": 825,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13983,7 +14348,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 816,
+      "line": 829,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -13994,7 +14359,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 818,
+      "line": 831,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -14005,7 +14370,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 820,
+      "line": 833,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -14016,7 +14381,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 822,
+      "line": 835,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -14027,7 +14392,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 824,
+      "line": 837,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -14038,7 +14403,7 @@
       "channelExpression": null,
       "column": 7,
       "file": "src/preload/index.ts",
-      "line": 826,
+      "line": 839,
       "method": "invoke",
       "methodExpression": null,
       "resolution": "literal",
@@ -14190,10 +14555,10 @@
     "src/mobile"
   ],
   "summary": {
-    "directAPIConsumers": 373,
-    "files": 756,
-    "operations": 715,
-    "runtimeElectronImports": 45,
+    "directAPIConsumers": 382,
+    "files": 768,
+    "operations": 736,
+    "runtimeElectronImports": 46,
     "typeOnlyElectronImports": 6,
     "unresolvedOperations": 9,
     "webviews": 1

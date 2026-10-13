@@ -1,6 +1,7 @@
 import { join } from 'path'
 import { existsSync, copyFileSync, mkdirSync, readFileSync } from 'fs'
 import type { DatabaseManager } from '../database'
+import { syncGroupAttachments } from '../task-groups/attachments'
 
 export interface MessageAttachmentRef {
   id: string
@@ -22,7 +23,7 @@ const TEXT_EXTENSIONS = ['.md', '.txt', '.json', '.yaml', '.yml', '.xml', '.csv'
  */
 export function syncAttachmentsToWorkspace(db: DatabaseManager, taskId: string, workspaceDir: string): string[] {
   const task = db.getTask(taskId)
-  const refs: string[] = []
+  const refs: string[] = task?.role === 'task_group' ? syncGroupAttachments(db, taskId, workspaceDir) : []
   if (!task?.attachments?.length) return refs
 
   const attachDir = db.getAttachmentsDir(taskId)

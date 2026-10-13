@@ -111,17 +111,22 @@ export class SyncManager {
     actionId: string,
     task: TaskRecord,
     input: string | undefined,
-    sourceId: string
+    sourceId: string,
+    origin: 'task-source-action' | 'task-group' = 'task-source-action'
   ): Promise<ActionResult> {
-    return this.runOwned(() => this.executeActionInternal(actionId, task, input, sourceId))
+    return this.runOwned(() => this.executeActionInternal(actionId, task, input, sourceId, origin))
   }
 
   private async executeActionInternal(
     actionId: string,
     task: TaskRecord,
     input: string | undefined,
-    sourceId: string
+    sourceId: string,
+    origin: 'task-source-action' | 'task-group'
   ): Promise<ActionResult> {
+    if (origin !== 'task-group' && actionId !== PluginActionId.AddComment && this.db.getTask(task.id)?.group_id) {
+      return { success: false, error: 'Use the task-group review controls for source actions on a grouped task.' }
+    }
     const source = this.db.getTaskSource(sourceId)
     if (!source) return { success: false, error: 'Task source not found' }
 
@@ -134,7 +139,7 @@ export class SyncManager {
     const result = await plugin.executeAction(actionId, task, input, config, ctx)
 
     if (result.success && result.taskUpdate && Object.keys(result.taskUpdate).length > 0) {
-      this.db.updateTask(task.id, result.taskUpdate, 'task-source-action')
+      this.db.updateTask(task.id, result.taskUpdate, origin)
     }
 
     // Comments are meaningful even when the source returns no local field changes.

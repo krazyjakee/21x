@@ -16,6 +16,7 @@
     "test:nav-rail": "node scripts/nav-rail-layout/run.mjs",
     "test:commander-input": "node scripts/commander-input/run.mjs",
     "test:activity-input": "node scripts/activity-input/run.mjs",
+    "test:task-groups": "node scripts/task-group-input/run.mjs",
     "test:task-layout": "node scripts/task-workspace-layout/run.mjs",
     "test:run": "cross-env ELECTRON_RUN_AS_NODE=1 electron ./node_modules/vitest/vitest.mjs run",
     "test:main": "cross-env ELECTRON_RUN_AS_NODE=1 electron ./node_modules/vitest/vitest.mjs --project main",

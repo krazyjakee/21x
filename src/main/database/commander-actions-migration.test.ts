@@ -19,7 +19,7 @@ describe('schema 35 Commander action migration', () => {
       VALUES ('ledger-old','commander:old','chat','generation-old','previous-process','idle',1,1)`).run()
     const before = (db.prepare('PRAGMA table_info(commander_messages)').all() as Array<{ name: string }>).map(column => column.name)
     expect(applySchema(db)).toBe(true)
-    expect(manager.getSetting('__schema_version')).toBe('36')
+    expect(manager.getSetting('__schema_version')).toBe('37')
     const after = (db.prepare('PRAGMA table_info(commander_messages)').all() as Array<{ name: string }>).map(column => column.name)
     expect(after.filter(name => !before.includes(name))).toEqual(['input_mode'])
     expect(db.prepare('SELECT content,input_mode FROM commander_messages WHERE id=?').get('old-user')).toEqual({ content: 'An old typed or spoken request', input_mode: null })

@@ -43,7 +43,8 @@ import { ClaudePluginManager } from './claude-plugin-manager'
 import { parseProcessTable, selectKillableMcpPids, WINDOWS_PROCESS_TABLE_SCRIPT } from './mcp-process-cleanup'
 import { buildWorkspaceStates, sweepLeakedWorkspaceProcesses, readDiskSpace, workspacePressureWarning, SHUTDOWN_GRACE_MS } from './workspace-process-cleanup'
 import { WORKSPACES_DIR, listWorkspaceDirs, taskAttachmentsDir } from './workspace-paths'
-import { setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTranscriptProvider, startTaskApiServer, stopTaskApiServer, closeTaskApiServer } from './task-api-server'
+import { setTaskApiAgentController, setTaskApiNotifier, setTaskApiUiState, setTranscriptProvider, setTaskApiTaskGroupService, startTaskApiServer, stopTaskApiServer, closeTaskApiServer } from './task-api-server'
+import { TaskGroupService } from './task-groups/service'
 import { setTaskAutomationTrigger, setTaskSchedulers } from './task-updates'
 import { CaptainWaker } from './captain-waker'
 import { startScheduledCoordination, stopScheduledCoordination, closeScheduledCoordination } from './scheduled-coordination'
@@ -792,6 +793,14 @@ app.whenReady().then(async () => {
 
   syncManager = new SyncManager(db, pluginRegistry, oauthManager)
   agentManager.setSyncManager(syncManager)
+  const taskGroups = new TaskGroupService(db, agentManager, syncManager, (channel, data) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (channel === 'task:updated') guardedIpcSend(mainWindow.webContents, 'task:updated', data)
+      else guardedIpcSend(mainWindow.webContents, 'tasks:refresh', data)
+    }
+    broadcastToMobileClients(channel, data)
+  })
+  setTaskApiTaskGroupService(taskGroups)
 
   // Start secret broker and write shell wrapper (awaited so broker is ready before any sessions)
   try {
@@ -844,6 +853,7 @@ app.whenReady().then(async () => {
 
   registerIpcHandlers({
     db,
+    taskGroups,
     agentManager,
     githubManager,
     worktreeManager,

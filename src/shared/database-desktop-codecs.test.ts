@@ -43,6 +43,8 @@ describe('explicit database desktop codecs', () => {
     expect(commands['db:getTask'].validateWireResult(encoded)).toBe(true)
     expect(() => commands['db:getTask'].encodeResult({ ...taskRow(), status: 'arbitrary-status' })).toThrow()
     expect(() => commands['db:getTask'].encodeResult({ ...taskRow(), labels: ['ok', 1] })).toThrow()
+    expect(commands['db:getTask'].encodeResult({ ...taskRow(), group_id: 'group-1' })).toMatchObject({ defined: true, value: { group_id: 'group-1' } })
+    expect(() => commands['db:getTask'].encodeResult({ ...taskRow(), group_id: { forged: true } })).toThrow()
   })
 
   it('preserves undefined versus null and never accepts an undeclared void result', () => {

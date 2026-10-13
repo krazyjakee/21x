@@ -9,6 +9,8 @@ import { applySchema } from './schema'
 import { ensureProjectCaptain, seedDefaultAgent, seedCaptainTasks, seedTaskManagementMcpServer, validateManagedTaskMcpRuntime, type ManagedTaskMcpRuntime } from './seed-core'
 import { seedOrchestratorSkill } from './captain-migration'
 import { userTaskRoleFilter } from './task-roles'
+import { TaskGroups } from './task-groups'
+import type { CreateTaskGroupData, TaskGroupRecord, TaskGroupProgressState } from '../../shared/task-groups'
 import { TASK_ROLE_CAPTAIN, type TaskRole } from '../../shared/task-roles'
 import { DEFAULT_PROJECT_ID } from '../../shared/projects'
 import { isTranscriptCursor, isTranscriptPageRequest, TRANSCRIPT_PAGE_LIMITS, TRANSCRIPT_PREVIEW_NOTICE, type TranscriptPage, type TranscriptPageRequest } from '../../shared/transcript-page'
@@ -692,6 +694,7 @@ export class DatabaseManager {
     const task = this.prepare('SELECT id, parent_task_id FROM tasks WHERE id = ?').get(taskId) as
       { id: string; parent_task_id: string | null } | undefined
     if (!task || task.parent_task_id) return undefined
+    if (this.getTaskGroupByTask(taskId) || this.getTask(taskId)?.role === 'task_group') throw new Error('Remove a task from its group before moving it to another project.')
     const project = this.prepare('SELECT id FROM projects WHERE id = ?').get(projectId)
     if (!project) return undefined
 
@@ -737,6 +740,9 @@ export class DatabaseManager {
   }
 
   createTask(data: CreateTaskData): TaskRecord | undefined {
+    for (const parentId of [data.parent_task_id, data.recurrence_parent_id]) {
+      if (parentId && (this.getTaskGroupByTask(parentId) || this.getTask(parentId)?.role === 'task_group')) throw new Error('Remove a task from its group before adding subtasks or recurrence instances.')
+    }
     const id = createId()
     const now = new Date().toISOString()
 
@@ -809,7 +815,11 @@ export class DatabaseManager {
     return this.getTask(id)
   }
 
-  updateTask(id: string, data: UpdateTaskData, origin?: 'session-feedback' | 'task-source' | 'system' | 'task-source-action'): TaskRecord | undefined {
+  updateTask(id: string, data: UpdateTaskData, origin?: 'session-feedback' | 'task-source' | 'system' | 'task-source-action' | 'task-group'): TaskRecord | undefined {
+    return this.db.transaction(() => this.updateTaskNow(id, data, origin))()
+  }
+
+  private updateTaskNow(id: string, data: UpdateTaskData, origin?: 'session-feedback' | 'task-source' | 'system' | 'task-source-action' | 'task-group'): TaskRecord | undefined {
     if (origin !== 'task-source' && origin !== 'task-source-action' && ('external_id' in data || 'source_id' in data || 'source' in data)) {
       throw new Error('Only the sync service can change a task source link.')
     }
@@ -817,7 +827,8 @@ export class DatabaseManager {
       this.validateNextSubtaskIds(id, data.next_subtask_ids)
     }
     const currentTask = this.getTask(id)
-    const approvedStatusWrite = origin === 'session-feedback' || origin === 'task-source' || origin === 'task-source-action'
+    if (currentTask) data = new TaskGroups(this).guardUpdate(currentTask, data, origin)
+    const approvedStatusWrite = origin === 'session-feedback' || origin === 'task-source' || origin === 'task-source-action' || origin === 'task-group'
     if (!approvedStatusWrite && currentTask?.status === TaskStatus.AgentLearning && this.getSetting(`session-feedback-completion:${id}`) && !(data.status === TaskStatus.Completed && data.complete_at_source === false)) {
       data = { ...data, status: TaskStatus.AgentLearning }
     }
@@ -882,6 +893,7 @@ export class DatabaseManager {
         !currentTask.attachments.some((existing) => existing.id === attachment.id))
       if (fieldChanged || attachmentAdded) this.recordTaskActivity(id)
     }
+    if (currentTask) new TaskGroups(this).afterUpdate(currentTask, data, origin)
     // Re-parenting must carry the child's existing activity into its new
     // ancestors, without inventing a fresh event for metadata housekeeping.
     if (data.parent_task_id && data.parent_task_id !== currentTask?.parent_task_id) {
@@ -926,12 +938,27 @@ export class DatabaseManager {
   }
 
   deleteTask(id: string): boolean {
+    if (this.getTaskGroupByTask(id) || this.getTask(id)?.role === 'task_group') throw new Error('Ungroup a member before deleting it; shared execution history must be retained.')
     const parentTaskId = this.getTask(id)?.parent_task_id
     if (parentTaskId) this.removeFromSiblingSuccessors(id, parentTaskId)
     this.deleteTaskAttachments(id)
     this.deleteTranscriptParts(id)
     const result = this.prepare('DELETE FROM tasks WHERE id = ?').run(id)
     return result.changes > 0
+  }
+
+  listTaskGroups(projectId: string, includeDissolved = false): TaskGroupRecord[] { return new TaskGroups(this).list(projectId, includeDissolved) }
+  getTaskGroup(id: string): TaskGroupRecord | undefined { return new TaskGroups(this).get(id) }
+  getTaskGroupByTask(taskId: string): TaskGroupRecord | undefined { return new TaskGroups(this).byTask(taskId) }
+  getTaskGroupHistory(taskId: string): TaskGroupRecord[] { return new TaskGroups(this).history(taskId) }
+  getTaskGroupMembers(groupId: string, includeFormer = false): TaskRecord[] { return new TaskGroups(this).members(groupId, includeFormer) }
+  getTaskGroupExecution(taskId: string): TaskRecord | undefined { return new TaskGroups(this).execution(taskId) }
+  createTaskGroup(data: CreateTaskGroupData): TaskGroupRecord { return new TaskGroups(this).create(data) }
+  addTasksToGroup(groupId: string, taskIds: string[]): TaskGroupRecord { return new TaskGroups(this).add(groupId, taskIds) }
+  removeTaskFromGroup(groupId: string, taskId: string): TaskGroupRecord { return new TaskGroups(this).remove(groupId, taskId) }
+  dissolveTaskGroup(groupId: string): TaskGroupRecord { return new TaskGroups(this).dissolve(groupId) }
+  setTaskGroupProgress(groupId: string, taskId: string, state: TaskGroupProgressState, message: string): TaskGroupRecord {
+    return new TaskGroups(this).progress(groupId, taskId, state, message)
   }
 
   // ── Heartbeat CRUD ──────────────────────────────────────────
@@ -1068,6 +1095,8 @@ export class DatabaseManager {
   }
 
   deleteAgent(id: string): boolean {
+    if (this.prepare("SELECT 1 FROM task_groups WHERE agent_id=? AND state='active' LIMIT 1").get(id))
+      throw new Error('Switch or dissolve active task groups before deleting their execution agent.')
     const result = this.prepare('DELETE FROM agents WHERE id = ?').run(id)
     return result.changes > 0
   }
@@ -2115,6 +2144,8 @@ export class DatabaseManager {
   }
 
   deleteTaskSource(id: string): boolean {
+    if (this.prepare(`SELECT 1 FROM tasks t JOIN task_groups g ON g.id=t.group_id WHERE t.source_id=? AND g.state='active' LIMIT 1`).get(id))
+      throw new Error('Ungroup source tasks before deleting their task source.')
     const result = this.prepare('DELETE FROM task_sources WHERE id = ?').run(id)
     return result.changes > 0
   }

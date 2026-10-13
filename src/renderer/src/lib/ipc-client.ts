@@ -49,6 +49,19 @@ import type { ProjectConcurrencyState } from '@shared/concurrency'
 import type { ProjectStatus, ProjectStatusHistoryPage } from '@shared/project-status'
 import type { ProjectOverviewEntry } from '@shared/project-overview'
 import type { CaptainMemory } from '@shared/captain-memory'
+import type { CreateTaskGroupData, TaskGroupReviewData } from '@shared/task-groups'
+
+export const taskGroupsApi = {
+  list: (projectId: string, includeDissolved = false) => window.electronAPI.taskGroups.list(projectId, includeDissolved),
+  get: (id: string) => window.electronAPI.taskGroups.get(id),
+  history: (taskId: string) => window.electronAPI.taskGroups.history(taskId),
+  create: (data: CreateTaskGroupData) => window.electronAPI.taskGroups.create(data),
+  add: (id: string, taskIds: string[]) => window.electronAPI.taskGroups.add(id, taskIds),
+  remove: (id: string, taskId: string) => window.electronAPI.taskGroups.remove(id, taskId),
+  dissolve: (id: string) => window.electronAPI.taskGroups.dissolve(id),
+  move: (id: string, status: string) => window.electronAPI.taskGroups.move(id, status),
+  review: (data: TaskGroupReviewData) => window.electronAPI.taskGroups.review(data)
+}
 
 export const taskApi = {
   /** Every project's tasks, or one project's when `projectId` is given. */

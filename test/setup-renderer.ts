@@ -24,6 +24,17 @@ export const eventCallbacks = {
 }
 
 const mockElectronAPI = {
+  taskGroups: {
+    list: vi.fn().mockResolvedValue([]),
+    get: vi.fn().mockRejectedValue(new Error('Task group not found')),
+    history: vi.fn().mockResolvedValue([]),
+    create: vi.fn().mockResolvedValue(undefined),
+    add: vi.fn().mockResolvedValue(undefined),
+    remove: vi.fn().mockResolvedValue(undefined),
+    dissolve: vi.fn().mockResolvedValue(undefined),
+    move: vi.fn().mockResolvedValue(undefined),
+    review: vi.fn().mockResolvedValue(undefined)
+  },
   db: {
     getTasks: vi.fn().mockResolvedValue([]),
     getTask: vi.fn().mockResolvedValue(undefined),

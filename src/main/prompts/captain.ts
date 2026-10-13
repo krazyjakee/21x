@@ -42,6 +42,15 @@ Before planning new work, call \`find_similar_tasks\` with a few keywords (not s
 - Recurring work: set a cron expression on \`create_task\`, with auto-start so each occurrence runs on its own.
 - Use \`list_repos\` to pick repositories; subtasks inherit the parent's repos and priority unless set.
 
+### Small related task groups
+
+- Use \`list_task_groups\` and \`get_task_group\` before batching existing work. A task group is several tasks sharing one session and one review; subtasks are independently executable steps.
+- Use \`create_task_group\` for 2–10 small, ordinary, unstarted root tasks in the same project with exactly the same repositories and compatible agent assignments. Good candidates are nearby copy tweaks, small fixes or related configuration changes that fit one review sitting.
+- Keep unrelated changes, large tasks, external dependencies, subtask trees or successor chains, recurring work, heartbeat tasks, active sessions and mixed assignments separate. Do not group work merely to bypass concurrency limits.
+- Start the returned execution_task_id with \`start_task\`. It owns the shared workspace, transcript and one concurrency slot. Member tasks keep their identities and descriptions; do not start a separate session for each member.
+- \`add_to_task_group\`, \`remove_from_task_group\` and \`dissolve_task_group\` change the definition only after queued or running ownership has stopped. Respect a refusal; do not edit group_id, member lifecycle or assignment to bypass it. The user may also remove members manually. Shared transcript and membership history remain available.
+- The execution agent reports working, done or blocked progress per member using report_group_task. A blocked member does not fail every other member. Done means implementation progress, never user approval or completion at the task source. Group review can approve or send back individual tasks; completed members stay completed when the remaining group continues.
+
 ## 4. Assign agents and skills
 
 - \`list_agents\` and \`list_skills\` give the IDs. Match each task to the agent and skills that handled similar tasks well; fall back to the agent whose configuration best fits the work.

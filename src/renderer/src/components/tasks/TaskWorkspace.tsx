@@ -29,6 +29,9 @@ import { useTaskShortcutRouter } from './workspace/useTaskShortcutRouter'
 import { TaskWorkspaceDialogs } from './workspace/TaskWorkspaceDialogs'
 import { TaskTranscriptPane } from './workspace/TaskTranscriptPane'
 import type { QueuedAgentStart } from '@/types/electron'
+import { TaskGroupHistoryNotice } from '@/components/task-groups/TaskGroupHistoryNotice'
+import { TaskStatusBadge } from './TaskStatusBadge'
+import { Markdown } from '@/components/ui/Markdown'
 
 const EMPTY_ARTIFACTS: Artifact[] = []
 const DEFAULT_ARTIFACT_UI: ArtifactUIState = { open: false, activeTabId: null, railExpanded: false }
@@ -58,6 +61,8 @@ interface TaskWorkspaceProps {
    * false: their own panel header already indicates the same session.
    */
   showActivity?: boolean
+  /** Shared execution owns agent controls; member approval stays outside it. */
+  groupExecution?: 'active' | 'history'
 }
 
 function TaskWorkspaceComponent({
@@ -75,9 +80,15 @@ function TaskWorkspaceComponent({
   onBack,
   onOpenFullView,
   panelLayout = 'both',
-  showActivity = true
+  showActivity = true,
+  groupExecution
 }: TaskWorkspaceProps) {
-  const { start, resume, switchAgent, abort, stop, sendMessage, approve } = useAgentSessionActions(task?.id)
+  const isGroupExecution = !!groupExecution || task?.role === 'task_group'
+  const groupHistory = groupExecution === 'history'
+  const isGroupMember = !!task?.group_id && !isGroupExecution
+  const { start, resume, switchAgent, abort, stop, sendMessage, approve } = useAgentSessionActions(isGroupMember ? undefined : task?.id)
+  const [groupProblem, setGroupProblem] = useState('')
+  const groupRestricted = async () => { setGroupProblem('Review member tasks in the group. Group configuration is managed from the shared conversation.'); }
   // Narrow per-field selectors: the transcript (TaskTranscriptPane) owns the
   // messages subscription, so streamed deltas don't re-render this workspace.
   const sessionId = useAgentStore((s) => (task?.id ? s.sessions.get(task.id)?.sessionId ?? null : null))
@@ -598,17 +609,17 @@ function TaskWorkspaceComponent({
   }, [task?.id, upsertArtifact])
 
   useTaskShortcutRouter({
-    task,
+    task: isGroupMember || groupHistory ? undefined : task,
     agents,
     artifacts,
     activeArtifactTabId: artifactUI.activeTabId,
     workspaceBodyRef,
-    onComplete: handleCompleteTask,
+    onComplete: isGroupExecution ? groupRestricted : handleCompleteTask,
     onStartSession: handleStartSession,
     onResumeSession: handleResumeSession,
     onStartFreshSession: handleStartFreshSession,
     onTriage: handleTriage,
-    onSnooze: handleShowSnooze
+    onSnooze: isGroupExecution ? () => { void groupRestricted() } : handleShowSnooze
   })
 
   if (!task) {
@@ -624,24 +635,35 @@ function TaskWorkspaceComponent({
   }
 
   // Persisted sessions count as started even before their transcript is hydrated.
-  const hasSession = !!task.session_id || !!sessionId || sessionStatus !== SessionStatus.IDLE || hasMessages
+  if (isGroupMember) return <div className="ui-scale flex h-full min-h-0 flex-col bg-background" data-testid="group-member-workspace">
+    <TaskGroupHistoryNotice taskId={task.id} />
+    <section className="min-h-0 flex-1 overflow-auto p-6" aria-label="Grouped task details"><h2 className="text-lg font-semibold">{task.title}</h2><div className="mt-2"><TaskStatusBadge status={task.status} /></div>
+      <p className="mt-3 text-sm text-muted-foreground">This task uses the group's shared session. Open the shared conversation to start, stop, send instructions, or review it. Remove it from the group before changing its execution settings.</p>
+      <div className="mt-4"><Markdown size="base">{task.description || 'No task description.'}</Markdown></div>
+      {task.labels.length > 0 && <p className="mt-4 text-sm">Labels: {task.labels.join(', ')}</p>}
+      {task.repos.length > 0 && <p className="mt-2 text-sm">Repositories: {task.repos.join(', ')}</p>}
+      {task.attachments.length > 0 && <ul className="mt-4 text-sm">{task.attachments.map(attachment => <li key={attachment.id}>{attachment.filename}</li>)}</ul>}
+      {task.output_fields.length > 0 && <OutputFieldsDisplay fields={task.output_fields} onChange={onUpdateOutputFields} />}
+    </section>
+  </div>
+  const hasSession = isGroupExecution || !!task.session_id || !!sessionId || sessionStatus !== SessionStatus.IDLE || hasMessages
   const assignedAgent = task.agent_id ? agents.find((a) => a.id === task.agent_id) : null
   const assignedAgentConfigured = isAgentConfigured(assignedAgent)
   // Triage uses the default agent (or the first agent in the list as a fallback).
   const triageAgent = !task.agent_id ? (agents.find((a) => a.is_default) || agents[0] || null) : null
   const triageAgentConfigured = isAgentConfigured(triageAgent)
-  const canResume = task.agent_id && task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE && !hasMessages
-  const canRestart = task.agent_id && task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE && hasMessages
+  const canResume = !groupHistory && task.agent_id && task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE && !hasMessages
+  const canRestart = !groupHistory && task.agent_id && task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE && hasMessages
   const hasPendingRecovery = recoveryState !== null && ['queued', 'retrying', 'claimed', 'starting'].includes(recoveryState.state)
-  const canStart = task.agent_id && assignedAgentConfigured && !task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE
+  const canStart = !groupHistory && task.agent_id && assignedAgentConfigured && !task.session_id && !sessionId && sessionStatus === SessionStatus.IDLE
     && task.status !== TaskStatus.Completed
     && !hasPendingRecovery
-  const canTriage = !task.agent_id && agents.length > 0 && triageAgentConfigured && sessionStatus === SessionStatus.IDLE
+  const canTriage = !isGroupExecution && !task.agent_id && agents.length > 0 && triageAgentConfigured && sessionStatus === SessionStatus.IDLE
     && task.status !== TaskStatus.Completed && task.status !== TaskStatus.Triaging
 
   let primaryAction: TaskPrimaryAction | null = null
   let handlePrimaryAction: (() => void) | undefined
-  if (task.status === TaskStatus.ReadyForReview || task.status === TaskStatus.Completed) {
+  if (!isGroupExecution && (task.status === TaskStatus.ReadyForReview || task.status === TaskStatus.Completed)) {
     if (task.status !== TaskStatus.Completed) {
       primaryAction = TaskPrimaryAction.COMPLETE
       handlePrimaryAction = () => void handleCompleteTask()
@@ -672,7 +694,7 @@ function TaskWorkspaceComponent({
             ? 'Recovery failed'
             : null
 
-  const detailsView = (
+  const detailsView = isGroupExecution ? <div className="overflow-auto p-4"><p className="mb-3 text-sm text-muted-foreground">Review and approve the member tasks from this group's review panel.</p><Markdown size="base">{task.description}</Markdown></div> : (
     <TaskDetailView
       task={task}
       agents={agents}
@@ -719,8 +741,8 @@ function TaskWorkspaceComponent({
       taskId={task.id}
       agentId={task.agent_id ?? undefined}
       onStop={handleAbort}
-      onRestart={handleStartFreshSession}
-      onSend={handleSend}
+      onRestart={groupHistory ? undefined : handleStartFreshSession}
+      onSend={groupHistory ? undefined : handleSend}
       onPickAttachments={handlePickAttachments}
       onAddAttachmentPaths={handleAddAttachmentPaths}
       onSaveImages={handleSaveImages}
@@ -735,7 +757,9 @@ function TaskWorkspaceComponent({
   return (
     <>
       <div className="ui-scale relative flex h-full min-h-0 flex-col bg-background">
-        <TaskHeaderBar
+        {!isGroupExecution && <TaskGroupHistoryNotice taskId={task.id} />}
+        {groupProblem && <p role="alert" className="shrink-0 px-4 py-2 text-sm text-destructive">{groupProblem}</p>}
+        {isGroupExecution ? <header className="flex min-h-12 shrink-0 items-center gap-3 border-b border-border p-3"><p className="min-w-0 flex-1 text-sm font-medium">{groupHistory ? 'Retained shared conversation' : 'Shared agent session'}</p><TaskStatusBadge status={task.status} />{primaryAction && handlePrimaryAction && <Button size="sm" onClick={handlePrimaryAction}>{primaryAction === TaskPrimaryAction.START ? 'Start group' : primaryAction === TaskPrimaryAction.RESUME ? 'Resume group' : 'Restart group'}</Button>}{!groupHistory && sessionStatus !== SessionStatus.IDLE && <Button size="sm" variant="outline" onClick={() => { void handleAbort() }}>Stop group</Button>}</header> : <TaskHeaderBar
           task={task}
           agent={assignedAgent}
           agents={agents}
@@ -757,7 +781,7 @@ function TaskWorkspaceComponent({
           onDelete={onDelete}
           recoveryState={recoveryLabel}
           showActivity={showActivity}
-        />
+        />}
         <div ref={workspaceBodyRef} className="relative flex min-h-0 flex-1 overflow-hidden">
           {panelLayout === 'task-only' || (!hasSession && panelLayout === 'both') ? (
             <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
@@ -816,7 +840,7 @@ function TaskWorkspaceComponent({
                     onToggleRail={() => setRailExpanded(task.id, !artifactUI.railExpanded)}
                     details={detailsView}
                     changes={<ChangesPanel taskId={task.id} repos={task.repos} className="h-full" onSummary={setChangesSummary} onPullRequests={handlePullRequests} />}
-                    output={<OutputFieldsDisplay fields={task.output_fields} onChange={onUpdateOutputFields} isActive={task.status !== TaskStatus.Completed} onComplete={handleCompleteTask} taskUpdatedAt={task.updated_at} />}
+                    output={<OutputFieldsDisplay fields={task.output_fields} onChange={onUpdateOutputFields} isActive={task.status !== TaskStatus.Completed} onComplete={isGroupExecution ? () => { void groupRestricted() } : handleCompleteTask} taskUpdatedAt={task.updated_at} />}
                     className="min-w-[320px] flex-1 border-l border-border/50"
                   />
                 </>

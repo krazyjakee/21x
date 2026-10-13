@@ -4,7 +4,7 @@ export const DESKTOP_EVENT_FORWARDING = {
     "id": "agent-host-dispatch",
     "source": {
       "file": "src/main/agent-manager-core.ts",
-      "line": 6110,
+      "line": 6202,
       "column": 52,
       "target": "reviewed-event-wrapper",
       "method": "send",
@@ -43,7 +43,7 @@ export const DESKTOP_EVENT_FORWARDING = {
     "id": "agent-broadcast",
     "source": {
       "file": "src/main/agent-manager-core.ts",
-      "line": 6115,
+      "line": 6207,
       "column": 7,
       "target": "reviewed-event-wrapper",
       "method": "send",
@@ -80,7 +80,7 @@ export const DESKTOP_EVENT_FORWARDING = {
     "id": "agent-persist-or-broadcast",
     "source": {
       "file": "src/main/agent-manager-core.ts",
-      "line": 6146,
+      "line": 6238,
       "column": 5,
       "target": "reviewed-event-wrapper",
       "method": "send",
@@ -321,7 +321,7 @@ export const DESKTOP_EVENT_FORWARDING = {
     "id": "task-api-relay",
     "source": {
       "file": "src/main/index.ts",
-      "line": 410,
+      "line": 411,
       "column": 7,
       "target": "guardedIpcSend",
       "method": "send",
@@ -360,7 +360,7 @@ export const DESKTOP_EVENT_FORWARDING = {
     "id": "mobile-to-desktop-relay",
     "source": {
       "file": "src/main/index.ts",
-      "line": 431,
+      "line": 432,
       "column": 7,
       "target": "guardedIpcSend",
       "method": "send",

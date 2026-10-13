@@ -14,6 +14,7 @@ import { createProviderRecoveryTable } from './provider-recovery-migration'
 import { createManagedSessionTables } from './managed-session-migration'
 import { createCommanderActionTables, migrateCommanderActions } from './commander-actions-migration'
 import { createSessionHandoffTable } from './session-handoff-migration'
+import { createTaskGroupTables, migrateTaskGroups } from './task-groups-migration'
 
 /**
  * Bump this whenever new migrations are added so returning users skip
@@ -77,8 +78,9 @@ import { createSessionHandoffTable } from './session-handoff-migration'
  * 33 → 34: observational managed-session ledger and Commander usage (#97/#99).
  * 34 → 35: Commander input mode and executed action snapshots / exact Undo (#86).
  * 35 → 36: durable planned session handoff steps (#103).
+ * 36 → 37: shared task-group execution anchors and retained membership/progress (#192).
  */
-const SCHEMA_VERSION = 36
+const SCHEMA_VERSION = 37
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -180,6 +182,7 @@ export function createTables(db: Database.Database): void {
       sort_order INTEGER NOT NULL DEFAULT 0,
       role TEXT NOT NULL DEFAULT 'task',
       project_id TEXT REFERENCES projects(id),
+      group_id TEXT REFERENCES task_groups(id) ON DELETE SET NULL,
       last_activity_at TEXT DEFAULT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -582,6 +585,7 @@ export function createTables(db: Database.Database): void {
   createManagedSessionTables(db)
   createCommanderActionTables(db)
   createSessionHandoffTable(db)
+  createTaskGroupTables(db)
 
   // Report routing (#62): a Captain report quotes the correlation id of
   // the `ask_captain` tool row it answers; this serves that lookup.
@@ -663,6 +667,7 @@ function rebuildTasksTable(db: Database.Database, columnNames: Set<string>): voi
       sort_order INTEGER NOT NULL DEFAULT 0,
       role TEXT NOT NULL DEFAULT 'task',
       project_id TEXT REFERENCES projects(id),
+      group_id TEXT REFERENCES task_groups(id) ON DELETE SET NULL,
       last_activity_at TEXT DEFAULT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -1124,6 +1129,9 @@ export function runMigrations(db: Database.Database): void {
 
   // Migration v36: resumable rollover intents preserve source turns.
   createSessionHandoffTable(db)
+
+  // Migration v37: retained group membership and one counted execution task.
+  migrateTaskGroups(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)

@@ -26,6 +26,39 @@ enum TaskStatus {
 | Agent Learning | blue | blue (pulsing) |
 | Completed | green | green |
 
+### Task groups
+
+A task group batches 2–10 ordinary, not-started root tasks in the same project
+with exactly the same repositories and compatible agent assignments. Subtasks,
+tasks that own children or successor dependencies, active native sessions,
+recurring tasks and heartbeat tasks cannot join. The execution task receives
+the union of member skills and a prompt listing member IDs, titles and work
+descriptions. See [task group guidance](task-groups.md) for grouping and review.
+
+The separate `task_groups` table points to a hidden `tasks.role = 'task_group'`
+anchor. This is counted work, so one group consumes one ordinary admission
+slot; it receives no Captain exemption. Only that anchor owns the native session,
+workspace and shared transcript. Members remain real source tasks and keep
+`session_id = null`. `tasks.group_id` identifies current membership, while
+`task_group_memberships` retains join/leave episodes and progress after removal
+or dissolution. Historical group transcripts remain available through history.
+
+Starting and going idle mirror lifecycle changes to unfinished members in one
+database transaction. Completed members stay completed during later group work.
+For selective send-back, pending members resume while untouched review members
+stay in review. Per-member `done` or `blocked` reports describe agent progress;
+they do not approve a task or close its source. The group can complete only
+after every current member has completed its own review and source-confirmation
+path. A failed source completion leaves that member in review.
+
+Member dragging and direct lifecycle, assignment, repository, project, parent,
+recurrence or heartbeat changes are blocked while grouped. Stop the group before
+changing owned work or its definition; the service also fences live and queued
+session ownership. Removal and dissolution preserve each member's lifecycle and
+the shared history. Ungroup a member before deleting it. Description edits on
+an idle group rebuild its pending execution context; active work must be stopped
+before instructions change.
+
 ### Coordinator rows
 
 Each project's Captain is stored as a row in `tasks` with

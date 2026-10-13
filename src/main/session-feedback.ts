@@ -47,8 +47,11 @@ export async function finishSessionFeedback(db: DatabaseManager, sync: SyncManag
 }
 
 /** Sends the task's completion action to its source; throws unless the source accepts it. */
-export async function completeTaskAtSource(sync: SyncManager | null | undefined, task: TaskRecord): Promise<void> {
+export async function completeTaskAtSource(sync: SyncManager | null | undefined, task: TaskRecord, origin?: 'task-group'): Promise<void> {
   if (!sync || !task.source_id) throw new Error('Task source is unavailable.')
-  const result = await sync.executeAction(getTaskCompletionAction(task.output_fields), task, undefined, task.source_id)
+  const action = getTaskCompletionAction(task.output_fields)
+  const result = origin
+    ? await sync.executeAction(action, task, undefined, task.source_id, origin)
+    : await sync.executeAction(action, task, undefined, task.source_id)
   if (!result.success) throw new Error(result.error || 'Source completion failed.')
 }

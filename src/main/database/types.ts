@@ -1,5 +1,6 @@
 import type { TaskRole } from '../../shared/task-roles'
 import type { ReasoningEffort } from '../../shared/reasoning-effort'
+export type { TaskGroupRecord, CreateTaskGroupData, TaskGroupProgressState } from '../../shared/task-groups'
 
 export type {
   ProjectRecord, CreateProjectData, UpdateProjectData,
@@ -301,6 +302,7 @@ export interface TaskRow {
   sort_order: number
   role: string
   project_id: string | null
+  group_id?: string | null
   created_at: string
   updated_at: string
   /** Meaningful work only; older clients may omit this field. */
@@ -387,11 +389,13 @@ export interface TaskRecord {
   complete_at_source: boolean | null
   parent_task_id: string | null
   next_subtask_ids: string[]
-  /** 'task' for the user's work; a coordinator role for rows that only host a conversation. */
+  /** Ordinary member work, Captain conversation, or hidden counted group execution. */
   role: TaskRole
   sort_order: number
   /** Always set: subtasks share their parent's project; unassigned rows belong to the Default project. */
   project_id: string
+  /** Active group membership, or the hidden execution anchor's identity. */
+  group_id?: string | null
   created_at: string
   updated_at: string
   /** Meaningful work only; older clients may omit this field. */
@@ -429,7 +433,7 @@ export interface CreateTaskData {
   complete_at_source?: boolean | null
   parent_task_id?: string | null
   next_subtask_ids?: string[]
-  /** Defaults to 'task'. Only the seed creates coordinator rows. */
+  /** Defaults to 'task'. Internal seed/group creation owns hidden roles. */
   role?: TaskRole
   /** Defaults to the Default project. Ignored for a subtask, which always shares its parent's project. */
   project_id?: string

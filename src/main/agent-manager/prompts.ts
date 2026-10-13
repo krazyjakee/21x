@@ -1,6 +1,7 @@
 import type { DatabaseManager, OutputFieldRecord, TaskRecord } from '../database'
 import { TaskStatus } from '../../shared/constants'
 import { buildSystemMessage, computeDeliveryId, SystemMessageOrigin } from '../../shared/system-authority'
+import { groupAttachmentReferences } from '../task-groups/attachments'
 
 export const ARTIFACT_WORKSPACE_INSTRUCTIONS = `
 
@@ -26,6 +27,24 @@ Only create this file when there's genuinely useful monitoring to do. Do not cre
  *  parent/sibling/subtask context, orchestration hints and output fields. */
 export function buildTaskWorkPrompt(db: DatabaseManager, taskId: string, task: TaskRecord | undefined): string {
   if (!task) return `Work on task: ${taskId}`
+  if (task.role === 'task_group') {
+    const group = db.getTaskGroupByTask(taskId)
+    if (!group || group.state !== 'active') throw new Error('This task group has no current work; its transcript is retained.')
+    const members = db.getTaskGroupMembers(group.id)
+    const pending = members.filter(member => member.status === TaskStatus.NotStarted)
+    const targets = pending.length ? pending : members.filter(member => member.status !== TaskStatus.Completed && member.status !== TaskStatus.ReadyForReview)
+    const focus = targets.length ? targets : members.filter(member => member.status !== TaskStatus.Completed)
+    let prompt = `Work on task group "${group.title}" in this one shared session and workspace.\nGroup ID: ${group.id}\nExecution task ID: ${taskId}\n`
+      + `Current requested work: ${focus.map(member => member.id).join(', ')}. Preserve other members already in review or completed.\n`
+      + 'Use report_group_task with group_id, task_id, state (working, done or blocked), and a short message for each member. A blocked member does not fail the whole group. Progress never approves a task or completes its source; leave review to the user. Do not start separate member sessions, create subtasks or enable heartbeat/recurrence for this batch.\n'
+    for (const member of members) {
+      prompt += `\n## ${member.title}\nTask ID: ${member.id}\nStatus: ${member.status}\n${member.description || '(no description)'}\n`
+      if (member.output_fields.length) prompt += buildOutputFieldInstructions(member.output_fields)
+    }
+    const attachments = groupAttachmentReferences(db, taskId)
+    if (attachments.length) prompt += `\nMember attachments copied into this shared workspace:\n${attachments.join('\n')}\nInspect only files relevant to the requested tasks.`
+    return prompt + ARTIFACT_WORKSPACE_INSTRUCTIONS
+  }
   let promptText = `Work on task: "${task.title}"\n\n${task.description || ''}${ARTIFACT_WORKSPACE_INSTRUCTIONS}`
 
   if (task.parent_task_id) {

@@ -1,0 +1,47 @@
+<!doctype html><html><head><meta charset="UTF-8"><title>Task groups native input</title></head><body><div id="root"></div>
+<script>
+// Controlled service responses only: no SDK, real task source, database or worktree.
+window.fixture = { calls: [], channels: new Map(), tasks: [], anchor: null, group: null, parts: [], revision: 0, sequence: 0, failSource: true, refuseRemove: false }
+const f = window.fixture, copy = value => JSON.parse(JSON.stringify(value))
+const subscribe = name => listener => { if (!f.channels.has(name)) f.channels.set(name, new Set()); f.channels.get(name).add(listener); return () => f.channels.get(name).delete(listener) }
+f.emit = (name, event) => { for (const listener of [...(f.channels.get(name) ?? [])]) listener(copy(event)) }
+f.record = (method, data) => { const record = {timestamp: new Date().toISOString(),method,...data};f.calls.push(record);console.log('TASK_GROUP_CALL '+JSON.stringify(record)) }
+f.snapshot = () => copy({ group: f.group, task: f.anchor, members: f.tasks.filter(task => [...f.group.task_ids,...f.group.former_task_ids].includes(task.id)) })
+f.phase = status => {
+  f.group.status = status; f.anchor.status = status
+  f.tasks = f.tasks.map(task => task.group_id===f.group.id && task.status!=='completed' ? {...task,status} : task)
+  for(const task of f.tasks)f.emit('onTaskUpdated',{taskId:task.id,updates:task})
+  f.emit('onTaskUpdated',{taskId:f.anchor.id,updates:f.anchor});f.emit('onTasksRefresh',null)
+}
+f.agentStatus = status => f.emit('onAgentStatus',{taskId:f.anchor.id,sessionId:'shared-native-session',agentId:'group-agent',status,epoch:'task-group-native',seq:++f.sequence})
+f.part = (id, content, tool) => {
+  const row={taskId:f.anchor.id,partId:id,seq:f.parts.find(row=>row.partId===id)?.seq??f.parts.length+1,role:'assistant',content,partType:tool?.name==='permission'?'question':tool?'tool':'text',tool,createdAt:1,updatedAt:Date.now(),rev:++f.revision}
+  f.parts=[...f.parts.filter(part=>part.partId!==id),row];f.emit('onTranscriptChanged',{taskId:f.anchor.id,parts:[row],maxRev:f.revision})
+}
+f.hitl = () => { f.part('group-permission','',{name:'permission',status:'pending',description:'Approve editing the checkout files?',requestId:'group-request',questions:[{header:'Permission',question:'Approve editing the checkout files?',options:[{label:'Allow',description:'Allow the shared agent to edit checkout files.'}]}]}); f.agentStatus('waiting_approval') }
+const noop = async()=>undefined
+const lists = new Set(['getAll','getTasks','getSubtasks','getRepos','scan','getImages','getLogs'])
+const methods = new Proxy({}, {get:(_,key)=>key.startsWith('on')?subscribe(key):async()=>lists.has(key)?[]:null})
+const stop = async sessionId => {f.record('stop',{sessionId});f.agentStatus('idle');f.phase('ready_for_review')}
+window.electronAPI = new Proxy({
+  db: new Proxy({getTasks:async()=>copy(f.tasks),getTask:async id=>copy(f.tasks.find(task=>task.id===id)??f.anchor),updateTask:async(id,updates)=>{f.record('ordinary-update',{id,updates});return copy({...f.anchor,...updates})}}, {get:(target,key)=>key in target?target[key]:methods[key]}),
+  settings:{getAll:async()=>({}),set:noop},
+  agents:new Proxy({getAll:async()=>[],getStartQueue:async()=>[],getStartRecoveryState:async()=>null}, {get:(target,key)=>key in target?target[key]:methods[key]}),
+  artifacts:{scan:async()=>[],read:async()=>null},attachments:{getImages:async()=>[]},
+  agentSession:new Proxy({
+    getTranscriptSnapshot:async taskId=>taskId===f.anchor.id?copy(f.parts):[],getTranscriptDelta:async()=>({parts:copy(f.parts),maxRev:f.revision}),
+    start:async(agentId,taskId)=>{f.record('start',{agentId,taskId});f.anchor.session_id='shared-native-session';f.phase('agent_working');f.agentStatus('working');return{sessionId:'shared-native-session'}},
+    abort:stop,stop,stopByTaskId:async taskId=>{await stop('shared-native-session');return{success:true,sessionId:'shared-native-session'}},
+    send:async(sessionId,message,taskId)=>{f.record('send',{sessionId,message,taskId});f.part('typed-response','Shared instructions received.');return{success:true}},
+    sendByTaskId:async(taskId,message)=>{f.record('send',{taskId,message});return{success:true,sessionId:'shared-native-session'}},
+    approve:async(sessionId,approved,message,responseType,requestId)=>{f.record('approve',{sessionId,approved,message,responseType,requestId});f.part('group-permission','',{name:'permission',status:'completed',description:'Approved editing checkout files.',requestId:'group-request'});f.agentStatus('working');return{success:true}}
+  }, {get:(target,key)=>key in target?target[key]:methods[key]}),
+  taskGroups:{
+    list:async()=>f.group?.state==='active'?[copy(f.group)]:[],get:async()=>f.snapshot(),history:async taskId=>f.group&&[...f.group.task_ids,...f.group.former_task_ids].includes(taskId)?[copy(f.group)]:[],
+    move:async(id,status)=>{f.record('move',{id,status});f.phase(status);return copy(f.group)},
+    remove:async(id,taskId)=>{f.record('remove',{id,taskId});if(f.refuseRemove)throw new Error('The group is queued. Stop it before changing membership.');f.group.task_ids=f.group.task_ids.filter(id=>id!==taskId);f.group.former_task_ids.push(taskId);f.tasks=f.tasks.map(task=>task.id===taskId?{...task,group_id:null}:task);f.emit('onTasksRefresh',null);return copy(f.group)},
+    dissolve:async id=>{f.record('dissolve',{id});f.group.state='dissolved';f.group.former_task_ids=[...new Set([...f.group.former_task_ids,...f.group.task_ids])];f.group.task_ids=[];f.tasks=f.tasks.map(task=>({...task,group_id:null}));f.emit('onTasksRefresh',null);return copy(f.group)},
+    review:async data=>{f.record('review',data);const failures=[],completed_task_ids=[];for(const id of data.task_ids){if(data.action==='approve'&&data.complete_at_source&&f.failSource){failures.push({task_id:id,message:'Task source unavailable; task remains ready for review.'});continue}f.tasks=f.tasks.map(task=>task.id===id?{...task,status:data.action==='approve'?'completed':'not_started'}:task);if(data.action==='approve')completed_task_ids.push(id)}f.emit('onTasksRefresh',null);return{group:copy(f.group),failures,completed_task_ids}}
+  }
+}, {get:(target,key)=>key in target?target[key]:key.startsWith('on')?subscribe(key):methods})
+</script><script type="module" src="/fixture.tsx"></script></body></html>

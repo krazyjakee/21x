@@ -179,6 +179,17 @@ export interface TeaCliStatus {
     message?: string;
 }
 export interface DesktopApi {
+    taskGroups: {
+        list(projectId: string, includeDissolved?: boolean): Promise<import("./task-groups").TaskGroupRecord[]>;
+        get(id: string): Promise<import("./task-groups").TaskGroupSnapshot<Task>>;
+        history(taskId: string): Promise<import("./task-groups").TaskGroupRecord[]>;
+        create(data: import("./task-groups").CreateTaskGroupData): Promise<import("./task-groups").TaskGroupRecord>;
+        add(id: string, taskIds: string[]): Promise<import("./task-groups").TaskGroupRecord>;
+        remove(id: string, taskId: string): Promise<import("./task-groups").TaskGroupRecord>;
+        dissolve(id: string): Promise<import("./task-groups").TaskGroupRecord>;
+        move(id: string, status: string): Promise<import("./task-groups").TaskGroupRecord>;
+        review(data: import("./task-groups").TaskGroupReviewData): Promise<import("./task-groups").TaskGroupReviewResult>;
+    };
     db: {
         getTasks: (projectId?: string) => Promise<Task[]>;
         getTask: (id: string) => Promise<Task | undefined>;
