@@ -1,8 +1,16 @@
-import { describe, it, expect, vi } from 'vitest'
-import { RecurrenceScheduler } from './recurrence-scheduler'
-import { createTestDb } from '../../test/helpers/db-test-helper'
+import { afterEach, describe, it, expect, vi } from 'vitest'
+import { RecurrenceSchedulerCore as RecurrenceScheduler } from './recurrence-scheduler-core'
+import { createPortableDbFixture } from '../../test/helpers/portable-db-test-helper'
 import { makeTask } from '../../test/helpers/task-fixtures'
 import type { CreateTaskData, DatabaseManager } from './database'
+
+const databases: ReturnType<typeof createPortableDbFixture>[] = []
+function createTestDb() {
+  const fixture = createPortableDbFixture()
+  databases.push(fixture)
+  return fixture
+}
+afterEach(() => { for (const fixture of databases.splice(0)) fixture.rawDb.close() })
 
 // Minimal mock — we only need calculateNextOccurrence (no DB access)
 // Pass 'UTC' timezone explicitly so tests produce deterministic results regardless of machine timezone
@@ -208,8 +216,7 @@ describe('RecurrenceScheduler — handing new instances to auto-start', () => {
    * straight away instead of waiting for its own tick.
    */
   const runTick = async (scheduler: RecurrenceScheduler): Promise<void> => {
-    await (scheduler as unknown as { checkAndCreateDueInstances(): Promise<void> })
-      .checkAndCreateDueInstances()
+    await scheduler.runNow()
   }
 
   function dueTemplate(db: DatabaseManager, overrides: Partial<CreateTaskData> = {}): string {

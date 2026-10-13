@@ -184,7 +184,7 @@ async function shutdownAppServices(): Promise<void> {
   connectorBridgePlugin?.stopPolling()
   if (db) disposeConnectorRuntime(db)
   voiceSessionManager?.shutdown()
-  recurrenceScheduler?.stop()
+  recurrenceScheduler?.shutdown()
   stopScheduledCoordination()
   heartbeatScheduler?.stop()
   captainWaker?.shutdown()
@@ -196,7 +196,7 @@ async function shutdownAppServices(): Promise<void> {
 
   oauthManager?.destroy()
   const serviceDrains = await Promise.allSettled([
-    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined, closeTaskApiServer(), closeMobileApiServer(), taskAutomationScheduler?.close(), captainWaker?.close()
+    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined, closeTaskApiServer(), closeMobileApiServer(), taskAutomationScheduler?.close(), captainWaker?.close(), recurrenceScheduler?.close()
   ])
   const incompleteServiceDrain = serviceDrains.find(result => result.status === 'rejected')
   if (incompleteServiceDrain?.status === 'rejected') throw incompleteServiceDrain.reason

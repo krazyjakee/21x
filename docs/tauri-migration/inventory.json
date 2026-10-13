@@ -5158,13 +5158,13 @@
         {
           "imported": "BrowserWindow",
           "local": "BrowserWindow",
-          "typeOnly": false
+          "typeOnly": true
         }
       ],
       "column": 1,
       "file": "src/main/recurrence-scheduler.ts",
-      "line": 2,
-      "mode": "runtime",
+      "line": 1,
+      "mode": "type-only",
       "syntax": "import"
     },
     {
@@ -5574,6 +5574,7 @@
     "src/main/project-status.ts",
     "src/main/prompts/captain.ts",
     "src/main/pull-request-merge.ts",
+    "src/main/recurrence-scheduler-core.ts",
     "src/main/recurrence-scheduler.ts",
     "src/main/repo-providers.ts",
     "src/main/scheduled-coordination.ts",
@@ -9867,22 +9868,22 @@
       "target": "reviewed-event-wrapper"
     },
     {
-      "channel": "tasks:refresh",
+      "channel": "task:created",
       "channelExpression": null,
-      "column": 9,
+      "column": 52,
       "file": "src/main/recurrence-scheduler.ts",
-      "line": 143,
+      "line": 15,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
       "target": "guardedIpcSend"
     },
     {
-      "channel": "task:created",
+      "channel": "tasks:refresh",
       "channelExpression": null,
-      "column": 9,
+      "column": 47,
       "file": "src/main/recurrence-scheduler.ts",
-      "line": 274,
+      "line": 16,
       "method": "send",
       "methodExpression": null,
       "resolution": "literal",
@@ -14050,10 +14051,10 @@
   ],
   "summary": {
     "directAPIConsumers": 368,
-    "files": 694,
+    "files": 695,
     "operations": 715,
-    "runtimeElectronImports": 47,
-    "typeOnlyElectronImports": 3,
+    "runtimeElectronImports": 46,
+    "typeOnlyElectronImports": 4,
     "unresolvedOperations": 11,
     "webviews": 1
   },

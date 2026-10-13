@@ -12661,9 +12661,9 @@
           "target": "reviewed-event-wrapper"
         },
         {
-          "column": 9,
+          "column": 52,
           "file": "src/main/recurrence-scheduler.ts",
-          "line": 274,
+          "line": 15,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -13676,9 +13676,9 @@
           "target": "guardedIpcSend"
         },
         {
-          "column": 9,
+          "column": 47,
           "file": "src/main/recurrence-scheduler.ts",
-          "line": 143,
+          "line": 16,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
