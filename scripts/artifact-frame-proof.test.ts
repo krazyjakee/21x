@@ -76,4 +76,17 @@ describe('opaque artifact frame diagnostic', () => {
     expect(completed[0]).toMatchObject({ directDesktopDenied: false, directStatusDenied: false,
       directListenDenied: false, directDeadlineReached: true, directUnrecognizedFailure: false })
   })
+
+  it.each([
+    ['Origin header is not a valid URL', 'directInvalidOrigin'],
+    ['missing Origin header', 'directMissingOrigin']
+  ])('classifies pinned origin parser error without treating it as authorization: %s', async (error, key) => {
+    const native = { core: { invoke: vi.fn(async () => { throw error }) },
+      event: { listen: vi.fn(async () => { throw error }) } }
+    const { completed } = frame(native)
+    await vi.waitFor(() => expect(completed).toHaveLength(1))
+    expect(completed[0]).toMatchObject({ [key]: true, directStringError: true,
+      directDesktopDenied: false, directStatusDenied: false, directListenDenied: false,
+      directUnrecognizedFailure: true, directAccepted: false, directDeadlineReached: false })
+  })
 })

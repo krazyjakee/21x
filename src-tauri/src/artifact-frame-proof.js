@@ -8,7 +8,8 @@
     directDeadlineReached: false, directUnrecognizedFailure: false, directAccepted: false,
     internalInvokeAvailable: typeof window.__TAURI_INTERNALS__?.invoke === 'function',
     internalIpcAvailable: typeof window.__TAURI_INTERNALS__?.ipc === 'function',
-    directTypeError: false, directStringError: false, directSecurityError: false };
+    directTypeError: false, directStringError: false, directSecurityError: false,
+    directInvalidOrigin: false, directMissingOrigin: false };
   const pending = new Set(['desktop', 'status', 'listen']);
   let directComplete = report.frameBridgeAbsent;
   const finish = () => {
@@ -40,6 +41,10 @@
           if (error?.name === 'TypeError') report.directTypeError = true;
           if (error?.name === 'SecurityError') report.directSecurityError = true;
           if (typeof error === 'string') report.directStringError = true;
+          // Exact parser errors from pinned Tauri ipc/protocol.rs. They diagnose
+          // malformed opaque-origin IPC; neither counts as an ACL denial.
+          if (error === 'Origin header is not a valid URL') report.directInvalidOrigin = true;
+          if (error === 'missing Origin header') report.directMissingOrigin = true;
         }
       } finally { clearTimeout(timeout); }
     }
