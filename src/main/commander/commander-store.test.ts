@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createTestDb } from '../../../test/helpers/db-test-helper'
+import { createPortableDbFixture as createTestDb } from '../../../test/helpers/portable-db-test-helper'
 import { CommanderStore } from './commander-store'
 
 let store: CommanderStore
@@ -21,6 +21,28 @@ beforeEach(() => {
 })
 
 describe('CommanderStore sessions', () => {
+  it('reuses the dedicated inbox after rename, store restart and archival without losing reports', () => {
+    const inbox = store.ensureReportInbox()
+    store.appendMessage(inbox.id, { role: 'report', content: 'The board fix is integrated; choose a release reviewer.' })
+    store.renameSession(inbox.id, 'Saved project updates')
+    store.createSession('Current conversation')
+    const restarted = new CommanderStore({ db: store.database })
+    expect(restarted.ensureReportInbox()).toMatchObject({ id: inbox.id, title: 'Saved project updates', is_report_inbox: true, unread_count: 1 })
+    restarted.setArchived(inbox.id, true)
+    expect(restarted.ensureReportInbox()).toMatchObject({ id: inbox.id, archived: false, is_report_inbox: true })
+    expect(restarted.listMessages(inbox.id)).toMatchObject([{ content: 'The board fix is integrated; choose a release reviewer.' }])
+    expect(restarted.listSessions().filter((session) => session.is_report_inbox)).toHaveLength(1)
+  })
+
+  it('adopts an older report inbox while preserving user chats with the same title', () => {
+    const conversation = store.createSession('Project reports')
+    store.appendMessage(conversation.id, { role: 'user', content: 'Help me plan.' })
+    const legacyInbox = store.createSession('Project reports')
+    store.appendMessage(legacyInbox.id, { role: 'report', content: 'The requested work finished.' })
+    expect(store.ensureReportInbox().id).toBe(legacyInbox.id)
+    expect(store.getSession(conversation.id)?.is_report_inbox).toBeUndefined()
+  })
+
   it('creates, renames, archives and lists sessions, most recent first', () => {
     const a = store.createSession()
     clock += 10

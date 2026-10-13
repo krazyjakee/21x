@@ -8,11 +8,8 @@
  * - speaks each reply as it streams — every finished sentence is handed to
  *   the selected engine the moment it exists, and the tail is flushed when the
  *   turn ends, so a short reply is never left in a buffer;
- * - never reads a Captain report aloud as written (#107). A report that is
- *   relayed starts a Commander turn, and that turn's plain-language summary
- *   is what is spoken. A report that gets no turn (no provider, or a stored
- *   briefing) reads its structured human explanation when present, or is
- *   announced in one line that points to the chat;
+ * - keeps arriving Captain reports silent (#88), including decisions and
+ *   blockers. They remain visible in their request thread or quiet inbox;
  * - on barge-in stops playback, cancels the synthesis request or connection,
  *   and cancels the Commander turn, so the cancelled reply is neither heard
  *   later nor written further.
@@ -30,6 +27,7 @@ import { commanderVoiceKey } from '../../shared/commander-call'
 import type { VoiceSpeechRequest } from '../../shared/voice-tts'
 import type { VoiceAnswerPart } from './voice-speech-service'
 import { COMMANDER_TECHNICAL_DETAILS, splitCommanderReport } from '../../shared/commander-report'
+import { parseCommanderAction } from '../../shared/commander-action'
 
 /** The part of the Commander service this bridge uses. */
 export interface CommanderVoiceCommander {
@@ -64,15 +62,14 @@ export interface CommanderVoiceOptions {
 export { commanderVoiceKey }
 
 /**
- * What is said for a report that no summary turn will speak for. The report
- * audit evidence is never read out. Structured human context follows the same
- * spoken contract as a Commander relay; older prose gets a short arrival cue.
+ * Plain-language formatting for an explicitly requested report reading.
+ * Arriving reports never invoke this helper or start speech (#88).
  */
 export function spokenReport(projectName: string | null | undefined, content?: string): string {
   const from = projectName?.trim() ? `Report from ${projectName.trim()}` : 'A report arrived'
   if (content?.includes(COMMANDER_TECHNICAL_DETAILS)) {
-    // Structured reports already contain the communication contract. Read the
-    // explanation when no model relay is available, never its audit section.
+    // Structured reports already contain the communication contract. Keep
+    // their audit section out of an explicitly requested reading.
     const explanation = splitCommanderReport(content).content
       .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
       .replace(/https?:\/\/\S+|\b(?:commit(?:\s+(?:hash|sha))?|(?:head[_ ]?)?sha)\s*[:=]?\s*[0-9a-f]{7,40}\b|\b(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b|\bPR\s*#\s*\d+\b/gi, '')
@@ -83,19 +80,66 @@ export function spokenReport(projectName: string | null | undefined, content?: s
   return `${from}; details in the chat.`
 }
 
+/** Facts from a validated executed mutation, never from hosted assistant claims. */
+export function spokenCommanderAction(tool: string, content: string, isError: boolean): string | null {
+  const action = parseCommanderAction(tool, content, isError)
+  if (!action || !action.changes.length) return null
+  const name = action.target.name
+  const kind = action.target.kind === 'repo' ? 'repository' : action.target.kind
+  const archived = action.changes.find((change) => change.field === 'archived')
+  if ((tool === 'archive_project' || tool === 'restore_project') && typeof archived?.after === 'boolean') {
+    return `${archived.after ? 'Archived' : 'Restored'} project “${name}”.`
+  }
+  const paused = action.changes.find((change) => change.field === 'all_projects_paused')
+  if (tool === 'pause_all_projects' && typeof paused?.after === 'boolean') return `${paused.after ? 'Paused' : 'Resumed'} new agent work across all projects.`
+  if (tool.startsWith('create_') || tool.startsWith('add_')) return `Created ${kind} “${name}”.`
+  if (tool.startsWith('remove_')) return `Removed ${kind} “${name}”.`
+  if (tool === 'promote_skill') return `Made skill “${name}” available to every project.`
+  if (tool === 'move_skill') return action.target.projectName
+    ? `Moved skill “${name}” to project “${action.target.projectName}”.`
+    : `Moved skill “${name}” to its selected project.`
+  const labels: Record<string, string> = {
+    description: 'description', content: 'instructions', preferred_model: 'preferred model',
+    default_branch: 'default branch', git_provider: 'repository provider', git_org: 'repository owner',
+    captain_agent_id: 'Captain assignment', default_agent_id: 'default agent assignment',
+    project_id: 'project assignment', is_deleted: 'availability'
+  }
+  const value = (input: unknown): string | null => {
+    if (input === null) return 'not set'
+    if (typeof input === 'boolean') return input ? 'on' : 'off'
+    if (typeof input === 'number') return String(input)
+    if (typeof input === 'string' && input.length <= 120) return input ? `“${input}”` : 'empty'
+    return null
+  }
+  return action.changes.map((change) => {
+    if (change.field === 'name' && typeof change.before === 'string' && typeof change.after === 'string') {
+      return `Renamed ${kind} from “${change.before}” to “${change.after}”.`
+    }
+    const label = labels[change.field] ?? change.field.replace(/_/g, ' ')
+    // Assignment IDs and long prose belong to card details, not speech.
+    const before = change.field.endsWith('_id') ? null : value(change.before)
+    const after = change.field.endsWith('_id') ? null : value(change.after)
+    return before !== null && after !== null
+      ? `Changed ${label} for ${kind} “${name}” from ${before} to ${after}.`
+      : `Changed ${label} for ${kind} “${name}”. Details are in the action card.`
+  }).join(' ')
+}
+
 interface TurnState {
   sessionId: string
   turnId: string
   key: string
-  /** Every message of the reply, in order: text runs and any report read between them. */
+  /** Every text run of the user's requested reply, in order. */
   parts: VoiceAnswerPart[]
-  /** The text run still being written, or null after a tool call or a report. */
+  /** The text run still being written, or null after a tool call. */
   textPart: VoiceAnswerPart | null
   runs: number
   /** Resolves once the passage is open (or refused). Deltas wait for it. */
   began: Promise<boolean>
   /** Barge-in or a close. Nothing more of this turn is spoken. */
   dead: boolean
+  /** One factual announcement per actual tool result in this turn. */
+  announcedActions: Set<string>
 }
 
 const DEFAULT_CANCEL_TIMEOUT_MS = 4000
@@ -103,8 +147,6 @@ const DEFAULT_CANCEL_TIMEOUT_MS = 4000
 export class CommanderVoice {
   private activeSessionId: string | null = null
   private readonly turns = new Map<string, TurnState>()
-  /** Report cues waiting to see whether a summary turn starts for them, per session. */
-  private readonly pendingCues = new Map<string, string[]>()
   private readonly unsubscribe: () => void
 
   constructor(private readonly options: CommanderVoiceOptions) {
@@ -149,7 +191,6 @@ export class CommanderVoice {
    * be read again by a later push.
    */
   bargeIn(sessionId: string): { cancelled: boolean } {
-    this.pendingCues.delete(sessionId)
     const key = commanderVoiceKey(sessionId)
     for (const turn of this.turns.values()) {
       if (turn.sessionId === sessionId) turn.dead = true
@@ -192,9 +233,7 @@ export class CommanderVoice {
         this.onTurnEvent(event.sessionId, event.turnId, event.event)
         return
       case 'messages_appended':
-        for (const message of event.messages) {
-          if (message.role === 'report') this.onReport(event.sessionId, message)
-        }
+        // Reports are quiet updates even during an active call or reply.
         return
       default:
         return
@@ -202,12 +241,9 @@ export class CommanderVoice {
   }
 
   private onTurnStarted(sessionId: string, turnId: string): void {
-    // A turn that starts right after a report is its summary: that is spoken
-    // in place of the cue.
-    this.pendingCues.delete(sessionId)
     if (sessionId !== this.activeSessionId) return
     const key = commanderVoiceKey(sessionId)
-    // A passage still reading the previous reply or a report is replaced: a
+    // A passage still reading the previous reply is replaced: a
     // new turn is the user moving on.
     if (this.options.speech.streamingTaskId === key) this.options.speech.stop('cancelled')
     const turn: TurnState = {
@@ -219,6 +255,7 @@ export class CommanderVoice {
       runs: 0,
       began: Promise.resolve(false),
       dead: false,
+      announcedActions: new Set(),
     }
     turn.began = this.options.speech
       .beginStreamingAnswer(key, undefined, 'conversation')
@@ -258,6 +295,14 @@ export class CommanderVoice {
           turn.textPart = null
           this.push(turn, true)
         }
+        if (inner.type === 'tool_call_result' && !turn.announcedActions.has(inner.id)) {
+          const fact = spokenCommanderAction(inner.name, inner.content, inner.isError)
+          if (fact) {
+            turn.announcedActions.add(inner.id)
+            turn.parts.push({ partId: `action:${turnId}:${inner.id}`, content: fact })
+            this.push(turn, true)
+          }
+        }
         return
       case 'done':
       case 'error':
@@ -280,47 +325,10 @@ export class CommanderVoice {
     })
   }
 
-  /**
-   * A Captain report in the active session. Its audit content is not spoken: when
-   * the Commander relays it, the relay turn starts in the same tick (see
-   * CommanderService.deliverReport) and its summary is read like any reply.
-   * The human explanation (or legacy one-line cue) is spoken only when no such turn follows.
-   */
-  private onReport(sessionId: string, message: CommanderMessage): void {
-    if (sessionId !== this.activeSessionId) return
-    const text = spokenReport(message.project_id ? this.options.resolveProjectName?.(message.project_id) : null, message.content)
-    const key = commanderVoiceKey(sessionId)
-
-    const open = [...this.turns.values()].find((t) => t.sessionId === sessionId && !t.dead)
-    if (open) {
-      // An append-only report can arrive during a reply without a relay turn.
-      // Normal deliverReport calls defer this event until the reply ends.
-      open.parts.push({ partId: `report:${message.id}`, content: text })
-      open.textPart = null
-      this.push(open, true)
-      return
-    }
-    const cues = this.pendingCues.get(sessionId)
-    if (cues) {
-      cues.push(text)
-      return
-    }
-    this.pendingCues.set(sessionId, [text])
-    queueMicrotask(() => {
-      const waiting = this.pendingCues.get(sessionId)
-      this.pendingCues.delete(sessionId)
-      if (!waiting || sessionId !== this.activeSessionId) return
-      void this.options.speech
-        .speak({ text: waiting.join(' '), source: 'conversation', taskId: key })
-        .catch((err) => console.error('[voice] speaking the report cue failed:', err))
-    })
-  }
-
   // ── Internals ─────────────────────────────────────────────
 
   private silenceSession(sessionId: string): void {
     const key = commanderVoiceKey(sessionId)
-    this.pendingCues.delete(sessionId)
     for (const [turnId, turn] of this.turns) {
       if (turn.sessionId === sessionId) {
         turn.dead = true

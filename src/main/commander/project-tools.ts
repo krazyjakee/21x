@@ -1,3 +1,4 @@
+import { createActionRecorder, pickActionFields, PROJECT_ACTION_FIELDS, REPO_ACTION_FIELDS, RESOURCE_ACTION_FIELDS } from './action-results'
 import type { AgentManager } from '../agent-manager'
 import type { DatabaseManager } from '../database'
 import type { ChatToolDefinition, ChatToolResult } from '../chat/tools'
@@ -396,6 +397,7 @@ function pendingApprovals(options: ProjectToolOptions): ChatToolResult {
 export function createCommanderProjectTools(options: ProjectToolOptions): ChatToolDefinition[] {
   const { db } = options
   const notify = (projectId: string, kind: ProjectChangeKind): void => options.onProjectChanged?.(projectId, kind)
+  const action = createActionRecorder(db, options.context)
 
   return [
     {
@@ -499,15 +501,15 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
       name: 'pause_all_projects',
       description: 'Pause (or resume) agent starts in every project at once. Takes effect immediately. Wide-reaching: pausing stops new agent starts in EVERY project until resumed (nothing already running is stopped).',
       inputSchema: { type: 'object', properties: { paused: { type: 'boolean' } }, required: ['paused'], additionalProperties: false },
-      handler: async (input) => {
+      handler: async (input, call) => {
         if (typeof input.paused !== 'boolean') throw new Error('paused must be true or false')
         const paused = input.paused
         const { agents } = options
         if (!agents) throw new Error('Agents are not available right now.')
-        return mutation(() => {
+        return action('pause_all_projects', call.toolCallId, { kind: 'all-projects', id: 'all-projects', name: 'All projects' }, { all_projects_paused: agents.isAllProjectsPaused() }, () => {
           agents.pauseAllProjects(paused)
           return { all_projects_paused: agents.isAllProjectsPaused() }
-        })
+        }, () => ({ all_projects_paused: agents.isAllProjectsPaused() }))
       }
     },
     {
@@ -543,7 +545,7 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
         required: ['name'],
         additionalProperties: false
       },
-      handler: async (input) => {
+      handler: async (input, call) => {
         const data = {
           name: requiredString(input, 'name', MAX_NAME_CHARS),
           description: optionalNullableString(input.brief, 'brief', MAX_BRIEF_CHARS) ?? '',
@@ -554,13 +556,13 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
         }
         if (data.git_provider && !PROVIDERS.has(data.git_provider)) throw new Error('git_provider must be github, gitlab, forgejo, or null')
         const repos = repoList(input.repos)
-        return mutation(() => {
+        return action('create_project', call.toolCallId, value => ({ kind: 'project', id: String(value.id), name: String(value.name) }), {}, () => {
           const created = db.createProject(data)
           if (!created) throw new Error('Project could not be created')
           for (const repo of repos) db.addProjectRepo(created.id, repo)
           notify(created.id, 'created')
           return compactProject(db, created, true)
-        })
+        }, value => pickActionFields(db.getProject(String(value.id)), PROJECT_ACTION_FIELDS))
       }
     },
     {
@@ -586,7 +588,7 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
         required: ['project', 'changes'],
         additionalProperties: false
       },
-      handler: async (input) => {
+      handler: async (input, call) => {
         const project = resolveProject(db, input.project)
         if (!input.changes || typeof input.changes !== 'object' || Array.isArray(input.changes)) throw new Error('changes must be an object')
         const raw = input.changes as Record<string, unknown>
@@ -602,13 +604,13 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
         }
         if (Object.keys(changes).length === 0) throw new Error('changes must include at least one supported field')
         if ('git_provider' in changes && changes.git_provider && !PROVIDERS.has(changes.git_provider)) throw new Error('git_provider must be github, gitlab, forgejo, or null')
-        return mutation(() => {
+        return action('update_project', call.toolCallId, { kind: 'project', id: project.id, name: project.name }, pickActionFields(project, PROJECT_ACTION_FIELDS), () => {
           const updated = db.updateProject(project.id, changes)
           if (!updated) throw new Error('Project no longer exists')
           if ('captain_agent_id' in changes || 'default_agent_id' in changes) releaseCaptain(options, project.id)
           notify(project.id, 'updated')
           return compactProject(db, updated, true)
-        })
+        }, () => pickActionFields(db.getProject(project.id), PROJECT_ACTION_FIELDS))
       }
     },
     ...repoTools(options, notify),
@@ -619,16 +621,16 @@ export function createCommanderProjectTools(options: ProjectToolOptions): ChatTo
         ? 'Archive a project. Takes effect immediately. Destructive: the project disappears from the board and its Captain is no longer woken until it is restored; its history is kept.'
         : 'Restore an archived project to the board. Takes effect immediately.',
       inputSchema: { type: 'object', properties: { ...projectLocatorSchema }, required: ['project'], additionalProperties: false },
-      handler: async (input) => {
+      handler: async (input, call) => {
         const project = resolveProject(db, input.project)
         const archived = toolName === 'archive_project'
         if (archived && project.id === DEFAULT_PROJECT_ID) throw new Error('The Default project cannot be archived.')
-        return mutation(() => {
+        return action(toolName, call.toolCallId, { kind: 'project', id: project.id, name: project.name }, { archived: project.archived }, () => {
           const updated = db.archiveProject(project.id, archived)
           if (!updated) throw new Error('Project no longer exists')
           notify(project.id, archived ? 'archived' : 'restored')
           return compactProject(db, updated, false)
-        })
+        }, () => ({ archived: db.getProject(project.id)!.archived }))
       }
     }))
   ]
@@ -669,28 +671,29 @@ function repoTools(
   notify: (projectId: string, kind: ProjectChangeKind) => void
 ): ChatToolDefinition[] {
   const { db } = options
+  const action = createActionRecorder(db, options.context)
   const baseProperties = projectLocatorSchema
   return [
     {
       name: 'add_project_repo',
       description: 'Add a repository to a project. Takes effect immediately.',
       inputSchema: { type: 'object', properties: { ...baseProperties, name: { type: 'string' }, provider: { type: 'string', enum: ['github', 'gitlab', 'forgejo'] }, org: { type: 'string' }, default_branch: { type: ['string', 'null'] } }, required: ['project', 'name'], additionalProperties: false },
-      handler: async (input) => {
+      handler: async (input, call) => {
         const project = resolveProject(db, input.project)
         const data = repoInput(input)
-        return mutation(() => {
+        return action('add_project_repo', call.toolCallId, value => ({ kind: 'repo', id: String(value.id), name: String(value.name), projectId: project.id }), {}, () => {
           const repo = db.addProjectRepo(project.id, data)
           if (!repo) throw new Error('Repository could not be added')
           notify(project.id, 'repos')
           return repoSummary(repo)
-        })
+        }, value => pickActionFields(db.getProjectRepo(String(value.id)), REPO_ACTION_FIELDS))
       }
     },
     {
       name: 'update_project_repo',
       description: 'Edit a project repository identified by its stable repo ID. Takes effect immediately; the old values are overwritten.',
       inputSchema: { type: 'object', properties: { ...baseProperties, repo_id: { type: 'string' }, changes: { type: 'object' } }, required: ['project', 'repo_id', 'changes'], additionalProperties: false },
-      handler: async (input) => {
+      handler: async (input, call) => {
         const project = resolveProject(db, input.project)
         const repoId = requiredString(input, 'repo_id', 200)
         const existing = db.getProjectRepo(repoId)
@@ -707,42 +710,42 @@ function repoTools(
         }
         if (Object.keys(changes).length === 0) throw new Error('changes must not be empty')
         if (typeof changes.provider === 'string' && !PROVIDERS.has(changes.provider)) throw new Error('provider must be github, gitlab, or forgejo')
-        return mutation(() => {
+        return action('update_project_repo', call.toolCallId, { kind: 'repo', id: existing.id, name: existing.name, projectId: project.id }, pickActionFields(existing, REPO_ACTION_FIELDS), () => {
           const repo = db.updateProjectRepo(repoId, changes)
           if (!repo) throw new Error('Repository no longer exists')
           notify(project.id, 'repos')
           return repoSummary(repo)
-        })
+        }, () => pickActionFields(db.getProjectRepo(repoId), REPO_ACTION_FIELDS))
       }
     },
     {
       name: 'remove_project_repo',
       description: 'Remove a repository from project configuration. Takes effect immediately. Destructive: new tasks in the project no longer get that repository (the remote repository itself is untouched).',
       inputSchema: { type: 'object', properties: { ...baseProperties, repo_id: { type: 'string' } }, required: ['project', 'repo_id'], additionalProperties: false },
-      handler: async (input) => {
+      handler: async (input, call) => {
         const project = resolveProject(db, input.project)
         const repoId = requiredString(input, 'repo_id', 200)
         const existing = db.getProjectRepo(repoId)
         if (!existing || existing.project_id !== project.id) throw new Error('Repository not found in that project')
-        return mutation(() => {
+        return action('remove_project_repo', call.toolCallId, { kind: 'repo', id: existing.id, name: existing.name, projectId: project.id }, { exists: true }, () => {
           if (!db.removeProjectRepo(repoId)) throw new Error('Repository no longer exists')
           notify(project.id, 'repos')
           return { removed_repo_id: repoId }
-        })
+        }, () => ({ exists: false }))
       }
     },
     {
       name: 'reorder_project_repos',
       description: 'Set the complete repository order using stable repo IDs. Takes effect immediately.',
       inputSchema: { type: 'object', properties: { ...baseProperties, ordered_ids: { type: 'array', items: { type: 'string' }, maxItems: MAX_REPOS } }, required: ['project', 'ordered_ids'], additionalProperties: false },
-      handler: async (input) => {
+      handler: async (input, call) => {
         const project = resolveProject(db, input.project)
         const ids = validateCompleteOrder(input.ordered_ids, db.getProjectRepos(project.id).map((repo) => repo.id), 'repository')
-        return mutation(() => {
+        return action('reorder_project_repos', call.toolCallId, { kind: 'project', id: project.id, name: project.name }, { repo_order: db.getProjectRepos(project.id).map(repo => repo.id) }, () => {
           db.reorderProjectRepos(project.id, ids)
           notify(project.id, 'repos')
           return { ordered_ids: ids }
-        })
+        }, () => ({ repo_order: db.getProjectRepos(project.id).map(repo => repo.id) }))
       }
     }
   ]
@@ -753,32 +756,33 @@ function resourceTools(
   notify: (projectId: string, kind: ProjectChangeKind) => void
 ): ChatToolDefinition[] {
   const { db } = options
+  const action = createActionRecorder(db, options.context)
   const baseProperties = projectLocatorSchema
   return [
     {
       name: 'add_project_resource',
       description: 'Add a context link or note to a project. Takes effect immediately.',
       inputSchema: { type: 'object', properties: { ...baseProperties, label: { type: 'string' }, url: { type: ['string', 'null'] }, notes: { type: 'string' } }, required: ['project', 'label'], additionalProperties: false },
-      handler: async (input) => {
+      handler: async (input, call) => {
         const project = resolveProject(db, input.project)
         const data = {
           label: requiredString(input, 'label', MAX_NAME_CHARS),
           url: validResourceUrl(optionalNullableString(input.url, 'url', MAX_URL_CHARS)),
           notes: optionalNullableString(input.notes, 'notes', MAX_NOTES_CHARS) ?? ''
         }
-        return mutation(() => {
+        return action('add_project_resource', call.toolCallId, value => ({ kind: 'resource', id: String(value.id), name: String(value.label), projectId: project.id }), {}, () => {
           const resource = db.addProjectResource(project.id, data)
           if (!resource) throw new Error('Resource could not be added')
           notify(project.id, 'resources')
           return resourceSummary(resource)
-        })
+        }, value => pickActionFields(db.getProjectResource(String(value.id)), RESOURCE_ACTION_FIELDS))
       }
     },
     {
       name: 'update_project_resource',
       description: 'Edit a project resource identified by its stable resource ID. Takes effect immediately; the old values are overwritten.',
       inputSchema: { type: 'object', properties: { ...baseProperties, resource_id: { type: 'string' }, changes: { type: 'object' } }, required: ['project', 'resource_id', 'changes'], additionalProperties: false },
-      handler: async (input) => {
+      handler: async (input, call) => {
         const project = resolveProject(db, input.project)
         const resourceId = requiredString(input, 'resource_id', 200)
         const existing = db.getProjectResource(resourceId)
@@ -793,42 +797,42 @@ function resourceTools(
           ...(raw.notes !== undefined ? { notes: optionalNullableString(raw.notes, 'notes', MAX_NOTES_CHARS) ?? '' } : {})
         }
         if (Object.keys(changes).length === 0) throw new Error('changes must not be empty')
-        return mutation(() => {
+        return action('update_project_resource', call.toolCallId, { kind: 'resource', id: existing.id, name: existing.label, projectId: project.id }, pickActionFields(existing, RESOURCE_ACTION_FIELDS), () => {
           const resource = db.updateProjectResource(resourceId, changes)
           if (!resource) throw new Error('Resource no longer exists')
           notify(project.id, 'resources')
           return resourceSummary(resource)
-        })
+        }, () => pickActionFields(db.getProjectResource(resourceId), RESOURCE_ACTION_FIELDS))
       }
     },
     {
       name: 'remove_project_resource',
       description: 'Remove a context resource from project configuration. Takes effect immediately. Destructive: the link or note and its text are deleted from the project context that every future task receives.',
       inputSchema: { type: 'object', properties: { ...baseProperties, resource_id: { type: 'string' } }, required: ['project', 'resource_id'], additionalProperties: false },
-      handler: async (input) => {
+      handler: async (input, call) => {
         const project = resolveProject(db, input.project)
         const resourceId = requiredString(input, 'resource_id', 200)
         const existing = db.getProjectResource(resourceId)
         if (!existing || existing.project_id !== project.id) throw new Error('Resource not found in that project')
-        return mutation(() => {
+        return action('remove_project_resource', call.toolCallId, { kind: 'resource', id: existing.id, name: existing.label, projectId: project.id }, { exists: true }, () => {
           if (!db.removeProjectResource(resourceId)) throw new Error('Resource no longer exists')
           notify(project.id, 'resources')
           return { removed_resource_id: resourceId }
-        })
+        }, () => ({ exists: false }))
       }
     },
     {
       name: 'reorder_project_resources',
       description: 'Set the complete resource order using stable resource IDs. Takes effect immediately.',
       inputSchema: { type: 'object', properties: { ...baseProperties, ordered_ids: { type: 'array', items: { type: 'string' }, maxItems: MAX_RESOURCES } }, required: ['project', 'ordered_ids'], additionalProperties: false },
-      handler: async (input) => {
+      handler: async (input, call) => {
         const project = resolveProject(db, input.project)
         const ids = validateCompleteOrder(input.ordered_ids, db.getProjectResources(project.id).map((resource) => resource.id), 'resource')
-        return mutation(() => {
+        return action('reorder_project_resources', call.toolCallId, { kind: 'project', id: project.id, name: project.name }, { resource_order: db.getProjectResources(project.id).map(resource => resource.id) }, () => {
           db.reorderProjectResources(project.id, ids)
           notify(project.id, 'resources')
           return { ordered_ids: ids }
-        })
+        }, () => ({ resource_order: db.getProjectResources(project.id).map(resource => resource.id) }))
       }
     }
   ]

@@ -78,6 +78,7 @@ export interface DesktopCommandMap {
   "commander:renameSession": { apiArguments: Parameters<NonNullable<DesktopApi["commander"]["renameSession"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["commander"]["renameSession"]>>> }
   "commander:send": { apiArguments: Parameters<NonNullable<DesktopApi["commander"]["send"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["commander"]["send"]>>> }
   "commander:setActiveSession": { apiArguments: Parameters<NonNullable<DesktopApi["commander"]["setActiveSession"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["commander"]["setActiveSession"]>>> }
+  "commander:undoAction": { apiArguments: Parameters<NonNullable<DesktopApi["commander"]["undoAction"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["commander"]["undoAction"]>>> }
   "concurrency:getState": { apiArguments: Parameters<NonNullable<DesktopApi["concurrency"]["getState"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["concurrency"]["getState"]>>> }
   "concurrency:pin": { apiArguments: Parameters<NonNullable<DesktopApi["concurrency"]["pin"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["concurrency"]["pin"]>>> }
   "concurrency:setCaptainControl": { apiArguments: Parameters<NonNullable<DesktopApi["concurrency"]["setCaptainControl"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["concurrency"]["setCaptainControl"]>>> }
@@ -409,6 +410,7 @@ export const DESKTOP_OPERATION_MANIFEST = {
   "command/commander:renameSession": {"name":"commander:renameSession","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/commander:send": {"name":"commander:send","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/commander:setActiveSession": {"name":"commander:setActiveSession","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
+  "command/commander:undoAction": {"name":"commander:undoAction","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "event/concurrency:changed": {"name":"concurrency:changed","kind":"event","disposition":"retained","owner":"service","caller":"service","destination":"trusted-desktop-main"},
   "command/concurrency:getState": {"name":"concurrency:getState","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/concurrency:pin": {"name":"concurrency:pin","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},

@@ -886,6 +886,10 @@ export interface DesktopApi {
         cancel: (sessionId: string) => Promise<{
             cancelled: boolean;
         }>;
+        undoAction: (sessionId: string, actionId: string) => Promise<{
+            alreadyUndone: boolean;
+            message: CommanderMessage;
+        }>;
         onEvent: (callback: (event: CommanderEvent) => void) => () => void;
     };
     /** ElevenLabs speech engine (#64). Answers with the speech snapshot; the key never comes back. */

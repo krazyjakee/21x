@@ -1,9 +1,9 @@
+import { createActionRecorder, pickActionFields, SKILL_ACTION_FIELDS } from './action-results'
 import type { DatabaseManager } from '../database'
 import { SkillVersionConflictError, type SkillRecord, type UpdateSkillData } from '../database/types'
 import type { ChatToolDefinition, ChatToolResult } from '../chat/tools'
 import {
   clip,
-  mutation,
   optionalNullableString,
   projectLocatorSchema,
   requiredString,
@@ -210,6 +210,7 @@ function listSkills(options: SkillToolOptions, input: Record<string, unknown>): 
 export function createCommanderSkillTools(options: SkillToolOptions): ChatToolDefinition[] {
   const { db } = options
   const notify = (skillId: string, kind: SkillChangeKind): void => options.onSkillChanged?.(skillId, kind)
+  const action = createActionRecorder(db, options.context)
   const skillLocatorSchema = {
     skill: { type: 'string', description: 'Stable skill ID, or the exact skill name.' }
   }
@@ -251,7 +252,7 @@ export function createCommanderSkillTools(options: SkillToolOptions): ChatToolDe
         required: ['name', 'description', 'content'],
         additionalProperties: false
       },
-      handler: async (input) => {
+      handler: async (input, call) => {
         const name = skillName(input)
         const project = input.project !== undefined && input.project !== null && input.project !== '' ? resolveProject(db, input.project) : null
         if (project?.archived) throw new Error(`Project "${project.name}" is archived. Restore it before adding skills to it.`)
@@ -264,13 +265,13 @@ export function createCommanderSkillTools(options: SkillToolOptions): ChatToolDe
           project_id: project?.id ?? null
         }
         assertNameFree(db, name)
-        return mutation(() => {
+        return action('create_skill', call.toolCallId, value => ({ kind: 'skill', id: String(value.id), name: String(value.name), ...(project ? { projectId: project.id } : {}) }), {}, () => {
           assertNameFree(db, name)
           const created = db.createSkill(data)
           if (!created) throw new Error('Skill could not be created')
           notify(created.id, 'created')
           return detailEntry(db, created)
-        })
+        }, value => pickActionFields(db.getSkill(String(value.id)), SKILL_ACTION_FIELDS))
       }
     },
     {
@@ -296,7 +297,7 @@ export function createCommanderSkillTools(options: SkillToolOptions): ChatToolDe
         required: ['skill', 'changes'],
         additionalProperties: false
       },
-      handler: async (input) => {
+      handler: async (input, call) => {
         const skill = resolveSkill(db, input.skill)
         if (!input.changes || typeof input.changes !== 'object' || Array.isArray(input.changes)) throw new Error('changes must be an object')
         const raw = input.changes as Record<string, unknown>
@@ -312,61 +313,61 @@ export function createCommanderSkillTools(options: SkillToolOptions): ChatToolDe
         if (Object.keys(changes).length === 0) throw new Error('changes must include at least one supported field')
         if (changes.name !== undefined) assertNameFree(db, changes.name, skill.id)
         const version = expectedVersion(input.expected_version)
-        return mutation(() => {
+        return action('update_skill', call.toolCallId, { kind: 'skill', id: skill.id, name: skill.name, ...(skill.project_id ? { projectId: skill.project_id } : {}) }, pickActionFields(skill, SKILL_ACTION_FIELDS), () => {
           if (changes.name !== undefined) assertNameFree(db, changes.name, skill.id)
           const updated = updateSkillOrConflict(db, skill, { ...changes, ...(version !== undefined ? { expected_version: version } : {}) })
           notify(skill.id, 'updated')
           return detailEntry(db, updated)
-        })
+        }, () => pickActionFields(db.getSkill(skill.id), SKILL_ACTION_FIELDS))
       }
     },
     {
       name: 'remove_skill',
       description: 'Soft-delete a skill. Takes effect immediately. Destructive: agents stop receiving it at once (in every project, for a global skill); history keeps it.',
       inputSchema: { type: 'object', properties: { ...skillLocatorSchema }, required: ['skill'], additionalProperties: false },
-      handler: async (input) => {
+      handler: async (input, call) => {
         const skill = resolveSkill(db, input.skill)
-        return mutation(() => {
+        return action('remove_skill', call.toolCallId, { kind: 'skill', id: skill.id, name: skill.name, ...(skill.project_id ? { projectId: skill.project_id } : {}) }, { exists: true }, () => {
           if (!db.deleteSkill(skill.id)) throw new Error('Skill no longer exists')
           notify(skill.id, 'removed')
           return { removed_skill_id: skill.id, name: skill.name, ...scopeOf(db, skill) }
-        })
+        }, () => ({ exists: false }))
       }
     },
     {
       name: 'promote_skill',
       description: 'Make a project skill global. Takes effect immediately. Wide-reaching: the skill becomes visible to, and usable by, every project.',
       inputSchema: { type: 'object', properties: { ...skillLocatorSchema }, required: ['skill'], additionalProperties: false },
-      handler: async (input) => {
+      handler: async (input, call) => {
         const skill = resolveSkill(db, input.skill)
         if (isGlobalSkill(skill)) throw new Error(`Skill "${skill.name}" is already global.`)
-        return mutation(() => {
+        return action('promote_skill', call.toolCallId, { kind: 'skill', id: skill.id, name: skill.name }, { project_id: skill.project_id }, () => {
           const updated = db.setSkillProject(skill.id, null)
           if (!updated) throw new Error('Skill no longer exists')
           notify(skill.id, 'scope')
           return { ...listEntry(db, updated), previous_project_id: skill.project_id, previous_project_name: projectName(db, skill.project_id) }
-        })
+        }, () => ({ project_id: db.getSkill(skill.id)!.project_id }))
       }
     },
     {
       name: 'move_skill',
       description: 'Give a skill to one project (from global or from another project), so only that project sees it. Refused while tasks in other projects or agent-level defaults still use it. Takes effect immediately. Wide-reaching: every other project loses access to the skill.',
       inputSchema: { type: 'object', properties: { ...skillLocatorSchema, ...projectLocatorSchema }, required: ['skill', 'project'], additionalProperties: false },
-      handler: async (input) => {
+      handler: async (input, call) => {
         const skill = resolveSkill(db, input.skill)
         const project = resolveProject(db, input.project)
         if (project.archived) throw new Error(`Project "${project.name}" is archived. Restore it before moving skills into it.`)
         if (skill.project_id === project.id) throw new Error(`Skill "${skill.name}" already belongs to "${project.name}".`)
         const blockers = moveBlockers(db, skill, project.id)
         if (blockers.length > 0) throw new Error(`Skill "${skill.name}" cannot be moved to "${project.name}": it is ${blockers.join('; and ')}. Remove those uses first, or keep it global.`)
-        return mutation(() => {
+        return action('move_skill', call.toolCallId, { kind: 'skill', id: skill.id, name: skill.name, projectId: project.id, projectName: project.name }, { project_id: skill.project_id }, () => {
           const stillBlocked = moveBlockers(db, skill, project.id)
           if (stillBlocked.length > 0) throw new Error(`Skill "${skill.name}" cannot be moved: it is ${stillBlocked.join('; and ')}.`)
           const updated = db.setSkillProject(skill.id, project.id)
           if (!updated) throw new Error('Skill no longer exists')
           notify(skill.id, 'scope')
           return { ...listEntry(db, updated), previous_project_id: skill.project_id, previous_project_name: projectName(db, skill.project_id) }
-        })
+        }, () => ({ project_id: db.getSkill(skill.id)!.project_id }))
       }
     }
   ]

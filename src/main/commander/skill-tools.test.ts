@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest'
-import { createTestDb } from '../../../test/helpers/db-test-helper'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { createPortableDbFixture as createTestDb } from '../../../test/helpers/portable-db-test-helper'
 import type { DatabaseManager } from '../database'
 import type { ChatToolResult } from '../chat/tools'
 import { createCommanderSkillTools, MUTATING_COMMANDER_SKILL_TOOLS, type SkillChangeKind } from './skill-tools'
@@ -36,6 +36,8 @@ beforeEach(() => {
   ;({ db } = createTestDb())
   changes = []
 })
+
+afterEach(() => db.db.close())
 
 describe('Commander skill reads', () => {
   it('lists metadata across scopes with counts, filters by scope and hides archived projects\' skills by default', async () => {

@@ -84,7 +84,7 @@ describe('ClaudeCodeSubscriptionChatProvider', () => {
 
     await expect(drain(provider.stream(request, new AbortController().signal))).resolves.toEqual([
       { type: 'tool_call', id: 'call_1', name: 'get_project', input: { name: 'Alpha' } },
-      { type: 'message_end', stopReason: 'tool_use', usage: { inputTokens: 0, outputTokens: 0 } }
+      { type: 'message_end', stopReason: 'tool_use' }
     ])
   })
 

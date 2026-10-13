@@ -6,6 +6,7 @@
  * 20x's CodingAgentAdapter contract.
  */
 
+import { reportedTokenUsage } from '../sessions/token-estimator'
 import { classifyProviderFailure, providerFailureError, type ProviderFailure } from '../agent-manager/provider-failure'
 import { CLIENT_NAME } from '../app-identity'
 import { spawn, type ChildProcess } from 'child_process'
@@ -22,7 +23,8 @@ import type {
   SessionMessage,
   MessagePart,
   McpServerConfig,
-  BackendModel
+  BackendModel,
+  AdapterTokenUsage
 } from './coding-agent-adapter'
 import { MessagePartType, SessionStatusType } from './coding-agent-adapter'
 import {
@@ -110,6 +112,7 @@ interface AppServerSession extends CodexItemState, JsonRpcPeer {
   recoveryIntentId?: string
   pendingRecoveryIntentId?: string
   lastTurnId?: string
+  tokenUsage?: AdapterTokenUsage
   config: SessionConfig
   codexUseApiKey: boolean
   codexAuthSummary: string
@@ -291,6 +294,7 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
     const messages = await this.getAllMessages(sessionId, config)
     session.messageBuffer = []
     session.pendingRecoveryIntentId = config.providerIntentId
+    session.tokenUsage = undefined
     return messages
   }
 
@@ -355,6 +359,10 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
       message: session.status === SessionStatusType.ERROR ? (session.lastError || 'Process error') : undefined,
       providerFailure: session.providerFailure
     }
+  }
+
+  async getUsage(sessionId: string, _config: SessionConfig): Promise<AdapterTokenUsage | null> {
+    return this.sessions.get(sessionId)?.tokenUsage ?? null
   }
 
   async pollMessages(
@@ -857,6 +865,15 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
 
   private handleNotification(session: AppServerSession, notification: JsonRpcNotification): void {
     const params = isObject(notification.params) ? notification.params : {}
+
+    if (notification.method === 'thread/tokenUsage/updated') {
+      const usage = isObject(params.tokenUsage) ? params.tokenUsage : isObject(params.token_usage) ? params.token_usage : null
+      const reported = reportedTokenUsage(usage?.last ?? usage)
+      const turnId = asString(params.turnId) || asString(params.turn_id)
+      if (reported && (!turnId || !session.lastTurnId || turnId === session.lastTurnId)) {
+        session.tokenUsage = { ...reported, provenance: 'reported', turnId }
+      }
+    }
 
     if (notification.method === 'thread/status/changed') {
       const status = asString(params.status)

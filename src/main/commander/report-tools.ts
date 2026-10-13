@@ -15,24 +15,20 @@ import { formatCommanderReport } from '../../shared/commander-report'
  *    `ask_captain` tool row carries that id ({@link CommanderStore.findDelegation}),
  *    unless that session is archived.
  * 2. Otherwise (no id, an unknown id, or an archived origin) it goes to the
- *    most recently active session, which is where the user is working.
- * 3. With no session at all, one titled {@link REPORT_INBOX_TITLE} is created
- *    for it, and later unprompted reports land there by rule 2.
+ *    durable quiet {@link REPORT_INBOX_TITLE} inbox, never the latest chat.
  *
  * The report keeps its project tag and correlation id whichever rule applied,
- * so it can always be traced back. Delivery itself (store, unread, relay when
- * the session is open) is {@link CommanderService.deliverReport}.
+ * so it can always be traced back. Delivery itself (store and unread, with
+ * no automatic model turn or speech) is {@link CommanderService.deliverReport}.
  *
- * Loop protection: a turn started by a report may call `ask_captain` only
- * while the session's budget lasts ({@link MAX_REPORT_ASKS_WITHOUT_USER_TURN}
- * calls since the user last spoke); {@link guardReportAsks} enforces it in
- * the tool, not the prompt.
+ * Quiet delivery never starts a follow-up turn. The older non-user-turn
+ * loop guard remains defensive compatibility code.
  */
 
 export const MAX_REPORT_ASKS_WITHOUT_USER_TURN = 3
 export const REPORT_INBOX_TITLE = 'Project reports'
 
-export type ReportRoutingStore = Pick<CommanderStore, 'findDelegation' | 'getSession' | 'listSessions' | 'createSession'>
+export type ReportRoutingStore = Pick<CommanderStore, 'findDelegation' | 'getSession' | 'ensureReportInbox'>
 
 export interface ReportRoute {
   sessionId: string
@@ -40,19 +36,29 @@ export interface ReportRoute {
 }
 
 export function resolveReportSession(store: ReportRoutingStore, correlationId?: string | null, preferredSessionId?: string | null): ReportRoute {
-  if (preferredSessionId) {
-    const preferred = store.getSession(preferredSessionId)
-    if (preferred) return { sessionId: preferred.id, routedBy: 'correlation' }
-  }
   const id = correlationId?.trim()
+  if (preferredSessionId && id) {
+    const preferred = store.getSession(preferredSessionId)
+    if (preferred && !preferred.archived) return { sessionId: preferred.id, routedBy: 'correlation' }
+  }
   if (id) {
     const delegation = store.findDelegation(id)
     const origin = delegation ? store.getSession(delegation.sessionId) : null
     if (origin && !origin.archived) return { sessionId: origin.id, routedBy: 'correlation' }
   }
-  const [latest] = store.listSessions()
-  if (latest) return { sessionId: latest.id, routedBy: 'latest' }
-  return { sessionId: store.createSession(REPORT_INBOX_TITLE).id, routedBy: 'inbox' }
+  return { sessionId: store.ensureReportInbox().id, routedBy: 'inbox' }
+}
+
+/** A retry keeps the destination already committed with its durable report. */
+function durableReportRoute(store: ReportRoutingStore, record: DeliveryRecord, requestSessionId?: string | null): ReportRoute {
+  const destination = record.sourceSessionId ? store.getSession(record.sourceSessionId) : null
+  const knownRequest = record.correlationId && (requestSessionId || store.findDelegation(record.correlationId)?.sessionId)
+  // Older pending deliveries may still name whichever chat was latest. Keep
+  // unsolicited/unknown updates quiet on recovery as well as on first arrival.
+  if (!knownRequest) return { sessionId: store.ensureReportInbox().id, routedBy: 'inbox' }
+  if (destination?.is_report_inbox) return { sessionId: store.ensureReportInbox().id, routedBy: knownRequest === destination.id ? 'correlation' : 'inbox' }
+  if (destination) return { sessionId: destination.id, routedBy: 'correlation' }
+  return resolveReportSession(store, record.correlationId, requestSessionId)
 }
 
 // ── Loop protection ───────────────────────────────────────────
@@ -114,7 +120,7 @@ export interface CommanderReportBridgeOptions {
   deliveries: DeliveryStore
 }
 
-/** The handler behind `report_to_commander`: routes, stores and relays one report. */
+/** The handler behind `report_to_commander`: routes and durably stores one quiet report. */
 export function createCaptainReportHandler(options: CommanderReportBridgeOptions): CaptainReportHandler {
   return (report) => {
     const project = options.getProject(report.projectId)
@@ -140,7 +146,7 @@ export function createCaptainReportHandler(options: CommanderReportBridgeOptions
       correlationId,
       payload: late ? `Late report after the request ${request?.state === 'failed' ? 'failed' : 'timed out'}: ${report.message}` : report.message
     })
-    const route = resolveReportSession(options.store, correlationId, record.sourceSessionId)
+    const route = durableReportRoute(options.store, record, request?.sourceSessionId)
     // Persist the chosen destination and final content before inserting the inbox
     // effect, so a crash cannot reroute the retry to a newer conversation.
     options.deliveries.bindReport(record.id, route.sessionId, record.payload)
@@ -174,7 +180,8 @@ export function recoverCaptainReports(options: CommanderReportBridgeOptions): vo
       if (!record.projectId) continue
       const project = options.getProject(record.projectId)
       if (!project) continue
-      const route = resolveReportSession(options.store, record.correlationId, record.sourceSessionId)
+      const request = record.correlationId ? options.deliveries.getCaptainRequest(record.correlationId) : null
+      const route = durableReportRoute(options.store, record, request?.sourceSessionId)
       options.deliveries.bindReport(record.id, route.sessionId, record.payload)
       options.service.deliverReport({ sessionId: route.sessionId, content: record.payload,
         projectId: project.id, projectName: project.name, correlationId: record.correlationId, deliveryId: record.id })

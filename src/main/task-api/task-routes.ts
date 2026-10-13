@@ -483,9 +483,7 @@ function reportToCommander(db: DatabaseManager, params: Record<string, unknown>)
     success: true,
     session_id: delivery.sessionId,
     routed_by: delivery.routedBy,
-    note: delivery.relayed
-      ? 'The Commander is relaying your report to the user now.'
-      : 'The report is queued in the Commander; the user sees it when they next open that conversation.'
+    note: 'The report is saved with its request or in the Project reports inbox. It will not interrupt the user\'s conversation.'
   }
 }
 

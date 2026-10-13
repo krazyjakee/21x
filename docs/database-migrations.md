@@ -269,3 +269,21 @@ Board manual ordering is a local presentation preference, persisted by project
 and status in `board-order-store.ts`, not another use of subtask `sort_order`.
 `setColumnOrder` is the integration point for future in-column drag ordering;
 the existing status-drop UI and PR #124 do not yet supply that interaction.
+
+
+### Version 34 — observe-only session ledger and token accounting
+
+The portable DDL in `managed-session-migration.ts` adds durable generations,
+turns, summaries, lifecycle/event inbox records and Commander token usage with
+reported/estimated provenance. The `sessions.ledger` flag gates observations;
+recording and startup reconciliation do not replay tools or model requests.
+
+### Version 35 — Commander action cards and exact Undo
+
+`commander_messages.input_mode` records `voice` or `typed` from the actual
+submission path. Existing rows stay null: history never invents voice attribution.
+`commander_actions` saves exact before/after changes, scoped tool-call identity,
+bounded display results and the committed Undo note. The action and its snapshot
+commit together. Supported reversals compare the affected current fields before
+writing; later conflicting edits, removals and scope moves are never guessed.
+These changes add no confirmation or model turn.

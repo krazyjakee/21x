@@ -27,3 +27,12 @@ export const COMMANDER_ADMIN_TOOLS: ReadonlySet<string> = new Set<string>([
 export function isCommanderAdminTool(name: string): boolean {
   return COMMANDER_ADMIN_TOOLS.has(name)
 }
+
+export type CommanderActionSeverity = 'neutral' | 'wide-reaching' | 'destructive'
+
+/** The same severity vocabulary is used by executed cards and speech. */
+export function commanderActionSeverity(tool: string): CommanderActionSeverity {
+  if (tool === 'archive_project' || tool.startsWith('remove_')) return 'destructive'
+  if (['pause_all_projects', 'promote_skill', 'move_skill'].includes(tool)) return 'wide-reaching'
+  return 'neutral'
+}

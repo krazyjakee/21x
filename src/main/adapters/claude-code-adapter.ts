@@ -1,3 +1,4 @@
+import { reportedTokenUsage } from '../sessions/token-estimator'
 import { classifyProviderFailure, type ProviderFailure } from '../agent-manager/provider-failure'
 /**
  * Claude Code Adapter
@@ -13,6 +14,7 @@ import { classifyProviderFailure, type ProviderFailure } from '../agent-manager/
 import { randomUUID } from 'crypto'
 import { tmpdir } from 'os'
 import type {
+  AdapterTokenUsage,
   CodingAgentAdapter,
   SessionConfig,
   SessionStatus,
@@ -102,6 +104,7 @@ interface ClaudeSession {
   lastError: string | null
   providerFailure?: ProviderFailure
   recoveryIntentId?: string
+  tokenUsage?: AdapterTokenUsage
   config: SessionConfig
   /** True when the next query must `resume` the persisted session */
   isResumed?: boolean
@@ -487,7 +490,10 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     // Note: Don't add user message to buffer - agent-manager already shows it
     // to avoid duplicate messages in UI
 
-    if (session.status !== 'busy') session.recoveryIntentId = config.providerIntentId
+    if (session.status !== 'busy') {
+      session.recoveryIntentId = config.providerIntentId
+      session.tokenUsage = undefined
+    }
     const isFirstPrompt = !session.queryIterator
 
     // A live query owns a persistent prompt stream. Add the next turn to that
@@ -653,6 +659,10 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     }
 
     session.streamTask = this.consumeStream(sessionId, session)
+  }
+
+  async getUsage(sessionId: string, _config: SessionConfig): Promise<AdapterTokenUsage | null> {
+    return this.sessions.get(sessionId)?.tokenUsage ?? null
   }
 
   async getStatus(sessionId: string, _config: SessionConfig): Promise<SessionStatus> {
@@ -1087,6 +1097,11 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
               'INCOMPATIBLE_SESSION_ID: This session does not exist on Claude Code servers. It may have been created with a different coding agent or has expired.'
             )
           }
+        }
+
+        if (msg.type === 'result') {
+          const reported = reportedTokenUsage((msg as Record<string, unknown>).usage)
+          if (reported) session.tokenUsage = { ...reported, provenance: 'reported', turnId: session.recoveryIntentId }
         }
 
         // Handle error result messages (e.g., rate limits) before treating as normal

@@ -887,6 +887,8 @@ export const commanderApi = {
     images?.length ? window.electronAPI.commander.send(sessionId, text, images) : window.electronAPI.commander.send(sessionId, text),
   getImage: (id: string): Promise<(ChatImageInput & { id: string }) | null> => window.electronAPI.commander.getImage(id),
   cancel: (sessionId: string): Promise<{ cancelled: boolean }> => window.electronAPI.commander.cancel(sessionId),
+  undoAction: (sessionId: string, actionId: string): Promise<{ alreadyUndone: boolean; message: CommanderMessage }> =>
+    window.electronAPI.commander.undoAction(sessionId, actionId),
   onEvent: (callback: (event: CommanderEvent) => void): (() => void) => window.electronAPI.commander.onEvent(callback)
 }
 

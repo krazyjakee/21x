@@ -113,6 +113,14 @@ export interface SessionMessage {
   parts: MessagePart[]
 }
 
+export interface AdapterTokenUsage {
+  inputTokens: number
+  outputTokens: number
+  cachedInputTokens?: number
+  provenance: 'reported'
+  turnId?: string
+}
+
 export interface MessagePart {
   id?: string
   type: MessagePartType
@@ -207,6 +215,9 @@ export interface CodingAgentAdapter {
    * @returns All messages from the session
    */
   getAllMessages?(sessionId: string, config: SessionConfig): Promise<SessionMessage[]>
+  /** Read-only token counters for the current/latest turn. Absent usage is
+   * unknown, never an invented reported zero. Does not change context/runtime. */
+  getUsage?(sessionId: string, config: SessionConfig): Promise<AdapterTokenUsage | null>
 
   /**
    * Read the session's PERSISTED history from durable storage (e.g. the CLI's

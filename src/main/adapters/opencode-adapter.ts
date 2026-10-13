@@ -1,9 +1,11 @@
+import { reportedTokenUsage } from '../sessions/token-estimator'
 import { classifyProviderFailure, type ProviderFailure } from '../agent-manager/provider-failure'
 import { Agent as UndiciAgent } from 'undici'
 import { homedir } from 'os'
 import { buildMergedOpencodeConfig } from '../utils/opencode-config'
 import type { DatabaseManager } from '../database'
 import type {
+  AdapterTokenUsage,
   CodingAgentAdapter,
   McpServerConfig,
   SessionConfig,
@@ -827,6 +829,25 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     } finally {
       this.onDataAvailable?.(sessionId)
     }
+  }
+
+  async getUsage(sessionId: string, config: SessionConfig): Promise<AdapterTokenUsage | null> {
+    const client = this.clients.get(sessionId)
+    if (!client) return null
+    const messages = await this.fetchMessages(client, sessionId, config.workspaceDir)
+    const latestUser = messages.findLastIndex((message) => message.info?.role === 'user')
+    let inputTokens = 0
+    let outputTokens = 0
+    let reported = false
+    for (const message of messages.slice(latestUser + 1)) {
+      if (message.info?.role !== 'assistant') continue
+      const usage = reportedTokenUsage(message.info.tokens)
+      if (!usage) continue
+      reported = true
+      inputTokens += usage.inputTokens
+      outputTokens += usage.outputTokens
+    }
+    return reported ? { inputTokens, outputTokens, provenance: 'reported', turnId: messages[latestUser]?.info?.id } : null
   }
 
   private async fetchMessages(ocClient: OpencodeClient, sessionId: string, workspaceDir?: string): Promise<OpencodeMessage[]> {

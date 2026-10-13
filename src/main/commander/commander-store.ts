@@ -31,6 +31,8 @@ export interface AppendCommanderMessageInput {
   correlationId?: string | null
   /** User messages only: images already validated by the caller (#144). */
   images?: ChatImageInput[]
+  /** Only authenticated human submission supplies attribution; other rows stay null. */
+  inputMode?: 'voice' | 'typed' | null
 }
 
 interface CommanderImageRow {
@@ -46,10 +48,11 @@ export interface CommanderStoreOptions {
 }
 
 const MAX_TITLE_CHARS = 120
+export const COMMANDER_REPORT_INBOX_SETTING = 'commander_report_inbox_session_id'
 
 /** Unread = reports newer than the last time the session was open. */
 const SESSION_SELECT = `
-  SELECT s.*, (
+  SELECT s.*, s.id = COALESCE((SELECT value FROM settings WHERE key = '${COMMANDER_REPORT_INBOX_SETTING}'), '') AS is_report_inbox, (
     SELECT COUNT(*) FROM commander_messages m
     WHERE m.session_id = s.id AND m.role = 'report' AND m.created_at > COALESCE(s.last_read_at, 0)
   ) AS unread_count
@@ -63,7 +66,8 @@ function toSession(row: CommanderSessionRow): CommanderSession {
     updated_at: row.updated_at,
     archived: row.archived === 1,
     last_read_at: row.last_read_at ?? null,
-    unread_count: row.unread_count ?? 0
+    unread_count: row.unread_count ?? 0,
+    ...(row.is_report_inbox === 1 ? { is_report_inbox: true } : {})
   }
 }
 
@@ -99,6 +103,7 @@ function toMessage(row: CommanderMessageRow, images?: ChatImageRef[]): Commander
     project_id: row.project_id ?? null,
     correlation_id: row.correlation_id ?? null,
     created_at: row.created_at,
+    input_mode: row.role === 'user' && (row.input_mode === 'voice' || row.input_mode === 'typed') ? row.input_mode : null,
     ...(images && images.length > 0 ? { images } : {})
   }
 }
@@ -123,6 +128,11 @@ export class CommanderStore {
     return this.source.db
   }
 
+  /** Shared portable accounting stores use the same SQLite connection. */
+  get database(): Database.Database {
+    return this.source.db
+  }
+
   /** Strictly increasing epoch ms. */
   now(): number {
     const ts = Math.max(this.clock(), this.lastTs + 1)
@@ -144,6 +154,27 @@ export class CommanderStore {
   getSession(id: string): CommanderSession | null {
     const row = this.db.prepare(`${SESSION_SELECT} WHERE s.id = ?`).get(id) as CommanderSessionRow | undefined
     return row ? toSession(row) : null
+  }
+
+  /** One durable quiet inbox; a rename or restart never changes its identity. */
+  ensureReportInbox(): CommanderSession {
+    return this.db.transaction(() => {
+      const setting = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(COMMANDER_REPORT_INBOX_SETTING) as { value: string } | undefined
+      let inbox = setting ? this.getSession(setting.value) : null
+      if (!inbox) {
+        // Adopt a pre-existing report-only inbox from earlier builds. A chat
+        // the user started with the same title remains an ordinary chat.
+        inbox = this.listSessions({ includeArchived: true }).find((session) => {
+          if (session.title !== 'Project reports') return false
+          const messages = this.listMessages(session.id)
+          return messages.some((message) => message.role === 'report') && !messages.some((message) => message.role === 'user')
+        }) ?? this.createSession('Project reports')
+        this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+          .run(COMMANDER_REPORT_INBOX_SETTING, inbox.id)
+      }
+      if (inbox.archived) this.setArchived(inbox.id, false)
+      return this.getSession(inbox.id)!
+    })()
   }
 
   /** Most recently active first. `search` matches the title or any message text. */
@@ -187,8 +218,8 @@ export class CommanderStore {
   // ── Messages ──────────────────────────────────────────────
 
   /** Only CommanderService's authenticated human submission path calls this. */
-  appendHumanMessage(sessionId: string, content: string, images?: ChatImageInput[], beforeCommit?: (message: CommanderMessage) => void): CommanderMessage {
-    return this.appendMessage(sessionId, { role: 'user', content, images }, message => {
+  appendHumanMessage(sessionId: string, content: string, images?: ChatImageInput[], beforeCommit?: (message: CommanderMessage) => void, inputMode: 'typed' | 'voice' = 'typed'): CommanderMessage {
+    return this.appendMessage(sessionId, { role: 'user', content, images, inputMode }, message => {
       beforeCommit?.(message)
     })
   }
@@ -203,8 +234,8 @@ export class CommanderStore {
       if (changes === 0) throw new Error(`Commander session not found: ${sessionId}`)
       this.db
         .prepare(`INSERT INTO commander_messages
-          (id, session_id, role, content, tool_calls, tool_call_id, tool_name, is_error, project_id, correlation_id, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          (id, session_id, role, content, tool_calls, tool_call_id, tool_name, is_error, project_id, correlation_id, created_at, input_mode)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(
           id,
           sessionId,
@@ -216,7 +247,8 @@ export class CommanderStore {
           input.isError ? 1 : 0,
           input.projectId ?? null,
           input.correlationId ?? null,
-          ts
+          ts,
+          input.role === 'user' ? input.inputMode ?? null : null
         )
       this.insertImages(id, input.images)
       const message = this.getMessage(id)!
@@ -244,8 +276,8 @@ export class CommanderStore {
       const session = this.db.prepare('SELECT 1 FROM commander_sessions WHERE id = ?').get(sessionId)
       if (!session) throw new Error(`Commander session not found: ${sessionId}`)
       inserted = this.db.prepare(`INSERT OR IGNORE INTO commander_messages
-        (id, session_id, role, content, tool_calls, tool_call_id, tool_name, is_error, project_id, correlation_id, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        (id, session_id, role, content, tool_calls, tool_call_id, tool_name, is_error, project_id, correlation_id, created_at, input_mode)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(
           id,
           sessionId,
@@ -257,7 +289,8 @@ export class CommanderStore {
           input.isError ? 1 : 0,
           input.projectId ?? null,
           input.correlationId ?? null,
-          ts
+          ts,
+          input.role === 'user' ? input.inputMode ?? null : null
         ).changes === 1
       if (inserted) {
         this.insertImages(id, input.images)

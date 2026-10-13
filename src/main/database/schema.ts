@@ -11,6 +11,8 @@ import { dropAuthorizationTables, dropMergeGrantTables, removeProjectPermissionS
 import { createDurableStartQueueTables, migrateDurableStartQueue } from './start-queue-migration'
 import { createIssueWriteTables, migrateIssueWrites } from './issue-writes-migration'
 import { createProviderRecoveryTable } from './provider-recovery-migration'
+import { createManagedSessionTables } from './managed-session-migration'
+import { createCommanderActionTables, migrateCommanderActions } from './commander-actions-migration'
 
 /**
  * Bump this whenever new migrations are added so returning users skip
@@ -70,8 +72,11 @@ import { createProviderRecoveryTable } from './provider-recovery-migration'
  * 31 → 32: merge grants and the escalation policy are removed: the
  *          merge_grant* tables are dropped and projects.settings loses its
  *          `escalation` and `merge_grants` blocks (authorization-schema.ts).
+ * 32 → 33: durable provider turn recovery.
+ * 33 → 34: observational managed-session ledger and Commander usage (#97/#99).
+ * 34 → 35: Commander input mode and executed action snapshots / exact Undo (#86).
  */
-const SCHEMA_VERSION = 33
+const SCHEMA_VERSION = 35
 
 /**
  * Bring `db` to the current schema. A fresh database gets the base tables from
@@ -421,6 +426,7 @@ export function createTables(db: Database.Database): void {
       is_error INTEGER NOT NULL DEFAULT 0,
       project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
       correlation_id TEXT,
+      input_mode TEXT CHECK(input_mode IS NULL OR input_mode IN ('voice', 'typed')),
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_commander_messages_session_created ON commander_messages(session_id, created_at);
@@ -571,6 +577,8 @@ export function createTables(db: Database.Database): void {
   // Delegated GitHub issue writes: the audit ledger and idempotency claims.
   createIssueWriteTables(db)
   createProviderRecoveryTable(db)
+  createManagedSessionTables(db)
+  createCommanderActionTables(db)
 
   // Report routing (#62): a Captain report quotes the correlation id of
   // the `ask_captain` tool row it answers; this serves that lookup.
@@ -1107,6 +1115,9 @@ export function runMigrations(db: Database.Database): void {
   // Migration v32: merge grants (v19, v26) and the escalation policy are gone.
   dropMergeGrantTables(db)
   removeProjectPermissionSettings(db)
+
+  // Migration v35: legacy messages remain unattributed; one executed-action ledger.
+  migrateCommanderActions(db)
 
   // Migration v4: FTS5 full-text search index for similar task search
   initializeTasksFts(db)

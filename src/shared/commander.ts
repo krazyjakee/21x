@@ -31,6 +31,8 @@ export interface CommanderSession {
   last_read_at: number | null
   /** Reports newer than `last_read_at`. */
   unread_count: number
+  /** The durable quiet inbox for unsolicited project reports (#88), regardless of its title. */
+  is_report_inbox?: boolean
 }
 
 export interface CommanderMessage {
@@ -54,6 +56,8 @@ export interface CommanderMessage {
   created_at: number
   /** User messages: attached images, metadata only (#144). Fetch the bytes with `commander:getImage`. */
   images?: ChatImageRef[]
+  /** Actual submission source; legacy messages have no attribution. */
+  input_mode?: 'voice' | 'typed' | null
 }
 
 export interface CommanderListSessionsRequest {

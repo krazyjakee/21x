@@ -2,15 +2,15 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { EventEmitter } from 'events'
 import type { CommanderEvent, CommanderMessage } from '../../shared/commander'
 import { VOICE_TTS_EVENTS, type VoiceTtsVoice } from '../../shared/voice-tts'
-import { CommanderVoice, commanderVoiceKey, spokenReport } from './commander-voice'
+import { CommanderVoice, commanderVoiceKey, spokenReport, spokenCommanderAction } from './commander-voice'
 import { VoiceSpeechService } from './voice-speech-service'
 import { formatCommanderReport } from '../../shared/commander-report'
 import type { VoiceTtsWorkerClient } from './voice-tts-worker-client'
 import type { VoiceTtsModelManager } from './voice-tts-model-manager'
 
 /**
- * Commander voice mode (#64): the reply is spoken as it streams, reports are
- * announced only while voice mode is on and never read out raw (#107), and barge-in cancels the speech and the
+ * Commander voice mode (#64): requested replies are spoken as they stream,
+ * arriving reports remain silent (#88), and barge-in cancels the speech and the
  * Commander turn together. The real speech service runs over a fake worker.
  */
 
@@ -129,6 +129,25 @@ beforeEach(() => {
 })
 
 describe('speaking the reply as it streams', () => {
+  it('states the exact validated mutation once even when the natural reply only says Done', async () => {
+    const { worker, speech, commander, voice } = setup()
+    await speech.prepare()
+    voice.setActiveSession('s1')
+    start(commander, 's1', 't1')
+    const action = { type: 'tool_call_result' as const, id: 'rename-1', name: 'update_project', isError: false,
+      content: JSON.stringify({ status: 'ok', target: { kind: 'project', id: 'p1', name: 'Orion' }, changes: [{ field: 'name', before: 'Atlas', after: 'Orion' }], undoId: 'undo-1' }) }
+    commander.emit({ type: 'turn_event', sessionId: 's1', turnId: 't1', event: action })
+    commander.emit({ type: 'turn_event', sessionId: 's1', turnId: 't1', event: action })
+    delta(commander, 's1', 't1', 'Done. ')
+    done(commander, 's1', 't1')
+    await flush()
+    const spoken = [...worker.spoken.flatMap((entry) => entry.sentences), ...worker.appended].join(' ')
+    expect(spoken).toContain('Renamed project from “Atlas” to “Orion”.')
+    expect(spoken.match(/Renamed project/g)).toHaveLength(1)
+    expect(commander.sent).toEqual([])
+    voice.dispose()
+  })
+
   it('keeps large numbers and compact dates in spoken explanations while filtering hash references', () => {
     const content = formatCommanderReport({
       title: 'Revenue update',
@@ -139,7 +158,7 @@ describe('speaking the reply as it streams', () => {
     expect(spoken).not.toMatch(/1a2b3c4|a{40}|1234567/)
   })
 
-  it('speaks a structured report explanation without audit evidence when no relay starts', async () => {
+  it('keeps structured reports silent even when they contain meaningful context', async () => {
     const { worker, speech, commander, voice } = setup()
     await speech.prepare()
     voice.setActiveSession('s1')
@@ -154,9 +173,10 @@ describe('speaking the reply as it streams', () => {
     commander.emit({ type: 'messages_appended', sessionId: 's1', messages: [report('s1', content)] })
     await flush()
     await flush()
-    const spoken = [...worker.spoken.flatMap((entry) => entry.sentences), ...worker.appended].join(' ')
-    for (const meaning of ['Board activity sorting', 'Recently updated tasks stay visible', 'Active work is easier to find', 'Integrated into the main codebase', 'Captain is arranging accessibility', 'No action is needed']) expect(spoken).toContain(meaning)
-    expect(spoken).not.toMatch(/PR #153|https:|tell_commander|a{40}/)
+    expect(worker.spoken).toEqual([])
+    expect(worker.appended).toEqual([])
+    expect(content).toContain('Recently updated tasks stay visible')
+    expect(content).toContain('Active work is easier to find')
     voice.dispose()
   })
 
@@ -207,8 +227,29 @@ describe('speaking the reply as it streams', () => {
   })
 })
 
+describe('executed action speech facts', () => {
+  const result = (field: string, before: unknown, after: unknown) => JSON.stringify({ status: 'ok', target: { kind: field === 'all_projects_paused' ? 'all-projects' : 'project', id: 'p1', name: 'Atlas' }, changes: [{ field, before, after }], undoId: 'undo-1' })
+  it.each([
+    ['archive_project', 'archived', false, true, 'Archived project “Atlas”.'],
+    ['restore_project', 'archived', true, false, 'Restored project “Atlas”.'],
+    ['pause_all_projects', 'all_projects_paused', false, true, 'Paused new agent work across all projects.'],
+    ['pause_all_projects', 'all_projects_paused', true, false, 'Resumed new agent work across all projects.'],
+    ['update_project', 'description', 'Old brief', 'New brief', 'Changed description for project “Atlas” from “Old brief” to “New brief”.']
+  ])('describes the validated %s result without a model call', (tool, field, before, after, sentence) => {
+    expect(spokenCommanderAction(String(tool), result(String(field), before, after), false)).toBe(sentence)
+  })
+
+  it('creates no execution fact from failure, no-op, legacy metadata, read tools or an assistant claim', () => {
+    expect(spokenCommanderAction('archive_project', result('archived', false, true), true)).toBeNull()
+    expect(spokenCommanderAction('get_project', result('archived', false, true), false)).toBeNull()
+    expect(spokenCommanderAction('archive_project', 'I archived Atlas.', false)).toBeNull()
+    expect(spokenCommanderAction('archive_project', JSON.stringify({ status: 'ok', result: { archived: true } }), false)).toBeNull()
+    expect(spokenCommanderAction('archive_project', JSON.stringify({ status: 'ok', target: { kind: 'project', id: 'p1', name: 'Atlas' }, changes: [] }), false)).toBeNull()
+  })
+})
+
 describe('reports', () => {
-  it('are announced only while voice mode is on for that session', async () => {
+  it('are silent in every session, including the active voice session', async () => {
     const { worker, speech, commander, voice } = setup()
     await speech.prepare()
 
@@ -223,17 +264,15 @@ describe('reports', () => {
 
     commander.emit({ type: 'messages_appended', sessionId: 's1', messages: [report('s1', 'Deployed to production.')] })
     await flush()
-    expect(worker.spoken).toHaveLength(1)
-    // No summary turn followed, so only the one-line cue is said, not the report.
-    expect(worker.spoken[0].sentences.join(' ')).toBe('Report from Web; details in the chat.')
+    expect(worker.spoken).toEqual([])
 
     voice.setActiveSession(null)
     commander.emit({ type: 'messages_appended', sessionId: 's1', messages: [report('s1', 'Another.')] })
     await flush()
-    expect(worker.spoken).toHaveLength(1)
+    expect(worker.spoken).toEqual([])
   })
 
-  it('arriving during a reply is read after it, not over it', async () => {
+  it('arriving during a reply leaves that reply uninterrupted and stays silent afterward', async () => {
     const { worker, speech, commander, voice } = setup()
     await speech.prepare()
     voice.setActiveSession('s1')
@@ -242,18 +281,23 @@ describe('reports', () => {
     commander.emit({ type: 'messages_appended', sessionId: 's1', messages: [report('s1', 'Build passed.')] })
     await flush()
     expect(worker.spoken).toHaveLength(1)
-    expect(worker.appended).toEqual(['Checking now.', 'Report from Web; details in the chat.'])
-    expect(worker.appended.join(' ')).not.toContain('Build passed')
+    expect(worker.appended).toEqual(['Checking now.'])
+    done(commander, 's1', 't1')
+    await flush()
+    expect(worker.spoken).toHaveLength(1)
+    expect(worker.appended).toEqual(['Checking now.'])
   })
 
-  it('speaks the summary of the relay turn, not the raw report', async () => {
+  it('speaks an explicitly requested explanation after silent report arrival', async () => {
     const { worker, speech, commander, voice } = setup()
     await speech.prepare()
     voice.setActiveSession('s1')
     const raw = 'Batch B2 merged in PR #104 on branch sessions-b2-no-silent-drop (commit 630894c); B3 next.'
-    // CommanderService.deliverReport appends the report and starts the relay
-    // turn in the same tick.
     commander.emit({ type: 'messages_appended', sessionId: 's1', messages: [report('s1', raw)] })
+    await flush()
+    expect(worker.spoken).toEqual([])
+    await voice.send('s1', 'Explain the history report.')
+    expect(commander.sent).toEqual([{ sessionId: 's1', text: 'Explain the history report.' }])
     start(commander, 's1', 't1')
     delta(commander, 's1', 't1', 'Web finished the history fix and is moving on. Nothing needs you. ')
     commander.running.delete('s1')
@@ -267,7 +311,7 @@ describe('reports', () => {
     expect(said).not.toContain('details in the chat')
   })
 
-  it('cancels a queued report cue when the user barges in before speech starts', async () => {
+  it('never queues report speech that could restart after barge-in', async () => {
     const { worker, speech, commander, voice } = setup()
     await speech.prepare()
     voice.setActiveSession('s1')

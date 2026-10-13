@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createTestDb } from '../../../test/helpers/db-test-helper'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPortableDbFixture as createTestDb } from '../../../test/helpers/portable-db-test-helper'
 import type { DatabaseManager } from '../database'
 import type { ChatToolDefinition, ChatToolResult } from '../chat/tools'
 import { DEFAULT_PROJECT_ID } from '../../shared/projects'
@@ -83,6 +83,8 @@ beforeEach(() => {
     onTerminalFailure: (_record, detail, timedOut) => terminalFailures.push({ detail, timedOut })
   })
 })
+
+afterEach(() => { delivery.dispose(); db.db.close() })
 
 describe('Commander tool registry', () => {
   it('registers delegation and project administration only: no task tools at all', () => {
@@ -448,9 +450,13 @@ describe('get_pending_approvals, navigate_to_project and pause_all_projects', ()
   it('pauses and resumes every project on the first call', async () => {
     const agents = fakeAgents()
     extra = { agents }
-    expect(body(await call('pause_all_projects', { paused: true }))).toEqual({ status: 'ok', result: { all_projects_paused: true } })
+    expect(body(await call('pause_all_projects', { paused: true }))).toEqual({ status: 'ok', result: { all_projects_paused: true },
+      target: { kind: 'all-projects', id: 'all-projects', name: 'All projects' },
+      changes: [{ field: 'all_projects_paused', before: false, after: true }], severity: 'wide-reaching', undoId: expect.any(String) })
     expect(agents.pauseAllProjects).toHaveBeenCalledWith(true)
-    expect(body(await call('pause_all_projects', { paused: false }))).toEqual({ status: 'ok', result: { all_projects_paused: false } })
+    expect(body(await call('pause_all_projects', { paused: false }))).toEqual({ status: 'ok', result: { all_projects_paused: false },
+      target: { kind: 'all-projects', id: 'all-projects', name: 'All projects' },
+      changes: [{ field: 'all_projects_paused', before: true, after: false }], severity: 'wide-reaching', undoId: expect.any(String) })
     expect(agents.isAllProjectsPaused()).toBe(false)
     await expect(call('pause_all_projects', { paused: 'yes' })).rejects.toThrow(/true or false/)
   })

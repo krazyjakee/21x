@@ -42,7 +42,7 @@ export function runDatabaseFixture(directory: string) {
     options.managedTaskMcp.command = join(directory, 'mutated-executable')
     manager.initialize()
     const db = manager
-    assert.equal(db.getSetting('__schema_version'), '33')
+    assert.equal(db.getSetting('__schema_version'), '35')
     assert.equal(db.db.pragma('journal_mode', { simple: true }), 'wal')
     assert.equal(db.db.pragma('foreign_keys', { simple: true }), 1)
     assert.equal(db.db.pragma('busy_timeout', { simple: true }), 5000)
@@ -135,7 +135,7 @@ export function runDatabaseFixture(directory: string) {
       reportVersion: 1,
       passed: true,
       runtime: 'standalone-node',
-      schemaVersion: 33,
+      schemaVersion: 35,
       proofs: ['task-crud', 'durable-transcript-snapshot-delta-reopen', 'project-captain-seeds', 'explicit-paths', 'encrypted-settings-provider', 'authenticated-settings-envelope-tamper', 'managed-mcp-idempotency-ownership']
     }
   } finally {

@@ -1,4 +1,7 @@
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
+import { TokenAccounting, SESSION_PROCESS_RUN_ID, type UsageKind } from '../sessions/token-accounting'
+import { requestCharacters } from '../sessions/token-estimator'
+import { ManagedSessionObserver } from '../sessions/managed-session'
 import type { ChatMessage } from '../../shared/chat'
 import type { CommanderEvent, CommanderMessage, CommanderSession } from '../../shared/commander'
 import { ChatRuntime, type ChatTurnHandle, type ChatTurnResult } from '../chat/chat-runtime'
@@ -7,7 +10,7 @@ import { validateChatImageInputs } from '../../shared/chat-images'
 import type { ChatToolDefinition } from '../chat/tools'
 import { normalizeTitle, type CommanderStore } from './commander-store'
 import { buildContext, DEFAULT_CONTEXT_BUDGET, MAX_SUMMARY_TRANSCRIPT_CHARS, planFold, transcriptForSummary, type ContextBudget } from './context'
-import { COMMANDER_SUMMARY_PROMPT, COMMANDER_SYSTEM_PROMPT, COMMANDER_TITLE_PROMPT, reportRelayNote, withSummary } from './prompts'
+import { COMMANDER_SUMMARY_PROMPT, COMMANDER_SYSTEM_PROMPT, COMMANDER_TITLE_PROMPT, withSummary } from './prompts'
 import { guardReportAsks, MAX_REPORT_ASKS_WITHOUT_USER_TURN } from './report-tools'
 import { COMMANDER_ADMIN_TOOLS } from '../../shared/commander-tools'
 
@@ -24,12 +27,10 @@ import { COMMANDER_ADMIN_TOOLS } from '../../shared/commander-tools'
  * Extension points:
  * - The Commander's tools (project-tools.ts) are supplied through `getTools`,
  *   built per turn from that turn's context (session, user message, trigger).
- * - #62 delivers Captain reports through `deliverReport`: the report is
- *   stored (unread until the session is read) and, when the session is the
- *   one open in the Commander view (`setActiveSession`), a turn is started so
- *   the Commander relays it. A turn started by a report can only call
- *   `ask_captain` within the session's report-ask budget until the user
- *   speaks again (report-tools.ts).
+ * - #62/#88 delivers Captain reports through `deliverReport`: reports are
+ *   durable unread updates. Delivery and opening a report never start a model
+ *   turn, reorder the conversation or interrupt its speech. Only an explicit
+ *   user message can request an explanation or follow-up.
  * - Only a turn the user started gets the admin tools (the ones that write
  *   projects or skills, {@link COMMANDER_ADMIN_TOOLS}). A report-started turn
  *   runs on text a Captain wrote, which may carry instructions from untrusted
@@ -65,6 +66,8 @@ export interface CommanderServiceOptions {
   oneShotTimeoutMs?: number
   /** `ask_captain` calls report-triggered turns may make per session before a user turn resets the count (#62). */
   maxReportAsks?: number
+  /** Injectable lifetime identity for durable startup observations. */
+  observationRunId?: string
 }
 
 /** A fold that could not write its summary; the turns stay verbatim until one succeeds. */
@@ -93,13 +96,13 @@ export interface AppendReportInput {
 }
 
 export interface DeliverReportInput extends AppendReportInput {
-  /** Shown to the model when it relays ("Project X says …"); the id is the fallback. */
+  /** Human project name retained for delivery callers; delivery starts no model turn. */
   projectName?: string | null
 }
 
 export interface DeliverReportResult {
   message: CommanderMessage
-  /** True when the session is open in the view and a relay turn started (or will, after the running one). */
+  /** Legacy delivery flag. Quiet reports always return false (#88). */
   relayed: boolean
 }
 
@@ -194,22 +197,36 @@ export class CommanderService {
   private readonly foldFailures = new Map<string, FoldFailure>()
   /** The session open in the Commander view, as the renderer reports it (#62). */
   private activeSessionId: string | null = null
-  /** Reports that arrived during a turn; relayed together once that turn ends. */
-  private readonly pendingRelay = new Map<string, { messageIds: string[]; projectName: string | null }>()
   /** `ask_captain` calls made by report-triggered turns since the user last spoke, per session. */
   private readonly reportAsks = new Map<string, number>()
+  private readonly accounting: TokenAccounting
+  private readonly managedSessions: ManagedSessionObserver
+  private readonly observationRunId: string
+  private readonly observationSequence = new Map<string, number>()
 
   constructor(private readonly options: CommanderServiceOptions) {
     this.store = options.store
     this.runtime = options.runtime ?? new ChatRuntime()
     this.budget = { ...DEFAULT_CONTEXT_BUDGET, ...options.budget }
+    this.observationRunId = options.observationRunId ?? SESSION_PROCESS_RUN_ID
+    this.accounting = new TokenAccounting(this.store.database, console.log, this.observationRunId)
+    this.managedSessions = new ManagedSessionObserver(this.store.database, this.observationRunId)
+    this.instrument(() => {
+      const interrupted = this.accounting.reconcileInterrupted()
+      if (interrupted.length) console.warn('[Commander] Interrupted usage observations retained:', interrupted)
+    })
+    this.retain(this.managedSessions.reconcileStartup().then((interrupted) => {
+      if (interrupted.length) console.warn('[Commander] Interrupted session turns retained without replay:', interrupted)
+    }).catch((error) => console.error('[Commander] Ledger startup observation failed:', error)))
   }
 
   shutdown(): void {
+    if (this.closing) return
+    this.instrument(() => this.accounting.shutdown())
+    try { this.managedSessions.shutdown() } catch (error) { console.error('[Commander] Ledger shutdown observation failed:', error) }
     this.closing = true
     this.shutdownSignal.abort()
     this.runtime.shutdown()
-    this.pendingRelay.clear()
     this.activeSessionId = null
     this.listeners.clear()
   }
@@ -237,6 +254,56 @@ export class CommanderService {
     if (this.closing) throw new Error('COMMANDER_SERVICE_CLOSED')
   }
 
+  private instrument(write: () => void): void {
+    try { write() } catch (error) { console.error('[Commander] Usage observation failed:', error) }
+  }
+
+  private observeLedger(ownerId: string, turnKey: string | undefined, eventType: string, idempotencyKey: string, payload: unknown, backendId?: string): void {
+    if (this.closing) return
+    try {
+      this.retain(this.managedSessions.observe({ ownerId, turnKey, eventType, idempotencyKey, payload,
+        generationKey: `${this.observationRunId}:commander`, engine: 'chat', backendId })
+        .catch((error) => console.error('[Commander] Ledger observation failed:', error)))
+    } catch (error) { console.error('[Commander] Ledger observation failed:', error) }
+  }
+
+  private observeCommanderEvent(event: CommanderEvent): void {
+    if (event.type === 'turn_event' && event.event.type !== 'done') {
+      const seq = (this.observationSequence.get(event.turnId) ?? 0) + 1
+      this.observationSequence.set(event.turnId, seq)
+      const identity = event.event.type === 'tool_call_start' || event.event.type === 'tool_call_result'
+        ? event.event.id : seq
+      this.observeLedger(event.sessionId, event.turnId, event.event.type, `${event.turnId}:${event.event.type}:${identity}`, event.event)
+    } else if (event.type === 'messages_appended') {
+      for (const message of event.messages) {
+        if (message.role === 'summary') this.observeLedger(event.sessionId, undefined, 'summary_saved', `summary:${message.id}`,
+          { content: message.content, lastFoldedId: message.correlation_id })
+        else this.observeLedger(event.sessionId, undefined, 'message_saved', `message:${message.id}`, message)
+      }
+    } else if (event.type === 'session_updated') {
+      const projection = createHash('sha256').update(JSON.stringify(event.session)).digest('hex')
+      this.observeLedger(event.session.id, undefined, 'session_updated', `session:${event.session.id}:${projection}`, event.session)
+    }
+  }
+
+  private async completeObserved(sessionId: string, kind: UsageKind, provider: ChatProvider,
+    request: Omit<ChatProviderRequest, 'tools' | 'toolChoice'>, signal: AbortSignal): Promise<string> {
+    const turnId = randomUUID()
+    const fullRequest = { ...request, tools: [], toolChoice: 'none' as const }
+    this.instrument(() => this.accounting.beginTurn(turnId, sessionId, kind, provider, requestCharacters(fullRequest)))
+    this.observeLedger(sessionId, turnId, 'turn_started', `${turnId}:started`, { kind, input: request.messages.map((message) => message.content).join('\n') }, provider.id)
+    let state = 'end_turn'
+    try {
+      return await completeText(this.accounting.observeProvider(provider, () => turnId), request, signal)
+    } catch (error) {
+      state = signal.aborted ? 'cancelled' : 'error'
+      throw error
+    } finally {
+      this.instrument(() => this.accounting.finishTurn(turnId, state))
+      this.observeLedger(sessionId, turnId, 'turn_done', `${turnId}:done`, { stopReason: state })
+    }
+  }
+
   /** Main-process observers of the event stream (#64 voice mode). Additive; the renderer path is `options.emit`. */
   private readonly listeners = new Set<(event: CommanderEvent) => void>()
 
@@ -251,6 +318,7 @@ export class CommanderService {
 
   private emit(event: CommanderEvent): void {
     if (this.closing) return
+    this.observeCommanderEvent(event)
     try {
       this.options.emit(event)
     } catch (err) {
@@ -315,7 +383,7 @@ export class CommanderService {
       (pendingMessage) => {
         prepared = this.prepareTurn(sessionId, provider, { trigger: 'user', userMessage: content, userMessageId: origin === 'typed' ? pendingMessage.id : undefined })
         session = this.store.markRead(sessionId)
-      })
+      }, origin)
     this.emit({ type: 'messages_appended', sessionId, messages: [message] })
     // Sending is reading: the user is looking at this session.
     if (session) this.emit({ type: 'session_updated', session })
@@ -350,8 +418,9 @@ export class CommanderService {
   private startTurn(sessionId: string, provider: ChatProvider, start: TurnStart, prepared?: PreparedTurn): { turnId: string; done: Promise<void> } {
     const { context, system, tools } = prepared ?? this.prepareTurn(sessionId, provider, start)
     let turnId = ''
+    const observedProvider = this.accounting.observeProvider(provider, () => turnId)
     const handle = this.runtime.startTurn(
-      { provider, messages: context.messages, system, tools, maxToolCalls: this.options.maxToolCalls },
+      { provider: observedProvider, messages: context.messages, system, tools, maxToolCalls: this.options.maxToolCalls },
       (event) => {
         // `done` is re-emitted after the turn's messages are stored.
         if (event.type === 'done') return
@@ -359,10 +428,15 @@ export class CommanderService {
       }
     )
     turnId = handle.turnId
+    this.instrument(() => this.accounting.beginTurn(turnId, sessionId, start.trigger, provider,
+      requestCharacters({ system, messages: context.messages, tools: tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })), toolChoice: 'auto' })))
+    this.observeLedger(sessionId, turnId, 'turn_started', `${turnId}:started`, { kind: start.trigger, input: start.userMessage }, provider.id)
     this.active.set(sessionId, handle)
     const done = handle.done
       .then((result) => this.finishTurn(sessionId, context.messages.length, result))
       .catch((err) => {
+        this.instrument(() => this.accounting.finishTurn(turnId, 'error'))
+        this.observeLedger(sessionId, turnId, 'turn_done', `${turnId}:done`, { stopReason: 'error' })
         console.error('[Commander] turn bookkeeping failed:', err)
         // The renderer must still leave its streaming state.
         const message = err instanceof Error ? err.message : String(err)
@@ -374,8 +448,6 @@ export class CommanderService {
       })
       .then(() => this.afterTurn(sessionId, provider))
       .catch((err) => console.error('[Commander] post-turn work failed:', err))
-      .then(() => this.relayPending(sessionId))
-      .catch((err) => console.error('[Commander] report relay failed:', err))
 
     this.retain(done)
     this.emit({ type: 'turn_started', sessionId, turnId })
@@ -383,6 +455,7 @@ export class CommanderService {
   }
 
   private finishTurn(sessionId: string, inputCount: number, result: ChatTurnResult): void {
+    this.instrument(() => this.accounting.finishTurn(result.turnId, result.stopReason))
     const added = result.messages.slice(inputCount)
     const stored: CommanderMessage[] = []
     for (const m of added) {
@@ -392,6 +465,8 @@ export class CommanderService {
     if (stored.length > 0) this.emit({ type: 'messages_appended', sessionId, messages: stored })
     this.emitSession(sessionId)
     if (this.active.get(sessionId)?.turnId === result.turnId) this.active.delete(sessionId)
+    this.observeLedger(sessionId, result.turnId, 'turn_done', `${result.turnId}:done`, { stopReason: result.stopReason })
+    this.observationSequence.delete(result.turnId)
     this.emit({ type: 'turn_event', sessionId, turnId: result.turnId, event: { type: 'done', stopReason: result.stopReason } })
   }
 
@@ -457,7 +532,7 @@ export class CommanderService {
       if (firstReply) {
         try {
           const model = provider ?? this.options.createProvider()
-          const raw = await completeText(
+          const raw = await this.completeObserved(sessionId, 'title',
             model,
             {
               system: COMMANDER_TITLE_PROMPT,
@@ -536,7 +611,7 @@ export class CommanderService {
           const prompt = summary
             ? `Previous summary:\n${summary}\n\nNew conversation to fold in:\n${chunk}`
             : `Conversation to summarise:\n${chunk}`
-          summary = (await completeText(
+          summary = (await this.completeObserved(sessionId, 'summary',
             model,
             { system: COMMANDER_SUMMARY_PROMPT, messages: [{ role: 'user', content: prompt }], maxTokens: 800 },
             signal
@@ -593,62 +668,12 @@ export class CommanderService {
   // ── Report delivery (#62) ───────────────────────────────────
 
   /**
-   * Stores a report and, when its session is the one open in the view, gives
-   * the Commander a turn to relay it. A session that is not open only gets
-   * the unread report (the list badge). If the open session is mid-turn, the
-   * relay waits for that turn to end. Storing never depends on the relay:
-   * with no provider (no API key) the report is still there, unread.
+   * Stores and emits a quiet report, including during a conversation turn.
+   * Correlation lets the view attach it to its request without changing the
+   * original message timestamp. No model/provider call or speech is started.
    */
   deliverReport(input: DeliverReportInput): DeliverReportResult {
-    const waitsForCurrentTurn = this.isSessionActive(input.sessionId) && this.active.has(input.sessionId)
-    const { message, inserted } = this.storeReport(input, !waitsForCurrentTurn)
-    if (!inserted) return { message, relayed: false }
-    if (!this.isSessionActive(input.sessionId)) return { message, relayed: false }
-    if (waitsForCurrentTurn) {
-      const pending = this.pendingRelay.get(input.sessionId)
-      if (pending) {
-        pending.messageIds.push(message.id)
-        pending.projectName = input.projectName ?? pending.projectName
-      } else {
-        this.pendingRelay.set(input.sessionId, { messageIds: [message.id], projectName: input.projectName ?? null })
-      }
-      return { message, relayed: true }
-    }
-    return { message, relayed: this.relayReport(input.sessionId, input.projectName ?? null) }
-  }
-
-  private relayReport(sessionId: string, projectName: string | null): boolean {
-    if (this.closing) return false
-    let provider: ChatProvider
-    try {
-      provider = this.options.createProvider()
-    } catch (err) {
-      console.warn('[Commander] Report stored but not relayed:', err instanceof Error ? err.message : err)
-      return false
-    }
-    if (!this.store.getSession(sessionId)) return false
-    this.startTurn(sessionId, provider, {
-      trigger: 'report',
-      userMessage: '',
-      systemNote: reportRelayNote(projectName ? `"${projectName}"` : 'a project')
-    })
-    return true
-  }
-
-  /** After a turn: relays a report that arrived during it, if the session is still open and idle. */
-  private relayPending(sessionId: string): void {
-    if (this.closing) return
-    const pending = this.pendingRelay.get(sessionId)
-    if (!pending) return
-    this.pendingRelay.delete(sessionId)
-    const messages = pending.messageIds
-      .map((id) => this.store.moveMessageToEnd(id))
-      .filter((message): message is CommanderMessage => message !== null)
-    if (messages.length > 0) {
-      this.emit({ type: 'messages_appended', sessionId, messages })
-      this.emitSession(sessionId)
-    }
-    if (!this.isSessionActive(sessionId) || this.active.has(sessionId)) return
-    this.relayReport(sessionId, pending.projectName)
+    const { message } = this.storeReport(input)
+    return { message, relayed: false }
   }
 }

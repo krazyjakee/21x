@@ -1,3 +1,4 @@
+import { reportedTokenUsage } from '../../sessions/token-estimator'
 import { randomUUID } from 'crypto'
 import type { ChatUsage } from '../../../shared/chat'
 import { findClaudeExecutable } from '../../adapters/claude-code-executable'
@@ -108,11 +109,8 @@ function parseReply(result: SdkResult): StructuredReply {
   return { response: '', tool_calls: [] }
 }
 
-function usageOf(result: SdkResult): ChatUsage {
-  return {
-    inputTokens: Number(result.usage?.input_tokens) || 0,
-    outputTokens: Number(result.usage?.output_tokens) || 0
-  }
+function usageOf(result: SdkResult): ChatUsage | null {
+  return reportedTokenUsage(result.usage)
 }
 
 function promptFor(request: ChatProviderRequest, conversation: unknown[], hasImages: boolean): string {
@@ -253,7 +251,8 @@ export class ClaudeCodeSubscriptionChatProvider implements ChatProvider {
       // is a premature answer that the next step repeats, so drop it.
       if (text && toolCalls.length === 0) yield { type: 'text_delta', text }
       yield* toolCalls
-      yield { type: 'message_end', stopReason: toolCalls.length > 0 ? 'tool_use' : 'end_turn', usage: usageOf(terminal) }
+      const usage = usageOf(terminal)
+      yield { type: 'message_end', stopReason: toolCalls.length > 0 ? 'tool_use' : 'end_turn', ...(usage ? { usage } : {}) }
     } catch (err) {
       if (signal.aborted || abortController.signal.aborted) throw new ChatAbortError()
       throw err

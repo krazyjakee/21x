@@ -417,6 +417,15 @@ requests with it (quoting the relay's correlation id) and to report unasked
 when the user must decide something. The Captain's merges and issue writes
 reach the Commander the same way, without the Captain doing anything.
 
+Reports are quiet updates (#88). Valid correlated replies remain with the
+request that caused them; unsolicited reports, unknown correlations and first
+replies to archived requests go to the dedicated Project reports inbox.
+Arrival, including during a running conversation or voice call, starts no
+model turn, reply or speech. Reports keep their original timestamps. Opening
+a report reveals its stored explanation without a paid model call; an explicit
+user question can request further explanation or follow-up. Decisions and
+escalations remain visible through the report content and unread/inbox indicators.
+
 The reporting contract (#173) covers completed, active, blocked and proposed
 work. Supply a human-readable `title`, `description`, known `impact`, current
 `outcome`, `next_step` with its owner, and `user_action` with any decision and

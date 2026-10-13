@@ -1,7 +1,7 @@
 /**
  * Captain reports back into Commander sessions (#62): routing by
- * correlation id, the open-session relay turn, the unread-only path, the
- * report-ask loop cap, Captain actions as reports, and the `report_to_commander`
+ * correlation id, the dedicated quiet inbox, unchanged request timestamps,
+ * silent delivery, Captain actions as reports, and the `report_to_commander`
  * route with its coordinator-only guard.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -58,12 +58,6 @@ function fakeProvider(chat: Reply = () => 'ok'): ChatProvider & { requests: Chat
   }
 }
 
-/** The last message of a chat request is the report note when a report started the turn. */
-function startedByReport(request: ChatProviderRequest): boolean {
-  const last = request.messages[request.messages.length - 1]
-  return last?.role === 'user' && last.content.includes('[Report from project')
-}
-
 const chatRequests = (provider: { requests: ChatProviderRequest[] }): ChatProviderRequest[] =>
   provider.requests.filter((r) => r.system !== COMMANDER_TITLE_PROMPT && r.system !== COMMANDER_SUMMARY_PROMPT)
 
@@ -92,14 +86,6 @@ function install(service: CommanderService): void {
 /** The correlation id inside the relay text a Captain received. */
 function correlationOf(relayText: string): string {
   return /correlation_id=(\S+)/.exec(relayText)![1]
-}
-
-/** Waits until the session has no running turn and its newest message is an assistant reply. */
-async function settled(service: CommanderService, sessionId: string): Promise<void> {
-  await vi.waitFor(() => {
-    expect(service.activeTurnId(sessionId)).toBeNull()
-    expect(store.listMessages(sessionId).at(-1)?.role).toBe('assistant')
-  })
 }
 
 beforeEach(() => {
@@ -166,31 +152,45 @@ describe('report routing', () => {
     expect(chatRequests(provider)).toHaveLength(4)
   })
 
-  it('sends unprompted, unknown-correlation and archived-origin reports to the most recent session, or an inbox when there is none', () => {
+  it('routes unprompted, unknown-correlation and archived-origin reports to the dedicated quiet inbox', () => {
     expect(store.listSessions()).toEqual([])
     const inbox = resolveReportSession(store)
     expect(inbox.routedBy).toBe('inbox')
     expect(store.getSession(inbox.sessionId)?.title).toBe(REPORT_INBOX_TITLE)
 
     const newer = store.createSession('Newer')
-    expect(resolveReportSession(store, null)).toEqual({ sessionId: newer.id, routedBy: 'latest' })
-    expect(resolveReportSession(store, 'cmd-unknown')).toEqual({ sessionId: newer.id, routedBy: 'latest' })
+    expect(resolveReportSession(store, null)).toEqual({ sessionId: inbox.sessionId, routedBy: 'inbox' })
+    expect(resolveReportSession(store, null, newer.id)).toEqual({ sessionId: inbox.sessionId, routedBy: 'inbox' })
+    expect(resolveReportSession(store, 'cmd-unknown')).toEqual({ sessionId: inbox.sessionId, routedBy: 'inbox' })
 
     // A delegation from an older session routes its reply back there.
-    const older = inbox.sessionId
+    const older = store.createSession('Older request').id
     store.appendMessage(older, { role: 'tool', content: '{"status":"sent"}', toolCallId: 'c1', toolName: 'ask_captain', projectId: null, correlationId: 'cmd-1' })
     // (appending bumps updated_at, so make the other one the most recent again)
     store.appendMessage(newer.id, { role: 'user', content: 'hi' })
     expect(resolveReportSession(store, 'cmd-1')).toEqual({ sessionId: older, routedBy: 'correlation' })
     expect(store.findDelegation('cmd-1')).toEqual({ sessionId: older, projectId: null })
 
-    // Archived origin: the report follows the user instead.
+    // Archived origin: the report goes to the quiet inbox.
     store.setArchived(older, true)
-    expect(resolveReportSession(store, 'cmd-1')).toEqual({ sessionId: newer.id, routedBy: 'latest' })
+    expect(resolveReportSession(store, 'cmd-1')).toEqual({ sessionId: inbox.sessionId, routedBy: 'inbox' })
   })
 })
 
 describe('report delivery', () => {
+  it('puts a first reply to an archived durable request in the inbox, with its correlation retained', () => {
+    const alpha = db.createProject({ name: 'Alpha' })!
+    const origin = store.createSession('Archived request')
+    captainDelivery.store.enqueue({ idempotencyKey: 'archived-request', kind: 'captain_request', projectId: alpha.id, sourceSessionId: origin.id, correlationId: 'cmd-archived', payload: 'Requested work' })
+    store.setArchived(origin.id, true)
+    const service = makeService(fakeProvider())
+    install(service)
+    expect(deliverCaptainReport({ projectId: alpha.id, message: 'The requested change is ready for review.', correlationId: 'cmd-archived', source: 'captain' }))
+      .toMatchObject({ delivered: true, sessionId: store.ensureReportInbox().id, routedBy: 'inbox', relayed: false })
+    expect(store.listMessages(origin.id)).toEqual([])
+    expect(store.listMessages(store.ensureReportInbox().id)).toMatchObject([{ content: 'The requested change is ready for review.', correlation_id: 'cmd-archived' }])
+  })
+
   it('routes by durable request ownership and stores duplicate delivery/ack once', async () => {
     const alpha = db.createProject({ name: 'Alpha' })!
     const service = makeService(fakeProvider())
@@ -263,7 +263,7 @@ describe('report delivery', () => {
     expect(captainDelivery.store.get(request.id)?.state).toBe('pending')
   })
 
-  it('recovers a crash before report inbox insertion into its archived origin exactly once', () => {
+  it('recovers an older unsolicited delivery into the quiet inbox exactly once', () => {
     const alpha = db.createProject({ name: 'Alpha' })!
     const origin = store.createSession('Origin')
     const newer = store.createSession('Newer')
@@ -274,7 +274,8 @@ describe('report delivery', () => {
     const options = { service, store, deliveries: captainDelivery.store, getProject: (id: string) => db.getProject(id) }
     recoverCaptainReports(options)
     recoverCaptainReports(options)
-    expect(store.listMessages(origin.id)).toMatchObject([{ content: 'Durable result', role: 'report' }])
+    expect(store.listMessages(store.ensureReportInbox().id)).toMatchObject([{ content: 'Durable result', role: 'report' }])
+    expect(store.listMessages(origin.id)).toEqual([])
     expect(store.listMessages(newer.id)).toEqual([])
     expect(captainDelivery.store.get(row.id)?.state).toBe('acknowledged')
   })
@@ -311,144 +312,108 @@ describe('report delivery', () => {
     expect(captainDelivery.store.get(request.id)).toMatchObject({ state: 'timed_out' })
   })
 
-  it('relays a report in the open session with a Commander turn, and only queues it unread elsewhere', async () => {
+  it('keeps unsolicited reports in a quiet inbox while the user conversation stays open', () => {
     const alpha = db.createProject({ name: 'Alpha' })!
-    const provider = fakeProvider((request) => (startedByReport(request) ? 'Alpha says the site shipped.' : 'ok'))
+    const provider = fakeProvider()
     const service = makeService(provider)
     install(service)
-    const open = store.createSession('Open')
-    const other = store.createSession('Other')
-    service.setActiveSession(open.id)
-
-    const delivery = deliverCaptainReport({ projectId: alpha.id, message: 'Site shipped.', correlationId: null, source: 'captain' })
-    // The most recent session is `other` (created last), so route there explicitly through the service for the open one.
-    expect(delivery).toMatchObject({ delivered: true, sessionId: other.id, relayed: false })
-    expect(store.getSession(other.id)?.unread_count).toBe(1)
+    const conversation = store.createSession('Current conversation')
+    const user = store.appendMessage(conversation.id, { role: 'user', content: 'Help with my release.' })
+    service.setActiveSession(conversation.id)
+    const content = formatCommanderReport({ title: 'Board sorting', description: 'Recently updated work stays visible.', impact: 'Active tasks are easier to find.', outcome: 'Integrated.', nextStep: 'The Captain will arrange review of accessibility work.', userAction: 'Choose a reviewer for the next change.' }, 'PR reference')
+    const delivery = deliverCaptainReport({ projectId: alpha.id, message: content, source: 'captain' })
+    expect(delivery).toMatchObject({ delivered: true, routedBy: 'inbox', relayed: false })
+    if (!delivery.delivered) throw new Error('Report delivery failed')
+    expect(delivery.sessionId).not.toBe(conversation.id)
+    expect(store.listMessages(conversation.id)).toEqual([user])
+    expect(store.listMessages(delivery.sessionId)).toMatchObject([{ role: 'report', content }])
+    expect(store.getSession(delivery.sessionId)).toMatchObject({ is_report_inbox: true, unread_count: 1 })
     expect(chatRequests(provider)).toHaveLength(0)
-
-    const relayed = service.deliverReport({ sessionId: open.id, content: 'Site shipped.', projectId: alpha.id, projectName: 'Alpha' })
-    expect(relayed.relayed).toBe(true)
-    expect(events.some((e) => e.type === 'turn_started' && e.sessionId === open.id)).toBe(true)
-    await settled(service, open.id)
-
-    const messages = store.listMessages(open.id)
-    expect(messages.map((m) => m.role)).toEqual(['report', 'assistant'])
-    expect(messages[1].content).toBe('Alpha says the site shipped.')
-    const [request] = chatRequests(provider)
-    expect(request.system).toContain('A report from project "Alpha" has just arrived')
-    // The turn is told to summarise in plain language, not to relay (#107).
-    expect(request.system).toContain('Explain the work for the user now in plain language')
-    expect(request.system).toContain('human-readable task or change title and a plain-language description')
-    expect(request.system).not.toContain('Relay it to the user now')
-    expect(request.messages.at(-1)?.content).toContain(`[Report from project ${alpha.id}]\nSite shipped.`)
+    expect(events.filter((event) => event.type === 'turn_started')).toHaveLength(0)
+    service.setActiveSession(delivery.sessionId)
+    store.markRead(delivery.sessionId)
+    expect(chatRequests(provider)).toHaveLength(0)
   })
 
-  it('relays a report that arrives mid-turn once that turn has ended', async () => {
+  it('stores a correlated report immediately without moving it after the running conversation turn', async () => {
     const alpha = db.createProject({ name: 'Alpha' })!
     let release: () => void = () => {}
     const gate = new Promise<void>((resolve) => { release = resolve })
-    const provider = fakeProvider(() => 'answer')
-    const slow: ChatProvider = {
-      ...provider,
-      stream(request, signal) {
-        const inner = provider.stream(request, signal)
-        return (async function* () {
-          if (!startedByReport(request)) await gate
-          yield* inner
-        })()
-      }
-    }
-    const service = makeService(slow)
-    const session = store.createSession()
+    const provider = fakeProvider(() => 'The release discussion continues.')
+    const service = makeService({ ...provider, stream(request, signal) {
+      const inner = provider.stream(request, signal)
+      return (async function* () { await gate; yield* inner })()
+    } })
+    install(service)
+    const session = store.createSession('Release discussion')
+    store.appendMessage(session.id, { role: 'tool', content: 'Asked the Captain.', toolCallId: 'ask-1', toolName: 'ask_captain', projectId: alpha.id, correlationId: 'cmd-request' })
     service.setActiveSession(session.id)
-    const turn = service.sendUserMessage(session.id, 'hello')
+    const turn = service.sendUserMessage(session.id, 'Now help with the release plan.')
     await vi.waitFor(() => expect(chatRequests(provider)).toHaveLength(1))
-
-    const delivery = service.deliverReport({ sessionId: session.id, content: 'Done.', projectId: alpha.id, projectName: 'Alpha' })
-    expect(delivery.relayed).toBe(true)
+    expect(deliverCaptainReport({ projectId: alpha.id, message: 'The requested board fix is integrated.', correlationId: 'cmd-request', source: 'captain' }))
+      .toMatchObject({ delivered: true, sessionId: session.id, routedBy: 'correlation', relayed: false })
+    const report = store.listMessages(session.id).find((message) => message.role === 'report')!
+    expect(events.some((event) => event.type === 'messages_appended' && event.messages.some((message) => message.id === report.id))).toBe(true)
     release()
     await turn.done
-    await vi.waitFor(() => expect(chatRequests(provider)).toHaveLength(2))
-    await settled(service, session.id)
-    expect(store.listMessages(session.id).map((m) => m.role)).toEqual(['user', 'assistant', 'report', 'assistant'])
+    expect(service.activeTurnId(session.id)).toBeNull()
+    expect(chatRequests(provider)).toHaveLength(1)
+    expect(store.getMessage(report.id)?.created_at).toBe(report.created_at)
+    expect(store.listMessages(session.id).map((message) => message.role)).toEqual(['tool', 'user', 'report', 'assistant'])
+    expect(events.filter((event) => event.type === 'turn_started')).toHaveLength(1)
   })
 
-  it('gives one relay the semantic context of multiple related pull-request reports', async () => {
+  it('keeps related report meaning available for an explicit user-requested explanation', async () => {
     const alpha = db.createProject({ name: 'Alpha' })!
-    let release: () => void = () => {}
-    const gate = new Promise<void>((resolve) => { release = resolve })
-    const provider = fakeProvider(() => 'The project update is ready.')
-    const service = makeService({ ...provider, stream(request, signal) {
-      const stream = provider.stream(request, signal)
-      return (async function* () { if (!startedByReport(request)) await gate; yield* stream })()
-    } })
-    const session = store.createSession('Progress')
+    const provider = fakeProvider(() => 'The board updates are ready to discuss.')
+    const service = makeService(provider)
+    const session = store.ensureReportInbox()
     service.setActiveSession(session.id)
-    const turn = service.sendUserMessage(session.id, 'What is changing on the board?')
-    await vi.waitFor(() => expect(chatRequests(provider)).toHaveLength(1))
     for (const context of [
       { title: 'Board activity sorting', description: 'Recently updated tasks stay visible.', impact: 'Active work is easier to find.', outcome: 'Integrated.', nextStep: 'The Captain is arranging keyboard accessibility.', userAction: 'No action is needed.' },
       { title: 'Keyboard accessibility', description: 'The board can be navigated from the keyboard.', impact: 'Keyboard users can find work without a mouse.', outcome: 'Under review.', nextStep: 'The reviewer will finish accessibility checks.', userAction: 'No user decision is needed.' }
-    ]) service.deliverReport({ sessionId: session.id, projectId: alpha.id, projectName: 'Alpha', content: formatCommanderReport(context, 'PR source evidence') })
-    release()
-    await turn.done
-    await settled(service, session.id)
-    const relays = chatRequests(provider).filter(startedByReport)
-    expect(relays).toHaveLength(1)
-    const context = relays[0].messages.map((message) => message.content).join('\n')
-    for (const phrase of ['Board activity sorting', 'Recently updated tasks stay visible', 'Active work is easier to find', 'Keyboard accessibility', 'without a mouse', 'reviewer will finish accessibility checks']) expect(context).toContain(phrase)
-    expect(relays[0].system).toContain('Synthesise multiple related updates into one coherent progress explanation')
+    ]) expect(service.deliverReport({ sessionId: session.id, projectId: alpha.id, content: formatCommanderReport(context, 'PR source evidence') }).relayed).toBe(false)
+    expect(chatRequests(provider)).toHaveLength(0)
     expect(store.listMessages(session.id).filter((message) => message.role === 'report')).toHaveLength(2)
+    await service.sendUserMessage(session.id, 'Explain the board updates together.').done
+    expect(chatRequests(provider)).toHaveLength(1)
+    const request = chatRequests(provider)[0]
+    const context = request.messages.map((message) => message.content).join('\n')
+    for (const phrase of ['Board activity sorting', 'Recently updated tasks stay visible', 'Active work is easier to find', 'Keyboard accessibility', 'without a mouse', 'reviewer will finish accessibility checks']) expect(context).toContain(phrase)
+    expect(request.system).toContain('Synthesise multiple related updates into one coherent progress explanation')
   })
 
-  it.each([false, true])('speaks only the summary and retains the report (mid-turn: %s)', async (midTurn) => {
+  it.each([false, true])('keeps arriving reports silent in voice mode (user turn active: %s)', async (midTurn) => {
     const alpha = db.createProject({ name: 'Alpha' })!
-    const raw = 'PR #104 merged on sessions-b2 (630894c); waiting for #99.'
-    const summary = 'Alpha finished the history fix and is waiting for your review.'
+    const content = formatCommanderReport({ title: 'History fix', description: 'Old conversation history is available again.', impact: 'Earlier instructions remain visible.', outcome: 'Integrated.', nextStep: 'The Captain is arranging release review.', userAction: 'Choose a release reviewer.' }, 'PR audit reference')
     let release: () => void = () => {}
     const gate = new Promise<void>((resolve) => { release = resolve })
-    const provider = fakeProvider((request) => startedByReport(request) ? summary : 'Checking now.')
-    const service = makeService({
-      ...provider,
-      stream(request, signal) {
-        const inner = provider.stream(request, signal)
-        return (async function* () {
-          if (midTurn && !startedByReport(request)) await gate
-          yield* inner
-        })()
-      }
-    })
+    const provider = fakeProvider(() => 'Checking your current request.')
+    const service = makeService({ ...provider, stream(request, signal) {
+      const inner = provider.stream(request, signal)
+      return (async function* () { if (midTurn) await gate; yield* inner })()
+    } })
     const spoken: string[] = []
     const speech: CommanderVoiceSpeech = {
       beginStreamingAnswer: vi.fn(async () => true),
       pushStreamingAnswer: (_key, parts) => { spoken.push(...parts.map((part) => part.content)) },
-      endStreamingAnswer: vi.fn(),
-      speak: vi.fn(async () => true),
-      interrupt: vi.fn(),
-      stop: vi.fn(),
-      streamingTaskId: null,
-      currentTaskId: null,
+      endStreamingAnswer: vi.fn(), speak: vi.fn(async () => true), interrupt: vi.fn(), stop: vi.fn(), streamingTaskId: null, currentTaskId: null
     }
     const voice = new CommanderVoice({ commander: service, speech })
-    const session = store.createSession()
+    const session = store.createSession('Current request')
     service.setActiveSession(session.id)
     voice.setActiveSession(session.id)
     try {
-      const turn = midTurn ? service.sendUserMessage(session.id, 'hello') : null
-      expect(service.deliverReport({ sessionId: session.id, content: raw, projectId: alpha.id, projectName: 'Alpha' }).relayed).toBe(true)
+      const turn = midTurn ? service.sendUserMessage(session.id, 'Help with my current request.') : null
+      expect(service.deliverReport({ sessionId: session.id, content, projectId: alpha.id }).relayed).toBe(false)
       release()
       await turn?.done
-      await vi.waitFor(() => expect(spoken).toContain(summary))
-      await settled(service, session.id)
-      expect(spoken.join(' ')).not.toContain(raw)
+      expect(chatRequests(provider)).toHaveLength(midTurn ? 1 : 0)
+      expect(spoken.join(' ')).not.toContain('History fix')
+      expect(spoken.join(' ')).not.toContain('Choose a release reviewer')
       expect(speech.speak).not.toHaveBeenCalled()
-      expect(store.listMessages(session.id).filter((message) => message.role === 'report')).toEqual([
-        expect.objectContaining({ content: raw, project_id: alpha.id })
-      ])
-    } finally {
-      release()
-      voice.dispose()
-    }
+      expect(store.listMessages(session.id).filter((message) => message.role === 'report')).toMatchObject([{ content }])
+    } finally { release(); voice.dispose() }
   })
 
   it('stores the report unread even when no provider can be built', () => {
@@ -468,33 +433,18 @@ describe('report delivery', () => {
 })
 
 describe('loop protection', () => {
-  it('refuses ask_captain once report-triggered turns have used the budget, until the user speaks', async () => {
+  it('never delegates in reaction to reports, regardless of the legacy loop budget', () => {
     const alpha = db.createProject({ name: 'Alpha' })!
-    const provider = fakeProvider((request) => {
-      // After its tool result the model answers in text; a turn that a report started delegates once.
-      if (request.messages.at(-1)?.role === 'tool') return 'Asked again.'
-      if (startedByReport(request)) return { toolCalls: [{ id: 'c', name: 'ask_captain', input: { project: 'Alpha', message: 'Follow up' } }] }
-      return 'ok'
-    })
+    const provider = fakeProvider(() => ({ toolCalls: [{ id: 'c', name: 'ask_captain', input: { project: 'Alpha', message: 'Follow up' } }] }))
     const service = makeService(provider)
-    const session = store.createSession()
+    const session = store.createSession('Conversation')
     service.setActiveSession(session.id)
-
     for (let i = 0; i < MAX_REPORT_ASKS_WITHOUT_USER_TURN + 1; i++) {
-      service.deliverReport({ sessionId: session.id, content: `Report ${i}`, projectId: alpha.id, projectName: 'Alpha' })
-      await settled(service, session.id)
+      expect(service.deliverReport({ sessionId: session.id, content: `Report ${i}`, projectId: alpha.id }).relayed).toBe(false)
     }
-    expect(sendMessage).toHaveBeenCalledTimes(MAX_REPORT_ASKS_WITHOUT_USER_TURN)
-    const toolRows = store.listMessages(session.id).filter((m) => m.role === 'tool')
-    expect(toolRows).toHaveLength(MAX_REPORT_ASKS_WITHOUT_USER_TURN + 1)
-    expect(toolRows.at(-1)).toMatchObject({ is_error: true })
-    expect(toolRows.at(-1)?.content).toContain('loop_guard')
-
-    // A user turn resets the budget.
-    await service.sendUserMessage(session.id, 'thanks').done
-    service.deliverReport({ sessionId: session.id, content: 'Another', projectId: alpha.id, projectName: 'Alpha' })
-    await settled(service, session.id)
-    expect(sendMessage).toHaveBeenCalledTimes(MAX_REPORT_ASKS_WITHOUT_USER_TURN + 1)
+    expect(chatRequests(provider)).toHaveLength(0)
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(store.listMessages(session.id).every((message) => message.role === 'report')).toBe(true)
   })
 
   it('guardReportAsks wraps only ask_captain', async () => {
@@ -529,10 +479,11 @@ describe('Captain actions as reports', () => {
     const session = store.createSession()
 
     reportCaptainAction(event({ projectId: alpha.id }))
-    const report = store.listMessages(session.id).at(-1)
+    const report = store.listMessages(store.ensureReportInbox().id).at(-1)
+    expect(store.listMessages(session.id)).toEqual([])
     expect(report).toMatchObject({ role: 'report', project_id: alpha.id, correlation_id: null })
     expect(report?.content).toContain('Merged https://github.com/acme/app/pull/1')
-    expect(store.getSession(session.id)?.unread_count).toBe(1)
+    expect(store.getSession(store.ensureReportInbox().id)?.unread_count).toBe(1)
   })
 
   it('words a blocked merge as a blocker', () => {
@@ -549,24 +500,26 @@ describe('report_to_commander route and scope', () => {
     { title: 'Scrollbar accessibility', description: 'The team is improving keyboard navigation.', impact: 'Keyboard users will be able to navigate the board.', outcome: 'In progress; the benefit is not available yet.', next_step: 'The task agent will finish implementation and request review.', user_action: 'No decision is waiting on you.' },
     { title: 'Release preparation', description: 'The completed changes are awaiting the required reviewer.', impact: 'The release cannot proceed until review is finished.', outcome: 'Blocked on the release reviewer.', next_step: 'The reviewer must approve; the Captain can then continue.', user_action: 'Choose a reviewer or provide the required review yourself.' },
     { title: 'Theme options', description: 'Two navigation designs are proposed.', impact: 'The choice changes how users find their work.', outcome: 'Awaiting your decision.', next_step: 'The Captain will assign implementation after your choice.', user_action: 'Choose the compact layout or the spacious layout.' }
-  ])('persists understandable context for $outcome and passes it to the relay unchanged', async (context) => {
+  ])('persists understandable context for $outcome and exposes it only on an explicit request', async (context) => {
     const alpha = db.createProject({ name: 'Alpha' })!
     const provider = fakeProvider(() => 'Explanation received.')
     const service = makeService(provider)
     install(service)
-    const session = store.createSession()
+    const session = store.ensureReportInbox()
     service.setActiveSession(session.id)
     const evidence = 'PR #153, correlation_id=technical-only, ' + 'a'.repeat(40)
     const result = await handleTaskRoute(db, '/report_to_commander', { project_id: alpha.id, message: evidence, ...context })
     expect(result).toMatchObject({ success: true })
-    await settled(service, session.id)
     const stored = store.listMessages(session.id).find((message) => message.role === 'report')!
     const presentation = splitCommanderReport(stored.content)
     for (const value of Object.values(context)) expect(presentation.content).toContain(value)
     expect(presentation.technicalDetails).toBe(evidence)
-    expect(chatRequests(provider)[0].messages.at(-1)?.content).toContain(context.description)
-    expect(chatRequests(provider)[0].messages.at(-1)?.content).toContain(context.impact)
-    expect(chatRequests(provider)[0].system).toContain('next meaningful step and who owns it')
+    expect(chatRequests(provider)).toHaveLength(0)
+    await service.sendUserMessage(session.id, 'Explain this project update.').done
+    const request = chatRequests(provider)[0]
+    expect(request.messages.map((message) => message.content).join('\n')).toContain(context.description)
+    expect(request.messages.map((message) => message.content).join('\n')).toContain(context.impact)
+    expect(request.system).toContain('next meaningful step and who owns it')
   })
 
   it('retrieves scoped task meaning and exposes missing impact instead of guessing', async () => {
@@ -574,7 +527,7 @@ describe('report_to_commander route and scope', () => {
     const beta = db.createProject({ name: 'Beta' })!
     const task = db.createTask({ title: 'Board activity sorting', description: 'Recently updated tasks stay visible.', project_id: alpha.id })!
     install(makeService(fakeProvider()))
-    const session = store.createSession()
+    const session = store.ensureReportInbox()
     expect(await handleTaskRoute(db, '/report_to_commander', { project_id: alpha.id, task_id: 'missing-task', message: 'Done' })).toEqual({ error: 'Task not found in this project' })
     expect(await handleTaskRoute(db, '/report_to_commander', { project_id: beta.id, task_id: task.id, message: 'Done' })).toEqual({ error: 'Task not found in this project' })
     expect(await handleTaskRoute(db, '/report_to_commander', { project_id: alpha.id, task_id: task.id, message: 'PR #153 merged' })).toMatchObject({ success: true })

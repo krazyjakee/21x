@@ -12,6 +12,7 @@ export interface CommanderSessionRow {
   archived: number
   last_read_at: number | null
   unread_count?: number
+  is_report_inbox?: number
 }
 
 export interface CommanderMessageRow {
@@ -26,4 +27,5 @@ export interface CommanderMessageRow {
   project_id: string | null
   correlation_id: string | null
   created_at: number
+  input_mode: 'voice' | 'typed' | null
 }

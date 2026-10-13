@@ -21,7 +21,7 @@ describe('portable database standalone Node proof', () => {
     const report = JSON.parse(stdout)
     expect(report.passed).toBe(true)
     expect(report.runtime).toBe('standalone-node')
-    expect(report.schemaVersion).toBe(33)
+    expect(report.schemaVersion).toBe(35)
     expect(report.portableModuleCount).toBeGreaterThan(10)
     expect(report.proofs).toContain('durable-transcript-snapshot-delta-reopen')
     expect(report.proofs).toContain('managed-mcp-idempotency-ownership')

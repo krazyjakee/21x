@@ -782,6 +782,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('commander:send', images?.length ? { sessionId, text, images } : { sessionId, text }),
     getImage: (id: string): Promise<unknown> => ipcRenderer.invoke('commander:getImage', { id }),
     cancel: (sessionId: string): Promise<{ cancelled: boolean }> => ipcRenderer.invoke('commander:cancel', { sessionId }),
+    undoAction: (sessionId: string, actionId: string): Promise<unknown> => ipcRenderer.invoke('commander:undoAction', { sessionId, actionId }),
     onEvent: (callback: (data: unknown) => void): (() => void) => {
       const handler = (_: unknown, d: unknown): void => callback(d)
       ipcRenderer.on('commander:event', handler)

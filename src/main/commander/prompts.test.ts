@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { COMMANDER_SYSTEM_PROMPT, COMMANDER_SUMMARY_PROMPT, REPORT_SUMMARY_RULES, reportRelayNote } from './prompts'
 
 describe('report summary instructions', () => {
+  it('keeps reports as background context until the user asks or they directly answer the current question', () => {
+    expect(COMMANDER_SYSTEM_PROMPT).toContain('Its arrival never starts a reply')
+    expect(COMMANDER_SYSTEM_PROMPT).toContain('do not interrupt an unrelated exchange with a report announcement')
+    expect(COMMANDER_SYSTEM_PROMPT).toContain('Do not delegate on a report alone')
+    expect(reportRelayNote('Web')).toContain('The user asked for an explanation')
+  })
+
   it('keeps a single explanation after the last tool result, without narration between calls (#114)', () => {
     expect(COMMANDER_SYSTEM_PROMPT).toContain('Do not write any text before or between tool calls')
     expect(COMMANDER_SYSTEM_PROMPT).toContain('Call the tools silently and write one reply after the last tool result')

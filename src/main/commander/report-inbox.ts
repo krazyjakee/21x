@@ -23,8 +23,8 @@ export interface CaptainReport {
   deliveryId?: string | null
 }
 
-/** How the report found its session: by the correlation id, the most recent session, or an inbox created for it. */
-export type ReportRoutedBy = 'correlation' | 'latest' | 'inbox'
+/** Correlated replies stay with their request; all other reports use the quiet inbox (#88). */
+export type ReportRoutedBy = 'correlation' | 'inbox'
 
 export type ReportDelivery =
   | { delivered: true; sessionId: string; routedBy: ReportRoutedBy; relayed: boolean }

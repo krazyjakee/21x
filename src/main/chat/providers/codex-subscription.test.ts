@@ -35,7 +35,7 @@ describe('CodexSubscriptionChatProvider', () => {
 
     await expect(drain(provider.stream(request, new AbortController().signal))).resolves.toEqual([
       { type: 'text_delta', text: 'Alpha is ready.' },
-      { type: 'message_end', stopReason: 'end_turn', usage: { inputTokens: 0, outputTokens: 0 } }
+      { type: 'message_end', stopReason: 'end_turn' }
     ])
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({
       executable: '/usr/bin/codex',
@@ -60,7 +60,7 @@ describe('CodexSubscriptionChatProvider', () => {
 
     await expect(drain(provider.stream(request, new AbortController().signal))).resolves.toEqual([
       { type: 'tool_call', id: 'call_1', name: 'get_project', input: { name: 'Alpha' } },
-      { type: 'message_end', stopReason: 'tool_use', usage: { inputTokens: 0, outputTokens: 0 } }
+      { type: 'message_end', stopReason: 'tool_use' }
     ])
   })
 

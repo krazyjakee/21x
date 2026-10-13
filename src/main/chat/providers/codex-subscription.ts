@@ -3,7 +3,7 @@ import { spawn } from 'child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import type { ChatReasoningEffort, ChatUsage } from '../../../shared/chat'
+import type { ChatReasoningEffort } from '../../../shared/chat'
 import { findExecutable } from '../../find-executable'
 import { applyCodexAuthEnv } from '../../adapters/shared/codex-auth'
 import { ChatAbortError, type ChatProvider, type ChatProviderEvent, type ChatProviderRequest } from './types'
@@ -308,8 +308,9 @@ export class CodexSubscriptionChatProvider implements ChatProvider {
       // is a premature answer that the next step repeats, so drop it.
       if (text && toolCalls.length === 0) yield { type: 'text_delta', text }
       yield* toolCalls
-      const usage: ChatUsage = { inputTokens: 0, outputTokens: 0 }
-      yield { type: 'message_end', stopReason: toolCalls.length > 0 ? 'tool_use' : 'end_turn', usage }
+      // codex exec's saved response has no token report. Commander records
+      // an explicit estimate rather than fabricating reported zero counters.
+      yield { type: 'message_end', stopReason: toolCalls.length > 0 ? 'tool_use' : 'end_turn' }
     } catch (error) {
       if (signal.aborted || error instanceof ChatAbortError) throw new ChatAbortError()
       throw error

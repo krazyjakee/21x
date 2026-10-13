@@ -9,6 +9,7 @@ import { CommanderStore } from '../commander/commander-store'
 import { createCommanderProjectTools } from '../commander/project-tools'
 import { CaptainDeliveryService } from '../commander/captain-delivery'
 import { createCommanderSkillTools } from '../commander/skill-tools'
+import { undoCommanderAction } from '../commander/action-undo'
 import { installCommanderReportBridge } from '../commander/report-tools'
 import { broadcastSkillsChanged } from './settings'
 import { recoverIssueWriteOutcomes } from '../captain-github-tools'
@@ -271,6 +272,21 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
     trusted(event, 'commander:cancel')
     if (typeof payload?.sessionId !== 'string') return { cancelled: false }
     return { cancelled: commander.cancel(payload.sessionId) }
+  })
+
+  ipcMain.handle('commander:undoAction', (event, payload: { sessionId?: string; actionId?: string }) => {
+    trusted(event, 'commander:undoAction')
+    const sessionId = requireString(payload?.sessionId, 'sessionId')
+    const actionId = requireString(payload?.actionId, 'actionId')
+    const outcome = undoCommanderAction({ db: deps.db, store, agents: deps.agentManager, sessionId, actionId,
+      onProjectChanged: (projectId, kind) => broadcastProjectChanged({ projectId, kind }),
+      onSkillChanged: (skillId, kind) => broadcastSkillsChanged({ skillId, kind }) })
+    if (!outcome.alreadyUndone) {
+      emit({ type: 'messages_appended', sessionId, messages: [outcome.message] })
+      const current = store.getSession(sessionId)
+      if (current) emit({ type: 'session_updated', session: current })
+    }
+    return outcome
   })
 
   return commander
