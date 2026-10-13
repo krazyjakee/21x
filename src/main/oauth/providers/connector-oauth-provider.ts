@@ -1,4 +1,5 @@
 import type { OAuthProvider, TokenResponse } from '../oauth-provider'
+import { redactCredentials } from '../../connectors/credentials'
 
 /**
  * Generic OAuth 2.0 authorization-code provider for embedded connector pieces
@@ -117,6 +118,10 @@ export class ConnectorOAuthProvider implements OAuthProvider {
   }
 
   private async tokenRequest(url: string, params: URLSearchParams, what: 'exchange' | 'refresh'): Promise<TokenResponse> {
+    const secretFields = ['code', 'code_verifier', 'client_secret', 'refresh_token']
+    const credentials = { type: 'custom_auth' as const,
+      props: Object.fromEntries(secretFields.map(name => [name, params.get(name)]).filter(([, value]) => value)) }
+    const safe = (value: string): string => redactCredentials(value, credentials)
     const response = await this.fetchImpl(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
@@ -130,14 +135,16 @@ export class ConnectorOAuthProvider implements OAuthProvider {
       /* not JSON or form data; handled below */
     }
     if (!response.ok) {
-      const error = optionalString(body.error) ?? null
+      const rawError = optionalString(body.error)
+      const error = rawError === 'invalid_grant' || rawError === 'invalid_token' ? rawError : rawError ? safe(rawError) : null
       const description = optionalString(body.error_description)
-      const detail = error ? `${error}${description ? `: ${description}` : ''}` : text.replace(/\s+/g, ' ').trim().slice(0, 200)
+      const detail = error ? safe(`${error}${description ? `: ${description}` : ''}`) : safe(text).replace(/\s+/g, ' ').trim().slice(0, 200)
       throw new OAuthTokenRequestError(response.status, error, `OAuth token ${what} failed (${response.status})${detail ? `: ${detail}` : ''}`)
     }
     const accessToken = optionalString(body.access_token)
     if (!accessToken) {
-      const error = optionalString(body.error) ?? null
+      const rawError = optionalString(body.error)
+      const error = rawError ? safe(rawError) : null
       throw new OAuthTokenRequestError(response.status, error, `OAuth token ${what} returned no access token${error ? ` (${error})` : ''}`)
     }
     const expiresIn = typeof body.expires_in === 'number' ? body.expires_in

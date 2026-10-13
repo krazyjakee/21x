@@ -35,6 +35,7 @@ const mainFiles = [
   'src/main/connectors/bridge/bridge.test.ts', 'src/main/connectors/bridge/trello-poc.test.ts',
   'src/main/connectors/bridge/todoist-oauth.test.ts',
   'src/main/oauth/local-oauth-server.test.ts',
+  'src/main/oauth/providers/connector-oauth-provider.test.ts',
   'src/main/database-transcript-page.test.ts', 'src/main/transcript-events.test.ts', 'src/main/transcript-page-authority.test.ts',
   'src/shared/**/*.test.ts',
   'scripts/tauri-inventory.test.ts', 'scripts/tauri-contracts.test.ts',

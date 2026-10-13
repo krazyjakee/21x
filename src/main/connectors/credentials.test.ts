@@ -200,6 +200,11 @@ describe('ConnectorCredentialStore', () => {
 })
 
 describe('redactCredentials', () => {
+  it('removes form-encoded secrets reflected in token request bodies', () => {
+    const secret = 'fixture-secret+/=%~ 123456'
+    const body = new URLSearchParams({ client_secret: secret }).toString()
+    expect(redactCredentials(body, { type: 'secret_text', secret })).toBe('client_secret=[REDACTED]')
+  })
   it('redacts a secret-text value', () => {
     expect(redactCredentials('Authorization: Bearer sk-live-abcdef123456', SECRET)).toBe('Authorization: Bearer [REDACTED]')
   })

@@ -4,6 +4,7 @@ import { CONNECTOR_PIECE_ALLOWLIST, getAllowedPiece, type AllowedPieceOAuth, typ
 import type { ConnectorStore } from './connector-store'
 import {
   ConnectorCredentialsUnavailableError,
+  redactCredentials,
   type ConnectorCredentialStorage,
   type ConnectorCredentialStore,
   type ConnectorCredentials,
@@ -270,7 +271,7 @@ export class ConnectorOAuthService implements PieceCredentialSource {
         throw new ConnectorOAuthError('revoked', `${label} access was revoked or has expired; reconnect it in the task source settings.`)
       }
       if (err instanceof ConnectorCredentialsUnavailableError) throw err
-      const detail = err instanceof Error ? err.message : String(err)
+      const detail = redactCredentials(err instanceof Error ? err.message : String(err), creds)
       throw new ConnectorOAuthError('refresh_failed', `${label} access token could not be renewed: ${detail}`)
     }
   }

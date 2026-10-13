@@ -1,0 +1,42 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "baseCommit": "144fab38cf5a5cbdd0a415131f68e0c92de87a27",
+  "scope": "Redact reflected OAuth request values, cached renewal credentials and form-encoded variants before user-facing errors, including before truncation. Fake endpoint controls only; no real provider/keychain/installed acceptance.",
+  "sourceSha256": {
+    "src/main/connectors/credentials.ts": "0d9e403eb40b6d1cffb24f83d13a511c0c25bddde26c8d273c0254b1015a320b",
+    "src/main/connectors/credentials.test.ts": "1b9af9ee15e82a2a52f70037a07d11139a77814acce7388b7f6f837abf009c29",
+    "src/main/connectors/oauth.ts": "985e5640cdc0ba53cb83f95eb288327ff32f3cad7215abbba89b1994e2336882",
+    "src/main/connectors/oauth-lifetime.test.ts": "f8c820e44b7ad9301b6d45b50df5d146d0bcb28eaf4194c5fc158b88f68addf3",
+    "src/main/oauth/providers/connector-oauth-provider.ts": "52a775559ea0000415c8afa69e10ace1b3b65e64ba3f2f6f703c48fd500f2ae1",
+    "src/main/oauth/providers/connector-oauth-provider.test.ts": "794d19b685bd7d0958badad1689502e064209b373c8e9e526d6052d223d83a33"
+  },
+  "tests": {
+    "standaloneAndService": {
+      "passed": 715,
+      "skipped": 0,
+      "files": 64,
+      "reportSha256": "dde924f692d4ae5ce9abda55f7ace9956f894a7afc5ad4befb39bda884808c7e"
+    },
+    "standaloneOAuthAndCredentials": {
+      "passed": 49,
+      "skipped": 0,
+      "files": 4,
+      "reportSha256": "24884318c337060ed22a83424dbf9568bdaa18488ebd1c8bcc72f09290f787be"
+    },
+    "legacyOAuthAndCredentials": {
+      "passed": 49,
+      "skipped": 0,
+      "files": 4,
+      "reportSha256": "6d067e2f0f6ee9a1af8cadaf78b1c7ce82d4febe989497e6270db5259c2c0c41"
+    }
+  },
+  "newReflectionCases": 6,
+  "checks": {
+    "forcedTypecheck": "passed",
+    "changedSourceLint": "passed",
+    "inventoryFreshness": "passed"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

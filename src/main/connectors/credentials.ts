@@ -99,6 +99,8 @@ export function credentialSecrets(creds: ConnectorCredentials): string[] {
   for (const s of [...out]) {
     const encoded = encodeURIComponent(s)
     if (encoded !== s) out.push(encoded)
+    const formEncoded = new URLSearchParams({ value: s }).toString().slice('value='.length)
+    if (formEncoded !== s && formEncoded !== encoded) out.push(formEncoded)
   }
   return out
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  ConnectorOAuthClosedError, ConnectorOAuthService, ConnectorOAuthShutdownIncompleteError,
+  ConnectorOAuthClosedError, ConnectorOAuthError, ConnectorOAuthService, ConnectorOAuthShutdownIncompleteError,
   type ConnectorOAuthServiceOptions
 } from './oauth'
 import type { ConnectorOAuth2Credentials } from './credentials'
@@ -27,6 +27,23 @@ function fixture() {
 }
 
 describe('connector OAuth shutdown ownership', () => {
+  it('redacts cached access and refresh credentials from a failed renewal message', async () => {
+    const f = fixture()
+    f.token.clientSecret = 'fixture-client-secret+/123456'
+    const result = f.service.get('instance').then((): never => { throw new Error('Expected fixture renewal failure') },
+      error => error as ConnectorOAuthError)
+    f.response.resolve(new Response(JSON.stringify({ error: 'temporarily_unavailable',
+      error_description: [f.token.accessToken, f.token.refreshToken, f.token.clientSecret, encodeURIComponent(f.token.clientSecret)].join(' ') }), { status: 503 }))
+    const error = await result
+    expect(error).toBeInstanceOf(ConnectorOAuthError)
+    expect(error.reason).toBe('refresh_failed')
+    for (const value of [f.token.accessToken, f.token.refreshToken!, f.token.clientSecret, encodeURIComponent(f.token.clientSecret)]) {
+      expect(error.message).not.toContain(value)
+    }
+    expect(error.message).toContain('[REDACTED]')
+    expect(f.credentials.set).not.toHaveBeenCalled()
+    await f.service.close()
+  })
   it.each([false, true])('joins raw refresh without late persistence or revoke writes (invalid grant: %s)', async invalid => {
     const f = fixture()
     const work = f.service.get('instance')

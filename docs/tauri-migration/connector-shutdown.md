@@ -110,3 +110,12 @@ credential/redaction, SSRF and TLS tests. [Source/security evidence](evidence/so
 records 87 focused cases under each launcher and 709 standalone/private-pipe cases
 overall. Credential tests mock the configured storage provider, restore it after
 each case, and close their SQLite fixture; they do not attest OS keychain security.
+
+Token endpoint errors now scrub reflected authorization codes, verifiers, client
+secrets and refresh tokens before reaching callers. Renewal errors also scrub the
+cached access token; URL and form-encoded variants are covered, and raw text is
+scrubbed before truncation. Invalid-grant classification remains available.
+[Error redaction evidence](evidence/connector-oauth-error-redaction-local.json)
+records six added reflection controls, 49 focused passes under each launcher and
+715 standalone/private-pipe passes. Endpoints and credentials in these controls
+are fixtures.
