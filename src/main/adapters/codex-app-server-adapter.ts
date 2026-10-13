@@ -7,6 +7,7 @@
  */
 
 import { reportedTokenUsage } from '../sessions/token-estimator'
+import { AdapterCompactionTracker, compactionFingerprint, promptContextTokens, type AdapterCompactionObservation } from '../sessions/compaction'
 import { classifyProviderFailure, providerFailureError, type ProviderFailure } from '../agent-manager/provider-failure'
 import { CLIENT_NAME } from '../app-identity'
 import { spawn, type ChildProcess } from 'child_process'
@@ -178,6 +179,7 @@ function decisionLabel(decision: string): string {
 
 export class CodexAppServerAdapter implements CodingAgentAdapter {
   private sessions = new Map<string, AppServerSession>()
+  private readonly compactions = new WeakMap<AppServerSession, AdapterCompactionTracker>()
   /**
    * Every app-server child that has been started and not yet stopped.
    *
@@ -363,6 +365,17 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
 
   async getUsage(sessionId: string, _config: SessionConfig): Promise<AdapterTokenUsage | null> {
     return this.sessions.get(sessionId)?.tokenUsage ?? null
+  }
+
+  private compactionTracker(session: AppServerSession): AdapterCompactionTracker {
+    let tracker = this.compactions.get(session)
+    if (!tracker) { tracker = new AdapterCompactionTracker('codex'); this.compactions.set(session, tracker) }
+    return tracker
+  }
+
+  async getCompactionObservations(sessionId: string, _config: SessionConfig): Promise<AdapterCompactionObservation[]> {
+    const session = this.sessions.get(sessionId)
+    return session ? this.compactionTracker(session).snapshot(session.threadId || session.sessionId).map((observation) => ({ ...observation, backendSessionId: sessionId })) : []
   }
 
   async pollMessages(
@@ -865,6 +878,27 @@ export class CodexAppServerAdapter implements CodingAgentAdapter {
 
   private handleNotification(session: AppServerSession, notification: JsonRpcNotification): void {
     const params = isObject(notification.params) ? notification.params : {}
+    const nativeId = session.threadId || session.sessionId
+    const sourceThread = asString(params.threadId) || asString(params.thread_id)
+    const sourceTurn = asString(params.turnId) || asString(params.turn_id)
+    if ((!sourceThread || sourceThread === nativeId) && (!sourceTurn || !session.lastTurnId || sourceTurn === session.lastTurnId)) {
+      const tracker = this.compactionTracker(session)
+      const item = isObject(params.item) ? params.item : null
+      if (notification.method === 'item/completed' && item && /^(context_?compaction|compaction(?:_summary)?)$/i.test(String(item.type))) {
+        tracker.observeExplicit(nativeId, asString(item.id) || asString(params.itemId) || compactionFingerprint([sourceTurn, item]), 'contextCompaction', {
+          turnId: sourceTurn || session.lastTurnId,
+          beforeTokens: typeof item.tokensBefore === 'number' ? item.tokensBefore : undefined,
+          afterTokens: typeof item.tokensAfter === 'number' ? item.tokensAfter : undefined
+        })
+      } else if (notification.method === 'thread/tokenUsage/updated') {
+        const usage = isObject(params.tokenUsage) ? params.tokenUsage : isObject(params.token_usage) ? params.token_usage : null
+        // `total` is cumulative billing, not the current prompt's occupancy.
+        if (isObject(usage?.last)) {
+          const tokens = promptContextTokens(usage.last, 'codex')
+          tracker.observeContext(nativeId, `${sourceTurn || session.lastTurnId || 'context'}:${tokens}`, tokens, sourceTurn || session.lastTurnId)
+        }
+      }
+    }
 
     if (notification.method === 'thread/tokenUsage/updated') {
       const usage = isObject(params.tokenUsage) ? params.tokenUsage : isObject(params.token_usage) ? params.token_usage : null

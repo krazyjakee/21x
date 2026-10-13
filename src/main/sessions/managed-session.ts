@@ -41,8 +41,8 @@ export class ManagedSessionObserver {
     const setting = this.db.prepare("SELECT value FROM settings WHERE key = 'sessions.ledger'").get() as { value: string } | undefined
     return ['1', 'true', 'observe'].includes(setting?.value?.trim().toLowerCase() ?? '')
   }
-  observe(input: SessionObservation): Promise<void> {
-    if (!this.enabled) return Promise.resolve()
+  observe(input: SessionObservation, managed = false): Promise<void> {
+    if (this.closed || (!managed && !this.enabled)) return Promise.resolve()
     // Commit the inbox before yielding: a crash between reception and
     // projection leaves a durable pending observation for startup.
     const inserted = this.inbox.enqueue(input, this.processRunId)
@@ -55,8 +55,8 @@ export class ManagedSessionObserver {
       this.drainOwned(input.ownerId)
     })
   }
-  async reconcileStartup(): Promise<string[]> {
-    if (!this.enabled) return []
+  async reconcileStartup(managed = false): Promise<string[]> {
+    if (this.closed || (!managed && !this.enabled)) return []
     this.inbox.recoverClaims(this.processRunId)
     for (const owner of this.inbox.pendingOwners()) {
       if (this.closed) return []

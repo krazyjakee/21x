@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({ undoAction: vi.fn() }))
 vi.mock('@/lib/ipc-client', async original => ({ ...await original<typeof import('@/lib/ipc-client')>(), commanderApi: { undoAction: mocks.undoAction } }))
 import { useCommanderStore } from '@/stores/commander-store'
 import { useUIStore } from '@/stores/ui-store'
+import { useCommanderCallUiStore } from '@/stores/commander-call-ui-store'
 import { ActionCard } from './ActionCard'
 
 function message(over: Partial<CommanderMessage> = {}): CommanderMessage {
@@ -45,7 +46,9 @@ describe('executed Commander action cards', () => {
     view.rerender(<ActionCard call={call} result={result()} />)
     mocks.undoAction.mockRejectedValue(new Error('The project changed after this action.'))
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('The project changed after this action.')
+    expect(await screen.findByText('The project changed after this action.')).toBeTruthy()
+    expect(useCommanderCallUiStore.getState().notice).toMatchObject({ text: 'The project changed after this action.', assertive: true })
+    expect(screen.queryByRole('alert')).toBeNull()
     expect(useCommanderStore.getState().undoneActions).toEqual([])
   })
 })

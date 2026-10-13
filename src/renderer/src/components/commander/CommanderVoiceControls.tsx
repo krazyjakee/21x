@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { activityNow, scheduleActivityDeadline, useActivityClock } from '@/lib/activity/activity-clock'
 import { useCommanderActivityStore } from '@/lib/activity/commander-activity-adapter'
 import { useVoiceActivity } from '@/lib/activity/voice-activity-adapter'
+import { voiceCapture } from '@/lib/voice-capture'
 import { callUnavailability, deriveCallState, type CallTurn } from '@/lib/commander-call/derive-call-state'
 import { useCommanderCallStore } from '@/stores/commander-call-store'
 import { useCommanderStore } from '@/stores/commander-store'
@@ -69,7 +70,7 @@ export function commanderVoiceReadiness(state: {
 function asCallTurn(
   observation: ReturnType<typeof useCommanderActivityStore.getState>['sessions'][string] | undefined
 ): CallTurn | null {
-  if (!observation) return null
+  if (!observation || observation.unavailable || observation.known === false || ['thinking', 'working', 'tool'].includes(observation.phase) && activityNow() - observation.observedAt >= 15_000) return null
   return {
     turnId: observation.turnId,
     phase: observation.phase,
@@ -97,6 +98,7 @@ export function CommanderVoiceControls() {
   const voiceTurnId = useVoiceStore((s) => s.turnId)
   const voiceState = useVoiceStore((s) => s.state)
   const partial = useVoiceStore((s) => s.partial)
+  const captureOpen = voiceCapture.isCapturing
 
   const openSettings = useUIStore((s) => s.openSettings)
   const setSettingsTab = useUIStore((s) => s.setSettingsTab)
@@ -132,7 +134,8 @@ export function CommanderVoiceControls() {
       },
       unavailable,
       mic: {
-        open: call.status === 'live' && Boolean(call.turnId) && voiceTurnId === call.turnId,
+        open: call.status === 'live' && Boolean(call.turnId) && voiceTurnId === call.turnId && captureOpen && voiceState === 'listening',
+        ownedTurn: call.status === 'live' && Boolean(call.turnId) && voiceTurnId === call.turnId,
         voiceState,
         partial
       },
@@ -152,6 +155,7 @@ export function CommanderVoiceControls() {
     unavailable,
     voiceTurnId,
     voiceState,
+    captureOpen,
     partial,
     voice?.state,
     speechOutput,

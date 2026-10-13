@@ -8,23 +8,39 @@ import { useVoiceStore } from '@/stores/voice-store'
 import { useCommanderStore } from '@/stores/commander-store'
 import { __resetCommanderCall, useCommanderCallStore } from '@/stores/commander-call-store'
 import { CommanderStage } from './CommanderStage'
-import { CommanderCallHost } from './CommanderCallHost'
+import { CommanderCallHost, commanderCallMedia } from './CommanderCallHost'
+import { voiceCapture } from '@/lib/voice-capture'
 import { insertAndSubmit, clearDictationTarget } from '@/lib/voice-dictation-target'
 import { __resetCommanderActivity } from '@/lib/activity/commander-activity-adapter'
+import { useCommanderCallUiStore } from '@/stores/commander-call-ui-store'
 const initial = useVoiceStore.getState()
-const endTurn = vi.fn(async () => { useVoiceStore.setState({ state: 'transcribing' }) })
-const startTurn = vi.fn(async () => { useVoiceStore.setState({ turnId: 'mic', turnEpoch: 'epoch', state: 'listening' }); return 'mic' })
+let capturing = false
+const endTurn = vi.fn(async () => { capturing = false; useVoiceStore.setState({ state: 'transcribing' }) })
+const startTurn = vi.fn(async () => { capturing = true; useVoiceStore.setState({ turnId: 'mic', turnEpoch: 'epoch', state: 'listening' }); return 'mic' })
 beforeEach(() => {
   __resetCommanderCall(); __resetCommanderActivity(); vi.clearAllMocks()
+  capturing = false; vi.spyOn(voiceCapture, 'isCapturing', 'get').mockImplementation(() => capturing)
+  useCommanderCallUiStore.setState({ captions: true, captionSize: 'medium', panelOpen: true, pipRequested: false, notice: null })
   useCommanderStore.setState({ sessions: [], selectedSessionId: 's1', messages: { s1: [] }, streaming: {}, turnErrors: {}, recentAction: null })
   useVoiceStore.setState({ ...initial, available: true, enabled: true, permission: 'granted', runtime: { installed: true, version: '', modulePath: '', sizeBytes: 0 },
     models: [{ id: 'model', installed: true } as VoiceModelState], engine: { state: 'ready', modelId: 'model', engine: 'fixture' }, state: 'idle', turnId: null, turnEpoch: null, partial: '', final: '',
     tts: { enabled: true, status: { state: 'ready' } } as VoiceTtsSnapshot, initializeTts: async () => {}, startTurn, endTurn,
-    cancel: async () => { useVoiceStore.setState({ turnId: null, turnEpoch: null, state: 'idle' }) }, stopPlaybackNow: vi.fn() })
+    cancel: async () => { capturing = false; useVoiceStore.setState({ turnId: null, turnEpoch: null, state: 'idle' }) }, stopPlaybackNow: vi.fn() })
 })
 afterEach(() => { cleanup(); __resetCommanderCall(); clearDictationTarget(); __resetCommanderActivity(); useVoiceStore.setState(initial); vi.restoreAllMocks() })
 function stage() { return render(<><textarea aria-label="Typed draft" defaultValue="keep this" /><CommanderCallHost /><CommanderStage panelOpen onPanelToggle={() => {}} compact={false} onCompactToggle={() => {}} /></>) }
 describe('Commander stage controls', () => {
+  it('does not claim Listening or input levels when a retained turn has no physical capture', async () => {
+    stage(); await act(async () => useCommanderCallStore.getState().start('s1'))
+    act(() => { capturing = false; useVoiceStore.setState({ partial: 'retained words', level: .8 }) })
+    expect(screen.getByTestId('commander-stage')).toHaveAttribute('data-call-state', 'ready')
+    expect(screen.getByLabelText('You, microphone muted')).toBeTruthy()
+    expect(commanderCallMedia.inputLevel()).toBe(0)
+    expect(commanderCallMedia.userCaption).toEqual({ partial: '', final: '' })
+    act(() => useVoiceStore.setState({ state: 'transcribing' }))
+    expect(screen.getByTestId('commander-stage')).toHaveAttribute('data-call-state', 'transcribing')
+    expect(commanderCallMedia.inputLevel()).toBe(0)
+  })
   it('shows idle presence, starts one owned microphone and keeps partial captions in one non-live owner', async () => {
     stage(); expect(screen.getByText('Start talking')).toBeTruthy()
     fireEvent.click(screen.getByLabelText('Turn voice mode on'))
@@ -53,7 +69,8 @@ describe('Commander stage controls', () => {
   it('retains unavailable reasons and typing, with a relevant fix rather than capture', () => {
     useVoiceStore.setState({ permission: 'denied' })
     stage(); fireEvent.click(screen.getByLabelText('Turn voice mode on'))
-    expect(screen.getByRole('alert')).toHaveTextContent('Microphone access is blocked')
+    expect(screen.getByText(/Microphone access is blocked/)).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.getByRole('button', { name: 'Open voice settings' })).toBeTruthy()
     const field = screen.getByLabelText('Typed draft'); fireEvent.change(field, { target: { value: 'typing remains usable' } })
     expect(field).toHaveValue('typing remains usable'); expect(startTurn).not.toHaveBeenCalled()

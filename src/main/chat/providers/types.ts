@@ -43,6 +43,8 @@ export type ChatProviderEvent =
 export interface ChatProvider {
   readonly id: string
   readonly model: string
+  /** Optional authoritative model window; metadata only for legacy callers. */
+  readonly contextWindow?: number
   /**
    * Whether user messages may carry images (#144). A provider that leaves
    * this unset is treated as text-only: images are refused before anything

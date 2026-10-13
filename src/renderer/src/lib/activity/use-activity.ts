@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { isRunningActivity } from '@shared/activity'
 import { useTaskStore } from '@/stores/task-store'
+import { useCommanderStore } from '@/stores/commander-store'
+import { useCommanderCallStore } from '@/stores/commander-call-store'
+import { useVoiceStore } from '@/stores/voice-store'
 import { activityNow, scheduleActivityDeadline, useActivityClock } from './activity-clock'
 import { deriveActivity, type ActivityResult } from './derive-activity'
 import {
@@ -15,6 +18,7 @@ import {
   commanderEvidence,
   ensureCommanderActivitySubscription,
   latestCommanderObservation,
+  retainCommanderSource,
   useCommanderActivityStore
 } from './commander-activity-adapter'
 import { ensureVoiceAttribution, useVoiceActivity } from './voice-activity-adapter'
@@ -97,10 +101,24 @@ export function useCommanderActivity(): ActivityResult {
   }, [])
   const sessions = useCommanderActivityStore((s) => s.sessions)
   const subscribed = useCommanderActivityStore((s) => s.subscribed)
+  const selected = useCommanderStore(s => s.selectedSessionId)
+  const callStatus = useCommanderCallStore(s => s.status)
+  const callSessionId = useCommanderCallStore(s => s.sessionId)
+  const callTurnId = useCommanderCallStore(s => s.turnId)
+  const voiceTurnId = useVoiceStore(s => s.turnId)
+  const latest = latestCommanderObservation(sessions)
+  const sessionId = callStatus === 'live' ? callSessionId : selected ?? latest?.sessionId
+  useEffect(() => sessionId ? retainCommanderSource(sessionId) : undefined, [sessionId])
+  const target = useMemo(() => sessionId ? { kind: 'commander' as const, id: sessionId } : null, [sessionId])
+  const owner = callStatus === 'live' && callTurnId && callTurnId === voiceTurnId ? target : null
+  const voice = useVoiceActivity(target, owner)
+  const voiceState = voice?.state
+  const micOpen = voice?.micOpen
   const result = useMemo(() => {
     void tick
-    return deriveActivity(commanderEvidence(latestCommanderObservation(sessions), subscribed), activityNow())
-  }, [tick, sessions, subscribed])
+    const evidence = commanderEvidence(sessionId ? sessions[sessionId] : latestCommanderObservation(sessions), subscribed)
+    return deriveActivity({ ...evidence, voice: voiceState ? { state: voiceState, micOpen } : null }, activityNow())
+  }, [tick, sessions, subscribed, sessionId, voiceState, micOpen])
   return useScheduledResult(result)
 }
 

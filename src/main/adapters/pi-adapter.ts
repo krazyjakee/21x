@@ -1,4 +1,5 @@
 import { classifyProviderFailure, type ProviderFailure } from '../agent-manager/provider-failure'
+import { AdapterCompactionTracker, compactionFingerprint, promptContextTokens, type AdapterCompactionObservation } from '../sessions/compaction'
 /**
  * Pi coding-agent adapter.
  *
@@ -56,6 +57,7 @@ interface PendingRequest {
 
 interface PiSession {
   id: string
+  nativeSessionId?: string
   process: ChildProcessWithoutNullStreams
   config: SessionConfig
   status: 'idle' | 'busy' | 'error'
@@ -96,6 +98,7 @@ type PiMessage = {
   timestamp?: number
   stopReason?: string
   errorMessage?: string
+  usage?: unknown
 }
 
 function textFromContent(content: unknown): string {
@@ -120,10 +123,25 @@ function resultText(result: unknown): string {
 
 export class PiAdapter implements CodingAgentAdapter {
   private sessions = new Map<string, PiSession>()
+  private readonly compactions = new WeakMap<PiSession, AdapterCompactionTracker>()
   private piExecutablePath: string | null = null
   onDataAvailable?: (sessionId: string) => void
 
   private legacyGatewayChecked = false
+
+  private compactionTracker(session: PiSession): AdapterCompactionTracker {
+    let tracker = this.compactions.get(session)
+    if (!tracker) {
+      tracker = new AdapterCompactionTracker('pi')
+      this.compactions.set(session, tracker)
+    }
+    return tracker
+  }
+
+  async getCompactionObservations(sessionId: string, _config: SessionConfig): Promise<AdapterCompactionObservation[]> {
+    const session = this.sessions.get(sessionId)
+    return session ? this.compactionTracker(session).snapshot(session.id) : []
+  }
 
   async initialize(): Promise<void> {
     await this.findPiExecutable()
@@ -331,6 +349,7 @@ export class PiAdapter implements CodingAgentAdapter {
         ? state.data.sessionFile
         : typeof state.data?.sessionId === 'string' ? state.data.sessionId : tempId
       session.id = realId
+      session.nativeSessionId = typeof state.data?.sessionId === 'string' ? state.data.sessionId : undefined
       if (realId !== tempId) {
         this.sessions.delete(tempId)
         this.sessions.set(realId, session)
@@ -409,6 +428,7 @@ export class PiAdapter implements CodingAgentAdapter {
   }
 
   private handleEvent(session: PiSession, event: Record<string, unknown>): void {
+    if (typeof event.sessionId === 'string' && event.sessionId !== session.id && event.sessionId !== session.nativeSessionId) return
     if (event.type === 'response') {
       const response = event as unknown as PiRpcResponse
       if (response.id) {
@@ -474,6 +494,11 @@ export class PiAdapter implements CodingAgentAdapter {
         break
       case 'message_end': {
         const message = event.message as PiMessage | undefined
+        if (message?.role === 'assistant') {
+          this.compactionTracker(session).observeContext(session.id,
+            `message:${message.timestamp ?? `${session.turn}:${session.assistantMessageOrdinal}`}`,
+            promptContextTokens(message.usage, 'pi'), String(session.turn))
+        }
         this.reconcileAssistantMessage(session, message)
         if (message?.role === 'assistant' && message.stopReason === 'error') {
           session.pendingTurnError = message.errorMessage || 'Pi model request failed'
@@ -501,7 +526,16 @@ export class PiAdapter implements CodingAgentAdapter {
         session.pendingTurnErrorMonotonicTime = event.success === true ? null : performance.now()
         break
       case 'compaction_end':
-        if (event.result) session.pendingTurnError = null
+      case 'auto_compaction_end':
+        if (event.result && event.aborted !== true && !event.errorMessage) {
+          session.pendingTurnError = null
+          const result = event.result as Record<string, unknown>
+          this.compactionTracker(session).observeExplicit(session.id,
+            String(event.id || compactionFingerprint([result.firstKeptEntryId, result.summary, result.tokensBefore, result.estimatedTokensAfter])),
+            String(event.type), { turnId: String(session.turn),
+              beforeTokens: typeof result.tokensBefore === 'number' ? result.tokensBefore : undefined,
+              afterTokens: typeof result.estimatedTokensAfter === 'number' ? result.estimatedTokensAfter : undefined })
+        }
         else if (event.aborted !== true && event.errorMessage) {
           session.parts.push({
             id: `pi-compaction-error-${session.turn}-${randomUUID()}`,

@@ -94,6 +94,8 @@ describe('VoicePlayback', () => {
     playback.start('system-reply')
     expect(playback.outputLevel).toBe(0)
     playback.play('system-reply', pcm(1), 24000)
+    expect(playback.outputLevel).toBe(0)
+    currentTime = sources[0].startedAt!
     expect(playback.outputLevel).toBeCloseTo(.5)
     analyserSample = 128
     expect(playback.outputLevel).toBe(0)
@@ -101,6 +103,45 @@ describe('VoicePlayback', () => {
     expect(playback.outputLevel).toBe(1)
     playback.stop()
     expect(playback.outputLevel).toBe(0)
+  })
+
+  it('uses the audio clock and context state rather than queued buffers to prove audible playback', () => {
+    const playback = new VoicePlayback()
+    playback.start('clocked')
+    playback.play('clocked', pcm(1), 24000)
+    expect(playback.hasQueuedAudio).toBe(true)
+    expect(playback.hasAudibleAudio).toBe(false)
+    currentTime = sources[0].startedAt!
+    expect(playback.hasAudibleAudio).toBe(true)
+    const context = (playback as unknown as { context: FakeAudioContext }).context
+    context.state = 'suspended'
+    expect(playback.hasAudibleAudio).toBe(false)
+    context.state = 'running'
+    currentTime += 1
+    expect(playback.hasAudibleAudio).toBe(false)
+    playback.stop()
+  })
+
+  it('notifies once at the real scheduled start and cleans its boundary timer on Stop', () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('window', { ...globalThis.window, setTimeout, clearTimeout })
+    try {
+      const playback = new VoicePlayback()
+      const changed = vi.fn()
+      const off = playback.subscribeActivity(changed)
+      playback.start('clocked')
+      playback.play('clocked', pcm(1), 24000)
+      const queued = changed.mock.calls.length
+      currentTime = sources[0].startedAt!
+      vi.advanceTimersByTime(65)
+      expect(playback.hasAudibleAudio).toBe(true)
+      expect(changed.mock.calls.length).toBe(queued + 1)
+      playback.stop()
+      const stopped = changed.mock.calls.length
+      vi.runOnlyPendingTimers()
+      expect(changed.mock.calls.length).toBe(stopped)
+      off()
+    } finally { vi.useRealTimers() }
   })
 
   it('plays each sentence where the last one ends', () => {

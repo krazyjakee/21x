@@ -163,7 +163,7 @@ export class TokenAccounting {
     const finishCall = this.finishCall.bind(this)
     let index = 0
     return {
-      id: provider.id, model: provider.model, supportsImages: provider.supportsImages,
+      id: provider.id, model: provider.model, supportsImages: provider.supportsImages, contextWindow: provider.contextWindow,
       async *stream(request: ChatProviderRequest, signal: AbortSignal) {
         const call = ++index
         const id = turnId()

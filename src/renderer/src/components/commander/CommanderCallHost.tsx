@@ -21,6 +21,7 @@ import {
   setActiveComposer
 } from '@/lib/voice-dictation-target'
 import { voicePlayback } from '@/lib/voice-playback'
+import { voiceCapture } from '@/lib/voice-capture'
 import {
   bindCommanderCallDriver,
   COMMANDER_VOICE_COMPOSER_KEY,
@@ -33,6 +34,7 @@ import {
   selectVoiceReady,
   useVoiceStore
 } from '@/stores/voice-store'
+import { useCommanderCallShortcuts } from './use-call-shortcuts'
 
 export const MICROPHONE_BUSY_MESSAGE =
   'Another microphone is already listening. Stop it before starting Commander voice mode.'
@@ -68,7 +70,8 @@ function ownedMicrophone() {
   const call = useCommanderCallStore.getState()
   const voice = useVoiceStore.getState()
   if (call.status !== 'live' || !call.sessionId || !call.turnId || voice.turnId !== call.turnId) return null
-  return { call, voice }
+  if (voice.state !== 'transcribing' && (voice.state !== 'listening' || !voiceCapture.isCapturing)) return null
+  return { call, voice, capturing: voiceCapture.isCapturing && voice.state === 'listening' }
 }
 
 function ownedPlayback() {
@@ -88,8 +91,8 @@ export const commanderCallMedia: CallMedia = {
     speechBargeIn: true,
     streamingTts: true
   },
-  inputLevel: () => ownedMicrophone()?.voice.level ?? 0,
-  outputLevel: () => (ownedPlayback()?.snapshot.hasQueuedAudio ? voicePlayback.outputLevel : 0),
+  inputLevel: () => { const owned = ownedMicrophone(); return owned?.capturing ? owned.voice.level : 0 },
+  outputLevel: () => (ownedPlayback()?.snapshot.hasAudibleAudio ? voicePlayback.outputLevel : 0),
   get userCaption() {
     const owned = ownedMicrophone()
     return owned ? { partial: owned.voice.partial, final: owned.voice.final } : { partial: '', final: '' }
@@ -97,7 +100,7 @@ export const commanderCallMedia: CallMedia = {
   get assistantCaption() {
     const owned = ownedPlayback()
     return owned
-      ? { text: owned.voice.speechText, speaking: owned.snapshot.hasQueuedAudio }
+      ? { text: owned.voice.speechText, speaking: owned.snapshot.hasAudibleAudio }
       : { text: '', speaking: false }
   },
   on: onCallMediaEvent
@@ -127,6 +130,7 @@ function captureAdvice(message: string): string {
  * call. Unmounting the app itself still tears everything down.
  */
 export function CommanderCallHost() {
+  useCommanderCallShortcuts()
   const hiddenField = useRef<HTMLTextAreaElement>(null)
   const status = useCommanderCallStore((s) => s.status)
   const sessionId = useCommanderCallStore((s) => s.sessionId)
@@ -241,7 +245,7 @@ export function CommanderCallHost() {
       isReplyActive: () => {
         const sessionId = useCommanderCallStore.getState().sessionId
         const turn = sessionId ? useCommanderActivityStore.getState().sessions[sessionId] : undefined
-        return !!ownedPlayback()?.snapshot.hasQueuedAudio || !!turn && ['thinking', 'working', 'tool'].includes(turn.phase) && activityNow() - turn.observedAt < 15_000
+        return !!ownedPlayback()?.snapshot.hasQueuedAudio || !!turn && !turn.unavailable && turn.known !== false && ['thinking', 'working', 'tool'].includes(turn.phase) && activityNow() - turn.observedAt < 15_000
       },
       finishMicrophone: async (ownedTurnId, signal) => {
         if (activeMicrophoneLease !== signal || useVoiceStore.getState().turnId !== ownedTurnId) return
@@ -339,7 +343,7 @@ export function CommanderCallHost() {
 
   // Voice barge-in stops in the same tick. A turn preparing text/tools counts
   // too: the user's new words supersede that reply before the sentence ends.
-  const replyActive = speaking || turn?.phase === 'thinking' || turn?.phase === 'working' || turn?.phase === 'tool'
+  const replyActive = speaking || !!turn && !turn.unavailable && turn.known !== false && activityNow() - turn.observedAt < 15_000 && ['thinking', 'working', 'tool'].includes(turn.phase)
   useEffect(() => {
     if (status !== 'live' || voiceTurnId !== callTurnId || !partial.trim() || !replyActive || replyInterrupted) return
     interrupt('barge_in')
@@ -363,6 +367,8 @@ export function CommanderCallHost() {
     if (status !== 'live') return undefined
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('[role="dialog"], [role="alertdialog"]')) return
+      const voiceTurn = useVoiceStore.getState().turnId
+      if (voiceTurn && voiceTurn !== useCommanderCallStore.getState().turnId) return
       event.preventDefault()
       event.stopImmediatePropagation()
       interrupt('stop')

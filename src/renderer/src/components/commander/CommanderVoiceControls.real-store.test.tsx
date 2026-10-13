@@ -37,6 +37,7 @@ import { clearDictationTarget, insertAndSubmit } from '@/lib/voice-dictation-tar
 import { useCommanderActivityStore } from '@/lib/activity/commander-activity-adapter'
 import { __resetVoiceAttribution, useVoiceAttributionStore } from '@/lib/activity/voice-activity-adapter'
 import { voicePlayback } from '@/lib/voice-playback'
+import { voiceCapture } from '@/lib/voice-capture'
 import { SettingsTab } from '@/types'
 import { VoiceOverlay } from '@/components/voice/VoiceOverlay'
 import { CommanderCallHost, commanderCallMedia } from './CommanderCallHost'
@@ -117,6 +118,8 @@ function renderBoth(): ReturnType<typeof render> {
 }
 
 beforeEach(() => {
+  // Controlled capture boundary for fake drivers; no physical microphone.
+  vi.spyOn(voiceCapture, 'isCapturing', 'get').mockImplementation(() => !!useVoiceStore.getState().turnId && useVoiceStore.getState().state === 'listening')
   vi.clearAllMocks()
   mocks.commanderState.selectedSessionId = 'session-1'
   mocks.commanderState.streaming = {}
@@ -134,6 +137,7 @@ afterEach(() => {
   __resetCommanderCall()
   __resetVoiceAttribution()
   voicePlayback.stop()
+  vi.restoreAllMocks()
 })
 
 describe('another microphone keeps its captions (#83 blocker 2)', () => {
@@ -302,6 +306,7 @@ describe('app-level call ownership', () => {
       })
     })
     const queued = vi.spyOn(voicePlayback, 'hasQueuedAudio', 'get').mockReturnValue(true)
+    const audible = vi.spyOn(voicePlayback, 'hasAudibleAudio', 'get').mockReturnValue(true)
     const level = vi.spyOn(voicePlayback, 'outputLevel', 'get').mockReturnValue(0.6)
     expect(commanderCallMedia.outputLevel()).toBe(0.6)
     expect(commanderCallMedia.assistantCaption).toEqual({ text: 'answer', speaking: true })
@@ -318,6 +323,7 @@ describe('app-level call ownership', () => {
     expect(commanderCallMedia.userCaption).toEqual({ partial: '', final: '' })
     expect(commanderCallMedia.assistantCaption).not.toHaveProperty('wordIndex')
     queued.mockRestore()
+    audible.mockRestore()
     level.mockRestore()
   })
 
@@ -361,7 +367,7 @@ describe('app-level call ownership', () => {
           buffer: null,
           onended: null as (() => void) | null,
           connect: () => undefined,
-          start: () => undefined,
+          start: (when: number) => { this.currentTime = when },
           stop: vi.fn()
         }
         sources.push(source)

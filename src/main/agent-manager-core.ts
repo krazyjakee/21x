@@ -37,7 +37,7 @@ import { STUCK_SESSION_TIMEOUT_MS, findStuckTool, hasGarbledOutput, isDelegation
 import { MAX_CONCURRENT_AGENT_SESSIONS_SETTING, checkAdmission, isExemptFromAdmission, isGlobalAdmissionReason, parseGlobalSessionLimit, type AdmissionDecision, type AdmissionLimits, type AdmissionReason, type CountedSession } from './agent-manager/admission'
 import { buildProjectLimitState, describeQueueReason, isAllProjectsPaused, projectAdmissionLimits, recordProjectSessionStart, setAllProjectsPaused, type ProjectLimitState } from './project-limits'
 import { FINDINGS_BEGIN, FINDINGS_END, SYSTEM_MESSAGE_MARKER } from '../shared/system-authority'
-import { ActivityObservations, shouldPublishHeartbeat } from './agent-manager/activity-observations'
+import { ActivityObservations, isKnownActivityDisconnect, shouldPublishHeartbeat } from './agent-manager/activity-observations'
 import { BranchDiffCache, ResourceMonitor, agentCap, autoLowerForPressure, findFileOverlap, projectAgentLevel, readProjectConcurrency, setConcurrencyLevel, setUserConcurrency, type LevelChangeResult, type OverlapCandidate } from './concurrency-control'
 import { effectiveLevel, recommendLevel, type ProjectConcurrencyState, type ResourcePressure } from '../shared/concurrency'
 import { collectMissedParts, debugTranscript, emitArtifactUpdatesFromParts, textTranscript, type DebugTranscriptMessage, notifyStatusTransition, transcriptPartsFromEvent, transcriptPartsFromMessages, type OutputMessage } from './agent-manager/transcript-events-core'
@@ -47,6 +47,9 @@ import { DurableStartQueueStore, type DurableQueuedStartInfo } from './sessions/
 import type { CaptainRuntimeState } from '../shared/captain-runtime'
 import { classifyProviderFailure, PROVIDER_CONTINUATION, PROVIDER_MAX_RETRIES, type ProviderFailure } from './agent-manager/provider-failure'
 import { ProviderRecoveryStore, type ProviderRecovery } from './sessions/provider-recovery-store'
+import { CompactionNormalizer } from './sessions/compaction'
+import { ManagedSessionObserver } from './sessions/managed-session'
+import type { SessionObservation } from './sessions/event-inbox'
 
 // Default OpenCode server URL (matches database default)
 
@@ -302,6 +305,8 @@ export class AgentManager extends EventEmitter {
   private lastSentStatus: Map<string, string> = new Map()
   /** Epoch/sequence stamps and heartbeat rate limits for agent:status (#95). */
   private readonly activityObservations = new ActivityObservations()
+  private readonly compactions = new CompactionNormalizer()
+  private readonly compactionObserver: ManagedSessionObserver | null
 
   // ── Admission control (see agent-manager/admission.ts) ──
   /** Starts waiting for a free slot, one per task, priority-ordered per project (#150). */
@@ -338,6 +343,7 @@ export class AgentManager extends EventEmitter {
       throw new Error('Explicit agent manager host services are required')
     }
     this.db = db
+    this.compactionObserver = db.db && typeof db.db.prepare === 'function' ? new ManagedSessionObserver(db.db) : null
     this.captainRuntimes = new CaptainRuntimeStore(db)
     this.deliveries = new DeliveryStore(db)
     this.providerRecoveries = new ProviderRecoveryStore(db)
@@ -471,6 +477,8 @@ export class AgentManager extends EventEmitter {
   }
 
   private async reconcileStartupNow(): Promise<void> {
+    if (!this.shuttingDown) await this.compactionObserver?.reconcileStartup(true)
+    if (this.shuttingDown) return
     // A crash while a wire send was in flight cannot prove rejection. A saved
     // backoff is different: its failed turn/rejection was already confirmed.
     for (const row of this.providerRecoveries.list(['sending', 'dispatching'])) {
@@ -1724,10 +1732,12 @@ export class AgentManager extends EventEmitter {
   /** Polls one session for new output and status changes. */
   private async pollSingleSession(entry: PollingEntry): Promise<void> {
     const { adapter, config } = entry
+    let polledSession: AgentSession | undefined
 
     try {
       let sessionId = this.resolvePollingSessionId(entry)
       const activeSession = this.sessions.get(sessionId)
+      polledSession = activeSession
       if (!activeSession) {
         console.log(`[AgentManager] Session ${sessionId} no longer exists, removing from polling`)
         this.stopAdapterPolling(entry.sessionId)
@@ -1748,6 +1758,10 @@ export class AgentManager extends EventEmitter {
         entry.partContentLengths,
         config
       )
+      // Stop/replacement may complete while the backend read is in flight.
+      // An old lease cannot publish output or renew its successor's activity.
+      sessionId = this.resolvePollingSessionId(entry)
+      if (this.sessions.get(sessionId) !== activeSession || this.stoppingSessions.has(activeSession)) return
       pruneDedup(entry.seenMessageIds, entry.seenPartIds, entry.partContentLengths)
 
       const realSessionId = newParts.find(p => p.realSessionId)?.realSessionId
@@ -1772,6 +1786,7 @@ export class AgentManager extends EventEmitter {
 
       // One batched IPC call instead of one per part, so the renderer does a
       // single state update + re-render.
+      if (this.sessions.get(sessionId) !== activeSession || this.stoppingSessions.has(activeSession)) return
       const batchMessages = this.collectOutputBatch(entry, sessionId, newParts)
       const currentSession = this.sessions.get(sessionId)
       if (currentSession) this.captureSessionProgress(currentSession, batchMessages)
@@ -1785,6 +1800,9 @@ export class AgentManager extends EventEmitter {
 
       const status = await adapter.getStatus(sessionId, config)
       const session = this.sessions.get(sessionId)
+      if (session !== activeSession || this.stoppingSessions.has(activeSession)) return
+      await this.pollCompactions(sessionId, activeSession, adapter, config)
+      if (this.shuttingDown || this.sessions.get(sessionId) !== activeSession || this.stoppingSessions.has(activeSession)) return
 
       if (status.type === SessionStatusType.ERROR) {
         await this.handleErrorStatus(sessionId, session, config, status, batchMessages, newParts.find((part) => part.type === MessagePartType.ERROR && part.providerFailure)?.providerFailure)
@@ -1804,7 +1822,55 @@ export class AgentManager extends EventEmitter {
       console.error('[AgentManager] Adapter polling error:', error)
       const sessionId = this.resolvePollingSessionId(entry)
       const session = this.sessions.get(sessionId)
-      if (session) this.handlePollingError(sessionId, session, error)
+      if (session && session === polledSession && !this.shuttingDown && !this.stoppingSessions.has(session)) {
+        if (isKnownActivityDisconnect(error)) this.publishActivityDisconnect(sessionId, session)
+        this.handlePollingError(sessionId, session, error)
+      }
+    }
+  }
+
+  /** Backend compaction is an observational divider in this same backend
+   * context. It never starts a replacement, recap, prompt or handoff. */
+  private async pollCompactions(sessionId: string, session: AgentSession, adapter: CodingAgentAdapter, config: SessionConfig): Promise<void> {
+    if (!adapter.getCompactionObservations || this.shuttingDown) return
+    try {
+      const observations = await adapter.getCompactionObservations(sessionId, config)
+      if (this.shuttingDown || this.sessions.get(sessionId) !== session || this.stoppingSessions.has(session)) return
+      const generationKey = `adapter:${sessionId}`
+      for (const observation of observations) {
+        const effect = this.compactions.observe(observation, { ownerId: session.taskId, generationKey,
+          backendSessionId: sessionId, backend: this.db.getAgent(session.agentId)?.config.coding_agent })
+        if (!effect) continue
+        const exists = this.db.db?.prepare('SELECT 1 FROM transcript_parts WHERE task_id = ? AND part_id = ?')
+          .get(session.taskId, effect.part.id)
+        if (!exists) {
+          const messages: OutputMessage[] = [{ id: effect.part.id!, role: effect.part.role ?? 'system',
+            content: effect.part.text ?? '', partType: effect.part.type, receivedAt: effect.part.receivedAt }]
+          this.persistTranscriptEvent('agent:output-batch', { sessionId, taskId: session.taskId, messages })
+        }
+        if (this.compactionObserver) {
+          // A historical signal may be read again after reconnect. Preserve
+          // its original received timestamp/payload and projection identity.
+          const prior = this.db.db.prepare('SELECT * FROM session_event_inbox WHERE idempotency_key = ?')
+            .get(effect.idempotencyKey) as { owner_id: string; generation_key: string; backend_id: string | null;
+              turn_key: string | null; event_type: string; engine: 'chat' | 'adapter'; payload: string; state: string } | undefined
+          if (!prior || prior.state !== 'processed') {
+            const input: SessionObservation = prior
+              ? { ownerId: prior.owner_id, generationKey: prior.generation_key, backendId: prior.backend_id ?? undefined,
+                  turnKey: prior.turn_key ?? undefined, engine: prior.engine, eventType: prior.event_type,
+                  idempotencyKey: effect.idempotencyKey, payload: JSON.parse(prior.payload) }
+              : { ownerId: session.taskId, generationKey, backendId: sessionId, engine: 'adapter',
+                  eventType: effect.eventType, idempotencyKey: effect.idempotencyKey, payload: effect.payload }
+            await this.compactionObserver.observe(input, true)
+          }
+        }
+        this.compactions.acknowledge(effect.idempotencyKey)
+        if (this.shuttingDown || this.sessions.get(sessionId) !== session || this.stoppingSessions.has(session)) return
+      }
+    } catch (error) {
+      // Instrumentation failure retains the pending normalization for retry;
+      // it cannot alter the existing provider/session recovery path.
+      console.error('[AgentManager] Compaction observation failed:', error)
     }
   }
 
@@ -1826,6 +1892,13 @@ export class AgentManager extends EventEmitter {
       status: session.status,
       ...this.activityObservations.stamp(true)
     })
+  }
+
+  private publishActivityDisconnect(sessionId: string, session: AgentSession): void {
+    this.activityObservations.forget(sessionId)
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+    this.sendHostEvent(this.mainWindow.webContents, 'agent:status', { sessionId, agentId: session.agentId,
+      taskId: session.taskId, status: session.status, ...this.activityObservations.stamp(true), disconnected: true })
   }
 
   /** Follows a re-key (temp -> real id) by task id and moves the polling entry with it. */
@@ -5272,6 +5345,7 @@ export class AgentManager extends EventEmitter {
     // Shutdown preserves the durable queue. The next process reconciles any
     // outstanding claim; stops below must not drain it in this process.
     this.shuttingDown = true
+    this.compactionObserver?.shutdown()
     if (this.providerRecoveryTimer) clearTimeout(this.providerRecoveryTimer)
     this.providerRecoveryTimer = null
     if (this.startQueueRetryTimer) {

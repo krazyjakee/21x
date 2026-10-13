@@ -28,6 +28,7 @@ import { act, cleanup, render } from '@testing-library/react'
 import { useVoiceControl } from './use-voice-control'
 import { useVoiceStore } from '@/stores/voice-store'
 import { useUIStore } from '@/stores/ui-store'
+import { __resetCommanderCall, useCommanderCallStore } from '@/stores/commander-call-store'
 import {
   CAPTAIN_COMPOSER_KEY,
   clearDictationTarget,
@@ -52,6 +53,7 @@ let toggleTurn: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
   cleanup()
+  __resetCommanderCall()
   vi.clearAllMocks()
   clearDictationTarget()
   hotkey.fire = null
@@ -67,6 +69,35 @@ beforeEach(() => {
 })
 
 describe('the global shortcut', () => {
+  it('targets the surviving Commander call instead of claiming Captain or opening another turn', async () => {
+    const toggleMicrophone = vi.fn(async () => {})
+    const initialToggle = useCommanderCallStore.getState().toggleMicrophone
+    useCommanderCallStore.setState({ status: 'live', sessionId: 'call-session', toggleMicrophone })
+    await act(async () => { render(<Harness />) })
+    expect(hotkey.fire).toBeTypeOf('function')
+    await act(async () => { hotkey.fire?.({ action: 'toggle' }) })
+    expect(toggleMicrophone).toHaveBeenCalledOnce()
+    expect(toggleTurn).not.toHaveBeenCalled()
+    expect(useUIStore.getState().showOrchestrator).toBe(false)
+    expect(getActiveComposer()).not.toBe(CAPTAIN_COMPOSER_KEY)
+    useCommanderCallStore.setState({ toggleMicrophone: initialToggle })
+  })
+  it('starts and finishes a PTT sentence on the Commander call and ignores a starting call', async () => {
+    const state = useCommanderCallStore.getState()
+    const beginTalk = vi.fn(async () => {}), finishTalk = vi.fn()
+    useCommanderCallStore.setState({ status: 'starting', sessionId: 'call-session', micMode: 'push-to-talk', beginTalk, finishTalk })
+    await act(async () => { render(<Harness />) })
+    expect(hotkey.fire).toBeTypeOf('function')
+    await act(async () => { hotkey.fire?.({ action: 'toggle' }) })
+    expect(beginTalk).not.toHaveBeenCalled(); expect(toggleTurn).not.toHaveBeenCalled()
+    useCommanderCallStore.setState({ status: 'live' })
+    await act(async () => hotkey.fire?.({ action: 'toggle' }))
+    expect(beginTalk).toHaveBeenCalledOnce()
+    useCommanderCallStore.setState({ pttHeld: true })
+    await act(async () => hotkey.fire?.({ action: 'toggle' }))
+    expect(finishTalk).toHaveBeenCalledOnce(); expect(toggleTurn).not.toHaveBeenCalled()
+    useCommanderCallStore.setState({ beginTalk: state.beginTalk, finishTalk: state.finishTalk })
+  })
   it('talks to Captain rather than running a command', async () => {
     registerComposer(CAPTAIN_COMPOSER_KEY, { getField: () => null, submit: vi.fn() })
     await act(async () => {

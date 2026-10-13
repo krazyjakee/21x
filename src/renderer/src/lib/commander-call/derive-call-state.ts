@@ -56,7 +56,7 @@ export interface CallStateInput {
   call: CallLifetime
   unavailable: CallUnavailability | null
   /** The microphone turn this call opened; `open` is false when it has none. */
-  mic: { open: boolean; voiceState: VoiceState; partial: string }
+  mic: { open: boolean; ownedTurn?: boolean; voiceState: VoiceState; partial: string }
   /** Verified Commander speech for the call's session (voice activity adapter). */
   speech: VoiceObservation['state']
   /** A reply voice is ready. False means replies are text only. */
@@ -217,7 +217,7 @@ export function deriveCallState(input: CallStateInput): CallPresentation {
   if (input.speech === 'speaking') return present('speaking', input, { controls: { stop: true } })
 
   const micOpen = mic.open
-  if (micOpen && mic.voiceState === 'transcribing') {
+  if ((mic.ownedTurn ?? micOpen) && mic.voiceState === 'transcribing') {
     return present('transcribing', input, { label: 'Writing your words…', controls: { stop: canStop } })
   }
   // The user talking outranks a reply still being prepared: barge-in is about to cancel it.

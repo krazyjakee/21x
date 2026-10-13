@@ -1,18 +1,21 @@
 import { createHash, randomUUID } from 'crypto'
 import { TokenAccounting, SESSION_PROCESS_RUN_ID, type UsageKind } from '../sessions/token-accounting'
-import { requestCharacters } from '../sessions/token-estimator'
+import { estimateTokens, requestCharacters } from '../sessions/token-estimator'
 import { ManagedSessionObserver } from '../sessions/managed-session'
+import { ChatEngine } from '../sessions/chat-engine'
+import { commanderRoleTools } from '../sessions/roles/commander'
 import type { ChatMessage } from '../../shared/chat'
 import type { CommanderEvent, CommanderMessage, CommanderSession } from '../../shared/commander'
 import { ChatRuntime, type ChatTurnHandle, type ChatTurnResult } from '../chat/chat-runtime'
 import { imagesUnsupportedMessage, type ChatProvider, type ChatProviderRequest } from '../chat/providers/types'
 import { validateChatImageInputs } from '../../shared/chat-images'
 import type { ChatToolDefinition } from '../chat/tools'
-import { normalizeTitle, type CommanderStore } from './commander-store'
-import { buildContext, DEFAULT_CONTEXT_BUDGET, MAX_SUMMARY_TRANSCRIPT_CHARS, planFold, transcriptForSummary, type ContextBudget } from './context'
+import { normalizeTitle, type AppendCommanderMessageInput, type CommanderStore } from './commander-store'
+import { buildContext, buildManagedContext, managedVerbatimTokens, MANAGED_SUMMARY_MAX_TOKENS, DEFAULT_CONTEXT_BUDGET, MAX_SUMMARY_TRANSCRIPT_CHARS, planFold, transcriptForSummary, type ContextBudget } from './context'
 import { COMMANDER_SUMMARY_PROMPT, COMMANDER_SYSTEM_PROMPT, COMMANDER_TITLE_PROMPT, withSummary } from './prompts'
-import { guardReportAsks, MAX_REPORT_ASKS_WITHOUT_USER_TURN } from './report-tools'
+import { MAX_REPORT_ASKS_WITHOUT_USER_TURN } from './report-tools'
 import { COMMANDER_ADMIN_TOOLS } from '../../shared/commander-tools'
+import { CommanderActivityObservations } from './activity-observations'
 
 /**
  * Runs Commander chat turns over persisted sessions (docs/commander.md).
@@ -118,6 +121,7 @@ interface PreparedTurn {
   context: ReturnType<typeof buildContext>
   system: string
   tools: ChatToolDefinition[]
+  managed: boolean
 }
 
 const MAX_USER_MESSAGE_CHARS = 100_000
@@ -186,6 +190,8 @@ export async function completeText(provider: ChatProvider, request: Omit<ChatPro
 export class CommanderService {
   private readonly store: CommanderStore
   private readonly runtime: ChatRuntime
+  private readonly chatEngine: ChatEngine
+  private readonly managedTurnIds = new Set<string>()
   private readonly budget: ContextBudget
   private readonly active = new Map<string, ChatTurnHandle>()
   private readonly work = new Set<Promise<unknown>>()
@@ -203,10 +209,12 @@ export class CommanderService {
   private readonly managedSessions: ManagedSessionObserver
   private readonly observationRunId: string
   private readonly observationSequence = new Map<string, number>()
+  private readonly activityObservations = new CommanderActivityObservations()
 
   constructor(private readonly options: CommanderServiceOptions) {
     this.store = options.store
     this.runtime = options.runtime ?? new ChatRuntime()
+    this.chatEngine = new ChatEngine(this.runtime)
     this.budget = { ...DEFAULT_CONTEXT_BUDGET, ...options.budget }
     this.observationRunId = options.observationRunId ?? SESSION_PROCESS_RUN_ID
     this.accounting = new TokenAccounting(this.store.database, console.log, this.observationRunId)
@@ -215,7 +223,7 @@ export class CommanderService {
       const interrupted = this.accounting.reconcileInterrupted()
       if (interrupted.length) console.warn('[Commander] Interrupted usage observations retained:', interrupted)
     })
-    this.retain(this.managedSessions.reconcileStartup().then((interrupted) => {
+    this.retain(this.managedSessions.reconcileStartup(this.commanderManaged()).then((interrupted) => {
       if (interrupted.length) console.warn('[Commander] Interrupted session turns retained without replay:', interrupted)
     }).catch((error) => console.error('[Commander] Ledger startup observation failed:', error)))
   }
@@ -225,6 +233,7 @@ export class CommanderService {
     this.instrument(() => this.accounting.shutdown())
     try { this.managedSessions.shutdown() } catch (error) { console.error('[Commander] Ledger shutdown observation failed:', error) }
     this.closing = true
+    this.managedTurnIds.clear()
     this.shutdownSignal.abort()
     this.runtime.shutdown()
     this.activeSessionId = null
@@ -254,6 +263,16 @@ export class CommanderService {
     if (this.closing) throw new Error('COMMANDER_SERVICE_CLOSED')
   }
 
+  private commanderManaged(): boolean {
+    if (this.closing) return false
+    const database = this.store.database
+    // Registration fixtures supply an empty structural database. Actual
+    // SQLite read failures must still surface rather than disable this gate.
+    if (typeof database?.prepare !== 'function') return false
+    const setting = database.prepare("SELECT value FROM settings WHERE key = 'sessions.commander_managed'").get() as { value: string } | undefined
+    return ['1', 'true'].includes(setting?.value.trim().toLowerCase() ?? '')
+  }
+
   private instrument(write: () => void): void {
     try { write() } catch (error) { console.error('[Commander] Usage observation failed:', error) }
   }
@@ -262,7 +281,8 @@ export class CommanderService {
     if (this.closing) return
     try {
       this.retain(this.managedSessions.observe({ ownerId, turnKey, eventType, idempotencyKey, payload,
-        generationKey: `${this.observationRunId}:commander`, engine: 'chat', backendId })
+        generationKey: `${this.observationRunId}:commander`, engine: 'chat', backendId },
+        this.commanderManaged() || (turnKey ? this.managedTurnIds.has(turnKey) : false))
         .catch((error) => console.error('[Commander] Ledger observation failed:', error)))
     } catch (error) { console.error('[Commander] Ledger observation failed:', error) }
   }
@@ -289,6 +309,7 @@ export class CommanderService {
   private async completeObserved(sessionId: string, kind: UsageKind, provider: ChatProvider,
     request: Omit<ChatProviderRequest, 'tools' | 'toolChoice'>, signal: AbortSignal): Promise<string> {
     const turnId = randomUUID()
+    if (this.commanderManaged()) this.managedTurnIds.add(turnId)
     const fullRequest = { ...request, tools: [], toolChoice: 'none' as const }
     this.instrument(() => this.accounting.beginTurn(turnId, sessionId, kind, provider, requestCharacters(fullRequest)))
     this.observeLedger(sessionId, turnId, 'turn_started', `${turnId}:started`, { kind, input: request.messages.map((message) => message.content).join('\n') }, provider.id)
@@ -301,6 +322,7 @@ export class CommanderService {
     } finally {
       this.instrument(() => this.accounting.finishTurn(turnId, state))
       this.observeLedger(sessionId, turnId, 'turn_done', `${turnId}:done`, { stopReason: state })
+      this.managedTurnIds.delete(turnId)
     }
   }
 
@@ -318,6 +340,8 @@ export class CommanderService {
 
   private emit(event: CommanderEvent): void {
     if (this.closing) return
+    const activity = this.activityObservations.record(event)
+    if (activity) event = { ...event, activity }
     this.observeCommanderEvent(event)
     try {
       this.options.emit(event)
@@ -341,6 +365,12 @@ export class CommanderService {
 
   activeTurnId(sessionId: string): string | null {
     return this.active.get(sessionId)?.turnId ?? null
+  }
+
+  activitySnapshot(sessionId: string): ReturnType<CommanderActivityObservations['read']> {
+    if (this.closing) return this.activityObservations.read(sessionId, null, true)
+    if (!this.store.hasSession(sessionId)) throw new Error('Commander session not found')
+    return this.activityObservations.read(sessionId, this.activeTurnId(sessionId))
   }
 
   activeSessions(): Array<{ sessionId: string; turnId: string }> {
@@ -396,31 +426,40 @@ export class CommanderService {
 
   /** Prepare synchronously inside the user-message transaction, before accepting the draft. */
   private prepareTurn(sessionId: string, provider: ChatProvider, start: TurnStart): PreparedTurn {
-    const context = buildContext(this.store.listMessages(sessionId), this.budget,
-      provider.supportsImages === true ? (id) => this.store.getMessageImages(id) : undefined)
+    const managed = this.commanderManaged()
+    const messages = this.store.listMessages(sessionId)
+    const images = provider.supportsImages === true ? (id: string) => this.store.getMessageImages(id) : undefined
+    const context = managed ? buildManagedContext(messages, provider.model, provider.contextWindow, images)
+      : buildContext(messages, this.budget, images)
     let system = withSummary(this.options.systemPrompt ?? COMMANDER_SYSTEM_PROMPT, context.summary)
     if (start.systemNote) system = `${system}\n\n${start.systemNote}`
     let tools = this.options.getTools?.({ sessionId, deliveryScope: randomUUID(), userMessage: start.userMessage, userMessageId: start.userMessageId, trigger: start.trigger }) ?? []
-    // Admin tools act only on turns the user started, whatever getTools returned.
-    if (start.trigger !== 'user') tools = tools.filter((tool) => !COMMANDER_ADMIN_TOOLS.has(tool.name))
-    if (start.trigger === 'report') {
-      const max = this.options.maxReportAsks ?? MAX_REPORT_ASKS_WITHOUT_USER_TURN
-      tools = guardReportAsks(tools, {
-        remaining: () => max - (this.reportAsks.get(sessionId) ?? 0),
-        consume: () => this.reportAsks.set(sessionId, (this.reportAsks.get(sessionId) ?? 0) + 1)
-      })
-    }
+    const max = this.options.maxReportAsks ?? MAX_REPORT_ASKS_WITHOUT_USER_TURN
+    tools = commanderRoleTools(tools, { trigger: start.trigger,
+      remainingReportAsks: () => max - (this.reportAsks.get(sessionId) ?? 0),
+      consumeReportAsk: () => this.reportAsks.set(sessionId, (this.reportAsks.get(sessionId) ?? 0) + 1) })
 
-    return { context, system, tools }
+    return { context, system, tools, managed }
   }
 
   /** One model turn over the session as stored right now. The caller has checked that no turn is running. */
   private startTurn(sessionId: string, provider: ChatProvider, start: TurnStart, prepared?: PreparedTurn): { turnId: string; done: Promise<void> } {
-    const { context, system, tools } = prepared ?? this.prepareTurn(sessionId, provider, start)
+    const { context, system, tools, managed } = prepared ?? this.prepareTurn(sessionId, provider, start)
     let turnId = ''
     const observedProvider = this.accounting.observeProvider(provider, () => turnId)
-    const handle = this.runtime.startTurn(
-      { provider: observedProvider, messages: context.messages, system, tools, maxToolCalls: this.options.maxToolCalls },
+    const steps = new Map<number, CommanderMessage>()
+    const turnOptions = { provider: observedProvider, messages: context.messages, system, tools, maxToolCalls: this.options.maxToolCalls,
+      ...(managed ? { onStep: async (message: ChatMessage, index: number) => {
+        if (this.closing) return
+        const stored = this.persistManagedStep(sessionId, turnId, message, index)
+        if (stored) steps.set(index, stored)
+        await this.managedSessions.observe({ ownerId: sessionId, turnKey: turnId, engine: 'chat',
+          generationKey: `${this.observationRunId}:commander`, eventType: 'step_committed',
+          idempotencyKey: `${turnId}:step:${index}`, payload: { stepIndex: index, messageId: stored?.id ?? null, role: message.role } }, true)
+      }, onContextNotice: (message: string, identity: string) => this.persistContextNotice(sessionId, turnId, message, identity) } : {}) }
+    const startEngine = managed ? this.chatEngine : this.runtime
+    const handle = startEngine.startTurn(
+      turnOptions,
       (event) => {
         // `done` is re-emitted after the turn's messages are stored.
         if (event.type === 'done') return
@@ -428,15 +467,19 @@ export class CommanderService {
       }
     )
     turnId = handle.turnId
+    if (managed) this.managedTurnIds.add(turnId)
+    if (managed && context.droppedTurns) this.persistContextNotice(sessionId, turnId,
+      `${context.droppedTurns} earlier turns are omitted from this model request while their summary is pending. The full history remains stored.`, 'pending-summary')
     this.instrument(() => this.accounting.beginTurn(turnId, sessionId, start.trigger, provider,
       requestCharacters({ system, messages: context.messages, tools: tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })), toolChoice: 'auto' })))
     this.observeLedger(sessionId, turnId, 'turn_started', `${turnId}:started`, { kind: start.trigger, input: start.userMessage }, provider.id)
     this.active.set(sessionId, handle)
     const done = handle.done
-      .then((result) => this.finishTurn(sessionId, context.messages.length, result))
+      .then((result) => this.finishTurn(sessionId, context.messages.length, result, managed ? steps : undefined))
       .catch((err) => {
         this.instrument(() => this.accounting.finishTurn(turnId, 'error'))
         this.observeLedger(sessionId, turnId, 'turn_done', `${turnId}:done`, { stopReason: 'error' })
+        this.managedTurnIds.delete(turnId)
         console.error('[Commander] turn bookkeeping failed:', err)
         // The renderer must still leave its streaming state.
         const message = err instanceof Error ? err.message : String(err)
@@ -454,18 +497,19 @@ export class CommanderService {
     return { turnId, done }
   }
 
-  private finishTurn(sessionId: string, inputCount: number, result: ChatTurnResult): void {
+  private finishTurn(sessionId: string, inputCount: number, result: ChatTurnResult, steps?: Map<number, CommanderMessage>): void {
     this.instrument(() => this.accounting.finishTurn(result.turnId, result.stopReason))
     const added = result.messages.slice(inputCount)
     const stored: CommanderMessage[] = []
-    for (const m of added) {
-      const persisted = this.persistChatMessage(sessionId, m)
+    for (const [index, m] of added.entries()) {
+      const persisted = steps ? steps.get(index + 1) ?? this.persistManagedStep(sessionId, result.turnId, m, index + 1) : this.persistChatMessage(sessionId, m)
       if (persisted) stored.push(persisted)
     }
-    if (stored.length > 0) this.emit({ type: 'messages_appended', sessionId, messages: stored })
+    if (stored.length > 0) this.emit({ type: 'messages_appended', sessionId, turnId: result.turnId, messages: stored })
     this.emitSession(sessionId)
     if (this.active.get(sessionId)?.turnId === result.turnId) this.active.delete(sessionId)
     this.observeLedger(sessionId, result.turnId, 'turn_done', `${result.turnId}:done`, { stopReason: result.stopReason })
+    this.managedTurnIds.delete(result.turnId)
     this.observationSequence.delete(result.turnId)
     this.emit({ type: 'turn_event', sessionId, turnId: result.turnId, event: { type: 'done', stopReason: result.stopReason } })
   }
@@ -488,6 +532,25 @@ export class CommanderService {
     }
     // The runtime never adds user messages; ignore defensively.
     return null
+  }
+
+  private persistManagedStep(sessionId: string, turnId: string, message: ChatMessage, index: number): CommanderMessage | null {
+    let input: AppendCommanderMessageInput
+    if (message.role === 'assistant') {
+      if (!message.content && !message.toolCalls?.length) return null
+      input = { role: 'assistant', content: message.content, toolCalls: message.toolCalls ?? null }
+    } else if (message.role === 'tool') {
+      input = { role: 'tool', content: message.content, toolCallId: message.toolCallId, toolName: message.name,
+        isError: message.isError === true, ...toolResultTags(message.content, message.isError === true) }
+    } else return null
+    return this.store.appendRuntimeStepOnce(sessionId, input, turnId, index).message
+  }
+
+  private persistContextNotice(sessionId: string, turnId: string, message: string, identity: string): void {
+    if (this.closing) return
+    const stored = this.store.appendRuntimeStepOnce(sessionId, { role: 'assistant', content: `[21x context] ${message}`, toolName: 'context_notice' }, `notice:${turnId}:${identity}`, 1)
+    if (stored.inserted) this.emit({ type: 'messages_appended', sessionId, turnId, messages: [stored.message] })
+    this.observeLedger(sessionId, turnId, 'context_notice', `${turnId}:notice:${identity}`, { message })
   }
 
   private async afterTurn(sessionId: string, provider: ChatProvider): Promise<void> {
@@ -586,7 +649,11 @@ export class CommanderService {
     if (this.folding.has(sessionId)) return null
     this.folding.add(sessionId)
     try {
-      const plan = planFold(this.store.listMessages(sessionId), this.budget)
+      const managed = this.commanderManaged()
+      let model = provider
+      if (managed) model ??= this.options.createProvider()
+      const foldBudget = managed && model ? { keepTurns: Number.POSITIVE_INFINITY, maxChars: managedVerbatimTokens(model.model, model.contextWindow) * 3.5 } : this.budget
+      const plan = planFold(this.store.listMessages(sessionId), foldBudget)
       if (!plan) {
         this.foldFailures.delete(sessionId)
         return null
@@ -598,24 +665,38 @@ export class CommanderService {
         this.recordFoldFailure(sessionId, 'summary input exceeds the size limit; stored history retained')
         return null
       }
+      if (managed && estimateTokens(plan.previousSummary?.length ?? 0) > MANAGED_SUMMARY_MAX_TOKENS) {
+        this.recordFoldFailure(sessionId, 'stored summary exceeds the managed token budget; history retained')
+        return null
+      }
       let summary = plan.previousSummary ?? ''
       try {
-        const model = provider ?? this.options.createProvider()
+        model ??= this.options.createProvider()
+        const chunkChars = managed ? Math.max(1, Math.min(MAX_SUMMARY_TRANSCRIPT_CHARS,
+          Math.floor(managedVerbatimTokens(model.model, model.contextWindow) * 3.5) - 160)) : MAX_SUMMARY_TRANSCRIPT_CHARS
+        if (excerpt.length > chunkChars * MAX_SUMMARY_CHUNKS) {
+          this.recordFoldFailure(sessionId, 'summary input exceeds bounded managed requests; stored history retained')
+          return null
+        }
         const signal = AbortSignal.any([this.shutdownSignal.signal, AbortSignal.timeout(this.options.oneShotTimeoutMs ?? DEFAULT_ONE_SHOT_TIMEOUT_MS)])
         // A large single turn is folded in bounded requests. Intermediate
         // summaries remain local: any failed/empty chunk leaves the durable
         // summary and its cursor untouched, ready for a complete retry.
-        for (let offset = 0; offset < excerpt.length; offset += MAX_SUMMARY_TRANSCRIPT_CHARS) {
+        for (let offset = 0; offset < excerpt.length; offset += chunkChars) {
           signal.throwIfAborted()
-          const chunk = excerpt.slice(offset, offset + MAX_SUMMARY_TRANSCRIPT_CHARS)
+          const chunk = excerpt.slice(offset, offset + chunkChars)
           const prompt = summary
             ? `Previous summary:\n${summary}\n\nNew conversation to fold in:\n${chunk}`
             : `Conversation to summarise:\n${chunk}`
           summary = (await this.completeObserved(sessionId, 'summary',
             model,
-            { system: COMMANDER_SUMMARY_PROMPT, messages: [{ role: 'user', content: prompt }], maxTokens: 800 },
+            { system: COMMANDER_SUMMARY_PROMPT, messages: [{ role: 'user', content: prompt }], maxTokens: managed ? MANAGED_SUMMARY_MAX_TOKENS : 800 },
             signal
           )).trim()
+          if (managed && estimateTokens(summary.length) > MANAGED_SUMMARY_MAX_TOKENS) {
+            this.recordFoldFailure(sessionId, 'the summary exceeds the managed token budget; history retained')
+            return null
+          }
           if (!summary) {
             this.recordFoldFailure(sessionId, 'the summary came back empty')
             return null
@@ -658,6 +739,8 @@ export class CommanderService {
       ? this.store.appendMessageOnce(input.sessionId, messageInput, input.deliveryId)
       : { message: this.store.appendMessage(input.sessionId, messageInput), inserted: true }
     const { message, inserted } = stored
+    if (inserted && this.commanderManaged()) this.observeLedger(input.sessionId, undefined, 'report_received', `report:${message.id}`,
+      { messageId: message.id, content: message.content, projectId: message.project_id, correlationId: message.correlation_id })
     if (emit && inserted) {
       this.emit({ type: 'messages_appended', sessionId: input.sessionId, messages: [message] })
     }

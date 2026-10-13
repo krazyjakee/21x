@@ -39,7 +39,10 @@ export function VoiceOverlay() {
   // Nothing is drawn while an answer is read, but Escape must still stop it.
   const speaking = useVoiceStore((s) => s.speaking)
   const stopSpeaking = useVoiceStore((s) => s.stopSpeaking)
-  const commanderCallLive = useCommanderCallStore((s) => s.status === 'live')
+  const commanderCallLive = useCommanderCallStore((s) => s.status !== 'off')
+  const commanderTurnId = useCommanderCallStore(s => s.turnId)
+  const voiceTurnId = useVoiceStore(s => s.turnId)
+  const commanderOwnsVoice = commanderCallLive && (!voiceTurnId || voiceTurnId === commanderTurnId)
 
   // Escape cancels the current turn or the open confirmation.
   useEffect(() => {
@@ -48,7 +51,7 @@ export function VoiceOverlay() {
       // The app-level Commander host owns Escape for a live call. Letting this
       // generic overlay cancel the same microphone turns a normal Stop into a
       // false media-loss error.
-      if (commanderCallLive) return
+      if (commanderOwnsVoice) return
       if (confirmation) void dismiss()
       else if (state === 'listening') void cancel()
       // Escape also stops speech. It is the one key a user reaches for when
@@ -57,7 +60,7 @@ export function VoiceOverlay() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [commanderCallLive, confirmation, state, dismiss, cancel, speaking, stopSpeaking])
+  }, [commanderOwnsVoice, confirmation, state, dismiss, cancel, speaking, stopSpeaking])
 
   useEffect(() => {
     if (!result) return undefined
@@ -70,7 +73,7 @@ export function VoiceOverlay() {
   const listening = state === 'listening'
   const transcribing = state === 'transcribing'
   const loudness = Math.min(Math.max(level, 0), 1)
-  const showBubble = !captionsElsewhere && (listening || transcribing || Boolean(partial))
+  const showBubble = !commanderOwnsVoice && !captionsElsewhere && (listening || transcribing || Boolean(partial))
   if (!showBubble && !confirmation && !result) return null
 
   return (

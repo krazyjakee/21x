@@ -16,8 +16,8 @@ import type { VoiceObservation } from './derive-activity'
  * - The store's `speaking` flag is set when synthesis *starts*, before any
  *   audio, and says nothing about who is speaking. It is never enough.
  * - `voicePlayback.isPlaying` only means a passage is open. Speaking needs the
- *   open passage to be the one attributed to this entity *and* audio queued
- *   or sounding for it.
+ *   open passage to be the one attributed to this entity and a running audio
+ *   clock currently inside a scheduled source interval.
  * - Capture has no owner of its own, so listening is `unknown` for every
  *   entity unless an owner is passed in and matches. The Commander call store
  *   passes one for the microphone turn it opened (#84).
@@ -47,6 +47,8 @@ export interface VoiceActivitySnapshot {
   playbackSpeechGeneration: number | null
   /** Sentences queued or sounding for that passage. */
   hasQueuedAudio: boolean
+  /** Running audio clock is currently inside a scheduled source interval. */
+  hasAudibleAudio: boolean
   /** The store's global flag (synthesis started). Never sufficient on its own. */
   storeSpeaking: boolean
   capture: {
@@ -94,20 +96,20 @@ export function deriveVoiceActivity(snapshot: VoiceActivitySnapshot, target: Voi
     listening = owner ? (sameTarget(owner, target) ? 'listening' : 'none') : 'unknown'
   }
 
-  // Speaking: attributed passage, the same passage open in playback, audio queued/sounding.
+  // Speaking: attributed passage, the same passage open, audio actually sounding.
   const passage = snapshot.passage
   const playbackLive = Boolean(
     passage &&
     snapshot.playbackSpeechId === passage.speechId &&
     snapshot.playbackSpeechGeneration === passage.speechGeneration &&
-    snapshot.hasQueuedAudio
+    snapshot.hasAudibleAudio
   )
   if (passage && playbackLive) {
     const owned = ownsPassage(passage, target)
     if (owned === true) return { state: 'speaking', ...(micOpen ? { micOpen: true } : {}) }
     if (owned === null) return { state: 'unknown' }
-  } else if (snapshot.storeSpeaking || (snapshot.playbackSpeechId && !snapshot.hasQueuedAudio)) {
-    // Synthesis pending or a silent open passage: not proof of speech. If it
+  } else if (snapshot.storeSpeaking || snapshot.hasQueuedAudio || (snapshot.playbackSpeechId && !snapshot.hasAudibleAudio)) {
+    // Synthesis/queued audio or a silent open passage is not proof of speech. If it
     // could be this entity's, say so honestly rather than "none".
     const owned = passage ? ownsPassage(passage, target) : null
     if (owned !== false) return listening === 'listening' ? { state: 'listening' } : { state: 'unknown' }
@@ -178,6 +180,7 @@ export function readVoiceActivitySnapshot(owner?: VoiceTarget | null): VoiceActi
     playbackSpeechId: voicePlayback.currentSpeechId,
     playbackSpeechGeneration: voicePlayback.currentSpeechGeneration,
     hasQueuedAudio: voicePlayback.hasQueuedAudio,
+    hasAudibleAudio: voicePlayback.hasAudibleAudio,
     storeSpeaking: voice.speaking,
     capture: {
       open: voiceCapture.isCapturing,
@@ -192,15 +195,16 @@ export function readVoiceActivitySnapshot(owner?: VoiceTarget | null): VoiceActi
  * React hook: the voice claim for `target`. Re-reads when the voice store's
  * speaking/listening facts or the passage attribution change.
  */
-export function useVoiceActivity(target: VoiceTarget | null): VoiceObservation | null {
+export function useVoiceActivity(target: VoiceTarget | null, captureOwner?: VoiceTarget | null): VoiceObservation | null {
   // Narrow scalar selectors only: re-render on these facts, never per level frame.
   useVoiceStore((s) => s.speaking)
   useVoiceStore((s) => s.state)
   useVoiceStore((s) => s.turnId)
   useVoiceAttributionStore((s) => s.version)
   useSyncExternalStore(voicePlayback.subscribeActivity, () => voicePlayback.activitySnapshot, () => voicePlayback.activitySnapshot)
+  useSyncExternalStore(voiceCapture.subscribeActivity, () => voiceCapture.activitySnapshot, () => voiceCapture.activitySnapshot)
   if (!target) return null
-  return deriveVoiceActivity(readVoiceActivitySnapshot(), target)
+  return deriveVoiceActivity(readVoiceActivitySnapshot(captureOwner), target)
 }
 
 /** Test-only reset. */

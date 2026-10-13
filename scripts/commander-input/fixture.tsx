@@ -3,7 +3,11 @@ import { createRoot } from 'react-dom/client'
 import { useCommanderCallStore } from '../../src/renderer/src/stores/commander-call-store'
 import { useVoiceAttributionStore } from '../../src/renderer/src/lib/activity/voice-activity-adapter'
 import { voicePlayback } from '../../src/renderer/src/lib/voice-playback'
+import { voiceCapture } from '../../src/renderer/src/lib/voice-capture'
 import { CommanderCallHost } from '../../src/renderer/src/components/commander/CommanderCallHost'
+import { CommanderCallSurfaces } from '../../src/renderer/src/components/commander/CommanderCallSurfaces'
+import { VoiceOverlay } from '../../src/renderer/src/components/voice/VoiceOverlay'
+import { activityNow } from '../../src/renderer/src/lib/activity/activity-clock'
 import { CommanderWorkspace } from '../../src/renderer/src/components/commander/CommanderWorkspace'
 import { useGlobalShortcuts } from '../../src/renderer/src/components/layout/hooks/use-global-shortcuts'
 import { focusComposerInput } from '../../src/renderer/src/lib/keyboard-shortcuts'
@@ -19,12 +23,16 @@ import './fixture.css'
 useAgentStore.setState({ agents: [{ id: 'agent', name: 'Test', config: { coding_agent: 'claude-code', model: 'claude-test' } }], isLoading: false })
 useCommanderStore.setState({ selectedSessionId: 'session-1' })
 useUIStore.setState({ sidebarView: 'commander', activeModal: null })
+// Input capture is controlled for keyboard tests; output uses real Web Audio.
+let capturing = false
+Object.defineProperty(voiceCapture, 'isCapturing', { configurable: true, get: () => capturing })
 useVoiceStore.setState({
   available: true, enabled: true, runtime: { installed: true }, engine: { state: 'ready' }, permission: 'granted',
   tts: { enabled: true, status: { state: 'ready' } },
   initializeTts: async () => {},
-  startTurn: async (mode, options) => { window.fixture.captures.push({ mode, deviceId: options?.deviceId ?? '' }); useVoiceStore.setState({ turnId: 'voice-turn', turnEpoch: 'fixture-epoch', state: 'listening' }); return 'voice-turn' },
+  startTurn: async (mode, options) => { capturing = true; window.fixture.captures.push({ mode, deviceId: options?.deviceId ?? '' }); useVoiceStore.setState({ turnId: 'voice-turn', turnEpoch: 'fixture-epoch', state: 'listening' }); return 'voice-turn' },
   endTurn: async () => {
+    capturing = false
     window.fixture.releases++
     useVoiceStore.setState({ state: 'transcribing' })
     window.setTimeout(() => {
@@ -32,18 +40,24 @@ useVoiceStore.setState({
       window.fixture.finalReceiver?.({ turnId: 'voice-turn', turnEpoch: 'fixture-epoch', text: 'Final words' })
     }, 50)
   },
-  cancel: async () => { useVoiceStore.setState({ turnId: null, state: 'idle' }) },
+  cancel: async () => { capturing = false; useVoiceStore.setState({ turnId: null, state: 'idle' }) },
   stopPlaybackNow: () => { voicePlayback.stop(); useVoiceStore.setState({ speaking: false, speechText: '' }) }
 })
 Object.assign(window.fixture, {
   partial: text => useVoiceStore.setState({ partial: text, level: .4 }),
+  navigate: view => useUIStore.getState().setSidebarView(view),
+  action: () => useCommanderStore.setState({ recentAction: { call: { id: 'archive-1', name: 'archive_project', input: { project: 'Web' } }, result: {
+    id: 'executed-action', session_id: 'session-1', role: 'tool', content: JSON.stringify({ status: 'ok', target: { kind: 'project', id: 'web', name: 'Web' }, changes: [{ field: 'archived', before: false, after: true }], undoId: 'exact-undo' }), tool_calls: null, tool_call_id: 'archive-1', tool_name: 'archive_project', is_error: false, project_id: null, correlation_id: null, created_at: 1
+  }, observedAt: activityNow() } }),
   speech: () => {
     const id = 'fixture-speech', generation = 1
     useVoiceAttributionStore.setState({ passage: { speechId: id, speechGeneration: generation, taskId: 'commander:session-1' }, version: 1 })
     voicePlayback.start(id, {}, generation)
     const pcm = new Uint8Array(24000 * 2 * 3), view = new DataView(pcm.buffer)
     for (let i = 0; i < pcm.length / 2; i++) view.setInt16(i * 2, Math.round(Math.sin(i / 24000 * 440 * Math.PI * 2) * 9000), true)
-    useVoiceStore.setState({ speechText: 'The checkout review is complete.', speaking: true })
+    // A reply follows a completed utterance; retained partial words would
+    // correctly trigger the production call's speech barge-in watcher.
+    useVoiceStore.setState({ partial: '', speechText: 'The checkout review is complete.', speaking: true })
     voicePlayback.play(id, pcm, 24000, generation)
   },
   callState: () => ({ status: useCommanderCallStore.getState().status, mode: useCommanderCallStore.getState().micMode, pttHeld: useCommanderCallStore.getState().pttHeld }),
@@ -77,11 +91,14 @@ Object.assign(window.fixture, {
 const actions = new Proxy({ focusComposer: focusComposerInput }, { get: (target, key) => target[key] ?? (() => {}) }) as CommandPaletteActions
 function Fixture() {
   const [, setOpen] = useState(false)
+  const view = useUIStore(s => s.sidebarView)
   useGlobalShortcuts(actions, setOpen)
   return (
     <div className="h-screen bg-background text-foreground">
       <CommanderCallHost />
-      <CommanderWorkspace />
+      <CommanderCallSurfaces />
+      <VoiceOverlay />
+      {view === 'commander' ? <CommanderWorkspace /> : <main aria-label="Another workspace"><button aria-label="Other workspace control">Other workspace</button></main>}
     </div>
   )
 }

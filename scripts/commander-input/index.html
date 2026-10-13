@@ -3,7 +3,7 @@
 <body><div id="root"></div>
 <script>
 // No real sessions, microphone, provider calls or application services.
-window.fixture = { sends: [], voiceSends: [], captures: [], releases: 0, finalReceiver: null, resolveSend: null, rejectSend: null }
+window.fixture = { sends: [], voiceSends: [], captures: [], releases: 0, undos: [], events: new Set(), finalReceiver: null, resolveSend: null, rejectSend: null }
 Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { enumerateDevices: async () => [{ kind: 'audioinput', deviceId: 'fixture-mic', label: 'Fixture microphone' }], addEventListener: () => {}, removeEventListener: () => {} } })
 const noop = async () => {}
 window.electronAPI = new Proxy({
@@ -11,7 +11,8 @@ window.electronAPI = new Proxy({
   settings: { getAll: async () => ({}), set: noop },
   commander: {
     listSessions: async () => [], listMessages: async () => ({ messages: [], activeTurnId: null }),
-    markRead: async () => null, setActiveSession: noop, onEvent: () => () => {},
+    markRead: async () => null, setActiveSession: noop, onEvent: listener => { window.fixture.events.add(listener); return () => window.fixture.events.delete(listener) },
+    undoAction: async (sessionId, actionId) => { window.fixture.undos.push({ sessionId, actionId }); return { alreadyUndone: false, message: { id: 'undo-note', session_id: sessionId, role: 'assistant', tool_name: 'undo_action', tool_call_id: actionId, tool_calls: null, content: 'Restored Web.', is_error: false, project_id: null, correlation_id: null, created_at: 2 } } },
     cancel: noop,
     send: (sessionId, text) => new Promise((resolve, reject) => {
       window.fixture.sends.push({ sessionId, text })

@@ -412,6 +412,10 @@ function convertThreadItem(
   const role = extractRole(item)
   const text = extractText(item)
 
+  // The scoped compaction seam records this lifecycle boundary. It is not a
+  // tool call, and historical reconciliation must not fabricate running tools.
+  if (/^(context_?compaction|compaction(?:_summary)?)$/i.test(type)) return []
+
   if (type.includes('reasoning')) {
     const partId = `reasoning-${itemId}`
     if (seenPartIds.has(partId)) return []

@@ -33,6 +33,8 @@ describe('deriveCallState state table', () => {
     ['ready', input({ mic: { open: false, voiceState: 'idle', partial: '' } })],
     ['listening', input()],
     ['transcribing', input({ mic: { open: true, voiceState: 'transcribing', partial: '' } })],
+    ['transcribing', input({ mic: { open: false, ownedTurn: true, voiceState: 'transcribing', partial: '' } })],
+    ['ready', input({ mic: { open: false, ownedTurn: true, voiceState: 'listening', partial: 'retained' } })],
     ['thinking', input({ turn: { turnId: 'turn-1', phase: 'thinking' } })],
     ['working', input({ turn: { turnId: 'turn-1', phase: 'tool', toolName: 'update_project' } })],
     ['thinking', input({ turn: { turnId: 'turn-1', phase: 'working' }, speechOutput: false })],

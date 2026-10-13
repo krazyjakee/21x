@@ -98,7 +98,8 @@ only path that acts without a language model, so every rule in it must be
 unambiguous. The wider path is the next section.
 
 **No control in the app runs these rules any more.** Every microphone dictates,
-and the global shortcut talks to Captain like the one in the top bar. The
+and the global shortcut targets the active Commander call when one exists,
+otherwise Captain like the one in the top bar. The
 parser and `VoiceActionService` are still in the tree, and `command` mode still
 works if something asks for it, but nothing does. They are the last of the
 original design's hands-free command idea, kept only until it is decided whether
@@ -157,24 +158,42 @@ Guards:
 
 ### The listening bubble
 
-While a turn is open, a bubble sits at the bottom of the window with three
-things in it:
+Task and Captain dictation keep the bottom listening bubble: its halo follows
+input level, its word says Listening or Writing the words, and its cross ends
+the turn while retaining the heard text. Escape cancels that turn. It shows
+current words only; sent sentences remain in the transcript.
 
-- a **halo that follows your voice** in both brightness and size, so you can
-  see the microphone is hearing you before any word appears. Both are needed:
-  light alone was hard to read, and the movement was invisible once the scale
-  was damped down;
-- the state, in one word: **Listening**, or **Writing the words**. It used to
-  say "Listening — pause to send", which read as an instruction to do something
-  when it only described what the loop does by itself;
-- a **cross that stops listening**, ending the turn and keeping what was heard.
-  Escape is the other exit and throws the words away instead; the cross says so
-  in its tooltip.
+Commander uses its call stage or in-app floating call instead. Captions appear
+once, in the currently visible surface, and its owned capture suppresses the
+ordinary bubble. Other microphone contexts retain their own bubble and controls.
+Commander captions default to on at Medium and support Small/Medium/Large,
+with two visible lines and a keyboard-accessible complete-text dialog. Partial
+words are italic and never announced. Only genuinely audible, attributed reply
+audio highlights an assistant sentence or drives the output ring; queued or
+suspended audio does not pretend to be speaking.
 
-The bubble shows only the words being said now. In conversation mode it used to
-show the sentence it had just sent, which put the same sentence on the screen
-twice: once in the transcript above, once in the bubble below. It now says
-"Speak now" and waits.
+Leaving Commander during a call or pressing PiP keeps the original session and
+single media lease alive. The floating tile has mic, Stop, Expand, captions and
+End controls, a draggable grip that snaps to corners, and arrow-key corner
+movement. Expand restores the full call view and focus. Stop/Escape interrupts
+without ending the call; End closes capture/playback/synthesis and keeps chat.
+Typing and native text Undo remain usable. Exact reversible Commander actions
+have one eight-second toast and direct Undo; there is no confirmation step.
+
+The configurable global shortcut (default Mod+Shift+Space) targets the active
+Commander call: open mic toggles mute, PTT starts/finishes an utterance on
+successive presses. Without a Commander call it opens Captain and dictates or
+runs its conversational loop as configured. It does not create a second mic.
+The top-bar Captain microphone remains an explicit Captain control.
+
+One CallAnnouncer handles Commander state/actions/errors and completed
+text-only replies. It never repeats spoken replies or partials. Quiet project
+reports get only a short polite inbox/thread location cue, no report speech,
+interruption or model turn. [Commander UI and shortcuts](./commander.md#ui)
+describe focus, caption sizing, reduced motion, recovery and the remaining
+manual screen-reader release gate. Local STT, system/downloaded speech and the
+existing barge-in gate work independently of a future cloud-provider decision;
+provider-specific word timings are optional and never invented.
 
 ### A click waits for the model
 

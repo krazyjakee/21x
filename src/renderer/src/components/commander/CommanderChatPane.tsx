@@ -16,6 +16,8 @@ import { AttachmentTray } from '@/components/chat/AttachmentTray'
 import { useChatAttachments } from '@/hooks/use-chat-attachments'
 import { useAgentStore } from '@/stores/agent-store'
 import { useCommanderStore } from '@/stores/commander-store'
+import { useCommanderCallStore } from '@/stores/commander-call-store'
+import { useUIStore } from '@/stores/ui-store'
 import type { Agent } from '@/types'
 import { CommanderMessageItem, ToolChip } from './CommanderMessageItem'
 import { CommanderActions } from './CommanderActions'
@@ -64,6 +66,8 @@ export const COMMANDER_EMPTY_DESCRIPTION =
 /** The open session: history, the streaming turn, and the composer. */
 export function CommanderChatPane({ tab = 'chat', embedded = false }: { tab?: 'chat' | 'actions'; embedded?: boolean } = {}) {
   const sessionId = useCommanderStore((s) => s.selectedSessionId)
+  const callSession = useCommanderCallStore(s => s.status !== 'off' ? s.sessionId : null)
+  const stageVisible = useUIStore(s => s.sidebarView === 'commander')
   const session = useCommanderStore((s) => s.sessions.find((x) => x.id === s.selectedSessionId))
   const unseenReports = useCommanderStore(s => sessionId ? s.unseenReports[sessionId] : undefined) ?? []
   const messages = useCommanderStore((s) => (s.selectedSessionId ? s.messages[s.selectedSessionId] : undefined)) ?? EMPTY
@@ -72,7 +76,8 @@ export function CommanderChatPane({ tab = 'chat', embedded = false }: { tab?: 'c
   const send = useCommanderStore((s) => s.send)
   const cancel = useCommanderStore((s) => s.cancel)
   const createSession = useCommanderStore((s) => s.createSession)
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useState(() => sessionId ? useCommanderStore.getState().drafts[sessionId] ?? '' : '')
+  useEffect(() => { if (sessionId) useCommanderStore.getState().setDraft(sessionId, draft) }, [sessionId, draft])
   const images = useChatAttachments({ draftKey: sessionId })
   const submitting = useRef(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -256,11 +261,11 @@ export function CommanderChatPane({ tab = 'chat', embedded = false }: { tab?: 'c
               <div className="commander-reply min-w-0 text-base leading-relaxed text-foreground">
                 <Markdown size="base">{streaming.text}</Markdown>
               </div>
-            ) : streaming.toolCalls.length === 0 ? (
+            ) : streaming.toolCalls.length === 0 && !stageVisible && callSession !== sessionId ? (
               <div className="flex gap-1 py-1" aria-label="Commander is thinking">
-                <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground/60" />
-                <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground/60 [animation-delay:150ms]" />
-                <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground/60 [animation-delay:300ms]" />
+                <span className="size-1.5 motion-safe:animate-pulse rounded-full bg-muted-foreground/60" />
+                <span className="size-1.5 motion-safe:animate-pulse rounded-full bg-muted-foreground/60 [animation-delay:150ms]" />
+                <span className="size-1.5 motion-safe:animate-pulse rounded-full bg-muted-foreground/60 [animation-delay:300ms]" />
               </div>
             ) : null}
             {streaming.toolCalls.length > 0 && (
@@ -273,7 +278,7 @@ export function CommanderChatPane({ tab = 'chat', embedded = false }: { tab?: 'c
           </div>
         )}
         {turnError && (
-          <div role="alert" className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm leading-relaxed text-destructive">
+          <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm leading-relaxed text-destructive">
             <AlertCircle className="mt-px size-3.5 shrink-0" aria-hidden="true" />
             <span className="min-w-0 break-words">{turnError}</span>
           </div>
@@ -366,7 +371,7 @@ export function CommanderChatPane({ tab = 'chat', embedded = false }: { tab?: 'c
 
 
 export function CommanderTranscript({ children, scrollRef, hidden }: { children: ReactNode; scrollRef: RefObject<HTMLDivElement | null>; hidden?: boolean }) {
-  return <div ref={scrollRef} hidden={hidden} className="commander-messages min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-4" data-testid="commander-messages">{children}</div>
+  return <div ref={scrollRef} hidden={hidden} role="log" aria-label="Commander transcript" aria-live="off" className="commander-messages min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-4" data-testid="commander-messages">{children}</div>
 }
 
 export function CommanderComposer({ children }: { children: ReactNode }) {

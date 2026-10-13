@@ -65,9 +65,24 @@ export class VoiceCapture {
   private handlers: VoiceCaptureHandlers | null = null
   /** Invalidates a getUserMedia request whose result arrives after Stop/restart. */
   private startGeneration = 0
+  private removeTrackListeners: (() => void) | null = null
+  private activityRevision = 0
+  private readonly activityListeners = new Set<() => void>()
+
+  subscribeActivity = (listener: () => void): (() => void) => {
+    this.activityListeners.add(listener)
+    return () => this.activityListeners.delete(listener)
+  }
+  get activitySnapshot(): number { return this.activityRevision }
+  private notifyActivity(): void {
+    this.activityRevision++
+    for (const listener of this.activityListeners) listener()
+  }
 
   get isCapturing(): boolean {
-    return this.stream !== null
+    return this.context?.state === 'running' && Boolean(this.stream?.getAudioTracks().some(
+      track => track.readyState === 'live' && track.enabled && !track.muted
+    ))
   }
 
   /** Builds the audio graph once. Later turns reuse it. */
@@ -91,6 +106,10 @@ export class VoiceCapture {
       }
       this.context = context
       this.node = node
+      context.onstatechange = () => {
+        if (this.context !== context) return
+        this.notifyActivity()
+      }
     })().catch((err) => {
       // Let the next turn try again rather than fail for ever.
       this.ready = null
@@ -100,7 +119,8 @@ export class VoiceCapture {
   }
 
   async start(handlers: VoiceCaptureHandlers, deviceId?: string, signal?: AbortSignal): Promise<boolean> {
-    if (this.stream) return true
+    if (this.isCapturing) return true
+    if (this.stream) this.stop()
     const mine = ++this.startGeneration
     let stream: MediaStream | null = null
     let streamStopped = false
@@ -130,6 +150,9 @@ export class VoiceCapture {
         stopPendingStream()
         return false
       }
+      if (!stream.getAudioTracks().some(track => track.readyState === 'live')) {
+        throw new Error('The microphone did not provide a live audio track.')
+      }
       // A context can be suspended by the browser between turns.
       if (context.state === 'suspended') await context.resume()
       if (signal?.aborted || mine !== this.startGeneration) {
@@ -141,6 +164,27 @@ export class VoiceCapture {
       this.handlers = handlers
       this.source = context.createMediaStreamSource(this.stream)
       this.source.connect(node)
+      const tracks = stream.getAudioTracks()
+      const ended = () => {
+        if (this.stream !== stream || mine !== this.startGeneration) return
+        const ownedHandlers = this.handlers
+        this.stop()
+        ownedHandlers?.onError?.('The microphone disconnected. Reconnect it or choose another input device.')
+      }
+      const changed = () => { if (this.stream === stream) this.notifyActivity() }
+      for (const track of tracks) {
+        track.addEventListener('ended', ended)
+        track.addEventListener('mute', changed)
+        track.addEventListener('unmute', changed)
+      }
+      this.removeTrackListeners = () => {
+        for (const track of tracks) {
+          track.removeEventListener('ended', ended)
+          track.removeEventListener('mute', changed)
+          track.removeEventListener('unmute', changed)
+        }
+      }
+      this.notifyActivity()
       // The worklet emits no audio, so it is not connected to the destination:
       // the user never hears their own microphone.
       return true
@@ -160,6 +204,9 @@ export class VoiceCapture {
   /** Flushes whatever is buffered and releases the microphone. */
   stop(): void {
     this.startGeneration += 1
+    const changed = this.stream !== null
+    this.removeTrackListeners?.()
+    this.removeTrackListeners = null
     this.flush()
     this.source?.disconnect()
     this.stream?.getTracks().forEach((track) => track.stop())
@@ -168,6 +215,7 @@ export class VoiceCapture {
     this.pending = []
     this.handlers?.onLevel?.(0)
     this.handlers = null
+    if (changed) this.notifyActivity()
     // The context and the worklet stay alive for the next turn.
   }
 
@@ -175,6 +223,7 @@ export class VoiceCapture {
   async release(): Promise<void> {
     this.stop()
     const context = this.context
+    if (context) context.onstatechange = null
     this.node?.disconnect()
     this.node = null
     this.context = null

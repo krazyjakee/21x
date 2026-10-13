@@ -1,6 +1,8 @@
 import type { ChatMessage } from '../../shared/chat'
 import { MAX_CHAT_IMAGE_TOTAL_BYTES, type ChatImageInput } from '../../shared/chat-images'
 import type { CommanderMessage } from '../../shared/commander'
+import { modelContextWindow } from '../sessions/model-windows'
+import { estimateTokens } from '../sessions/token-estimator'
 
 /**
  * Turning a stored Commander session into model context (docs/commander.md).
@@ -25,6 +27,38 @@ export interface ContextBudget {
 }
 
 export const DEFAULT_CONTEXT_BUDGET: ContextBudget = { keepTurns: 8, maxChars: 24_000 }
+export const MANAGED_VERBATIM_MAX_TOKENS = 16_000
+export const MANAGED_SUMMARY_MAX_TOKENS = 1_500
+
+export function managedVerbatimTokens(model: string, window?: number): number {
+  const known = window ?? modelContextWindow(model)
+  return known && Number.isSafeInteger(known) && known > 0
+    ? Math.max(1, Math.min(MANAGED_VERBATIM_MAX_TOKENS, Math.floor(known * 0.6))) : MANAGED_VERBATIM_MAX_TOKENS
+}
+
+export function chatMessageCharacters(message: ChatMessage): number {
+  return message.content.length + (message.role === 'assistant' && message.toolCalls ? JSON.stringify(message.toolCalls).length : 0)
+}
+
+/** D7 is a hard model-view ceiling. Full turns remain in SQLite; omissions
+ * are explicit. Never truncate the newest user instruction to make it fit. */
+export function buildManagedContext(messages: CommanderMessage[], model: string, window?: number, loadImages?: CommanderImageLoader): BuiltContext {
+  const { summary, rest } = unfoldedMessages(messages)
+  if (summary && estimateTokens(summary.content.length) > MANAGED_SUMMARY_MAX_TOKENS)
+    throw new Error('Stored summary exceeds the managed 1,500-token budget. History is retained; shorten the summary before continuing.')
+  const turns = splitTurns(rest)
+  const limit = managedVerbatimTokens(model, window)
+  let dropped = 0
+  while (dropped < turns.length) {
+    const history = toChatMessages(turns.slice(dropped).flat(), loadImages)
+    if (dropped && history[0]?.role === 'user') history[0] = { ...history[0], content: `[${omittedTurnsMarker(dropped)}]\n\n${history[0].content}` }
+    if (estimateTokens(history.reduce((sum, message) => sum + chatMessageCharacters(message), 0)) <= limit)
+      return { summary: summary?.content ?? null, messages: history, droppedTurns: dropped, pendingFoldTurns: 0 }
+    if (dropped === turns.length - 1) throw new Error('Newest turn exceeds the managed context budget. Its full history is retained; shorten the message before continuing.')
+    dropped++
+  }
+  return { summary: summary?.content ?? null, messages: [], droppedTurns: 0, pendingFoldTurns: 0 }
+}
 
 const TOOL_TEXT_IN_SUMMARY = 600
 export const MAX_SUMMARY_TRANSCRIPT_CHARS = 32_000

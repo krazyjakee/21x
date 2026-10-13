@@ -61,6 +61,8 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 beforeEach(() => {
+  // Controlled capture boundary for fake drivers; no physical microphone.
+  vi.spyOn(voiceCapture, 'isCapturing', 'get').mockImplementation(() => !!useVoiceStore.getState().turnId && useVoiceStore.getState().state === 'listening')
   vi.clearAllMocks()
   vi.mocked(window.electronAPI.voice.cancelTurn).mockImplementation(async () => {})
   __resetCommanderCall()
@@ -297,7 +299,7 @@ class OwnershipAudioContext {
     return { duration: length / rate, getChannelData: () => data }
   }
   createBufferSource() {
-    const source = { buffer: null, onended: null, connect() {}, start: vi.fn(), stop: vi.fn() }
+    const source = { buffer: null, onended: null, connect() {}, start: vi.fn((when: number) => { this.currentTime = when }), stop: vi.fn() }
     audioSources.push(source)
     return source
   }

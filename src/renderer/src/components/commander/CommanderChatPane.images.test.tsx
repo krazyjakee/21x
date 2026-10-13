@@ -68,6 +68,7 @@ beforeEach(() => {
   clearCommanderImageCache()
   useAgentStore.setState({ agents: [], isLoading: false, error: null, sessions: new Map() })
   useCommanderStore.setState({
+    drafts: {},
     sessions: [], reportInbox: null, unseenReports: {}, recentAction: null, undoingActions: [], undoneActions: [], selectedSessionId: null, search: '', showArchived: false, messages: {}, streaming: {}, turnErrors: {}, isLoading: false, error: null
   })
   api.listSessions.mockResolvedValue([session()])

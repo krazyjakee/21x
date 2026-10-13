@@ -126,7 +126,7 @@ export function ActivityAnnouncer() {
 
       const expiresAt = session.observedAt + ACTIVITY_STALE_MS
       scheduleActivityDeadline(expiresAt)
-      const fresh = session.observedAt <= now && now < expiresAt
+      const fresh = !session.disconnected && session.observedAt <= now && now < expiresAt
       if (!previous) {
         // Hydration/first sighting establishes the baseline without speaking.
         connectionRef.current.set(taskId, { lost: !fresh, announcedLost: false })

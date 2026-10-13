@@ -39,6 +39,8 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 beforeEach(() => {
+  // Controlled capture boundary for fake drivers; no physical microphone.
+  vi.spyOn(voiceCapture, 'isCapturing', 'get').mockImplementation(() => !!useVoiceStore.getState().turnId && useVoiceStore.getState().state === 'listening')
   vi.clearAllMocks()
   __resetCommanderCall()
   __resetCommanderActivity()
@@ -86,6 +88,7 @@ describe('Independent PR 164 adversarial review', () => {
   })
   it('End closes a published microphone turn while capture opening remains pending (real voice-store action)', async () => {
     const capture = deferred<boolean>()
+    vi.spyOn(voiceCapture, 'isCapturing', 'get').mockReturnValue(false)
     vi.spyOn(voiceCapture, 'start').mockImplementation(() => capture.promise)
     vi.spyOn(voiceCapture, 'stop').mockImplementation(() => {})
     useVoiceStore.setState({ startTurn: initial.startTurn, cancel: initial.cancel })
@@ -154,14 +157,14 @@ describe('Independent PR 164 adversarial review', () => {
     emit({ type: 'messages_appended', sessionId: 'session-1', messages: [{ id: 'report1', role: 'report', project_id: 'p' }] } as CommanderEvent)
     expect(useCommanderCallStore.getState().lastEvent).toMatchObject({ kind: 'report', messageId: 'report1' })
   })
-  it('first queued audio updates Speaking and speech_start without waiting for another speech event', async () => {
+  it('first audible audio updates Speaking and speech_start without waiting for another speech event', async () => {
     class AudioGraph {
       state = 'running'
       currentTime = 0
       destination = {}
       createAnalyser() { return { fftSize: 256, frequencyBinCount: 128, connect() {}, disconnect() {}, getByteTimeDomainData(data: Uint8Array) { data.fill(140) } } }
       createBuffer(_channels: number, length: number, sampleRate: number) { return { duration: length / sampleRate, getChannelData: () => new Float32Array(length) } }
-      createBufferSource() { return { buffer: null, onended: null, connect() {}, start() {}, stop() {} } }
+      createBufferSource() { return { buffer: null, onended: null, connect() {}, start: (when: number) => { this.currentTime = when }, stop() {} } }
       resume() { return Promise.resolve() }
       close() { return Promise.resolve() }
     }

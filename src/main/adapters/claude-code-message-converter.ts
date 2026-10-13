@@ -427,6 +427,8 @@ export function convertSDKMessageToParts(
       }
     }
   } else if (msgWithProps.type === 'system') {
+    // Compaction observations have one dedicated ledger/divider projection.
+    if (msgWithProps.subtype === 'compact_boundary') return parts
     // Skip system init messages - they're internal session setup
     if (msgWithProps.subtype === ClaudeSystemSubtype.INIT) {
       return parts

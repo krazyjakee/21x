@@ -82,12 +82,14 @@ import { SettingsTab } from '@/types'
 import { CommanderVoiceControls } from './CommanderVoiceControls'
 import { CommanderCallHost } from './CommanderCallHost'
 import { __resetCommanderCall } from '@/stores/commander-call-store'
+import { voiceCapture } from '@/lib/voice-capture'
 
 function renderVoice() {
   return render(<><CommanderCallHost /><CommanderVoiceControls /></>)
 }
 
 beforeEach(() => {
+  vi.spyOn(voiceCapture, 'isCapturing', 'get').mockImplementation(() => !!mocks.voiceState.turnId && mocks.voiceState.state === 'listening')
   mocks.voiceState.available = true
   mocks.voiceState.enabled = true
   mocks.voiceState.runtime.installed = true
@@ -111,6 +113,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  vi.restoreAllMocks()
   clearDictationTarget()
   __resetCommanderCall()
 })

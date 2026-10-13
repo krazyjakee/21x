@@ -1,4 +1,5 @@
 import { classifyProviderFailure, type ProviderFailure } from '../agent-manager/provider-failure'
+import { AdapterCompactionTracker, type AdapterCompactionObservation } from '../sessions/compaction'
 /**
  * Unified ACP (Agent Client Protocol) adapter for all ACP-compatible coding agents.
  * Supports: codex-acp and cursor-agent.
@@ -109,6 +110,7 @@ export class AcpAdapter implements CodingAgentAdapter {
   private agentType: AcpAgentType
   private agentConfig: AcpAgentConfig
   private sessions = new Map<string, AcpSession>()
+  private readonly compactions = new WeakMap<AcpSession, AdapterCompactionTracker>()
   private debugRpcLogs: boolean
 
   /** Callback set by agent-manager to trigger an immediate poll cycle */
@@ -123,6 +125,21 @@ export class AcpAdapter implements CodingAgentAdapter {
 
   private get label(): string {
     return `AcpAdapter/${this.agentType}`
+  }
+
+  private compactionTracker(session: AcpSession): AdapterCompactionTracker {
+    let tracker = this.compactions.get(session)
+    if (!tracker) {
+      tracker = new AdapterCompactionTracker(this.agentType)
+      this.compactions.set(session, tracker)
+    }
+    return tracker
+  }
+
+  async getCompactionObservations(sessionId: string, _config: SessionConfig): Promise<AdapterCompactionObservation[]> {
+    const session = this.sessions.get(sessionId)
+    return session ? this.compactionTracker(session).snapshot(session.acpSessionId || sessionId)
+      .map((observation) => ({ ...observation, backendSessionId: sessionId })) : []
   }
 
   /** Returns true when Codex uses API-key auth; see applyCodexAuthEnv. */
@@ -728,6 +745,23 @@ export class AcpAdapter implements CodingAgentAdapter {
     // calls), so notifications are buffered as-is.
     if ('method' in message && !('id' in message)) {
       const notification = message as JsonRpcNotification
+
+      if (notification.method === 'session/update') {
+        const params = notification.params as { sessionId?: string; update?: Record<string, unknown> } | undefined
+        // During session/new the process can stream history before its native
+        // session ID is assigned. Preserve that normal ingestion path; once
+        // known, reject notifications belonging to another native session.
+        if (session.acpSessionId && params?.sessionId && params.sessionId !== session.acpSessionId) return
+        const update = params?.update
+        // ACP usage_update.used is current context occupancy. Cost and
+        // prompt-response usage are cumulative and cannot prove compaction.
+        if (update?.sessionUpdate === 'usage_update' &&
+            (!params?.sessionId || params.sessionId === (session.acpSessionId || session.sessionId))) {
+          this.compactionTracker(session).observeContext(session.acpSessionId || session.sessionId,
+            `${session.activeTurnId ?? session.currentTurnId}:${update.used}`, update.used,
+            String(session.activeTurnId ?? session.currentTurnId))
+        }
+      }
 
       if (this.debugRpcLogs) {
         console.log(`[${this.label}] << Notification: ${notification.method}`)

@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button'
 import { useCommanderStore } from '@/stores/commander-store'
 import { useUIStore } from '@/stores/ui-store'
 import { useSkillStore } from '@/stores/skill-store'
+import { useCommanderCallUiStore } from '@/stores/commander-call-ui-store'
 import { formatToolResult, toolCallLabel } from './tool-call-label'
 
 type CommanderToolCall = NonNullable<CommanderMessage['tool_calls']>[number]
@@ -45,10 +46,10 @@ export function ActionCard({ call, result, requestedBy, compact = false }: {
     {!compact && action && <dl className="mt-2 space-y-1 text-sm leading-relaxed">{action.changes.map((change, index) => <div key={index} className="break-words"><dt className="inline font-medium">{change.field}: </dt><dd className="inline"><span>{valueText(change.before)}</span><span aria-label="changes to"> → </span><span>{valueText(change.after)}</span></dd></div>)}</dl>}
     {!compact && requestedBy?.input_mode === 'voice' && <p className="mt-2 break-words text-sm leading-relaxed text-muted-foreground">Heard: “{requestedBy.content}”</p>}
     <div className="mt-3 flex flex-wrap items-center gap-2">
-      {action?.undoId ? <Button size="sm" variant="outline" disabled={undoing || undone} onClick={() => { setError(''); void useCommanderStore.getState().undoAction(result.session_id, action.undoId!).catch(reason => setError(reason instanceof Error ? reason.message : 'The action could not be undone.')) }}><Undo2 className="size-icon-sm" aria-hidden="true" />{undone ? 'Undone' : undoing ? 'Undoing…' : 'Undo'}</Button> : <span className="text-xs text-muted-foreground">Can't be undone here</span>}
+      {action?.undoId ? <Button size="sm" variant="outline" disabled={undoing || undone} onClick={() => { setError(''); void useCommanderStore.getState().undoAction(result.session_id, action.undoId!).catch(reason => { const message = reason instanceof Error ? reason.message : 'The action could not be undone.'; setError(message); useCommanderCallUiStore.getState().announce(message) }) }}><Undo2 className="size-icon-sm" aria-hidden="true" />{undone ? 'Undone' : undoing ? 'Undoing…' : 'Undo'}</Button> : <span className="text-xs text-muted-foreground">Can't be undone here</span>}
       {action && <Button size="sm" variant="ghost" onClick={() => openTarget(action.target)}><ExternalLink className="size-icon-sm" aria-hidden="true" />Open {action.target.kind === 'repo' || action.target.kind === 'resource' ? 'project' : action.target.kind === 'all-projects' ? 'projects' : action.target.kind}</Button>}
     </div>
-    {error && <p role="alert" className="mt-2 text-sm leading-relaxed text-destructive">{error}</p>}
+    {error && <p className="mt-2 text-sm leading-relaxed text-destructive">{error}</p>}
     {!compact && <details className="mt-3"><summary className="cursor-pointer text-sm text-muted-foreground">Show tool details</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-sm leading-relaxed">{formatToolResult(result.content)}</pre></details>}
   </article>
 }

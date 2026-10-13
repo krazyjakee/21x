@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { ActivityObservations, shouldPublishHeartbeat } from './activity-observations'
+import { ActivityObservations, isKnownActivityDisconnect, shouldPublishHeartbeat } from './activity-observations'
 
 describe('ActivityObservations', () => {
+  it('distinguishes known transport loss from a generic temporary status failure', () => {
+    expect(isKnownActivityDisconnect(Object.assign(new Error('Backend stopped'), { code: 'ECONNRESET' }))).toBe(true)
+    expect(isKnownActivityDisconnect(new Error('Client not found'))).toBe(true)
+    expect(isKnownActivityDisconnect(new Error('Temporary service pressure'))).toBe(false)
+  })
   it('stamps every push with the epoch and an increasing sequence', () => {
     const o = new ActivityObservations(() => 0, 5_000, 'E')
     expect(o.stamp()).toEqual({ epoch: 'E', seq: 1 })

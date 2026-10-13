@@ -15,10 +15,13 @@ class FakeAudioContext {
 }
 
 function stream() {
-  const track = { stop: vi.fn() }
+  const listeners = new Map<string, () => void>()
+  const track = { stop: vi.fn(), readyState: 'live', enabled: true, muted: false,
+    addEventListener: vi.fn((event: string, callback: () => void) => { listeners.set(event, callback) }),
+    removeEventListener: vi.fn((event: string) => { listeners.delete(event) }) }
   return {
-    track,
-    value: { getTracks: () => [track] } as unknown as MediaStream
+    track, listeners,
+    value: { getTracks: () => [track], getAudioTracks: () => [track] } as unknown as MediaStream
   }
 }
 
@@ -39,6 +42,47 @@ afterEach(() => {
 })
 
 describe('VoiceCapture acquisition ownership', () => {
+  it('invalidates physical capture on track loss and never lets a retired track stop its replacement', async () => {
+    const first = stream()
+    const second = stream()
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValueOnce(first.value).mockResolvedValueOnce(second.value) } })
+    const capture = new VoiceCapture()
+    const changed = vi.fn()
+    const off = capture.subscribeActivity(changed)
+    const onError = vi.fn()
+    await capture.start({ onAudio: vi.fn(), onError })
+    expect(capture.isCapturing).toBe(true)
+    const ended = first.listeners.get('ended')!
+    first.track.readyState = 'ended'
+    expect(capture.isCapturing).toBe(false)
+    ended()
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining('microphone disconnected'))
+    expect(first.track.stop).toHaveBeenCalledOnce()
+    await capture.start({ onAudio: vi.fn(), onError })
+    ended()
+    expect(capture.isCapturing).toBe(true)
+    expect(second.track.stop).not.toHaveBeenCalled()
+    expect(changed).toHaveBeenCalledTimes(3)
+    capture.stop(); off()
+  })
+
+  it('does not claim capture from a muted track or suspended audio context', async () => {
+    const input = stream()
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: vi.fn(async () => input.value) } })
+    const capture = new VoiceCapture()
+    await capture.start({ onAudio: vi.fn() })
+    const context = (capture as unknown as { context: FakeAudioContext }).context
+    input.track.muted = true
+    expect(capture.isCapturing).toBe(false)
+    input.track.muted = false
+    context.state = 'suspended'
+    expect(capture.isCapturing).toBe(false)
+    context.state = 'running'
+    expect(capture.isCapturing).toBe(true)
+    capture.stop()
+  })
+
   it('stops a stream that resolves after End and reports no cancellation error', async () => {
     let resolveMedia!: (value: MediaStream) => void
     const getUserMedia = vi.fn(() => new Promise<MediaStream>((resolve) => { resolveMedia = resolve }))

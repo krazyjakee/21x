@@ -35,6 +35,7 @@ const api = mocks.commanderApi
 
 import { useAgentStore } from '@/stores/agent-store'
 import { useCommanderStore } from '@/stores/commander-store'
+import { useCommanderCallUiStore } from '@/stores/commander-call-ui-store'
 import { CommanderWorkspace } from './CommanderWorkspace'
 import { toolCallLabel } from './tool-call-label'
 
@@ -69,8 +70,10 @@ function renderWorkspace() {
 
 
 beforeEach(() => {
+  useCommanderCallUiStore.setState({ captions: true, captionSize: 'medium', panelOpen: true, pipRequested: false, notice: null })
   useAgentStore.setState({ agents: [], isLoading: false, error: null, sessions: new Map() })
   useCommanderStore.setState({
+    drafts: {},
     sessions: [], reportInbox: null, unseenReports: {}, recentAction: null, undoneActions: [], undoingActions: [],
     selectedSessionId: null,
     search: '',
@@ -106,6 +109,16 @@ afterEach(() => {
 })
 
 describe('CommanderWorkspace', () => {
+  it('restores the session draft when returning after the workspace unmounts', async () => {
+    api.listSessions.mockResolvedValue([session()])
+    const first = renderWorkspace()
+    fireEvent.click(await screen.findByText('Launch'))
+    fireEvent.change(screen.getByLabelText('Message the Commander'), { target: { value: 'A draft before navigating away' } })
+    first.unmount()
+    render(<CommanderWorkspace />)
+    expect(screen.getByLabelText('Message the Commander')).toHaveValue('A draft before navigating away')
+    expect(api.send).not.toHaveBeenCalled()
+  })
   it('starts with the stage beside Chat and preserves the typed draft across panel and tab toggles', async () => {
     api.listSessions.mockResolvedValue([session()])
     renderWorkspace(); fireEvent.click(await screen.findByText('Launch'))

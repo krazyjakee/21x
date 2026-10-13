@@ -1,4 +1,5 @@
 import { reportedTokenUsage } from '../sessions/token-estimator'
+import { AdapterCompactionTracker, promptContextTokens, type AdapterCompactionObservation } from '../sessions/compaction'
 import { classifyProviderFailure, type ProviderFailure } from '../agent-manager/provider-failure'
 import { Agent as UndiciAgent } from 'undici'
 import { homedir } from 'os'
@@ -86,6 +87,8 @@ export class OpencodeAdapter implements CodingAgentAdapter {
   /** A separate V2 client with a reasonable timeout for quick operations (config, providers, health) */
   private quickClient: V2OpencodeClient | null = null
   private clients: Map<string, OpencodeClient> = new Map() // sessionId -> ocClient (default timeout, for polling/status/create)
+  private readonly compactions = new Map<string, AdapterCompactionTracker>()
+  private readonly contextTurnKeys = new Map<string, string>()
   /** Separate clients with no timeout, used ONLY for session.prompt() which runs indefinitely */
   private promptClients: Map<string, OpencodeClient> = new Map()
   private v2Client: V2OpencodeClient | null = null
@@ -604,6 +607,8 @@ export class OpencodeAdapter implements CodingAgentAdapter {
   ): void {
     setTillDoneSession(this.tillDoneConfigPath, sessionId, config.tillDone !== false)
     this.clients.set(sessionId, connection.ocClient)
+    this.compactions.delete(sessionId)
+    this.contextTurnKeys.delete(sessionId)
     this.promptClients.set(sessionId, connection.promptClient)
     this.sessionPermissionModes.set(sessionId, config.permissionMode || 'ask')
     if (config.workspaceDir) this.sessionWorkspaceDirs.set(sessionId, config.workspaceDir)
@@ -835,6 +840,7 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     const client = this.clients.get(sessionId)
     if (!client) return null
     const messages = await this.fetchMessages(client, sessionId, config.workspaceDir)
+    this.observeContext(sessionId, messages)
     const latestUser = messages.findLastIndex((message) => message.info?.role === 'user')
     let inputTokens = 0
     let outputTokens = 0
@@ -848,6 +854,23 @@ export class OpencodeAdapter implements CodingAgentAdapter {
       outputTokens += usage.outputTokens
     }
     return reported ? { inputTokens, outputTokens, provenance: 'reported', turnId: messages[latestUser]?.info?.id } : null
+  }
+
+  private compactionTracker(sessionId: string): AdapterCompactionTracker {
+    let tracker = this.compactions.get(sessionId)
+    if (!tracker) { tracker = new AdapterCompactionTracker('opencode'); this.compactions.set(sessionId, tracker) }
+    return tracker
+  }
+
+  private observeContext(sessionId: string, messages: OpencodeMessage[]): void {
+    const user = messages.findLast((message) => message.info?.role === 'user')?.info
+    if (typeof user?.id === 'string') this.contextTurnKeys.set(sessionId, user.id)
+    const assistant = messages.findLast((message) => message.info?.role === 'assistant')?.info
+    if (typeof assistant?.id === 'string') this.compactionTracker(sessionId).observeContext(sessionId, assistant.id, promptContextTokens(assistant.tokens, 'opencode'), user?.id)
+  }
+
+  async getCompactionObservations(sessionId: string, _config: SessionConfig): Promise<AdapterCompactionObservation[]> {
+    return this.clients.has(sessionId) ? this.compactionTracker(sessionId).snapshot(sessionId) : []
   }
 
   private async fetchMessages(ocClient: OpencodeClient, sessionId: string, workspaceDir?: string): Promise<OpencodeMessage[]> {
@@ -971,6 +994,7 @@ export class OpencodeAdapter implements CodingAgentAdapter {
       return []
     }
     const messages = await this.fetchMessages(ocClient, sessionId, config.workspaceDir)
+    this.observeContext(sessionId, messages)
     return convertPolledParts(messages, seenMessageIds, seenPartIds, partContentLengths)
   }
 
@@ -1026,6 +1050,8 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     // else would ever stop them.
     await this.disconnectSessionMcpServers(sessionId)
     this.clients.delete(sessionId)
+    this.compactions.delete(sessionId)
+    this.contextTurnKeys.delete(sessionId)
     this.promptClients.delete(sessionId)
     this.pendingPermissions.delete(sessionId)
     this.sessionPermissionModes.delete(sessionId)
@@ -1316,6 +1342,22 @@ export class OpencodeAdapter implements CodingAgentAdapter {
     // Unwrap /global/event payload envelope if present
     const inner = (event.payload || event) as Record<string, unknown>
     const type = inner.type as string | undefined
+
+    const properties = (inner.properties || {}) as Record<string, unknown>
+    if (type === 'message.updated') {
+      const info = properties.info && typeof properties.info === 'object' ? properties.info as Record<string, unknown> : {}
+      if (info.role === 'user' && typeof info.sessionID === 'string' && typeof info.id === 'string' && this.clients.has(info.sessionID)) this.contextTurnKeys.set(info.sessionID, info.id)
+    }
+    if (type === 'session.compacted') {
+      const sessionId = properties.sessionID || properties.sessionId
+      if (typeof sessionId === 'string' && this.clients.has(sessionId)) {
+        const turnId = this.contextTurnKeys.get(sessionId)
+        const key = String(inner.id || properties.id || properties.messageID || `session.compacted:${turnId || 'initial'}`)
+        this.compactionTracker(sessionId).observeExplicit(sessionId, key, 'session.compacted', { turnId })
+        this.onDataAvailable?.(sessionId)
+      }
+      return
+    }
 
     if (type === 'server.instance.disposed' || type === 'global.disposed') {
       const props = (inner.properties || {}) as Record<string, unknown>

@@ -274,6 +274,12 @@ export function registerCommanderHandlers(deps: IpcDeps, options: CommanderIpcOp
     return { cancelled: commander.cancel(payload.sessionId) }
   })
 
+  ipcMain.handle('commander:getActivity', (event, payload: { sessionId?: string }) => {
+    trusted(event, 'commander:getActivity')
+    const sessionId = requireString(payload?.sessionId, 'sessionId')
+    return commander.activitySnapshot(sessionId)
+  })
+
   ipcMain.handle('commander:undoAction', (event, payload: { sessionId?: string; actionId?: string }) => {
     trusted(event, 'commander:undoAction')
     const sessionId = requireString(payload?.sessionId, 'sessionId')

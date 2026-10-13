@@ -27,7 +27,7 @@ const SCHEDULING_LEAD_SECONDS = 0.06
 export class VoicePlayback {
   private context: AudioContext | null = null
   private analyser: AnalyserNode | null = null
-  private sources = new Set<AudioBufferSourceNode>()
+  private sources = new Map<AudioBufferSourceNode, { start: number; end: number }>()
   private speechId: string | null = null
   private speechGeneration: number | null = null
   /** Highest main-process lease observed, retained after playback stops. */
@@ -39,13 +39,18 @@ export class VoicePlayback {
   private activityRevision = 0
   private readonly activityListeners = new Set<() => void>()
   private levelData: Uint8Array<ArrayBuffer> | null = null
+  private boundaryTimer: ReturnType<typeof setTimeout> | null = null
 
   /** A low-frequency lifecycle signal for truthful activity indicators. It is
    * emitted only when a passage opens/closes or queued audio starts/drains —
    * never for analyser frames. */
   subscribeActivity = (listener: () => void): (() => void) => {
     this.activityListeners.add(listener)
-    return () => this.activityListeners.delete(listener)
+    this.scheduleAudioBoundary()
+    return () => {
+      this.activityListeners.delete(listener)
+      if (!this.activityListeners.size) this.clearAudioBoundary()
+    }
   }
 
   get activitySnapshot(): number {
@@ -78,6 +83,35 @@ export class VoicePlayback {
    */
   get hasQueuedAudio(): boolean {
     return this.pending > 0
+  }
+
+  /** Scheduled buffers prove speech only while the audio clock is running
+   * within a source's playback interval. Queued/suspended audio is pending. */
+  get hasAudibleAudio(): boolean {
+    if (!this.speechId || this.context?.state !== 'running') return false
+    const now = this.context.currentTime
+    return [...this.sources.values()].some(({ start, end }) => now >= start && now < end)
+  }
+
+  private clearAudioBoundary(): void {
+    if (this.boundaryTimer !== null) clearTimeout(this.boundaryTimer)
+    this.boundaryTimer = null
+  }
+
+  /** One source-boundary timer, only with activity consumers; no audio or
+   * animation polling. Source end/state-change callbacks cover other edges. */
+  private scheduleAudioBoundary(): void {
+    this.clearAudioBoundary()
+    const context = this.context
+    if (!this.activityListeners.size || !this.speechId || context?.state !== 'running') return
+    const starts = [...this.sources.values()].map(({ start }) => start).filter(start => start > context.currentTime)
+    if (!starts.length) return
+    this.boundaryTimer = setTimeout(() => {
+      this.boundaryTimer = null
+      if (this.context !== context || !this.speechId) return
+      this.notifyActivity()
+      this.scheduleAudioBoundary()
+    }, Math.ceil((Math.min(...starts) - context.currentTime) * 1000) + 5)
   }
 
   /**
@@ -143,17 +177,19 @@ export class VoicePlayback {
     this.nextStartTime = startAt + buffer.duration
     const queueWasEmpty = this.pending === 0
     this.pending += 1
-    if (queueWasEmpty) this.notifyActivity()
     source.onended = () => {
       this.sources.delete(source)
       this.pending -= 1
+      this.notifyActivity()
+      this.scheduleAudioBoundary()
       if (this.pending <= 0 && this.speechId === speechId) {
-        this.notifyActivity()
         this.handlers.onDrained?.()
       }
     }
-    this.sources.add(source)
+    this.sources.set(source, { start: startAt, end: startAt + buffer.duration })
     source.start(startAt)
+    if (queueWasEmpty) this.notifyActivity()
+    this.scheduleAudioBoundary()
     this.startLevelReporting()
   }
 
@@ -161,7 +197,8 @@ export class VoicePlayback {
   stop(speechGeneration?: number): boolean {
     if (speechGeneration !== undefined && speechGeneration !== this.speechGeneration) return false
     const changed = this.speechId !== null || this.pending > 0
-    for (const source of this.sources) {
+    this.clearAudioBoundary()
+    for (const source of this.sources.keys()) {
       try {
         source.onended = null
         source.stop()
@@ -184,6 +221,7 @@ export class VoicePlayback {
   async release(): Promise<void> {
     this.stop()
     const context = this.context
+    if (context) context.onstatechange = null
     this.analyser?.disconnect()
     this.analyser = null
     this.context = null
@@ -209,6 +247,11 @@ export class VoicePlayback {
     analyser.connect(context.destination)
     this.context = context
     this.analyser = analyser
+    context.onstatechange = () => {
+      if (this.context !== context) return
+      this.notifyActivity()
+      this.scheduleAudioBoundary()
+    }
     return context
   }
 
@@ -219,7 +262,7 @@ export class VoicePlayback {
    */
   get outputLevel(): number {
     const analyser = this.analyser
-    if (!analyser || !this.speechId || this.pending <= 0) return 0
+    if (!analyser || !this.hasAudibleAudio) return 0
     if (!this.levelData || this.levelData.length !== analyser.frequencyBinCount) {
       this.levelData = new Uint8Array(analyser.frequencyBinCount)
     }

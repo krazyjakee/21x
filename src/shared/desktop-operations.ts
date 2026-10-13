@@ -71,6 +71,7 @@ export interface DesktopCommandMap {
   "commander:archiveSession": { apiArguments: Parameters<NonNullable<DesktopApi["commander"]["archiveSession"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["commander"]["archiveSession"]>>> }
   "commander:cancel": { apiArguments: Parameters<NonNullable<DesktopApi["commander"]["cancel"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["commander"]["cancel"]>>> }
   "commander:createSession": { apiArguments: Parameters<NonNullable<DesktopApi["commander"]["createSession"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["commander"]["createSession"]>>> }
+  "commander:getActivity": { apiArguments: Parameters<NonNullable<DesktopApi["commander"]["getActivity"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["commander"]["getActivity"]>>> }
   "commander:getImage": { apiArguments: Parameters<NonNullable<DesktopApi["commander"]["getImage"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["commander"]["getImage"]>>> }
   "commander:listMessages": { apiArguments: Parameters<NonNullable<DesktopApi["commander"]["listMessages"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["commander"]["listMessages"]>>> }
   "commander:listSessions": { apiArguments: Parameters<NonNullable<DesktopApi["commander"]["listSessions"]>>; result: Awaited<ReturnType<NonNullable<DesktopApi["commander"]["listSessions"]>>> }
@@ -403,6 +404,7 @@ export const DESKTOP_OPERATION_MANIFEST = {
   "command/commander:cancel": {"name":"commander:cancel","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/commander:createSession": {"name":"commander:createSession","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "event/commander:event": {"name":"commander:event","kind":"event","disposition":"retained","owner":"service","caller":"service","destination":"trusted-desktop-main"},
+  "command/commander:getActivity": {"name":"commander:getActivity","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/commander:getImage": {"name":"commander:getImage","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/commander:listMessages": {"name":"commander:listMessages","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},
   "command/commander:listSessions": {"name":"commander:listSessions","kind":"command","disposition":"retained","owner":"service","caller":"trusted-desktop-main","destination":"service"},

@@ -68,6 +68,20 @@ export const KEYBOARD_SHORTCUT_GROUPS = [
     ]
   },
   {
+    label: 'Commander call',
+    shortcuts: [
+      { keys: ['Cmd/Ctrl', 'D'], label: 'Toggle Commander microphone outside text fields' },
+      { keys: ['Space (hold)'], label: 'Push to talk outside text fields' },
+      { keys: ['Esc'], label: 'Stop the Commander reply; keep the call open' },
+      { keys: ['Cmd/Ctrl', 'Shift', 'C'], label: 'Toggle Commander captions' },
+      { keys: ['Cmd/Ctrl', '\\'], label: 'Toggle Commander Chat panel' },
+      { keys: ['Cmd/Ctrl', 'Shift', 'M'], label: 'Commander full view / floating call' },
+      { keys: ['Cmd/Ctrl', 'Shift', 'E'], label: 'End Commander call' },
+      { keys: ['Cmd/Ctrl', 'Z'], label: 'Undo latest reversible Commander action outside text fields' },
+      { keys: ['Cmd/Ctrl', 'Shift', 'Space'], label: 'Voice shortcut: active Commander call, Captain otherwise (configurable)' }
+    ]
+  },
+  {
     label: 'Audio',
     shortcuts: [
       { keys: ['V', 'T'], label: 'Toggle task audio' },
@@ -126,7 +140,7 @@ export function findComposerElement(): HTMLTextAreaElement | null {
   }
   // Fallback: any visible composer textarea inside the task workspace
   const fallback = document.querySelector<HTMLTextAreaElement>('[data-voice-composer] textarea')
-  if (fallback && !fallback.disabled && fallback.offsetParent !== null) return fallback
+  if (fallback && !fallback.disabled && !fallback.readOnly && !fallback.closest('[aria-hidden="true"], [hidden], [inert]') && fallback.offsetParent !== null) return fallback
   return null
 }
 

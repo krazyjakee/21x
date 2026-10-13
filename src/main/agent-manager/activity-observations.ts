@@ -59,3 +59,12 @@ export class ActivityObservations {
 export function shouldPublishHeartbeat(status: string): boolean {
   return status === 'working' || status === 'waiting_approval'
 }
+
+/** A failed request alone may be temporary. These signals specifically mean
+ * the local backend/session transport no longer exists or is disconnected. */
+export function isKnownActivityDisconnect(error: unknown): boolean {
+  const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+  return ['ECONNREFUSED', 'ECONNRESET', 'EPIPE', 'ENOTCONN'].includes(code)
+    || /client not found|session not found|connection (?:closed|lost|refused)|socket (?:closed|disconnected)/i.test(message)
+}

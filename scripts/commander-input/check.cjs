@@ -3,6 +3,7 @@ const assert = require('node:assert/strict')
 const url = process.env.COMMANDER_INPUT_URL
 app.setPath('userData', process.env.COMMANDER_INPUT_PROFILE)
 app.commandLine.appendSwitch('disable-gpu')
+if (process.env.COMMANDER_SCREEN_READER === '1') app.commandLine.appendSwitch('force-renderer-accessibility')
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 app.whenReady().then(async () => {
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith(url) && !details.url.startsWith('devtools:') }))
@@ -32,7 +33,7 @@ app.whenReady().then(async () => {
     wc.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
     await pause(30)
   }
-  const state = () => js(`(() => { const f = ${field}, r = f.getBoundingClientRect(); return { active: { tag: document.activeElement?.tagName, label: document.activeElement?.getAttribute("aria-label"), hidden: document.activeElement?.getAttribute("aria-hidden"), readOnly: document.activeElement?.readOnly }, disabled: f.disabled, readOnly: f.readOnly, hidden: !!f.closest('[aria-hidden="true"], [hidden], [inert]'), pointerEvents: getComputedStyle(f).pointerEvents, hit: document.elementFromPoint(r.x+r.width/2,r.y+r.height/2) === f, value: f.value } })()`)
+  const state = () => js(`(() => { const f = ${field}, r = f?.getBoundingClientRect(); return { active: { tag: document.activeElement?.tagName, label: document.activeElement?.getAttribute("aria-label"), hidden: document.activeElement?.getAttribute("aria-hidden"), readOnly: document.activeElement?.readOnly }, disabled: f?.disabled, readOnly: f?.readOnly, hidden: f ? !!f.closest('[aria-hidden="true"], [hidden], [inert]') : true, pointerEvents: f ? getComputedStyle(f).pointerEvents : null, hit: r ? document.elementFromPoint(r.x+r.width/2,r.y+r.height/2) === f : false, value: f?.value } })()`)
   const failures = []
   const check = async (name, test) => {
     win.setContentSize(1200, 900); wc.setZoomFactor(1)
@@ -224,6 +225,84 @@ app.whenReady().then(async () => {
     await click('[aria-label="Stop the reply"]')
     await wait(`!document.querySelector('[data-testid="commander-output-ring"]')`)
     assert.equal(await js('window.fixture.callState().status'), 'live')
+  })
+  await check('native floating call drag, navigation, single captions and full-view focus restoration', async () => {
+    await click('[aria-label="Turn voice mode on"]'); await wait('window.fixture.callState().status === "live"')
+    await click('textarea[aria-label="Message the Commander"]'); await type('preserved draft')
+    await key('M', ['control', 'shift'])
+    await wait(`document.querySelector('[data-testid="commander-pip"]')`)
+    assert.equal(await js('document.activeElement.ariaLabel'), 'Expand Commander call')
+    await js('window.fixture.partial("Exactly one partial caption")')
+    assert.equal(await js(`document.querySelectorAll('[data-testid="commander-voice-status"]').length`), 1)
+    assert(await js(`!document.querySelector('[data-testid="voice-overlay"]')`))
+    const point = await js(`(() => { const r=document.querySelector('[aria-label="Move Commander call"]').getBoundingClientRect(); return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)} })()`)
+    wc.sendInputEvent({ type: 'mouseMove', ...point }); wc.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
+    wc.sendInputEvent({ type: 'mouseMove', x: 100, y: 70 }); await pause(50)
+    wc.sendInputEvent({ type: 'mouseUp', x: 100, y: 70, button: 'left', clickCount: 1 })
+    await wait(`document.querySelector('.commander-pip-top-left')`)
+    await click('[data-testid="commander-pip-expand"]')
+    await wait(`!document.querySelector('[data-testid="commander-pip"]')`)
+    assert(await js(`document.activeElement === ${field}`)); assert.equal(await js(`${field}.value`), 'preserved draft')
+    await js('window.fixture.navigate("tasks")')
+    await wait(`document.querySelector('[data-testid="commander-pip"]') && !${field}`)
+    await click('[aria-label="Other workspace control"]'); await key('a')
+    assert.equal(await js('document.activeElement.ariaLabel'), 'Other workspace control')
+    assert.equal(await js('window.fixture.captures.length'), 1)
+    await click('[data-testid="commander-pip-expand"]'); await wait(`${field}`)
+    assert.equal(await js(`${field}.value`), 'preserved draft'); assert.equal(await js('window.fixture.captures.length'), 1)
+    await key('E', ['control', 'shift'])
+    assert.equal(await js('window.fixture.callState().status'), 'off')
+  })
+  await check('native captions sizes, keyboard controls, contrast and one silent live-region owner', async () => {
+    await click('[aria-label="Turn voice mode on"]'); await wait('window.fixture.callState().status === "live"')
+    await js('window.fixture.partial("Complete caption text stays available in the dialog and remains silent while it is partial.")')
+    await click('[aria-label="Read full captions"]'); await wait(`document.querySelector('[role="dialog"]')`)
+    for (const [size, expected] of [['small', 13], ['medium', 14], ['large', 18]]) {
+      await js(`(() => { const s=document.querySelector('[aria-label="Caption size"]'); s.value='${size}'; s.dispatchEvent(new Event('change',{bubbles:true})); })()`)
+      assert.equal(await js(`parseFloat(getComputedStyle(document.querySelector('.commander-caption-full')).fontSize)`), expected)
+    }
+    assert(await js(`document.querySelector('[role="dialog"]').textContent.includes('remains silent while it is partial')`))
+    await key('Escape'); await wait(`!document.querySelector('[role="dialog"]')`)
+    await wait(`document.activeElement.ariaLabel === 'Read full captions'`)
+    assert.equal(await js('document.activeElement.ariaLabel'), 'Read full captions')
+    assert.equal(await js('window.fixture.callState().status'), 'live')
+    assert.equal(await js(`document.querySelectorAll('[data-testid="commander-call-announcer"] [aria-live]').length`), 2)
+    assert(await js(`!document.querySelector('[data-testid="commander-call-announcer"]').textContent.includes('remains silent while it is partial')`))
+    await js('window.fixture.speech()')
+    await wait(`document.querySelector('[data-testid="commander-output-ring"]')`)
+    for (const dark of [false, true]) {
+      await js(`document.documentElement.classList.toggle('dark', ${dark})`)
+      const contrast = await js(`(() => {
+        const rgb = color => color.match(/[\\d.]+/g).slice(0,3).map(Number).map(v=>{v/=255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4});
+        const luminance = color => {const c=rgb(color);return c[0]*.2126+c[1]*.7152+c[2]*.0722};
+        const ratio=(a,b)=>{a=luminance(a);b=luminance(b);return(Math.max(a,b)+.05)/(Math.min(a,b)+.05)};
+        const text=getComputedStyle(document.querySelector('.commander-caption-text'));
+        const surface=getComputedStyle(document.querySelector('.commander-caption-strip'));
+        return {caption:ratio(text.color,surface.backgroundColor)};
+      })()`)
+      assert(contrast.caption >= 4.5, 'caption contrast at least 4.5:1')
+      // The ring contrasts against the card/background it surrounds.
+      assert(await js(`(() => {const parse=c=>c.match(/[\\d.]+/g).slice(0,3).map(Number).map(v=>{v/=255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4});const l=c=>{const v=parse(c);return v[0]*.2126+v[1]*.7152+v[2]*.0722};const a=l(getComputedStyle(document.querySelector('[data-testid="commander-output-ring"]')).borderTopColor),b=l(getComputedStyle(document.querySelector('.commander-stage')).backgroundColor);return (Math.max(a,b)+.05)/(Math.min(a,b)+.05)>=3})()`), 'ring contrast at least 3:1')
+    }
+    await click('[aria-label="Mute microphone"]'); await key('End')
+    assert.equal(await js('document.activeElement.ariaLabel'), 'Turn voice mode off')
+    await key('C', ['control', 'shift']); assert(await js(`!document.querySelector('[data-testid="commander-voice-status"]')`))
+    await key('C', ['control', 'shift']); assert(await js(`document.querySelector('[data-testid="commander-voice-status"]')`))
+  })
+  await check('native text undo stays local; eight-second exact-action toast works in PiP', async () => {
+    await click('[aria-label="Turn voice mode on"]'); await wait('window.fixture.callState().status === "live"')
+    await click('textarea[aria-label="Message the Commander"]'); await type('native undo')
+    await js('window.fixture.action()'); await wait(`document.querySelector('[data-testid="commander-action-toast"]')`)
+    await key('z', ['control']); assert.equal(await js('window.fixture.undos.length'), 0)
+    assert.notEqual(await js(`${field}.value`), 'native undo')
+    await js('document.activeElement.blur()'); await key('M', ['control', 'shift'])
+    await wait(`document.querySelector('[data-testid="commander-pip"]')`)
+    await key('z', ['control']); await wait('window.fixture.undos.length === 1')
+    assert.deepEqual(await js('window.fixture.undos[0]'), { sessionId: 'session-1', actionId: 'exact-undo' })
+    assert(await js(`document.querySelector('[data-testid="commander-action-toast"]').textContent.includes('Undone')`))
+    await wait(`!document.querySelector('[data-testid="commander-action-toast"]')`)
+    assert.equal(await js('window.fixture.callState().status'), 'live')
+    await key('E', ['control', 'shift']); assert.equal(await js('window.fixture.callState().status'), 'off')
   })
   win.destroy()
   if (failures.length) throw new Error('Failed: ' + failures.join(', '))

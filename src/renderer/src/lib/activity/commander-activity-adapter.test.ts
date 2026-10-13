@@ -1,8 +1,16 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CommanderEvent } from '@shared/commander'
 import { ACTIVITY_STALE_MS } from '@shared/activity'
 import { deriveActivity } from './derive-activity'
-import { commanderEvidence, reduceCommanderEvent, type CommanderTurnObservation } from './commander-activity-adapter'
+import { __resetCommanderActivity, commanderEvidence, recordCommanderSnapshot, reduceCommanderEvent, retainCommanderSource, useCommanderActivityStore, type CommanderTurnObservation } from './commander-activity-adapter'
+import type { CommanderActivitySnapshot } from '@shared/activity'
+
+beforeEach(() => __resetCommanderActivity())
+afterEach(() => { __resetCommanderActivity(); vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals() })
+
+const snapshot = (over: Partial<CommanderActivitySnapshot> = {}): CommanderActivitySnapshot => ({
+  epoch: 'main-1', sequence: 1, turnId: 't', phase: 'working', ageMs: 0, openTools: [], hasText: true, ...over
+})
 
 const ev = (turnId: string, event: Extract<CommanderEvent, { type: 'turn_event' }>['event']): CommanderEvent => ({
   type: 'turn_event',
@@ -68,5 +76,49 @@ describe('Commander activity adapter', () => {
   it('without a live subscription every result is unknown', () => {
     const obs = run([{ type: 'turn_started', sessionId: 's', turnId: 't1' }])
     expect(deriveActivity(commanderEvidence(obs, false), 0).state).toBe('unknown')
+  })
+
+  it('retains source age and rejects repeated snapshots instead of renewing a silent provider', () => {
+    expect(recordCommanderSnapshot('s', snapshot({ ageMs: 6_000 }), 10_000)).toBe(true)
+    expect(recordCommanderSnapshot('s', snapshot({ ageMs: 9_000 }), 13_000)).toBe(false)
+    const state = useCommanderActivityStore.getState()
+    expect(state.sessions.s.observedAt).toBe(4_000)
+    expect(deriveActivity(commanderEvidence(state.sessions.s, state.subscribed), 19_000).state).toBe('unknown')
+    expect(recordCommanderSnapshot('s', snapshot({ sequence: 2, ageMs: 0 }), 20_000, 500)).toBe(true)
+    expect(useCommanderActivityStore.getState().sessions.s.observedAt).toBe(19_500)
+  })
+
+  it('retires old main epochs and does not replay a finished accent from hydration', () => {
+    recordCommanderSnapshot('s', snapshot({ sequence: 5 }), 0)
+    recordCommanderSnapshot('s', snapshot({ epoch: 'main-2', phase: 'idle', outcome: 'finished' }), 100)
+    expect(recordCommanderSnapshot('s', snapshot({ sequence: 6 }), 200)).toBe(false)
+    const state = useCommanderActivityStore.getState()
+    expect(state.epoch).toBe('main-2')
+    expect(state.sessions.s.outcome).toBeUndefined()
+    expect(deriveActivity(commanderEvidence(state.sessions.s, state.subscribed), 200).state).toBe('idle')
+  })
+
+  it('unknown snapshots and malformed metadata cannot produce a running claim', () => {
+    recordCommanderSnapshot('s', snapshot({ phase: 'unknown' }), 0)
+    const state = useCommanderActivityStore.getState()
+    expect(deriveActivity(commanderEvidence(state.sessions.s, state.subscribed), 0).state).toBe('unknown')
+    expect(recordCommanderSnapshot('s', snapshot({ sequence: 2, ageMs: -1 }), 1)).toBe(false)
+  })
+
+  it('uses one source loop and prevents hung reads or released late replies from refreshing evidence', async () => {
+    vi.useFakeTimers()
+    let resolve!: (value: CommanderActivitySnapshot) => void
+    const pending = new Promise<CommanderActivitySnapshot>(done => { resolve = done })
+    const getActivity = vi.fn(() => pending)
+    vi.stubGlobal('window', { ...window, electronAPI: { ...window.electronAPI,
+      commander: { getActivity, onEvent: () => () => {} } } })
+    const release = retainCommanderSource('s')
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(getActivity).toHaveBeenCalledTimes(1)
+    release()
+    resolve(snapshot())
+    await pending
+    await Promise.resolve()
+    expect(useCommanderActivityStore.getState().sessions.s).toBeUndefined()
   })
 })

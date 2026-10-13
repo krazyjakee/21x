@@ -70,7 +70,7 @@ function setup(getStatus: () => Promise<unknown>) {
   const windowSend = vi.fn()
   ;(mgr as any).mainWindow = { isDestroyed: () => false, webContents: { send: windowSend, isDestroyed: () => false } }
   const sendToRenderer = vi.spyOn(mgr as any, 'sendToRenderer').mockImplementation(() => undefined)
-  const adapter = { pollMessages: vi.fn(async () => []), getStatus: vi.fn(getStatus) }
+  const adapter = { pollMessages: vi.fn(async (): Promise<unknown[]> => []), getStatus: vi.fn(getStatus) }
   const session = {
     agentId: 'agent-1',
     taskId: 'task-1',
@@ -85,7 +85,7 @@ function setup(getStatus: () => Promise<unknown>) {
   ;(mgr as any).sessions.set('session-1', session)
   ;(mgr as any).startAdapterPolling('session-1', adapter, { agentId: 'agent-1', taskId: 'task-1', workspaceDir: '/tmp/ws' }, session)
   const entry = (mgr as any).pollingEntries.get('session-1')
-  const heartbeats = () => windowSend.mock.calls.filter(([channel, data]) => channel === 'agent:status' && (data as any)?.heartbeat)
+  const heartbeats = () => windowSend.mock.calls.filter(([channel, data]) => channel === 'agent:status' && (data as any)?.heartbeat && !(data as any)?.disconnected)
   return { mgr, entry, session, windowSend, sendToRenderer, heartbeats, adapter }
 }
 
@@ -111,13 +111,14 @@ describe('AgentManager activity heartbeats (#95)', () => {
     expect(heartbeats()).toHaveLength(2)
   })
 
-  it('a failed poll publishes nothing', async () => {
-    const { mgr, entry, heartbeats } = setup(async () => {
+  it('a known disconnected poll publishes no live heartbeat and invalidates activity immediately', async () => {
+    const { mgr, entry, heartbeats, windowSend } = setup(async () => {
       throw new Error('Client not found')
     })
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     await (mgr as any).pollSingleSession(entry)
     expect(heartbeats()).toHaveLength(0)
+    expect(windowSend).toHaveBeenCalledWith('agent:status', expect.objectContaining({ disconnected: true, heartbeat: true }))
   })
 
   it('an idle session publishes no heartbeat', async () => {
@@ -142,6 +143,30 @@ describe('AgentManager activity heartbeats (#95)', () => {
 
     expect(heartbeats()).toHaveLength(0)
     expect((mgr as any).pollingEntries.size).toBe(0)
+  })
+
+  it('a delayed output read cannot update a replacement that reused the session id', async () => {
+    const { mgr, entry, session, heartbeats, adapter, sendToRenderer } = setup(async () => ({ type: SessionStatusType.BUSY }))
+    let finish!: (parts: unknown[]) => void
+    adapter.pollMessages.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const polling = (mgr as any).pollSingleSession(entry)
+    ;(mgr as any).sessions.set('session-1', { ...session, createdAt: new Date() })
+    finish([{ id: 'old-output', type: 'text', content: 'Late response' }])
+    await polling
+    expect(sendToRenderer).not.toHaveBeenCalled()
+    expect(adapter.getStatus).not.toHaveBeenCalled()
+    expect(heartbeats()).toHaveLength(0)
+  })
+
+  it('a delayed status read cannot renew a replacement that reused the session id', async () => {
+    let finish!: (status: unknown) => void
+    const { mgr, entry, session, heartbeats, adapter } = setup(() => new Promise(resolve => { finish = resolve }))
+    const polling = (mgr as any).pollSingleSession(entry)
+    await vi.waitFor(() => expect(adapter.getStatus).toHaveBeenCalled())
+    ;(mgr as any).sessions.set('session-1', { ...session, createdAt: new Date() })
+    finish({ type: SessionStatusType.BUSY })
+    await polling
+    expect(heartbeats()).toHaveLength(0)
   })
 
   it('transition pushes carry the same epoch and an increasing sequence', () => {

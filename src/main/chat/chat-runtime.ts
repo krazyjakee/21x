@@ -30,6 +30,12 @@ export interface ChatTurnOptions {
   maxTokens?: number
   /** Optional external signal; the turn also gets its own controller for `cancel()`. */
   signal?: AbortSignal
+  /** Managed callers durably commit a completed model/tool step before the
+   * next effect. Legacy callers keep the existing in-memory behavior. */
+  onStep?: (message: ChatMessage, stepIndex: number) => void | Promise<void>
+  /** Context recovery may request a completed action again. Reuse its saved
+   * result rather than dispatch the same name/arguments a second time. */
+  reuseCompletedTools?: () => boolean
 }
 
 export interface ChatTurnResult {
@@ -56,7 +62,7 @@ export type ChatEventListener = (event: ChatRuntimeEvent) => void
  * "cancelled" result for every call of the last assistant message that lacks
  * one, so the returned history can be sent again.
  */
-function closeUnansweredToolCalls(messages: ChatMessage[]): void {
+function closeUnansweredToolCalls(messages: ChatMessage[], content = 'Cancelled before this tool ran.'): void {
   let lastAssistant = -1
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === 'assistant') {
@@ -71,13 +77,19 @@ function closeUnansweredToolCalls(messages: ChatMessage[]): void {
   )
   for (const call of assistant.toolCalls) {
     if (answered.has(call.id)) continue
-    messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: 'Cancelled before this tool ran.', isError: true })
+    messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content, isError: true })
   }
 }
 
 function clampToolLimit(requested: number | undefined): number {
   const value = Number.isFinite(requested) ? Math.floor(requested as number) : DEFAULT_MAX_TOOL_CALLS_PER_TURN
   return Math.max(0, Math.min(MAX_TOOL_CALLS_PER_TURN_CAP, value))
+}
+
+function toolIdentity(name: string, input: Record<string, unknown>): string {
+  const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
+    : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonical(item)])) : value
+  return `${name}:${JSON.stringify(canonical(input))}`
 }
 
 export class ChatRuntime {
@@ -184,6 +196,8 @@ export class ChatRuntime {
     // Partial assistant text is kept on cancel so the caller can show what arrived.
     let currentText = ''
     let currentCalls: ChatToolCall[] = []
+    let stepIndex = 0
+    const completedTools = new Map<string, { content: string; isError?: boolean }>()
 
     try {
       while (true) {
@@ -221,8 +235,10 @@ export class ChatRuntime {
         }
 
         signal.throwIfAborted()
-        messages.push({ role: 'assistant', content: currentText, ...(currentCalls.length > 0 ? { toolCalls: currentCalls } : {}) })
+        const assistant: ChatMessage = { role: 'assistant', content: currentText, ...(currentCalls.length > 0 ? { toolCalls: currentCalls } : {}) }
+        messages.push(assistant)
         currentText = ''
+        if (options.onStep) await options.onStep(assistant, ++stepIndex)
         const calls = currentCalls
         currentCalls = []
 
@@ -232,10 +248,20 @@ export class ChatRuntime {
         }
         if (stopReason === 'max_tokens') {
           // A truncated tool input parses as a plausible partial object; never run it.
+          if (options.onStep) {
+            const before = messages.length
+            closeUnansweredToolCalls(messages, 'Tool call was not executed because the model response was truncated.')
+            for (const message of messages.slice(before)) await options.onStep(message, ++stepIndex)
+          }
           return finish('max_tokens')
         }
         if (limitReached) {
           // Asked for a text answer and still got tool calls: stop rather than loop.
+          if (options.onStep) {
+            const before = messages.length
+            closeUnansweredToolCalls(messages, 'Tool call was not executed because the turn tool limit was reached.')
+            for (const message of messages.slice(before)) await options.onStep(message, ++stepIndex)
+          }
           return finish('tool_limit')
         }
 
@@ -243,7 +269,12 @@ export class ChatRuntime {
           if (signal.aborted) throw new DOMException('Chat turn cancelled', 'AbortError')
           emit({ type: 'tool_call_start', id: call.id, name: call.name, input: call.input })
           let result: { content: string; isError?: boolean }
-          if (toolCallsUsed >= limit) {
+          const identity = toolIdentity(call.name, call.input)
+          const saved = options.reuseCompletedTools?.() ? completedTools.get(identity) : undefined
+          if (saved) {
+            toolCallsUsed++
+            result = saved
+          } else if (toolCallsUsed >= limit) {
             limitReached = true
             result = {
               content: `Tool-call limit reached for this turn (${limit}). Answer with what you have.`,
@@ -252,15 +283,32 @@ export class ChatRuntime {
           } else {
             toolCallsUsed++
             result = await runTool(toolsByName.get(call.name), call.name, call.input, { signal, toolCallId: call.id })
+            completedTools.set(identity, result)
           }
-          signal.throwIfAborted()
+          if (!options.onStep) signal.throwIfAborted()
           const isError = result.isError === true
+          const tool: ChatMessage = { role: 'tool', toolCallId: call.id, name: call.name, content: result.content, isError }
+          messages.push(tool)
+          if (options.onStep) await options.onStep(tool, ++stepIndex)
+          signal.throwIfAborted()
           emit({ type: 'tool_call_result', id: call.id, name: call.name, content: result.content, isError })
-          messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: result.content, isError })
         }
         if (toolCallsUsed >= limit) limitReached = true
       }
     } catch (err) {
+      if (options.onStep && currentText) {
+        const partial: ChatMessage = { role: 'assistant', content: currentText }
+        messages.push(partial)
+        currentText = ''
+        try { await options.onStep(partial, ++stepIndex) } catch { /* Retain raw history for the caller's final durable flush. */ }
+      }
+      if (options.onStep) {
+        const before = messages.length
+        closeUnansweredToolCalls(messages, 'Tool outcome is unconfirmed after interruption. Review the persisted work before repeating this action.')
+        for (const message of messages.slice(before)) {
+          try { await options.onStep(message, ++stepIndex) } catch { /* The caller still owns the retained result history. */ }
+        }
+      }
       if (isAbortError(err, signal)) {
         // Calls streamed before the abort never ran, so keep only the text.
         if (currentText) messages.push({ role: 'assistant', content: currentText })

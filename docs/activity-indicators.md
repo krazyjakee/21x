@@ -1,6 +1,6 @@
 # Activity indicators
 
-Status of GitHub [#95](https://github.com/krazyjakee/21x/issues/95): **task surfaces complete plus Commander call integration**. This covers the shared vocabulary, freshness rules, indicator primitives, the voice adapter, every task-session surface — canvas panels, the status bar, the nav rail, the Captain entry, the dashboard hero, board cards and the task header bar — and app-level Commander call ownership. The remaining Commander presence surfaces come in follow-up work (see [Not wired here](#not-wired-here)).
+Implementation for GitHub [#95](https://github.com/krazyjakee/21x/issues/95) covers the shared vocabulary, freshness rules, indicator primitives, voice adapter, task/Captain surfaces and Commander stage/PiP integration. Verification is tracked separately from implementation; source and component checks do not substitute for native keyboard and assistive-technology checks.
 
 The indicators answer one question, "is the Commander, a Captain or a task session doing something right now?", and they never claim activity without evidence. **Unknown is not idle, and idle is not running.**
 
@@ -44,7 +44,8 @@ Constants in `src/shared/activity.ts`:
 
 - **Every push is stamped.** `emitStatus` adds `epoch` (one main-process lifetime) and `seq` (increases with every push) to each `agent:status` push (`src/main/agent-manager/activity-observations.ts`). The renderer rejects a push whose sequence is not newer within the same epoch. A new epoch (main restarted) is accepted.
 - **Successful polls send heartbeats.** After an adapter poll where both `pollMessages` and `getStatus` succeed, a session that is `working` or `waiting_approval` publishes a heartbeat, at most once every 5 s: `{ sessionId, agentId, taskId, status, epoch, seq, heartbeat: true }`. Heartbeats go straight to the window with `guardedIpcSend`. They skip `sendToRenderer`, `lastSentStatus`, notifications, the voice bridge and mobile clients, so none of the transition side effects (Captain wakes, queue drains, notifications) can fire.
-- **Silence becomes unknown.** A failed or hung poll sends nothing, so the claim expires to `unknown` within 15 s. A long, quiet tool stays fresh because every successful poll renews it. Replaying the renderer's cached status never renews anything.
+- **Silence becomes unknown.** A failed or hung poll provides no fresh live heartbeat, so the claim expires to `unknown` within 15 s. A long, quiet tool stays fresh because every successful poll renews it. Replaying the renderer's cached status never renews anything.
+- **Known transport loss invalidates immediately.** Missing backend sessions, disconnected sockets and connection refusal send a stamped `disconnected` observation through the window-only heartbeat transport. It changes no task/session lifecycle or approval policy. A new successful observation is required to restore live activity. Delayed reads from a stopped or replaced runtime cannot publish output or bless its successor, even if a session ID is reused.
 - **Idle is not heartbeated.** A verified idle stays fresh for 15 s after the transition and then becomes `unknown`. The badges treat "unknown with no active history" as quiet (see below), so this does not clutter the UI.
 - **Separate observation store.** The renderer keeps these observations in `useSessionActivityStore` (`lib/activity/session-activity-adapter.ts`), apart from the agent store: that store's `initSession` and transcript hydration make up statuses that are not evidence. `agent-store` hands every push to `recordAgentStatus()` and then ignores heartbeats, so its existing behaviour is unchanged. `overview-store` also ignores heartbeats.
 
@@ -54,7 +55,7 @@ Constants in `src/shared/activity.ts`:
 
 ### Commander
 
-`lib/activity/commander-activity-adapter.ts` subscribes to `commander:event` itself, so the state stays current while the Commander view is closed. Events of an older turn are ignored, and a finished turn is not revived. The Commander has no heartbeat yet, so a turn that goes quiet for 15 s shows as "Status unavailable · Last seen replying". The adapter never reads a cached `activeTurnId`.
+`lib/activity/commander-activity-adapter.ts` subscribes to `commander:event` itself, so the state stays current while the Commander view is closed. Main stamps actual turn observations with an epoch and sequence. Old turns, retired process epochs and repeated source snapshots cannot revive activity. A shared five-second `commander:getActivity` read reconciles the selected conversation or surviving call without loading transcript history. It confirms idle from the main-owned runtime; active reads preserve the age of the last real provider/tool event. A silent active turn therefore becomes "Status unavailable" after 15 s. Failed/hung reads do not renew evidence, and overlapping reads are avoided. Snapshot hydration never replays a finished accent.
 
 ### Time and deadlines
 
@@ -65,16 +66,14 @@ All evidence is stamped with monotonic time (`performance.now()`, via `activityN
 `lib/activity/voice-activity-adapter.ts` is the only place indicators read voice state. It **fails closed**:
 
 - The store's `speaking` flag is set when synthesis *starts*, before any audio, and it names no speaker. On its own it never counts as speaking.
-- `speaking` needs three things: the passage attributed by its `speechStart` event (`taskId`) belongs to this entity, the same passage is open in `voicePlayback`, and `hasQueuedAudio` is true.
-- Playback publishes only queue/passage boundary changes (never analyser
-  frames), so the first PCM, a drain, a later sentence and cancellation all
-  re-derive the claim immediately.
+- `speaking` needs three things: the passage attributed by its `speechStart` event (`taskId`) belongs to this entity, the same passage is open in `voicePlayback`, and a running AudioContext clock lies inside a scheduled source's playback interval (`hasAudibleAudio`). Queued buffers before their scheduled start, suspended contexts and silent passage gaps do not prove speaking.
+- Playback publishes source-start, queue/drain, passage and context-state boundaries, never analyser frames. A single boundary timer runs only with activity consumers; Stop/unsubscription cancels it.
 - Unattributed passages give `unknown` for everyone. Commander passages use
   the shared `commander:<sessionId>` key, so only that Commander session may
   claim them.
 - The microphone has no owner of its own, so `listening` is `unknown` unless a
   caller passes a provable owner. The app-level Commander call host supplies
-  the session whose microphone turn it opened.
+  the session whose microphone turn it opened. Capture also requires a running audio graph and a live, enabled, unmuted audio track. Track loss releases only its own capture lease and exposes a microphone recovery error; retired track callbacks cannot stop a replacement. Capture boundary notifications make suspension, mute and Stop visible without polling.
 
 The adapter controls no audio or microphone and adds no audio loop. #89 owns the real output-level speaking ring. Here speaking is a static speaker icon and ring.
 
@@ -137,19 +136,16 @@ Compact surfaces call `isQuietActivity(result)` and render nothing for a verifie
 | Board task card | `components/dashboard/TaskBoard.tsx` | `TaskActivityBadge` in the card's title row. Quiet states render nothing, so a calm board stays calm. The card's durable lifecycle column and the live badge are separate: sitting in the "Agent working" column never makes the badge say "Running". |
 | Task header bar | `components/tasks/TaskHeaderBar.tsx` | `TaskActivityBadge` between the lifecycle status menu and the recovery pill, via `TaskWorkspace`'s `showActivity` prop. Suppressed inside canvas task panels, whose own header owns it. |
 
-## Not wired here
+## Commander ownership
 
-The Commander's own surfaces are **not** wired from this document. The Commander redesign rewrites those files, and it consumes the primitives here rather than the other way round:
+Commander surfaces consume the shared source observations and voice adapter through `useCallPresentation`. The application call host owns microphone/playback lifetime across navigation; stage and PiP are views of that same call:
 
-- Commander chat and the presence stage — [#85](https://github.com/krazyjakee/21x/issues/85).
+- Commander chat and the presence stage — [#85](https://github.com/krazyjakee/21x/issues/85). Chat's secondary thinking animation is suppressed while the same stage/PiP owns presence.
 - The speaking ring driven by the real output level — [#89](https://github.com/krazyjakee/21x/issues/89), which owns `ActivityRing`'s moving variant and supplies `lib/activity/voice-activity-adapter` with a provable playback owner.
 - Picture-in-picture and the action toast — [#87](https://github.com/krazyjakee/21x/issues/87). App-level call-lifetime mounting is already wired by the Commander call host.
-- The Commander `CallAnnouncer` — [#91](https://github.com/krazyjakee/21x/issues/91). The `ActivityAnnouncer` here deliberately says nothing about the Commander.
+- The Commander `CallAnnouncer` — [#91](https://github.com/krazyjakee/21x/issues/91). The task/Captain `ActivityAnnouncer` deliberately says nothing about Commander, so mirrored shell indicators cannot duplicate its speech.
 
-Two pieces of plumbing remain outstanding and belong to whoever touches those files next:
-
-- An authoritative Commander idle snapshot. Until it exists, a quiet Commander turn becomes `unknown` after 15 s — correct, but coarse. The call's verified speaking and listening claims do not rely on that stale turn observation.
-- A typed transport for the new `agent:status` fields in `electron.d.ts`/preload. The fields pass through today because preload forwards the payload unchanged, and the renderer validates them at runtime (`readAgentStatusActivityMeta`).
+Agent status epoch/sequence/heartbeat/disconnection fields and Commander activity snapshots have typed desktop transport and runtime validation. Verified local speaking/listening use their media lifetime even when a provider turn observation is stale. Reports remain quiet inbox updates and do not manufacture active model or speech states.
 
 ## Tests
 

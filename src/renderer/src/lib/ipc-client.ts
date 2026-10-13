@@ -889,6 +889,7 @@ export const commanderApi = {
   cancel: (sessionId: string): Promise<{ cancelled: boolean }> => window.electronAPI.commander.cancel(sessionId),
   undoAction: (sessionId: string, actionId: string): Promise<{ alreadyUndone: boolean; message: CommanderMessage }> =>
     window.electronAPI.commander.undoAction(sessionId, actionId),
+  getActivity: (sessionId: string): Promise<import('@shared/activity').CommanderActivitySnapshot> => window.electronAPI.commander.getActivity(sessionId),
   onEvent: (callback: (event: CommanderEvent) => void): (() => void) => window.electronAPI.commander.onEvent(callback)
 }
 

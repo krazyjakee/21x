@@ -156,6 +156,11 @@ export class CommanderStore {
     return row ? toSession(row) : null
   }
 
+  /** Activity reads only need identity, without counting historical reports. */
+  hasSession(id: string): boolean {
+    return Boolean(this.db.prepare('SELECT 1 FROM commander_sessions WHERE id = ?').get(id))
+  }
+
   /** One durable quiet inbox; a rename or restart never changes its identity. */
   ensureReportInbox(): CommanderSession {
     return this.db.transaction(() => {
@@ -258,11 +263,34 @@ export class CommanderStore {
     return insert()
   }
 
-  /**
-   * Inserts one application-visible effect for one delivery row and
-   * acknowledges that row in the same SQLite transaction. Replays return the
-   * original message without emitting a second report.
-   */
+  /** A runtime step has stable identity before any subsequent tool effect. */
+  appendRuntimeStepOnce(sessionId: string, input: AppendCommanderMessageInput, turnId: string, stepIndex: number): { message: CommanderMessage; inserted: boolean } {
+    if (!['assistant', 'tool'].includes(input.role) || !Number.isSafeInteger(stepIndex) || stepIndex < 1)
+      throw new Error('Invalid managed Commander step')
+    const id = `managed-step:${turnId}:${stepIndex}`
+    const existing = this.getMessage(id)
+    if (existing) {
+      if (existing.session_id !== sessionId || existing.role !== input.role || existing.content !== input.content
+        || existing.tool_call_id !== (input.toolCallId ?? null) || existing.tool_name !== (input.toolName ?? null)
+        || existing.project_id !== (input.projectId ?? null) || existing.correlation_id !== (input.correlationId ?? null)
+        || existing.is_error !== (input.isError === true) || JSON.stringify(existing.tool_calls) !== JSON.stringify(input.toolCalls?.length ? input.toolCalls : null))
+        throw new Error('Managed step identity belongs to different content or owner')
+      return { message: existing, inserted: false }
+    }
+    const timestamp = this.now()
+    this.db.transaction(() => {
+      if (!this.db.prepare('UPDATE commander_sessions SET updated_at = ? WHERE id = ?').run(timestamp, sessionId).changes)
+        throw new Error(`Commander session not found: ${sessionId}`)
+      this.db.prepare(`INSERT INTO commander_messages
+        (id, session_id, role, content, tool_calls, tool_call_id, tool_name, is_error, project_id, correlation_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(id, sessionId, input.role, input.content, input.toolCalls?.length ? JSON.stringify(input.toolCalls) : null,
+          input.toolCallId ?? null, input.toolName ?? null, input.isError ? 1 : 0, input.projectId ?? null, input.correlationId ?? null, timestamp)
+    })()
+    return { message: this.getMessage(id)!, inserted: true }
+  }
+
+  /** Idempotent external report delivery and outbox acknowledgement. */
   appendMessageOnce(
     sessionId: string,
     input: AppendCommanderMessageInput,

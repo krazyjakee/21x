@@ -138,6 +138,10 @@ export interface AgentStatusEvent {
   agentId: string
   taskId: string
   status: import('@/stores/agent-store').SessionStatus
+  epoch?: string
+  seq?: number
+  heartbeat?: boolean
+  disconnected?: boolean
 }
 
 /** A durable transcript projection part (the single source of truth for rendering). */
@@ -682,6 +686,7 @@ interface ElectronAPI {
     getImage: (id: string) => Promise<(ChatImageInput & { id: string }) | null>
     cancel: (sessionId: string) => Promise<{ cancelled: boolean }>
     undoAction: (sessionId: string, actionId: string) => Promise<{ alreadyUndone: boolean; message: CommanderMessage }>
+    getActivity: (sessionId: string) => Promise<import('@shared/activity').CommanderActivitySnapshot>
     onEvent: (callback: (event: CommanderEvent) => void) => () => void
   }
   /** ElevenLabs speech engine (#64). Answers with the speech snapshot; the key never comes back. */

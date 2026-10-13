@@ -127,6 +127,9 @@ describe('keyboard shortcuts', () => {
       draft.disabled = false
       draft.style.visibility = 'hidden'
       expect(findComposerElement()).toBeNull()
+      draft.remove()
+      expect(findComposerElement()).toBeNull()
+      expect(shouldAutoFocusComposer(new KeyboardEvent('keydown', { key: 'a' }))).toBe(false)
     } finally {
       root.remove()
     }

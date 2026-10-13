@@ -1,4 +1,5 @@
 import { reportedTokenUsage } from '../sessions/token-estimator'
+import { AdapterCompactionTracker, compactionFingerprint, promptContextTokens, type AdapterCompactionObservation } from '../sessions/compaction'
 import { classifyProviderFailure, type ProviderFailure } from '../agent-manager/provider-failure'
 /**
  * Claude Code Adapter
@@ -170,6 +171,7 @@ function newClaudeSession(sessionId: string, config: SessionConfig, isResumed: b
 
 export class ClaudeCodeAdapter implements CodingAgentAdapter {
   private sessions = new Map<string, ClaudeSession>()
+  private readonly compactions = new WeakMap<ClaudeSession, AdapterCompactionTracker>()
   private sdkLoading: Promise<void> | null = null
 
   /**
@@ -665,6 +667,17 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
     return this.sessions.get(sessionId)?.tokenUsage ?? null
   }
 
+  private compactionTracker(session: ClaudeSession): AdapterCompactionTracker {
+    let tracker = this.compactions.get(session)
+    if (!tracker) { tracker = new AdapterCompactionTracker('claude-code'); this.compactions.set(session, tracker) }
+    return tracker
+  }
+
+  async getCompactionObservations(sessionId: string, _config: SessionConfig): Promise<AdapterCompactionObservation[]> {
+    const session = this.sessions.get(sessionId)
+    return session ? this.compactionTracker(session).snapshot(session.sessionId || sessionId).map((observation) => ({ ...observation, backendSessionId: sessionId })) : []
+  }
+
   async getStatus(sessionId: string, _config: SessionConfig): Promise<SessionStatus> {
     const session = this.sessions.get(sessionId)
     if (!session) {
@@ -1080,6 +1093,21 @@ export class ClaudeCodeAdapter implements CodingAgentAdapter {
             // Don't delete the old sessionId yet - agent-manager needs to poll with it
             // to receive the realSessionId. The old key will be deleted by destroySession
             // or when agent-manager explicitly removes it.
+          }
+        }
+
+        const nativeId = session.sessionId || sessionId
+        if (!msg.parent_tool_use_id && (!msg.session_id || msg.session_id === nativeId)) {
+          const tracker = this.compactionTracker(session)
+          if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
+            const metadata = msg.compact_metadata && typeof msg.compact_metadata === 'object' ? msg.compact_metadata as Record<string, unknown> : {}
+            tracker.observeExplicit(nativeId, String(msg.uuid || msg.id || compactionFingerprint([metadata, msg.timestamp])), 'compact_boundary', {
+              turnId: session.recoveryIntentId, beforeTokens: typeof metadata.pre_tokens === 'number' ? metadata.pre_tokens : undefined
+            })
+          } else if (msg.type === 'assistant' && msg.message && typeof msg.message === 'object') {
+            const assistant = msg.message as Record<string, unknown>
+            const key = assistant.id || msg.uuid
+            if (typeof key === 'string') tracker.observeContext(nativeId, key, promptContextTokens(assistant.usage, 'claude-code'), session.recoveryIntentId)
           }
         }
 

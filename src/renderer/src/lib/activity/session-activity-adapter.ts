@@ -22,6 +22,7 @@ export interface SessionObservation {
   status: LivePhase
   /** Monotonic receipt time of the latest accepted observation. */
   observedAt: number
+  disconnected?: boolean
   /** The latest observed transition (never set by the first observation). */
   lastTransition?: { from: LivePhase; to: LivePhase; at: number }
 }
@@ -133,6 +134,7 @@ export function recordAgentStatus(event: unknown, now: number = activityNow()): 
     agentId: typeof e.agentId === 'string' ? e.agentId : previous?.agentId ?? '',
     status,
     observedAt: now,
+    ...(meta.disconnected ? { disconnected: true } : {}),
     ...(transition
       ? { lastTransition: { from: transition.from, to: transition.to, at: transition.at } }
       : previous?.lastTransition
@@ -215,7 +217,8 @@ export function taskEvidence(
     live: liveFromSession(session),
     queue: input.queue,
     lifecycle: input.lifecycle ?? null,
-    outcome
+    outcome,
+    disconnected: session?.disconnected
   }
 }
 
@@ -231,7 +234,7 @@ export function captainEvidence(session: SessionObservation | undefined): Activi
   } else if (t && t.to === 'error' && session?.status === 'error') {
     outcome = { kind: 'failed', observedAt: t.at }
   }
-  return { entity: 'captain', live: liveFromSession(session), outcome }
+  return { entity: 'captain', live: liveFromSession(session), outcome, disconnected: session?.disconnected }
 }
 
 // ── Queue source (one shared revalidation loop) ─────────────

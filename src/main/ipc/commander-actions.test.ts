@@ -53,6 +53,24 @@ afterEach(async () => {
 })
 
 describe('Commander direct Undo IPC', () => {
+  it('reads authoritative activity without constructing a provider or loading transcript history', () => {
+    const sql = vi.spyOn(fixture.rawDb, 'prepare')
+    const snapshot = handlers.get('commander:getActivity')!(trusted, { sessionId })
+    expect(snapshot).toMatchObject({ phase: 'idle', turnId: null, ageMs: expect.any(Number), sequence: expect.any(Number), epoch: expect.any(String) })
+    expect(sql.mock.calls.every(([query]) => !query.includes('commander_messages'))).toBe(true)
+    expect(provider).not.toHaveBeenCalled()
+    expect(confirm).not.toHaveBeenCalled()
+  })
+
+  it('guards activity reads before touching an untrusted payload and rejects missing sessions', () => {
+    const read = vi.fn(() => sessionId)
+    expect(() => handlers.get('commander:getActivity')!({ ...trusted, senderFrame: { url: 'https://example.com/', parent: null } },
+      { get sessionId() { return read() } })).toThrow('only available to the main window')
+    expect(read).not.toHaveBeenCalled()
+    expect(() => handlers.get('commander:getActivity')!(trusted, { sessionId: 'missing' })).toThrow('Commander session not found')
+    expect(provider).not.toHaveBeenCalled()
+  })
+
   it('reverses the recorded action immediately in the same conversation, without a model or confirmation', () => {
     const result = handlers.get('commander:undoAction')!(trusted, { sessionId, actionId }) as { alreadyUndone: boolean; message: { id: string; session_id: string; content: string } }
     expect(result.alreadyUndone).toBe(false)

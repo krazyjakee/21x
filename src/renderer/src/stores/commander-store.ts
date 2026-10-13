@@ -37,6 +37,8 @@ export interface CommanderActionNotice {
 }
 
 interface CommanderState {
+  drafts: Record<string, string>
+  setDraft: (sessionId: string, text: string) => void
   recentAction: CommanderActionNotice | null
   sessions: CommanderSession[]
   undoingActions: string[]
@@ -71,6 +73,7 @@ interface CommanderState {
 }
 
 let unsubscribeEvents: (() => void) | null = null
+let eventSubscribers = 0
 /**
  * Turns whose `done` already arrived. `commander:send` resolves on the invoke
  * channel and events on another, so a fast turn's `done` can beat the reply;
@@ -96,6 +99,8 @@ function mergeMessages(existing: CommanderMessage[], incoming: CommanderMessage[
 }
 
 export const useCommanderStore = create<CommanderState>((set, get) => ({
+  drafts: {},
+  setDraft: (sessionId, text) => set(state => ({ drafts: { ...state.drafts, [sessionId]: text } })),
   recentAction: null,
   sessions: [],
   undoingActions: [], undoneActions: [],
@@ -127,9 +132,12 @@ export const useCommanderStore = create<CommanderState>((set, get) => ({
     if (!unsubscribeEvents) {
       unsubscribeEvents = commanderApi.onEvent((event) => get().handleEvent(event))
     }
+    eventSubscribers++
+    let subscribed = true
     return () => {
-      unsubscribeEvents?.()
-      unsubscribeEvents = null
+      if (!subscribed) return
+      subscribed = false
+      if (--eventSubscribers === 0) { unsubscribeEvents?.(); unsubscribeEvents = null }
     }
   },
 

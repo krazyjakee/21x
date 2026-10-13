@@ -39,6 +39,8 @@ Report arrival and opening the inbox never start a model turn or speech.
 
 ## Turns and the context budget
 
+With `sessions.commander_managed` enabled, Commander uses ChatEngine and sends at most the lesser of 16,000 estimated tokens and 60% of the model's known context window as verbatim history, plus a summary of at most 1,500 tokens from that same model. Context notices identify omitted history; complete messages and tool results remain stored. One confirmed context overflow retries at half budget without repeating completed tool effects. Protected instructions that still cannot fit fail visibly rather than being cut. The flag defaults off; the legacy budget below remains available during staged rollout.
+
 `CommanderService.sendUserMessage` (`src/main/commander/commander-service.ts`)
 does the following:
 
@@ -243,25 +245,31 @@ Commander opens with a calm call stage and Chat beside it. The transcript and
 composer remain mounted when the panel closes or switches to Actions, preserving
 typed drafts, images, model choice and thinking level. Narrow windows stack the
 stage above Chat; both surfaces use the shared interface scale and readable
-markdown/code typography. The in-app compact button reduces the stage beside
-Chat. An independent floating/OS PiP window is outside this batch.
+markdown/code typography. Leaving Commander during a call, or pressing PiP,
+shows the in-app floating call. It preserves the original call session; opening
+Project reports or another Chat never retargets its microphone. The floating
+view is part of this window, not an always-on-top OS window.
 
 - **Stage:** an abstract presence tile shows an icon and a state word. The user
   tile shows an initial, a real input meter while its owned microphone runs,
-  and a crossed-out mic otherwise. Before a call, Start talking uses the same
+  and a crossed-out mic otherwise. Listening requires matching turn ownership
+  and a physically running capture; a cached turn ID cannot animate the mic.
+  PTT can show Writing your words after capture closes while its recogniser
+  delivers the final tail, with the input meter at zero. Before a call, Start talking uses the same
   authoritative app-level host as the previous voice controls. Voice failures
   expose a readable reason and recovery action; typing remains available.
   Cached active turn IDs do not establish live activity: fresh turn observations
   expire after 15 seconds without a new event. Real capture/playback ownership
   remains authoritative even during long media sessions.
-- **Captions:** on by default, partial words are muted italics and finished
+- **Captions:** on by default at Medium, with Small/Medium/Large sizes (13/14/18px)
+  in the microphone menu and full-caption dialog. Partial words are italics and finished
   user text remains available. Assistant highlighting follows the actual spoken
   sentence from `speechText`; word timing is never invented. The strip shows
   at most two lines, and Read full captions exposes the complete current text.
   Completed messages remain in Chat. Partials are not live-region announcements
   and the global voice bubble does not repeat an owned Commander caption.
 - **Toolbar:** mic/mute, the mode/input-device menu, Stop, CC, Chat panel,
-  Voice settings, compact stage and a separate red End. Left/Right/Home/End
+  Voice settings, PiP and a separate red End. Left/Right/Home/End
   navigate its buttons; Chat/Actions support arrow keys. Stop and Escape
   interrupt a reply while leaving the call open. End closes media, cancels
   synthesis/the active reply and retains the conversation.
@@ -292,13 +300,65 @@ Chat. An independent floating/OS PiP window is outside this batch.
   records retain their evidence without inventing changes or successful
   execution. Exact reversible actions use direct Undo IPC, with conflict errors
   shown inline; unsupported operations say Can't be undone here. A fresh
-  validated action has an eight-second stage toast; destructive changes use its
-  single assertive announcement region. Undo notes disable a historical card's
+  validated action has one eight-second toast beside either call surface;
+  destructive changes use the single CallAnnouncer assertive region. Undo notes disable a historical card's
   Undo after reload. The server owns the exact reversal and idempotency.
 
+- **Floating call:** approximately 280px wide, with Commander identity, state
+  icon + word, current captions, Mic, Stop, Expand, CC and End. Drag its grip to
+  snap to a corner; the grip's arrow keys choose corners without a pointer.
+  Expand returns to the call's session and restores the previous field/control
+  when it still exists, otherwise a visible call control. Automatic PiP on
+  navigation does not steal focus. Draft text survives returning to its session.
+  Full view and PiP share caption settings, one media owner and one latest-action
+  toast. They never show duplicate caption strips or a second microphone queue.
+- **Screen readers:** one app-mounted `CallAnnouncer` owns polite and assertive
+  regions. It announces unavailable reasons once, thinking after one second
+  (cancelled if the state changes), errors/destructive executed actions
+  assertively, and other executed actions/completed text-only replies politely.
+  Partial words and replies already delivered by speech stay silent. Report
+  arrival has one short polite location cue, without report contents or voice
+  synthesis. The transcript is a named log with automatic announcements off;
+  readers can navigate all retained messages without repeating a spoken reply.
+  Every state includes an icon and word. Captions and rings use foreground
+  contrast tokens in light/dark themes; reduced motion removes breathing and
+  uses fixed ring-opacity steps.
+
+Call shortcuts apply while Commander is open or a call survives elsewhere.
+Mod means Cmd on macOS and Ctrl elsewhere. Dialogs retain their keys. Mic and
+Undo do not intercept text inputs, contenteditable editors or terminals; native
+text Undo continues there. Mod+5 and palette navigation remain available.
+
+| Shortcut | Behavior |
+| --- | --- |
+| Mod+D outside editors | Toggle the live call's microphone |
+| Space held outside text/control inputs | Push to talk, when that mode is selected |
+| Esc | Stop/cancel the reply; leave the call open. A dialog closes first. |
+| Mod+Shift+C | Toggle captions in either call surface |
+| Mod+\ | Toggle Chat/Actions side panel |
+| Mod+Shift+M | Full view ↔ floating call |
+| Mod+Shift+E | End the call and retain the transcript |
+| Mod+Z outside editors | Directly Undo the latest eligible reversible action |
+| Global voice shortcut (default Mod+Shift+Space) | Active Commander call; Captain otherwise |
+
+The configurable global voice shortcut mutes/unmutes an open mic. In PTT mode
+it starts an utterance on one press and finishes it on the next; held Space
+continues to be the local press/release control. During call setup it waits
+without claiming Captain or opening another capture.
+
 The view lives in `components/commander/`; `commander-store.ts` owns durable
-session projections and `commander-call-store.ts` owns call/microphone leases.
+session projections and drafts, `commander-call-store.ts` owns call/microphone
+leases, and `commander-call-ui-store.ts` owns caption/panel/PiP preferences.
 The view never opens a second microphone or independent playback queue.
+
+Automated component/native checks cover call navigation, corner snapping,
+keyboard controls, focus restoration, caption size/full text, contrast tokens,
+quiet/deduplicated live regions, and exact Undo versus native text Undo. An
+actual screen-reader pass remains a manual release gate: check NVDA/VoiceOver
+(or the target platform's reader) through unavailable, listening, thinking,
+working, speaking, interrupted and error states, full view/PiP, the sessions
+modal, action details/Undo, and typed fallback. Automation does not establish
+announcement timing or reading order on those assistive technologies.
 
 ## Reports (#62)
 
@@ -402,37 +462,25 @@ controls retain their compatibility contract. The wake word stays out of scope.
 - **Half-heard words appear once** (#83). While its own conversation turn
   runs, the stage caption strip shows them and the app-level host sets the voice store's
   `captionOwner`, so the global `VoiceOverlay` leaves its listening bubble out.
+  PiP is the sole caption surface after navigation or pressing PiP.
   Confirmations and results still appear in the overlay. Ownership follows the
   turn the call host actually opened, never the fact that it is starting: a
   microphone opened anywhere else keeps the overlay and its words. If another
   microphone is already listening, clicking the voice button is refused at once
   ("Another microphone is already listening…") before voice mode or the reply
   voice is touched, and the check runs again just before the turn opens.
-- **When voice cannot start**, the reason is visible text under the button. It
-  also describes the button to screen readers, and its tooltip holds the full
-  reason. The two controls do different things:
-  - **The label** opens Settings → Voice directly.
-  - **The voice button** shows the full reason in an alert with an **Open voice
-    settings** button. It does not start anything while the reason is blocking.
-
-  | Label | Meaning | Button click |
-  | --- | --- | --- |
-  | Mic blocked | The OS refused microphone access | explains |
-  | Voice not installed | The local speech runtime is missing | explains |
-  | Voice not set up | No speech model is installed | explains |
-  | Voice engine error | A model is installed but the speech engine failed (for example, the worker crashed) | tries again: turning voice on reloads the engine |
-  | Voice unavailable | This build has no voice bridge | explains (no settings button) |
-
-  An installed engine that is merely switched off shows no label: one click
-  turns it on and starts the conversation. A start that fails later (the engine
-  does not recover, the reply voice cannot be prepared, no microphone is found,
-  access is refused, or the device is in use) also ends in the alert with
-  **Open voice settings** and says what to do, as does a conversation that ends
-  on a reported failure. "Another microphone is already listening" and errors
-  sending a message have no settings button, because Settings cannot fix them.
-  A current Commander provider error remains visible with Retry and **Type
-  instead** until the user recovers; an old failure does not return after End
-  or contaminate a later turn. Typed chat is unaffected throughout.
+- **When voice cannot start**, the stage shows the full reason as visible
+  text and CallAnnouncer gives one polite notice. Missing runtime/model or
+  blocked microphone offers Voice settings; no open session offers Sessions.
+  Start talking cannot bypass a blocking reason. Typing remains usable.
+  An installed engine switched off can be enabled when starting the call.
+  Later capture, provider, network or synthesis failures are assertive notices
+  with readable recovery controls: Retry, Type instead, Voice settings, or
+  model settings as appropriate. A foreign microphone is preserved and must
+  be stopped before Commander claims capture. A current provider error stays
+  visible until recovery; End clears it. PiP can Retry or Expand to the full
+  settings/fallback controls. Closing a dialog with Escape does not stop the
+  call behind it.
 - **The call state is derived, not independently advanced.**
   `deriveCallState()` combines the app-level call lifetime, the microphone
   snapshot, the Commander turn observation and verified speech attribution.
@@ -446,9 +494,10 @@ controls retain their compatibility contract. The wake word stays out of scope.
   `speechText`, and speech/interruption events. `wordTimings` is false and no
   word index is fabricated. Every value is scoped to the live call's owned
   microphone turn or its verified `commander:<sessionId>` playback passage;
-  foreign and retained global voice data reads as neutral. Queue boundaries
-  drive `speech_start`/`speech_end`, including the first PCM after synthesis
-  starts and pauses between sentences. A future cloud provider can implement
+  foreign and retained global voice data reads as neutral. Actual running Web
+  Audio source intervals drive `speech_start`/`speech_end`; queued-before-start
+  or suspended audio does not claim Speaking or animate the ring. Source
+  start/drain/state boundaries cover pauses between sentences. A future cloud provider can implement
   the same `CallMedia` contract without changing the call store.
 - **The reply is spoken as it is written**, through whichever engine is
   selected in Settings → Voice (system, downloaded, or ElevenLabs). Each

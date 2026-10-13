@@ -78,6 +78,10 @@ export interface AgentStatusEvent {
     agentId: string;
     taskId: string;
     status: import("./constants").SessionStatus;
+    epoch?: string;
+    seq?: number;
+    heartbeat?: boolean;
+    disconnected?: boolean;
 }
 /** A durable transcript projection part (the single source of truth for rendering). */
 export type { TranscriptPartRecord };
@@ -890,6 +894,7 @@ export interface DesktopApi {
             alreadyUndone: boolean;
             message: CommanderMessage;
         }>;
+        getActivity: (sessionId: string) => Promise<import("./activity").CommanderActivitySnapshot>;
         onEvent: (callback: (event: CommanderEvent) => void) => () => void;
     };
     /** ElevenLabs speech engine (#64). Answers with the speech snapshot; the key never comes back. */

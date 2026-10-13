@@ -56,6 +56,16 @@ describe('recordAgentStatus', () => {
     expect(useSessionActivityStore.getState().sessions.t).toMatchObject({ status: 'working', observedAt: 1_000 })
   })
 
+  it('invalidates known disconnected transport immediately and requires a new authoritative observation to restore it', () => {
+    recordAgentStatus(status('t', 'working', 1), 0)
+    recordAgentStatus(status('t', 'working', 2, { heartbeat: true, disconnected: true }), 1000)
+    expect(derive('t', 1000)).toMatchObject({ state: 'unknown', lastKnown: 'running' })
+    recordAgentStatus(status('t', 'working', 3, { heartbeat: true }), 2000)
+    expect(derive('t', 2000).state).toBe('running')
+    expect(recordAgentStatus(status('t', 'working', 2, { heartbeat: true, disconnected: true }), 3000)).toBe(false)
+    expect(derive('t', 3000).state).toBe('running')
+  })
+
   it('accepts a new epoch (main restarted) even with a lower sequence', () => {
     recordAgentStatus(status('t', 'working', 50), 0)
     expect(recordAgentStatus({ ...status('t', 'idle'), epoch: 'E2', seq: 1 }, 10)).toBe(true)

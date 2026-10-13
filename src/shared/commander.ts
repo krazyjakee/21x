@@ -66,7 +66,9 @@ export interface CommanderListSessionsRequest {
 }
 
 /** Events on `commander:event`. */
-export type CommanderEvent =
+export type CommanderEvent = CommanderEventPayload & { activity?: import('./activity').CommanderActivitySnapshot }
+
+type CommanderEventPayload =
   /** A turn started for a session. */
   | { type: 'turn_started'; sessionId: string; turnId: string }
   /** A streaming runtime event, minus the `done` payload's full history. */
@@ -77,7 +79,7 @@ export type CommanderEvent =
       event: Exclude<ChatRuntimeEvent, { type: 'done' }> | { type: 'done'; stopReason: ChatStopReason }
     }
   /** Messages were stored (user, assistant, tool, report, summary). */
-  | { type: 'messages_appended'; sessionId: string; messages: CommanderMessage[] }
+  | { type: 'messages_appended'; sessionId: string; messages: CommanderMessage[]; turnId?: string }
   /** Title, archive state, unread count or timestamps changed. */
   | { type: 'session_updated'; session: CommanderSession }
 

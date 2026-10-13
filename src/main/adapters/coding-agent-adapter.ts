@@ -5,6 +5,7 @@
 
 import type { ReasoningEffort } from '../../shared/reasoning-effort'
 import type { ProviderFailure } from '../agent-manager/provider-failure'
+import type { AdapterCompactionObservation } from '../sessions/compaction'
 
 export enum SessionStatusType {
   IDLE = 'idle',
@@ -29,6 +30,8 @@ export enum MessagePartType {
   ERROR = 'error',
   /** Recoverable provider error: the backend is retrying the request itself. */
   RETRY = 'retry',
+  /** A within-session context boundary; never a durable generation handoff. */
+  COMPACTION = 'compaction',
   TASK_PROGRESS = 'task_progress'
 }
 
@@ -218,6 +221,8 @@ export interface CodingAgentAdapter {
   /** Read-only token counters for the current/latest turn. Absent usage is
    * unknown, never an invented reported zero. Does not change context/runtime. */
   getUsage?(sessionId: string, config: SessionConfig): Promise<AdapterTokenUsage | null>
+  /** Read-only scoped evidence. Root projection deduplicates per generation. */
+  getCompactionObservations?(sessionId: string, config: SessionConfig): Promise<AdapterCompactionObservation[]>
 
   /**
    * Read the session's PERSISTED history from durable storage (e.g. the CLI's

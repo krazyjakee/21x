@@ -16,6 +16,7 @@ import {
   taskIdOfComposer
 } from '@/lib/voice-dictation-target'
 import type { VoiceUiContext } from '@shared/voice'
+import { useCommanderCallStore } from '@/stores/commander-call-store'
 
 /**
  * Connects voice control to the application shell. Mount it once.
@@ -78,6 +79,19 @@ export function useVoiceControl(): void {
 
     const offHotkey = voiceApi.onHotkey(({ action }) => {
       if (action !== 'toggle') return
+      const call = useCommanderCallStore.getState()
+      if (call.status !== 'off') {
+        // The app-owned call retains its original Commander session, even
+        // while another workspace or report inbox is selected.
+        if (call.status === 'live') {
+          if (call.micMode === 'push-to-talk') {
+            if (call.pttHeld || call.pttFinishing) call.finishTalk()
+            else if (!call.muted) void call.beginTalk()
+            else void call.toggleMicrophone()
+          } else void call.toggleMicrophone()
+        }
+        return
+      }
       // The shortcut talks to Captain, exactly like the microphone in the
       // top bar. It used to run the built-in command rules instead, which is
       // the only place a spoken sentence could be rejected for not being one

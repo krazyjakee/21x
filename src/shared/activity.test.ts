@@ -4,10 +4,20 @@ import {
   describeActivityQueueReason,
   isAgentStatusHeartbeat,
   isRunningActivity,
-  readAgentStatusActivityMeta
+  readAgentStatusActivityMeta,
+  readCommanderActivitySnapshot
 } from './activity'
 
 describe('shared activity contract', () => {
+  it('validates Commander source age and identity before accepting live claims', () => {
+    const snapshot = { epoch: 'main', sequence: 2, turnId: 'turn', phase: 'working', ageMs: 500, hasText: true, openTools: [] }
+    expect(readCommanderActivitySnapshot(snapshot)).toEqual(snapshot)
+    expect(readCommanderActivitySnapshot({ ...snapshot, ageMs: -1 })).toBeNull()
+    expect(readCommanderActivitySnapshot({ ...snapshot, sequence: 0 })).toBeNull()
+    expect(readCommanderActivitySnapshot({ ...snapshot, turnId: {} })).toBeNull()
+    expect(readCommanderActivitySnapshot({ ...snapshot, phase: 'cached_active' })).toBeNull()
+    expect(readCommanderActivitySnapshot({ ...snapshot, openTools: [{ id: 1, name: 'get_project' }] })).toBeNull()
+  })
   it('has eleven states and only running/thinking/tool count as running', () => {
     expect(ACTIVITY_STATES).toHaveLength(11)
     expect(ACTIVITY_STATES.filter(isRunningActivity)).toEqual(['running', 'thinking', 'tool'])

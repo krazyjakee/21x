@@ -1,4 +1,4 @@
-# Session accounting and observational ledger
+# Session accounting and managed Commander
 
 Schema v34 adds Commander turn/call usage independently of the managed-session
 rollout. Every user, title and summary model turn records a durable usage row,
@@ -43,3 +43,48 @@ events nor interrupted turns cause a model/tool replay. Token accounting also
 marks previous-process running usage interrupted and logs the preserved figures.
 This provides durable evidence for a future managed lifecycle without changing
 the existing Commander or adapter ownership rules.
+
+`sessions.commander_managed` enables the managed Commander when its setting is
+`1` or `true`; it defaults off. Observe-only recording remains independently
+controlled by `sessions.ledger`. Managed Commander forces its own shared-ledger
+observations even if the observe-only flag is off. Rollout remains observe-only,
+then Captains, then Commander. Adapter management and planned rollover have
+separate gates and are not activated by this flag.
+
+Managed Commander uses `ChatEngine` over the existing `ChatRuntime` and selected
+subscription/API provider. D7 limits verbatim model context to the lesser of
+16,000 estimated tokens and 60% of a known model window; unknown windows use
+16,000. The summary contributes at most 1,500 tokens separately. Text and tool
+metadata use the accounting character estimator; image modality tokens remain
+unknown until reported. User instructions and tool call/result pairing are
+preserved. Older whole turns can leave the model view with an explicit omission
+marker and a visible context notice; the full transcript remains in SQLite.
+An oversized newest instruction or stored summary rejects a draft before it
+is accepted, with a retained-history error.
+
+Each model step and completed tool result has a stable durable message identity
+and a shared inbox event. The engine waits for persistence before executing the
+next tool or model request. A crash preserves committed steps and marks the
+interrupted turn; startup does not replay its actions. A known context overflow
+before any output from that model attempt gets exactly one retry at half the
+verbatim budget within the same runtime turn. Completed tool results remain in
+the request, and identical completed actions are reused if the model asks for
+them again after recovery. Large tool outputs may be shortened only in the
+model view, with an explicit marker; their full durable results remain intact.
+Cancellation, partial output and unknown transport failures do not trigger an
+overflow retry. A persistent overflow, or protected instructions that cannot
+fit the smaller budget, ends visibly with its history retained.
+
+Summary requests use the session's own provider/model, with bounded transcript
+chunks and a 1,500-token output ceiling. Only a complete valid summary advances
+the fold cursor. Empty, failed or oversized summaries leave stored history and
+the prior cursor intact. Accounting and shared observers seal this instance's
+pending work before shutdown; late ignored-abort title/summary work cannot
+access SQLite.
+
+Captain reports enter the shared inbox as correlated durable observations and
+remain quiet messages in the requesting conversation (or the project-report
+inbox according to existing routing). Delivery never starts a model turn or
+speech. `roles/commander.ts` owns the defensive report tool policy: report-owned
+administration is refused and the report-ask budget is shared; explicit user
+tools retain their direct action behavior.

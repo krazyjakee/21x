@@ -1,0 +1,218 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "issues": [
+    87,
+    91,
+    95,
+    100,
+    102
+  ],
+  "resolvedIssues": [
+    87,
+    100,
+    102
+  ],
+  "scope": "Local Linux application and standalone regressions, isolated native Electron keyboard/layout and genuine shared WebAudio playback. Provider protocols and microphone leases use controlled fixtures; no live provider, physical microphone, other OS or production Tauri cutover claim.",
+  "source": {
+    "baseCommit": "1e7ff3f671919fa3d01c249fdd598f5cfcb6a973",
+    "targetBranch": "master",
+    "schemaVersion": 35,
+    "changedSourceHashes": {
+      "docs/activity-indicators.md": "f40c21faa119d6dc435da3e4fcfff74ff40e97f5370fdab20a703b0d4effa507",
+      "docs/commander.md": "312adce70aa6c150712d9099313fd4a2d9b9a03bd20c5a16d192cb3e5b93ac08",
+      "docs/managed-sessions.md": "aa62922cfbde83f65958063c595ed523d424396cefa606a2caaf14b51a791d33",
+      "docs/tauri-migration/event-forwarding-review.json": "702c360144fc53c4360697ecfee0e19d6b5b026b5ac389352603bdb93fbd90a3",
+      "docs/tauri-migration/inventory.json": "1ebba5560cf0c12c9ce7c03810eb1e18ab842808a04a77aa1e56edf9f274da44",
+      "docs/tauri-migration/operations.json": "b4bacb88678952619dc74cb549936a430cffbee7158d637652c096079ad6c636",
+      "docs/voice.md": "77ea26a736b9dee465edff1ab81c68d390076895e08c0ca269f00a5518b6f286",
+      "scripts/commander-input/check.cjs": "ffae5a0c208a9e89dbcbefbeb8015fdeb5a38eafd978eb7686e36ef9bf3b9135",
+      "scripts/commander-input/fixture.tsx": "c2013c36d0766528a08b0334db428b7dba1acb661e61982859636b9044a9b011",
+      "scripts/commander-input/index.html": "347d6aa507ee5536c55fe29cb389ff21b0a2e6488be9fd7249f61c0888aa29cb",
+      "src/main/adapters/acp-adapter.ts": "15b801badadfc6be38b1f21b479903355698fb3adf1ff2b885b0927133cff5ac",
+      "src/main/adapters/adapter-compaction.test.ts": "a84efa9a6f118b5dd01ce0f31b39a90366557f22e96451c489d46e3190c42356",
+      "src/main/adapters/claude-code-adapter.ts": "fc80e884a64f2847c9942a9090dc6740d630fca2b9e81dd1fa6c08d0ff75b314",
+      "src/main/adapters/claude-code-message-converter.ts": "7175b55d00ad12d0234158ba90d35c4c4e191af48f1438f2f1039e0b10c6b8a5",
+      "src/main/adapters/codex-app-server-adapter.ts": "bcd05514cbb59dfbcb662334b458590fb7ed907d5a9a59c6f38f18a0c2d459b0",
+      "src/main/adapters/codex-app-server-items.ts": "5d2fb06adfc5ecebd0b5313732ea7aca8026f60d5fc2201f6c94d295421fea98",
+      "src/main/adapters/coding-agent-adapter.ts": "fa9179b064b3c5972038abee3158b1c4e8c2f3f240366ad4e7f3ee0efd085eb5",
+      "src/main/adapters/opencode-adapter.ts": "45b09b0410891bfe3350f5d816c8a7823531f7984ee870d8cfa83fce1473912a",
+      "src/main/adapters/pi-adapter.ts": "7af18f2115eea9e4272a05c1fece4dc53bafc99441c83c087c56a4d9d7866575",
+      "src/main/agent-manager-activity.test.ts": "2a88138934ea6be4771a98429c136fa712794fbb421fe3351ea8da5f853e333c",
+      "src/main/agent-manager-compaction.test.ts": "4c85d9247195d19b68c3d6ffa486082cc34b472e10adfbc3f4d8153ee83560e7",
+      "src/main/agent-manager-core.ts": "bd7295be2c13d330fde7952ce4303f2e147a0deedff4d96866fec42d122dc9e1",
+      "src/main/agent-manager/activity-observations.test.ts": "3ca43b1bccad81b71fb40b89522f55d347459778d094053abd1bc122237bfa88",
+      "src/main/agent-manager/activity-observations.ts": "89e05e0623287610f8f6a4fc5a656dd047468801a27dfa9abac9e7604a29b790",
+      "src/main/chat/chat-runtime.ts": "a767049a70cc2eb20131160777ceb81b6c175248fe01c85dee2d148c03ed2604",
+      "src/main/chat/providers/types.ts": "0a250c31f9863ae72286cf1ad4ec9676a1008a5d46a0b38dc49f12b57a776466",
+      "src/main/commander/activity-observations.test.ts": "f49b9ed434b79b10d18cdcadc361f0747dac04e7f2d6a44a97a654dc1142624c",
+      "src/main/commander/activity-observations.ts": "d444b7bb9a78eb9eb0bad30a4df7e642fa4cd3223532f3a6822c199ba3d350a7",
+      "src/main/commander/commander-managed.test.ts": "34391c98ffa4e49647603567d3a1e9333e08354ea6987fd63d57d99d5be7efcb",
+      "src/main/commander/commander-service.ts": "b298278cb55343075ca28d215fb7b21f7567b03b7c6ec2b04b8e17064f78be21",
+      "src/main/commander/commander-store.ts": "7940d74a8d0a4e4ab8e9dc428de9d49d5524bddeed38748ffbbdd993becdd454",
+      "src/main/commander/context.ts": "0724036c64f18d7f83d7ed03c94687bb8c94bf113a0d0dfed72c7c8647f4bc82",
+      "src/main/ipc/commander-actions.test.ts": "e3501178e5871732b944a589143b758c0846578b67cf0278feaa347da135577a",
+      "src/main/ipc/commander.ts": "ad67dadcee54bb18fdc66ce686935beffcb418f4002c97c60cb8a47878343238",
+      "src/main/sessions/chat-engine.test.ts": "119f7d71689ec686d961b61899e4789f97007e32443f722632cf4f7a46680e66",
+      "src/main/sessions/chat-engine.ts": "793822384b36d7fad0b29784a4d3af8bad532d687eb94e5ca13ac130f3821674",
+      "src/main/sessions/compaction.test.ts": "a76de82ba1ec41d3dccfff2abe85edc1f8a6cd522bd180de236ecbc0ee25ee91",
+      "src/main/sessions/compaction.ts": "d628a7afaf71591644cea598386ce3a73a7e4d5503f534ac2f5b9c81d5b57689",
+      "src/main/sessions/managed-session.ts": "626d6fc8e8d73e1c053f8b74ac95788c7ace0b41082040bff9fb306684818ef0",
+      "src/main/sessions/roles/commander.test.ts": "e3c1650a32c9110b10a4dceddcfbf0fb6698f4e23492b71db3c85549865c08fd",
+      "src/main/sessions/roles/commander.ts": "aea90e7c067ab3f046e8f2d4d50a78d28dee9b0cf8f9e49b1e8afd97dde3b685",
+      "src/main/sessions/token-accounting.ts": "93eb28d81c954df901c3e1a8417c1d74231711eb92ed4614f901ddd922dc3d82",
+      "src/preload/index.ts": "7601a0cf7ac4fc20817fcf71d791ee71a74f87733e74fd0928c91f906f80bdee",
+      "src/renderer/src/components/activity/ActivityAnnouncer.tsx": "6fee422dc627e5415374bc696f0868322884fd2e97786e75500f19e21fddcede",
+      "src/renderer/src/components/agents/transcript/CompactionDivider.test.tsx": "5f4fff33e15d41f506fd74d0110c1907c3d50423c15c2a7352b6cb6ea86fe4b7",
+      "src/renderer/src/components/agents/transcript/CompactionDivider.tsx": "c43ec8e58f931d4d5c22261c0f58e10c30abe38c9ba462117192ae8cc8ad298b",
+      "src/renderer/src/components/agents/transcript/MessageBubble.tsx": "5f0e4e521b201c247d8e56bd892996f96ed86266a8d5cef69149ce0c12a8015e",
+      "src/renderer/src/components/commander/ActionCard.test.tsx": "ce3981bbbb17c517f65c5ca73fb3ec55a991c78b5b53e0b8bfee6252f9f257a5",
+      "src/renderer/src/components/commander/ActionCard.tsx": "fcb55b0ee06122224baca830b5259e6958e2f26e5fe3da24003c67902bc90cf0",
+      "src/renderer/src/components/commander/CallAnnouncer.test.tsx": "9c28268c296542b4c30f95cacb3ea27e3fb273bb7c0d4a72adaf5e6ed688024f",
+      "src/renderer/src/components/commander/CallAnnouncer.tsx": "723db92e82f1e0d8d0a6f7529a3db18d8d1c24d1a51c3eff54b06dd9e819cf1d",
+      "src/renderer/src/components/commander/CommanderActionToast.tsx": "6120527827c9fb4fee37fa2e00b606d42c11678d48f14f872e3799c69e2c7fbc",
+      "src/renderer/src/components/commander/CommanderCallHost.confirmation-ownership.test.tsx": "e658b47aabf1e5fc856c9b14601c75ad0862c96afa1d22cb3e0ce7b40236efa5",
+      "src/renderer/src/components/commander/CommanderCallHost.ownership.test.tsx": "e90ab774540c16737519fc560dd2b64951749c6da7a5474313684f099019a82b",
+      "src/renderer/src/components/commander/CommanderCallHost.terminal-ownership.test.tsx": "c26c417eafcf0e2bcccf06348611f5f8800b0c4afc51a624eb80cd41be69a8ff",
+      "src/renderer/src/components/commander/CommanderCallHost.tsx": "04815ce56b71bcd83ce0d2c530d63911537344015d1da0248e51c1600b8eaeed",
+      "src/renderer/src/components/commander/CommanderCallSurfaces.tsx": "58e1293ed855f75346f132dead7087a371495870758ffddb36ad2fe9617f3d46",
+      "src/renderer/src/components/commander/CommanderCaptions.tsx": "6c4ac042bbc467622dce9ba31a3729e1663d4187bbcf1c088755158ea311d80c",
+      "src/renderer/src/components/commander/CommanderChatPane.images.test.tsx": "e92b4035f2c04abaa274ee2545f7ef8c19d9074fdb41718249e63465564d2f5d",
+      "src/renderer/src/components/commander/CommanderChatPane.tsx": "ad3a0ea421c655f55c2a91cf9a395554ce0e1e6858e55d0328379955523dad60",
+      "src/renderer/src/components/commander/CommanderPip.test.tsx": "ef0b1b4a79ad5f32db15d79059801207187a67e7cd3ecf0484e5e1f8cd585670",
+      "src/renderer/src/components/commander/CommanderPip.tsx": "2dbb5562b7b128fa26dbf078c44f46dcde10f2a3ff96d79d9c6ba73c53ebe4fd",
+      "src/renderer/src/components/commander/CommanderStage.test.tsx": "3b47d61ea452b39112f33a0f94788d9ff786c74c564e41d78dbfa95bee9eb0c0",
+      "src/renderer/src/components/commander/CommanderStage.tsx": "833e57060cb4af8ff8d7b3d0d5f15377bc463fe448c35c7ce8a8fc592a206845",
+      "src/renderer/src/components/commander/CommanderVoiceControls.real-store.test.tsx": "3646447484a6aa54ee8c852c2c2db8f7398b7884e7e5a4ca0158d35ab2e7ded1",
+      "src/renderer/src/components/commander/CommanderVoiceControls.test.tsx": "52023efd41ef4cb37507a5258c1a56fdaa1619b8e0a627b8407f114f162f92ee",
+      "src/renderer/src/components/commander/CommanderVoiceControls.tsx": "18fe608b13fef22fd0ef22a89dfc72af53feafa2fc0dc446777b9c4f8b980a5d",
+      "src/renderer/src/components/commander/CommanderWorkspace.test.tsx": "5f30252bdece5df758dbbd44cd8abf157a417ebf78bdc2a41a552ace033a5a72",
+      "src/renderer/src/components/commander/CommanderWorkspace.tsx": "6055e1845b8b34a3e0731708ada932a3fa6ab065f946ef71dc83c9b5b612dfeb",
+      "src/renderer/src/components/commander/use-call-presentation.ts": "730f74f27877bcd6f4cd7203d2f9cf2652a4849ed6c50e088452bb666ae454ca",
+      "src/renderer/src/components/commander/use-call-shortcuts.ts": "be2bc9a686cf306b91dab0b5d8fb4c1d034a2adb71a1965d856c732cdd89d48a",
+      "src/renderer/src/components/layout/AppLayout.tsx": "7ce85bbefb37d71f0793526e225e22b3effe81482b88aea74f62c50cef428083",
+      "src/renderer/src/components/voice/VoiceOverlay.tsx": "5b1de35c2197a102d9b55815b1d5e3cc1c162eed4042fe3bac172e85e4803f10",
+      "src/renderer/src/hooks/use-voice-control.test.tsx": "6f2b7b45f9be32e9e097e9f4f421ba2494d368eb8264954c1a5445ed288bdc1b",
+      "src/renderer/src/hooks/use-voice-control.ts": "9007eef659a7f55daf75c1d6d7bb04bfbee6aafd8c8cd1de1eba64c646e2a28c",
+      "src/renderer/src/lib/activity/commander-activity-adapter.test.ts": "4929db170e978afac7cb7932b8919cb295d591445caf9bb455e66acfeb272304",
+      "src/renderer/src/lib/activity/commander-activity-adapter.ts": "3f4ec9a24858144adbcee7ca41f605f3942287e5aebc49811dda8823c85b6563",
+      "src/renderer/src/lib/activity/session-activity-adapter.test.ts": "259119ca8839df1d11581d1b1b9d292eb6c37eb570692687526b76b4503dee96",
+      "src/renderer/src/lib/activity/session-activity-adapter.ts": "4cf8a3851f5924e90319c9848817f1c79e6a9f991b949ba52ab03548546a7fba",
+      "src/renderer/src/lib/activity/use-activity.ts": "44a7f01b6e7a5abc4014fe2ca509826ce07ec556edd05025345c52849acd77fc",
+      "src/renderer/src/lib/activity/voice-activity-adapter.test.ts": "7279f8e1efe3f3198a2b8c4434785838d84f50a35d055a0d537ed89629b61387",
+      "src/renderer/src/lib/activity/voice-activity-adapter.ts": "78618d358735e20dc3fc58380a1c5d9cbba48312b33b2aa9d7044e00059ece79",
+      "src/renderer/src/lib/commander-call/derive-call-state.test.ts": "d7c872346a0d53dd970eb0466b707341206e671723334f2232683d5f618180d8",
+      "src/renderer/src/lib/commander-call/derive-call-state.ts": "1d5117b8054b440400067df8f2b6b471ed180e12a597822900b6cc5632b69fbb",
+      "src/renderer/src/lib/ipc-client.ts": "0ef3d69e49127a8462ec51d7b36e25487db3aa3d58e945ec9c2af61b3b71d866",
+      "src/renderer/src/lib/keyboard-shortcuts.test.ts": "5861e791dad624fb125f0aa6695cd1816e3d95e48edce1f228e162177401e439",
+      "src/renderer/src/lib/keyboard-shortcuts.ts": "0c0715a9602668812911823571163985d3cbb4276a73d63e8598856dbc765898",
+      "src/renderer/src/lib/voice-capture.test.ts": "121e99bdc87c210ba33629e63b09c0391479a618e8dc8c1106ef5059928b7dcb",
+      "src/renderer/src/lib/voice-capture.ts": "16df88144ab75b4d6623d351fed2fe0cbc4efba446d13e3a22deff0cd3f23a22",
+      "src/renderer/src/lib/voice-playback.test.ts": "d12ed5c453f634a3fceccb50dc2b8a9167cdeac41e5fa90020fee7a0bfe3b7a9",
+      "src/renderer/src/lib/voice-playback.ts": "1eb32e80da907f59f0b3352cb54fddb4fa7757861f2657e65947ae3773e02053",
+      "src/renderer/src/stores/commander-call-ui-store.ts": "0c48ba390dafd73de77cc7592690c6c96f4c867e6551b542ab208b6676a960a1",
+      "src/renderer/src/stores/commander-store.ts": "3addc1faec874527efd4109ef73fe1a7ca43cb5ac2219e7ca3892c8c5f37f8e8",
+      "src/renderer/src/styles/globals.css": "32c240b444ae9500f1ef3cc3629b2684ea141045fb4e3d28adffc071108a5e6f",
+      "src/renderer/src/types/electron.d.ts": "bb3727e93f9ca35f77d9aa592d51c0add66bb3ad09f312a9c77f9585533613ac",
+      "src/shared/activity.test.ts": "2092d02e4bc0797217a33d66068af9327b1d9aec2cec176e51298de5f19a62ba",
+      "src/shared/activity.ts": "74b431ca80dab38e05a160090ea05c1235197da868dcfe7cd424520167988bb6",
+      "src/shared/commander.ts": "71c62b1b68c8ec7b8780efee77e8f0dfca7d504eff0de4e72ad7a306170c3210",
+      "src/shared/desktop-api.ts": "b7796177c181fdff18c810c2e6d7de937bfa733a727ef33c21a41dcef250ecac",
+      "src/shared/desktop-event-forwarding.ts": "cb3c472bfbf00c50cba43414a90de3fc66de6b44451ccfe73c73165ba28bccbb",
+      "src/shared/desktop-operations.ts": "ff233d3922fe2a5eb40dd3cb64bd958ecb055a41c1c24b128ba4166a67c14d2f",
+      "vitest.tauri.config.ts": "23dd15b10a44c482a900a39a2095ca3c936d631c77311e4f397301c2ea26f8ce"
+    }
+  },
+  "decisions": {
+    "pipLifetime": "In-app PiP keeps the same call alive across navigation; global shortcut targets active Commander call and Captain otherwise",
+    "layout": "Stage first with Chat beside it",
+    "undo": "Exact reversals only",
+    "reports": "Quiet inbox; correlated reports stay with their request"
+  },
+  "tests": {
+    "application": {
+      "command": "rtk pnpm test:run --reporter=json --outputFile=.git/issue-closing/batch3-app-final.json",
+      "passed": 5644,
+      "failed": 0,
+      "skipped": 20,
+      "success": true,
+      "reportSha256": "ec4632cdd0a144fee43d9490b975d03236c0aaf48401b898afe0bac4ba08cbf9"
+    },
+    "standalone": {
+      "command": "rtk pnpm test:tauri --service-proofs --reporter=json --outputFile=.git/issue-closing/batch3-tauri-final.json",
+      "passed": 1931,
+      "failed": 0,
+      "skipped": 0,
+      "success": true,
+      "reportSha256": "975b6b24c977692f91c67814272a37f6a7c361e32dee75ff9f6f364627e5c024"
+    }
+  },
+  "verification": {
+    "forcedTypecheck": {
+      "command": "rtk pnpm exec tsc --build --noEmit --force",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint": {
+      "command": "rtk pnpm lint",
+      "exitCode": 0,
+      "logSha256": "9e82aeb1d63ebe144cbbfad5a99774612d72479a110c12337892816d99ce2890",
+      "errors": 0,
+      "existingWarnings": 165
+    },
+    "build": {
+      "command": "rtk pnpm build",
+      "exitCode": 0,
+      "logSha256": "393ef4e66ef15e5e1fc8da3936133c72c2d6f6677519285c369b2676a3956c7c"
+    },
+    "tauriFrontend": {
+      "command": "rtk pnpm tauri:frontend:build",
+      "exitCode": 0,
+      "logSha256": "6886c2bce4f85e7c070330ccf1611e3cb42a362e0c7ca4fe77d98d5040a868d8"
+    },
+    "standaloneDatabaseStage": {
+      "command": "rtk pnpm tauri:prepare:database",
+      "exitCode": 0,
+      "logSha256": "ffe0ee8b6de6bff680285a1d86e422d99c1e53a00348da03cfef1c2393751b5b"
+    },
+    "inventoryFreshness": {
+      "command": "rtk node scripts/tauri-inventory.mjs --check",
+      "exitCode": 0,
+      "logSha256": "c33e53f89752b3778f15927302ac21ad9a57bd583b76efb906283a982472edf8"
+    },
+    "contractFreshness": {
+      "command": "rtk node scripts/tauri-contracts.mjs --check",
+      "exitCode": 0,
+      "logSha256": "1e228e68b513e5fc375dda38e3381e12fe4d53c8b9ff23b7d57c3d9a64de9b1b"
+    },
+    "diffWhitespace": {
+      "command": "rtk git diff --check",
+      "exitCode": 0,
+      "logSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    "nativeCommander": {
+      "command": "DISPLAY=:199 rtk pnpm test:commander-input",
+      "exitCode": 0,
+      "logSha256": "a12f3d3d2344209f9b5216b2eb300cd6ed48125ec63c441c4a4ed83641f3d788",
+      "checks": 15
+    }
+  },
+  "assistiveTechnologyAttempt": {
+    "command": "DISPLAY=:199 rtk dbus-run-session -- rtk python3 .git/issue-closing/orca-batch3.py",
+    "exitCode": 1,
+    "completed": false,
+    "reader": "Orca with private preferences and private dummy Speech Dispatcher; own Xephyr and D-Bus session",
+    "observed": "Orca initialized speech, identified landmarks and read Message the Commander. The Electron verification run exited before completing stage/PiP/state checks.",
+    "logSha256": {
+      "batch3-orca-run.log": "a5f1d001b8e43decb5d311812a164e900a271bb865b9f2f7ff734b24aa107056",
+      "batch3-orca-native.log": "0b965fdf78c660f191d702e6ad5ea6b58cce0dc064fab62369af892f222b91a6",
+      "batch3-orca-debug.log": "37dee8e4b506dd5fced25f3eafb142e70d38d8eef213c392078ddf57717194ae"
+    },
+    "acceptanceClaim": "No completed manual screen-reader or announcement-order audit."
+  },
+  "remainingWork": [
+    "#91: complete manual keyboard/screen-reader pass across all documented states, including typed fallback and announcement timing/order.",
+    "#95: complete cross-surface native/assistive checks for hidden-window resume, long silent tools, disconnected/dead backend and playback drain after hook-up.",
+    "#101: Captains on AdapterEngine; #103: planned rollover; #104: context meter and summaries."
+  ]
+}
