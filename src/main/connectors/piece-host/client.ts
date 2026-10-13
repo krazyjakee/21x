@@ -98,6 +98,13 @@ export interface PieceCallRequest {
 
 export const DEFAULT_PIECE_CALL_TIMEOUT_MS = 60_000
 
+export class PieceHostShutdownIncompleteError extends Error {
+  constructor() {
+    super('Connector worker shutdown is incomplete; retain its database and profile ownership')
+    this.name = 'PieceHostShutdownIncompleteError'
+  }
+}
+
 interface ActiveCall {
   id: number
   instanceId: string
@@ -116,6 +123,7 @@ export class PieceHostClient {
   private queue: Promise<unknown> = Promise.resolve()
   private nextId = 1
   private disposed = false
+  private pendingWork = new Set<Promise<unknown>>()
   /** Number of host processes started; exposed for diagnostics and tests. */
   starts = 0
 
@@ -134,6 +142,7 @@ export class PieceHostClient {
   }
 
   call(req: PieceCallRequest): Promise<unknown> {
+    if (this.disposed) return Promise.reject(new PieceCancelledError())
     // Refuse before queueing: a non-allowlisted piece never reaches the host.
     try {
       resolveAllowedOperation(req.pieceName, req.pieceVersion, req.target, this.options.allowlist ?? CONNECTOR_PIECE_ALLOWLIST)
@@ -153,6 +162,29 @@ export class PieceHostClient {
       this.active.reject(new PieceCancelledError())
       this.active = null
     }
+  }
+
+  /** Join raw credentials/KV callbacks and actual worker exits before releasing owner resources. */
+  async close(timeoutMs = 2000): Promise<void> {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3000) {
+      throw new RangeError('Connector shutdown deadline must be an integer from 1 to 3000 ms')
+    }
+    this.dispose()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const expired = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new PieceHostShutdownIncompleteError()), timeoutMs)
+    })
+    try {
+      do {
+        await Promise.race([Promise.allSettled([...this.pendingWork, this.queue]), expired])
+      } while (this.pendingWork.size)
+    } finally { if (timer) clearTimeout(timer) }
+  }
+
+  private ownWork<T>(work: Promise<T>): Promise<T> {
+    this.pendingWork.add(work)
+    void work.then(() => this.pendingWork.delete(work), () => this.pendingWork.delete(work))
+    return work
   }
 
   private async execute(req: PieceCallRequest): Promise<unknown> {
@@ -178,7 +210,7 @@ export class PieceHostClient {
         }
         req.signal?.addEventListener('abort', onAbort, { once: true })
 
-        void (async () => {
+        void this.ownWork((async () => {
           try {
             const creds = await this.options.credentials.get(req.instanceId)
             // A late credential read must not create a worker after timeout,
@@ -203,7 +235,7 @@ export class PieceHostClient {
           } catch (err) {
             this.failActive(call, err)
           }
-        })()
+        })())
       })
     } catch (err) {
       throw this.redact(err, resolved.creds)
@@ -240,12 +272,15 @@ export class PieceHostClient {
     ready.catch(() => undefined)
     const handle: HostHandle = { transport, ready }
     this.host = handle
+    let exited!: () => void
+    this.ownWork(new Promise<void>(resolve => { exited = resolve }))
 
     transport.onMessage((message) => {
       if (this.host !== handle) return
       this.onHostMessage(handle, message, markReady)
     })
     transport.onExit((code) => {
+      exited()
       const crash = new PieceHostCrashedError(code)
       markFailed(crash)
       if (this.host !== handle) return
@@ -293,9 +328,9 @@ export class PieceHostClient {
           })
           return
         }
-        void this.handleStore(call.instanceId, message)
+        void this.ownWork(this.handleStore(call.instanceId, message)
           .then((value) => reply({ kind: 'store-result', storeId: message.storeId, ok: true, value }))
-          .catch((err) => reply({ kind: 'store-result', storeId: message.storeId, ok: false, error: serializePieceError(err) }))
+          .catch((err) => reply({ kind: 'store-result', storeId: message.storeId, ok: false, error: serializePieceError(err) })))
         return
       }
     }

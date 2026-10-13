@@ -8,7 +8,7 @@ import { applySchema } from '../../database/schema'
 import { ConnectorStore } from '../connector-store'
 import type { ConnectorCredentials } from '../credentials'
 import type { ConnectorPieceAllowlist } from '../allowlist'
-import { kvBackendFromConnectorStore, PieceHostClient, type PieceHostTransport, type PieceKvBackend } from './client'
+import { kvBackendFromConnectorStore, PieceHostClient, PieceHostShutdownIncompleteError, type PieceHostTransport, type PieceKvBackend } from './client'
 import {
   PieceCancelledError,
   PieceExecutionError,
@@ -332,6 +332,67 @@ function makeClient(opts: { kv?: PieceKvBackend; creds?: Record<string, Connecto
 const base = { instanceId: 'inst-1', pieceName: PIECE, pieceVersion: VERSION }
 
 describe('piece host credential-read lifetime', () => {
+  it('retains a raw credential read after public disposal and a bounded close deadline', async () => {
+    let finish!: (value: ConnectorCredentials | null) => void
+    const held = new Promise<ConnectorCredentials | null>(resolve => { finish = resolve })
+    const { client, processes } = makeClient({ getCredentials: () => held })
+    const call = client.runAction({ ...base, actionName: 'echo' }).catch(error => error)
+    try {
+      await new Promise<void>(resolve => setImmediate(resolve))
+      await expect(client.close(10)).rejects.toBeInstanceOf(PieceHostShutdownIncompleteError)
+      expect(await call).toBeInstanceOf(PieceCancelledError)
+      finish(null)
+      await client.close()
+      expect(processes).toHaveLength(0)
+    } finally { finish(null); await call; await client.close() }
+  })
+
+  it('requires an actual worker exit acknowledgement after requesting kill', async () => {
+    const { client, processes } = makeClient()
+    await client.runAction({ ...base, actionName: 'echo' })
+    let kills = 0
+    processes[0].kill = () => { kills++ }
+    try {
+      await expect(client.close(10)).rejects.toBeInstanceOf(PieceHostShutdownIncompleteError)
+      expect(kills).toBe(1)
+      expect(processes[0].alive).toBe(true)
+      processes[0].crash(0)
+      await client.close()
+      expect(kills).toBe(1)
+    } finally { processes[0].crash(0); await client.close() }
+  })
+
+  it('joins a raw KV callback after its call and worker have been cancelled', async () => {
+    let finish!: (value: unknown) => void
+    let entered!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const held = new Promise<unknown>(resolve => { finish = resolve })
+    let writes = 0
+    const { client } = makeClient({ kv: {
+      get: () => { entered(); return held }, put: () => { writes++ }, delete: () => null
+    } })
+    const call = client.runAction({ ...base, actionName: 'counter' }).catch(error => error)
+    try {
+      await started
+      await expect(client.close(10)).rejects.toBeInstanceOf(PieceHostShutdownIncompleteError)
+      expect(await call).toBeInstanceOf(PieceCancelledError)
+      finish(0)
+      await client.close()
+      expect(writes).toBe(0)
+    } finally { finish(null); await call; await client.close() }
+  })
+
+  it('joins normal worker exit and refuses new calls after close', async () => {
+    let reads = 0
+    const { client, processes } = makeClient({ getCredentials: () => { reads++; return null } })
+    await client.runAction({ ...base, actionName: 'echo' })
+    await client.close()
+    expect(processes[0].alive).toBe(false)
+    await expect(client.runAction({ ...base, actionName: 'echo' })).rejects.toBeInstanceOf(PieceCancelledError)
+    expect(reads).toBe(1)
+    await client.close()
+  })
+
   it.each(['cancel', 'timeout', 'dispose'] as const)('does not spawn a worker when credentials resolve after %s', async reason => {
     let finish!: (value: ConnectorCredentials | null) => void
     const held = new Promise<ConnectorCredentials | null>(resolve => { finish = resolve })
