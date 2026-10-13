@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { createTestDb } from '../../test/helpers/db-test-helper'
+import { createPortableTestDb } from '../../test/helpers/portable-db-test-helper'
 import type { DatabaseManager } from './database'
 import { ClaudePluginManager } from './claude-plugin-manager'
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'fs'
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -11,7 +11,7 @@ let manager: ClaudePluginManager
 let tempPluginsDir: string
 
 beforeEach(() => {
-  ;({ db } = createTestDb())
+  db = createPortableTestDb()
   tempPluginsDir = mkdtempSync(join(tmpdir(), '20x-plugins-test-'))
   manager = new ClaudePluginManager(db, tempPluginsDir)
 
@@ -24,7 +24,10 @@ beforeEach(() => {
   }))
 })
 
-afterEach(() => {
+afterEach(async () => {
+  await manager.close()
+  db.db.close()
+  rmSync(tempPluginsDir, { recursive: true, force: true })
   vi.unstubAllGlobals()
 })
 

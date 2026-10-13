@@ -192,6 +192,7 @@ async function shutdownAppServices(): Promise<void> {
   shutdownCommanderServices()
   shutdownSecretBroker()
   shutdownMcpProbes()
+  claudePluginManager?.shutdown()
   stopTaskApiServer()
   void stopMobileApiServer()
   syncManager?.stop()
@@ -210,7 +211,7 @@ async function shutdownAppServices(): Promise<void> {
 
   oauthManager?.destroy()
   const serviceDrains = await Promise.allSettled([
-    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined, closeTaskApiServer(), closeMobileApiServer(), taskAutomationScheduler?.close(), captainWaker?.close(), recurrenceScheduler?.close(), closeScheduledCoordination(), heartbeatScheduler?.close(), workspaceCleanupScheduler?.close(), closeTerminalServices(), closeChatServices(), closeCommanderServices(), closeSecretBroker(), closeMcpProbes()
+    syncManager?.close(), connectorBridgePlugin?.close(), db ? closeConnectorRuntime(db) : undefined, closeTaskApiServer(), closeMobileApiServer(), taskAutomationScheduler?.close(), captainWaker?.close(), recurrenceScheduler?.close(), closeScheduledCoordination(), heartbeatScheduler?.close(), workspaceCleanupScheduler?.close(), closeTerminalServices(), closeChatServices(), closeCommanderServices(), closeSecretBroker(), closeMcpProbes(), claudePluginManager?.close()
   ])
   const incompleteServiceDrain = serviceDrains.find(result => result.status === 'rejected')
   if (incompleteServiceDrain?.status === 'rejected') throw incompleteServiceDrain.reason
@@ -851,7 +852,7 @@ app.whenReady().then(async () => {
   // The reminder clock belongs to the application, across window recreation.
   overdueNotifier.start()
 
-  claudePluginManager = new ClaudePluginManager(db)
+  claudePluginManager = new ClaudePluginManager(db, join(app.getPath('userData'), 'plugins'))
 
   // Voice control (design §5.1). It never blocks start-up: when the local
   // speech runtime or the model is absent, voice simply stays switched off.

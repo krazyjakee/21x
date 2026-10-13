@@ -353,7 +353,7 @@
           "channelExpression": "channel",
           "column": 7,
           "file": "src/main/index.ts",
-          "line": 431,
+          "line": 432,
           "method": "send",
           "target": "guardedIpcSend"
         }
@@ -382,7 +382,7 @@
           "channelExpression": "channel",
           "column": 7,
           "file": "src/main/index.ts",
-          "line": 452,
+          "line": 453,
           "method": "send",
           "target": "guardedIpcSend"
         }
@@ -8686,7 +8686,7 @@
         {
           "column": 7,
           "file": "src/main/index.ts",
-          "line": 468,
+          "line": 469,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -9450,7 +9450,7 @@
         {
           "column": 15,
           "file": "src/main/index.ts",
-          "line": 620,
+          "line": 621,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -9458,7 +9458,7 @@
         {
           "column": 11,
           "file": "src/main/index.ts",
-          "line": 626,
+          "line": 627,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -12930,7 +12930,7 @@
         {
           "column": 50,
           "file": "src/main/index.ts",
-          "line": 764,
+          "line": 765,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -13611,7 +13611,7 @@
         {
           "column": 23,
           "file": "src/main/index.ts",
-          "line": 811,
+          "line": 812,
           "method": "send",
           "resolution": "literal",
           "target": "guardedIpcSend"
@@ -18894,7 +18894,7 @@
         "producerOwner": "authenticated-task-api",
         "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
       },
-      "line": 431,
+      "line": 432,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
@@ -18925,7 +18925,7 @@
         "producerOwner": "authenticated-mobile-api",
         "runtimeEnforcement": "not-installed; exact schemas/caller/domain authority required before portable forwarding"
       },
-      "line": 452,
+      "line": 453,
       "method": "send",
       "methodExpression": null,
       "resolution": "unresolved",
