@@ -89,3 +89,18 @@ its desktop default. [Portable plugin evidence](evidence/connector-portable-plug
 extends the staged proof with a real portable database manager, engine ownership
 and a configuration rejection before closing plugin/runtime/database in order.
 Native source command bindings and production bootstrap integration remain open.
+
+All 63 existing bridge/Trello/Todoist regressions now run under standalone Node,
+using the existing portable database helper and injected secret-storage fixture.
+They cover mapping/import/export, retry/cursor behavior, source state, local OAuth
+callbacks, token refresh/revocation and redaction against fake providers. They use
+an in-process transport and mock keychain; the staged real child remains separate.
+[Regression evidence](evidence/connector-portable-api-regressions-local.json) records
+622 standalone/private-pipe passes and the preserved 63 legacy-launcher passes.
+
+The [initial staged matrix](evidence/connector-staged-platform-partial.json) passed
+the actual staged hook proof on Windows and Linux at `4708dd0`. Both macOS targets
+stopped in a fixture-path assertion before that phase. The fixture now uses
+physical temporary paths and explicitly tests system ancestor aliases such as
+macOS `/var` to `/private/var`. Package/link/escape checks remain required. This
+matrix is retained as failed overall; the corrected retry is separate evidence.

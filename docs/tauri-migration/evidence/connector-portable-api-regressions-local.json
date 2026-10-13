@@ -1,0 +1,40 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "baseCommit": "074d0b47a40b15946f78e5a37fb56d1fd9cf4553",
+  "scope": "Existing 63 bridge/Trello/Todoist fake-provider regressions now run under standalone Node with no Electron imports. Temporary fixture paths canonicalized; resource ancestor-alias control added. In-process fake transport/network/keychain remain fixtures, not packaged provider or OS keychain acceptance.",
+  "sourceSha256": {
+    "src/main/connectors/bridge/bridge.test.ts": "a33c1ee0d9807e7ef4f4a4dcfd39558c08334c60c3f4d13c7e6aa74d65b1987c",
+    "src/main/connectors/bridge/trello-poc.test.ts": "c34d234dab002615c494ef50fc8c4afd619f6bee0d303493d090a17078032131",
+    "src/main/connectors/bridge/todoist-oauth.test.ts": "616bf4153a1089269aee487d291dceb99f352c67406f40fef2dd556a542b71fc",
+    "src/main/connectors/piece-host/packaged-resources.test.ts": "856f1604af88fda9c2ca44507a0c5b55c44378baf9463f58912adb8f07224b74",
+    "vitest.tauri.config.ts": "16697f29d8736e825c339b323cc3ac6abebd10f6fe4288c064cefad6ea5736a3"
+  },
+  "tests": {
+    "standaloneAndService": {
+      "passed": 622,
+      "skipped": 0,
+      "files": 58,
+      "reportSha256": "a629ece8fdfb17eba0eeedf64c7e327fe8941dd1b93111e541dfcec7577a4608"
+    },
+    "portableConnectorAndTranscript": {
+      "passed": 85,
+      "skipped": 0,
+      "files": 5,
+      "reportSha256": "c735b4824736521b44e04a3d60834d9c6d720be768c4b3335151da7b3d4460f7"
+    },
+    "legacyConnector": {
+      "passed": 63,
+      "skipped": 0,
+      "files": 3,
+      "reportSha256": "a514b0be9c003cc46655778624a39c0a8a161c423b3ddf98cdcca87af4c67550"
+    }
+  },
+  "checks": {
+    "forcedTypecheck": "passed",
+    "changedSourceLint": "passed",
+    "inventoryFreshness": "passed"
+  },
+  "productionReady": false,
+  "electronRetirementReady": false
+}

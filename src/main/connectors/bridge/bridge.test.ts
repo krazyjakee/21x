@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createTestDb } from '../../../../test/helpers/db-test-helper'
+import { createPortableTestDb } from '../../../../test/helpers/portable-db-test-helper'
 import type { DatabaseManager } from '../../database'
 import { TaskStatus, PluginActionId } from '../../../shared/constants'
 import { CONNECTOR_PIECE_ALLOWLIST, type ConnectorPieceAllowlist } from '../allowlist'
@@ -7,7 +7,7 @@ import { ConnectorStore } from '../connector-store'
 import type { ConnectorCredentials } from '../credentials'
 import { kvBackendFromConnectorStore, PieceHostClient, type PieceHostTransport } from '../piece-host/client'
 import type { HostInboundMessage, HostOutboundMessage } from '../piece-host/protocol'
-import { ConnectorBridgePlugin } from '../../plugins/connector-bridge-plugin'
+import { ConnectorBridgeCore as ConnectorBridgePlugin } from '../../plugins/connector-bridge-core'
 import type { PluginContext } from '../../plugins/types'
 import { ConnectorBridgeClosedError, ConnectorBridgeEngine, type BridgeRuntime } from './engine'
 import { mapItem, validateMapping, type ConnectorTaskMapping } from './mapping'
@@ -181,7 +181,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
 }
 
 beforeEach(() => {
-  ;({ db } = createTestDb())
+  db = createPortableTestDb()
   store = new ConnectorStore(db)
   instanceId = store.createInstance({ pieceName: PIECE, pieceVersion: VERSION }).id
   projectId = db.createProject({ name: 'Connector project' })!.id

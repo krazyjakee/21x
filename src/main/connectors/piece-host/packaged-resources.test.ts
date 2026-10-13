@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, relative } from 'node:path'
+import { basename, dirname, join, relative } from 'node:path'
 import { CONNECTOR_PIECE_ALLOWLIST } from '../allowlist'
 import { ConnectorResourcesUnavailableError, createPackagedConnectorTransport, validateConnectorResources } from './packaged-resources'
 
@@ -15,7 +15,7 @@ describe('connector packaged resource authority', () => {
     packages: Record<string, { version: string; entry: string; entrySha256: string; metadataSha256: string }> }
   function save() { writeFileSync(join(service, 'CONNECTOR_WORKER_MANIFEST.json'), JSON.stringify(manifest)) }
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), '21x-connector-resources-'))
+    root = realpathSync(mkdtempSync(join(tmpdir(), '21x-connector-resources-')))
     service = join(root, 'service')
     mkdirSync(join(root, 'node'), { recursive: true })
     writeFileSync(join(root, 'node', process.platform === 'win32' ? 'node.exe' : 'node'), 'fixture-node-never-executed')
@@ -42,6 +42,16 @@ describe('connector packaged resource authority', () => {
 
   it('refuses to execute a worker through any Node binary other than the owning process', () => {
     expect(() => createPackagedConnectorTransport(root)).toThrow(ConnectorResourcesUnavailableError)
+  })
+
+  it('returns physical resource paths when the temporary directory has a system ancestor alias', () => {
+    const aliases = mkdtempSync(join(tmpdir(), '21x-connector-parent-alias-'))
+    const link = join(aliases, 'parent')
+    try {
+      symlinkSync(dirname(root), link, 'junction')
+      const aliased = join(link, basename(root))
+      expect(validateConnectorResources(aliased)).toMatchObject({ root, worker: join(service, 'piece-host.cjs') })
+    } finally { rmSync(link, { recursive: true, force: true }); rmSync(aliases, { recursive: true, force: true }) }
   })
 
   it('rejects worker content that disagrees with its staged manifest', () => {

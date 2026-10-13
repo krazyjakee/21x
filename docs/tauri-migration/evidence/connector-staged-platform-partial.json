@@ -1,0 +1,45 @@
+{
+  "evidenceVersion": 1,
+  "recordedDate": "2026-10-13",
+  "run": "https://github.com/krazyjakee/21x/actions/runs/38346595906",
+  "conclusion": "failure",
+  "scope": "Service-only staged connector resource proof. Windows/Linux passed; both macOS fixture-path assertions failed before that phase. No installed GUI or production acceptance.",
+  "targets": [
+    {
+      "target": "linux-appimage-x64",
+      "sourceCommit": "4708dd02dd1039c78d53d54ff3d7abce93fdf760",
+      "portablePassed": 549,
+      "portableFailed": 0,
+      "stagedResourceHookProofPassed": true,
+      "report": "connector-staged-4708dd0-linux-appimage-x64-service-tests.json",
+      "reportSha256": "59db13b5693ed49c78edce75c302e0f5e5d1f4c6465881954f9faa6715b0a6b7"
+    },
+    {
+      "target": "macos-arm64",
+      "sourceCommit": "4708dd02dd1039c78d53d54ff3d7abce93fdf760",
+      "portablePassed": 548,
+      "portableFailed": 1,
+      "stagedResourceHookProofPassed": false,
+      "failure": "Fixture expected logical temporary paths instead of canonical physical paths; failed before staged hook phase."
+    },
+    {
+      "target": "macos-x64",
+      "sourceCommit": "4708dd02dd1039c78d53d54ff3d7abce93fdf760",
+      "portablePassed": 548,
+      "portableFailed": 1,
+      "stagedResourceHookProofPassed": false,
+      "failure": "Fixture expected logical temporary paths instead of canonical physical paths; failed before staged hook phase."
+    },
+    {
+      "target": "windows-x64",
+      "sourceCommit": "4708dd02dd1039c78d53d54ff3d7abce93fdf760",
+      "portablePassed": 549,
+      "portableFailed": 0,
+      "stagedResourceHookProofPassed": true,
+      "report": "connector-staged-4708dd0-windows-x64-service-tests.json",
+      "reportSha256": "25455a1fa6f850f3adcac637a189b36b8e01be008b6be7f6e05bb4c421713e6c"
+    }
+  ],
+  "productionReady": false,
+  "electronRetirementReady": false
+}

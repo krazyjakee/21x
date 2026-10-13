@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { installTlsGuard } from '../piece-host/tls-guard'
 import { readdirSync, readFileSync, statSync } from 'fs'
 import { join, relative } from 'path'
-import { createTestDb } from '../../../../test/helpers/db-test-helper'
+import { createPortableTestDb } from '../../../../test/helpers/portable-db-test-helper'
 import type { DatabaseManager } from '../../database'
 import { PluginActionId, TaskStatus } from '../../../shared/constants'
-import { ConnectorBridgePlugin } from '../../plugins/connector-bridge-plugin'
+import { ConnectorBridgeCore as ConnectorBridgePlugin } from '../../plugins/connector-bridge-core'
 import type { PluginContext } from '../../plugins/types'
 import { CONNECTOR_PIECE_ALLOWLIST } from '../allowlist'
 import { ConnectorStore } from '../connector-store'
@@ -316,7 +316,7 @@ function loggedText(): string {
 }
 
 beforeEach(() => {
-  ;({ db } = createTestDb())
+  db = createPortableTestDb()
   instanceId = new ConnectorStore(db).createInstance({ pieceName: PIECE, pieceVersion: VERSION }).id
   projectId = db.createProject({ name: 'Trello project' })!.id
   config = { piece_name: PIECE, connector_instance_id: instanceId, props: { board_id: BOARD }, poll_interval_minutes: 10 }
