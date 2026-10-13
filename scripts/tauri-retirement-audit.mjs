@@ -41,6 +41,7 @@ const report = {
     'package.json', 'vite.tauri.config.ts', 'src-tauri/tauri.conf.json',
     'src/service/database-service.ts', 'src/service/configuration-backend.ts', 'src/service/agent-backend.ts',
     'src/main/node-worker-runtime.ts',
+    'src/main/agent-installer/installer-network.js', 'src/main/agent-installer/installer-utils.js',
     'src/main/connectors/piece-host/node-transport.ts', 'src/main/connectors/piece-host/host-entry.ts',
     'src/main/connectors/piece-host/worker-environment.ts', 'src/main/connectors/piece-host/client.ts',
     'src/main/connectors/bridge/runtime.ts', 'src/main/connectors/bridge/scheduler.ts', 'src/main/connectors/oauth.ts',

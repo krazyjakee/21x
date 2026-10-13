@@ -60,3 +60,12 @@ local hooks. Its commands and revision scopes are retained in
 `pnpm tauri:prepare:connectors` before the opt-in worker proof; that proof joins
 plugin/runtime close before its real SQLite fixture closes. Default and opt-in
 suite counts are reported separately in their evidence.
+
+The portable suite now includes CLI asset/detection regressions and the
+[installer network owner](installer-network.md). Its complete opt-in local run
+passed 1,055 cases with zero skips in 76 files. The provider matrix at `85e09e3`
+passed both macOS targets but exposed four Windows fixture assumptions;
+[correction evidence](evidence/provider-platform-fixtures-local.json) records
+platform paths/absolute roots and the Windows Pi shell launcher. The corrected
+Windows retry is separate pending evidence, rather than a reclassification of
+the failed job.

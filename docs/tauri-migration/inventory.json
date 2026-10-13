@@ -4430,7 +4430,7 @@
       "bindings": [],
       "column": 27,
       "file": "src/main/agent-installer/installer-utils.js",
-      "line": 53,
+      "line": 54,
       "mode": "runtime",
       "syntax": "dynamic-import"
     },
@@ -4438,7 +4438,7 @@
       "bindings": [],
       "column": 25,
       "file": "src/main/agent-installer/installer-utils.js",
-      "line": 70,
+      "line": 72,
       "mode": "runtime",
       "syntax": "dynamic-import"
     },
@@ -5357,6 +5357,7 @@
     "src/main/agent-installer/detect.js",
     "src/main/agent-installer/git.js",
     "src/main/agent-installer/install.js",
+    "src/main/agent-installer/installer-network.js",
     "src/main/agent-installer/installer-utils.js",
     "src/main/agent-installer/nodejs.js",
     "src/main/agent-installer/rtk-integrations.js",
@@ -14046,7 +14047,7 @@
   ],
   "summary": {
     "directAPIConsumers": 368,
-    "files": 690,
+    "files": 691,
     "operations": 715,
     "runtimeElectronImports": 47,
     "typeOnlyElectronImports": 3,
